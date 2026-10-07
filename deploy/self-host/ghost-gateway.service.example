@@ -1,0 +1,19 @@
+[Unit]
+Description=Ghost mobile gateway
+After=ghost-host.service network-online.target
+Wants=ghost-host.service
+
+[Service]
+Type=simple
+User=ghost
+Group=ghost
+UMask=0077
+EnvironmentFile=/etc/ghost/gateway.env
+ExecStart=/usr/bin/node /opt/ghost/source/apps/ghost-gateway/server.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=75
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

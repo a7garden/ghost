@@ -1,0 +1,19 @@
+{
+  "binary": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-ui-fixture-macos-arm64",
+  "sha256": "7a7eb3e3cda54cbc302ec2259ece86bb08146cd276fd7a02bf26d4e6011e6bd3",
+  "bytes": 12814264,
+  "features": [
+    "ui-fixtures"
+  ],
+  "uiAssetsEmbedded": true,
+  "browserBundled": false,
+  "actualBrowserAdditionalDependencies": [
+    "pinned OxiBrowser executable",
+    "macOS sandbox-exec"
+  ],
+  "additionalNodeBunPythonRuntime": false,
+  "developmentDebugArtifact": true,
+  "releaseOrSigningVerified": false,
+  "dynamicLinks": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-ui-fixture-macos-arm64:\n\t/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n",
+  "file": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-ui-fixture-macos-arm64: Mach-O 64-bit executable arm64"
+}

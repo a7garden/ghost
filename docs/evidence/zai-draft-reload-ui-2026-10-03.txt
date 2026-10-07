@@ -1,0 +1,111 @@
+- complementary:
+  - button "Ghost 전체 보기":
+    - generic: ghost
+    - generic: 개인 작업실
+  - button "작업실 검색 ⌘ K":
+    - generic: 작업실 검색
+    - generic: ⌘ K
+  - navigation "주 탐색":
+    - button "전체 보기":
+      - generic: 전체 보기
+    - button "내 확인":
+      - generic: 내 확인
+    - button "맡은 일":
+      - generic: 맡은 일
+    - button "함께 하는 일":
+      - generic: 함께 하는 일
+    - button "할 일과 일정":
+      - generic: 할 일과 일정
+    - button "연동":
+      - generic: 연동
+  - generic: 나의 Ghost
+  - button "새 Ghost 만들기":
+  - navigation "나의 Ghost":
+    - button "Milo":
+      - generic: Milo
+    - button "Sage 확인 필요":
+      - generic: Sage
+      - generic "확인 필요"
+  - generic: 문서 공간
+  - navigation "문서 공간":
+    - button "연결 검증 문서":
+      - generic: 연결 검증 문서
+  - button "설정":
+    - generic: 설정
+  - button "로컬 호스트 연결됨":
+    - generic: 로컬 호스트 연결됨
+  - generic: G
+  - strong: 나의 워크스페이스
+  - generic: 나만의 에이전트 팀
+  - button "연결 안내":
+- banner:
+  - button "작업실"
+  - generic: Sage
+  - generic: 호스트 연결됨
+  - button "어두운 테마":
+- main:
+  - region "Sage와 대화":
+    - 'button "협업 프로토콜 실제 검증: Milo에게 delegate_ghost로 background"':
+      - generic: "협업 프로토콜 실제 검증: Milo에게 delegate_ghost로 background"
+    - button "새 대화":
+    - button "Ghost 설정":
+    - button "Sage 아바타 변경"
+    - heading "Sage" [level=1]
+    - paragraph: 한국어로 명확하고 간결하게 답하는 개인 비서. 사용자가 요청한 일만 실행하고, 문서는 저장 전에 검토를 요청한다. 실제 도구 결과만 보고한다.
+    - generic: 내 확인 필요
+    - log "대화 이력":
+      - article:
+        - generic: "협업 프로토콜 실제 검증: Milo에게 delegate_ghost로 background=false 위임을 한 번 실제 실행해 줘. 위임 내용은 \"23×29를 검산하고 report_delegation으로 진행을 한 번 기록한 후 667과 GHOST-COLLAB-1003을 포함해 한 문장으로 보고해 줘. 다른 도구나 재위임은 사용하지 마.\"야. 결과가 돌아오면 책임 Ghost인 Sage가 받은 답을 한 문장으로 정리해 줘. 문서나 다른 데이터는 수정하지 마. 함께할 Ghost: - Milo (b9310462-c62c-437f-8070-0ae09fd34f93): 간단한 계산과 근거를 검산하는 전문가. 요청 범위만 수행한다. 위임을 받으면 report_delegation으로 진행을 한 번 기록하고 최종 결과를 한국어 한 문장으로 반환한다. 추가 위임은 하지 않는다. 각자의 역할에 맞게 협업을 요청하고, 받은 결과를 이 대화에서 정리해 줘. 현재 허용된 도구와 권한 안에서 진행해 줘."
+      - article:
+        - strong: Sage
+        - generic: 협업 검증을 위해 실제로 실행하겠습니다. 먼저 참여 Ghost 목록을 확인하고, 사용자가 지정한 Milo에게 background=false 위임을 보냅니다.
+      - article:
+        - generic "Available specialist identities":
+          - generic: Available specialist identities
+      - article:
+        - generic "Specialist Ghost completed delegated work":
+          - generic: Specialist Ghost completed delegated work
+      - article:
+        - strong: Sage
+        - generic: "위임이 성공적으로 완료되었습니다. 책임 Ghost인 Sage(나)가 받은 답을 한 문장으로 정리합니다. **정리:** Milo가 background=false 위임을 받아 23×29를 두 경로로 검산한 결과 667로 일치함을 확인하고, report_delegation으로 진행 기록을 남긴 뒤 GHOST-COLLAB-1003 협업 완료를 한 문장으로 보고했습니다. - 실제 도구 결과: `delegate_ghost` 성공 (Milo 반환, task_id `05e9b82d…`) - Milo 원문 보고: \"23×29를 두 경로로 검산한 결과 667으로 일치하며, GHOST-COLLAB-1003 협업으로 진행 기록(report_delegation)을 완료했습니다.\" - 문서·데이터 수정: 없음 (요청대로 미실행)"
+      - article:
+        - generic: 입력 보존 테스트야. 도구 없이 “콘솔 입력 확인”이라고만 답해줘.
+      - article:
+        - strong: Sage
+        - generic: 콘솔 입력 확인
+      - button "Milo와 함께 협업 종료 협업 보기":
+        - strong: Milo와 함께
+        - generic: 협업 종료
+        - text: 협업 보기
+    - generic: Sage에게 메시지
+    - textbox "Sage에게 메시지" [active]:
+      - /placeholder: Sage에게 이야기하세요…
+      - text: 추가로 입력한 초안 — 자동 전송하지 않음.
+    - generic: Sage
+    - generic: ·
+    - generic: zai/glm-5.1
+    - button "메시지 보내기":
+    - paragraph: Enter로 보내기 · Shift + Enter로 줄바꿈
+  - complementary "Ghost 작업과 문서":
+    - heading "함께 하는 일" [level=2]
+    - button "모든 작업 보기":
+    - paragraph: 등록된 목표 없음
+    - heading "이 대화의 작업" [level=3]
+    - generic: "4"
+    - strong: 응답 생성
+    - generic: 완료
+    - strong: 응답 생성
+    - generic: 완료
+    - strong: list_ghosts
+    - generic: 완료
+    - strong: delegate_ghost
+    - generic: 완료
+    - heading "문서 공간" [level=3]
+    - button "연결 검증 문서":
+      - generic: 연결 검증 문서
+    - button "Ghost의 컴퓨터":
+      - generic: Ghost의 컴퓨터
+    - generic: 아직 연결되지 않았어요
+    - button "반복 작업 예약":
+      - generic: 반복 작업 예약
+    - paragraph: 작업과 대화는 호스트에 저장돼요.

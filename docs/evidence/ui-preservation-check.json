@@ -1,0 +1,38 @@
+{
+  "frozenOriginalSourceTestsAndLock": {
+    "src/tools.rs": true,
+    "src/protocol.rs": true,
+    "src/provider.rs": true,
+    "src/store.rs": true,
+    "src/native_http.rs": true,
+    "src/provider_journal.rs": true,
+    "src/provider_control.rs": true,
+    "src/judge.rs": true,
+    "src/collaboration.rs": true,
+    "tests/native_policy.rs": true,
+    "tests/native_provider.rs": true,
+    "tests/acceptance.rs": true,
+    "tests/browser_handoff.rs": true,
+    "tests/browser_core.rs": true,
+    "tests/collaboration.rs": true,
+    "tests/browser_local_e2e.rs": true,
+    "tests/fixtures/browser_child.rs": true,
+    "Cargo.lock": true
+  },
+  "previous110CasesAndAssertionsPreserved": true,
+  "previousSixArtifactsUnchanged": {
+    "ghost-macos-arm64": "265c929c00d51163a39abcf00ff60767a6dfe5b12f0364be7751a28a503d73d3",
+    "ghosts-macos-arm64": "2e65edb5a85e1b40af63477ffbe7d13df1099ebdfd35de43a201a6ba1f7374de",
+    "ghost-native-macos-arm64": "de036d26ae8450d3c4723093467dbad78c94c78df5beb992527ce73649f0760c",
+    "ghost-browser-core-macos-arm64": "b62923eb08ccee6192dc167da5c9044a6d33dd28e9351f1bf277f53962988a05",
+    "ghost-local-browser-macos-arm64": "0b923c3ae654285b14437addb61a4f199f2b66bcb7459200906e3ea27f953796",
+    "ghost-handoff-checkpoint-macos-arm64": "90c88a52fa31609ee2c58629978229844280a6e78a7faddc85ca2b27359af2a0"
+  },
+  "allowedBaselineFilesModified": [
+    "Cargo.toml",
+    "src/lib.rs",
+    "src/browser/handoff.rs",
+    "src/main.rs",
+    "src/browser.rs"
+  ]
+}

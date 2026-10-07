@@ -1,0 +1,15 @@
+.ghost-arc { font-family: inherit; color: inherit; min-height: 100dvh;
+  --g-arc-background: var(--color-surface-elevated-2);
+  --g-arc-surface: var(--color-surface-elevated-2);
+  --g-arc-surface-muted: var(--color-background-secondary-hover);
+  --g-arc-surface-raised: var(--color-surface-elevated-2);
+  --g-arc-foreground: var(--color-text);
+  --g-arc-text-secondary: var(--color-text-secondary);
+  --g-arc-text-muted: var(--color-text-secondary);
+  --g-arc-border: var(--color-border);
+  --g-arc-border-subtle: var(--color-border);
+  --g-arc-border-strong: var(--color-border);
+  --g-arc-font-body: inherit;
+  --g-arc-font-display: inherit;
+}
+.ghost-arc button, .ghost-arc [role="listbox"], .ghost-arc [role="tooltip"], .ghost-arc [data-arc-portals] { -webkit-app-region: no-drag; }

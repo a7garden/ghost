@@ -1,0 +1,33 @@
+
+running 4 tests
+test actual_browser_ui_actions_epoch_pause_resume_cancel_unknown_and_reconcile ... FAILED
+test actual_mock_two_questions_independent_tasks_cancel_errors_dedup_and_refresh ... FAILED
+test loopback_fixed_routes_session_origin_csrf_and_read_only_snapshots ... FAILED
+test ui_cli_refuses_existing_unmarked_user_root_without_changing_it ... ok
+
+failures:
+
+---- actual_browser_ui_actions_epoch_pause_resume_cancel_unknown_and_reconcile stdout ----
+
+thread 'actual_browser_ui_actions_epoch_pause_resume_cancel_unknown_and_reconcile' (19654235) panicked at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250:5:
+there is no reactor running, must be called from the context of a Tokio 1.x runtime
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- actual_mock_two_questions_independent_tasks_cancel_errors_dedup_and_refresh stdout ----
+
+thread 'actual_mock_two_questions_independent_tasks_cancel_errors_dedup_and_refresh' (19654553) panicked at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250:5:
+there is no reactor running, must be called from the context of a Tokio 1.x runtime
+
+---- loopback_fixed_routes_session_origin_csrf_and_read_only_snapshots stdout ----
+
+thread 'loopback_fixed_routes_session_origin_csrf_and_read_only_snapshots' (19654969) panicked at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250:5:
+there is no reactor running, must be called from the context of a Tokio 1.x runtime
+
+
+failures:
+    actual_browser_ui_actions_epoch_pause_resume_cancel_unknown_and_reconcile
+    actual_mock_two_questions_independent_tasks_cancel_errors_dedup_and_refresh
+    loopback_fixed_routes_session_origin_csrf_and_read_only_snapshots
+
+test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.41s
+

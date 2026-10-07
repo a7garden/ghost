@@ -1,0 +1,25 @@
+{
+  "exitCode": 0,
+  "ready": {
+    "jsonrpc": "2.0",
+    "method": "ghost/ready",
+    "params": {
+      "browserSessionId": "5e334ba2-eb0a-4a23-8a7e-0d67475ffaab",
+      "controlAvailable": true,
+      "controlEpoch": 0,
+      "freshObservationRequired": false,
+      "ghostTaskId": "fixture-anchor",
+      "handoffId": null,
+      "networkFrozen": false,
+      "scriptsFrozen": false,
+      "state": "agent_active",
+      "tabsToObserve": [],
+      "trust": "trusted_host_state"
+    }
+  },
+  "stderr": "",
+  "agentStdoutBytes": 0,
+  "configuredEnvironmentEmpty": true,
+  "temporarySandbox": true,
+  "untrustedRuntimeDiagnostics": true
+}

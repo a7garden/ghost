@@ -1,0 +1,112 @@
+{
+  "checked_at": "2026-10-02T17:42:57.635193+00:00",
+  "status": "passed",
+  "live_provider": "zai",
+  "requested_model": "zai/glm-5.1",
+  "direct_probe_returned_model": "glm-5.3",
+  "endpoint": "https://api.z.ai/api/coding/paas/v4",
+  "console_url": "http://127.0.0.1:62062/",
+  "checks": [
+    "Direct Z.ai HTTP 200: glm-5.1 requested, glm-5.3 returned",
+    "React UI profile creation and model submission",
+    "Actual list_ghosts tool and final answer 323",
+    "Document review waiting_owner; zero saved documents before approval",
+    "Pending review and transcript survive restart without model redispatch",
+    "React approval saves exactly one PDC Djot 1 document; UI preview renders it",
+    "Sage to Milo owned delegation: requested/accepted/progress/result",
+    "Sage receives and summarizes Milo result 667/GHOST-COLLAB-1003",
+    "Identical submit returns the same task and executes once",
+    "Original conversation marker recalled after restart",
+    "New draft typed during request survives ACK and reload",
+    "Console stops both children; port collision cleans up its new host"
+  ],
+  "profiles": [
+    {
+      "name": "Milo",
+      "id": "b9310462-c62c-437f-8070-0ae09fd34f93",
+      "model_dispatch_attempts": 2,
+      "reported_tokens": 6232
+    },
+    {
+      "name": "Sage",
+      "id": "f7f93930-d0a4-4d0b-ba24-79baf60929d2",
+      "model_dispatch_attempts": 13,
+      "reported_tokens": 34375
+    }
+  ],
+  "document": {
+    "path": "/Users/garden/Documents/Ghost/Live E2E/01a0fdac-1a5c-72e3-9653-542fd2478f05.djot",
+    "sha256": "bdb3f23469eb188f92a7cad1877a148c99c9b9579faf14aaeb74e5d927f4db8a",
+    "profile": "pdc-djot/1"
+  },
+  "collaboration": {
+    "delegation_id": "f7f93930-d0a4-4d0b-ba24-79baf60929d2:delegate_ghost:4f9f7d47-eb1f-4e58-ba69-4f4ed6f8ee6e",
+    "state": "complete",
+    "message_types": [
+      "requested",
+      "accepted",
+      "progress",
+      "progress",
+      "result"
+    ],
+    "message_count": 5,
+    "owner_result": "위임이 성공적으로 완료되었습니다. 책임 Ghost인 Sage(나)가 받은 답을 한 문장으로 정리합니다.\n\n**정리:** Milo가 background=false 위임을 받아 23×29를 두 경로로 검산한 결과 667로 일치함을 확인하고, report_delegation으로 진행 기록을 남긴 뒤 GHOST-COLLAB-1003 협업 완료를 한 문장으로 보고했습니다.\n\n- 실제 도구 결과: `delegate_ghost` 성공 (Milo 반환, task_id `05e9b82d…`)\n- Milo 원문 보고: \"23×29를 두 경로로 검산한 결과 667으로 일치하며, GHOST-COLLAB-1003 협업으로 진행 기록(report_delegation)을 완료했습니다.\"\n- 문서·데이터 수정: 없음 (요청대로 미실행)"
+  },
+  "idempotency": {
+    "request_id": "c4db6e58-8a12-417c-ac2b-80529da0c7d2",
+    "task_id": "70b32adc-3966-408f-a185-3df142766433",
+    "phase": "complete",
+    "response": "첫 연결 검증에서 사용한 표식은 GHOST-LIVE-1003-A7이고, 곱셈 결과는 17×19=323입니다."
+  },
+  "credentials": {
+    "credential_scan": "passed",
+    "files_checked": 1981,
+    "credential_file_mode": "0600",
+    "scope": [
+      "ghost source and UI dist excluding build/dependency directories",
+      "running workspace database and WAL files"
+    ]
+  },
+  "tests": {
+    "ui_unit": 21,
+    "ui_bridge": 7,
+    "ghost_library": 37,
+    "ghost_durable_and_workspace_integration": 8,
+    "provider_library": 621,
+    "provider_mock_http": 8,
+    "total": 702,
+    "ghost_clippy": "passed",
+    "provider_clippy": "passed",
+    "ui_production_build": "passed",
+    "isolated_bridge_e2e": "passed"
+  },
+  "failures_fixed": [
+    {
+      "symptom": "HTTP 429 through Rust while direct Coding Plan succeeded",
+      "cause": "Provider catalog overrides static model Coding Plan URL with general API",
+      "fix": "Explicit Coding Plan transport binding"
+    },
+    {
+      "symptom": "Empty completed response without tool execution",
+      "cause": "ToolCallEnd exists but Done.message omits tools",
+      "fix": "Assembled tool calls included in final message; usage retained across chunks"
+    }
+  ],
+  "limits": [
+    "USD not measured: zero prices in static Z.ai catalog are placeholders, not free usage. Request and token admission budgets apply.",
+    "Historical diagnosis failures are retained.",
+    "Live scope is Z.ai plus local documents and collaboration; Slack, voice, remote computers and deployment are not live-verified."
+  ],
+  "sha256": {
+    "src/durable.rs": "3ba0355e50648ad19f7e7b416a8c775494513bf0c755b68c08993dd6d926d85e",
+    "apps/ghost-ui/scripts/console.mjs": "dcb45f4eebb65d3ef05111d807c20b61edc943d0bac7d4e11b8321ecfca9719f",
+    "apps/ghost-ui/scripts/serve.mjs": "e6f01443628915329418a3eb6aeedc3c3cb656d4af750e9a91fa6891bd3c2773",
+    "apps/ghost-ui/server/bridge.mjs": "012feabff374ca1be09578e4224cfae4f96af35efce692ed072709a1ea708b7d",
+    "apps/ghost-ui/server/bridge.test.mjs": "2ed081714a897c77a77e119825d4885cdf50aa6cbfe59bf6490bccaf73165d10",
+    "apps/ghost-ui/src/features/DotDetail.tsx": "426f79cd7f1c16563d4793423b5b8185c4de6e9d6542869e807b27bef04a7959",
+    "examples/model_probe.rs": "d11a5b3af5533f09471a77aae729196a1be85e0752ced552a41cad0bc868f4f2",
+    "../oxicode/oxicode-ai/src/providers/openai.rs": "116da5309fd1c60b450737656da3c367ab60b46d33243c84bb9cef9bbdbf99cc",
+    "../oxicode/oxicode-ai/tests/provider_mock.rs": "77ef0838a64cf3ae93e470c642ab0deb8952c8e4287ef99ef9786827d02e5a29",
+    "target/debug/ghost": "b3c825eaba0bd9b9f962ce492c802bfe841155a37d7bcaec65f5d1eeb194f24b"
+  }
+}

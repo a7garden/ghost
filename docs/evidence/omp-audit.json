@@ -1,0 +1,118 @@
+{
+  "calls": [
+    {
+      "interface": "OMP 18.4.4 CLI",
+      "model": "zai/glm-5",
+      "elapsedSeconds": 345.98,
+      "exitCode": 0,
+      "intendedModelVerified": true,
+      "toolExecutions": 0,
+      "assistantMessages": 1,
+      "stopReason": "stop",
+      "usage": [
+        {
+          "input": 1855,
+          "output": 31268,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 33123,
+          "cost": {
+            "input": 0.0018549999999999999,
+            "output": 0.10005760000000001,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.1019126
+          }
+        }
+      ],
+      "passed": true
+    },
+    {
+      "interface": "OMP 18.4.4 CLI",
+      "model": "minimax-code/MiniMax-M2.7",
+      "elapsedSeconds": 361.6,
+      "exitCode": 0,
+      "intendedModelVerified": true,
+      "toolExecutions": 0,
+      "assistantMessages": 1,
+      "stopReason": "stop",
+      "usage": [
+        {
+          "input": 17102,
+          "output": 24517,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 41619,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        }
+      ],
+      "passed": true
+    },
+    {
+      "interface": "OMP 18.4.4 CLI",
+      "model": "zai/glm-5",
+      "elapsedSeconds": 110.77,
+      "exitCode": 0,
+      "intendedModelVerified": true,
+      "toolExecutions": 0,
+      "assistantMessages": 1,
+      "stopReason": "stop",
+      "usage": [
+        {
+          "input": 20089,
+          "output": 11378,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 31467,
+          "cost": {
+            "input": 0.020089,
+            "output": 0.0364096,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.056498599999999996
+          }
+        }
+      ],
+      "passed": true
+    },
+    {
+      "interface": "OMP 18.4.4 CLI",
+      "model": "zai/glm-5",
+      "elapsedSeconds": 24.29,
+      "exitCode": 0,
+      "intendedModelVerified": true,
+      "toolExecutions": 0,
+      "assistantMessages": 1,
+      "stopReason": "stop",
+      "usage": [
+        {
+          "input": 979,
+          "output": 1918,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 2897,
+          "cost": {
+            "input": 0.000979,
+            "output": 0.006137600000000001,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.007116600000000001
+          }
+        }
+      ],
+      "passed": true
+    }
+  ],
+  "authPreflightFailure": "separate SDK auth attempt failed before provider request, no successful model usage",
+  "accountIdentity": "parent-provided explicit user confirmation; quota queries not duplicated",
+  "toolsDisabled": true,
+  "automaticRetriesDisabled": true,
+  "maxTimePerCallSeconds": 720,
+  "externalTimeoutSeconds": 750
+}

@@ -1,0 +1,9 @@
+
+running 4 tests
+test actual_browser_ui_actions_epoch_pause_resume_cancel_unknown_and_reconcile ... ok
+test actual_mock_two_questions_independent_tasks_cancel_errors_dedup_and_refresh ... ok
+test loopback_fixed_routes_session_origin_csrf_and_read_only_snapshots ... ok
+test ui_cli_refuses_existing_unmarked_user_root_without_changing_it ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.73s
+

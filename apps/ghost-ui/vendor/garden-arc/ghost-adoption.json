@@ -1,0 +1,10 @@
+{
+  "upstream_commit": "6049b6f8157a2efc49e2c118124ba1f50846d03e",
+  "selected_public_subpaths": [
+    "select",
+    "tooltip"
+  ],
+  "root_provider_only": true,
+  "upstream_source_modified": false,
+  "distribution": "selected exports/dependency closure; retained adapter source and license metadata"
+}

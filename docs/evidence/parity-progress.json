@@ -1,0 +1,47 @@
+{
+  "status": "local_implementation_verified_external_validation_pending",
+  "requested_scope": [
+    "provider_validation",
+    "durable_computer_tools",
+    "pdc_spaces_pages",
+    "review_before_save",
+    "client_recovery",
+    "parallel_workers",
+    "incremental_storage",
+    "operations_budgets",
+    "durable_cross_profile_delegation",
+    "brain_connector",
+    "voice",
+    "slack",
+    "responsibility_lifecycle",
+    "durable_forks_extensions"
+  ],
+  "completed": [],
+  "connected_services_verified": [],
+  "note": "Implementation and controlled tests do not establish connected-service verification. User AGENTS pins new documents to PDC 1; existing PDC 2 documents will be read without conversion.",
+  "updated_at": "2026-10-02T17:02:58.364856+00:00",
+  "implemented_and_controlled_tested": [
+    "provider_validation",
+    "durable_computer_tools",
+    "pdc_spaces_pages",
+    "review_before_save",
+    "client_recovery",
+    "parallel_workers",
+    "incremental_storage",
+    "operations_budgets",
+    "durable_cross_profile_delegation",
+    "brain_connector",
+    "voice",
+    "slack",
+    "responsibility_lifecycle",
+    "durable_forks_extensions"
+  ],
+  "evidence": "minimal-ghost-verification-2026-10-03.json",
+  "remaining_release_gates": [
+    "No live provider, paid voice, Slack account, OpenBot/Docker, or production oxibrain verification.",
+    "Backup is individually consistent per SQLite database, not atomic across databases; external PDC spaces/assets are referenced and not copied.",
+    "Normalized durable rows reduce database rewrites; commit encoding and snapshot cloning still scale with retained history.",
+    "Separate-host federation, multi-user authentication, A2A interoperability, signed releases and portable dependency bundles remain outside this verified local unit.",
+    "Three pre-existing SDK doctests are ignored."
+  ]
+}

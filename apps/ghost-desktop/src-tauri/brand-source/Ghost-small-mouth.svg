@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-label="Ghost with two short eyes and a small round mouth">
+  <g id="ghost">
+    <path fill="#000" d="M278 425 C278 309 377 215 500 215 C623 215 722 309 722 425 L722 695 C722 728 700 757 667 757 C636 757 619 727 587 727 C555 727 536 757 500 757 C464 757 445 727 413 727 C381 727 363 757 333 757 C300 757 278 728 278 695 Z"/>
+    <rect fill="#fff" x="384" y="403" width="78" height="27" rx="13.5"/>
+    <rect fill="#fff" x="538" y="403" width="78" height="27" rx="13.5"/>
+    <ellipse id="mouth" fill="#fff" cx="500" cy="484" rx="15" ry="15"/>
+  </g>
+</svg>

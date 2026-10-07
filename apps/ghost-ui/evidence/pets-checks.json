@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-03",
+  "rust_tests": {
+    "command": "cargo test --offline -j 2",
+    "passed": 75,
+    "failed": 0
+  },
+  "ui_tests": {
+    "command": "npm --prefix apps/ghost-ui test",
+    "vitest_passed": 29,
+    "bridge_passed": 8,
+    "failed": 0
+  },
+  "builds": [
+    "cargo check --offline --features workspace-ui -j 2",
+    "npm --prefix apps/ghost-ui run build"
+  ],
+  "browser_checks": [
+    "create avatar and assign in example mode",
+    "reload preserves assignment",
+    "other Ghost remains independent",
+    "v2 export ZIP opens with valid CRC and pet.json",
+    "exported original sprite accepted by Rust validator",
+    "read_avatar matches original image",
+    "live UI imports and assigns avatar through Rust host",
+    "production CSP allows PNG import",
+    "invalid dimensions disable save and show error",
+    "dark theme and animation setting",
+    "320px creator and 375px settings without horizontal overflow",
+    "floating pet opens assigned Ghost conversation and can be hidden"
+  ],
+  "compatibility": {
+    "versions": [
+      1,
+      2
+    ],
+    "cell": [
+      192,
+      208
+    ],
+    "v1_size": [
+      1536,
+      1872
+    ],
+    "v2_size": [
+      1536,
+      2288
+    ],
+    "format_source": "Installed Codex desktop app.asar pet loader and sprite renderer, inspected 2026-10-03",
+    "native_codex_installation_tested": false
+  },
+  "screenshots": [
+    "pets-creator-desktop.png",
+    "pets-mobile-dark.png",
+    "pets-creator-mobile.png"
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "localShellReadable": true,
+  "projectReadable": true,
+  "uiStagedFiles": [
+    {
+      "name": "index.html",
+      "bytes": 3471
+    },
+    {
+      "name": "mod.rs",
+      "bytes": 18901
+    },
+    {
+      "name": "style.css",
+      "bytes": 6957
+    },
+    {
+      "name": "http.rs",
+      "bytes": 4518
+    },
+    {
+      "name": "app.js",
+      "bytes": 7231
+    }
+  ],
+  "uiCodeApplied": false,
+  "uiAdrRecorded": true,
+  "lastCompletedVerification": {
+    "default": {
+      "passed": 47,
+      "failed": 0,
+      "ignored": 0
+    },
+    "local": {
+      "passed": 91,
+      "failed": 0,
+      "ignored": 0
+    },
+    "engine": {
+      "passed": 110,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "knownOngoingTestSession": null,
+  "matchingTaskWorkspaceProcesses": [],
+  "uiServerStarted": false,
+  "guiStarted": false,
+  "guiWaitingForParentSlot": true,
+  "capacityErrorsObserved": 0,
+  "fallbackModelUsed": false,
+  "initialProcessMetadataReadSandboxDenied": true
+}

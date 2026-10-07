@@ -1,0 +1,80 @@
+{
+  "date": "2026-10-02",
+  "sourceHashes": {
+    "Cargo.toml": "fc835c594252097d1754ec3a219775a907b70796551df78c9d58273b5d9e5cf5",
+    "src/lib.rs": "858b5fa0d6056df4141a2e72a885d316baafe432dacb07ce8274cc465100114f",
+    "src/main.rs": "b053f871f57320138fc5461bff6216508f41a57afb2d12c8d348616e514cc69e",
+    "src/provider.rs": "bac654dcb17bc53059c295b2312dd3c7c3bfc715a15aafdc397bfac20e5516b8",
+    "src/native_http.rs": "27365deed410c8e900b25d0b05dd8c1d0a46d5290dc2d1179d466a0d8cf101fa",
+    "src/provider_control.rs": "f6d506fac9dc70bfa391a11944beed273005fc2b693500472fa315861a095d71",
+    "src/provider_journal.rs": "0f2b5de1382465317d4b94f3aee18309e6785ede3de57304f28b24e90b7281a9",
+    "tests/native_policy.rs": "32232d8a4552d7cd9c41066da391c95041fe5be13d9db90535ae15c2131382ea",
+    "tests/native_provider.rs": "aa121d6764f9508d56ec088a73b0405f411064107f6ef70d37afa76c50f3975b"
+  },
+  "frozenOriginalPreserved": {
+    "Cargo.lock": true,
+    "src/store.rs": true,
+    "src/tools.rs": true,
+    "src/judge.rs": true,
+    "src/collaboration.rs": true,
+    "tests/acceptance.rs": true,
+    "tests/collaboration.rs": true
+  },
+  "tests": {
+    "default": {
+      "passed": 47,
+      "failed": 0,
+      "ignored": 0,
+      "globalConfigDenied": true,
+      "publicNetworkDenied": true
+    },
+    "fixtures": {
+      "passed": 65,
+      "failed": 0,
+      "ignored": 0,
+      "globalConfigDenied": true,
+      "publicNetworkDenied": true
+    },
+    "engine": {
+      "passed": 66,
+      "failed": 0,
+      "ignored": 0,
+      "globalConfigDenied": true,
+      "publicNetworkDenied": true
+    }
+  },
+  "additionalOmpCalls": 0,
+  "liveProviderCalls": 0,
+  "actualCredentialAccess": false,
+  "persistentSecurityChanges": false,
+  "browserModified": false,
+  "browserReferenceHashes": {
+    "/Users/garden/Documents/Workspace/Projects/oxibrowser/docs/ghost-mcp.md": "55948522ed2fac53ffd6156a4ce301e4e0c18f832625bf7ea5e92daaa16481f5",
+    "/Users/garden/Documents/Workspace/Projects/oxibrowser/crates/oxibrowser/src/mcp/ghost.rs": "8d938c5d333e2fbb84c059b3f38afcc0eb169239d62fafb41cf77a428812df48"
+  },
+  "binary": {
+    "path": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-native-macos-arm64",
+    "sha256": "de036d26ae8450d3c4723093467dbad78c94c78df5beb992527ce73649f0760c",
+    "bytes": 8882936,
+    "features": [
+      "default"
+    ]
+  },
+  "previousBinariesPreserved": true,
+  "formatPassed": true,
+  "buildPassed": true,
+  "smokePassed": true,
+  "modelEvidence": {
+    "configuredModel": "gpt-6.1-sol",
+    "activeTurnModelIndependentlyVerified": false,
+    "directDevelopmentAuthorized": true
+  },
+  "blockers": [],
+  "notRun": [
+    "live provider/credentials",
+    "production DNS/TLS integration",
+    "browser actions or browser tests",
+    "SDK-only separate combination",
+    "release/other-platform packaging"
+  ]
+}

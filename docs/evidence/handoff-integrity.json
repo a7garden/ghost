@@ -1,0 +1,89 @@
+{
+  "testMatrix": {
+    "default": {
+      "passed": 47,
+      "failed": 0,
+      "ignored": 0
+    },
+    "local": {
+      "passed": 91,
+      "failed": 0,
+      "ignored": 0
+    },
+    "engine": {
+      "passed": 110,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "newActualControllerCases": 14,
+  "frozenOriginalSourceAndTests": {
+    "src/tools.rs": true,
+    "src/protocol.rs": true,
+    "src/lib.rs": true,
+    "src/provider.rs": true,
+    "src/store.rs": true,
+    "src/native_http.rs": true,
+    "src/provider_journal.rs": true,
+    "src/main.rs": true,
+    "src/provider_control.rs": true,
+    "src/judge.rs": true,
+    "src/collaboration.rs": true,
+    "tests/native_policy.rs": true,
+    "tests/native_provider.rs": true,
+    "tests/acceptance.rs": true,
+    "tests/browser_core.rs": true,
+    "tests/collaboration.rs": true,
+    "tests/browser_local_e2e.rs": true,
+    "tests/fixtures/browser_child.rs": true
+  },
+  "changedAndNewSourceHashes": {
+    "src/browser.rs": "1a0388d7d001d3fee0c867d4dacc741078abc84340b6382b4b8c73b4f2912800",
+    "src/browser/handoff.rs": "53be2138c50b12b575a8a08679527595f545068623f7905df724d6791ec2d7bd",
+    "tests/browser_handoff.rs": "b0827f16b5dfb92a830eb933762143dd409ce8e07112935b5d3d41be9b528cdb",
+    "Cargo.toml": "f2aaf2d218b5cd178c5a6a3235f9f8e847c5d2001759a9cf7fc596f429ba9800",
+    "Cargo.lock": "dab22ce1d6bbc720015c4da93d670635fe1001deba85ad38bc987cb3299d43ac"
+  },
+  "previous96CasesAndAssertionsPreserved": true,
+  "oldAndNewRuntimePinsUnchanged": true,
+  "binarySourceBuildCorrespondenceIndependentlyVerified": false,
+  "baseArtifact": {
+    "binary": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-handoff-checkpoint-macos-arm64",
+    "sha256": "90c88a52fa31609ee2c58629978229844280a6e78a7faddc85ca2b27359af2a0",
+    "bytes": 8880840,
+    "features": [
+      "default"
+    ],
+    "oldArtifactsUnchanged": {
+      "ghost-macos-arm64": "265c929c00d51163a39abcf00ff60767a6dfe5b12f0364be7751a28a503d73d3",
+      "ghosts-macos-arm64": "2e65edb5a85e1b40af63477ffbe7d13df1099ebdfd35de43a201a6ba1f7374de",
+      "ghost-native-macos-arm64": "de036d26ae8450d3c4723093467dbad78c94c78df5beb992527ce73649f0760c",
+      "ghost-browser-core-macos-arm64": "b62923eb08ccee6192dc167da5c9044a6d33dd28e9351f1bf277f53962988a05",
+      "ghost-local-browser-macos-arm64": "0b923c3ae654285b14437addb61a4f199f2b66bcb7459200906e3ea27f953796"
+    },
+    "file": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-handoff-checkpoint-macos-arm64: Mach-O 64-bit executable arm64",
+    "dynamicLinks": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-handoff-checkpoint-macos-arm64:\n\t/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)",
+    "debugDevelopmentArtifact": true,
+    "browserBundled": false,
+    "handoffConstructorEnabled": false,
+    "releaseOrSigningVerified": false
+  },
+  "standaloneSmokePassed": true,
+  "cargoFmtPassed": true,
+  "offlineJ1": true,
+  "serialTests": true,
+  "maxConcurrentRealChildren": 2,
+  "browserRepoWrittenOrBuilt": false,
+  "otherProjectsWritten": false,
+  "persistentAccessOrSecurityChanged": false,
+  "realUserApprovalOrUiVerified": false,
+  "scriptsOrNetworkFreeze": false,
+  "liveProviderCalls": 0,
+  "ompCallsThisUnit": 0,
+  "configuredModel": "gpt-6.1-sol",
+  "effectiveTurnModelIndependentlyVerified": false,
+  "capacityFailures": 0,
+  "astraFallback": false,
+  "noGitCreated": true,
+  "remainingCurrentUnitBlockers": []
+}

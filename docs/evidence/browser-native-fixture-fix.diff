@@ -1,0 +1,11 @@
+--- before/tests/native_provider.rs
++++ after/tests/native_provider.rs
+@@ -45,6 +45,8 @@
+                 match listener.accept() {
+                     Ok((mut stream, _)) => {
+                         counter.fetch_add(1, Ordering::SeqCst);
++                        // macOS accepts inherit the listener's nonblocking flag.
++                        stream.set_nonblocking(false).unwrap();
+                         stream
+                             .set_read_timeout(Some(Duration::from_millis(400)))
+                             .unwrap();

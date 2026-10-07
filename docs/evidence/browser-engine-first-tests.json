@@ -1,0 +1,32 @@
+{
+  "isolationAvailable": true,
+  "globalConfigDenied": true,
+  "publicNetworkDenied": true,
+  "loopbackAllowed": true,
+  "credentialEnvironmentRemoved": true,
+  "persistentSecurityChanges": false,
+  "liveProviderCalls": 0,
+  "results": [
+    {
+      "target": "collaboration",
+      "exitCode": 0
+    },
+    {
+      "target": "acceptance",
+      "exitCode": 0
+    },
+    {
+      "target": "ghost",
+      "exitCode": 0
+    },
+    {
+      "target": "native_provider",
+      "exitCode": 0
+    },
+    {
+      "target": "browser_core",
+      "exitCode": 101
+    }
+  ],
+  "passed": false
+}

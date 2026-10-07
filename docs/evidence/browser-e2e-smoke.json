@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "binary": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-local-browser-macos-arm64",
+  "sha256": "0b923c3ae654285b14437addb61a4f199f2b66bcb7459200906e3ea27f953796",
+  "clearedEnvironment": true,
+  "distinctIdentities": true,
+  "freshCliProcesses": true,
+  "completedArtifacts": 2,
+  "duplicateParentAndDelivery": true,
+  "cancelBeforeDispatch": true,
+  "nativeInterpreterRequired": false,
+  "liveProviderCalls": 0
+}

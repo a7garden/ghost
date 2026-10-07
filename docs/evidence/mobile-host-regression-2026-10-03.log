@@ -1,0 +1,19 @@
+   Compiling ghost v0.1.0 (/Users/garden/Documents/Workspace/Projects/ghost)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.37s
+     Running tests/host.rs (target/debug/deps/host-8eeb2e833be51ee0)
+
+running 4 tests
+test async_unavailable_computer_command_returns_error_without_panicking ... ok
+test headless_host_runs_and_persists_work_goals_and_timers ... ok
+test graceful_shutdown_joins_partial_http_request_before_releasing_host ... ok
+test cli_uses_the_live_host_while_its_durable_writer_is_open ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+
+     Running tests/self_host.rs (target/debug/deps/self_host-cc9d9634cb428647)
+
+running 1 test
+test service_sigterm_drains_and_removes_owned_discovery ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+

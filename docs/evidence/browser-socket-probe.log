@@ -1,0 +1,3 @@
+macOS selected host, loopback-only sandbox, Rust std TcpListener with nonblocking=true and read timeout=1s:
+accepted_stream_first_read=Err(WouldBlock), elapsed_ms=0
+explicit_blocking_read=Ok(1)

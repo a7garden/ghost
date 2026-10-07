@@ -1,0 +1,50 @@
+{
+  "binary": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-macos-arm64",
+  "environment": "cleared; PATH=/usr/bin:/bin",
+  "runtime": "native subprocesses; mock only",
+  "checks": [
+    {
+      "profile": "alpha",
+      "identity": "60e49560-f524-4dde-871e-0cdb6ba83356",
+      "sessions": [
+        "bcbfabb0-150e-41be-82cb-eb5e662ae5e5",
+        "b3e5b91d-92ec-41ed-8634-2f3b23b29b78"
+      ],
+      "outboxRows": 3,
+      "run": {
+        "completed": 3,
+        "denied": 0,
+        "failed": 0,
+        "uncertain": 0
+      }
+    },
+    {
+      "profile": "beta",
+      "identity": "12a5fff6-a11b-4554-a61f-eb46d77faebc",
+      "sessions": [
+        "0803cbc6-19c1-43d7-8782-c820b379a0fa",
+        "da22c190-3eda-43da-9555-430efdaab83d"
+      ],
+      "outboxRows": 4,
+      "run": {
+        "completed": 2,
+        "denied": 1,
+        "failed": 0,
+        "uncertain": 0
+      }
+    }
+  ],
+  "passed": true,
+  "verified": [
+    "two independent durable profiles",
+    "two sessions per profile",
+    "concurrent separate CLI processes",
+    "identical replay deduplication",
+    "conflicting replay rejection",
+    "native allowed write",
+    "default-deny write",
+    "durable cancellation",
+    "reopen status and correlated outbox",
+    "second run has no duplicate effects"
+  ]
+}

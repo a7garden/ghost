@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-02",
+  "userEvidenceId": "Sentinel_52cc2943cb908191ad1fccfb7927104a",
+  "userQuote": "ghost도 sol 6.1로 해도 돼. 중요한거니까",
+  "approvalMechanism": "exec_command require_escalated auto_review returned success before continuing",
+  "configuredModel": "gpt-6.1-sol",
+  "activeTurnModelIndependentlyVerified": false,
+  "directDevelopmentResumed": true,
+  "ompCallsThisUnit": 0,
+  "paths": [
+    "src/collaboration.rs",
+    "tests/collaboration.rs",
+    "docs/collaboration-acceptance.md"
+  ],
+  "scope": "existing collaboration recovery, fixture, regression only; no new credentials/security settings/deployment/browser edits"
+}

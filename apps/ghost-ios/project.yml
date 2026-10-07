@@ -1,0 +1,50 @@
+name: Ghost
+options:
+  bundleIdPrefix: io.a7garden
+  deploymentTarget:
+    iOS: '17.0'
+packages:
+  GhostMobileCore:
+    path: .
+targets:
+  Ghost:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    dependencies:
+      - package: GhostMobileCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.a7garden.ghost
+        SWIFT_VERSION: '6.0'
+        TARGETED_DEVICE_FAMILY: '1,2'
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Ghost
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Ghost와 음성으로 대화할 때 마이크를 사용합니다.
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        MARKETING_VERSION: '0.1.0'
+        CURRENT_PROJECT_VERSION: '1'
+  GhostUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: Ghost
+    settings:
+      base:
+        SWIFT_VERSION: '6.0'
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: io.a7garden.ghost.uitests
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  Ghost:
+    build:
+      targets:
+        Ghost: all
+    test:
+      targets:
+        - GhostUITests

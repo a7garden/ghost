@@ -1,0 +1,7 @@
+/Users/garden/Documents/Codex/2026-10-01/task-3/ui-window-proof.swift:35:89: error: extra trailing closure passed in call
+ 33 |     func js(_ body: String) async throws -> Any {
+ 34 |         try await withCheckedThrowingContinuation { continuation in
+ 35 |             web.callAsyncJavaScript(body, arguments: [:], in: nil, contentWorld: .page) { result in
+    |                                                                                         `- error: extra trailing closure passed in call
+ 36 |                 continuation.resume(with: result)
+ 37 |             }

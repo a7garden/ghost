@@ -1,0 +1,5 @@
+node_modules/
+src-tauri/target/
+src-tauri/resources/
+src-tauri/gen/
+vendor/garden-native-host/target/

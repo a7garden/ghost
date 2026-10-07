@@ -1,0 +1,37 @@
+{
+  "name": "@garden/arc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "files": [
+    "src",
+    "styles.css",
+    "LICENSE",
+    "NOTICE",
+    "manifest.json",
+    "dependency-licenses.json",
+    "README.md",
+    "ghost-adoption.json"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./styles.css",
+    "./select": "./src/registry/components/select/select.tsx",
+    "./tooltip": "./src/registry/components/tooltip/tooltip.tsx"
+  },
+  "scripts": {},
+  "peerDependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "dependencies": {
+    "@radix-ui/react-select": "2.3.7",
+    "@radix-ui/react-tooltip": "1.2.16",
+    "lucide-react": "1.47.0",
+    "motion": "13.4.0"
+  }
+}

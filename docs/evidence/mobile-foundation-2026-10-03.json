@@ -1,0 +1,84 @@
+{
+  "observed_at_utc": "2026-10-02T16:59:32.620982+00:00",
+  "task": "iPhone foreground voice, authenticated personal gateway, self-host service boundary",
+  "runs": [
+    {
+      "command": "node --test apps/ghost-gateway/*.test.mjs",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "command": "GHOST_TEST_BINARY=target/debug/ghost node --test apps/ghost-gateway/host.integration.mjs",
+      "passed": 1,
+      "failed": 0,
+      "model": "mock",
+      "real_host": true
+    },
+    {
+      "command": "swift test (apps/ghost-ios)",
+      "passed": 3,
+      "failed": 0
+    },
+    {
+      "command": "cargo test --offline --test host --test self_host",
+      "passed": 5,
+      "failed": 0
+    },
+    {
+      "command": "xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost -sdk iphonesimulator -configuration Debug -derivedDataPath /tmp/ghost-ios-build CODE_SIGN_IDENTITY=- build",
+      "result": "BUILD SUCCEEDED",
+      "source_warnings": 0,
+      "tool_notice": "AppIntents metadata extraction skipped because the app has no AppIntents dependency"
+    },
+    {
+      "check": "launchd renderer",
+      "result": "Two valid 0600 plists; refuses existing file overwrite; services not installed"
+    }
+  ],
+  "simulator": "iPhone 18 Pro, iOS 27.0; ad-hoc signed install and launch; connection screen visually inspected",
+  "implemented": [
+    "native iPhone lists/chat/tasks/connection UI",
+    "voice-only WebRTC page with origin-checked native bridge",
+    "device token hashing and per-request revocation",
+    "TLS edge to authenticated loopback control",
+    "persisted explicit retry IDs",
+    "host SIGTERM drain"
+  ],
+  "not_verified": [
+    "physical iPhone",
+    "live provider audio/cost/latency",
+    "public TLS endpoint",
+    "Linux build/systemd installation",
+    "PC screen/takeover UI",
+    "local PC agent/router",
+    "background/CallKit/APNs"
+  ],
+  "test_scope_note": "Only the commands above were run in this chat. Other chats are editing the shared host and web UI; these results do not certify future edits or all features.",
+  "sha256": {
+    "apps/ghost-gateway/devices.mjs": "792bcd742578e86c9be6c4cce0dd81c67aae67754ab153c8ca8e4dba468256f5",
+    "apps/ghost-gateway/gateway.test.mjs": "4fd0b1b89c3e13153fcbc876f7f006dffd7a156b6e09507a535619f9590e4c20",
+    "apps/ghost-gateway/host.integration.mjs": "5445ab283b9993c38349eaf71962cd3215798e628308a04f528601d7eece853b",
+    "apps/ghost-gateway/package.json": "fde760abc45eb37496f9f5cc3eab6424ffafa1f5edc80e4b7ed71f372bf2d920",
+    "apps/ghost-gateway/public/tokens.css": "491d3ec7c9e27727d9af19bafff1c2ebd7368371d29f8860991b311446fa3f03",
+    "apps/ghost-gateway/public/voice.css": "5031fb172fa3b38afda02d80cb0de76c4d9d52b7ee0b9839d911c18b0fda3395",
+    "apps/ghost-gateway/public/voice.html": "b2276589092c2b26301b302c343c40cfa45e4762d8738c895f4a2a614913412a",
+    "apps/ghost-gateway/public/voice.js": "259e4d9c8c4d61f772b90fe730856e7c437849da273339f1f7bcb68c03129d47",
+    "apps/ghost-gateway/server.mjs": "9c6e7e68e26510509ccf8ef2d0f79c26bb1b7f44abe408f5b8c84503a3ac96f7",
+    "apps/ghost-gateway/voice.test.mjs": "ad45a3c56c786fc4de47f0222e9d2e10ba6c2948cf10622173a0d37158d2ae60",
+    "apps/ghost-ios/App/GhostApp.swift": "99b662b437e59460aceba24c66a845c4efe97fcaee1d21a4b1e75c49315f77ea",
+    "apps/ghost-ios/App/Model.swift": "8ae43f15d8699d907802693cfa0d51bde34b0492d8221098f3367530971b4c94",
+    "apps/ghost-ios/App/VoiceScreen.swift": "17f2f0bc81834a42c9a6b69a83afa529900405a7c8fa2c3da16d8a35ea1c08f4",
+    "apps/ghost-ios/Package.swift": "70aca0c03e035bb8c2a6607423e2ab8c57f872c0bcba3d073f0698635d7d032c",
+    "apps/ghost-ios/Sources/GhostMobileCore/Transport.swift": "16d0aa0fe38076b3c317e4a449c6926f7492ad6c910c686ade8db252bfd11968",
+    "apps/ghost-ios/Tests/GhostMobileCoreTests/TransportTests.swift": "0120e125d68910c034c1e9e4c6999a3f79305f55e22ea9790e2c744034350aa6",
+    "apps/ghost-ios/project.yml": "160528494e2e92a493949de97b52f0512e71d567c7df7fd0695920caab963932",
+    "deploy/self-host/Caddyfile.example": "501fb991553d510c8da18e11f8a07f9bdedc17c50d6e7839438aec38dd7c8acb",
+    "deploy/self-host/README.md": "92fd1eb19d502da174487176de5e5f7bcf73f63f0f6a93710b03fdae0c6b055b",
+    "deploy/self-host/gateway.env.example": "8b55179a87d175de05520c04dcf532deee05aea6fc656eed3731522f574cf569",
+    "deploy/self-host/ghost-gateway.service.example": "8537b0d5b0882d0a4988778d5680962f16609f2d99c8eb017ceaff5a43614e61",
+    "deploy/self-host/ghost-host.service.example": "737f05457efa7b17a13f54649255890c5d19bd54fb666ed427ebe62c920cb547",
+    "deploy/self-host/render-launchd.py": "cc6e25fb4df7a8cf91d081bd003513936b3e322e3edf76c2eae567e3bd38edcd",
+    "src/control/server.rs": "787bf57126194a63c1c6c4b962fc9fbc2383cd04f10939c153091eb80bb093b9",
+    "tests/self_host.rs": "106d3cc08d3f826e46c6324829d878fa91f0414292ef8b6ffeb3d7f68f1bab31"
+  }
+}

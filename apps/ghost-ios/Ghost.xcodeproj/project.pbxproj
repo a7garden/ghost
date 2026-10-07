@@ -1,0 +1,461 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		320EFEAB288FB17DC643C2B5 /* ChatUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCC147278078FB5258EAD57B /* ChatUITests.swift */; };
+		349ECE0AAE2A6C7D33DB26B3 /* MessageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC906B305422C78708EF199E /* MessageHistory.swift */; };
+		6394ECA05A61CCFCBFE4AC2E /* VoiceScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF93FAE8DC1F71DFA5148BC4 /* VoiceScreen.swift */; };
+		7647933B07EE6F77C9F330F4 /* GhostMobileCore in Frameworks */ = {isa = PBXBuildFile; productRef = E74FBD16B51A393AB8EBA64D /* GhostMobileCore */; };
+		77745434DF1D960CAD5E50CE /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5233062CDDA8ECDAD9337D86 /* Model.swift */; };
+		F9379130D7349B4A746AB49F /* GhostApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9F8310C88BC181A67965A7 /* GhostApp.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		5C77CDDC3F33B840C3982052 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 3B6A339E10ACBBE07D55E9E0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 25D4E4F1C51A642ED05913AE;
+			remoteInfo = Ghost;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		210C80F89E9E82E2589E8AC6 /* Ghost.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Ghost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		21103DABE74F76176F779EEF /* ghost-ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "ghost-ios"; path = .; sourceTree = SOURCE_ROOT; };
+		5233062CDDA8ECDAD9337D86 /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
+		9B9F8310C88BC181A67965A7 /* GhostApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostApp.swift; sourceTree = "<group>"; };
+		A2CBD3F209672C194763E595 /* GhostUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = GhostUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC906B305422C78708EF199E /* MessageHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageHistory.swift; sourceTree = "<group>"; };
+		BF93FAE8DC1F71DFA5148BC4 /* VoiceScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceScreen.swift; sourceTree = "<group>"; };
+		FCC147278078FB5258EAD57B /* ChatUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatUITests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		E7B7E34965015AE6857F907F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7647933B07EE6F77C9F330F4 /* GhostMobileCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		07A0AF82DC1DCDB3BBCD4212 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				FCC147278078FB5258EAD57B /* ChatUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		1777A4B81F272A8C249619F9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				210C80F89E9E82E2589E8AC6 /* Ghost.app */,
+				A2CBD3F209672C194763E595 /* GhostUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B106C7B4A6A4953429D6CA34 = {
+			isa = PBXGroup;
+			children = (
+				E18BFCAB49BCE3B1F821C94C /* App */,
+				DDAB51829116776BDAB0E6A9 /* Packages */,
+				07A0AF82DC1DCDB3BBCD4212 /* UITests */,
+				1777A4B81F272A8C249619F9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DDAB51829116776BDAB0E6A9 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				21103DABE74F76176F779EEF /* ghost-ios */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		E18BFCAB49BCE3B1F821C94C /* App */ = {
+			isa = PBXGroup;
+			children = (
+				9B9F8310C88BC181A67965A7 /* GhostApp.swift */,
+				AC906B305422C78708EF199E /* MessageHistory.swift */,
+				5233062CDDA8ECDAD9337D86 /* Model.swift */,
+				BF93FAE8DC1F71DFA5148BC4 /* VoiceScreen.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		25D4E4F1C51A642ED05913AE /* Ghost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DEECEEBFB81B438E8EE297DF /* Build configuration list for PBXNativeTarget "Ghost" */;
+			buildPhases = (
+				A8989A7FD184CA713E409A13 /* Sources */,
+				E7B7E34965015AE6857F907F /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Ghost;
+			packageProductDependencies = (
+				E74FBD16B51A393AB8EBA64D /* GhostMobileCore */,
+			);
+			productName = Ghost;
+			productReference = 210C80F89E9E82E2589E8AC6 /* Ghost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CB10196ECA5AD7CFCAE141E3 /* GhostUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 426E302627D0E2887897F803 /* Build configuration list for PBXNativeTarget "GhostUITests" */;
+			buildPhases = (
+				EED1CE0988F66DC4DD523078 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D2660B11D44C5B5905538047 /* PBXTargetDependency */,
+			);
+			name = GhostUITests;
+			packageProductDependencies = (
+			);
+			productName = GhostUITests;
+			productReference = A2CBD3F209672C194763E595 /* GhostUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		3B6A339E10ACBBE07D55E9E0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					25D4E4F1C51A642ED05913AE = {
+						ProvisioningStyle = Automatic;
+					};
+					CB10196ECA5AD7CFCAE141E3 = {
+						ProvisioningStyle = Automatic;
+						TestTargetID = 25D4E4F1C51A642ED05913AE;
+					};
+				};
+			};
+			buildConfigurationList = 01E5C3D97BC73CA2425D33F1 /* Build configuration list for PBXProject "Ghost" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B106C7B4A6A4953429D6CA34;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				163D5A28758903B18A0CDF82 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1777A4B81F272A8C249619F9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				25D4E4F1C51A642ED05913AE /* Ghost */,
+				CB10196ECA5AD7CFCAE141E3 /* GhostUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A8989A7FD184CA713E409A13 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F9379130D7349B4A746AB49F /* GhostApp.swift in Sources */,
+				349ECE0AAE2A6C7D33DB26B3 /* MessageHistory.swift in Sources */,
+				77745434DF1D960CAD5E50CE /* Model.swift in Sources */,
+				6394ECA05A61CCFCBFE4AC2E /* VoiceScreen.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EED1CE0988F66DC4DD523078 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				320EFEAB288FB17DC643C2B5 /* ChatUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D2660B11D44C5B5905538047 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 25D4E4F1C51A642ED05913AE /* Ghost */;
+			targetProxy = 5C77CDDC3F33B840C3982052 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		05CB74079096DA87B0E9B41E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Ghost;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ghost와 음성으로 대화할 때 마이크를 사용합니다.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.a7garden.ghost;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2B139FD6CAEFE2D22C6A57DD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.a7garden.ghost.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Ghost;
+			};
+			name = Debug;
+		};
+		55A1BBB450F95B18CB8DE947 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		5D36B29449D77FC9B8819CD0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		8904F0FEBE227605CA101C72 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.a7garden.ghost.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Ghost;
+			};
+			name = Release;
+		};
+		F697E6540A026BB231E1386D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Ghost;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ghost와 음성으로 대화할 때 마이크를 사용합니다.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.a7garden.ghost;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		01E5C3D97BC73CA2425D33F1 /* Build configuration list for PBXProject "Ghost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				55A1BBB450F95B18CB8DE947 /* Debug */,
+				5D36B29449D77FC9B8819CD0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		426E302627D0E2887897F803 /* Build configuration list for PBXNativeTarget "GhostUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2B139FD6CAEFE2D22C6A57DD /* Debug */,
+				8904F0FEBE227605CA101C72 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DEECEEBFB81B438E8EE297DF /* Build configuration list for PBXNativeTarget "Ghost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F697E6540A026BB231E1386D /* Debug */,
+				05CB74079096DA87B0E9B41E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		163D5A28758903B18A0CDF82 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E74FBD16B51A393AB8EBA64D /* GhostMobileCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GhostMobileCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 3B6A339E10ACBBE07D55E9E0 /* Project object */;
+}

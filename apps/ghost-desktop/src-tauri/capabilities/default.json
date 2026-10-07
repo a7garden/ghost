@@ -1,0 +1,7 @@
+{
+  "identifier": "window",
+  "description": "Window dragging for the Ghost console. No filesystem, shell, or process commands are exposed to the renderer.",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*"] },
+  "permissions": ["core:window:allow-start-dragging"]
+}

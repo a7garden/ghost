@@ -1,0 +1,49 @@
+{
+  "checkedAt": "2026-10-02T17:02:56.830Z",
+  "mode": "explicit demo",
+  "conversationViewports": [
+    {
+      "composerBottom": 777.5,
+      "documentWidth": 320,
+      "viewportHeight": 812,
+      "width": 320
+    },
+    {
+      "composerBottom": 777.5,
+      "documentWidth": 375,
+      "viewportHeight": 812,
+      "width": 375
+    },
+    {
+      "composerBottom": 777.5,
+      "documentWidth": 414,
+      "viewportHeight": 812,
+      "width": 414
+    },
+    {
+      "composerBottom": 775.5,
+      "documentWidth": 768,
+      "viewportHeight": 812,
+      "width": 768
+    }
+  ],
+  "collaboration": {
+    "width": 320,
+    "documentWidth": 320,
+    "overflowingControls": 0
+  },
+  "checks": [
+    "Example message submission and reload persistence",
+    "Mobile navigation",
+    "Approval to document preview and collaboration completion",
+    "Collaboration lineage and request/accept/progress/result record",
+    "Participant selection enables collaboration request only with a prompt",
+    "Modal autofocus and Escape dismissal",
+    "Search filters Ghost names",
+    "Light and dark collaboration view"
+  ],
+  "limitations": [
+    "External model and service execution not tested",
+    "Not a comprehensive accessibility audit"
+  ]
+}

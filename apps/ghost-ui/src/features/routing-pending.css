@@ -1,0 +1,10 @@
+.routing-pending-inputs{display:grid;gap:10px;margin:10px 0 12px}
+.routing-pending-inputs article{padding:13px 15px;border:1px solid var(--color-border);border-radius:14px;background:var(--color-background-secondary)}
+.routing-pending-heading{display:flex;align-items:center;gap:8px;font-size:13px}
+.routing-pending-inputs p{margin:7px 0 0;font-size:12px;line-height:1.65;color:var(--color-text-secondary)}
+.routing-pending-actions{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px}
+.routing-pending-actions .text-button{display:inline-flex;align-items:center;gap:5px;font-size:12px}
+.routing-pending-inputs .routing-pending-notice{color:var(--color-text)}
+.routing-pending-spinner{animation:routing-pending-turn 1.5s linear infinite}
+@keyframes routing-pending-turn{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.routing-pending-spinner{animation:none}}

@@ -1,0 +1,212 @@
+{
+  "uiCheckpointTestMatrix": {
+    "default": {
+      "passed": 47,
+      "failed": 0,
+      "ignored": 0
+    },
+    "local": {
+      "passed": 95,
+      "failed": 0,
+      "ignored": 0
+    },
+    "engine": {
+      "passed": 114,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "localMatrixComposite": true,
+  "full114PassedBeforeConcurrentSourceChanges": true,
+  "newUiHttpCases": 4,
+  "packagedUiArtifactHttpCasesPassed": 4,
+  "sourcePreservationAtUiCheckpoint": {
+    "frozenOriginalSourceTestsAndLock": {
+      "src/tools.rs": true,
+      "src/protocol.rs": true,
+      "src/provider.rs": true,
+      "src/store.rs": true,
+      "src/native_http.rs": true,
+      "src/provider_journal.rs": true,
+      "src/provider_control.rs": true,
+      "src/judge.rs": true,
+      "src/collaboration.rs": true,
+      "tests/native_policy.rs": true,
+      "tests/native_provider.rs": true,
+      "tests/acceptance.rs": true,
+      "tests/browser_handoff.rs": true,
+      "tests/browser_core.rs": true,
+      "tests/collaboration.rs": true,
+      "tests/browser_local_e2e.rs": true,
+      "tests/fixtures/browser_child.rs": true,
+      "Cargo.lock": true
+    },
+    "previous110CasesAndAssertionsPreserved": true,
+    "previousSixArtifactsUnchanged": {
+      "ghost-macos-arm64": "265c929c00d51163a39abcf00ff60767a6dfe5b12f0364be7751a28a503d73d3",
+      "ghosts-macos-arm64": "2e65edb5a85e1b40af63477ffbe7d13df1099ebdfd35de43a201a6ba1f7374de",
+      "ghost-native-macos-arm64": "de036d26ae8450d3c4723093467dbad78c94c78df5beb992527ce73649f0760c",
+      "ghost-browser-core-macos-arm64": "b62923eb08ccee6192dc167da5c9044a6d33dd28e9351f1bf277f53962988a05",
+      "ghost-local-browser-macos-arm64": "0b923c3ae654285b14437addb61a4f199f2b66bcb7459200906e3ea27f953796",
+      "ghost-handoff-checkpoint-macos-arm64": "90c88a52fa31609ee2c58629978229844280a6e78a7faddc85ca2b27359af2a0"
+    },
+    "allowedBaselineFilesModified": [
+      "Cargo.toml",
+      "src/lib.rs",
+      "src/browser/handoff.rs",
+      "src/main.rs",
+      "src/browser.rs"
+    ]
+  },
+  "previous110AssertionsNotEditedByUiTask": true,
+  "currentOriginalTestHashesAfterConcurrentEdits": {
+    "tests/native_policy.rs": true,
+    "tests/native_provider.rs": true,
+    "tests/acceptance.rs": false,
+    "tests/browser_handoff.rs": true,
+    "tests/browser_core.rs": true,
+    "tests/collaboration.rs": false,
+    "tests/browser_local_e2e.rs": true,
+    "tests/fixtures/browser_child.rs": true
+  },
+  "originalCargoLockBeforeUiSha256": "dab22ce1d6bbc720015c4da93d670635fe1001deba85ad38bc987cb3299d43ac",
+  "currentCargoLockSha256": "1c7cacdb2998b2daa7a98e531aaa0fc2f0bfbc42861321a43979caa96af1ca20",
+  "concurrentChangesPreserved": true,
+  "currentWholeCheckoutAndSdkValidatedAfterConcurrentChanges": false,
+  "concurrentSourceMayStillBeChanging": true,
+  "currentBaselineFileHashesObserved": {
+    "src/tools.rs": "a02dc7d56dd7ab8cff67bf9e47e3e7ff83c300ed96f6b52c26c6c91e77e251d3",
+    "src/protocol.rs": "c2b0473704f15c644c0ef88ad8e4b081d6f388dc7bc2135fd73b42e9554eb396",
+    "src/lib.rs": "dbdc64c9d7b77dfdc81769245a8b1fa976e3b5125b2f1325abd219eb0d61db75",
+    "src/provider.rs": "bac654dcb17bc53059c295b2312dd3c7c3bfc715a15aafdc397bfac20e5516b8",
+    "src/store.rs": "d72e77bc3ba2a4adb6adc2cd86df06ef6f4f584da18e05bf90b515e9e2997cf8",
+    "src/native_http.rs": "27365deed410c8e900b25d0b05dd8c1d0a46d5290dc2d1179d466a0d8cf101fa",
+    "src/provider_journal.rs": "0f2b5de1382465317d4b94f3aee18309e6785ede3de57304f28b24e90b7281a9",
+    "src/main.rs": "eb0dd213b5303c5bf23f1b736d6e7ae16c8e6c779590d6bdc64e0ad1aa02b637",
+    "src/provider_control.rs": "f6d506fac9dc70bfa391a11944beed273005fc2b693500472fa315861a095d71",
+    "src/judge.rs": "def01eb3248ea8073c8879e0317bd2e712f71f9a5883b02f733d4bdbf0b77e38",
+    "src/collaboration.rs": "038727bbd58fed01587d1a213499ca6fca8775b9b27f9f963c0988bdd083e4bf",
+    "src/browser.rs": "a47ec0a80ad5289cdce5167f9a37f33685cb143fb00f488ff1f9a1c58a78dfb4",
+    "src/browser/handoff.rs": "c93c5f844b5f45ede9fa72619beabc4cd34127a3c42ceaae03807a7d86070dea",
+    "tests/native_policy.rs": "32232d8a4552d7cd9c41066da391c95041fe5be13d9db90535ae15c2131382ea",
+    "tests/native_provider.rs": "629593e50081958e9b4f1806f27342e353878272d7625476b68d76ffd83f6a89",
+    "tests/acceptance.rs": "36cf8f6d3fee4badf70717f0207a5389046dd48a6e3b449f33fbc0f74949d084",
+    "tests/browser_handoff.rs": "b0827f16b5dfb92a830eb933762143dd409ce8e07112935b5d3d41be9b528cdb",
+    "tests/browser_core.rs": "818e1caee2cc5f2b729572e2ac5961c95732e0617b8eace8891ba27b4e6fcc5f",
+    "tests/collaboration.rs": "2c8449ce8065e9bc8244ca6d44f3bc9d18433b0bca7b8723cc30b3345beef31f",
+    "tests/browser_local_e2e.rs": "af4063416af0c398ba2cd872871136b4ea7509747e677299f554c339b8e0b85d",
+    "tests/fixtures/browser_child.rs": "b660c26f20206c1565effe77dd48fec4fb4787e29ebba2d01f7a7dcfd1005333",
+    "Cargo.toml": "6094ff6b2c70eec650b971fc197e2d69f06f8499df61e338edf89babb75c8a40",
+    "Cargo.lock": "1c7cacdb2998b2daa7a98e531aaa0fc2f0bfbc42861321a43979caa96af1ca20",
+    "README.md": "1bcb21dbb7213c62215629133257857c80dab290fef51b351e9c66912ed6eda3",
+    "docs/status.md": "bb1500c16c8425e82784c1d1d640252c42dc3e90840f478ddc2072433d492c84",
+    "docs/v1-acceptance.md": "00ee70188f7532557248fe01a13b2a73434253b403b5b937377b26d923d654a1"
+  },
+  "newOwnUiSourceDocHashes": {
+    "src/ui/mod.rs": "8904b40c72260be970d3f1e72779290a06676e9681a581816f11e91e7be14b3f",
+    "src/ui/http.rs": "61da6902d329aa983aedee7aa89d5d0427c0487610715597925b555fe53ecb70",
+    "src/ui/index.html": "56391fc419aab246ad9542dd284c12d504183c83353d284dfdd7265eeaacca2d",
+    "src/ui/style.css": "8935ab6d45f995d62d4e447bd12c52b6a177a8a7ce1540f1a0d1ce660b7c0b34",
+    "src/ui/app.js": "b0022b6f3f465ab0dfe34909e1849811204471f34b68df01cd6cfa30c6f10a0c",
+    "tests/ui_fixture.rs": "5b657ee0bb5f893c7b26eabd098524deb387c3b7bd0e05952704299c1e4342ad",
+    "tests/fixtures/ui_window_proof.swift": "6e6eede5785242fab8dfd3a19048ddfdd29a8ab14c3ae18f291fc4e37612e082",
+    "docs/adr-008-fixture-host-ui.md": "a0f76b2e221b3009d13198c9cd35ebea009c72d8103bf411946cdd4b605fd4dd",
+    "docs/ui-fixture-2026-10-02.md": "0c9e86f4d655303ad874a748c163126c695b32f07906b8ea78a355c501cbaa16"
+  },
+  "concurrentFilesNotAuthoredByUiTask": {
+    "src/durable.rs": "32fb7a1086b981950f281dc1bd7fafbdc42658f805c954d357768a90e7a0d242",
+    "tests/durable.rs": "b9f7e27088466d9164922575171589b11ea18ca7b2dbf094ec974ac0b62eb168"
+  },
+  "previousSixArtifactsUnchanged": {
+    "ghost-macos-arm64": "265c929c00d51163a39abcf00ff60767a6dfe5b12f0364be7751a28a503d73d3",
+    "ghosts-macos-arm64": "2e65edb5a85e1b40af63477ffbe7d13df1099ebdfd35de43a201a6ba1f7374de",
+    "ghost-native-macos-arm64": "de036d26ae8450d3c4723093467dbad78c94c78df5beb992527ce73649f0760c",
+    "ghost-browser-core-macos-arm64": "b62923eb08ccee6192dc167da5c9044a6d33dd28e9351f1bf277f53962988a05",
+    "ghost-local-browser-macos-arm64": "0b923c3ae654285b14437addb61a4f199f2b66bcb7459200906e3ea27f953796",
+    "ghost-handoff-checkpoint-macos-arm64": "90c88a52fa31609ee2c58629978229844280a6e78a7faddc85ca2b27359af2a0"
+  },
+  "runtimePinsUnchanged": {
+    "browser-e2e-pin.json": true,
+    "handoff-pin.json": true
+  },
+  "selectedBrowserSourceSameAsReadOnlyPin": {
+    "docs/ghost-mcp.md": true,
+    "docs/ghost-handoff.md": true,
+    "crates/oxibrowser/src/mcp/ghost.rs": true,
+    "crates/oxibrowser/src/mcp/ghost/handoff.rs": true,
+    "crates/oxibrowser/src/main.rs": true,
+    "crates/oxibrowser/tests/ghost_handoff.rs": true
+  },
+  "upstream138TestsReportedNotRerun": true,
+  "browserSourceBinaryCorrespondenceIndependentlyVerified": false,
+  "artifact": {
+    "binary": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-ui-fixture-macos-arm64",
+    "sha256": "7a7eb3e3cda54cbc302ec2259ece86bb08146cd276fd7a02bf26d4e6011e6bd3",
+    "bytes": 12814264,
+    "features": [
+      "ui-fixtures"
+    ],
+    "uiAssetsEmbedded": true,
+    "browserBundled": false,
+    "actualBrowserAdditionalDependencies": [
+      "pinned OxiBrowser executable",
+      "macOS sandbox-exec"
+    ],
+    "additionalNodeBunPythonRuntime": false,
+    "developmentDebugArtifact": true,
+    "releaseOrSigningVerified": false,
+    "dynamicLinks": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-ui-fixture-macos-arm64:\n\t/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n",
+    "file": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-ui-fixture-macos-arm64: Mach-O 64-bit executable arm64"
+  },
+  "artifactRepresentsLatestSharedSource": false,
+  "standaloneSmokePassed": true,
+  "cargoFmtPassedAtUiCheckpoint": false,
+  "javascriptSyntaxPassed": true,
+  "guiHelperCompiled": true,
+  "actualFrontendRenderOrDomInteraction": false,
+  "screenshots": 0,
+  "realHumanApprovalVerified": false,
+  "scriptsNetworkFrozen": false,
+  "maxConcurrentActualChildrenInOwnTests": 2,
+  "pinnedFixtureProcessesAtReadOnlyObservation": [],
+  "offlineJ1": true,
+  "serialTests": true,
+  "liveProviderCalls": 0,
+  "ompCallsThisUnit": 0,
+  "configuredModel": "gpt-6.1-sol",
+  "effectiveTurnModelIndependentlyVerified": false,
+  "capacityErrors": 0,
+  "astraFallback": false,
+  "browserRepoWrittenBuiltOrExistingBrowserClosed": false,
+  "otherProjectsWrittenByUiTask": false,
+  "newPersistentSecurityCredentialPaymentSharing": false,
+  "gitRemotePushPrMergeDeploy": false,
+  "interruptedExecution": {
+    "completed": [
+      "first UI feature build",
+      "new UI headless tests 4/4",
+      "default regression 47/47",
+      "Swift owned-window helper compile"
+    ],
+    "interrupted": "local 95-case matrix execution transport executor key changed; no final log/audit",
+    "oldSessionId": 76461,
+    "knownOwnedFixtureOrTestProcessesAfterRecovery": 0,
+    "duplicateConcurrentLaunch": false,
+    "capacityErrors": 0,
+    "fallback": false,
+    "guiStarted": false
+  },
+  "remainingBlockers": [
+    "parent shared GUI/GPU slot; then actual frontend interaction/render/screenshots against saved artifact",
+    "coordinate integration regression after concurrent durable/source task completes"
+  ],
+  "nextV1Backlog": [
+    "general profile/role/workflow UI",
+    "reconnect/event cursor/socket kill replay",
+    "direct provider secret input/approved credential storage/revoke",
+    "canonical conversation/compaction integration",
+    "Cassette/oxibrain provenance",
+    "portable SDK/build/migration/signing",
+    "handle-relative filesystem opens"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "isolationAvailable": true,
+  "globalConfigDenied": true,
+  "publicNetworkDenied": true,
+  "loopbackAllowed": false,
+  "credentialEnvironmentRemoved": true,
+  "persistentSecurityChanges": false,
+  "liveProviderCalls": 0,
+  "results": [
+    {
+      "target": "native_provider",
+      "exitCode": 0
+    },
+    {
+      "target": "ghost",
+      "exitCode": 0
+    },
+    {
+      "target": "native_policy",
+      "exitCode": 0
+    },
+    {
+      "target": "acceptance",
+      "exitCode": 0
+    },
+    {
+      "target": "collaboration",
+      "exitCode": 0
+    },
+    {
+      "target": "ghost",
+      "exitCode": 0
+    }
+  ],
+  "passed": true
+}

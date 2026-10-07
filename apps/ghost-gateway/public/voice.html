@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ghost와 통화</title>
+  <link rel="stylesheet" href="/mobile/tokens.css"><link rel="stylesheet" href="/mobile/voice.css">
+  <script src="/mobile/voice.js" defer></script>
+</head>
+<body>
+  <main>
+    <div class="orb" aria-hidden="true"><span></span><span></span></div>
+    <h1 id="status" aria-live="polite">음성 통화</h1>
+    <p id="caption" aria-live="polite">통화를 시작하면 Ghost가 듣고 답합니다.</p>
+    <p id="timer" aria-label="통화 시간"></p>
+    <div class="controls">
+      <button id="start">통화 시작</button>
+      <button id="mute" hidden>마이크 끄기</button>
+      <button id="end" hidden>통화 종료</button>
+    </div>
+    <p id="error" role="alert"></p>
+    <audio id="audio" autoplay playsinline></audio>
+  </main>
+</body>
+</html>

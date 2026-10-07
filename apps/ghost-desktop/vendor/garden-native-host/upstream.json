@@ -1,0 +1,14 @@
+{
+  "source": "/Users/garden/Documents/Workspace/Projects/garden-ui",
+  "version": "0.1.0",
+  "contracts": [
+    "contracts/native/README.md",
+    "templates/desktop/src-tauri/tauri.conf.json",
+    "templates/desktop/src-tauri/tauri.macos.conf.json"
+  ],
+  "sha256": {
+    "Cargo.toml": "d625d728a41b0f68f92dfdecd4ac96ddbbdc6bd0f438aabd51a2a9e7726b2e96",
+    "src/lib.rs": "44d6328873281a0e154f11e43c01714f6b38aaf669c4478dadce36bc2629b082",
+    "src/protocol.rs": "87ab784dd3c65c8bc4c1a3625b45272b9d3d2d59ebd50c11536b48272df595f3"
+  }
+}

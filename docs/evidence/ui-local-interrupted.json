@@ -1,0 +1,15 @@
+{
+  "completed": [
+    "first UI feature build",
+    "new UI headless tests 4/4",
+    "default regression 47/47",
+    "Swift owned-window helper compile"
+  ],
+  "interrupted": "local 95-case matrix execution transport executor key changed; no final log/audit",
+  "oldSessionId": 76461,
+  "knownOwnedFixtureOrTestProcessesAfterRecovery": 0,
+  "duplicateConcurrentLaunch": false,
+  "capacityErrors": 0,
+  "fallback": false,
+  "guiStarted": false
+}

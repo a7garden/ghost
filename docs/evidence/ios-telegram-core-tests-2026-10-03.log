@@ -1,0 +1,36 @@
+Building for debugging...
+[2 / 11] GhostMobileCore
+[4 / 13] GhostMobileCore
+[11 / 14] GhostMobileCoreTests-product
+[13 / 16] GhostMobileCoreTests-product
+[19 / 21] GhostMobileCoreTests-product
+Build complete! (1.27초)
+Test Suite 'All tests' started at 2026-10-03 02:26:33.519.
+Test Suite 'All tests' passed at 2026-10-03 02:26:33.520.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test retrySurvivesProcessStateAndRemainsBoundToCommand() started.
+◇ Test voiceActionsRemainBoundToTheOriginalGhostAndCall() started.
+◇ Test serverAddressRejectsCredentialLeaks() started.
+◇ Test corruptDraftsAreNotSilentlyOverwritten() started.
+◇ Test creatingConversationMovesTheLatestDraftWithoutErasingNewText() started.
+◇ Test corruptedJournalFailsBeforeDispatch() started.
+◇ Test unknownStartOutcomeIsNeverReportedAsConfirmedEnded() started.
+◇ Test closingDuringSignallingEndsTheLateCallAndRejectsFurtherStarts() started.
+◇ Test sendCompletionCannotEraseLaterTypingOrAnotherConversation() started.
+◇ Test failedHangupRetainsCallIdentityForRetryAndBlocksNewCalls() started.
+◇ Test draftsSurviveReopenAndStayInTheirConversation() started.
+✔ Test voiceActionsRemainBoundToTheOriginalGhostAndCall() passed after 0.001 seconds.
+✔ Test unknownStartOutcomeIsNeverReportedAsConfirmedEnded() passed after 0.001 seconds.
+✔ Test closingDuringSignallingEndsTheLateCallAndRejectsFurtherStarts() passed after 0.001 seconds.
+✔ Test failedHangupRetainsCallIdentityForRetryAndBlocksNewCalls() passed after 0.001 seconds.
+✔ Test serverAddressRejectsCredentialLeaks() passed after 0.001 seconds.
+✔ Test corruptedJournalFailsBeforeDispatch() passed after 0.002 seconds.
+✔ Test corruptDraftsAreNotSilentlyOverwritten() passed after 0.002 seconds.
+✔ Test sendCompletionCannotEraseLaterTypingOrAnotherConversation() passed after 0.002 seconds.
+✔ Test creatingConversationMovesTheLatestDraftWithoutErasingNewText() passed after 0.002 seconds.
+✔ Test retrySurvivesProcessStateAndRemainsBoundToCommand() passed after 0.002 seconds.
+✔ Test draftsSurviveReopenAndStayInTheirConversation() passed after 0.003 seconds.
+✔ Test run with 11 tests in 0 suites passed after 0.003 seconds.

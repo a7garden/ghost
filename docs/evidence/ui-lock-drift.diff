@@ -1,0 +1,42 @@
+--- Ghost before UI Cargo.lock
++++ Ghost current Cargo.lock
+@@ -796,6 +796,7 @@
+  "anyhow",
+  "clap",
+  "fs2",
++ "futures",
+  "libc",
+  "oxicode-sdk",
+  "reqwest",
+@@ -1602,6 +1603,23 @@
+ ]
+ 
+ [[package]]
++name = "oxicode-durable"
++version = "0.81.0"
++dependencies = [
++ "fs2",
++ "futures",
++ "jsonschema",
++ "oxicode-ai",
++ "parking_lot",
++ "rusqlite",
++ "serde",
++ "serde_json",
++ "thiserror 2.0.21",
++ "tokio",
++ "uuid",
++]
++
++[[package]]
+ name = "oxicode-hashline"
+ version = "0.81.0"
+ dependencies = [
+@@ -1630,6 +1648,7 @@
+  "oxicode-agent",
+  "oxicode-ai",
+  "oxicode-api-stability",
++ "oxicode-durable",
+  "oxicode-hashline",
+  "oxicode-snapcompact",
+  "parking_lot",

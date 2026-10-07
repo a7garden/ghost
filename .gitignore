@@ -1,0 +1,27 @@
+# Rust build output
+/target/
+**/target/
+
+# JavaScript and Python environments
+**/node_modules/
+**/.venv/
+**/venv/
+**/__pycache__/
+**/*.py[cod]
+
+# Apple build output
+**/.build/
+**/DerivedData/
+**/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+
+# Generated web bundles and local design-tool traces
+/apps/*/dist/
+/.hallmark/
+
+# Local machine clutter and secrets
+.DS_Store
+**/.DS_Store
+.env
+.env.*
+!.env.example
+!.env.*.example

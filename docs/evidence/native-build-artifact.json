@@ -1,0 +1,15 @@
+{
+  "features": [
+    "default"
+  ],
+  "nativeFixturesEnabled": false,
+  "oxicodeEngineEnabled": false,
+  "executable": "/Users/garden/Documents/Workspace/Projects/ghost/target/debug/ghost",
+  "profile": {
+    "opt_level": "0",
+    "debuginfo": 2,
+    "debug_assertions": true,
+    "overflow_checks": true,
+    "test": false
+  }
+}

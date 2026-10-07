@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "binary": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghost-native-macos-arm64",
+  "sha256": "de036d26ae8450d3c4723093467dbad78c94c78df5beb992527ce73649f0760c",
+  "clearedEnvironment": true,
+  "distinctIdentities": true,
+  "freshCliProcesses": true,
+  "completedArtifacts": 2,
+  "duplicateParentAndDelivery": true,
+  "cancelBeforeDispatch": true,
+  "nativeInterpreterRequired": false,
+  "liveProviderCalls": 0
+}

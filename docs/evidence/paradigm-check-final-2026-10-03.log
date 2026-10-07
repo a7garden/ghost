@@ -1,0 +1,52 @@
+    Checking oxicode-durable v0.81.0 (/Users/garden/Documents/Workspace/Projects/oxicode/oxicode-durable)
+    Checking oxicode-sdk v0.81.0 (/Users/garden/Documents/Workspace/Projects/oxicode/oxicode-sdk)
+    Checking ghost v0.1.0 (/Users/garden/Documents/Workspace/Projects/ghost)
+warning: constant `BODY_LIMIT` is never used
+ --> src/local_http.rs:7:18
+  |
+7 | pub(crate) const BODY_LIMIT: usize = 16_384;
+  |                  ^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `read` is never used
+  --> src/local_http.rs:34:15
+   |
+34 | pub(crate) fn read(stream: &mut TcpStream) -> Result<Request> {
+   |               ^^^^
+
+warning: method `delete` is never used
+   --> src/workspace/scheduler.rs:123:12
+    |
+ 21 | impl Journal {
+    | ------------ method in this implementation
+...
+123 |     pub fn delete(&self, kind: &str, id: &str) -> Result<()> { self.0.execute("DELETE FROM workspace_objects WHERE kind=? AND id=?"...
+    |            ^^^^^^
+
+warning: `ghost` (lib) generated 3 warnings
+error: cannot construct `GhostHost` with struct literal syntax due to private fields
+  --> tests/durable.rs:72:25
+   |
+72 |     let host = Arc::new(host::GhostHost {
+   |                         ^^^^^^^^^^^^^^^
+   |
+   = note: ...and other private field `services` that was not provided
+
+error: cannot construct `GhostHost` with struct literal syntax due to private fields
+   --> tests/durable.rs:130:22
+    |
+130 |             Arc::new(host::GhostHost {
+    |                      ^^^^^^^^^^^^^^^
+    |
+    = note: ...and other private field `services` that was not provided
+
+error: cannot construct `GhostHost` with struct literal syntax due to private fields
+   --> tests/durable.rs:155:13
+    |
+155 |     let h = host::GhostHost {
+    |             ^^^^^^^^^^^^^^^
+    |
+    = note: ...and other private field `services` that was not provided
+
+error: could not compile `ghost` (test "durable") due to 3 previous errors

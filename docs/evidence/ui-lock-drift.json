@@ -1,0 +1,24 @@
+{
+  "newPackages": [
+    [
+      "oxicode-durable",
+      "0.81.0"
+    ]
+  ],
+  "removedPackages": [],
+  "changedPackages": [
+    [
+      "oxicode-sdk",
+      "0.81.0"
+    ],
+    [
+      "ghost",
+      "0.1.0"
+    ]
+  ],
+  "originalHash": "dab22ce1d6bbc720015c4da93d670635fe1001deba85ad38bc987cb3299d43ac",
+  "currentHash": "1c7cacdb2998b2daa7a98e531aaa0fc2f0bfbc42861321a43979caa96af1ca20",
+  "beforeSnapshotExact": true,
+  "sdkManifestMtime": 1790946779.9247305,
+  "ghostLockMtime": 1790945856.569824
+}

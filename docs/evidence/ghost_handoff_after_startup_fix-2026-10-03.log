@@ -1,0 +1,22 @@
+   Compiling ghost v0.1.0 (/Users/garden/Documents/Workspace/Projects/ghost)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.27s
+     Running tests/browser_handoff.rs (target/debug/deps/browser_handoff-5c866e9583562278)
+
+running 14 tests
+test phase_persistence_loss_before_control_bytes_closes_and_reconciles ... ok
+test historical_control_duplicates_never_roll_epoch_back_or_repeat_effects ... ok
+test actual_host_process_crash_recovers_control_and_effect_without_retransmit ... ok
+test actual_owned_child_crash_keeps_effect_unknown_after_fresh_restart ... ok
+test final_control_and_activity_commit_failure_is_unknown_atomic ... ok
+test private_control_eof_idle_and_pending_fail_closed ... ok
+test cancellation_kills_only_owned_child_and_keeps_other_ghost_usable ... ok
+test revoke_is_enforced_by_watchdog_idle_and_during_handoff ... ok
+test independent_watchdog_ends_actual_child_before_child_deadline ... ok
+test pending_agent_handoff_waits_for_effect_and_blocks_new_admission ... ok
+test human_operation_blocks_resume_race_and_duplicate_shares_one_effect ... ok
+test late_actual_ack_never_commits_success_or_replays ... ok
+test controller_owner_anchor_grant_and_page_authority_are_separate ... ok
+test real_private_handoff_human_fixture_and_all_tab_fresh_barrier ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.32s
+

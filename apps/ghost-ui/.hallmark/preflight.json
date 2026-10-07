@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-03",
+  "framework": "React, TypeScript, Vite; separate frontend package in the Ghost project",
+  "source": "src/styles.css",
+  "tokens": "src/tokens.css",
+  "theme": "existing Codex system",
+  "font": "system sans-serif with Korean system fallback",
+  "scope": "conversation-centered application; no marketing page or brand redesign",
+  "owner_preferences": ["Ghost is the unit", "remove promotional subtitles", "show collaboration", "keep current icon"],
+  "concurrency": "Preserve Rust, embedded UI, and concurrent planner/integrations changes"
+}

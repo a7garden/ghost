@@ -1,0 +1,137 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+ Downloading crates ...
+  Downloaded alloca v0.4.0
+  Downloaded page_size v0.6.0
+  Downloaded criterion-plot v0.8.2
+  Downloaded colored v3.1.1
+  Downloaded mockito v1.7.2
+  Downloaded criterion v0.8.2
+   Compiling zerocopy v0.8.55
+   Compiling zerocopy-derive v0.8.55
+   Compiling hashbrown v0.17.1
+   Compiling tokio-util v0.7.19
+   Compiling crossbeam-utils v0.8.22
+   Compiling tower v0.5.3
+   Compiling rayon-core v1.13.0
+   Compiling either v1.17.0
+   Compiling alloca v0.4.0
+   Compiling plotters-backend v0.3.7
+   Compiling ciborium-io v0.2.2
+   Compiling clap_builder v4.6.5
+   Compiling cast v0.3.0
+   Compiling tinytemplate v1.2.1
+   Compiling assert-json-diff v2.0.2
+   Compiling page_size v0.6.0
+   Compiling similar v2.7.0
+   Compiling itertools v0.13.0
+   Compiling anes v0.1.6
+   Compiling colored v3.1.1
+   Compiling plotters-svg v0.3.7
+   Compiling oorandom v11.1.5
+   Compiling indexmap v2.14.0
+   Compiling plotters v0.3.7
+   Compiling tower-http v0.6.11
+   Compiling h2 v0.4.16
+   Compiling crossbeam-epoch v0.9.20
+   Compiling criterion-plot v0.8.2
+   Compiling crossbeam-deque v0.8.7
+   Compiling clap v4.6.5
+   Compiling rayon v1.12.0
+   Compiling hyper v1.11.0
+   Compiling hyper-util v0.1.20
+   Compiling hyper-rustls v0.27.9
+   Compiling ppv-lite86 v0.2.21
+   Compiling half v2.7.1
+   Compiling ahash v0.8.12
+   Compiling reqwest v0.12.28
+   Compiling referencing v0.46.10
+   Compiling rand_chacha v0.9.0
+   Compiling rand_chacha v0.3.1
+   Compiling ciborium-ll v0.2.2
+   Compiling rand v0.9.5
+   Compiling rand v0.8.7
+   Compiling ciborium v0.2.2
+   Compiling num-bigint-dig v0.8.6
+   Compiling tungstenite v0.26.2
+   Compiling mockito v1.7.2
+   Compiling criterion v0.8.2
+   Compiling jsonschema v0.46.10
+   Compiling oxicode-catalog v0.81.0 (/Users/garden/Documents/Workspace/Projects/oxicode/oxicode-catalog)
+   Compiling rsa v0.9.10
+   Compiling tokio-tungstenite v0.26.2
+   Compiling oxicode-ai v0.81.0 (/Users/garden/Documents/Workspace/Projects/oxicode/oxicode-ai)
+warning: unused import: `Usage`
+  --> oxicode-ai/src/providers/openai.rs:19:24
+   |
+19 |     ToolResultMessage, Usage, error::ProviderError,
+   |                        ^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `oxicode-ai` (lib) generated 1 warning (run `cargo fix --lib -p oxicode-ai` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.67s
+     Running tests/provider_mock.rs (target/debug/deps/provider_mock-6772fbe7ea9e7044)
+
+running 8 tests
+test test_rate_limit_error ... ok
+test test_server_error ... ok
+test test_auth_error ... ok
+test test_empty_stream ... ok
+test test_streaming_with_history ... ok
+test test_model_override ... ok
+test test_openai_streaming_text ... ok
+test test_openai_tool_call_parsing ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+warning: unused import: `Usage`
+  --> oxicode-ai/src/providers/openai.rs:19:24
+   |
+19 |     ToolResultMessage, Usage, error::ProviderError,
+   |                        ^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `oxicode-ai` (lib) generated 1 warning (run `cargo fix --lib -p oxicode-ai` to apply 1 suggestion)
+   Compiling oxicode-ai v0.81.0 (/Users/garden/Documents/Workspace/Projects/oxicode/oxicode-ai)
+warning: `oxicode-ai` (lib test) generated 1 warning (1 duplicate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.05s
+     Running unittests src/lib.rs (target/debug/deps/oxicode_ai-e0958d937f4013ec)
+
+running 1 test
+test providers::openai::tests::usage_survives_separate_network_chunks_before_finish ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 620 filtered out; finished in 0.00s
+
+     Running tests/error_handling.rs (target/debug/deps/error_handling-aa08f6a532b00b36)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.00s
+
+     Running tests/models_dev_enrichment.rs (target/debug/deps/models_dev_enrichment-0fa13ba73ad195de)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/provider_codex_gemini_factory.rs (target/debug/deps/provider_codex_gemini_factory-928289ec931a3f54)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/provider_mock.rs (target/debug/deps/provider_mock-6772fbe7ea9e7044)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/provider_transform_tests.rs (target/debug/deps/provider_transform_tests-bd8a29bd417712b2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+

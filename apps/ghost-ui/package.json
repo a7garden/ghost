@@ -1,0 +1,28 @@
+{
+  "name": "@ghost/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "console": "node scripts/console.mjs",
+    "dev": "vite --host 127.0.0.1 --port 5178 --strictPort",
+    "build": "tsc -b && vite build",
+    "serve": "node scripts/serve.mjs",
+    "test": "vitest run && node --test server/bridge.test.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "1.50.0",
+    "onnxruntime-web": "1.30.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "@garden/arc": "file:vendor/garden-arc"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.2",
+    "vitest": "5.0.3"
+  }
+}

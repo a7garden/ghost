@@ -1,0 +1,20 @@
+{
+  "contract": "controlled anonymous AF_UNIX task/session/epoch contract read 2026-10-02",
+  "wireVersion": "MCP 2024-11-05 / JSON-RPC 2.0",
+  "sourceHashes": {
+    "docs/ghost-mcp.md": "d9d7e95171578811d5db1aa0b479131501ef6759de3506e1b562f30fe1d1e2eb",
+    "docs/ghost-handoff.md": "9e025ce1fcfb8e7e9804d44dedf1679c4f3be7aee8c8aa03f6ea0323a6ddb217",
+    "crates/oxibrowser/src/mcp/ghost.rs": "8f4d8c6c92826a993594858bbfd03c96f646cb66085ba9099555a5a15576b11d",
+    "crates/oxibrowser/src/mcp/ghost/handoff.rs": "b75de5c1c9caecfad88f8fc7b4981d677725e25648a1e3bbe9bb39752a9d2049",
+    "crates/oxibrowser/src/main.rs": "752301d2ec265faa3b7233048670ed7ca02d14ca656f69946a7363ad94e2a336",
+    "crates/oxibrowser/tests/ghost_handoff.rs": "b5a232f55e6ec7570b11d7e20660c908f92c4a510ed8d8fd67544d845dbc5dfc"
+  },
+  "sourceBinary": "/Users/garden/Documents/Workspace/Projects/oxibrowser/target/debug/oxibrowser",
+  "pinnedBinary": "/Users/garden/Documents/Codex/2026-10-01/task-3/handoff-pin/oxibrowser-065c1b741324",
+  "binarySha256": "065c1b7413246a0f1afba41ab3be088c048df352bdf72680f5cf98bc1b5e9f9e",
+  "binaryBytes": 238655704,
+  "browserRepoReadOnly": true,
+  "sourceBuildCorrespondenceIndependentlyVerified": false,
+  "upstreamReportedTests": 138,
+  "upstreamTestsRerun": false
+}

@@ -1,0 +1,9 @@
+# ADR 001 — Host-owned persistence and a small engine adapter
+
+Decision: prioritize reuse of oxicode 0.81.0 behind a small provider boundary. Start with mock; probe an optional oxicode SDK integration without credentials. Ghost owns identity, SQLite state, approvals, effect ledger, recovery and correlation. Engine sessions are activities, not identities.
+
+Read-only local source inspection on 2026-10-01 confirms `oxicode-sdk/src/ports/mod.rs` PortRegistry::noop installs AllowAllAccessGate. `lifecycle/supervisor.rs` restore_from_snapshot builds an empty ToolRegistry and Agent::new before import_state. Therefore Ghost will not entrust capability enforcement or durable recovery to those defaults. The optional SDK agent receives no registered tools; Ghost invokes host tools only after policy checks. No SDK or neighboring project edits.
+
+Parent's public investigation identified oxicode main 5a7b8587c0bca342efd9bf1fbc62c704de5659d3 (MIT, Rust 1.96), Rig 0.43.0 at 654567eb64274fca00cab86cdd32c86b9913769e (MIT), and Goose alpha11. Rig is the comparison fallback if oxicode integration cannot preserve guarantees; its serialized resume is version-sensitive and host reconstruction remains necessary. Goose's default ACP path needs an external process. No new SDK construction in this project. These candidate facts originate in the delegated research, not a fresh web investigation in this task.
+
+Runtime portability is separate from development tooling: OMP 18.4.4/Bun develops Ghost, but is not shipped or required to execute Ghost. OMP development requests are finite, tool-free, limited to approved code/fixtures, with global context/MCP/extensions/skills/memory/telemetry/fallback/retry disabled. Existing authentication is used normally; secret values are never copied into Ghost or model context.

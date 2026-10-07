@@ -1,0 +1,109 @@
+ghost
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+acceptance
+
+running 24 tests
+test allowed_read_write_and_double_run_no_duplicates ... ok
+test cancel_persists_and_excludes_work ... ok
+test cli_submit_survives_process_exit_and_double_run_is_idempotent ... ok
+test cli_two_ghost_isolation_and_policy ... ok
+test concurrent_threads_distinct_correlation ... ok
+test crash_recovery_marks_uncertain_and_never_replays ... ok
+test default_deny_and_policy_lifecycle ... ok
+test grant_folder_replaced_with_symlink_denied ... ok
+test grant_id_captured_before_audit_after_multiple_audits ... ok
+test grant_via_symlink_alias_denied ... ok
+test identities_independent_and_persistent ... ok
+test invalid_profile_names_rejected ... ok
+test judge_only_chooses_allowed ... ok
+test mac_temp_path_alias_allowed_io ... ok
+test oversized_read_rejected ... ok
+test profile_directory_symlink_alias_rejected ... ok
+test provider_failure_does_not_strand_queue ... ok
+test recovery_transaction_rollback_on_persistent_trigger_abort ... ok
+test self_state_write_under_broader_parent_grant ... ok
+test session_and_task_persistence_with_duplicate_semantics ... ok
+test symlink_traversal_sibling_and_overwrite_denied ... ok
+test task_outbox_atomic_rollback_on_trigger_abort ... ok
+test unknown_profile_does_not_create_directory ... ok
+test writer_contention_then_reacquisition ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s
+
+
+native_policy
+
+running 4 tests
+test address_filter_blocks_private_mapped_and_special_addresses ... ok
+test credential_debug_and_errors_never_include_the_value ... ok
+test endpoints_require_exact_host_preset_approval ... ok
+test outcome_class_controls_terminal_state_without_replay_permission ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+native_provider
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+collaboration
+
+running 19 tests
+test ack_failure_after_inbox_commit_recovers_exactly_once ... ok
+test acked_unrelated_write_task_pointer_rejected_run_and_cancel ... ok
+test busy_acked_queued_child_pending_cancel_reconciles_without_calls ... ok
+test cancel_before_dispatch_and_busy_reconcile ... ok
+test cli_durable_vertical_path ... ok
+test corrupt_second_envelope_means_zero_dispatch ... ok
+test duplicate_request_and_replay_reject_conflicts ... ok
+test interrupted_parent_recovers_uncertain_without_rerun ... ok
+test lost_ack_then_cancel_cancels_persisted_receiver_task_no_calls ... ok
+test missing_or_mismatched_receipt_blocks_root_completion ... ok
+test profile_identity_drift_or_recreate_fails_closed ... ok
+test protocol_validation_and_sender_message_namespace ... ok
+test provenance_records_persisted_attempt_and_process_ids ... ok
+test public_list_is_readonly_under_writer_lock_and_rejects_symlink_journal ... ok
+test selective_provider_failure_keeps_partial_artifact ... ok
+test snapshot_is_readonly_and_works_under_writer_lock ... ok
+test spoofed_existing_inbox_payload_rejected_untouched ... ok
+test two_ghosts_vertical_end_to_end ... ok
+test unrelated_write_task_not_executed_or_cancelled ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+
+
+browser_handoff
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+browser_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+browser_local_e2e
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+ghost
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

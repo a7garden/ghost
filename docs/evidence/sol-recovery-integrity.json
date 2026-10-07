@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-02",
+  "sourceHashes": {
+    "Cargo.toml": "08e582ec5ff6c03bb711cbf7d3300ea0354b5ff43170b6a3983e0ce51377e19b",
+    "Cargo.lock": "a2cddc3879dee05baa45734f91b0d7488b165fc73d70b7721bea6f0279f8b9cb",
+    "src/lib.rs": "05834adc01c0842c3c1d9ebf7a3183e3e1de7bc10ec21fe20bdf2d93e2289981",
+    "src/main.rs": "0c4a030e51a7c48fbf74f3e40fbb9e270198a03b5d6e49580853168c121bdc00",
+    "src/protocol.rs": "885767a2ae8bc7205d7477bbdf7ca7d528e9a0c627939f2f9a10d0bb2da9ba71",
+    "src/collaboration.rs": "cbcd54c447b0be5cd655c7524270909a5c27d7741c821bb94afcb6cc5d992e6b",
+    "src/provider.rs": "5460396c45a9f2c3bfffbb7cf55678b234b657f2de00dda14eecd4d4d0ba0ed4",
+    "tests/collaboration.rs": "22b5fc41425a1f6e2da44f4e07edbf425925bab3b391069a2a5e1372cb30c806"
+  },
+  "changedSincePreviousCheckpoint": {
+    "Cargo.toml": false,
+    "Cargo.lock": false,
+    "src/lib.rs": true,
+    "src/main.rs": true,
+    "src/protocol.rs": true,
+    "src/collaboration.rs": true,
+    "src/provider.rs": true,
+    "tests/collaboration.rs": true
+  },
+  "originalPreserved": {
+    "src/store.rs": true,
+    "src/tools.rs": true,
+    "src/judge.rs": true,
+    "tests/acceptance.rs": true
+  },
+  "defaultTests": {
+    "passed": 43,
+    "failed": 0
+  },
+  "optionalTests": {
+    "passed": 44,
+    "failed": 0,
+    "legacyTestSkipped": false,
+    "globalMcpConfigAndNetworkDenied": true
+  },
+  "formatPassed": true,
+  "buildPassed": true,
+  "clearedEnvironmentSmokePassed": true,
+  "additionalOmpCalls": 0,
+  "credentialsOrPersistentSecuritySettingsChanged": false,
+  "oxibrowserModified": false,
+  "binary": {
+    "path": "/Users/garden/Documents/Workspace/Projects/ghost/dist/ghosts-macos-arm64",
+    "sha256": "2e65edb5a85e1b40af63477ffbe7d13df1099ebdfd35de43a201a6ba1f7374de",
+    "bytes": 8564424
+  },
+  "firstUnitBinaryPreserved": true,
+  "blockers": [],
+  "modelEvidence": {
+    "configuredModel": "gpt-6.1-sol",
+    "activeTurnModelIndependentlyVerified": false,
+    "formalDirectDevelopmentApprovalSucceeded": true
+  }
+}

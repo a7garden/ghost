@@ -1,0 +1,22 @@
+{
+  "passed": true,
+  "binarySha256": "7a7eb3e3cda54cbc302ec2259ece86bb08146cd276fd7a02bf26d4e6011e6bd3",
+  "environmentCleared": true,
+  "temporaryUiServerFiniteExit": true,
+  "separateOrigins": true,
+  "newIndependentIdentities": [
+    "77bfcb47-a9c8-4cd5-ad93-7787e19926ef",
+    "47e0fa3b-2609-4a1c-bc98-697147a2aed3"
+  ],
+  "newIndependentSessions": [
+    "a4fd5eb0-7275-4cd1-af73-5035e731c109",
+    "5bf9777c-c9fe-4283-bd59-a12717453bf0"
+  ],
+  "mockExplicit": true,
+  "liveApiCalls": 0,
+  "actualBrowserChildrenOpened": 0,
+  "guiStarted": false,
+  "browserProfileOrDesktopUsed": false,
+  "nodeBunPythonProductRuntimeInstalled": false,
+  "csrfOrCookieLogged": false
+}

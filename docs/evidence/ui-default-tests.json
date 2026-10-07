@@ -1,0 +1,66 @@
+{
+  "isolationAvailable": true,
+  "sandboxGuardsApplyTo": "existing regression hosts; real browser children use separate per-child sandbox",
+  "regressionHostsGlobalConfigDenied": true,
+  "regressionHostsPublicNetworkDenied": true,
+  "loopbackAllowed": false,
+  "credentialEnvironmentRemoved": true,
+  "realE2eHostCleanEnvironment": false,
+  "realChildrenOriginSandbox": false,
+  "realE2eHostOuterSandbox": false,
+  "persistentSecurityChanges": false,
+  "liveProviderCalls": 0,
+  "results": [
+    {
+      "target": "browser_local_e2e",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    },
+    {
+      "target": "browser_core",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    },
+    {
+      "target": "ui_fixture",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    },
+    {
+      "target": "acceptance",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    },
+    {
+      "target": "browser_handoff",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    },
+    {
+      "target": "collaboration",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    },
+    {
+      "target": "native_policy",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    },
+    {
+      "target": "native_provider",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    },
+    {
+      "target": "ghost",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    },
+    {
+      "target": "ghost",
+      "exitCode": 0,
+      "hostIsolation": "outer macOS sandbox"
+    }
+  ],
+  "passed": true
+}
