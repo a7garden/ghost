@@ -1,6 +1,7 @@
 //! Bounded, credential-free DAV transport. Host binding/permission checks and
 //! durable effects stay in planner_sync. No discovery, worker, or TLS bypass.
 use super::{
+    SyncPhase,
     Adapter, AdapterFuture, Condition, ConditionalWrite, Inventory, RemoteResource, WriteOutcome,
 };
 use anyhow::{anyhow, bail, Result};
@@ -21,12 +22,14 @@ pub struct HttpAdapter {
     collection: Url,
     client: Client,
     inventory_timeout: Duration,
+    phase: SyncPhase,
 }
 impl HttpAdapter {
     /// Explicit owner-selected HTTPS collection; credentials remain a future
     /// integration boundary. URLs containing userinfo are never credentials.
-    pub fn https(binding: &str, collection: &str) -> Result<Self> {
-        Self::build(binding, collection, false, Duration::from_secs(5))
+    /// The collection phase must match the persisted collection identity.
+    pub fn https(binding: &str, collection: &str, phase: SyncPhase) -> Result<Self> {
+        Self::build(binding, collection, false, Duration::from_secs(5), phase)
     }
     #[cfg(test)]
     pub(crate) fn loopback_fixture(
@@ -34,9 +37,21 @@ impl HttpAdapter {
         collection: &str,
         timeout: Duration,
     ) -> Result<Self> {
-        Self::build(binding, collection, true, timeout)
+        Self::build(
+            binding,
+            collection,
+            true,
+            timeout,
+            SyncPhase::ExplicitActive,
+        )
     }
-    fn build(binding: &str, input: &str, fixture: bool, timeout: Duration) -> Result<Self> {
+    fn build(
+        binding: &str,
+        input: &str,
+        fixture: bool,
+        timeout: Duration,
+        phase: SyncPhase,
+    ) -> Result<Self> {
         if binding.is_empty() || binding.len() > 1024 || !safe_reference(input) {
             bail!("invalid DAV binding or collection URL");
         }
@@ -90,6 +105,7 @@ impl HttpAdapter {
             } else {
                 Duration::from_secs(15)
             },
+            phase,
         })
     }
     fn resolve_href(&self, href: &str) -> Result<(Url, Option<String>)> {
@@ -311,6 +327,9 @@ impl Adapter for HttpAdapter {
     fn binding(&self) -> &str {
         &self.binding
     }
+    fn phase(&self) -> SyncPhase {
+        self.phase
+    }
     fn inventory(&self) -> AdapterFuture<'_, Inventory> {
         Box::pin(async move {
             tokio::time::timeout(self.inventory_timeout, self.full_inventory())
@@ -335,6 +354,9 @@ impl Adapter for HttpAdapter {
     }
     fn write(&self, request: ConditionalWrite) -> AdapterFuture<'_, WriteOutcome> {
         Box::pin(async move {
+            if self.phase != SyncPhase::ExplicitActive {
+                bail!("CalDAV writes require explicit_active phase");
+            }
             if !super::safe_uid(&request.uid) {
                 bail!("invalid DAV mutation UID");
             }

@@ -1,19 +1,47 @@
 //! Long-lived Ghost host. Owns profile runtimes, durable command receipts, goals,
 //! schedules and policy independently of any UI, transport or optional adapter.
 mod actions;
+pub mod orchestration;
 pub mod avatars;
+mod cli_tools;
+mod code_worker;
 pub mod integrations;
 pub mod models;
+#[cfg(feature = "lifetime")]
+pub(crate) mod inference;
+mod omp_worker;
+mod omp_provider;
 pub mod operations;
 pub mod planner;
 #[cfg(feature = "caldav")]
 pub mod planner_sync;
+#[cfg(feature = "caldav")]
+pub mod planner_google_transport;
 mod protocol;
 pub mod routing_dispatch;
 pub mod routing_host;
 pub mod routing_model;
 mod scheduler;
 pub mod voice;
+pub mod wake;
+pub mod incidents;
+pub mod skills;
+#[cfg(feature = "lifetime")]
+pub mod lifetime;
+#[cfg(feature = "lifetime")]
+mod lifetime_api;
+#[cfg(feature = "lifetime")]
+mod lifetime_memory;
+#[cfg(feature = "lifetime")]
+mod lifetime_documents;
+// The owner decision resume in adapters/computer.rs reuses this module's
+// loopback worker request client.
+#[cfg(feature = "lifetime")]
+pub(crate) mod lifetime_driver;
+#[cfg(feature = "lifetime")]
+mod lifetime_runtime;
+#[cfg(feature = "lifetime")]
+pub mod lifetime_computers;
 pub mod work_routing;
 pub(crate) use protocol::cancel_delegation;
 pub(crate) mod services;
@@ -66,12 +94,22 @@ pub(crate) struct State {
     pub(crate) profiles: BTreeMap<String, Profile>,
     pub(crate) journal: Journal,
 }
+struct WorkspaceLock(File);
+impl Drop for WorkspaceLock {
+    fn drop(&mut self) {
+        // A forked child can retain the open file description after we close
+        // our descriptor. Release our lease explicitly, in the original field
+        // drop order after workspace state, rather than at that child's exit.
+        let _ = fs2::FileExt::unlock(&self.0);
+    }
+}
+
 pub struct Host {
     pub(crate) root: PathBuf,
     pub(crate) state: Mutex<State>,
     pub(crate) handle: tokio::runtime::Handle,
     pub(crate) default_model: String,
-    _lock: File,
+    _lock: WorkspaceLock,
     pub(crate) brain: memory::Brain,
     computer: Arc<dyn computer::ComputerBackend>,
     integrations: integrations::Connections,
@@ -79,6 +117,15 @@ pub struct Host {
     profile_workers: Mutex<BTreeMap<String, Vec<tokio::task::AbortHandle>>>,
     recovery: tokio::sync::Mutex<()>,
     stopping: AtomicBool,
+    pub(crate) dispatch_enabled: bool,
+    #[cfg(feature = "lifetime")]
+    pub(crate) pi_callback_token: String,
+    #[cfg(feature = "lifetime")]
+    pub(crate) pi_local_route: Option<lifetime_runtime::LocalPiRoute>,
+    #[cfg(feature = "lifetime")]
+    pub(crate) authority_epoch: u64,
+    #[cfg(feature = "lifetime")]
+    pub(crate) native_computers: Option<lifetime_computers::NativeComputers>,
 }
 impl Host {
     pub fn open(
@@ -111,16 +158,119 @@ impl Host {
             .truncate(false)
             .open(lock_path)?;
         lock.try_lock_exclusive()
-            .map_err(|_| anyhow!("workspace is already served by another process"))?;
+            .map_err(|error| anyhow!(error).context("workspace is already served by another process"))?;
+        let lock = WorkspaceLock(lock);
         let mut profiles = BTreeMap::new();
         for name in store::list_profiles(&root)? {
             let p = Self::profile(ProfileStore::open_profile(&root, &name)?)?;
             profiles.insert(p.id.clone(), p);
         }
         let journal = Journal::open(&root.join("workspace.db"))?;
+        let dispatch_enabled = journal.dispatch_enabled()?;
         if journal.get::<String>("meta", "workspace_id")?.is_none() {
             journal.put("meta", "workspace_id", &uuid::Uuid::now_v7().to_string())?;
         }
+        #[cfg(feature = "lifetime")]
+        let authority_epoch = lifetime::authority::current(&journal.0)?.epoch;
+        #[cfg(feature = "lifetime")]
+        if dispatch_enabled && std::env::var("GHOST_LIFETIME_MODE").as_deref() == Ok("broker") {
+            use crate::lifetime_contract::{canonical_digest, Envelope, ResponseStatus, VERSION};
+            use rusqlite::OptionalExtension;
+            let primary: Option<(String, String)> = journal.0.query_row(
+                "SELECT ghost_id,conversation_id FROM lifetime_registry WHERE kind='primary'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).optional()?;
+            if let Some((ghost_id, conversation_id)) = primary {
+                let profile = profiles.get(&ghost_id).ok_or_else(|| anyhow!("registered Primary profile is missing"))?;
+                uuid::Uuid::parse_str(&conversation_id)?;
+                anyhow::ensure!(!profile.runtime.session.committed()?.conversations.contains_key(&conversation_id),
+                    "registered Primary personal conversation conflicts with legacy runtime ownership");
+            } else {
+                // A named Primary is an explicit identity; arbitrary first-profile
+                // ordering never selects or overwrites an existing user's Ghost.
+                let ghost_id = match profiles.values().find(|profile| profile.name == "primary") {
+                    Some(profile) => profile.id.clone(),
+                    None => {
+                        let profile = Self::profile(ProfileStore::create_profile(&root, "primary",
+                            "주 Ghost. 사용자의 개인 대화와 장기 책임을 맡고, 필요한 전문 Ghost와 작업을 조율한다.")?)?;
+                        let id = profile.id.clone();
+                        profiles.insert(id.clone(), profile);
+                        id
+                    }
+                };
+                let conversation_id = uuid::Uuid::now_v7().to_string();
+                let body = json!({"method":"registry.ensure","ghost_id":ghost_id,
+                    "kind":"primary","conversation_id":conversation_id,"roles":["coordination"]});
+                let command_id = format!("primary-bootstrap:{ghost_id}:{conversation_id}");
+                let envelope = Envelope {
+                    protocol_version: VERSION.into(), payload_digest: canonical_digest(&body)?,
+                    actor_ref: "owner".into(), authority_epoch, expected_revision: None,
+                    correlation_id: command_id.clone(), command_id, body,
+                };
+                let response = lifetime::apply(&journal.0, &envelope, "owner")?;
+                anyhow::ensure!(response.status == ResponseStatus::Success,
+                    "Primary registration was not accepted: {}", response.summary);
+            }
+            for (name, role, soul) in [
+                ("specialist-research", "research", "지속형 리서치 Ghost. 주 Ghost와 요약·근거를 교환하고 맡은 책임을 검증 가능한 작업으로 수행한다."),
+                ("specialist-engineering", "engineering", "지속형 엔지니어링 Ghost. 자기 작업 범위와 sandbox에서 실제 OMP 실행을 맡고 검수 가능한 산출물을 주 Ghost에게 전달한다."),
+                ("specialist-operations", "operations", "지속형 운영 Ghost. 운영 상태와 복구 경계를 보존하며 맡은 책임과 검증 결과를 주 Ghost와 공유한다."),
+            ] {
+                let existing: Option<(String, String)> = journal.0.query_row(
+                    "SELECT r.ghost_id,r.conversation_id FROM lifetime_registry r
+                     WHERE r.kind='specialist' AND EXISTS(SELECT 1 FROM json_each(r.roles) WHERE value=?1)
+                     ORDER BY r.ghost_id LIMIT 1",
+                    [role], |row| Ok((row.get(0)?, row.get(1)?)),
+                ).optional()?;
+                if let Some((ghost_id, conversation_id)) = existing {
+                    let profile = profiles.get(&ghost_id).ok_or_else(|| anyhow!("registered specialist profile is missing"))?;
+                    uuid::Uuid::parse_str(&conversation_id)?;
+                    anyhow::ensure!(!profile.runtime.session.committed()?.conversations.contains_key(&conversation_id),
+                        "registered specialist conversation conflicts with legacy runtime ownership");
+                    // A draining specialist is still the user's configured role;
+                    // startup must not reactivate it or create a replacement.
+                    continue;
+                }
+                let ghost_id = match profiles.values().find(|profile| profile.name == name) {
+                    Some(profile) => profile.id.clone(),
+                    None => {
+                        let profile = Self::profile(ProfileStore::create_profile(&root, name, soul)?)?;
+                        let id = profile.id.clone();
+                        profiles.insert(id.clone(), profile);
+                        id
+                    }
+                };
+                let claimed: bool = journal.0.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM lifetime_registry WHERE ghost_id=?1)",
+                    [&ghost_id], |row| row.get(0),
+                )?;
+                anyhow::ensure!(!claimed, "named specialist profile is already registered with a different role; preserve its identity");
+                let conversation_id = uuid::Uuid::now_v7().to_string();
+                let body = json!({"method":"registry.ensure","ghost_id":ghost_id,
+                    "kind":"specialist","conversation_id":conversation_id,"roles":[role]});
+                let command_id = format!("specialist-bootstrap:{role}:{ghost_id}:{conversation_id}");
+                let envelope = Envelope {
+                    protocol_version: VERSION.into(), payload_digest: canonical_digest(&body)?,
+                    actor_ref: "owner".into(), authority_epoch, expected_revision: None,
+                    correlation_id: command_id.clone(), command_id, body,
+                };
+                let response = lifetime::apply(&journal.0, &envelope, "owner")?;
+                anyhow::ensure!(response.status == ResponseStatus::Success,
+                    "Specialist registration was not accepted: {}", response.summary);
+            }
+        }
+        #[cfg(feature = "lifetime")]
+        let native_computers = if dispatch_enabled {
+            lifetime_computers::NativeComputers::from_environment(&journal, &profiles, authority_epoch)?
+        } else { None };
+        // An operator-configured owned browser backend replaces the default
+        // conversation computer for this host; its browser state is bound to
+        // the same durable computer registry as the native worker homes.
+        #[cfg(feature = "lifetime")]
+        let computer = match native_computers.as_ref().and_then(|computers| computers.conversation_backend()) {
+            Some(owned) => owned,
+            None => computer,
+        };
         let this = Arc::new(Self {
             root,
             state: Mutex::new(State { profiles, journal }),
@@ -134,7 +284,18 @@ impl Host {
             profile_workers: Mutex::new(BTreeMap::new()),
             recovery: tokio::sync::Mutex::new(()),
             stopping: AtomicBool::new(false),
+            dispatch_enabled,
+            #[cfg(feature = "lifetime")]
+            pi_callback_token: format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()),
+            #[cfg(feature = "lifetime")]
+            pi_local_route: if dispatch_enabled { lifetime_runtime::LocalPiRoute::from_environment()? } else { None },
+            #[cfg(feature = "lifetime")]
+            authority_epoch,
+            #[cfg(feature = "lifetime")]
+            native_computers,
         });
+        // Recovery roots remain inspectable without starting any effect owner.
+        if !dispatch_enabled { return Ok(this); }
         let runtimes = this
             .lock()?
             .profiles
@@ -193,6 +354,8 @@ impl Host {
         for worker in channels::start(&this) {
             this.track(worker);
         }
+        #[cfg(feature = "lifetime")]
+        lifetime_driver::start(&this)?;
         Ok(this)
     }
     pub(crate) fn lock(&self) -> Result<std::sync::MutexGuard<'_, State>> {
@@ -215,6 +378,7 @@ impl Host {
         })
     }
     fn start_worker(self: &Arc<Self>, id: String, runtime: Runtime, concurrency: usize) {
+        if !self.dispatch_enabled { return; }
         let weak = Arc::downgrade(self);
         let runner_weak = weak.clone();
         let runner_id = id.clone();
@@ -302,6 +466,13 @@ impl Host {
             )?;
             s.journal.delivered(&schedule, &submission.task_id, now)?;
         }
+        // Owner-approved wake schedules share this same loop and journal; no
+        // second timer exists. Recover interrupted claims first, then fire.
+        wake::fire_due(&s, id, now)?;
+        // Owner-approved incident intake shares this loop too; no second
+        // timer, daemon, or MCP dependency exists.
+        incidents::fire_due(&s, id, now)?;
+        orchestration::tick(self, &s, id)?;
         self.dispatch_goals(&s, id)?;
         protocol::project(&s, id)?;
         for mut record in s
@@ -374,12 +545,14 @@ impl Host {
             .filter(|r| r.profile_id == id && r.state == "pending")
         {
             let snapshot = p.runtime.session.committed()?;
-            if snapshot
-                .tasks
-                .get(&review.task_id)
-                .is_none_or(|t| t.phase.terminal())
-                || review.expires_ms <= now
-            {
+            // Lifetime proposals carry no Task: their source turn may settle
+            // while the proposal stays Owner-decidable until it expires.
+            let stale_task = review.lifetime_origin.is_none()
+                && snapshot
+                    .tasks
+                    .get(&review.task_id)
+                    .is_none_or(|t| t.phase.terminal());
+            if stale_task || review.expires_ms <= now {
                 review.state = if review.expires_ms <= now {
                     "expired"
                 } else {
@@ -479,7 +652,11 @@ impl Host {
                     ),
                     true,
                 )?;
-                config.tools.extend(services::tool_definitions(self));
+                config.tools.extend(services::scoped_tool_definitions(
+                    self,
+                    services::ToolRole::Ordinary,
+                    &policy,
+                ));
                 s.journal.put("goal_config", &key, &config)?;
                 config
             };
@@ -501,9 +678,25 @@ impl Host {
         }
         Ok(())
     }
+    fn read_only_action(action: &Action) -> bool {
+        #[cfg(feature = "lifetime")]
+        if let Command::Lifetime { envelope } = &action.command {
+            return lifetime::authority::read_only(envelope.body["method"].as_str());
+        }
+        let _ = action;
+        false
+    }
+
     /// Issue a local command. For external adapter commands inside Tokio, use
     /// `action_async` so the caller does not block the executor.
     pub fn action(self: &Arc<Self>, action: Action) -> Result<Value> {
+        if !self.dispatch_enabled && !Self::read_only_action(&action) {
+            return Ok(json!({"ok":false,"error":"dispatch_off"}));
+        }
+        #[cfg(feature = "lifetime")]
+        if let Command::Lifetime { envelope } = &action.command {
+            return self.lifetime_action(envelope);
+        }
         if matches!(&action.command, Command::Routing { .. }) {
             return routing_host::owner_action(self, &action);
         }
@@ -539,6 +732,49 @@ impl Host {
                     *from_ms,
                     *to_ms,
                 )),
+                OwnerAction::PlannerSyncStatus { collection_id } => Some(
+                    planner_sync::sync_status(&*self.lock()?, collection_id),
+                ),
+                _ => None,
+            };
+            if let Some(value) = value {
+                return Ok(match value {
+                    Ok(result) => json!({"ok":true,"result":result}),
+                    Err(error) => json!({"ok":false,"error":error.to_string()}),
+                });
+            }
+        }
+        // Wake reads are pure derivations from persisted rows; like planner
+        // status reads they carry no command receipt and no effect.
+        if let Command::Workspace { action: ref query } = action.command {
+            let value = match query {
+                OwnerAction::WakeList { profile_id } => {
+                    Some(wake::list(&*self.lock()?, profile_id).map(|wakes| json!(wakes)))
+                }
+                OwnerAction::WakePreview {
+                    profile_id,
+                    wake_id,
+                    now_ms,
+                } => Some(wake::preview(&*self.lock()?, profile_id, wake_id, *now_ms)),
+                OwnerAction::IncidentList { profile_id } => {
+                    Some(incidents::status(&*self.lock()?, profile_id))
+                }
+                OwnerAction::IncidentPreview { profile_id, now_ms } => {
+                    Some(incidents::preview(&*self.lock()?, profile_id, *now_ms))
+                }
+                OwnerAction::SkillList { profile_id } => {
+                    Some(skills::list(&*self.lock()?, profile_id).map(|items| json!(items)))
+                }
+                OwnerAction::SkillManifest { profile_id } => Some(
+                    skills::manifest(&*self.lock()?, &self.root, profile_id),
+                ),
+                // Owner memory source review is a pure read: no command
+                // receipt, no CAS and no side effect, like the other reads.
+                #[cfg(feature = "lifetime")]
+                OwnerAction::MemorySourceList {
+                    profile_id,
+                    conversation_id,
+                } => Some(self.owner_memory_source_list(profile_id, conversation_id)),
                 _ => None,
             };
             if let Some(value) = value {
@@ -597,6 +833,9 @@ impl Host {
     /// Async variant for computer and channel effects. An interrupted effect
     /// leaves its command intent available for inspection rather than replay.
     pub async fn action_async(self: &Arc<Self>, action: Action) -> Result<Value> {
+        if !self.dispatch_enabled && !Self::read_only_action(&action) {
+            return Ok(json!({"ok":false,"error":"dispatch_off"}));
+        }
         // Read-only discovery has no effects to replay and does not retain large catalogs in command receipts.
         let read = match &action.command {
             Command::Workspace {
@@ -605,6 +844,39 @@ impl Host {
             Command::Workspace {
                 action: OwnerAction::DiscoverLocalModels,
             } => Some(models::discover().await),
+            Command::Workspace {
+                action: OwnerAction::WakeList { profile_id },
+            } => Some(wake::list(&*self.lock()?, profile_id).map(|wakes| json!(wakes))),
+            Command::Workspace {
+                action:
+                    OwnerAction::WakePreview {
+                        profile_id,
+                        wake_id,
+                        now_ms,
+                    },
+            } => Some(wake::preview(&*self.lock()?, profile_id, wake_id, *now_ms)),
+            Command::Workspace {
+                action: OwnerAction::IncidentList { profile_id },
+            } => Some(incidents::status(&*self.lock()?, profile_id)),
+            Command::Workspace {
+                action: OwnerAction::IncidentPreview { profile_id, now_ms },
+            } => Some(incidents::preview(&*self.lock()?, profile_id, *now_ms)),
+            Command::Workspace {
+                action: OwnerAction::SkillList { profile_id },
+            } => Some(skills::list(&*self.lock()?, profile_id).map(|items| json!(items))),
+            Command::Workspace {
+                action: OwnerAction::SkillManifest { profile_id },
+            } => Some(skills::manifest(&*self.lock()?, &self.root, profile_id)),
+            // Owner memory source review is a pure read: no command receipt,
+            // no CAS and no side effect, like the other registered reads.
+            #[cfg(feature = "lifetime")]
+            Command::Workspace {
+                action:
+                    OwnerAction::MemorySourceList {
+                        profile_id,
+                        conversation_id,
+                    },
+            } => Some(self.owner_memory_source_list(profile_id, conversation_id)),
             _ => None,
         };
         if let Some(result) = read {
@@ -621,6 +893,32 @@ impl Host {
         }
         let request_id = action.request_id;
         let result = match action.command {
+            #[cfg(feature = "lifetime")]
+            Command::Workspace {
+                action: OwnerAction::MemorySourceInspect {
+                    profile_id, conversation_id, origin, content,
+                },
+            } => self.owner_memory_source_inspect(
+                &profile_id, &conversation_id, &origin, &content,
+            ).await,
+            #[cfg(feature = "lifetime")]
+            Command::Workspace {
+                action: OwnerAction::MemorySourceCorrect {
+                    profile_id, conversation_id, prior, expected_prior_episode_id,
+                    prior_content, replacement_content,
+                },
+            } => self.owner_memory_source_correct(
+                &request_id, &profile_id, &conversation_id, &prior,
+                &expected_prior_episode_id, &prior_content, &replacement_content,
+            ).await,
+            #[cfg(feature = "lifetime")]
+            Command::Workspace {
+                action: OwnerAction::MemorySourceResume {
+                    profile_id, conversation_id, correction_request_id,
+                },
+            } => self.owner_memory_source_resume(
+                &profile_id, &conversation_id, &correction_request_id,
+            ).await,
             Command::Workspace {
                 action: OwnerAction::RecoverProfile { profile_id },
             } => self.recover_profile(&profile_id).await,
@@ -631,8 +929,8 @@ impl Host {
                 action: OwnerAction::CheckModelProvider { id },
             } => models::check(self, &id).await,
             Command::Workspace {
-                action: OwnerAction::Computer { profile_id, verb },
-            } => computer::control(self, &profile_id, &verb).await,
+                action: OwnerAction::Computer { profile_id, verb, action_id },
+            } => computer::control(self, &profile_id, &verb, action_id.as_deref()).await,
             Command::Workspace {
                 action:
                     OwnerAction::VoiceStart {
@@ -649,13 +947,28 @@ impl Host {
             Command::Workspace {
                 action: OwnerAction::SendSlack { outbox_id },
             } => channels::send_slack(self, &outbox_id).await,
+            #[cfg(feature = "caldav")]
+            Command::Workspace {
+                action:
+                    OwnerAction::PlannerSyncOnce {
+                        collection_id,
+                        write,
+                    },
+            } => self.planner_sync_once(&collection_id, write).await,
             _ => unreachable!("external command classification"),
         };
         self.finish_action(&request_id, result)
     }
 
     fn external_command(command: &Command) -> bool {
-        matches!(
+        #[cfg(feature = "lifetime")]
+        if matches!(command, Command::Workspace {
+            action: OwnerAction::MemorySourceInspect { .. } | OwnerAction::MemorySourceCorrect { .. }
+                | OwnerAction::MemorySourceResume { .. }
+        }) {
+            return true;
+        }
+        let channel = matches!(
             command,
             Command::Workspace {
                 action: OwnerAction::Computer { .. }
@@ -668,7 +981,17 @@ impl Host {
                     | OwnerAction::VoiceEnd { .. }
                     | OwnerAction::SendSlack { .. }
             }
-        )
+        );
+        #[cfg(feature = "caldav")]
+        if !channel {
+            return matches!(
+                command,
+                Command::Workspace {
+                    action: OwnerAction::PlannerSyncOnce { .. }
+                }
+            );
+        }
+        channel
     }
 
     fn begin_action(&self, action: &Action) -> Result<Option<Value>> {
@@ -754,7 +1077,12 @@ impl Host {
                     .map_err(|_| anyhow!("profile unavailable"))?;
                 let mut config = host::config(&store, Some(&model), tools)?;
                 if tools {
-                    config.tools.extend(services::tool_definitions(self));
+                    let policy: Policy = s.journal.get("policy", &p.id)?.unwrap_or_default();
+                    config.tools.extend(services::scoped_tool_definitions(
+                        self,
+                        services::ToolRole::Ordinary,
+                        &policy,
+                    ));
                 }
                 Ok(
                     json!({"conversation_id":p.runtime.session.create_conversation_with_id(request,config)?}),
@@ -777,16 +1105,21 @@ impl Host {
                     .ok_or_else(|| anyhow!("conversation missing"))?
                     .config
                     .clone();
-                if config.tools.iter().any(|tool| tool.name == "list_ghosts")
+                if config.tools.iter().any(|tool| tool.name == "list_todos")
                     && !snapshot
                         .tasks
                         .values()
                         .any(|t| t.conversation_id == conversation_id && !t.phase.terminal())
                 {
-                    let extra = services::tool_definitions(self)
-                        .into_iter()
-                        .filter(|tool| !config.tools.iter().any(|old| old.name == tool.name))
-                        .collect::<Vec<_>>();
+                    let policy: Policy = s.journal.get("policy", &p.id)?.unwrap_or_default();
+                    let extra = services::scoped_tool_definitions(
+                        self,
+                        services::ToolRole::Ordinary,
+                        &policy,
+                    )
+                    .into_iter()
+                    .filter(|tool| !config.tools.iter().any(|old| old.name == tool.name))
+                    .collect::<Vec<_>>();
                     if !extra.is_empty() {
                         config.tools.extend(extra);
                         p.runtime.session.set_config(&conversation_id, config)?;
@@ -1015,8 +1348,24 @@ impl Host {
             profiles.push(json!({"id":p.id,"name":p.name,"persona":persona,"avatar_id":avatar.avatar_id,"avatar_version":avatar.version,"conversations":conversations,"grants":grants,"policy":policy,"spend":spend,"usage":{"tokens":usage_tokens,"cost_usd":usage_cost},"error":p.error}));
         }
         Ok(
-            json!({"mode":"durable_workspace","host_protocol_version":1,"capabilities":{"routing":routing_host::capability(),"avatars":true,"documents":cfg!(feature="documents"),"memory":memory::Brain::configured(),"channels":cfg!(feature="channels"),"computer":{"backend":self.computer.identity(),"configured":self.computer.configured(),"operations":self.computer.capabilities()}},"avatars":s.journal.objects::<avatars::Avatar>("avatar")?,"todos":s.journal.objects::<planner::Todo>("todo")?,"calendar_events":s.journal.objects::<planner::Event>("calendar_event")?,"connected_planner":connected_planner_snapshot(&s)?,"integrations":s.journal.objects::<integrations::Integration>("integration")?,"routing_shares":s.journal.objects::<routing_host::RoutingShare>("routing_share_v1")?,"routing_results":routing_dispatch::owner_results(&s)?,"workspace_id":s.journal.get::<String>("meta","workspace_id")?,"default_model":models::selected_llm(&s,&self.default_model)?,"model_settings":models::settings(&s)?,"profiles":profiles,"schedules":s.journal.list()?,"spaces":s.journal.objects::<documents::Space>("space")?,"reviews":s.journal.objects::<Review>("review")?.into_iter().filter(|r|!r.profile_id.is_empty()&&matches!(r.state.as_str(),"pending"|"approved")).collect::<Vec<_>>(),"goals":s.journal.objects::<Goal>("goal")?,"delegations":s.journal.objects::<Delegation>("delegation")?,"slack_bindings":s.journal.objects::<channels::SlackBinding>("slack_binding")?,"slack_outbox":s.journal.objects::<channels::Outbox>("slack_outbox")?,"voice_calls":s.journal.objects::<channels::Call>("voice_call")?,"connector_status":s.journal.objects::<Value>("connector_status")?,"connectors":{"computer":self.computer.configured(),"brain":memory::Brain::configured(),"voice":cfg!(feature="channels")&&std::env::var_os("OPENAI_API_KEY").is_some(),"slack":cfg!(feature="channels")&&std::env::var_os("GHOST_SLACK_APP_TOKEN").is_some()}}),
+            self.with_snapshot_authority(&s.journal.0,
+            json!({"mode":"durable_workspace","host_protocol_version":1,"capabilities":{"orchestration":true,"routing":routing_host::capability(),"code_worker":{"configured":code_worker::configured(),"projects":code_worker::project_ids()},"omp_subscription":{"configured":omp_provider::configured(),"models":omp_provider::model_specs().iter().map(|(provider,model)|format!("{provider}/{model}")).collect::<Vec<_>>()},"avatars":true,"documents":cfg!(feature="documents"),"memory":memory::Brain::configured(),"channels":cfg!(feature="channels"),"computer":{"backend":self.computer.identity(),"configured":self.computer.configured(),"operations":self.computer.capabilities()}},"avatars":s.journal.objects::<avatars::Avatar>("avatar")?,"todos":s.journal.objects::<planner::Todo>("todo")?,"calendar_events":s.journal.objects::<planner::Event>("calendar_event")?,"connected_planner":connected_planner_snapshot(&s)?,"integrations":s.journal.objects::<integrations::Integration>("integration")?,"routing_shares":s.journal.objects::<routing_host::RoutingShare>("routing_share_v1")?,"routing_results":routing_dispatch::owner_results(&s)?,"workspace_id":s.journal.get::<String>("meta","workspace_id")?,"default_model":models::selected_llm(&s,&self.default_model)?,"model_settings":models::settings(&s)?,"profiles":profiles,"schedules":s.journal.list()?,"spaces":s.journal.objects::<documents::Space>("space")?,"reviews":s.journal.objects::<Review>("review")?.into_iter().filter(|r|!r.profile_id.is_empty()&&matches!(r.state.as_str(),"pending"|"approved"|"saved"|"declined")).collect::<Vec<_>>(),"goals":s.journal.objects::<Goal>("goal")?,"delegations":s.journal.objects::<Delegation>("delegation")?,"orchestration_plans":s.journal.objects::<orchestration::Plan>("orchestration_plan")?,"orchestration_runs":s.journal.objects::<orchestration::Run>("orchestration_run")?,"slack_bindings":s.journal.objects::<channels::SlackBinding>("slack_binding")?,"slack_outbox":s.journal.objects::<channels::Outbox>("slack_outbox")?,"voice_calls":s.journal.objects::<channels::Call>("voice_call")?,"connector_status":s.journal.objects::<Value>("connector_status")?,"connectors":{"computer":self.computer.configured(),"brain":memory::Brain::configured(),"voice":cfg!(feature="channels")&&std::env::var_os("OPENAI_API_KEY").is_some(),"slack":cfg!(feature="channels")&&std::env::var_os("GHOST_SLACK_APP_TOKEN").is_some()}}),
+            )?
         )
+    }
+
+    fn with_snapshot_authority(&self, _conn: &rusqlite::Connection, snapshot: Value) -> Result<Value> {
+        #[cfg(feature = "lifetime")]
+        let snapshot = {
+            let mut snapshot = snapshot;
+            let authority = lifetime::authority::current(_conn)?;
+            snapshot["lifetime_authority"] = json!({
+                "authority_epoch": authority.epoch,
+                "dispatch_enabled": authority.dispatch_enabled && self.dispatch_enabled && authority.epoch == self.authority_epoch,
+            });
+            snapshot
+        };
+        Ok(snapshot)
     }
 }
 
@@ -1047,9 +1396,12 @@ impl Host {
         let mut workers = self.workers.lock().unwrap_or_else(|e| e.into_inner());
         if self.stopping.load(Ordering::Acquire) {
             task.abort();
-        } else {
-            workers.push(task);
         }
+        // The handle is retained even for a task aborted while stopping: an
+        // aborted future is dropped on a later scheduler tick, so discarding
+        // the handle would let that teardown outlive shutdown() and drop(),
+        // keeping the workspace lock alive against the next writer.
+        workers.push(task);
     }
 
     pub(crate) fn spawn(
@@ -1127,23 +1479,34 @@ impl Host {
 
     /// Stop dispatch and await task teardown. Durable work is retained for restart.
     /// Drop all Host handles afterwards to release the root and profile locks.
+    ///
+    /// Drains the worker list until one full round observes no workers, so a
+    /// task spawned or tracked inside the shutdown window is aborted and joined
+    /// here instead of finishing its teardown after this call. Every Host
+    /// worker future is therefore complete before the caller drops the host
+    /// and another writer opens the workspace.
     pub async fn shutdown(&self) -> Result<()> {
         self.integrations.clear();
         self.stopping.store(true, Ordering::Release);
-        let tasks = std::mem::take(
-            &mut *self
-                .workers
-                .lock()
-                .map_err(|_| anyhow!("worker state unavailable"))?,
-        );
-        for task in &tasks {
-            task.abort();
-        }
         let mut failure = None;
-        for task in tasks {
-            if let Err(error) = task.await {
-                if !error.is_cancelled() {
-                    failure = Some(anyhow!("Ghost worker shutdown failed: {error}"));
+        loop {
+            let tasks = std::mem::take(
+                &mut *self
+                    .workers
+                    .lock()
+                    .map_err(|_| anyhow!("worker state unavailable"))?,
+            );
+            if tasks.is_empty() {
+                break;
+            }
+            for task in &tasks {
+                task.abort();
+            }
+            for task in tasks {
+                if let Err(error) = task.await {
+                    if !error.is_cancelled() {
+                        failure = Some(anyhow!("Ghost worker shutdown failed: {error}"));
+                    }
                 }
             }
         }
@@ -1168,8 +1531,14 @@ impl Drop for Host {
 mod extension_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wake_tests;
 #[cfg(all(test, feature = "documents"))]
 mod workflow_tests;
+#[cfg(all(test, feature = "lifetime", feature = "documents"))]
+mod lifetime_documents_tests;
+#[cfg(all(test, feature = "lifetime"))]
+mod incidents_tests;
 
 fn connected_planner_snapshot(s: &State) -> Result<Value> {
     #[cfg(feature = "caldav")]

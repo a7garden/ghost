@@ -1,0 +1,547 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ghost-lifetime/1",
+  "title": "Ghost lifetime contract revision 1",
+  "$defs": {
+    "Artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digest",
+        "locator",
+        "privacy",
+        "producing_attempt"
+      ],
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "privacy": {
+          "enum": [
+            "public",
+            "private",
+            "local_only"
+          ]
+        },
+        "producing_attempt": {
+          "type": "string"
+        }
+      }
+    },
+    "Goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "requirement_digest",
+        "prompt",
+        "accountable_ghost",
+        "reply_conversation",
+        "privacy",
+        "state",
+        "acceptance_spec"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requirement_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "accountable_ghost": {
+          "type": "string"
+        },
+        "reply_conversation": {
+          "type": "string"
+        },
+        "privacy": {
+          "enum": [
+            "public",
+            "private",
+            "local_only"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "acceptance_spec": {
+          "type": "object"
+        }
+      }
+    },
+    "Work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "goal_id",
+        "goal_revision",
+        "owner",
+        "owner_revision",
+        "state",
+        "execution_id",
+        "cancellation",
+        "blocker"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "goal_id": {
+          "type": "string"
+        },
+        "goal_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "owner": {
+          "type": "string"
+        },
+        "owner_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cancellation": {
+          "type": "string"
+        },
+        "blocker": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "RuntimeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversation_id",
+        "ghost_id",
+        "runtime_kind",
+        "runtime_release",
+        "storage_ref"
+      ],
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "ghost_id": {
+          "type": "string"
+        },
+        "runtime_kind": {
+          "type": "string"
+        },
+        "runtime_release": {
+          "type": "string"
+        },
+        "storage_ref": {
+          "type": "string"
+        }
+      }
+    },
+    "WorkerSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_id",
+        "work_id",
+        "work_revision",
+        "authority_epoch",
+        "computer_id",
+        "cwd",
+        "prompt",
+        "model",
+        "thinking",
+        "allowed_tools",
+        "deadline_ms",
+        "max_progress_bytes"
+      ],
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "work_id": {
+          "type": "string"
+        },
+        "work_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "computer_id": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "thinking": {
+          "type": "string"
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deadline_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_progress_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "input_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkerArtifactInput"
+          }
+        }
+      }
+    },
+    "WorkerArtifactInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "work_id",
+        "goal_id",
+        "goal_revision",
+        "execution_id",
+        "state",
+        "artifacts",
+        "protected_artifacts_withheld"
+      ],
+      "properties": {
+        "work_id": {
+          "type": "string"
+        },
+        "goal_id": {
+          "type": "string"
+        },
+        "goal_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Artifact"
+          }
+        },
+        "protected_artifacts_withheld": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "passed",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "string"
+        }
+      }
+    },
+    "Acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "work_id",
+        "goal_revision",
+        "requirement_digest",
+        "artifact_digest",
+        "verifier_revision",
+        "policy_revision",
+        "checks"
+      ],
+      "properties": {
+        "work_id": {
+          "type": "string"
+        },
+        "goal_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requirement_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "artifact_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "verifier_revision": {
+          "type": "string"
+        },
+        "policy_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Check"
+          }
+        }
+      }
+    },
+    "ComputerBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "computer_id",
+        "ghost_id",
+        "backend",
+        "host_id",
+        "epoch",
+        "capabilities",
+        "accepted_capabilities",
+        "grant_revision"
+      ],
+      "properties": {
+        "computer_id": {
+          "type": "string"
+        },
+        "ghost_id": {
+          "type": "string"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "accepted_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "grant_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "Envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "command_id",
+        "payload_digest",
+        "actor_ref",
+        "authority_epoch",
+        "expected_revision",
+        "correlation_id",
+        "body"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "ghost-lifetime/1"
+        },
+        "command_id": {
+          "type": "string"
+        },
+        "payload_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "actor_ref": {
+          "type": "string"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expected_revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "body": {
+          "type": "object"
+        }
+      }
+    },
+    "Response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "summary",
+        "object_refs",
+        "artifacts",
+        "next_actions",
+        "error_code",
+        "retry_class",
+        "data"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "success",
+            "warning",
+            "error"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "object_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Artifact"
+          }
+        },
+        "next_actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "error_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retry_class": {
+          "enum": [
+            "same_id",
+            "reconcile_first",
+            "new_revision",
+            "never"
+          ]
+        },
+        "data": {}
+      }
+    },
+    "Snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "contract_revision",
+        "mode",
+        "goals",
+        "work",
+        "bindings",
+        "artifacts",
+        "acceptances"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "ghost-lifetime/1"
+        },
+        "contract_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mode": {
+          "type": "string"
+        },
+        "goals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Goal"
+          }
+        },
+        "work": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Work"
+          }
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RuntimeBinding"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Artifact"
+          }
+        },
+        "acceptances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Acceptance"
+          }
+        }
+      }
+    }
+  }
+}

@@ -434,11 +434,12 @@ fn caldav_http_endpoint_tls_and_href_policy_is_fail_closed() {
         "https://example.com/calendar/?key=x",
     ] {
         assert!(
-            HttpAdapter::https("binding", endpoint).is_err(),
+            HttpAdapter::https("binding", endpoint, SyncPhase::ExplicitActive).is_err(),
             "{endpoint}"
         );
     }
-    let a = HttpAdapter::https("binding", "https://example.com/calendar/").unwrap();
+    let a = HttpAdapter::https("binding", "https://example.com/calendar/", SyncPhase::ExplicitActive)
+        .unwrap();
     for href in [
         "https://other.example/calendar/a.ics",
         "https://example.com:8443/calendar/a.ics",
@@ -474,7 +475,8 @@ fn caldav_http_endpoint_tls_and_href_policy_is_fail_closed() {
 }
 #[test]
 fn caldav_http_xml_namespaces_partial_dtd_and_duplicates_are_rejected() {
-    let a = HttpAdapter::https("binding", "https://example.com/calendar/").unwrap();
+    let a = HttpAdapter::https("binding", "https://example.com/calendar/", SyncPhase::ExplicitActive)
+        .unwrap();
     assert_eq!(
         a.parse_listing(&xml(&item("/calendar/a.ics", "&quot;e&quot;")))
             .unwrap()

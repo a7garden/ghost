@@ -8,6 +8,12 @@ pub mod protocol;
 #[serde(default)]
 pub struct Policy {
     pub browser: bool,
+    /// Public web search and page reading through a fixed CLI adapter.
+    pub web: bool,
+    /// Permit a bounded OMP analysis call without Ghost tools or workspace input.
+    pub external_worker: bool,
+    /// Permit bounded Codex CLI code work in a disposable, allowlisted project copy.
+    pub code_worker: bool,
     pub shell: bool,
     pub memory: bool,
     pub delegation: bool,
@@ -22,6 +28,9 @@ impl Default for Policy {
     fn default() -> Self {
         Self {
             browser: false,
+            web: false,
+            external_worker: false,
+            code_worker: false,
             shell: false,
             memory: false,
             delegation: true,
@@ -33,6 +42,14 @@ impl Default for Policy {
             model: None,
         }
     }
+}
+/// Immutable authenticated command provenance for a lifetime document proposal.
+/// The Host derives all fields; model text never supplies them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LifetimeReviewOrigin {
+    pub turn_id: String,
+    pub authority_epoch: u64,
+    pub request_digest: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Review {
@@ -50,6 +67,10 @@ pub struct Review {
     pub expires_ms: u64,
     pub state: String,
     pub result: Option<Value>,
+    /// Present only for canonical lifetime proposals; legacy and direct Owner
+    /// drafts stay None and keep the existing task-bound review lifecycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifetime_origin: Option<LifetimeReviewOrigin>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Delegation {

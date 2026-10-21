@@ -1,0 +1,30 @@
+{
+  "contract_id": "ghost-home-privacy-lanes/1",
+  "wire_protocol": "ghost-lifetime/1",
+  "wire_contract_revision": 1,
+  "prerequisite": "native-workspace-v1.json: registered per-computer home volumes with atomic worker home leases",
+  "owner": "home/registry owner",
+  "problem": "Private skill snapshots and conversation state are written into the persistent worker HOME. Sticky conversation disclosure alone cannot protect a later public or new conversation from private HOME leftovers, because both model routes previously mounted the same home_volume",
+  "decision": "Two sibling privacy lanes live INSIDE each registered home_volume root: `public` and `private`. The lane is selected solely from the trusted physical backend in the sealed runner config: SubscriptionNative mounts home_volume/public, LocalHttp mounts home_volume/private. Local may consume public-classified tasks but its own HOME stays private. Only the selected lane child is ever mounted at /home/ghost; the containing home_volume root and the sibling lane are never mounted, so a fresh public worker can neither read the private lane or legacy originals nor be reached by private state, and a local/private worker cannot write into the public lane through its mounted HOME",
+  "provisioning": "Fresh bindings create both empty lane directories with the owner UID and mode 0700. Existing legacy unclassified home roots are never silently lane-provisioned, reclassified, or emptied: acquire_worker_home, worker_home_is_current, and worker mount preparation classify the root and fail closed with the exact operator instruction until `ghost computers migrate-home` runs. The frozen tools/session/workspace paths are unchanged; only the HOME mount path gains the lane segment",
+  "migration": {
+    "command": "ghost computers migrate-home --config <config> --ghost <ghost> --computer <computer> --confirm",
+    "authorization": "Durable registry envelope `migrate_home`, deduplicated by command ID at the current binding epoch, native worker backend only. Refused with `home_lease_held` while any process or collection lease is active or revoked (a revoked reservation is a cleanup tombstone whose home may still be mounted), and with `home_root_forged` when a lane entry is not a real directory (for example a symlinked lane)",
+    "effect": "Records the full byte/identity inventory of the home root (kind, mode, uid, dev, ino, size, bounded sha256) on a durable `migrate_home` attempt BEFORE any change, then creates missing lanes (0700, owner UID) and renames every legacy original into the `private` lane. Rename-only: same volume, same inode, identity re-verified after each move; nothing is deleted, copied out, declassified, or forwarded. Overwrite targets are refused. A root that is already exactly the two lanes completes as an honest `already_migrated` no-op",
+    "unknown_outcomes": "A crash or failed effect leaves the attempt `authorized` — the outcome is UNKNOWN. Every new lifecycle or migration effect on that computer is refused (`lifecycle_outcome_unknown` / `migration_outcome_unknown`) until the operator verifies disk state against the recorded inventory and resolves the attempt via the existing `ghost computers resolve-lifecycle --attempt <id> --resolution <canonical-json> --by <who>`. Re-runs are never blind replays; only an explicit resolution reopens the gate",
+    "classification": "Migration classifies all legacy originals as private. There is no deletion, no automatic declassification, and no source-to-live action; reclassification of any original into the public lane remains a separate explicit owner decision that this contract does not provide"
+  },
+  "recovery": {
+    "capture": "Format-2 recovery bundles capture whole selected roots, so both lanes and any legacy originals inside a home root are preserved byte-for-byte with their manifest digests; symlinks and special files remain refused at capture",
+    "restore": "restore_bundle classifies each captured Present home root with the same admission rule and reports it per computer in `RestoreReport.home_lanes` (`lane_isolated`, `legacy_requires_migration`, `forged_refused`), plus an explicit reconciliation requirement naming `ghost computers migrate-home` for every legacy root. Restored legacy roots therefore meet the identical fail-closed admission at the new authority epoch"
+  },
+  "verification": [
+    "fresh bindings expose exactly public and private lanes at 0700 and worker grants pass admission",
+    "one stray original at a home root fails acquire, currency, and mount preparation with the migration instruction",
+    "migrate-home moves every legacy original into private with bytes, modes, and link targets preserved and converges the root to exactly the two lanes",
+    "active and revoked process/collect leases and forged symlinked lanes refuse migration without moving anything",
+    "an interrupted migration stays authorized-unknown, blocks all new effects, and only an explicit resolve-lifecycle reopens migration",
+    "public-classified and private workers resolve different HOME directories for the same home_volume while tools, session, and execution workspace paths stay unchanged",
+    "format-2 capture/restore round-trips both lanes and originals and reports legacy homes as requiring migration"
+  ]
+}

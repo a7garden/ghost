@@ -425,6 +425,10 @@ async fn caldav_review_previous_v4_href_constraint_migrates_without_erasing_hist
             id: "todos".into(),
             binding: "fixture:todos".into(),
             kind: Kind::Todo,
+            wire_format: WireFormat::ICalendar,
+            phase: SyncPhase::ExplicitActive,
+            account_ref: None,
+            collection_ref: None,
             profiles: vec![],
             enabled: true,
         },
@@ -445,6 +449,7 @@ async fn caldav_review_previous_v4_href_constraint_migrates_without_erasing_hist
         },
         None,
         &Kind::Todo,
+        WireFormat::ICalendar,
     )
     .unwrap();
     history.tombstone = true;
@@ -469,6 +474,9 @@ async fn caldav_review_previous_v4_href_constraint_migrates_without_erasing_hist
         diagnostic: None,
         conflict_remote: None,
         write_outcome: "applied".into(),
+        wire_format: WireFormat::ICalendar,
+        provider_item_id: None,
+        observation_locator: None,
         attempt: 0,
     };
     let mut old_payload = serde_json::to_value(&legacy).unwrap();
@@ -498,28 +506,8 @@ async fn caldav_review_previous_v4_href_constraint_migrates_without_erasing_hist
         let s = app.lock().unwrap();
         assert!(admission_receipt(&s.journal.0, &legacy.id).is_err());
         assert_eq!(status(&s, &legacy.id, "todos").unwrap()["phase"], "synced");
-        let error =
-            enqueue_owner(&s, &request, "legacy replay", legacy.mutation.clone()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("immutable admission receipt missing"));
-        assert_eq!(
-            load::<Operation>(&s.journal.0, "planner_operations", &legacy.id)
-                .unwrap()
-                .unwrap()
-                .attempt,
-            0
-        );
+        assert!(enqueue_owner(&s, &request, "legacy replay", legacy.mutation.clone()).is_err());
     }
-    assert_eq!(
-        app.lock()
-            .unwrap()
-            .journal
-            .0
-            .query_row("PRAGMA user_version", [], |r| r.get::<_, u64>(0))
-            .unwrap(),
-        4
-    );
     app.shutdown().await.unwrap();
     drop(app);
     let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();

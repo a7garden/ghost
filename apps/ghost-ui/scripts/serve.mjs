@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, extname, sep } from 'node:path';
 import { createBridge } from '../server/bridge.mjs';
 
-const base = fileURLToPath(new URL('../dist/', import.meta.url));
+const base = process.env.GHOST_UI_DIST ? resolve(process.env.GHOST_UI_DIST) : fileURLToPath(new URL('../dist/', import.meta.url));
 const bridge = createBridge();
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.svg': 'image/svg+xml', '.map': 'application/json' };
 const server = createServer((req, res) => bridge(req, res, async () => {

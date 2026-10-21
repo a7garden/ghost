@@ -159,12 +159,9 @@ async fn mcp_stdio_scope_pagination_persistence_and_uncertain_effects() {
         .runtime
         .session
         .clone();
-    let conversation = session
-        .create_conversation(host::durable::AgentConfig::new(
-            host::mock_model(),
-            "fixture",
-        ))
-        .unwrap();
+    let mut config = host::durable::AgentConfig::new(host::mock_model(), "fixture");
+    config.tools = services::role_tool_definitions(&app, services::ToolRole::Ordinary);
+    let conversation = session.create_conversation(config).unwrap();
     let task_id = session
         .submit(&conversation, "message", InputKind::Prompt, "fixture")
         .unwrap()

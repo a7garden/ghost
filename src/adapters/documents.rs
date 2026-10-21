@@ -1,5 +1,5 @@
-//! Source-preserving document plane. The owner's session instructions pin new
-//! writes to PDC 1; PDC 2 is readable in place. No automatic conversions.
+//! Source-preserving document plane. New writes use PDC 2 Markdown or HTML;
+//! PDC 1 and unmarked legacy sources remain readable and are never rewritten.
 #[cfg(not(feature = "documents"))]
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,9 @@ pub struct Page {
     pub title: String,
     pub hash: String,
     pub profile: String,
+    /// PDC 1 documents and unmarked legacy files are always read-only.
+    #[serde(default)]
+    pub legacy: bool,
     pub diagnostic: Option<String>,
     pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

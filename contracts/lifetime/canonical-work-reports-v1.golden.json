@@ -1,0 +1,16 @@
+{
+  "contract_id": "ghost-canonical-work-reports/1",
+  "kind": "deterministic contract fixture scenarios; not observed model or product acceptance",
+  "cases": [
+    {"name":"derived_goal_owned_report", "source":{"target":"pi","body_method":"conversation.submit","canonical_origin_exists":true,"registered_pair_matches":true,"binding_matches":true,"goal_revision_matches":true}, "inspect":"success", "reply":{"sender_kind":"ghost","kind":"assistant_advisory","source_turn_id":null,"origin_report_id":"exact receiver command ID"}, "owner_run_changed":false},
+    {"name":"same_report_same_text_new_callback_id", "first_reply":"committed actual SDK text", "second_reply":"identical actual SDK text", "expected":"original reply ID and sequence; one turn"},
+    {"name":"same_report_changed_text", "first_reply":"committed actual SDK text", "second_reply":"different text", "expected":"conflict; original reply preserved"},
+    {"name":"foreign_or_forged_or_noncanonical_report", "expected":"error; no reply and no Owner lifecycle or Goal/Work mutation"},
+    {"name":"stale_goal_report", "source_goal_revision":1, "current_goal_revision":2, "expected":"error; no reply"},
+    {"name":"active_owner_report_admission", "owner":"running", "report":"received", "expected":"durably queued in same canonical conversation, not direct SDK interleaving; report has no Owner turn capability"},
+    {"name":"previously_done_sdk_report", "receiver_receipt":"success", "sdk_submission":"done with committed AssistantEntry", "canonical_report_registration":"absent before additive migration", "expected":"recover original request/submission/entry identity, project once; zero new model/worker requests"},
+    {"name":"lost_projection_ack", "host_reply":"committed", "pi_reply_receipt":"unconfirmed", "expected":"inspect current report; recover original reply identity or replay exact original callback; never replace text or choose a new model invocation"},
+    {"name":"notification_attempts_work_mutation", "origin_kind":"work_report", "attempts":["goal.create","work.submit","work.steer","work.cancel","memory.get","memory.submit","handoff","wait"], "expected":"rejected before Host mutation transport"},
+    {"name":"private_notification", "original_report_privacy":"public", "current_conversation_privacy":"private", "expected":"strongest private disclosure, existing guarded local model only; no external model fallback"}
+  ]
+}

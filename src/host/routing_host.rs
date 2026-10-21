@@ -67,7 +67,7 @@ pub fn capability() -> Value {
         "runtime_dispatch":true,"effect_fence":true,"verified_completion_report":true,
         "model_router":true,"model_tool_registration":true,"entry_view":true,
         "verification_scope":"observed_local_effects","external_mutation_dispatch":false,
-        "immutable_evidence":true,"unsupported_bound_mutation_tools":["shell","integration_call","memory_retain","planner_mutation","browser_mutation"]})
+        "immutable_evidence":true,"unsupported_bound_mutation_tools":["shell","integration_call","memory_retain","memory_session_record","planner_mutation","browser_mutation","code_worker"]})
 }
 /// Owner control only. Uses canonical receipts and their current visibility;
 /// no transcript cache or model caller switch. Pages are ordered by immutable

@@ -1,0 +1,19 @@
+{
+  "contract_id": "ghost-native-worker-backend-facts/1",
+  "owner": "integration coordinator",
+  "depends_on": "ghost-native-workspace/1",
+  "evidence": "Existing AppleContainerBackend::probe creates task=None; capabilities.shell/persistent_filesystem and configured are false until a real scoped task context. A CLI probe is not a native-worker capability registration",
+  "decision": "Register the actual verified GuestOmp runtime as its distinct backend, apple-native-omp. Do not fabricate a for_task execution/preview directory, set probe capabilities true, mutate the existing ComputerBackend trait or create another registry/home store",
+  "registry_type": "pub struct NativeWorkerBackendFacts { pub configured: bool, pub available: bool }; defined by D in registry.rs, reexported by Root through computers/mod.rs",
+  "registry_api": "ComputerRegistry::register_native_worker_backend(&mut self, facts: NativeWorkerBackendFacts, accepted_capabilities: Vec<String>) -> anyhow::Result<()>",
+  "registration": "Existing RegisteredBackend must preserve dynamically observed ComputerBackend behavior and separately represent native-worker facts (boring enum). Native backend identity is exactly apple-native-omp and offered capability set is exactly shell+persistent_filesystem, with browser/human_control false. Configured means validated actual native runner/runtime/source/model/tool route, not mere CLI installation; available comes from actual read-only service probe. Reject available=true/configured=false or unoffered trusted acceptance. Existing downgrade/current/lease logic consumes both registration kinds without granting or changing bindings",
+  "worker_factory": "GuestRunnerConfig::worker_backend_facts(&self) -> anyhow::Result<crate::computers::NativeWorkerBackendFacts>",
+  "factory_rules": "C validates the same selected native GuestOmp config, canonical immutable source snapshot and pinned Linux ARM64/OMP runtime/tool/model route before reporting configured. Probe Apple CLI/service read-only once per registered runner. Preserve no fallback/global auth/config/automatic retry. Do not clone/revalidate config unnecessarily, spawn a VM, call a model, create an execution or infer availability from configuration. A missing/invalid prerequisite is an error, not configured=true",
+  "consumer": "C registers these real factory facts on the existing shared registry handle before acquire_worker_home. Root Host reads the exact configured per-Ghost runner_config and invokes the same factory before provisioning or issuing grants, not a separate pseudo backend",
+  "ownership": {
+    "C": "Only CNativeTools1 existing worker allowlist; factory and real registration consumer",
+    "D": "Only DHome2 registry.rs and owned behavioral tests; new facts type/registration variant and shared current/lease checks",
+    "root": "computers/mod.rs reexport; Host config/grant/routing; contracts and all build/runtime verification"
+  },
+  "verification": ["bare Apple CLI probe cannot grant native shell", "invalid native runtime/source route reports no configured capability", "native unavailable/downgraded registration cannot acquire or remain current", "no browser/human capability or arbitrary capability upgrade", "actual native full builtin/isolated-home/file publication remains a separate Root smoke gate"]
+}

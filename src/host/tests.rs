@@ -48,7 +48,7 @@ async fn worker_stream_is_visible_and_owner_cancel_closes_it_without_blocking_ac
         }),
         handle: tokio::runtime::Handle::current(),
         default_model: "mock".into(),
-        _lock: File::create(dir.path().join("test.lock")).unwrap(),
+        _lock: super::WorkspaceLock(File::create(dir.path().join("test.lock")).unwrap()),
         brain: memory::Brain::default(),
         computer: computer::default_backend(),
         integrations: crate::host::integrations::Connections::default(),
@@ -56,6 +56,15 @@ async fn worker_stream_is_visible_and_owner_cancel_closes_it_without_blocking_ac
         profile_workers: Mutex::new(BTreeMap::new()),
         recovery: tokio::sync::Mutex::new(()),
         stopping: AtomicBool::new(false),
+        dispatch_enabled: true,
+        #[cfg(feature = "lifetime")]
+        pi_callback_token: String::new(),
+        #[cfg(feature = "lifetime")]
+        pi_local_route: None,
+        #[cfg(feature = "lifetime")]
+        native_computers: None,
+        #[cfg(feature = "lifetime")]
+        authority_epoch: 1,
     });
     let c = runtime
         .session
@@ -374,7 +383,7 @@ fn setup_delegation_with_provider(
         }),
         handle: tokio::runtime::Handle::current(),
         default_model: "mock".into(),
-        _lock: File::create(root.join("test.lock")).unwrap(),
+        _lock: super::WorkspaceLock(File::create(root.join("test.lock")).unwrap()),
         brain: memory::Brain::default(),
         computer: computer::default_backend(),
         integrations: crate::host::integrations::Connections::default(),
@@ -382,6 +391,15 @@ fn setup_delegation_with_provider(
         profile_workers: Mutex::new(BTreeMap::new()),
         recovery: tokio::sync::Mutex::new(()),
         stopping: AtomicBool::new(false),
+        dispatch_enabled: true,
+        #[cfg(feature = "lifetime")]
+        pi_callback_token: String::new(),
+        #[cfg(feature = "lifetime")]
+        pi_local_route: None,
+        #[cfg(feature = "lifetime")]
+        native_computers: None,
+        #[cfg(feature = "lifetime")]
+        authority_epoch: 1,
     });
     {
         let state = app.lock().unwrap();
@@ -399,7 +417,7 @@ fn setup_delegation_with_provider(
         let state = app.lock().unwrap();
         let store = state.profiles[&owner_id].host.store.lock().unwrap();
         let mut config = host::config(&store, Some("mock"), true).unwrap();
-        config.tools.extend(services::tool_definitions(&app));
+        config.tools.extend(services::role_tool_definitions(&app, services::ToolRole::Ordinary));
         config
     };
     let conversation = app.lock().unwrap().profiles[&owner_id]
@@ -644,6 +662,50 @@ async fn wait_for_running_delegate(
         })
         .await
         .expect("owner and specialist should reach a persisted owner wait")
+}
+
+#[cfg(all(unix, feature = "lifetime"))]
+#[tokio::test]
+async fn dropped_host_releases_writer_lock_despite_child_inheriting_descriptor() {
+    struct Child { pid: libc::pid_t, wake: libc::c_int }
+    impl Drop for Child {
+        fn drop(&mut self) {
+            unsafe {
+                let byte = 1u8;
+                libc::write(self.wake, (&byte as *const u8).cast(), 1);
+                libc::close(self.wake);
+                libc::waitpid(self.pid, std::ptr::null_mut(), 0);
+            }
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let app = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let mut pipe = [0; 2];
+    assert_eq!(unsafe { libc::pipe(pipe.as_mut_ptr()) }, 0);
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        unsafe { libc::close(pipe[0]); libc::close(pipe[1]); }
+        panic!("failed to create isolated inherited-descriptor child");
+    }
+    if pid == 0 {
+        // No Rust allocation, destructor, or lock in a multithreaded fork child.
+        unsafe {
+            libc::close(pipe[1]);
+            let mut byte = 0u8;
+            libc::read(pipe[0], (&mut byte as *mut u8).cast(), 1);
+            libc::_exit(0);
+        }
+    }
+    unsafe { libc::close(pipe[0]); }
+    let _child = Child { pid, wake: pipe[1] };
+    let error = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock"))
+        .err().expect("the live Host must exclude another writer");
+    assert!(error.to_string().contains("workspace is already served"));
+    app.shutdown().await.unwrap();
+    drop(app);
+    let reopened = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock"))
+        .expect("an unrelated child's inherited descriptor must not retain the dropped Host lease");
+    reopened.shutdown().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

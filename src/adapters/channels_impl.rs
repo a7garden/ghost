@@ -140,7 +140,11 @@ pub fn receive(app: &Host, envelope: &Value) -> Result<()> {
         if !config.tools.iter().any(|t| t.name == "list_spaces") {
             config
                 .tools
-                .extend(crate::host::services::tool_definitions(app));
+                .extend(crate::host::services::scoped_tool_definitions(
+                    app,
+                    crate::host::services::ToolRole::Ordinary,
+                    &policy,
+                ));
         }
         let incoming = Incoming {
             id: id.clone(),

@@ -1,5 +1,5 @@
-//! Source-preserving document plane. The owner's session instructions pin new
-//! writes to PDC 1; PDC 2 is readable in place. No automatic conversions.
+//! Source-preserving document plane. New writes use PDC 2; legacy PDC 1
+//! documents remain readable and are never rewritten in place.
 use super::{digest, DocumentLink, Page, Space};
 use anyhow::{anyhow, bail, Result};
 use oxi_frontmatter::pdc::{self, BodyProfile, Classification, DocumentExt};
@@ -41,6 +41,15 @@ fn bounded(path: &Path) -> Result<Vec<u8>> {
     }
     Ok(bytes)
 }
+fn canonical_body(body: &str) -> Result<String> {
+    if body.starts_with('\u{feff}') || body.contains('\r') {
+        bail!("canonical PDC 2 bodies must use UTF-8 without a BOM and LF line endings");
+    }
+    if body.is_empty() {
+        return Ok(String::new());
+    }
+    Ok(format!("{}\n", body.trim_end_matches('\n')))
+}
 fn safe_path(space: &Space, locator: &str) -> Result<PathBuf> {
     if space.path.is_symlink() {
         bail!("Space root must not be a symlink");
@@ -81,7 +90,8 @@ fn projection(space: &Space, locator: &str, include_source: bool) -> Result<Page
             .to_string_lossy()
             .into(),
         hash: digest(&bytes),
-        profile: "legacy".into(),
+        profile: "unclassified".into(),
+        legacy: false,
         diagnostic: None,
         deleted: false,
         source: include_source.then(|| source.clone()),
@@ -94,6 +104,7 @@ fn projection(space: &Space, locator: &str, include_source: bool) -> Result<Page
         Classification::Valid(doc) => {
             page.id = Some(doc.id);
             page.profile = doc.profile.id_str().into();
+            page.legacy = doc.legacy;
             if let Some(title) = doc.envelope.get("title").and_then(|v| v.as_str()) {
                 if !title.is_empty() {
                     page.title = title.into();
@@ -106,17 +117,21 @@ fn projection(space: &Space, locator: &str, include_source: bool) -> Result<Page
                 .unwrap_or(false);
             if include_source {
                 let body = source[doc.body_range].to_string();
-                let (html, links, diagnostics) = render_in(space, doc.profile, &body)?;
-                page.preview = Some(html);
-                page.links = links;
-                page.diagnostics = diagnostics;
+                if !doc.legacy {
+                    let (html, links, diagnostics) = render_in(space, doc.profile, &body)?;
+                    page.preview = Some(html);
+                    page.links = links;
+                    page.diagnostics = diagnostics;
+                }
                 page.body = Some(body);
             }
         }
         Classification::LegacyHtml => {
+            page.legacy = true;
             page.diagnostic = Some("legacy_html: readable without conversion".into())
         }
         Classification::LegacyMarkdown => {
+            page.legacy = true;
             page.diagnostic = Some("legacy_markdown: readable without conversion".into())
         }
         Classification::Invalid(e) => page.diagnostic = Some(e.to_string()),
@@ -165,6 +180,7 @@ pub fn list(space: &Space, query: &str) -> Result<Vec<Page>> {
             title: path,
             hash: String::new(),
             profile: "diagnostic".into(),
+            legacy: false,
             diagnostic: Some(e.to_string()),
             deleted: false,
             source: None,
@@ -283,14 +299,15 @@ pub fn new_source(
         bail!("invalid document title");
     }
     let (extension, body_profile, opening, closing) = match profile {
-        "pdc-djot/1" => ("djot", "pdc-djot/1", "---\n", "---\n"),
+        "pdc-markdown/1" => ("md", "pdc-markdown/1", "---\n", "---\n"),
         "pdc-html/1" => ("html", "pdc-html/1", "<!--\n---\n", "---\n-->\n"),
-        _ => bail!("new documents follow the owner's PDC 1 profiles"),
+        _ => bail!("new documents must use a PDC 2 Markdown or HTML profile"),
     };
-    let bytes=format!("{opening}format: pdc-document/1\nbody: {body_profile}\nid: {id}\ncreated: {created}\nupdated: {created}\ntitle: {}\n{closing}{body}",serde_json::to_string(title)?).into_bytes();
+    let body = canonical_body(body)?;
+    let bytes = format!("{opening}format: pdc-document/2\nbody: {body_profile}\nid: {id}\ncreated: {created}\nupdated: {created}\ntitle: {}\n{closing}{body}",serde_json::to_string(title)?).into_bytes();
     if !matches!(
         pdc::classify(ext(Path::new(&format!("a.{extension}")))?, &bytes),
-        Classification::Valid(_)
+        Classification::Valid(doc) if !doc.legacy && doc.profile.id_str() == body_profile
     ) {
         bail!("invalid or unsafe new PDC document");
     }
@@ -318,9 +335,19 @@ pub fn proposed_source(current: &Page, title: &str, body: &str, updated: &str) -
     let Classification::Valid(doc) = pdc::classify(extension, source.as_bytes()) else {
         bail!("unsupported_lossless_edit");
     };
+    if doc.legacy || current.legacy {
+        bail!("legacy_document_read_only: create a separate PDC 2 target after backup");
+    }
     if current.title == title && current.body.as_deref() == Some(body) {
         return Ok(source.as_bytes().to_vec());
     }
+    let body = if current.body.as_deref() == Some(body) {
+        // Metadata-only edits preserve authored body bytes, including legacy
+        // line endings in a valid PDC 2 source.
+        body.to_owned()
+    } else {
+        canonical_body(body)?
+    };
     let mut next = source.as_bytes()[..doc.body_range.start].to_vec();
     next.extend_from_slice(body.as_bytes());
     let next = pdc::patch_metadata(extension, &next, &[("title", title), ("updated", updated)])
@@ -356,6 +383,9 @@ pub fn update(
     let Classification::Valid(doc) = pdc::classify(extension, source.as_bytes()) else {
         bail!("unsupported_lossless_edit");
     };
+    if doc.legacy || current.legacy {
+        bail!("legacy_document_read_only: create a separate PDC 2 target after backup");
+    }
     if current.body.as_deref() == Some(body) && current.title == title {
         return Ok(current);
     }
@@ -532,4 +562,107 @@ if bytes.len()>8*1024*1024{bail!("asset exceeds preview limit; original remains 
         .map_err(|_| anyhow!("preview observations unavailable"))?
         .clone();
     Ok((format!("<!doctype html><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'\"><style>body{{font:14px/1.65 system-ui;padding:20px;color:#222}}pre{{white-space:pre-wrap}}a{{pointer-events:none}}img{{max-width:100%;height:auto}}</style>{safe}"),links,diagnostics))
+}
+
+#[cfg(test)]
+#[path = "documents_conformance_tests.rs"]
+mod conformance_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn document_listing_preserves_good_sources_and_edit_cas_with_malformed_sibling() {
+        let root = tempfile::tempdir().unwrap();
+        let space_path = root.path().join("space");
+        fs::create_dir_all(&space_path).unwrap();
+        let space = Space {
+            id: "fixture-space".into(),
+            name: "Fixture".into(),
+            path: space_path.clone(),
+            writable: true,
+            profiles: Vec::new(),
+        };
+        let id = uuid::Uuid::now_v7().to_string();
+        let asset_ref =
+            format!("pdc://asset/sha256/{}", "a".repeat(64));
+        let body = format!("## Source body\n\n![Receipt]({asset_ref})");
+        let expected_body = canonical_body(&body).unwrap();
+        let (locator, initial) = new_source(
+            &id,
+            "Source preserving",
+            &body,
+            "pdc-markdown/1",
+            "2026-10-09T01:00:00.000Z",
+        )
+        .unwrap();
+        let initial = String::from_utf8(initial).unwrap();
+        let source = initial.replacen(
+            "title: \"Source preserving\"\n",
+            "title: \"Source preserving\"\ncustom_metadata: keep-this-value\n",
+            1,
+        );
+        assert_ne!(source, initial);
+        fs::write(space.path.join(&locator), source.as_bytes()).unwrap();
+        fs::write(space.path.join("malformed.md"), [0xff, 0xfe, 0xfd]).unwrap();
+        let legacy = "# Read-only legacy source\n";
+        fs::write(space.path.join("legacy.md"), legacy).unwrap();
+
+        let pages = list(&space, "").unwrap();
+        let good = pages
+            .iter()
+            .find(|page| page.id.as_deref() == Some(id.as_str()))
+            .expect("valid source remains listed");
+        assert!(good.diagnostic.is_none());
+        assert!(
+            pages
+                .iter()
+                .any(|page| page.locator == "malformed.md" && page.diagnostic.is_some())
+        );
+        let legacy_page = read_source(&space, "legacy.md").unwrap();
+        assert!(legacy_page.legacy);
+        assert_eq!(legacy_page.source.as_deref(), Some(legacy));
+
+        let page = read_source(&space, &locator).unwrap();
+        assert_eq!(page.source.as_deref(), Some(source.as_str()));
+        assert_eq!(page.body.as_deref(), Some(expected_body.as_str()));
+        assert!(page.source.as_deref().unwrap().contains(&asset_ref));
+        assert!(
+            update(
+                &space,
+                &id,
+                "stale-hash",
+                "Changed title",
+                &body,
+                "2026-10-09T01:01:00.000Z",
+            )
+            .is_err(),
+            "stale source hashes must not overwrite the canonical document"
+        );
+        assert_eq!(
+            fs::read(space.path.join(&locator)).unwrap().as_slice(),
+            source.as_bytes()
+        );
+
+        let updated = update(
+            &space,
+            &id,
+            &page.hash,
+            "Changed title",
+            &body,
+            "2026-10-09T01:01:00.000Z",
+        )
+        .unwrap();
+        assert_eq!(updated.id.as_deref(), Some(id.as_str()));
+        let updated_source = fs::read_to_string(space.path.join(&locator)).unwrap();
+        assert!(updated_source.contains("custom_metadata: keep-this-value"));
+        assert!(updated_source.contains(&asset_ref));
+        assert!(updated_source.ends_with(&expected_body));
+        assert_eq!(
+            fs::read(space.path.join("malformed.md")).unwrap().as_slice(),
+            &[0xff, 0xfe, 0xfd]
+        );
+        assert_eq!(fs::read_to_string(space.path.join("legacy.md")).unwrap(), legacy);
+    }
 }

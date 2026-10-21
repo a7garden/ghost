@@ -1,0 +1,36 @@
+{
+  "revision": 1,
+  "methods": {
+    "host": [
+      "goal.submit",
+      "goal.inspect",
+      "goal.update",
+      "work.submit",
+      "work.inspect",
+      "work.steer",
+      "work.cancel",
+      "work.result",
+      "work.accept",
+      "snapshot"
+    ],
+    "pi": [
+      "conversation.ensure",
+      "conversation.submit",
+      "conversation.inspect",
+      "conversation.steer",
+      "conversation.cancel_turn",
+      "runtime.reconcile"
+    ],
+    "worker": [
+      "submit",
+      "inspect",
+      "events",
+      "steer",
+      "cancel",
+      "collect",
+      "acknowledge",
+      "fence"
+    ]
+  },
+  "digest_encoding": "sorted-key-json-integer-v1"
+}

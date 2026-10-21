@@ -18,6 +18,10 @@ pub struct Action {
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    #[cfg(feature = "lifetime")]
+    Lifetime {
+        envelope: crate::lifetime_contract::Envelope,
+    },
     /// Authenticated owner control only; model callers use a Task-bound host method.
     Routing {
         action: RoutingAction,
@@ -78,6 +82,39 @@ pub enum Command {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OwnerAction {
+    SaveOrchestration { id: Option<String>, version: Option<u64>, plan: crate::host::orchestration::PlanInput },
+    StartOrchestration { plan_id: String, version: u64 },
+    CancelOrchestration { run_id: String },
+    #[cfg(feature = "lifetime")]
+    MemorySourceInspect {
+        profile_id: String,
+        conversation_id: String,
+        origin: crate::adapters::memory::TrustedSourceOrigin,
+        content: String,
+    },
+    #[cfg(feature = "lifetime")]
+    MemorySourceCorrect {
+        profile_id: String,
+        conversation_id: String,
+        prior: crate::adapters::memory::TrustedSourceOrigin,
+        expected_prior_episode_id: String,
+        prior_content: String,
+        replacement_content: String,
+    },
+    #[cfg(feature = "lifetime")]
+    MemorySourceResume {
+        profile_id: String,
+        conversation_id: String,
+        correction_request_id: String,
+    },
+    /// Read-only Owner review surface: latest source-revision receipts for one
+    /// registered Ghost pair. No command receipt, no CAS, and no side effect;
+    /// inspect/correct/resume remain the only memory source writes.
+    #[cfg(feature = "lifetime")]
+    MemorySourceList {
+        profile_id: String,
+        conversation_id: String,
+    },
     ModelCatalog,
     DiscoverLocalModels,
     CheckModelProvider {
@@ -134,6 +171,134 @@ pub enum OwnerAction {
     ReconcilePlannerEffect {
         profile_id: String,
         effect_key: String,
+    },
+    #[cfg(feature = "caldav")]
+    PlannerSyncOnce {
+        collection_id: String,
+        #[serde(default)]
+        write: bool,
+    },
+    #[cfg(feature = "caldav")]
+    PlannerSyncStatus {
+        collection_id: String,
+    },
+    /// Owner-approved daily wake schedule (G06 briefing).
+    AddWake {
+        profile_id: String,
+        conversation_id: String,
+        prompt: String,
+        timezone: String,
+        local_time: String,
+        #[serde(default)]
+        quiet_minutes: Option<u32>,
+        #[serde(default)]
+        missed_policy: String,
+    },
+    UpdateWake {
+        profile_id: String,
+        wake_id: String,
+        #[serde(default)]
+        local_time: Option<String>,
+        #[serde(default)]
+        timezone: Option<String>,
+        #[serde(default)]
+        quiet_minutes: Option<Option<u32>>,
+        #[serde(default)]
+        missed_policy: Option<String>,
+        #[serde(default)]
+        paused: Option<bool>,
+    },
+    DeleteWake {
+        profile_id: String,
+        wake_id: String,
+    },
+    /// Read-only: list wake schedules (no command receipt).
+    WakeList {
+        profile_id: String,
+    },
+    /// Read-only: deterministic next-briefing preview (no model, no effect).
+    WakePreview {
+        profile_id: String,
+        wake_id: String,
+        #[serde(default)]
+        now_ms: Option<u64>,
+    },
+    /// Owner-configured incident responsibility binding (G10 intake). Binds
+    /// the actual registered lifetime Primary pair to one exact alerts source
+    /// with severity/source scope and disclosure level; never implicit.
+    SaveIncidentBinding {
+        profile_id: String,
+        binding: crate::host::incidents::IncidentInput,
+        /// None creates the binding; Some(version) is the CAS precondition.
+        #[serde(default)]
+        version: Option<u64>,
+    },
+    /// Owner removal of the incident binding; the run ledger is preserved.
+    DeleteIncidentBinding {
+        profile_id: String,
+        version: u64,
+    },
+    /// Owner pause/resume of incident deliveries (CAS on the binding version).
+    PauseIncidentBinding {
+        profile_id: String,
+        paused: bool,
+        version: u64,
+    },
+    /// Read-only: binding, recent delivery runs, collisions (no receipt).
+    IncidentList {
+        profile_id: String,
+    },
+    /// Read-only: bounded source read + what would fire now (no effect).
+    IncidentPreview {
+        profile_id: String,
+        #[serde(default)]
+        now_ms: Option<u64>,
+    },
+    /// Scoped skill store: import/replace with CAS, explicit pinning manifest,
+    /// and the Owner-controlled improvement candidate path.
+    SaveSkill {
+        profile_id: String,
+        name: String,
+        content: String,
+        #[serde(default)]
+        version: Option<u64>,
+    },
+    DeleteSkill {
+        profile_id: String,
+        name: String,
+        version: u64,
+    },
+    SetSkillStatus {
+        profile_id: String,
+        name: String,
+        status: String,
+    },
+    /// Read-only: the explicit pinned skill manifest for scoped OMP sessions.
+    SkillManifest {
+        profile_id: String,
+    },
+    /// Read-only: skill store listing.
+    SkillList {
+        profile_id: String,
+    },
+    SkillRecover {
+        profile_id: String,
+        name: String,
+    },
+    SaveSkillCandidate {
+        profile_id: String,
+        skill: String,
+        content: String,
+        #[serde(default)]
+        note: String,
+    },
+    PromoteSkillCandidate {
+        profile_id: String,
+        candidate_id: String,
+    },
+    RejectSkillCandidate {
+        profile_id: String,
+        candidate_id: String,
     },
     SaveTodo {
         id: Option<String>,
@@ -272,6 +437,9 @@ pub enum OwnerAction {
     Computer {
         profile_id: String,
         verb: String,
+        /// Exact browser-action identity for owner approve/deny decisions.
+        #[serde(default)]
+        action_id: Option<String>,
     },
     SlackBinding {
         binding: SlackBinding,

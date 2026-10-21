@@ -6,6 +6,10 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "lifetime")]
+use rusqlite::OptionalExtension;
+#[cfg(feature = "lifetime")]
+use serde_json::json;
 use serde_json::Value;
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -67,6 +71,11 @@ pub trait ComputerBackend: Send + Sync {
         authorize: Authorize<'a>,
     ) -> ComputerFuture<'a, Result<Value>>;
     fn control<'a>(&'a self, owner: &'a str, verb: &'a str) -> ComputerFuture<'a, Result<Value>>;
+    /// Declared profile scope; private data is served only by the scoped local
+    /// worker path, never by this legacy conversation bridge.
+    fn profile_scope(&self, _owner: &str) -> Option<&str> {
+        None
+    }
 }
 
 #[cfg(feature = "computer")]
@@ -129,6 +138,8 @@ pub fn default_backend() -> Arc<dyn ComputerBackend> {
 pub fn configured() -> bool {
     default_backend().configured()
 }
+
+
 
 fn allowed(host: &Host, owner: &str, shell: bool) -> Result<()> {
     let state = host.lock()?;
@@ -292,6 +303,15 @@ pub async fn execute(
 ) -> Result<ToolOutput> {
     let shell = call.name == "shell";
     allowed(host, owner, shell)?;
+    // The legacy bridge has no sticky private-context/transport boundary.
+    // Private profiles are available only through the scoped local worker.
+    if !shell && call.name == "browser" {
+        if host.computer_backend().profile_scope(owner) == Some("private") {
+            bail!(
+                "private-profile browsing requires the scoped local worker; legacy conversation browsing is blocked before any page data is read"
+            );
+        }
+    }
     let operation = normalize(call)?;
     let backend = Arc::clone(host.computer_backend());
     let authorize = || {
@@ -307,9 +327,27 @@ pub async fn execute(
     dispatch(backend.as_ref(), owner, operation, &authorize).await
 }
 
-pub async fn control(host: &Host, id: &str, verb: &str) -> Result<Value> {
+pub async fn control(host: &Host, id: &str, verb: &str, action_id: Option<&str>) -> Result<Value> {
     if !host.lock()?.profiles.contains_key(id) {
         bail!("Ghost missing");
+    }
+    // Owner decision on one precise worker browser action. The decision is
+    // recorded against the durable action identity; capability configuration
+    // never substitutes for this explicit owner act.
+    #[cfg(feature = "lifetime")]
+    if verb == "pending_browser_actions" {
+        let computers = host.native_computers.as_ref()
+            .ok_or_else(|| anyhow!("no native computers are configured"))?;
+        let actions = computers.pending_browser_actions(id)?;
+        return Ok(serde_json::to_value(actions)?);
+    }
+    #[cfg(feature = "lifetime")]
+    if matches!(verb, "approve_browser_action" | "deny_browser_action") {
+        let action_id = action_id.ok_or_else(|| anyhow!("browser action decision requires action_id"))?;
+        let computers = host.native_computers.as_ref()
+            .ok_or_else(|| anyhow!("no native computers are configured"))?;
+        let approve = verb == "approve_browser_action";
+        return owner_browser_decision(host, computers, id, action_id, approve).await;
     }
     if verb == "start" {
         allowed(host, id, false)?;
@@ -327,7 +365,133 @@ pub async fn control(host: &Host, id: &str, verb: &str) -> Result<Value> {
             backend.identity()
         );
     }
+    // Registry-authorized lifecycle for the owned browser rides the Host
+    // native computers; a stop of the owned backend is the same effect.
+    #[cfg(feature = "lifetime")]
+    if matches!(verb, "stop" | "idle_stop" | "recreate") {
+        if let Some(computers) = host.native_computers.as_ref() {
+            if computers.route_computer(id).is_some() {
+                let response = computers.execute_lifecycle(id, verb)?;
+                return Ok(serde_json::to_value(response)?);
+            }
+        }
+    }
+    if matches!(verb, "idle_stop" | "recreate") {
+        bail!(
+            "computer backend `{}` has no registry-authorized lifecycle on this host",
+            backend.identity()
+        );
+    }
     backend.control(id, verb).await
+}
+
+/// Deterministic owner decision and same-execution resume for one paused
+/// worker browser action. The decision is never a model prompt: the exact
+/// `browser.resume` control wire carries the action identity, the decision,
+/// and the authenticated approver to the worker that holds the sealed
+/// session, its persisted request/session/budget, and the pending receipt.
+/// The worker CASes the durable registry action with this approver identity
+/// and only its real response is reported — a refused or unknown resume is
+/// returned as-is, and a dispatch failure leaves the decision unrecorded so
+/// the question stays pending and retryable.
+#[cfg(feature = "lifetime")]
+async fn owner_browser_decision(
+    host: &Host,
+    computers: &crate::host::lifetime_computers::NativeComputers,
+    ghost_id: &str,
+    action_id: &str,
+    approve: bool,
+) -> Result<Value> {
+    let refused = |found: bool, reason: &str| json!({
+        "action": {"action_id": action_id, "found": found},
+        "wake": crate::lifetime_contract::Response {
+            status: crate::lifetime_contract::ResponseStatus::Error,
+            summary: reason.into(), object_refs: Vec::new(), artifacts: Vec::new(),
+            next_actions: Vec::new(), error_code: Some("browser_resume_refused".into()),
+            retry_class: crate::lifetime_contract::RetryClass::Never,
+            data: json!({"resumed": false}),
+        },
+    });
+    let Some(action) = computers.owned_browser_action(ghost_id, action_id)? else {
+        return Ok(refused(false, "no browser action with this identity is owned by this Ghost's computer route"));
+    };
+    // Browser and Home leases share the original native execution identity.
+    let raw_execution_id = action.execution_id.clone();
+    let (socket, resume_epoch) = {
+        let state = host.lock()?;
+        let conn = &state.journal.0;
+        let work: Option<(String, String, i64, String)> = conn
+            .query_row(
+                "SELECT w.id,w.goal_id,json_extract(w.payload,'$.goal_revision'),json_extract(w.payload,'$.cancellation')
+                 FROM lifetime_work w WHERE w.execution_id=?1",
+                [&raw_execution_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        let Some((work_id, goal_id, work_revision, cancellation)) = work else {
+            return Ok(refused(true, "no current Work holds this execution"));
+        };
+        let goal_revision: Option<i64> = conn
+            .query_row("SELECT revision FROM lifetime_goals WHERE id=?1", [&goal_id], |row| row.get(0))
+            .optional()?;
+        let current = goal_revision.is_some_and(|revision| revision == work_revision)
+            && (!approve || cancellation == "none")
+            && crate::host::lifetime::work_scope_current(conn, &work_id)?;
+        if !current {
+            return Ok(refused(true, "the Work's Goal revision, cancellation, or delegation graph scope is no longer current"));
+        }
+        // Sealed route: the exact committed execution's original worker
+        // endpoint, never today's route guess.
+        let Some(socket) = computers.socket_for_execution(conn, &work_id, ghost_id, &raw_execution_id)? else {
+            return Ok(refused(true, "the producing worker route is not registered on this host"));
+        };
+        let authority = crate::host::lifetime::authority::current(conn)?;
+        anyhow::ensure!(
+            authority.epoch == host.authority_epoch,
+            "host writer authority is fenced; reopen the current generation before deciding"
+        );
+        if approve {
+            anyhow::ensure!(
+                authority.dispatch_enabled,
+                "restored Host is read-only; owner approval cannot dispatch effects"
+            );
+        }
+        (socket.to_path_buf(), authority.epoch)
+    };
+    let command_id = uuid::Uuid::new_v4().to_string();
+    let body = json!({
+        "method": "browser.resume",
+        "execution_id": raw_execution_id,
+        "action_id": action_id,
+        "decision": if approve { "approve" } else { "deny" },
+        "approver": "owner",
+    });
+    let envelope = crate::lifetime_contract::Envelope {
+        protocol_version: crate::lifetime_contract::VERSION.into(),
+        payload_digest: crate::lifetime_contract::canonical_digest(&body)?,
+        actor_ref: ghost_id.to_owned(),
+        authority_epoch: resume_epoch,
+        expected_revision: None,
+        correlation_id: command_id.clone(),
+        command_id,
+        body,
+    };
+    let response = crate::host::lifetime_driver::worker_request(&socket, &envelope).await
+        .map_err(|error| anyhow!("resume dispatch outcome is unknown; reconcile this exact action before retrying: {error}"))?;
+    let after = computers.owned_browser_action(ghost_id, action_id)?;
+    Ok(json!({
+        "action": {
+            "action_id": action.action_id,
+            "computer_id": action.computer_id,
+            "execution_id": action.execution_id,
+            "arguments_digest": action.arguments_digest,
+            "requested_epoch": action.requested_epoch,
+            "state_before": action.state,
+            "state": after.as_ref().map(|action| action.state.as_str()),
+            "approved_by": after.as_ref().and_then(|action| action.approved_by.as_deref()),
+        },
+        "wake": serde_json::to_value(&response)?,
+    }))
 }
 
 #[cfg(test)]

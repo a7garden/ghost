@@ -6,6 +6,8 @@ Garden 0.1.0의 `contracts/native/README.md`, `templates/desktop/src-tauri`, `pa
 
 앱은 `~/.config/ghost/console.json`의 경로·모델·포트를 읽어 재사용한다. 인증 파일이나 운영 데이터를 번들에 넣지 않는다. 설정이 없으면 `~/Library/Application Support/Ghost`와 `mock` 모델을 사용한다. 앱 종료는 작업 취소가 아니며 호스트의 정상 종료/복원 경로를 따른다. 앱을 다시 열면 저장된 대화와 작업을 복원한다. 같은 포트에 기존 콘솔이 있으면 그 프로세스를 건드리지 않고 안내한다.
 
+상시 Host 또는 mini 연결을 사용할 때는 이 설정에 `"host_mode":"external"`을 명시한다. 앱은 해당 `root`의 접속 정보를 HMAC으로 검증한 뒤 UI만 시작한다. 연결 실패 때 새 Host를 띄우지 않으며, 앱을 닫아도 외부 Host는 종료하지 않는다. 별도 Host를 앱이 소유하는 기존 동작은 `managed` 모드다. 외부 모드 검증은 `node --test apps/ghost-ui/scripts/console.test.mjs`로 실행한다. UI 브리지의 이미지 모듈도 형제 `ghost-omp/` 경로로 함께 패키징한다.
+
 ```sh
 # Ghost root에서 먼저 실행
 cargo build --offline --features workspace-ui

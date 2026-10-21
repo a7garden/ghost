@@ -56,7 +56,7 @@ fn setup(root: &Path, call: ai::ToolCall) -> (Arc<Host>, String) {
         }),
         handle: tokio::runtime::Handle::current(),
         default_model: "mock".into(),
-        _lock: File::create(root.join("test.lock")).unwrap(),
+        _lock: super::WorkspaceLock(File::create(root.join("test.lock")).unwrap()),
         brain: memory::Brain::default(),
         computer: computer::default_backend(),
         integrations: crate::host::integrations::Connections::default(),
@@ -64,6 +64,15 @@ fn setup(root: &Path, call: ai::ToolCall) -> (Arc<Host>, String) {
         profile_workers: Mutex::new(BTreeMap::new()),
         recovery: tokio::sync::Mutex::new(()),
         stopping: AtomicBool::new(false),
+        dispatch_enabled: true,
+        #[cfg(feature = "lifetime")]
+        pi_callback_token: String::new(),
+        #[cfg(feature = "lifetime")]
+        pi_local_route: None,
+        #[cfg(feature = "lifetime")]
+        native_computers: None,
+        #[cfg(feature = "lifetime")]
+        authority_epoch: 1,
     });
     app.lock().unwrap().profiles[&id]
         .host
@@ -87,7 +96,7 @@ fn start(app: &Arc<Host>, id: &str) -> String {
         let p = &s.profiles[id];
         let store = p.host.store.lock().unwrap();
         let mut c = host::config(&store, Some("mock"), true).unwrap();
-        c.tools.extend(services::tool_definitions(app));
+        c.tools.extend(services::role_tool_definitions(app, services::ToolRole::Ordinary));
         (p.runtime.session.clone(), p.runtime.clone(), c)
     };
     let conversation = session.create_conversation(config).unwrap();
@@ -216,7 +225,7 @@ async fn review_survives_restart_and_saves_only_after_owner_approval() {
         ai::ToolCall::new(
             "review",
             "review_page",
-            json!({"space_id":space,"title":"Owner page","body":"Approved content","profile":"pdc-djot/1"}),
+            json!({"space_id":space,"title":"Owner page","body":"Approved content","profile":"pdc-markdown/1"}),
         ),
     );
     connect_space(&app, &id, notes.path(), &space);
@@ -359,7 +368,7 @@ async fn interrupted_approved_write_uses_persisted_hash_instead_of_overwriting()
         &page_id,
         "Original",
         "old",
-        "pdc-djot/1",
+        "pdc-markdown/1",
         "2026-01-01T00:00:00.000Z",
     )
     .unwrap();
@@ -508,12 +517,10 @@ async fn delegated_file_authority_is_intersection_and_revocation_is_immediate() 
     let source = source_session
         .submit(&source_convo, "input", InputKind::Prompt, "analyze")
         .unwrap();
-    let convo = session
-        .create_conversation(host::durable::AgentConfig::new(
-            host::mock_model(),
-            "recipient",
-        ))
-        .unwrap();
+    let mut config = host::durable::AgentConfig::new(host::mock_model(), "recipient");
+    config.tools = host::tool_definitions();
+    config.tools.extend(services::role_tool_definitions(&app, services::ToolRole::Ordinary));
+    let convo = session.create_conversation(config).unwrap();
     let input = session
         .submit(&convo, "child", InputKind::Prompt, "read")
         .unwrap();
@@ -690,7 +697,8 @@ fn service_configuration_is_explicit_and_escaped() {
         true,
     )
     .unwrap();
-    assert!(spec.contains("Ghost &amp; Notes") && spec.contains("--headless"));
+    assert!(spec.contains("Ghost &amp; Notes") && spec.contains("com.a7.ghost"));
+    assert!(spec.contains("<string>run</string>") && !spec.contains("--headless"));
     let systemd = operations::service_spec(
         Path::new("/tmp/%i $root"),
         Path::new("/tmp/ghost"),

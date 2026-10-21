@@ -29,7 +29,8 @@ impl Journal {
         }
         let conn = Connection::open(path)?;
         let version: u64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version > 4 {
+        let supported = if cfg!(feature = "lifetime") { 14 } else { 4 };
+        if version > supported {
             bail!("unsupported workspace schema version");
         }
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
@@ -46,7 +47,45 @@ impl Journal {
         if version < 3 {
             conn.execute_batch("PRAGMA user_version=3;")?;
         }
+        #[cfg(feature = "lifetime")]
+        {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(include_str!("../../contracts/lifetime/migration-005.sql"))?;
+            tx.execute_batch(include_str!("../../contracts/lifetime/migration-006.sql"))?;
+            tx.execute_batch(include_str!("../../contracts/lifetime/migration-007.sql"))?;
+            if version < 8 {
+                tx.execute_batch(include_str!("../../contracts/lifetime/migration-008.sql"))?;
+            }
+            if version < 9 {
+                tx.execute_batch(include_str!("../../contracts/lifetime/migration-009.sql"))?;
+            }
+            tx.execute_batch(include_str!("../../contracts/lifetime/migration-010.sql"))?;
+            if version < 11 {
+                tx.execute_batch(include_str!("../../contracts/lifetime/migration-011.sql"))?;
+            }
+            if version < 12 {
+                tx.execute_batch(include_str!("../../contracts/lifetime/migration-012.sql"))?;
+            }
+            tx.execute_batch(include_str!("../../contracts/lifetime/migration-013.sql"))?;
+            if version < 14 {
+                tx.execute_batch(include_str!("../../contracts/lifetime/migration-014.sql"))?;
+            }
+            tx.pragma_update(None, "user_version", 14)?;
+            tx.commit()?;
+        }
+        super::skills::migrate_scope(&conn)?;
         Ok(Self(conn))
+    }
+    pub(crate) fn dispatch_enabled(&self) -> Result<bool> {
+        #[cfg(feature = "lifetime")]
+        {
+            return self.0.query_row(
+                "SELECT dispatch_enabled FROM lifetime_authority WHERE singleton=1",
+                [], |row| row.get(0),
+            ).map_err(Into::into);
+        }
+        #[cfg(not(feature = "lifetime"))]
+        Ok(true)
     }
     /// Commit an intent before changing another store. A lost response may be
     /// recovered; an interrupted command never blindly reissues a policy change.

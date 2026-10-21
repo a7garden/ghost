@@ -13,8 +13,10 @@ browser-handoff-fixtures = ["browser-local-e2e", "dep:libc"]
 ui-fixtures = ["browser-handoff-fixtures"]
 durable-runtime = ["dep:oxicode-sdk", "oxicode-sdk/durable", "dep:futures"]
 # Host is headless by default. Adapters and UI remain independently selectable.
-host = ["durable-runtime", "dep:hmac", "dep:base64", "dep:image"]
-caldav = ["host", "dep:time", "time/macros", "dep:roxmltree"]
+host = ["durable-runtime", "dep:hmac", "dep:base64", "dep:image", "dep:tempfile", "dep:jiff"]
+# Opt-in expansion; production launch configuration remains unchanged.
+lifetime = ["host", "dep:libc", "dep:errno", "dep:parking_lot", "dep:tokio-tungstenite"]
+caldav = ["host", "dep:time", "time/macros", "dep:roxmltree", "dep:libc"]
 documents = ["host", "dep:oxi-frontmatter", "dep:time", "dep:tempfile", "dep:ammonia", "dep:jotdown", "dep:pulldown-cmark", "dep:base64"]
 memory = ["host", "dep:oxibrain-client"]
 computer = ["host", "dep:hmac"]
@@ -24,9 +26,11 @@ oxicode-engine = ["durable-runtime"]
 
 [dependencies]
 libc = { version = "0.2", optional = true }
+errno = { version = "0.3", optional = true }
+parking_lot = { version = "=0.12.5", optional = true }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 futures = { version = "0.3", optional = true }
 uuid = { version = "1", features = ["v4", "v5", "v7"] }
@@ -36,8 +40,8 @@ fs2 = "0.4"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync", "net", "process", "io-util", "signal"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
 oxicode-sdk = { path = "../oxicode/oxicode-sdk", version = "0.81.0", optional = true }
-oxi-frontmatter = { path = "../oximemo/crates/oxi-frontmatter", version = "0.3.0", optional = true }
-oxibrain-client = { path = "../oxibrain/crates/oxibrain-client", version = "0.17.0", optional = true }
+oxi-frontmatter = { path = "../oximemo/crates/oxi-frontmatter", version = "0.4.0", optional = true }
+oxibrain-client = { path = "../oxibrain/crates/oxibrain-client", version = "0.19.0", optional = true }
 time = { version = "0.3", features = ["formatting", "parsing"], optional = true }
 roxmltree = { version = "=0.21.1", optional = true }
 tempfile = { version = "3", optional = true }
@@ -48,9 +52,12 @@ pulldown-cmark = { version = "0.13", optional = true }
 hmac = { version = "0.12", optional = true }
 base64 = {version="0.22",optional=true}
 image = { version = "0.25.10", default-features = false, features = ["png", "webp"], optional = true }
+# IANA timezone/DST-correct wake occurrence math; embedded tzdb keeps tests hermetic.
+jiff = { version = "0.2.38", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+parking_lot = "=0.12.5"
 
 [[bin]]
 name = "ghost"
@@ -60,3 +67,7 @@ path = "src/main.rs"
 name = "ghost-browser-fixture"
 path = "tests/fixtures/browser_child.rs"
 required-features = ["browser-fixtures"]
+
+[[example]]
+name = "g1_source_smoke_012047"
+required-features = ["memory", "documents"]

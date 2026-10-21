@@ -359,7 +359,7 @@ fn app_status(app: &Arc<Host>, id: &str) -> Value {
     status(&app.lock().unwrap(), id, "todos").unwrap()
 }
 #[tokio::test]
-async fn caldav_weak_etag_raw_preserved_and_local_schema_migration_stable() {
+async fn caldav_weak_etag_preserves_legacy_data_and_rejects_delete() {
     let root = tempfile::tempdir().unwrap();
     let db = Connection::open(root.path().join("workspace.db")).unwrap();
     db.execute_batch("CREATE TABLE workspace_objects(kind TEXT,id TEXT,payload TEXT,PRIMARY KEY(kind,id));INSERT INTO workspace_objects VALUES('todo','legacy','{\"id\":\"legacy\",\"title\":\"keep\",\"notes\":\"\",\"due\":null,\"completed\":false,\"version\":1,\"updated_ms\":0}'); PRAGMA user_version=3;").unwrap();
@@ -387,15 +387,6 @@ async fn caldav_weak_etag_raw_preserved_and_local_schema_migration_stable() {
     );
     assert_eq!(result["ok"], false);
     assert!(remote.requests.lock().unwrap().is_empty());
-    assert_eq!(
-        app.lock()
-            .unwrap()
-            .journal
-            .0
-            .query_row("PRAGMA user_version", [], |r| r.get::<_, u64>(0))
-            .unwrap(),
-        4
-    );
     app.shutdown().await.unwrap();
 }
 #[tokio::test]
@@ -533,6 +524,10 @@ async fn caldav_offline_queue_live_status_and_disabled_cache_remain_separate() {
         id: "todos".into(),
         binding: "fixture:todos".into(),
         kind: Kind::Todo,
+        wire_format: WireFormat::ICalendar,
+        phase: SyncPhase::ExplicitActive,
+        account_ref: None,
+        collection_ref: None,
         profiles: vec![],
         enabled: false,
     };

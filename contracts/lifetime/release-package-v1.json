@@ -1,0 +1,79 @@
+{
+  "contract_revision": "ghost-release-package-v1",
+  "run_id": "ghost-20261009T012047Z",
+  "status": "CONTRACT_READY",
+  "purpose": "Create and verify a bounded immutable selected-component release package using the existing recovery bundle inventory/security code",
+  "api": {
+    "request": "Reuse recovery_bundle::BundleRequest/ReleaseIdentity/RootSpec; no parallel release identity or file inventory framework",
+    "create": "release_package::create_release_package(&BundleRequest, destination:&Path) -> Result<ReleasePackageReceipt>",
+    "verify": "release_package::verify_release_package(source:&Path, expected_manifest_sha256:&str) -> Result<ReleasePackageReceipt>",
+    "receipt_fields": [
+      "release: ReleaseIdentity",
+      "manifest_sha256: lowercase SHA256",
+      "package_path: PathBuf",
+      "component_digests: exact observed inventory digests"
+    ]
+  },
+  "components": [
+    "host",
+    "pi",
+    "bridge",
+    "image",
+    "ui",
+    "gateway",
+    "extensions",
+    "config",
+    "schema"
+  ],
+  "pins": {
+    "supported_schemas": [12, 13, 14],
+    "schema_rule": "Each request and manifest pins exactly one supported schema: schema_min equals schema_max. Existing immutable schema12 and schema13 packages remain valid; schema13 adds only canonical report correlation; schema14 is the current Host schema (briefing notifications, migration-014) and adds no packaging semantics.",
+    "protocol": "Use existing public protocol revision selected by Root",
+    "runtime": "Exact declared runtimes and immutable image digest references required; no latest tags/downloads",
+    "source": "Root supplies authoritative source_revision, selected dirty_snapshot_digest and sibling path dependency provenance; do not inspect/reset/stash Git"
+  },
+  "digest_rules": {
+    "manifest": "Canonical versioned serialized manifest with externally supplied expected SHA256 on verification; self-consistency alone is not authenticity",
+    "component": "Reuse streamed existing bundle inventory hashes; canonical sorted relative file/type/size/mode/content digest rows, with a versioned deterministic encoding. Compare or populate every declared component digest from actual copied inventory, never echo caller values as observed",
+    "configuration": "Digest only exact Root-selected redacted public configuration; credential/token/cookie/keychain contents never copied into a release"
+  },
+  "filesystem": {
+    "inventory": "Explicit caller-selected roots only, exact exclusions and bounds from recovery-bundle-v1; no PC-wide discovery",
+    "source": "No-follow fd anchors; fail if source changes during capture; source owners selected/stopped, not discovered/killed",
+    "destination": "New private owned destination only, immutable after commit; refuse overwrite and reject symlink/hardlink/traversal/tamper",
+    "state": "Release packaging does not silently snapshot live DBs; actual recovery already uses stopped consistent snapshots separately",
+    "secrets": "Credential exclusions remain exact source-owner declarations; never serialize private bytes into manifest or diagnostics"
+  },
+  "ownership": {
+    "helper": [
+      "src/operations/release_package.rs",
+      "src/operations/recovery_bundle.rs",
+      "tests/lifetime_recovery_release*.rs"
+    ],
+    "root": [
+      "src/operations/mod.rs",
+      "src/main.rs",
+      "src/bin/**",
+      "contracts/lifetime/**",
+      "Cargo.toml",
+      "Cargo.lock",
+      "scripts/**",
+      "deploy/**",
+      "infra/**",
+      "all services and sibling projects"
+    ]
+  },
+  "verification": {
+    "helper": "Source only: skip every build/test/lint/formatter/Git/model/auth/service/restore/install operation",
+    "root": "Actual create→verify→tamper rejection on a selected owned temporary package; source/caller identity comparison and archive/bundle tests after handback",
+    "required": [
+      "externally pinned manifest rejects tampered manifest",
+      "changed copied component rejected",
+      "source mutation rejected",
+      "sibling/root provenance retained",
+      "missing component/runtime/image pin rejected",
+      "credentials excluded",
+      "destination collision and symlink traversal rejected"
+    ]
+  }
+}

@@ -33,12 +33,24 @@ fn page_saved(s: &State, review: &Review, page: &documents::Page) -> Result<()> 
     }
     Ok(())
 }
-pub fn save_review(s: &State, review: &mut Review) -> Result<Value> {
+pub fn save_review(app: &Host, s: &State, review: &mut Review) -> Result<Value> {
     let space = space(s, &review.space_id)?;
     if !space.writable {
         bail!("Space is read-only");
     }
-    if !review.profile_id.is_empty() {
+    if let Some(origin) = review.lifetime_origin.as_ref() {
+        // Lifetime proposals carry no legacy Task. Their authority is
+        // re-proven from the durable registry pair, the immutable Owner turn,
+        // the unchanged epoch, an uncancelled source run and the current
+        // explicit writable Space grant before any CAS/save work runs.
+        #[cfg(feature = "lifetime")]
+        super::lifetime_documents::verify_owner_save(app, s, review, origin)?;
+        #[cfg(not(feature = "lifetime"))]
+        {
+            let _ = (&app, &s, &review, origin);
+            bail!("lifetime document proposals require the lifetime feature");
+        }
+    } else if !review.profile_id.is_empty() {
         if !space.profiles.contains(&review.profile_id) {
             bail!("Space access was revoked");
         }
@@ -127,6 +139,9 @@ pub fn save_review(s: &State, review: &mut Review) -> Result<Value> {
 }
 pub fn apply(app: &Arc<Host>, s: &State, request: &str, action: OwnerAction) -> Result<Value> {
     match action {
+        OwnerAction::SaveOrchestration { id, version, plan } => super::orchestration::save(s, request, id, version, plan),
+        OwnerAction::StartOrchestration { plan_id, version } => super::orchestration::start(s, request, &plan_id, version),
+        OwnerAction::CancelOrchestration { run_id } => super::orchestration::cancel(s, &run_id),
         OwnerAction::SaveModelProvider { provider, version } => {
             super::models::save(s, provider, version)
         }
@@ -172,6 +187,145 @@ pub fn apply(app: &Arc<Host>, s: &State, request: &str, action: OwnerAction) -> 
             profile_id,
             effect_key,
         } => super::planner_sync::reconcile_effect(s, &profile_id, &effect_key),
+        #[cfg(feature = "caldav")]
+        OwnerAction::PlannerSyncOnce { .. } => {
+            bail!("connected planner sync requires async dispatch")
+        }
+        #[cfg(feature = "caldav")]
+        OwnerAction::PlannerSyncStatus { collection_id } => {
+            super::planner_sync::sync_status(s, &collection_id)
+        }
+        OwnerAction::AddWake {
+            profile_id,
+            conversation_id,
+            prompt,
+            timezone,
+            local_time,
+            quiet_minutes,
+            missed_policy,
+        } => super::wake::add(
+            s,
+            request,
+            &profile_id,
+            super::wake::WakeInput {
+                conversation_id,
+                prompt,
+                timezone,
+                local_time,
+                quiet_minutes,
+                missed_policy,
+            },
+        ),
+        OwnerAction::UpdateWake {
+            profile_id,
+            wake_id,
+            local_time,
+            timezone,
+            quiet_minutes,
+            missed_policy,
+            paused,
+        } => super::wake::update(
+            s,
+            &profile_id,
+            &wake_id,
+            local_time,
+            timezone,
+            quiet_minutes,
+            missed_policy,
+            paused,
+        ),
+        OwnerAction::DeleteWake {
+            profile_id,
+            wake_id,
+        } => super::wake::remove(s, &profile_id, &wake_id),
+        OwnerAction::SaveSkill {
+            profile_id,
+            name,
+            content,
+            version,
+        } => super::skills::save(
+            s,
+            &app.root,
+            request,
+            &profile_id,
+            &name,
+            &content,
+            version,
+        ),
+        OwnerAction::DeleteSkill {
+            profile_id,
+            name,
+            version,
+        } => super::skills::remove(s, &app.root, &profile_id, &name, version),
+        OwnerAction::SetSkillStatus {
+            profile_id,
+            name,
+            status,
+        } => super::skills::set_status(s, &profile_id, &name, &status),
+        OwnerAction::SkillRecover {
+            profile_id,
+            name,
+        } => super::skills::recover(s, &app.root, &profile_id, &name),
+        OwnerAction::SaveSkillCandidate {
+            profile_id,
+            skill,
+            content,
+            note,
+        } => super::skills::save_candidate(
+            s,
+            &app.root,
+            request,
+            &profile_id,
+            &skill,
+            &content,
+            &note,
+        ),
+        OwnerAction::PromoteSkillCandidate {
+            profile_id,
+            candidate_id,
+        } => super::skills::promote_candidate(s, &app.root, &profile_id, &candidate_id),
+        OwnerAction::RejectSkillCandidate {
+            profile_id,
+            candidate_id,
+        } => super::skills::reject_candidate(s, &profile_id, &candidate_id),
+        OwnerAction::WakeList { profile_id } => {
+            Ok(json!(super::wake::list(s, &profile_id)?))
+        }
+        OwnerAction::WakePreview {
+            profile_id,
+            wake_id,
+            now_ms,
+        } => super::wake::preview(s, &profile_id, &wake_id, now_ms),
+        OwnerAction::SaveIncidentBinding {
+            profile_id,
+            binding,
+            version,
+        } => super::incidents::save(s, request, &profile_id, binding, version),
+        OwnerAction::DeleteIncidentBinding { profile_id, version } => {
+            super::incidents::remove(s, &profile_id, version)
+        }
+        OwnerAction::PauseIncidentBinding {
+            profile_id,
+            paused,
+            version,
+        } => super::incidents::set_paused(s, &profile_id, paused, version),
+        OwnerAction::IncidentList { profile_id } => super::incidents::status(s, &profile_id),
+        OwnerAction::IncidentPreview { profile_id, now_ms } => {
+            super::incidents::preview(s, &profile_id, now_ms)
+        }
+        OwnerAction::SkillList { profile_id } => {
+            Ok(json!(super::skills::list(s, &profile_id)?))
+        }
+        OwnerAction::SkillManifest { profile_id } => {
+            super::skills::manifest(s, &app.root, &profile_id)
+        }
+        // Reached only from direct apply callers; the registered Host read
+        // paths handle this first. Same pure read, no command receipt here.
+        #[cfg(feature = "lifetime")]
+        OwnerAction::MemorySourceList {
+            profile_id,
+            conversation_id,
+        } => app.owner_memory_source_list(&profile_id, &conversation_id),
         OwnerAction::SaveTodo { id, version, todo } => {
             super::planner::save_todo(s, request, id.as_deref(), version, todo)
         }
@@ -330,8 +484,9 @@ pub fn apply(app: &Arc<Host>, s: &State, request: &str, action: OwnerAction) -> 
                     expires_ms: now_ms() + 86400000,
                     state: "pending".into(),
                     result: None,
+                    lifetime_origin: None,
                 });
-            save_review(s, &mut review)
+            save_review(app, s, &mut review)
         }
         OwnerAction::DecideReview { review_id, approve } => {
             let mut review: Review = s
@@ -345,7 +500,7 @@ pub fn apply(app: &Arc<Host>, s: &State, request: &str, action: OwnerAction) -> 
                 bail!("proposal already resolved");
             }
             if approve {
-                let value = save_review(s, &mut review)?;
+                let value = save_review(app, s, &mut review)?;
                 if !review.profile_id.is_empty() {
                     let p = s
                         .profiles
@@ -408,7 +563,13 @@ pub fn apply(app: &Arc<Host>, s: &State, request: &str, action: OwnerAction) -> 
                 ),
                 true,
             )?;
-            config.tools.extend(super::services::tool_definitions(app));
+            config
+                .tools
+                .extend(super::services::scoped_tool_definitions(
+                    app,
+                    super::services::ToolRole::Ordinary,
+                    &policy,
+                ));
             config.system_prompt.push_str(&format!("\nThis conversation is bound to page {page_id} in Space {space_id}. Before working on the page, read_page to obtain current untrusted source and hash. Propose edits with review_page; only the owner saves."));
             s.journal.put(
                 "page_chat",
@@ -792,6 +953,10 @@ pub fn apply(app: &Arc<Host>, s: &State, request: &str, action: OwnerAction) -> 
             )?;
             Ok(json!(call))
         }
+        #[cfg(feature = "lifetime")]
+        OwnerAction::MemorySourceInspect { .. } | OwnerAction::MemorySourceCorrect { .. }
+        | OwnerAction::MemorySourceResume { .. } =>
+            bail!("memory source command requires async dispatch"),
         OwnerAction::Computer { .. }
         | OwnerAction::VoiceStart { .. }
         | OwnerAction::VoiceEnd { .. }

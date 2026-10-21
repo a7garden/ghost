@@ -132,7 +132,7 @@ fn start(app: &Arc<Host>, profile: &str) -> String {
         let p = &s.profiles[profile];
         let store = p.host.store.lock().unwrap();
         let mut config = host::config(&store, Some("mock"), true).unwrap();
-        config.tools.extend(services::tool_definitions(app));
+        config.tools.extend(services::role_tool_definitions(app, services::ToolRole::Ordinary));
         (p.runtime.session.clone(), p.runtime.clone(), config)
     };
     let convo = session.create_conversation(config).unwrap();
@@ -393,7 +393,7 @@ async fn caldav_h03_delegation_intersection_and_revocation_before_dispatch() {
         let p = &s.profiles[&recipient];
         let store = p.host.store.lock().unwrap();
         let mut config = host::config(&store, Some("mock"), true).unwrap();
-        config.tools.extend(services::tool_definitions(&app));
+        config.tools.extend(services::role_tool_definitions(&app, services::ToolRole::Ordinary));
         (p.runtime.session.clone(), p.runtime.clone(), config)
     };
     let convo = session.create_conversation(config).unwrap();
@@ -437,6 +437,10 @@ async fn caldav_h03_delegation_intersection_and_revocation_before_dispatch() {
         id: "todos".into(),
         binding: "fixture:todos".into(),
         kind: Kind::Todo,
+        wire_format: WireFormat::ICalendar,
+        phase: SyncPhase::ExplicitActive,
+        account_ref: None,
+        collection_ref: None,
         profiles: vec![recipient.clone(), sender_id.clone()],
         enabled: true,
     };

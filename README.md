@@ -1,5 +1,9 @@
 # Ghost
 
+## 2026-10-22 PC–mini 복원·운영 연결 준비
+
+실제 운영 상태의 전체 cold capture/mini dispatch-off 복원, 원 영수증을 보존하는 worker artifact 경로 재연결, stopped-Host CAS fence와 operator rebind/runtime acceptance를 구현·검증했다. mini는 Studio 없이 직접 ZAI로 대화하고 실제 Linux Node/Python 업무의 독립 수용·같은 Primary 보고를 완료했다. PC 앱은 별도 writer 대신 기존 상시 Host에 연결한다. **현재 정본 writer는 Studio이며 mini 운영 cutover는 아직 미실행이다.** 기존 Primary의 ZAI 이력 허용 응답과 최종 fence/전환·백업 원격화를 남겼다. [구현·검증·보존 경계](docs/dual-host-2026-10-22.md).
+
 Ghost는 **Rust로 구현하는 장기 실행 에이전트의 기본 단위**다. 각 Ghost는
 고유 UUID, 역할, 권한, 맡은 일과 실행 기록을 유지한다. 대화·모델·UI가
 바뀌어도 identity와 저장된 작업은 남는다. 제품 목표는 OpenAI dot의 기능과 완성도이며,
