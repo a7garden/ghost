@@ -53,9 +53,14 @@ fn position_overlay(overlay: &tauri::WebviewWindow) {
     let scale = monitor.scale_factor();
     let origin = monitor.position();
     let size = monitor.size();
-    let x = origin.x as f64 / scale + ((size.width as f64 / scale) - width) / 2.0;
-    let y = origin.y as f64 / scale + (size.height as f64 / scale) - height - OVERLAY_BOTTOM_GAP;
-    let _ = overlay.set_position(tauri::LogicalPosition::new(x, y));
+    // Physical pixels throughout: converting through the parked window's
+    // monitor scale would misplace the overlay on mixed-DPI setups.
+    let width_px = (width * scale).round() as i32;
+    let height_px = (height * scale).round() as i32;
+    let gap_px = (OVERLAY_BOTTOM_GAP * scale).round() as i32;
+    let x = origin.x + (size.width as i32 - width_px) / 2;
+    let y = origin.y + size.height as i32 - height_px - gap_px;
+    let _ = overlay.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
 /// Surface the parked overlay over the current work; a visible overlay toggles
@@ -64,13 +69,20 @@ fn toggle_overlay(app: &tauri::AppHandle) {
     let Some(overlay) = overlay_window(app) else {
         return;
     };
-    if overlay.is_visible().unwrap_or(false) {
-        let _ = overlay.hide();
-        return;
+    // The renderer's Esc handler and the focus-loss auto-hide also hide the
+    // window: an unreadable state must not re-surface a just-dismissed
+    // overlay, so only act on a definite answer.
+    match overlay.is_visible() {
+        Ok(true) => {
+            let _ = overlay.hide();
+        }
+        Ok(false) => {
+            position_overlay(&overlay);
+            let _ = overlay.show();
+            let _ = overlay.set_focus();
+        }
+        Err(_) => {}
     }
-    position_overlay(&overlay);
-    let _ = overlay.show();
-    let _ = overlay.set_focus();
 }
 
 fn port() -> Result<u16, String> {
@@ -252,7 +264,10 @@ fn main() {
             let overlay = tauri::WebviewWindowBuilder::new(
                 app,
                 "overlay",
-                tauri::WebviewUrl::App("index.html".into()),
+                // Warm placeholder only: about:blank is already allowlisted
+                // and costs nothing to boot; the compact overlay page
+                // replaces it once the bridge is ready.
+                tauri::WebviewUrl::External("about:blank".parse().unwrap()),
             )
             .title("Ghost")
             .inner_size(OVERLAY_SIZE.0, OVERLAY_SIZE.1)
@@ -290,7 +305,11 @@ fn main() {
             let tracked = overlay.clone();
             overlay.on_window_event(move |event| {
                 if let WindowEvent::Focused(focused) = event {
-                    let state = tracked.app_handle().state::<DesktopHost>();
+                    // The handler is attached before `manage`; a missing state
+                    // just means no dismiss decision is possible yet.
+                    let Some(state) = tracked.app_handle().try_state::<DesktopHost>() else {
+                        return;
+                    };
                     if *focused {
                         state.overlay_focused.store(true, Ordering::Release);
                     } else if state.overlay_focused.swap(false, Ordering::AcqRel) {
@@ -333,10 +352,14 @@ fn main() {
                     }
                     if let Some(pid) = state.pid {
                         if pid != previous_pid && health(&client, &origin, pid) {
-                            // A restarted bridge has a new CSRF value; reload its bootstrap.
-                            let _ = window.navigate(origin.parse().unwrap());
-                            let _ = overlay.navigate(overlay_url.clone());
-                            previous_pid = pid;
+                            // A restarted bridge has a new CSRF value; reload
+                            // both windows' bootstrap. A failed reload keeps
+                            // previous_pid so the next health tick retries.
+                            let reloaded = window.navigate(origin.parse().unwrap()).is_ok()
+                                && overlay.navigate(overlay_url.clone()).is_ok();
+                            if reloaded {
+                                previous_pid = pid;
+                            }
                         }
                     }
                 }
