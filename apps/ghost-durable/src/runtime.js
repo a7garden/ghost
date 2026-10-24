@@ -22,6 +22,7 @@ import { openMemoryContext, guardMemoryContextModels } from "./memory-context.js
 import { validateWorkInputArtifacts } from "./work-inputs.js";
 import { validatePinnedWorkSkills, assertPinnedWorkSkills, renderPinnedWorkSkills } from "./work-skills.js";
 import { createBrowserWaitTask } from "./browser-wait.js";
+import { validateBotRepairDescriptor, matchesBotRepair } from "./bot-repair.js";
 import { createDirectWorkTools, verifiedDirectWorkReceipt, DIRECT_WORK_TOOL_NAMES, validateExecutionTools, assertPinnedExecutionTools } from "./direct-work.js";
 import { acquireGhostLock, openGhostIndex, openPiConversationStorage } from "./storage.js";
 
@@ -304,8 +305,17 @@ function createHostTools(hostToolTransport, ghostId, conversationId, resolveTool
     role: "system", content: "",
     sections: { "ghost-controller": `<ghost-controller>\n${controllerInstructions}\nCurrent authenticated input kind: ${scope.originKind}. Turn ID: ${scope.turnId}. Earlier memory-derived context was excluded by current authority. Use only the current committed input and retained authorized evidence.\n</ghost-controller>` },
     toolsAdded: getCurrentTools(messages).filter(tool => !DIRECT_WORK_TOOL_NAMES.includes(tool.name)
-      && !WORK_MEMORY_TOOLS.includes(tool.name) && (scope.originKind === "owner" || !BOT_TOOL_NAMES.has(tool.name))),
+      && !WORK_MEMORY_TOOLS.includes(tool.name) && tool.name !== "bot_repair" && (scope.originKind === "owner" || !BOT_TOOL_NAMES.has(tool.name))),
   });
+  const currentBotRepair = async scope => {
+    if (scope.originKind !== "work_report" || typeof scope.reportId !== "string") return null;
+    const response = await hostToolTransport({ method: "conversation.report.inspect", invocation_id: crypto.randomUUID(),
+      ghost_id: ghostId, conversation_id: conversationId, report_id: scope.reportId,
+      inference_scope: scope.inferenceScope, conversation_disclosure: scope.conversationDisclosure, arguments: {} }, BACKGROUND_CONTEXT);
+    if (response?.status !== "success" || response.data?.report?.id !== scope.reportId
+      || response.data.report.ghost_id !== ghostId || response.data.report.conversation_id !== conversationId) return null;
+    return validateBotRepairDescriptor(response.data.bot_repair, scope.reportId);
+  };
   const renderControllerInstructions = () => {
     const assignment = controllerContext.assignment;
     if (!assignment) return controllerInstructions;
@@ -411,7 +421,12 @@ Current authenticated Goal assignment: ${JSON.stringify({
           "Do not retry this invocation through the public endpoint.",
         ]);
       }
-      if (trustedScope.originKind === "work_report" && !WORK_REPORT_READ_ONLY_METHODS.has(method)) {
+      if (method === "bot.repair") {
+        let descriptor;
+        try { descriptor = await currentBotRepair(trustedScope); } catch { descriptor = null; }
+        if (!matchesBotRepair(descriptor, args)) return toolFailure("This exact report no longer has the matching bounded repair capability; no repair was sent.", [], "no_effect");
+      }
+      if (trustedScope.originKind === "work_report" && method !== "bot.repair" && !WORK_REPORT_READ_ONLY_METHODS.has(method)) {
         return toolFailure("Work report notifications have no Owner capability; no mutation or personal-memory request was sent.", [
           "Use only scoped read-only controller inspection for this Host notification.",
           "Do not create Goals, alter Work, send mailbox messages, or access personal memory.",
@@ -512,6 +527,7 @@ Current authenticated Goal assignment: ${JSON.stringify({
           ...(method === "goal.create" || Object.hasOwn(MEMORY_TOOL_METHODS, name)
             || Object.hasOwn(DOCUMENT_TOOL_METHODS, name) || Object.hasOwn(BOT_TOOL_METHODS, name)
             ? { turn_id: trustedScope.turnId } : {}),
+          ...(method === "bot.repair" ? { report_id: trustedScope.reportId } : {}),
           inference_scope: trustedScope.inferenceScope,
           conversation_disclosure: trustedScope.conversationDisclosure,
           ...(workMemoryRevision ? { work_memory_context_revision: workMemoryRevision } : {}),
@@ -637,6 +653,8 @@ Current authenticated Goal assignment: ${JSON.stringify({
       operation === "evaluate" ? "Evaluate the exact candidate through the Host's fixed independent evaluator; model claims cannot approve it."
         : "Activate the exact independently evaluated candidate through Host provisioning and Pi readiness; report pending state truthfully.",
       Type.Object({ candidate_id: Type.String({ minLength: 1, maxLength: 400 }), candidate_digest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }, { additionalProperties: false }))),
+    invoke("bot_repair", "bot.repair", "Repair only the failed candidate named by this report's freshly checked Host capability. Keep the exact original purpose and contracts; fix instruction mistakes only. The Host allows at most two repairs, retains prior failures, and repeats the fixed independent evaluation. Call once, then finish this report with the truthful evaluating state; never claim readiness or poll.",
+      Type.Object({ candidate_id: Type.String({ minLength: 1, maxLength: 400 }), candidate_digest: Type.String({ pattern: "^[a-f0-9]{64}$" }), instructions: Type.String({ minLength: 1, maxLength: 32768 }) }, { additionalProperties: false })),
     invoke("registry_inspect", "registry.inspect", "Inspect public Ghost registry metadata; no registry changes are available.", emptyArguments),
     invoke("work_delegate", "work.delegate", "Delegate from this parent Work. Prefer a Host-issued contract_ref from work_inspect to preserve the exact authorized task; freeform delegation remains subject to independent review.", Type.Union([Type.Object({
       parent_work_id: Type.String({ minLength: 1 }),
@@ -679,18 +697,21 @@ Current authenticated Goal assignment: ${JSON.stringify({
           if (!assignment && controllerContext.memoryContext) messages = await controllerContext.memoryContext.filter(messages);
           if (!assignment) {
             const scope = await resolveToolScope();
-            if (scope.originKind !== "owner") return { messages: [{
+            if (scope.originKind !== "owner") {
+              const repair = await currentBotRepair(scope);
+              return { messages: [{
               role: "system", content: "",
-              sections: { "ghost-controller": `<ghost-controller>\n${controllerInstructions}\nCurrent authenticated input kind: ${scope.originKind ?? "unbound"}. This input has no Owner or direct Work execution capability.\n</ghost-controller>` },
-              toolsAdded: modelTools.filter((tool) => !DIRECT_WORK_TOOL_NAMES.includes(tool.name) && !WORK_MEMORY_TOOLS.includes(tool.name) && !BOT_TOOL_NAMES.has(tool.name)),
+              sections: { "ghost-controller": `<ghost-controller>\n${controllerInstructions}\nCurrent authenticated input kind: ${scope.originKind ?? "unbound"}. This input has no Owner or direct Work execution capability. ${repair ? `Host grants only this bounded failed-candidate repair: ${JSON.stringify(repair)}. Preserve the original task's scalar/object contracts exactly; use bot_repair once if its instructions were wrong, then report evaluating and finish.` : "No candidate repair capability is available."}\n</ghost-controller>` },
+              toolsAdded: modelTools.filter((tool) => !DIRECT_WORK_TOOL_NAMES.includes(tool.name) && !WORK_MEMORY_TOOLS.includes(tool.name) && !BOT_TOOL_NAMES.has(tool.name) && (tool.name !== "bot_repair" || repair !== null)),
             }, ...messages.filter((message) => message.role !== "system")] };
+            }
             // A long-lived Primary also contains old assignment/report system
             // entries. Rebuild the current controller header so their old Work
             // IDs cannot masquerade as the new Owner's active responsibility.
             return { messages: [{
               role: "system", content: "",
               sections: { "ghost-controller": `<ghost-controller>\n${controllerInstructions}\nCurrent authenticated input kind: owner. Turn ID: ${scope.turnId}. Respond to the latest Owner request. Previous assignment instructions and Goal/Work IDs in history are historical, not a current assignment. For a new responsibility use goal_create, inspect its returned Work, and submit that new Work. Never reuse or resubmit a completed historical Work.\n</ghost-controller>` },
-              toolsAdded: modelTools.filter((tool) => !DIRECT_WORK_TOOL_NAMES.includes(tool.name) && !WORK_MEMORY_TOOLS.includes(tool.name)),
+              toolsAdded: modelTools.filter((tool) => !DIRECT_WORK_TOOL_NAMES.includes(tool.name) && !WORK_MEMORY_TOOLS.includes(tool.name) && tool.name !== "bot_repair"),
             }, ...messages.filter((message) => message.role !== "system")] };
           }
           return controllerContext.assignmentRequest(messages);
@@ -859,6 +880,7 @@ export class GhostRuntime {
         inferenceScope: inferencePolicy.scope,
         conversationDisclosure: disclosure,
         activeTurnId: activeTurn?.turn_id ?? null,
+        reportId: originKind === "work_report" ? activeTurn?.turn_id ?? null : null,
         turnId: originKind === "work_report" || originKind === "goal_assignment" ? null : activeTurn?.turn_id ?? null,
         originKind,
         assignmentId: activeTurn?.assignment_id ?? null,

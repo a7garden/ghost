@@ -358,6 +358,14 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
 
     if (workMemoryContextRevision !== undefined && (typeof workMemoryContextRevision !== "string" || !/^[a-f0-9]{64}$/u.test(workMemoryContextRevision))) throw new Error("Invalid Work memory context provenance stamp.");
     switch (method) {
+      case "bot.repair": {
+        if (!isBoundedText(reportId, 400) || !hasExactArguments(args, ["candidate_id", "candidate_digest", "instructions"])
+          || !isBoundedText(args.candidate_id, 400) || typeof args.candidate_digest !== "string" || !/^[a-f0-9]{64}$/u.test(args.candidate_digest)
+          || typeof args.instructions !== "string" || Buffer.byteLength(args.instructions, "utf8") < 1 || Buffer.byteLength(args.instructions, "utf8") > 32768) {
+          throw new Error("Bot repair requires the bound report and exact candidate identity with bounded replacement instructions.");
+        }
+        return command({ ...scope, invocationId, method, fields: { report_id: reportId, arguments: args } });
+      }
       case "work.memory.context.inspect":
       case "work.memory.recall":
       case "work.memory.record": {
