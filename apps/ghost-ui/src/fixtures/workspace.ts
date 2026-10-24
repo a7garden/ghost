@@ -26,7 +26,7 @@ export function initialWorkspace(): Snapshot {
       { id: 'collab-writing', owner: 'sage', owner_task: 'delegate-writing', target: 'milo', conversation_id: 'milo-chat', task_id: 'task-writing', background: false, state: 'running' },
       { id: 'collab-code', owner: 'sage', owner_task: 'delegate-code', target: 'nova', conversation_id: 'nova-chat', task_id: 'task-code', background: true, state: 'running' },
     ],
-    reviews: [{ id: 'review-intro', profile_id: 'milo', conversation_id: 'milo-chat', title: 'Ghost 소개 문서를 저장할까요?', body: '# 함께 일하는 나의 Ghost\n\nGhost는 맡은 일을 이어가는 개인 에이전트입니다.\n\n## 일을 맡기세요\n조사, 글쓰기, 개발처럼 역할에 맞는 Ghost에게 원하는 결과를 알려주세요.\n\n## 필요할 때 함께 결정하세요\n검토가 필요한 내용은 저장 전에 보여줍니다.\n\n## 결과에서 이어가세요\n완성된 문서와 대화는 다음 작업의 출발점이 됩니다.\n\n— 화면 검증을 위한 예시 초안', state: 'pending', space_id: 'space-ghost' }],
+    reviews: [{ id: 'review-intro', profile_id: 'milo', conversation_id: 'milo-chat', title: 'Ghost 소개 문서를 저장할까요?', body: '# 함께 일하는 나의 Ghost\n\nGhost는 맡은 일을 이어가는 개인 에이전트입니다.\n\n## 일을 맡기세요\n조사, 글쓰기, 개발처럼 역할에 맞는 Ghost에게 원하는 결과를 알려주세요.\n\n## 필요할 때 함께 결정하세요\n검토가 필요한 내용은 저장 전에 보여줍니다.\n\n## 결과에서 이어가세요\n완성된 문서와 대화는 다음 작업의 출발점이 됩니다.\n\n— 화면 검증을 위한 예시 초안', state: 'pending', space_id: 'space-ghost', page_id: 'page-intro', expected_hash: null }],
     goals: [
       { id: 'goal-research', profile_id: 'sage', title: '매주 에이전트 도구 동향 정리', criteria: '새로운 도구와 적용할 만한 변화를 근거와 함께 정리', instruction: '에이전트 도구 동향을 살펴봐줘.', state: 'running', evidence: [], note: '공식 문서에서 바뀐 내용을 살펴보고 있어요.' },
       { id: 'goal-launch', profile_id: 'milo', title: '첫 사용자를 위한 시작 가이드', criteria: '소개와 시작 방법을 문서로 정리', instruction: '시작 가이드를 만들어줘.', state: 'running', evidence: [], note: '소개 문서의 저장을 기다리고 있어요.' },

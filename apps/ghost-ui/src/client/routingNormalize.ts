@@ -1,5 +1,5 @@
 import type { Admission, AdmissionView, Decision, Resolution, RoutingCapability, RoutingInput, RoutingOperation, RoutingOrigin, RoutingProposal, RoutingView, Work, WorkStatus, WorkTarget } from './routingTypes';
-const invalid = (): never => { throw new Error('과업 접수 응답 형식을 확인할 수 없습니다. 호스트 계약을 확인해 주세요.'); };
+const invalid = (): never => { throw new Error('작업 접수 응답 형식을 확인할 수 없습니다. 호스트 계약을 확인해 주세요.'); };
 const obj = (v: unknown): Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : invalid();
 const str = (v: unknown): string => typeof v === 'string' ? v : invalid();
 const num = (v: unknown): number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : invalid();

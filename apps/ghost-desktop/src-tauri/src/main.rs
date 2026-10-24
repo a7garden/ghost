@@ -161,16 +161,8 @@ fn ready(supervisor: &ProcessSupervisor, port: u16) -> Result<(String, u32), Str
     }
 }
 
-const TITLEBAR: &str = r#"
-document.addEventListener('DOMContentLoaded', () => {
-  const style = document.createElement('style');
-  style.textContent = 'body{box-sizing:border-box;padding-top:43px!important;height:100dvh!important}.app-shell{min-height:calc(100dvh - 43px)!important}.dot-detail{height:calc(100dvh - 105px)!important}.sidebar{height:calc(100dvh - 43px)!important;top:43px!important}.main-shell.chat-shell{height:calc(100dvh - 43px)!important}.chat-shell .dot-detail{height:100%!important}.ghost-native-titlebar{position:fixed;inset:0 0 auto;height:43px;background:color-mix(in srgb,var(--color-surface-elevated-2,#ededed) 92%,var(--color-text,#222) 8%);z-index:10000;border-bottom:1px solid var(--color-border,#ddd)}';
-  document.head.appendChild(style);
-  const bar = document.createElement('div'); bar.className='ghost-native-titlebar';
-  bar.setAttribute('data-tauri-drag-region',''); bar.setAttribute('aria-hidden','true');
-  document.body.prepend(bar);
-});
-"#;
+// 창 상단 46px 타이틀바는 콘솔 UI가 렌더링한다(ghost-ui GTitleBar, Tauri 셸에서만).
+// 트래픽 라이트 overlay·드래그는 네이티브 창 플래그가 담당한다.
 
 fn fail(window: &tauri::WebviewWindow, error: &str) {
     let message = serde_json::to_string(error).unwrap_or_else(|_| "\"실행 실패\"".into());
@@ -235,7 +227,6 @@ fn main() {
             .title_bar_style(tauri::TitleBarStyle::Overlay)
             .hidden_title(true)
             .traffic_light_position(tauri::LogicalPosition::new(14.0, 20.0))
-            .initialization_script(TITLEBAR)
             .on_permission_request(move |webview, kind| {
                 use tauri::webview::{PermissionKind, PermissionResponse};
                 if kind == PermissionKind::Microphone

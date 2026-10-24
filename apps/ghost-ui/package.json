@@ -11,13 +11,16 @@
     "test": "vitest run && node --test server/bridge.test.mjs"
   },
   "dependencies": {
+    "@garden/arc": "file:vendor/garden-arc",
+    "@garden/ui": "file:vendor/garden-ui",
     "lucide-react": "1.50.0",
     "onnxruntime-web": "1.30.0",
+    "qrcode": "1.5.4",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "@garden/arc": "file:vendor/garden-arc"
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@types/qrcode": "1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",

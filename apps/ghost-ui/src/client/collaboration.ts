@@ -10,7 +10,7 @@ export function delegationContext(snapshot: Snapshot, d: Delegation) {
   const phase = finishedDelegation(d) || d.state === 'cancelling' ? d.state : task?.phase ?? d.state;
   const needsOwner = !finishedDelegation(d) && (phase === 'waiting_owner' || snapshot.reviews.some(r => r.profile_id === d.target && r.conversation_id === d.conversation_id && ['pending', 'approved'].includes(r.state)));
   const status: DotState = ['uncertain', 'failed'].includes(phase) || needsOwner ? 'attention' : isRunning(phase) || phase === 'running' || phase === 'cancelling' ? 'working' : 'idle';
-  const label = needsOwner ? '내 확인 필요' : ({ running: '함께 작업 중', pending: '요청 전달 중', cancelling: '중단 확인 중' }[phase] ?? phaseLabel(phase));
+  const label = needsOwner ? '확인 필요' : ({ running: '함께 작업 중', pending: '요청 전달 중', cancelling: '취소 확인 중' }[phase] ?? phaseLabel(phase));
   return { owner, target, source, conversation, task, phase, status, label, title: conversation?.title ?? '협업 요청', summary: task?.output || task?.partial || '' };
 }
 
@@ -23,7 +23,7 @@ export function collaborationGroups(snapshot: Snapshot) {
     const task = source?.tasks.find(t => t.id === d.owner_task);
     const root = task?.parent_id || d.owner_task || d.id;
     const key = `${d.owner}:${source?.id ?? ''}:${root}`;
-    const group = groups.get(key) ?? { id: key, owner: d.owner, title: source?.title ?? 'Ghost가 함께 맡은 일', sourceId: source?.id, delegations: [] };
+    const group = groups.get(key) ?? { id: key, owner: d.owner, title: source?.title ?? '협업 요청', sourceId: source?.id, delegations: [] };
     group.delegations.push(d); groups.set(key, group);
   }
   return [...groups.values()];

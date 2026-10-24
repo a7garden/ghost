@@ -17,7 +17,7 @@ describe('collaboration lineage and status', () => {
   });
   it('shows owner review even when the delegation is broadly running', () => {
     const s = initialWorkspace(), ctx = delegationContext(s, s.delegations[0]);
-    expect(ctx.status).toBe('attention'); expect(ctx.label).toBe('내 확인 필요');
+    expect(ctx.status).toBe('attention'); expect(ctx.label).toBe('확인 필요');
   });
   it('never reports uncertain or failed collaboration as success', () => {
     for (const state of ['uncertain', 'failed']) {

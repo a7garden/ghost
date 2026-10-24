@@ -1,0 +1,26 @@
+/* 데스크톱(Tauri) 셸에서만 렌더링되는 커스텀 타이틀바. 브라우저 콘솔 레이아웃은
+ * 그대로 둔다. 높이 46px은 ghost-desktop 창의 macOS traffic-light overlay
+ * 구조(traffic_light_position 14,20)와 맞춘 값이다. */
+.g-titlebar.ghost-desktop-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  height: 46px;
+  background: var(--color-surface-under);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.ghost-desktop-titlebar__title {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 타이틀바가 문서 흐름에서 상단 46px을 차지하므로 전체 높이 기준을 보정한다. */
+.app-shell--desktop { min-height: calc(100dvh - 46px); }
+.app-shell--desktop .sidebar { height: calc(100dvh - 46px); top: 46px; }
+.app-shell--desktop .main-shell.chat-shell { height: calc(100dvh - 46px); }
+.app-shell--desktop .dot-detail { height: calc(100dvh - 108px); }
+.app-shell--desktop .chat-shell .dot-detail { height: 100%; }
