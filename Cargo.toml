@@ -36,8 +36,8 @@ fs2 = "0.4"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync", "net", "process", "io-util", "signal"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
 oxicode-sdk = { path = "../oxicode/oxicode-sdk", version = "0.81.0", optional = true }
-oxi-frontmatter = { path = "../oximemo/crates/oxi-frontmatter", version = "0.3.0", optional = true }
-oxibrain-client = { path = "../oxibrain/crates/oxibrain-client", version = "0.17.0", optional = true }
+oxi-frontmatter = { path = "../oximemo/crates/oxi-frontmatter", version = "0.4.0", optional = true }
+oxibrain-client = { path = "../oxibrain/crates/oxibrain-client", version = "0.21.0", optional = true }
 time = { version = "0.3", features = ["formatting", "parsing"], optional = true }
 roxmltree = { version = "=0.21.1", optional = true }
 tempfile = { version = "3", optional = true }
