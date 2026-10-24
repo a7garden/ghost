@@ -8,12 +8,12 @@ export class RoutingFailure extends ConfirmedFailure {
  constructor(public readonly code: RoutingErrorCode) { super(routingErrorMessage(code)); this.name = 'RoutingFailure'; }
 }
 export const routingErrorMessage = (code: RoutingErrorCode) => ({
- target_unavailable: '이 과업에 접근할 수 없습니다. 현재 권한과 과업을 다시 확인해 주세요.',
+ target_unavailable: '이 작업에 접근할 수 없습니다. 현재 권한과 작업을 다시 확인해 주세요.',
  origin_unavailable: '이 대화에서 요청을 접수할 수 없습니다. 대화와 접근 권한을 확인해 주세요.',
- revision_conflict: '과업의 요구사항이 다른 곳에서 변경됐습니다. 최신 이력을 확인한 뒤 다시 보내 주세요.',
+ revision_conflict: '작업의 요구사항이 다른 곳에서 변경됐습니다. 최신 작업 기록을 확인한 뒤 다시 보내 주세요.',
  input_collision: '같은 메시지 ID에 다른 내용이 있습니다. 기존 접수 결과를 확인해 주세요.',
  authority_changed: '요청 중 권한이 변경됐습니다. 현재 허용 범위를 확인한 뒤 다시 보내 주세요.',
- mutation_conflict: '같은 과업에 겹치는 변경이 있습니다. 정정 범위를 확인한 뒤 다시 보내 주세요.',
+ mutation_conflict: '같은 작업에 겹치는 변경이 있습니다. 정정 범위를 확인한 뒤 다시 보내 주세요.',
  clarification_already_answered: '이 확인 질문은 이미 답변됐습니다. 저장된 답변을 다시 불러올게요.',
 }[code]);
 // Called by the future adapter for structured error codes, never error strings.
@@ -89,7 +89,7 @@ export class RoutingClient {
   return observation;
  }
  async submit(turn: RoutingTurn): Promise<AdmissionView> {
-  if (!(await this.capability()).admission) throw new Error('이 호스트는 과업 접수를 지원하지 않습니다.');
+  if (!(await this.capability()).admission) throw new Error('이 호스트는 작업 접수를 지원하지 않습니다.');
   if (turn.resolves.length && !(await this.capability()).clarification_resolution) throw new Error('이 호스트는 대상 확인 답변을 지원하지 않습니다.');
   let recovered: AdmissionView | null = null;
   const receipt = async (messageId: string) => {

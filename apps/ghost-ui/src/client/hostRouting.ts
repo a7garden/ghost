@@ -16,12 +16,12 @@ export class HostRoutingTransport {
  }
  async capability() {
   const result = await this.query({ type: 'routing_capability' });
-  if (!result || typeof result !== 'object' || (result as { schema?: unknown }).schema !== 'ghost-routing-host/1') throw new Error('지원하는 과업 접수 Host 계약이 아닙니다.');
+  if (!result || typeof result !== 'object' || (result as { schema?: unknown }).schema !== 'ghost-routing-host/1') throw new Error('이 호스트의 작업 접수 형식을 지원하지 않습니다.');
   return normalizeRoutingCapability(result);
  }
  async candidates(entry: RoutingEntry, query = '', limit = 50) {
   const result = await this.query({ type: 'routing_candidates', entry: entryDTO(entry), query, limit });
-  if (!Array.isArray(result)) throw new Error('과업 후보 응답을 확인할 수 없습니다.');
+  if (!Array.isArray(result)) throw new Error('작업 후보 응답을 확인할 수 없습니다.');
   return result;
  }
  async work(entry: RoutingEntry, workId: string) {
@@ -29,32 +29,32 @@ export class HostRoutingTransport {
  }
  async decisions(entry: RoutingEntry, workId: string) {
   const result = await this.query({ type: 'routing_decisions', entry: entryDTO(entry), work_id: workId });
-  if (!Array.isArray(result)) throw new Error('과업 이력 응답을 확인할 수 없습니다.');
+  if (!Array.isArray(result)) throw new Error('작업 기록 응답을 확인할 수 없습니다.');
   return result.map(normalizeDecision);
  }
  async view(entry: RoutingEntry): Promise<RoutingView> {
-  if ((await this.capability()).entry_view !== true) throw new Error('Host가 과업 접수 이력 조회를 제공하지 않습니다.');
+  if ((await this.capability()).entry_view !== true) throw new Error('호스트가 작업 접수 기록 조회를 제공하지 않습니다.');
   const works = new Map<string, RoutingView['works'][number]>(), decisions = new Map<string, RoutingView['decisions'][number]>(), admissions = new Map<string, RoutingView['admissions'][number]>();
   const seen = new Set<string>(); let cursor: string | null = null;
   do {
    const raw = await this.query({ type: 'routing_view', entry: entryDTO(entry), limit: 50, before_admission_id: cursor });
-   if (!raw || typeof raw !== 'object' || (raw as {schema?: unknown}).schema !== 'ghost-routing-view/1') throw new Error('과업 접수 이력 계약을 확인할 수 없습니다.');
+   if (!raw || typeof raw !== 'object' || (raw as {schema?: unknown}).schema !== 'ghost-routing-view/1') throw new Error('작업 접수 기록 계약을 확인할 수 없습니다.');
    const next = (raw as {next_before_admission_id?: unknown}).next_before_admission_id;
-   if (next !== null && (typeof next !== 'string' || !next || seen.has(next))) throw new Error('과업 접수 이력 페이지를 확인할 수 없습니다.');
+   if (next !== null && (typeof next !== 'string' || !next || seen.has(next))) throw new Error('작업 접수 기록 페이지를 확인할 수 없습니다.');
    const page = normalizeRoutingView(raw);
    for (const work of page.works) {
     const saved = works.get(work.id);
     if (!saved || work.work_revision > saved.work_revision) works.set(work.id, work);
-    else if (work.work_revision === saved.work_revision && JSON.stringify(work) !== JSON.stringify(saved)) throw new Error('과업 버전이 일치하지 않습니다.');
+    else if (work.work_revision === saved.work_revision && JSON.stringify(work) !== JSON.stringify(saved)) throw new Error('작업 버전이 일치하지 않습니다.');
    }
    for (const decision of page.decisions) {
     const saved = decisions.get(decision.id);
-    if (saved && JSON.stringify(saved) !== JSON.stringify(decision)) throw new Error('과업 이력이 일치하지 않습니다.');
+    if (saved && JSON.stringify(saved) !== JSON.stringify(decision)) throw new Error('작업 기록이 일치하지 않습니다.');
     decisions.set(decision.id, decision);
    }
    for (const view of page.admissions) {
     const origin = view.admission.input.origin;
-    if (origin.entry_profile_id !== entry.entry_profile_id || origin.conversation_id !== entry.conversation_id || admissions.has(view.admission.id)) throw new Error('접수 이력의 대화가 일치하지 않습니다.');
+    if (origin.entry_profile_id !== entry.entry_profile_id || origin.conversation_id !== entry.conversation_id || admissions.has(view.admission.id)) throw new Error('접수 기록의 대화가 일치하지 않습니다.');
     admissions.set(view.admission.id, view);
    }
    cursor = next as string | null;
@@ -68,7 +68,7 @@ export class HostRoutingTransport {
  }
  async prepare(turn: RoutingTurn, requestId: string, options: {timeoutMs?:number;pollMs?:number} = {}) {
   const capability = await this.capability();
-  if (!capability.model_router || !capability.model_tool_registration) throw new Error('Host의 모델 과업 분류 경로가 아직 준비되지 않았습니다.');
+  if (!capability.model_router || !capability.model_tool_registration) throw new Error('호스트의 모델 작업 분류 경로가 아직 준비되지 않았습니다.');
   let response: unknown;
   try { response = await this.send({request_id:requestId,command:{type:'routing',action:{
    type:'routing_natural',entry:entryDTO(turn.entry),text:turn.text,kind:turn.kind??'prompt',
@@ -180,7 +180,7 @@ export function createHostRoutingAdapter(transport: HostRoutingTransport, provid
   receipt: (entry, id) => transport.receipt(entry, id),
   admit: (input, proposal, id) => transport.admit(input, proposal, id),
   view: entry => providers?.view ? providers.view(entry) : transport.view(entry),
-  prepare: (turn, id) => { if (providers?.prepare) return providers.prepare(turn, id); throw new Error('Host의 모델 과업 분류 경로가 아직 연결되지 않았습니다.'); },
+  prepare: (turn, id) => { if (providers?.prepare) return providers.prepare(turn, id); throw new Error('호스트의 모델 작업 분류 경로가 아직 연결되지 않았습니다.'); },
   observePending: request => transport.observePending(request),
   cancelPending: request => transport.cancelPending(request),
  };

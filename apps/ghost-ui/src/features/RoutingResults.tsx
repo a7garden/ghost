@@ -1,3 +1,4 @@
+import { uiTerms } from '../uiText';
 import {useState} from 'react';
 import {ArrowUpRight,FileText} from 'lucide-react';
 import {Modal} from '../components/Modal';
@@ -22,5 +23,5 @@ export function RoutingCompletionInbox({snapshot,connected=true}:{snapshot:Snaps
  const [selectedId,setSelectedId]=useState(''),capability=snapshot.capabilities.routing as RoutingCapability|undefined;
  if(!connected||capability?.runtime_dispatch!==true||!snapshot.routing_results?.completion_outbox.length)return null;
  const rows=snapshot.routing_results.completion_outbox.slice().sort((a,b)=>b.updated_ms-a.updated_ms),selected=rows.find(r=>r.id===selectedId);
- return <><section className="routing-completion-inbox" aria-label="저장된 과업 결과"><h2>과업 결과</h2>{rows.map(result=><article className="inbox-item" key={result.id} data-completion-result={result.id}><FileText size={22}/><div><span className="eyeline">{snapshot.profiles.find(p=>p.id===result.profile_id)?.name??'담당 Ghost'} · {routingResultLabel(result,capability)}</span><h2>{result.source_fragments[0]?.text||'맡긴 작업'}</h2><button className="button secondary" onClick={()=>setSelectedId(result.id)}>결과 확인<ArrowUpRight size={14}/></button></div></article>)}</section>{selected&&<Modal title="과업 결과" onClose={()=>setSelectedId('')}><RoutingResultContent result={selected} capability={capability}/></Modal>}</>;
+ return <><section className="routing-completion-inbox" aria-label={`저장된 ${uiTerms.workResults}`}><h2>{uiTerms.workResults}</h2>{rows.map(result=><article className="inbox-item" key={result.id} data-completion-result={result.id}><FileText size={22}/><div><span className="eyeline">{snapshot.profiles.find(p=>p.id===result.profile_id)?.name??'담당 Ghost'} · {routingResultLabel(result,capability)}</span><h2>{result.source_fragments[0]?.text||uiTerms.work}</h2><button className="button secondary" onClick={()=>setSelectedId(result.id)}>결과 확인<ArrowUpRight size={14}/></button></div></article>)}</section>{selected&&<Modal title={uiTerms.workResults} onClose={()=>setSelectedId('')}><RoutingResultContent result={selected} capability={capability}/></Modal>}</>;
 }

@@ -1,0 +1,83 @@
+/* Navigation and conversation context are two independently toggled rails. */
+.workspace-sidebar-header { display: flex; align-items: center; gap: 4px; min-height: var(--height-toolbar); flex-shrink: 0; }
+.workspace-switcher { display: grid; place-items: center; width: 36px; min-height: 36px; padding: 0; margin-right: auto; border-radius: var(--radius-lg); }
+.workspace-switcher:hover { background: var(--color-background-secondary-hover); }
+.workspace-switcher > svg { width: 20px; height: 20px; flex-shrink: 0; }
+.sidebar .sidebar-search, .mobile-sidebar .sidebar-search { min-height: 32px; padding: 6px 10px; margin: 4px 0 12px; font-size: 12px; flex-shrink: 0; }
+.sidebar .primary-nav, .mobile-sidebar .primary-nav { flex-shrink: 0; gap: 2px; }
+.sidebar .nav-row, .mobile-sidebar .nav-row { min-height: 32px; padding: 5px 10px; gap: 8px; border-radius: var(--radius-row); font-size: 13px; }
+.sidebar .nav-row > span, .mobile-sidebar .nav-row > span { white-space: nowrap; }
+.sidebar .nav-count, .mobile-sidebar .nav-count { background: none; font-size: 11px; padding: 0 3px; }
+.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 8px 0 16px; }
+.sidebar-section { margin-top: 16px; }
+.sidebar-label { padding: 0 5px; margin-bottom: 3px; min-height: 28px; }
+.sidebar-section-toggle { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1; min-height: 28px; padding: 2px 4px; font-size: 11px; color: var(--color-text-secondary); text-align: left; border-radius: var(--radius-md); }
+.sidebar-section-toggle:hover { color: var(--color-text); background: var(--color-background-secondary-hover); }
+.sidebar-section-toggle[aria-expanded="false"] > svg { transform: rotate(-90deg); }
+.sidebar-section-count { margin-left: auto; padding-right: 6px; color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
+.sidebar-scroll nav[hidden] { display: none; }
+.sidebar-ghost-group + .sidebar-ghost-group { margin-top: 2px; }
+.sidebar .dot-nav, .mobile-sidebar .dot-nav { min-height: 34px; padding: 4px 9px; }
+.sidebar-conversations { margin: 3px 4px 8px 20px; padding-left: 9px; border-left: var(--hairline) solid var(--color-border); }
+.sidebar-conversation { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; min-height: 29px; padding: 5px 8px; border-radius: var(--radius-lg); text-align: left; font-size: 11px; color: var(--color-text-secondary); }
+.sidebar-conversation > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-conversation:hover { background: var(--color-background-secondary-hover); color: var(--color-text); }
+.sidebar-conversation.selected { background: var(--color-background-secondary-active); color: var(--color-text); }
+.sidebar .sidebar-bottom, .mobile-sidebar .sidebar-bottom { margin-top: 0; padding-top: 8px; flex-shrink: 0; border-top: var(--hairline) solid var(--color-border-subtle); }
+.sidebar-connection { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 11px; font-size: 11px; color: var(--color-text-secondary); border-radius: var(--radius-lg); }
+.sidebar-connection:hover { background: var(--color-background-secondary-hover); color: var(--color-text); }
+.sidebar-connection > svg { margin-left: auto; }
+.navigation-toggle { display: inline-flex; }
+.mobile-sidebar { flex: 1; min-height: 0; overflow: hidden; }
+.mobile-sidebar .workspace-sidebar-header { display: none; }
+.mobile-nav-dialog { display: flex; flex-direction: column; width: min(300px, 100vw); height: 100dvh; max-height: 100dvh; margin: 0 auto 0 0; border-radius: 0; padding: 16px; }
+.mobile-nav-dialog .modal-head { flex-shrink: 0; }
+.mobile-nav-dialog .sidebar-scroll { min-height: 80px; }
+
+/* One inset right sidebar: Garden panel controls, independently disclosed cards. */
+.dot-detail { max-width: none; padding: 0; gap: 0; }
+.conversation-toolbar { padding-inline: 24px; }
+.chat-inner { padding-inline: 24px; }
+.composer-area { padding: 16px 24px 12px; }
+.context-sidebar {
+  --g-ink: var(--color-text);
+  --g-ink2: var(--color-text-secondary);
+  --g-page: transparent;
+  --g-line: var(--color-border);
+  --g-hover: var(--color-background-secondary-hover);
+  min-width: 0; min-height: 0; height: 100%;
+  padding: 8px 16px 16px 8px;
+}
+.context-stack-panel { height: 100%; background: transparent; }
+.context-stack-panel > .g-panel__header { border: 0; padding: 0 4px 0 8px; }
+.context-stack-panel > .g-panel__body { padding: 8px 0 16px; overscroll-behavior: contain; scrollbar-width: thin; }
+.context-stack-panel .g-panel__close { color: var(--color-text-secondary); }
+.context-stack-panel .g-panel__close:focus-visible { outline: 2px solid var(--color-text-secondary); outline-offset: 2px; }
+.context-sidebar .context-card-stack, .context-sidebar-content .context-card-stack { gap: 12px; }
+.context-card, .context-profile-card { overflow: hidden; }
+.context-card-toggle { min-height: 44px; border-radius: var(--radius-xl); }
+.context-card-action { min-height: 32px; }
+.context-stack-panel #live-phone-card { margin-bottom: 12px; }
+.context-sidebar-drawer { display: flex; flex-direction: column; padding: 16px 0 0; width: min(340px, 100vw); background: var(--color-surface-under); }
+.context-sidebar-drawer .modal-head { padding: 0 16px 12px; margin-bottom: 0; flex-shrink: 0; }
+.context-sidebar-drawer .modal-head h2 { font-size: 13px; }
+.context-sidebar-content { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 8px 16px 24px; }
+
+@media (min-width: 56rem) {
+  .app-shell { --app-sidebar-width: 244px; }
+  .app-shell > .sidebar { padding: 4px 10px 10px; overflow: hidden; }
+  .app-shell.navigation-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .app-shell.navigation-collapsed > .sidebar { display: none; }
+}
+@media (min-width: 76rem) {
+  .dot-detail.context-open { grid-template-columns: minmax(0, 1fr) 324px; }
+  .context-open .conversation-toolbar-voice, .context-open .conversation-toolbar-settings { display: none; }
+}
+@media (max-width: 39.99rem) {
+  .conversation-toolbar { padding-inline: 12px; }
+  .chat-inner { padding-inline: 16px; }
+  .composer-area { padding: 12px 14px 8px; }
+}
+@media (pointer: coarse) {
+  .sidebar .nav-row, .mobile-sidebar .nav-row, .sidebar-conversation, .sidebar-section-toggle, .sidebar-connection, .context-sidebar-content .context-card-action { min-height: 44px; }
+}

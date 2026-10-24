@@ -34,7 +34,7 @@ export function usePendingRouting(client:RoutingClient|undefined,entry:RoutingEn
    }
    const latest=await current.pending(entry);
    if(version===epoch.current){setRequests(latest);setNotice('');}
-  }catch{if(version===epoch.current)setNotice('연결을 기다리고 있어요. 저장된 요청으로 접수 상태를 다시 확인할 수 있습니다.');}
+  }catch{if(version===epoch.current)setNotice('연결을 기다리고 있습니다. 저장된 요청으로 접수 상태를 다시 확인할 수 있습니다.');}
   finally{jobs.delete('scan');}
  },[entryKey,connected]);
  useEffect(()=>{
@@ -55,7 +55,7 @@ export function usePendingRouting(client:RoutingClient|undefined,entry:RoutingEn
    }
    const latest=await current.pending(entry);
    if(version===epoch.current){setRequests(latest);setNotice('');}
-  }catch{if(version===epoch.current)setNotice('접수 상태를 아직 확인하지 못했어요. 요청 기록을 유지하고 다시 확인합니다.');}
+  }catch{if(version===epoch.current)setNotice('접수 상태를 아직 확인하지 못했습니다. 요청 기록을 유지하고 다시 확인합니다.');}
   finally{jobs.delete(request.request_id);if(version===epoch.current)setChecking(previous=>previous.filter(id=>id!==request.request_id));}
  },[entryKey]);
  return {requests,waiting:requests.some(active),blocking:requests.length>0,checking,notice,refresh:scan,check:(request:PendingRoutingRequest)=>change(request,'check'),cancel:(request:PendingRoutingRequest)=>change(request,'cancel'),dismiss:(request:PendingRoutingRequest)=>change(request,'dismiss')};
@@ -67,10 +67,10 @@ export function RoutingPendingInputs({pending,connected}:{pending:PendingState;c
  return <section className="routing-pending-inputs" aria-label="입력 접수 상태">
   {pending.requests.map(request=>{
    const terminal=!active(request),busy=pending.checking.includes(request.request_id);
-   const label=request.state==='cancelled'?'입력 접수가 취소됐어요.':request.state==='failed'?'이번 입력은 접수되지 않았어요.':request.state==='cancel_requested'?'입력 접수 취소를 확인하고 있어요.':request.state==='unknown'?'저장된 요청의 접수 상태를 확인하고 있어요.':'요청을 접수하고 있어요.';
+   const label=request.state==='cancelled'?'입력 접수가 취소되었습니다.':request.state==='failed'?'이번 입력은 접수되지 않았습니다.':request.state==='cancel_requested'?'입력 접수 취소를 확인하고 있습니다.':request.state==='unknown'?'저장된 요청의 접수 상태를 확인하고 있습니다.':'요청을 접수하고 있습니다.';
    return <article key={request.request_id} data-pending-request={request.request_id} data-pending-state={request.state}>
     <div className="routing-pending-heading" role="status">{terminal?<CircleAlert size={16}/>:<LoaderCircle size={16} className="routing-pending-spinner"/>}<strong>{label}</strong></div>
-    <p>{terminal?'작성한 메시지를 유지했습니다. 입력을 다시 준비한 뒤 보낼 수 있어요.':request.state==='cancel_requested'?'취소 상태와 이미 저장된 접수 결과를 함께 확인합니다.':'대상이 확인되면 이 대화에 과업을 연결할게요. 작성한 메시지는 보관하고 있습니다.'}</p>
+    <p>{terminal?'작성한 메시지를 유지했습니다. 입력을 다시 준비한 뒤 보낼 수 있습니다.':request.state==='cancel_requested'?'취소 상태와 이미 저장된 접수 결과를 함께 확인합니다.':'대상이 확인되면 이 대화에 작업을 연결합니다. 작성한 메시지는 보관하고 있습니다.'}</p>
     {pending.notice&&<p className="routing-pending-notice">{pending.notice}</p>}
     <div className="routing-pending-actions">
      <button type="button" className="text-button" disabled={!connected||busy} onClick={()=>void pending.check(request)}><RefreshCw size={13}/>다시 확인</button>

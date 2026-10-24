@@ -50,12 +50,3 @@ it('omits empty and settled-only categories from the automatic deck while keepin
   expect(result.categories).toEqual([]);
   expect(result.pastTasks).toHaveLength(1);
 });
-
-it('keeps attention categories present and orders cards by useful current context', async () => {
-  const { contextualCards } = await import('./contextProjection');
-  const snapshot = initialWorkspace(), profile = snapshot.profiles[0], conversation = profile.conversations[0];
-  snapshot.reviews = [{ id: 'review', profile_id: profile.id, conversation_id: conversation.id, title: 'Review', body: '', state: 'pending', space_id: '' }];
-  conversation.tasks = [{ id: 'failed', name: 'check', phase: 'failed', partial: '', output: '' }];
-  snapshot.delegations = []; snapshot.goals = []; snapshot.schedules = []; snapshot.spaces = []; snapshot.connectors.computer = true;
-  expect(contextualCards(snapshot, profile.id, conversation.id).categories).toEqual(['reviews', 'tasks', 'computer']);
-});

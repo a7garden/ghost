@@ -81,24 +81,13 @@
 .mobile-context.context-stack-shell { margin-inline: 0; overflow-y: auto; padding: 0 0 12px; gap: 12px; }
 .mobile-context .context-card-stack { padding-top: 0; }
 
-/* One shared profile/activity surface, independent of the call card. */
-.context-profile-card { border: var(--hairline) solid var(--color-border); border-radius: 18px; background: var(--color-surface-elevated-2); padding: 20px 16px 16px; overflow: hidden; }
+/* Profile and each context category occupy separate Garden Card surfaces. */
+.context-profile-card { flex: 0 0 auto; min-width: 0; border: var(--hairline) solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-surface-elevated); padding: 16px; overflow: hidden; }
 .context-profile-header { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .context-profile-header > div { display: grid; gap: 5px; min-width: 0; }
 .context-profile-header strong { font-size: 15px; font-weight: 550; overflow-wrap: anywhere; }
-.context-profile-header span { color: var(--color-text-secondary); font-size: 13px; }
-.context-profile-actions { display: flex; gap: 8px; margin: 18px 0 20px; }
-.context-profile-actions > button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 8px; min-height: 36px; border-radius: 10px; background: var(--color-background-secondary-hover); font-size: 12px; }
-.context-profile-actions > button:hover:not(:disabled) { background: var(--color-background-secondary-hover); }
-.context-computer-section { margin-bottom: 20px; }
-.context-computer-section > h3 { color: var(--color-text-secondary); font-size: 12px; font-weight: 450; margin: 0 0 4px; }
-.context-computer-section .context-permissions { margin-top: 6px; }
-.context-profile-card .context-card-stack { gap: 14px; }
-.context-profile-card .context-section { min-width: 0; margin: 0; }
-.context-section > h3 { margin: 0; font-size: 12px; font-weight: 450; }
-.context-section .context-card-toggle { min-height: 32px; padding: 4px 0 8px; border-radius: 5px; color: var(--color-text-secondary); }
-.context-section .context-card-icon { display: none; }
-.context-section .context-card-body { padding: 0; }
-.context-section .context-task-entry { padding-block: 6px; }
-.context-section .context-task-entry + .context-task-entry, .context-section .context-entry + .context-entry { border-top: 0; }
-@media (pointer: coarse) { .context-profile-actions > button, .context-section .context-card-toggle { min-height: 44px; } }
+.context-profile-header span { color: var(--color-text-secondary); font-size: 12px; }
+.context-profile-actions { display: flex; gap: 8px; margin-top: 16px; }
+.context-profile-actions > button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 8px; min-height: 36px; border-radius: var(--radius-lg); background: var(--color-background-secondary-hover); font-size: 12px; }
+.context-profile-actions > button:hover:not(:disabled) { background: var(--color-background-secondary-active); }
+@media (pointer: coarse) { .context-profile-actions > button { min-height: 44px; } }

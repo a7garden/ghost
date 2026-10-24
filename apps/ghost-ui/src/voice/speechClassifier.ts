@@ -1,6 +1,8 @@
-import * as ort from 'onnxruntime-web/wasm';
+import type * as OrtNS from 'onnxruntime-web/wasm';
 import type { SpeechClassifier } from './speechProbability';
 import { SPEECH_FRAME, SPEECH_RATE } from './speechProbability';
+
+// onnxruntime is loaded lazily so it stays out of the main chunk.
 
 // Silero v6.0's official recurrent ONNX interface: 512 new samples, 64
 // context samples, state [2, 1, 128], scalar 16k sample rate. Assets are bundled
@@ -10,13 +12,14 @@ export class SileroSpeechClassifier implements SpeechClassifier {
   private context = new Float32Array(64);
   private generation = 0;
   private closed = false;
-  private pending?: Promise<ort.InferenceSession.ReturnType>;
-  constructor(private session: ort.InferenceSession) {}
+  private pending?: Promise<OrtNS.InferenceSession.ReturnType>;
+  constructor(private session: OrtNS.InferenceSession) {}
   async classify(frame: Float32Array) {
     if (this.closed || frame.length !== SPEECH_FRAME) throw new Error('음성 판정 프레임을 확인해 주세요.');
+    const ort = await import('onnxruntime-web/wasm');
     const generation = this.generation, input = new Float32Array(576); input.set(this.context); input.set(frame, 64);
     const feeds = { input: new ort.Tensor('float32', input, [1, 576]), state: new ort.Tensor('float32', this.state.slice(), [2, 1, 128]), sr: new ort.Tensor('int64', new BigInt64Array([BigInt(SPEECH_RATE)]), []) };
-    let outputs: ort.InferenceSession.ReturnType | undefined;
+    let outputs: OrtNS.InferenceSession.ReturnType | undefined;
     try {
       const pending = this.session.run(feeds); this.pending = pending; outputs = await pending;
       if (generation !== this.generation || this.closed) return 0;
@@ -33,10 +36,10 @@ export class SileroSpeechClassifier implements SpeechClassifier {
   async close() { if (this.closed) return; this.closed = true; this.reset(); await this.pending?.catch(() => {}); await this.session.release(); }
 }
 export async function createSpeechClassifier(signal: AbortSignal): Promise<SpeechClassifier> {
-  ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false; ort.env.logLevel = 'error';
+  const ort = await import('onnxruntime-web/wasm'); ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false; ort.env.logLevel = 'error';
   const base = new URL('/voice-vad/', window.location.origin);
   ort.env.wasm.wasmPaths = { wasm: new URL('ort-wasm-simd-threaded.wasm', base).href, mjs: new URL('ort-wasm-simd-threaded.mjs', base).href };
-  let session: ort.InferenceSession | undefined;
+  let session: OrtNS.InferenceSession | undefined;
   try {
     const response = await fetch(new URL('silero-vad-v6.0.onnx', base), { signal, cache: 'force-cache', credentials: 'same-origin' });
     if (!response.ok || Number(response.headers.get('content-length') || 0) > 3 * 1024 * 1024) throw new Error('model');

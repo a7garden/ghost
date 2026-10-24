@@ -1,15 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ArrowUpRight, Check, ChevronDown, FileText, MessageCircle, Plus, Settings2, Square, PanelRight, CircleAlert, X, Phone, Menu } from 'lucide-react';
+import { GPanel } from '@garden/ui';
+import { uiTerms } from '../uiText';
+import { useEffect, useId, useRef, useState } from 'react';
+import { ArrowUp, ArrowUpRight, Check, ChevronDown, FileText, MessageCircle, Plus, Settings2, Square, PanelRight, CircleAlert, X, Phone, PanelLeft } from 'lucide-react';
 import { DotAvatar } from '../components/DotAvatar';
-import { Status } from '../components/Status';
 import { Modal } from '../components/Modal';
-import { dotState, isRunning, phaseLabel, toneFor } from '../client/types';
+import { usePanelState } from '../components/usePanelState';
+import { isRunning, phaseLabel, toneFor } from '../client/types';
 import type { Profile, Snapshot, Review, Command, Conversation } from '../client/types';
 import { CollaborationStrip } from './CollaborationView';
 import { VoicePanel, useVoiceCall } from '../voice/VoicePanel';
 import { useAvatarSpeaking } from '../pets/AvatarProvider';
 import { ConversationContext } from './ConversationContext';
 import { contextualCards } from './contextProjection';
+import { profileSummary } from './profileSummary';
+import { conversationStarters } from './conversationSuggestions';
 import { ConversationModelPicker } from './ConversationModelPicker';
 import { RoutingConversation, RoutingWorkList, RoutingWorkDetail, useRoutingConversation } from './RoutingConversation';
 import type { RoutingConnection, ClarificationChoice } from './RoutingConversation';
@@ -18,8 +22,8 @@ import { routingTimeline } from '../client/routingTimeline';
 import {RoutingPending,RoutingTerminal} from '../client/errors';
 import {RoutingPendingInputs,usePendingRouting} from './RoutingPending';
 
-type Props = { routing?: RoutingConnection; profile: Profile; snapshot: Snapshot; mode: string; action: (command: Command) => Promise<Record<string, any>>; busy: boolean; connected: boolean; navigate: (route: string) => void; route: string; onReview: (review: Review) => void; onOpenNavigation?: () => void };
-export function DotDetail({ routing, profile, snapshot, mode, action, busy, connected, navigate, route, onReview, onOpenNavigation }: Props) {
+type Props = { routing?: RoutingConnection; profile: Profile; snapshot: Snapshot; mode: string; action: (command: Command) => Promise<Record<string, any>>; busy: boolean; connected: boolean; navigate: (route: string) => void; route: string; onReview: (review: Review) => void; onOpenNavigation?: () => void; navigationOpen?: boolean };
+export function DotDetail({ routing, profile, snapshot, mode, action, busy, connected, navigate, route, onReview, onOpenNavigation, navigationOpen = false }: Props) {
   const fromRoute = new URLSearchParams(route.split('?')[1] || '').get('conversation');
   const [conversationId, setConversationId] = useState(fromRoute ?? profile.conversations[0]?.id ?? '');
   // A creation snapshot can arrive before its action resolves. Keep the chosen
@@ -32,7 +36,11 @@ export function DotDetail({ routing, profile, snapshot, mode, action, busy, conn
   const [clarificationError, setClarificationError] = useState<{ source: string; message: string }>();
   const selectedWork = routingState.view?.works.find(w => w.id === selectedWorkId);
   const openWork = (id: string) => { setShowContext(false); setSelectedWorkId(id); };
-  const [draft, setDraft] = useState(''), [error, setError] = useState(''), [settings, setSettings] = useState(false), [history, setHistory] = useState(false), [schedule, setSchedule] = useState(false), [showContext, setShowContext] = useState(false), [showVoice, setShowVoice] = useState(false);
+  const [draft, setDraft] = useState(''), [error, setError] = useState(''), [settings, setSettings] = useState(false), [history, setHistory] = useState(false), [schedule, setSchedule] = useState(false), [showVoice, setShowVoice] = useState(false);
+  const [showContext, setShowContext] = usePanelState(`ghost-ui:context-open:${snapshot.workspace_id}`);
+  const contextPanelId = useId();
+  const contextToggle = useRef<HTMLButtonElement>(null);
+  const closeContext = () => { setShowContext(false); requestAnimationFrame(() => contextToggle.current?.focus()); };
   const [wide, setWide] = useState(() => window.matchMedia('(min-width: 76rem)').matches);
   const [voiceCollapsed, setVoiceCollapsed] = useState(false), [modelSaving, setModelSaving] = useState(false);
   const [disclosures, setDisclosures] = useState<Record<string, Record<string, boolean>>>({});
@@ -61,7 +69,7 @@ export function DotDetail({ routing, profile, snapshot, mode, action, busy, conn
       setError('');setClarificationError(undefined);
       if(!request.turn.resolves.length&&draftRef.current===request.turn.text){
         try{localStorage.removeItem(draftKey);draftRef.current='';setDraft('');}
-        catch{setError('요청은 접수됐지만 초안 표시를 정리하지 못했습니다. 접수 이력을 확인해 주세요.');}
+        catch{setError('요청은 접수됐지만 초안 표시를 정리하지 못했습니다. 접수 기록을 확인해 주세요.');}
       }
     }
   });
@@ -73,7 +81,7 @@ export function DotDetail({ routing, profile, snapshot, mode, action, busy, conn
   const call = useVoiceCall({ profileId: profile.id, conversationId: conversation?.id ?? '', profileName: profile.name, enabled: voiceEnabled, runningTasks: running.length, latestReply: latestVoiceReply, onSpeakingChange,
     submitTranscript: async text => {
       if (!connected || mode === 'demo') throw new Error('Ghost 호스트에 다시 연결해 주세요.');
-      if (!conversation || modelBlocked || modelSaving || pending.blocking) throw new Error(pending.blocking?(pending.waiting?'이전 입력의 접수 상태를 확인하고 있어요. 확인이나 취소가 끝난 뒤 다시 말씀해 주세요.':'입력 접수 기록을 확인하고 입력 다시 준비를 눌러 주세요.'):'사용할 모델을 확인하고 진행 중인 응답이 끝난 뒤 다시 말씀해 주세요.');
+      if (!conversation || modelBlocked || modelSaving || pending.blocking) throw new Error(pending.blocking?(pending.waiting?'이전 입력의 접수 상태를 확인하고 있습니다. 확인이나 취소가 끝난 뒤 다시 말씀해 주세요.':'입력 접수 기록을 확인하고 입력 다시 준비를 눌러 주세요.'):'사용할 모델을 확인하고 진행 중인 응답이 끝난 뒤 다시 말씀해 주세요.');
       if (routing?.inputAvailable) { try{await routing.client.submit({entry:{entry_profile_id:profile.id,conversation_id:conversation.id},text,kind:conversation.messages.length?'follow_up':'prompt',resolves:[]});routingState.refresh();}catch(e){if(e instanceof RoutingPending){void pending.refresh();routingState.refresh();return;}throw e;} }
       else await action({ type: 'submit', profile_id: profile.id, conversation_id: conversation.id, prompt: text, kind: running.length ? 'steer' : 'prompt' }); stayAtBottom.current = true;
     },
@@ -85,10 +93,10 @@ export function DotDetail({ routing, profile, snapshot, mode, action, busy, conn
       const result = await action({ type: 'create_conversation', profile_id: profile.id, model: selectedConversationModel(snapshot), tools: true });
       setConversationId(result.conversation_id); navigate(`/ghosts/${profile.id}?conversation=${result.conversation_id}`);
     }
-    setShowVoice(true); setVoiceCollapsed(false);
+    setShowVoice(true); setVoiceCollapsed(false); if (wide) setShowContext(true);
   });
 
-  useEffect(() => { if (!sending.current) { if (createdModelDraft.current?.id === conversation?.id) { const text = createdModelDraft.current!.text; createdModelDraft.current = null; draftRef.current = text; setDraft(text); try { localStorage.setItem(draftKey, text); } catch { setError('초안을 저장하지 못했습니다. 보내기 전 내용을 복사해 두세요.'); } return; } try { const saved = localStorage.getItem(draftKey) || ''; draftRef.current = saved; setDraft(saved); } catch { setError('저장된 초안을 읽지 못했습니다.'); } } }, [draftKey]);
+  useEffect(() => { if (!sending.current) { const created = createdModelDraft.current; if (created && created.id === conversation?.id) { const text = created.text; createdModelDraft.current = null; draftRef.current = text; setDraft(text); try { localStorage.setItem(draftKey, text); } catch { setError('초안을 저장하지 못했습니다. 보내기 전 내용을 복사해 두세요.'); } return; } try { const saved = localStorage.getItem(draftKey) || ''; draftRef.current = saved; setDraft(saved); } catch { setError('저장된 초안을 읽지 못했습니다.'); } } }, [draftKey]);
   useEffect(() => { if (fromRoute) setConversationId(fromRoute); }, [fromRoute]);
   useEffect(() => { if (stayAtBottom.current) messagesEnd.current?.scrollIntoView({ block: 'nearest', behavior: 'instant' }); }, [conversation?.messages.length, conversation?.tasks.map(t => t.partial).join(''), reviews.length, routingState.view?.admissions.length]);
   useEffect(() => { const input = composerInput.current; if (input) { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 160)}px`; } }, [draft, wide]);
@@ -112,7 +120,7 @@ export function DotDetail({ routing, profile, snapshot, mode, action, busy, conn
       setConversationId(cid!); createdConversation.current = null; stayAtBottom.current = true;
     } catch (e) {
       if(e instanceof RoutingPending||e instanceof RoutingTerminal){setError('');setConversationId(e.entry.conversation_id);createdConversation.current=null;navigate(`/ghosts/${profile.id}?conversation=${e.entry.conversation_id}`);void pending.refresh();routingState.refresh();}
-      else setError(e instanceof Error ? e.message : '메시지를 보내지 못했습니다. 초안을 유지했어요.');
+      else setError(e instanceof Error ? e.message : '메시지를 보내지 못했습니다. 초안을 유지했습니다.');
     }
     finally { sending.current = false; }
   };
@@ -130,15 +138,21 @@ export function DotDetail({ routing, profile, snapshot, mode, action, busy, conn
     finally { answeringRef.current = ''; setAnswering(''); }
   };
   const renderContext = (management = false) => <ConversationContext workContent={routingState.view?.works.length ? <RoutingWorkList view={routingState.view} profileId={profile.id} profiles={snapshot.profiles} onOpenWork={openWork}/> : undefined} workCount={routingState.view?.works.length} profile={profile} conversation={conversation} snapshot={snapshot} busy={busy} connected={connected} navigate={navigate} disclosure={disclosure} onDisclosure={onDisclosure} management={management} onVoice={() => void openVoice()} voiceAvailable={!busy && connected && mode !== 'demo'} onSettings={() => { setShowContext(false); setSettings(true); setError(''); }} onReview={review => { setShowContext(false); onReview(review); }} onCancel={task => void run(async () => { const request=pending.requests.find(request=>request.task_id===task.id);if(request)await pending.cancel(request);else await action({ type: 'cancel', profile_id: profile.id, task_id: task.id }); })} onSchedule={() => { setShowContext(false); setSchedule(true); setError(''); }}/>
-  return <div className={`dot-detail ${contextCount > 0 ? 'has-context-cards' : ''}`}>
-    <section className="conversation-column" aria-label={`${profile.name}와 대화`}>
-      <header className="conversation-toolbar"><div className="conversation-identity">{onOpenNavigation && <button type="button" className="icon-button mobile-toggle" aria-label="탐색 메뉴 열기" onClick={onOpenNavigation}><Menu size={19}/></button>}<button className="avatar-edit-button" aria-label={`${profile.name} 아바타 변경`} onClick={() => navigate(`/settings?tab=pets&ghost=${encodeURIComponent(profile.id)}`)}><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={28}/></button><h1 className="conversation-heading"><span className="conversation-profile-name">{profile.name}</span><button className="text-button conversation-title" aria-label={`${conversation?.title ?? '새 대화'} · ${profile.name} 대화 이력`} title="대화 이력" onClick={() => setHistory(true)}><span>{conversation?.title ?? '새 대화'}</span><ChevronDown size={13}/></button></h1></div><div className="conversation-toolbar-actions"><button className="icon-button conversation-toolbar-voice" title="음성 통화" aria-label={call.state.active ? '전화 중 카드 보기' : '음성 통화 열기'} aria-pressed={showVoice} disabled={busy || !connected || mode === 'demo'} onClick={() => void openVoice()}><Phone size={17}/></button><button className="icon-button" aria-label="새 대화" title="새 대화" disabled={busy} onClick={() => void startConversation()}><Plus size={18}/></button><button className="icon-button conversation-toolbar-settings" title={`${profile.name} 설정`} aria-label={`${profile.name} 설정`} onClick={() => { setSettings(true); setError(''); }}><Settings2 size={17}/></button><button className="icon-button context-toggle" title="작업과 자료" aria-label={`작업과 자료 보기${contextCount ? ` · ${contextCount}개 항목` : ''}`} aria-expanded={showContext} onClick={() => setShowContext(true)}><PanelRight size={17}/>{contextCount > 0 && <span className="context-toggle-count">{contextCount}</span>}</button></div></header>
+  return <div className={`dot-detail ${showContext && wide ? 'context-open' : ''}`}>
+    <section className={`conversation-column ${!hasContent ? 'conversation-is-empty' : ''}`} aria-label={`${profile.name}와 대화`}>
+      <header className="conversation-toolbar"><div className="conversation-identity">{onOpenNavigation && <button type="button" className="icon-button navigation-toggle" aria-label={navigationOpen ? '탐색 사이드바 숨기기' : '탐색 사이드바 보기'} aria-expanded={navigationOpen} onClick={onOpenNavigation}><PanelLeft size={17}/></button>}<button className="avatar-edit-button" aria-label={`${profile.name} 아바타 변경`} onClick={() => navigate(`/settings?tab=pets&ghost=${encodeURIComponent(profile.id)}`)}><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={28}/></button><h1 className="conversation-heading"><span className="conversation-profile-name">{profile.name}</span><button className="text-button conversation-title" aria-label={`${conversation?.title ?? '새 대화'} · ${profile.name} ${uiTerms.conversationHistory}`} title={uiTerms.conversationHistory} onClick={() => setHistory(true)}><span>{conversation?.title ?? '새 대화'}</span><ChevronDown size={13}/></button></h1></div><div className="conversation-toolbar-actions"><button className="icon-button conversation-toolbar-voice" title="음성 통화" aria-label={call.state.active ? '전화 중 카드 보기' : '음성 통화 열기'} aria-pressed={showVoice} disabled={busy || !connected || mode === 'demo'} onClick={() => void openVoice()}><Phone size={17}/></button><button className="icon-button" aria-label="새 대화" title="새 대화" disabled={busy} onClick={() => void startConversation()}><Plus size={18}/></button><button className="icon-button conversation-toolbar-settings" title={`${profile.name} 설정`} aria-label={`${profile.name} 설정`} onClick={() => { setSettings(true); setError(''); }}><Settings2 size={17}/></button><button ref={contextToggle} className="icon-button context-toggle" title={showContext ? '작업과 자료 숨기기' : '작업과 자료 보기'} aria-label={`${showContext ? '작업과 자료 숨기기' : '작업과 자료 보기'}${contextCount ? ` · ${contextCount}개 항목` : ''}`} aria-controls={showContext ? contextPanelId : undefined} aria-expanded={showContext} onClick={() => setShowContext(!showContext)}><PanelRight size={17}/>{contextCount > 0 && <span className="context-toggle-count">{contextCount}</span>}</button></div></header>
       {!wide && showVoice && <div className="inline-phone-card" id="live-phone-card">{phoneCard}</div>}
       <div className="conversation-scroll" ref={scrollArea} onScroll={() => { const el = scrollArea.current!; stayAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; }}>
         <div className="chat-inner">
-          {!hasContent && <div className="dot-introduction"><button className="avatar-edit-button" aria-label={`${profile.name} 아바타 변경`} onClick={() => navigate(`/settings?tab=pets&ghost=${encodeURIComponent(profile.id)}`)}><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={72}/></button><h1>{profile.name}</h1>{profile.persona.trim() && <p>{profile.persona}</p>}<Status state={dotState(profile, reviews)}/></div>}
+          {!hasContent && <div className="conversation-start">
+            <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={44}/>
+            <h2>{profile.name}</h2>
+            <p title={profileSummary(profile.persona)}>{profileSummary(profile.persona)}</p>
+            {profile.persona.trim() && <button type="button" className="text-button role-instructions-link" onClick={() => { setSettings(true); setError(''); }}>{uiTerms.roleInstructions}<ArrowUpRight size={12}/></button>}
+            <div className="prompt-suggestions" role="group" aria-label="대화 시작 제안">{conversationStarters(profile.persona).map(({ label, prompt }) => <button type="button" key={label} title={prompt} onClick={() => { updateDraft(prompt); composerInput.current?.focus(); }}>{label}<ArrowUpRight size={12}/></button>)}</div>
+          </div>}
           {profile.error && <div className="inline-error" role="alert"><CircleAlert size={17}/>{profile.error}</div>}
-          <div className="messages" role="log" aria-label="대화 이력" aria-live="polite" aria-relevant="additions text">
+          <div className="messages" role="log" aria-label={uiTerms.conversationHistory} aria-live="polite" aria-relevant="additions text">
             {conversationRows.map(row => {
               if(row.kind==='admission')return <RoutingConversation key={row.receipt.admission.id} view={routingState.view?{...routingState.view,admissions:[row.receipt]}:null} error="" onRetry={routingState.refresh} onOpenWork={openWork} onClarify={connected && !pending.blocking && routing?.capability.clarification_resolution && routing.inputAvailable !== false ? choice => void clarify(choice) : undefined} answering={answering} clarificationError={clarificationError}/>;
               if(!conversation)return null;
@@ -146,9 +160,8 @@ export function DotDetail({ routing, profile, snapshot, mode, action, busy, conn
               return <article key={`${conversation?.id}:${index}`} className={`message message-${m.role}`}>
               {m.role === 'tool' ? <details className="tool-result"><summary><Check size={15}/><span>{m.tool?.output?.summary ?? m.tool?.name ?? '작업 결과'}</span><ChevronDown size={13}/></summary><pre>{m.tool?.output?.content ? JSON.stringify(m.tool.output.content, null, 2) : m.text}</pre></details> : m.role === 'user' ? <div className="user-bubble">{m.text}</div> : <><div className="message-speaker"><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={25}/><strong>{m.role === 'interrupted' ? `${profile.name} · 중단된 응답` : m.role === 'queued' ? '나 · 대기 중' : profile.name}</strong></div><div className="message-body">{m.role === 'interrupted' && !m.text ? (conversation.tasks.some(t => t.id === m.task_id && t.phase === 'cancelled') ? '요청을 취소했습니다.' : '응답이 중단되었습니다. 작업 상태를 확인한 뒤 다시 요청해 주세요.') : displayMessage(m.text, conversation)}</div></>}
             </article>;})}
-            {!hasContent && <div className="conversation-empty"><div className="prompt-suggestions">{['함께할 수 있는 일을 알려줘', '새로운 아이디어를 정리하고 싶어', '자료를 찾아서 비교해줘'].map(text => <button key={text} onClick={() => updateDraft(text)}>{text}<ArrowUpRight size={14}/></button>)}</div></div>}
             {running.filter(t => t.phase === 'model_running').map(t => <article key={t.id} className="message message-stream" aria-label={`${profile.name} · ${t.name} · ${phaseLabel(t.phase)}`}><div className="task-response-heading"><strong>{t.name}</strong><span>{phaseLabel(t.phase)}</span>{!t.partial && <span className="thinking-dots" aria-hidden="true"><i/><i/><i/></span>}</div>{t.partial && <div className="message-body">{t.partial}</div>}</article>)}
-            {reviews.filter(r => !conversation || r.conversation_id === conversation.id).map(r => <div className="inline-review" key={r.id}><div className="inline-review-header"><FileText size={19}/><span>저장 전 확인</span></div><h3>{r.title}</h3><p>{r.body.replace(/^#+\s*/gm, '').slice(0, 110)}…</p><button className="button secondary" onClick={() => onReview(r)}>초안 검토<ArrowUpRight size={14}/></button></div>)}
+            {reviews.filter(r => !conversation || r.conversation_id === conversation.id).map(r => <div className="inline-review" key={r.id}><div className="inline-review-header"><FileText size={19}/><span>저장 전 {uiTerms.reviews}</span></div><h3>{r.title}</h3><p>{r.body.replace(/^#+\s*/gm, '').slice(0, 110)}…</p><button className="button secondary" onClick={() => onReview(r)}>검토하기<ArrowUpRight size={14}/></button></div>)}
             {routingState.error&&<RoutingConversation view={null} error={routingState.error} onRetry={routingState.refresh} onOpenWork={openWork}/>}
             <CollaborationStrip snapshot={snapshot} profileId={profile.id} conversationId={conversation?.id} navigate={navigate}/>
             {running.filter(t => t.phase !== 'model_running').map(t => <div className="task-response-heading task-work-state" key={t.id} role="status" aria-label={`${profile.name} · ${t.name} · ${phaseLabel(t.phase)}`}><span className="activity-bars" aria-hidden="true"><i/><i/><i/></span><strong>{t.name}</strong><span>{phaseLabel(t.phase)}</span></div>)}
@@ -158,12 +171,48 @@ export function DotDetail({ routing, profile, snapshot, mode, action, busy, conn
       </div>
       <div className="composer-area"><div className="composer-inner"><RoutingPendingInputs pending={pending} connected={connected}/>{modelBlocked && <p className="composer-model-block" role="status">{conversation?.model_available === false ? conversation.model_error || '사용할 모델을 선택해 주세요. 작성한 메시지는 유지됩니다.' : '선택한 모델은 진행 중인 응답이 끝난 뒤 적용됩니다. 작성한 메시지는 유지됩니다.'}</p>}{error && <div className="inline-error" role="alert"><CircleAlert size={16}/><span>{error}</span><button className="icon-button" aria-label="오류 메시지 닫기" onClick={() => setError('')}><X size={14}/></button></div>}<form className="composer" onSubmit={e => { e.preventDefault(); void send(); }}><label className="sr-only" htmlFor="message-input">{profile.name}에게 메시지</label><textarea ref={composerInput} id="message-input" disabled={pending.waiting} aria-describedby="composer-keyboard-help" placeholder={`${profile.name}에게 이야기하세요…`} value={draft} maxLength={8192} rows={1} onChange={e => updateDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }}/><div className="composer-bottom"><div className="composer-context"><ConversationModelPicker snapshot={snapshot} profileId={profile.id} conversation={conversation} busy={busy} connected={connected} mode={mode} action={action} onCreated={id => { createdModelDraft.current = { id, text: draftRef.current }; setConversationId(id); navigate(`/ghosts/${profile.id}?conversation=${id}`); }} onSaving={setModelSaving} navigate={navigate} running={running.length > 0}/></div><div className="composer-actions">{running.length > 0 && !pending.waiting && <button type="button" className="icon-button" aria-label="진행 중 작업 취소" title="진행 중 작업 취소" disabled={busy || !connected} onClick={() => void run(async () => { for (const t of running) await action({ type: 'cancel', profile_id: profile.id, task_id: t.id }); })}><Square size={15}/></button>}<button className="send-button" type="submit" disabled={!draft.trim() || busy || !connected || modelBlocked || modelSaving || pending.blocking} aria-label="메시지 보내기">{busy ? <span className="button-loading"/> : <ArrowUp size={20}/>}</button></div></div></form><p id="composer-keyboard-help" className="sr-only">Enter로 보내기 · Shift + Enter로 줄바꿈{running.length > 0 ? ' · 추가 지시는 진행 중인 응답에 전달됩니다.' : ''}</p>{mode === 'demo' && <p className="composer-caption">예시 모드</p>}</div></div>
     </section>
-    {wide && contextCount > 0 && <aside className="context-deck" aria-label="이 대화의 카드">{showVoice && <div id="live-phone-card">{phoneCard}</div>}{renderContext()}</aside>}
-    {showContext && <Modal title="작업과 자료" onClose={() => setShowContext(false)} drawer><div className="mobile-context context-stack-shell">{showVoice && <button className="context-phone-link" onClick={() => { setShowContext(false); setVoiceCollapsed(false); requestAnimationFrame(() => document.getElementById('live-phone-card')?.scrollIntoView({ block: 'nearest' })); }}><Phone size={16}/>음성 통화 카드 보기<ArrowUpRight size={14}/></button>}{renderContext(true)}</div></Modal>}
-    {history && <Modal title={`${profile.name}와 나눈 대화`} onClose={() => setHistory(false)}><div className="history-list">{profile.conversations.map(c => <button key={c.id} className={c.id === conversation?.id ? 'selected' : ''} onClick={() => { setConversationId(c.id); setHistory(false); stayAtBottom.current = true; navigate(`/ghosts/${profile.id}?conversation=${c.id}`); }}><MessageCircle size={17}/><span>{c.title}</span>{c.id === conversation?.id && <Check size={15}/>}</button>)}</div><button className="button secondary full-width" disabled={busy} onClick={() => void startConversation()}><Plus size={16}/>새 대화</button>{error && <p className="form-error" role="alert">{error}</p>}</Modal>}
+    {showContext && (wide ? <aside id={contextPanelId} className="context-sidebar context-stack-sidebar" aria-label="작업과 자료" onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); closeContext(); } }}>
+      <GPanel title="작업과 자료" onClose={closeContext} closeLabel="작업과 자료 숨기기" className="context-stack-panel">
+        {showVoice && <div id="live-phone-card">{phoneCard}</div>}{renderContext(true)}
+      </GPanel>
+    </aside> : <Modal title="작업과 자료" onClose={closeContext} drawer className="context-sidebar-drawer"><div id={contextPanelId} className="context-sidebar-content">{showVoice && <button className="context-phone-link" onClick={() => { setShowContext(false); setVoiceCollapsed(false); requestAnimationFrame(() => document.getElementById('live-phone-card')?.scrollIntoView({ block: 'nearest' })); }}><Phone size={16}/>음성 통화 카드 보기<ArrowUpRight size={14}/></button>}{renderContext(true)}</div></Modal>)}
+    {history && <Modal title={`${profile.name} · ${uiTerms.conversationHistory}`} onClose={() => setHistory(false)}><div className="history-list">{profile.conversations.map(c => <button key={c.id} className={c.id === conversation?.id ? 'selected' : ''} onClick={() => { setConversationId(c.id); setHistory(false); stayAtBottom.current = true; navigate(`/ghosts/${profile.id}?conversation=${c.id}`); }}><MessageCircle size={17}/><span>{c.title}</span>{c.id === conversation?.id && <Check size={15}/>}</button>)}</div><button className="button secondary full-width" disabled={busy} onClick={() => void startConversation()}><Plus size={16}/>새 대화</button>{error && <p className="form-error" role="alert">{error}</p>}</Modal>}
     {selectedWork && routingState.view && routing && <RoutingWorkDetail key={selectedWork.id} work={selectedWork} view={routingState.view} capability={routing.capability} results={snapshot.routing_results?.results} bindings={snapshot.routing_results?.bindings} observations={snapshot.routing_results?.evidence} effectObservations={snapshot.routing_results?.effect_evidence} onClose={() => setSelectedWorkId('')}/>}
-    {settings && <Modal title={`${profile.name} 설정`} onClose={() => !busy && setSettings(false)}><form className="form-stack" onSubmit={e => { e.preventDefault(); const form = new FormData(e.currentTarget); void run(async () => { await action({ type: 'workspace', action: { type: 'persona', profile_id: profile.id, persona: String(form.get('persona')) } }); const voice = form.get('voice') === 'on'; if (voice !== (profile.policy.voice === true)) await action({ type: 'workspace', action: { type: 'policy', profile_id: profile.id, policy: { ...profile.policy, voice } } }); setSettings(false); }); }}><div className="settings-avatar"><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={84}/><h3>{profile.name}</h3><button type="button" className="button secondary" onClick={() => { setSettings(false); navigate(`/settings?tab=pets&ghost=${encodeURIComponent(profile.id)}`); }}>아바타 변경</button></div><label>역할과 성격<textarea name="persona" defaultValue={profile.persona} rows={4} maxLength={4096} required/></label><label className="checkbox-row"><input type="checkbox" name="voice" defaultChecked={profile.policy.voice === true}/>이 Ghost와 음성으로 대화</label><p className="field-help">선택한 로컬 STT·TTS 모델을 사용합니다. 마이크 권한은 통화를 시작할 때 요청합니다.</p><div className="permission-summary"><span>현재 허용된 도구</span><p>{Object.entries(profile.policy).filter(([k,v]) => ['browser','shell','memory','delegation','voice'].includes(k) && v === true).map(([k]) => ({ browser: '브라우저', shell: '셸', memory: '기억', delegation: '위임', voice: '음성' }[k])).join(' · ') || '설정된 도구가 없습니다'}</p></div>{error && <p className="form-error" role="alert">{error}</p>}<button className="button primary full-width" disabled={busy}>{busy ? '저장 중…' : '설정 저장'}</button></form></Modal>}
-    {schedule && conversation && <Modal title="반복 작업 예약" onClose={() => !busy && setSchedule(false)}><form className="form-stack" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void run(async () => { await action({ type: 'add_schedule', profile_id: profile.id, conversation_id: conversation.id, prompt: String(f.get('prompt')), interval_seconds: Number(f.get('interval')) }); setSchedule(false); }); }}><label>반복할 일<textarea name="prompt" placeholder="새로운 소식이 있으면 요약해줘." rows={3} maxLength={8192} required/></label><label>반복 간격<select name="interval" defaultValue="86400"><option value="3600">1시간마다</option><option value="86400">하루마다</option><option value="604800">일주일마다</option></select></label><p className="field-help">첫 실행은 선택한 간격 이후입니다.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="button primary" disabled={busy}>{busy ? '저장 중…' : '예약 저장'}</button></form></Modal>}
+    {settings && <Modal title={`${profile.name} 설정`} onClose={() => !busy && setSettings(false)}>
+      <form className="form-stack" onSubmit={e => {
+        e.preventDefault();
+        const form = new FormData(e.currentTarget);
+        void run(async () => {
+          await action({ type: 'workspace', action: { type: 'persona', profile_id: profile.id, persona: String(form.get('persona')) } });
+          const voice = form.get('voice') === 'on';
+          const web = form.get('web') === 'on';
+          const memory = form.get('memory') === 'on';
+          const worker = form.get('worker') === 'on';
+          const codeWorker = form.get('code_worker') === 'on';
+          if (voice !== (profile.policy.voice === true) || web !== (profile.policy.web === true) || memory !== (profile.policy.memory === true) || worker !== (profile.policy.external_worker === true) || codeWorker !== (profile.policy.code_worker === true)) {
+            await action({ type: 'workspace', action: { type: 'policy', profile_id: profile.id, policy: { ...profile.policy, voice, web, memory, external_worker: worker, code_worker: codeWorker } } });
+          }
+          setSettings(false);
+        });
+      }}>
+        <div className="settings-avatar"><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={84}/><h3>{profile.name}</h3><button type="button" className="button secondary" onClick={() => { setSettings(false); navigate(`/settings?tab=pets&ghost=${encodeURIComponent(profile.id)}`); }}>아바타 변경</button></div>
+        <label>{uiTerms.roleInstructions}<textarea name="persona" defaultValue={profile.persona} rows={4} maxLength={4096} required/></label>
+        <label className="checkbox-row"><input type="checkbox" name="voice" defaultChecked={profile.policy.voice === true}/>이 Ghost와 음성으로 대화</label>
+        <p className="field-help">선택한 로컬 STT·TTS 모델을 사용합니다. 마이크 권한은 통화를 시작할 때 요청합니다.</p>
+        <label className="checkbox-row"><input type="checkbox" name="web" defaultChecked={profile.policy.web === true}/>공개 웹 검색과 페이지 읽기 허용</label>
+        <p className="field-help">설정된 OxiBrowser CLI만 사용합니다. 검색어는 DuckDuckGo에 전달됩니다.</p>
+        <label className="checkbox-row"><input type="checkbox" name="memory" defaultChecked={profile.policy.memory === true}/>이 Ghost의 기억 읽기와 저장 허용</label>
+        <p className="field-help">호스트에 연결한 기억 공간만 사용합니다. 주 Ghost의 개인 기억은 허용된 로컬 추론에서만 읽고 저장하며, 모델 요약은 검수된 사실이 아닙니다.</p>
+        <label className="checkbox-row"><input type="checkbox" name="worker" defaultChecked={profile.policy.external_worker === true}/>OMP 구독 분석 작업자 허용</label>
+        <p className="field-help">일반 개발·조사만 보내고 금융 원장·자격 증명·민감 기록은 제외하세요. 호스트에 등록한 MiniMax Code 모델로 요청문을 전송합니다. 운영체제 수준의 파일 격리는 아닙니다. Codex 작업자와 합산해 UTC 기준 하루 Ghost당 4회, 이 호스트 전체 12회로 제한합니다.</p>
+        <label className="checkbox-row"><input type="checkbox" name="code_worker" defaultChecked={profile.policy.code_worker === true}/>Codex 구독 코드 작업자 허용</label>
+        <p className="field-help">허용 목록의 저장소에서 커밋된 HEAD만 임시 복제해 편집합니다. 원본 checkout에는 반영하지 않고, macOS workspace-write 샌드박스와 명령 네트워크·웹 검색·MCP·사용자 환경 상속 비활성 상태로 실행합니다. 결과 패치를 검토한 뒤 별도로 적용하세요. 코드와 요청은 Codex 구독으로 OpenAI에 전송되므로 금융 자료·자격 증명·민감 기록은 보내지 마세요.</p>
+        <div className="permission-summary"><span>현재 허용된 도구</span><p>{Object.entries(profile.policy).filter(([k,v]) => ['browser','shell','memory','delegation','voice','web','external_worker','code_worker'].includes(k) && v === true).map(([k]) => ({ browser: '브라우저', shell: '셸', memory: '기억', delegation: '위임', voice: '음성', web: '웹 검색·읽기', external_worker: 'OMP 분석 작업자', code_worker: 'Codex 코드 작업자' }[k])).join(' · ') || '설정된 도구가 없습니다'}</p></div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="button primary full-width" disabled={busy}>{busy ? '저장 중…' : '설정 저장'}</button>
+      </form>
+    </Modal>}
+    {schedule && conversation && <Modal title={`${uiTerms.schedules} 예약`} onClose={() => !busy && setSchedule(false)}><form className="form-stack" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void run(async () => { await action({ type: 'add_schedule', profile_id: profile.id, conversation_id: conversation.id, prompt: String(f.get('prompt')), interval_seconds: Number(f.get('interval')) }); setSchedule(false); }); }}><label>반복할 일<textarea name="prompt" placeholder="새로운 소식이 있으면 요약해줘." rows={3} maxLength={8192} required/></label><label>반복 간격<select name="interval" defaultValue="86400"><option value="3600">1시간마다</option><option value="86400">하루마다</option><option value="604800">일주일마다</option></select></label><p className="field-help">첫 실행은 선택한 간격 이후입니다.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="button primary" disabled={busy}>{busy ? '저장 중…' : '반복 작업 예약'}</button></form></Modal>}
   </div>;
 }
 

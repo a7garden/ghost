@@ -1,14 +1,18 @@
+import { routeLabels, uiTerms } from './uiText';
 import { ArcProvider } from '@garden/arc';
-import { Tooltip as ArcTooltip } from '@garden/arc/tooltip';
 import '@garden/arc/styles.css';
 import './arc-adoption.css';
+import { GTitleBar } from '@garden/ui';
+import './desktop-titlebar.css';
 import { AvatarProvider } from './pets/AvatarProvider';
 import { Settings } from './pets/Settings';
 import { FloatingPet } from './pets/FloatingPet';
 import { usePreferences } from './pets/preferences';
-import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, ChevronRight, CircleHelp, FileText, Folder, Home, Inbox, LayoutList, Menu, Plus, Search, Settings2, X, ArrowUp, Check, RefreshCw, CircleAlert, Monitor, CalendarDays, Plug } from 'lucide-react';
-import { DotAvatar, GhostMark } from './components/DotAvatar';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { ArrowUpRight, ChevronRight, FileText, Folder, LayoutList, PanelLeft, Plus, Search, X, ArrowUp, Check, RefreshCw, CircleAlert, Monitor } from 'lucide-react';
+import { DotAvatar } from './components/DotAvatar';
+import { WorkspaceSidebar } from './components/WorkspaceSidebar';
+import { usePanelState } from './components/usePanelState';
 import { Modal } from './components/Modal';
 import { Status } from './components/Status';
 import { Planner } from './features/Planner';
@@ -17,13 +21,22 @@ import { Overview } from './features/Overview';
 import { DotDetail } from './features/DotDetail';
 import { WorkView, InboxView, SpacesView } from './features/WorkViews';
 import { connect } from './client/api';
+import { searchWorkspace } from './client/searchIndex';
+import { inboxItems } from './client/inbox';
 import type { Client } from './client/types';
 import { useWorkspace } from './client/useWorkspace';
-import { dotState, toneFor } from './client/types';
+import { toneFor } from './client/types';
 import type { Profile, Review } from './client/types';
-import { GitBranch } from 'lucide-react';
 import { CollaborationView } from './features/CollaborationView';
 import { CollaborateForm } from './features/CollaborateForm';
+import { LifetimeRoute } from './features/LifetimeRoute';
+import { LegacyTranscript, legacyHistoryPath, legacyHistoryRequested } from './features/LegacyTranscript';
+
+const lifetimeEnabled = import.meta.env.VITE_GHOST_LIFETIME === 'true';
+
+// Tauri 웹뷰는 모든 내비게이션에 __TAURI_INTERNALS__를 주입한다. 브라우저 콘솔에는
+// 없으므로 커스텀 타이틀바와 높이 보정은 데스크톱 창에서만 적용된다.
+const desktopShell = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 const currentRoute = () => location.hash.replace(/^#/, '').replace(/^\/dots\//, '/ghosts/') || '/';
 export function App({ connectClient = connect }: { connectClient?: () => Promise<Client> } = {}) {
@@ -34,58 +47,107 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const [assignedProfile, setAssignedProfile] = useState(''), [search, setSearch] = useState('');
   const assignmentConversation = useRef<Record<string, string>>({});
   const [collaborate, setCollaborate] = useState(false);
+  const [navigationCollapsed, setNavigationCollapsed] = usePanelState('ghost-ui:navigation-collapsed');
+  const [desktopNavigation, setDesktopNavigation] = useState(() => window.matchMedia('(min-width: 56rem)').matches);
+  useEffect(() => { const media = window.matchMedia('(min-width: 56rem)'); const change = () => { setDesktopNavigation(media.matches); if (media.matches) setMobileOpen(false); }; media.addEventListener('change', change); return () => media.removeEventListener('change', change); }, []);
+  const focusNavigation = () => requestAnimationFrame(() => document.querySelector<HTMLElement>('.main-shell .navigation-toggle')?.focus());
+  const closeNavigation = () => { setMobileOpen(false); focusNavigation(); };
+  const navigationOpen = desktopNavigation ? !navigationCollapsed : mobileOpen;
+  const toggleNavigation = () => desktopNavigation ? setNavigationCollapsed(!navigationCollapsed) : setMobileOpen(!mobileOpen);
   const initialSelection = useRef(Boolean(location.hash));
   useEffect(() => {
     if (!initialSelection.current && snapshot) {
       initialSelection.current = true;
-      if (snapshot.profiles[0]) { const next = `/ghosts/${snapshot.profiles[0].id}`; location.hash = next; setRoute(next); }
+      if (lifetimeEnabled && mode === 'live') { location.hash = '/lifetime'; setRoute('/lifetime'); }
+      else if (snapshot.profiles[0]) { const next = `/ghosts/${snapshot.profiles[0].id}`; location.hash = next; setRoute(next); }
     }
-  }, [snapshot]);
+  }, [snapshot, mode]);
   useEffect(() => { const change = () => { setRoute(currentRoute()); setMobileOpen(false); }; window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
   useEffect(() => { const key = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); location.hash = '/settings?tab=appearance'; } if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setSearch(''); setDialog('search'); } }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, []);
   useEffect(() => { setFormError(''); }, [dialog, review]);
-  const navigate = (path: string) => { window.scrollTo(0, 0); location.hash = path; setRoute(path); setMobileOpen(false); };
+  const navigate = (path: string) => { window.scrollTo(0, 0); location.hash = path; setRoute(path); setMobileOpen(false); if (mobileOpen) focusNavigation(); };
   const dotId = route.startsWith('/ghosts/') ? route.split('/')[2].split('?')[0] : null;
   const dot = snapshot?.profiles.find(p => p.id === dotId);
   const section = route.startsWith('/spaces') ? 'spaces' : route.split('/')[1]?.split('?')[0] || 'home';
   useEffect(() => { window.scrollTo(0, 0); }, [section, dotId]);
-  const pending = snapshot?.reviews.filter(r => ['pending', 'approved'].includes(r.state)) ?? [];
-  const assign = (p?: Profile) => { setAssignedProfile(p?.id ?? snapshot?.profiles[0]?.id ?? ''); setDialog('assign'); };
+  const inbox = snapshot ? inboxItems(snapshot, !error) : null;
+  const pending = inbox?.reviews ?? [];
+  const attentionCount = inbox?.count ?? 0;
+  const assign = (p?: Profile) => {
+    if (lifetimeEnabled && mode === 'live') { navigate(p ? `/lifetime?ghost=${encodeURIComponent(p.id)}` : '/lifetime'); return; }
+    setAssignedProfile(p?.id ?? snapshot?.profiles[0]?.id ?? ''); setDialog('assign');
+  };
   const selectedSpace = route.startsWith('/spaces/') ? route.split('/')[2] : snapshot?.spaces[0]?.id;
-  const label = dot?.name ?? ({ home: '전체 보기', settings: '설정', inbox: '내 확인', work: '맡은 일', together: '함께 하는 일', planner: '할 일과 일정', integrations: '연동', spaces: '문서 공간', ghosts: 'Ghost' }[section] || '전체 보기');
+  const addGhost = () => { if (lifetimeEnabled && mode === 'live') navigate('/lifetime?create=1'); else setDialog('add'); };
+  const label = dot?.name ?? routeLabels[section as keyof typeof routeLabels] ?? '찾을 수 없는 화면';
+  const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, together: true, planner: true, integrations: true, settings: true };
+  const searchHits = snapshot ? searchWorkspace(snapshot, search) : [];
+  const [searchActive, setSearchActive] = useState(0);
+  const searchIndex = Math.min(searchActive, Math.max(searchHits.length - 1, 0));
+  useEffect(() => { setSearchActive(0); }, [dialog, search]);
+  useEffect(() => { document.getElementById(`search-hit-${searchIndex}`)?.scrollIntoView({ block: 'nearest' }); }, [searchIndex, searchHits.length, dialog]);
+  const searchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    const last = searchHits.length - 1;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      setSearchActive(i => e.key === 'ArrowDown' ? Math.min(i + 1, last) : e.key === 'ArrowUp' ? Math.max(i - 1, 0) : e.key === 'Home' ? 0 : last);
+    } else if (e.key === 'Enter') {
+      const hit = searchHits[searchIndex];
+      if (hit) { e.preventDefault(); setDialog(null); navigate(hit.path); }
+    }
+  };
   const close = () => { if (!busy) { setDialog(null); setReview(null); } };
   const safe = async (fn: () => Promise<void>) => { setFormError(''); try { await fn(); } catch (e) { setFormError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다. 다시 시도해 주세요.'); } };
-  const sidebar = <>
-    <button className="brand" aria-label="Ghost 전체 보기" onClick={() => navigate('/')}><GhostMark/><span>ghost</span><span className="brand-workspace">개인 작업실</span></button>
-    <button className="sidebar-search" onClick={() => { setDialog('search'); setMobileOpen(false); }}><Search size={17}/><span>작업실 검색</span><kbd>⌘ K</kbd></button>
-    <nav className="primary-nav" aria-label="주 탐색">{[{ path: '/', key: 'home', name: '전체 보기', Icon: Home }, { path: '/inbox', key: 'inbox', name: '내 확인', Icon: Inbox }, { path: '/work', key: 'work', name: '맡은 일', Icon: LayoutList }, { path: '/together', key: 'together', name: '함께 하는 일', Icon: GitBranch }, { path: '/planner', key: 'planner', name: '할 일과 일정', Icon: CalendarDays }, { path: '/integrations', key: 'integrations', name: '연동', Icon: Plug }].map(({ path, key, name, Icon }) => <button key={key} className={`nav-row ${section === key ? 'selected' : ''}`} onClick={() => navigate(path)} aria-current={section === key ? 'page' : undefined}><Icon size={17}/><span>{name}</span>{key === 'inbox' && pending.length > 0 && <span className="nav-count">{pending.length}</span>}</button>)}</nav>
-    <div className="sidebar-section"><div className="sidebar-label"><span>나의 Ghost</span><button className="icon-button small" aria-label="새 Ghost 만들기" onClick={() => { setDialog('add'); setMobileOpen(false); }}><Plus size={15}/></button></div><nav aria-label="나의 Ghost">{snapshot?.profiles.map(p => <button key={p.id} className={`nav-row dot-nav ${dotId === p.id ? 'selected' : ''}`} onClick={() => navigate(`/ghosts/${p.id}`)} aria-current={dotId === p.id ? 'page' : undefined}><DotAvatar profileId={p.id} tone={toneFor(p.id)} size={30}/><span>{p.name}</span><span className={`nav-status state-${dotState(p, pending)}`} aria-label={dotState(p, pending) === 'attention' ? '확인 필요' : undefined}/></button>)}</nav></div>
-    <div className="sidebar-section"><div className="sidebar-label"><span>문서 공간</span><Folder size={14}/></div><nav aria-label="문서 공간">{snapshot?.spaces.map(s => <button key={s.id} className={`nav-row ${selectedSpace === s.id && section === 'spaces' ? 'selected' : ''}`} onClick={() => navigate(`/spaces/${s.id}`)}><Folder size={16}/><span>{s.name}</span></button>)}{!snapshot?.spaces.length && <button className="nav-row" onClick={() => navigate('/spaces')}><Folder size={16}/><span>문서 공간 보기</span></button>}</nav></div>
-    <div className="sidebar-bottom"><button className={`nav-row ${section === 'settings' ? 'selected' : ''}`} aria-current={section === 'settings' ? 'page' : undefined} onClick={() => navigate(`/settings?tab=appearance${dotId ? `&ghost=${encodeURIComponent(dotId)}` : ''}`)}><Settings2 size={17}/><span>앱 설정</span></button>{(error || mode === 'demo') && <button className="connection-row" onClick={() => setDialog('connection')}><span className={`connection-light ${error ? 'disconnected' : ''}`}/><span>{error ? '연결 확인 필요' : '예시 작업실'}</span><Settings2 size={15}/></button>}<div className="owner-row"><div className="owner-avatar">G</div><div><strong>나의 워크스페이스</strong><span>{mode === 'demo' ? '인터랙티브 미리보기' : '나만의 에이전트 팀'}</span></div><ArcTooltip content="작업실 연결 안내"><button className="icon-button" aria-label="연결 안내" onClick={() => setDialog('connection')}><CircleHelp size={17}/></button></ArcTooltip></div></div>
-  </>;
-  return <ArcProvider theme={resolvedTheme} density="compact" motion={preferences.animate ? 'user' : 'reduce'} className="ghost-arc"><AvatarProvider key={snapshot?.workspace_id ?? 'loading'} snapshot={snapshot} query={query} animate={preferences.animate}><div className="app-shell">
-    <aside className="sidebar">{sidebar}</aside>
-    <div className={`main-shell ${dot ? 'chat-shell' : ''}`}>{!dot && <header className="topbar"><div className="breadcrumbs"><button className="icon-button mobile-toggle" aria-label="탐색 메뉴 열기" onClick={() => setMobileOpen(true)}><Menu size={19}/></button><button onClick={() => navigate('/')} className="breadcrumb-root">작업실</button><ChevronRight size={13}/><span>{label}</span></div><div className="topbar-actions">{mode === 'demo' && <span className="mode-badge"><i/>예시 모드</span>}</div></header>}
+  const sidebar = <WorkspaceSidebar snapshot={snapshot} route={route} section={section} dotId={dotId} selectedSpace={selectedSpace} pending={pending} attentionCount={attentionCount} mode={mode} error={error} lifetimeEnabled={lifetimeEnabled} navigate={navigate} onSearch={() => { setSearch(''); setDialog('search'); setMobileOpen(false); }} onAdd={() => { addGhost(); setMobileOpen(false); }} onConnection={() => { setDialog('connection'); setMobileOpen(false); }} onCollapse={() => { setNavigationCollapsed(true); focusNavigation(); }}/>;
+  const lifetimeScreen = (path: string) => snapshot && <LifetimeRoute route={path} legacyGhostIDs={snapshot.profiles.map(profile => profile.id)} onOpenHistory={ghost => { if (snapshot.profiles.some(profile => profile.id === ghost)) navigate(legacyHistoryPath(ghost, dotId === ghost ? new URLSearchParams(route.split('?')[1] ?? '').get('conversation') ?? undefined : undefined)); }} action={workspace.lifetimeAction} memoryAction={action} workspaceId={snapshot.workspace_id} authority={snapshot.lifetime_authority} mode={mode} documentReviews={snapshot.reviews} documentAuthorityEpoch={snapshot.lifetime_authority?.authority_epoch} onOpenDocumentReview={setReview}/>;
+  return <ArcProvider theme={resolvedTheme} density="compact" motion={preferences.animate ? 'user' : 'reduce'} className="ghost-arc"><AvatarProvider key={snapshot?.workspace_id ?? 'loading'} snapshot={snapshot} query={query} animate={preferences.animate}>{desktopShell && <GTitleBar className="ghost-desktop-titlebar" aria-label="Ghost" macOSInset={80} left={<span className="ghost-desktop-titlebar__title">Ghost</span>}/>}<div className={`app-shell ${navigationCollapsed ? 'navigation-collapsed' : ''} ${desktopShell ? 'app-shell--desktop' : ''}`}>
+    <aside className="sidebar" aria-label="작업실 탐색">{sidebar}</aside>
+    <div className={`main-shell ${dot ? 'chat-shell' : ''}`}>{!dot && <header className="topbar"><div className="breadcrumbs"><button className="icon-button navigation-toggle" aria-label={navigationOpen ? '탐색 사이드바 숨기기' : '탐색 사이드바 보기'} aria-expanded={navigationOpen} onClick={toggleNavigation}><PanelLeft size={17}/></button><button onClick={() => navigate('/')} className="breadcrumb-root">작업실</button><ChevronRight size={13}/><span>{label}</span></div><div className="topbar-actions">{mode === 'demo' && <span className="mode-badge"><i/>예시 모드</span>}</div></header>}
       {error && <div className="connection-error" role="alert"><CircleAlert size={17}/><span>{error}</span><button className="text-button" onClick={reconnect}><RefreshCw size={14}/>다시 연결</button></div>}
       {!snapshot ? <main className="page-content loading-content" aria-busy={!error}><div className="skeleton heading-skeleton"/><div className="skeleton description-skeleton"/><div className="dot-grid">{[0, 1, 2, 3].map(i => <div className="skeleton dot-skeleton" key={i}/>)}</div>{error && <p>연결되면 저장된 Ghost와 작업을 표시합니다.</p>}</main> : <main id="main-content" className={dot ? 'detail-main' : ''}>
         {section === 'settings' && <Settings snapshot={snapshot} route={route} navigate={navigate} action={action} busy={busy} mode={mode} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError}/>}
-        {section === 'home' && <Overview snapshot={snapshot} mode={mode} navigate={navigate} onReview={setReview} onAdd={() => setDialog('add')} onAssign={assign}/>}
-        {section === 'ghosts' && (dot ? <DotDetail key={dot.id} profile={dot} snapshot={snapshot} mode={mode} action={action} busy={busy} connected={!error} routing={workspace.routing} navigate={navigate} route={route} onReview={setReview} onOpenNavigation={() => setMobileOpen(true)}/> : <div className="empty-state"><CircleAlert size={28}/><h1>이 Ghost를 찾을 수 없어요</h1><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>)}
+        {section === 'home' && <Overview snapshot={snapshot} mode={mode} connected={!error} navigate={navigate} onReview={setReview} onAdd={addGhost} onAssign={assign}/>}
+        {section === 'ghosts' && (dot ? lifetimeEnabled && mode === 'live' ? legacyHistoryRequested(route) ? <LegacyTranscript profile={dot} route={route} navigate={navigate}/> : lifetimeScreen(`/lifetime?ghost=${encodeURIComponent(dot.id)}`) : <DotDetail key={dot.id} profile={dot} snapshot={snapshot} mode={mode} action={action} busy={busy} connected={!error} routing={workspace.routing} navigate={navigate} route={route} onReview={setReview} onOpenNavigation={toggleNavigation} navigationOpen={navigationOpen}/> : <div className="empty-state"><CircleAlert size={28}/><h1>이 Ghost를 찾을 수 없습니다</h1><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>)}
         {section === 'work' && <WorkView snapshot={snapshot} action={action} busy={busy} navigate={navigate} onAssign={() => assign()}/>}
         {section === 'together' && <CollaborationView snapshot={snapshot} route={route} mode={mode} action={action} query={query} busy={busy} navigate={navigate} onAssign={() => setCollaborate(true)}/>}
         {section === 'planner' && <Planner snapshot={snapshot} action={action} query={query} busy={busy} connected={!error}/>}
         {section === 'integrations' && <Integrations snapshot={snapshot} action={action} busy={busy} mode={mode} navigate={navigate}/>}
         {section === 'inbox' && <InboxView snapshot={snapshot} onReview={setReview} navigate={navigate} connected={!error}/>}
-        {section === 'spaces' && <SpacesView key={selectedSpace ?? 'empty'} snapshot={snapshot} selectedSpace={selectedSpace} action={query} navigate={navigate}/>}
+        {section === 'spaces' && <SpacesView key={selectedSpace ?? 'empty'} snapshot={snapshot} selectedSpace={selectedSpace} action={query} navigate={navigate} theme={resolvedTheme}/>}
+        {section === 'lifetime' && lifetimeEnabled && lifetimeScreen(route)}
+        {!knownSections[section] && !(section === 'lifetime' && lifetimeEnabled) && <div className="empty-state"><CircleAlert size={28}/><h1>이 화면을 찾을 수 없습니다</h1><p className="muted">주소가 이동했거나 잘못되었을 수 있습니다.</p><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>}
       </main>}
     </div>
-    {mobileOpen && <Modal title="작업실 탐색" onClose={() => setMobileOpen(false)} className="mobile-nav-dialog"><div className="mobile-sidebar">{sidebar}</div></Modal>}
+    {mobileOpen && <Modal title="작업실 탐색" onClose={closeNavigation} drawer className="mobile-nav-dialog"><div className="mobile-sidebar">{sidebar}</div></Modal>}
     {collaborate && snapshot && <CollaborateForm snapshot={snapshot} action={action} busy={busy} mode={mode} onClose={() => !busy && setCollaborate(false)} onCreated={path => { setCollaborate(false); navigate(path); }}/>} 
-    {dialog === 'add' && <Modal title="Ghost 만들기" onClose={close}><form className="form-stack" onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); void safe(async () => { const result = await action({ type: 'create_profile', name: String(data.get('name')), persona: String(data.get('persona')) }); setDialog(null); navigate(`/ghosts/${result.profile_id}`); }); }}><div className="new-dot-illustration"><DotAvatar tone="mint" size={94}/><DotAvatar tone="lilac" size={74}/></div><label>Ghost 이름<input name="name" placeholder="예: Scout" required maxLength={64} pattern="[A-Za-z0-9_-]+" autoComplete="off"/><span className="field-help">영문, 숫자, 밑줄과 하이픈을 사용할 수 있어요.</span></label><label>맡길 역할<textarea name="persona" placeholder="자료를 조사하고, 확인한 근거와 함께 요약합니다." required maxLength={4096} rows={3}/></label>{formError && <p className="form-error" role="alert">{formError}</p>}<button className="button primary full-width" disabled={busy}>{busy ? '만드는 중…' : 'Ghost 만들기'}<Plus size={16}/></button></form></Modal>}
-    {dialog === 'assign' && snapshot && <Modal title="새로운 일 맡기기" onClose={close}><form className="form-stack" onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); void safe(async () => { const p = snapshot.profiles.find(p => p.id === assignedProfile); if (!p) throw new Error('함께할 Ghost를 선택해 주세요.'); let cid = assignmentConversation.current[p.id]; if (!cid) { const created = await action({ type: 'create_conversation', profile_id: p.id, model: snapshot.default_model, tools: true }); cid = created.conversation_id; assignmentConversation.current[p.id] = cid; } await action({ type: 'submit', profile_id: p.id, conversation_id: cid, prompt: String(data.get('prompt')), kind: 'prompt' }); delete assignmentConversation.current[p.id]; setDialog(null); navigate(`/ghosts/${p.id}?conversation=${cid}`); }); }}><label>함께할 Ghost<select value={assignedProfile} onChange={e => setAssignedProfile(e.target.value)} disabled={busy}>{snapshot.profiles.map(p => <option key={p.id} value={p.id}>{p.name} · {p.persona.slice(0, 24)}</option>)}</select></label><label>어떤 결과가 필요한가요?<textarea name="prompt" rows={5} placeholder="하고 싶은 일과 원하는 결과를 알려주세요." required maxLength={8192}/></label><p className="field-help">선택한 Ghost의 새 대화에서 진행합니다. 현재 허용된 도구와 권한이 적용돼요.</p>{formError && <p className="form-error" role="alert">{formError}</p>}<button className="button primary full-width" disabled={busy || !assignedProfile}>{busy ? '요청 저장 중…' : '일 맡기기'}<ArrowUp size={16}/></button></form></Modal>}
-    {dialog === 'search' && snapshot && <Modal title="작업실에서 찾기" onClose={close} className="search-dialog"><label className="search-field"><Search size={18}/><input aria-label="작업실 검색" placeholder="Ghost, 맡은 일, 문서 공간 검색" value={search} onChange={e => setSearch(e.target.value)}/></label><div className="search-results">{snapshot.profiles.filter(p => `${p.name} ${p.persona}`.toLowerCase().includes(search.toLowerCase())).map(p => <button key={p.id} onClick={() => { setDialog(null); navigate(`/ghosts/${p.id}`); }}><DotAvatar profileId={p.id} tone={toneFor(p.id)} size={36}/><span><strong>{p.name}</strong><small>{p.persona}</small></span><ArrowUpRight size={16}/></button>)}{snapshot.goals.filter(g => g.title.toLowerCase().includes(search.toLowerCase())).map(g => <button key={g.id} onClick={() => { setDialog(null); navigate('/work'); }}><LayoutList size={18}/><span>{g.title}</span><ArrowUpRight size={16}/></button>)}{snapshot.spaces.filter(s => s.name.toLowerCase().includes(search.toLowerCase())).map(s => <button key={s.id} onClick={() => { setDialog(null); navigate(`/spaces/${s.id}`); }}><Folder size={18}/><span>{s.name}</span><ArrowUpRight size={16}/></button>)}{![...snapshot.profiles.map(p => p.name + ' ' + p.persona), ...snapshot.goals.map(g => g.title), ...snapshot.spaces.map(s => s.name)].some(v => v.toLowerCase().includes(search.toLowerCase())) && <p className="quiet-empty">다른 이름이나 단어로 찾아보세요.</p>}</div></Modal>}
-    {dialog === 'connection' && <Modal title="작업실 연결" onClose={close}><div className="form-stack"><div className="connection-illustration"><Monitor size={36}/></div><h3>{mode === 'demo' ? '지금은 예시 작업실이에요' : '로컬 Ghost 호스트를 사용하고 있어요'}</h3><p className="muted">{mode === 'demo' ? '여기 있는 Ghost와 작업은 UI를 살펴보기 위한 예시입니다. 대화, 검토, 예약 변경은 이 브라우저의 예시에만 반영됩니다.' : 'Ghost의 역할, 대화와 맡은 일은 호스트에 저장됩니다. 호스트가 실행 중이면 화면을 닫아도 작업이 이어집니다.'}</p><div className="connection-detail"><span>상태</span><strong>{error ? '다시 연결 필요' : mode === 'demo' ? '예시 모드' : '연결됨'}</strong></div><button className="button secondary" onClick={reconnect}><RefreshCw size={16}/>연결 다시 확인</button></div></Modal>}
-    {review && snapshot && <Modal title="저장 전 검토" onClose={close} drawer><div className="review-content"><div className="review-byline"><DotAvatar profileId={review.profile_id} tone={toneFor(review.profile_id)} size={42}/><div><strong>{snapshot.profiles.find(p => p.id === review.profile_id)?.name ?? 'Ghost'}의 제안</strong><span>{snapshot.spaces.find(s => s.id === review.space_id)?.name ?? '문서 공간'}에 저장</span></div><Status state="attention" label="검토 대기"/></div><h2>{review.title}</h2><div className="document-paper"><pre>{review.body}</pre></div></div><div className="drawer-footer">{formError && <p className="form-error" role="alert">{formError}</p>}<p>내용을 확인하고 저장 여부를 결정해 주세요.</p><div><button className="button secondary" disabled={busy} onClick={() => void safe(async () => { await action({ type: 'workspace', action: { type: 'decide_review', review_id: review.id, approve: false } }); setReview(null); })}>저장하지 않음</button><button className="button primary" disabled={busy} onClick={() => void safe(async () => { await action({ type: 'workspace', action: { type: 'decide_review', review_id: review.id, approve: true } }); setReview(null); })}>{busy ? '처리 중…' : '승인하고 저장'}<Check size={16}/></button></div></div></Modal>}
+    {dialog === 'add' && <Modal title="Ghost 만들기" onClose={close}><form className="form-stack" onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); void safe(async () => { const result = await action({ type: 'create_profile', name: String(data.get('name')), persona: String(data.get('persona')) }); setDialog(null); navigate(`/ghosts/${result.profile_id}`); }); }}><div className="new-dot-illustration"><DotAvatar tone="mint" size={94}/><DotAvatar tone="lilac" size={74}/></div><label>Ghost 이름<input name="name" placeholder="예: Scout" required maxLength={64} pattern="[A-Za-z0-9_-]+" autoComplete="off"/><span className="field-help">영문, 숫자, 밑줄과 하이픈을 사용할 수 있습니다.</span></label><label>{uiTerms.roleInstructions}<textarea name="persona" placeholder="자료를 조사하고, 확인한 근거와 함께 요약합니다." required maxLength={4096} rows={3}/></label>{formError && <p className="form-error" role="alert">{formError}</p>}<button className="button primary full-width" disabled={busy}>{busy ? '만드는 중…' : 'Ghost 만들기'}<Plus size={16}/></button></form></Modal>}
+    {dialog === 'assign' && snapshot && <Modal title="일 맡기기" onClose={close}><form className="form-stack" onSubmit={e => {
+      e.preventDefault();
+      const form = e.currentTarget;
+      const prompt = String(new FormData(form).get('prompt') ?? '');
+      void safe(async () => {
+        if (!prompt.trim()) {
+          (form.elements.namedItem('prompt') as HTMLTextAreaElement)?.focus();
+          throw new Error('맡길 일을 입력해 주세요.');
+        }
+        const p = snapshot.profiles.find(p => p.id === assignedProfile);
+        if (!p) throw new Error('담당 Ghost를 선택해 주세요.');
+        let cid = assignmentConversation.current[p.id];
+        if (!cid) {
+          const created = await action({ type: 'create_conversation', profile_id: p.id, model: snapshot.default_model, tools: true });
+          cid = created.conversation_id;
+          assignmentConversation.current[p.id] = cid;
+        }
+        await action({ type: 'submit', profile_id: p.id, conversation_id: cid, prompt, kind: 'prompt' });
+        delete assignmentConversation.current[p.id];
+        setDialog(null);
+        navigate(`/ghosts/${p.id}?conversation=${cid}`);
+      });
+    }}><label>담당 Ghost<select value={assignedProfile} onChange={e => setAssignedProfile(e.target.value)} disabled={busy}>{snapshot.profiles.map(p => <option key={p.id} value={p.id}>{p.name} · {p.persona.slice(0, 24)}</option>)}</select></label><label>어떤 결과가 필요한가요?<textarea name="prompt" rows={5} placeholder="하고 싶은 일과 원하는 결과를 알려주세요." required maxLength={8192}/></label><p className="field-help">선택한 Ghost의 새 대화에서 진행합니다. 현재 허용된 도구와 권한이 적용됩니다.</p>{formError && <p className="form-error" role="alert">{formError}</p>}<button className="button primary full-width" disabled={busy || !assignedProfile}>{busy ? '요청 저장 중…' : '일 맡기기'}<ArrowUp size={16}/></button></form></Modal>}
+    {dialog === 'search' && snapshot && <Modal title={`${uiTerms.workspace} 검색`} onClose={close} className="search-dialog"><label className="search-field"><Search size={18}/><input aria-label="작업실 검색" aria-activedescendant={`search-hit-${searchIndex}`} placeholder="Ghost, 맡긴 일, 문서 공간 검색" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={searchKeyDown}/></label><div className="search-results" role="listbox" aria-label="검색 결과" aria-activedescendant={`search-hit-${searchIndex}`}>{searchHits.map((hit, i) => <button key={`${hit.kind}:${hit.id}`} id={`search-hit-${i}`} role="option" aria-selected={i === searchIndex} className={i === searchIndex ? 'selected' : undefined} onClick={() => { setDialog(null); navigate(hit.path); }}>{hit.kind === 'ghost' && hit.profile_id ? <DotAvatar profileId={hit.profile_id} tone={toneFor(hit.profile_id)} size={36}/> : hit.kind === 'space' ? <Folder size={18}/> : <LayoutList size={18}/>}<span><strong>{hit.title}</strong>{hit.subtitle && <small>{hit.subtitle}</small>}</span><ArrowUpRight size={16}/></button>)}{!searchHits.length && <p className="quiet-empty">다른 이름이나 단어로 검색해 주세요.</p>}</div></Modal>}
+    {dialog === 'connection' && <Modal title="작업실 연결" onClose={close}><div className="form-stack"><div className="connection-illustration"><Monitor size={36}/></div><h3>{mode === 'demo' ? '예시 모드입니다' : '로컬 Ghost 호스트를 사용합니다'}</h3><p className="muted">{mode === 'demo' ? '여기 있는 Ghost와 작업은 UI를 살펴보기 위한 예시입니다. 대화, 문서 검토, 반복 작업 변경은 이 브라우저의 예시에만 반영됩니다.' : 'Ghost의 역할, 대화와 맡은 일은 호스트에 저장됩니다. 호스트가 실행 중이면 화면을 닫아도 작업이 이어집니다.'}</p><div className="connection-detail"><span>상태</span><strong>{error ? '다시 연결 필요' : mode === 'demo' ? '예시 모드' : '연결됨'}</strong></div><button className="button secondary" onClick={reconnect}><RefreshCw size={16}/>연결 다시 확인</button></div></Modal>}
+    {review && snapshot && <Modal title={`저장 전 ${uiTerms.reviews}`} onClose={close} drawer><div className="review-content"><div className="review-byline"><DotAvatar profileId={review.profile_id} tone={toneFor(review.profile_id)} size={42}/><div><strong>{snapshot.profiles.find(p => p.id === review.profile_id)?.name ?? 'Ghost'}의 제안</strong><span>{snapshot.spaces.find(s => s.id === review.space_id)?.name ?? '문서 공간'}에 저장</span></div><Status state="attention" label="검토 대기"/></div><h2>{review.title}</h2><p className="field-help">{review.page_id && review.expected_hash !== undefined ? `${review.expected_hash === null ? '새 문서 생성' : '기존 문서 수정'} · 대상 문서 ${review.page_id}` : '저장 대상 정보가 없습니다. 호스트의 제안을 다시 확인해 주세요.'}</p><pre className="garden-document-source-readonly"><code>{review.body}</code></pre></div><div className="drawer-footer">{formError && <p className="form-error" role="alert">{formError}</p>}<p>내용과 저장 대상을 확인하고 저장 여부를 결정해 주세요.</p><div><button className="button secondary" disabled={busy} onClick={() => void safe(async () => { await action({ type: 'workspace', action: { type: 'decide_review', review_id: review.id, approve: false } }); setReview(null); })}>저장하지 않음</button><button className="button primary" disabled={busy || !review.page_id || review.expected_hash === undefined} onClick={() => void safe(async () => { await action({ type: 'workspace', action: { type: 'decide_review', review_id: review.id, approve: true } }); setReview(null); })}>{busy ? '처리 중…' : '승인하고 저장'}<Check size={16}/></button></div></div></Modal>}
     {preferences.companion && !mobileOpen && section !== 'settings' && <FloatingPet profile={snapshot?.profiles.find(p => p.id === preferences.companionProfile) ?? snapshot?.profiles[0]} onOpen={() => { const p = snapshot?.profiles.find(p => p.id === preferences.companionProfile) ?? snapshot?.profiles[0]; if (p) navigate(`/ghosts/${p.id}`); }} onHide={() => updatePreferences({ companion: false })}/>}
   </div></AvatarProvider></ArcProvider>;
 }
