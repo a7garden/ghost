@@ -104,6 +104,27 @@ enum Cmd {
         #[command(subcommand)]
         c: ControlCmd,
     },
+    /// Send one prompt to the running host's main Ghost and print the reply.
+    #[cfg(feature = "host")]
+    Chat {
+        /// Prompt text; read from stdin when omitted.
+        prompt: Vec<String>,
+        /// Target Ghost profile name or id prefix (default: "primary", else the first).
+        #[arg(long)]
+        profile: Option<String>,
+        /// Existing conversation id (default: the profile's latest conversation).
+        #[arg(long)]
+        conversation: Option<String>,
+        /// Input kind for the turn (default: follow-up when the conversation has messages).
+        #[arg(long, default_value = "auto")]
+        kind: String,
+        /// Seconds to wait for the reply after admission.
+        #[arg(long, default_value_t = 300)]
+        timeout: u64,
+        /// Print the full JSON record instead of the plain reply text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Owner-approved daily wake schedules and briefings (G06).
     #[cfg(feature = "host")]
     Wake {
@@ -1244,6 +1265,347 @@ fn control_command(root: &std::path::Path, c: ControlCmd) -> Result<()> {
     }
 }
 
+/// Outcome of one admitted chat turn, after the entry task stops running.
+#[cfg(feature = "host")]
+struct ChatTurn {
+    profile_id: String,
+    conversation_id: String,
+    request_id: String,
+    task_id: String,
+    phase: String,
+    reply: String,
+}
+
+/// Send one canonical routing chat turn to a running host: routing_natural →
+/// routing_receipt → routing_admit, then poll the entry task for the reply.
+#[cfg(feature = "host")]
+fn chat_command(
+    root: &std::path::Path,
+    prompt: Vec<String>,
+    profile: Option<String>,
+    conversation: Option<String>,
+    kind: &str,
+    timeout: u64,
+    json: bool,
+) -> Result<()> {
+    use ghost::control::api::{Action, Command, RoutingAction, RoutingEntry};
+    use ghost::control::ControlClient;
+    use ghost::durable::durable::InputKind;
+
+    let mut raw = prompt.join(" ");
+    if raw.trim().is_empty() {
+        raw = std::io::read_to_string(std::io::stdin().lock())?;
+    }
+    let text = raw.trim().to_string();
+    if text.is_empty() {
+        anyhow::bail!("보낼 메시지가 비어 있습니다. 프롬프트를 인수나 표준 입력으로 넣어 주세요.");
+    }
+    anyhow::ensure!(
+        text.len() <= 8192,
+        "메시지가 너무 깁니다. 8192바이트 이하로 줄여 주세요."
+    );
+
+    let client = ControlClient::discover(root).context(
+        "실행 중인 Ghost 호스트를 찾지 못했습니다. `ghost serve`로 호스트를 시작한 뒤 다시 시도하세요.",
+    )?;
+    let snapshot = client.snapshot()?;
+    // The snapshot endpoint answers with the bare snapshot; only failures wrap.
+    if snapshot.get("ok").is_some_and(|ok| ok == false) {
+        anyhow::bail!(
+            "호스트 상태를 읽지 못했습니다: {}",
+            snapshot["error"].as_str().unwrap_or_default()
+        );
+    }
+    let profiles = snapshot["profiles"]
+        .as_array()
+        .context("호스트 응답에 Ghost 목록이 없습니다.")?;
+    let chosen = match profile.as_deref() {
+        Some(wanted) => profiles
+            .iter()
+            .find(|p| p["name"] == wanted)
+            .or_else(|| {
+                profiles
+                    .iter()
+                    .find(|p| p["id"].as_str().is_some_and(|id| id.starts_with(wanted)))
+            })
+            .with_context(|| format!("Ghost 프로필을 찾지 못했습니다: {wanted}"))?,
+        None => profiles
+            .iter()
+            .find(|p| p["name"] == "primary")
+            .or_else(|| profiles.first())
+            .context("등록된 Ghost가 없습니다.")?,
+    };
+    let profile_name = chosen["name"].as_str().unwrap_or_default().to_string();
+    let profile_id = chosen["id"]
+        .as_str()
+        .context("Ghost 프로필 id가 없습니다.")?
+        .to_string();
+    let conversations = chosen["conversations"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    let conversation_id = match conversation.as_deref() {
+        Some(id) => {
+            anyhow::ensure!(
+                conversations.iter().any(|c| c["id"] == id),
+                "대화를 찾지 못했습니다: {id}"
+            );
+            id.to_string()
+        }
+        // Conversation ids are UUIDv7, so the lexicographic maximum is newest.
+        None => match conversations
+            .iter()
+            .max_by_key(|c| c["id"].as_str().unwrap_or_default().to_string())
+        {
+            Some(c) => c["id"].as_str().context("대화 id가 없습니다.")?.to_string(),
+            None => {
+                let model = snapshot["default_model"]
+                    .as_str()
+                    .unwrap_or("mock")
+                    .to_string();
+                let reply = client.action(Action {
+                    request_id: uuid::Uuid::new_v4().to_string(),
+                    command: Command::CreateConversation {
+                        profile_id: profile_id.clone(),
+                        model,
+                        tools: true,
+                    },
+                })?;
+                if reply["ok"] == false {
+                    anyhow::bail!(
+                        "새 대화를 만들지 못했습니다: {}",
+                        reply["error"].as_str().unwrap_or_default()
+                    );
+                }
+                reply["result"]["conversation_id"]
+                    .as_str()
+                    .context("대화 생성 응답을 확인할 수 없습니다.")?
+                    .to_string()
+            }
+        },
+    };
+    let has_messages = conversations
+        .iter()
+        .find(|c| c["id"] == conversation_id)
+        .and_then(|c| c["messages"].as_array())
+        .is_some_and(|m| !m.is_empty());
+    let kind = match kind {
+        "auto" => {
+            if has_messages {
+                InputKind::FollowUp
+            } else {
+                InputKind::Prompt
+            }
+        }
+        "prompt" => InputKind::Prompt,
+        "follow-up" | "follow_up" => InputKind::FollowUp,
+        "steer" => InputKind::Steer,
+        other => anyhow::bail!("지원하지 않는 kind입니다: {other}"),
+    };
+
+    let entry = RoutingEntry {
+        profile_id: profile_id.clone(),
+        conversation_id: conversation_id.clone(),
+    };
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let natural = client.action(Action {
+        request_id: request_id.clone(),
+        command: Command::Routing {
+            action: RoutingAction::RoutingNatural {
+                entry: entry.clone(),
+                text: text.clone(),
+                kind,
+                resolves: Vec::new(),
+                clarification_target: None,
+            },
+        },
+    })?;
+    if natural["ok"] == false {
+        anyhow::bail!(
+            "요청을 접수하지 못했습니다: {}",
+            natural["error"].as_str().unwrap_or_default()
+        );
+    }
+    anyhow::ensure!(
+        natural["result"]["routing_pending"] == true,
+        "요청 접수 응답을 확인할 수 없습니다."
+    );
+    let task_id = natural["result"]["submission"]["task_id"]
+        .as_str()
+        .context("요청 접수 응답에 작업 id가 없습니다.")?
+        .to_string();
+
+    const RUNNING: [&str; 7] = [
+        "queued",
+        "model_ready",
+        "model_running",
+        "tools",
+        "tool_ready",
+        "tool_running",
+        "waiting_child",
+    ];
+    // One poll loop for classification and the reply: a plain chat turn ends
+    // with the entry task and no admission; a work turn surfaces a receipt
+    // that must be admitted so the proposal dispatches.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout.max(30));
+    let empty = Vec::<serde_json::Value>::new();
+    let mut admitted: Option<String> = None;
+    let (phase, reply_text, output) = loop {
+        if admitted.is_none() {
+            let receipt = client.action(Action {
+                request_id: uuid::Uuid::new_v4().to_string(),
+                command: Command::Routing {
+                    action: RoutingAction::RoutingReceipt {
+                        entry: entry.clone(),
+                        message_id: request_id.clone(),
+                    },
+                },
+            })?;
+            if receipt["ok"] == true && !receipt["result"].is_null() {
+                // Root proposal items mirror the console: one item per anchor segment.
+                let admission = receipt["result"]["admission"].clone();
+                let items = admission["items"]
+                    .as_array()
+                    .context("작업 분류 결과를 확인할 수 없습니다.")?;
+                let proposal_items: Vec<serde_json::Value> = items
+                    .iter()
+                    .filter(|item| {
+                        !item["segment_id"].is_null()
+                            && item["segment_id"] == item["group_anchor_segment_id"]
+                    })
+                    .map(|item| {
+                        let additional: Vec<&str> = items
+                            .iter()
+                            .filter(|m| {
+                                m["group_anchor_segment_id"] == item["group_anchor_segment_id"]
+                                    && m["segment_id"] != item["segment_id"]
+                            })
+                            .filter_map(|m| m["segment_id"].as_str())
+                            .collect();
+                        serde_json::json!({
+                            "segment_id": item["segment_id"],
+                            "additional_segment_ids": additional,
+                            "operation": item["operation"],
+                        })
+                    })
+                    .collect();
+                let admit = client.action(Action {
+                    request_id: request_id.clone(),
+                    command: Command::Routing {
+                        action: RoutingAction::RoutingAdmit {
+                            entry: entry.clone(),
+                            text: admission["input"]["text"]
+                                .as_str()
+                                .unwrap_or(&text)
+                                .to_string(),
+                            segments: serde_json::from_value(
+                                admission["input"]["segments"].clone(),
+                            )?,
+                            resolves: serde_json::from_value(
+                                admission["input"]["resolves"].clone(),
+                            )?,
+                            proposal: serde_json::from_value(serde_json::json!({
+                                "schema": ghost::host::work_routing::PROPOSAL_SCHEMA,
+                                "items": proposal_items,
+                            }))?,
+                        },
+                    },
+                })?;
+                if admit["ok"] == false {
+                    anyhow::bail!(
+                        "작업 접수가 거부됐습니다: {}",
+                        admit["error"].as_str().unwrap_or_default()
+                    );
+                }
+                admitted = admission["id"].as_str().map(str::to_string);
+            }
+        }
+        let snapshot = client.snapshot()?;
+        let conversation = snapshot["profiles"]
+            .as_array()
+            .unwrap_or(&empty)
+            .iter()
+            .find(|p| p["id"] == profile_id)
+            .and_then(|p| p["conversations"].as_array())
+            .and_then(|cs| cs.iter().find(|c| c["id"] == conversation_id));
+        let task = conversation
+            .and_then(|c| c["tasks"].as_array())
+            .and_then(|ts| ts.iter().find(|t| t["id"] == task_id));
+        let phase = task
+            .and_then(|t| t["phase"].as_str())
+            .unwrap_or("queued")
+            .to_string();
+        if !RUNNING.contains(&phase.as_str()) {
+            // Assistant text of this task only: a failed turn must not echo
+            // the previous turn's answer.
+            let text = conversation
+                .and_then(|c| c["messages"].as_array())
+                .and_then(|ms| {
+                    ms.iter().rev().find(|m| {
+                        m["role"] == "assistant"
+                            && m["task_id"] == task_id
+                            && m["text"].as_str().is_some_and(|t| !t.trim().is_empty())
+                    })
+                })
+                .and_then(|m| m["text"].as_str())
+                .unwrap_or_default()
+                .to_string();
+            let output = task
+                .and_then(|t| t["output"].as_str())
+                .unwrap_or_default()
+                .to_string();
+            break (phase, text, output);
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "{timeout}초 안에 답이 끝나지 않았습니다. 작업 {task_id} 는 계속 진행 중입니다."
+        );
+        std::thread::sleep(std::time::Duration::from_millis(900));
+    };
+    let turn = ChatTurn {
+        profile_id,
+        conversation_id,
+        request_id,
+        task_id,
+        phase,
+        reply: if reply_text.is_empty() {
+            output
+        } else {
+            reply_text
+        },
+    };
+
+    if json {
+        emit(&serde_json::json!({
+            "profile": profile_name,
+            "profile_id": turn.profile_id,
+            "conversation_id": turn.conversation_id,
+            "request_id": turn.request_id,
+            "task_id": turn.task_id,
+            "admission_id": admitted,
+            "phase": turn.phase,
+            "reply": turn.reply,
+        }))?;
+    } else {
+        if turn.reply.is_empty() {
+            eprintln!("({})", turn.phase);
+        } else {
+            println!("{}", turn.reply);
+        }
+        if let Some(admission_id) = &admitted {
+            eprintln!("접수된 작업: {admission_id}");
+        }
+        match turn.phase.as_str() {
+            "waiting_owner" => eprintln!("승인 대기 작업이 있습니다. 콘솔에서 확인해 주세요."),
+            "uncertain" => eprintln!("결과 확인이 필요합니다. 작업 {}", turn.task_id),
+            "failed" => anyhow::bail!("작업이 실패로 끝났습니다 (작업 {}).", turn.task_id),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[cfg(feature = "durable-runtime")]
 #[derive(Subcommand)]
 enum ConversationCmd {
@@ -1599,6 +1961,15 @@ fn run() -> Result<()> {
         ),
         #[cfg(feature = "host")]
         Cmd::Control { c } => control_command(root, c),
+        #[cfg(feature = "host")]
+        Cmd::Chat {
+            prompt,
+            profile,
+            conversation,
+            kind,
+            timeout,
+            json,
+        } => chat_command(root, prompt, profile, conversation, &kind, timeout, json),
         #[cfg(feature = "host")]
         Cmd::Wake { c } => wake_command(root, c),
         #[cfg(feature = "host")]

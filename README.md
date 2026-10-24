@@ -32,6 +32,16 @@ ghost control snapshot
 ghost control send --file command.json
 ```
 
+실행 중인 호스트의 주 Ghost("primary")에게 프롬프트 한 건을 보내고 답을
+표준 출력으로 받는 원샷 경로도 있다. 대화가 없으면 만들고, 접수(admission)가
+필요한 작업 턴은 콘솔과 같은 routing 절차를 밟는다.
+
+```sh
+ghost chat '오늘 일정 요약해줘'          # 답 텍스트만 출력
+ghost chat --profile Scout --json '...'  # 대상 교체와 JSON 기록
+ghost chat --timeout 600 --kind prompt '...'  # 대기 상한과 입력 종류 지정
+```
+
 `ghost run`은 기본적으로 화면 없는 foreground 호스트다. 기본 상태 위치는 macOS의
 `~/Library/Application Support/Ghost`이며 `--root` 또는 `GHOST_ROOT`로 바꾼다.
 터미널 종료 이후의 상시 운영은 별도 launchd/service 등록을 사용한다.

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Ghost</title>
+    <link rel="stylesheet" href="/src/overlay/overlay.css" />
+  </head>
+  <body>
+    <main id="overlay">
+      <header data-tauri-drag-region>
+        <span id="dot" aria-hidden="true"></span>
+        <h1 data-tauri-drag-region id="title">Ghost</h1>
+        <output id="status" role="status"></output>
+      </header>
+      <ol id="log" aria-live="polite"></ol>
+      <form id="composer">
+        <textarea
+          id="input"
+          rows="1"
+          placeholder="주 Ghost에게 명령 — Enter 전송 · Esc 닫기"
+          autocomplete="off"
+        ></textarea>
+        <button id="send" type="submit" aria-label="보내기" disabled>➤</button>
+      </form>
+    </main>
+    <script type="module" src="/src/overlay/main.ts"></script>
+  </body>
+</html>

@@ -2,7 +2,18 @@
 
 Ghost의 기존 React 콘솔을 Tauri 2 창으로 실행한다. UI 디자인, Rust 실행 호스트와 저장 형식은 유지한다. 앱이 Node 콘솔과 그 자식 Rust/UI 서버만 감독하며 외부에서 시작한 호스트는 종료하지 않는다. 창의 빈 상단 46px은 Garden의 macOS native traffic-light/overlay/drag 구조를 따른다.
 
-Garden 0.1.0의 `contracts/native/README.md`, `templates/desktop/src-tauri`, `packages/native/rust`를 기준으로 네이티브 수명주기를 통합했다. 사용자의 지시에 따라 Garden 전체 UI/문서/서비스 프레임워크 채택은 수행하지 않는다. `vendor/garden-native-host`는 실행 감독기 원본과 라이선스만 보존한 스냅샷이다. IPC 권한은 창 드래그뿐이다. 작업 명령은 기존 typed control API와 같은 출처의 인증 브리지를 사용한다.
+Garden 0.1.0의 `contracts/native/README.md`, `templates/desktop/src-tauri`, `packages/native/rust`를 기준으로 네이티브 수명주기를 통합했다. 사용자의 지시에 따라 Garden 전체 UI/문서/서비스 프레임워크 채택은 수행하지 않는다. `vendor/garden-native-host`는 실행 감독기 원본과 라이선스만 보존한 스냅샷이다. IPC 권한은 창 드래그와 오버레이 창의 native hide뿐이다. 작업 명령은 기존 typed control API와 같은 출처의 인증 브리지를 사용한다.
+
+## 채팅 오버레이
+
+앱은 콘솔과 같은 출처의 작은 채팅 오버레이 창(`overlay.html`)을 기동 시 화면 밖에
+미리 만들어 둔다. 전역 단축키 **⌘⇧G**로 주 창 모니터 아래 center에 한 프레임 만에
+띄우고, 다시 누르면 감춘다. Esc와 포커스 상실(바깥 클릭·다른 앱 전환)도 오버레이를
+감춘다. 입력은 Enter로 전송하고 Shift+Enter는 줄바꿈이다. 대화 상대는 "primary"
+Ghost이며 마지막 대화를 이어서 하고, Ghost·대화 선택은 `localStorage`에
+workspace별로 기록된다. 전송은 콘솔과 같은 routing 절차(`routing_natural` → 접수 →
+`routing_admit`)를 쓰므로 접수 대기·취소 기록도 콘솔과 공유한다.
+
 
 앱은 `~/.config/ghost/console.json`의 경로·모델·포트를 읽어 재사용한다. 인증 파일이나 운영 데이터를 번들에 넣지 않는다. 설정이 없으면 `~/Library/Application Support/Ghost`와 `mock` 모델을 사용한다. 앱 종료는 작업 취소가 아니며 호스트의 정상 종료/복원 경로를 따른다. 앱을 다시 열면 저장된 대화와 작업을 복원한다. 같은 포트에 기존 콘솔이 있으면 그 프로세스를 건드리지 않고 안내한다.
 
