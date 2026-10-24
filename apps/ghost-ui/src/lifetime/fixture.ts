@@ -55,6 +55,7 @@ async function applyFixtureCommand(state: FixtureState, envelope: Envelope): Pro
       command_id: commandId,
       found: true,
       authority_epoch: receipt.envelope.authority_epoch,
+      payload_digest: receipt.envelope.payload_digest,
       response: structuredClone(receipt.response),
     });
   }
@@ -114,7 +115,9 @@ async function applyFixtureCommand(state: FixtureState, envelope: Envelope): Pro
     if (typeof body.prompt !== "string" || body.prompt.trim().length === 0) return emptyResponse("error", "A direction is required.", "never", "invalid_command");
     work.state = "steer_requested";
     work.blocker = "Fixture mode recorded the direction; no live worker received it.";
-    return emptyResponse("warning", "Fixture direction recorded locally; no live worker was steered.", "never", null, work, [work.id]);
+    // 로컬 기록은 동기로 완료되므로 success가 정직한 상태다. warning은 클라이언트
+    // 정산 경로에서 영구 미해결로 남아 이후 모든 변이를 막는다.
+    return emptyResponse("success", "Fixture direction recorded locally; no live worker was steered.", "never", null, work, [work.id]);
   }
   if (method === "work.cancel") {
     const work = state.snapshot.work.find(item => item.id === body.work_id);
@@ -175,5 +178,5 @@ export function createLifetimeFixtureTransport(storage?: LifetimeStorage, initia
 
 export function createLifetimeFixtureClient(storage: LifetimeStorage, initial?: Snapshot): LifetimeClient {
   const transport = createLifetimeFixtureTransport(storage, initial);
-  return createLifetimeClient(transport, storage, { actor_ref: "owner", authority_epoch: 1, workspace_id: "fixture", dispatch_enabled: true });
+  return createLifetimeClient(transport, storage, { ...fixtureIdentity, workspace_id: "fixture", dispatch_enabled: true });
 }

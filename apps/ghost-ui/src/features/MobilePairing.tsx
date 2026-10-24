@@ -36,7 +36,8 @@ function invitationResponse(value: unknown): Invitation {
       || !Array.isArray(item.scope.conversation_ids) || !Array.isArray(item.scope.capabilities)) {
     throw new Error('연결 요청의 서버·권한을 확인하지 못했습니다.');
   }
-  const origin = new URL(item.origin);
+  let origin: URL;
+  try { origin = new URL(item.origin); } catch { throw new Error('HTTPS 연결 주소를 확인하지 못했습니다.'); }
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) {
     throw new Error('HTTPS 연결 주소를 확인하지 못했습니다.');
   }
@@ -53,12 +54,24 @@ class OperatorError extends Error {
   }
 }
 
+// CSRF 토큰은 브리지 세션당 고정(randomBytes at startup)이므로 마운트당 한 번만
+// bootstrap을 읽고 재사용한다. 회전으로 인한 403은 상태 폴링의 오류 배너로 드러난다.
+let pairingBootstrap: Promise<{ mode: string; csrf: string }> | undefined;
+async function pairingConfig(signal?: AbortSignal): Promise<{ mode: string; csrf: string }> {
+  pairingBootstrap ??= fetch('/ghost-api/bootstrap', { cache: 'no-store', redirect: 'error', signal })
+    .then(async bootstrap => {
+      const config = await bootstrap.json();
+      if (!bootstrap.ok || config.mode !== 'live' || typeof config.csrf !== 'string') throw new Error('실행 중인 PC Ghost에 연결해 주세요.');
+      return config;
+    })
+    .catch(error => { pairingBootstrap = undefined; throw error; });
+  return pairingBootstrap;
+}
+
 async function operatorJSON(path: string, body?: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
   // Reuse the existing same-origin UI bootstrap/CSRF convention; no Host or
   // device credential crosses this browser boundary.
-  const bootstrap = await fetch('/ghost-api/bootstrap', { cache: 'no-store', redirect: 'error', signal });
-  const config = await bootstrap.json();
-  if (!bootstrap.ok || config.mode !== 'live' || typeof config.csrf !== 'string') throw new Error('실행 중인 PC Ghost에 연결해 주세요.');
+  const config = await pairingConfig(signal);
   const response = await fetch(`/ghost-api/mobile/invitations${path}`, {
     method: body ? 'POST' : 'GET', cache: 'no-store', redirect: 'error', signal,
     headers: { 'X-Ghost-UI-CSRF': config.csrf, ...(body ? { 'Content-Type': 'application/json' } : {}) },

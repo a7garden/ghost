@@ -40,7 +40,7 @@ export interface BotSurface { target: BotTarget; bots: BotSummary[]; operations:
 const bytes = (value: string) => new TextEncoder().encode(value).length;
 const text = (value: unknown, max = 4096): value is string => typeof value === 'string' && value.trim().length > 0 && bytes(value) <= max;
 const revision = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
-const mode = (value: unknown): value is BotMode => ['active', 'paused', 'retired'].includes(String(value));
+const mode = (value: unknown): value is BotMode => typeof value === 'string' && ['active', 'paused', 'retired'].includes(value);
 const states = new Set(['draft', 'evaluating', 'provisioning', 'ready', 'failed', 'reconcile_required']);
 function pointer(value: unknown, ghost: unknown): value is BotDefinitionRef {
   return isRecord(value) && Object.keys(value).length === 3 && value.ghost_id === ghost
@@ -71,7 +71,7 @@ export function parseBotSurface(response: Response, target: BotTarget): BotSurfa
       || !value.required_capabilities.every(capability => text(capability, 128))
       || new Set(value.required_capabilities).size !== value.required_capabilities.length
       || !isRecord(value.input_contract) || !isRecord(value.output_contract)
-      || value.memory !== undefined && (!isRecord(value.memory) || !['verified', 'degraded', 'blocked'].includes(String(value.memory.state))
+      || value.memory !== undefined && (!isRecord(value.memory) || typeof value.memory.state !== 'string' || !['verified', 'degraded', 'blocked'].includes(value.memory.state)
         || typeof value.memory.required !== 'boolean' || value.memory.reason !== null && !text(value.memory.reason, 512)
         || value.memory.required && value.memory.state !== 'verified' && value.admission_allowed)
       || ids.has(value.ghost_id as string)) throw new Error('Ghost 목록의 상태가 올바르지 않습니다.');
@@ -79,8 +79,8 @@ export function parseBotSurface(response: Response, target: BotTarget): BotSurfa
   }
   const operations = new Set<string>();
   for (const value of data.operations) {
-    if (!base(value) || !['create', 'update', 'clone', 'repair'].includes(String(value.action)) || !text(value.candidate_id, 256) || !isDigest(value.candidate_digest)
-      || !states.has(String(value.state)) || !text(value.operation_id, 512)
+    if (!base(value) || typeof value.action !== 'string' || !['create', 'update', 'clone', 'repair'].includes(value.action) || !text(value.candidate_id, 256) || !isDigest(value.candidate_digest)
+      || typeof value.state !== 'string' || !states.has(value.state) || !text(value.operation_id, 512)
       || value.source_turn_id !== null && !text(value.source_turn_id, 512)
       || value.blocker !== null && !text(value.blocker, 512)
       || operations.has(value.candidate_id as string)) throw new Error('Ghost 생성 상태가 올바르지 않습니다.');

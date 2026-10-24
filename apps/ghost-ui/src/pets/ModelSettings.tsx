@@ -8,6 +8,8 @@ import { InferenceSettings } from './InferenceSettings';
 
 type Action = (command: Command) => Promise<Record<string, any>>;
 export const MODEL_ROLES: { id: ModelRole; name: string; short: string }[] = [{ id: 'llm', name: '대화', short: 'LLM' }, { id: 'stt', name: '음성 인식', short: 'STT' }, { id: 'tts', name: '음성 합성', short: 'TTS' }];
+// OMP 구독 제공자의 전송처 표기. 모르는 id는 host가 준 name을 쓴다.
+const OMP_PROVIDER_NAMES: Record<string, string> = { zai: 'Z.AI', minimax: 'MiniMax' };
 type Catalog = { providers: ModelProvider[]; updated_ms: number | null; checked_ms?: number; refresh?: string; source?: string };
 type Installation = { id: string; name: string; path: string; roles: ModelRole[]; role_source: string };
 const timeLabel = (value: number | null) => value ? new Date(value).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '날짜 정보 없음';
@@ -48,7 +50,7 @@ export function ModelSettings({ snapshot, action, busy, mode }: { snapshot: Snap
     {(settings?.providers ?? []).map(provider => { const hostManaged = provider.kind === 'omp_subscription'; return <article className="model-provider" key={provider.id}>
       <div className="model-provider-heading"><div><strong>{provider.name}</strong><span className="model-role-tags">{provider.roles.map(role => role.toUpperCase()).join(' · ')}{!provider.enabled && ' · 비활성'}</span></div><span className="subtle-count">{provider.models.length}개 모델</span></div>
       <p className="model-endpoint">{hostManaged ? 'OMP stdio · 로컬 구독 인증' : provider.endpoint}</p>
-      {provider.error ? <p className="form-error">{provider.error}</p> : <p className="field-help">{hostManaged ? `대화 내용은 ${provider.id === 'zai' ? 'Z.AI' : 'MiniMax'}에 전달됩니다 · OMP 로컬 구독 인증 사용 · 실제 응답은 아직 확인하지 않았습니다.` : provider.checked_ms ? `목록 확인 · ${timeLabel(provider.checked_ms)}` : '연결 확인 전'}</p>}
+      {provider.error ? <p className="form-error">{provider.error}</p> : <p className="field-help">{hostManaged ? `대화 내용은 ${OMP_PROVIDER_NAMES[provider.id] ?? (provider.name || '구독 제공자')}에 전달됩니다 · OMP 로컬 구독 인증 사용 · 실제 응답은 아직 확인하지 않았습니다.` : provider.checked_ms ? `목록 확인 · ${timeLabel(provider.checked_ms)}` : '연결 확인 전'}</p>}
       {!hostManaged && <div className="model-provider-actions"><button className="text-button" disabled={locked} onClick={() => void run(provider.id, { type: 'check_model_provider', id: provider.id }, result => { checkedProvider(result, provider.id); setNotice(`${provider.name}의 모델 목록을 확인했습니다. 실제 응답 생성은 새 대화에서 확인하세요.`); })}><RefreshCw size={14}/>{pending === provider.id ? '확인 중…' : '목록 확인'}</button><button className="text-button" disabled={locked} onClick={() => openProvider(provider)}>편집<ChevronRight size={14}/></button><button className="icon-button" aria-label={`${provider.name} 제공자 삭제`} disabled={locked} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></button></div>}
     </article>; })}
     {available && !settings?.providers.length && <p className="quiet-empty">등록된 제공자 없음</p>}

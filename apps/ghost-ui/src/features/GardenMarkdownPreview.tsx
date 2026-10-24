@@ -84,6 +84,7 @@ const presentation = `
 
 /** The host sanitizes preview HTML. This frame adds fixed CSS and runs no document code. */
 export function GardenMarkdownPreview({ html, title, theme }: { html: string; title: string; theme: Theme }) {
-  const srcDoc = `${html}<style data-garden-markdown-presentation>${gardenMarkdownStyles[theme]}${presentation}</style>`;
+  // sandbox가 스크립트는 막지만 원격 하위 리소스는 막지 않으므로 CSP로 함께 차단한다.
+  const srcDoc = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">${html}<style data-garden-markdown-presentation>${gardenMarkdownStyles[theme]}${presentation}</style>`;
   return <iframe title={`${title} 미리보기`} sandbox="" referrerPolicy="no-referrer" srcDoc={srcDoc}/>;
 }

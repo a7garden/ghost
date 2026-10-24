@@ -5,7 +5,9 @@ type Selection = { provider: string; model: string; effort: string };
 type Provider = { id: string; name: string; auth: string; models: string[]; efforts: string[]; default_model: string; default_effort: string; image: boolean };
 type Configuration = { settings: { version: number; default: Selection; conversations: Record<string, Selection>; external_grants: Record<string,string[]>; credentials: Record<string,boolean>; image_provider: string }; providers: Provider[] };
 export async function inferenceRequest(body?: Record<string,unknown>): Promise<Configuration> {
-  const bootstrap=await fetch('/ghost-api/bootstrap',{cache:'no-store'}).then(r=>r.json());
+  const bootstrapResponse=await fetch('/ghost-api/bootstrap',{cache:'no-store'});
+  if(!bootstrapResponse.ok) throw new Error('연결된 Ghost 호스트가 필요합니다.');
+  const bootstrap=await bootstrapResponse.json();
   if(bootstrap.mode!=='live'||!bootstrap.csrf) throw new Error('연결된 Ghost 호스트가 필요합니다.');
   const response=await fetch('/ghost-api/inference/settings',{method:body?'POST':'GET',cache:'no-store',
     headers:{'Content-Type':'application/json','X-Ghost-UI-CSRF':bootstrap.csrf},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});
@@ -19,8 +21,8 @@ export function InferenceSettings({ pair, disabled=false }: { pair?:{ghost_id:st
   const [data,setData]=useState<Configuration>(),[error,setError]=useState(''),[busy,setBusy]=useState(false),[expanded,setExpanded]=useState(!pair);
   const [draft,setDraft]=useState<Selection>(),[allow,setAllow]=useState(false),[keys,setKeys]=useState<Record<string,string>>({}),[notice,setNotice]=useState('');
   const pairKey=pair?`${pair.ghost_id}/${pair.conversation_id}`:'';
-  const load=async()=>{try{const next=await inferenceRequest();setData(next);setDraft(next.settings.conversations[pairKey]??next.settings.default);setError('');}catch(e){setError(e instanceof Error?e.message:'설정을 불러오지 못했습니다.');}};
-  useEffect(()=>{void load();},[pairKey]);
+  const [reload,setReload]=useState(0);
+  useEffect(()=>{let stale=false;void (async()=>{try{const next=await inferenceRequest();if(stale)return;setData(next);setDraft(next.settings.conversations[pairKey]??next.settings.default);setError('');}catch(e){if(!stale)setError(e instanceof Error?e.message:'설정을 불러오지 못했습니다.');}})();return()=>{stale=true;};},[pairKey,reload]);
   const save=async(body:Record<string,unknown>)=>{if(!data||busy)return false;setBusy(true);setError('');setNotice('');try{const next=await inferenceRequest({version:data.settings.version,...body});setData(next);setDraft(next.settings.conversations[pairKey]??next.settings.default);setAllow(false);return true;}catch(e){setError(e instanceof Error?e.message:'저장 결과를 확인하지 못했습니다.');return false;}finally{setBusy(false);}};
   const provider=data?.providers.find(p=>p.id===draft?.provider);
   const granted=Boolean(pairKey&&draft&&data?.settings.external_grants[pairKey]?.includes(draft.provider));
@@ -43,7 +45,7 @@ export function InferenceSettings({ pair, disabled=false }: { pair?:{ghost_id:st
       </>}
     </div>}
     {notice&&<p role="status">{notice}</p>}
-    {error&&<p role="alert" className="form-error">{error}<button className="text-button" onClick={()=>void load()}>다시 확인</button></p>}
+    {error&&<p role="alert" className="form-error">{error}<button className="text-button" onClick={()=>setReload(n=>n+1)}>다시 확인</button></p>}
     {pair&&expanded&&<ImageComposer key={pairKey} pair={pair}/>}
   </section>;
 }

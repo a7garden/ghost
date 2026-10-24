@@ -14,7 +14,7 @@ const optionalNumber = (v: unknown) => typeof v === 'number' && Number.isFinite(
 function modelSettings(v: unknown): ModelSettings | undefined {
   const s = object(v);
   if (!Array.isArray(s.providers)) return undefined;
-  const providers: ModelProvider[] = list(s.providers).filter(p => p.kind === 'builtin' || p.kind === 'openai_compatible').map(p => {
+  const providers: ModelProvider[] = list(s.providers).filter(p => p.kind === 'builtin' || p.kind === 'openai_compatible' || p.kind === 'omp_subscription').map(p => {
     const auth = object(p.auth);
     return { id: text(p.id), name: text(p.name), kind: p.kind as ModelProvider['kind'], endpoint: text(p.endpoint),
       auth: auth.type === 'env' ? { type: 'env', variable: text(auth.variable) } : { type: auth.type === 'sdk' ? 'sdk' : 'none' },
@@ -33,8 +33,9 @@ export function normalizeSnapshot(value: unknown): Snapshot {
     || (authority.authority_epoch as number) < 1 || typeof authority.dispatch_enabled !== 'boolean')) {
     throw new Error('호스트의 지속형 권한과 실행 상태를 확인하지 못했습니다.');
   }
+  const profiles = list(s.profiles).map(p => text(p.id));
   return {
-    orchestration_plans: normalizeGraphs(s.orchestration_plans), orchestration_runs: normalizeGraphRuns(s.orchestration_runs),
+    orchestration_plans: normalizeGraphs(s.orchestration_plans, profiles), orchestration_runs: normalizeGraphRuns(s.orchestration_runs, profiles),
     workspace_id: s.workspace_id, default_model: text(s.default_model, 'mock'),
     lifetime_authority: s.lifetime_authority === undefined ? undefined : {
       authority_epoch: authority.authority_epoch as number, dispatch_enabled: authority.dispatch_enabled as boolean,

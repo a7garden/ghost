@@ -27,8 +27,11 @@ export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mo
         authority_epoch: authority.authority_epoch, dispatch_enabled: authority.dispatch_enabled,
       });
       return { client };
-    } catch {
-      return { error: '접수 ID와 재시도 큐를 저장하지 못했습니다. 브라우저 저장 권한을 확인하세요.' };
+    } catch (error) {
+      // 저장 권한 외에도 workspace/owner 검증 실패가 있다. 원인을 덧붙여 운영자가
+      // 구분할 수 있게 한다.
+      const detail = error instanceof Error && error.message ? ` (${error.message})` : '';
+      return { error: `접수 ID와 재시도 큐를 준비하지 못했습니다. 브라우저 저장 권한을 확인하세요.${detail}` };
     }
   }, [action, workspaceId, authority?.authority_epoch, authority?.dispatch_enabled, mode]);
   if ('error' in session) return <div className="page-content" role="alert">{session.error}</div>;

@@ -63,7 +63,11 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
   }, []);
   const lifetimeAction = useCallback(async (envelope: Envelope) => {
     if (!client.current || client.current.mode !== 'live') throw new Error('Lifetime 접수는 연결된 Ghost 호스트가 필요합니다.');
-    return client.current.action(envelope);
+    const result = await client.current.action(envelope);
+    // lifetime 뮤테이션도 문서 검토·인박스를 바꾸므로 성공 후 스냅샷을 동기화한다.
+    // 갱신 실패는 주기 폴링이 회복하므로 원 요청의 결과를 그대로 돌려준다.
+    try { setSnapshot(await client.current.snapshot()); setError(''); } catch { /* 다음 폴링 */ }
+    return result;
   }, []);
   return { routing, snapshot, mode, error, busy, action, query, lifetimeAction, reconnect: () => setAttempt(n => n + 1) };
 }

@@ -261,11 +261,14 @@ class DemoClient implements Client {
   private owner(a: Record<string, any>): unknown {
     switch (a.type) {
       case 'save_orchestration': {
+        if (!a.plan || typeof a.plan.title !== 'string' || !Array.isArray(a.plan.nodes) || !Array.isArray(a.plan.edges)) throw new Error('구조 내용을 확인할 수 없습니다. 다시 저장해 주세요.');
         const error = validateGraph(a.plan, this.state.profiles.map(p => p.id));
         if (error) throw new Error(error);
         const plans = this.state.orchestration_plans ??= [];
         const previous = plans.find(plan => plan.id === a.id);
-        if (a.id && (!previous || previous.version !== a.version) || !a.id && a.version != null) throw new Error('구조가 변경되었습니다. 최신 구조를 다시 열어 주세요.');
+        const staleUpdate = a.id && (!previous || previous.version !== a.version);
+        const staleCreate = !a.id && a.version !== null && a.version !== undefined;
+        if (staleUpdate || staleCreate) throw new Error('구조가 변경되었습니다. 최신 구조를 다시 열어 주세요.');
         const plan = { ...structuredClone(a.plan), id: a.id ?? crypto.randomUUID(), version: (previous?.version ?? 0) + 1, updated_ms: Date.now() };
         if (previous) Object.assign(previous, plan); else plans.push(plan);
         return plan;

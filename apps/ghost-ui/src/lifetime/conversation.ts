@@ -51,7 +51,7 @@ export function parseRegistryResponse(response: Response): RegistryConversation[
       || (item.kind !== "primary" && item.kind !== "specialist")
       || (item.mode !== "active" && item.mode !== "draining")
       || !Array.isArray(item.roles) || !item.roles.every(role => typeof role === "string" && role.trim())) {
-      throw new Error("Host registry response contains an invalid conversation target.");
+      throw new Error("Host가 반환한 등록 대화 목록에 올바르지 않은 항목이 있습니다.");
     }
     const entry: RegistryConversation = {
       ghost_id: item.ghost_id,
@@ -79,7 +79,7 @@ function parseTurn(value: unknown): ConversationTurn {
     || typeof value.text !== "string"
     || !isPrivacy(value.privacy)
     || (value.kind !== "user" && value.kind !== "assistant_advisory" && value.kind !== "host_fact")
-    || (value.source_turn_id !== null && typeof value.source_turn_id !== "string")
+    || (value.source_turn_id !== null && !nullableIdentity(value.source_turn_id))
     || value.origin_report_id !== undefined && (
       !nullableIdentity(value.origin_report_id)
       || value.origin_report_id !== null && (

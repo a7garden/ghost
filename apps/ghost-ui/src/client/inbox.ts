@@ -16,7 +16,7 @@ export function inboxItems(snapshot: Snapshot, connected = true) {
 export function taskAttentionMessage(task: Task) {
   if (task.phase === 'waiting_owner') return '작업이 확인을 기다리고 있습니다. 대화에서 요청 내용을 확인해 주세요.';
   if (task.phase === 'uncertain') return '실제 실행 결과를 확인하지 못했습니다. 다시 요청하기 전에 대화의 실행 기록과 실제 결과를 확인해 주세요.';
-  if (/model interrupted or rejected/i.test(task.output)) {
+  if (/interrupted; no automatic replay|command interrupted; inspect the saved state/i.test(task.output)) {
     return '모델 응답이 중단되었거나 요청이 거절되었습니다. 저장된 기록만으로는 두 원인을 구분할 수 없습니다. 대화의 실행 기록과 모델 설정을 확인해 주세요.';
   }
   return '작업이 실패했습니다. 대화의 실행 기록을 확인해 주세요.';

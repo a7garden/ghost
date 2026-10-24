@@ -129,7 +129,7 @@ function parseDisclosure(value: unknown, where_: string): MemorySourceDisclosure
 }
 
 function parseStatus(value: unknown, where_: string): MemorySourceStatus {
-  if (typeof value !== 'string' || !(value in memorySourceStatusLabels)) {
+  if (typeof value !== 'string' || !Object.prototype.hasOwnProperty.call(memorySourceStatusLabels, value)) {
     throw new Error(`기억 출처 ${where_}의 status 값이 예상과 다릅니다.`);
   }
   return value as MemorySourceStatus;
@@ -190,7 +190,17 @@ export function parseMemorySourceList(result: unknown): MemorySourceList {
   if (!isRecord(result.data) || !Array.isArray(result.data.sources)) {
     throw new Error('기억 출처 목록 형식이 예상과 다릅니다.');
   }
-  return { sources: result.data.sources.map(parseSourceView), truncated: result.data.truncated === true };
+  if (typeof result.data.truncated !== 'boolean') {
+    throw new Error('기억 출처 목록 형식이 예상과 다릅니다.');
+  }
+  const sources = result.data.sources.map(parseSourceView);
+  const seen = new Set<string>();
+  for (const row of sources) {
+    const key = memorySourceRowKey(row);
+    if (seen.has(key)) throw new Error('기억 출처 목록에 중복 항목이 있습니다.');
+    seen.add(key);
+  }
+  return { sources, truncated: result.data.truncated };
 }
 
 // memory_source_inspect replies with the same Response envelope; a success

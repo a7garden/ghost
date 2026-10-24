@@ -17,7 +17,7 @@ const callbacks = { navigate: () => {}, onReview: () => {}, onAdd: () => {}, onA
 
 it('counts exactly the review and task items shown in the inbox, including a failure without reviews', () => {
   const snapshot = workspace(), conversation = snapshot.profiles[0].conversations[0];
-  conversation.tasks.push({ id: 'failure', name: '응답 생성', phase: 'failed', partial: '', output: 'model interrupted or rejected; credentials and raw transport errors omitted' });
+  conversation.tasks.push({ id: 'failure', name: '응답 생성', phase: 'failed', partial: '', output: 'command interrupted; inspect the saved state before issuing a new request' });
   const overview = renderToStaticMarkup(createElement(Overview, { snapshot, mode: 'live', ...callbacks }));
   const inbox = renderToStaticMarkup(createElement(InboxView, { snapshot, ...callbacks }));
   expect(overview).toContain('확인 필요 1');

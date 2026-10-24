@@ -5,7 +5,7 @@ import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { toneFor } from '../client/types';
 import type { Command, Profile, Snapshot } from '../client/types';
-import { edgeLabels, graphLayers, graphStateLabels, validateGraph } from '../client/orchestration';
+import { activeRunStates, edgeLabels, graphLayers, graphStateLabels, validateGraph } from '../client/orchestration';
 import type { EdgeCondition, GraphInput, GraphJob, GraphNode, GraphPlan, GraphRun } from '../client/orchestration';
 import './orchestration.css';
 
@@ -22,7 +22,7 @@ export function OrchestrationView({ snapshot, mode, busy, action, navigate }: Pr
   const selected = plans.find(plan => plan.id === selectedId) ?? plans[0];
   const history = runs.filter(run => run.plan.id === selected?.id).sort((a,b) => b.created_ms-a.created_ms);
   const viewing = history.find(run => run.id === runId);
-  const active = history.find(run => ['running','cancelling'].includes(run.state));
+  const active = history.find(run => activeRunStates.includes(run.state));
   const available = mode === 'demo' || snapshot.capabilities.orchestration === true;
   const locked = busy || pending;
   const perform = async (command: Command) => {
@@ -54,7 +54,7 @@ export function OrchestrationView({ snapshot, mode, busy, action, navigate }: Pr
         {viewing && <section className="graph-run-results" aria-label="작업별 실행 결과">{viewing.jobs.map(job => {
           const node = viewing.plan.nodes.find(node => node.id === job.node_id)!;
           return <Card key={job.node_id} className="graph-result"><div><h3>{node.title}</h3><span>{graphStateLabels[job.state]}</span></div>{job.output && <details><summary>결과 보기</summary><pre>{job.output}</pre></details>}{job.task_id && <button className="text-button" onClick={() => navigate(`/ghosts/${node.profile_id}?conversation=${encodeURIComponent(job.conversation_id)}`)}>작업 대화<ArrowUpRight size={14}/></button>}</Card>;
-        })}{['running','cancelling'].includes(viewing.state) && <button className="button secondary" disabled={locked || viewing.state === 'cancelling'} onClick={() => void perform({ type:'workspace', action:{ type:'cancel_orchestration', run_id:viewing.id } })}><Square size={13}/>{viewing.state === 'cancelling' ? '취소 확인 중' : '이 실행 취소'}</button>}</section>}
+        })}{activeRunStates.includes(viewing.state) && <button className="button secondary" disabled={locked || viewing.state === 'cancelling'} onClick={() => void perform({ type:'workspace', action:{ type:'cancel_orchestration', run_id:viewing.id } })}><Square size={13}/>{viewing.state === 'cancelling' ? '취소 확인 중' : '이 실행 취소'}</button>}</section>}
         {active && !viewing && <button className="text-button" onClick={() => setRunId(active.id)}>진행 중인 실행 보기<ArrowUpRight size={14}/></button>}
       </>}
     </>}

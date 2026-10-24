@@ -22,7 +22,7 @@ export function LegacyTranscript({ profile, route, navigate }: { profile: Profil
     </select></label>}
     {!conversation && <p className="empty-state">{requested ? '이 Ghost에서 해당 대화 기록을 찾을 수 없습니다.' : '저장된 이전 대화 없음'}</p>}
     {conversation && <div className="lifetime-transcript" aria-label={conversation.title}>
-      {conversation.messages.map((message, index) => <article className="lifetime-turn" key={index}>
+      {conversation.messages.map((message, index) => <article className="lifetime-turn" key={`${message.role}:${index}`}>
         <header><strong>{message.role === 'user' ? '나' : message.role === 'tool' ? '도구 기록' : profile.name}</strong></header>
         <pre>{message.text}</pre>
         {message.tool?.output && <details><summary>{message.tool.output.summary ?? message.tool.name}</summary><pre>{JSON.stringify(message.tool.output.content ?? message.tool.output, null, 2)}</pre></details>}

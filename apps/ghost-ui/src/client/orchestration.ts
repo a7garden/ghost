@@ -17,6 +17,7 @@ export function graphLayers(plan: GraphInput): string[][] {
   }
   return layers;
 }
+export const activeRunStates: readonly string[] = ['running', 'cancelling'];
 export function validateGraph(plan: GraphInput, profiles: string[]): string | null {
   if (!plan.title.trim() || bytes(plan.title) > 200) return '구조 이름을 200바이트 이내로 입력해 주세요.';
   if (!plan.nodes.length || plan.nodes.length > 16) return '작업을 1~16개 지정해 주세요.';
@@ -24,7 +25,7 @@ export function validateGraph(plan: GraphInput, profiles: string[]): string | nu
   const ids = new Set(plan.nodes.map(node => node.id));
   if (ids.size !== plan.nodes.length) return '작업 ID가 중복되었습니다.';
   for (const node of plan.nodes) {
-    if (!/^[a-f0-9-]{36}$/i.test(node.id) || !profiles.includes(node.profile_id)) return '담당 Ghost를 선택해 주세요.';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(node.id) || !profiles.includes(node.profile_id)) return '담당 Ghost를 선택해 주세요.';
     if (!node.title.trim() || bytes(node.title) > 200) return '각 작업 이름을 200바이트 이내로 입력해 주세요.';
     if (!node.prompt.trim() || bytes(node.prompt) > 4000) return '각 작업의 요청 내용을 4000바이트 이내로 입력해 주세요.';
   }
@@ -37,25 +38,25 @@ export function validateGraph(plan: GraphInput, profiles: string[]): string | nu
   if (!graphLayers(plan).length) return '순환 연결은 실행할 수 없습니다. 앞선 작업으로 돌아가는 연결을 제거해 주세요.';
   return null;
 }
-export function normalizeGraphs(value: unknown): GraphPlan[] {
+export function normalizeGraphs(value: unknown, profiles: string[]): GraphPlan[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error('호스트의 작업 구조 응답을 확인하지 못했습니다.');
   return value.map(item => {
-    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !Number.isSafeInteger(item.version) || item.version < 1 || typeof item.updated_ms !== 'number' || typeof item.title !== 'string' || !Array.isArray(item.nodes) || !Array.isArray(item.edges)
+    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !Number.isSafeInteger(item.version) || item.version < 1 || !Number.isFinite(item.updated_ms) || typeof item.title !== 'string' || !Array.isArray(item.nodes) || !Array.isArray(item.edges)
       || item.nodes.some((node: GraphNode) => !node || ['id','profile_id','title','prompt'].some(key => typeof node[key as keyof GraphNode] !== 'string'))
       || item.edges.some((edge: GraphEdge) => !edge || typeof edge.from !== 'string' || typeof edge.to !== 'string' || !Object.hasOwn(edgeLabels,edge.condition))) throw new Error('호스트의 작업 구조 응답을 확인하지 못했습니다.');
     const plan = item as GraphPlan;
-    if (validateGraph(plan, plan.nodes.map(node => node.profile_id))) throw new Error('호스트가 유효하지 않은 작업 구조를 반환했습니다.');
+    if (validateGraph(plan, profiles)) throw new Error('호스트가 유효하지 않은 작업 구조를 반환했습니다.');
     return plan;
   });
 }
-export function normalizeGraphRuns(value: unknown): GraphRun[] {
+export function normalizeGraphRuns(value: unknown, profiles: string[]): GraphRun[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error('호스트의 구조 실행 기록을 확인하지 못했습니다.');
   return value.map(item => {
-    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !['running','cancelling','complete','failed','cancelled'].includes(item.state) || typeof item.created_ms !== 'number' || !Array.isArray(item.jobs)) throw new Error('호스트의 구조 실행 기록을 확인하지 못했습니다.');
-    const plan = normalizeGraphs([item.plan])[0];
-    if (item.jobs.length !== plan.nodes.length || new Set(item.jobs.map((job: GraphJob) => job.node_id)).size !== plan.nodes.length || item.jobs.some((job: GraphJob) => !job || !plan.nodes.some(node => node.id === job.node_id) || !Object.hasOwn(graphStateLabels,job.state) || typeof job.output !== 'string' || typeof job.conversation_id !== 'string' || !(job.task_id === null || typeof job.task_id === 'string'))) throw new Error('호스트의 작업별 실행 기록을 확인하지 못했습니다.');
+    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !['running','cancelling','complete','failed','cancelled'].includes(item.state) || !Number.isFinite(item.created_ms) || !Array.isArray(item.jobs) || item.jobs.some((job: GraphJob) => !job || typeof job !== 'object')) throw new Error('호스트의 구조 실행 기록을 확인하지 못했습니다.');
+    const plan = normalizeGraphs([item.plan], profiles)[0];
+    if (item.jobs.length !== plan.nodes.length || new Set(item.jobs.map((job: GraphJob) => job.node_id)).size !== plan.nodes.length || item.jobs.some((job: GraphJob) => !plan.nodes.some(node => node.id === job.node_id) || !Object.hasOwn(graphStateLabels,job.state) || typeof job.output !== 'string' || typeof job.conversation_id !== 'string' || !(job.task_id === null || typeof job.task_id === 'string'))) throw new Error('호스트의 작업별 실행 기록을 확인하지 못했습니다.');
     return { ...item, plan } as GraphRun;
   });
 }

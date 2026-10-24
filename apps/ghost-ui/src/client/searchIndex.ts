@@ -1,4 +1,5 @@
 import type { Snapshot } from './types';
+import { taskDisplayLabel } from './taskLabel';
 
 export type SearchHit = { kind: 'ghost' | 'work' | 'space'; id: string; title: string; subtitle?: string; path: string; profile_id?: string };
 
@@ -20,7 +21,7 @@ export function searchWorkspace(snapshot: Pick<Snapshot, 'profiles' | 'goals' | 
         hits.push({ kind: 'work', id: `conversation:${c.id}`, title: c.title, subtitle: `${p.name} · 대화`, path: `/ghosts/${p.id}?conversation=${c.id}` });
       }
       for (const t of c.tasks) {
-        const label = t.name === '응답 생성' ? c.title : t.name;
+        const label = taskDisplayLabel(t, c);
         if (!label.toLowerCase().includes(q) || emitted.has(label)) continue;
         emitted.add(label);
         hits.push({ kind: 'work', id: `task:${t.id}`, title: label, subtitle: `${p.name} · ${c.title}`, path: `/ghosts/${p.id}?conversation=${c.id}` });

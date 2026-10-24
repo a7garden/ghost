@@ -18,9 +18,11 @@ describe('task graph validation',()=>{
   it('preserves frozen run plans and fails closed for missing or unknown work states',()=>{
     const saved={...plan(),id:'plan',version:1,updated_ms:1};
     const run={id:'run',plan:saved,state:'running',created_ms:1,jobs:saved.nodes.map(node=>({node_id:node.id,state:'pending',conversation_id:node.id,task_id:null,output:''}))};
-    expect(normalizeGraphRuns([run])[0].plan.version).toBe(1);
-    expect(()=>normalizeGraphRuns([{...run,jobs:run.jobs.slice(1)}])).toThrow();
-    expect(()=>normalizeGraphRuns([{...run,jobs:run.jobs.map(job=>({...job,state:'invented'}))}])).toThrow();
-    expect(()=>normalizeGraphs([{...saved,edges:[{from:a,to:c,condition:'unknown'}]}])).toThrow();
+    const profiles=['p0','p1','p2'];
+    expect(normalizeGraphRuns([run],profiles)[0].plan.version).toBe(1);
+    expect(()=>normalizeGraphRuns([{...run,jobs:run.jobs.slice(1)}],profiles)).toThrow();
+    expect(()=>normalizeGraphRuns([{...run,jobs:run.jobs.map(job=>({...job,state:'invented'}))}],profiles)).toThrow();
+    expect(()=>normalizeGraphs([{...saved,edges:[{from:a,to:c,condition:'unknown'}]}],profiles)).toThrow();
+    expect(()=>normalizeGraphs([saved],['p0'])).toThrow();
   });
 });
