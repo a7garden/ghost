@@ -670,7 +670,8 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
         }
         // Canonical goal.create already enqueues this Ghost's assignment. This
         // only reconciles that durable admission; no OMP spec or process exists.
-        return command({ ...scope, invocationId, method: "work.pi.admit", fields: { work_id: args.work_id } });
+        return command({ ...scope, invocationId, method: "work.pi.admit", fields: { work_id: args.work_id,
+          ...(workMemoryContextRevision === undefined ? {} : { work_memory_context_revision: workMemoryContextRevision }) } });
       }
       case "work.cancel":
         return command({ ...scope, invocationId, method, fields: { work_id: args.work_id } });
@@ -707,7 +708,8 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
           invocationId,
           method,
           expectedRevision: context.goal.revision,
-          fields,
+          fields: { ...fields, ...(["work.delegate", "work.wait"].includes(method) && workMemoryContextRevision !== undefined
+            ? { work_memory_context_revision: workMemoryContextRevision } : {}) },
         });
       }
       case "work.children":
@@ -749,12 +751,6 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
           method,
           fields: {
             report_id: reportId,
-    work_id: workId,
-    generation_task_id: generationTaskId,
-    task_id: taskId,
-    call_id: callId,
-    input_digest: inputDigest,
-    operation,
             ghost_id: ghostId,
             conversation_id: conversationId,
             text: args.text,

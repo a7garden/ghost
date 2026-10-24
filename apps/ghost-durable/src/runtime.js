@@ -499,6 +499,11 @@ Current authenticated Goal assignment: ${JSON.stringify({
       }
       let result;
       try {
+        let workMemoryRevision;
+        if (trustedScope.originKind === "goal_assignment" && ["work.submit", "work.delegate", "work.wait"].includes(method)) {
+          await controllerContext.memoryContext.validate();
+          workMemoryRevision = await controllerContext.memoryContext.workRevision();
+        }
         result = await hostToolTransport({
           method,
           invocation_id: invocationId,
@@ -509,6 +514,7 @@ Current authenticated Goal assignment: ${JSON.stringify({
             ? { turn_id: trustedScope.turnId } : {}),
           inference_scope: trustedScope.inferenceScope,
           conversation_disclosure: trustedScope.conversationDisclosure,
+          ...(workMemoryRevision ? { work_memory_context_revision: workMemoryRevision } : {}),
           arguments: args,
         }, context);
       } catch (error) {

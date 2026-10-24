@@ -41,5 +41,10 @@ test("direct Pi callback authenticates the exact task/call input envelope and co
     await transport({ method: "conversation.reply", ghost_id: "ghost", conversation_id: "conversation", turn_id: "owner-turn", invocation_id: "memory-reply", inference_scope: "public", conversation_disclosure: "public", memory_context_revision: "a".repeat(64), arguments: { text: "memory-derived response" } });
     assert.deepEqual(requests[3].envelope.body, { method: "conversation.reply", ghost_id: "ghost", conversation_id: "conversation", turn_id: "owner-turn", text: "memory-derived response", memory_context_revision: "a".repeat(64) });
     assert.equal(requests.length, 4, "stamped replay reaches the Host guard without a legacy history-read shortcut");
+    const reportReply = { method: "conversation.report.reply", ghost_id: "ghost", conversation_id: "conversation", report_id: "accepted-work-report", invocation_id: "report-reply", inference_scope: "public", conversation_disclosure: "public", arguments: { text: "The accepted Work is ready." } };
+    await transport(reportReply);
+    await transport(reportReply);
+    assert.deepEqual(requests[4].envelope.body, { method: "conversation.report.reply", report_id: "accepted-work-report", ghost_id: "ghost", conversation_id: "conversation", text: "The accepted Work is ready." });
+    assert.deepEqual(requests[4], requests[5], "report retries preserve their own identity without execution-only fields");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
