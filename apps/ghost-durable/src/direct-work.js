@@ -16,7 +16,7 @@ export function assertPinnedExecutionTools(pinned, current) {
     throw new ProtocolError("pi_tool_pin_conflict", "The original Work execution tool set cannot expand during reload or recovery.", "never");
   }
 }
-const boundedPath = Type.String({ minLength: 1, maxLength: 4096 });
+const boundedPath = Type.String({ minLength: 1, maxLength: 4096, description: "Path relative to this Work's workspace, for example output/result.json. No absolute path or parent traversal." });
 const schemas = {
   read: Type.Object({ path: boundedPath, offset: Type.Optional(Type.Integer({ minimum: 1 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000 })) }, { additionalProperties: false }),
   write: Type.Object({ path: boundedPath, content: Type.String({ maxLength: 65536 }) }, { additionalProperties: false }),
@@ -37,7 +37,7 @@ const descriptions = {
   read: "Read text inside this Work's Host-isolated filesystem.",
   write: "Write up to 64 KiB of UTF-8 text inside this Work's Host-isolated filesystem; this does not publish or accept an artifact.",
   edit: "Replace unique exact text blocks inside one Work file; overlapping edits are rejected.",
-  bash: "Run a bounded command inside this Work's Host-isolated process environment. An unknown result must be reconciled, never retried with a new call.",
+  bash: "Run a bounded command with guest cwd /workspace inside this Work's Host-isolated process environment. Host storage paths are inaccessible. An unknown result must be reconciled, never retried with a new call.",
   publish_artifact: "Publish a Work file through the Host artifact contract. Independent verification and Owner acceptance remain separate.",
 };
 
