@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { isAbsolute, join } from "node:path";
-import { discover } from "../../ghost-ui/server/bridge.mjs";
+import { isAbsolute } from "node:path";
+import { discover } from "./host-discovery.js";
 import { payloadDigest, PROTOCOL_VERSION } from "./contract.js";
+import { validateDirectWorkIdentity } from "./direct-work.js";
 import { DOCUMENT_TOOL_NAMES, MEMORY_TOOL_NAMES } from "./models.js";
 
 const MAX_REQUEST_BYTES = 1_048_576;
@@ -24,27 +25,6 @@ function validResponse(value) {
     && Array.isArray(value.next_actions);
 }
 
-// Strict passthrough shape check for the Host-authoritative child artifact
-// metadata snapshot (WorkerArtifactInput). Metadata only: no contents, no
-// byte lengths, no extra fields are ever forwarded into the spec.
-function isArtifactInputSnapshot(value) {
-  return Array.isArray(value) && value.every((record) => record !== null && typeof record === "object"
-    && !Array.isArray(record)
-    && typeof record.work_id === "string" && record.work_id.length > 0
-    && typeof record.goal_id === "string" && record.goal_id.length > 0
-    && Number.isSafeInteger(record.goal_revision) && record.goal_revision >= 1
-    && typeof record.execution_id === "string" && record.execution_id.length > 0
-    && typeof record.state === "string" && record.state.length > 0
-    && Array.isArray(record.artifacts) && record.artifacts.every((artifact) =>
-      artifact !== null && typeof artifact === "object" && !Array.isArray(artifact)
-      && typeof artifact.digest === "string" && artifact.digest.length > 0
-      && typeof artifact.locator === "string"
-      && typeof artifact.privacy === "string"
-      && typeof artifact.producing_attempt === "string"
-      && Object.keys(artifact).length === 4)
-    && typeof record.protected_artifacts_withheld === "boolean"
-    && Object.keys(record).length === 7);
-}
 const MEMORY_TOOL_NAME_SET = new Set(MEMORY_TOOL_NAMES);
 const DOCUMENT_TOOL_NAME_SET = new Set(DOCUMENT_TOOL_NAMES);
 const MAX_DOCUMENT_TITLE_BYTES = 512;
@@ -90,10 +70,7 @@ const TURN_STATUS_REASON_CODES = new Set([
   "reply_delivery_unconfirmed",
   "authority_revoked",
 ]);
-const EXISTING_WORK_EXECUTION_STATES = new Set([
-  "submitted", "steering", "running", "unknown",
-  "accepted", "complete", "completed", "failed", "stopped", "rejected",
-]);
+
 
 function safeErrorCode(value) {
   return typeof value === "string" && /^[a-z0-9][a-z0-9_:-]{0,99}$/iu.test(value) ? value : null;
@@ -170,7 +147,7 @@ async function boundedJson(response) {
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size)));
 }
 
-export function createHostToolTransport({ hostRoot, callbackToken, localCallbackToken, authorityEpoch }) {
+export function createHostToolTransport({ hostRoot, callbackToken, localCallbackToken, authorityEpoch, dispatch }) {
   if (!isAbsolute(hostRoot)) {
     throw new Error("The Host root must be an absolute coordinator-owned path.");
   }
@@ -229,6 +206,15 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
     const requestBody = JSON.stringify({ ghost_id: ghostId, conversation_id: conversationId, envelope });
     if (Buffer.byteLength(requestBody, "utf8") > MAX_REQUEST_BYTES) {
       throw new Error("Pi Host callback request exceeds the one-megabyte endpoint limit.");
+    }
+
+    // A trusted in-process/stdio coordinator may supply transport only; the
+    // exact body conversion, digest, epoch and identity checks above still run.
+    if (dispatch !== undefined) {
+      if (typeof dispatch !== "function") throw new Error("Host dispatch must be a trusted function.");
+      const frame = await dispatch({ ghost_id: ghostId, conversation_id: conversationId, envelope });
+      if (frame?.ok !== true || !validResponse(frame.result)) throw Object.assign(new Error("Scoped Host dispatch returned no verified lifetime receipt."), { code: "host_callback_rejected" });
+      return frame.result;
     }
 
     let origin;
@@ -350,6 +336,14 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
     turn_id: turnId,
     assignment_id: assignmentId,
     report_id: reportId,
+    work_id: workId,
+    generation_task_id: generationTaskId,
+    task_id: taskId,
+    call_id: callId,
+    input_digest: inputDigest,
+    operation,
+    memory_context_revision: memoryContextRevision,
+    work_memory_context_revision: workMemoryContextRevision,
     inference_scope: inferenceScope,
     conversation_disclosure: conversationDisclosure,
     arguments: args,
@@ -362,7 +356,37 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
       throw new Error("Pi callback identity and arguments must come from the bound runtime invocation.");
     }
 
+    if (workMemoryContextRevision !== undefined && (typeof workMemoryContextRevision !== "string" || !/^[a-f0-9]{64}$/u.test(workMemoryContextRevision))) throw new Error("Invalid Work memory context provenance stamp.");
     switch (method) {
+      case "work.memory.context.inspect":
+      case "work.memory.recall":
+      case "work.memory.record": {
+        if (![assignmentId, workId].every(value => isBoundedText(value, 400)) || inferenceScope !== "local") throw new Error("Work memory requires the exact authenticated assignment and local inference route.");
+        if (method === "work.memory.context.inspect" && Object.keys(args).length !== 0) throw new Error("Work memory inspection accepts no model arguments.");
+        if (method === "work.memory.recall" && (!hasExactArguments(args, ["query"], ["token_budget"]) || typeof args.query !== "string" || Buffer.byteLength(args.query, "utf8") > 8192
+          || (args.token_budget !== undefined && (!Number.isInteger(args.token_budget) || args.token_budget < 128 || args.token_budget > 2048)))) throw new Error("Invalid Work memory recall arguments.");
+        if (method === "work.memory.record" && (!hasExactArguments(args, ["summary", "limitations", "artifact_digests"]) || typeof args.summary !== "string" || Buffer.byteLength(args.summary, "utf8") < 1 || Buffer.byteLength(args.summary, "utf8") > 16384
+          || typeof args.limitations !== "string" || Buffer.byteLength(args.limitations, "utf8") > 8192 || !Array.isArray(args.artifact_digests) || args.artifact_digests.length < 1 || args.artifact_digests.length > 8
+          || new Set(args.artifact_digests).size !== args.artifact_digests.length || args.artifact_digests.some(value => typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)))) throw new Error("Invalid generated Work experience arguments.");
+        return command({ ...scope, invocationId, method, fields: { ghost_id: ghostId, conversation_id: conversationId, assignment_id: assignmentId, work_id: workId, ...args } });
+      }
+      case "work.execute": {
+        validateDirectWorkIdentity({ ghostId, conversationId, assignmentId, workId, generationTaskId, taskId, callId, inputDigest, operation, args, invocationId });
+        return command({ ...scope, invocationId, method, fields: {
+          assignment_id: assignmentId, work_id: workId, generation_task_id: generationTaskId, task_id: taskId,
+          call_id: callId, input_digest: inputDigest, operation, arguments: args,
+          ...(workMemoryContextRevision === undefined ? {} : { work_memory_context_revision: workMemoryContextRevision }),
+        } });
+      }
+      case "work.execution.complete": {
+        if (![assignmentId, workId].every(value => isBoundedText(value, 400))
+          || !Number.isSafeInteger(taskId) || taskId < 1
+          || !hasExactArguments(args, ["summary"]) || typeof args.summary !== "string" || Buffer.byteLength(args.summary, "utf8") > 32768
+          || invocationId !== JSON.stringify(["ghost-pi-complete/1", ghostId, conversationId, assignmentId, taskId])) {
+          throw new Error("Pi execution completion requires the original bound assignment and GenerationTask identity.");
+        }
+        return command({ ...scope, invocationId, method, fields: { assignment_id: assignmentId, work_id: workId, task_id: taskId, summary: args.summary, ...(workMemoryContextRevision === undefined ? {} : { work_memory_context_revision: workMemoryContextRevision }) } });
+      }
       case "inference.settings":
       case "inference.inspect":
         return command({ ...scope, invocationId, method });
@@ -417,6 +441,7 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
           },
         });
       }
+      case "memory.context.inspect":
       case "memory.capabilities": {
         if (typeof turnId !== "string" || turnId.length === 0 || Object.keys(args).length !== 0) {
           throw new Error("Runtime memory.capabilities requires the trusted owner turn and no model arguments.");
@@ -427,7 +452,7 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
           method,
           fields: memoryIdentityFields(ghostId, conversationId, turnId),
         });
-        return validateAvailableMemoryTools(response, inferenceScope);
+        return method === "memory.context.inspect" ? response : validateAvailableMemoryTools(response, inferenceScope);
       }
       case "memory.search": {
         requireCanonicalMemoryScope(scope, turnId);
@@ -597,6 +622,25 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
           fields: memoryIdentityFields(ghostId, conversationId, turnId, { review_id: args.review_id }),
         });
       }
+      case "bot.prepare": {
+        if (!isBoundedText(turnId, 400) || !hasExactArguments(args, ["display_name", "purpose", "input_contract", "output_contract", "instructions", "required_capabilities", "source_work_ids"])
+          || !isBoundedText(args.display_name, 256) || !isBoundedText(args.purpose, 4096) || !isBoundedText(args.instructions, 32768)
+          || [args.input_contract, args.output_contract].some(value => value === null || typeof value !== "object" || Array.isArray(value))
+          || !Array.isArray(args.required_capabilities) || args.required_capabilities.length > 5 || new Set(args.required_capabilities).size !== args.required_capabilities.length
+          || args.required_capabilities.some(value => !["read", "write", "edit", "bash", "publish_artifact"].includes(value))
+          || !Array.isArray(args.source_work_ids) || args.source_work_ids.length > 8 || new Set(args.source_work_ids).size !== args.source_work_ids.length || args.source_work_ids.some(value => !isBoundedText(value, 400))) {
+          throw new Error("Bot preparation requires only bounded candidate content and scoped source Work IDs from the trusted Owner turn.");
+        }
+        return command({ ...scope, invocationId, method, fields: { turn_id: turnId, arguments: args } });
+      }
+      case "bot.evaluate":
+      case "bot.activate": {
+        if (!isBoundedText(turnId, 400) || !hasExactArguments(args, ["candidate_id", "candidate_digest"]) || !isBoundedText(args.candidate_id, 400)
+          || typeof args.candidate_digest !== "string" || !/^[a-f0-9]{64}$/u.test(args.candidate_digest)) {
+          throw new Error("Bot evaluation/activation requires the exact candidate identity and digest from the trusted Owner turn.");
+        }
+        return command({ ...scope, invocationId, method, fields: { turn_id: turnId, arguments: args } });
+      }
       case "goal.create": {
         const argumentFields = Object.keys(args);
         if (typeof turnId !== "string" || turnId.length === 0
@@ -621,108 +665,12 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
       case "work.inspect":
         return inspectWork(scope, invocationId, args.work_id);
       case "work.submit": {
-        if (Object.keys(args).length !== 1 || !Object.hasOwn(args, "work_id")
-          || typeof args.work_id !== "string" || args.work_id.length === 0) {
-          throw new Error("work.submit accepts only one exact Work ID; all other controls are rejected.");
+        if (!hasExactArguments(args, ["work_id"]) || !isBoundedText(args.work_id, 400)) {
+          throw new Error("work.submit accepts only the exact Work ID for same-Ghost Pi admission.");
         }
-        const inspected = await inspectWork(scope, invocationId, args.work_id);
-        if (inspected.status !== "success") return inspected;
-        const work = inspected.data?.work;
-        if (!work || work.id !== args.work_id || typeof work.goal_id !== "string" || work.owner !== ghostId) {
-          throw new Error("Pi Host returned a work item outside the closed-over Ghost scope.");
-        }
-        const executionId = `pi-${sha256(invocationId)}`;
-        const hasExecution = typeof work.execution_id === "string" && work.execution_id.length > 0;
-        if ((work.execution_id !== null && !hasExecution)
-          || (hasExecution && (work.execution_id !== executionId
-            || !EXISTING_WORK_EXECUTION_STATES.has(work.state)))
-          || (hasExecution && work.blocker !== null)
-          || work.cancellation !== "none"
-          || (!hasExecution && (work.state !== "queued" || work.blocker !== null))) {
-          throw new Error("Work is not a current queued item or its existing execution is not this exact Pi submission.");
-        }
-        const goalReply = await inspectGoal(scope, invocationId, work.goal_id);
-        if (goalReply.status !== "success") return goalReply;
-        const goal = goalReply.data?.goal;
-        if (!goal || goal.id !== work.goal_id || goal.accountable_ghost !== ghostId || goal.reply_conversation !== conversationId
-          || !Number.isSafeInteger(goal.revision) || goal.revision < 1 || work.goal_revision !== goal.revision) {
-          throw new Error("Pi Host work or Goal scope changed; inspect the current Host state before submitting.");
-        }
-        if (typeof goal.prompt !== "string" || goal.prompt.trim().length === 0) {
-          throw new Error("The current immutable Goal prompt is unavailable; no Work execution was submitted.");
-        }
-        if (hasExecution) {
-          return {
-            ...inspected,
-            data: {
-              work,
-              execution_id: work.execution_id,
-            },
-          };
-        }
-        const grant = inspected.data?.worker_grant;
-        if (!grant || typeof grant !== "object" || Array.isArray(grant)
-          || grant.ghost_id !== ghostId || grant.authority_epoch !== authorityEpoch
-          || typeof grant.computer_id !== "string" || grant.computer_id.length === 0
-          || typeof grant.task_snapshot_root !== "string" || !isAbsolute(grant.task_snapshot_root)
-          || typeof grant.model !== "string" || grant.model.length === 0
-          || !["max", "off"].includes(grant.thinking)
-          || !Array.isArray(grant.allowed_tools) || grant.allowed_tools.length === 0
-          || grant.allowed_tools.some(name => typeof name !== "string" || name.length === 0)
-          || new Set(grant.allowed_tools).size !== grant.allowed_tools.length
-          || !Array.isArray(grant.privacy_classes) || !grant.privacy_classes.includes(goal.privacy)
-          || !Number.isSafeInteger(grant.deadline_ms) || grant.deadline_ms < 1 || grant.deadline_ms > 180_000
-          || !Number.isSafeInteger(grant.max_progress_bytes) || grant.max_progress_bytes < 1 || grant.max_progress_bytes > 1_048_576) {
-          throw Object.assign(
-            new Error("No current Host-issued native computer grant permits this exact Ghost and Goal."),
-            { code: "ghost_native_grant_missing" },
-          );
-        }
-        const inputArtifacts = inspected.data?.input_artifacts;
-        if (inputArtifacts != null && !isArtifactInputSnapshot(inputArtifacts)) {
-          throw new Error("Host returned a malformed child artifact metadata snapshot; no Worker execution was submitted.");
-        }
-        const cwd = join(grant.task_snapshot_root, sha256(executionId));
-        const receipt = await command({
-          ...scope,
-          invocationId,
-          method,
-          expectedRevision: goal.revision,
-          fields: {
-            work_id: work.id,
-            spec: {
-              execution_id: executionId,
-              work_id: work.id,
-              work_revision: goal.revision,
-              authority_epoch: grant.authority_epoch,
-              computer_id: grant.computer_id,
-              cwd,
-              prompt: goal.prompt,
-              model: grant.model,
-              thinking: grant.thinking,
-              allowed_tools: grant.allowed_tools,
-              deadline_ms: grant.deadline_ms,
-              max_progress_bytes: grant.max_progress_bytes,
-              // Strict passthrough of the verified Host inspection snapshot only;
-              // omitted entirely when the Host reported no eligible child refs so
-              // historical spec serialization stays byte-equivalent.
-              ...(Array.isArray(inputArtifacts) && inputArtifacts.length > 0
-                ? { input_artifacts: inputArtifacts }
-                : {}),
-            },
-          },
-        });
-        if (receipt.status === "success") {
-          const recoveredWork = receipt.data?.work;
-          if (receipt.data?.execution_id !== executionId
-            || recoveredWork?.id !== work.id
-            || recoveredWork?.goal_id !== goal.id
-            || recoveredWork?.goal_revision !== goal.revision
-            || recoveredWork?.execution_id !== executionId) {
-            throw new Error("Host did not confirm the exact committed Work execution; no replacement was submitted.");
-          }
-        }
-        return receipt;
+        // Canonical goal.create already enqueues this Ghost's assignment. This
+        // only reconciles that durable admission; no OMP spec or process exists.
+        return command({ ...scope, invocationId, method: "work.pi.admit", fields: { work_id: args.work_id } });
       }
       case "work.cancel":
         return command({ ...scope, invocationId, method, fields: { work_id: args.work_id } });
@@ -769,8 +717,13 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
           || Object.keys(args).length !== 1 || !Object.hasOwn(args, "text") || typeof args.text !== "string") {
           throw new Error("Canonical assistant projection requires its committed owner turn and exact text argument.");
         }
-        const existing = await inspectCanonicalReply(scope, invocationId, turnId, args.text);
-        if (existing) return existing;
+        if (memoryContextRevision !== undefined && (typeof memoryContextRevision !== "string" || !/^[a-f0-9]{64}$/u.test(memoryContextRevision))) {
+          throw new Error("Memory-derived reply requires its exact opaque context revision outside model arguments.");
+        }
+        if (memoryContextRevision === undefined) {
+          const existing = await inspectCanonicalReply(scope, invocationId, turnId, args.text);
+          if (existing) return existing;
+        }
         return command({
           ...scope,
           invocationId,
@@ -780,6 +733,7 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
             ghost_id: ghostId,
             conversation_id: conversationId,
             text: args.text,
+            ...(memoryContextRevision === undefined ? {} : { memory_context_revision: memoryContextRevision }),
           },
         });
       }
@@ -795,6 +749,12 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
           method,
           fields: {
             report_id: reportId,
+    work_id: workId,
+    generation_task_id: generationTaskId,
+    task_id: taskId,
+    call_id: callId,
+    input_digest: inputDigest,
+    operation,
             ghost_id: ghostId,
             conversation_id: conversationId,
             text: args.text,

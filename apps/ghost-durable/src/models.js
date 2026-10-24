@@ -1,19 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import { isIP } from "node:net";
-import { mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { createModels, createProvider, fauxProvider } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { completionToSse, validateLocalCompletion } from "../../ghost-omp/completion-codec.mjs";
+import { completionToSse, validateLocalCompletion } from "./providers/completion-codec.mjs";
 
 const BROKER_SINK = "http://127.0.0.1:1/v1";
 const MAX_BROKER_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
-const MAX_STDERR_BYTES = 64 * 1024;
 const GATEWAY_TIMEOUT_MS = 180_000;
-const SYSTEM_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 const LOCAL_PROVIDER_ID = "ghost-local";
 const LOCAL_OUTPUT_TOKENS = 1_024;
 const LOCAL_CONTEXT_WINDOW = 16_384;
@@ -75,7 +69,7 @@ export async function restrictMemoryTools(body, resolveMemoryTools, onMemoryTool
   if (body.tools !== undefined) {
     if (!Array.isArray(body.tools)) throw new Error("Pi model request tools are not an array.");
     body.tools = body.tools.filter((tool) => {
-      const name = tool?.function?.name;
+      const name = tool?.function?.name ?? tool?.name;
       if (typeof name !== "string" || !name.startsWith("memory_")) {
         if (typeof name !== "string" || !name.startsWith("document_")) return true;
         if (!DOCUMENT_MODEL_TOOL_NAME_SET.has(name)) return false;
@@ -373,161 +367,9 @@ export function createLocalModelProvider({
 }
 
 
-function isAllowedOmpModel(value) {
-  const match = /^([^/]+)\/([^/]+)$/u.exec(value);
-  return match !== null
-    && ["zai", "minimax-code"].includes(match[1])
-    && match[2].length <= 300
-    && /^[A-Za-z0-9._:-]+$/u.test(match[2]);
-}
-
-function parseAllowedOmpModels(value) {
-  if (typeof value !== "string" || value.length > 4 * 1024) {
-    throw new Error("GHOST_OMP_SUBSCRIPTION_MODELS must be a bounded comma-separated model allowlist.");
-  }
-  const allowed = [];
-  for (const raw of value.split(",")) {
-    const model = raw.trim();
-    if (isAllowedOmpModel(model) && !allowed.includes(model) && allowed.length < 32) allowed.push(model);
-  }
-  return allowed;
-}
-
-async function resolveOmpExecutable(executable) {
-  if (typeof executable !== "string" || !isAbsolute(executable)) {
-    throw new Error("GHOST_OMP_EXECUTABLE must be an absolute executable path.");
-  }
-  let resolved;
-  try {
-    resolved = await realpath(executable);
-    const info = await stat(resolved);
-    if (!info.isFile() || (info.mode & 0o111) === 0) throw new Error();
-  } catch {
-    throw new Error("GHOST_OMP_EXECUTABLE must identify an executable file.");
-  }
-  return resolved;
-}
-
-function collectGatewayProcess(child, requestLine, signal) {
-  return new Promise((resolve, reject) => {
-    const stdout = [];
-    const stderr = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let failure;
-    let timer;
-
-    const stop = (error) => {
-      if (failure) return;
-      failure = error;
-      child.kill("SIGKILL");
-    };
-    const cleanup = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-    };
-    const onAbort = () => stop(new Error("OMP gateway request was cancelled."));
-
-    child.stdout.on("data", (chunk) => {
-      stdoutBytes += chunk.length;
-      if (stdoutBytes > MAX_RESPONSE_BYTES) stop(new Error("OMP gateway output exceeded its limit."));
-      else stdout.push(chunk);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderrBytes += chunk.length;
-      if (stderrBytes > MAX_STDERR_BYTES) stop(new Error("OMP gateway diagnostics exceeded their limit."));
-      else stderr.push(chunk);
-    });
-    child.stdin.on("error", () => stop(new Error("OMP gateway request handoff failed.")));
-    child.once("error", () => stop(new Error("OMP gateway process could not be started.")));
-    child.once("close", (code, signalName) => {
-      cleanup();
-      if (failure) reject(failure);
-      else resolve({ code, signal: signalName, stdout: Buffer.concat(stdout) });
-    });
-
-    if (signal?.aborted) onAbort();
-    else signal?.addEventListener("abort", onAbort, { once: true });
-    timer = setTimeout(() => stop(new Error("OMP gateway request timed out.")), GATEWAY_TIMEOUT_MS);
-    child.stdin.end(requestLine);
-  });
-}
-
-async function invokeOmpGateway(executable, request, signal) {
-  const home = process.env.HOME;
-  if (typeof home !== "string" || home.length === 0) throw new Error("OMP credential home is unavailable.");
-  const requestLine = `${JSON.stringify(request)}\n`;
-  if (Buffer.byteLength(requestLine, "utf8") > MAX_BROKER_FRAME_BYTES) {
-    throw new Error("OMP request exceeded its frame limit.");
-  }
-
-  const temporary = await mkdtemp(join(tmpdir(), "ghost-omp-provider-"));
-  let child;
-  try {
-    const config = join(temporary, "config.yml");
-    await writeFile(config,
-      "retry:\n  enabled: false\n  modelFallback: false\n  usageAwareFallback: false\n  waitForUsageReset: false\n",
-      { mode: 0o600, flag: "wx" });
-    const searchPaths = [dirname(executable)];
-    if (typeof process.env.GHOST_OMP_EXECUTABLE === "string") {
-      searchPaths.push(dirname(process.env.GHOST_OMP_EXECUTABLE));
-    }
-    searchPaths.push(...SYSTEM_PATHS);
-    child = spawn(executable, [
-      "--no-extensions",
-      "--no-rules",
-      "--no-skills",
-      "--no-session",
-      "--config",
-      config,
-      "auth-gateway",
-      "stdio",
-    ], {
-      cwd: temporary,
-      env: {
-        HOME: home,
-        PATH: [...new Set(searchPaths)].join(delimiter),
-        TMPDIR: temporary,
-        NO_COLOR: "1",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const result = await collectGatewayProcess(child, requestLine, signal);
-    if (result.code !== 0) throw new Error("OMP gateway process failed.");
-
-    let frames;
-    try {
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(result.stdout);
-      frames = text.split(/\r?\n/u).filter((line) => line.trim().length > 0).map((line) => JSON.parse(line));
-    } catch {
-      throw new Error("OMP gateway returned invalid JSONL.");
-    }
-    if (frames[0]?.ready !== true) throw new Error("OMP gateway did not become ready.");
-    const response = frames.find((frame) => frame?.id === request.id);
-    if (!response || !Number.isSafeInteger(response.status) || response.status < 200 || response.status >= 300
-      || response.body === null || typeof response.body !== "object") {
-      throw new Error("OMP gateway omitted a successful matching response frame.");
-    }
-    return response;
-  } finally {
-    if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    await rm(temporary, { recursive: true, force: true });
-  }
-}
-
-export async function createStdioOmpInvoker({ executable, modelRef, configuredModels }) {
-  validateModelRef(modelRef);
-  if (!parseAllowedOmpModels(configuredModels).includes(modelRef)) {
-    throw new Error("GHOST_MODEL_REF is not in GHOST_OMP_SUBSCRIPTION_MODELS.");
-  }
-  const resolvedExecutable = await resolveOmpExecutable(executable);
-  return (request, signal) => {
-    if (request?.path !== "/v1/chat/completions" || request?.body?.model !== modelRef
-      || request?.body?.stream !== false) {
-      throw new Error("OMP gateway request does not match the configured subscription model.");
-    }
-    return invokeOmpGateway(resolvedExecutable, request, signal);
-  };
+// Legacy entry point fails closed. Running OMP is no longer an inference route.
+export async function createStdioOmpInvoker() {
+  throw new Error("OMP inference was removed; configure Ghost registered inference providers.");
 }
 
 function createBrokerProvider({ modelRef, invoke, assertPublicDisclosure, resolveMemoryTools, onMemoryToolsExposed }) {

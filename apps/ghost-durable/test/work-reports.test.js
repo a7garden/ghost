@@ -629,6 +629,8 @@ test("Work report model requests expose no memory tools and cannot send Goal or 
   assert.equal(modelRequests.length, 2);
   assert.equal((modelRequests[0].body.tools ?? []).some((tool) => tool?.function?.name?.startsWith("memory_")), false);
   assert.equal(modelRequests[0].body.tools.some((tool) => tool?.function?.name === "work_submit"), true);
+  assert.equal(modelRequests[0].body.tools.some((tool) => tool?.function?.name?.startsWith("bot_")), false);
+  assert.equal(modelRequests[0].body.tools.some((tool) => ["read", "write", "edit", "bash", "publish_artifact"].includes(tool?.function?.name)), false);
   assert.equal(host.calls.some(({ method }) => method === "memory.capabilities"), false);
   assert.equal(host.calls.some(({ method }) => [
     "goal.create", "goal.update", "work.submit", "work.steer", "work.cancel",
@@ -923,10 +925,11 @@ test("assignment replay isolates Owner context and rejects foreign Work, extra c
     const requirements = assignmentRequest.body.messages
       .filter((message) => message.role === "user")
       .map((message) => { try { return JSON.parse(message.content); } catch { return null; } })
-      .find((message) => message?.native_worker_requirements !== undefined);
-    assert.equal(requirements.native_worker_requirements, assignmentPrompt);
+      .find((message) => message?.requirements !== undefined);
+    assert.equal(requirements.requirements, assignmentPrompt);
     assert.equal(requirements.assigned_work_id, "work-assignment-fixture");
-    assert.match(requirements.controller_task, /After submission.*finish/);
+    assert.match(requirements.task, /execute the task directly/);
+    assert.equal(assignmentRequest.body.tools.some(tool => tool.function.name === "work_submit"), false);
     assert.equal(host.calls.some(({ method }) => [
       "work.submit", "goal.create", "goal.update", "work.steer", "work.cancel", "work.delegate",
     ].includes(method)), false);
@@ -1104,336 +1107,81 @@ test("assignment inspection reservation blocks legacy SDK admission before Host 
     releaseInspection();
   }
 });
-test("authorized Goal assignment preserves the exact Work handle across a lost ACK and reopen", async () => {
-  const assignments = new Map();
-  const works = new Map();
-  const assignmentPrompt = "Execute only the exact current Goal prompt bytes.";
-  let lostWorkAck = 0;
-  const host = createHostTransport(new Map(), {
-    assignments,
-    works,
-    afterWorkSubmit(_invocation, receipt) {
-      lostWorkAck += 1;
-      if (lostWorkAck === 1) throw new Error("simulated lost ACK after durable Work submission");
-      return receipt;
-    },
+test("direct Goal assignment preserves original call identity and never repeats a lost-ACK effect after reopen", async () => {
+  const assignments = new Map(), works = new Map();
+  const host = createHostTransport(new Map(), { assignments, works,
+    afterAssignmentInspect(_input, receipt) { return { ...receipt, data: { ...receipt.data, execution: { engine: "pi", version: 1 } } }; },
   });
-  let assignmentRequestStarted;
-  const assignmentStarted = new Promise((resolve) => { assignmentRequestStarted = resolve; });
-  let releaseAssignment;
-  const assignmentGate = new Promise((resolve) => { releaseAssignment = resolve; });
-  const localRoute = localRoutedProvider(async (_request, index) => {
-    if (index === 1) return { role: "assistant", content: "Private Owner history remains committed." };
-    if (index === 2) {
-      assignmentRequestStarted();
-      await assignmentGate;
-      return {
-        role: "assistant",
-        content: null,
-        tool_calls: [{
-          id: "authorized-original-work-submit",
-          type: "function",
-          function: {
-            name: "work_submit",
-            arguments: JSON.stringify({ work_id: "work-assignment-fixture" }),
-          },
-        }],
-      };
+  const effects = new Map(); let completed = 0;
+  const transport = async input => {
+    if (input.method === "work.execute") {
+      assert.equal(input.work_id, "work-assignment-fixture");
+      assert.equal(input.operation, "bash");
+      assert.equal(input.input_digest, payloadDigest({ operation: input.operation, arguments: input.arguments }));
+      assert.equal(effects.has(input.invocation_id), false);
+      effects.set(input.invocation_id, { ...input });
+      throw new Error("PRIVATE_DIAGNOSTIC_ACK_LOST");
     }
-    if (index === 3) {
-      return {
-        role: "assistant",
-        content: null,
-        tool_calls: [{
-          id: "inspect-original-work-after-lost-ack",
-          type: "function",
-          function: {
-            name: "work_inspect",
-            arguments: JSON.stringify({ work_id: "work-assignment-fixture" }),
-          },
-        }],
-      };
+    if (input.method === "work.execution.complete") {
+      completed += 1;
+      return { status: "error", error_code: "pi_effect_unknown", data: { effect_state: "unknown" } };
     }
-    if (index === 4) {
-      return { role: "assistant", content: "The original submitted Work handle remains active; no result acceptance is claimed." };
-    }
-    throw new Error("A completed cached assignment must not request another model turn.");
+    return host.transport(input);
+  };
+  let modelCalls = 0;
+  const route = localRoutedProvider(async (_request, index) => {
+    modelCalls += 1;
+    if (index === 1) return { role: "assistant", content: null, tool_calls: [{ id: "direct-original-effect", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "append-effect", timeout: 5 }) } }] };
+    if (index === 2) return { role: "assistant", content: null, tool_calls: [{ id: "direct-forbidden-replacement", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "append-effect", timeout: 5 }) } }] };
+    return { role: "assistant", content: "The original effect is unknown; reconciliation is required." };
   });
-  const first = await createRuntime({
-    provider: localRoute.provider,
-    hostToolTransport: host.transport,
-    base: assignmentCanaryRoot,
-  });
-
-  try {
-    const prior = ownerInput(
-      "assignment-recovery-private-owner",
-      "assignment-recovery-private-owner-turn",
-      "PRIVATE_PARENT_HISTORY_SECRET",
-      "private",
-    );
-    assert.equal((await first.runtime.handle(prior)).status, "success");
-    await first.runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
-
-    const assignment = assignmentEnvelope(
-      "authorized-existing-work-assignment",
-      assignmentPrompt,
-      "private",
-    );
-    addAssignmentSource(assignments, assignment);
-    works.set(assignment.body.work_id, {
-      id: assignment.body.work_id,
-      goal_id: assignment.body.goal_id,
-      goal_revision: assignment.body.goal_revision,
-      owner: GHOST_ID,
-      owner_revision: 1,
-      state: "queued",
-      cancellation: "none",
-      execution_id: null,
-      blocker: null,
-    });
-
-    const admitted = await first.runtime.handle(assignment);
-    assert.equal(admitted.status, "success");
-    assert.equal(admitted.data.submission_id, null);
-    await within(assignmentStarted);
-    const original = await readAssignment(first.root, assignment.command_id);
-    assert.notEqual(original.sdk_task_id, null);
-
-    const replay = await first.runtime.handle(assignment);
-    assert.equal(replay.status, "success");
-    assert.equal((await readAssignment(first.root, assignment.command_id)).sdk_task_id, original.sdk_task_id);
-    assert.equal(localRoute.requests.length, 2);
-    releaseAssignment();
-    await first.runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
-
-    assert.equal(localRoute.requests.length, 4);
-    for (const request of localRoute.requests.slice(1)) {
-      const messages = request.body.messages ?? [];
-      assert.equal(JSON.stringify(messages).includes("PRIVATE_PARENT_HISTORY_SECRET"), false);
-    }
-
-    const submitCalls = host.calls.filter(({ method }) => method === "work.submit");
-    assert.equal(submitCalls.length, 1);
-    assert.equal(lostWorkAck, 1);
-    assert.equal(host.workEffects.length, 1);
-    const committed = host.committedWorkSubmits.get(assignment.body.work_id);
-    assert.equal(committed.successful, true);
-    assert.equal(committed.invocation_id, submitCalls[0].invocation_id);
-    assert.equal(committed.ghost_id, GHOST_ID);
-    assert.equal(committed.conversation_id, CONVERSATION_ID);
-    assert.equal(committed.goal_id, assignment.body.goal_id);
-    assert.equal(committed.goal_revision, assignment.body.goal_revision);
-    assert.equal(committed.work_revision, assignment.body.goal_revision);
-    assert.equal(committed.authority_epoch, assignment.authority_epoch);
-    assert.equal(committed.execution_id, `pi-${createHash("sha256").update(submitCalls[0].invocation_id, "utf8").digest("hex")}`);
-    assert.equal(committed.prompt, assignmentPrompt);
-    assert.equal(works.get(assignment.body.work_id).state, "submitted");
-    assert.equal(host.calls.some(({ method, turn_id }) =>
-      method === "conversation.turn_status" && turn_id === assignment.command_id), false);
-    assert.equal(host.calls.some(({ method, turn_id, report_id }) =>
-      (method === "conversation.reply" && turn_id === assignment.command_id)
-      || (method === "conversation.report.reply" && report_id === assignment.command_id)), false);
-
-    const run = await readRun(first.root, assignment.command_id);
-    const stored = await readAssignment(first.root, assignment.command_id);
-    assert.equal(run.status, "answered");
-    assert.equal(run.submission_id, null);
-    assert.notEqual(run.entry_id, null);
-    assert.notEqual(stored.sdk_task_id, null);
-    assert.notEqual(stored.sdk_entry_id, null);
-
-    const inspected = await first.runtime.handle(lifetimeEnvelope("inspect-assignment-owner-history", {
-      method: "conversation.inspect",
-      ghost_id: GHOST_ID,
-      conversation_id: CONVERSATION_ID,
-    }));
-    assert.equal(inspected.status, "success");
-    assert.equal(JSON.stringify(inspected.data.committed_view.entries).includes("PRIVATE_PARENT_HISTORY_SECRET"), true);
-    const assignmentUserEntries = inspected.data.committed_view.entries.filter((entry) =>
-      entry.model?.some((message) => message.role === "user"
-        && JSON.stringify(message).includes(assignmentPrompt)));
-    assert.equal(assignmentUserEntries.length, 0);
-
-    await first.runtime.close();
-    runtimes.delete(first.runtime);
-    const recoveryRoute = localRoutedProvider(() => {
-      throw new Error("A committed assignment must not infer again after reopen.");
-    });
-    const reopened = await createRuntime({
-      root: first.root,
-      provider: recoveryRoute.provider,
-      hostToolTransport: host.transport,
-    });
-    const cached = await reopened.runtime.handle(assignment);
-    assert.equal(cached.status, "success");
-    assert.equal(cached.data.submission_id, null);
-    const reconciled = await reopened.runtime.handle(lifetimeEnvelope("reconcile-assignment-after-reopen", {
-      method: "runtime.reconcile",
-      ghost_id: GHOST_ID,
-      conversation_id: CONVERSATION_ID,
-    }));
-    assert.equal(reconciled.status, "success");
-    await reopened.runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
-    const recovered = await readAssignment(first.root, assignment.command_id);
-    assert.equal(recovered.sdk_task_id, stored.sdk_task_id);
-    assert.equal(recovered.sdk_entry_id, stored.sdk_entry_id);
-    assert.equal(recoveryRoute.requests.length, 0);
-    assert.equal(host.workEffects.length, 1);
-    assert.equal(host.calls.filter(({ method }) => method === "work.submit").length, 1);
-    assert.equal((await readRun(first.root, assignment.command_id)).submission_id, null);
-  } finally {
-    releaseAssignment();
-  }
+  const first = await createRuntime({ provider: route.provider, hostToolTransport: transport, base: assignmentCanaryRoot });
+  const assignment = assignmentEnvelope("direct-lost-ack-assignment", "Append one isolated effect only.", "private");
+  addAssignmentSource(assignments, assignment);
+  assert.equal((await first.runtime.handle(assignment)).status, "success");
+  await first.runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
+  assert.equal(effects.size, 1, "a new model call ID cannot replace the uncertain effect");
+  const original = await readAssignment(first.root, assignment.command_id);
+  assert.equal((await readRun(first.root, assignment.command_id)).status, "effect_unknown");
+  const toolReplies = route.requests.at(-1).body.messages.filter(message => message.role === "tool");
+  assert.match(JSON.stringify(toolReplies), /pi_effect_unconfirmed/);
+  assert.equal(JSON.stringify(toolReplies).includes("PRIVATE_DIAGNOSTIC_ACK_LOST"), false);
+  assert.equal(host.calls.some(input => input.method === "work.submit"), false);
+  await first.runtime.close(); runtimes.delete(first.runtime);
+  const countBeforeReopen = modelCalls;
+  const reopened = await createRuntime({ root: first.root, provider: route.provider, hostToolTransport: transport });
+  assert.equal((await reopened.runtime.handle(assignment)).status, "success");
+  await reopened.runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
+  assert.equal(modelCalls, countBeforeReopen, "unknown receipt recovery cannot repeat inference or effects");
+  assert.equal(effects.size, 1);
+  assert.equal((await readAssignment(first.root, assignment.command_id)).sdk_task_id, original.sdk_task_id);
+  assert.equal(completed, 0, "an unknown effect cannot be projected as a completed producer result");
 });
 
-test("exact committed Work submission recovers without a current grant or another Host mutation", async (t) => {
+test("work submission reconciles same-Ghost Pi admission without an OMP spec or ambient computer grant", async (t) => {
   await mkdir(assignmentCanaryRoot, { recursive: true, mode: 0o700 });
-  const hostRoot = await mkdtemp(join(assignmentCanaryRoot, "transport-recovery-"));
-  tempRoots.add(hostRoot);
+  const hostRoot = await mkdtemp(join(assignmentCanaryRoot, "transport-pi-admission-")); tempRoots.add(hostRoot);
   const controlToken = "a".repeat(64);
-  await writeFile(join(hostRoot, ".ghost-control.json"), JSON.stringify({
-    protocol: "ghost-control",
-    protocol_version: 1,
-    host: "127.0.0.1",
-    port: 9,
-    token: controlToken,
-  }), { mode: 0o600 });
-
-  const invocationId = "committed-original-work-submit";
-  const executionId = `pi-${createHash("sha256").update(invocationId, "utf8").digest("hex")}`;
-  const workId = "work-transport-recovery";
-  const goalId = "goal-transport-recovery";
-  const prompt = "Run only the exact immutable Goal prompt.";
-  const grantForAnotherRoute = {
-    ghost_id: GHOST_ID,
-    authority_epoch: 1,
-    computer_id: "replacement-computer",
-    task_snapshot_root: "/tmp/replacement-task-root",
-    model: "replacement-model",
-    thinking: "max",
-    allowed_tools: ["work_read"],
-    privacy_classes: ["public"],
-    deadline_ms: 30_000,
-    max_progress_bytes: 4096,
-  };
-  let current;
-  let mutationCount = 0;
-  const response = (data) => new Response(JSON.stringify({
-    ok: true,
-    result: {
-      status: "success",
-      summary: "fixture Host response",
-      artifacts: [],
-      next_actions: [],
-      data,
-    },
-  }), { status: 200, headers: { "content-type": "application/json" } });
+  await writeFile(join(hostRoot, ".ghost-control.json"), JSON.stringify({ protocol: "ghost-control", protocol_version: 1, host: "127.0.0.1", port: 9, token: controlToken }), { mode: 0o600 });
+  const bodies = [];
   t.mock.method(globalThis, "fetch", async (url, options = {}) => {
     const parsed = new URL(url);
     if (parsed.pathname.startsWith("/api/v1/bootstrap/")) {
       const nonce = parsed.pathname.slice("/api/v1/bootstrap/".length);
-      const proof = createHmac("sha256", controlToken)
-        .update("ghost-control-bootstrap-v1\0")
-        .update(nonce)
-        .digest("hex");
+      const proof = createHmac("sha256", controlToken).update("ghost-control-bootstrap-v1\0").update(nonce).digest("hex");
       return new Response(JSON.stringify({ protocol: "ghost-control", version: 1, proof }), { status: 200 });
     }
     assert.equal(parsed.pathname, "/api/v1/pi/action");
-    const request = JSON.parse(options.body);
-    const method = request.envelope.body.method;
-    if (method === "work.inspect") {
-      const data = { work: { ...current.work }, result: null, acceptance: null };
-      if (Object.hasOwn(current, "grant")) data.worker_grant = current.grant;
-      return response(data);
-    }
-    if (method === "goal.inspect") return response({ goal: { ...current.goal } });
-    if (method === "work.submit") {
-      mutationCount += 1;
-      return response({
-        work: { ...current.work, state: "submitted", execution_id: executionId },
-        execution_id: executionId,
-      });
-    }
-    throw new Error(`Unexpected Host callback ${method}.`);
+    const request = JSON.parse(options.body); bodies.push(request.envelope.body);
+    assert.equal(request.ghost_id, GHOST_ID); assert.equal(request.conversation_id, CONVERSATION_ID);
+    return new Response(JSON.stringify({ ok: true, result: { status: "success", summary: "Existing Pi assignment", artifacts: [], next_actions: [], data: { work: { id: "work-pi-admission" }, assignment_id: "same-assignment", execution: { engine: "pi", version: 1 } } } }), { status: 200 });
   });
-
-  const transport = createHostToolTransport({
-    hostRoot,
-    callbackToken: "fixture-callback-token",
-    authorityEpoch: 1,
-  });
-  const resetCurrent = (workChanges = {}, goalChanges = {}, grant) => {
-    current = {
-      work: {
-        id: workId,
-        goal_id: goalId,
-        goal_revision: 7,
-        owner: GHOST_ID,
-        owner_revision: 1,
-        state: "running",
-        execution_id: executionId,
-        cancellation: "none",
-        blocker: null,
-        ...workChanges,
-      },
-      goal: {
-        id: goalId,
-        revision: 7,
-        prompt,
-        accountable_ghost: GHOST_ID,
-        reply_conversation: CONVERSATION_ID,
-        privacy: "public",
-        ...goalChanges,
-      },
-    };
-    if (grant !== undefined) current.grant = grant;
-  };
-  const submit = (overrides = {}) => transport({
-    method: "work.submit",
-    invocation_id: overrides.invocationId ?? invocationId,
-    ghost_id: GHOST_ID,
-    conversation_id: CONVERSATION_ID,
-    inference_scope: "public",
-    conversation_disclosure: "public",
-    arguments: {
-      work_id: overrides.workId ?? workId,
-      ...(overrides.extraArguments ?? {}),
-    },
-  });
-
-  resetCurrent();
-  const recovered = await submit();
-  assert.equal(recovered.status, "success");
-  assert.equal(mutationCount, 0);
-  current.grant = grantForAnotherRoute;
-  const recoveredAfterRouteChange = await submit();
-  assert.equal(recoveredAfterRouteChange.status, "success");
-  assert.equal(mutationCount, 0);
-  const deniedReuseCases = [
-    { extraArguments: { prompt: `${prompt} changed` } },
-    { extraArguments: { model: "forged-model" } },
-    { invocationId: "different-invocation" },
-    { workId: "different-work" },
-    { workChanges: { cancellation: "requested" } },
-    { workChanges: { state: "stale" } },
-    { workChanges: { blocker: "parent-incomplete" } },
-    { workChanges: { owner: "foreign-ghost" } },
-    { goalChanges: { revision: 8 } },
-    { goalChanges: { accountable_ghost: "foreign-ghost" } },
-    { goalChanges: { reply_conversation: "foreign-conversation" } },
-    { goalChanges: { id: "different-goal" } },
-  ];
-  for (const { invocationId: requestId, workId: requestWorkId, extraArguments, workChanges, goalChanges } of deniedReuseCases) {
-    resetCurrent(workChanges, goalChanges);
-    await assert.rejects(submit({ invocationId: requestId, workId: requestWorkId, extraArguments }));
-    assert.equal(mutationCount, 0);
-  }
-
-  resetCurrent({ state: "queued", execution_id: null });
-  await assert.rejects(submit(), (error) => error instanceof Error
-    && error.code === "ghost_native_grant_missing");
-  assert.equal(mutationCount, 0);
+  const transport = createHostToolTransport({ hostRoot, callbackToken: "fixture-callback-token", authorityEpoch: 1 });
+  const input = { method: "work.submit", invocation_id: "original-pi-admission", ghost_id: GHOST_ID, conversation_id: CONVERSATION_ID, inference_scope: "public", conversation_disclosure: "public", arguments: { work_id: "work-pi-admission" } };
+  for (let i = 0; i < 2; i += 1) assert.equal((await transport(input)).data.assignment_id, "same-assignment");
+  assert.deepEqual(bodies, [{ method: "work.pi.admit", work_id: "work-pi-admission" }, { method: "work.pi.admit", work_id: "work-pi-admission" }]);
+  for (const extra of [{ prompt: "forged" }, { model: "forged" }, { computer_id: "forged" }, { spec: {} }]) await assert.rejects(transport({ ...input, arguments: { ...input.arguments, ...extra } }));
+  assert.equal(bodies.length, 2, "model controls cannot reach the Host");
 });
 
 test("assignment coordination delegates from and waits on only the exact assigned Work", async () => {
@@ -1580,104 +1328,17 @@ test("assignment coordination delegates from and waits on only the exact assigne
   }
 });
 
-test("only a typed pre-submit refusal proves no effect; unknown failures stay ambiguous and redact diagnostics", async () => {
-  for (const [code, expectedEffectClass] of [
-    ["ghost_native_grant_missing", "no_effect"],
-    [undefined, undefined],
-  ]) {
-  const assignments = new Map();
-  const works = new Map();
-  const host = createHostTransport(new Map(), { assignments, works });
-  const privateDiagnostic = "PRIVATE_MUTATION_TRANSPORT_DIAGNOSTIC";
-  const grantlessTransport = async (invocation) => {
-    if (invocation.method === "work.submit") {
-      throw Object.assign(new Error(privateDiagnostic), { code });
-    }
-    return host.transport(invocation);
-  };
-  const assignmentPrompt = "Submit only this exact Work when a current native grant exists.";
-  let assignmentRequestStarted;
-  const assignmentStarted = new Promise((resolve) => { assignmentRequestStarted = resolve; });
-  let releaseAssignment;
-  const assignmentGate = new Promise((resolve) => { releaseAssignment = resolve; });
-  const privateRoute = localRoutedProvider(async (_request, index) => {
-    if (index === 1) return { role: "assistant", content: "Private Owner history was committed." };
-    if (index === 2) {
-      assignmentRequestStarted();
-      await assignmentGate;
-      return {
-        role: "assistant",
-        content: null,
-        tool_calls: [{
-          id: "grantless-work-submit",
-          type: "function",
-          function: {
-            name: "work_submit",
-            arguments: JSON.stringify({ work_id: "work-assignment-fixture" }),
-          },
-        }],
-      };
-    }
-    if (index === 3) {
-      return { role: "assistant", content: "The exact Work has no current native grant; the missing prerequisite was reported." };
-    }
-    throw new Error("Grant-less submission fixture dispatched an unexpected model turn.");
-  });
-  const { root, runtime } = await createRuntime({
-    provider: privateRoute.provider,
-    hostToolTransport: grantlessTransport,
-    base: assignmentCanaryRoot,
-  });
-  try {
-    const prior = ownerInput(
-      "grantless-private-parent",
-      "grantless-private-parent-turn",
-      "PRIVATE_PARENT_HISTORY_SECRET",
-      "private",
-    );
-    assert.equal((await runtime.handle(prior)).status, "success");
-    await runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
-
-    const assignment = assignmentEnvelope("grantless-goal-assignment", assignmentPrompt, "private");
-    addAssignmentSource(assignments, assignment);
-    works.set(assignment.body.work_id, {
-      id: assignment.body.work_id,
-      goal_id: assignment.body.goal_id,
-      goal_revision: assignment.body.goal_revision,
-      owner: GHOST_ID,
-      owner_revision: 1,
-      state: "queued",
-      cancellation: "none",
-      execution_id: null,
-      blocker: null,
-    });
-
-    assert.equal((await runtime.handle(assignment)).status, "success");
-    await within(assignmentStarted);
-    releaseAssignment();
-    await runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
-
-    assert.equal(host.calls.some(({ method }) => method === "work.submit"), false);
-    const inspected = await runtime.handle(lifetimeEnvelope("inspect-grantless-assignment", {
-      method: "conversation.inspect",
-      ghost_id: GHOST_ID,
-      conversation_id: CONVERSATION_ID,
-    }));
-    assert.equal(inspected.status, "success");
-    const toolMessage = privateRoute.requests.at(-1).body.messages.find(
-      (message) => message.role === "tool" && message.tool_call_id === "grantless-work-submit",
-    );
-    const toolResult = JSON.parse(toolMessage.content);
-    assert.equal(toolResult.status, "error");
-    assert.equal(toolResult.data?.host_effect_class, expectedEffectClass);
-    assert.equal(JSON.stringify(inspected.data.committed_view.entries).includes(privateDiagnostic), false);
-    const run = await readRun(root, assignment.command_id);
-    assert.equal(run.status, "answered");
-    assert.equal(works.get(assignment.body.work_id).execution_id, null);
-  } finally {
-    releaseAssignment();
-  }
-  }
+test("a missing Pi environment never exposes direct execution or redirects an assignment through legacy submission", async () => {
+  const assignments = new Map(); const host = createHostTransport(new Map(), { assignments });
+  const route = localRoutedProvider(async () => ({ role: "assistant", content: "Blocked: this assignment has no isolated Pi environment." }));
+  const { runtime } = await createRuntime({ provider: route.provider, hostToolTransport: host.transport, base: assignmentCanaryRoot });
+  const assignment = assignmentEnvelope("no-pi-environment", "Perform this Work only in its isolated Pi environment.", "private");
+  addAssignmentSource(assignments, assignment);
+  assert.equal((await runtime.handle(assignment)).status, "success"); await runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
+  assert.equal(route.requests.length, 1);
+  const names = route.requests[0].body.tools.map(tool => tool.function.name);
+  for (const name of ["read", "write", "edit", "bash", "publish_artifact", "work_submit"]) assert.equal(names.includes(name), false);
+  assert.equal(host.calls.some(input => ["work.submit", "work.execute", "work.execution.complete"].includes(input.method)), false);
 });
 
 test("Goal delegation must target the operations ghost approved by Host inspection", async (t) => {

@@ -1,5 +1,5 @@
 import { createHostToolTransport } from "./host-transport.js";
-import { createBrokerModelProvider, createFixtureModelProvider, createLocalModelProvider, createStdioOmpInvoker } from "./models.js";
+import { createFixtureModelProvider, createLocalModelProvider } from "./models.js";
 import { errorResponse, protocolHandshake } from "./contract.js";
 import { openGhostRuntime } from "./runtime.js";
 import { createRegisteredModelProvider } from "./registered-models.js";
@@ -90,22 +90,12 @@ async function main() {
     let modelProvider;
     if (mode === "fixture") {
       modelProvider = createFixtureModelProvider();
-    } else if (process.env.GHOST_INFERENCE_PROVIDER_MODE === "registered") {
+    } else {
       const localModelProvider = optionalLocalModelProvider();
       localRouteConfigured = localModelProvider !== undefined;
       modelProvider = createRegisteredModelProvider({ hostRoot: requiredEnv("GHOST_LIFETIME_HOST_ROOT"),
-        executable: requiredEnv("GHOST_CODEX_EXECUTABLE"), localModelProvider,
+        executable: process.env.GHOST_CODEX_EXECUTABLE, localModelProvider,
         onDiagnostic: (diagnostic) => process.stderr.write(`${JSON.stringify(diagnostic)}\n`) });
-    } else {
-      const modelRef = requiredEnv("GHOST_MODEL_REF");
-      const invoke = await createStdioOmpInvoker({
-        executable: requiredEnv("GHOST_OMP_EXECUTABLE"),
-        modelRef,
-        configuredModels: requiredEnv("GHOST_OMP_SUBSCRIPTION_MODELS"),
-      });
-      const localModelProvider = optionalLocalModelProvider();
-      localRouteConfigured = localModelProvider !== undefined;
-      modelProvider = createBrokerModelProvider({ modelRef, invoke, localModelProvider });
     }
     const hostToolTransport = process.env.GHOST_LIFETIME_HOST_ROOT === undefined ? undefined : createHostToolTransport({
       callbackToken: requiredEnv("GHOST_PI_CALLBACK_TOKEN"),

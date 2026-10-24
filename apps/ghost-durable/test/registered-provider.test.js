@@ -41,3 +41,20 @@ test('local remains an explicit option and provider keys reject unsafe files',as
    await assert.rejects(readProviderKey(root,'zai-coding'));
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('Codex compatibility output is withheld when consent changes during inference',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'ghost-codex-revoke-'));
+ let allowed=true;
+ const selection={provider:'codex',model:'gpt-6.1-sol',effort:'high'};
+ const provider=createRegisteredModelProvider({hostRoot:root,executable:'/usr/bin/false',complete:async({body})=>{
+  allowed=false;return {model:body.model,choices:[{message:{role:'assistant',content:'revoked output'},finish_reason:'stop'}]};
+ }}).forConversation(undefined,async()=>{},undefined,undefined,undefined,{
+  transport:async({method})=>({status:'success',data:method==='inference.settings'?{selection,credentials_present:true,external_allowed:allowed}:{inference_scope:'selected'}}),
+  ghostId:'g',conversationId:'c',disclosure:async()=>'non_public',inspectAssignment:async()=>{},
+ });
+ try {
+  const route=await provider.selectRegistered('non_public');
+  const result=await provider.models.complete(provider.models.getModel(route.target.provider,route.target.modelId),{messages:[{role:'user',content:'hello',timestamp:1}]},provider.streamOptions);
+  assert.equal(result.stopReason,'error');assert.equal(result.content.some(p=>p.text==='revoked output'),false);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
