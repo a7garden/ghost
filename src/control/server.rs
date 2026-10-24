@@ -17,6 +17,9 @@ use crate::workspace::{CSS, INDEX, JS, TOKENS, WORKFLOWS};
 
 const REQUEST_BODY_LIMIT: usize = 8 * 1_048_576;
 const MAX_CONNECTIONS: usize = 32;
+/// Upper bound a single events long-poll may hold its request thread. The
+/// bridge and UI poll cycles are sized above this.
+const MAX_EVENTS_WAIT_MS: u64 = 25_000;
 
 /// Serve the host on loopback. The host process owns all profile stores while
 /// this transport is alive; clients use the protected discovery file.
@@ -314,7 +317,24 @@ fn route(
             );
         }
         let after = parts[1].parse::<u64>()?;
-        return respond_result(peer, host.events(parts[0], after));
+        let wait_ms = match request.headers.get("x-ghost-events-wait-ms") {
+            Some(raw) => match raw.parse::<u64>() {
+                Ok(wait) => wait.min(MAX_EVENTS_WAIT_MS),
+                Err(_) => {
+                    return respond_json(
+                        peer,
+                        400,
+                        &json!({"ok": false, "error": "invalid_event_cursor"}),
+                    )
+                }
+            },
+            None => 0,
+        };
+        return respond_result(peer, if wait_ms == 0 {
+            host.events(parts[0], after)
+        } else {
+            host.events_wait(parts[0], after, Duration::from_millis(wait_ms))
+        });
     }
 
     #[cfg(feature = "workspace-ui")]
@@ -573,6 +593,190 @@ mod voice_tests {
             vec![b'a'; crate::host::voice::MAX_REQUEST_BYTES + 1],
         );
         assert!(response(&input, &session, &host).starts_with("HTTP/1.1 413"));
+        runtime.block_on(host.shutdown()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod events_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::io::Read;
+
+    fn get_request(session: &http::Session, target: &str, wait_ms: Option<u64>) -> http::Request {
+        let mut headers = HashMap::from([
+            (
+                "host".into(),
+                session.origin.trim_start_matches("http://").into(),
+            ),
+            ("origin".into(), session.origin.clone()),
+            ("authorization".into(), format!("Bearer {}", "a".repeat(64))),
+            ("x-ghost-csrf".into(), "a".repeat(64)),
+        ]);
+        if let Some(wait) = wait_ms {
+            headers.insert("x-ghost-events-wait-ms".into(), wait.to_string());
+        }
+        http::Request {
+            method: "GET".into(),
+            target: target.into(),
+            body: Vec::new(),
+            headers,
+        }
+    }
+
+    fn action(
+        session: &Arc<http::Session>,
+        host: &Arc<Host>,
+        command: Value,
+    ) -> Result<Value> {
+        let input = http::Request {
+            method: "POST".into(),
+            target: "/api/v1/action".into(),
+            body: serde_json::to_vec(&serde_json::json!({
+                "request_id": uuid::Uuid::new_v4().to_string(),
+                "command": command
+            }))
+            .unwrap(),
+            headers: HashMap::from([
+                (
+                    "host".into(),
+                    session.origin.trim_start_matches("http://").into(),
+                ),
+                ("origin".into(), session.origin.clone()),
+                ("content-type".into(), "application/json".into()),
+                ("authorization".into(), format!("Bearer {}", "a".repeat(64))),
+                ("x-ghost-csrf".into(), "a".repeat(64)),
+            ]),
+        };
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        route(&mut peer, &input, session, host, false)?;
+        peer.shutdown(Shutdown::Both).unwrap();
+        let mut output = String::new();
+        client.read_to_string(&mut output).unwrap();
+        let (_, payload) = output.split_once("\r\n\r\n").unwrap();
+        let parsed: Value = serde_json::from_str(payload)
+            .unwrap_or_else(|error| panic!("invalid JSON response: {error}; body: {output}"));
+        Ok(parsed)
+    }
+
+    #[test]
+    fn events_reject_invalid_wait_hints_without_touching_the_host() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let host = Host::open(root.path(), runtime.handle().clone(), Some("mock")).unwrap();
+        let session = Arc::new(http::Session::new_with_control_token(
+            62077,
+            "events-test",
+            "a".repeat(64),
+        ));
+        let mut input =
+            get_request(&session, "/api/v1/events/00000000-0000-0000-0000-000000000000/0", None);
+        input
+            .headers
+            .insert("x-ghost-events-wait-ms".into(), "soon".into());
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        route(&mut peer, &input, &session, &host, false).unwrap();
+        peer.shutdown(Shutdown::Both).unwrap();
+        let mut output = String::new();
+        client.read_to_string(&mut output).unwrap();
+        assert!(output.starts_with("HTTP/1.1 400"));
+        assert!(output.contains("invalid_event_cursor"));
+        runtime.block_on(host.shutdown()).unwrap();
+    }
+
+    #[test]
+    fn events_long_poll_wakes_when_a_commit_lands() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let host = Arc::new(Host::open(root.path(), runtime.handle().clone(), Some("mock")).unwrap());
+        let session = Arc::new(http::Session::new_with_control_token(
+            62077,
+            "events-test",
+            "a".repeat(64),
+        ));
+        let profile = action(
+            &session,
+            &host,
+            serde_json::json!({"type": "create_profile", "name": "scout", "persona": "tester"}),
+        )
+        .unwrap()["result"]["profile_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let conversation = action(
+            &session,
+            &host,
+            serde_json::json!({"type": "create_conversation", "profile_id": profile, "model": "mock", "tools": true}),
+        )
+        .unwrap()["result"]["conversation_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Seed the cursor at the latest existing commit so the long-poll can
+        // only return once the submitted turn commits something new.
+        let baseline = {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (mut peer, _) = listener.accept().unwrap();
+            let input = get_request(&session, &format!("/api/v1/events/{profile}/0"), None);
+            route(&mut peer, &input, &session, &host, false).unwrap();
+            peer.shutdown(Shutdown::Both).unwrap();
+            let mut output = String::new();
+            client.read_to_string(&mut output).unwrap();
+            let (_, payload) = output.split_once("\r\n\r\n").unwrap();
+            let events: Value = serde_json::from_str(payload).unwrap();
+            events
+                .as_array()
+                .and_then(|list| list.last())
+                .and_then(|commit| commit["revision"].as_u64())
+                .unwrap_or(0)
+        };
+
+        let submit_host = host.clone();
+        let submit_session = session.clone();
+        let submit_profile = profile.clone();
+        let submit_conversation = conversation.clone();
+        let submitter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            action(
+                &submit_session,
+                &submit_host,
+                serde_json::json!({"type": "submit", "profile_id": submit_profile, "conversation_id": submit_conversation, "prompt": "count commits", "kind": "prompt"}),
+            )
+        });
+
+        let started = std::time::Instant::now();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        let input = get_request(
+            &session,
+            &format!("/api/v1/events/{profile}/{baseline}"),
+            Some(8_000),
+        );
+        route(&mut peer, &input, &session, &host, false).unwrap();
+        peer.shutdown(Shutdown::Both).unwrap();
+        let mut output = String::new();
+        client.read_to_string(&mut output).unwrap();
+        let elapsed = started.elapsed();
+
+        assert!(submitter.join().unwrap().is_ok());
+        let (_, payload) = output.split_once("\r\n\r\n").unwrap();
+        let events: Value = serde_json::from_str(payload).unwrap();
+        let commits = events.as_array().expect("events response is an array");
+        assert!(
+            commits.iter().any(|commit| commit["revision"].as_u64() > Some(baseline)),
+            "expected a commit newer than {baseline}: {events}"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(250),
+            "long-poll returned before the submitted turn committed: {elapsed:?}"
+        );
         runtime.block_on(host.shutdown()).unwrap();
     }
 }

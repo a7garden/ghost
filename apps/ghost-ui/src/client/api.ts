@@ -41,6 +41,24 @@ export async function connect(options?: { routingProviders?: Partial<Pick<Routin
       if (!r.ok || data.ok !== true) throw new Error(typeof data.error === 'string' ? data.error : '요청 결과를 확인하지 못했습니다. 같은 요청으로 다시 시도할 수 있습니다.');
       return data.result;
     },
+    // Long-poll one profile's committed runtime events. The host holds the
+    // request until a commit lands or its wait cap elapses, then replies with
+    // the plain commit list from /api/v1/events.
+    async events(profileId, after, waitMs, signal) {
+      const r = await fetch(`/ghost-api/events/${profileId}/${after}`, {
+        headers: { 'X-Ghost-UI-CSRF': config.csrf, 'X-Ghost-Events-Wait-Ms': String(waitMs) },
+        cache: 'no-store',
+        signal: AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(40000)]),
+      });
+      if (!r.ok) throw new Error('Ghost 호스트 이벤트를 확인하지 못했습니다.');
+      const payload: unknown = await r.json();
+      const isCommit = (item: unknown): item is { revision: number } => {
+        if (typeof item !== 'object' || item === null || !('revision' in item)) return false;
+        return typeof item.revision === 'number';
+      };
+      const events = Array.isArray(payload) ? payload.filter(isCommit) : [];
+      return { events, latest: events.length ? events[events.length - 1].revision : after };
+    },
   };
   return client;
 }

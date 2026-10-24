@@ -37,7 +37,8 @@ export interface RoutingPendingMetadata {
 }
 export interface Envelope { request_id: string; command: Command; routing_pending?: RoutingPendingMetadata; }
 export interface Bootstrap { mode: 'demo' | 'live'; csrf: string; }
-export interface Client { routing?: RoutingAdapter; routingTransport?: HostRoutingTransport; mode: 'demo' | 'live'; snapshot(signal?: AbortSignal): Promise<Snapshot>; action(envelope: Envelope): Promise<unknown>; }
+export interface HostEvent { revision: number; event?: string; task_id?: string }
+export interface Client { routing?: RoutingAdapter; routingTransport?: HostRoutingTransport; mode: 'demo' | 'live'; snapshot(signal?: AbortSignal): Promise<Snapshot>; action(envelope: Envelope): Promise<unknown>; events?(profileId: string, after: number, waitMs: number, signal?: AbortSignal): Promise<{ events: HostEvent[]; latest: number }>; }
 
 const runningPhases = new Set(['queued', 'model_ready', 'model_running', 'tools', 'tool_ready', 'tool_running', 'waiting_child']);
 export const isRunning = (phase: string) => runningPhases.has(phase);

@@ -59,8 +59,9 @@ export function createBridge({ root = process.env.GHOST_ROOT } = {}) {
     if (req.url === '/ghost-api/bootstrap' && req.method === 'GET') return json(res, 200, { mode: root ? 'live' : 'demo', csrf, protocol: 'ghost-ui', protocol_version: 1, owner_pid: Number(process.env.GHOST_CONSOLE_OWNER_PID || process.pid) });
     if (!equal(req.headers['x-ghost-ui-csrf'], csrf)) return json(res, 403, { error: '페이지를 새로고침하고 다시 시도하세요.' });
     const voice = req.method === 'POST' && /^\/ghost-api\/voice\/(config|transcribe|synthesize)$/.test(req.url);
+    const events = req.method === 'GET' && /^\/ghost-api\/events\/([0-9a-f-]{36})\/(\d+)$/.exec(req.url);
     const write = (req.url === '/ghost-api/action' || voice) && req.method === 'POST';
-    const read = req.url === '/ghost-api/snapshot' && req.method === 'GET';
+    const read = (req.url === '/ghost-api/snapshot' && req.method === 'GET') || Boolean(events);
     if (!write && !read) return json(res, 404, { error: 'not_found' });
     if (write && (req.headers.origin !== origin || req.headers['content-type'] !== 'application/json')) return json(res, 403, { error: '요청의 출처와 형식을 확인하세요.' });
     if (!root) return json(res, 503, { error: '예시 모드에는 연결된 호스트가 없습니다.' });
@@ -70,10 +71,11 @@ export function createBridge({ root = process.env.GHOST_ROOT } = {}) {
       const disconnected = new AbortController();
       const closed = () => { if (!res.writableEnded) disconnected.abort(); };
       res.once('close', closed);
-      const target = voice ? req.url.slice('/ghost-api/'.length) : write ? 'action' : 'snapshot';
+      const target = voice ? req.url.slice('/ghost-api/'.length) : events ? `events/${events[1]}/${events[2]}` : write ? 'action' : 'snapshot';
+      const waitHeader = events && typeof req.headers['x-ghost-events-wait-ms'] === 'string' ? { 'X-Ghost-Events-Wait-Ms': req.headers['x-ghost-events-wait-ms'] } : {};
       const upstream = await fetch(`${host.origin}/api/v1/${target}`, {
-        method: write ? 'POST' : 'GET', redirect: 'error', signal: AbortSignal.any([disconnected.signal, AbortSignal.timeout(voice ? 130000 : 30000)]), body,
-        headers: { Authorization: `Bearer ${host.token}`, 'X-Ghost-CSRF': host.token, Origin: host.origin, 'Sec-Fetch-Site': 'same-origin', ...(write ? { 'Content-Type': 'application/json' } : {}) },
+        method: write ? 'POST' : 'GET', redirect: 'error', signal: AbortSignal.any([disconnected.signal, AbortSignal.timeout(voice ? 130000 : events ? 35000 : 30000)]), body,
+        headers: { Authorization: `Bearer ${host.token}`, 'X-Ghost-CSRF': host.token, Origin: host.origin, 'Sec-Fetch-Site': 'same-origin', ...(write ? { 'Content-Type': 'application/json' } : {}), ...waitHeader },
       });
       try { json(res, upstream.status, await boundedJSON(upstream)); }
       finally { res.off('close', closed); }

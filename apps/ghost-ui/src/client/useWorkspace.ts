@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CommandQueue, connect } from './api';
+import { subscribeHostEvents } from './hostEvents';
 import { RoutingClient } from './routingClient';
 import type { RoutingConnection } from '../features/RoutingConversation';
 import type { Client, Command, Snapshot } from './types';
@@ -15,7 +16,26 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
   useEffect(() => {
     let alive = true, timer: ReturnType<typeof setTimeout>;
     const abort = new AbortController();
+    let polling = false, refreshQueued = false, failures = 0, unsubEvents: (() => void) | null = null, eventProfiles = '';
+    // Host events only mark freshness: any commit wakes the snapshot poll so
+    // the fixed 1.8s cycle becomes event-driven with a slow safety fallback.
+    const wake = () => { refreshQueued = true; if (!polling && alive) { clearTimeout(timer); timer = setTimeout(poll, 0); } };
+    const syncEvents = (result: Snapshot) => {
+      if (client.current?.mode !== 'live' || typeof client.current.events !== 'function') return;
+      const ids = result.profiles.map(p => p.id).sort();
+      const key = ids.join(',');
+      if (key === eventProfiles) return;
+      eventProfiles = key;
+      unsubEvents?.();
+      unsubEvents = subscribeHostEvents(
+        (profileId, after, signal) => client.current!.events!(profileId, after, 25000, signal),
+        ids,
+        wake,
+      );
+    };
     const poll = async () => {
+      if (polling) { refreshQueued = true; return; }
+      polling = true;
       const captured = revision.current;
       try {
         const result = await client.current!.snapshot(abort.signal);
@@ -27,20 +47,25 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
           if (client.current?.routing) {
             const routingClient = new RoutingClient(client.current.routing, queue.current);
             const capability = await routingClient.capability();
-            if (!alive || captured !== revision.current || mutation.current) {
-              if (alive) timer = setTimeout(poll, document.hidden ? 10000 : 1800);
-              return;
-            }
+            if (!alive || captured !== revision.current || mutation.current) return;
             setRouting(capability.admission ? { client: routingClient, capability, inputAvailable: client.current.routing.canPrepareInput === true } : undefined);
           } else setRouting(undefined);
-          setSnapshot(result); setError('');
+          setSnapshot(result); setError(''); failures = 0;
+          syncEvents(result);
         }
-      } catch (e) { if (alive) { if (client.current?.routing) setRouting(undefined); setError(e instanceof Error ? e.message : '연결을 확인해 주세요.'); } }
-      if (alive) timer = setTimeout(poll, document.hidden ? 10000 : 1800);
+      } catch (e) { if (alive) { failures += 1; if (client.current?.routing) setRouting(undefined); setError(e instanceof Error ? e.message : '연결을 확인해 주세요.'); } }
+      finally {
+        polling = false;
+        if (alive) {
+          const delay = refreshQueued ? 500 : failures > 0 ? 5000 : document.hidden ? 10000 : 30000;
+          refreshQueued = false;
+          timer = setTimeout(poll, delay);
+        }
+      }
     };
     setRouting(undefined);
     connectClient().then(c => { if (alive) { client.current = c; setMode(c.mode); void poll(); } }).catch(e => { if (alive) setError(e.message); });
-    return () => { alive = false; abort.abort(); clearTimeout(timer); };
+    return () => { alive = false; abort.abort(); clearTimeout(timer); unsubEvents?.(); };
   }, [attempt, connectClient]);
   const action = useCallback(async (command: Command) => {
     if (!client.current || !queue.current) throw new Error('호스트 연결을 기다려 주세요.');

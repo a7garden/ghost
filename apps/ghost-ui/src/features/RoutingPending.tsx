@@ -7,9 +7,9 @@ import './routing-pending.css';
 type Settled=(request:PendingRoutingRequest,observation:RoutingPendingObservation)=>void;
 const active=(request:PendingRoutingRequest)=>!['failed','cancelled'].includes(request.state);
 
-// The original envelope is the journal of an input, never a client Work store.
-// Polling observes the canonical receipt/task; it never resends the prompt.
-export function usePendingRouting(client:RoutingClient|undefined,entry:RoutingEntry,connected:boolean,onSettled:Settled){
+ // Polling is the fallback: host event signals call scan() sooner. It only
+ // observes the canonical receipt/task; it never resends the prompt.
+ export function usePendingRouting(client:RoutingClient|undefined,entry:RoutingEntry,connected:boolean,onSettled:Settled){
  const clientRef=useRef(client),settledRef=useRef(onSettled),epoch=useRef(0),inFlight=useRef(new Set<string>()),notified=useRef(new Set<string>());
  if(client)clientRef.current=client;
  settledRef.current=onSettled;
@@ -40,7 +40,7 @@ export function usePendingRouting(client:RoutingClient|undefined,entry:RoutingEn
  useEffect(()=>{
   epoch.current++;inFlight.current=new Set();notified.current=new Set();setRequests([]);setChecking([]);setNotice('');
   let live=true,timer:ReturnType<typeof setTimeout>;
-  const poll=async()=>{await scan();if(live)timer=setTimeout(poll,document.hidden?10000:2000);};void poll();
+  const poll=async()=>{await scan();if(live)timer=setTimeout(poll,document.hidden?30000:15000);};void poll();
   return()=>{live=false;epoch.current++;clearTimeout(timer);};
  },[entryKey,connected,scan]);
  const change=useCallback(async(request:PendingRoutingRequest,kind:'check'|'cancel'|'dismiss')=>{

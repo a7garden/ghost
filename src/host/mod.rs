@@ -1039,6 +1039,52 @@ impl Host {
         )?)
     }
 
+    /// Long-poll variant of [`Self::events`]: returns as soon as the profile's
+    /// durable session commits anything newer than `after`, or the current
+    /// (possibly empty) list once `timeout` elapses. Waiting subscribes to the
+    /// session's change signal and never drives execution.
+    pub fn events_wait(&self, profile_id: &str, after: u64, timeout: Duration) -> Result<Value> {
+        self.handle.block_on(async move {
+            // Subscribe before the first read so a commit racing this call
+            // still wakes the wait instead of being seen only on a re-poll.
+            let mut watch = {
+                let state = self.lock()?;
+                let profile = state
+                    .profiles
+                    .get(profile_id)
+                    .ok_or_else(|| anyhow!("profile missing"))?;
+                profile.runtime.session.watch()
+            };
+            let deadline = tokio::time::Instant::now() + timeout;
+            loop {
+                let commits = self.events(profile_id, after)?;
+                if commits.as_array().is_some_and(|list| !list.is_empty()) {
+                    return Ok(commits);
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return Ok(commits);
+                }
+                match tokio::time::timeout_at(deadline, watch.changed()).await {
+                    Ok(Ok(())) => {}
+                    // The watched session was replaced (profile recovery) and
+                    // its sender is gone: pause briefly, then resubscribe.
+                    Ok(Err(_)) => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        watch = {
+                            let state = self.lock()?;
+                            let profile = state
+                                .profiles
+                                .get(profile_id)
+                                .ok_or_else(|| anyhow!("profile missing"))?;
+                            profile.runtime.session.watch()
+                        };
+                    }
+                    Err(_) => return self.events(profile_id, after),
+                }
+            }
+        })
+    }
+
     pub(crate) fn computer_backend(&self) -> &Arc<dyn computer::ComputerBackend> {
         &self.computer
     }

@@ -130,3 +130,15 @@ test('voice rejects missing auth, foreign origin, oversized audio and arbitrary 
   assert.equal((await fetch(`${ui.origin}/ghost-api/voice/transcribe`, { method: 'POST', headers, body: JSON.stringify({ profile_id: 'p', conversation_id: 'c', audio_base64: 'a'.repeat(6 * 1024 * 1024) }) })).status, 502);
   assert.equal(requests.length, 0);
 });
+test('events proxy forwards the cursor path and wait hint, rejects malformed cursors', async t => {
+  const { ui, bootstrap, requests } = await fixture(t);
+  const headers = { 'X-Ghost-UI-CSRF': bootstrap.csrf, 'X-Ghost-Events-Wait-Ms': '25000' };
+  const profile = '11111111-2222-3333-4444-555555555555';
+  const response = await fetch(`${ui.origin}/ghost-api/events/${profile}/7`, { headers });
+  assert.equal(response.status, 200);
+  const forwarded = requests.find(r => r.path.startsWith('/api/v1/events/'));
+  assert.equal(forwarded.path, `/api/v1/events/${profile}/7`);
+  assert.equal(forwarded.headers['x-ghost-events-wait-ms'], '25000');
+  assert.equal((await fetch(`${ui.origin}/ghost-api/events/not-a-uuid/7`, { headers })).status, 404);
+  assert.equal((await fetch(`${ui.origin}/ghost-api/events/${profile}/abc`, { headers })).status, 404);
+});

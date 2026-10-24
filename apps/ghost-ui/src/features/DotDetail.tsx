@@ -65,6 +65,14 @@ export function DotDetail({ routing, profile, snapshot, mode, action, busy, conn
       }
     }
   });
+  // Snapshot changes follow host commits (event-driven refresh); re-scan the
+  // pending journal then instead of waiting for the next fallback tick.
+  const pendingSnapshot = useRef(snapshot);
+  useEffect(() => {
+    if (pendingSnapshot.current === snapshot) return;
+    pendingSnapshot.current = snapshot;
+    if (connected) void pending.refresh();
+  }, [snapshot, connected, pending.refresh]);
   const onSpeakingChange = useAvatarSpeaking(profile.id);
   const replyMessage = conversation?.messages.map((message, index) => ({ message, index })).reverse().find(({ message }) => message.role === 'assistant' && message.text.trim() && conversation.tasks.some(task => task.id === message.task_id && task.phase === 'complete'));
   const latestVoiceReply = replyMessage && conversation ? { id: `${conversation.id}:${replyMessage.message.task_id}:${replyMessage.index}`, taskId: replyMessage.message.task_id!, text: replyMessage.message.text } : undefined;
