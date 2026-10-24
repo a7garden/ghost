@@ -94,3 +94,21 @@ test("write and edit enforce the Host's 64 KiB UTF-8 limit before dispatch", asy
   assert.equal((await tools.edit.execute({ path: "answer.txt", edits: [{ oldText: "old", newText: "x".repeat(65537) }] }, api, {})).isError, true);
   assert.equal(calls, 0);
 });
+
+test("bash command recipes preserve reference input identity and refuse mixed or malformed authority", async () => {
+  const calls = [];
+  const tools = setup(async input => {
+    calls.push(input);
+    return { status: "success", data: { receipt: { assignment_id: input.assignment_id, work_id: input.work_id, generation_task_id: input.generation_task_id, task_id: input.task_id, call_id: input.call_id, input_digest: input.input_digest, execution_id: "recipe-execution", state: "complete" } } };
+  });
+  const args = { command_ref: `pc-${"a".repeat(64)}`, timeout: 12 };
+  assert.equal((await tools.bash.execute(args, api, {})).isError, false);
+  assert.deepEqual(calls[0].arguments, args);
+  assert.equal(calls[0].input_digest, payloadDigest({ operation: "bash", arguments: args }));
+  for (const bad of [{ command: "override" }, { command_ref: null }, { command_ref: "invented" }, { timeout: null }, { timeout: 181 }, { timeout: 1.5 }, { actor_ref: "owner" }]) {
+    const changed = { ...args, ...bad };
+    assert.equal((await tools.bash.execute(changed, api, {})).isError, true);
+    assert.throws(() => validateDirectWorkIdentity({ ghostId: "ghost", conversationId: "conversation", assignmentId: "assignment", workId: "work", taskId: api.taskId, callId: api.callId, generationTaskId: 7, operation: "bash", args: changed, inputDigest: payloadDigest({ operation: "bash", arguments: changed }), invocationId: calls[0].invocation_id }));
+  }
+  assert.equal(calls.length, 1, "denied inputs never reach Host effects");
+});

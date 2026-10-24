@@ -21,7 +21,10 @@ const schemas = {
   read: Type.Object({ path: boundedPath, offset: Type.Optional(Type.Integer({ minimum: 1 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000 })) }, { additionalProperties: false }),
   write: Type.Object({ path: boundedPath, content: Type.String({ maxLength: 65536 }) }, { additionalProperties: false }),
   edit: Type.Object({ path: boundedPath, edits: Type.Array(Type.Object({ oldText: Type.String({ minLength: 1, maxLength: 65536 }), newText: Type.String({ maxLength: 65536 }) }, { additionalProperties: false }), { minItems: 1, maxItems: 64 }) }, { additionalProperties: false }),
-  bash: Type.Object({ command: Type.String({ minLength: 1, maxLength: 16384 }), timeout: Type.Optional(Type.Integer({ minimum: 1, maximum: 180 })) }, { additionalProperties: false }),
+  bash: Type.Union([
+    Type.Object({ command: Type.String({ minLength: 1, maxLength: 16384 }), timeout: Type.Optional(Type.Integer({ minimum: 1, maximum: 180 })) }, { additionalProperties: false }),
+    Type.Object({ command_ref: Type.String({ pattern: "^pc-[a-f0-9]{64}$" }), timeout: Type.Optional(Type.Integer({ minimum: 1, maximum: 180 })) }, { additionalProperties: false }),
+  ]),
   browser: Type.Union([
     Type.Object({ operation: Type.Literal("navigate"), url: Type.String({ minLength: 1, maxLength: 8192 }) }, { additionalProperties: false }),
     ...["read", "snapshot", "screenshot"].map(operation => Type.Object({ operation: Type.Literal(operation) }, { additionalProperties: false })),
@@ -37,12 +40,22 @@ const descriptions = {
   read: "Read text inside this Work's Host-isolated filesystem.",
   write: "Write up to 64 KiB of UTF-8 text inside this Work's Host-isolated filesystem; this does not publish or accept an artifact.",
   edit: "Replace unique exact text blocks inside one Work file; overlapping edits are rejected.",
-  bash: "Run a bounded command with guest cwd /workspace inside this Work's Host-isolated process environment. Host storage paths are inaccessible. An unknown result must be reconciled, never retried with a new call.",
+  bash: "Run a bounded command with guest cwd /workspace inside this Work's Host-isolated process environment. Prefer command_ref from work_inspect command_recipes for a sealed verifier command; the Host resolves its exact bytes. Supply command or command_ref, never both. Host storage paths are inaccessible. An unknown result must be reconciled, never retried with a new call.",
   publish_artifact: "Publish a Work file through the Host artifact contract. Independent verification and Owner acceptance remain separate.",
 };
 
 export function directWorkInvocationId({ ghostId, conversationId, assignmentId, workId, taskId, callId }) {
   return JSON.stringify(["ghost-pi-direct/1", ghostId, conversationId, assignmentId, workId, taskId, callId]);
+}
+
+function validBashArguments(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
+  const reference = Object.hasOwn(args, "command_ref");
+  const key = reference ? "command_ref" : "command";
+  return Object.keys(args).every(field => field === key || field === "timeout")
+    && typeof args[key] === "string"
+    && (reference ? /^pc-[a-f0-9]{64}$/u.test(args[key]) : Buffer.byteLength(args[key], "utf8") > 0 && Buffer.byteLength(args[key], "utf8") <= 16384)
+    && (!Object.hasOwn(args, "timeout") || Number.isSafeInteger(args.timeout) && args.timeout >= 1 && args.timeout <= 180);
 }
 
 export function validateDirectWorkIdentity({ ghostId, conversationId, assignmentId, workId, taskId, callId, generationTaskId, operation, args, inputDigest, invocationId }) {
@@ -52,6 +65,7 @@ export function validateDirectWorkIdentity({ ghostId, conversationId, assignment
     || typeof callId !== "string" || callId.length === 0 || callId.length > 400
     || !DIRECT_WORK_TOOL_NAMES.includes(operation)
     || args === null || typeof args !== "object" || Array.isArray(args)
+    || (operation === "bash" && !validBashArguments(args))
     || inputDigest !== payloadDigest({ operation, arguments: args })
     || invocationId !== directWorkInvocationId({ ghostId, conversationId, assignmentId, workId, taskId, callId })) {
     throw new Error("Direct Pi invocation must retain its bound assignment, task/call identity and exact input digest.");
@@ -93,6 +107,7 @@ export function createDirectWorkTools({ hostToolTransport, ghostId, conversation
         || uncertainAssignments.has(scope.assignmentId)) {
         return failure("Direct tools require the exact active authenticated Work with no unresolved effect; no execution was sent.");
       }
+      if (operation === "bash" && !validBashArguments(args)) return failure("Bash requires either a bounded command or an exact Host command reference, with an optional bounded timeout; no execution was sent.");
       const textValues = operation === "write" ? [args.content] : operation === "edit" ? args.edits.flatMap(edit => [edit.oldText, edit.newText]) : [];
       if (textValues.some(value => Buffer.byteLength(value, "utf8") > 65536)) return failure("File text exceeds the Host's 64 KiB UTF-8 operation limit; no execution was sent.");
       if (context?.abortSignal?.aborted) return failure("This Pi tool invocation was cancelled before dispatch; no execution was sent.");
