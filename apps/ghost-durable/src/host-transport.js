@@ -683,6 +683,16 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
         let fields;
         if (method === "work.steer") fields = { work_id: context.work.id, prompt: args.prompt };
         else if (method === "work.wait") fields = { work_id: context.work.id, wait_for: args.wait_for };
+        else if (Object.hasOwn(args, "contract_ref")) {
+          if (!hasExactArguments(args, ["parent_work_id", "contract_ref"])
+            || !isBoundedText(args.parent_work_id, 400)
+            || typeof args.contract_ref !== "string" || !/^dc-[a-f0-9]{64}$/u.test(args.contract_ref)) {
+            throw new Error("Delegation contract requests require only the parent Work and exact Host-issued contract reference.");
+          }
+          // The Host resolves and revalidates the sealed contract under its
+          // writer lock; the model cannot override any of its contents.
+          fields = { parent_work_id: context.work.id, contract_ref: args.contract_ref };
+        }
         else {
           const summaryBytes = Buffer.byteLength(args.summary, "utf8");
           if (summaryBytes > 8_192) throw new Error("Delegation summary exceeds 8192 UTF-8 bytes.");
