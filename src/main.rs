@@ -17,6 +17,17 @@ fn emit(v: &impl serde::Serialize) -> Result<()> {
     Ok(())
 }
 
+/// Input kinds `ghost chat` accepts. The host's routing natural turn rejects
+/// steer, so the command never offers it.
+#[cfg(feature = "host")]
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum ChatKind {
+    /// Follow-up when the conversation already has messages, else prompt.
+    Auto,
+    Prompt,
+    FollowUp,
+}
+
 #[derive(Parser)]
 #[command(
     name = "ghost",
@@ -107,7 +118,8 @@ enum Cmd {
     /// Send one prompt to the running host's main Ghost and print the reply.
     #[cfg(feature = "host")]
     Chat {
-        /// Prompt text; read from stdin when omitted.
+        /// Prompt text; read from stdin when omitted (pipes only — an interactive
+        /// stdin is rejected instead of blocking on EOF).
         prompt: Vec<String>,
         /// Target Ghost profile name or id prefix (default: "primary", else the first).
         #[arg(long)]
@@ -115,10 +127,10 @@ enum Cmd {
         /// Existing conversation id (default: the profile's latest conversation).
         #[arg(long)]
         conversation: Option<String>,
-        /// Input kind for the turn (default: follow-up when the conversation has messages).
-        #[arg(long, default_value = "auto")]
-        kind: String,
-        /// Seconds to wait for the reply after admission.
+        /// Input kind for the turn.
+        #[arg(long, value_enum, default_value_t = ChatKind::Auto)]
+        kind: ChatKind,
+        /// Seconds to wait for the reply after admission (minimum 30).
         #[arg(long, default_value_t = 300)]
         timeout: u64,
         /// Print the full JSON record instead of the plain reply text.
@@ -1276,6 +1288,105 @@ struct ChatTurn {
     reply: String,
 }
 
+/// Poll the routing receipt once for `request_id` and admit a pending
+/// classification. The admit is a NEW owner command under its own UUID: the
+/// host keys `workspace_commands` replays by request id alone, so reusing the
+/// natural turn's id would collide with its recorded payload, and the
+/// admission identity is derived from the message id that admit carries.
+#[cfg(feature = "host")]
+fn admit_pending_receipt(
+    client: &ghost::control::ControlClient,
+    entry: &ghost::control::api::RoutingEntry,
+    request_id: &str,
+    text: &str,
+    admitted: &mut Option<String>,
+) -> Result<()> {
+    use ghost::control::api::{Action, Command, RoutingAction};
+    if admitted.is_some() {
+        return Ok(());
+    }
+    let receipt = client.action(Action {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: Command::Routing {
+            action: RoutingAction::RoutingReceipt {
+                entry: entry.clone(),
+                message_id: request_id.to_string(),
+            },
+        },
+    })?;
+    if receipt.get("ok").is_some_and(|ok| ok == false) {
+        anyhow::bail!(
+            "작업 분류 상태를 읽지 못했습니다: {}",
+            receipt["error"].as_str().unwrap_or_default()
+        );
+    }
+    if receipt["result"].is_null() {
+        return Ok(()); // Classification still running or the turn answers directly.
+    }
+    // Root proposal items mirror the console: one item per anchor segment.
+    let admission = &receipt["result"]["admission"];
+    let items = admission["items"]
+        .as_array()
+        .context("작업 분류 결과를 확인할 수 없습니다.")?;
+    let proposal_items: Vec<serde_json::Value> = items
+        .iter()
+        .filter(|item| {
+            !item["segment_id"].is_null() && item["segment_id"] == item["group_anchor_segment_id"]
+        })
+        .map(|item| {
+            let additional: Vec<&str> = items
+                .iter()
+                .filter(|m| {
+                    m["group_anchor_segment_id"] == item["group_anchor_segment_id"]
+                        && m["segment_id"] != item["segment_id"]
+                })
+                .filter_map(|m| m["segment_id"].as_str())
+                .collect();
+            serde_json::json!({
+                "segment_id": item["segment_id"],
+                "additional_segment_ids": additional,
+                "operation": item["operation"],
+            })
+        })
+        .collect();
+    let admit = client.action(Action {
+        // A fresh UUID: the host tests admit under their own message id, and
+        // the natural turn's recorded payload would reject this replay.
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: Command::Routing {
+            action: RoutingAction::RoutingAdmit {
+                entry: entry.clone(),
+                text: admission["input"]["text"]
+                    .as_str()
+                    .unwrap_or(text)
+                    .to_string(),
+                segments: serde_json::from_value(admission["input"]["segments"].clone())
+                    .context("작업 분류 결과의 세그먼트를 읽을 수 없습니다.")?,
+                resolves: serde_json::from_value(admission["input"]["resolves"].clone())
+                    .context("작업 분류 결과의 확인 답변을 읽을 수 없습니다.")?,
+                proposal: serde_json::from_value(serde_json::json!({
+                    "schema": ghost::host::work_routing::PROPOSAL_SCHEMA,
+                    "items": proposal_items,
+                }))
+                .context("작업 분류 결과의 제안을 읽을 수 없습니다.")?,
+            },
+        },
+    })?;
+    if admit["ok"] == false {
+        anyhow::bail!(
+            "작업 접수가 거부됐습니다: {}",
+            admit["error"].as_str().unwrap_or_default()
+        );
+    }
+    // The admit commits the authoritative admission under its own message id;
+    // the receipt admission was only the model's classification record.
+    *admitted = admit["result"]["id"]
+        .as_str()
+        .or_else(|| admission["id"].as_str())
+        .map(str::to_string);
+    Ok(())
+}
+
 /// Send one canonical routing chat turn to a running host: routing_natural →
 /// routing_receipt → routing_admit, then poll the entry task for the reply.
 #[cfg(feature = "host")]
@@ -1284,7 +1395,7 @@ fn chat_command(
     prompt: Vec<String>,
     profile: Option<String>,
     conversation: Option<String>,
-    kind: &str,
+    kind: ChatKind,
     timeout: u64,
     json: bool,
 ) -> Result<()> {
@@ -1294,6 +1405,11 @@ fn chat_command(
 
     let mut raw = prompt.join(" ");
     if raw.trim().is_empty() {
+        use std::io::IsTerminal;
+        anyhow::ensure!(
+            !std::io::stdin().is_terminal(),
+            "프롬프트를 인수로 넣거나 표준 입력을 파이프해 주세요."
+        );
         raw = std::io::read_to_string(std::io::stdin().lock())?;
     }
     let text = raw.trim().to_string();
@@ -1304,6 +1420,8 @@ fn chat_command(
         text.len() <= 8192,
         "메시지가 너무 깁니다. 8192바이트 이하로 줄여 주세요."
     );
+    // A short --timeout must not report a deadline it never honored.
+    let timeout = timeout.max(30);
 
     let client = ControlClient::discover(root).context(
         "실행 중인 Ghost 호스트를 찾지 못했습니다. `ghost serve`로 호스트를 시작한 뒤 다시 시도하세요.",
@@ -1391,17 +1509,15 @@ fn chat_command(
         .and_then(|c| c["messages"].as_array())
         .is_some_and(|m| !m.is_empty());
     let kind = match kind {
-        "auto" => {
+        ChatKind::Auto => {
             if has_messages {
                 InputKind::FollowUp
             } else {
                 InputKind::Prompt
             }
         }
-        "prompt" => InputKind::Prompt,
-        "follow-up" | "follow_up" => InputKind::FollowUp,
-        "steer" => InputKind::Steer,
-        other => anyhow::bail!("지원하지 않는 kind입니다: {other}"),
+        ChatKind::Prompt => InputKind::Prompt,
+        ChatKind::FollowUp => InputKind::FollowUp,
     };
 
     let entry = RoutingEntry {
@@ -1448,79 +1564,11 @@ fn chat_command(
     // One poll loop for classification and the reply: a plain chat turn ends
     // with the entry task and no admission; a work turn surfaces a receipt
     // that must be admitted so the proposal dispatches.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout.max(30));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout);
     let empty = Vec::<serde_json::Value>::new();
     let mut admitted: Option<String> = None;
     let (phase, reply_text, output) = loop {
-        if admitted.is_none() {
-            let receipt = client.action(Action {
-                request_id: uuid::Uuid::new_v4().to_string(),
-                command: Command::Routing {
-                    action: RoutingAction::RoutingReceipt {
-                        entry: entry.clone(),
-                        message_id: request_id.clone(),
-                    },
-                },
-            })?;
-            if receipt["ok"] == true && !receipt["result"].is_null() {
-                // Root proposal items mirror the console: one item per anchor segment.
-                let admission = receipt["result"]["admission"].clone();
-                let items = admission["items"]
-                    .as_array()
-                    .context("작업 분류 결과를 확인할 수 없습니다.")?;
-                let proposal_items: Vec<serde_json::Value> = items
-                    .iter()
-                    .filter(|item| {
-                        !item["segment_id"].is_null()
-                            && item["segment_id"] == item["group_anchor_segment_id"]
-                    })
-                    .map(|item| {
-                        let additional: Vec<&str> = items
-                            .iter()
-                            .filter(|m| {
-                                m["group_anchor_segment_id"] == item["group_anchor_segment_id"]
-                                    && m["segment_id"] != item["segment_id"]
-                            })
-                            .filter_map(|m| m["segment_id"].as_str())
-                            .collect();
-                        serde_json::json!({
-                            "segment_id": item["segment_id"],
-                            "additional_segment_ids": additional,
-                            "operation": item["operation"],
-                        })
-                    })
-                    .collect();
-                let admit = client.action(Action {
-                    request_id: request_id.clone(),
-                    command: Command::Routing {
-                        action: RoutingAction::RoutingAdmit {
-                            entry: entry.clone(),
-                            text: admission["input"]["text"]
-                                .as_str()
-                                .unwrap_or(&text)
-                                .to_string(),
-                            segments: serde_json::from_value(
-                                admission["input"]["segments"].clone(),
-                            )?,
-                            resolves: serde_json::from_value(
-                                admission["input"]["resolves"].clone(),
-                            )?,
-                            proposal: serde_json::from_value(serde_json::json!({
-                                "schema": ghost::host::work_routing::PROPOSAL_SCHEMA,
-                                "items": proposal_items,
-                            }))?,
-                        },
-                    },
-                })?;
-                if admit["ok"] == false {
-                    anyhow::bail!(
-                        "작업 접수가 거부됐습니다: {}",
-                        admit["error"].as_str().unwrap_or_default()
-                    );
-                }
-                admitted = admission["id"].as_str().map(str::to_string);
-            }
-        }
+        admit_pending_receipt(&client, &entry, &request_id, &text, &mut admitted)?;
         let snapshot = client.snapshot()?;
         let conversation = snapshot["profiles"]
             .as_array()
@@ -1537,6 +1585,10 @@ fn chat_command(
             .unwrap_or("queued")
             .to_string();
         if !RUNNING.contains(&phase.as_str()) {
+            // The admission may commit between the receipt poll above and this
+            // terminal read; re-check once so a classified work turn is never
+            // silently dropped (mirrors the console's final receipt check).
+            admit_pending_receipt(&client, &entry, &request_id, &text, &mut admitted)?;
             // Assistant text of this task only: a failed turn must not echo
             // the previous turn's answer.
             let text = conversation
@@ -1600,6 +1652,7 @@ fn chat_command(
             "waiting_owner" => eprintln!("승인 대기 작업이 있습니다. 콘솔에서 확인해 주세요."),
             "uncertain" => eprintln!("결과 확인이 필요합니다. 작업 {}", turn.task_id),
             "failed" => anyhow::bail!("작업이 실패로 끝났습니다 (작업 {}).", turn.task_id),
+            "cancelled" => anyhow::bail!("작업이 취소로 끝났습니다 (작업 {}).", turn.task_id),
             _ => {}
         }
     }
@@ -1969,7 +2022,7 @@ fn run() -> Result<()> {
             kind,
             timeout,
             json,
-        } => chat_command(root, prompt, profile, conversation, &kind, timeout, json),
+        } => chat_command(root, prompt, profile, conversation, kind, timeout, json),
         #[cfg(feature = "host")]
         Cmd::Wake { c } => wake_command(root, c),
         #[cfg(feature = "host")]

@@ -39,9 +39,14 @@ fn position_overlay(overlay: &tauri::WebviewWindow) {
     let monitor = main
         .as_ref()
         .and_then(|window| window.current_monitor().ok().flatten())
-        .or_else(|| overlay.current_monitor().ok().flatten());
+        .or_else(|| overlay.current_monitor().ok().flatten())
+        // Display-transition edge: without any current monitor the overlay
+        // would otherwise surface at its off-screen park position, invisible
+        // yet consuming the toggle.
+        .or_else(|| overlay.primary_monitor().ok().flatten());
     let Some(monitor) = monitor else {
-        // No monitor geometry: show where it was last positioned.
+        // Practically unreachable with the primary fallback; leave placement
+        // untouched rather than guessing.
         return;
     };
     let (width, height) = OVERLAY_SIZE;
@@ -199,17 +204,7 @@ fn main() {
         return;
     }
     tauri::Builder::default()
-        .plugin(
-            ShortcutBuilder::new()
-                .with_shortcuts(["cmd+shift+G"])
-                .expect("overlay shortcut parse failed")
-                .with_handler(|app, _shortcut, event| {
-                    if event.state == ShortcutState::Pressed {
-                        toggle_overlay(app);
-                    }
-                })
-                .build(),
-        )
+        .plugin(ShortcutBuilder::new().build())
         .setup(|app| {
             let port = port()?;
             let origin = format!("http://127.0.0.1:{port}");
@@ -276,7 +271,20 @@ fn main() {
                     || url.origin().ascii_serialization() == overlay_origin
             })
             .build()?;
-            overlay.hide()?;
+            let _ = overlay.hide();
+            // A taken or rejected ⌘⇧G must not take the whole console down:
+            // register here and keep the app usable without the shortcut.
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            if let Err(error) =
+                app.global_shortcut()
+                    .on_shortcut("cmd+shift+G", |app, _shortcut, event| {
+                        if event.state == ShortcutState::Pressed {
+                            toggle_overlay(app);
+                        }
+                    })
+            {
+                eprintln!("⌘⇧G 오버레이 단축키를 등록하지 못했습니다: {error}");
+            }
             // Click-outside and app-switch dismissal: hide only after the
             // overlay actually held focus, so show→focus can't self-dismiss.
             let tracked = overlay.clone();
