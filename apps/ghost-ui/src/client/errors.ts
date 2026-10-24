@@ -2,6 +2,15 @@ import type { RoutingEntry } from './routingTypes';
 
 export class ConfirmedFailure extends Error {}
 
+// A non-2xx host reply whose status code callers may branch on (e.g. events
+// long-polls stop permanently on 4xx but retry transient 5xx/network faults).
+export class HttpStatusError extends Error {
+ constructor(public readonly status: number, message: string) {
+  super(message);
+  this.name = 'HttpStatusError';
+ }
+}
+
 // Asynchronous disposition of a routing turn: the exact submission is validated
 // and still unconfirmed or still running. This is never failed work, never a
 // ConfirmedFailure, and never a reason to submit the same intent as a new task.

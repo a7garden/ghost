@@ -3,7 +3,7 @@ import { normalizeSnapshot } from './normalize';
 import { initialWorkspace, examplePages } from '../fixtures/workspace';
 import { exampleCollaboration } from '../fixtures/collaboration';
 import type { Bootstrap, Client, Command, Envelope, Page, RoutingPendingMetadata, Snapshot } from './types';
-import { ConfirmedFailure, RoutingPending, RoutingTerminal } from './errors';
+import { ConfirmedFailure, HttpStatusError, RoutingPending, RoutingTerminal } from './errors';
 import type { PendingRoutingRequest, RoutingEntry, RoutingTurn } from './routingTypes';
 import { normalizeRoutingFailure } from './routingClient';
 import { HostRoutingTransport, createHostRoutingAdapter } from './hostRouting';
@@ -44,13 +44,21 @@ export async function connect(options?: { routingProviders?: Partial<Pick<Routin
     // Long-poll one profile's committed runtime events. The host holds the
     // request until a commit lands or its wait cap elapses, then replies with
     // the plain commit list from /api/v1/events.
+    // Deadline chain: the host holds at most 25s, the bridge times out its
+    // upstream at 35s, and this abort gives up at 40s — keep the headroom in sync.
     async events(profileId, after, waitMs, signal) {
-      const r = await fetch(`/ghost-api/events/${profileId}/${after}`, {
+      // macOS 13 Safari 16 and older Firefox lack AbortSignal.any/timeout
+      // (see voice/transport.ts); degrade to an unbounded bridge-bounded poll.
+      const timeoutSignal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(40000) : undefined;
+      const effectiveSignal = signal && timeoutSignal && typeof AbortSignal.any === 'function'
+        ? AbortSignal.any([signal, timeoutSignal])
+        : signal ?? timeoutSignal;
+      const r = await fetch(`/ghost-api/events/${encodeURIComponent(profileId)}/${after}`, {
         headers: { 'X-Ghost-UI-CSRF': config.csrf, 'X-Ghost-Events-Wait-Ms': String(waitMs) },
         cache: 'no-store',
-        signal: AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(40000)]),
+        signal: effectiveSignal,
       });
-      if (!r.ok) throw new Error('Ghost 호스트 이벤트를 확인하지 못했습니다.');
+      if (!r.ok) throw new HttpStatusError(r.status, 'Ghost 호스트 이벤트를 확인하지 못했습니다.');
       const payload: unknown = await r.json();
       const isCommit = (item: unknown): item is { revision: number } => {
         if (typeof item !== 'object' || item === null || !('revision' in item)) return false;

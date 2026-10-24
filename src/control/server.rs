@@ -152,6 +152,16 @@ async fn accept_until_shutdown(
                     continue;
                 }
                 if requests.len() >= MAX_CONNECTIONS {
+                    // Long-poll handlers park their thread for up to
+                    // MAX_EVENTS_WAIT_MS; shed load with an explicit status
+                    // instead of dropping the connection silently.
+                    let _ = http::respond(
+                        &mut peer,
+                        503,
+                        "application/json",
+                        br#"{"ok":false,"error":"busy"}"#,
+                        None,
+                    );
                     let _ = peer.shutdown(Shutdown::Both);
                     continue;
                 }
@@ -324,7 +334,7 @@ fn route(
                     return respond_json(
                         peer,
                         400,
-                        &json!({"ok": false, "error": "invalid_event_cursor"}),
+                        &json!({"ok": false, "error": "invalid_events_wait"}),
                     )
                 }
             },
@@ -661,6 +671,22 @@ mod events_tests {
         Ok(parsed)
     }
 
+    fn round_trip(request: &http::Request, session: &http::Session, host: &Arc<Host>) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        route(&mut peer, request, session, host, false).unwrap();
+        peer.shutdown(Shutdown::Both).unwrap();
+        let mut output = String::new();
+        client.read_to_string(&mut output).unwrap();
+        assert!(output.starts_with("HTTP/1.1 400"), "{output}");
+        let (_, payload) = output.split_once("\r\n\r\n").unwrap();
+        serde_json::from_str::<Value>(payload).unwrap()["error"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
     #[test]
     fn events_reject_invalid_wait_hints_without_touching_the_host() {
         let root = tempfile::tempdir().unwrap();
@@ -671,20 +697,15 @@ mod events_tests {
             "events-test",
             "a".repeat(64),
         ));
-        let mut input =
+        let mut bad_wait =
             get_request(&session, "/api/v1/events/00000000-0000-0000-0000-000000000000/0", None);
-        input
+        bad_wait
             .headers
             .insert("x-ghost-events-wait-ms".into(), "soon".into());
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (mut peer, _) = listener.accept().unwrap();
-        route(&mut peer, &input, &session, &host, false).unwrap();
-        peer.shutdown(Shutdown::Both).unwrap();
-        let mut output = String::new();
-        client.read_to_string(&mut output).unwrap();
-        assert!(output.starts_with("HTTP/1.1 400"));
-        assert!(output.contains("invalid_event_cursor"));
+        assert_eq!(round_trip(&bad_wait, &session, &host), "invalid_events_wait");
+        let bad_cursor =
+            get_request(&session, "/api/v1/events/not-a-uuid/0", None);
+        assert_eq!(round_trip(&bad_cursor, &session, &host), "invalid_event_cursor");
         runtime.block_on(host.shutdown()).unwrap();
     }
 

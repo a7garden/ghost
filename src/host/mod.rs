@@ -1042,8 +1042,12 @@ impl Host {
     /// Long-poll variant of [`Self::events`]: returns as soon as the profile's
     /// durable session commits anything newer than `after`, or the current
     /// (possibly empty) list once `timeout` elapses. Waiting subscribes to the
-    /// session's change signal and never drives execution.
+    /// session's change signal and never drives execution. Sync-thread only:
+    /// it parks the calling thread, so async callers must use a plain thread.
     pub fn events_wait(&self, profile_id: &str, after: u64, timeout: Duration) -> Result<Value> {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            bail!("events_wait blocks its thread; call it from a plain (non-async) thread");
+        }
         self.handle.block_on(async move {
             // Subscribe before the first read so a commit racing this call
             // still wakes the wait instead of being seen only on a re-poll.
@@ -1057,6 +1061,10 @@ impl Host {
             };
             let deadline = tokio::time::Instant::now() + timeout;
             loop {
+                // Host shutdown must not wait out the full poll deadline.
+                if self.stopping.load(Ordering::Acquire) {
+                    return self.events(profile_id, after);
+                }
                 let commits = self.events(profile_id, after)?;
                 if commits.as_array().is_some_and(|list| !list.is_empty()) {
                     return Ok(commits);

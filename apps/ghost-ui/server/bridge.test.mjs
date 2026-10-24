@@ -141,4 +141,9 @@ test('events proxy forwards the cursor path and wait hint, rejects malformed cur
   assert.equal(forwarded.headers['x-ghost-events-wait-ms'], '25000');
   assert.equal((await fetch(`${ui.origin}/ghost-api/events/not-a-uuid/7`, { headers })).status, 404);
   assert.equal((await fetch(`${ui.origin}/ghost-api/events/${profile}/abc`, { headers })).status, 404);
+  assert.equal(requests.length, 2); // bootstrap probe + the one valid events call; rejected cursors never reach the host
+  const noWait = await fetch(`${ui.origin}/ghost-api/events/${profile}/7`, { headers: { 'X-Ghost-UI-CSRF': bootstrap.csrf } });
+  assert.equal(noWait.status, 200);
+  const eventsCalls = requests.filter(r => r.path.startsWith('/api/v1/events/'));
+  assert.equal(eventsCalls.at(-1).headers['x-ghost-events-wait-ms'], undefined); // absent hint must not be forwarded
 });

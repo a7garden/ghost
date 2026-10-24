@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { HttpStatusError } from './errors';
 import { subscribeHostEvents } from './hostEvents';
 
 type Page = { events: { revision: number }[]; latest: number };
@@ -30,16 +31,31 @@ describe('subscribeHostEvents', () => {
     expect(signal?.aborted).toBe(true);
   });
 
-  it('gives up on a profile after repeated errors and fires no events', async () => {
+  it('keeps retrying transient faults with capped escalating backoff', async () => {
     vi.useFakeTimers();
     try {
-      const fetchEvents = vi.fn((_profileId: string, _after: number, _signal: AbortSignal) => Promise.reject(new Error('host gone')));
+      const fetchEvents = vi.fn((_profileId: string, _after: number, _signal: AbortSignal) => Promise.reject(new Error('bridge restarting')));
       const onEvent = vi.fn();
-      const stop = subscribeHostEvents(fetchEvents, ['gone'], onEvent, 1000);
-      // Calls at t=0, 1000, 2000; the third failure ends the loop, so a fourth
-      // never fires even with the clock advanced well past the backoff.
+      const stop = subscribeHostEvents(fetchEvents, ['p1'], onEvent, 1000);
+      // Delays: 1000, 2000, 4000 — the fourth call lands at t=7000 and the
+      // loop is still alive (never gives up on transient faults).
       await vi.advanceTimersByTimeAsync(3500);
       expect(fetchEvents).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(3500);
+      expect(fetchEvents).toHaveBeenCalledTimes(4);
+      expect(onEvent).not.toHaveBeenCalled();
+      stop();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('stops a profile loop permanently on a 4xx status', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchEvents = vi.fn((_profileId: string, _after: number, _signal: AbortSignal) => Promise.reject(new HttpStatusError(404, 'profile missing')));
+      const onEvent = vi.fn();
+      const stop = subscribeHostEvents(fetchEvents, ['gone'], onEvent, 1000);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(fetchEvents).toHaveBeenCalledTimes(1);
       expect(onEvent).not.toHaveBeenCalled();
       stop();
     } finally { vi.useRealTimers(); }

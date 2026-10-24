@@ -4,6 +4,10 @@ import { constants } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 
 const LIMIT = 1_048_576;
+// Must stay above the host's events wait cap (MAX_EVENTS_WAIT_MS = 25s in
+// src/control/server.rs) so the bridge never aborts a long poll before the
+// host answers.
+const EVENTS_WAIT_TIMEOUT_MS = 35_000;
 const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 export async function discover(root) {
   if (!isAbsolute(root) || (await lstat(root)).isSymbolicLink()) throw new Error('Ghost 상태 폴더는 실제 절대 경로여야 합니다.');
@@ -59,7 +63,7 @@ export function createBridge({ root = process.env.GHOST_ROOT } = {}) {
     if (req.url === '/ghost-api/bootstrap' && req.method === 'GET') return json(res, 200, { mode: root ? 'live' : 'demo', csrf, protocol: 'ghost-ui', protocol_version: 1, owner_pid: Number(process.env.GHOST_CONSOLE_OWNER_PID || process.pid) });
     if (!equal(req.headers['x-ghost-ui-csrf'], csrf)) return json(res, 403, { error: '페이지를 새로고침하고 다시 시도하세요.' });
     const voice = req.method === 'POST' && /^\/ghost-api\/voice\/(config|transcribe|synthesize)$/.test(req.url);
-    const events = req.method === 'GET' && /^\/ghost-api\/events\/([0-9a-f-]{36})\/(\d+)$/.exec(req.url);
+    const events = req.method === 'GET' && /^\/ghost-api\/events\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(\d+)$/.exec(req.url);
     const write = (req.url === '/ghost-api/action' || voice) && req.method === 'POST';
     const read = (req.url === '/ghost-api/snapshot' && req.method === 'GET') || Boolean(events);
     if (!write && !read) return json(res, 404, { error: 'not_found' });
@@ -71,10 +75,14 @@ export function createBridge({ root = process.env.GHOST_ROOT } = {}) {
       const disconnected = new AbortController();
       const closed = () => { if (!res.writableEnded) disconnected.abort(); };
       res.once('close', closed);
-      const target = voice ? req.url.slice('/ghost-api/'.length) : events ? `events/${events[1]}/${events[2]}` : write ? 'action' : 'snapshot';
+      let target, timeoutMs = 30000;
+      if (voice) { target = req.url.slice('/ghost-api/'.length); timeoutMs = 130000; }
+      else if (events) { target = `events/${events[1]}/${events[2]}`; timeoutMs = EVENTS_WAIT_TIMEOUT_MS; }
+      else if (write) target = 'action';
+      else target = 'snapshot';
       const waitHeader = events && typeof req.headers['x-ghost-events-wait-ms'] === 'string' ? { 'X-Ghost-Events-Wait-Ms': req.headers['x-ghost-events-wait-ms'] } : {};
       const upstream = await fetch(`${host.origin}/api/v1/${target}`, {
-        method: write ? 'POST' : 'GET', redirect: 'error', signal: AbortSignal.any([disconnected.signal, AbortSignal.timeout(voice ? 130000 : events ? 35000 : 30000)]), body,
+        method: write ? 'POST' : 'GET', redirect: 'error', signal: AbortSignal.any([disconnected.signal, AbortSignal.timeout(timeoutMs)]), body,
         headers: { Authorization: `Bearer ${host.token}`, 'X-Ghost-CSRF': host.token, Origin: host.origin, 'Sec-Fetch-Site': 'same-origin', ...(write ? { 'Content-Type': 'application/json' } : {}), ...waitHeader },
       });
       try { json(res, upstream.status, await boundedJSON(upstream)); }

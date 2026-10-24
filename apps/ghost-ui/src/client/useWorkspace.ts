@@ -5,6 +5,10 @@ import { RoutingClient } from './routingClient';
 import type { RoutingConnection } from '../features/RoutingConversation';
 import type { Client, Command, Snapshot } from './types';
 
+// At most the host's MAX_EVENTS_WAIT_MS (25s); the bridge aborts its upstream
+// at 35s and the client deadline is 40s — keep the headroom chain in sync.
+const EVENTS_WAIT_MS = 25000;
+
 export function useWorkspace(connectClient: () => Promise<Client> = connect) {
   const client = useRef<Client | null>(null), queue = useRef<CommandQueue | null>(null);
   const queueWorkspace = useRef('');
@@ -28,7 +32,9 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
       eventProfiles = key;
       unsubEvents?.();
       unsubEvents = subscribeHostEvents(
-        (profileId, after, signal) => client.current!.events!(profileId, after, 25000, signal),
+        // At most the host's MAX_EVENTS_WAIT_MS (25s); the bridge aborts its
+        // upstream at 35s and the client deadline is 40s — keep in sync.
+        (profileId, after, signal) => client.current!.events!(profileId, after, EVENTS_WAIT_MS, signal),
         ids,
         wake,
       );
@@ -57,7 +63,10 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
       finally {
         polling = false;
         if (alive) {
-          const delay = refreshQueued ? 500 : failures > 0 ? 5000 : document.hidden ? 10000 : 30000;
+          // Priority: a queued event wake beats error retry beats visibility.
+          let delay = document.hidden ? 10000 : 30000;
+          if (failures > 0) delay = 5000;
+          if (refreshQueued) delay = 500;
           refreshQueued = false;
           timer = setTimeout(poll, delay);
         }
