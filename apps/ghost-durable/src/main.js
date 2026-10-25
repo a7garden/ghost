@@ -1,5 +1,5 @@
 import { createHostToolTransport } from "./host-transport.js";
-import { createFixtureModelProvider, createLocalModelProvider } from "./models.js";
+import { createFixtureModelProvider, createLocalModelProvider, localOutputTokenLimit } from "./models.js";
 import { errorResponse, protocolHandshake } from "./contract.js";
 import { openGhostRuntime } from "./runtime.js";
 import { createRegisteredModelProvider } from "./registered-models.js";
@@ -37,17 +37,30 @@ function requiredEnv(name) {
 function optionalLocalModelProvider() {
   const baseUrl = process.env.GHOST_LIFETIME_LOCAL_MODEL_URL;
   const modelId = process.env.GHOST_LIFETIME_LOCAL_MODEL_ID;
+  const rawOutputTokens = process.env.GHOST_LIFETIME_LOCAL_MAX_OUTPUT_TOKENS;
+  if (rawOutputTokens !== undefined && !/^[1-9][0-9]*$/u.test(rawOutputTokens)) {
+    throw new Error('Invalid explicit local output token limit.');
+  }
+  const maxOutputTokens = localOutputTokenLimit(rawOutputTokens === undefined ? undefined : Number(rawOutputTokens));
+  if (rawOutputTokens !== undefined && (typeof baseUrl !== "string" || baseUrl.length === 0 || typeof modelId !== "string" || modelId.length === 0)) {
+    throw new Error('An explicit local output limit requires the configured local route.');
+  }
   if (baseUrl === undefined && modelId === undefined) return undefined;
   if (typeof baseUrl !== "string" || baseUrl.length === 0 || typeof modelId !== "string" || modelId.length === 0) {
     return undefined;
   }
   try {
-    return createLocalModelProvider({ baseUrl, modelId,
+    const provider = createLocalModelProvider({ baseUrl, modelId, maxOutputTokens,
       // Emit only controlled codes/status, never prompts, response bodies,
       // tool arguments, credentials or exception messages.
       onDiagnostic: (diagnostic) => process.stderr.write(`${JSON.stringify(diagnostic)}\n`),
     });
+    if (process.env.GHOST_LIFETIME_LOCAL_ROUTE_IDENTITY !== undefined && process.env.GHOST_LIFETIME_LOCAL_ROUTE_IDENTITY !== provider.localRouteConfig.identity) {
+      throw new Error('Pinned local route configuration differs from the captured Host identity.');
+    }
+    return provider;
   } catch {
+    if (rawOutputTokens !== undefined || process.env.GHOST_LIFETIME_LOCAL_ROUTE_IDENTITY !== undefined) throw new Error('Captured local route is invalid.');
     return undefined;
   }
 }

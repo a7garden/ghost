@@ -33,6 +33,7 @@ pub(super) fn inspect(
     let (assignment_id, ghost_id, conversation_id) = request_scope(envelope, principal)?;
     let source = load_source(conn, assignment_id, ghost_id, conversation_id, SourcePurpose::Dispatch)?;
     let prompt = host_apply::string_field(&source.receiver.body, "prompt")?;
+    let definition=crate::host::bots_store::definition_for_work(conn,&source.work)?;
     Ok(host_apply::success(
         "canonical Goal assignment inspected",
         vec![
@@ -41,6 +42,8 @@ pub(super) fn inspect(
             source.work.id.clone(),
         ],
         json!({
+            "definition":definition,
+            "work_wait":super::pi_wait::projection(conn,&source.work,assignment_id)?,
             "assignment": {
                 "id": assignment_id,
                 "source_command_id": source.source_command_id,
@@ -263,25 +266,35 @@ fn load_source(
             "Goal assignment prompt differs from the current Goal requirement",
         ));
     }
+    let work = load_work(conn, work_id)?;
     if receiver.expected_revision != Some(goal.revision)
         || goal.accountable_ghost != ghost_id
         || goal.reply_conversation != conversation_id
         || (dispatch && goal.state != "open")
-        || goal.privacy != receiver_privacy
+        || crate::host::work_memory::assignment_privacy(conn,&work,&goal.privacy)? != receiver_privacy
         || !valid_privacy(&goal.privacy)
     {
         return Err(host_apply::not_found(
             "Goal assignment does not match the current target Goal",
         ));
     }
-    let work = load_work(conn, work_id)?;
     let can_start = work.state == "queued" && work.execution_id.is_none();
-    let can_continue = work.execution_id.is_some() && is_continuation_state(&work.state);
+    if dispatch && !crate::host::bot_lifecycle::work_may_start(conn,&work)? {
+        return Err(host_apply::reject("bot_unavailable","Bot is paused or retired; no new Work execution was started",RetryClass::NewRevision));
+    }
+    let bound_wait=super::pi_wait::projection(conn,&work,assignment_id)?;
+    let parked=bound_wait.as_ref().is_some_and(|wait|matches!(wait["phase"].as_str(),Some("waiting"|"resolved")));
+    let can_continue = (work.execution_id.is_some() && is_continuation_state(&work.state)) || parked;
     if work.goal_id != goal.id
         || work.goal_revision != goal.revision
         || work.owner != ghost_id
         || (dispatch && (work.cancellation != "none"
-            || work.blocker.is_some()
+            // A transient receiver failure is a delivery diagnosis, not a
+            // policy/graph gate. Revalidate this exact queued assignment using
+            // all source, revision, authority and ancestry checks below. Once
+            // an execution exists, every blocker still prevents redispatch.
+            || work.blocker.as_deref().is_some_and(|reason|
+                !(parked && reason.starts_with(graph::WAIT_BLOCKER)) && (!can_start || !super::outbox::recoverable_assignment_blocker(reason)))
             || (!can_start && !can_continue)))
     {
         return Err(host_apply::conflict(
@@ -293,7 +306,8 @@ fn load_source(
             "Goal assignment ancestry, revision, or graph deadline is no longer current",
         ));
     }
-    if dispatch && can_continue && !has_matching_work_submit(conn, &receiver, &goal, &work, ghost_id)? {
+    if dispatch && can_continue && !super::pi_execution::has_binding(conn,&work,assignment_id,receiver.authority_epoch)?
+        && !has_matching_work_submit(conn, &receiver, &goal, &work, ghost_id)? {
         return Err(host_apply::conflict(
             "Goal assignment continuation has no matching committed target work.submit",
         ));
@@ -322,6 +336,12 @@ fn load_source(
                 }
                 verify_owner_goal_source(&source, &goal, &work, ghost_id, conversation_id)?;
                 ("owner_goal", None, goal.id.clone(), None)
+            }
+            Some("bot.evaluate" | "bot.repair" | "bot.update.prepare" | "bot.clone.prepare") => {
+                verify_current_goal_work_receipt(&source,&goal,&work)?;
+                if link.is_some() || has_link_history {return Err(host_apply::not_found("bot evaluation cannot adopt delegated ancestry"));}
+                crate::host::bots_provisioning::verify_evaluation_origin(conn,&source.envelope,&source.response,&goal,&work,dispatch)?;
+                ("bot_evaluation",None,goal.id.clone(),None)
             }
             Some("goal.create") => {
                 verify_current_goal_work_receipt(&source, &goal, &work)?;
@@ -448,6 +468,11 @@ fn load_source(
         return Err(host_apply::conflict(
             "Goal assignment root is no longer current and open",
         ));
+    }
+    if crate::host::work_memory::requires_private_delivery(conn,&work.id)? {conversation::raise_privacy(&mut privacy,"private")?;}
+    conversation::raise_privacy(&mut privacy,&crate::host::shared_skills::privacy(conn,&work)?)?;
+    for asset in crate::host::bots_provisioning::assets_for_work(conn,&work)? {
+        conversation::raise_privacy(&mut privacy,asset["privacy"].as_str().unwrap_or("local_only"))?;
     }
     Ok(AssignmentSource {
         source_command_id,
@@ -770,8 +795,9 @@ fn verify_owner_turn_goal_origin(
     // Model-created root Goal: the committed origin must be a goal.create by
     // the accountable Ghost itself, anchored to a real canonical Owner user
     // turn. The turn identity in the envelope is never trusted on its own.
+    let resolved=super::task_contracts::resolve_goal_body(conn,&source.envelope.body,false)?;
     host_apply::exact_fields(
-        &source.envelope.body,
+        &resolved,
         &[
             "method",
             "turn_id",
@@ -781,7 +807,7 @@ fn verify_owner_turn_goal_origin(
             "acceptance_spec",
         ],
     )?;
-    let body = &source.envelope.body;
+    let body = &resolved;
     let turn_id = host_apply::string_field(body, "turn_id")?;
     let prompt = host_apply::string_field(body, "prompt")?;
     let acceptance_spec = host_apply::value_field(body, "acceptance_spec")?;
@@ -983,18 +1009,9 @@ fn verify_delegated_origin(
     ghost_id: &str,
     dispatch: bool,
 ) -> Result<(Work, Goal)> {
-    host_apply::exact_fields(
-        &source.envelope.body,
-        &[
-            "method",
-            "parent_work_id",
-            "target_ghost_id",
-            "summary",
-            "artifact_refs",
-            "acceptance_spec",
-        ],
-    )?;
-    let body = &source.envelope.body;
+    let normalized=super::delegation_contracts::resolved_body(conn,&source.envelope.body)?;
+    host_apply::allowed_fields(&normalized,&["method","parent_work_id","target_ghost_id","summary","artifact_refs","acceptance_spec","work_memory_context_revision"],&["method","parent_work_id","target_ghost_id","summary","artifact_refs","acceptance_spec"])?;
+    let body = &normalized;
     let summary = host_apply::string_field(body, "summary")?;
     let acceptance_spec = host_apply::value_field(body, "acceptance_spec")?;
     let artifact_refs = parse_opaque_refs(body)?;
@@ -1231,31 +1248,22 @@ fn verify_delegated_source(
     ghost_id: &str,
     dispatch: bool,
 ) -> Result<(Work, Goal)> {
-    host_apply::exact_fields(
-        &source.envelope.body,
-        &[
-            "method",
-            "parent_work_id",
-            "target_ghost_id",
-            "summary",
-            "artifact_refs",
-            "acceptance_spec",
-        ],
-    )?;
-    let parent_work_id = host_apply::string_field(&source.envelope.body, "parent_work_id")?;
+    let normalized=super::delegation_contracts::resolved_body(conn,&source.envelope.body)?;
+    host_apply::allowed_fields(&normalized,&["method","parent_work_id","target_ghost_id","summary","artifact_refs","acceptance_spec","work_memory_context_revision"],&["method","parent_work_id","target_ghost_id","summary","artifact_refs","acceptance_spec"])?;
+    let parent_work_id = host_apply::string_field(&normalized, "parent_work_id")?;
     let summary = validated_delegation_summary(host_apply::string_field(
-        &source.envelope.body,
+        &normalized,
         "summary",
     )?)?;
-    let artifact_refs = parse_opaque_refs(&source.envelope.body)?;
+    let artifact_refs = parse_opaque_refs(&normalized)?;
     let delegated_prompt = graph::delegated_prompt(&summary, &artifact_refs)?;
     if !link.current
         || link.child_work_id != work.id
         || link.parent_work_id != parent_work_id
-        || host_apply::string_field(&source.envelope.body, "method")? != "work.delegate"
-        || host_apply::string_field(&source.envelope.body, "target_ghost_id")? != ghost_id
+        || host_apply::string_field(&normalized, "method")? != "work.delegate"
+        || host_apply::string_field(&normalized, "target_ghost_id")? != ghost_id
         || delegated_prompt != goal.prompt
-        || host_apply::value_field(&source.envelope.body, "acceptance_spec")? != &goal.acceptance_spec
+        || host_apply::value_field(&normalized, "acceptance_spec")? != &goal.acceptance_spec
         || source.response["data"]["goal"]["prompt"] != goal.prompt
         || source.response["data"]["link"]["child_work_id"] != work.id
         || source.response["data"]["link"]["parent_work_id"] != link.parent_work_id

@@ -1,6 +1,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-durable";
 import { ProtocolError } from "./contract.js";
+import { memoryQueryProperties } from "./memory-query.js";
 export const WORK_MEMORY_METHODS = Object.freeze({ work_memory_recall: "work.memory.recall", work_memory_record: "work.memory.record" });
 export const WORK_MEMORY_TOOLS = Object.freeze(Object.keys(WORK_MEMORY_METHODS));
 export function validateWorkMemoryDescriptor(value) {
@@ -18,11 +19,11 @@ export function validateWorkMemoryDescriptor(value) {
 function denied(summary) { const details = { status: "error", summary, error_code: "work_memory_unavailable", retry_class: "never", artifacts: [], next_actions: ["Inspect the exact Work grant and original receipt. Do not use Owner memory or another Work as fallback."] }; return { isError: true, content: [{ type: "text", text: JSON.stringify(details) }], details }; }
 export function createWorkMemoryTools({ hostToolTransport, ghostId, conversationId, resolveToolScope, controllerContext }) {
   const schemas = {
-    work_memory_recall: Type.Object({ query: Type.String({ maxLength: 8192 }), token_budget: Type.Optional(Type.Integer({ minimum: 128, maximum: 2048 })) }, { additionalProperties: false }),
+    work_memory_recall: Type.Object({ query: Type.String({ maxLength: 8192 }), token_budget: Type.Optional(Type.Integer({ minimum: 128, maximum: 2048 })), ...memoryQueryProperties() }, { additionalProperties: false }),
     work_memory_record: Type.Object({ summary: Type.String({ minLength: 1, maxLength: 16384 }), limitations: Type.String({ maxLength: 8192 }), artifact_digests: Type.Array(Type.String({ pattern: "^[a-f0-9]{64}$" }), { minItems: 1, maxItems: 8, uniqueItems: true }) }, { additionalProperties: false }),
   };
   return WORK_MEMORY_TOOLS.map(name => defineTool({ name, parameters: schemas[name], replay: "unsafe", executionMode: "sequential",
-    description: name === "work_memory_recall" ? "Recall only this Work's explicitly granted shared evidence; preserve source references and uncertainty. Owner/private memory is never a fallback."
+    description: name === "work_memory_recall" ? "Recall only this Work's explicitly granted shared evidence. Optional as_of/known_at are integer epoch milliseconds; temporal requests default to memory only and documents temporal filters return unsupported. Preserve evidence and abstain when absent. Owner/private memory is never a fallback."
       : "Propose a bounded generated experience candidate linked to this Work's actual published artifact digests. Host derives provenance, verification and PDC outbox; this never records personal facts or directly ingests a memory session.",
     execute: async (args, api, context) => {
       let scope; try { scope = await resolveToolScope(); } catch { return denied("Work memory authority is unavailable; no request was sent."); }

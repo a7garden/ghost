@@ -25,3 +25,7 @@
 .env.*
 !.env.example
 !.env.*.example
+
+# Isolated lifetime implementation state and dirty-source recovery copies
+/.lifetime-canary/
+/.lifetime-recovery/

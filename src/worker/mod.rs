@@ -1,8 +1,8 @@
-mod scoped_tools;
+pub(crate) mod scoped_tools;
 #[cfg(unix)]
 mod browser_relay;
 #[cfg(unix)]
-mod native_tools;
+pub(crate) mod native_tools;
 // Read by the Host's scoped owner artifact surface (lifetime/artifact.rs),
 // which reuses the journal's verified artifact read/hash primitive.
 pub(crate) mod journal;
@@ -36,8 +36,9 @@ const MAX_EXECUTION_ID_BYTES: usize = 400;
 const MAX_PROMPT_BYTES: usize = 512 * 1024;
 const RPC_ACK_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Durable OMP execution journal and process supervisor. The worker server owns
-/// this object; individual Host/SSH client connections do not own child stdin.
+/// Historical execution journal and reconciliation owner. Public constructors
+/// never admit or respawn a separate reasoning process. Private unit fixtures
+/// retain synthetic process coverage.
 pub struct Supervisor {
     root: PathBuf,
     runner: Runner,
@@ -45,35 +46,45 @@ pub struct Supervisor {
     _lock: fs::File,
     actors: HashMap<String, ActorHandle>,
     authority_epoch: Arc<RwLock<u64>>,
+    legacy_fixture: bool,
 }
 
 impl Supervisor {
     /// Open the coordinator-registered scoped OMP runtime. Model requests never
     /// select the executable, entry point, package, or configuration overlay.
     pub fn open(root: &Path) -> Result<Self> {
-        let runner = Runner::registered()?;
-        Self::open_configured(root, runner)
+        Self::open_configured(root, Runner::Retired)
     }
 
-    /// Open with coordinator-trusted Bun, scoped entry, pinned package, and overlay.
-    pub fn open_with_scoped_omp(root: &Path, bun: &Path, entry: &Path, package_root: &Path, overlay: &Path) -> Result<Self> {
-        let runner = Runner::scoped_omp(bun, entry, package_root, overlay)?;
-        Self::open_configured(root, runner)
+    /// Historical constructor retained for journal access only. Runtime assets
+    /// are not opened and this constructor cannot admit or resume reasoning.
+    pub fn open_with_scoped_omp(root: &Path, _bun: &Path, _entry: &Path, _package_root: &Path, _overlay: &Path) -> Result<Self> {
+        Self::open(root)
     }
-
-    /// Open one explicitly configured credentialless Linux OMP route.
     #[cfg(unix)]
-    pub fn open_with_guest_omp(root: &Path, config: GuestRunnerConfig) -> Result<Self> {
-        Self::open_configured(root, Runner::guest(config)?)
-    }
+    pub fn open_with_guest_omp(root: &Path, config: GuestRunnerConfig) -> Result<Self> { Self::open_configured(root,Runner::guest(config)?) }
+    /// The former public canary constructor is also reconciliation-only.
+    pub fn open_with_canary_runner(root: &Path, _executable: &Path, _runner_args: &[String]) -> Result<Self> { Self::open(root) }
 
-    /// Explicit trusted fixture entry. This is not a production runner path.
-    pub fn open_with_canary_runner(root: &Path, executable: &Path, runner_args: &[String]) -> Result<Self> {
-        let runner = Runner::canary(executable, runner_args)?;
-        Self::open_configured(root, runner)
+    #[cfg(test)]
+    fn open_legacy_fixture(root:&Path,executable:&Path,args:&[String])->Result<Self> {
+        // Parallel historical fixture subprocess forks can transiently retain
+        // another thread's CLOEXEC lock descriptor until exec completes.
+        let runner=Runner::canary(executable,args)?;
+        let deadline=std::time::Instant::now()+Duration::from_secs(1);
+        loop {
+            match Self::open_configured_inner(root,runner.clone(),true) {
+                Err(error) if error.to_string()=="worker supervisor is already open for this root" && std::time::Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(5)),
+                result=>return result,
+            }
+        }
     }
 
     fn open_configured(root: &Path, runner: Runner) -> Result<Self> {
+        Self::open_configured_inner(root,runner,false)
+    }
+    fn permits_legacy_fixture(&self)->bool {cfg!(test) && self.legacy_fixture}
+    fn open_configured_inner(root:&Path,runner:Runner,legacy_fixture:bool)->Result<Self> {
         ensure!(root.is_absolute(), "worker root must be absolute");
         if let Ok(metadata) = fs::symlink_metadata(root) {
             ensure!(!metadata.file_type().is_symlink(), "worker root must not be a symlink");
@@ -93,7 +104,7 @@ impl Supervisor {
         lock.try_lock_exclusive().map_err(|_| anyhow!("worker supervisor is already open for this root"))?;
         let journal = Journal::open(&root)?;
         let authority_epoch = Arc::new(RwLock::new(journal.current_epoch()?));
-        let mut supervisor = Self { root: root.clone(), runner, journal, _lock: lock, actors: HashMap::new(), authority_epoch };
+        let mut supervisor = Self { root: root.clone(), runner, journal, _lock: lock, actors: HashMap::new(), authority_epoch, legacy_fixture };
         supervisor.recover_open_executions()?;
         Ok(supervisor)
     }
@@ -134,6 +145,9 @@ impl Supervisor {
             Ok(CommandLookup::Complete(response)) | Ok(CommandLookup::Pending(response)) => return Ok(response),
             Ok(CommandLookup::Missing) => {}
             Err(error) => return Ok(error_response("conflict", &error.to_string(), RetryClass::Never)),
+        }
+        if matches!(method,"submit"|"steer"|"browser.resume") && !self.permits_legacy_fixture() {
+            return Ok(error_response("legacy_execution_retired","Fresh separate-agent admission and continuation are retired; inspect the original receipt and use Ghost Pi for new Work",RetryClass::Never));
         }
         match method {
             "submit" => self.submit(request, body, &request_digest),
@@ -535,6 +549,10 @@ impl Supervisor {
     }
 
     fn start_actor(&mut self, spec: WorkerSpec, session_locator: String) -> Result<()> {
+        if !self.permits_legacy_fixture() {
+            self.journal.mark_recovery_unknown(&spec.execution_id,"Legacy reasoning respawn is retired; retained for independent reconciliation")?;
+            return Ok(());
+        }
         if self.actors.contains_key(&spec.execution_id) { return Ok(()); }
         let record = self.journal.get_execution(&spec.execution_id)?.ok_or_else(|| anyhow!("execution disappeared before process start"))?;
         if record.state != "admitted" { return Ok(()); }
@@ -769,6 +787,7 @@ impl Supervisor {
                 &json!({"decision": decision, "result": result}), 0, true, Some("failed"))?;
             return Ok(error_response("budget_exhausted", "owner decision completed; no active budget remains for SDK continuation", RetryClass::Never));
         }
+        ensure!(self.permits_legacy_fixture(),"legacy_execution_retired: old reasoning cannot resume");
         let handle = crate::worker::process::start_actor_with_budget(
             &self.root,
             self.runner.clone(),
@@ -963,3 +982,17 @@ fn warning_response(summary: &str, object_refs: Vec<String>, data: Value, code: 
 fn error_response(code: &str, summary: &str, retry: RetryClass) -> Response {
     Response { status:ResponseStatus::Error,summary:summary.to_owned(),object_refs:Vec::new(),artifacts:Vec::new(),next_actions:Vec::new(),error_code:Some(code.into()),retry_class:retry,data:Value::Null }
 }
+
+#[cfg(all(test,unix))]
+#[path="legacy_fixture_tests/supervisor.rs"]
+mod legacy_supervisor_tests;
+#[cfg(all(test,unix))]
+#[path="legacy_fixture_tests/recovery.rs"]
+mod legacy_recovery_tests;
+#[cfg(all(test,unix))]
+#[path="legacy_fixture_tests/scoped_tools.rs"]
+mod legacy_scoped_tools_tests;
+
+#[cfg(all(test,unix))]
+#[path="legacy_fixture_tests/guest_runtime.rs"]
+mod legacy_guest_runtime_tests;

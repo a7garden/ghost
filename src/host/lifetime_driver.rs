@@ -1,14 +1,40 @@
 //! Explicit per-Ghost transports. Ledger state is committed before I/O.
 use super::{lifetime, lifetime_runtime::PiProcess, Host};
-use crate::lifetime_contract::{canonical_digest, Envelope, Response, ResponseStatus, VERSION};
+use crate::lifetime_contract::{canonical_digest, Envelope, Response, ResponseStatus, RetryClass, VERSION};
 use anyhow::{anyhow, bail, Context, Result};
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::HashSet, path::PathBuf, sync::{Arc, Weak}, time::Duration};
+use std::{collections::{HashMap, HashSet}, path::PathBuf, sync::{Arc, Weak}, time::{Duration, Instant}};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 enum Delivery<'a> { Pi, Worker(&'a std::path::Path, Envelope) }
+
+// Transport recovery reuses immutable receiver IDs. It never creates another
+// model submission or retries a failed/unknown worker execution.
+#[derive(Default)]
+struct RecoveryBackoff {
+    failures: u32,
+    next_attempt: Option<Instant>,
+}
+
+impl RecoveryBackoff {
+    fn ready(&self, now: Instant) -> bool {
+        self.failures < 6 && self.next_attempt.is_none_or(|next| now >= next)
+    }
+
+    fn failed(&mut self, now: Instant) -> bool {
+        self.failures += 1;
+        self.next_attempt = Some(now + Duration::from_secs(1 << self.failures.min(5)));
+        self.failures < 6
+    }
+}
+
+fn retryable_pi_response(target: &str, response: &Response) -> bool {
+    target == "pi" && response.status == ResponseStatus::Error
+        && response.retry_class == RetryClass::SameId
+}
+
 pub(crate) fn start(host: &Arc<Host>) -> Result<()> {
     let Some(entry) = std::env::var_os("GHOST_LIFETIME_PI_ENTRY") else { return Ok(()); };
     let entry = PathBuf::from(entry).canonicalize()?;
@@ -20,10 +46,78 @@ pub(crate) fn start(host: &Arc<Host>) -> Result<()> {
     Ok(())
 }
 
+/// The actual task is tracked by Host, so shutdown joins it even when the
+/// driver itself is aborted. Dropping the local observation always cancels it.
+struct ContinuationJob {
+    abort:tokio::task::AbortHandle,
+    result:tokio::sync::oneshot::Receiver<Result<()>>,
+    completed:Option<Result<()>>,
+}
+impl Drop for ContinuationJob {fn drop(&mut self){self.abort.abort();}}
+fn take_continuation_handle(host:&Host,id:tokio::task::Id)->Option<tokio::task::JoinHandle<()>> {
+    let mut tasks=host.workers.lock().unwrap_or_else(|e|e.into_inner());
+    let index=tasks.iter().position(|task|task.id()==id && task.is_finished())?;
+    Some(tasks.swap_remove(index))
+}
+async fn cancel_continuation_job(host:&Host,job:ContinuationJob) {
+    job.abort.abort();
+    // Never detach the actual handle before teardown completes: concurrent
+    // Host shutdown may abort this driver while it is waiting here.
+    while !job.abort.is_finished(){tokio::time::sleep(Duration::from_millis(1)).await;}
+    if let Some(actual)=take_continuation_handle(host,job.abort.id()){let _=actual.await;}
+}
+/// One pending continuation per existing driver concern; polling never waits
+/// for transport. Only its own completed task is removed from Host tracking.
+async fn poll_continuation_job<Fut>(host:&Host,job:&mut Option<ContinuationJob>,launch:impl FnOnce()->Fut)->Option<Result<()>>
+where Fut:std::future::Future<Output=Result<()>>+Send+'static {
+    if let Some(job)=job.as_mut() {
+        if job.completed.is_none() {
+            job.completed=match job.result.try_recv() {
+                Ok(result)=>Some(result),
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed)=>Some(Err(anyhow!("continuation was cancelled before receipt"))),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)=>None,
+            };
+        }
+    }
+    let completed=if job.as_ref().is_some_and(|job|job.completed.is_some() && job.abort.is_finished()) {
+        let mut completed_job=job.take().unwrap();
+        if let Some(actual)=take_continuation_handle(host,completed_job.abort.id()) {
+            if let Err(error)=actual.await {return Some(Err(error.into()));}
+        }
+        completed_job.completed.take()
+    }else{None};
+    if job.is_none(){
+        let (sender,result)=tokio::sync::oneshot::channel();
+        let pending=launch();
+        let abort=host.spawn(async move {let result=pending.await;let _=sender.send(result);});
+        *job=Some(ContinuationJob{abort,result,completed:None});
+    }
+    completed
+}
+
+#[cfg(test)]
+pub(crate) async fn run_fixture_driver(host:Arc<Host>,entry:PathBuf) {
+    let weak=Arc::downgrade(&host);let root=host.root.join("durable");drop(host);
+    run(weak,entry,root,"fixture".into()).await;
+}
+
+#[cfg(test)]
+pub(crate) async fn run_broker_fixture_driver(host:Arc<Host>,entry:PathBuf) {
+    let weak=Arc::downgrade(&host);let root=host.root.join("durable");drop(host);
+    run(weak,entry,root,"broker".into()).await;
+}
+
 async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
     let mut pi: Option<PiProcess> = None;
     let mut suspended = HashSet::new();
+    let mut delivery_recovery: HashMap<i64, RecoveryBackoff> = HashMap::new();
+    let mut startup_recovery = RecoveryBackoff::default();
+    let mut pi_started_at: Option<Instant> = None;
     let mut recovered_pi = false;
+    let mut bot_memory_validation:Option<ContinuationJob>=None;
+    let mut experience_continuation:Option<ContinuationJob>=None;
+    let mut publication_continuation:Option<ContinuationJob>=None;
+    let mut verification_continuation:Option<ContinuationJob>=None;
     loop {
         let Some(host) = weak.upgrade() else { break; };
         if host.stopping.load(std::sync::atomic::Ordering::Acquire) { break; }
@@ -40,6 +134,8 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
             Ok(true) => {
                 if let Some(process) = pi.take() { let _ = process.close().await; }
                 recovered_pi = false;
+                pi_started_at = None;
+                startup_recovery.failed(Instant::now());
             }
             Ok(false) => {}
             Err(error) => { eprintln!("Pi child status unavailable: {error}"); break; }
@@ -48,16 +144,47 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
             eprintln!("lifetime graph maintenance unavailable: {error}");
             break;
         }
+        // Keep the verifier's own native bounds and pending/unknown receipt
+        // semantics. Optional source guards cannot hold unrelated deliveries;
+        // shutdown still cancels and joins this exact tracked continuation.
+        let verifying=Arc::clone(&host);
+        if matches!(poll_continuation_job(&host,&mut verification_continuation,move || async move {
+            verifying.advance_task_verifications().await
+        }).await,Some(Err(_))) {eprintln!("independent Owner task verification is blocked; inspect its original receipt");}
+        let validating=Arc::clone(&host);
+        if matches!(poll_continuation_job(&host,&mut bot_memory_validation,move || async move {
+            tokio::time::timeout(Duration::from_secs(30),validating.advance_bot_memory_readiness()).await.map_err(|_|anyhow!("bot memory readiness deadline exceeded"))?
+        }).await,Some(Err(_))) {eprintln!("bot memory readiness is pending; inspect its original operation");}
+        if host.advance_bot_provisioning().is_err() {
+            eprintln!("bot creation continuation is blocked; inspect its original operation");
+        }
+        // These existing outboxes retain their durable retry/occurrence owner.
+        // Keep one bounded in-flight operation each, so optional indexing or
+        // publication I/O cannot hold unrelated Pi deliveries behind its wait.
+        let advancing=Arc::clone(&host);
+        if matches!(poll_continuation_job(&host,&mut experience_continuation,move || async move {
+            anyhow::ensure!(advancing.advance_work_experiences_bounded(Duration::from_secs(30)).await?,"experience continuation deadline exceeded");Ok(())
+        }).await,Some(Err(_))) {
+            eprintln!("generated experience continuation is pending; reconcile its original outbox record");
+        }
+        let advancing=Arc::clone(&host);
+        if matches!(poll_continuation_job(&host,&mut publication_continuation,move || async move {
+            anyhow::ensure!(advancing.advance_memory_publications_bounded(Duration::from_secs(30)).await?,"publication continuation deadline exceeded");Ok(())
+        }).await,Some(Err(_))) {
+            eprintln!("source-view publication continuation is pending; inspect its original occurrence");
+        }
         let pending = match host.lock().and_then(|state| lifetime::pending_outbox(&state.journal.0)) {
             Ok(items) => items,
             Err(error) => { eprintln!("lifetime outbox unavailable: {error}"); break; }
         };
-        if !recovered_pi {
+        if pi_started_at.is_some_and(|started| started.elapsed() >= Duration::from_secs(60)) {
+            startup_recovery = RecoveryBackoff::default();
+        }
+        if !recovered_pi && startup_recovery.ready(Instant::now()) {
             let bindings = runnable_bindings(&host);
             match bindings {
                 Ok(bindings) => {
                     if !bindings.is_empty() || pending.iter().any(|item| item.target == "pi") {
-                        recovered_pi = true;
                         match PiProcess::start(&entry, &root, &host.root, &mode, &host.pi_callback_token, authority_epoch, host.pi_local_route.as_ref()).await {
                             Ok(mut process) => {
                                 let mut confirmed_channel = true;
@@ -99,10 +226,19 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
                                         Err(error) => eprintln!("Pi recovery scope unavailable: {error}"),
                                     }
                                 }
-                                if confirmed_channel { pi = Some(process); }
-                                else { let _ = process.close().await; }
+                                if confirmed_channel {
+                                    pi = Some(process);
+                                    recovered_pi = true;
+                                    pi_started_at = Some(Instant::now());
+                                } else {
+                                    let _ = process.close().await;
+                                    startup_recovery.failed(Instant::now());
+                                }
                             }
-                            Err(error) => eprintln!("Pi startup unavailable: {error}"),
+                            Err(error) => {
+                                startup_recovery.failed(Instant::now());
+                                eprintln!("Pi startup unavailable: {error}");
+                            }
                         }
                     }
                 }
@@ -111,6 +247,7 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
         }
         for item in pending {
             if suspended.contains(&item.id) { continue; }
+            if delivery_recovery.get(&item.id).is_some_and(|retry| !retry.ready(Instant::now())) { continue; }
             let command = match outbox_envelope(item.payload) {
                 Ok(command) => command,
                 Err(error) => {
@@ -119,6 +256,10 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
                     continue;
                 }
             };
+            if item.target=="worker" && matches!(command.body["method"].as_str(),Some("submit"|"steer")) {
+                block_delivery(&host,&command,"Legacy OMP admission is retired; reconcile the original execution before explicit Pi migration");
+                suspended.insert(item.id);continue;
+            }
             let delivery = match delivery_route(&host, &command, &item.target, &mode) {
                 Ok(Some(delivery)) => delivery,
                 Ok(None) => {
@@ -136,7 +277,12 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
             let result = match delivery {
                 Delivery::Pi => match pi.as_mut() {
                     Some(process) => bounded_pi_request(process, &command).await,
-                    None => Err(anyhow!("Pi runtime unavailable; committed intent remains pending")),
+                    None => {
+                        block_delivery(&host, &command, if startup_recovery.failures >= 6 {
+                            "Pi startup recovery exhausted; explicit reconciliation required"
+                        } else { "Pi runtime recovery pending; original command remains queued" });
+                        continue;
+                    }
                 },
                 Delivery::Worker(socket, command) => bounded_worker_request(socket, &command).await,
             };
@@ -148,19 +294,33 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
                         block_delivery(&host, &command, "Receiver ACK commit is unconfirmed; reconcile the same command ID");
                         eprintln!("lifetime receiver receipt commit failed: {error}");
                         suspended.insert(item.id);
+                    } else {
+                        delivery_recovery.remove(&item.id);
                     }
                 }
                 Ok(response) => {
                     block_delivery(&host, &command, response.error_code.as_deref().unwrap_or("Receiver has not durably accepted the command"));
-                    suspended.insert(item.id);
+                    if !retryable_pi_response(&item.target, &response) {
+                        suspended.insert(item.id);
+                    } else if !delivery_recovery.entry(item.id).or_default().failed(Instant::now()) {
+                        block_delivery(&host, &command, "Pi receiver recovery exhausted; reconcile the original command ID");
+                        suspended.insert(item.id);
+                    }
                 }
                 Err(error) => {
                     block_delivery(&host, &command, "Delivery unconfirmed; reconcile the original command and execution IDs");
                     eprintln!("lifetime delivery unconfirmed: {error}");
-                    suspended.insert(item.id);
                     if item.target == "pi" {
                         if let Some(process) = pi.take() { let _ = process.close().await; }
                         recovered_pi = false;
+                        pi_started_at = None;
+                        startup_recovery.failed(Instant::now());
+                        if !delivery_recovery.entry(item.id).or_default().failed(Instant::now()) {
+                            block_delivery(&host, &command, "Pi transport recovery exhausted; reconcile the original command ID");
+                            suspended.insert(item.id);
+                        }
+                    } else {
+                        suspended.insert(item.id);
                     }
                 }
             }
@@ -170,6 +330,8 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
                 eprintln!("Pi committed submission observation unavailable: {error}");
                 if let Some(process) = pi.take() { let _ = process.close().await; }
                 recovered_pi = false;
+                pi_started_at = None;
+                startup_recovery.failed(Instant::now());
             }
         }
         if let Err(error) = observe_workers(&host, authority_epoch).await {
@@ -177,6 +339,12 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
         }
         drop(host);
         tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    if let Some(validation)=bot_memory_validation {if let Some(host)=weak.upgrade(){cancel_continuation_job(&host,validation).await;}}
+    if let Some(host)=weak.upgrade() {
+        if let Some(continuation)=verification_continuation {cancel_continuation_job(&host,continuation).await;}
+        if let Some(continuation)=experience_continuation {cancel_continuation_job(&host,continuation).await;}
+        if let Some(continuation)=publication_continuation {cancel_continuation_job(&host,continuation).await;}
     }
     if let Some(process) = pi { if let Err(error) = process.close().await { eprintln!("Pi close unconfirmed: {error}"); } }
 }
@@ -310,6 +478,8 @@ fn persist_delivery_blocker(
     for payload in payloads {
         let mut work: crate::lifetime_contract::Work = serde_json::from_str(&payload)?;
         if matches!(work.state.as_str(), "accepted" | "completed" | "failed" | "cancelled") { continue; }
+        if work.blocker.as_deref().is_some_and(|existing|
+            !lifetime::recoverable_assignment_blocker(existing)) { continue; }
         work.blocker = Some(reason.into());
         tx.execute("UPDATE lifetime_work SET payload=?1 WHERE id=?2", rusqlite::params![serde_json::to_string(&work)?, work.id])?;
     }
@@ -496,6 +666,9 @@ fn delivery_route<'a>(host: &'a Host, command: &Envelope, target: &str, mode: &s
     anyhow::ensure!(authority.dispatch_enabled && authority.epoch == host.authority_epoch && command.authority_epoch == authority.epoch,
         "outbox writer authority is fenced or dispatch is disabled");
     if target == "worker" {
+        // Historical inspection/cancellation remain available, but even a
+        // committed unacknowledged submit cannot start a new OMP execution.
+        if matches!(method,"submit"|"steer") {return Ok(None);}
         let Some(computers) = host.native_computers.as_ref() else { return Ok(None); };
         let (work_id, ghost_id): (String, String) = if method == "submit" {
             let work_id = command.body["spec"]["work_id"].as_str().ok_or_else(|| anyhow!("worker work scope missing"))?;
@@ -565,6 +738,9 @@ fn delivery_route<'a>(host: &'a Host, command: &Envelope, target: &str, mode: &s
         return Ok(socket.map(|socket| Delivery::Worker(socket, worker_command)));
     }
     anyhow::ensure!(target == "pi", "unknown lifetime outbox target");
+    if let Some(allowed) = lifetime::selected_task_delivery_allowed(conn, command)? {
+        return Ok(allowed.then_some(Delivery::Pi));
+    }
     let public: bool = match method {
         "conversation.input" if mode == "broker" => {
             let ghost_id = command.body["ghost_id"].as_str().ok_or_else(|| anyhow!("Pi Ghost scope missing"))?;
@@ -681,6 +857,40 @@ mod tests {
     use rusqlite::{params, Connection};
 
     #[test]
+    fn recovery_backs_off_and_stops_after_six_failures() {
+        let mut retry = RecoveryBackoff::default();
+        let mut now = Instant::now();
+        assert!(retry.ready(now));
+        for seconds in [2, 4, 8, 16, 32] {
+            assert!(retry.failed(now));
+            assert!(!retry.ready(now));
+            now += Duration::from_secs(seconds);
+            assert!(!retry.ready(now - Duration::from_millis(1)));
+            assert!(retry.ready(now));
+        }
+        assert!(!retry.failed(now));
+        assert!(!retry.ready(now + Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn only_pi_same_id_errors_allow_automatic_redelivery() {
+        let mut response: Response = serde_json::from_value(json!({
+            "status":"error", "summary":"temporary Host inspection failure",
+            "object_refs":[], "artifacts":[], "next_actions":[],
+            "error_code":"goal_assignment_inspection_unconfirmed", "retry_class":"same_id", "data":{}
+        })).unwrap();
+        assert!(retryable_pi_response("pi", &response));
+        assert!(!retryable_pi_response("worker", &response));
+        for class in [RetryClass::Never, RetryClass::ReconcileFirst, RetryClass::NewRevision] {
+            response.retry_class = class;
+            assert!(!retryable_pi_response("pi", &response));
+        }
+        response.retry_class = RetryClass::SameId;
+        response.status = ResponseStatus::Success;
+        assert!(!retryable_pi_response("pi", &response));
+    }
+
+    #[test]
     fn stale_assignment_failure_cannot_block_a_reused_work_or_other_attempt() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(include_str!("../../contracts/lifetime/migration-005.sql")).unwrap();
@@ -735,6 +945,9 @@ mod tests {
         assert_eq!(blocked.blocker.as_deref(), Some("current delivery unconfirmed"));
         assert_eq!(blocked.goal_revision, 2);
         assert_eq!(blocked.execution_id, None);
+        persist_delivery_blocker(&conn, &command, "Delivery scope is unresolved; explicit reconciliation required").unwrap();
+        let preserved: String = conn.query_row("SELECT payload FROM lifetime_work WHERE id='current'", [], |row| row.get(0)).unwrap();
+        assert_eq!(serde_json::from_str::<Work>(&preserved).unwrap(), blocked);
         let historical_payload: String = conn.query_row(
             "SELECT payload FROM lifetime_work WHERE id='historical'", [], |row| row.get(0),
         ).unwrap();
@@ -851,5 +1064,62 @@ mod tests {
             "input_artifacts":[input_record(Some("public"), false)],
         }));
         assert_eq!(unknown, "local_only");
+    }
+}
+    #[tokio::test]
+    async fn committed_legacy_submit_and_steer_never_reach_a_worker_transport() {
+        let fixture=crate::host::lifetime::pi_execution::tests::setup_with_spec(json!({}));
+        for method in ["submit","steer"] {
+            let command=crate::host::lifetime::pi_execution::tests::envelope("owner",json!({"method":method,"spec":{"work_id":fixture.work},"execution_id":"legacy-original"}));
+            assert!(delivery_route(&fixture.host,&command,"worker","broker").unwrap().is_none());
+        }
+    }
+
+#[cfg(test)]
+mod readiness_job_tests {
+    use super::*;
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn continuation_cleanup_keeps_actual_handle_tracked_until_drop_finishes_during_shutdown() {
+        use std::sync::atomic::{AtomicBool,Ordering};
+        struct SlowDrop {entered:Arc<AtomicBool>,release:Arc<AtomicBool>}
+        impl Drop for SlowDrop {fn drop(&mut self){self.entered.store(true,Ordering::SeqCst);while !self.release.load(Ordering::SeqCst){std::thread::sleep(Duration::from_millis(1));}}}
+        let fixture=crate::host::lifetime::pi_execution::tests::setup_with_spec(crate::host::lifetime::pi_execution::tests::verifier_spec("expected"));
+        let host=Arc::new(fixture.host);
+        let entered=Arc::new(AtomicBool::new(false));let release=Arc::new(AtomicBool::new(false));let started=Arc::new(AtomicBool::new(false));
+        let mut job=None;let entered_child=Arc::clone(&entered);let release_child=Arc::clone(&release);let started_child=Arc::clone(&started);
+        poll_continuation_job(&host,&mut job,move ||async move {
+            let _slow_drop=SlowDrop{entered:entered_child,release:release_child};started_child.store(true,Ordering::SeqCst);
+            std::future::pending::<()>().await;Ok(())
+        }).await;
+        tokio::time::timeout(Duration::from_secs(2),async {while !started.load(Ordering::SeqCst){tokio::task::yield_now().await;}}).await.unwrap();
+        let job=job.take().unwrap();let id=job.abort.id();let cancelling=Arc::clone(&host);
+        host.spawn(async move {cancel_continuation_job(&cancelling,job).await;});
+        tokio::time::timeout(Duration::from_secs(2),async {while !entered.load(Ordering::SeqCst){tokio::time::sleep(Duration::from_millis(1)).await;}}).await.unwrap();
+        let retained=host.workers.lock().unwrap().iter().any(|task|task.id()==id && !task.is_finished());
+        let shutdown_host=Arc::clone(&host);let shutdown=tokio::spawn(async move{shutdown_host.shutdown().await});
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let shutdown_waited=!shutdown.is_finished();
+        release.store(true,Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(2),shutdown).await.unwrap().unwrap().unwrap();
+        assert!(retained,"normal cancellation must not detach the actual task during teardown");
+        assert!(shutdown_waited,"Host shutdown must join blocked teardown even after aborting its driver");
+        assert!(host.workers.lock().unwrap().is_empty());assert_eq!(Arc::strong_count(&host),1);
+    }
+
+    #[tokio::test]
+    async fn pending_readiness_does_not_block_next_driver_step_and_timeout_is_observed() {
+        let fixture=crate::host::lifetime::pi_execution::tests::setup_with_spec(crate::host::lifetime::pi_execution::tests::verifier_spec("expected"));
+        let mut job=None;let now=Instant::now();
+        let first=poll_continuation_job(&fixture.host,&mut job,||async {
+            tokio::time::timeout(Duration::from_millis(20),std::future::pending::<()>()).await.map_err(|_|anyhow!("fixture deadline"))?;Ok(())
+        }).await;
+        assert!(first.is_none());assert!(now.elapsed()<Duration::from_millis(100));
+        // This is the next driver callback, not a claim of real Pi delivery.
+        let following_callback=std::sync::atomic::AtomicBool::new(false);following_callback.store(true,std::sync::atomic::Ordering::SeqCst);
+        assert!(following_callback.load(std::sync::atomic::Ordering::SeqCst));
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(matches!(poll_continuation_job(&fixture.host,&mut job,||async {Ok(())}).await,Some(Err(_))));
+        let job=job.take().unwrap();cancel_continuation_job(&fixture.host,job).await;
+        assert!(fixture.host.workers.lock().unwrap().is_empty(),"completed continuations must not accumulate in Host workers");
     }
 }

@@ -156,6 +156,30 @@ fn verify_owner_turn(
     Ok(())
 }
 
+/// The operator route never invents a turn or changes its submission state.
+pub(super) fn selected_task_scope(
+    conn: &Connection,
+    ghost_id: &str,
+    conversation_id: &str,
+    turn_id: &str,
+    recovery: bool,
+) -> Result<()> {
+    conversation::registered_mode(conn, ghost_id, conversation_id)?;
+    conversation::require_pi_binding(conn, ghost_id, conversation_id)?;
+    let binding = super::db::binding(conn, conversation_id)?.ok_or_else(||host_apply::not_found("Pi binding is missing"))?;
+    if binding.runtime_release != "1.1.0" || binding.storage_ref.is_empty() || binding.storage_ref.starts_with("unresolved:") {
+        return Err(host_apply::reject("selected_task_binding_unconfirmed", "Selected-task inspection requires an acknowledged Pi binding", RetryClass::Never));
+    }
+    verify_owner_turn(conn, ghost_id, conversation_id, turn_id)?;
+    let run = scoped_run(conn, ghost_id, conversation_id, turn_id)?;
+    if recovery && (run.cancel_requested || run.submission_id.is_some() || run.entry_id.is_some()
+        || !matches!(run.state.as_str(), "queued" | "effect_unknown")) {
+        return Err(host_apply::reject("selected_task_recovery_blocked",
+            "Owner turn cannot start selected-task recovery", RetryClass::Never));
+    }
+    Ok(())
+}
+
 fn validate_opaque_id(field: &str, value: &str) -> Result<()> {
     if value.trim().is_empty() || value.len() > MAX_OPAQUE_ID_UTF8_BYTES {
         return Err(host_apply::invalid(format!(
@@ -425,6 +449,12 @@ pub(super) fn report_status(
         return Err(host_apply::invalid(
             "answered status requires a committed assistant entry identity",
         ));
+    }
+    if target_state == "answered" && run.state != "answered" {
+        super::task_contracts::require_reply_admission(tx, turn_id, ghost_id, conversation_id)?;
+        if !super::super::bots_provisioning::creation_reply_admitted(tx, turn_id, ghost_id, conversation_id)? {
+            return Err(host_apply::reject("bot_creation_incomplete", "The prepared Owner bot creation has no armed evaluation/provisioning responsibility", RetryClass::Never));
+        }
     }
     let same_state = run.state == target_state;
     let reason_code = report_reason(&run.reason_code, reported_reason, same_state)?;

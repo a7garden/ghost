@@ -65,7 +65,13 @@ pub(super) fn apply(
             super::turn_runs::report_status(tx, envelope, principal)
         }
         "conversation.turn.inspect" => {
-            super::turn_runs::inspect_turn(tx, &envelope.body, principal)
+            let mut response=super::turn_runs::inspect_turn(tx,&envelope.body,principal)?;
+            if response.status==ResponseStatus::Success {
+                let descriptor=super::task_contracts::turn_descriptor(tx,host_apply::string_field(&envelope.body,"turn_id")?,host_apply::string_field(&envelope.body,"ghost_id")?,host_apply::string_field(&envelope.body,"conversation_id")?)?;
+                response.data["task_contract"]=descriptor.unwrap_or(Value::Null);
+                response.data["task_admission"]=super::task_contracts::turn_admission(tx,host_apply::string_field(&envelope.body,"turn_id")?,host_apply::string_field(&envelope.body,"ghost_id")?,host_apply::string_field(&envelope.body,"conversation_id")?)?.unwrap_or(Value::Null);
+            }
+            Ok(response)
         }
         "conversation.report.inspect" => super::reports::inspect(tx, envelope, principal),
         "conversation.report.reply" => super::reports::reply(tx, envelope, principal),
@@ -282,7 +288,7 @@ fn conversation_input(
     envelope: &Envelope,
     context: &mut host_apply::ApplyContext,
 ) -> Result<Response> {
-    host_apply::exact_fields(
+    host_apply::allowed_fields(
         &envelope.body,
         &[
             "method",
@@ -290,8 +296,9 @@ fn conversation_input(
             "conversation_id",
             "text",
             "privacy",
-            "attachments",
+            "attachments", "task_contract",
         ],
+        &["method","ghost_id","conversation_id","text","privacy","attachments"],
     )?;
     let ghost_id = host_apply::string_field(&envelope.body, "ghost_id")?;
     let conversation_id = host_apply::string_field(&envelope.body, "conversation_id")?;
@@ -307,6 +314,7 @@ fn conversation_input(
     require_active(tx, ghost_id, conversation_id)?;
     ensure_pi_binding(tx, ghost_id, conversation_id)?;
 
+    let task_privacy=super::task_contracts::bind_input(tx,envelope)?;
     let attachments: Vec<Artifact> = serde_json::from_value(
         host_apply::value_field(&envelope.body, "attachments")?.clone(),
     )
@@ -327,6 +335,7 @@ fn conversation_input(
 
     let mut privacy = conversation_privacy(tx, ghost_id, conversation_id)?;
     raise_privacy(&mut privacy, requested_privacy)?;
+    if let Some(task_privacy)=task_privacy {raise_privacy(&mut privacy,&task_privacy)?;}
     for attachment in &attachments {
         raise_privacy(&mut privacy, &attachment.privacy)?;
     }
@@ -542,8 +551,9 @@ fn goal_create(
     principal: &str,
     context: &mut host_apply::ApplyContext,
 ) -> Result<Response> {
+    let resolved=super::task_contracts::resolve_goal_body(tx,&envelope.body,true)?;
     host_apply::exact_fields(
-        &envelope.body,
+        &resolved,
         &[
             "method",
             "turn_id",
@@ -553,10 +563,10 @@ fn goal_create(
             "acceptance_spec",
         ],
     )?;
-    let turn_id = host_apply::string_field(&envelope.body, "turn_id")?;
-    let requested_ghost = host_apply::string_field(&envelope.body, "ghost_id")?;
-    let requested_conversation = host_apply::string_field(&envelope.body, "conversation_id")?;
-    let prompt = host_apply::string_field(&envelope.body, "prompt")?;
+    let turn_id = host_apply::string_field(&resolved, "turn_id")?;
+    let requested_ghost = host_apply::string_field(&resolved, "ghost_id")?;
+    let requested_conversation = host_apply::string_field(&resolved, "conversation_id")?;
+    let prompt = host_apply::string_field(&resolved, "prompt")?;
     host_apply::validate_text("prompt", prompt)?;
     if principal != requested_ghost {
         return Err(host_apply::reject(
@@ -588,11 +598,15 @@ fn goal_create(
         ));
     }
     super::turn_runs::ensure_goal_admission(tx, &turn_ghost, &turn_conversation, turn_id)?;
-    let acceptance_spec = host_apply::value_field(&envelope.body, "acceptance_spec")?.clone();
+    let acceptance_spec = host_apply::value_field(&resolved, "acceptance_spec")?.clone();
     if !acceptance_spec.is_object() {
         return Err(host_apply::invalid("acceptance_spec must be an object"));
     }
 
+    if let Some(reference)=envelope.body.get("task_contract_ref") {
+        let prior:Option<String>=tx.query_row("SELECT response FROM lifetime_commands WHERE actor_ref=?1 AND json_extract(request,'$.body.method')='goal.create' AND json_extract(request,'$.body.turn_id')=?2 AND json_extract(request,'$.body.task_contract_ref')=?3 AND json_extract(response,'$.status')='success' ORDER BY rowid LIMIT 1",params![principal,turn_id,reference.as_str()],|r|r.get(0)).optional()?;
+        if let Some(prior)=prior {return Ok(serde_json::from_str(&prior)?);}
+    }
     let prior_goals: i64 = tx.query_row(
         "SELECT COUNT(*) FROM lifetime_turn_goals WHERE turn_id=?1",
         [turn_id],
@@ -625,7 +639,7 @@ fn goal_create(
         &admission_envelope,
         principal,
         context,
-        false,
+        true,
     )?;
     if response.status == ResponseStatus::Error {
         return Ok(response);
@@ -653,8 +667,9 @@ fn conversation_reply(
     envelope: &Envelope,
     principal: &str,
 ) -> Result<Response> {
-    host_apply::exact_fields(
+    host_apply::allowed_fields(
         &envelope.body,
+        &["method", "turn_id", "ghost_id", "conversation_id", "text", "memory_context_revision"],
         &["method", "turn_id", "ghost_id", "conversation_id", "text"],
     )?;
     let turn_id = host_apply::string_field(&envelope.body, "turn_id")?;
@@ -692,6 +707,10 @@ fn conversation_reply(
         ));
     }
     super::turn_runs::check_reply(tx, ghost_id, conversation_id, turn_id)?;
+    super::task_contracts::require_reply_admission(tx, turn_id, ghost_id, conversation_id)?;
+    if !super::super::bots_provisioning::creation_reply_admitted(tx, turn_id, ghost_id, conversation_id)? {
+        return Err(host_apply::reject("bot_creation_incomplete", "The prepared Owner bot creation has no armed evaluation/provisioning responsibility", RetryClass::Never));
+    }
     let mut privacy = conversation_privacy(tx, ghost_id, conversation_id)?;
     raise_privacy(&mut privacy, &turn_privacy)?;
     persist_disclosure(tx, ghost_id, conversation_id, &privacy)?;

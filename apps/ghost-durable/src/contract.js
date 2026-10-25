@@ -122,6 +122,29 @@ export function validateEnvelope(envelope) {
   requireString(body, "conversation_id");
 
   switch (body.method) {
+    case "conversation.inspect": {
+      if (Object.hasOwn(body, "selected_task_inspection")) {
+        const target = body.selected_task_inspection;
+        if (Object.keys(body).length !== 4 || target === null || typeof target !== "object" || Array.isArray(target)
+          || Object.keys(target).length !== 1 || !Object.hasOwn(target, "turn_id")
+          || typeof target.turn_id !== "string" || target.turn_id.length < 1 || Buffer.byteLength(target.turn_id, "utf8") > 400) {
+          throw new ProtocolError("invalid_envelope", "selected_task_inspection requires only one exact bounded turn.");
+        }
+      }
+      break;
+    }
+    case "runtime.reconcile": {
+      if (Object.hasOwn(body, "selected_task_recovery")) {
+        const target = body.selected_task_recovery;
+        if (target === null || typeof target !== "object" || Array.isArray(target)
+          || Object.keys(target).length !== 2 || !Object.hasOwn(target, "turn_id") || !Object.hasOwn(target, "operation_id")
+          || typeof target.turn_id !== "string" || target.turn_id.length < 1 || Buffer.byteLength(target.turn_id, "utf8") > 400
+          || typeof target.operation_id !== "string" || !/^selected-task:[a-f0-9]{64}$/u.test(target.operation_id)) {
+          throw new ProtocolError("invalid_envelope", "selected_task_recovery requires one exact bounded turn and original admission operation.");
+        }
+      }
+      break;
+    }
     case "conversation.status":
       requireString(body, "request_id");
       if (body.request_id.length > 400) {

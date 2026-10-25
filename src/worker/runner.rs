@@ -252,6 +252,7 @@ impl GuestRunner {
 
 #[derive(Clone)]
 pub(crate) enum Runner {
+    Retired,
     ScopedOmp { executable: PathBuf, args: Vec<String> },
     Canary { executable: PathBuf, args: Vec<String> },
     #[cfg(unix)]

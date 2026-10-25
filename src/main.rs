@@ -83,10 +83,10 @@ enum Cmd {
         /// Absolute OxiBrowser CLI path for public web search/read tools.
         #[arg(long)]
         oxibrowser_executable: Option<PathBuf>,
-        /// Absolute OMP CLI path for the bounded analysis worker.
+        /// Retired option; supplying an OMP worker path is rejected.
         #[arg(long)]
         omp_executable: Option<PathBuf>,
-        /// Fixed minimax-code provider/model, required with --omp-executable.
+        /// Retired option; use the Ghost Pi registered inference provider.
         #[arg(long)]
         omp_model: Option<String>,
         #[arg(long, default_value = "launchd")]
@@ -381,6 +381,17 @@ enum LifetimeCmd {
 #[cfg(all(feature = "lifetime", unix))]
 #[derive(Subcommand)]
 enum RecoveryCmd {
+    /// Preserve a supported immutable native no-cache backup as a private USTAR artifact.
+    PackNativeBackup {
+        #[arg(long)] source: PathBuf,
+        #[arg(long)] destination: PathBuf,
+    },
+    /// Verify a pinned artifact and extract exact native bytes into an absent private root.
+    UnpackNativeBackup {
+        #[arg(long)] archive: PathBuf,
+        #[arg(long)] sha256: String,
+        #[arg(long)] destination: PathBuf,
+    },
     /// Capture an explicit complete inventory whose owners are already stopped.
     Create {
         #[arg(long)]
@@ -455,6 +466,8 @@ fn release_command(c: ReleaseCmd) -> Result<()> {
 fn recovery_command(c: RecoveryCmd) -> Result<()> {
     use ghost::operations::recovery_bundle;
     match c {
+        RecoveryCmd::PackNativeBackup { source, destination } => emit(&ghost::operations::native_backup_artifact::pack(&source,&destination)?),
+        RecoveryCmd::UnpackNativeBackup { archive, sha256, destination } => emit(&ghost::operations::native_backup_artifact::unpack(&archive,&sha256,&destination)?),
         RecoveryCmd::Create { request, destination } => {
             let request = read_bundle_request(&request)?;
             emit(&recovery_bundle::create_bundle(&request, &destination)?)

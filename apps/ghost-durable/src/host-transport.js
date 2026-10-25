@@ -4,6 +4,7 @@ import { discover } from "./host-discovery.js";
 import { payloadDigest, PROTOCOL_VERSION } from "./contract.js";
 import { validateDirectWorkIdentity } from "./direct-work.js";
 import { DOCUMENT_TOOL_NAMES, MEMORY_TOOL_NAMES } from "./models.js";
+import { MEMORY_QUERY_FIELDS, memoryQueryArguments } from "./memory-query.js";
 
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 8 * 1_048_576;
@@ -12,9 +13,15 @@ function sha256(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function callbackCommandId(ghostId, conversationId, invocationId, method) {
+export function callbackCommandId(ghostId, conversationId, invocationId, method) {
   const identity = JSON.stringify(["ghost-pi-callback-v2", ghostId, conversationId, invocationId, method]);
   return `pi-tool-v2:${sha256(identity)}`;
+}
+
+export function taskContractGoalBody({ ghostId, conversationId, turnId, taskContractRef }) {
+  if (![ghostId, conversationId, turnId].every(value => typeof value === 'string' && value.length > 0 && value.length <= 400)
+    || typeof taskContractRef !== 'string' || !/^ot-[a-f0-9]{64}$/u.test(taskContractRef)) throw new Error('Exact scoped Owner task reference is required');
+  return { method: 'goal.create', turn_id: turnId, ghost_id: ghostId, conversation_id: conversationId, task_contract_ref: taskContractRef };
 }
 
 function validResponse(value) {
@@ -161,9 +168,19 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
     throw new Error("A captured positive Host authority epoch is required.");
   }
 
+  function verifyWaitResponse(response,envelope) {
+    if (envelope.body.method==="work.wait" && envelope.body.assignment_id!==undefined && response.status==="success") {
+      const r=response.data?.wait_receipt,b=envelope.body;
+      if (!r || r.kind!=="pi-work-wait/1" || r.assignment_id!==b.assignment_id || r.work_id!==b.work_id
+        || r.generation_task_id!==b.generation_task_id || r.authority_epoch!==envelope.authority_epoch
+        || r.wait_command_id!==envelope.command_id || r.wait_payload_digest!==envelope.payload_digest
+        || JSON.stringify(r.wait_for)!==JSON.stringify(b.wait_for)) throw new Error("Host did not confirm the exact immutable Work wait receipt.");
+    }
+    return response;
+  }
   async function command({
     ghostId, conversationId, invocationId, method, fields = {}, expectedRevision = null,
-    inferenceScope, conversationDisclosure,
+    inferenceScope, conversationDisclosure, contextRef,
   }) {
     let endpointPath;
     let credential;
@@ -173,7 +190,7 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
     } else if (inferenceScope === "selected" && ["public", "non_public"].includes(conversationDisclosure)) {
       endpointPath = "/api/v1/pi/selected-action";
       credential = callbackToken;
-    } else if (inferenceScope === "local" && conversationDisclosure === "non_public") {
+    } else if (inferenceScope === "local" && ["public", "non_public"].includes(conversationDisclosure)) {
       endpointPath = "/api/v1/pi/local-action";
       credential = localCallbackToken;
       if (!credential) {
@@ -203,7 +220,8 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
       correlation_id: commandId,
       body,
     };
-    const requestBody = JSON.stringify({ ghost_id: ghostId, conversation_id: conversationId, envelope });
+    const outer = { ghost_id: ghostId, conversation_id: conversationId, ...(contextRef === undefined ? {} : { context_ref: contextRef }), envelope };
+    const requestBody = JSON.stringify(outer);
     if (Buffer.byteLength(requestBody, "utf8") > MAX_REQUEST_BYTES) {
       throw new Error("Pi Host callback request exceeds the one-megabyte endpoint limit.");
     }
@@ -212,9 +230,9 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
     // exact body conversion, digest, epoch and identity checks above still run.
     if (dispatch !== undefined) {
       if (typeof dispatch !== "function") throw new Error("Host dispatch must be a trusted function.");
-      const frame = await dispatch({ ghost_id: ghostId, conversation_id: conversationId, envelope });
+      const frame = await dispatch(outer, { inferenceScope, conversationDisclosure });
       if (frame?.ok !== true || !validResponse(frame.result)) throw Object.assign(new Error("Scoped Host dispatch returned no verified lifetime receipt."), { code: "host_callback_rejected" });
-      return frame.result;
+      return verifyWaitResponse(frame.result,envelope);
     }
 
     let origin;
@@ -253,7 +271,7 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
     if (!response.ok || frame?.ok !== true || !validResponse(frame.result)) {
       throw Object.assign(new Error("Pi Host callback did not return a verified lifetime Response; inspect current state and stop if unresolved."), { code: "host_callback_rejected", http_status: response.status });
     }
-    return frame.result;
+    return verifyWaitResponse(frame.result,envelope);
   }
 
   async function inspectWork(scope, invocationId, workId) {
@@ -333,6 +351,7 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
     invocation_id: invocationId,
     ghost_id: ghostId,
     conversation_id: conversationId,
+    context_ref: contextRef,
     turn_id: turnId,
     assignment_id: assignmentId,
     report_id: reportId,
@@ -344,11 +363,13 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
     operation,
     memory_context_revision: memoryContextRevision,
     work_memory_context_revision: workMemoryContextRevision,
+    wait_goal_revision: waitGoalRevision,
     inference_scope: inferenceScope,
     conversation_disclosure: conversationDisclosure,
     arguments: args,
   }) => {
-    const scope = { ghostId, conversationId, inferenceScope, conversationDisclosure };
+    if (contextRef !== undefined && (typeof contextRef !== "string" || !/^wc-[a-f0-9]{64}$/u.test(contextRef))) throw new Error("Invalid trusted Work context reference.");
+    const scope = { ghostId, conversationId, inferenceScope, conversationDisclosure, contextRef };
     if (typeof invocationId !== "string" || invocationId.length === 0
       || typeof ghostId !== "string" || ghostId.length === 0
       || typeof conversationId !== "string" || conversationId.length === 0
@@ -358,6 +379,14 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
 
     if (workMemoryContextRevision !== undefined && (typeof workMemoryContextRevision !== "string" || !/^[a-f0-9]{64}$/u.test(workMemoryContextRevision))) throw new Error("Invalid Work memory context provenance stamp.");
     switch (method) {
+      case "work.context.claim": {
+        if (!contextRef || ![assignmentId,workId].every(value=>isBoundedText(value,400))
+          || !hasExactArguments(args,["generation_task_id","provider_session_id","storage_ref"])
+          || !Number.isSafeInteger(args.generation_task_id) || args.generation_task_id < 1
+          || !isBoundedText(args.provider_session_id,400) || !isBoundedText(args.storage_ref,1024)
+          || isAbsolute(args.storage_ref) || args.storage_ref.split(/[\\/]/u).some(part=>!part || part==='..' || part==='.') ) throw new Error("Work context claim requires the original trusted context and exact SDK/store identities.");
+        return command({...scope,invocationId,method,fields:{assignment_id:assignmentId,work_id:workId,context_ref:contextRef,...args}});
+      }
       case "bot.repair": {
         if (!isBoundedText(reportId, 400) || !hasExactArguments(args, ["candidate_id", "candidate_digest", "instructions"])
           || !isBoundedText(args.candidate_id, 400) || typeof args.candidate_digest !== "string" || !/^[a-f0-9]{64}$/u.test(args.candidate_digest)
@@ -366,16 +395,26 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
         }
         return command({ ...scope, invocationId, method, fields: { report_id: reportId, arguments: args } });
       }
+      case "memory.publication.capabilities":
+      case "memory.publication.context.inspect":
+      case "memory.publication.read": {
+        const work = assignmentId !== undefined || workId !== undefined;
+        if (inferenceScope !== "local" || (work ? ![assignmentId, workId].every(value => isBoundedText(value, 400)) || turnId !== undefined : !isBoundedText(turnId, 400))) throw new Error("Published sources require an exact authenticated local Owner turn or Work assignment.");
+        if (method === "memory.publication.read" ? !hasExactArguments(args, ["reference"]) || !isBoundedText(args.reference, 400) : Object.keys(args).length !== 0) throw new Error("Published source operations accept only a Host-issued reference or no arguments.");
+        return command({ ...scope, invocationId, method, fields: { ghost_id: ghostId, conversation_id: conversationId,
+          ...(work ? { assignment_id: assignmentId, work_id: workId } : { turn_id: turnId }), ...args } });
+      }
       case "work.memory.context.inspect":
       case "work.memory.recall":
       case "work.memory.record": {
         if (![assignmentId, workId].every(value => isBoundedText(value, 400)) || inferenceScope !== "local") throw new Error("Work memory requires the exact authenticated assignment and local inference route.");
         if (method === "work.memory.context.inspect" && Object.keys(args).length !== 0) throw new Error("Work memory inspection accepts no model arguments.");
-        if (method === "work.memory.recall" && (!hasExactArguments(args, ["query"], ["token_budget"]) || typeof args.query !== "string" || Buffer.byteLength(args.query, "utf8") > 8192
+        if (method === "work.memory.recall" && (!hasExactArguments(args, ["query"], ["token_budget", ...MEMORY_QUERY_FIELDS]) || typeof args.query !== "string" || Buffer.byteLength(args.query, "utf8") > 8192
           || (args.token_budget !== undefined && (!Number.isInteger(args.token_budget) || args.token_budget < 128 || args.token_budget > 2048)))) throw new Error("Invalid Work memory recall arguments.");
         if (method === "work.memory.record" && (!hasExactArguments(args, ["summary", "limitations", "artifact_digests"]) || typeof args.summary !== "string" || Buffer.byteLength(args.summary, "utf8") < 1 || Buffer.byteLength(args.summary, "utf8") > 16384
           || typeof args.limitations !== "string" || Buffer.byteLength(args.limitations, "utf8") > 8192 || !Array.isArray(args.artifact_digests) || args.artifact_digests.length < 1 || args.artifact_digests.length > 8
           || new Set(args.artifact_digests).size !== args.artifact_digests.length || args.artifact_digests.some(value => typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)))) throw new Error("Invalid generated Work experience arguments.");
+        if (method === "work.memory.recall") memoryQueryArguments(args);
         return command({ ...scope, invocationId, method, fields: { ghost_id: ghostId, conversation_id: conversationId, assignment_id: assignmentId, work_id: workId, ...args } });
       }
       case "work.execute": {
@@ -395,9 +434,19 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
         }
         return command({ ...scope, invocationId, method, fields: { assignment_id: assignmentId, work_id: workId, task_id: taskId, summary: args.summary, ...(workMemoryContextRevision === undefined ? {} : { work_memory_context_revision: workMemoryContextRevision }) } });
       }
-      case "inference.settings":
-      case "inference.inspect":
-        return command({ ...scope, invocationId, method });
+      case "inference.settings": {
+        const bound=assignmentId!==undefined||workId!==undefined;
+        if(bound&&![assignmentId,workId].every(value=>isBoundedText(value,400)))throw new Error("Inference settings require the exact outer assignment and Work pair.");
+        return command({ ...scope, invocationId, method,fields:bound?{assignment_id:assignmentId,work_id:workId}:{} });
+      }
+      case "inference.inspect": {
+        if (!hasExactArguments(args, [])) throw new Error("Inference inspection accepts no model arguments.");
+        const bound = assignmentId !== undefined || workId !== undefined;
+        if (bound && ![assignmentId, workId].every(value => isBoundedText(value, 400))) {
+          throw new Error("Inference inspection requires the exact outer assignment and Work pair.");
+        }
+        return command({ ...scope, invocationId, method, fields: bound ? {assignment_id: assignmentId, work_id: workId} : {} });
+      }
       case "conversation.assignment.inspect": {
         if (typeof assignmentId !== "string" || assignmentId.length === 0 || assignmentId.length > 400
           || Object.keys(args).length !== 0) {
@@ -464,25 +513,26 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
       }
       case "memory.search": {
         requireCanonicalMemoryScope(scope, turnId);
-        if (!hasExactArguments(args, ["query"]) || typeof args.query !== "string") {
-          throw new Error("memory.search accepts only a query string.");
+        if (!hasExactArguments(args, ["query"], MEMORY_QUERY_FIELDS) || typeof args.query !== "string") {
+          throw new Error("memory.search accepts a query and optional temporal scope.");
         }
         return command({
           ...scope,
           invocationId,
           method,
-          fields: memoryIdentityFields(ghostId, conversationId, turnId, { query: args.query }),
+          fields: memoryIdentityFields(ghostId, conversationId, turnId, { query: args.query, ...memoryQueryArguments(args) }),
         });
       }
       case "memory.recall": {
         requireCanonicalMemoryScope(scope, turnId);
-        if (!hasExactArguments(args, ["query"], ["token_budget"]) || typeof args.query !== "string"
+        if (!hasExactArguments(args, ["query"], ["token_budget", ...MEMORY_QUERY_FIELDS]) || typeof args.query !== "string"
           || (Object.hasOwn(args, "token_budget")
             && (!Number.isSafeInteger(args.token_budget) || args.token_budget < 128 || args.token_budget > 2_048))) {
           throw new Error("memory.recall requires a query and an optional token_budget from 128 through 2048.");
         }
         const selected = {
           query: args.query,
+          ...memoryQueryArguments(args),
           ...(Object.hasOwn(args, "token_budget") ? { token_budget: args.token_budget } : {}),
         };
         return command({
@@ -631,13 +681,23 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
         });
       }
       case "bot.prepare": {
-        if (!isBoundedText(turnId, 400) || !hasExactArguments(args, ["display_name", "purpose", "input_contract", "output_contract", "instructions", "required_capabilities", "source_work_ids"])
-          || !isBoundedText(args.display_name, 256) || !isBoundedText(args.purpose, 4096) || !isBoundedText(args.instructions, 32768)
-          || [args.input_contract, args.output_contract].some(value => value === null || typeof value !== "object" || Array.isArray(value))
-          || !Array.isArray(args.required_capabilities) || args.required_capabilities.length > 5 || new Set(args.required_capabilities).size !== args.required_capabilities.length
-          || args.required_capabilities.some(value => !["read", "write", "edit", "bash", "publish_artifact"].includes(value))
-          || !Array.isArray(args.source_work_ids) || args.source_work_ids.length > 8 || new Set(args.source_work_ids).size !== args.source_work_ids.length || args.source_work_ids.some(value => !isBoundedText(value, 400))) {
-          throw new Error("Bot preparation requires only bounded candidate content and scoped source Work IDs from the trusted Owner turn.");
+        const sourceRef = args.source_contract_ref;
+        const hasSourceRef = typeof sourceRef === "string" && /^bsc-[a-f0-9]{64}$/u.test(sourceRef);
+        const validSources = Array.isArray(args.source_work_ids) && args.source_work_ids.length <= 8
+          && new Set(args.source_work_ids).size === args.source_work_ids.length
+          && args.source_work_ids.every(value => isBoundedText(value, 400));
+        const refOnly = hasSourceRef && hasExactArguments(args, ["display_name", "purpose", "source_contract_ref"], ["source_work_ids"])
+          && (!Object.hasOwn(args, "source_work_ids") || (validSources && args.source_work_ids.length === 1));
+        const explicit = hasExactArguments(args, ["display_name", "purpose", "input_contract", "output_contract", "instructions", "required_capabilities", "source_work_ids"], ["source_contract_ref"])
+          && (sourceRef === undefined || hasSourceRef) && isBoundedText(args.instructions, 32768)
+          && [args.input_contract, args.output_contract].every(value => value !== null && typeof value === "object" && !Array.isArray(value))
+          && Array.isArray(args.required_capabilities) && args.required_capabilities.length <= 5
+          && new Set(args.required_capabilities).size === args.required_capabilities.length
+          && args.required_capabilities.every(value => ["read", "write", "edit", "bash", "publish_artifact"].includes(value));
+        if (!isBoundedText(turnId, 400) || (!refOnly && !explicit)
+          || !isBoundedText(args.display_name, 256) || !isBoundedText(args.purpose, 4096)
+          || (!refOnly && !validSources)) {
+          throw new Error("Bot preparation requires an exact Host source-contract reference or bounded explicit content and scoped source Work IDs from the trusted Owner turn.");
         }
         return command({ ...scope, invocationId, method, fields: { turn_id: turnId, arguments: args } });
       }
@@ -650,6 +710,14 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
         return command({ ...scope, invocationId, method, fields: { turn_id: turnId, arguments: args } });
       }
       case "goal.create": {
+        if (Object.hasOwn(args,"task_contract_ref")) {
+          if (!isBoundedText(turnId,400) || !hasExactArguments(args,["task_contract_ref"])
+            || typeof args.task_contract_ref!=="string" || !/^ot-[a-f0-9]{64}$/u.test(args.task_contract_ref)) {
+            throw new Error("Task-bound Goal creation accepts only the current Host-issued task reference.");
+          }
+          const { method: _method, ...fields } = taskContractGoalBody({ ghostId, conversationId, turnId, taskContractRef: args.task_contract_ref });
+          return command({...scope,invocationId,method,fields});
+        }
         const argumentFields = Object.keys(args);
         if (typeof turnId !== "string" || turnId.length === 0
           || argumentFields.length !== 2 || !argumentFields.includes("prompt") || !argumentFields.includes("acceptance_spec")
@@ -681,16 +749,38 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
         return command({ ...scope, invocationId, method: "work.pi.admit", fields: { work_id: args.work_id,
           ...(workMemoryContextRevision === undefined ? {} : { work_memory_context_revision: workMemoryContextRevision }) } });
       }
+      case "work.wait.inspect": {
+        if (!hasExactArguments(args,["wait_command_id","wait_payload_digest","wait_for"])
+          || !isBoundedText(assignmentId,400) || !isBoundedText(workId,400)
+          || !Number.isSafeInteger(generationTaskId) || generationTaskId<1) throw new Error("Exact original Work wait inspection identity is required.");
+        return command({...scope,invocationId,method,fields:{assignment_id:assignmentId,work_id:workId,generation_task_id:generationTaskId,...args,
+          ...(workMemoryContextRevision===undefined?{}:{work_memory_context_revision:workMemoryContextRevision})}});
+      }
       case "work.cancel":
         return command({ ...scope, invocationId, method, fields: { work_id: args.work_id } });
       case "work.steer":
       case "work.wait":
       case "work.delegate": {
+        if (method === "work.wait" && assignmentId !== undefined) {
+          if (!hasExactArguments(args,["work_id","wait_for"]) || args.work_id!==workId
+            || !isBoundedText(assignmentId,400) || !Number.isSafeInteger(generationTaskId) || generationTaskId<1
+            || !Number.isSafeInteger(waitGoalRevision) || waitGoalRevision<1) throw new Error("Bound Work wait requires its original assignment, generation and Goal revision.");
+          return command({...scope,invocationId,method,expectedRevision:waitGoalRevision,fields:{...args,assignment_id:assignmentId,generation_task_id:generationTaskId,
+            ...(workMemoryContextRevision===undefined?{}:{work_memory_context_revision:workMemoryContextRevision})}});
+        }
         const context = await workContext(scope, invocationId, args.work_id ?? args.parent_work_id);
         if (context.response) return context.response;
         let fields;
         if (method === "work.steer") fields = { work_id: context.work.id, prompt: args.prompt };
         else if (method === "work.wait") fields = { work_id: context.work.id, wait_for: args.wait_for };
+        else if (Object.hasOwn(args,"template_ref")) {
+          if (!hasExactArguments(args,["parent_work_id","template_ref","target_ghost_id"])
+            || !isBoundedText(args.parent_work_id,400) || !isBoundedText(args.target_ghost_id,400)
+            || typeof args.template_ref!=="string" || !/^dt-[a-f0-9]{64}$/u.test(args.template_ref)) {
+            throw new Error("Target-free delegation requires the exact Host template and selected eligible target only.");
+          }
+          fields={parent_work_id:context.work.id,template_ref:args.template_ref,target_ghost_id:args.target_ghost_id};
+        }
         else if (Object.hasOwn(args, "contract_ref")) {
           if (!hasExactArguments(args, ["parent_work_id", "contract_ref"])
             || !isBoundedText(args.parent_work_id, 400)
@@ -807,7 +897,7 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
             sender_id: ghostId,
             message_id: `pi-${sha256(invocationId)}`,
             recipient_ids: args.recipient_ids,
-            privacy: conversationDisclosure === "non_public" ? "local_only" : "public",
+            privacy: inferenceScope === "local" || conversationDisclosure === "non_public" ? "local_only" : "public",
             summary: args.summary,
             object_refs: args.object_refs,
           },

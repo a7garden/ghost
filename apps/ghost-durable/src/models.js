@@ -11,6 +11,12 @@ const GATEWAY_TIMEOUT_MS = 180_000;
 const LOCAL_PROVIDER_ID = "ghost-local";
 const LOCAL_OUTPUT_TOKENS = 1_024;
 const LOCAL_CONTEXT_WINDOW = 16_384;
+export function localOutputTokenLimit(value = LOCAL_OUTPUT_TOKENS) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > LOCAL_CONTEXT_WINDOW / 4) {
+    throw new Error('Local output token limit must be a safe integer from 1 through 4096.');
+  }
+  return value;
+}
 export const MEMORY_TOOL_NAMES = Object.freeze([
   "memory_search",
   "memory_recall",
@@ -32,6 +38,7 @@ export const DOCUMENT_TOOL_NAMES = Object.freeze([
 ]);
 const DOCUMENT_TOOL_NAME_SET = new Set(DOCUMENT_TOOL_NAMES);
 const DOCUMENT_MODEL_TOOL_NAME_SET = new Set(DOCUMENT_TOOL_NAMES.map((name) => `document_${name}`));
+const PUBLICATION_TOOL_NAME_SET = new Set(["source_view_list", "source_view_read"]);
 
 export function createFixtureModelProvider(options = {}) {
   const fake = fauxProvider({ tokensPerSecond: options.tokensPerSecond ?? 10_000 });
@@ -60,7 +67,7 @@ export async function restrictMemoryTools(body, resolveMemoryTools, onMemoryTool
   if (!Array.isArray(available)) throw new Error("Memory capability callback did not return a tool-name list.");
   const allowed = new Set();
   for (const name of available) {
-    if ((!MEMORY_TOOL_NAME_SET.has(name) && !DOCUMENT_TOOL_NAME_SET.has(name)) || allowed.has(name)) {
+    if ((!MEMORY_TOOL_NAME_SET.has(name) && !DOCUMENT_TOOL_NAME_SET.has(name) && !PUBLICATION_TOOL_NAME_SET.has(name)) || allowed.has(name)) {
       throw new Error("Memory capability callback returned an unknown or duplicate tool name.");
     }
     allowed.add(name);
@@ -70,6 +77,10 @@ export async function restrictMemoryTools(body, resolveMemoryTools, onMemoryTool
     if (!Array.isArray(body.tools)) throw new Error("Pi model request tools are not an array.");
     body.tools = body.tools.filter((tool) => {
       const name = tool?.function?.name ?? tool?.name;
+      if(PUBLICATION_TOOL_NAME_SET.has(name)) {
+        if(!allowed.has(name))return false;
+        exposed.push(name);return true;
+      }
       if (typeof name !== "string" || !name.startsWith("memory_")) {
         if (typeof name !== "string" || !name.startsWith("document_")) return true;
         if (!DOCUMENT_MODEL_TOOL_NAME_SET.has(name)) return false;
@@ -184,7 +195,7 @@ function completionFacts(completion) {
   };
 }
 
-function createLocalSseFetch({ baseUrl, modelId, fetchImpl, assertLocalAuthority, resolveMemoryTools, onMemoryToolsExposed, onDiagnostic, resolveDiagnosticContext }) {
+function createLocalSseFetch({ baseUrl, modelId, maxOutputTokens, fetchImpl, assertLocalAuthority, resolveMemoryTools, onMemoryToolsExposed, onDiagnostic, resolveDiagnosticContext }) {
   const endpoint = `${baseUrl}/chat/completions`;
   return async (input, init) => {
     const requestId = randomUUID(), startedAt = Date.now();
@@ -202,7 +213,7 @@ function createLocalSseFetch({ baseUrl, modelId, fetchImpl, assertLocalAuthority
       throw new Error("Pi local model request was not valid JSON.");
     }
     if (body === null || typeof body !== "object" || body.model !== modelId || body.stream !== true
-      || !Number.isSafeInteger(body.max_tokens) || body.max_tokens <= 0 || body.max_tokens > LOCAL_OUTPUT_TOKENS) {
+      || !Number.isSafeInteger(body.max_tokens) || body.max_tokens <= 0 || body.max_tokens > maxOutputTokens) {
       throw new Error("Pi local model request did not match the pinned model and output budget.");
     }
     if (typeof assertLocalAuthority === "function") await assertLocalAuthority();
@@ -210,7 +221,7 @@ function createLocalSseFetch({ baseUrl, modelId, fetchImpl, assertLocalAuthority
     await restrictMemoryTools(body, resolveMemoryTools, onMemoryToolsExposed);
     body.stream = false;
     delete body.stream_options;
-    // The pinned local route declares reasoning:false and a 1024 output budget; leaving
+    // The local route declares reasoning:false and a bounded output budget; leaving
     // reasoning_effort unset keeps the local engine's default thinking mode on, whose
     // think blocks (measured 779-2135 tokens) truncate before any content or tool_calls.
     body.reasoning_effort = "none";
@@ -287,12 +298,14 @@ export function createLocalModelProvider({
   baseUrl,
   modelId,
   fetchImpl = globalThis.fetch,
+  maxOutputTokens = LOCAL_OUTPUT_TOKENS,
   assertLocalAuthority,
   resolveMemoryTools,
   onMemoryToolsExposed,
   resolveDiagnosticContext,
   onDiagnostic = () => {},
 }) {
+  maxOutputTokens = localOutputTokenLimit(maxOutputTokens);
   const pinnedBaseUrl = validateLocalBaseUrl(baseUrl);
   validateLocalModelId(modelId);
   if (typeof fetchImpl !== "function") throw new Error("Local inference fetch implementation is unavailable.");
@@ -307,7 +320,7 @@ export function createLocalModelProvider({
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: LOCAL_CONTEXT_WINDOW,
-    maxTokens: LOCAL_OUTPUT_TOKENS,
+    maxTokens: maxOutputTokens,
     compat: { maxTokensField: "max_tokens", supportsUsageInStreaming: false },
   };
   const completions = openAICompletionsApi();
@@ -315,6 +328,7 @@ export function createLocalModelProvider({
     baseUrl: pinnedBaseUrl,
     modelId,
     fetchImpl,
+    maxOutputTokens,
     assertLocalAuthority,
     resolveMemoryTools,
     onMemoryToolsExposed,
@@ -325,7 +339,7 @@ export function createLocalModelProvider({
     ...options,
     fetch: localFetch,
     apiKey: "ghost-local-transport",
-    maxTokens: LOCAL_OUTPUT_TOKENS,
+    maxTokens: maxOutputTokens,
     maxRetries: 0,
     maxRetryDelayMs: 0,
   });
@@ -345,6 +359,7 @@ export function createLocalModelProvider({
   return {
     provider,
     models,
+    localRouteConfig: Object.freeze({ identity: createHash('sha256').update(JSON.stringify({ base_url: pinnedBaseUrl, max_output_tokens: maxOutputTokens, model_id: modelId, version: 1 })).digest('hex'), maxOutputTokens }),
     modelRef: { provider: LOCAL_PROVIDER_ID, modelId },
     streamOptions: { maxRetries: 0, maxRetryDelayMs: 0, timeoutMs: GATEWAY_TIMEOUT_MS },
     forConversation(assertLocalAuthority, resolveMemoryTools, onMemoryToolsExposed, resolveDiagnosticContext) {
@@ -352,6 +367,7 @@ export function createLocalModelProvider({
       return createLocalModelProvider({
         baseUrl: pinnedBaseUrl,
         modelId,
+        maxOutputTokens,
         fetchImpl: async (input, init) => {
           await assertLocalAuthority();
           return fetchImpl(input, init);
@@ -443,6 +459,7 @@ export function createBrokerModelProvider({ modelRef, invoke, localModelProvider
       models,
       modelRef: modelReference,
       localModelRef: localModelProvider?.modelRef,
+      localRouteConfig: localModelProvider?.localRouteConfig,
       streamOptions,
     };
   };
@@ -459,6 +476,7 @@ export function createBrokerModelProvider({ modelRef, invoke, localModelProvider
     models,
     modelRef: modelReference,
     localModelRef: localModelProvider?.modelRef,
+      localRouteConfig: localModelProvider?.localRouteConfig,
     streamOptions,
     forConversation,
   };

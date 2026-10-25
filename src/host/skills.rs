@@ -218,6 +218,10 @@ pub(crate) fn save(
     version: Option<u64>,
 ) -> Result<Value> {
     let name = skill_name(name)?;
+    #[cfg(feature="lifetime")]
+    if super::shared_skills::alias_reserved(&s.journal.0,profile_id,&name)? {
+        bail!("local skill name collides with an adopted shared skill alias");
+    }
     if content.is_empty() || content.len() > MAX_SKILL_BYTES {
         bail!("skill content must be 1..={MAX_SKILL_BYTES} bytes");
     }

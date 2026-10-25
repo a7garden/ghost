@@ -306,32 +306,8 @@ pub fn service_spec_with_tools(
     }) {
         bail!("OxiBrowser requires an absolute executable path");
     }
-    if omp_executable.is_some_and(|path| {
-        !path.is_absolute() || path.to_string_lossy().chars().any(char::is_control)
-    }) {
-        bail!("OMP requires an absolute executable path");
-    }
-    if omp_executable.is_some() != omp_model.is_some() {
-        bail!("configure both the OMP executable and provider/model, or neither");
-    }
-    if let Some(model) = omp_model {
-        let valid = |part: &str| {
-            !part.is_empty()
-                && part.len() <= 120
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
-        };
-        let Some((provider, model_id)) = model.split_once('/') else {
-            bail!("OMP model must be a provider-qualified MiniMax Code model");
-        };
-        if provider != "minimax-code"
-            || !valid(provider)
-            || !valid(model_id)
-            || model.starts_with('-')
-        {
-            bail!("OMP model must use the minimax-code subscription provider and a valid model id");
-        }
+    if omp_executable.is_some() || omp_model.is_some() {
+        bail!("legacy_execution_retired: service specifications cannot configure OMP workers; configure Ghost Pi instead");
     }
     let args = vec![
         executable.to_string_lossy().into_owned(),
@@ -368,12 +344,8 @@ pub fn service_spec_with_tools(
                     path.to_string_lossy().into_owned(),
                 ));
             }
-            if let Some(path) = omp_executable {
-                values.push(("GHOST_OMP_EXECUTABLE", path.to_string_lossy().into_owned()));
-            }
-            if let Some(model) = omp_model {
-                values.push(("GHOST_OMP_MODEL", model.to_string()));
-            }
+
+
             let environment = if values.is_empty() {
                 String::new()
             } else {
@@ -408,15 +380,8 @@ pub fn service_spec_with_tools(
                     quote(&path.to_string_lossy())
                 ));
             }
-            if let Some(path) = omp_executable {
-                environment.push_str(&format!(
-                    "Environment=GHOST_OMP_EXECUTABLE={}\n",
-                    quote(&path.to_string_lossy())
-                ));
-            }
-            if let Some(model) = omp_model {
-                environment.push_str(&format!("Environment=GHOST_OMP_MODEL={}\n", quote(model)));
-            }
+
+
             Ok(format!("[Unit]\nDescription=Ghost durable host\n[Service]\nType=simple\nExecStart={}\n{}Restart=on-failure\nRestartSec=5\nTimeoutStopSec=30\n[Install]\nWantedBy=default.target\n",args.iter().map(|v|quote(v)).collect::<Vec<_>>().join(" "),environment))
         }
         _ => bail!("choose launchd or systemd"),

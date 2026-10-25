@@ -112,3 +112,16 @@ test("bash command recipes preserve reference input identity and refuse mixed or
   }
   assert.equal(calls.length, 1, "denied inputs never reach Host effects");
 });
+
+test("completed read output is withheld on post-receipt revocation without dispatching another effect", async () => {
+  let revoked=false;const receipts=[];
+  const context={assignment:{id:"assignment",work_id:"work",execution:{engine:"pi",version:1}},generationTaskId:async()=>7,
+    memoryContext:{validate:async()=>{if(revoked)throw Error("revoked source view");},workRevision:async()=>null}};
+  const make=()=>Object.fromEntries(createDirectWorkTools({ghostId:"ghost",conversationId:"conversation",resolveToolScope:async()=>scope,controllerContext:context,
+    hostToolTransport:async input=>{const response={status:"success",data:{receipt:{assignment_id:input.assignment_id,work_id:input.work_id,generation_task_id:input.generation_task_id,task_id:input.task_id,call_id:input.call_id,input_digest:input.input_digest,execution_id:"original-effect",state:"complete"},output:"WITHHELD_DERIVED_OUTPUT"}};receipts.push(response);revoked=true;return response;}}).map(tool=>[tool.name,tool]));
+  const tools=make();const result=await tools.read.execute({path:"result.txt"},api,{});
+  assert.equal(result.isError,true);assert.ok(!JSON.stringify(result).includes("WITHHELD_DERIVED_OUTPUT"));assert.equal(receipts[0].data.receipt.state,"complete");
+  await tools.read.execute({path:"result.txt"},{taskId:9,callId:"new-call"},{});
+  await make().read.execute({path:"result.txt"},api,{});
+  assert.equal(receipts.length,1,"a fresh tool instance still checks current authority before requesting a cached or new receipt");
+});

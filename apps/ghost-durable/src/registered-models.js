@@ -13,6 +13,23 @@ import { restrictMemoryTools } from './models.js';
 import { ProtocolError } from './contract.js';
 
 const MODELS = { codex: ['gpt-6-luna','gpt-6-sol','gpt-6.1-sol','gpt-6-astra'], 'zai-coding': ['glm-5.3'], minimax: ['MiniMax-M3.1-Flash-Preview'] };
+// Z.AI/MiniMax constrained decoding emits empty arguments for tools whose
+// parameter schema is a top-level anyOf (measured 2026-10-25: read/bash on
+// glm-5.3). The Host revalidates every executed call against the real schema,
+// so the wire carries a merged-object view of the union instead.
+function flattenAnyOfParameters(tool) {
+  const parameters = tool?.parameters;
+  if (!parameters || !Array.isArray(parameters.anyOf)) return tool;
+  const merged = { type: 'object', properties: {}, required: [], additionalProperties: false };
+  for (const variant of parameters.anyOf) {
+    if (variant?.type !== 'object') continue;
+    Object.assign(merged.properties, variant.properties ?? {});
+    for (const name of variant.required ?? []) {
+      if (merged.properties[name] !== undefined && !merged.required.includes(name)) merged.required.push(name);
+    }
+  }
+  return { ...tool, parameters: merged };
+}
 // These are existing Host credential profiles, not aliases for Pi's built-in
 // zai/minimax catalogs (which use different endpoints and protocols).
 const ENDPOINTS = Object.freeze({ 'zai-coding': 'https://api.z.ai/api/v1', minimax: 'https://api.minimax.io/v1' });
@@ -36,22 +53,31 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
   const forConversation = (_publicGuard, localGuard, resolveMemoryTools, onMemoryToolsExposed, _context, binding) => {
     let selected=null;
     const models=createModels();
-    const settings = async () => {
+    const settings = async (bootstrapDisclosure) => {
       if (typeof binding?.transport !== 'function') throw new Error('Registered inference needs its Host binding.');
-      const disclosure=await binding.disclosure();
+      const committed=await binding.disclosure();
+      // A fresh assignment's authenticated envelope can bootstrap metadata
+      // routing before its disclosure is persisted. Only callbackScope uses
+      // this hint; selection and every actual invocation read committed state.
+      const disclosure=committed==='unknown' && ['public','non_public'].includes(bootstrapDisclosure) ? bootstrapDisclosure : committed;
+      if(!['public','non_public'].includes(disclosure)) throw new ProtocolError('inference_disclosure_unknown','Committed disclosure is unavailable for registered inference.','same_id');
       const response=await binding.transport({ method:'inference.settings', invocation_id:randomUUID(), ghost_id:binding.ghostId, conversation_id:binding.conversationId,
-        inference_scope:'selected',conversation_disclosure:disclosure,arguments:{} });
+        inference_scope:'selected',conversation_disclosure:disclosure,...binding.inferenceAssignment?.(),arguments:{} });
       if (response.status !== 'success') throw new Error('Host model selection could not be read.');
       return { ...response.data, disclosure };
     };
+    let lastCommittedDisclosure=null;
+    let scopeGenerationCache=null;
+    const authorityInspect=(disclosure)=>binding.transport({method:'inference.inspect',invocation_id:randomUUID(),ghost_id:binding.ghostId,conversation_id:binding.conversationId,
+      inference_scope:'selected',conversation_disclosure:disclosure,...binding.inferenceAssignment?.(),arguments:{}});
     const assertSelected = async (expected = selected) => {
       if (!expected || !same(expected, selected)) throw new Error('Provider selection changed.');
       await binding.inspectAssignment();
       const current=await settings();
       if (!same(expected,current.selection) || !current.credentials_present || !['public','non_public'].includes(current.disclosure)
         || (current.disclosure !== 'public' && !current.external_allowed)) throw new Error('Provider selection or external consent changed.');
-      const result=await binding.transport({method:'inference.inspect',invocation_id:randomUUID(),ghost_id:binding.ghostId,conversation_id:binding.conversationId,
-        inference_scope:'selected',conversation_disclosure:current.disclosure,arguments:{}});
+      lastCommittedDisclosure=current.disclosure;
+      const result=await authorityInspect(current.disclosure);
       if (result.status !== 'success' || result.data?.inference_scope !== 'selected') throw new Error('Host authority blocks selected inference.');
     };
     const completions=openAICompletionsApi();
@@ -96,6 +122,7 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
           const body=await request.json();
           if(body.model!==model.id || body.model!==ref(expected).modelId || body.stream!==true) throw new Error('Native request does not match committed selection.');
           await restrictMemoryTools(body,async()=>[],onMemoryToolsExposed);
+          body.tools=(body.tools ?? []).map(flattenAnyOfParameters);
           for(const tool of body.tools ?? []) allowedTools.add(tool.name);
           body.model=expected.model;
           body.reasoning={...body.reasoning,effort:expected.effort};
@@ -115,12 +142,22 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
           catch(error) { await response.body?.cancel().catch(()=>{});throw error; }
           if(!response.body) throw new Error('Native provider returned no response body.');
           const reader=response.body.getReader();
-          let responseBytes=0;
+          let responseBytes=0, lastGate=-65536;
           const bodyStream=new ReadableStream({async pull(controller){
             try {
               request.signal.throwIfAborted();
               const part=await reader.read();
-              await assertSelected(expected);
+              // The Host refuses selection changes for a conversation with an
+              // active turn, so the selection identity cannot change mid-stream.
+              // Authority/consent rechecks stay bounded: one per 64 KiB plus the
+              // post-header and completion checks, so revocation is enforced
+              // without a round trip per event.
+              if(!lastCommittedDisclosure) throw new Error('Provider selection changed.');
+              if(responseBytes-lastGate>=65536){
+                lastGate=responseBytes;
+                const gated=await authorityInspect(lastCommittedDisclosure);
+                if (gated.status !== 'success' || gated.data?.inference_scope !== 'selected') throw new Error('Host authority blocks selected inference.');
+              }
               request.signal.throwIfAborted();
               responseBytes+=part.value?.byteLength ?? 0;
               if(responseBytes>4*1024*1024) throw new Error('Native provider response exceeded its byte limit.');
@@ -148,8 +185,12 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
             }
             result.push(event);
           }
+          // The committed generation settled; later fences re-resolve scope
+          // fresh so a selection change between turns is never masked.
+          scopeGenerationCache=null;
           result.end();
         } catch(error) {
+          scopeGenerationCache=null;
           const failure={...(terminal ?? {role:'assistant',api:model.api,provider:model.provider,model:model.id,timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}}),content:[],stopReason:opts?.signal?.aborted?'aborted':'error',errorMessage:error.message};
           result.push({type:'error',reason:failure.stopReason,error:failure});result.end();
         }
@@ -161,19 +202,28 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
       api:{'openai-completions':{stream:(model,context,opts)=>completions.stream(model,context,options(opts)),streamSimple:(model,context,opts)=>completions.streamSimple(model,context,options(opts))},
         'openai-responses':{stream:(model,context,opts)=>streamNative('stream',model,context,opts),streamSimple:(model,context,opts)=>streamNative('streamSimple',model,context,opts)}}}));
     if(localModelProvider) models.setProvider(localModelProvider.forConversation(localGuard,resolveMemoryTools,onMemoryToolsExposed,_context));
-    return {models,modelRef:ref(defaultSelection),localModelRef:localModelProvider?.modelRef,streamOptions:{maxRetries:0,maxRetryDelayMs:0,timeoutMs:180_000},
-      async callbackScope() { return (await settings()).selection?.provider === 'local' ? 'local' : 'selected'; },
+    return {models,modelRef:ref(defaultSelection),localModelRef:localModelProvider?.modelRef,localRouteConfig:localModelProvider?.localRouteConfig,streamOptions:{maxRetries:0,maxRetryDelayMs:0,timeoutMs:180_000},
+      async callbackScope(bootstrapDisclosure) {
+        // The Host refuses selection changes for a conversation with an active
+        // turn, so within one committed generation the scope is stable; fences
+        // re-resolve fresh between generations because the cache is cleared
+        // when the generation stream settles.
+        if (scopeGenerationCache) return scopeGenerationCache.value;
+        return (await settings(bootstrapDisclosure)).selection?.provider === 'local' ? 'local' : 'selected';
+      },
       async selectRegistered(privacy) {
         const current=await settings(), s=current.selection;
         if (current.disclosure !== privacy) throw new ProtocolError('inference_disclosure_changed','Conversation disclosure changed during selection.','same_id');
         if(s?.provider==='local') {
-          if(!localModelProvider || s.model!==localModelProvider.modelRef.modelId || privacy!=='non_public') throw new ProtocolError('local_provider_unavailable','The selected local route is unavailable.','same_id');
+          if(!localModelProvider || s.model!==localModelProvider.modelRef.modelId || !['public','non_public'].includes(privacy)) throw new ProtocolError('local_provider_unavailable','The selected local route is unavailable.','same_id');
           selected=s; return {scope:'local',target:localModelProvider.modelRef};
         }
         if (!MODELS[s?.provider]?.includes(s.model) || !(s.provider==='zai-coding'?['low','high','max']:['low','medium','high','xhigh','max']).includes(s.effort)) throw new ProtocolError('inference_selection_unsupported','The selected provider, model or effort is unsupported.','same_id');
         if(!current.credentials_present) throw new ProtocolError('inference_credentials_missing','Register the selected provider before inference.','same_id');
         if(privacy!=='public'&&!current.external_allowed) throw new ProtocolError('inference_consent_required','Allow the selected provider for this conversation before inference.','same_id');
-        selected={...s}; return {scope:'selected',target:ref(s)};
+        selected={...s}; lastCommittedDisclosure=current.disclosure;
+        scopeGenerationCache={value:s.provider==='local'?'local':'selected'};
+        return {scope:'selected',target:ref(s)};
       }};
   };
   const initial=forConversation(undefined,async()=>{throw new Error('Local inference requires a conversation binding.');});

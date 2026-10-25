@@ -1,4 +1,6 @@
 use super::registry::HomeManifest;
+use super::producer_profile::{AcceptedProducerProfile, ProducerProfileManifest, ProducerRuntimeFactsReceipt,
+    ProducerRuntimeObservation, PRODUCER_JSON_PROBE_COMMAND, producer_json_probe_sha256};
 use crate::adapters::computer::{
     Authorize, ComputerBackend, ComputerCapabilities, ComputerFuture, ComputerOperation,
 };
@@ -29,6 +31,17 @@ pub const APPLE_CONTAINER_OUTPUT_LIMIT: usize = 64 * 1024;
 const MAX_COMMAND_BYTES: usize = 8192;
 pub const PINNED_TASK_IMAGE: &str =
     "docker.io/library/ubuntu@sha256:08571ca13e00ca07a2a84eab83a959b4242e22cceb16486a11bef1428c9e93a7";
+// Configured producer policy, shared with the actual task argv below. These
+// describe a plan, not installed software, runtime health or a probed inventory.
+const TASK_GUEST_OS:&str="linux";
+const TASK_GUEST_ARCH:&str="arm64";
+const TASK_SHELL:&str="/bin/sh";
+const TASK_SHELL_ARGUMENT:&str="-lc";
+const TASK_ROOT_READ_ONLY:bool=true;
+const TASK_NETWORK:&str="none";
+const PRODUCER_WORK_MOUNT:&str="/workspace";
+const PRODUCER_WORK_WRITABLE:bool=true;
+const PRODUCER_TMPFS_TMP:bool=false;
 const MAX_EXECUTION_TIMEOUT: Duration = Duration::from_secs(300);
 const CLI_TIMEOUT: Duration = Duration::from_secs(10);
 const PIPE_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
@@ -69,6 +82,9 @@ struct TaskContext {
     guest_uid: u32,
     guest_gid: u32,
     container_name: String,
+    verification_only: bool,
+    producer_profile: Option<ProducerProfileManifest>,
+    producer_cli_sha256: Option<String>,
 }
 
 struct TaskRuntime {
@@ -132,6 +148,17 @@ impl TaskRuntime {
 }
 
 impl AppleContainerBackend {
+    /// Public guest coordinates only. In particular, the pinned image does not
+    /// assert that any language, package, executable or service is available.
+    pub(crate) fn configured_producer_environment()->Value {
+        serde_json::json!({
+            "version":"ghost-execution-environment/1","evidence":"configured_policy","backend":"apple_container",
+            "image_ref":PINNED_TASK_IMAGE,"os":TASK_GUEST_OS,"architecture":TASK_GUEST_ARCH,
+            "shell":{"program":TASK_SHELL,"args":[TASK_SHELL_ARGUMENT]},"cwd":PRODUCER_WORK_MOUNT,
+            "filesystem":{"root_read_only":TASK_ROOT_READ_ONLY,"work_mount":{"target":PRODUCER_WORK_MOUNT,"writable":PRODUCER_WORK_WRITABLE},"tmpfs_mounts":if PRODUCER_TMPFS_TMP {vec!["/tmp"]}else{vec![]}},
+            "network":TASK_NETWORK
+        })
+    }
     /// Probe only the installed binary and read-only service status. Never starts
     /// the container service or changes launchd/global configuration.
     pub fn probe(cli_path: &Path) -> Result<Self> {
@@ -204,6 +231,70 @@ impl AppleContainerBackend {
         )?;
         let mut backend = Self::probe(cli_path)?;
         backend.task = Some(Arc::new(task));
+        Ok(backend)
+    }
+
+    /// Producer-only route. A model cannot supply an image or construct the
+    /// sealed profile. The exact cached image is rechecked before each shell
+    /// spawn; absent/mismatching references never reach `container run`.
+    pub(crate) fn for_accepted_producer(
+        cli_path: &Path, manifest: &HomeManifest, execution_id: &str,
+        profile: &AcceptedProducerProfile, guest_uid: u32, guest_gid: u32,
+    ) -> Result<Self> {
+        if guest_uid != profile.runtime_facts().sandbox_uid || guest_gid != profile.runtime_facts().sandbox_gid {
+            bail!("Accepted producer probe UID/GID differs from this task");
+        }
+        if producer_cli_sha256(cli_path)? != profile.runtime_facts().container_cli_sha256 {
+            bail!("Accepted producer probe executable differs from this CLI");
+        }
+        let mut task = TaskContext::producer(manifest, execution_id, profile.manifest(), guest_uid, guest_gid)?;
+        task.producer_cli_sha256 = Some(profile.runtime_facts().container_cli_sha256.clone());
+        let mut backend = Self::probe(cli_path)?;
+        if producer_cli_sha256(&backend.cli_path)? != profile.runtime_facts().container_cli_sha256 {
+            bail!("Accepted producer CLI changed during validation");
+        }
+        backend.task = Some(Arc::new(task));
+        Ok(backend)
+    }
+
+    /// Bootstrap capability evidence only. This accepts a proposed immutable
+    /// plan but can execute ONLY the fixed general JSON/stdlib probe. The
+    /// returned real receipt is not Owner acceptance or a Work grant.
+    pub(crate) async fn probe_producer_profile(
+        cli_path: &Path, manifest: &HomeManifest, execution_id: &str,
+        profile: &ProducerProfileManifest, guest_uid: u32, guest_gid: u32,
+        authorize: Authorize<'_>,
+    ) -> Result<ProducerRuntimeFactsReceipt> {
+        let mut task = TaskContext::producer(manifest, execution_id, profile, guest_uid, guest_gid)?;
+        let cli_sha256 = producer_cli_sha256(cli_path)?;
+        let mut backend = Self::probe(cli_path)?;
+        if producer_cli_sha256(&backend.cli_path)? != cli_sha256 {
+            bail!("Producer probe CLI changed during version/service validation");
+        }
+        task.producer_cli_sha256 = Some(cli_sha256.clone());
+        backend.task = Some(Arc::new(task));
+        let result = backend.execute_shell(PRODUCER_JSON_PROBE_COMMAND, 30_000, authorize).await?;
+        let cli_identity = match producer_cli_sha256(&backend.cli_path) {
+            Ok(observed) if observed == cli_sha256 => ProbeCliIdentity::Matched,
+            Ok(_) => ProbeCliIdentity::Changed,
+            Err(_) => ProbeCliIdentity::Unavailable,
+        };
+        let observation = producer_probe_observation(&result, cli_identity)?;
+        let facts = ProducerRuntimeFactsReceipt { kind: "ghost-producer-runtime-facts/1".into(),
+            profile_digest: profile.digest()?, image_ref: profile.image_ref.clone(),
+            platform_manifest_digest: profile.platform_manifest_digest.clone(),
+            probe_sha256: producer_json_probe_sha256(), observation_sha256: observation.digest()?, exit_code: 0,
+            evidence: "owned_container_probe".into(), container_cli_sha256: cli_sha256, container_cli_version: APPLE_CONTAINER_CLI_VERSION.into(),
+            sandbox_uid: guest_uid, sandbox_gid: guest_gid, observation };
+        facts.validate_for_profile(profile).map_err(|_| producer_probe_rejection("runtime_facts_rejected", &result, cli_identity))?;
+        Ok(facts)
+    }
+
+    /// Deterministic Host verification only: the selected snapshot is mounted
+    /// read-only at /inputs, with disposable tmpfs scratch and no producer home.
+    pub(crate) fn for_verification(cli_path:&Path,manifest:&HomeManifest,execution_id:&str,image_ref:&str,guest_uid:u32,guest_gid:u32)->Result<Self> {
+        let mut backend=Self::for_task(cli_path,manifest,execution_id,image_ref,guest_uid,guest_gid)?;
+        Arc::get_mut(backend.task.as_mut().ok_or_else(||anyhow!("verification task missing"))?).ok_or_else(||anyhow!("verification task unexpectedly shared"))?.verification_only=true;
         Ok(backend)
     }
 
@@ -501,6 +592,9 @@ impl AppleContainerBackend {
             bail!("computer authorization was revoked before guest execution");
         }
         let task = self.task_context()?;
+        if let Some(expected) = &task.producer_cli_sha256 {
+            if producer_cli_sha256(&self.cli_path)? != *expected { bail!("Accepted producer CLI identity changed before image inspection"); }
+        }
         let image_args = [
             OsString::from("image"),
             OsString::from("inspect"),
@@ -508,6 +602,14 @@ impl AppleContainerBackend {
         ];
         let image = self.run_cli(&image_args, CLI_TIMEOUT).await?;
         ensure_cli_success(&image, "pinned image inspection")?;
+        if let Some(profile) = &task.producer_profile {
+            let inspection: Value = serde_json::from_slice(&image.stdout)
+                .map_err(|_| anyhow!("Producer cached image inspection is not valid JSON"))?;
+            profile.validate_cached_image(&inspection)?;
+            if task.producer_cli_sha256.as_ref().is_none_or(|expected| producer_cli_sha256(&self.cli_path).as_ref().ok() != Some(expected)) {
+                bail!("Accepted producer CLI identity changed before guest execution");
+            }
+        }
 
         let snapshot = task.snapshot()?;
         let argv = task.run_argv(&snapshot, command)?;
@@ -910,7 +1012,21 @@ impl TaskContext {
             guest_uid,
             guest_gid,
             container_name,
+            verification_only: false,
+            producer_profile: None,
+            producer_cli_sha256: None,
         })
+    }
+
+    // Private bootstrap for the accepted producer constructor and fixed probe
+    // only. The public legacy constructor above retains its exact image gate.
+    fn producer(manifest: &HomeManifest, execution_id: &str, profile: &ProducerProfileManifest,
+        guest_uid: u32, guest_gid: u32) -> Result<Self> {
+        profile.validate()?;
+        let mut task = Self::new(manifest, execution_id, PINNED_TASK_IMAGE, guest_uid, guest_gid)?;
+        task.image_ref = profile.image_ref.clone();
+        task.producer_profile = Some(profile.clone());
+        Ok(task)
     }
 
     fn snapshot(&self) -> Result<PathBuf> {
@@ -922,47 +1038,128 @@ impl TaskContext {
     }
 
     fn run_argv(&self, snapshot: &Path, command: &str) -> Result<Vec<OsString>> {
+        let profile = self.producer_profile.as_ref();
+        if self.verification_only && profile.is_some() { bail!("Producer profile cannot enter the independent verifier route"); }
         let source = snapshot
             .to_str()
             .ok_or_else(|| anyhow!("task snapshot path is not UTF-8"))?;
         if source.contains(',') {
             bail!("task snapshot path cannot be represented by Apple container --mount");
         }
-        Ok(vec![
+        let mut argv=vec![
             OsString::from("run"),
             OsString::from("--name"),
             OsString::from(self.container_name.as_str()),
             OsString::from("--os"),
-            OsString::from("linux"),
+            OsString::from(profile.map(|p| p.os.as_str()).unwrap_or(TASK_GUEST_OS)),
             OsString::from("--arch"),
-            OsString::from("arm64"),
+            OsString::from(profile.map(|p| p.architecture.as_str()).unwrap_or(TASK_GUEST_ARCH)),
             OsString::from("--uid"),
             OsString::from(self.guest_uid.to_string()),
             OsString::from("--gid"),
             OsString::from(self.guest_gid.to_string()),
             OsString::from("--cap-drop"),
             OsString::from("ALL"),
-            OsString::from("--read-only"),
+        ];
+        if profile.map(|p| p.isolation.root_read_only).unwrap_or(TASK_ROOT_READ_ONLY) {argv.push(OsString::from("--read-only"));}
+        argv.extend([
             OsString::from("--no-dns"),
             OsString::from("--network"),
-            OsString::from("none"),
+            OsString::from(profile.map(|p| p.isolation.network.as_str()).unwrap_or(TASK_NETWORK)),
             OsString::from("--cpus"),
-            OsString::from("1"),
+            OsString::from(profile.map(|p| p.isolation.cpus).unwrap_or(1).to_string()),
             OsString::from("--memory"),
-            OsString::from("256m"),
+            OsString::from(format!("{}m", profile.map(|p| p.isolation.memory_mib).unwrap_or(256))),
             OsString::from("--init"),
             OsString::from("--workdir"),
-            OsString::from("/workspace"),
+            OsString::from(if self.verification_only {"/tmp"}else{profile.map(|p| p.isolation.cwd.as_str()).unwrap_or(PRODUCER_WORK_MOUNT)}),
             OsString::from("--mount"),
             OsString::from(format!(
-                "type=bind,source={source},target=/workspace"
+                "type=bind,source={source},target={}{}",if self.verification_only {"/inputs"}else{profile.map(|p| p.isolation.work_mount.as_str()).unwrap_or(PRODUCER_WORK_MOUNT)},if self.verification_only || !profile.map(|p| p.isolation.work_writable).unwrap_or(PRODUCER_WORK_WRITABLE) {",readonly"}else{""}
             )),
             OsString::from(self.image_ref.as_str()),
-            OsString::from("/bin/sh"),
-            OsString::from("-lc"),
+            OsString::from(profile.map(|p| p.shell.program.as_str()).unwrap_or(TASK_SHELL)),
+            OsString::from(profile.map(|p| p.shell.args[0].as_str()).unwrap_or(TASK_SHELL_ARGUMENT)),
             OsString::from(command),
-        ])
+        ]);
+        if self.verification_only || PRODUCER_TMPFS_TMP {argv.splice(1..1,[OsString::from("--tmpfs"),OsString::from("/tmp")]);}
+        // The new producer route retains strict empty-stderr receipts. Disable
+        // CLI progress at its source for both the fixed probe and Work shell.
+        // Legacy producer/verifier argv remains byte-for-byte unchanged.
+        if profile.is_some() {argv.splice(1..1,[OsString::from("--progress"),OsString::from("none")]);}
+        Ok(argv)
     }
+}
+
+#[derive(Clone, Copy)]
+enum ProbeCliIdentity { Matched, Changed, Unavailable }
+impl ProbeCliIdentity {
+    fn code(self) -> &'static str {
+        match self { Self::Matched => "matched", Self::Changed => "changed", Self::Unavailable => "unavailable" }
+    }
+}
+
+#[derive(Debug)]
+struct ProducerProbeRejection { diagnostic: Value }
+impl std::fmt::Display for ProducerProbeRejection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "Producer fixed JSON probe rejected: {}", self.diagnostic)
+    }
+}
+impl std::error::Error for ProducerProbeRejection {}
+
+fn producer_probe_rejection(code: &'static str, result: &Value, cli_identity: ProbeCliIdentity) -> anyhow::Error {
+    // Only the fixed probe reaches this path: no Owner task input, credentials,
+    // model command or arbitrary result object is included. Preserve its actual
+    // output under the same combined cap used by the original CLI collector.
+    let mut remaining = APPLE_CONTAINER_OUTPUT_LIMIT;
+    let mut capture = |field: &str| -> (Option<String>, bool) {
+        let Some(text) = result[field].as_str() else { return (None, false); };
+        let mut end = text.len().min(remaining);
+        while !text.is_char_boundary(end) { end -= 1; }
+        remaining -= end;
+        (Some(text[..end].to_owned()), end != text.len())
+    };
+    let (stdout, stdout_truncated) = capture("stdout");
+    let (stderr, stderr_truncated) = capture("stderr");
+    ProducerProbeRejection { diagnostic: serde_json::json!({
+        "kind":"ghost-producer-probe-diagnostic/1", "code":code, "cli_identity":cli_identity.code(),
+        "result":{"state":result["state"].as_str(),"exit_code":result["exit_code"].as_i64(),"success":result["success"].as_bool(),
+            "stdout":stdout,"stderr":stderr,"stdout_truncated":stdout_truncated,"stderr_truncated":stderr_truncated}
+    }) }.into()
+}
+
+fn producer_probe_observation(result: &Value, cli_identity: ProbeCliIdentity) -> Result<ProducerRuntimeObservation> {
+    let reject = |code| producer_probe_rejection(code, result, cli_identity);
+    if result["state"] != "stopped" || result["exit_code"] != 0 || result["success"] != true {
+        return Err(reject("execution_unsuccessful"));
+    }
+    match cli_identity {
+        ProbeCliIdentity::Changed => return Err(reject("cli_identity_changed")),
+        ProbeCliIdentity::Unavailable => return Err(reject("cli_identity_unavailable")),
+        ProbeCliIdentity::Matched => {}
+    }
+    match result["stderr"].as_str() {
+        Some("") => {}
+        Some(_) => return Err(reject("stderr_nonempty")),
+        None => return Err(reject("stderr_invalid")),
+    }
+    let stdout = result["stdout"].as_str().ok_or_else(|| reject("stdout_invalid"))?;
+    serde_json::from_str(stdout).map_err(|_| reject("observation_invalid"))
+}
+
+fn producer_cli_sha256(path: &Path) -> Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path.canonicalize()?)?;
+    if !file.metadata()?.is_file() { bail!("Producer CLI must be a regular executable file"); }
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 65536];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 { break; }
+        digest.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 fn resolve_task_snapshot(manifest: &HomeManifest, execution_id: &str) -> Result<PathBuf> {
@@ -1186,4 +1383,147 @@ fn ensure_supported_host() -> Result<()> {
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 fn ensure_supported_host() -> Result<()> {
     bail!("Apple container requires macOS on Apple silicon")
+}
+
+
+#[cfg(test)]
+mod configured_environment_tests {
+    use super::*;
+    fn task(verification_only:bool)->TaskContext {
+        TaskContext {manifest:HomeManifest{home_volume:"/host-only/home".into(),task_snapshot_root:"/host-only/tasks".into(),browser_profile:"/host-only/browser".into(),credential_broker:Some("secret-broker-marker".into())},execution_id:"fixture-execution".into(),image_ref:PINNED_TASK_IMAGE.into(),guest_uid:501,guest_gid:20,container_name:"fixture-container".into(),verification_only,producer_profile:None,producer_cli_sha256:None}
+    }
+    fn argv(verification_only:bool)->Vec<String> {
+        task(verification_only).run_argv(Path::new("/host-only/selected"),"printf fixture").unwrap().into_iter().map(|arg|arg.into_string().unwrap()).collect()
+    }
+    #[test]
+    fn configured_producer_environment_matches_actual_task_argv_without_inventory_claims() {
+        let descriptor=AppleContainerBackend::configured_producer_environment();let args=argv(false);
+        let option=|name:&str|args[args.iter().position(|value|value==name).unwrap()+1].clone();
+        assert_eq!(descriptor["evidence"],"configured_policy");assert_eq!(descriptor["image_ref"],PINNED_TASK_IMAGE);
+        assert_eq!(descriptor["os"],option("--os"));assert_eq!(descriptor["architecture"],option("--arch"));assert_eq!(descriptor["cwd"],option("--workdir"));assert_eq!(descriptor["network"],option("--network"));
+        assert_eq!(descriptor["filesystem"]["root_read_only"],args.iter().any(|arg|arg=="--read-only"));
+        assert_eq!(descriptor["filesystem"]["work_mount"]["target"],"/workspace");assert_eq!(descriptor["filesystem"]["work_mount"]["writable"],true);
+        assert_eq!(option("--mount"),"type=bind,source=/host-only/selected,target=/workspace");
+        assert_eq!(descriptor["filesystem"]["tmpfs_mounts"],serde_json::json!([]));assert!(!args.iter().any(|arg|arg=="--tmpfs"));
+        assert_eq!(args[args.len()-3],descriptor["shell"]["program"].as_str().unwrap());assert_eq!(args[args.len()-2],descriptor["shell"]["args"][0].as_str().unwrap());
+        let encoded=descriptor.to_string();for forbidden in ["/host-only","secret-broker-marker","python","perl","languages","packages","available","healthy"] {assert!(!encoded.contains(forbidden));}
+    }
+    #[test]
+    fn verifier_task_argv_remains_distinct_from_the_producer_policy() {
+        let expected=vec!["run","--tmpfs","/tmp","--name","fixture-container","--os","linux","--arch","arm64","--uid","501","--gid","20","--cap-drop","ALL","--read-only","--no-dns","--network","none","--cpus","1","--memory","256m","--init","--workdir","/tmp","--mount","type=bind,source=/host-only/selected,target=/inputs,readonly",PINNED_TASK_IMAGE,"/bin/sh","-lc","printf fixture"];
+        assert_eq!(argv(true),expected);
+        let producer=AppleContainerBackend::configured_producer_environment();assert_eq!(producer["cwd"],"/workspace");assert_eq!(producer["filesystem"]["tmpfs_mounts"],serde_json::json!([]));
+    }
+
+    #[test]
+    fn accepted_producer_profile_and_actual_argv_share_one_plan_without_changing_legacy_verifier() {
+        let accepted = super::super::producer_profile::fixture_accepted_producer_profile();
+        let mut selected = task(false);
+        selected.image_ref = accepted.manifest().image_ref.clone();
+        selected.producer_profile = Some(accepted.manifest().clone());
+        selected.producer_cli_sha256 = Some(accepted.runtime_facts().container_cli_sha256.clone());
+        let actual: Vec<_> = selected.run_argv(Path::new("/host-only/selected"), "printf fixture").unwrap()
+            .into_iter().map(|arg| arg.into_string().unwrap()).collect();
+        let mut expected = argv(false);
+        assert!(!expected.iter().any(|argument| argument == "--progress"));
+        assert!(!argv(true).iter().any(|argument| argument == "--progress"));
+        let image = expected.iter().position(|value| value == PINNED_TASK_IMAGE).unwrap();
+        expected[image] = accepted.manifest().image_ref.clone();
+        expected.splice(1..1, ["--progress".into(), "none".into()]);
+        assert_eq!(actual, expected, "only the accepted image and progress transport change; all prior sandbox argv stays exact");
+        assert_eq!(&actual[1..3], &["--progress", "none"]);
+        let environment = accepted.environment();
+        let option = |name: &str| actual[actual.iter().position(|value| value == name).unwrap() + 1].clone();
+        assert_eq!(environment["image_ref"], actual[image + 2]);
+        assert_eq!(environment["os"], option("--os")); assert_eq!(environment["architecture"], option("--arch"));
+        assert_eq!(environment["cwd"], option("--workdir")); assert_eq!(environment["network"], option("--network"));
+        assert_eq!(environment["json_runtime"]["interpreter"], "/usr/local/bin/python3");
+        assert_eq!(environment["evidence"], "controlled_fixture");
+        assert_eq!(environment["backend"], "fixture"); assert_eq!(environment["simulated"], true);
+        assert_eq!(environment["filesystem"]["tmpfs_mounts"], serde_json::json!([]));
+        assert!(!environment.to_string().contains("/host-only"));
+        assert!(TaskContext::new(&selected.manifest, "valid", &accepted.manifest().image_ref, 501, 20).is_err(), "legacy constructor must retain its fixed image gate");
+        selected.verification_only = true;
+        assert!(selected.run_argv(Path::new("/host-only/selected"), "printf fixture").is_err());
+        verifier_task_argv_remains_distinct_from_the_producer_policy();
+    }
+
+    #[test]
+    fn fixed_producer_probe_rejections_preserve_original_bounded_output_and_distinguish_causes() {
+        let accepted = super::super::producer_profile::fixture_accepted_producer_profile();
+        let observation = &accepted.runtime_facts().observation;
+        let good = serde_json::json!({"state":"stopped","exit_code":0,"success":true,
+            "stdout":serde_json::to_string(observation).unwrap(),"stderr":""});
+        assert_eq!(producer_probe_observation(&good, ProbeCliIdentity::Matched).unwrap(), *observation);
+        for (identity, stderr, expected) in [
+            (ProbeCliIdentity::Changed, "original CLI warning", "cli_identity_changed"),
+            (ProbeCliIdentity::Unavailable, "original CLI warning", "cli_identity_unavailable"),
+            (ProbeCliIdentity::Matched, "original CLI warning", "stderr_nonempty"),
+        ] {
+            let mut original = good.clone(); original["stderr"] = serde_json::json!(stderr);
+            let error = producer_probe_observation(&original, identity).unwrap_err();
+            let diagnostic = &error.downcast_ref::<ProducerProbeRejection>().unwrap().diagnostic;
+            assert_eq!(diagnostic["code"], expected);
+            assert_eq!(diagnostic["cli_identity"], identity.code());
+            assert_eq!(diagnostic["result"]["stdout"], original["stdout"]);
+            assert_eq!(diagnostic["result"]["stderr"], original["stderr"]);
+            assert_eq!(diagnostic["result"]["stdout_truncated"], false);
+            assert_eq!(diagnostic["result"]["stderr_truncated"], false);
+        }
+        let mut malformed = good.clone(); malformed["stdout"] = serde_json::json!("original non-JSON probe output");
+        let error = producer_probe_observation(&malformed, ProbeCliIdentity::Matched).unwrap_err();
+        let diagnostic = &error.downcast_ref::<ProducerProbeRejection>().unwrap().diagnostic;
+        assert_eq!(diagnostic["code"], "observation_invalid");
+        assert_eq!(diagnostic["result"]["stdout"], malformed["stdout"]);
+        let mut oversized = good; oversized["stdout"] = serde_json::json!("λ".repeat(APPLE_CONTAINER_OUTPUT_LIMIT));
+        let error = producer_probe_observation(&oversized, ProbeCliIdentity::Matched).unwrap_err();
+        let diagnostic = &error.downcast_ref::<ProducerProbeRejection>().unwrap().diagnostic;
+        assert_eq!(diagnostic["result"]["stdout"].as_str().unwrap().len(), APPLE_CONTAINER_OUTPUT_LIMIT);
+        assert_eq!(diagnostic["result"]["stdout_truncated"], true);
+    }
+
+    #[cfg(all(feature = "lifetime", target_os = "macos", target_arch = "aarch64"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "explicit cached-reference producer probe; no image-pull command, service or default changes"]
+    async fn real_owner_producer_profile_fixed_json_probe_writes_genuine_receipt() -> Result<()> {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        use std::io::Write;
+        if std::env::var("GHOST_PRODUCER_PROFILE_PROBE").as_deref() != Ok("1") {
+            bail!("Explicit fixed producer probe opt-in required");
+        }
+        let receipt = PathBuf::from(std::env::var_os("GHOST_PRODUCER_PROFILE_PROBE_RECEIPT")
+            .ok_or_else(|| anyhow!("Absolute disposable receipt path required"))?);
+        if !receipt.is_absolute() || receipt.exists() || !receipt.parent().is_some_and(Path::is_dir) {
+            bail!("Probe receipt must be a new absolute file in an existing disposable directory");
+        }
+        let cli = std::env::var_os("GHOST_PRODUCER_PROFILE_PROBE_CLI").map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/opt/homebrew/bin/container"));
+        let retained = tempfile::Builder::new().prefix("ghost-fixed-producer-probe-").tempdir()?.keep().canonicalize()?;
+        for name in ["home", "tasks", "browser"] {
+            let path = retained.join(name); std::fs::create_dir(&path)?; std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+        }
+        let execution = format!("{:x}", Sha256::digest(retained.to_string_lossy().as_bytes()));
+        let snapshot = retained.join("tasks").join(&execution); std::fs::create_dir(&snapshot)?;
+        std::fs::set_permissions(&snapshot, std::fs::Permissions::from_mode(0o700))?;
+        let home = HomeManifest { home_volume: retained.join("home"), task_snapshot_root: retained.join("tasks"),
+            browser_profile: retained.join("browser"), credential_broker: None };
+        let profile = ProducerProfileManifest {
+            kind: "ghost-producer-profile/1".into(), profile_id: "python-stdlib".into(), revision: 1,
+            image_ref: "docker.io/library/python@sha256:016508ba505da24f7139765bc4bb669df4e88eb2f12eeadd571bf2f88d7533df".into(),
+            platform_manifest_digest: "sha256:067d97da25897fa5342cdbef0eeb6a50a527faa965696c7bfa0a3b576ce65c8a".into(),
+            image_config_digest: "sha256:c3ac8543171364d1e007f8e053d221c35c72ed2773b46eb2b423b0167f9c2da9".into(),
+            os: "linux".into(), architecture: "arm64".into(), platform_variant: "v8".into(),
+            shell: super::super::producer_profile::ProducerShell { program: "/bin/sh".into(), args: vec!["-lc".into()] },
+            isolation: Default::default(), json_runtime: super::super::producer_profile::ProducerJsonRuntime {
+                kind: "python-stdlib/1".into(), interpreter: "/usr/local/bin/python3".into() },
+        };
+        println!("producer_profile_probe_root={} execution={}", retained.display(), execution);
+        let facts = AppleContainerBackend::probe_producer_profile(&cli, &home, &execution, &profile,
+            unsafe { libc::geteuid() }, unsafe { libc::getegid() }, &|| Ok(())).await?;
+        let encoded = serde_json::to_vec_pretty(&serde_json::json!({"manifest":profile,"runtime_facts":facts}))?;
+        let mut output = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&receipt)?;
+        output.write_all(&encoded)?; output.sync_all()?;
+        println!("producer_profile_probe_receipt={}", receipt.display());
+        Ok(())
+    }
 }

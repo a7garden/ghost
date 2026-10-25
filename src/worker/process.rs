@@ -1,3 +1,7 @@
+#[cfg(all(unix,test))]
+use super::guest_runtime::spawn_guest_legacy_fixture as spawn_guest;
+#[cfg(all(unix,not(test)))]
+use super::guest_runtime::spawn_guest;
 use crate::{lifetime_contract::{canonical_digest, WorkerSpec}, worker::{journal::{AppendOutcome, Journal, ProcessIdentity, ToolAdmission, ToolReceipt}, omp_rpc::{self, FrameDecoder, MAX_PHYSICAL_FRAME_BYTES}, process_identity, runner::Runner, scoped_tools::{ScopedWorkspace, MAX_TOOL_CONTENT_BYTES}}};
 #[cfg(unix)]
 use crate::worker::{native_tools::{create_execution_workspace, is_exact_worker_tool_scope, NativeWorkspace, PUBLISH_ARTIFACT_TOOL}, runner::GuestHomeLease};
@@ -11,7 +15,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::HashSet, fs, io::{BufRead, BufReader, Read}, path::{Path, PathBuf}, process::{Child, ChildStdin, Command, Stdio}, sync::{atomic::{AtomicBool, Ordering}, mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender}, Arc, RwLock}, thread, time::{Duration, Instant}};
 use uuid::Uuid;
 #[cfg(unix)]
-use super::{guest_broker::{GuestBrokerAuthorizationCheck, GuestBrokerConfig, GuestModelBackend}, guest_runtime::{spawn_guest, GuestRuntimeConfig, GuestRuntimeError}};
+use super::{guest_broker::{GuestBrokerAuthorizationCheck, GuestBrokerConfig, GuestModelBackend}, guest_runtime::{GuestRuntimeConfig, GuestRuntimeError}};
 
 
 const RPC_WAIT: Duration = Duration::from_secs(30);
@@ -342,6 +346,7 @@ fn run_actor(root: &Path, runner: &Runner, spec: &WorkerSpec, session_locator: &
     #[cfg(unix)]
     let mut browser_relay: Option<Arc<super::browser_relay::WorkerBrowserRelay>> = None;
     let child = match runner {
+        Runner::Retired => bail!("legacy_execution_retired: no separate reasoning process may start"),
         Runner::ScopedOmp { executable, args } | Runner::Canary { executable, args } => {
             let mut command = Command::new(executable);
             command.args(args)

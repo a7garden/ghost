@@ -83,11 +83,14 @@ fn setup(writable: bool) -> TestHost {
         profile_workers: Mutex::new(BTreeMap::new()),
         recovery: tokio::sync::Mutex::new(()),
         stopping: AtomicBool::new(false),
+        #[cfg(test)]
+        legacy_fixture_reasoning: AtomicBool::new(false),
         dispatch_enabled: true,
         pi_callback_token: String::new(),
         pi_local_route: Some(lifetime_runtime::LocalPiRoute {
             base_url: "http://127.0.0.1:9/v1".into(),
             model_id: "test-model".into(),
+            max_output_tokens: 1024,
             callback_token: "test-token".into(),
         }),
         native_computers: None,
@@ -108,7 +111,7 @@ fn envelope(t: &TestHost, command: &str, method: &str, args: serde_json::Value) 
     object.insert("conversation_id".into(), json!(t.conversation));
     object.insert("turn_id".into(), json!(t.turn));
     lifetime::PiToolRequest {
-        ghost_id: t.ghost.clone(),
+        context_ref: None, ghost_id: t.ghost.clone(),
         conversation_id: t.conversation.clone(),
         envelope: Envelope {
             protocol_version: VERSION.into(),
@@ -479,7 +482,7 @@ async fn pending_proposal_survives_cold_reopen_and_stays_owner_decidable() {
     let root = t.root.path().to_path_buf();
     drop(t.app);
 
-    let reopened = Host::open(&root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let reopened = Host::open_legacy_fixture(&root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let review: Review = reopened.lock().unwrap().journal.get("review", &review_id).unwrap().unwrap();
     assert_eq!(review.state, "pending");
     assert_eq!(review.lifetime_origin.as_ref().unwrap().authority_epoch, 1);

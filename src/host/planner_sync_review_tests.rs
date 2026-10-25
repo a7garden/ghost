@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 
 fn setup() -> (tempfile::TempDir, Arc<Host>) {
     let root = tempfile::tempdir().unwrap();
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     configure_fixture(&app, "todos", Kind::Todo, vec![]);
     (root, app)
 }
@@ -487,7 +487,7 @@ async fn caldav_review_previous_v4_href_constraint_migrates_without_erasing_hist
     )
     .unwrap();
     drop(conn);
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     assert_eq!(
         serde_json::to_value(row(&app, "a")).unwrap(),
         serde_json::to_value(&history).unwrap()
@@ -510,7 +510,7 @@ async fn caldav_review_previous_v4_href_constraint_migrates_without_erasing_hist
     }
     app.shutdown().await.unwrap();
     drop(app);
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     assert!(row(&app, "a").tombstone);
     assert_eq!(
         locator_uid(&app.lock().unwrap().journal.0, "todos", "a.ics").unwrap(),

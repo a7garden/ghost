@@ -15,13 +15,14 @@ use super::db;
 use crate::lifetime_contract::{Artifact, Response, ResponseStatus, RetryClass};
 use anyhow::{bail, Result, anyhow};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::path::Path;
 
 pub(super) fn read_work_artifact(
     conn: &Connection,
     computers: Option<&super::super::lifetime_computers::NativeComputers>,
+    pi_root: &Path,
     body: &Value,
 ) -> Result<Response> {
     exact_fields(body, &["method", "work_id", "execution_id", "digest", "locator"])?;
@@ -107,6 +108,15 @@ pub(super) fn read_work_artifact(
     let Some(artifact) = artifact.and_then(|value| serde_json::from_value::<Artifact>(value.clone()).ok()) else {
         return unavailable("the digest/locator pair does not name an artifact of the current result".into());
     };
+    let pi: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM lifetime_pi_executions WHERE work_id=?1 AND execution_id=?2)",
+        params![work_id, execution_id], |row| row.get(0))?;
+    if pi {
+        let bytes = match crate::worker::journal::read_verified_pi_artifact(pi_root.parent().ok_or_else(||anyhow!("Pi Host root missing"))?,conn,execution_id,digest,Path::new(locator)) {
+            Ok(bytes)=>bytes, Err(error)=>return unavailable(format!("Pi immutable artifact verification refused this read: {error}")),
+        };
+        return Ok(Response { status:ResponseStatus::Success,summary:"Current Pi artifact verified".into(),object_refs:vec![work.id,goal.id],artifacts:vec![artifact.clone()],next_actions:vec![],error_code:None,retry_class:RetryClass::SameId,
+            data:json!({"work_id":work_id,"execution_id":execution_id,"goal_revision":goal.revision,"digest":digest,"privacy":artifact.privacy,"byte_length":bytes.len(),"encoding":"base64","data":STANDARD.encode(bytes)}) });
+    }
     let Some(computers) = computers else {
         return unavailable("owner artifact reads require the native worker route on this host".into());
     };

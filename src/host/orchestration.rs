@@ -493,7 +493,7 @@ mod tests {
             .unwrap();
         crate::store::ProfileStore::create_profile(path, "reviewer", "Review supplied evidence")
             .unwrap();
-        let app = Host::open(path, tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        let app = Host::open_legacy_fixture(path, tokio::runtime::Handle::current(), Some("mock")).unwrap();
         let ids = app.lock().unwrap().profiles.keys().cloned().collect();
         (app, ids)
     }

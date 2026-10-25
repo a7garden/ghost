@@ -1898,6 +1898,12 @@ impl ComputerRegistry {
 
     /// Fetches one browser action's durable state, including the normalized
     /// exact-action detail the owner approved.
+    /// Latest immutable proposal for exact Pi effect input, including decisions.
+    pub fn browser_action_for_input(&self,computer:&str,execution:&str,digest:&str,epoch:u64)->Result<Option<BrowserAction>> {
+        let id:Option<String>=self.db.query_row("SELECT action_id FROM computer_browser_actions WHERE computer_id=?1 AND execution_id=?2 AND arguments_digest=?3 AND requested_epoch=?4 ORDER BY proposed_at_ms DESC LIMIT 1",params![computer,execution,digest,epoch],|r|r.get(0)).optional()?;
+        id.map(|id|self.browser_action(&id)).transpose().map(Option::flatten)
+    }
+
     pub fn browser_action(&self, action_id: &str) -> Result<Option<BrowserAction>> {
         let row: Option<(String, String, String, i64, String, Option<String>, Option<String>)> = self
             .db

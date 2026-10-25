@@ -9,6 +9,7 @@ import { openGhostRuntime } from "../src/runtime.js";
 import { createFakeProvider } from "./fake-provider.js";
 import { createBrokerModelProvider, createLocalModelProvider } from "../src/models.js";
 import { openGhostIndex } from "../src/storage.js";
+import { callbackCommandId } from "../src/host-transport.js";
 
 const tempRoots = new Set();
 const repoRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
@@ -65,7 +66,8 @@ async function setup(options = {}) {
         entry_id: invocation.arguments.entry_id,
         reason_code: invocation.arguments.reason_code,
         cancel_requested: invocation.arguments.status === "cancelled" ? true : run.cancel_requested,
-        latest_status_command_id: invocation.invocation_id,
+        latest_status_command_id: callbackCommandId(invocation.ghost_id, invocation.conversation_id,
+          invocation.invocation_id, "conversation.turn_status"),
         updated_at_ms: run.updated_at_ms + 1,
       };
       controllerRuns.set(key, run);
@@ -216,7 +218,7 @@ function createRoutedProvider({ brokerCalls = [], localCalls = [], localReply, l
 test("real Pi Harness persists text→tool→result→final and replays the same requestId", async (t) => {
   const provider = createFakeProvider([
     fauxAssistantMessage([
-      fauxToolCall("work_submit", { work_id: "work-fixture" }),
+      fauxToolCall("registry_inspect", {}),
     ], { stopReason: "toolUse" }),
     fauxAssistantMessage([fauxText("Work was durably admitted.")]),
   ]);
@@ -486,10 +488,10 @@ test("exact cancellation quiesces its owner turn without cancelling accepted Hos
   };
   const provider = createFakeProvider([
     fauxAssistantMessage([
-      fauxToolCall("work_submit", { work_id: "work-background-1" }),
+      fauxToolCall("goal_create", { prompt: "work-background-1", acceptance_spec: { required_checks: ["independent_review"] } }),
     ], { stopReason: "toolUse" }),
     fauxAssistantMessage([
-      fauxToolCall("work_submit", { work_id: "work-background-2" }),
+      fauxToolCall("goal_create", { prompt: "work-background-2", acceptance_spec: { required_checks: ["independent_review"] } }),
     ], { stopReason: "toolUse" }),
     fauxAssistantMessage([fauxText("The later owner turn completed.")]),
   ]);
@@ -560,7 +562,7 @@ test("queued exact cancellation persists through reopen without calling the mode
   const controllerRuns = new Map();
   const provider = createFakeProvider([
     fauxAssistantMessage([
-      fauxToolCall("work_submit", { work_id: "first-owner-work" }),
+      fauxToolCall("goal_create", { prompt: "first-owner-work", acceptance_spec: { required_checks: ["independent_review"] } }),
     ], { stopReason: "toolUse" }),
     fauxAssistantMessage([fauxText("The preceding owner turn completed.")]),
   ]);
@@ -571,7 +573,7 @@ test("queued exact cancellation persists through reopen without calling the mode
     if (invocation.method === "memory.capabilities" || invocation.method === "documents.capabilities") {
       return { status: "success", data: { available_tools: [] } };
     }
-    if (invocation.method === "work.submit") {
+    if (invocation.method === "goal.create") {
       firstWorkStarted = true;
       await firstBlocked;
       return { status: "success", data: { execution_id: "first-owner-work", state: "queued" } };
@@ -908,6 +910,8 @@ test("committed turn status with a lost ACK is observed after reopen without ano
   assert.equal(committedRun.state, "answered");
   const originalStatusCall = first.controllerCalls.find((call) => call.method === "conversation.turn_status" && call.arguments.status === "answered");
   assert.equal(typeof originalStatusCall.invocation_id, "string");
+  assert.equal(committedRun.latest_status_command_id, callbackCommandId("ghost-fixture", "conversation-fixture",
+    originalStatusCall.invocation_id, "conversation.turn_status"), "Host inspection exposes the committed callback command identity");
   assert.equal(first.calls.some((call) => call.method === "conversation.reply"), false);
   await first.runtime.close();
   firstClosed = true;
@@ -977,4 +981,26 @@ test("a 16k local conversation compacts old history before SDK clamps its answer
     method: "conversation.inspect", ghost_id: "ghost-fixture", conversation_id: "conversation-fixture",
   }));
   assert.ok(inspected.data.committed_view.entries.some((entry) => entry.kind === "pi.compaction"));
+});
+
+
+test("selected Owner task compacts only a no-tool history summary before its fresh current generation", async t => {
+  const localCalls=[],brokerCalls=[],taskRef=`ot-${"9".repeat(64)}`;
+  const provider=createRoutedProvider({localCalls,brokerCalls,localUsage:n=>({prompt_tokens:n===1?9000:n===2?14618:2500,completion_tokens:10,total_tokens:n===1?9010:n===2?14628:2510})});
+  const {runtime}=await setup({mode:"broker",provider,onControllerInspect:(run,invocation)=>({status:"success",data:{run,task_contract:invocation.turn_id==="selected-context-3"?{task_contract_ref:taskRef,mode:"direct",input_digest:"8".repeat(64)}:null,task_admission:invocation.turn_id==="selected-context-3"?{kind:"owner-task-admission/1",turn_id:invocation.turn_id,ghost_id:"ghost-fixture",conversation_id:"conversation-fixture",task_contract_ref:taskRef,input_digest:"8".repeat(64),state:"admitted",goal_id:"existing-goal",goal_revision:1,work_id:"existing-work",work_state:"queued"}:null}})});
+  t.after(()=>runtime.close());await runtime.handle(ensure());
+  for(let n=1;n<=3;n++) {
+    const prompt=n<3?`Authorized old history ${n}: ${"bounded history. ".repeat(620)}`:"Compare the newly selected immutable task input.";
+    assert.equal((await runtime.handle(canonicalInput(`selected-context-command-${n}`,`selected-context-${n}`,prompt,"local_only"))).status,"success");
+    await runtime.waitForIdle("ghost-fixture","conversation-fixture");
+  }
+  assert.equal(brokerCalls.length,0);
+  const summary=localCalls.find(call=>JSON.stringify(call.body.messages).includes("context summarization assistant"));
+  assert.ok(summary,"the selected task did not permanently block SDK compaction");
+  assert.equal(summary.body.tools?.length??0,0,"SDK summary has no action tools");
+  assert.equal(JSON.stringify(summary.body.messages).includes(taskRef),false,"ephemeral Owner descriptor did not enter historical summary text");
+  assert.ok(JSON.stringify(localCalls.at(-1).body.messages).includes(taskRef),"real generation received the current freshly checked selected task");
+  const inspected=await runtime.handle(envelope("inspect-selected-task-compaction",{method:"conversation.inspect",ghost_id:"ghost-fixture",conversation_id:"conversation-fixture"}));
+  assert.ok(inspected.data.committed_view.entries.some(entry=>entry.kind==="pi.compaction"));
+  assert.equal(JSON.stringify(inspected.data.committed_view).includes(taskRef),false,"descriptor was not persisted as ambient system authority");
 });

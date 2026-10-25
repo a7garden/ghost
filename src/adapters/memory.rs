@@ -18,6 +18,25 @@ use std::{collections::BTreeMap, fs, path::Path};
 #[cfg(feature = "memory")]
 use tokio::sync::Mutex;
 #[cfg(feature = "memory")]
+#[path = "memory_scoped.rs"]
+mod scoped;
+#[cfg(feature = "memory")]
+#[path = "memory_episode_write.rs"]
+mod episode_write;
+#[cfg(feature = "memory")]
+#[path = "memory_source_recovery.rs"]
+mod source_recovery;
+#[cfg(feature = "memory")]
+#[path = "memory_query.rs"]
+pub(crate) mod query;
+pub(crate) fn read_error_code(output:&ToolOutput)->Option<&'static str> {
+    #[cfg(feature="memory")] {query::error_code(output)}
+    #[cfg(not(feature="memory"))] {let _=output;None}
+}
+#[path = "memory_publication.rs"]
+#[cfg(feature = "lifetime")]
+pub(crate) mod publication;
+#[cfg(feature = "memory")]
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 #[cfg(feature = "memory")]
 use std::{
@@ -30,7 +49,7 @@ use std::{
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
 #[cfg(feature = "memory")]
-const SOURCE_LEDGER_VERSION: i64 = 2;
+const SOURCE_LEDGER_VERSION: i64 = 3;
 #[cfg(feature = "memory")]
 const SOURCE_LEDGER_APPLICATION_ID: i64 = 0x4753_4231;
 #[cfg(feature = "memory")]
@@ -214,7 +233,7 @@ impl Brain {
             safe_map
                 && std::env::var_os("GHOST_BRAIN_EXECUTABLE").is_some()
                 && std::env::var_os("GHOST_BRAIN_DIR").is_some()
-                && std::env::var("GHOST_BRAIN_TOKEN").is_ok_and(|token| !token.is_empty())
+                && (scoped::enabled() || std::env::var("GHOST_BRAIN_TOKEN").is_ok_and(|token| !token.is_empty()))
         }
         #[cfg(not(feature = "memory"))]
         {
@@ -231,8 +250,8 @@ impl Brain {
         if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 65_536 {
             bail!("brain space map must be a small regular file, not a symlink");
         }
-        let map: BTreeMap<String, String> = serde_json::from_slice(&fs::read(path)?)?;
-        let Some(space) = map.get(owner).cloned() else {
+        let map = crate::adapters::memory_bindings::LegacySpaceMap::parse(&fs::read(path)?)?;
+        let Some(space) = map.mapped_space(owner).map(str::to_owned) else {
             return Ok(None);
         };
         if space.is_empty()
@@ -263,6 +282,174 @@ impl Brain {
             )
             .await?;
         Ok(client)
+    }
+
+    /// Opaque configuration stamp. This is provenance, never a credential or
+    /// evidence that the engine accepted the scoped token.
+    pub fn context_revision(owner: &str) -> Result<String> {
+        #[cfg(not(feature = "memory"))]
+        { let _ = owner; bail!("memory feature unavailable"); }
+        #[cfg(feature = "memory")]
+        {
+            use sha2::{Digest, Sha256};
+            if let Some(snapshot) = scoped::snapshot(owner)? { return Ok(snapshot.revision); }
+            let space = Self::space_for_owner(owner)?;
+            let secret = std::env::var("GHOST_BRAIN_TOKEN").unwrap_or_default();
+            let payload = json!({"owner":owner,"space":space,
+                "token_digest":format!("{:x}",Sha256::digest(secret.as_bytes())),
+                "executable":std::env::var_os("GHOST_BRAIN_EXECUTABLE").map(|value|value.to_string_lossy().into_owned()),
+                "directory":std::env::var_os("GHOST_BRAIN_DIR").map(|value|value.to_string_lossy().into_owned())});
+            Ok(format!("{:x}",Sha256::digest(serde_json::to_vec(&payload)?)))
+        }
+    }
+
+    pub fn read_available(owner: &str) -> Result<bool> {
+        #[cfg(not(feature = "memory"))]
+        { let _ = owner; return Ok(false); }
+        #[cfg(feature = "memory")]
+        { Ok(if let Some(snapshot) = scoped::snapshot(owner)? { !snapshot.bindings.is_empty() }
+            else { Self::configured() && Self::space_for_owner(owner)?.is_some() }) }
+    }
+
+    pub fn work_profile(owner: &str, ids: &[String]) -> Result<crate::adapters::memory_bindings::WorkMemoryProfile> {
+        #[cfg(not(feature="memory"))]
+        {let _=(owner,ids);bail!("memory feature unavailable");}
+        #[cfg(feature="memory")]
+        {Ok(scoped::snapshot(owner)?.ok_or_else(||anyhow!("Work memory requires explicit scoped bindings"))?
+            .restrict_shared(ids)?.work_profile())}
+    }
+
+    #[cfg(feature="memory")]
+    fn work_snapshot(owner:&str,profile:&crate::adapters::memory_bindings::WorkMemoryProfile)->Result<scoped::ScopeSnapshot> {
+        let ids:Vec<_>=profile.bindings.iter().map(|binding|binding.id.clone()).collect();
+        let snapshot=scoped::snapshot(owner)?.ok_or_else(||anyhow!("Work memory bindings are unavailable"))?.restrict_shared(&ids)?;
+        ensure!(snapshot.work_profile()==*profile,"Work memory grant changed; a new admitted revision is required");
+        Ok(snapshot)
+    }
+
+    pub async fn validate_work_context(&self,owner:&str,profile:&crate::adapters::memory_bindings::WorkMemoryProfile,
+        check:impl Fn()->Result<()>+Send+Sync)->Result<String> {
+        check()?;
+        #[cfg(not(feature="memory"))]
+        {let _=(owner,profile);bail!("memory feature unavailable");}
+        #[cfg(feature="memory")]
+        {
+            let snapshot=Self::work_snapshot(owner,profile)?;
+            let mut slot=self.client.lock().await;drop(slot.take());
+            for binding in &snapshot.bindings {drop(snapshot.connect(binding,owner,&check).await?);}
+            snapshot.check(owner,&check)?;
+            Ok(snapshot.revision)
+        }
+    }
+
+    pub async fn read_work_memory(&self,owner:&str,session:&str,profile:&crate::adapters::memory_bindings::WorkMemoryProfile,
+        call:&ai::ToolCall,check:impl Fn()->Result<()>+Send+Sync)->Result<ToolOutput> {
+        check()?;
+        ensure!(call.name=="memory_recall","Work memory permits recall only");
+        #[cfg(not(feature="memory"))]
+        {let _=(owner,session,profile,call);bail!("memory feature unavailable");}
+        #[cfg(feature="memory")]
+        {let snapshot=Self::work_snapshot(owner,profile)?;self.scoped_read(owner,session,call,&snapshot,&check).await}
+    }
+
+    /// A read of the existing documents plane triggers its normal registered-root
+    /// reconciliation. This never registers a root or ingests an episode.
+    pub async fn experience_document_indexed(&self,owner:&str,page_id:&str,expected_root:&std::path::Path,expected_sha256:&str,
+        check:impl Fn()->Result<()>+Send+Sync)->Result<bool> {
+        check()?;
+        #[cfg(not(feature="memory"))]
+        {let _=(owner,page_id,expected_root,expected_sha256);bail!("memory feature unavailable");}
+        #[cfg(feature="memory")]
+        {
+            use crate::adapters::memory_bindings::MemoryCapability::Read;
+            ensure!(Self::source_permission(owner,&[Read])?,"own document read capability is not granted");
+            let revision=Self::context_revision(owner)?;
+            let guarded=||{check()?;ensure!(Self::context_revision(owner)?==revision,"memory authority changed during document reconciliation");Ok(())};
+            let space=Self::space_for_owner(owner)?.ok_or_else(||anyhow!("own document space is not mapped"))?;
+            let mut slot=self.client.lock().await;drop(slot.take());
+            let mut client=Self::connect_source(owner,&[Read],None,&guarded).await?;
+            let proof=client.document_source_proof(&space,page_id,expected_sha256).await?;
+            let proof_space_allowed=proof.as_ref().is_none_or(|proof|client.authenticated_scope().and_then(|scope|scope["spaces"].as_array()).is_some_and(|spaces|spaces.iter().any(|space|space.as_str()==Some(proof.space.as_str()))));
+            guarded()?;
+            drop(Self::connect_source(owner,&[Read],None,&guarded).await?);
+            let Some(proof)=proof else{return Ok(false);};
+            if !proof_space_allowed {return Ok(false);}
+            let expected=expected_root.canonicalize()?.join(format!("{page_id}.md")).canonicalize()?;
+            let root=std::path::Path::new(&proof.canonical_root);
+            let relative=std::path::Path::new(&proof.locator);
+            if !root.is_absolute() || relative.components().any(|component|!matches!(component,std::path::Component::Normal(_))) {return Ok(false);}
+            let observed=root.join(relative).canonicalize()?;
+            Ok(proof.fresh && proof.root_generation>0 && !proof.source_revision.is_empty()
+                && proof.document_uuid==page_id && proof.source_sha256==expected_sha256
+                && observed==expected && observed.starts_with(root.canonicalize()?))
+        }
+    }
+
+    /// Reauthenticate rather than trusting a cached engine Scope. A failed
+    /// check makes prior memory context unsafe to reuse, even with no query.
+    pub async fn validate_context(&self, owner: &str,
+        check: impl Fn() -> Result<()> + Send + Sync) -> Result<String> {
+        check()?;
+        #[cfg(not(feature = "memory"))]
+        { let _ = owner; bail!("memory feature unavailable"); }
+        #[cfg(feature = "memory")]
+        {
+            let revision = Self::context_revision(owner)?;
+            let mut slot = self.client.lock().await;
+            drop(slot.take());
+            if let Some(snapshot) = scoped::snapshot(owner)? {
+                for binding in &snapshot.bindings {
+                    drop(snapshot.connect(binding,owner,&check).await?);
+                }
+                snapshot.check(owner,&check)?;
+            } else {
+                let space = Self::space_for_owner(owner)?.ok_or_else(||anyhow!("owner has no mapped memory space"))?;
+                let mut client = Self::connect().await?;
+                verify_engine_owner_space(&mut client,owner,&space,&check).await?;
+            }
+            check()?;
+            ensure!(Self::context_revision(owner)? == revision,"memory authority changed during context inspection");
+            Ok(revision)
+        }
+    }
+
+    #[cfg(feature = "memory")]
+    fn source_permission(owner: &str, required: &[crate::adapters::memory_bindings::MemoryCapability]) -> Result<bool> {
+        Ok(match scoped::snapshot(owner)? {
+            Some(snapshot) => snapshot.source(required)?.is_some(),
+            None => true,
+        })
+    }
+
+    #[cfg(feature = "memory")]
+    async fn connect_source(owner: &str, required: &[crate::adapters::memory_bindings::MemoryCapability],
+        cached: Option<BrainClient>, check: &(impl Fn() -> Result<()> + Send + Sync)) -> Result<BrainClient> {
+        // Every operation authenticates a fresh session; never reuse a token's
+        // previously resolved Scope after a policy or engine revocation.
+        drop(cached);
+        if let Some(snapshot) = scoped::snapshot(owner)? {
+            let binding = snapshot.source(required)?.ok_or_else(||anyhow!("own source memory capability is not granted"))?;
+            snapshot.connect(binding,owner,check).await
+        } else { Self::connect().await }
+    }
+
+    #[cfg(feature = "memory")]
+    async fn finish_source(owner: &str, required: &[crate::adapters::memory_bindings::MemoryCapability],
+        client: BrainClient, cached: &mut Option<BrainClient>, mut result: Result<SourceReceipt>,
+        check: &(impl Fn() -> Result<()> + Send + Sync)) -> Result<SourceReceipt> {
+        if scoped::enabled() {
+            drop(client);
+            // Even engine-side revocation with an unchanged config must fence
+            // delivery. Preserve the original source/receipt identity and let
+            // the existing ledger reconcile; never issue another ingest.
+            if result.is_ok() && Self::connect_source(owner,required,None,check).await.is_err() {
+                if let Ok(receipt) = &mut result { receipt.status = SourceStatus::EffectUnknown; }
+            }
+        } else if result.as_ref().is_ok_and(|receipt| !matches!(receipt.status,
+            SourceStatus::EffectUnknown | SourceStatus::CorrectionBlocked)) {
+            *cached = Some(client);
+        }
+        result
     }
 
     pub async fn read_memory(
@@ -299,6 +486,9 @@ impl Brain {
                     "oxibrain is not configured with a scoped token and profile space map",
                 ));
             }
+            if let Some(snapshot) = scoped::snapshot(owner)? {
+                return self.scoped_read(owner,current_session_id,call,&snapshot,&check).await;
+            }
             let space = match Self::space_for_owner(owner) {
                 Ok(Some(space)) => space,
                 Ok(None) => {
@@ -314,8 +504,19 @@ impl Brain {
                     ))
                 }
             };
-            self.memory_connected(&space, current_session_id, call, &check)
-                .await
+            let captured_revision = Self::context_revision(owner)?;
+            let guarded = || { check()?; ensure!(Self::context_revision(owner)? == captured_revision,
+                "memory authority changed during I/O"); Ok(()) };
+            let mut output = self.memory_connected(&space,current_session_id,call,&guarded).await?;
+            if output.status == ToolStatus::Success {
+                if self.validate_context(owner,&guarded).await.is_err() {
+                    return Ok(ToolOutput::error(ToolStatus::Denied,"Memory authority cannot be revalidated; retrieved content withheld"));
+                }
+                if let Some(value) = output.content.as_object_mut() {
+                    value.insert("context_revision".into(),json!(captured_revision));
+                }
+            }
+            Ok(output)
         }
     }
     /// Source-backed ingest configured only through an explicit Ghost ledger.
@@ -345,15 +546,20 @@ impl Brain {
         #[cfg(feature = "memory")]
         {
             ensure_brain_configured()?;
+            use crate::adapters::memory_bindings::MemoryCapability::{Read, Ingest};
+            if !Self::source_permission(owner,&[Read,Ingest])? {
+                return Ok(SourceCapabilities { notes:false, sessions:false });
+            }
+            let captured_revision = Self::context_revision(owner)?;
+            let upstream_check = check;
+            let check = || { upstream_check()?;
+                ensure!(Self::context_revision(owner)? == captured_revision,"memory authority changed during I/O"); Ok(()) };
             let space = Self::space_for_owner(owner)?
                 .ok_or_else(|| anyhow!("owner has no mapped OxiBrain space"))?;
             let brain_dir = configured_brain_dir()?;
             check_owner_authority(owner, &space, &check)?;
             let mut slot = self.client.lock().await;
-            let mut client = match slot.take() {
-                Some(client) => client,
-                None => Self::connect().await?,
-            };
+            let mut client = Self::connect_source(owner,&[Read,Ingest],slot.take(),&check).await?;
             let result: Result<SourceCapabilities> = async {
                 verify_engine_owner_space(&mut client, owner, &space, &check).await?;
                 let capabilities =
@@ -363,7 +569,10 @@ impl Brain {
                 Ok(capabilities)
             }
             .await;
-            if result.is_ok() {
+            if scoped::enabled() {
+                drop(client);
+                if result.is_ok() { drop(Self::connect_source(owner,&[Read,Ingest],None,&check).await?); }
+            } else if result.is_ok() {
                 *slot = Some(client);
             }
             result
@@ -387,16 +596,19 @@ impl Brain {
         {
             validate_origin_content(origin, content)?;
             ensure_brain_configured()?;
+            use crate::adapters::memory_bindings::MemoryCapability::{Read, Ingest};
+            ensure!(Self::source_permission(&origin.owner,&[Read,Ingest])?,"own memory ingest capability is not granted");
+            let captured_revision = Self::context_revision(&origin.owner)?;
+            let upstream_check = check;
+            let check = || { upstream_check()?;
+                ensure!(Self::context_revision(&origin.owner)? == captured_revision,"memory authority changed during I/O"); Ok(()) };
             let space = Self::space_for_owner(&origin.owner)?
                 .ok_or_else(|| anyhow!("owner has no mapped OxiBrain space"))?;
             let brain_dir = configured_brain_dir()?;
             check_source_authority(origin, &space, &check)?;
             if matches!(&origin.kind, SourceOriginKind::Session { .. }) {
                 let mut slot = self.client.lock().await;
-                let mut client = match slot.take() {
-                    Some(client) => client,
-                    None => Self::connect().await?,
-                };
+                let mut client = Self::connect_source(&origin.owner,&[Read,Ingest],slot.take(),&check).await?;
                 let result = async {
                     verify_engine_space(&mut client, origin, &space, &check).await?;
                     require_session_record_schema(&mut client, origin, &space, &check).await?;
@@ -419,22 +631,14 @@ impl Brain {
                     .await
                 }
                 .await;
-                if let Ok(receipt) = &result {
-                    if receipt.status != SourceStatus::EffectUnknown {
-                        *slot = Some(client);
-                    }
-                }
-                return result;
+                return Self::finish_source(&origin.owner,&[Read,Ingest],client,&mut slot,result,&check).await;
             }
             let prepared = match prepare_ingest(origin, content, &space, ledger, &brain_dir, None)? {
                 PreparedIngest::Local(receipt) => return Ok(receipt),
                 PreparedIngest::Work(record) => record,
             };
             let mut slot = self.client.lock().await;
-            let mut client = match slot.take() {
-                Some(client) => client,
-                None => Self::connect().await?,
-            };
+            let mut client = Self::connect_source(&origin.owner,&[Read,Ingest],slot.take(),&check).await?;
             let result = execute_ingest(
                 &mut client,
                 origin,
@@ -446,12 +650,7 @@ impl Brain {
                 &check,
             )
             .await;
-            if let Ok(receipt) = &result {
-                if receipt.status != SourceStatus::EffectUnknown {
-                    *slot = Some(client);
-                }
-            }
-            result
+            Self::finish_source(&origin.owner,&[Read,Ingest],client,&mut slot,result,&check).await
         }
     }
 
@@ -472,6 +671,12 @@ impl Brain {
         {
             validate_origin_content(origin, content)?;
             ensure_brain_configured()?;
+            use crate::adapters::memory_bindings::MemoryCapability::Read;
+            ensure!(Self::source_permission(&origin.owner,&[Read])?,"own memory read capability is not granted");
+            let captured_revision = Self::context_revision(&origin.owner)?;
+            let upstream_check = check;
+            let check = || { upstream_check()?;
+                ensure!(Self::context_revision(&origin.owner)? == captured_revision,"memory authority changed during I/O"); Ok(()) };
             let space = Self::space_for_owner(&origin.owner)?
                 .ok_or_else(|| anyhow!("owner has no mapped OxiBrain space"))?;
             let brain_dir = configured_brain_dir()?;
@@ -493,10 +698,7 @@ impl Brain {
                 return Ok(record_receipt(origin, &record, SourceStatus::Prepared));
             }
             let mut slot = self.client.lock().await;
-            let mut client = match slot.take() {
-                Some(client) => client,
-                None => Self::connect().await?,
-            };
+            let mut client = Self::connect_source(&origin.owner,&[Read],slot.take(),&check).await?;
             let result = inspect_record(
                 &mut client,
                 origin,
@@ -508,12 +710,7 @@ impl Brain {
                 &check,
             )
             .await;
-            if let Ok(receipt) = &result {
-                if receipt.status != SourceStatus::EffectUnknown {
-                    *slot = Some(client);
-                }
-            }
-            result
+            Self::finish_source(&origin.owner,&[Read],client,&mut slot,result,&check).await
         }
     }
 
@@ -565,15 +762,18 @@ impl Brain {
                 "prior episode id is malformed"
             );
             ensure_brain_configured()?;
+            use crate::adapters::memory_bindings::MemoryCapability::{Read,Ingest,Redact};
+            ensure!(Self::source_permission(&prior.owner,&[Read,Ingest,Redact])?,"own memory correction capability is not granted");
+            let captured_revision = Self::context_revision(&prior.owner)?;
+            let upstream_check = check;
+            let check = || { upstream_check()?;
+                ensure!(Self::context_revision(&prior.owner)? == captured_revision,"memory authority changed during I/O"); Ok(()) };
             let space = Self::space_for_owner(&prior.owner)?
                 .ok_or_else(|| anyhow!("owner has no mapped OxiBrain space"))?;
             let brain_dir = configured_brain_dir()?;
             check_source_authority(prior, &space, &check)?;
             let mut slot = self.client.lock().await;
-            let mut client = match slot.take() {
-                Some(client) => client,
-                None => Self::connect().await?,
-            };
+            let mut client = Self::connect_source(&prior.owner,&[Read,Ingest,Redact],slot.take(),&check).await?;
             let result = execute_correction(
                 &mut client,
                 prior,
@@ -587,15 +787,7 @@ impl Brain {
                 &check,
             )
             .await;
-            if let Ok(receipt) = &result {
-                if !matches!(
-                    receipt.status,
-                    SourceStatus::EffectUnknown | SourceStatus::CorrectionBlocked
-                ) {
-                    *slot = Some(client);
-                }
-            }
-            result
+            Self::finish_source(&prior.owner,&[Read,Ingest,Redact],client,&mut slot,result,&check).await
         }
     }
 
@@ -629,7 +821,7 @@ impl Brain {
             let mut statement = connection.prepare(
                 "SELECT owner,source_id,revision,source_kind,session_id,disclosure,space,
                         content_sha256,source_locator,ingest_state,episode_id,prior_revision,
-                        prior_episode_id,redaction_state,redaction_closure_sha256
+                        prior_episode_id,redaction_state,redaction_closure_sha256,attempt_nonce
                  FROM source_records WHERE owner=?1
                  ORDER BY updated_at_ms DESC, rowid DESC",
             )?;
@@ -700,6 +892,7 @@ impl Brain {
                     prior_episode_id,
                     redaction_state,
                     redaction_closure_sha256,
+                    attempt_nonce:row.get(15)?,
                 };
                 check_record_identity(&origin, &record.space, &record)?;
                 let status = listed_receipt_status(&record)?;
@@ -713,6 +906,101 @@ impl Brain {
             check()?;
             Ok((heads, more))
         }
+    }
+
+    #[cfg(feature = "memory")]
+    async fn scoped_read(&self, owner: &str, current_session_id: &str, call: &ai::ToolCall,
+        snapshot: &scoped::ScopeSnapshot, check: &(impl Fn() -> Result<()> + Send + Sync)) -> Result<ToolOutput> {
+        snapshot.check(owner,check)?;
+        let query_scope=match query::QueryScope::parse(&call.arguments) {Ok(scope)=>scope,Err(error)=>return Ok(error.output())};
+        let mut slot = self.client.lock().await;
+        drop(slot.take());
+        snapshot.check(owner,check)?;
+        let count = snapshot.bindings.iter().map(|binding|binding.spaces.len()).sum::<usize>();
+        if count == 0 { return Ok(ToolOutput::error(ToolStatus::Denied,"No read memory binding is granted")); }
+        let budget = call.arguments["token_budget"].as_u64().unwrap_or(1024).clamp(128,2048) as usize;
+        let limit = if call.name == "memory_session_list" { call.arguments["limit"].as_u64().unwrap_or(10).clamp(1,20) as usize } else { 12 };
+        let mut scopes = Vec::new();
+        let mut evidence = Vec::new();
+        let mut index = 0usize;
+        let mut partial = false;
+        let mut result_bytes = 0usize;
+        let mut delivered_bindings = Vec::new();
+        for binding in &snapshot.bindings {
+            snapshot.check(owner,check)?;
+            let connected = snapshot.connect(binding,owner,check).await;
+            if snapshot.check(owner,check).is_err() {
+                return Ok(ToolOutput::error(ToolStatus::Denied,"Memory grant changed; retrieved content withheld"));
+            }
+            let mut client = connected.ok();
+            if let Some(client)=client.as_mut() {if let Some(error)=query_scope.validate_native(client,if call.name=="memory_search" {"search"} else {"recall"}).await? {return Ok(error);}}
+            let mut delivered = false;
+            for space in &binding.spaces {
+                let scope_budget = budget / count + usize::from(index < budget % count);
+                let scope_limit = limit / count + usize::from(index < limit % count);
+                index += 1;
+                if scope_limit == 0 && call.name != "memory_recall" {
+                    partial = true;
+                    scopes.push(json!({"binding_id":binding.id,"space":space,"partial":true,"reason":"total_result_limit"}));
+                    continue;
+                }
+                let result: Result<Value> = async {
+                    let client = client.as_mut().ok_or_else(||anyhow!("scoped memory unavailable"))?;
+                    snapshot.check(owner,check)?;
+                    let value = match call.name.as_str() {
+                        "memory_recall" => {let mut args=json!({"space":space,
+                            "query":call.arguments["query"],"session_id":current_session_id,"token_budget":scope_budget});query_scope.apply(&mut args);client.call_tool_json("recall",args).await?},
+                        "memory_search" => {let mut args=json!({"space":space,
+                            "query":call.arguments["query"],"mode":"auto","limit":scope_limit});query_scope.apply(&mut args);client.call_tool_json("search",args).await?},
+                        "memory_session_list" => client.call_tool_json("session_list",json!({"space":space,
+                            "session_id":current_session_id,"limit":scope_limit})).await?,
+                        _ => bail!("unsupported scoped memory read"),
+                    };
+                    snapshot.check(owner,check)?;
+                    Ok(value)
+                }.await;
+                match result {
+                    Ok(value) => {
+                        let bytes = serde_json::to_vec(&value)?.len();
+                        if bytes > 262_144 || result_bytes + bytes > 524_288 {
+                            partial = true;
+                            scopes.push(json!({"binding_id":binding.id,"space":space,"partial":true,"reason":"result_size_limit"}));
+                            continue;
+                        }
+                        result_bytes += bytes;
+                        delivered = true;
+                        if let Some(items) = value.pointer("/data/evidence").and_then(Value::as_array) {
+                            for item in items { evidence.push(json!({"binding_id":binding.id,"space":space,"source":item})); }
+                        }
+                        let scope_partial = value.pointer("/meta/partial").and_then(Value::as_bool).unwrap_or(false);
+                        partial |= scope_partial;
+                        scopes.push(json!({"binding_id":binding.id,"space":space,"policy_revision":binding.policy_revision,
+                            "token_budget":scope_budget,"partial":scope_partial,"result":value}));
+                    }
+                    Err(_) => {
+                        partial = true;
+                        scopes.push(json!({"binding_id":binding.id,"space":space,"partial":true,"reason":"scope_unavailable"}));
+                    }
+                }
+                if snapshot.check(owner,check).is_err() {
+                    return Ok(ToolOutput::error(ToolStatus::Denied,"Memory grant changed; retrieved content withheld"));
+                }
+            }
+            drop(client);
+            if delivered { delivered_bindings.push(binding); }
+        }
+        // A token can be revoked in the engine without changing Host config.
+        // Fresh post-query authentication fences such in-flight results too.
+        for binding in delivered_bindings {
+            if snapshot.connect(binding,owner,check).await.is_err() {
+                return Ok(ToolOutput::error(ToolStatus::Denied,"Memory grant cannot be revalidated; retrieved content withheld"));
+            }
+        }
+        snapshot.check(owner,check)?;
+        Ok(ToolOutput::success("Scoped source evidence; independent space ranks are not comparable",json!({
+            "context_revision":snapshot.revision,"partial":partial,"token_budget":budget,"scopes":scopes,"evidence":evidence,
+            "query_scope":query_scope.metadata(),"global_snapshot":false
+        })))
     }
 
     #[cfg(feature = "memory")]
@@ -732,24 +1020,16 @@ impl Brain {
                 "memory writes require a Host-provided trusted source identity and receipt ledger",
             ));
         }
+        let query_scope=match query::QueryScope::parse(&call.arguments) {Ok(scope)=>scope,Err(error)=>return Ok(error.output())};
         let mut slot = self.client.lock().await;
         let mut client = match slot.take() {
             Some(client) => client,
             None => Self::connect().await?,
         };
         check()?;
+        if let Some(error)=query_scope.validate_native(&mut client,if call.name=="memory_search" {"search"} else {"recall"}).await? {return Ok(error);}
         let result: Result<Value> = match call.name.as_str() {
-            "memory_search" => client
-                .search(
-                    call.arguments["query"]
-                        .as_str()
-                        .ok_or_else(|| anyhow!("query required"))?,
-                    space,
-                    "auto",
-                    12,
-                )
-                .await
-                .map(|value| json!(value)),
+            "memory_search" => {let mut args=json!({"query":call.arguments["query"].as_str().ok_or_else(||anyhow!("query required"))?,"space":space,"mode":"auto","limit":12});query_scope.apply(&mut args);client.call_tool_data("search",args).await},
             "memory_recall" => {
                 let query = call.arguments["query"]
                     .as_str()
@@ -758,17 +1038,12 @@ impl Brain {
                     .as_u64()
                     .unwrap_or(1024)
                     .clamp(128, 2048) as usize;
-                client
-                    .call_tool_json(
-                        "recall",
-                        json!({
+                let mut args=json!({
                             "query":query,
                             "space":space,
                             "token_budget":token_budget,
                             "session_id":current_session_id
-                        }),
-                    )
-                    .await
+                        });query_scope.apply(&mut args);client.call_tool_json("recall",args).await
             }
             "memory_session_list" => {
                 let limit = call.arguments["limit"].as_u64().unwrap_or(10).clamp(1, 20);
@@ -930,6 +1205,7 @@ struct SourceRecord {
     prior_episode_id: Option<String>,
     redaction_state: String,
     redaction_closure_sha256: Option<String>,
+    attempt_nonce: Option<String>,
 }
 
 /// One latest-per-source-identity ledger head: Host-owned identity and
@@ -1167,6 +1443,7 @@ fn open_source_ledger(
                 prior_episode_id TEXT,
                 redaction_state TEXT NOT NULL CHECK(redaction_state IN ('none','prepared','plan_ready','sent','effect_unknown','complete','blocked')),
                 redaction_closure_sha256 TEXT,
+                attempt_nonce TEXT CHECK(attempt_nonce IS NULL OR (length(attempt_nonce)=32 AND attempt_nonce NOT GLOB '*[^a-f0-9]*')),
                 updated_at_ms INTEGER NOT NULL,
                 PRIMARY KEY(owner,source_id,revision),
                 UNIQUE(space,source_locator),
@@ -1178,19 +1455,22 @@ fn open_source_ledger(
         )?;
         connection.pragma_update(None, "application_id", SOURCE_LEDGER_APPLICATION_ID)?;
         connection.pragma_update(None, "user_version", SOURCE_LEDGER_VERSION)?;
-    } else if user_version == 1
+    } else if matches!(user_version,1|2)
         && application_id == SOURCE_LEDGER_APPLICATION_ID
         && table_count == 1
     {
         let migration = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        migration.execute_batch(
+        if user_version==1 {migration.execute_batch(
             "ALTER TABLE source_records
                 ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'note'
                 CHECK(source_kind IN ('note','session'));
             ALTER TABLE source_records ADD COLUMN session_id TEXT;
             CREATE UNIQUE INDEX source_session_ids
                 ON source_records(space,session_id) WHERE source_kind='session';",
-        )?;
+        )?;}
+        // No backfill: an old sent/unknown row has no dispatch identity and
+        // cannot acquire retry authority from this additive migration.
+        migration.execute_batch("ALTER TABLE source_records ADD COLUMN attempt_nonce TEXT CHECK(attempt_nonce IS NULL OR (length(attempt_nonce)=32 AND attempt_nonce NOT GLOB '*[^a-f0-9]*'));")?;
         migration.pragma_update(None, "user_version", SOURCE_LEDGER_VERSION)?;
         migration.commit()?;
     } else {
@@ -1231,7 +1511,7 @@ fn read_source_record(
         .query_row(
             "SELECT space,source_kind,session_id,disclosure,content_sha256,source_locator,
                     ingest_state,episode_id,prior_revision,prior_episode_id,redaction_state,
-                    redaction_closure_sha256
+                    redaction_closure_sha256,attempt_nonce
              FROM source_records WHERE owner=?1 AND source_id=?2 AND revision=?3",
             params![origin.owner, origin.source_id, origin.revision],
             |row| {
@@ -1248,6 +1528,7 @@ fn read_source_record(
                     prior_episode_id: row.get(9)?,
                     redaction_state: row.get(10)?,
                     redaction_closure_sha256: row.get(11)?,
+                    attempt_nonce: row.get(12)?,
                 })
             },
         )
@@ -1365,6 +1646,7 @@ fn prepare_ingest(
             prior_episode_id: prior_episode_id.map(str::to_owned),
             redaction_state: "none".to_owned(),
             redaction_closure_sha256: None,
+            attempt_nonce: None,
         }
     };
     tx.commit()?;
@@ -1758,23 +2040,7 @@ async fn recall_source_episode_ids(
         .await
         .map_err(|_| anyhow!("OxiBrain source provenance recall is unavailable"))?;
     check_source_authority(origin, space, check)?;
-    let layers = envelope["data"]["layers"]
-        .as_array()
-        .ok_or_else(|| anyhow!("OxiBrain source provenance response is malformed"))?;
-    let mut ids = std::collections::BTreeSet::new();
-    for layer in layers {
-        if let Some(provenance) = layer.get("provenance").and_then(Value::as_array) {
-            for candidate in provenance.iter().filter_map(Value::as_str) {
-                if valid_episode_id(candidate) {
-                    ids.insert(candidate.to_owned());
-                    if ids.len() >= 64 {
-                        return Ok(ids.into_iter().collect());
-                    }
-                }
-            }
-        }
-    }
-    Ok(ids.into_iter().collect())
+    source_recovery::candidate_ids(&envelope)
 }
 
 #[cfg(feature = "memory")]
@@ -1961,31 +2227,23 @@ async fn execute_ingest(
         )
         .await;
     }
-    verify_engine_space(client, origin, space, check).await?;
+    let engine_space_id=verify_engine_space(client, origin, space, check).await?;
     check_source_authority(origin, space, check)?;
-    if !transition_ingest(
-        origin,
-        space,
-        ledger,
-        brain_dir,
-        "prepared",
-        "sent",
-        None,
-    )? {
+    let Some(attempt_nonce)=episode_write::begin_attempt(origin,space,ledger,brain_dir,&record)? else {
         let latest = load_source_record(origin, space, ledger, brain_dir)?
             .ok_or_else(|| anyhow!("source receipt disappeared before ingest"))?;
         return reconcile_ingest(
             client, origin, content, space, ledger, brain_dir, &latest, check,
         )
         .await;
-    }
+    };
     if check_source_authority(origin, space, check).is_err() {
-        let _ = transition_ingest(
+        let _ = episode_write::finish_attempt(
             origin,
             space,
             ledger,
             brain_dir,
-            "sent",
+            &attempt_nonce,
             "prepared",
             None,
         );
@@ -2012,7 +2270,22 @@ async fn execute_ingest(
             }),
         ),
     };
-    let response = client.call_tool(tool, arguments).await;
+    let response = client.call_episode_tool(tool, arguments, &engine_space_id, &attempt_nonce).await;
+    let response=match response {
+        Ok(oxibrain_client::EpisodeToolResult::Text(text))=>Some(text),
+        Ok(oxibrain_client::EpisodeToolResult::NotCommittedBusy {..})=>{
+            // This is evidence only for the exact dispatched attempt. The
+            // current original-source gate and nonce CAS precede retryability.
+            if check_source_authority(origin,space,check).is_ok()
+                &&episode_write::finish_attempt(origin,space,ledger,brain_dir,&attempt_nonce,"prepared",None)? {
+                return Ok(record_receipt(origin,&record,SourceStatus::Prepared));
+            }
+            let latest=load_source_record(origin,space,ledger,brain_dir)?
+                .ok_or_else(||anyhow!("source receipt disappeared after episode outcome"))?;
+            return reconcile_ingest(client,origin,content,space,ledger,brain_dir,&latest,check).await;
+        },
+        Err(_)=>None,
+    };
     let response_prefix = match &origin.kind {
         SourceOriginKind::Note => "Ingested as episode: ".to_owned(),
         SourceOriginKind::Session { session_id } => {
@@ -2020,18 +2293,17 @@ async fn execute_ingest(
         }
     };
     let episode_id = match response
-        .ok()
         .and_then(|text| text.strip_prefix(&response_prefix).map(str::to_owned))
         .filter(|id| valid_episode_id(id))
     {
         Some(episode_id) => episode_id,
         None => {
-            let _ = transition_ingest(
+            let _ = episode_write::finish_attempt(
                 origin,
                 space,
                 ledger,
                 brain_dir,
-                "sent",
+                &attempt_nonce,
                 "effect_unknown",
                 None,
             );
@@ -2045,12 +2317,12 @@ async fn execute_ingest(
     let verified = inspect_episode(client, origin, content, space, &episode_id, check).await;
     match verified {
         Ok(EpisodeInspection::Exact) => {
-            if transition_ingest(
+            if episode_write::finish_attempt(
                 origin,
                 space,
                 ledger,
                 brain_dir,
-                "sent",
+                &attempt_nonce,
                 "recorded",
                 Some(&episode_id),
             )? {
@@ -2074,12 +2346,12 @@ async fn execute_ingest(
             }
         }
         Ok(EpisodeInspection::Redacted) => {
-            let _ = transition_ingest(
+            let _ = episode_write::finish_attempt(
                 origin,
                 space,
                 ledger,
                 brain_dir,
-                "sent",
+                &attempt_nonce,
                 "redacted",
                 Some(&episode_id),
             );
@@ -2093,12 +2365,12 @@ async fn execute_ingest(
             ))
         }
         Ok(EpisodeInspection::NotOwned) | Err(_) => {
-            let _ = transition_ingest(
+            let _ = episode_write::finish_attempt(
                 origin,
                 space,
                 ledger,
                 brain_dir,
-                "sent",
+                &attempt_nonce,
                 "effect_unknown",
                 Some(&episode_id),
             );
@@ -2205,12 +2477,18 @@ fn correction_receipt(
 
 #[cfg(feature = "memory")]
 fn exact_episode_closure(value: &Value, pointer: &str, episode_id: &str) -> bool {
-    value
-        .pointer(pointer)
-        .and_then(Value::as_array)
-        .is_some_and(|episodes| {
-            episodes.len() == 1 && episodes[0].as_str() == Some(episode_id)
-        })
+    let Some(episodes)=value.pointer(pointer).and_then(Value::as_array) else{return false;};
+    let Some(parent)=pointer.strip_suffix("/episodes") else{return false;};
+    let proof=value.pointer(&format!("{parent}/publication_declarations"));
+    let declarations=match proof {None=>&[][..],Some(Value::Array(values))=>values.as_slice(),_=>return false};
+    if episodes.is_empty()||episodes.len()>4097||declarations.len()>4096 {return false;}
+    let mut expected=std::collections::BTreeSet::from([episode_id]);
+    for declaration in declarations {
+        let Some(id)=declaration.as_str().filter(|id|valid_episode_id(id)) else{return false;};
+        if !expected.insert(id) {return false;}
+    }
+    let mut actual=std::collections::BTreeSet::new();
+    episodes.iter().all(|id|id.as_str().is_some_and(|id|actual.insert(id)))&&actual==expected
 }
 
 #[cfg(feature = "memory")]
@@ -2791,8 +3069,11 @@ async fn execute_correction(
 }
 
 #[cfg(all(test, feature = "memory", unix))]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    include!("memory_scoped_tests.rs");
+    include!("memory_query_tests.rs");
+    include!("memory_episode_write_tests.rs");
     use std::{
         fs,
         os::unix::fs::PermissionsExt,
@@ -2807,9 +3088,14 @@ mod tests {
     static SOURCE_ENV_LOCK: LazyLock<Mutex<()>> =
         LazyLock::new(|| Mutex::new(()));
 
-    struct SourceEnvGuard {
+    pub(crate) struct SourceEnvGuard {
         _guard: tokio::sync::MutexGuard<'static, ()>,
         previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+    impl SourceEnvGuard {
+        pub(crate) fn capture_extra(&mut self,keys:&[&'static str]) {
+            for key in keys {if !self.previous.iter().any(|(saved,_)|saved==key) {self.previous.push((key,std::env::var_os(key)));}}
+        }
     }
 
     impl Drop for SourceEnvGuard {
@@ -2831,6 +3117,9 @@ mod tests {
             "GHOST_BRAIN_DIR",
             "GHOST_BRAIN_TOKEN",
             "GHOST_BRAIN_SOURCE_LEDGER",
+            "GHOST_BRAIN_BINDINGS",
+            "GHOST_BRAIN_TOKEN_OWN_FIXTURE",
+            "GHOST_BRAIN_TOKEN_SHARED_FIXTURE",
         ];
         let previous = keys
             .iter()
@@ -2846,6 +3135,7 @@ mod tests {
         std::env::set_var("GHOST_BRAIN_EXECUTABLE", brain_dir.join("brain-fixture"));
         std::env::set_var("GHOST_BRAIN_DIR", brain_dir);
         std::env::set_var("GHOST_BRAIN_TOKEN", "fixture-token");
+        std::env::remove_var("GHOST_BRAIN_BINDINGS");
         std::env::set_var(
             "GHOST_BRAIN_SOURCE_LEDGER",
             root.join("source-ledger.sqlite"),
@@ -2866,6 +3156,7 @@ mod tests {
 import sys,json,time,os,hashlib
 from pathlib import Path
 root=Path(sys.argv[-1])
+fixture_space_id='f'*32
 info=json.loads('''@INFO@''')
 state_path=root/'episodes.json'
 def load_state():
@@ -2887,7 +3178,7 @@ for line in sys.stdin:
  elif method=='handshake':
   result=info
  elif method=='spaces/list':
-  result={'spaces':[{'id':'fixture-space-id','name':'fixture-space','created_at':0,'episode_count':0,'entity_count':0}]}
+  result={'spaces':[{'id':fixture_space_id,'name':'fixture-space','created_at':0,'episode_count':0,'entity_count':0}]}
  elif method=='resources/read':
   uri=req['params']['uri'];episode_id=uri.split('://',1)[1].split('?',1)[0]
   state=load_state();episode=state['episodes'].get(episode_id)
@@ -2908,12 +3199,12 @@ for line in sys.stdin:
     result={'isError':True,'content':[{'type':'text','text':'index unavailable'}]}
     print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}),flush=True)
     continue
-   matches=[ep for ep in state['episodes'].values() if ep['space']==('fixture-space-id' if args['space']=='fixture-space' else args['space']) and query.lower() in ep['content'].lower() and ep['redacted_at'] is None]
-   ids=[ep['id'] for ep in matches]
+   matches=[ep for ep in state['episodes'].values() if ep['space']==(fixture_space_id if args['space']=='fixture-space' else args['space']) and query.lower() in ep['content'].lower() and ep['redacted_at'] is None]
+   ids=['episode://'+ep['id'] for ep in matches]
    layers=[] if not matches else [{'kind':'query_neighborhood','text':'\n'.join(ep['content'] for ep in matches),'estimated_tokens':8,'provenance':ids}]
    text=json.dumps({'data':{'layers':layers,'total_tokens':8,'truncated':False},'meta':{'dropped':{}}},ensure_ascii=False)
   elif name=='ingest':
-   content=args['content'];source_path=args['source_path'];space='fixture-space-id' if args['space']=='fixture-space' else args['space']
+   content=args['content'];source_path=args['source_path'];space=fixture_space_id if args['space']=='fixture-space' else args['space']
    episode_id=hashlib.sha256((space+'\0'+source_path+'\0'+content).encode()).hexdigest()
    state['episodes'][episode_id]={'id':episode_id,'space':space,'kind':'primary','trust':args['trust'],'content_hash':[0]*32,'content':content,'source':{'kind':'note','ref':{'path':source_path}},'redacted_at':None}
    save_state(state)
@@ -3260,12 +3551,13 @@ for line in sys.stdin:
                 .await
                 .unwrap();
             assert_eq!(result.status, ToolStatus::Success);
+            let expected_reference = format!("episode://{expected_episode}");
             assert!(
                 result.content["data"]["layers"][0]["provenance"]
                     .as_array()
                     .unwrap()
                     .iter()
-                    .any(|id| id.as_str() == Some(expected_episode))
+                    .any(|id| id.as_str() == Some(expected_reference.as_str()))
             );
         }
         let other = brain
@@ -3384,6 +3676,23 @@ for line in sys.stdin:
         }));
         assert_eq!(redactions[0]["params"]["arguments"]["dry_run"], true);
         assert_eq!(redactions[1]["params"]["arguments"]["dry_run"], false);
+    }
+
+    #[test]
+    fn source_correction_accepts_only_exact_engine_publication_copy_proof() {
+        let source_owned="a".repeat(64);let declaration_owned="b".repeat(64);
+        let source=source_owned.as_str();let declaration=declaration_owned.as_str();
+        let valid=json!({"closure":{"episodes":[source,declaration],"publication_declarations":[declaration]}});
+        assert!(exact_episode_closure(&valid,"/closure/episodes",source));
+        for invalid in [
+            json!({"closure":{"episodes":[source,declaration]}}),
+            json!({"closure":{"episodes":[source],"publication_declarations":[declaration]}}),
+            json!({"closure":{"episodes":[source,declaration,declaration],"publication_declarations":[declaration]}}),
+            json!({"closure":{"episodes":[source,declaration],"publication_declarations":[declaration,declaration]}}),
+            json!({"closure":{"episodes":[source,declaration,"unrelated-episode"],"publication_declarations":[declaration]}}),
+            json!({"closure":{"episodes":[source],"publication_declarations":[source]}}),
+        ] {assert!(!exact_episode_closure(&invalid,"/closure/episodes",source));}
+        assert!(exact_episode_closure(&json!({"closure":{"episodes":[source]}}),"/closure/episodes",source));
     }
 
     #[tokio::test]

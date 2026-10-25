@@ -23,6 +23,10 @@ const BACKEND: &str = "apple-native-omp";
 const CAPABILITIES: [&str; 2] = ["persistent_filesystem", "shell"];
 const BROWSER_CAPABILITIES: [&str; 2] = ["browser", "human_control"];
 const TOOLS: [&str; 12] = ["read", "write", "edit", "bash", "grep", "glob", "ast_grep", "ast_edit", "eval", "todo", "publish_artifact", "browser"];
+#[cfg(test)]
+const PI_FIXTURE_CLI:&str="/bin/false";
+#[cfg(test)]
+const PI_FIXTURE_HOST:&str="pi-fixture-host";
 const MAX_CONFIG_BYTES: u64 = 65_536;
 const MAX_PROGRESS_BYTES: u64 = 1_048_576;
 
@@ -81,6 +85,7 @@ struct HomePolicy<S, P> {
     privacy_classes: P,
 }
 
+#[derive(Clone)]
 struct Route {
     computer_id: String,
     model: String,
@@ -91,6 +96,7 @@ struct Route {
     /// route's model context — admission denies before DOM/text can flow.
     browser_private: bool,
     browser_enabled: bool,
+    producer_profile_ref: Option<super::bots::RevisionRef>,
 }
 
 pub(crate) struct NativeComputers {
@@ -99,6 +105,42 @@ pub(crate) struct NativeComputers {
     origins: BTreeMap<String, WorkerOrigin>,
     browser: Option<Arc<OwnedBrowser>>,
     authority_epoch: u64,
+    /// Direct Pi tools use the container transport, never the legacy socket.
+    pi_cli: Option<PathBuf>,
+    pi_dynamic: Mutex<BTreeMap<String,Route>>,
+    workspace_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PiConfiguration {
+    #[serde(default)]
+    accepted_producer_profiles: Vec<super::lifetime::producer_profiles::OwnerAcceptedProfile>,
+    registry_root: PathBuf,
+    container_cli: PathBuf,
+    accepted_capabilities: Vec<String>,
+    routes: Vec<PiRoute>,
+    #[serde(default)]
+    browser: Option<BrowserConfiguration>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PiRoute {
+    #[serde(default)]
+    producer_profile_ref: Option<super::bots::RevisionRef>,
+    ghost_id: String,
+    computer_id: String,
+    privacy_classes: Vec<String>,
+    deadline_ms: u64,
+}
+
+pub(crate) struct PiEnvironment {
+    pub(crate) ghost_id: String,
+    pub(crate) manifest: crate::computers::HomeManifest,
+    pub(crate) directory: PathBuf,
+    pub(crate) container_cli: PathBuf,
+    pub(crate) producer_profile: Option<crate::computers::AcceptedProducerProfile>,
 }
 
 #[derive(Serialize)]
@@ -140,8 +182,110 @@ impl NativeWorkerGrant<'_> {
 }
 
 impl NativeComputers {
+    #[cfg(test)]
+    pub(crate) fn pi_fixture_allow_private(&mut self,ghost:&str)->Result<()> {
+        if let Some(route)=self.routes.get_mut(ghost) {
+            route.privacy_classes=vec!["private".into(),"local_only".into()];return Ok(());
+        }
+        let mut routes=self.pi_dynamic.lock();
+        let route=routes.get_mut(ghost).ok_or_else(||anyhow!("Pi fixture route missing"))?;
+        route.privacy_classes=vec!["private".into(),"local_only".into()];Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pi_fixture_browser_instance(&self,ghost:&str)->Result<Option<Value>> {
+        let computer=self.pi_computer(ghost).ok_or_else(||anyhow!("Pi fixture computer missing"))?;
+        self.registry.lock().browser_instance(&computer)?.map(serde_json::to_value).transpose().map_err(Into::into)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pi_fixture_replace_browser_instance(&self,instance:&Value)->Result<()> {
+        self.registry.lock().register_browser_instance(&serde_json::from_value(instance.clone())?)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pi_fixture_reopened_browser(&self)->Result<OwnedBrowser> {
+        let config=OwnedBrowserConfig::from_computers(self.browser.as_ref().ok_or_else(||anyhow!("Pi fixture browser missing"))?.config_computers())?;
+        Ok(OwnedBrowser::new(config,Arc::clone(&self.registry),self.authority_epoch).with_confinement(true).with_instance_recording(true).with_work_isolation(true))
+    }
+    #[cfg(test)]
+    pub(crate) fn attach_pi_fixture_browser(&mut self,ghost:&str,executable:&Path,private:bool)->Result<()> {
+        let route=self.routes.get_mut(ghost).ok_or_else(||anyhow!("Pi fixture route missing"))?;
+        if private {route.privacy_classes=vec!["private".into(),"local_only".into()];}
+        route.browser_enabled=true;route.browser_private=private;
+        let executable=executable.canonicalize()?;
+        let computer=OwnedBrowserComputer {ghost_id:ghost.into(),computer_id:route.computer_id.clone(),executable_sha256:crate::computers::local_browser::file_sha256(&executable)?,executable,headless:true,profile_scope:if private {"private"}else{"public"}.into()};
+        let config=OwnedBrowserConfig::from_computers(vec![computer.clone()])?;
+        let runtime=config.runtime_facts()?;
+        let browser=Arc::new(OwnedBrowser::new(config,Arc::clone(&self.registry),self.authority_epoch).with_confinement(true).with_instance_recording(true).with_work_isolation(true));
+        self.registry.lock().register_backend_with_runtime(Arc::clone(&browser) as Arc<dyn crate::adapters::computer::ComputerBackend>,true,BROWSER_CAPABILITIES.iter().map(|v|v.to_string()).collect(),Some(runtime))?;
+        attach_owned_browser(&mut self.registry.lock(),&computer,&self.workspace_id,self.authority_epoch)?;
+        self.browser=Some(browser);Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn set_pi_fixture_cli(&mut self,cli:&Path)->Result<()> {
+        let cli=cli.canonicalize()?;
+        ensure!(crate::computers::AppleContainerBackend::probe(&cli)?.available(),"Actual fixture container service unavailable");
+        self.pi_cli=Some(cli);Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn select_pi_fixture_profile(&mut self,conn:&Connection,ghost:&str,reference:&super::bots::RevisionRef)->Result<()> {
+        ensure!(self.workspace_id==PI_FIXTURE_HOST,"Profile fixture requires disposable registry");
+        super::lifetime::producer_profiles::resolve(conn,reference)?;
+        let route=self.routes.get_mut(ghost).ok_or_else(||anyhow!("Fixture Pi route missing"))?;
+        super::lifetime::producer_profiles::select(conn,ghost,Some(reference))?;
+        route.producer_profile_ref=(!super::lifetime::producer_profiles::is_legacy(reference)?).then(||reference.clone());
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pi_fixture_snapshot(&self,ghost:&str,execution:&str,epoch:u64)->Result<PathBuf> {
+        let computer=self.pi_computer(ghost).ok_or_else(||anyhow!("Pi fixture computer missing"))?;
+        let home=self.registry.lock().inspect_worker_home(&computer,ghost,epoch)?.ok_or_else(||anyhow!("Pi fixture home unavailable"))?;
+        Ok(home.task_snapshot_root.join(execution))
+    }
+    #[cfg(test)]
+    pub(crate) fn pi_fixture(root:&Path,ghost:&str)->Result<Self> {Self::pi_fixture_at(root,ghost,1)}
+    /// Explicit operator acceptance for epoch-boundary tests, using the real
+    /// registry CAS/rebind path. The old NativeComputers stays fenced afterwards.
+    #[cfg(test)]
+    pub(crate) fn pi_fixture_accept_next_epoch(&self)->Result<()> {
+        let mut routes=self.routes.clone();routes.extend(self.pi_dynamic.lock().clone());
+        let mut registry=self.registry.lock();
+        for (ghost,route) in routes {
+            let prior=registry_request(&mut registry,&ghost,self.authority_epoch,json!({"method":"inspect","computer_id":route.computer_id}))?;
+            ensure!(prior.status==ResponseStatus::Success,"fixture acceptance binding missing");
+            let mut binding:ComputerBinding=serde_json::from_value(prior.data["binding"].clone())?;
+            let expected=binding.grant_revision;ensure!(binding.epoch==self.authority_epoch,"fixture old epoch differs");
+            binding.epoch+=1;binding.grant_revision+=1;
+            let body=json!({"method":"bind","binding":binding});let command_id=uuid::Uuid::new_v4().to_string();
+            let response=registry.handle(&Envelope{protocol_version:VERSION.into(),payload_digest:canonical_digest(&body)?,actor_ref:ghost.clone(),authority_epoch:self.authority_epoch,expected_revision:Some(expected),correlation_id:command_id.clone(),command_id,body},&ghost)?;
+            ensure!(response.status==ResponseStatus::Success,"fixture explicit rebind failed: {}",response.summary);
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn pi_fixture_at(root:&Path,ghost:&str,epoch:u64)->Result<Self> {
+        let mut registry=ComputerRegistry::open(root)?;
+        registry.register_native_worker_backend(NativeWorkerBackendFacts {configured:true,available:true},CAPABILITIES.iter().map(|v|v.to_string()).collect())?;
+        let prior=registry_request(&mut registry,ghost,epoch,json!({"method":"inspect","computer_id":"pi-fixture"}))?;
+        if prior.error_code.as_deref()==Some("not_found") {
+            let response=registry_request(&mut registry,ghost,epoch,json!({"method":"bind","binding":{
+                "computer_id":"pi-fixture","ghost_id":ghost,"backend":BACKEND,"host_id":"pi-fixture-host","epoch":epoch,
+                "capabilities":CAPABILITIES,"accepted_capabilities":CAPABILITIES,"grant_revision":1}}))?;
+            ensure!(response.status==ResponseStatus::Success,"Pi fixture binding failed: {}",response.summary);
+        } else {
+            ensure!(prior.status==ResponseStatus::Success && prior.data["binding"]["ghost_id"]==ghost && prior.data["binding"]["host_id"]=="pi-fixture-host" && prior.data["binding"]["epoch"]==epoch && prior.data["revoked"]==false,"Cold Pi fixture binding changed or was fenced");
+        }
+        Ok(Self {registry:Arc::new(Mutex::new(registry)),routes:BTreeMap::from([(ghost.into(),Route {computer_id:"pi-fixture".into(),model:String::new(),thinking:String::new(),privacy_classes:vec!["public".into()],deadline_ms:300_000,browser_private:false,browser_enabled:false,producer_profile_ref:None})]),
+            origins:BTreeMap::new(),browser:None,authority_epoch:epoch,pi_cli:Some(PathBuf::from(PI_FIXTURE_CLI)),pi_dynamic:Mutex::new(BTreeMap::new()),workspace_id:PI_FIXTURE_HOST.into()})
+    }
     /// Called only for dispatch-enabled startup, before any Host worker starts.
     pub(crate) fn from_environment(journal: &Journal, profiles: &BTreeMap<String, Profile>, epoch: u64) -> Result<Option<Self>> {
+        if let Some(file) = std::env::var_os("GHOST_PI_COMPUTERS_CONFIG") {
+            ensure!(std::env::var_os(CONFIG_ENV).is_none(), "select Pi computer configuration explicitly; legacy dispatch configuration cannot also be enabled");
+            return Self::from_pi_configuration(journal, profiles, epoch, Path::new(&file)).map(Some);
+        }
         let Some(file) = std::env::var_os(CONFIG_ENV) else { return Ok(None); };
         let mut config: Configuration = read_private_json(Path::new(&file))?;
         ensure!(!config.routes.is_empty() && config.routes.len() <= 64, "native routes must contain 1..=64 explicit Ghosts");
@@ -289,7 +433,7 @@ impl NativeComputers {
                 model: route.model, thinking: route.thinking,
                 privacy_classes: route.privacy_classes, deadline_ms,
                 browser_private: browser_scope == Some("private"),
-                browser_enabled: browser_scope.is_some() });
+                browser_enabled: browser_scope.is_some(), producer_profile_ref:None });
         }
         // Explicit owned-browser gate: probed, registered on the same durable
         // registry, and attached per computer after its worker binding is current.
@@ -338,7 +482,310 @@ impl NativeComputers {
             }
             None => None,
         };
-        Ok(Some(Self { registry, routes, origins, browser, authority_epoch: epoch }))
+        Ok(Some(Self { registry, routes, origins, browser, authority_epoch: epoch, pi_cli: None,pi_dynamic:Mutex::new(BTreeMap::new()),workspace_id }))
+    }
+
+    /// Trusted Host startup entry point. The same strict private Owner file
+    /// validation applies as for from_environment; no model supplies this path.
+    pub(crate) fn from_pi_configuration(journal: &Journal, profiles: &BTreeMap<String, Profile>, epoch: u64, file: &Path) -> Result<Self> {
+        let mut config: PiConfiguration = read_private_json(file)?;
+        config.accepted_capabilities.sort_unstable();
+        ensure!(config.accepted_capabilities.iter().map(String::as_str).eq(CAPABILITIES), "Pi requires explicit shell and persistent filesystem acceptance");
+        ensure!(!config.routes.is_empty() && config.routes.len() <= 64, "Pi routes must contain 1..=64 Ghosts");
+        private_directory(&config.registry_root)?;
+        let cli = config.container_cli.canonicalize()?;
+        let probe = crate::computers::AppleContainerBackend::probe(&cli)?;
+        ensure!(probe.available(), "Pi container service is not available");
+        let cli_sha256=crate::computers::local_browser::file_sha256(&cli)?;
+        let workspace_id = journal.get::<String>("meta", "workspace_id")?.ok_or_else(|| anyhow!("Pi requires workspace identity"))?;
+        let mut registry = ComputerRegistry::open(&config.registry_root)?;
+        // The registry identity is retained so existing home ownership, layout,
+        // fencing and leases remain authoritative. No OMP runner is constructed.
+        registry.register_native_worker_backend_with_runtime(NativeWorkerBackendFacts { configured: true, available: true },
+            config.accepted_capabilities, Some(RuntimeFacts::new("apple-container", crate::computers::local_browser::file_sha256(&cli)?)?))?;
+        ensure!(config.accepted_producer_profiles.len()<=32,"Too many Owner accepted producer profiles");
+        for accepted in config.accepted_producer_profiles { super::lifetime::producer_profiles::accept_config(&journal.0,accepted)?; }
+        let mut routes = BTreeMap::new();
+        let mut computers = BTreeSet::new();
+        for mut route in config.routes {
+            ensure!(profiles.contains_key(&route.ghost_id), "Pi route requires an existing Ghost");
+            ensure!(!routes.contains_key(&route.ghost_id) && computers.insert(route.computer_id.clone()), "Pi Ghost/computer routes must be distinct");
+            ensure!(route.deadline_ms > 0 && route.deadline_ms <= 1_800_000, "Pi deadline must be bounded");
+            if let Some(reference)=route.producer_profile_ref.as_ref() {
+                if let Some(profile)=super::lifetime::producer_profiles::resolve(&journal.0,reference)? {
+                    ensure!(profile.runtime_facts().container_cli_sha256==cli_sha256
+                        && profile.runtime_facts().sandbox_uid==unsafe {libc::geteuid()}
+                        && profile.runtime_facts().sandbox_gid==unsafe {libc::getegid()},"Selected producer profile probe belongs to another CLI or sandbox identity");
+                }
+            }
+            route.privacy_classes.sort_unstable();
+            ensure!(!route.privacy_classes.is_empty() && route.privacy_classes.iter().all(|p| matches!(p.as_str(), "public" | "private" | "local_only"))
+                && route.privacy_classes.windows(2).all(|p| p[0] != p[1]), "invalid Pi privacy classes");
+            let policy_key = format!("native_home_privacy:{}", route.computer_id);
+            let previous = journal.get::<HomePolicy<String, Vec<String>>>("meta", &policy_key)?;
+            if let Some(policy) = previous.as_ref() {
+                ensure!(policy.ghost_id == route.ghost_id && policy.computer_id == route.computer_id && policy.privacy_classes == route.privacy_classes,
+                    "Pi home privacy provenance changed; explicit reconciliation required");
+            }
+            let inspection = registry_request(&mut registry, &route.ghost_id, epoch, json!({"method":"inspect","computer_id":route.computer_id}))?;
+            if inspection.status == ResponseStatus::Success {
+                ensure!(previous.is_some(), "existing Pi home lacks Host privacy provenance");
+                let binding: ComputerBinding = serde_json::from_value(inspection.data["binding"].clone())?;
+                ensure!(binding.ghost_id == route.ghost_id && binding.backend == BACKEND && binding.host_id == workspace_id
+                    && binding.epoch == epoch && inspection.data["revoked"] == false && inspection.data["capability_downgrade"] == false,
+                    "Pi home is foreign, fenced, revoked or downgraded");
+            } else {
+                ensure!(inspection.error_code.as_deref() == Some("not_found"), "Pi computer inspection failed");
+                journal.put("meta", &policy_key, &HomePolicy { ghost_id: &route.ghost_id, computer_id: &route.computer_id, privacy_classes: &route.privacy_classes })?;
+                let response = registry_request(&mut registry, &route.ghost_id, epoch, json!({"method":"bind","binding":{
+                    "computer_id":route.computer_id,"ghost_id":route.ghost_id,"backend":BACKEND,"host_id":workspace_id,
+                    "epoch":epoch,"capabilities":CAPABILITIES,"accepted_capabilities":CAPABILITIES,"grant_revision":1}}))?;
+                ensure!(response.status == ResponseStatus::Success, "Pi home binding rejected: {}", response.summary);
+            }
+            super::lifetime::producer_profiles::select(&journal.0,&route.ghost_id,route.producer_profile_ref.as_ref())?;
+            routes.insert(route.ghost_id, Route { computer_id: route.computer_id, model: String::new(), thinking: String::new(),
+                privacy_classes: route.privacy_classes, deadline_ms: route.deadline_ms, browser_private: false, browser_enabled: false, producer_profile_ref:route.producer_profile_ref });
+        }
+        let registry=Arc::new(Mutex::new(registry));
+        let browser=if let Some(section)=config.browser {
+            let mut accepted=section.accepted_capabilities; accepted.sort();
+            ensure!(accepted.iter().map(String::as_str).eq(BROWSER_CAPABILITIES),"Pi browser requires explicit browser and human_control acceptance");
+            for computer in &section.computers {
+                let route=routes.get_mut(&computer.ghost_id).ok_or_else(||anyhow!("Pi browser requires an existing Ghost route"))?;
+                ensure!(route.computer_id==computer.computer_id,"Pi browser must match its accepted computer");
+                ensure!(computer.profile_scope!="private" || route.privacy_classes.iter().all(|privacy|privacy!="public"),"Private Pi browser requires a protected-only execution route");
+                route.browser_enabled=true;
+                route.browser_private=computer.profile_scope=="private";
+            }
+            let service=OwnedBrowserConfig::from_computers(section.computers.clone())?;
+            let runtime=service.runtime_facts()?;
+            let browser=Arc::new(OwnedBrowser::new(service,Arc::clone(&registry),epoch).with_confinement(true).with_instance_recording(true).with_work_isolation(true));
+            registry.lock().register_backend_with_runtime(Arc::clone(&browser) as Arc<dyn crate::adapters::computer::ComputerBackend>,true,
+                BROWSER_CAPABILITIES.iter().map(|v|v.to_string()).collect(),Some(runtime))?;
+            for computer in &section.computers { attach_owned_browser(&mut registry.lock(),computer,&workspace_id,epoch)?; }
+            Some(browser)
+        } else { None };
+        let computers=Self { registry, routes, origins: load_worker_origins(journal)?, browser,
+            authority_epoch: epoch, pi_cli: Some(cli),pi_dynamic:Mutex::new(BTreeMap::new()),workspace_id };
+        computers.restore_provisioned_pi_routes(&journal.0,profiles)?;
+        Ok(computers)
+    }
+
+    /// Reloads only the immutable provisioned route graph using bindings that
+    /// are already accepted at this NativeComputers' current epoch. It never
+    /// advances registry authority or repairs a fenced/revoked binding.
+    pub(crate) fn restore_provisioned_pi_routes(&self,conn:&Connection,profiles:&BTreeMap<String,Profile>)->Result<()> {
+        let mut query=conn.prepare("SELECT payload FROM workspace_objects WHERE kind='pi_provisioned_route' ORDER BY id")?;
+        let mut saved=query.query_map([],|r|r.get::<_,String>(0))?.map(|raw|Ok(serde_json::from_str::<Value>(&raw?)?)).collect::<Result<Vec<_>>>()?;
+        drop(query);
+        ensure!(saved.len()<=64,"Too many provisioned Pi routes");
+        while !saved.is_empty() {
+            let before=saved.len();let mut remaining=vec![];
+            for entry in saved {
+                let ghost=entry["ghost_id"].as_str().ok_or_else(||anyhow!("Provisioned Pi Ghost missing"))?;
+                let issuer=entry["issuer_ghost"].as_str().ok_or_else(||anyhow!("Provisioned Pi issuer missing"))?;
+                ensure!(profiles.contains_key(ghost),"Provisioned Pi Ghost profile is missing");
+                if self.pi_route(issuer).is_some() {
+                    let profile=Self::saved_pi_profile(&entry)?;
+                    self.provision_pi_ghost_with_profile(conn,issuer,ghost,self.authority_epoch,&profile)?;
+                }
+                else {remaining.push(entry);}
+            }
+            ensure!(remaining.len()<before,"Provisioned Pi issuer graph has no accepted root or has a cycle");saved=remaining;
+        }
+        Ok(())
+    }
+
+    fn pi_route(&self,ghost:&str)->Option<Route> {self.routes.get(ghost).cloned().or_else(||self.pi_dynamic.lock().get(ghost).cloned())}
+
+    pub(crate) fn pi_profile_ref(&self,ghost:&str)->Result<super::bots::RevisionRef> {
+        self.pi_route(ghost).ok_or_else(||anyhow!("Pi profile route missing"))?.producer_profile_ref.map(Ok).unwrap_or_else(super::lifetime::producer_profiles::legacy_ref)
+    }
+
+    fn saved_pi_profile(record:&Value)->Result<super::bots::RevisionRef> {
+        match record["profile"].as_str() {
+            Some("pi-default/1")=>{ensure!(record.get("producer_profile_ref").is_none(),"Legacy provisioned profile contains a foreign pin");super::lifetime::producer_profiles::legacy_ref()},
+            Some("pi-producer/1")=>Ok(serde_json::from_value(record["producer_profile_ref"].clone())?),
+            _=>Err(anyhow!("Unknown provisioned Pi profile")),
+        }
+    }
+
+    pub(crate) fn pi_provisioned_profile_matches(&self,record:&Value,reference:&super::bots::RevisionRef)->Result<bool> {
+        Ok(Self::saved_pi_profile(record)?==*reference)
+    }
+
+    /// Producer observations resolve the original assignment, never today's
+    /// issuer/default route. Independent verification uses its legacy plan.
+    pub(crate) fn pi_work_execution_environment(&self,conn:&Connection,work:&crate::lifetime_contract::Work)->Result<Option<Value>> {
+        let Some(legacy)=self.pi_execution_environment(&work.owner) else {return Ok(None)};
+        match super::lifetime::work_context::producer_profile(conn,work)? {
+            Some(profile)=>Ok(Some(profile.environment())),None=>Ok(Some(legacy)),
+        }
+    }
+
+    pub(crate) fn pi_computer(&self,ghost:&str)->Option<String> {self.pi_route(ghost).map(|route|route.computer_id)}
+
+    pub(crate) fn pi_available(&self, ghost: &str, epoch: u64, privacy: &str) -> Result<bool> {
+        let Some(route)=self.pi_route(ghost) else {return Ok(false);};
+        Ok(self.pi_cli.is_some() && epoch == self.authority_epoch && route.privacy_classes.iter().any(|p|p==privacy)
+            && self.registry.lock().inspect_worker_home(&route.computer_id,ghost,epoch)?.is_some())
+    }
+
+    /// Selected execution policy only; availability remains a separate guard.
+    /// Test routes can use either simulated tools or an actual selected Apple
+    /// CLI, so fixture registry identity alone never implies simulation.
+    pub(crate) fn pi_execution_environment(&self,ghost:&str)->Option<Value> {
+        self.pi_route(ghost)?;
+        let _cli=self.pi_cli.as_ref()?;
+        #[cfg(test)]
+        if _cli.as_path()==Path::new(PI_FIXTURE_CLI) {
+            return Some(json!({"version":"ghost-execution-environment/1","evidence":"fixture","backend":"fixture","route":"fixture","simulated":true}));
+        }
+        let mut policy=crate::computers::AppleContainerBackend::configured_producer_environment();
+        let route="configured";
+        #[cfg(test)]
+        let route=if self.workspace_id==PI_FIXTURE_HOST {"fixture"}else{route};
+        policy["route"]=json!(route);
+        Some(policy)
+    }
+
+    pub(crate) fn pi_deadline(&self, ghost: &str) -> Result<u64> {
+        self.pi_route(ghost).map(|route| route.deadline_ms).ok_or_else(|| anyhow!("Pi route missing"))
+    }
+
+    pub(crate) fn pi_browser_available(&self, ghost:&str)->bool {
+        self.pi_cli.is_some() && self.browser.is_some() && self.routes.get(ghost).is_some_and(|route|route.browser_enabled)
+    }
+
+    pub(crate) fn pi_browser_private(&self,ghost:&str)->bool {self.routes.get(ghost).is_some_and(|route|route.browser_private)}
+
+    pub(crate) async fn pi_browser_execute(&self,ghost:&str,execution:&str,operation:crate::adapters::computer::BrowserOperation,
+        authorize:crate::adapters::computer::Authorize<'_>)->Result<Value> {
+        ensure!(self.pi_browser_available(ghost),"Pi browser is not granted");
+        self.browser.as_ref().unwrap().scoped_execute(ghost,execution,operation,authorize).await
+    }
+
+    pub(crate) async fn pi_browser_proposal(&self,ghost:&str,execution:&str,digest:&str,args:&Value)->Result<crate::computers::BrowserAction> {
+        let browser=self.browser.as_ref().ok_or_else(||anyhow!("Pi browser missing"))?;
+        let computer=browser.computer_id_for(ghost)?;
+        if let Some(prior)=self.registry.lock().browser_action_for_input(&computer,execution,digest,self.authority_epoch)? {return Ok(prior);}
+        let reference=args["ref"].as_str().ok_or_else(||anyhow!("Exact observed browser target required"))?;
+        let snapshot=args["snapshot_id"].as_u64().ok_or_else(||anyhow!("Exact observed browser snapshot required"))?;
+        let target=browser.target_label(ghost,execution,reference,snapshot).ok_or_else(||anyhow!("Browser observation stale"))?;
+        let detail=serde_json::json!({"operation":args["operation"],"arguments":args,"url":target["url"],"snapshot_id":snapshot,"target":target,"authority_epoch":self.authority_epoch});
+        ensure!(browser.verify_live_target(ghost,execution,&detail).await?,"Browser target no longer matches observation");
+        let id=self.registry.lock().propose_browser_action(&computer,ghost,execution,digest,self.authority_epoch,&detail)?;
+        self.registry.lock().browser_action(&id)?.ok_or_else(||anyhow!("Browser proposal missing"))
+    }
+
+    pub(crate) async fn pi_browser_approval_current(&self,ghost:&str,execution:&str,action:&crate::computers::BrowserAction)->Result<bool> {
+        ensure!(action.execution_id==execution && action.requested_epoch==self.authority_epoch,"Browser action scope changed");
+        self.browser.as_ref().ok_or_else(||anyhow!("Pi browser missing"))?.verify_live_target(ghost,execution,&action.detail).await
+    }
+    pub(crate) fn pi_browser_decide(&self,action:&str,approve:bool)->Result<crate::computers::BrowserAction> {
+        self.registry.lock().decide_browser_action(action,"owner",approve)
+    }
+    pub(crate) fn pi_browser_claim(&self,action:&str,digest:&str)->Result<()> {
+        self.registry.lock().record_browser_action_effect(action,digest)
+    }
+
+    pub(crate) async fn pi_browser_gesture(&self,ghost:&str,execution:&str,args:&Value,authorize:crate::adapters::computer::Authorize<'_>)->Result<Value> {
+        self.browser.as_ref().ok_or_else(||anyhow!("Pi browser missing"))?.scoped_targeted_gesture(ghost,execution,args,authorize).await
+    }
+
+    pub(crate) async fn pi_browser_stop(&self,ghost:&str,execution:&str)->Result<()> {
+        if let Some(browser)=&self.browser {
+            browser.stop_scoped_session(ghost,execution).await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn pi_acquire(&self, ghost: &str, execution: &str, epoch: u64, privacy: &str) -> Result<PiEnvironment> {
+        ensure!(self.pi_available(ghost, epoch, privacy)?, "no current Pi computer grant");
+        let computer_id = self.pi_computer(ghost).ok_or_else(||anyhow!("Pi route missing"))?;
+        let manifest = self.registry.lock().acquire_worker_home(&computer_id, ghost, execution, epoch)?;
+        let directory = manifest.task_snapshot_root.join(execution);
+        if !directory.exists() {
+            // execution is the Host-derived lowercase SHA-256 component.
+            crate::worker::native_tools::create_execution_workspace(&manifest.task_snapshot_root, execution)
+                .map_err(|error| anyhow!(error.code))?;
+        }
+        crate::worker::native_tools::NativeWorkspace::open(&directory).map_err(|error| anyhow!(error.code))?;
+        Ok(PiEnvironment { ghost_id:ghost.into(), manifest, directory, container_cli: self.pi_cli.as_ref().unwrap().clone(), producer_profile:None })
+    }
+
+    pub(crate) fn pi_current(&self, ghost: &str, execution: &str, computer: &str, epoch: u64, privacy: &str) -> Result<bool> {
+        Ok(self.pi_available(ghost, epoch, privacy)? && self.pi_computer(ghost).as_deref() == Some(computer)
+            && self.registry.lock().worker_home_is_current(computer, ghost, execution, epoch)?)
+    }
+
+    pub(crate) fn pi_release(&self, ghost: &str, execution: &str, epoch: u64) -> Result<()> {
+        let route = self.pi_route(ghost).ok_or_else(|| anyhow!("Pi route missing"))?;
+        self.registry.lock().release_worker_home(&route.computer_id, ghost, execution, epoch)
+    }
+
+    /// Provision only the caller's already accepted Pi execution profile.
+    /// All paths, capabilities and computer identity are Host-derived. This
+    /// crosses the registry database boundary; call outside a Host transaction.
+    pub(crate) fn provision_pi_ghost(&self,conn:&Connection,issuer:&str,ghost:&str,epoch:u64,profile:&str)->Result<Value> {
+        ensure!(conn.is_autocommit(),"Pi provisioning must not run inside the Host command transaction");
+        ensure!(profile=="pi-default/1","Unsupported historical Pi execution profile");
+        self.provision_pi_ghost_with_profile(conn,issuer,ghost,epoch,&super::lifetime::producer_profiles::legacy_ref()?)
+    }
+
+    pub(crate) fn provision_pi_ghost_with_profile(&self,conn:&Connection,issuer:&str,ghost:&str,epoch:u64,profile:&super::bots::RevisionRef)->Result<Value> {
+        ensure!(conn.is_autocommit(),"Pi provisioning must not run inside the Host command transaction");
+        ensure!(self.pi_cli.is_some() && epoch==self.authority_epoch,"Pi execution profile unavailable or fenced");
+        super::lifetime::producer_profiles::resolve(conn,profile)?;
+        uuid::Uuid::parse_str(ghost)?;
+        let source=self.pi_route(issuer).ok_or_else(||anyhow!("Issuer has no accepted Pi execution profile"))?;
+        ensure!(self.pi_available(issuer,epoch,source.privacy_classes.first().ok_or_else(||anyhow!("Issuer privacy profile empty"))?)?,"Issuer Pi profile no longer current");
+        let computer=format!("pi-bot-{}",&format!("{:x}",Sha256::digest(ghost.as_bytes()))[..32]);
+        let mut record=json!({"ghost_id":ghost,"issuer_ghost":issuer,"computer_id":computer,"privacy_classes":source.privacy_classes,"deadline_ms":source.deadline_ms,"profile":"pi-default/1"});
+        if !super::lifetime::producer_profiles::is_legacy(profile)? { record["profile"]=json!("pi-producer/1");record["producer_profile_ref"]=serde_json::to_value(profile)?; }
+        let prior:Option<String>=conn.query_row("SELECT payload FROM workspace_objects WHERE kind='pi_provisioned_route' AND id=?1",[ghost],|r|r.get(0)).optional()?;
+        if let Some(prior)=prior {ensure!(serde_json::from_str::<Value>(&prior)?==record,"Provisioned Pi route changed; explicit reconciliation required");}
+        else {ensure!(self.pi_profile_ref(issuer)?==*profile,"New bot profile must match its issuer Owner-selected profile");}
+        ensure!(!self.routes.contains_key(ghost),"Ghost already has a static operator Pi route");
+        {let dynamic=self.pi_dynamic.lock();ensure!(dynamic.contains_key(ghost)||dynamic.len()<64,"Provisioned Pi route limit reached");}
+        let policy_key=format!("native_home_privacy:{computer}");
+        let policy=json!({"ghost_id":ghost,"computer_id":computer,"privacy_classes":source.privacy_classes});
+        let existing_policy:Option<String>=conn.query_row("SELECT payload FROM workspace_objects WHERE kind='meta' AND id=?1",[&policy_key],|r|r.get(0)).optional()?;
+        if let Some(existing)=existing_policy {ensure!(serde_json::from_str::<Value>(&existing)?==policy,"Provisioned Pi privacy provenance conflict");}
+        else {conn.execute("INSERT INTO workspace_objects(kind,id,payload) VALUES('meta',?1,?2)",params![policy_key,serde_json::to_string(&policy)?])?;}
+        let mut registry=self.registry.lock();
+        let inspected=registry_request(&mut registry,ghost,epoch,json!({"method":"inspect","computer_id":computer}))?;
+        if inspected.error_code.as_deref()==Some("not_found") {
+            let response=registry_request(&mut registry,ghost,epoch,json!({"method":"bind","binding":{"computer_id":computer,"ghost_id":ghost,"backend":BACKEND,"host_id":self.workspace_id,"epoch":epoch,"capabilities":CAPABILITIES,"accepted_capabilities":CAPABILITIES,"grant_revision":1}}))?;
+            ensure!(response.status==ResponseStatus::Success,"Provisioned Pi computer bind failed: {}",response.summary);
+        } else {
+            ensure!(inspected.status==ResponseStatus::Success && inspected.data["binding"]["ghost_id"]==ghost && inspected.data["binding"]["host_id"]==self.workspace_id
+                && inspected.data["binding"]["backend"]==BACKEND && inspected.data["binding"]["epoch"]==epoch && inspected.data["revoked"]==false && inspected.data["capability_downgrade"]==false,
+                "Provisioned Pi home is foreign, revoked, fenced or downgraded");
+        }
+        ensure!(registry.inspect_worker_home(&computer,ghost,epoch)?.is_some(),"Provisioned Pi home is not ready");drop(registry);
+        #[cfg(test)]
+        {
+            let fault:Option<String>=conn.query_row("SELECT f.payload FROM workspace_objects f JOIN workspace_objects c ON c.kind='bot_candidate_v1' AND c.id=f.id WHERE f.kind='bot_provisioning_test_fault' AND json_extract(c.payload,'$.definition.ghost_id')=?1 AND json_extract(f.payload,'$.stage')='environment_registry_commit'",[ghost],|r|r.get(0)).optional()?;
+            if let Some(raw)=fault {
+                let fault:Value=serde_json::from_str(&raw)?;
+                let parent=std::env::var_os("GHOST_A03_CRASH_PARENT").map(PathBuf::from)
+                    .ok_or_else(||anyhow!("A03 registry-boundary exit requires its private child root"))?;
+                ensure!(fault["behavior"]=="exit-process" && parent.is_absolute() && parent.is_dir()
+                    && fault["parent_root"].as_str()==parent.to_str()
+                    && self.workspace_id==PI_FIXTURE_HOST && self.pi_cli.as_deref()==Some(Path::new(PI_FIXTURE_CLI)),
+                    "A03 registry-boundary exit requires the declared disposable fixture");
+                // Registry/home committed, but the Host route and dynamic map
+                // do not exist yet. Exit without unwinding or phase projection.
+                std::process::exit(73);
+            }
+        }
+        conn.execute("INSERT OR IGNORE INTO workspace_objects(kind,id,payload) VALUES('pi_provisioned_route',?1,?2)",params![ghost,serde_json::to_string(&record)?])?;
+        super::lifetime::producer_profiles::select(conn,ghost,Some(profile))?;
+        self.pi_dynamic.lock().insert(ghost.into(),Route {computer_id:computer.clone(),model:String::new(),thinking:String::new(),privacy_classes:source.privacy_classes,deadline_ms:source.deadline_ms,browser_private:false,browser_enabled:false,producer_profile_ref:(!super::lifetime::producer_profiles::is_legacy(profile)?).then(||profile.clone())});
+        let mut response=json!({"engine":"pi","execution_profile":"pi-default/1","ghost_id":ghost,"computer_id":computer,"authority_epoch":epoch,"ready":true});
+        if !super::lifetime::producer_profiles::is_legacy(profile)? {response["execution_profile"]=json!("pi-producer/1");response["producer_profile_ref"]=serde_json::to_value(profile)?;}
+        Ok(response)
     }
 
     /// The Ghost's current native computer identity, when routed here.
@@ -719,6 +1166,19 @@ mod tests {
 
     const GHOST: &str = "22222222-2222-7222-8222-222222222222";
 
+    #[test]
+    fn configured_pi_environment_distinguishes_simulation_from_selected_container_policy() {
+        let root=tempfile::tempdir().unwrap();let mut computers=NativeComputers::pi_fixture(root.path(),GHOST).unwrap();
+        let simulated=computers.pi_execution_environment(GHOST).unwrap();assert_eq!(simulated["backend"],"fixture");assert_eq!(simulated["simulated"],true);assert!(simulated.get("image_ref").is_none());assert!(simulated.get("os").is_none());
+        // Metadata-only declaration: no CLI execution, probe or package check.
+        // A real fixture CLI selection uses this same pi_cli field after its
+        // existing independent acceptance path has run.
+        computers.pi_cli=Some(PathBuf::from("/declared-only/container-cli"));
+        let selected=computers.pi_execution_environment(GHOST).unwrap();assert_eq!(selected["backend"],"apple_container");assert_eq!(selected["route"],"fixture");assert_eq!(selected["evidence"],"configured_policy");assert_eq!(selected["image_ref"],crate::computers::PINNED_TASK_IMAGE);assert!(selected.get("simulated").is_none());assert!(!selected.to_string().contains("/declared-only"));
+        computers.workspace_id="configured-owner-workspace".into();assert_eq!(computers.pi_execution_environment(GHOST).unwrap()["route"],"configured");
+        assert!(computers.pi_execution_environment("unknown-ghost").is_none());computers.pi_cli=None;assert!(computers.pi_execution_environment(GHOST).is_none());
+    }
+
     fn fixture() -> (tempfile::TempDir, Journal, NativeComputers) {
         let root = tempfile::tempdir().unwrap();
         let journal = Journal::open(&root.path().join("host.db")).unwrap();
@@ -740,10 +1200,14 @@ mod tests {
                 thinking: "max".into(), privacy_classes: vec!["public".into()], deadline_ms: 180_000,
                 browser_private: false,
                 browser_enabled: false,
+                producer_profile_ref: None,
             })]),
             origins,
             browser: None,
             authority_epoch: 1,
+            pi_cli: None,
+            pi_dynamic:Mutex::new(BTreeMap::new()),
+            workspace_id:"test-host".into(),
         };
         (root, journal, computers)
     }

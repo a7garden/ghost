@@ -1096,6 +1096,29 @@ pub(crate) fn execution_session_locator(root: &Path, execution_id: &str) -> Stri
 /// this worker root's immutable artifact store, name the expected digest, be a
 /// bounded regular file that was never a symlink, hash to the expected digest,
 /// and stay unchanged for the whole read.
+/// Host Pi history uses its already-held journal authority rather than
+/// reopening a mutable workspace database path while resolving old locators.
+pub(crate) fn read_verified_pi_artifact(
+    host_root: &Path,
+    authority: &Connection,
+    execution_id: &str,
+    expected_digest: &str,
+    locator: &Path,
+) -> Result<Vec<u8>> {
+    let root = host_root.join("pi-execution");
+    let mapped = crate::operations::pi_artifact_relocation::configured_artifact_locator(&root, authority, locator, expected_digest)?;
+    let bytes = read_verified_artifact(&root, execution_id, expected_digest, mapped.as_deref().unwrap_or(locator))?;
+    if let Some(path) = mapped {
+        let bound = crate::operations::recovery_bundle::read_private_bound_file(&path, INLINE_FRAME_LIMIT as u64)?;
+        ensure!(bound == bytes && format!("{:x}", Sha256::digest(&bound)) == expected_digest,
+            "restored Pi artifact path changed during verification");
+        ensure!(crate::operations::pi_artifact_relocation::configured_artifact_locator(&root, authority, locator, expected_digest)?.as_ref() == Some(&path),
+            "restored Pi artifact authority changed before delivery");
+        return Ok(bound);
+    }
+    Ok(bytes)
+}
+
 pub(crate) fn read_verified_artifact(
     worker_root: &Path,
     execution_id: &str,

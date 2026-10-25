@@ -5,7 +5,7 @@ use sha2::Digest;
 
 fn host() -> (tempfile::TempDir, Arc<Host>) {
     let root = tempfile::tempdir().unwrap();
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     for name in ["wake-owner-fixture", "wake-specialist-fixture"] {
         app.action(Action {
             request_id: uuid::Uuid::new_v4().to_string(),
@@ -440,7 +440,7 @@ async fn legacy_skill_keys_migrate_without_cross_ghost_name_collisions() {
     }
     app.shutdown().await.unwrap();
     drop(app);
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     for (id, digest) in ids.iter().zip(digests) {
         let manifest = wake_action(&app, OwnerAction::SkillManifest { profile_id: id.clone() });
         let skills = manifest["skills"].as_array().unwrap();
@@ -474,7 +474,7 @@ async fn conflicting_legacy_skill_records_preserve_both_payloads() {
     ).unwrap();
     app.shutdown().await.unwrap();
     drop(app);
-    let result = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"));
+    let result = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"));
     assert!(result.is_err(), "conflicting revisions must never be silently chosen");
     let conn = rusqlite::Connection::open(root.path().join("workspace.db")).unwrap();
     for (key, expected) in [(format!("{id}:brief"), original), ("brief".into(), conflicting)] {

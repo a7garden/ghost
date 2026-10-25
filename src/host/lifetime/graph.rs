@@ -472,6 +472,18 @@ pub(super) fn terminal_changed(
                 bail!("parent Ghost must be registered before child reports can be delivered");
             }
             let revision = db::revision(work.goal_revision)?;
+            super::super::memory_publication::absorb_child_dependencies(conn,work,&parent)?;
+            super::super::shared_skills::transfer(conn,work,&parent)?;
+            let mut child_disclosure=child_goal.privacy.clone();
+            conversation::raise_privacy(&mut child_disclosure,&super::super::shared_skills::privacy(conn,work)?)?;
+            if let Some(execution)=&work.execution_id {
+                let pinned:Option<String>=conn.query_row("SELECT privacy FROM lifetime_pi_executions WHERE execution_id=?1",[execution],|r|r.get(0)).optional()?;
+                if let Some(pinned)=pinned {conversation::raise_privacy(&mut child_disclosure,&pinned)?;}
+            }
+            let mut parent_disclosure=conversation::conversation_privacy(conn,&parent_goal.accountable_ghost,&parent_goal.reply_conversation)?;
+            conversation::raise_privacy(&mut parent_disclosure,&parent_goal.privacy)?;
+            conversation::raise_privacy(&mut parent_disclosure,&super::super::shared_skills::privacy(conn,&parent)?)?;
+            conversation::persist_disclosure(conn,&parent_goal.accountable_ghost,&parent_goal.reply_conversation,&parent_disclosure)?;
             let inserted = conn.execute(
                 "INSERT OR IGNORE INTO lifetime_graph_wakes(parent_work_id,child_work_id,child_goal_revision,state) VALUES(?1,?2,?3,?4)",
                 params![parent.id, work.id, revision, work.state],
@@ -505,7 +517,7 @@ pub(super) fn terminal_changed(
                         message_id,
                         parent.owner,
                         payload_digest,
-                        child_goal.privacy,
+                        child_disclosure,
                         serde_json::to_string(&payload)?,
                     ],
                 )?;
@@ -513,7 +525,7 @@ pub(super) fn terminal_changed(
                     "method": "conversation.submit",
                     "ghost_id": parent_goal.accountable_ghost,
                     "conversation_id": parent_goal.reply_conversation,
-                    "privacy": parent_goal.privacy,
+                    "privacy": parent_disclosure,
                     "goal_id": parent_goal.id,
                     "goal_revision": parent_goal.revision,
                     "prompt": summary,
@@ -542,18 +554,9 @@ fn work_delegate(
     principal: &str,
     context: &mut ApplyContext,
 ) -> Result<Response> {
-    let body = &envelope.body;
-    apply::exact_fields(
-        body,
-        &[
-            "method",
-            "parent_work_id",
-            "target_ghost_id",
-            "summary",
-            "artifact_refs",
-            "acceptance_spec",
-        ],
-    )?;
+    let normalized=super::delegation_contracts::resolved_body(conn,&envelope.body).map_err(|error|apply::invalid(error.to_string()))?;
+    let body=&normalized;
+    apply::allowed_fields(body,&["method","parent_work_id","target_ghost_id","summary","artifact_refs","acceptance_spec","work_memory_context_revision"],&["method","parent_work_id","target_ghost_id","summary","artifact_refs","acceptance_spec"])?;
     let parent_work_id = apply::string_field(body, "parent_work_id")?;
     let target_ghost_id = apply::string_field(body, "target_ghost_id")?;
     let summary = apply::string_field(body, "summary")?;
@@ -620,6 +623,9 @@ fn work_delegate(
     if target_mode != "active" {
         return Err(apply::conflict("target Ghost is not active"));
     }
+    if !super::super::bot_lifecycle::admission_allowed(conn,target_ghost_id)? {
+        return Err(apply::conflict("target bot is paused, retired, or not independently ready"));
+    }
 
     let mut budget = budget_for(conn, &scope.root_goal_id)?;
     if budget.is_none() {
@@ -668,13 +674,17 @@ fn work_delegate(
         )?);
     }
 
+    super::super::work_memory::validate_delegation_target(conn,&parent_work,target_ghost_id)?;
+    super::super::memory_publication::validate_delegation_target(conn,&parent_work,target_ghost_id)?;
+    super::super::shared_skills::delegation_target(conn,&parent_work,target_ghost_id)?;
+    let child_privacy=super::pi_execution::privacy(conn,&parent_work)?;
     let child_prompt = delegated_prompt(summary, &artifact_refs)?;
     let child_body = json!({
         "method": "goal.submit",
         "ghost_id": target_ghost_id,
         "conversation_id": target_conversation,
         "prompt": child_prompt,
-        "privacy": parent_goal.privacy,
+        "privacy": child_privacy,
         "acceptance_spec": acceptance_spec,
     });
     let child_envelope = Envelope {
@@ -701,6 +711,9 @@ fn work_delegate(
         .ok_or_else(|| anyhow!("goal_submit did not persist its child Goal"))?;
     let child_work = db::work(conn, &child_work_id)?
         .ok_or_else(|| anyhow!("goal_submit did not persist its child Work"))?;
+    super::super::work_memory::restrict_child(conn,&parent_work,&child_work)?;
+    super::super::memory_publication::child_dependencies(conn,&parent_work,&child_work)?;
+    super::super::shared_skills::transfer(conn,&parent_work,&child_work)?;
     insert_link(
         conn,
         &child_work.id,
@@ -727,7 +740,7 @@ fn work_delegate(
 
 fn work_wait(conn: &Connection, envelope: &Envelope, principal: &str) -> Result<Response> {
     let body = &envelope.body;
-    apply::exact_fields(body, &["method", "work_id", "wait_for"])?;
+    apply::allowed_fields(body,&["method","work_id","wait_for","work_memory_context_revision","assignment_id","generation_task_id"],&["method","work_id","wait_for"])?;
     let work_id = apply::string_field(body, "work_id")?;
     apply::validate_identity("work_id", work_id)?;
     let wait_for = opaque_string_array(body, "wait_for", WAIT_FOR_MAX)?;
@@ -794,6 +807,7 @@ fn work_wait(conn: &Connection, envelope: &Envelope, principal: &str) -> Result<
         }
     }
 
+    let pi_wait=super::pi_wait::prepare(conn,envelope,principal,&waiter)?;
     conn.execute(
         "DELETE FROM lifetime_blocking_edges WHERE waiter_work_id=?1 AND kind='dependency'",
         [&waiter.id],
@@ -821,6 +835,7 @@ fn work_wait(conn: &Connection, envelope: &Envelope, principal: &str) -> Result<
         waiter.blocker = Some(format_wait_blocker(&edges));
     }
     db::update_work(conn, &waiter)?;
+    let wait_receipt=pi_wait.as_ref().map(|binding|super::pi_wait::store(conn,binding)).transpose()?;
     Ok(apply::success(
         if edges.is_empty() {
             "work dependencies are resolved"
@@ -830,6 +845,7 @@ fn work_wait(conn: &Connection, envelope: &Envelope, principal: &str) -> Result<
         vec![waiter.id.clone()],
         json!({
             "work": waiter,
+            "wait_receipt":wait_receipt,
             "root_goal_id": waiter_scope.root_goal_id,
             "wait_for": wait_for,
             "resolved_wait_for": resolved,
@@ -1429,11 +1445,10 @@ fn request_worker_cancellation(
     work.state = "cancel_requested".to_owned();
     work.blocker = Some(reason.to_owned());
     db::update_work(conn, work)?;
-    let body = json!({ "method": "cancel", "execution_id": execution_id });
-    context.enqueue(
-        "worker",
-        apply::outgoing(envelope, principal, Some(work.goal_revision), body)?,
-    );
+    if !super::pi_execution::execution_is_pi(conn,&execution_id)? {
+        let body = json!({ "method": "cancel", "execution_id": execution_id });
+        context.enqueue("worker",apply::outgoing(envelope, principal, Some(work.goal_revision), body)?);
+    }
     Ok(true)
 }
 
@@ -1548,6 +1563,7 @@ fn refresh_waiter_blocker(conn: &Connection, waiter_id: &str) -> Result<Option<W
             waiter.state = "queued".to_owned();
             waiter.blocker = None;
             db::update_work(conn, &waiter)?;
+            super::pi_wait::mark_resolved(conn,&waiter)?;
             return Ok(Some(waiter));
         }
     } else if waiter.state == "blocked"
@@ -1568,7 +1584,7 @@ fn enqueue_released_assignment(
     context: &mut ApplyContext,
     mut work: Work,
 ) -> Result<()> {
-    if work.execution_id.is_some() || !current_result_scope(conn, &work)? {
+    if work.execution_id.is_some() || super::pi_wait::has_bound_wait(conn,&work)? || !current_result_scope(conn, &work)? {
         return Ok(());
     }
     let pending: bool = conn.query_row(
@@ -1610,7 +1626,7 @@ fn enqueue_released_assignment(
         "goal_revision": goal.revision,
         "work_id": work.id,
         "prompt": goal.prompt,
-        "privacy": goal.privacy,
+        "privacy": super::super::work_memory::assignment_privacy(conn,&work,&goal.privacy)?,
     });
     let payload = apply::outgoing_with_cause(
         &source, &cause.command_id, &source.actor_ref, Some(goal.revision), body,

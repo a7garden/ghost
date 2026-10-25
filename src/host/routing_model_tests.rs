@@ -193,7 +193,7 @@ impl ai::Provider for ScriptedRouter {
 
 fn fixture() -> (tempfile::TempDir, Arc<Host>, String, Runtime, String) {
     let dir = tempfile::tempdir().unwrap();
-    let app = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let mut profile = Host::profile(
         ProfileStore::create_profile(dir.path(), "router", "synthetic anonymous fixture").unwrap(),
     )

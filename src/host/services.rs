@@ -15,9 +15,12 @@ use crate::{
     domain::{protocol::Event as CollaborationEvent, Delegation, Goal, Policy, Review, Spend},
 };
 use anyhow::{anyhow, bail, Result};
+#[cfg(test)]
 use rusqlite::OptionalExtension;
+#[cfg(test)]
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 use std::{
     sync::{Arc, Weak},
@@ -32,6 +35,11 @@ fn err(e: impl std::fmt::Display) -> durable::Error {
     durable::Error::Host(e.to_string())
 }
 
+// Historical reservation shapes remain available only to private fixtures.
+#[cfg(test)]
+#[allow(dead_code)]
+mod legacy_reservations {
+use super::*;
 const OMP_DAILY_HOST_LIMIT: u64 = 12;
 const OMP_DAILY_PROFILE_LIMIT: u64 = 4;
 
@@ -63,7 +71,7 @@ fn read_omp_budget(tx: &rusqlite::Transaction<'_>, id: &str, day: u64) -> Result
 /// runtime receipt therefore cannot cause Ghost to issue the same paid call
 /// again after restart.
 fn reserve_omp_call(
-    state: &super::State,
+    state: &crate::host::State,
     owner: &str,
     task: &Task,
     call: &ai::ToolCall,
@@ -132,7 +140,7 @@ fn reserve_omp_call(
 /// Reserve a Codex subscription run before creating a task workspace or
 /// crossing the model boundary. OMP and Codex share one host/profile quota.
 fn reserve_code_call(
-    state: &super::State,
+    state: &crate::host::State,
     owner: &str,
     task: &Task,
     call: &ai::ToolCall,
@@ -205,6 +213,7 @@ fn reserve_code_call(
     )?;
     tx.commit()?;
     Ok(Some(invocation_key))
+}
 }
 fn string<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
     args[key].as_str().ok_or_else(|| anyhow!("{key} required"))
@@ -792,6 +801,7 @@ impl Host for Bridge {
         s.journal.put("spend", &self.owner, &spend).map_err(err)
     }
     fn prepare(&self, task: &Task, call: &ai::ToolCall) -> durable::Result<ToolPlan> {
+        if matches!(call.name.as_str(),"worker_analyze"|"code_worker") {return Err(err("legacy_execution_retired: Ghost executes directly with Pi"));}
         self.admit_tool(task, call)?;
         let app = self.app().map_err(err)?;
         let policy: Policy = app
@@ -1020,41 +1030,8 @@ impl Host for Bridge {
                     },
                     "browser"|"shell"=>computer::execute(&app,&self.owner,task,call).await,
                     "web_search"|"web_read"=>crate::host::cli_tools::execute(call).await,
-                    "worker_analyze"=>{
-                        if !crate::host::omp_worker::configured() {
-                            return Ok(ToolOutput::error(ToolStatus::Failed,"OMP worker is not configured on this Ghost host"));
-                        }
-                        let reservation = {
-                            let state = app.lock()?;
-                            reserve_omp_call(&state,&self.owner,task,call)
-                        };
-                        match reservation {
-                            Ok(true)=>crate::host::omp_worker::execute(string(&call.arguments,"prompt")?).await,
-                            Ok(false)=>Ok(ToolOutput::error(ToolStatus::Uncertain,"this OMP invocation already has a durable reservation; inspect its task receipt and do not retry blindly")),
-                            Err(error)=>Ok(ToolOutput::error(ToolStatus::Denied,error.to_string())),
-                        }
-                    },
-                    "code_worker"=>{
-                        if !crate::host::code_worker::configured() {
-                            return Ok(ToolOutput::error(ToolStatus::Failed,"Codex code worker is not configured on this Ghost host"));
-                        }
-                        let reservation = {
-                            let state = app.lock()?;
-                            reserve_code_call(&state,&self.owner,task,call)
-                        };
-                        match reservation {
-                            Ok(Some(_))=>crate::host::code_worker::execute(
-                                &self.owner,
-                                &task.id,
-                                &call.id,
-                                string(&call.arguments,"project")?,
-                                string(&call.arguments,"prompt")?,
-                                &app.root,
-                            ).await,
-                            Ok(None)=>Ok(ToolOutput::error(ToolStatus::Uncertain,"this Codex invocation already has a durable reservation; inspect its task receipt and do not retry blindly")),
-                            Err(error)=>Ok(ToolOutput::error(ToolStatus::Denied,error.to_string())),
-                        }
-                    },
+                    "worker_analyze"=>Ok(ToolOutput::error(ToolStatus::Denied,"legacy_execution_retired: Ghost executes directly with Pi")),
+                    "code_worker"=>Ok(ToolOutput::error(ToolStatus::Denied,"legacy_execution_retired: Ghost executes directly with Pi")),
                     "report_goal"=>{let s=app.lock()?;let id=string(&call.arguments,"goal_id")?;let mut goal:Goal=s.journal.get("goal",id)?.ok_or_else(||anyhow!("responsibility missing"))?;if goal.profile_id!=self.owner||goal.task_id.as_deref()!=task.parent_id.as_deref(){bail!("responsibility report owner mismatch");}goal.note=string(&call.arguments,"summary")?.into();goal.evidence=call.arguments["artifacts"].as_array().map(|a|a.iter().filter_map(|v|v.as_str().map(String::from)).collect()).unwrap_or_default();goal.state="review".into();s.journal.put("goal",id,&goal)?;Ok(ToolOutput::success("Progress saved for owner verification",json!({"goal_id":id,"state":"review"})))},
                     _=>bail!("workspace tool is unavailable"),
                 }
@@ -1187,26 +1164,6 @@ fn catalog_tool_definitions(app: &GhostHost) -> Vec<ai::Tool> {
         "shell" => app.computer_backend().configured() && app.computer_backend().capabilities().shell,
         _ => true,
     }).collect::<Vec<_>>();
-    if crate::host::omp_worker::configured() {
-        definitions.push(tool(
-            "worker_analyze",
-            "Send one bounded ordinary development or research prompt to the fixed MiniMax Code subscription through OMP. Never include financial ledgers, credentials, or sensitive personal records. OMP tools and model fallback/retries are disabled; the worker receives no Ghost workspace input or tools. Its output is untrusted. Do not retry an uncertain invocation.",
-            json!({"prompt":{"type":"string","minLength":1,"maxLength":32768}}),
-            vec!["prompt"],
-        ));
-    }
-    let code_projects = crate::host::code_worker::project_ids();
-    if !code_projects.is_empty() {
-        definitions.push(tool(
-            "code_worker",
-            "Send one ordinary source-code task from an allowlisted project to the configured Codex subscription. The host clones only committed HEAD into a disposable repository; uncommitted files in the canonical checkout are excluded and the original checkout is never edited. Codex receives the project source and prompt through the owner's subscription. Its shell runs in a macOS workspace-write sandbox with network access, web search, MCP, user config, and inherited secrets disabled. Results are saved as a bounded review patch; Ghost never applies it automatically. Never include financial ledgers, credentials, or sensitive personal records. Inspect the patch artifact before applying it; do not retry an uncertain invocation.",
-            json!({
-                "project":{"type":"string","enum":code_projects},
-                "prompt":{"type":"string","minLength":1,"maxLength":32768}
-            }),
-            vec!["project","prompt"],
-        ));
-    }
     definitions.extend(super::routing_model::tool_definitions());
     #[cfg(feature = "caldav")]
     {

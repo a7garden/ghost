@@ -12,7 +12,7 @@ fn root() -> String {
 
 async fn broken_acknowledgement_preserves_status(case: &str, code: u16) {
     let root = tempfile::tempdir().unwrap();
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     configure_fixture(&app, "todos", Kind::Todo, vec![]);
     let base = Synthetic::new("fixture:todos");
     base.seed("ack", ics("ack", Kind::Todo, ""));
@@ -255,7 +255,7 @@ async fn caldav_http_malformed_listing_and_get_etags_never_admit_writable_base_o
         for at_listing in [true, false] {
             let root = tempfile::tempdir().unwrap();
             let app =
-                Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+                Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
             configure_fixture(&app, "todos", Kind::Todo, vec![]);
             let encoded = tag.replace('"', "&quot;");
             let listing = xml_reply(&xml(&item(
@@ -342,7 +342,7 @@ async fn caldav_http_malformed_listing_and_get_etags_never_admit_writable_base_o
 async fn caldav_http_valid_strong_and_weak_tags_preserve_raw_but_weak_is_read_only() {
     for tag in ["\"base\"", "\"café\"", "W/\"weak\""] {
         let root = tempfile::tempdir().unwrap();
-        let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
         configure_fixture(&app, "todos", Kind::Todo, vec![]);
         let raw = ics("validtag", Kind::Todo, "");
         let encoded = tag.replace('"', "&quot;");
@@ -400,7 +400,7 @@ async fn caldav_http_valid_strong_and_weak_tags_preserve_raw_but_weak_is_read_on
 #[tokio::test]
 async fn caldav_http_adapter_independent_malformed_tag_cannot_enter_host_cache() {
     let root = tempfile::tempdir().unwrap();
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     configure_fixture(&app, "todos", Kind::Todo, vec![]);
     let remote = Synthetic::new("fixture:todos");
     remote.seed("cached", ics("cached", Kind::Todo, ""));
@@ -695,7 +695,7 @@ async fn caldav_http_invalid_mutation_and_unknown_schema_never_send() {
 async fn caldav_http_supported_canonical_readback_matches_goal_unknown_does_not() {
     for unsupported in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
         configure_fixture(&app, "todos", Kind::Todo, vec![]);
         let admission = owner(
             &app,

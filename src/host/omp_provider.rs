@@ -1,33 +1,25 @@
-//! OMP's authenticated stdio gateway as a Ghost model provider.
-//!
-//! Requests use OMP's existing local credential store. No API key is copied
-//! into Ghost, no gateway port is opened, and retry/fallback chains are off.
+//! Historical OMP model metadata remains readable. Fresh inference is retired;
+//! the Ghost Pi registered provider owns all new model requests.
 
 use crate::durable::durable::ai;
-use anyhow::{anyhow, bail, Result};
-use serde_json::{json, Value};
-use std::{
-    collections::BTreeMap,
-    io,
-    path::{Path, PathBuf},
-    process::Stdio,
-    sync::Arc,
-    time::Duration,
-};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
-    process::{Child, Command},
-    time::timeout,
-};
+use anyhow::{bail, Result};
+use std::sync::Arc;
+#[cfg(test)]
+use std::path::PathBuf;
 
 pub(crate) const MODEL_ENV: &str = "GHOST_OMP_SUBSCRIPTION_MODELS";
 pub(crate) const ENDPOINT: &str = "omp+stdio://local";
+#[cfg(test)]
 const EXECUTABLE_ENV: &str = "GHOST_OMP_EXECUTABLE";
 const MAX_CATALOG_BYTES: usize = 4 * 1024;
+#[cfg(test)]
 const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+#[cfg(test)]
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+#[cfg(test)]
 const MAX_STDERR_BYTES: usize = 64 * 1024;
-const DEADLINE: Duration = Duration::from_secs(180);
+#[cfg(test)]
+const DEADLINE: std::time::Duration = std::time::Duration::from_secs(180);
 
 fn allowed_provider(provider: &str) -> bool {
     matches!(provider, "zai" | "minimax-code")
@@ -69,6 +61,8 @@ pub(crate) fn model_specs() -> Vec<(String, String)> {
     result
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn executable() -> Option<PathBuf> {
     let path = PathBuf::from(std::env::var_os(EXECUTABLE_ENV)?);
     if !path.is_absolute() {
@@ -89,9 +83,7 @@ fn executable() -> Option<PathBuf> {
     Some(resolved)
 }
 
-pub(crate) fn configured() -> bool {
-    executable().is_some() && !model_specs().is_empty()
-}
+pub(crate) fn configured() -> bool { false }
 
 pub(crate) fn is_allowed(provider: &str, model: &str) -> bool {
     model_specs()
@@ -101,73 +93,25 @@ pub(crate) fn is_allowed(provider: &str, model: &str) -> bool {
         })
 }
 
-pub(crate) fn subscription_providers() -> Vec<super::models::Provider> {
-    if executable().is_none() {
-        return Vec::new();
-    }
-    let mut by_provider = BTreeMap::<String, Vec<super::models::Model>>::new();
-    for (provider, id) in model_specs() {
-        let name = match id.as_str() {
-            "glm-5.1" => "GLM-5.1".to_owned(),
-            _ => id.clone(),
-        };
-        by_provider
-            .entry(provider)
-            .or_default()
-            .push(super::models::Model {
-                id,
-                name,
-                roles: vec![super::models::Role::Llm],
-            });
-    }
-    by_provider
-        .into_iter()
-        .map(|(id, mut models)| {
-            models.sort_by(|a, b| a.name.cmp(&b.name));
-            super::models::Provider {
-                name: match id.as_str() {
-                    "zai" => "Z.AI · OMP 구독".into(),
-                    "minimax-code" => "MiniMax · OMP 구독".into(),
-                    _ => id.clone(),
-                },
-                id,
-                kind: super::models::Kind::OmpSubscription,
-                endpoint: ENDPOINT.into(),
-                auth: super::models::Auth::None,
-                roles: vec![super::models::Role::Llm],
-                models,
-                enabled: true,
-                checked_ms: None,
-                error: None,
-            }
-        })
-        .collect()
+pub(crate) fn subscription_providers() -> Vec<super::models::Provider> {Vec::new()}
+
+pub(crate) fn probe(_provider: &str) -> Result<Vec<super::models::Model>> {
+    bail!("legacy_inference_retired: OMP inference is unsupported; select a Ghost Pi registered provider")
 }
 
-pub(crate) fn probe(provider: &str) -> Result<Vec<super::models::Model>> {
-    if executable().is_none() {
-        bail!("OMP CLI를 사용할 수 없습니다.");
-    }
-    let Some(entry) = subscription_providers()
-        .into_iter()
-        .find(|entry| entry.id == provider)
-    else {
-        bail!("OMP 구독 모델이 허용 목록에 없습니다.");
-    };
-    Ok(entry.models)
+pub(crate) fn create(_provider: &str) -> Result<Arc<dyn ai::Provider>> {
+    bail!("legacy_inference_retired: use the Ghost Pi registered provider route; OMP inference is unsupported")
 }
 
-pub(crate) fn create(provider: &str) -> Result<Arc<dyn ai::Provider>> {
-    if !allowed_provider(provider) || !subscription_providers().iter().any(|p| p.id == provider) {
-        bail!("OMP 구독 제공자를 사용할 수 없습니다.");
-    }
-    let executable = executable().ok_or_else(|| anyhow!("OMP 실행 파일이 없습니다."))?;
-    Ok(Arc::new(OmpSubscriptionProvider {
-        executable,
-        provider: provider.to_owned(),
-    }))
-}
-
+// Old codec/transport source is preserved for historical fixture analysis;
+// no production factory constructs or links its process transport.
+#[cfg(test)]
+#[allow(dead_code)]
+mod legacy_transport {
+use super::*;
+use serde_json::{json,Value};
+use std::{io,path::Path,process::Stdio};
+use tokio::{io::{AsyncRead,AsyncReadExt,AsyncWriteExt},process::{Child,Command},time::timeout};
 struct OmpSubscriptionProvider {
     executable: PathBuf,
     provider: String,
@@ -590,4 +534,6 @@ fn parse_completion(
         .unwrap_or((message.usage.input + message.usage.output) as u64)
         as usize;
     Ok(message)
+}
+
 }

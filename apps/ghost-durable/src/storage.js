@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite";
 import { openNodeSqliteDatabase } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { initializeTurnStatusObservations } from "./turn-status-observations.js";
 
 function keyFor(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -113,6 +114,7 @@ export async function openGhostIndex(root, ghostId) {
       PRIMARY KEY (turn_id, status)
     )`);
     await database.exec("CREATE TABLE IF NOT EXISTS ghost_runtime_migrations (migration_id TEXT PRIMARY KEY, applied_at_ms INTEGER NOT NULL)");
+    await initializeTurnStatusObservations(database);
     await database.transaction(async (transaction) => {
       const marker = await transaction.get(
         "SELECT migration_id FROM ghost_runtime_migrations WHERE migration_id = ?",
@@ -184,18 +186,26 @@ export async function openGhostIndex(root, ghostId) {
   }
 }
 
-export async function openPiConversationStorage(root, ghostId, conversationId) {
+export async function openPiConversationStorage(root, ghostId, conversationId, context = null) {
   const ghostKey = keyFor(ghostId);
   const conversationKey = keyFor(conversationId);
-  const absolutePath = join(resolve(root), ghostKey, conversationKey, "durable.sqlite");
+  const absolutePath = context
+    ? join(resolve(root), ghostKey, "work-contexts", context.ref, "durable.sqlite")
+    : join(resolve(root), ghostKey, conversationKey, "durable.sqlite");
   const database = await prepareDatabase(absolutePath);
   try {
     await database.exec("CREATE TABLE IF NOT EXISTS ghost_runtime_identity (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-    for (const [key, value] of [["ghost_id", ghostId], ["conversation_id", conversationId]]) {
-      await database.run("INSERT OR IGNORE INTO ghost_runtime_identity (key, value) VALUES (?, ?)", key, value);
-      const identity = await database.get("SELECT value FROM ghost_runtime_identity WHERE key = ?", key);
-      if (identity?.value !== value) throw new Error("Pi conversation storage identity mismatch.");
-    }
+    await database.transaction(async tx=>{
+      if(context && !await tx.get("SELECT value FROM ghost_runtime_identity WHERE key='work_context'")) {
+        const initialized=await tx.get("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('ghost_runtime_identity','sqlite_sequence') LIMIT 1");
+        if(initialized) throw new Error("Existing initialized Pi storage has no exact Work context seal; explicit reconciliation is required.");
+      }
+      for (const [key, value] of [["ghost_id", ghostId], ["conversation_id", conversationId], ...(context ? [["work_context", JSON.stringify(context)]] : [])]) {
+        await tx.run("INSERT OR IGNORE INTO ghost_runtime_identity (key, value) VALUES (?, ?)", key, value);
+        const identity = await tx.get("SELECT value FROM ghost_runtime_identity WHERE key = ?", key);
+        if (identity?.value !== value) throw new Error("Pi conversation storage identity mismatch.");
+      }
+    });
     const storage = await SqliteStorage.open(database);
     return {
       database,

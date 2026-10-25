@@ -5,7 +5,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, afterEach } from "node:test";
 import { createBrokerModelProvider, createLocalModelProvider } from "../src/models.js";
-import { createHostToolTransport } from "../src/host-transport.js";
+import { createHostToolTransport, callbackCommandId } from "../src/host-transport.js";
+import {workWaitBody} from "../src/work-wait.js";
 import { openGhostRuntime } from "../src/runtime.js";
 import { openGhostIndex } from "../src/storage.js";
 import { payloadDigest } from "../src/contract.js";
@@ -118,7 +119,7 @@ function addReportSource(reports, envelope) {
 function brokerProvider(invoke) {
   return createBrokerModelProvider({ modelRef: BROKER_MODEL, invoke });
 }
-function localRoutedProvider(respond) {
+function localRoutedProvider(respond, usage) {
   const requests = [];
   const localModelProvider = createLocalModelProvider({
     baseUrl: LOCAL_BASE_URL,
@@ -136,6 +137,7 @@ function localRoutedProvider(respond) {
         id: `local-completion-${requests.length}`,
         object: "chat.completion",
         model: LOCAL_MODEL_ID,
+        ...(usage ? { usage: usage(requests.length) } : {}),
         choices: [{
           index: 0,
           message,
@@ -184,6 +186,7 @@ function createHostTransport(reports, {
   const controllerRuns = new Map();
   const committedWorkSubmits = new Map();
   const workEffects = [];
+  const waitReceipts=new Map();
   const committedWorkMatches = (assignment, work, submission) => Boolean(
     submission?.successful === true
       && submission.ghost_id === assignment.ghost_id
@@ -319,7 +322,17 @@ function createHostTransport(reports, {
           return { status: "error", error_code: "wait_scope_conflict", retry_class: "never" };
         }
         work.blocker = `waiting:${JSON.stringify(invocation.arguments.wait_for)}`;
-        return { status: "success", data: { work: { ...work } } };
+        const waitReceipt=invocation.assignment_id===undefined?null:{kind:"pi-work-wait/1",assignment_id:invocation.assignment_id,work_id:work.id,generation_task_id:invocation.generation_task_id,
+          goal_revision:work.goal_revision,owner_revision:work.owner_revision,authority_epoch:1,execution_id:work.execution_id,
+          wait_command_id:callbackCommandId(invocation.ghost_id,invocation.conversation_id,invocation.invocation_id,"work.wait"),wait_payload_digest:payloadDigest(workWaitBody(invocation)),wait_for:invocation.arguments.wait_for};
+        if(waitReceipt) waitReceipts.set(waitReceipt.wait_command_id,waitReceipt);
+        return { status: "success", data: { work: { ...work },wait_receipt:waitReceipt } };
+      }
+      case "work.wait.inspect": {
+        const receipt=waitReceipts.get(invocation.arguments.wait_command_id);
+        assert.ok(receipt);assert.deepEqual(invocation.arguments.wait_for,receipt.wait_for);
+        assert.ok(receipt.wait_for.every(id=>works.get(id)?.state==="accepted"),"Coordination fixture must explicitly resolve its dependency");
+        return {status:"success",data:{wait_receipt:receipt,phase:"resolved"}};
       }
       case "work.inspect": {
         const work = works.get(invocation.arguments.work_id);
@@ -628,7 +641,8 @@ test("Work report model requests expose no memory tools and cannot send Goal or 
 
   assert.equal(modelRequests.length, 2);
   assert.equal((modelRequests[0].body.tools ?? []).some((tool) => tool?.function?.name?.startsWith("memory_")), false);
-  assert.equal(modelRequests[0].body.tools.some((tool) => tool?.function?.name === "work_submit"), true);
+  assert.equal(modelRequests[0].body.tools.some((tool) => tool?.function?.name === "work_submit"), false);
+  assert.equal(modelRequests[0].body.tools.some((tool) => tool?.function?.name === "work_steer"), false);
   assert.equal(modelRequests[0].body.tools.some((tool) => tool?.function?.name?.startsWith("bot_")), false);
   assert.equal(modelRequests[0].body.tools.some((tool) => ["read", "write", "edit", "bash", "publish_artifact"].includes(tool?.function?.name)), false);
   assert.equal(host.calls.some(({ method }) => method === "memory.capabilities"), false);
@@ -735,6 +749,44 @@ test("lost report-reply ACK reconciles the original advisory without another rep
   assert.equal(replyAttempts, 1);
   assert.equal(reports.get(report.command_id).reply.text, "Exact original Work report advisory.");
 });
+test("a transient assignment inspection failure recovers the same ID with one model request across reopen", async () => {
+  const assignments = new Map();
+  let inspections = 0;
+  const host = createHostTransport(new Map(), {
+    assignments,
+    afterAssignmentInspect(_invocation, receipt) {
+      if (++inspections === 1) throw Object.assign(new Error("fixture discovery unavailable"), { code: "host_discovery_failed" });
+      return receipt;
+    },
+  });
+  const modelRequests = [];
+  const provider = brokerProvider(async request => {
+    modelRequests.push(request);
+    return completion(request, { role: "assistant", content: "Original assignment recovered." });
+  });
+  const first = await createRuntime({ provider, hostToolTransport: host.transport, base: assignmentCanaryRoot });
+  const assignment = assignmentEnvelope("transient-assignment-same-id", "Recover only this exact assignment.");
+  addAssignmentSource(assignments, assignment);
+  const unconfirmed = await first.runtime.handle(assignment);
+  assert.equal(unconfirmed.error_code, "goal_assignment_inspection_unconfirmed");
+  assert.equal(unconfirmed.retry_class, "same_id");
+  assert.equal(modelRequests.length, 0);
+
+  assert.equal((await first.runtime.handle(assignment)).status, "success");
+  await first.runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
+  assert.equal(modelRequests.length, 1);
+  const original = await readAssignment(first.root, assignment.command_id);
+  assert.ok(original.sdk_task_id);
+  await first.runtime.close();
+  runtimes.delete(first.runtime);
+
+  const reopened = await createRuntime({ root: first.root, provider, hostToolTransport: host.transport });
+  assert.equal((await reopened.runtime.handle(assignment)).status, "success");
+  await reopened.runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
+  assert.equal(modelRequests.length, 1);
+  assert.equal((await readAssignment(first.root, assignment.command_id)).sdk_task_id, original.sdk_task_id);
+});
+
 test("assignment reinspection blocks a stale Goal revision before any model request", async () => {
   const assignments = new Map();
   let inspections = 0;
@@ -930,6 +982,7 @@ test("assignment replay isolates Owner context and rejects foreign Work, extra c
     assert.equal(requirements.assigned_work_id, "work-assignment-fixture");
     assert.match(requirements.task, /execute the task directly/);
     assert.equal(assignmentRequest.body.tools.some(tool => tool.function.name === "work_submit"), false);
+    assert.equal(assignmentRequest.body.tools.some(tool => tool.function.name === "work_steer"), false);
     assert.equal(host.calls.some(({ method }) => [
       "work.submit", "goal.create", "goal.update", "work.steer", "work.cancel", "work.delegate",
     ].includes(method)), false);
@@ -1295,7 +1348,7 @@ test("assignment coordination delegates from and waits on only the exact assigne
       goal_revision: assignment.body.goal_revision,
       owner: OPS_GHOST,
       owner_revision: 1,
-      state: "queued",
+      state: "accepted",
       cancellation: "none",
       execution_id: null,
       blocker: null,
@@ -1473,4 +1526,87 @@ test("Goal delegation must target the operations ghost approved by Host inspecti
   assert.equal(hostRouted.status, "success");
   assert.equal(delegateRequests.length, 2);
   assert.equal(delegateRequests[1].envelope.body.target_ghost_id, "ghost-registered-specialist");
+});
+
+test('cold assignment reopen refuses a changed Owner local output route before any new inference and preserves its admission pin', async () => {
+  const assignments = new Map(); let inspections = 0, allow = false, requests = 0;
+  const host = createHostTransport(new Map(), { assignments, afterAssignmentInspect(_request, receipt) {
+    if (++inspections > 1 && !allow) throw new Error('fixture temporary preflight outage');
+    return receipt;
+  } });
+  const providerFor = maxOutputTokens => {
+    const base=brokerProvider(async request => {
+      requests++; return completion(request, { role: 'assistant', content: 'Fresh authorized assignment only.' });
+    });
+    const localRouteConfig=createLocalModelProvider({ baseUrl: LOCAL_BASE_URL, modelId: LOCAL_MODEL_ID, maxOutputTokens }).localRouteConfig;
+    return {...base,localRouteConfig,forConversation(...args) {return {...base.forConversation(...args),localRouteConfig};}};
+  };
+  const first = await createRuntime({ provider: providerFor(1024), hostToolTransport: host.transport, base: assignmentCanaryRoot });
+  const assignment = assignmentEnvelope('local-cap-original-assignment', 'Retain the originally admitted local route.');
+  addAssignmentSource(assignments, assignment);
+  assert.equal((await first.runtime.handle(assignment)).status, 'success');
+  await first.runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
+  assert.equal(requests, 0);
+  const readPin = async () => {
+    const index = await openGhostIndex(first.root, GHOST_ID);
+    try { return await index.get('SELECT identity,max_output_tokens FROM ghost_assignment_local_route_pins WHERE assignment_id = ?', assignment.command_id); }
+    finally { await index.close(); }
+  };
+  const pin = await readPin(); assert.equal(pin.max_output_tokens, 1024);
+  await first.runtime.close(); runtimes.delete(first.runtime); allow = true;
+  const reopened = await createRuntime({ root: first.root, provider: providerFor(4096), hostToolTransport: host.transport });
+  assert.equal((await reopened.runtime.handle(assignment)).status, 'success');
+  await reopened.runtime.waitForIdle(GHOST_ID, CONVERSATION_ID);
+  assert.equal(requests, 0);
+  assert.deepEqual(await readPin(), pin);
+  const index = await openGhostIndex(first.root, GHOST_ID);
+  try { assert.equal((await index.get('SELECT count(*) AS n FROM ghost_assignment_local_route_pins')).n, 1); }
+  finally { await index.close(); }
+});
+
+test("reports and assignments hide Owner task inspection and reject hallucinated task inspection calls",async()=>{
+  for(const origin of ["report","assignment"]){
+    const reports=new Map(),assignments=new Map();
+    const host=createHostTransport(reports,{assignments});const requests=[];
+    const provider=brokerProvider(async request=>{
+      requests.push(request);
+      assert.equal(request.body.tools.some(tool=>tool.function.name==="task_contract_inspect"),false);
+      return completion(request,requests.length===1?{role:"assistant",content:null,tool_calls:[{id:`foreign-task-inspect-${origin}`,type:"function",function:{name:"task_contract_inspect",arguments:"{}"}}]}:{role:"assistant",content:"Owner task authority is unavailable for this input."});
+    });
+    const {runtime}=await createRuntime({provider,hostToolTransport:host.transport});
+    const command=origin==="report"?workReport("task-inspect-report","Read only report."):assignmentEnvelope("task-inspect-assignment","Perform only the existing assignment.");
+    if(origin==="report")addReportSource(reports,command);else addAssignmentSource(assignments,command);
+    assert.equal((await runtime.handle(command)).status,"success");await runtime.waitForIdle(GHOST_ID,CONVERSATION_ID);
+    assert.equal(requests.length,2);
+    assert.equal(host.calls.some(input=>input.method==="conversation.turn.inspect"),false,"no Owner turn or task grant can be inspected from another origin");
+    assert.equal(host.calls.some(input=>input.method==="goal.create"),false);
+  }
+});
+
+test("a clean report compacts authorized old history then receives fresh verifier evidence on its first generation", async () => {
+  const reports=new Map(),host=createHostTransport(reports);
+  const verification={version:"ghost-independent-verification/1",work_id:"completed-original-work",execution_id:"completed-execution",status:"failed",historical_status:"failed",current_scope:true,accepted:false,receipt_ref:"completed-original-work:receipt",authorizes_inference_or_effects:false,automatic_retry:false};
+  const transport=async request=>{const result=await host.transport(request);if(request.method==="conversation.report.inspect"&&result.status==="success")result.data.independent_verification=verification;return result;};
+  const routed=localRoutedProvider(async()=>({role:"assistant",content:"The verifier failed; this output was not accepted."}),n=>({prompt_tokens:n===1?9000:n===2?14618:2500,completion_tokens:10,total_tokens:n===1?9010:n===2?14628:2510}));
+  const {runtime,root}=await createRuntime({provider:routed.provider,hostToolTransport:transport});
+  for(let n=1;n<=2;n++) {assert.equal((await runtime.handle(ownerInput(`report-history-command-${n}`,`report-history-turn-${n}`,`Authorized historical input ${n}: ${"bounded history. ".repeat(620)}`,"local_only"))).status,"success");await runtime.waitForIdle(GHOST_ID,CONVERSATION_ID);}
+  const report=workReport("verifier-failed-after-history","The producer completed; verification is separate.","local_only");addReportSource(reports,report);
+  assert.equal((await runtime.handle(report)).status,"success");await runtime.waitForIdle(GHOST_ID,CONVERSATION_ID);
+  const summary=routed.requests.find(request=>JSON.stringify(request.body.messages).includes("context summarization assistant"));
+  assert.ok(summary,"blocking SDK compaction must remain usable for a clean report");assert.equal(summary.body.tools?.length??0,0);
+  const real=routed.requests.at(-1);assert.ok(JSON.stringify(real.body.messages).includes("Current independent verification evidence:"));assert.ok(JSON.stringify(real.body.messages).includes("completed-original-work"));
+  assert.equal((await readRun(root,report.command_id)).status,"answered");assert.equal(reports.get(report.command_id).reply.text,"The verifier failed; this output was not accepted.");
+});
+
+test("failed or changed final report inspection fences actual model invocation after a valid header", async () => {
+  for(const failure of ["throw","changed"]) {
+    const reports=new Map(),host=createHostTransport(reports);let inspections=0,invocations=0;
+    const projection={version:"ghost-independent-verification/1",work_id:"completed-work",execution_id:"completed-execution",status:"failed",historical_status:"failed",current_scope:true,accepted:false,receipt_ref:"completed-work:receipt",authorizes_inference_or_effects:false,automatic_retry:false};
+    const transport=async request=>{const result=await host.transport(request);if(request.method==="conversation.report.inspect"&&result.status==="success"){inspections++;if(inspections>=4&&failure==="throw")throw Error("controlled current inspection unavailable");result.data.independent_verification={...projection,...(inspections>=4?{status:"unknown",current_scope:false}:{})};}return result;};
+    const {runtime,root}=await createRuntime({provider:brokerProvider(async request=>{invocations++;return completion(request,{role:"assistant",content:"This must not be emitted."});}),hostToolTransport:transport});
+    const report=workReport(`report-final-${failure}`,"Original completed producer report.");addReportSource(reports,report);
+    assert.equal((await runtime.handle(report)).status,"success");await runtime.waitForIdle(GHOST_ID,CONVERSATION_ID);
+    assert.ok(inspections>=4);assert.equal(invocations,0,"actual provider cannot run with an earlier valid but now unconfirmed report observation");assert.equal(reports.get(report.command_id).reply,null);assert.notEqual((await readRun(root,report.command_id)).status,"answered");
+    await runtime.close();runtimes.delete(runtime);
+  }
 });

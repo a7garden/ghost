@@ -294,6 +294,7 @@ struct ControlState {
     phase: ControlPhase,
     control_epoch: u64,
     last_snapshot_id: u64,
+    observation_sequence: u64,
     last_url: String,
     refs: HashMap<String, RefTarget>,
     handoff_id: Option<String>,
@@ -305,6 +306,7 @@ impl ControlState {
             phase: ControlPhase::Agent,
             control_epoch: 0,
             last_snapshot_id: 0,
+            observation_sequence: 0,
             last_url: String::new(),
             refs: HashMap::new(),
             handoff_id: None,
@@ -368,6 +370,7 @@ pub struct OwnedBrowser {
     /// Registers each launched browser instance in the registry so another
     /// process (the Host) can stop the exact instance by verified identity.
     instance_recorder: bool,
+    isolate_work_profiles: bool,
 }
 
 impl OwnedBrowser {
@@ -383,6 +386,7 @@ impl OwnedBrowser {
             sessions: Mutex::new(BTreeMap::new()),
             confinement: false,
             instance_recorder: false,
+            isolate_work_profiles: false,
         }
     }
 
@@ -401,6 +405,8 @@ impl OwnedBrowser {
         self.instance_recorder = enabled;
         self
     }
+
+    pub fn with_work_isolation(mut self,enabled:bool)->Self {self.isolate_work_profiles=enabled;self}
 
     /// The current page URL of this owner's session, when a snapshot exists.
     pub fn page_url(&self, owner: &str, execution_id: &str) -> Option<String> {
@@ -537,7 +543,7 @@ impl OwnedBrowser {
             return Ok(false);
         }
         let control = session.control.lock();
-        if control.last_snapshot_id == 0 {
+        if control.last_snapshot_id == 0 || control.phase != ControlPhase::Agent {
             return Ok(false);
         }
         if u64::try_from(control.last_snapshot_id).unwrap_or(0) != detail["snapshot_id"].as_u64().unwrap_or(u64::MAX) {
@@ -552,6 +558,42 @@ impl OwnedBrowser {
         };
         Ok(target.role == detail["target"]["role"].as_str().unwrap_or_default()
             && target.name == detail["target"]["name"].as_str().unwrap_or_default())
+    }
+
+    /// Validate the exact observed DOM node against the live document immediately
+    /// before consuming approval. Cached snapshot identity alone is insufficient.
+    pub async fn verify_live_target(&self,owner:&str,execution:&str,detail:&Value)->Result<bool> {
+        if !self.verify_target(owner,execution,detail)? {return Ok(false);}
+        let session=self.sessions.lock().get(&self.config.computer_for(owner)?.computer_id).cloned().ok_or_else(||anyhow!("browser session missing"))?;
+        let (backend,x,y)={let control=session.control.lock();let target=&control.refs[detail["target"]["ref"].as_str().unwrap()];(target.backend,target.x,target.y)};
+        let cdp=&session.cdp;let sid=session.session_id.as_str();
+        let url=cdp.request(Some(sid),"Runtime.evaluate",json!({"expression":"location.href","returnByValue":true})).await?;
+        if url["result"]["value"]!=detail["url"] {return Ok(false);}
+        let nodes=cdp.request(Some(sid),"Accessibility.getPartialAXTree",json!({"backendNodeId":backend,"fetchRelatives":false})).await?;
+        let matches=nodes["nodes"].as_array().is_some_and(|nodes|nodes.iter().any(|node|node["backendDOMNodeId"].as_i64()==Some(backend)&&node["role"]["value"]==detail["target"]["role"]&&node["name"]["value"]==detail["target"]["name"]));
+        if !matches || !x.is_finite() || !y.is_finite() {return Ok(false);}
+        let hit=cdp.request(Some(sid),"DOM.getNodeForLocation",json!({"x":x.round() as i64,"y":y.round() as i64,"includeUserAgentShadowDOM":true})).await?;
+        Ok(hit["backendNodeId"].as_i64()==Some(backend))
+    }
+
+    pub async fn scoped_targeted_gesture(&self,owner:&str,execution:&str,args:&Value,authorize:Authorize<'_>)->Result<Value> {
+        // Reuse the complete lease/phase/epoch gate before a targeted gesture.
+        self.scoped_execute(owner,execution,BrowserOperation::Read,authorize).await?;
+        let session=self.sessions.lock().get(&self.config.computer_for(owner)?.computer_id).cloned().ok_or_else(||anyhow!("browser session missing"))?;
+        let reference=args["ref"].as_str().ok_or_else(||anyhow!("Gesture target missing"))?;
+        let point=fresh_point(&session.control,reference,args["snapshot_id"].as_u64().unwrap_or(0))?;
+        let backend=session.control.lock().refs[reference].backend;
+        authorize()?;
+        if args["operation"]=="key" {
+            session.cdp.request(Some(&session.session_id),"DOM.focus",json!({"backendNodeId":backend})).await?;
+            authorize()?;
+            dispatch_key(&session.cdp,&session.session_id,args["value"].as_str().ok_or_else(||anyhow!("Key missing"))?).await?;
+        } else {
+            session.cdp.request(Some(&session.session_id),"Input.dispatchMouseEvent",json!({"type":"mouseWheel","x":point.0,"y":point.1,"deltaX":0,"deltaY":args["value"]})).await?;
+        }
+        session.control.lock().last_snapshot_id=0;
+        authorize()?;
+        Ok(json!({"operation":args["operation"],"target":reference}))
     }
 
     /// Read-only fresh observation of the current page: snapshot + url, for
@@ -633,6 +675,20 @@ impl OwnedBrowser {
         }
     }
 
+    pub async fn stop_scoped_session(&self,owner:&str,execution:&str)->Result<()> {
+        let computer=self.config.computer_for(owner)?.computer_id.clone();
+        let current=self.sessions.lock().get(&computer).cloned();
+        if current.as_ref().is_some_and(|session|session.execution_id==execution) {
+            self.idle_stop(&computer,owner).await?;
+        } else if current.is_none() {
+            let recorded=self.registry().browser_instance(&computer)?;
+            if recorded.is_some_and(|instance|instance.lease_execution_id==execution && instance.authority_epoch==self.epoch()) {
+                self.stop_registered_instance(&computer)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Stops and starts the owned browser against the same persistent profile.
     /// `keep_running` is true only for the process that will own the new
     /// session (the Host); verification-only callers stop it again so no
@@ -661,7 +717,7 @@ impl OwnedBrowser {
             )?;
             let computer = self.config.computer_for(ghost_id)?;
             let launched =
-                launch_browser(computer, &manifest.browser_profile, &execution_id, self.confinement,
+                launch_browser(computer, &manifest.browser_profile, &execution_id, self.confinement && computer.profile_scope=="public",
                     self.instance_recorder.then_some((self.registry.as_ref(), epoch))).await;
             let outcome = match launched {
                 Ok(session) => {
@@ -871,6 +927,10 @@ impl OwnedBrowser {
                     return Ok(existing);
                 }
             }
+            if existing.execution_id != execution_id {
+                ensure!(!self.registry().browser_lease_is_current(computer_id,ghost_id,&existing.execution_id,epoch)?,
+                    "another authoritative browser writer owns this computer; it must release its session first");
+            }
             // A different writer or a fenced session: stop the child, forget
             // the session, and re-derive from the registry. The other writer's
             // own lease checks will fence its operations.
@@ -894,8 +954,11 @@ impl OwnedBrowser {
             epoch,
         )?;
         let computer = self.config.computer_for(ghost_id)?;
+        let profile=if self.isolate_work_profiles && !execution_id.starts_with("browser-") {
+            profile_for_execution(&manifest.browser_profile,&format!("pi-work-{execution_id}"))?
+        } else {manifest.browser_profile.clone()};
         let inner =
-            launch_browser(computer, &manifest.browser_profile, execution_id, self.confinement,
+            launch_browser(computer, &profile, execution_id, self.confinement && computer.profile_scope=="public",
                 self.instance_recorder.then_some((self.registry.as_ref(), epoch))).await;
         let inner = match inner {
             Ok(inner) => inner,
@@ -911,6 +974,23 @@ impl OwnedBrowser {
             .insert(computer_id.to_owned(), Arc::clone(&inner));
         Ok(inner)
     }
+}
+
+/// Pi Work profiles never reuse the Owner conversation's profile or another
+/// Work's cookies, local storage, tabs, or page references. The execution ID
+/// is Host-derived and is additionally validated before it becomes a path.
+fn profile_for_execution(base:&Path,execution:&str)->Result<PathBuf> {
+    let Some(key)=execution.strip_prefix("pi-work-") else {return Ok(base.to_path_buf());};
+    ensure!(key.len()==64 && key.bytes().all(|c|c.is_ascii_digit()||(b'a'..=b'f').contains(&c)),"Pi browser execution identity invalid");
+    use std::os::unix::fs::DirBuilderExt;
+    for directory in [base.to_path_buf(),base.join(format!("pi-work-{key}"))] {
+        match std::fs::DirBuilder::new().mode(0o700).create(&directory) {
+            Ok(())=>{},Err(error) if error.kind()==std::io::ErrorKind::AlreadyExists=>{},Err(error)=>return Err(error.into()),
+        }
+        let metadata=std::fs::symlink_metadata(&directory)?;
+        ensure!(metadata.is_dir() && !metadata.file_type().is_symlink() && directory.canonicalize()?==directory,"Pi browser profile is not a canonical real directory");
+    }
+    Ok(base.join(format!("pi-work-{key}")))
 }
 
 impl ComputerBackend for OwnedBrowser {
@@ -1149,6 +1229,8 @@ async fn launch_browser(
         .as_str()
         .ok_or_else(|| anyhow!("DevTools did not return a flat session"))?
         .to_owned();
+    cdp.request(Some(&session_id),"Page.enable",json!({})).await?;
+    cdp.request(Some(&session_id),"Page.setLifecycleEventsEnabled",json!({"enabled":true})).await?;
     if confinement {
         cdp.request(
             Some(&session_id),
@@ -1258,9 +1340,7 @@ impl Cdp {
                     }
                     let mut listening = subscribers_reader.lock();
                     if let Some(queues) = listening.get_mut(&method) {
-                        for queue in queues {
-                            let _ = queue.send(value.clone());
-                        }
+                        queues.retain(|queue|queue.send(value.clone()).is_ok());
                     }
                 }
             }
@@ -1320,14 +1400,15 @@ impl Cdp {
     }
 
     /// Registers a one-shot event waiter before the triggering request.
-    async fn wait_event(&self, method: &str, timeout: Duration) -> Option<Value> {
+    #[cfg(test)]
+    fn event_waiter(&self, method: &str) -> oneshot::Receiver<Value> {
         let (sender, receiver) = oneshot::channel();
         self.events
             .lock()
             .entry(method.to_owned())
             .or_default()
             .push(sender);
-        tokio::time::timeout(timeout, receiver).await.ok()?.ok()
+        receiver
     }
 }
 
@@ -1337,11 +1418,15 @@ async fn run_operation(session: &SessionInner, operation: BrowserOperation) -> R
     let sid = session.session_id.as_str();
     match operation {
         BrowserOperation::Navigate { url } => {
-            let loaded = cdp.wait_event("Page.loadEventFired", NAVIGATION_TIMEOUT);
+            let mut loaded = cdp.subscribe("Page.lifecycleEvent");
             let started = cdp
                 .request(Some(sid), "Page.navigate", json!({"url": url}))
                 .await?;
-            let settled = loaded.await.is_some();
+            let settled = tokio::time::timeout(NAVIGATION_TIMEOUT,async {
+                while let Some(event)=loaded.recv().await {
+                    if event["params"]["name"]=="load" && event["params"]["loaderId"]==started["loaderId"] && event["params"]["frameId"]==started["frameId"] {return true;}
+                } false
+            }).await.unwrap_or(false);
             let title = cdp
                 .request(
                     Some(sid),
@@ -1391,8 +1476,10 @@ async fn run_operation(session: &SessionInner, operation: BrowserOperation) -> R
             );
             let snapshot_id = {
                 let mut control = session.control.lock();
+                control.observation_sequence=control.observation_sequence.checked_add(1).ok_or_else(||anyhow!("browser snapshot sequence exhausted"))?;
+                let next=control.observation_sequence;
                 control.invalidate_observations();
-                control.last_snapshot_id += 1;
+                control.last_snapshot_id = next;
                 control.last_snapshot_id
             };
             let page_url: String = cdp
@@ -1651,6 +1738,30 @@ mod tests {
             binding.accepted_capabilities,
             vec!["browser".to_owned(), "human_control".to_owned()]
         );
+    }
+
+    #[test]
+    fn pi_browser_profiles_are_disjoint_and_refuse_symlink_or_untrusted_identity() {
+        let root=tempfile::tempdir().unwrap();let base=root.path().canonicalize().unwrap().join("public");
+        let first=profile_for_execution(&base,&format!("pi-work-{}","a".repeat(64))).unwrap();
+        let second=profile_for_execution(&base,&format!("pi-work-{}","b".repeat(64))).unwrap();
+        assert_ne!(first,second);assert_ne!(first,base);
+        std::fs::write(first.join("Cookies"),b"first-work-only").unwrap();assert!(!second.join("Cookies").exists());assert!(!base.join("Cookies").exists());
+        assert_eq!(profile_for_execution(&base,"browser-owner").unwrap(),base);
+        assert!(profile_for_execution(&base,"pi-work-../../owner").is_err());
+        let linked=base.join(format!("pi-work-{}","c".repeat(64)));std::os::unix::fs::symlink(&first,&linked).unwrap();
+        assert!(profile_for_execution(&base,&format!("pi-work-{}","c".repeat(64))).is_err());
+    }
+
+    #[tokio::test]
+    async fn load_event_waiter_is_registered_before_a_fast_navigation_event() {
+        let (sender,_receiver)=mpsc::unbounded_channel();
+        let cdp=Cdp {next_id:Arc::new(AtomicU64::new(1)),sender,pending:Arc::new(Mutex::new(HashMap::new())),events:Arc::new(Mutex::new(HashMap::new())),subscribers:Arc::new(Mutex::new(HashMap::new()))};
+        let waiter=cdp.event_waiter("Page.loadEventFired");
+        let registered=cdp.events.lock().remove("Page.loadEventFired").unwrap();
+        // The event arrives before the caller polls/awaits the receiver.
+        for sender in registered {sender.send(json!({"method":"Page.loadEventFired"})).unwrap();}
+        assert!(tokio::time::timeout(Duration::from_millis(20),waiter).await.unwrap().is_ok());
     }
 
 }

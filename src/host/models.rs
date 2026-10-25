@@ -932,7 +932,7 @@ mod tests {
     async fn conversation_selection_restores_without_changing_defaults_or_other_chats() {
         let root = tempfile::tempdir().unwrap();
         let app =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         let (profile, conversation) = owner(&app, "selection-one");
         let (other, other_conversation) = owner(&app, "selection-two");
@@ -987,7 +987,7 @@ mod tests {
         app.shutdown().await.unwrap();
         drop(app);
         let restored =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         {
             let s = restored.lock().unwrap();
@@ -1051,7 +1051,7 @@ mod tests {
     async fn shutdown_joins_tasks_tracked_while_stopping_before_cold_reopen() {
         let root = tempfile::tempdir().unwrap();
         let app =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         let workspace_id = app.snapshot().unwrap()["workspace_id"].clone();
         app.shutdown().await.unwrap();
@@ -1063,7 +1063,7 @@ mod tests {
         app.shutdown().await.unwrap();
         drop(app);
         let restored =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         assert_eq!(restored.snapshot().unwrap()["workspace_id"], workspace_id);
         restored.shutdown().await.unwrap();
@@ -1073,7 +1073,7 @@ mod tests {
         use crate::durable::durable::TaskKind;
         let root = tempfile::tempdir().unwrap();
         let app =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         let (profile, conversation) = owner(&app, "selection-busy");
         save(
@@ -1129,7 +1129,7 @@ mod tests {
         use crate::durable::durable::InputKind;
         let root = tempfile::tempdir().unwrap();
         let app =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         let (profile, conversation) = owner(&app, "selection-valid");
         let (foreign, _) = owner(&app, "selection-foreign");

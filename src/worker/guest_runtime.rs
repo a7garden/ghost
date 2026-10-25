@@ -76,6 +76,7 @@ pub struct GuestLaunch {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestRuntimeError {
+    Retired,
     InvalidConfig,
     Unauthorized,
     ContainerProbe,
@@ -91,6 +92,7 @@ pub enum GuestRuntimeError {
 impl fmt::Display for GuestRuntimeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Retired => formatter.write_str("legacy_execution_retired: Guest OMP reasoning admission is retired"),
             Self::InvalidConfig => formatter.write_str("guest runtime configuration rejected"),
             Self::Unauthorized => formatter.write_str("guest runtime authority check failed"),
             Self::ContainerProbe => formatter.write_str("Apple Container CLI operation failed"),
@@ -286,7 +288,13 @@ struct ValidatedPaths {
     skills_snapshot: Option<PathBuf>,
 }
 
-pub fn spawn_guest(
+/// Historical public API remains typed, but never starts an OMP container.
+pub fn spawn_guest(_config:GuestRuntimeConfig,_authorization_check:GuestBrokerAuthorizationCheck)->GuestRuntimeResult<GuestLaunch> {
+    Err(GuestRuntimeError::Retired)
+}
+
+#[cfg(test)]
+pub(crate) fn spawn_guest_legacy_fixture(
     config: GuestRuntimeConfig,
     authorization_check: GuestBrokerAuthorizationCheck,
 ) -> GuestRuntimeResult<GuestLaunch> {
@@ -316,7 +324,7 @@ pub fn spawn_guest(
         config.broker.execution_id.clone(), config.broker.authority_epoch);
     // Resolve the real native effort before sealing the guest configuration.
     // This guard owns/reaps the bridge even if later payload/VM setup fails.
-    let broker = match GuestModelBroker::start(Arc::clone(&config.broker), broker_authorization) {
+    let broker = match GuestModelBroker::start_legacy_fixture(Arc::clone(&config.broker), broker_authorization) {
         Ok(broker) => broker,
         Err(error) => {
             record_reservation_event(&reservation_path, "configuration_rejected")

@@ -440,6 +440,13 @@ async fn owner_browser_decision(
         if !current {
             return Ok(refused(true, "the Work's Goal revision, cancellation, or delegation graph scope is no longer current"));
         }
+        let pi:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM lifetime_pi_executions WHERE work_id=?1 AND execution_id=?2 AND ghost_id=?3 AND authority_epoch=?4 AND state='running')",rusqlite::params![work_id,raw_execution_id,ghost_id,host.authority_epoch],|row|row.get(0))?;
+        if pi {
+            let authority=crate::host::lifetime::authority::current(conn)?;
+            anyhow::ensure!(authority.epoch==host.authority_epoch && (!approve || authority.dispatch_enabled),"Pi browser authority fenced");
+            let after=computers.pi_browser_decide(action_id,approve)?;
+            return Ok(json!({"action":after,"wake":{"status":"success","summary":"Exact Pi browser decision recorded; the original durable call will reconcile it","data":{"resumed":false,"decision_recorded":true}}}));
+        }
         // Sealed route: the exact committed execution's original worker
         // endpoint, never today's route guess.
         let Some(socket) = computers.socket_for_execution(conn, &work_id, ghost_id, &raw_execution_id)? else {

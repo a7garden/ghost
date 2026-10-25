@@ -85,7 +85,7 @@ fn fixture(
     call: Option<ai::ToolCall>,
     crash: bool,
 ) -> (Arc<Host>, RoutingEntry, Arc<tokio::sync::Notify>) {
-    let app = Host::open(root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
     for worker in app.workers.lock().unwrap().iter() {
         worker.abort();
     }
@@ -406,7 +406,7 @@ async fn one_work_conversation_binding_retry_amend_cancel_and_restart() {
     drop(session);
     app.shutdown().await.unwrap();
     drop(app);
-    let reopened = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let reopened = Host::open_legacy_fixture(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     pump(&reopened).unwrap();
     let state = reopened.lock().unwrap();
     assert_eq!(
@@ -518,7 +518,7 @@ async fn process_loss_after_nonreplayable_effect_requires_reconciliation() {
     let _ = driving.await;
     app.shutdown().await.unwrap();
     drop(app);
-    let reopened = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let reopened = Host::open_legacy_fixture(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     for worker in reopened.workers.lock().unwrap().iter() {
         worker.abort();
     }

@@ -17,7 +17,7 @@ pub(crate) fn current(conn: &Connection) -> Result<Authority> {
 
 pub(crate) fn read_only(method: Option<&str>) -> bool {
     matches!(method, Some("snapshot" | "goal.inspect" | "work.inspect" | "work.artifact" | "work.children"
-        | "conversation.inspect" | "conversation.turn.inspect" | "conversation.report.inspect" | "command.inspect" | "registry.inspect" | "mailbox.inspect" | "notification.inspect"))
+        | "conversation.inspect" | "conversation.turn.inspect" | "conversation.report.inspect" | "command.inspect" | "registry.inspect" | "mailbox.inspect" | "notification.inspect" | "bot.definition.inspect" | "bot.candidate.inspect" | "bot.discover" | "bot.lifecycle.inspect" | "bot.surface.inspect" | "bot.creation.plan" | "work.memory.profile.inspect" | "memory.context.inspect" | "work.experience.inspect"))
 }
 
 pub(crate) fn guard(conn: &Connection, envelope: &Envelope) -> Result<Option<Response>> {

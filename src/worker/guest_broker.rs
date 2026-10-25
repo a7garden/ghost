@@ -66,6 +66,7 @@ pub struct GuestBrokerConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestBrokerError {
+    Retired,
     InvalidConfig,
     Unauthorized,
     AlreadyRunning,
@@ -82,6 +83,7 @@ pub enum GuestBrokerError {
 impl fmt::Display for GuestBrokerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
+            Self::Retired => "legacy_execution_retired: separate-agent model brokers are retired; use this Ghost's Pi execution",
             Self::InvalidConfig => "guest broker configuration rejected",
             Self::Unauthorized => "guest broker authority check failed",
             Self::AlreadyRunning => "guest broker is already running",
@@ -110,6 +112,16 @@ pub struct GuestModelBroker {
 
 impl GuestModelBroker {
     pub fn start(
+        _config: Arc<GuestBrokerConfig>,
+        _authorization_check: GuestBrokerAuthorizationCheck,
+    ) -> BrokerResult<Self> {
+        Err(GuestBrokerError::Retired)
+    }
+
+    // The original transport corpus is private unit-fixture evidence only.
+    // No feature or environment variable enables it in a production build.
+    #[cfg(test)]
+    pub(super) fn start_legacy_fixture(
         config: Arc<GuestBrokerConfig>,
         authorization_check: GuestBrokerAuthorizationCheck,
     ) -> BrokerResult<Self> {
@@ -1794,3 +1806,7 @@ fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
     value.push(suffix);
     PathBuf::from(value)
 }
+
+#[cfg(test)]
+#[path="legacy_fixture_tests/model_broker.rs"]
+mod legacy_model_broker_tests;

@@ -18,6 +18,14 @@ use crate::workspace::{CSS, INDEX, JS, TOKENS, WORKFLOWS};
 const REQUEST_BODY_LIMIT: usize = 8 * 1_048_576;
 const MAX_CONNECTIONS: usize = 32;
 
+#[cfg(all(test, feature = "lifetime"))]
+#[path = "pi_test_http.rs"]
+pub(crate) mod pi_test_http;
+
+#[cfg(all(test, feature = "lifetime"))]
+#[path = "pi_report_http_tests.rs"]
+mod pi_report_http_tests;
+
 /// Serve the host on loopback. The host process owns all profile stores while
 /// this transport is alive; clients use the protected discovery file.
 pub fn serve(root: &Path, port: u16, model: Option<&str>, with_ui: bool) -> Result<()> {
@@ -292,10 +300,17 @@ fn route(
         }
         let input = serde_json::from_slice::<crate::host::lifetime::PiToolRequest>(&request.body);
         return match input {
-            Ok(input) => respond_result(peer, host.handle.block_on(host.lifetime_pi_action(&input,
-                if local { crate::host::lifetime::PiInferenceScope::Local }
-                else if request.target == "/api/v1/pi/selected-action" { crate::host::lifetime::PiInferenceScope::Selected }
-                else { crate::host::lifetime::PiInferenceScope::Public }))),
+            Ok(input) => {
+                #[cfg(test)]
+                let _observation=pi_test_http::begin_observation(&host.root,&input);
+                let result=host.handle.block_on(host.lifetime_pi_action(&input,
+                    if local { crate::host::lifetime::PiInferenceScope::Local }
+                    else if request.target == "/api/v1/pi/selected-action" { crate::host::lifetime::PiInferenceScope::Selected }
+                    else { crate::host::lifetime::PiInferenceScope::Public }));
+                #[cfg(test)]
+                pi_test_http::observe(&host.root,&input,&result);
+                respond_result(peer,result)
+            },
             Err(_) => respond_json(peer, 400, &json!({"ok":false,"error":"invalid Pi callback envelope"})),
         };
     }

@@ -11,6 +11,7 @@ struct ReportSource {
     receiver: Envelope,
     goal: Goal,
     origin_privacy: Option<String>,
+    producing_work: Option<crate::lifetime_contract::Work>,
 }
 
 struct StoredReply {
@@ -54,7 +55,7 @@ fn valid_privacy(privacy: &str) -> bool {
 }
 
 fn load_source(
-    tx: &Transaction<'_>,
+    tx: &rusqlite::Connection,
     report_id: &str,
     ghost_id: &str,
     conversation_id: &str,
@@ -191,13 +192,32 @@ fn load_source(
         }
     };
 
+    // Resolve the producing Work from this report's committed source command;
+    // never select an unrelated/latest Work merely because its Goal matches.
+    let execution:Option<String>=tx.query_row("SELECT json_extract(request,'$.body.execution_id') FROM lifetime_commands WHERE command_id=?1",[&source_command_id],|r|r.get(0)).optional()?.flatten();
+    let notice_work=super::task_verification::report_work(tx,&source_command_id,report_id)?;
+    let work:Option<crate::lifetime_contract::Work>=if notice_work.is_some(){notice_work}else if let Some(execution)=execution {
+        let mut q=tx.prepare("SELECT payload FROM lifetime_work WHERE execution_id=?1 AND goal_id=?2 AND json_extract(payload,'$.goal_revision')=?3 LIMIT 2")?;
+        let rows=q.query_map(params![execution,goal.id,goal.revision],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        if rows.len()>1 {return Err(host_apply::conflict("Report producer execution identifies multiple Works"));}
+        rows.first().map(|raw|serde_json::from_str(raw)).transpose()?
+    }else{None};
+    if let Some(work)=&work {if work.goal_id!=goal.id || work.goal_revision!=goal.revision {return Err(host_apply::conflict("Report verifier source is outside this Goal revision"));}}
+
     Ok(ReportSource {
         outbox_id,
         source_command_id,
         receiver,
         goal,
         origin_privacy,
+        producing_work: work,
     })
+}
+
+pub(super) fn bot_repair_goal(conn:&rusqlite::Connection,report_id:&str,ghost_id:&str,conversation_id:&str)->Result<Goal> {
+    conversation::registered_mode(conn,ghost_id,conversation_id)?;
+    conversation::require_pi_binding(conn,ghost_id,conversation_id)?;
+    Ok(load_source(conn,report_id,ghost_id,conversation_id)?.goal)
 }
 
 fn report_privacy(
@@ -318,10 +338,12 @@ pub(super) fn inspect(
     let privacy = report_privacy(tx, &source, ghost_id, conversation_id)?;
     let reply = load_reply(tx, &source, report_id, ghost_id, conversation_id)?;
     let prompt = host_apply::string_field(&source.receiver.body, "prompt")?;
+    let verification=source.producing_work.as_ref().map(|work|super::task_verification::view(tx,work)).transpose()?.flatten();
     Ok(host_apply::success(
         "canonical Work report inspected",
         vec![report_id.to_owned()],
         json!({
+            "independent_verification":verification,
             "report": {
                 "id": report_id,
                 "source_command_id": source.source_command_id,

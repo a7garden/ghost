@@ -381,7 +381,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn owner(root: &Path, endpoint: &str) -> (Arc<Host>, Context) {
-        let app = Host::open(root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        let app = Host::open_legacy_fixture(root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
         let profile = app
             .action(Action {
                 request_id: uuid::Uuid::new_v4().to_string(),
@@ -730,7 +730,7 @@ mod tests {
         drop(runtime);
         drop(app);
         let reopened =
-            Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+            Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
         assert_eq!(
             config(&reopened, &context.profile_id, &context.conversation_id).unwrap()["available"],
             true

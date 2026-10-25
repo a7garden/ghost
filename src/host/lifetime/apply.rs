@@ -189,6 +189,7 @@ pub(super) fn apply(conn: &Connection, envelope: &Envelope, principal: &str,
                 serde_json::to_string(&item.payload)?,
             ],
         )?;
+        if item.target=="pi" {super::work_context::admitted(&tx,&item.payload)?;}
     }
     tx.commit()?;
     Ok(response)
@@ -235,6 +236,9 @@ fn dispatch(
     context: &mut ApplyContext,
 ) -> Result<Response> {
     let method = string_field(&envelope.body, "method")?;
+    if super::selected_tasks::handles(method) {
+        return super::selected_tasks::apply(conn, envelope, principal, context);
+    }
     if super::conversation::handles(method) {
         return super::conversation::apply(conn, envelope, principal, context);
     }
@@ -245,10 +249,44 @@ fn dispatch(
         return super::graph::apply(conn, envelope, principal, context);
     }
     match method {
+        "work.memory.profile.configure" | "work.memory.bind" | "work.memory.revoke" | "work.experience.inspect" | "work.experience.resume" => super::super::work_memory::apply_owner(conn, envelope, principal),
+        "task.contract.register" => super::task_contracts::register(conn,envelope,principal),
+        "bot.definition.update" | "bot.definition.inspect" => super::super::bots_store::apply_owner(conn, envelope, principal),
+        "bot.evaluation_profile.configure" => super::super::bots_provisioning::configure_evaluator(conn,envelope,principal),
+        "bot.candidate.inspect" => super::super::bots_provisioning::inspect(conn,envelope,principal),
+        "bot.discover" => super::super::bots_provisioning::discover(conn,envelope,principal),
+        "bot.surface.inspect" => super::super::bot_lifecycle::surface(conn,envelope,principal),
+        "bot.lifecycle.inspect" | "bot.lifecycle.set" => super::super::bot_lifecycle::apply_owner(conn,envelope,principal),
+        "bot.update.prepare" | "bot.clone.prepare" => {
+            let evaluated=super::super::bot_lifecycle::prepare(conn,envelope,principal)?;
+            let body=super::super::bots_provisioning::evaluation_goal(conn,&evaluated,principal)?.ok_or_else(||invalid("new lifecycle candidate already has evaluation"))?;
+            let mut request=envelope.clone();request.payload_digest=canonical_digest(&body)?;request.body=body;
+            let admitted=admit_goal(conn,&request,principal,context,true)?;
+            super::super::bots_provisioning::evaluation_admitted(conn,&evaluated,principal,Some(&admitted))
+        },
+        "bot.activate" => super::super::bots_provisioning::activate(conn,envelope,principal),
+        "bot.runtime.prepare" => {
+            let (response,body)=super::super::bots_provisioning::runtime_prepare(conn,envelope,principal)?;
+            if let Some(body)=body {context.enqueue("pi",outgoing(envelope,principal,None,body)?);}
+            Ok(response)
+        },
+        "bot.evaluate" | "bot.repair" => {
+            let evaluated=if method=="bot.repair" {super::super::bots_provisioning::repaired_evaluation_envelope(conn,envelope)?} else {envelope.clone()};
+            let planned=super::super::bots_provisioning::evaluation_goal(conn,&evaluated,principal)?;
+            let admitted=if let Some(body)=planned {
+                // This is the implementation of the authenticated evaluate
+                // intent, not a nested command or an impersonated credential.
+                let mut request=envelope.clone();request.payload_digest=canonical_digest(&body)?;request.body=body;
+                Some(admit_goal(conn,&request,principal,context,true)?)
+            } else {None};
+            super::super::bots_provisioning::evaluation_admitted(conn,&evaluated,principal,admitted.as_ref())
+        },
+        "bot.prepare" | "bot.provision" => Err(reject("waiting_host","bot creation requires Host resource preflight",RetryClass::ReconcileFirst)),
         "goal.submit" => admit_goal(conn, envelope, principal, context, true),
         "goal.inspect" => goal_inspect(conn, &envelope.body),
         "goal.update" => goal_update(conn, envelope, principal, context),
         "work.submit" => work_submit(conn, envelope, principal, context),
+        "work.pi.admit" => super::pi_execution::admit(conn, envelope, principal, context),
         "work.inspect" => work_inspect(conn, &envelope.body),
         "work.steer" => work_steer(conn, envelope, principal, context),
         "work.cancel" => work_cancel(conn, envelope, principal, context),
@@ -282,6 +320,9 @@ pub(super) fn admit_goal(
     validate_text("prompt", prompt)?;
     validate_privacy(privacy)?;
     let acceptance_spec = value_field(&envelope.body, "acceptance_spec")?;
+    if !super::super::bot_lifecycle::admission_allowed(conn,ghost_id)? {
+        return Err(reject("bot_unavailable","Bot is paused, retired, or lacks an evaluated selected definition",RetryClass::NewRevision));
+    }
     if !acceptance_spec.is_object() {
         return Err(invalid("acceptance_spec must be an object"));
     }
@@ -334,7 +375,7 @@ pub(super) fn admit_goal(
             "goal_revision": goal.revision,
             "work_id": work.id,
             "prompt": goal.prompt,
-            "privacy": goal.privacy,
+            "privacy": super::super::work_memory::assignment_privacy(conn,&work,&goal.privacy)?,
         });
         context.enqueue(
             "pi",
@@ -463,14 +504,10 @@ fn goal_update(
             work.state = "cancel_requested".to_owned();
             work.blocker = Some("requirement changed; waiting for prior execution cancellation".to_owned());
             db::update_work(conn, work)?;
-            let body = json!({
-                "method": "cancel",
-                "execution_id": work.execution_id,
-            });
-            context.enqueue(
-                "worker",
-                outgoing(envelope, principal, Some(work.goal_revision), body)?,
-            );
+            if !super::pi_execution::execution_is_pi(conn,work.execution_id.as_deref().unwrap())? {
+                let body = json!({"method":"cancel","execution_id":work.execution_id});
+                context.enqueue("worker",outgoing(envelope,principal,Some(work.goal_revision),body)?);
+            }
         }
     }
     let mut replacement_work_id = None;
@@ -514,7 +551,7 @@ fn goal_update(
             "goal_revision": goal.revision,
             "work_id": work.id,
             "prompt": goal.prompt,
-            "privacy": goal.privacy,
+            "privacy": super::super::work_memory::assignment_privacy(conn,work,&goal.privacy)?,
         });
         context.enqueue(
             "pi",
@@ -785,11 +822,10 @@ pub(super) fn work_cancel(
             work.cancellation = "requested".to_owned();
             work.state = "cancel_requested".to_owned();
             db::update_work(conn, &work)?;
-            let body = json!({ "method": "cancel", "execution_id": execution_id });
-            context.enqueue(
-                "worker",
-                outgoing(envelope, principal, Some(work.goal_revision), body)?,
-            );
+            if !super::pi_execution::execution_is_pi(conn,&execution_id)? {
+                let body = json!({ "method": "cancel", "execution_id": execution_id });
+                context.enqueue("worker",outgoing(envelope, principal, Some(work.goal_revision), body)?);
+            }
         }
     }
     super::graph::cancel_descendants(conn, &work.id, envelope, principal, context)?;
@@ -960,11 +996,12 @@ fn work_result(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
         super::mailbox::notify_work(conn, &work, &goal, "result")?;
     }
     if is_newer && state != "running" {
+        let report_summary=if super::super::work_memory::has_lineage(conn,&work)? || super::super::memory_publication::has_work_dependencies(conn,&work)? {"Work-scoped source content is retained in its original execution; this report contains status metadata only."}else{_summary};
         let body = json!({
             "method":"conversation.submit","ghost_id":goal.accountable_ghost,
             "conversation_id":goal.reply_conversation,"privacy":goal.privacy,
             "goal_id":goal.id,"goal_revision":goal.revision,
-            "prompt":format!("Authoritative Host report for work {} and execution {}: state={state}, current={current}, reason={reason:?}. {} Goal acceptance is separate; do not claim verified completion or start another execution for this report.", work.id, execution_id, _summary),
+            "prompt":format!("Authoritative Host report for work {} and execution {}: state={state}, current={current}, reason={reason:?}. {} Goal acceptance is separate; do not claim verified completion or start another execution for this report.", work.id, execution_id, report_summary),
         });
         context.enqueue("pi", outgoing(envelope, principal, Some(goal.revision), body)?);
     }
@@ -1196,7 +1233,7 @@ fn work_accept(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
         "privacy":goal.privacy,
         "goal_id":goal.id,
         "goal_revision":goal.revision,
-        "prompt":format!("Authenticated owner verification: work_id={} is accepted at goal_revision={}. {} independent checks passed under verifier {} and policy {}. Goal state={}. Report this committed acceptance to the user; do not submit or restart any execution. Artifact contents remain in their original privacy scope.", work.id, goal.revision, acceptance.checks.len(), acceptance.verifier_revision, acceptance.policy_revision, goal.state),
+        "prompt":format!("Authenticated Host verification: work_id={} is accepted at goal_revision={}. {} independent checks passed under verifier {} and policy {}. Goal state={}. Report this committed acceptance to the user; do not submit or restart any execution. Artifact contents remain in their original privacy scope.", work.id, goal.revision, acceptance.checks.len(), acceptance.verifier_revision, acceptance.policy_revision, goal.state),
     });
     context.enqueue("pi", outgoing(envelope, principal, Some(goal.revision), report)?);
     Ok(success(
@@ -1423,7 +1460,7 @@ pub(super) fn exact_fields(body: &Value, fields: &[&str]) -> Result<()> {
     allowed_fields(body, fields, fields)
 }
 
-fn allowed_fields(body: &Value, allowed: &[&str], required: &[&str]) -> Result<()> {
+pub(super) fn allowed_fields(body: &Value, allowed: &[&str], required: &[&str]) -> Result<()> {
     let Some(object) = body.as_object() else {
         return Err(invalid("command body must be an object"));
     };

@@ -14,6 +14,12 @@ use anyhow::{anyhow, bail, ensure, Result};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+#[cfg(all(test,feature="memory"))]
+#[path="lifetime_memory_tests.rs"]
+mod tests;
+#[cfg(all(test,feature="memory",feature="lifetime"))]
+#[path="memory_temporal_tests.rs"]
+mod temporal_tests;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct MemoryScope {
@@ -210,6 +216,11 @@ fn string<'a>(body: &'a Value, name: &str) -> Result<&'a str> {
 impl Host {
     fn memory_scope(&self, request: &lifetime::PiToolRequest, route: lifetime::PiInferenceScope) -> Result<MemoryScope> {
         let state = self.lock()?;
+        self.memory_scope_locked(&state,request,route)
+    }
+
+    fn memory_scope_locked(&self,state: &super::State,request: &lifetime::PiToolRequest,
+        route: lifetime::PiInferenceScope) -> Result<MemoryScope> {
         if let Some(response) = self.check_pi_host_scope(&state, request, route)? {
             bail!("{}: {}", response.error_code.as_deref().unwrap_or("unauthorized"), response.summary);
         }
@@ -252,14 +263,91 @@ impl Host {
         Ok(MemoryScope { disclosure, permitted: policy.memory })
     }
 
+    fn memory_context_stamp(&self,request: &lifetime::PiToolRequest,route: lifetime::PiInferenceScope,
+        captured: MemoryScope) -> Result<(bool,Option<String>,String)> {
+        let configured = route == lifetime::PiInferenceScope::Local && captured.permitted && Brain::source_configured();
+        let configuration = Brain::context_revision(&request.ghost_id).ok();
+        let revision = format!("{:x}",Sha256::digest(serde_json::to_vec(&json!({
+            "ghost_id":request.ghost_id,"authority_epoch":self.authority_epoch,
+            "memory_permitted":configured,"disclosure":captured.disclosure,"configuration":configuration
+        }))?));
+        Ok((configured,configuration,revision))
+    }
+
+    fn memory_lineage_key(request: &lifetime::PiToolRequest) -> Result<String> {
+        Ok(format!("{}:{}:{}",request.ghost_id,request.conversation_id,string(&request.envelope.body,"turn_id")?))
+    }
+
+    fn record_memory_lineage(&self,request: &lifetime::PiToolRequest,route: lifetime::PiInferenceScope,
+        revision: &str) -> Result<()> {
+        let state=self.lock()?;
+        let captured=self.memory_scope_locked(&state,request,route)?;
+        let (configured,_,current)=self.memory_context_stamp(request,route,captured)?;
+        ensure!(configured && current==revision,"memory authority changed before result delivery");
+        let key=Self::memory_lineage_key(request)?;
+        let previous:Option<String>=state.journal.get("memory_context_lineage_v1",&key)?;
+        ensure!(previous.as_ref().is_none_or(|value|value==revision),
+            "memory authority changed within this Owner turn; a fresh Owner turn is required");
+        if previous.is_none() {state.journal.put("memory_context_lineage_v1",&key,&revision)?;}
+        Ok(())
+    }
+
+    pub(crate) fn memory_reply_current(&self,state: &super::State,request: &lifetime::PiToolRequest,
+        route: lifetime::PiInferenceScope) -> Result<Option<Response>> {
+        if request.envelope.body["method"]!="conversation.reply" {return Ok(None);}
+        if let Some(response)=self.publication_effect_current(state,request,route)? {return Ok(Some(response));}
+        let key=Self::memory_lineage_key(request)?;
+        let previous:Option<String>=state.journal.get("memory_context_lineage_v1",&key)?;
+        let stamp=request.envelope.body.get("memory_context_revision");
+        if stamp.is_none() && previous.is_none() {return Ok(None);}
+        let Some(stamp)=stamp.and_then(Value::as_str).filter(|value|value.len()==64 && value.bytes().all(|byte|byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))) else {
+            return Ok(Some(denied("disclosure_blocked","Memory-derived reply lacks valid provenance",RetryClass::Never)));
+        };
+        if previous.as_ref().is_some_and(|value|value!=stamp) {
+            return Ok(Some(denied("disclosure_blocked","Reply memory lineage differs from the Host result receipt",RetryClass::Never)));
+        }
+        let captured=self.memory_scope_locked(state,request,route)?;
+        let (configured,_,current)=self.memory_context_stamp(request,route,captured)?;
+        if !configured || current!=stamp {
+            return Ok(Some(denied("disclosure_blocked","Reply memory authority is no longer current",RetryClass::Never)));
+        }
+        Ok(None)
+    }
+
+    /// Runs before command-receipt replay, so a lost-ACK reply cannot disclose
+    /// revoked source bytes through the cached success path.
+    pub(crate) async fn lifetime_memory_reply_guard(&self,request: &lifetime::PiToolRequest,
+        route: lifetime::PiInferenceScope) -> Result<Option<Response>> {
+        if request.envelope.body["method"]!="conversation.reply" {return Ok(None);}
+        request.envelope.validate()?;
+        let requires_auth={
+            let state=self.lock()?;
+            if let Some(response)=self.memory_reply_current(&state,request,route)? {return Ok(Some(response));}
+            request.envelope.body.get("memory_context_revision").is_some()
+        };
+        if !requires_auth {return Ok(None);}
+        let mut envelope=request.envelope.clone();
+        envelope.body=json!({"method":"memory.context.inspect","ghost_id":request.ghost_id,
+            "conversation_id":request.conversation_id,"turn_id":string(&request.envelope.body,"turn_id")?});
+        envelope.payload_digest=crate::lifetime_contract::canonical_digest(&envelope.body)?;
+        let context=lifetime::PiToolRequest {context_ref: request.context_ref.clone(), ghost_id:request.ghost_id.clone(),conversation_id:request.conversation_id.clone(),envelope};
+        let inspected=self.lifetime_memory_action(&context,route).await;
+        match inspected {
+            Ok(response) if response.status==ResponseStatus::Success && response.data["memory_permitted"]==true
+                && response.data["context_revision"]==request.envelope.body["memory_context_revision"]=>Ok(None),
+            _=>Ok(Some(denied("disclosure_blocked","Memory-derived reply cannot revalidate source authority",RetryClass::Never))),
+        }
+    }
+
     pub(crate) async fn lifetime_memory_action(&self, request: &lifetime::PiToolRequest, route: lifetime::PiInferenceScope) -> Result<Response> {
         request.envelope.validate()?;
         let body = &request.envelope.body;
         let method = string(body, "method")?;
         let extra: &[&str] = match method {
             "memory.capabilities" => &[],
-            "memory.search" => &["query"],
-            "memory.recall" => &["query", "token_budget"],
+            "memory.context.inspect" => &[],
+            "memory.search" => &["query", "as_of", "known_at", "planes"],
+            "memory.recall" => &["query", "token_budget", "as_of", "known_at", "planes"],
             "memory.session_list" => &["limit"],
             "memory.retain" => &["text"],
             "memory.session_record" => &["summary"],
@@ -274,9 +362,25 @@ impl Host {
             Ok(scope) => scope,
             Err(error) => return Ok(denied("unauthorized", error.to_string(), RetryClass::Never)),
         };
-        let configured = route == lifetime::PiInferenceScope::Local && captured.permitted && Brain::source_configured();
+        let (configured,captured_configuration,context_revision)=self.memory_context_stamp(request,route,captured)?;
+        if method == "memory.context.inspect" {
+            let check = || {
+                ensure!(self.memory_scope(request,route)? == captured,
+                    "memory authority changed during context inspection");
+                ensure!(Brain::context_revision(&request.ghost_id).ok() == captured_configuration,
+                    "memory configuration changed during context inspection");
+                Ok(())
+            };
+            if configured {
+                self.brain.validate_context(&request.ghost_id,&check).await?;
+            }
+            check()?;
+            return Ok(success("Current authenticated memory context inspected",json!({
+                "context_revision":context_revision,"memory_permitted":configured
+            })));
+        }
         if method == "memory.capabilities" && !configured {
-            return Ok(success("No memory tools are available in this captured scope", json!({"available_tools":[]})));
+            return Ok(success("No memory tools are available in this captured scope", json!({"available_tools":[],"context_revision":context_revision})));
         }
         if !configured {
             return Ok(denied("disclosure_blocked", "Memory requires current permission, an explicit source ledger and an accepted local Pi route", RetryClass::Never));
@@ -286,18 +390,20 @@ impl Host {
             let current = self.memory_scope(request, route)?;
             ensure!(current == captured && current.permitted,
                 "memory permission or immutable disclosure scope changed during I/O");
+            ensure!(Brain::context_revision(&request.ghost_id).ok() == captured_configuration,
+                "memory binding configuration changed during I/O");
             Ok(())
         };
         if method == "memory.capabilities" {
             let capabilities = self.brain.source_capabilities(&request.ghost_id, &ledger, &check).await?;
             check()?;
-            let available: &[&str] = match (capabilities.notes, capabilities.sessions) {
-                (true, true) => &["memory_search", "memory_recall", "memory_session_list", "memory_retain", "memory_session_record"],
-                (true, false) => &["memory_search", "memory_recall", "memory_session_list", "memory_retain"],
-                (false, true) => &["memory_session_record"],
-                (false, false) => &[],
-            };
-            return Ok(success("Live scoped memory capabilities inspected", json!({"available_tools":available})));
+            let mut available = Vec::new();
+            if Brain::read_available(&request.ghost_id)? {
+                available.extend(["memory_search","memory_recall","memory_session_list"]);
+            }
+            if capabilities.notes { available.push("memory_retain"); }
+            if capabilities.sessions { available.push("memory_session_record"); }
+            return Ok(success("Live scoped memory capabilities inspected", json!({"available_tools":available,"context_revision":context_revision})));
         }
         let turn_id = string(body, "turn_id")?;
         let session_id = format!("ghost-session/v1/{}/{}/{turn_id}/1", request.ghost_id, request.conversation_id);
@@ -321,9 +427,18 @@ impl Host {
             if check().is_err() {
                 return Ok(denied("effect_unknown", "Memory authority changed during I/O; inspect the original source receipt before any new write", RetryClass::ReconcileFirst));
             }
-            let data = serde_json::to_value(&receipt)?;
+            let mut data = serde_json::to_value(&receipt)?;
+            data["context_revision"] = json!(context_revision);
+            if matches!(receipt.status,SourceStatus::Recorded|SourceStatus::AlreadyRecorded) {
+                self.record_memory_lineage(request,route,&context_revision)?;
+            }
             return Ok(match receipt.status {
                 SourceStatus::Recorded | SourceStatus::AlreadyRecorded => success("Untrusted source stored; this is not a folded belief or accepted fact", data),
+                SourceStatus::Prepared => Response {
+                    status:ResponseStatus::Error,summary:"The original episode attempt did not commit; retry only this same original memory command after contention clears".into(),
+                    data,object_refs:vec![],artifacts:vec![],next_actions:vec!["retry_original_memory_command".into()],
+                    error_code:Some("memory_busy".into()),retry_class:RetryClass::SameId,
+                },
                 SourceStatus::EffectUnknown => Response {
                     status: ResponseStatus::Error, summary: "Memory outcome is unresolved; no alternate source or blind replay is permitted".into(),
                     data, object_refs: vec![], artifacts: vec![], next_actions: vec!["inspect_original_source_receipt".into()],
@@ -332,7 +447,7 @@ impl Host {
                 _ => denied("conflict", "Source receipt is not an active recorded revision", RetryClass::Never),
             });
         }
-        let (name, arguments) = match method {
+        let (name, mut arguments) = match method {
             "memory.search" => ("memory_search", json!({"query":string(body,"query")?})),
             "memory.recall" => {
                 let budget = body.get("token_budget").map(|value| value.as_u64()
@@ -348,9 +463,15 @@ impl Host {
             }
             _ => unreachable!("memory method was checked before I/O"),
         };
+        if matches!(method,"memory.search"|"memory.recall") {for field in ["as_of","known_at","planes"] {if let Some(value)=body.get(field) {arguments[field]=value.clone();}}}
         let call = ai::ToolCall::new(&request.envelope.command_id, name, arguments);
-        let output = self.brain.read_memory(&request.ghost_id, &session_id, &call, &check).await?;
+        let mut output = self.brain.read_memory(&request.ghost_id, &session_id, &call, &check).await?;
         check()?;
+        if let Some(code)=crate::adapters::memory::read_error_code(&output) {let mut response=denied(code,output.summary,RetryClass::Never);response.data=output.content;return Ok(response);}
+        if let Some(data) = output.content.as_object_mut() {
+            data.insert("context_revision".into(),json!(context_revision));
+        }
+        if output.status==ToolStatus::Success {self.record_memory_lineage(request,route,&context_revision)?;}
         Ok(match output.status {
             ToolStatus::Success => success(output.summary, output.content),
             ToolStatus::Denied => denied("unauthorized", output.summary, RetryClass::Never),

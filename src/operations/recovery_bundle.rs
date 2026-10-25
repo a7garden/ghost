@@ -205,6 +205,40 @@ pub fn verify_bundle(source: &Path) -> anyhow::Result<Value> {
     }
 }
 
+/// Read one private file through the recovery plane's descriptor-relative
+/// no-follow traversal, with its parent and leaf bindings checked after I/O.
+#[cfg(unix)]
+pub(crate) fn read_private_bound_file(path: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
+    imp::read_private_bound_file(path, limit, || Ok(()))
+}
+
+/// Stream a bounded immutable operator artifact while retaining the same
+/// descriptor-relative ownership, link, mutation and path-binding checks.
+#[cfg(unix)]
+pub(crate) fn with_private_bound_file<T>(path: &Path, limit: u64, read: impl FnOnce(&mut std::fs::File) -> anyhow::Result<T>) -> anyhow::Result<T> {
+    imp::with_private_bound_file(path, limit, read)
+}
+
+#[cfg(unix)]
+pub(crate) fn publish_private_staged(source: &Path, destination: &Path, held: &std::fs::File, parent_identity: (u64,u64)) -> anyhow::Result<()> {
+    imp::publish_private_staged(source,destination,held,parent_identity,||Ok(()))
+}
+
+#[cfg(unix)]
+pub(crate) fn open_bound_directory(path: &Path) -> anyhow::Result<std::fs::File> { imp::open_absolute_directory(path) }
+
+#[cfg(all(unix,test))]
+pub(crate) fn publish_private_staged_before_rename(source: &Path, destination: &Path, held: &std::fs::File, parent_identity: (u64,u64), before_rename: impl FnOnce()->anyhow::Result<()>) -> anyhow::Result<()> {
+    imp::publish_private_staged(source,destination,held,parent_identity,before_rename)
+}
+
+#[cfg(all(unix, test))]
+pub(crate) fn read_private_bound_file_after_read(
+    path: &Path, limit: u64, after_read: impl FnOnce() -> anyhow::Result<()>,
+) -> anyhow::Result<Vec<u8>> {
+    imp::read_private_bound_file(path, limit, after_read)
+}
+
 /// Captures selected release components in the established private bundle
 /// boundary and commits a caller-built, versioned manifest only after copying.
 pub(crate) fn capture_selected_components<F>(
@@ -1454,7 +1488,7 @@ mod imp {
             .context("Host root must contain workspace.db")?;
         ensure!(host_entry.kind == EntryKind::Sqlite, "Host workspace.db is not a SQLite snapshot");
         let facts = host_entry.database.as_ref().context("Host database facts are missing")?;
-        ensure!(matches!(facts.user_version, 9..=14), "Host schema is unsupported; only schemas 9 through 14 are restorable");
+        ensure!(matches!(facts.user_version, 9..=16), "Host schema is unsupported; only schemas 9 through 16 are restorable");
         ensure!(
             facts.user_version >= manifest.release.schema_min as i64
                 && facts.user_version <= manifest.release.schema_max as i64,
@@ -2162,7 +2196,7 @@ mod imp {
         Ok(next as u64)
     }
 
-    fn open_absolute_directory(path: &Path) -> anyhow::Result<File> {
+    pub(super) fn open_absolute_directory(path: &Path) -> anyhow::Result<File> {
         ensure!(path.is_absolute(), "directory path must be absolute");
         let root_name = cstring(b"/", "filesystem root")?;
         let mut current = open_at(libc::AT_FDCWD, &root_name, DIRECTORY_FLAGS)?;
@@ -2181,6 +2215,67 @@ mod imp {
             }
         }
         Ok(current)
+    }
+
+    pub(super) fn read_private_bound_file(path: &Path, limit: u64, after_read: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<Vec<u8>> {
+        with_private_bound_file(path,limit,|file| {
+            let mut bytes = Vec::new();
+            file.take(limit + 1).read_to_end(&mut bytes)?;
+            after_read()?;
+            ensure!(bytes.len() as u64 <= limit,"private file grew beyond bounded read");
+            Ok(bytes)
+        })
+    }
+
+    pub(super) fn with_private_bound_file<T>(path: &Path, limit: u64, read: impl FnOnce(&mut File) -> anyhow::Result<T>) -> anyhow::Result<T> {
+        let parent = path.parent().context("private file parent missing")?;
+        let leaf = Path::new(path.file_name().context("private file name missing")?);
+        let directory = open_absolute_directory(parent)?;
+        let directory_before = Fingerprint::from_metadata(&directory.metadata()?);
+        let mut file = open_relative_file(&directory, leaf)?;
+        let before = Fingerprint::from_metadata(&file.metadata()?);
+        ensure!(before.length <= limit && before.mode & 0o077 == 0
+            && file.metadata()?.uid() == unsafe { libc::geteuid() }, "private file is oversized, exposed or foreign");
+        let value=read(&mut file)?;
+        ensure!(Fingerprint::from_metadata(&file.metadata()?) == before,
+            "private file changed during bounded read");
+        verify_relative_file_binding(&directory, leaf, before)?;
+        let reopened = open_absolute_directory(parent)?;
+        ensure!(Fingerprint::from_metadata(&reopened.metadata()?) == directory_before,
+            "private file parent path changed during read");
+        verify_relative_file_binding(&reopened, leaf, before)?;
+        Ok(value)
+    }
+
+    pub(super) fn publish_private_staged(source: &Path, destination: &Path, held: &File, parent_identity: (u64,u64), before_rename: impl FnOnce()->anyhow::Result<()>) -> anyhow::Result<()> {
+        let parent=destination.parent().context("publication parent missing")?;
+        ensure!(source.parent()==Some(parent),"staged publication must retain its original parent");
+        let directory=open_absolute_directory(parent)?;
+        let parent_metadata=directory.metadata()?;
+        ensure!((parent_metadata.dev(),parent_metadata.ino())==parent_identity,"publication parent identity changed");
+        let from=cstring(source.file_name().context("staged leaf missing")?.as_bytes(),"staged leaf")?;
+        let to=cstring(destination.file_name().context("destination leaf missing")?.as_bytes(),"destination leaf")?;
+        let expected=held.metadata()?;
+        ensure!(expected.mode()&0o077==0 && expected.uid()==unsafe {libc::geteuid()},"staged artifact must be private and owned");
+        ensure!(expected.is_dir() || (expected.is_file() && expected.nlink()==1),"staged artifact type/link count refused");
+        ensure!(stat_matches_metadata(&stat_at(directory.as_raw_fd(),&from)?,&expected),"staged inode binding changed");
+        before_rename()?;
+        ensure!(stat_matches_metadata(&stat_at(directory.as_raw_fd(),&from)?,&expected),"staged inode binding changed before publication");
+        let reopened=open_absolute_directory(parent)?;
+        ensure!((reopened.metadata()?.dev(),reopened.metadata()?.ino())==parent_identity,"publication parent binding changed before rename");
+        #[cfg(target_os="macos")]
+        let result=unsafe {libc::renameatx_np(directory.as_raw_fd(),from.as_ptr(),directory.as_raw_fd(),to.as_ptr(),libc::RENAME_EXCL)};
+        #[cfg(target_os="linux")]
+        let result=unsafe {libc::renameat2(directory.as_raw_fd(),from.as_ptr(),directory.as_raw_fd(),to.as_ptr(),libc::RENAME_NOREPLACE)};
+        #[cfg(not(any(target_os="macos",target_os="linux")))]
+        bail!("exclusive artifact publication unsupported on this platform");
+        #[cfg(any(target_os="macos",target_os="linux"))]
+        ensure!(result==0,"exclusive artifact publication failed: {}",std::io::Error::last_os_error());
+        ensure!(stat_matches_metadata(&stat_at(directory.as_raw_fd(),&to)?,&held.metadata()?),"published artifact inode differs from held source");
+        let reopened=open_absolute_directory(parent)?;
+        ensure!((reopened.metadata()?.dev(),reopened.metadata()?.ino())==parent_identity,"publication parent binding changed after rename");
+        ensure!(stat_matches_metadata(&stat_at(reopened.as_raw_fd(),&to)?,&held.metadata()?),"published artifact binding changed");
+        directory.sync_all()?; Ok(())
     }
 
     fn open_relative_directory(root: &File, relative: &Path) -> anyhow::Result<File> {

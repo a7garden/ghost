@@ -63,9 +63,25 @@ impl ScopedWorkspace {
         ensure!(!relative.as_os_str().is_empty(), "worker cwd must be a child of the workspace root");
         let cwd_components = normal_components(relative)?;
 
-        let scope = Self { root, cwd_components };
+        let scope = Self { root: root.join("workspaces"), cwd_components };
         let _ = scope.open_cwd().map_err(|error| anyhow::anyhow!(error.code))?;
         Ok(scope)
+    }
+
+    /// Host-derived canonical task directory. No model-supplied root is accepted.
+    pub(crate) fn for_task(path: &Path) -> Result<Self> {
+        ensure!(path.is_absolute() && path.canonicalize()? == path, "task path must be canonical");
+        let scope = Self { root: path.to_path_buf(), cwd_components: vec![] };
+        let _ = scope.open_cwd().map_err(|error| anyhow::anyhow!(error.code))?;
+        Ok(scope)
+    }
+
+    /// Creates an immutable-input candidate without overwriting existing data.
+    /// Callers verify its digest through NativeWorkspace before reuse.
+    pub(crate) fn create_input(&self, relative:&str, bytes:&[u8]) -> std::result::Result<(),ToolFailure> {
+        validate_relative_path(relative)?;
+        if bytes.len()>super::native_tools::MAX_ARTIFACT_FILE_BYTES { return Err(ToolFailure::new("tool_file_too_large")); }
+        self.atomic_write(relative,bytes,None)
     }
 
     pub(crate) fn read_utf8(&self, relative: &str) -> std::result::Result<(String, String), ToolFailure> {
@@ -137,7 +153,7 @@ impl ScopedWorkspace {
     }
 
     fn open_cwd(&self) -> std::result::Result<File, ToolFailure> {
-        let workspaces = self.root.join("workspaces");
+        let workspaces = &self.root;
         let mut current = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -265,7 +281,7 @@ fn normal_components(path: &Path) -> Result<Vec<String>> {
     }).collect()
 }
 
-fn validate_relative_path(path: &str) -> std::result::Result<Vec<String>, ToolFailure> {
+pub(crate) fn validate_relative_path(path: &str) -> std::result::Result<Vec<String>, ToolFailure> {
     if path.is_empty() || path.len() > MAX_TOOL_PATH_BYTES || path.starts_with('/') || path.contains('\\') || path.contains(':') || path.contains('\0') {
         return Err(ToolFailure::new("tool_path_invalid"));
     }

@@ -80,10 +80,16 @@ pub(super) fn insert_work(conn: &Connection, work: &Work) -> Result<()> {
             serde_json::to_string(work)?,
         ],
     )?;
+    super::super::bots_store::pin_work(conn, work)?;
+    super::super::shared_skills::pin_work(conn,work)?;
+        super::super::work_memory::pin_work(conn, work)?;
+    super::super::memory_publication::pin_work(conn,work)?;
     Ok(())
 }
 
 pub(super) fn update_work(conn: &Connection, work: &Work) -> Result<()> {
+    let previous = self::work(conn, &work.id)?
+        .ok_or_else(|| anyhow::anyhow!("lifetime work disappeared before update"))?;
     let changed = conn.execute(
         "UPDATE lifetime_work SET goal_revision=?1,owner=?2,owner_revision=?3,state=?4,execution_id=?5,cancellation=?6,payload=?7 WHERE id=?8",
         params![
@@ -99,6 +105,15 @@ pub(super) fn update_work(conn: &Connection, work: &Work) -> Result<()> {
     )?;
     if changed != 1 {
         bail!("lifetime work disappeared during update");
+    }
+    if previous.goal_revision != work.goal_revision
+        || previous.owner_revision != work.owner_revision
+        || previous.owner != work.owner
+    {
+        super::super::bots_store::pin_work(conn, work)?;
+    super::super::shared_skills::pin_work(conn,work)?;
+        super::super::work_memory::pin_work(conn, work)?;
+        super::super::memory_publication::pin_work(conn,work)?;
     }
     Ok(())
 }

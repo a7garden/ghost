@@ -157,7 +157,7 @@ fn all() -> RoutingPermissions {
 #[tokio::test]
 async fn routing_real_host_control_admission_group_retry_revision_and_reopen() {
     let d = tempfile::tempdir().unwrap();
-    let app = Host::open(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let e = entry(&app, "marketing");
     let specialist = entry(&app, "developer");
     let cap = result(route(&app, &key(), json!({"type":"routing_capability"})));
@@ -291,7 +291,7 @@ async fn routing_real_host_control_admission_group_retry_revision_and_reopen() {
     assert_eq!(bad["error_code"], "origin_unavailable");
     app.shutdown().await.unwrap();
     drop(app);
-    let reopened = Host::open(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let reopened = Host::open_legacy_fixture(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let receipt = result(route(
         &reopened,
         &key(),
@@ -308,7 +308,7 @@ async fn routing_real_host_control_admission_group_retry_revision_and_reopen() {
 #[tokio::test]
 async fn routing_real_task_explicit_sharing_zero_candidates_revocation_and_linked_answer() {
     let d = tempfile::tempdir().unwrap();
-    let app = Host::open(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let source = entry(&app, "source");
     let receiver = entry(&app, "receiver");
     stop_workers(&app);
@@ -519,7 +519,7 @@ async fn routing_real_task_explicit_sharing_zero_candidates_revocation_and_linke
 #[tokio::test]
 async fn routing_command_pending_intent_and_committed_admission_recover_without_duplicates() {
     let d = tempfile::tempdir().unwrap();
-    let app = Host::open(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let e = entry(&app, "owner");
     let id = key();
     let (text, segments) = parts(&["job"]);
@@ -550,7 +550,7 @@ async fn routing_command_pending_intent_and_committed_admission_recover_without_
         .unwrap());
     app.shutdown().await.unwrap();
     drop(app);
-    let reopened = Host::open(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let reopened = Host::open_legacy_fixture(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let recovered: Action = serde_json::from_value(
         json!({"request_id":id,"command":serde_json::from_str::<Value>(&payload).unwrap()}),
     )
@@ -655,7 +655,7 @@ async fn source_tool(app: &Arc<Host>, e: &RoutingEntry, call: ai::ToolCall) -> h
 #[tokio::test]
 async fn routing_real_delegation_lineage_cancellation_policy_and_duplicate_records_deny() {
     let d = tempfile::tempdir().unwrap();
-    let app = Host::open(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let source = entry(&app, "parent");
     let receiver = entry(&app, "child");
     stop_workers(&app);
@@ -889,7 +889,7 @@ impl host::durable::Host for RoutingProbe {
 #[tokio::test]
 async fn routing_actual_runtime_pre_intent_task_binds_to_current_tool_and_original_submission() {
     let d = tempfile::tempdir().unwrap();
-    let app = Host::open(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let e = entry(&app, "probe");
     stop_workers(&app);
     tokio::task::yield_now().await;
@@ -945,7 +945,7 @@ async fn routing_actual_runtime_pre_intent_task_binds_to_current_tool_and_origin
 #[tokio::test]
 async fn routing_rejected_owner_command_is_immutable_after_assignment_permission_repair() {
     let d = tempfile::tempdir().unwrap();
-    let app = Host::open(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let e = entry(&app, "owner");
     let assignee = entry(&app, "assignee");
     let id = key();
@@ -981,7 +981,7 @@ async fn routing_rejected_owner_command_is_immutable_after_assignment_permission
 #[tokio::test]
 async fn routing_owner_view_restores_entry_history_without_writing_or_cross_entry_leaks() {
     let d = tempfile::tempdir().unwrap();
-    let app = Host::open(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(d.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let e = entry(&app, "view_source");
     let other = entry(&app, "private_other_entry");
     let first: Admission = serde_json::from_value(result(admit(
@@ -1061,7 +1061,7 @@ struct SelectedAnswerFixture {
 impl SelectedAnswerFixture {
     fn open() -> Self {
         let directory = tempfile::tempdir().unwrap();
-        let app = Host::open(
+        let app = Host::open_legacy_fixture(
             directory.path(),
             tokio::runtime::Handle::current(),
             Some("mock"),

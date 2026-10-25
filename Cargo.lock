@@ -907,6 +907,7 @@ dependencies = [
  "ammonia",
  "anyhow",
  "base64 0.22.1",
+ "blake3",
  "clap",
  "errno",
  "fs2",
@@ -915,6 +916,7 @@ dependencies = [
  "image",
  "jiff",
  "jotdown",
+ "jsonschema",
  "libc",
  "oxi-frontmatter",
  "oxibrain-client",
@@ -1782,13 +1784,15 @@ dependencies = [
 
 [[package]]
 name = "oxibrain-client"
-version = "0.19.0"
+version = "0.21.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "unicode-normalization",
 ]
 
 [[package]]

@@ -1,15 +1,29 @@
 //! Long-lived Ghost host. Owns profile runtimes, durable command receipts, goals,
 //! schedules and policy independently of any UI, transport or optional adapter.
 mod actions;
+#[cfg(feature = "lifetime")]
+pub mod bots;
+#[cfg(feature = "lifetime")]
+pub(crate) mod bots_store;
+#[cfg(feature = "lifetime")]
+pub(crate) mod bots_provisioning;
+#[cfg(feature = "lifetime")]
+pub(crate) mod bots_memory;
+#[cfg(feature = "lifetime")]
+pub(crate) mod bot_lifecycle;
+#[cfg(feature = "lifetime")]
+pub(crate) mod shared_skills;
 pub mod orchestration;
 pub mod avatars;
 mod cli_tools;
+#[cfg(test)]
+#[allow(dead_code)]
 mod code_worker;
 pub mod integrations;
 pub mod models;
 #[cfg(feature = "lifetime")]
 pub(crate) mod inference;
-mod omp_worker;
+// Historical source retained; no OMP worker module is linked.
 mod omp_provider;
 pub mod operations;
 pub mod planner;
@@ -32,6 +46,10 @@ pub mod lifetime;
 mod lifetime_api;
 #[cfg(feature = "lifetime")]
 mod lifetime_memory;
+#[cfg(feature = "lifetime")]
+pub(crate) mod work_memory;
+#[cfg(feature = "lifetime")]
+pub(crate) mod memory_publication;
 #[cfg(feature = "lifetime")]
 mod lifetime_documents;
 // The owner decision resume in adapters/computer.rs reuses this module's
@@ -117,6 +135,8 @@ pub struct Host {
     profile_workers: Mutex<BTreeMap<String, Vec<tokio::task::AbortHandle>>>,
     recovery: tokio::sync::Mutex<()>,
     stopping: AtomicBool,
+    #[cfg(test)]
+    legacy_fixture_reasoning: AtomicBool,
     pub(crate) dispatch_enabled: bool,
     #[cfg(feature = "lifetime")]
     pub(crate) pi_callback_token: String,
@@ -213,7 +233,7 @@ impl Host {
             }
             for (name, role, soul) in [
                 ("specialist-research", "research", "지속형 리서치 Ghost. 주 Ghost와 요약·근거를 교환하고 맡은 책임을 검증 가능한 작업으로 수행한다."),
-                ("specialist-engineering", "engineering", "지속형 엔지니어링 Ghost. 자기 작업 범위와 sandbox에서 실제 OMP 실행을 맡고 검수 가능한 산출물을 주 Ghost에게 전달한다."),
+                ("specialist-engineering", "engineering", "지속형 엔지니어링 Ghost. 자기 작업 범위와 sandbox에서 자신의 Pi 실행으로 실제 작업을 맡고 검수 가능한 산출물을 주 Ghost에게 전달한다."),
                 ("specialist-operations", "operations", "지속형 운영 Ghost. 운영 상태와 복구 경계를 보존하며 맡은 책임과 검증 결과를 주 Ghost와 공유한다."),
             ] {
                 let existing: Option<(String, String)> = journal.0.query_row(
@@ -284,6 +304,8 @@ impl Host {
             profile_workers: Mutex::new(BTreeMap::new()),
             recovery: tokio::sync::Mutex::new(()),
             stopping: AtomicBool::new(false),
+        #[cfg(test)]
+        legacy_fixture_reasoning: AtomicBool::new(false),
             dispatch_enabled,
             #[cfg(feature = "lifetime")]
             pi_callback_token: format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()),
@@ -363,6 +385,15 @@ impl Host {
             .lock()
             .map_err(|_| anyhow!("workspace state unavailable"))
     }
+    #[cfg(test)]
+    fn open_legacy_fixture(root:&Path,handle:tokio::runtime::Handle,model:Option<&str>)->Result<Arc<Self>> {
+        let app=Self::open(root,handle,model)?;
+        app.legacy_fixture_reasoning.store(true,Ordering::Release);
+        let profiles=app.lock()?.profiles.values().map(|p|(p.id.clone(),p.runtime.clone())).collect::<Vec<_>>();
+        for (id,runtime) in profiles {app.start_legacy_fixture_worker(id,runtime,4);}
+        Ok(app)
+    }
+
     fn profile(store: ProfileStore) -> Result<Profile> {
         let id = store.uuid.clone();
         let name = store.name.clone();
@@ -377,8 +408,21 @@ impl Host {
             error: None,
         })
     }
-    fn start_worker(self: &Arc<Self>, id: String, runtime: Runtime, concurrency: usize) {
-        if !self.dispatch_enabled { return; }
+    fn permits_legacy_fixture_reasoning(&self)->bool {
+        #[cfg(test)] {return self.legacy_fixture_reasoning.load(Ordering::Acquire);}
+        #[cfg(not(test))] {false}
+    }
+    // Legacy receipts stay open, but Pi is the sole reasoning owner. Missing
+    // Pi configuration never permits a fallback agent or a second scheduler.
+    fn start_worker(self: &Arc<Self>, _id:String, _runtime:Runtime, _concurrency:usize) {
+        #[cfg(test)]
+        if self.permits_legacy_fixture_reasoning() {self.start_legacy_fixture_worker(_id,_runtime,_concurrency);}
+    }
+
+    #[cfg(test)]
+    fn start_legacy_fixture_worker(self: &Arc<Self>, id:String, runtime:Runtime, concurrency:usize) {
+        if !self.dispatch_enabled {return;}
+        self.legacy_fixture_reasoning.store(true,Ordering::Release);
         let weak = Arc::downgrade(self);
         let runner_weak = weak.clone();
         let runner_id = id.clone();
@@ -1094,6 +1138,7 @@ impl Host {
                 kind,
                 ..
             } => {
+                if !self.permits_legacy_fixture_reasoning() {bail!("pi_execution_prerequisite: use the canonical Ghost Pi conversation route; the legacy profile runtime is retired");}
                 text(&prompt, 8192)?;
                 models::prepare_conversation(s, &p.id, &conversation_id, kind)?;
                 // Existing tool-enabled chats pick up newly shipped host tools
@@ -1349,7 +1394,7 @@ impl Host {
         }
         Ok(
             self.with_snapshot_authority(&s.journal.0,
-            json!({"mode":"durable_workspace","host_protocol_version":1,"capabilities":{"orchestration":true,"routing":routing_host::capability(),"code_worker":{"configured":code_worker::configured(),"projects":code_worker::project_ids()},"omp_subscription":{"configured":omp_provider::configured(),"models":omp_provider::model_specs().iter().map(|(provider,model)|format!("{provider}/{model}")).collect::<Vec<_>>()},"avatars":true,"documents":cfg!(feature="documents"),"memory":memory::Brain::configured(),"channels":cfg!(feature="channels"),"computer":{"backend":self.computer.identity(),"configured":self.computer.configured(),"operations":self.computer.capabilities()}},"avatars":s.journal.objects::<avatars::Avatar>("avatar")?,"todos":s.journal.objects::<planner::Todo>("todo")?,"calendar_events":s.journal.objects::<planner::Event>("calendar_event")?,"connected_planner":connected_planner_snapshot(&s)?,"integrations":s.journal.objects::<integrations::Integration>("integration")?,"routing_shares":s.journal.objects::<routing_host::RoutingShare>("routing_share_v1")?,"routing_results":routing_dispatch::owner_results(&s)?,"workspace_id":s.journal.get::<String>("meta","workspace_id")?,"default_model":models::selected_llm(&s,&self.default_model)?,"model_settings":models::settings(&s)?,"profiles":profiles,"schedules":s.journal.list()?,"spaces":s.journal.objects::<documents::Space>("space")?,"reviews":s.journal.objects::<Review>("review")?.into_iter().filter(|r|!r.profile_id.is_empty()&&matches!(r.state.as_str(),"pending"|"approved"|"saved"|"declined")).collect::<Vec<_>>(),"goals":s.journal.objects::<Goal>("goal")?,"delegations":s.journal.objects::<Delegation>("delegation")?,"orchestration_plans":s.journal.objects::<orchestration::Plan>("orchestration_plan")?,"orchestration_runs":s.journal.objects::<orchestration::Run>("orchestration_run")?,"slack_bindings":s.journal.objects::<channels::SlackBinding>("slack_binding")?,"slack_outbox":s.journal.objects::<channels::Outbox>("slack_outbox")?,"voice_calls":s.journal.objects::<channels::Call>("voice_call")?,"connector_status":s.journal.objects::<Value>("connector_status")?,"connectors":{"computer":self.computer.configured(),"brain":memory::Brain::configured(),"voice":cfg!(feature="channels")&&std::env::var_os("OPENAI_API_KEY").is_some(),"slack":cfg!(feature="channels")&&std::env::var_os("GHOST_SLACK_APP_TOKEN").is_some()}}),
+            json!({"mode":"durable_workspace","host_protocol_version":1,"capabilities":{"orchestration":true,"routing":routing_host::capability(),"code_worker":{"configured":false,"retired":true,"projects":[]},"omp_subscription":{"configured":omp_provider::configured(),"models":omp_provider::model_specs().iter().map(|(provider,model)|format!("{provider}/{model}")).collect::<Vec<_>>()},"avatars":true,"documents":cfg!(feature="documents"),"memory":memory::Brain::configured(),"channels":cfg!(feature="channels"),"computer":{"backend":self.computer.identity(),"configured":self.computer.configured(),"operations":self.computer.capabilities()}},"avatars":s.journal.objects::<avatars::Avatar>("avatar")?,"todos":s.journal.objects::<planner::Todo>("todo")?,"calendar_events":s.journal.objects::<planner::Event>("calendar_event")?,"connected_planner":connected_planner_snapshot(&s)?,"integrations":s.journal.objects::<integrations::Integration>("integration")?,"routing_shares":s.journal.objects::<routing_host::RoutingShare>("routing_share_v1")?,"routing_results":routing_dispatch::owner_results(&s)?,"workspace_id":s.journal.get::<String>("meta","workspace_id")?,"default_model":models::selected_llm(&s,&self.default_model)?,"model_settings":models::settings(&s)?,"profiles":profiles,"schedules":s.journal.list()?,"spaces":s.journal.objects::<documents::Space>("space")?,"reviews":s.journal.objects::<Review>("review")?.into_iter().filter(|r|!r.profile_id.is_empty()&&matches!(r.state.as_str(),"pending"|"approved"|"saved"|"declined")).collect::<Vec<_>>(),"goals":s.journal.objects::<Goal>("goal")?,"delegations":s.journal.objects::<Delegation>("delegation")?,"orchestration_plans":s.journal.objects::<orchestration::Plan>("orchestration_plan")?,"orchestration_runs":s.journal.objects::<orchestration::Run>("orchestration_run")?,"slack_bindings":s.journal.objects::<channels::SlackBinding>("slack_binding")?,"slack_outbox":s.journal.objects::<channels::Outbox>("slack_outbox")?,"voice_calls":s.journal.objects::<channels::Call>("voice_call")?,"connector_status":s.journal.objects::<Value>("connector_status")?,"connectors":{"computer":self.computer.configured(),"brain":memory::Brain::configured(),"voice":cfg!(feature="channels")&&std::env::var_os("OPENAI_API_KEY").is_some(),"slack":cfg!(feature="channels")&&std::env::var_os("GHOST_SLACK_APP_TOKEN").is_some()}}),
             )?
         )
     }
@@ -1473,6 +1518,11 @@ impl Host {
             .get_mut(id)
             .ok_or_else(|| anyhow!("Ghost missing"))?
             .error = None;
+        #[cfg(test)]
+        if self.permits_legacy_fixture_reasoning() {
+            self.start_legacy_fixture_worker(id.into(),runtime,concurrency);
+            return Ok(json!({"profile_id":id,"state":"recovered"}));
+        }
         self.start_worker(id.into(), runtime, concurrency);
         Ok(json!({"profile_id":id,"state":"recovered"}))
     }
@@ -1560,3 +1610,8 @@ mod routing_host_tests;
 mod routing_model_http_tests;
 #[cfg(test)]
 mod routing_model_tests;
+
+#[cfg(all(test,feature="lifetime"))]
+mod retirement_tests;
+#[cfg(all(test, feature = "lifetime"))]
+mod preservation_tests;

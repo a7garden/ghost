@@ -29,7 +29,7 @@ impl Journal {
         }
         let conn = Connection::open(path)?;
         let version: u64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        let supported = if cfg!(feature = "lifetime") { 14 } else { 4 };
+        let supported = if cfg!(feature = "lifetime") { 16 } else { 4 };
         if version > supported {
             bail!("unsupported workspace schema version");
         }
@@ -70,7 +70,11 @@ impl Journal {
             if version < 14 {
                 tx.execute_batch(include_str!("../../contracts/lifetime/migration-014.sql"))?;
             }
-            tx.pragma_update(None, "user_version", 14)?;
+            tx.execute_batch(include_str!("../../contracts/lifetime/migration-015.sql"))?;
+            if version < 16 {
+                tx.execute_batch(include_str!("../../contracts/lifetime/migration-016.sql"))?;
+            }
+            tx.pragma_update(None, "user_version", 16)?;
             tx.commit()?;
         }
         super::skills::migrate_scope(&conn)?;

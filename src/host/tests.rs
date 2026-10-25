@@ -56,6 +56,8 @@ async fn worker_stream_is_visible_and_owner_cancel_closes_it_without_blocking_ac
         profile_workers: Mutex::new(BTreeMap::new()),
         recovery: tokio::sync::Mutex::new(()),
         stopping: AtomicBool::new(false),
+        #[cfg(test)]
+        legacy_fixture_reasoning: AtomicBool::new(true),
         dispatch_enabled: true,
         #[cfg(feature = "lifetime")]
         pi_callback_token: String::new(),
@@ -83,7 +85,7 @@ async fn worker_stream_is_visible_and_owner_cancel_closes_it_without_blocking_ac
         .unwrap();
     let task = reply["result"]["task_id"].as_str().unwrap();
     let mut watch = runtime.session.watch();
-    app.start_worker(id.clone(), runtime.clone(), 4);
+    app.start_legacy_fixture_worker(id.clone(), runtime.clone(), 4);
     tokio::time::timeout(Duration::from_secs(3),async {
             loop {
                 let snap=runtime.session.snapshot().unwrap();
@@ -123,7 +125,7 @@ fn setup(root: &Path) -> (tokio::runtime::Runtime, Arc<Host>, String, String) {
         .enable_all()
         .build()
         .unwrap();
-    let app = Host::open(root, rt.handle().clone(), None).unwrap();
+    let app = Host::open_legacy_fixture(root, rt.handle().clone(), None).unwrap();
     let id = app.lock().unwrap().profiles.keys().next().unwrap().clone();
     let reply = app
         .action(Action {
@@ -176,7 +178,7 @@ fn timer_lost_ack_reuses_occurrence_after_restart_and_pause_defers_work() {
         .enable_all()
         .build()
         .unwrap();
-    let app = Host::open(dir.path(), rt.handle().clone(), None).unwrap();
+    let app = Host::open_legacy_fixture(dir.path(), rt.handle().clone(), None).unwrap();
     // Queued input still owns this conversation: another occurrence waits.
     app.dispatch_due(&id, 4000).unwrap();
     {
@@ -391,6 +393,8 @@ fn setup_delegation_with_provider(
         profile_workers: Mutex::new(BTreeMap::new()),
         recovery: tokio::sync::Mutex::new(()),
         stopping: AtomicBool::new(false),
+        #[cfg(test)]
+        legacy_fixture_reasoning: AtomicBool::new(true),
         dispatch_enabled: true,
         #[cfg(feature = "lifetime")]
         pi_callback_token: String::new(),
@@ -425,8 +429,8 @@ fn setup_delegation_with_provider(
         .session
         .create_conversation(config)
         .unwrap();
-    app.start_worker(owner_id.clone(), owner_runtime, 4);
-    app.start_worker(target_id.clone(), target_runtime, 4);
+    app.start_legacy_fixture_worker(owner_id.clone(), owner_runtime, 4);
+    app.start_legacy_fixture_worker(target_id.clone(), target_runtime, 4);
     let submitted = app
         .action(Action {
             request_id: uuid::Uuid::new_v4().to_string(),
@@ -679,7 +683,7 @@ async fn dropped_host_releases_writer_lock_despite_child_inheriting_descriptor()
         }
     }
     let dir = tempfile::tempdir().unwrap();
-    let app = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let mut pipe = [0; 2];
     assert_eq!(unsafe { libc::pipe(pipe.as_mut_ptr()) }, 0);
     let pid = unsafe { libc::fork() };
@@ -698,12 +702,12 @@ async fn dropped_host_releases_writer_lock_despite_child_inheriting_descriptor()
     }
     unsafe { libc::close(pipe[0]); }
     let _child = Child { pid, wake: pipe[1] };
-    let error = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock"))
+    let error = Host::open_legacy_fixture(dir.path(), tokio::runtime::Handle::current(), Some("mock"))
         .err().expect("the live Host must exclude another writer");
     assert!(error.to_string().contains("workspace is already served"));
     app.shutdown().await.unwrap();
     drop(app);
-    let reopened = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock"))
+    let reopened = Host::open_legacy_fixture(dir.path(), tokio::runtime::Handle::current(), Some("mock"))
         .expect("an unrelated child's inherited descriptor must not retain the dropped Host lease");
     reopened.shutdown().await.unwrap();
 }
@@ -729,7 +733,7 @@ async fn graceful_host_shutdown_preserves_owned_delegation_for_restart() {
     app.shutdown().await.unwrap();
     drop(app);
 
-    let resumed = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let resumed = Host::open_legacy_fixture(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             {

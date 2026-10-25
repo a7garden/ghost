@@ -228,3 +228,25 @@ impl Host {
         Ok(json!({"ok":true,"settings":settings,"providers":catalog(self.pi_local_route.as_ref())}))
     }
 }
+
+/// Opt-in live-test bootstrap for the registered external provider structure.
+/// Copies the Owner's already-registered zai-coding credential into the
+/// isolated test Host and commits it as the default selection, so every
+/// canary conversation runs on external inference exactly as the installed
+/// product does. The secret value never enters logs, receipts or snapshots.
+#[cfg(test)]
+pub(crate) fn install_external_test_inference(host: &Host) -> Result<()> {
+    let home = std::env::var("HOME").map_err(|_| anyhow!("HOME is required to locate the Owner zai-coding credential"))?;
+    let raw = fs::read(Path::new(&home).join("Library/Application Support/Ghost/inference-credentials/zai-coding.json"))
+        .map_err(|error| anyhow!("registered external inference requires the Owner zai-coding credential: {error}"))?;
+    let secret = serde_json::from_slice::<Value>(&raw)?
+        .get("api_key").and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("Owner zai-coding credential is malformed"))?
+        .to_owned();
+    let value = host.configure_inference(&json!({"operation":"set_api_key","version":0,"provider":"zai-coding","api_key":secret}))?;
+    ensure!(value["settings"]["credentials"]["zai-coding"]==true, "zai-coding credential was not registered");
+    let value = host.configure_inference(&json!({"operation":"set_default","version":1,"selection":{"provider":"zai-coding","model":"glm-5.3","effort":"max"}}))?;
+    ensure!(value["settings"]["default"]["provider"]=="zai-coding" && value["settings"]["default"]["model"]=="glm-5.3",
+        "external default selection was not committed");
+    Ok(())
+}

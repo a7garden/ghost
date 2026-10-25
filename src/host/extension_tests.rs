@@ -30,7 +30,7 @@ fn profile(app: &Arc<Host>, name: &str) -> String {
 #[tokio::test]
 async fn planner_persists_deduplicates_and_rejects_stale_updates() {
     let root = tempfile::tempdir().unwrap();
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let key = uuid::Uuid::new_v4().to_string();
     let create = json!({"type":"workspace","action":{"type":"save_todo","todo":{"title":"한 주 계획","notes":"개인 할 일","due":"2028-02-29"}}});
     let first = result(action(&app, &key, create.clone()));
@@ -84,7 +84,7 @@ async fn planner_persists_deduplicates_and_rejects_stale_updates() {
     assert!(adjacent["events"].as_array().unwrap().is_empty());
     app.shutdown().await.unwrap();
     drop(app);
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     assert_eq!(app.snapshot().unwrap()["todos"][0]["completed"], true);
     result(owner(
         &app,
@@ -128,7 +128,7 @@ for line in sys.stdin:
 #[tokio::test]
 async fn mcp_stdio_scope_pagination_persistence_and_uncertain_effects() {
     let root = tempfile::tempdir().unwrap();
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let owner_id = profile(&app, "owner");
     let other = profile(&app, "other");
     let saved = result(owner(
@@ -202,7 +202,7 @@ async fn mcp_stdio_scope_pagination_persistence_and_uncertain_effects() {
 #[tokio::test]
 async fn mcp_rechecks_grants_after_connection_and_does_not_dispatch() {
     let root = tempfile::tempdir().unwrap();
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let profile_id = profile(&app, "agent");
     let saved = result(owner(
         &app,
@@ -230,7 +230,7 @@ async fn mcp_rechecks_grants_after_connection_and_does_not_dispatch() {
 #[tokio::test]
 async fn integration_settings_validate_endpoints_and_keep_env_references_only() {
     let root = tempfile::tempdir().unwrap();
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     for url in [
         "http://example.com/mcp",
         "https://user:password@example.com/mcp",
@@ -327,7 +327,7 @@ async fn mcp_http_handles_session_headers_json_sse_and_tool_errors() {
         }
     });
     let root = tempfile::tempdir().unwrap();
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let saved = result(owner(
         &app,
         json!({"type":"save_integration","integration":{"name":"HTTP fixture","transport":{"kind":"http","url":url},"enabled":true}}),

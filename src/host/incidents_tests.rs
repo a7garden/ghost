@@ -78,6 +78,8 @@ fn setup() -> TestHost {
         profile_workers: Mutex::new(BTreeMap::new()),
         recovery: tokio::sync::Mutex::new(()),
         stopping: AtomicBool::new(false),
+        #[cfg(test)]
+        legacy_fixture_reasoning: AtomicBool::new(false),
         dispatch_enabled: true,
         pi_callback_token: String::new(),
         pi_local_route: None,

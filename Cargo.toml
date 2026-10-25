@@ -15,7 +15,7 @@ durable-runtime = ["dep:oxicode-sdk", "oxicode-sdk/durable", "dep:futures"]
 # Host is headless by default. Adapters and UI remain independently selectable.
 host = ["durable-runtime", "dep:hmac", "dep:base64", "dep:image", "dep:tempfile", "dep:jiff"]
 # Opt-in expansion; production launch configuration remains unchanged.
-lifetime = ["host", "dep:libc", "dep:errno", "dep:parking_lot", "dep:tokio-tungstenite"]
+lifetime = ["host", "dep:libc", "dep:errno", "dep:parking_lot", "dep:tokio-tungstenite", "dep:jsonschema"]
 caldav = ["host", "dep:time", "time/macros", "dep:roxmltree", "dep:libc"]
 documents = ["host", "dep:oxi-frontmatter", "dep:time", "dep:tempfile", "dep:ammonia", "dep:jotdown", "dep:pulldown-cmark", "dep:base64"]
 memory = ["host", "dep:oxibrain-client"]
@@ -29,9 +29,11 @@ libc = { version = "0.2", optional = true }
 errno = { version = "0.3", optional = true }
 parking_lot = { version = "=0.12.5", optional = true }
 anyhow = "1"
+blake3 = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+jsonschema = { version = "=0.46.10", default-features = false, optional = true }
 futures = { version = "0.3", optional = true }
 uuid = { version = "1", features = ["v4", "v5", "v7"] }
 sha2 = "0.10"
@@ -41,7 +43,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", 
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
 oxicode-sdk = { path = "../oxicode/oxicode-sdk", version = "0.81.0", optional = true }
 oxi-frontmatter = { path = "../oximemo/crates/oxi-frontmatter", version = "0.4.0", optional = true }
-oxibrain-client = { path = "../oxibrain/crates/oxibrain-client", version = "0.19.0", optional = true }
+oxibrain-client = { path = "../oxibrain/crates/oxibrain-client", version = "0.21.0", optional = true }
 time = { version = "0.3", features = ["formatting", "parsing"], optional = true }
 roxmltree = { version = "=0.21.1", optional = true }
 tempfile = { version = "3", optional = true }
