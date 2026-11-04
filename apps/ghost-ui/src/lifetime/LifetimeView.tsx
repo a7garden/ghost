@@ -1055,7 +1055,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     {workspaceSnapshot && selectedTarget && onOpenApproval && <AgentPluginSurfaces
       snapshot={workspaceSnapshot} ghostId={selectedTarget.ghost_id} workspaceKey={workspaceSnapshot.workspace_id}
       onOpenApproval={onOpenApproval}/>}
-    {mode === 'live' && selectedTarget && <InferenceSettings pair={selectedTarget} connected={connected} disabled={writesDisabled || Boolean(busy)}/>}
+    {mode === 'live' && selectedTarget && <InferenceSettings pair={selectedTarget} primary={selectedTarget.kind === "primary"} connected={connected} disabled={writesDisabled || Boolean(busy)}/>}
     {(!workspaceSnapshot || !onOpenApproval) && <section className="lifetime-outbox" aria-label="문서 저장 제안 검토">
       <div className="lifetime-section-heading"><div><h3>문서 저장 요청</h3></div></div>
       {selectedTarget !== undefined && documentReviews !== undefined && documentAuthorityEpoch !== undefined && lifetimeDocumentReviews.length === 0

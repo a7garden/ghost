@@ -125,6 +125,7 @@ pub(super) fn admitted(conn: &Connection, receiver: &Value) -> Result<()> {
     // A queued assignment retains the skill revision selected at admission,
     // even when the Owner updates that skill before Pi first inspects it.
     super::pi_execution::skill_refs(conn, &work)?;
+    super::orchestra::admit_assignment(conn, &work, apply::string_field(body, "conversation_id")?)?;
     let digest = canonical_digest(&serde_json::to_value(&receiver)?)?;
     let execution = execution_id(&work.owner, &work, &receiver.command_id)?;
     let mut context = Context {
@@ -202,6 +203,16 @@ fn current(conn: &Connection, context: &Context, request: &PiToolRequest) -> Res
         "Pi context execution lineage changed"
     );
     Ok(work)
+}
+
+/// Selection bootstrap occurs before Pi can claim its SDK generation. This
+/// observation only exposes routing metadata for the original assignment.
+pub(super) fn inference_preflight(conn: &Connection, request: &PiToolRequest) -> Result<Option<Work>> {
+    let body = &request.envelope.body;
+    let Some(assignment_id) = body["assignment_id"].as_str() else { return Ok(None); };
+    let Some(context) = load::<Context>(conn, CONTEXT, assignment_id)? else { return Ok(None); };
+    ensure!(body["work_id"].as_str() == Some(&context.work_id), "Inference preflight Work does not match its assignment");
+    current(conn, &context, request).map(Some)
 }
 
 pub(super) fn view(conn: &Connection, assignment: &str) -> Result<Option<Value>> {

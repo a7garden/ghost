@@ -11,6 +11,7 @@ pub(crate) struct PiProcess {
     output: BufReader<ChildStdout>,
 }
 
+#[derive(Clone)]
 pub(crate) enum PiLauncher {
     Bundled(PathBuf),
     NodeEntry(PathBuf),
@@ -121,6 +122,28 @@ impl PiProcess {
                 .env("GHOST_LIFETIME_LOCAL_MAX_OUTPUT_TOKENS", route.max_output_tokens.to_string())
                 .env("GHOST_LIFETIME_LOCAL_ROUTE_IDENTITY", route.config_identity()?);
         }
+        Self::spawn(command, mode).await
+    }
+
+    pub(crate) async fn launch_orchestra_review(launcher: &PiLauncher, host_root: &Path, authority_epoch: u64) -> Result<Self> {
+        let mode = "orchestra-review";
+        let mut command = launcher.command()?;
+        command.arg("--root").arg(host_root.join("durable")).arg("--mode").arg(mode)
+            .env("GHOST_LIFETIME_HOST_ROOT", host_root)
+            .env("GHOST_PI_AUTHORITY_EPOCH", authority_epoch.to_string())
+            .env_remove("GHOST_PI_CALLBACK_TOKEN")
+            .env_remove("GHOST_PI_LOCAL_CALLBACK_TOKEN")
+            .env_remove("GHOST_LIFETIME_LOCAL_MODEL_URL")
+            .env_remove("GHOST_LIFETIME_LOCAL_MODEL_ID")
+            .env_remove("GHOST_LIFETIME_LOCAL_MAX_OUTPUT_TOKENS")
+            .env_remove("GHOST_LIFETIME_LOCAL_ROUTE_IDENTITY")
+            .env_remove("BUN_BE_BUN")
+            .env_remove("BUN_OPTIONS")
+            .env_remove("NODE_OPTIONS");
+        Self::spawn(command, mode).await
+    }
+
+    async fn spawn(mut command: Command, mode: &str) -> Result<Self> {
         let mut child = command
             .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit()).kill_on_drop(true).spawn()?;

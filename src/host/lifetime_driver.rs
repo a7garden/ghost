@@ -127,6 +127,7 @@ async fn run(weak: Weak<Host>, launcher: PiLauncher, root: PathBuf, mode: String
     let mut publication_continuation:Option<ContinuationJob>=None;
     let mut verification_continuation:Option<ContinuationJob>=None;
     let mut pi_cancellation: Option<ContinuationJob> = None;
+    let mut orchestra_review: Option<ContinuationJob> = None;
     loop {
         let Some(host) = weak.upgrade() else { break; };
         if host.stopping.load(std::sync::atomic::Ordering::Acquire) { break; }
@@ -187,6 +188,15 @@ async fn run(weak: Weak<Host>, launcher: PiLauncher, root: PathBuf, mode: String
             settle_pi_cancellations(&cancelling, authority_epoch).await
         }).await, Some(Err(_))) {
             eprintln!("Pi cancellation remains unresolved; original effects are fenced");
+        }
+        if mode == "broker" {
+            let reviewing = Arc::clone(&host);
+            if matches!(poll_continuation_job(&host, &mut orchestra_review, || {
+                let launcher = launcher.clone();
+                async move { reviewing.advance_orchestra_reviews(&launcher).await }
+            }).await, Some(Err(_))) {
+                eprintln!("independent Orchestra review is pending; inspect its original receipt");
+            }
         }
         let pending = match host.lock().and_then(|state| lifetime::pending_outbox(&state.journal.0)) {
             Ok(items) => items,
@@ -369,6 +379,7 @@ async fn run(weak: Weak<Host>, launcher: PiLauncher, root: PathBuf, mode: String
     if let Some(host)=weak.upgrade() {
         if let Some(continuation)=verification_continuation {cancel_continuation_job(&host,continuation).await;}
         if let Some(continuation) = pi_cancellation { cancel_continuation_job(&host, continuation).await; }
+        if let Some(continuation) = orchestra_review { cancel_continuation_job(&host, continuation).await; }
         if let Some(continuation)=experience_continuation {cancel_continuation_job(&host,continuation).await;}
         if let Some(continuation)=publication_continuation {cancel_continuation_job(&host,continuation).await;}
     }

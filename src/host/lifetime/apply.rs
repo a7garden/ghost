@@ -876,11 +876,11 @@ pub(super) fn work_cancel(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct StoredResult {
-    event: Value,
-    producer: String,
-    epoch: u64,
-    sequence: u64,
+pub(super) struct StoredResult {
+    pub(super) event: Value,
+    pub(super) producer: String,
+    pub(super) epoch: u64,
+    pub(super) sequence: u64,
     current: bool,
     reason: Option<String>,
 }
@@ -1091,7 +1091,7 @@ fn result_response(
     Ok(response)
 }
 
-fn result_is_current(conn: &Connection, record: &StoredResult) -> Result<(bool, Option<String>)> {
+pub(super) fn result_is_current(conn: &Connection, record: &StoredResult) -> Result<(bool, Option<String>)> {
     if !record.current {
         return Ok((false, record.reason.clone()));
     }
@@ -1223,6 +1223,7 @@ fn work_accept(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
     }) {
         return Err(conflict("acceptance artifact is not attached to the current result"));
     }
+    let orchestra_review = super::orchestra_review::require_pass(conn, &goal, &work, &acceptance.artifact_digest)?;
     let required = required_checks(&goal.acceptance_spec)?;
     let mut seen = BTreeSet::new();
     for check in &acceptance.checks {
@@ -1276,7 +1277,7 @@ fn work_accept(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
         "privacy":goal.privacy,
         "goal_id":goal.id,
         "goal_revision":goal.revision,
-        "prompt":format!("Authenticated Host verification: work_id={} is accepted at goal_revision={}. {} independent checks passed under verifier {} and policy {}. Goal state={}. Report this committed acceptance to the user; do not submit or restart any execution. Artifact contents remain in their original privacy scope.", work.id, goal.revision, acceptance.checks.len(), acceptance.verifier_revision, acceptance.policy_revision, goal.state),
+        "prompt":format!("Authenticated Host verification: work_id={} is accepted at goal_revision={}. {} independent checks passed under verifier {} and policy {}. Goal state={}. Report this committed acceptance to the user; do not submit or restart any execution. Artifact contents remain in their original privacy scope.{}", work.id, goal.revision, acceptance.checks.len(), acceptance.verifier_revision, acceptance.policy_revision, goal.state, orchestra_review.map(|evidence| format!(" {evidence}.")).unwrap_or_default()),
     });
     context.enqueue("pi", outgoing(envelope, principal, Some(goal.revision), report)?);
     Ok(success(
@@ -1320,7 +1321,7 @@ fn validate_required_checks(spec: &Value) -> Result<()> {
     Ok(())
 }
 
-fn required_checks(spec: &Value) -> Result<BTreeSet<String>> {
+pub(super) fn required_checks(spec: &Value) -> Result<BTreeSet<String>> {
     validate_required_checks(spec)?;
     // Validation above guarantees the array holds unique non-empty strings.
     let Some(items) = spec.get("required_checks").and_then(Value::as_array) else {
@@ -1416,7 +1417,7 @@ fn artifact_inputs_current(conn: &Connection, work: &Work) -> Result<bool> {
     Ok(inputs.as_slice() == current.as_deref().unwrap_or(&[]))
 }
 
-fn result_record(conn: &Connection, execution_id: &str) -> Result<Option<StoredResult>> {
+pub(super) fn result_record(conn: &Connection, execution_id: &str) -> Result<Option<StoredResult>> {
     let payload: Option<String> = conn
         .query_row(
             "SELECT payload FROM lifetime_results WHERE execution_id=?1",

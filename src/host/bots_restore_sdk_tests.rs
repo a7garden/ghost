@@ -1114,6 +1114,66 @@ mod actual_sdk {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires the explicit compiled Orchestra provider canary entry"]
+    async fn bundled_bun_orchestra_intake_routes_reviews_and_reports() {
+        let binary = PathBuf::from(std::env::var_os("GHOST_TEST_ORCHESTRA_BUN").expect("compiled fixture entry"));
+        let mut f = host_fixture();
+        let _environment = isolated_environment(f.root.path(), &f.ghost).await;
+        f.host.pi_callback_token = "orchestra-fixture-host-callback".into();
+        let configure = |input| f.host.configure_inference(&input).unwrap();
+        configure(json!({"operation":"set_api_key","version":0,"provider":"zai-coding","api_key":"orchestra-fixture-producer"}));
+        configure(json!({"operation":"set_api_key","version":1,"provider":"minimax","api_key":"orchestra-fixture-reviewer"}));
+        configure(json!({"operation":"select","version":2,"ghost_id":f.ghost,"conversation_id":f.conversation,
+            "selection":{"provider":"zai-coding","model":"glm-5.3","effort":"low"}}));
+        configure(json!({"operation":"set_orchestra","version":3,"ghost_id":f.ghost,"conversation_id":f.conversation,
+            "profile":{"routes":{"routine-code":{"provider":"zai-coding","model":"glm-5.3","effort":"max"}},
+                "reviewer":{"provider":"minimax","model":"MiniMax-M3.1-Flash-Preview","effort":"medium"}}}));
+        let host = Arc::new(f.host);
+        let http = pi_test_http::Server::start(Arc::clone(&host), "a".repeat(64));
+        let driver = Driver::start_bundled(&host, binary.canonicalize().unwrap());
+        owner(&host, "orchestra-e2e-input", json!({
+            "method":"conversation.input","ghost_id":f.ghost,"conversation_id":f.conversation,
+            "text":"ORCHESTRA_E2E_OWNER 결과 파일을 만들고 독립 검수 결과를 알려줘.",
+            "privacy":"public","attachments":[],
+        }), None);
+        let trace_path = f.root.path().join("orchestra-provider-trace.jsonl");
+        let deadline = Instant::now() + Duration::from_secs(25);
+        loop {
+            let reported: bool = host.lock().unwrap().journal.0.query_row(
+                "SELECT EXISTS(SELECT 1 FROM lifetime_turns WHERE conversation_id=?1 AND text LIKE '독립 Pi 리뷰를 통과했습니다.%')",
+                [&f.conversation], |r| r.get(0),
+            ).unwrap();
+            if reported { break; }
+            assert!(Instant::now() < deadline, "Orchestra report did not arrive. Host errors: {:?}. Provider trace: {}",
+                http.errors(), fs::read_to_string(&trace_path).unwrap_or_default());
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+
+        let goal: String = host.lock().unwrap().journal.0.query_row(
+            "SELECT goal_id FROM lifetime_turn_goals WHERE turn_id='orchestra-e2e-input'", [], |r| r.get(0),
+        ).unwrap();
+        let thread = owner(&host, "orchestra-e2e-thread", json!({"method":"goal.thread.inspect","goal_id":goal}), None);
+        assert_eq!(thread["goal"]["state"], "accepted");
+        assert_eq!(thread["goal"]["acceptance_spec"]["orchestra_task"], "routine-code");
+        assert!(thread["reports"].as_array().unwrap().iter().any(|report| report["text"].as_str().unwrap().contains("독립 Pi 리뷰를 통과했습니다.")));
+        let trace: Vec<Value> = fs::read_to_string(trace_path).unwrap().lines().map(|line|serde_json::from_str(line).unwrap()).collect();
+        assert!(trace.iter().any(|call|call["owner"] == true && call["intake"] == true && call["effort"] == "low"));
+        assert!(trace.iter().any(|call|call["assignment"] == true && call["model"] == "glm-5.3" && call["effort"] == "max"));
+        let review: Vec<_> = trace.iter().filter(|call|call["reviewer"] == true).collect();
+        assert_eq!(review.len(), 1);
+        assert_eq!(review[0]["model"], "MiniMax-M3.1-Flash-Preview");
+        assert_eq!(review[0]["effort"], "medium");
+        assert_eq!(review[0]["store"], false);
+        assert_eq!(review[0]["tools"], json!([]));
+        assert_eq!(review[0]["containsOwnerTurn"], false);
+        assert_eq!(review[0]["containsArtifact"], true);
+        assert_eq!(review[0]["credentialMatches"], true);
+        assert!(trace.iter().any(|call| call["verified"] == true && call["reviewer"] == false));
+        assert!(http.errors().is_empty());
+        driver.close(&host).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn actual_sdk_owner_chat_opens_work_thread_and_follow_up_reports_back() {
         let mut f = host_fixture();
         let _environment = isolated_environment(f.root.path(), &f.ghost).await;

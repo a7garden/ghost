@@ -202,6 +202,7 @@ fn plan(host: &Host, conn: &Connection, work_id: &str) -> Result<(Plan, Vec<u8>,
     let goal =
         db::goal(conn, &work.goal_id)?.ok_or_else(|| anyhow!("Task verification Goal missing"))?;
     let artifact = published(conn, &work, &t.content.artifact_path)?;
+    super::orchestra_review::require_pass(conn, &goal, &work, &artifact.digest)?;
     let bytes = crate::worker::journal::read_verified_pi_artifact(
         &host.root,
         conn,
@@ -287,6 +288,7 @@ fn current_conn(host: &Host, conn: &Connection, p: &Plan) -> Result<()> {
             && graph::current_result_scope(conn, &work)?,
         "Independent verifier source was cancelled, replaced or closed"
     );
+    super::orchestra_review::require_pass(conn, &goal, &work, &p.output.digest)?;
     let (_, t) = task_contracts::work_source(conn, &work)?
         .ok_or_else(|| anyhow!("Verifier source grant missing"))?;
     ensure!(
@@ -346,7 +348,11 @@ impl Host {
         };
         let source_work = {
             let state = self.lock()?;
-            db::work(&state.journal.0, &work_id)?.ok_or_else(|| anyhow!("Verifier Work missing"))?
+            let work = db::work(&state.journal.0, &work_id)?.ok_or_else(|| anyhow!("Verifier Work missing"))?;
+            if !super::orchestra_review::ready_for_verifier(&state.journal.0, &work)? {
+                return Ok(());
+            }
+            work
         };
         self.work_memory_verification_guard(&source_work).await?;
         let verified_publication = self.publication_work_guard(&source_work).await?;
@@ -502,7 +508,10 @@ impl Host {
             saved.plan == p && saved.state == "complete" && saved.passed,
             "Independent verifier receipt is pending, unknown, failed or stale"
         );
-        let checks=vec![Check{id:"artifact_sha256".into(),passed:true,evidence:format!("Host independently reopened immutable producer artifact {}",p.output.digest)},Check{id:"owner_verifier".into(),passed:true,evidence:format!("Independent isolated verifier {} under image {} interpreter {} accepted script {} input {} output {}; producer self-check is not acceptance authority",p.verification_execution,p.image,p.interpreter,p.script_sha256,p.input_sha256,p.output.digest)}];
+        let mut checks=vec![Check{id:"artifact_sha256".into(),passed:true,evidence:format!("Host independently reopened immutable producer artifact {}",p.output.digest)},Check{id:"owner_verifier".into(),passed:true,evidence:format!("Independent isolated verifier {} under image {} interpreter {} accepted script {} input {} output {}; producer self-check is not acceptance authority",p.verification_execution,p.image,p.interpreter,p.script_sha256,p.input_sha256,p.output.digest)}];
+        let work = db::work(conn, &p.work_id)?.ok_or_else(|| anyhow!("Verifier Work missing"))?;
+        let goal = db::goal(conn, &work.goal_id)?.ok_or_else(|| anyhow!("Verifier Goal missing"))?;
+        checks.extend(super::orchestra_review::acceptance_check(conn, &goal, &work, &p.output.digest)?);
         let acceptance = Acceptance {
             work_id: p.work_id,
             goal_revision: p.goal_revision,

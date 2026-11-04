@@ -2095,6 +2095,7 @@ impl Host {
                 "Published artifact does not match the Owner's expected path and content digest"
             )
         })?;
+        let review = super::orchestra_review::acceptance_check(conn, &goal, &work, &artifact.digest)?;
         let bytes = crate::worker::journal::read_verified_pi_artifact(
             &self.root,
             conn,
@@ -2157,6 +2158,7 @@ impl Host {
                 "stdout expectation requires exact Owner command"
             );
         }
+        checks.extend(review);
         for required in goal.acceptance_spec["required_checks"]
             .as_array()
             .into_iter()

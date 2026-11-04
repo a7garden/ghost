@@ -360,6 +360,7 @@ fn conversation_input(
         conversation_id,
     )?;
 
+    super::orchestra::admit_turn(tx, &envelope.command_id, ghost_id, conversation_id, &privacy)?;
     let outbox_body = json!({
         "method": "conversation.input",
         "ghost_id": ghost_id,
@@ -661,6 +662,7 @@ fn goal_create(
     let goal_id = response.data["goal"]["id"]
         .as_str()
         .ok_or_else(|| anyhow!("Goal admission response omitted its Goal identity"))?;
+    super::orchestra::admit_goal(tx, turn_id, goal_id, &acceptance_spec)?;
     tx.execute(
         "INSERT INTO lifetime_turn_goals(turn_id,goal_id) VALUES(?1,?2)",
         params![turn_id, goal_id],

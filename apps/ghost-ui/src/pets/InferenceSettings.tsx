@@ -7,8 +7,9 @@ import '../features/connections.css';
 type Pair = { ghost_id: string; conversation_id: string };
 type Selection = { provider: string; model: string; effort: string };
 type Provider = { id: string; name: string; auth: string; models: string[]; efforts: string[]; default_model: string | null; default_effort: string; image: boolean; image_note?: string };
+type OrchestraProfile = { routes: Record<string, Selection>; reviewer: Selection | null };
 type Configuration = {
-  settings: { version: number; default: Selection; conversations: Record<string, Selection>; external_grants: Record<string, string[]>; credentials: Record<string, boolean>; image_provider: string };
+  settings: { version: number; default: Selection; conversations: Record<string, Selection>; external_grants: Record<string, string[]>; credentials: Record<string, boolean>; image_provider: string; orchestra?: Record<string, { version: number; profile: OrchestraProfile }> };
   providers: Provider[];
 };
 
@@ -49,7 +50,7 @@ export function inferenceProviderStatus(provider: Pick<Provider, 'id' | 'auth' |
   return { label: '카탈로그', tone: 'neutral', detail: '' };
 }
 
-type InferenceProps = { pair?: Pair; disabled?: boolean; connected?: boolean };
+type InferenceProps = { pair?: Pair; primary?: boolean; disabled?: boolean; connected?: boolean };
 export function InferenceSettings({ pair, ...props }: InferenceProps) {
   // Project registry entries onto the two fields accepted by inference requests.
   const target: Pair | undefined = pair && { ghost_id: pair.ghost_id, conversation_id: pair.conversation_id };
@@ -58,14 +59,15 @@ export function InferenceSettings({ pair, ...props }: InferenceProps) {
   return <InferencePanel key={pairKey} {...props} pair={target} pairKey={pairKey}/>;
 }
 
-function InferencePanel({ pair, pairKey, disabled = false, connected = true }: InferenceProps & { pairKey: string }) {
+function InferencePanel({ pair, pairKey, primary = false, disabled = false, connected = true }: InferenceProps & { pairKey: string }) {
   const [data, setData] = useState<Configuration>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false), [draft, setDraft] = useState<Selection>(), [allow, setAllow] = useState(false);
   const [keyEditor, setKeyEditor] = useState<{ provider: string; value: string }>();
   const [notice, setNotice] = useState(''), [reload, setReload] = useState(0);
+  const [reviewProvider, setReviewProvider] = useState<string>();
   const saving = useRef(false);
   const refresh = () => {
-    setData(undefined); setDraft(undefined); setAllow(false); setKeyEditor(undefined); setError(''); setNotice('');
+    setData(undefined); setDraft(undefined); setAllow(false); setReviewProvider(undefined); setKeyEditor(undefined); setError(''); setNotice('');
     setReload(value => value + 1);
   };
   useEffect(() => {
@@ -92,6 +94,7 @@ function InferencePanel({ pair, pairKey, disabled = false, connected = true }: I
       const next = await inferenceRequest({ version: data.settings.version, ...body });
       setData(next);
       if (body.operation === 'set_api_key') setKeyEditor(undefined);
+      if (body.operation === 'set_orchestra') setReviewProvider(undefined);
       if (body.operation === 'select' || body.operation === 'set_default') {
         setDraft(next.settings.conversations[pairKey] ?? next.settings.default);
         setAllow(false);
@@ -111,6 +114,11 @@ function InferencePanel({ pair, pairKey, disabled = false, connected = true }: I
   const needsGrant = Boolean(pair && draft?.provider !== 'local' && !granted);
   const usableSelection = Boolean(draft && provider?.models.includes(draft.model) && provider.efforts.includes(draft.effort));
   const imageProviders = data?.providers.filter(item => item.image) ?? [];
+  const orchestra = data?.settings.orchestra?.[pairKey]?.profile;
+  const savedReviewer = orchestra?.reviewer?.provider ?? '';
+  const reviewerOptions = data?.providers.filter(item => selected?.provider !== 'local' && item.id !== selected?.provider
+    && ['zai-coding', 'minimax'].includes(item.id) && item.default_model && data.settings.credentials[item.id]) ?? [];
+  const proposedReviewer = reviewerOptions.find(item => item.id === reviewProvider);
 
   const fields = <>
     {!connected && <p className="connection-message" role="status">호스트에 연결하면 설정을 변경할 수 있습니다.</p>}
@@ -192,6 +200,28 @@ function InferencePanel({ pair, pairKey, disabled = false, connected = true }: I
           </div>
         </section>
       </>}
+      {pair && primary && (reviewerOptions.length > 0 || savedReviewer) && <section className="inference-pair-body" aria-label="독립 리뷰">
+        <div className="inference-pair-settings">
+          <div className="inference-fields">
+            <label>독립 리뷰<select value={reviewProvider ?? savedReviewer} disabled={locked} onChange={event => setReviewProvider(event.target.value)}>
+              <option value="">자동 리뷰 끄기</option>
+              {savedReviewer && !reviewerOptions.some(item => item.id === savedReviewer) && <option value={savedReviewer} disabled>{savedReviewer} · 사용 불가</option>}
+              {reviewerOptions.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select></label>
+          </div>
+          <p className="field-help">새 공개 업무의 요구사항과 산출물을 선택한 제공자에게 보내 독립 리뷰를 받습니다.</p>
+          <div className="inference-footer">
+            <button type="button" className="button secondary" disabled={locked || reviewProvider === undefined || reviewProvider === savedReviewer
+              || (reviewProvider !== '' && !proposedReviewer)} onClick={() => void save({
+                operation: 'set_orchestra', ...pair, profile: { routes: orchestra?.routes ?? {},
+                  reviewer: proposedReviewer?.default_model ? { provider: proposedReviewer.id, model: proposedReviewer.default_model,
+                    effort: proposedReviewer.default_effort } : null },
+              }, proposedReviewer ? '새 공개 업무의 독립 리뷰를 켰습니다.' : '독립 리뷰 권한을 해제했습니다.')}>
+              {proposedReviewer ? '전송 허용 및 켜기' : '독립 리뷰 끄기'}
+            </button>
+          </div>
+        </div>
+      </section>}
       {pair && <fieldset className="connection-fieldset inference-pair-images" disabled={locked}><ImageComposer pair={pair}/></fieldset>}
     </>}
     {notice && <p className="connection-message" role="status">{notice}</p>}
@@ -209,6 +239,7 @@ function InferencePanel({ pair, pairKey, disabled = false, connected = true }: I
         if (saving.current) return;
         setSettingsOpen(false);
         setAllow(false);
+        setReviewProvider(undefined);
       }}><div className="form-stack">{fields}</div></Modal>}
     </> : fields}
   </section>;

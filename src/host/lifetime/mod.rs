@@ -15,6 +15,8 @@ mod pi_wait;
 mod db;
 mod graph;
 mod mailbox;
+pub(crate) mod orchestra;
+pub(crate) mod orchestra_review;
 mod pi_tools;
 pub(crate) mod work_context;
 pub(crate) mod producer_profiles;

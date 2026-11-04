@@ -96,7 +96,7 @@ pub(crate) fn apply(conn: &Connection, request: &PiToolRequest, scope: PiInferen
     if method == "inference.settings" && scope == PiInferenceScope::Selected {
         apply::exact_fields(body, if body.get("assignment_id").is_some() || body.get("work_id").is_some(){ &["method","assignment_id","work_id"] }else{ &["method"] })?;
         return Ok(apply::success("Current registered model selection",vec![],
-            super::super::inference::selection_view(conn,&request.ghost_id,&request.conversation_id)?));
+            super::orchestra::selection_view(conn, request)?));
     }
     if method == "inference.inspect" {
         apply::exact_fields(body, if body.get("assignment_id").is_some() || body.get("work_id").is_some(){ &["method","assignment_id","work_id"] }else{ &["method"] })?;
@@ -181,7 +181,9 @@ pub(crate) fn apply(conn: &Connection, request: &PiToolRequest, scope: PiInferen
     let mut response=super::apply_with_admission(conn,envelope,&request.ghost_id,|_|Ok(None))?;
     if method=="conversation.turn.inspect" && response.status==ResponseStatus::Success {
         let descriptor=super::super::bots_provisioning::creation_descriptor(conn,apply::string_field(body,"turn_id")?,&request.ghost_id,&request.conversation_id,envelope.authority_epoch)?;
-        response.data.as_object_mut().unwrap().insert("bot_creation".into(),descriptor.unwrap_or(Value::Null));
+        let data = response.data.as_object_mut().unwrap();
+        data.insert("bot_creation".into(),descriptor.unwrap_or(Value::Null));
+        data.insert("orchestra".into(), super::orchestra::intake_view(conn,apply::string_field(body,"turn_id")?)?);
     }
     if method == "goal.create" && response.status == ResponseStatus::Success {
         if let Some(work_id) = response.data["work"]["id"].as_str() {

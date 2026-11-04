@@ -4,12 +4,26 @@ Agent Orchestra의 공통 업무 규칙과 분야별 지침은 Ghost의 기존 �
 
 | 영역 | Ghost에서 적용되는 경로 | 이식 경계 |
 | --- | --- | --- |
-| 접수와 책임 | 기본 Ghost가 대화에서 업무를 만들고 위임, 취합, 보고를 맡는다. 업무에 지정된 스킬 판본은 Pi 실행에 전달된다. | 일반 대화의 접수 턴에 업무 스킬을 주입하는 경로는 별도다. |
+| 접수와 책임 | 기본 Ghost가 대화에서 업무를 만들고 위임, 취합, 보고를 맡는다. 기본 Ghost의 접수 턴부터 작업 유형, 위임 범위, 확인 조건, 보고 책임을 적용한다. | 업무에 등록한 전체 스킬 판본은 별도로 Pi Work에 전달된다. |
 | 위임 | 담당 Ghost, 계약, 실행 공간, 의존성 및 대기·재개를 Host가 추적한다. 자식 업무의 `acceptance_spec.delegation_allowed`를 `false`로 지정하면 Host가 해당 업무의 재위임과 판본 변경을 통한 권한 확대를 거부한다. | 동일 파일의 단일 작성자 원칙은 브리프와 산출물 취합에 적용한다. 실행 공간의 격리는 프로젝트 전체 파일 잠금과 별개다. 정해진 위임 계약에는 이 제한이 사전에 들어 있어야 한다. |
-| 라우팅 | Ghost별로 승인된 Pi 모델과 권한을 사용한다. | `orch route --json --caller ghost`는 미리보기다. 작업 유형별 모델·effort 자동 배정, 공급자 대체와 패널 실행에는 별도 Host 어댑터가 필요하다. |
-| 검증과 리뷰 | 산출물 해시, 실행 증거, 독립된 결정적 검증과 소유자 수용을 구분한다. | R2의 타사 모델 리뷰에는 실제 작성자·리뷰어 공급자, 동일 산출물과 판본, 읽기 전용 입력, 리뷰 라운드를 Host가 묶어야 한다. 현재 위임의 문자열 참조는 리뷰어에게 검증된 원본을 전달하는 권한이 아니다. |
+| 라우팅 | Pi가 작업 유형을 제안하면 Host가 접수 시점의 승인된 모델·effort를 고정한다. Codex와 지원되는 Z.AI 모델의 기본 매핑은 `orch route --json --caller ghost`에서 추출한다. | 승인된 작성 공급자 안에서 배정한다. 다른 공급자를 쓰는 Orchestra 경로는 별도로 설정하며, 미설정 유형은 대화 기본 경로를 사용한다. |
+| 검증과 리뷰 | 승인된 공개 업무는 다른 공급자의 Pi가 원본 산출물과 현재 요구사항을 독립 리뷰한다. Host는 산출물 해시, 실행과 요구사항 판본에 리뷰를 묶고, 기존 필수 검증도 통과해야 수용한다. | 리뷰어 승인과 공개 범위가 유효해야 한다. 검증할 증거가 부족하거나 리뷰에 실패하면 수용 대기로 남긴다. |
 | 도구와 분야별 흐름 | 공통 계약, 작업자 계약, 선택한 `game`, `desktop-app`, `research` 지침을 Pi 업무에서 참조할 수 있다. 실행은 승인된 작업 공간의 파일·셸 도구와 격리 브라우저 경로를 쓴다. | `agent-desktop`과 특수 도구는 각자 별도 권한과 실행 연결이 필요하다. 분야를 선택해도 Host 화면이나 계정 권한은 생기지 않는다. |
 | 복구와 기록 | 같은 실행의 영수증과 취소·권한 울타리로 미확정 동작을 보호한다. 업무 스레드에 상태와 결과를 연결한다. | Orchestra의 통합 실행·비용 원장이나 승인된 Oxibrain 기록과의 자동 연동은 별도다. |
+
+## 작업 경로와 독립 리뷰
+
+기본 Ghost는 대화에서 새 업무를 접수할 때 Host가 제시한 유형 중 하나를 고른다. 질문과 후속 대화는 해당 턴의 목적에 맞게 처리한다. 업무 시작 알림, 산출물 게시 알림, 최종 수용 보고를 구분한다. 같은 업무를 다시 열면 기존 실행과 판본을 확인한다.
+
+웹 앱의 기본 Ghost 대화에서 **대화 모델 → 독립 리뷰**를 열고, 키가 등록된 Z.AI 또는 MiniMax를 골라 전송을 허용한다. 작성 공급자와 다른 공급자만 선택할 수 있다. 설정한 뒤 새로 접수하는 공개 업무에 적용된다. 같은 Bun 번들의 일회성 Pi 리뷰 모드는 공개 요구사항과 단일 UTF-8 산출물(합계 최대 48 KiB)을 받고 도구 없이 검토한다. 대화 전체나 로컬 스킬, 파일 경로는 보내지 않는다. 보호된 업무는 기존 로컬 실행과 검증 경로를 따른다.
+
+소유자 API `POST /api/v1/inference/settings`의 `set_orchestra`는 현재 `version`, `ghost_id`, `conversation_id`, `profile`을 받는다. `profile.routes`는 작업 유형에서 `{provider,model,effort}`로 가는 맵이고 `profile.reviewer`는 같은 형태의 선택 또는 `null`이다. 경로 지정은 해당 대화가 승인한 작성 공급자 안에서만 유효하다. `profile: null`은 대화의 Orchestra 설정을 지운다. 설정을 해제하거나 바꾸면 이전 승인이 철회된다. 진행 중 리뷰의 권한이 사라지면 현재 업무를 수용하지 않는다. 응답을 확인하지 못한 동일 리뷰는 자동 재요청하지 않는다.
+
+지원되는 기본 경로를 최신 Orchestra 레지스트리에서 다시 만들 수 있다.
+
+```sh
+python3 scripts/export-orchestra-routes.py > contracts/lifetime/orchestra-routes.json
+```
 
 ## 스킬 내보내기
 
@@ -46,3 +60,14 @@ cargo test --locked --features 'lifetime memory documents' --test lifetime_host_
 ```
 
 격리 검증은 로컬 테스트 모델에 도달한 스킬 바이트와 해시, 파일 작성·재확인·게시, Host 수용을 확인한다. 모델이 실제 업무를 얼마나 잘 수행하는지, 운영 설치판이나 외부 공급자 리뷰가 준비됐는지는 별도 확인 대상이다.
+
+
+접수, 업무별 추론, 별도 공급자 리뷰, 기본 대화 최종 보고를 한 경로에서 검증하는 Bun 시험도 있다. 격리된 Host와 실제 Pi SDK를 사용한다. 테스트 엔트리는 두 공급자의 응답만 가로채며 외부 모델 호출과 실제 API 키를 사용하지 않는다.
+
+```sh
+bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig \
+  --outfile /tmp/ghost-orchestra-e2e-pi apps/ghost-durable/test/fixtures/orchestra-bun-main.mjs
+GHOST_TEST_ORCHESTRA_BUN=/tmp/ghost-orchestra-e2e-pi \
+  cargo test --locked --features 'lifetime memory documents' --lib \
+    bundled_bun_orchestra_intake_routes_reviews_and_reports -- --ignored
+```

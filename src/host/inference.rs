@@ -20,6 +20,8 @@ pub(crate) struct Settings {
     pub external_grants: BTreeMap<String, Vec<String>>,
     pub credentials: BTreeMap<String, bool>,
     pub image_provider: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub orchestra: BTreeMap<String, super::lifetime::orchestra::ApprovedProfile>,
 }
 
 #[cfg(test)]
@@ -105,9 +107,9 @@ mod tests {
         app.shutdown().await.unwrap();
     }
 }
-impl Default for Settings { fn default() -> Self { Self { version: 0, default: Selection::default(), conversations: BTreeMap::new(), external_grants: BTreeMap::new(), credentials: BTreeMap::new(), image_provider: "codex".into() } } }
+impl Default for Settings { fn default() -> Self { Self { version: 0, default: Selection::default(), conversations: BTreeMap::new(), external_grants: BTreeMap::new(), credentials: BTreeMap::new(), image_provider: "codex".into(), orchestra: BTreeMap::new() } } }
 pub(crate) fn key(ghost: &str, conversation: &str) -> String { format!("{ghost}/{conversation}") }
-fn valid_selection(s: &Selection) -> bool {
+pub(crate) fn valid_selection(s: &Selection) -> bool {
     let model = match s.provider.as_str() {
         "codex" => matches!(s.model.as_str(), "gpt-6-luna" | "gpt-6-sol" | "gpt-6.1-sol" | "gpt-6-astra"),
         "zai-coding" => s.model == "glm-5.3",
@@ -174,6 +176,7 @@ impl Host {
             "set_default"=> &["version","operation","selection"],
             "set_api_key"=> &["version","operation","provider","api_key"],
             "image_provider"=> &["version","operation","provider"],
+            "set_orchestra"=> &["version","operation","ghost_id","conversation_id","profile"],
             "revoke_external"=> &["version","operation","ghost_id","conversation_id"],
             _=>bail!("unsupported inference operation"),
         };
@@ -222,6 +225,29 @@ impl Host {
             "image_provider" => {
                 let provider=input.get("provider").and_then(Value::as_str).ok_or_else(||anyhow!("missing provider"))?;
                 ensure!(matches!(provider,"codex"|"minimax"|"local"),"unsupported image provider"); settings.image_provider=provider.into();
+            },
+            "set_orchestra" => {
+                let ghost=input.get("ghost_id").and_then(Value::as_str).ok_or_else(||anyhow!("missing Ghost"))?;
+                let conversation=input.get("conversation_id").and_then(Value::as_str).ok_or_else(||anyhow!("missing conversation"))?;
+                let bound:bool=state.journal.0.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM lifetime_bindings WHERE ghost_id=?1 AND conversation_id=?2)
+                     OR EXISTS(SELECT 1 FROM lifetime_registry WHERE ghost_id=?1 AND conversation_id=?2)",
+                    [ghost,conversation],|row|row.get(0))?;
+                ensure!(bound,"conversation is outside the selected Ghost");
+                let profile=input.get("profile").ok_or_else(||anyhow!("missing Orchestra profile"))?;
+                if profile.is_null() {
+                    settings.orchestra.remove(&key(ghost,conversation));
+                } else {
+                    let profile:super::lifetime::orchestra::Profile=serde_json::from_value(profile.clone())?;
+                    let selection=settings.conversations.get(&key(ghost,conversation)).unwrap_or(&settings.default);
+                    profile.validate(selection)?;
+                    if let Some(reviewer)=&profile.reviewer {
+                        ensure!(settings.credentials.get(&reviewer.provider).copied().unwrap_or(reviewer.provider=="codex"),
+                            "Register the independent reviewer credentials before approving the route");
+                    }
+                    let version = settings.version.checked_add(1).ok_or_else(||anyhow!("version exhausted"))?;
+                    settings.orchestra.insert(key(ghost,conversation), super::lifetime::orchestra::ApprovedProfile { version, profile });
+                }
             },
             "revoke_external" => {
                 let ghost=input.get("ghost_id").and_then(Value::as_str).ok_or_else(||anyhow!("missing Ghost"))?;

@@ -35,6 +35,11 @@ function flattenAnyOfParameters(tool) {
 const ENDPOINTS = Object.freeze({ 'zai-coding': 'https://api.z.ai/api/v1', minimax: 'https://api.minimax.io/v1' });
 const ref = (s) => ({ provider: 'ghost-registered', modelId: `${s.provider}/${s.model}` });
 const same = (a,b) => a?.provider === b?.provider && a?.model === b?.model && a?.effort === b?.effort;
+const supportedRegisteredExternalSelection = (s) => typeof s?.provider === 'string' && Object.hasOwn(MODELS, s.provider)
+  && MODELS[s.provider].includes(s.model)
+  && (s.provider === 'zai-coding' ? ['low','high','max'] : ['low','medium','high','xhigh','max']).includes(s.effort);
+export const supportedOrchestraReviewSelection = (s) => supportedRegisteredExternalSelection(s) && Object.hasOwn(ENDPOINTS, s.provider);
+
 export async function readProviderKey(root, provider) {
   if (!['zai-coding','minimax'].includes(provider)) throw new Error('Unsupported credential provider.');
   const file = await open(join(root,'inference-credentials',`${provider}.json`), constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -50,8 +55,9 @@ export async function readProviderKey(root, provider) {
 export function createRegisteredModelProvider({ hostRoot, executable, localModelProvider, complete = codexCompletion, fetchImpl = globalThis.fetch, onDiagnostic = () => {} }) {
   const defaultSelection={provider:'codex',model:'gpt-6-luna',effort:'high'};
   const workRoot=join(hostRoot,'inference-tmp');
-  const forConversation = (_publicGuard, localGuard, resolveMemoryTools, onMemoryToolsExposed, _context, binding) => {
-    let selected=null;
+  const createScopedProvider = ({ localGuard, resolveMemoryTools, onMemoryToolsExposed, context, binding, reviewSelection }) => {
+    let selected=reviewSelection ?? null;
+    let reviewCredential;
     const models=createModels();
     const settings = async (bootstrapDisclosure) => {
       if (typeof binding?.transport !== 'function') throw new Error('Registered inference needs its Host binding.');
@@ -72,6 +78,9 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
       inference_scope:'selected',conversation_disclosure:disclosure,...binding.inferenceAssignment?.(),arguments:{}});
     const assertSelected = async (expected = selected) => {
       if (!expected || !same(expected, selected)) throw new Error('Provider selection changed.');
+      // Only the private one-shot entry point can supply this immutable route.
+      // Host authorizes the public artifact before spawning that process.
+      if (reviewSelection) return;
       await binding.inspectAssignment();
       const current=await settings();
       if (!same(expected,current.selection) || !current.credentials_present || !['public','non_public'].includes(current.disclosure)
@@ -123,6 +132,10 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
           if (!endpoint || request.url!==`${endpoint}/responses` || request.method!=='POST') throw new Error('Unpinned native provider request.');
           const body=await request.json();
           if(body.model!==model.id || body.model!==ref(expected).modelId || body.stream!==true) throw new Error('Native request does not match committed selection.');
+          if (reviewSelection) {
+            if (body.tools?.length || body.previous_response_id || body.conversation) throw new Error('Review must use a fresh context without tools.');
+            body.store=false;
+          }
           await restrictMemoryTools(body,async()=>[],onMemoryToolsExposed);
           body.tools=(body.tools ?? []).map(flattenAnyOfParameters);
           for(const tool of body.tools ?? []) allowedTools.add(tool.name);
@@ -134,6 +147,7 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
           request.signal.throwIfAborted();
           await assertSelected(expected);
           const key=await readProviderKey(hostRoot,expected.provider);
+          if (reviewSelection) reviewCredential=key;
           await assertSelected(expected);
           request.signal.throwIfAborted();
           const response=await fetchImpl(request.url,{method:'POST',redirect:'error',signal:request.signal,
@@ -159,11 +173,13 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
               // Authority/consent rechecks stay bounded: one per 64 KiB plus the
               // post-header and completion checks, so revocation is enforced
               // without a round trip per event.
-              if(!lastCommittedDisclosure) throw new Error('Provider selection changed.');
-              if(responseBytes-lastGate>=65536){
-                lastGate=responseBytes;
-                const gated=await authorityInspect(lastCommittedDisclosure);
-                if (gated.status !== 'success' || gated.data?.inference_scope !== 'selected') throw new Error('Host authority blocks selected inference.');
+              if (!reviewSelection) {
+                if(!lastCommittedDisclosure) throw new Error('Provider selection changed.');
+                if(responseBytes-lastGate>=65536){
+                  lastGate=responseBytes;
+                  const gated=await authorityInspect(lastCommittedDisclosure);
+                  if (gated.status !== 'success' || gated.data?.inference_scope !== 'selected') throw new Error('Host authority blocks selected inference.');
+                }
               }
               request.signal.throwIfAborted();
               responseBytes+=part.value?.byteLength ?? 0;
@@ -243,7 +259,23 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
       auth:{apiKey:{name:'Ghost scoped provider adapter',resolve:async()=>({auth:{}})}},
       api:{'openai-completions':{stream:(model,context,opts)=>completions.stream(model,context,options(opts)),streamSimple:(model,context,opts)=>completions.streamSimple(model,context,options(opts))},
         'openai-responses':{stream:(model,context,opts)=>streamNative('stream',model,context,opts),streamSimple:(model,context,opts)=>streamNative('streamSimple',model,context,opts)}}}));
-    if(localModelProvider) models.setProvider(localModelProvider.forConversation(localGuard,resolveMemoryTools,onMemoryToolsExposed,_context));
+    if (reviewSelection) {
+      return { async review(systemPrompt, prompt, { signal, timeoutMs, decode }) {
+        const target = ref(reviewSelection);
+        const model = models.getModel(target.provider, target.modelId);
+        const message = await models.complete(model, {
+          systemPrompt, messages: [{ role: 'user', content: prompt, timestamp: Date.now() }], tools: [],
+        }, { signal, timeoutMs, maxTokens: 8192, maxRetries: 0, cacheRetention: 'none' });
+        signal.throwIfAborted();
+        if (message.stopReason !== 'stop' || message.content.some(block => !['text', 'thinking'].includes(block.type))) {
+          throw new Error('Review provider did not complete a text-only turn.');
+        }
+        const answer = decode(message.content.filter(block => block.type === 'text').map(block => block.text).join(''));
+        if (reviewCredential && answer.summary.includes(reviewCredential)) throw new Error('Review response contained transport credentials.');
+        return answer;
+      } };
+    }
+    if(localModelProvider) models.setProvider(localModelProvider.forConversation(localGuard,resolveMemoryTools,onMemoryToolsExposed,context));
     return {models,modelRef:ref(defaultSelection),localModelRef:localModelProvider?.modelRef,localRouteConfig:localModelProvider?.localRouteConfig,streamOptions:{maxRetries:0,maxRetryDelayMs:0,timeoutMs:180_000},
       async callbackScope(bootstrapDisclosure) {
         // The Host refuses selection changes for a conversation with an active
@@ -260,7 +292,7 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
           if(!localModelProvider || s.model!==localModelProvider.modelRef.modelId || !['public','non_public'].includes(privacy)) throw new ProtocolError('local_provider_unavailable','The selected local route is unavailable.','same_id');
           selected=s; return {scope:'local',target:localModelProvider.modelRef};
         }
-        if (!MODELS[s?.provider]?.includes(s.model) || !(s.provider==='zai-coding'?['low','high','max']:['low','medium','high','xhigh','max']).includes(s.effort)) throw new ProtocolError('inference_selection_unsupported','The selected provider, model or effort is unsupported.','same_id');
+        if (!supportedRegisteredExternalSelection(s)) throw new ProtocolError('inference_selection_unsupported','The selected provider, model or effort is unsupported.','same_id');
         if(!current.credentials_present) throw new ProtocolError('inference_credentials_missing','Register the selected provider before inference.','same_id');
         if(privacy!=='public'&&!current.external_allowed) throw new ProtocolError('inference_consent_required','Allow the selected provider for this conversation before inference.','same_id');
         selected={...s}; lastCommittedDisclosure=current.disclosure;
@@ -268,6 +300,12 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
         return {scope:'selected',target:ref(s)};
       }};
   };
+  const forConversation = (_publicGuard, localGuard, resolveMemoryTools, onMemoryToolsExposed, context, binding) =>
+    createScopedProvider({ localGuard, resolveMemoryTools, onMemoryToolsExposed, context, binding });
   const initial=forConversation(undefined,async()=>{throw new Error('Local inference requires a conversation binding.');});
-  return {...initial,forConversation};
+  return {...initial,forConversation, completeOrchestraReview(selection, systemPrompt, prompt, options) {
+    if (!supportedOrchestraReviewSelection(selection)) throw new Error('Unsupported review provider selection.');
+    const scoped = createScopedProvider({ reviewSelection: Object.freeze({ ...selection }) });
+    return scoped.review(systemPrompt, prompt, options);
+  }};
 }

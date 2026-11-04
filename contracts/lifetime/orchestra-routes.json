@@ -1,0 +1,62 @@
+{
+  "3d-ui-polish": {
+    "effort": "high",
+    "model": "gpt-6-astra",
+    "provider": "codex"
+  },
+  "aseprite-ui-polish": {
+    "effort": "high",
+    "model": "gpt-6-astra",
+    "provider": "codex"
+  },
+  "feature": {
+    "effort": "high",
+    "model": "gpt-6.1-sol",
+    "provider": "codex"
+  },
+  "investigate": {
+    "effort": "high",
+    "model": "glm-5.3",
+    "provider": "zai-coding"
+  },
+  "lookup": {
+    "effort": "low",
+    "model": "gpt-6-luna",
+    "provider": "codex"
+  },
+  "motion-generate": {
+    "effort": "high",
+    "model": "glm-5.3",
+    "provider": "zai-coding"
+  },
+  "performance": {
+    "effort": "xhigh",
+    "model": "gpt-6.1-sol",
+    "provider": "codex"
+  },
+  "qa-autopilot": {
+    "effort": "high",
+    "model": "gpt-6.1-sol",
+    "provider": "codex"
+  },
+  "qa-explore": {
+    "effort": "high",
+    "model": "gpt-6.1-sol",
+    "provider": "codex"
+  },
+  "research": {
+    "effort": "high",
+    "model": "gpt-6.1-sol",
+    "provider": "codex"
+  },
+  "routine-code": {
+    "effort": "medium",
+    "model": "gpt-6.1-sol",
+    "provider": "codex"
+  },
+  "small-impl": {
+    "effort": "high",
+    "model": "glm-5.3",
+    "provider": "zai-coding"
+  }
+}

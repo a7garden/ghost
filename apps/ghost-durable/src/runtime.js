@@ -328,6 +328,25 @@ function workReportSourceRejected(response) {
   return response?.status === "error" && ["never", "new_revision"].includes(response.retry_class);
 }
 
+function ownerOrchestraDescriptor(value) {
+  if (value == null) return null;
+  const { tasks, default_task, independent_review } = value;
+  if (!Array.isArray(tasks) || tasks.length === 0 || tasks.length > 64
+    || tasks.some(task => typeof task !== "string" || !/^[a-z0-9-]{1,40}$/u.test(task))
+    || new Set(tasks).size !== tasks.length || !tasks.includes(default_task) || typeof independent_review !== "boolean") {
+    throw new ProtocolError("owner_orchestra_descriptor_invalid", "Current Owner Orchestra options are malformed; no model request is permitted.", "same_id");
+  }
+  return { tasks: [...tasks], default_task, independent_review };
+}
+
+function ownerOrchestraInstructions(orchestra) {
+  return `
+Agent Orchestra intake for this exact Owner turn. For a new durable responsibility, identify the intended result and owning project. Follow its instructions, current authority and disclosure. Use the relevant game, desktop-app, research or general workflow as the work requires. Answer ordinary conversation directly; ask a focused question only when a missing decision materially changes the result or scope.
+For an unsealed new Goal, propose one compatible task label in goal_create's acceptance_spec.orchestra_task. Host-offered task labels: ${JSON.stringify(orchestra.tasks)}. Default for ordinary work: ${orchestra.default_task}. The Host resolves the route and grants. Do not request providers, models, effort, tool permissions or computer settings in the Goal.
+Keep one accountable Ghost for requirements, integration, acceptance and the final report. In goal_create's prompt preserve the Owner's requirements in a bounded brief: intended result, owning scope, protected boundaries, decided interfaces and observable acceptance checks. List check commands and expected evidence in the brief; use acceptance_spec.required_checks for check IDs the verifier or Owner can actually attest. For specialist help within approved scope, give each child a bounded brief, checks and stopping conditions. Children report back without further delegation. Use one writer per scope and disjoint scope for parallel writers. Do not expand grants or relay the full conversation.
+Require ground-truth checks on the actual result and ordinary review for normal changes. R2 work such as security, privacy, data migrations or live infrastructure requires independent review from a different provider than the writer. ${orchestra.independent_review ? "The Host pins an independent reviewer for this Goal's root Work." : "No cross-provider reviewer is approved for this turn; leave R2 verification pending for independent Owner review and disclose the missing evidence."} A producer check, execution receipt or queued Work is not acceptance. For destructive or outward-facing effects, preserve the review and Owner approval gates; intake and routing grant no approval.
+Acknowledge the exact admission in this turn. When the Host delivers the separate Work report, report the result, actual checks and review, evidence and material limits; identify any pending verification honestly.`;
+}
 
 function createHostTools(hostToolTransport, ghostId, conversationId, resolveToolScope, authorizeMemoryTool, authorizeDocumentTool, controllerContext, selectedAdmission) {
   const controllerIdentity = `Trusted conversation identity: ${JSON.stringify({ ghost_id: ghostId, conversation_id: conversationId })}`;
@@ -364,11 +383,7 @@ function createHostTools(hostToolTransport, ghostId, conversationId, resolveTool
       throw new ProtocolError("work_report_inspection_changed", "Current report evidence changed or was not confirmed for this model request.", "same_id");
     }
   };
-  let currentCreationDescriptor = null;
-  let currentIntegrationCapability = false;
   const currentOwnerTask = async scope => {
-    currentCreationDescriptor = null;
-    currentIntegrationCapability = false;
     if (scope.originKind !== "owner" || typeof scope.turnId !== "string") return null;
     const bootstrap = controllerContext.ownerBootstrap;
     if (bootstrap?.turnId === scope.turnId && !await bootstrap.ready) throw new ProtocolError("owner_bootstrap_unconfirmed", "Owner bootstrap status was not confirmed; no inference is permitted.", "same_id");
@@ -388,8 +403,10 @@ function createHostTools(hostToolTransport, ghostId, conversationId, resolveTool
     if (run.cancel_requested !== false || !["queued", "running"].includes(run.state)) {
       throw new ProtocolError("owner_task_turn_inactive", "Current Owner turn was cancelled or is no longer active; no model request is permitted.", "never");
     }
-    currentIntegrationCapability = response.data.integration_approvals === true;
+    const integration = response.data.integration_approvals === true;
+    const orchestra = ownerOrchestraDescriptor(response.data.orchestra);
     const creation = response.data.bot_creation;
+    let creationDescriptor = null;
     if (creation !== null && creation !== undefined) {
       if (creation.kind !== "ghost-bot-creation-descriptor/1" || creation.state !== "available"
         || !["create", "requirements"].includes(creation.mode) || creation.turn_id !== scope.turnId
@@ -400,7 +417,7 @@ function createHostTools(hostToolTransport, ghostId, conversationId, resolveTool
           || typeof item.source_work_id !== "string" || item.source_work_id.length > 400)) {
         throw new ProtocolError("bot_creation_descriptor_invalid", "Current Owner creation descriptor was malformed; inspect its exact source before preparing a candidate.", "never");
       }
-      currentCreationDescriptor = { kind: creation.kind, state: creation.state, mode: creation.mode,
+      creationDescriptor = { kind: creation.kind, state: creation.state, mode: creation.mode,
         turn_id: creation.turn_id, ghost_id: creation.ghost_id, conversation_id: creation.conversation_id,
         ...(creation.fulfillment === undefined ? {} : { fulfillment: validateCreationFulfillment(creation.fulfillment) }),
         source_contracts: creation.source_contracts.map(item => ({ source_contract_ref: item.source_contract_ref,
@@ -412,7 +429,7 @@ function createHostTools(hostToolTransport, ghostId, conversationId, resolveTool
           artifact_path: item.artifact_path })) };
 
     }
-    if (task === null || task === undefined) return null;
+    if (task == null) return { task: null, creation: creationDescriptor, integration, orchestra };
     if (typeof task.task_contract_ref !== "string" || !/^ot-[a-f0-9]{64}$/u.test(task.task_contract_ref)
       || !["direct", "delegate"].includes(task.mode)
       || typeof task.input_digest !== "string" || !/^[a-f0-9]{64}$/u.test(task.input_digest)) {
@@ -420,10 +437,11 @@ function createHostTools(hostToolTransport, ghostId, conversationId, resolveTool
     }
     // Ephemeral observation of this actual Owner turn, never persisted as a
     // capability or copied from model/history. Host admission checks it again.
-    return { task_contract_ref: task.task_contract_ref, mode: task.mode, input_digest: task.input_digest };
+    return { task: { task_contract_ref: task.task_contract_ref, mode: task.mode, input_digest: task.input_digest },
+      creation: creationDescriptor, integration, orchestra };
   };
   const creationFulfillment = createBotCreationFulfillment({ index: controllerContext.index, scope: resolveToolScope,
-    inspect: async scope => { await currentOwnerTask(scope); return currentCreationDescriptor; },
+    inspect: async scope => (await currentOwnerTask(scope))?.creation ?? null,
     inspectTerminal: controllerContext.inspectCreationTerminal,
     readTurn: controllerContext.readTurn, readEntry: controllerContext.readEntry, readTask: controllerContext.taskRecord,
     diagnostic: controllerContext.diagnostic });
@@ -438,8 +456,9 @@ function createHostTools(hostToolTransport, ghostId, conversationId, resolveTool
     // disclosure guards still run, and generation must bind its own header.
     if (ownerSummaryPurpose.getStore() === controllerContext) return;
     if (ownerTaskObservation?.turnId !== scope.turnId || ownerTaskObservation.confirmed !== true
-      || JSON.stringify(ownerTaskObservation.task) !== JSON.stringify(fresh)
-      || JSON.stringify(ownerTaskObservation.creation ?? null) !== JSON.stringify(currentCreationDescriptor)) {
+      || JSON.stringify(ownerTaskObservation.task) !== JSON.stringify(fresh?.task)
+      || JSON.stringify(ownerTaskObservation.creation) !== JSON.stringify(fresh?.creation)
+      || JSON.stringify(ownerTaskObservation.orchestra) !== JSON.stringify(fresh?.orchestra)) {
       throw new ProtocolError("owner_task_inspection_changed", "Owner task changed or was not confirmed for this exact model request; no inference is permitted.", "same_id");
     }
   };
@@ -733,9 +752,14 @@ Current authenticated Goal assignment: ${JSON.stringify({
       };
     },
   });
-  const acceptanceSpec = Type.Object({
+  const acceptanceChecks = {
     required_checks: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true })),
-  }, { additionalProperties: true });
+  };
+  const acceptanceSpec = Type.Object(acceptanceChecks, { additionalProperties: true });
+  const proposedGoal = (spec = acceptanceSpec) => Type.Object({
+    prompt: Type.String({ minLength: 1 }),
+    acceptance_spec: spec,
+  }, { additionalProperties: false });
   const emptyArguments = Type.Object({}, { additionalProperties: false });
 
   const workWaitTask = createWorkWaitTask({dispatch:hostToolTransport,doc:CanonicalAssignmentRunDoc,validate:async input=>{
@@ -807,10 +831,7 @@ Current authenticated Goal assignment: ${JSON.stringify({
     invoke("task_contract_inspect", "conversation.turn.inspect", "Inspect the current Owner turn’s optional task contract and bot-creation source contract offers. Use an exact offered source_contract_ref to reuse an accepted task without copying its schemas or procedure. These references never convey verifier or activation authority.", emptyArguments),
     invoke("goal_create", "goal.create", "Create a Goal from the current Owner turn. Use its exact inspected task_contract_ref when present; otherwise provide prompt and acceptance conditions for independent review.", Type.Union([Type.Object({
       task_contract_ref: Type.String({ pattern: "^ot-[a-f0-9]{64}$" }),
-    }, { additionalProperties: false }), Type.Object({
-      prompt: Type.String({ minLength: 1 }),
-      acceptance_spec: acceptanceSpec,
-    }, { additionalProperties: false })])),
+    }, { additionalProperties: false }), proposedGoal()])),
     invoke("goal_update", "goal.update", "Update an owned Goal after inspecting its current revision; privacy cannot be changed.", Type.Object({
       goal_id: Type.String({ minLength: 1 }),
       prompt: Type.String({ minLength: 1 }),
@@ -922,15 +943,22 @@ Current authenticated Goal assignment: ${JSON.stringify({
               if (scope.originKind === "work_report") reportObservation = { reportId: scope.reportId, value: report };
               return controllerContext.boundRequest({ messages: [{
               role: "system", content: "",
-              sections: { "ghost-controller": `<ghost-controller>\n${controllerInstructions}\nCurrent authenticated input kind: ${scope.originKind ?? "unbound"}. This input has no Owner or direct Work execution capability. ${report?.verification ? `Current independent verification evidence: ${JSON.stringify(report.verification)}. Report this verdict honestly and finish. A failed verifier is not acceptance and does not prove its exact diagnostic cause; unknown is unresolved. Do not poll unavailable sources or retry an execution.` : "No independent verification projection is available."} ${repair ? `Host grants only this bounded failed-candidate repair: ${JSON.stringify(repair)}. Preserve the original task's scalar/object contracts exactly; use bot_repair once if its instructions were wrong, then report evaluating and finish.` : "No candidate repair capability is available."}\n</ghost-controller>` },
+              sections: { "ghost-controller": `<ghost-controller>\n${controllerInstructions}\nCurrent authenticated input kind: ${scope.originKind ?? "unbound"}. This input has no Owner or direct Work execution capability. ${report ? "In the final Work report name the actual result, checks and review evidence, and material limits. " : ""}${report?.verification ? `Current independent verification evidence: ${JSON.stringify(report.verification)}. Report this verdict honestly and finish. A failed verifier is not acceptance and does not prove its exact diagnostic cause; unknown is unresolved. Do not poll unavailable sources or retry an execution.` : "No independent verification projection is available."} ${repair ? `Host grants only this bounded failed-candidate repair: ${JSON.stringify(repair)}. Preserve the original task's scalar/object contracts exactly; use bot_repair once if its instructions were wrong, then report evaluating and finish.` : "No candidate repair capability is available."}\n</ghost-controller>` },
               toolsAdded: modelTools.filter((tool) => !DIRECT_WORK_TOOL_NAMES.includes(tool.name) && !WORK_MEMORY_TOOLS.includes(tool.name) && tool.name !== "work_submit" && tool.name !== "work_steer" && !BOT_TOOL_NAMES.has(tool.name) && !OWNER_ONLY_TOOL_NAMES.has(tool.name) && (tool.name !== "bot_repair" || repair !== null)),
             }, ...messages.filter((message) => message.role !== "system")] });
             }
             ownerTaskObservation = { turnId: scope.turnId, confirmed: false };
-            const ownerTask = await currentOwnerTask(scope);
-            ownerTaskObservation = { turnId: scope.turnId, task: ownerTask, creation: currentCreationDescriptor, confirmed: true };
-            const ownerCreation = currentCreationDescriptor;
-            const integrationEnabled = currentIntegrationCapability;
+            const { task: ownerTask, creation: ownerCreation, orchestra, integration: integrationEnabled } = await currentOwnerTask(scope);
+            ownerTaskObservation = { turnId: scope.turnId, task: ownerTask, creation: ownerCreation, orchestra, confirmed: true };
+            const orchestraIntake = orchestra && !ownerTask && !ownerCreation ? ownerOrchestraInstructions(orchestra) : "";
+            // This model-facing view exposes only the applicable branch and
+            // current labels; the registered execution schema remains stable.
+            const ownerTools = orchestraIntake ? modelTools.map(tool => tool.name === "goal_create" ? {
+              ...tool, parameters: proposedGoal(Type.Object({
+                ...acceptanceChecks,
+                orchestra_task: Type.Optional(Type.String({ enum: orchestra.tasks })),
+              }, { additionalProperties: true })),
+            } : tool) : modelTools;
             const creationBlocked = await creationFulfillment.hasBlockedReceipt(scope.turnId);
             const runtimeAdmission = controllerContext.selectedTaskAdmission?.turn_id === scope.turnId ? controllerContext.selectedTaskAdmission : null;
             // A long-lived Primary also contains old assignment/report system
@@ -938,8 +966,8 @@ Current authenticated Goal assignment: ${JSON.stringify({
             // IDs cannot masquerade as the new Owner's active responsibility.
             return controllerContext.boundRequest({ messages: [{
               role: "system", content: "",
-              sections: { "ghost-controller": `<ghost-controller>\n${controllerInstructions}\nCurrent authenticated input kind: owner. Turn ID: ${scope.turnId}. ${ownerCreation ? `The Host confirms this actual Owner creation request: ${JSON.stringify(ownerCreation)}. For a source contract offer, use bot_prepare with only display_name, purpose and its exact scalar source_contract_ref; omit source_work_ids because the Host derives the bound Work. the Host supplies the authoritative procedure and contracts. Do not create a new Goal for this creation request or substitute empty schemas. ` : ""}${ownerTask ? `The Host confirms the actual Owner selected this current task: ${JSON.stringify(ownerTask)}. Its immutable input is already supplied through the registered task, so do not ask the Owner to resupply it. ${runtimeAdmission ? `The existing Pi runtime has verified this task's admission: ${JSON.stringify(runtimeAdmission)}. Acknowledge its actual Work state and finish this Owner turn. Do not call goal_create or work_submit for it. Queued admission is not artifact acceptance.` : "If this turn has no admitted Goal yet, use goal_create with only this exact task_contract_ref, retain its returned Goal/Work IDs and automatic_admission observation, then report the queued responsibility and finish this Owner turn. Do not submit that Work or create another Goal."} Instructions and input will be staged by the Host for that Work; do not invent them.` : "No current Owner-selected task descriptor is available."} Respond to the latest Owner request. Previous assignment instructions and Goal/Work IDs in history are historical, not a current assignment. ${ownerCreation ? "Use the bounded bot creation flow for this request, then report its actual evaluating/provisioning state and finish." : runtimeAdmission ? "This selected responsibility is already admitted; report its current state without another Goal." : "For a new responsibility use goal_create once; it automatically queues its returned Work. Report its actual admission state and finish this Owner turn."} Never reuse or resubmit a completed historical Work.${integrationEnabled ? " For explicit external actions, list functions, then propose the exact call. Briefly tell the Owner what will happen and to whom or where, and that approval is pending. Omit internal IDs and tool names." : ""}\n</ghost-controller>` },
-              toolsAdded: modelTools.filter((tool) => !DIRECT_WORK_TOOL_NAMES.includes(tool.name) && !WORK_MEMORY_TOOLS.includes(tool.name) && tool.name !== "work_submit" && tool.name !== "work_steer" && tool.name !== "bot_repair" && (!creationBlocked || !BOT_TOOL_NAMES.has(tool.name)) && (integrationEnabled || !INTEGRATION_TOOL_NAMES.has(tool.name))),
+              sections: { "ghost-controller": `<ghost-controller>\n${controllerInstructions}\nCurrent authenticated input kind: owner. Turn ID: ${scope.turnId}. ${ownerCreation ? `The Host confirms this actual Owner creation request: ${JSON.stringify(ownerCreation)}. For a source contract offer, use bot_prepare with only display_name, purpose and its exact scalar source_contract_ref; omit source_work_ids because the Host derives the bound Work. the Host supplies the authoritative procedure and contracts. Do not create a new Goal for this creation request or substitute empty schemas. ` : ""}${ownerTask ? `The Host confirms the actual Owner selected this current task: ${JSON.stringify(ownerTask)}. Its immutable input is already supplied through the registered task, so do not ask the Owner to resupply it. ${runtimeAdmission ? `The existing Pi runtime has verified this task's admission: ${JSON.stringify(runtimeAdmission)}. Acknowledge its actual Work state and finish this Owner turn. Do not call goal_create or work_submit for it. Queued admission is not artifact acceptance.` : "If this turn has no admitted Goal yet, use goal_create with only this exact task_contract_ref, retain its returned Goal/Work IDs and automatic_admission observation, then report the queued responsibility and finish this Owner turn. Do not submit that Work or create another Goal."} Instructions and input will be staged by the Host for that Work; do not invent them.` : "No current Owner-selected task descriptor is available."} Respond to the latest Owner request. Previous assignment instructions and Goal/Work IDs in history are historical, not a current assignment. ${ownerCreation ? "Use the bounded bot creation flow for this request, then report its actual evaluating/provisioning state and finish." : runtimeAdmission ? "This selected responsibility is already admitted; report its current state without another Goal." : "For a new responsibility use goal_create once; it automatically queues its returned Work. Report its actual admission state and finish this Owner turn."} Never reuse or resubmit a completed historical Work.${integrationEnabled ? " For explicit external actions, list functions, then propose the exact call. Briefly tell the Owner what will happen and to whom or where, and that approval is pending. Omit internal IDs and tool names." : ""}${orchestraIntake}\n</ghost-controller>` },
+              toolsAdded: ownerTools.filter((tool) => !DIRECT_WORK_TOOL_NAMES.includes(tool.name) && !WORK_MEMORY_TOOLS.includes(tool.name) && tool.name !== "work_submit" && tool.name !== "work_steer" && tool.name !== "bot_repair" && (!creationBlocked || !BOT_TOOL_NAMES.has(tool.name)) && (integrationEnabled || !INTEGRATION_TOOL_NAMES.has(tool.name))),
             }, ...messages.filter((message) => message.role !== "system")] });
           }
           return controllerContext.boundRequest(await controllerContext.assignmentRequest(messages));
@@ -1083,7 +1111,7 @@ export class GhostRuntime {
       const run = await session.harness.snapshot(CanonicalAssignmentRunDoc, session.root.id, BACKGROUND_CONTEXT);
       return run?.assignment_id === controllerContext.assignment?.id ? sdkRecordId(run.generation_task_id) : null;
     } };
-    const inferencePolicy = { scope: "blocked", assignmentId: null };
+    const inferencePolicy = { scope: "blocked", assignmentId: null, workId: null };
     const controllerCompaction = createControllerCompactionPolicy();
     // beforeRequest hooks run in the tool-extension scope, which has neither
     // `executionContext` nor `controllerCompaction`; bound through this closure.
@@ -1103,8 +1131,18 @@ export class GhostRuntime {
       if(run?.assignment_id===inferencePolicy.assignmentId && run.wait_failed) throw new ProtocolError("pi_wait_unconfirmed","Original Work wait is unresolved; no inference is permitted.","never");
       if (typeof inferencePolicy.assignmentId === "string") controllerContext.assignment = await this.#reinspectGoalAssignment(session, inferencePolicy.assignmentId);
     };
-    const inferenceAssignment = () => typeof inferencePolicy.assignmentId === "string"
-      ? { assignment_id: inferencePolicy.assignmentId, work_id: controllerContext.assignment?.work_id ?? executionContext?.work_id } : {};
+    const inferenceAssignment = () => {
+      // Registered settings must use the durable pair even before the
+      // GenerationTask exists and the isolated context can be claimed.
+      const assignmentId = inferencePolicy.assignmentId ?? executionContext?.assignment_id;
+      if (assignmentId == null) return {};
+      const workId = inferencePolicy.workId ?? executionContext?.work_id;
+      if (typeof workId !== "string" || !workId
+        || (executionContext && (assignmentId !== executionContext.assignment_id || workId !== executionContext.work_id))) {
+        throw new ProtocolError("inference_assignment_unconfirmed", "The original inference assignment and Work pair is unavailable.", "never");
+      }
+      return { assignment_id: assignmentId, work_id: workId };
+    };
     const publicDisclosureGuard = async () => {
       if (await this.#conversationPrivacy(ghost.index, conversationId) !== "public") {
         throw new Error("Committed conversation privacy blocks the public model broker.");
@@ -3079,6 +3117,7 @@ export class GhostRuntime {
       if (turn.origin_kind === "goal_assignment") {
         const assignment = await this.#reinspectGoalAssignment(session, turn.turn_id);
         session.inferencePolicy.assignmentId = turn.turn_id;
+        session.inferencePolicy.workId = assignment.work_id;
         session.controllerContext.assignment = assignment;
         privacy = await this.#conversationPrivacy(session.index, session.conversationId);
       } else if (turn.origin_kind === "work_report") {
@@ -3287,11 +3326,13 @@ export class GhostRuntime {
     const clearAssignmentContext = () => {
       if (session.inferencePolicy.assignmentId === turnId) {
         session.inferencePolicy.assignmentId = null;
+        session.inferencePolicy.workId = null;
         session.controllerContext.assignment = null;
         session.controllerContext.assignmentBoundary = null;
       }
     };
     session.inferencePolicy.assignmentId = turnId;
+    session.inferencePolicy.workId = initialTurn.origin_work_id;
     try {
       if (["answered", "failed", "cancelled"].includes(turn.status)) {
         clearAssignmentContext();

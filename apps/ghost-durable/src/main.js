@@ -3,6 +3,8 @@ import { createFixtureModelProvider, createLocalModelProvider, localOutputTokenL
 import { errorResponse, protocolHandshake } from "./contract.js";
 import { openGhostRuntime } from "./runtime.js";
 import { createRegisteredModelProvider } from "./registered-models.js";
+import { handleOrchestraReview } from "./orchestra-review.js";
+import { isAbsolute } from "node:path";
 
 const MAX_FRAME_BYTES = 1_048_576;
 
@@ -19,8 +21,8 @@ function parseArgs(argv) {
   }
   const root = parsed.get("--root");
   const mode = parsed.get("--mode");
-  if (!root || (mode !== "fixture" && mode !== "broker")) {
-    throw new Error("Usage: node src/main.js --root PATH --mode fixture|broker");
+  if (!root || !["fixture", "broker", "orchestra-review"].includes(mode)) {
+    throw new Error("Usage: node src/main.js --root PATH --mode fixture|broker|orchestra-review");
   }
   return { root, mode };
 }
@@ -94,12 +96,35 @@ async function* boundedLines(input) {
   if (size !== 0) throw new Error("JSONL input ended before its newline.");
 }
 
+async function runOrchestraReview() {
+  const hostRoot = requiredEnv("GHOST_LIFETIME_HOST_ROOT");
+  if (!isAbsolute(hostRoot)) throw new Error("The review credential root must be absolute.");
+  const authorityEpoch = requiredAuthorityEpoch();
+  const modelProvider = createRegisteredModelProvider({ hostRoot });
+  writeFrame(protocolHandshake("orchestra-review"));
+  for await (const line of boundedLines(process.stdin)) {
+    let input;
+    try {
+      input = JSON.parse(line);
+    } catch {
+      writeFrame(errorResponse("invalid_json", "JSONL request frame is not valid JSON.", "never", { command_id: null }));
+      return;
+    }
+    writeFrame(await handleOrchestraReview(input, { authorityEpoch, modelProvider }));
+    return;
+  }
+}
+
 async function main() {
   const { root, mode } = parseArgs(process.argv.slice(2));
   let runtime;
 
   let localRouteConfigured = false;
   try {
+    if (mode === "orchestra-review") {
+      await runOrchestraReview();
+      return;
+    }
     let modelProvider;
     if (mode === "fixture") {
       modelProvider = createFixtureModelProvider();
