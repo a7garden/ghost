@@ -4,7 +4,7 @@ import { isArtifact, isGoal, isRecord, isWork } from "./guards";
 interface FollowUp { id: string; text: string; revision: number }
 interface Report extends FollowUp { created_at_ms: number }
 interface Origin { id: string; text: string; created_at_ms: number }
-interface GraphLink { parent_work_id: string; child_work_id: string; current: boolean }
+interface GraphLink { parent_work_id: string; child_work_id: string; parent_goal_revision?: number; current: boolean }
 interface BlockingEdge { waiter_work_id: string; blocker_work_id: string; kind: string }
 interface GraphResult { work_id: string; artifacts: Artifact[] }
 
@@ -38,7 +38,8 @@ function isReport(value: unknown): value is Report {
 function isGraph(value: unknown): value is NonNullable<WorkThread["graph"]> {
   return isRecord(value) && Array.isArray(value.work) && value.work.every(isWork)
     && Array.isArray(value.links) && value.links.every(link => isRecord(link) && typeof link.child_work_id === "string"
-      && typeof link.parent_work_id === "string" && typeof link.current === "boolean")
+      && typeof link.parent_work_id === "string" && typeof link.current === "boolean"
+      && (link.parent_goal_revision === undefined || typeof link.parent_goal_revision === "number"))
     && Array.isArray(value.blocking_edges) && value.blocking_edges.every(edge => isRecord(edge) && typeof edge.waiter_work_id === "string"
       && typeof edge.blocker_work_id === "string" && typeof edge.kind === "string")
     && Array.isArray(value.results) && value.results.every(result => isRecord(result) && typeof result.work_id === "string"
@@ -68,6 +69,37 @@ export function followUpCommand(goal: Goal, draft: FollowUpDraft) {
   const encoder = new TextEncoder();
   if (encoder.encode(text).length > 16_384 || encoder.encode(prompt).length > 65_536) return null;
   return { method: "goal.update", goal_id: goal.id, prompt, acceptance_spec: goal.acceptance_spec, follow_up: text };
+}
+
+export function threadProgressWork(goal: Goal | undefined, work: Work[], links: ReadonlyMap<string, GraphLink>): Work[] {
+  if (!goal) return [];
+  const current = work.filter(item => item.state !== "stale" && (item.goal_id === goal.id
+    ? item.goal_revision === goal.revision : links.get(item.id)?.current));
+  if (goal.state !== "accepted") return current;
+
+  // Expiry retires execution links. Keep the accepted chain for this revision visible.
+  const workByID = new Map(work.map(item => [item.id, item]));
+  const children = new Map<string, Work[]>();
+  for (const child of work) {
+    const link = links.get(child.id);
+    if (!link || child.state !== "accepted") continue;
+    const parent = workByID.get(link.parent_work_id);
+    if (!parent || parent.goal_revision !== link.parent_goal_revision) continue;
+    const siblings = children.get(parent.id) ?? [];
+    siblings.push(child);
+    children.set(parent.id, siblings);
+  }
+  const pending = current.filter(item => item.goal_id === goal.id && item.state === "accepted");
+  const accepted = new Set(pending.map(item => item.id));
+  for (const parent of pending) {
+    for (const child of children.get(parent.id) ?? []) {
+      if (accepted.has(child.id)) continue;
+      accepted.add(child.id);
+      pending.push(child);
+    }
+  }
+  const visible = new Set([...current.map(item => item.id), ...accepted]);
+  return work.filter(item => visible.has(item.id));
 }
 
 export function workThreadTitle(prompt: string): string {

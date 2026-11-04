@@ -4,7 +4,7 @@ import type { Goal, Work } from "../../../../contracts/lifetime/bindings.ts";
 import { Modal } from "../components/Modal";
 import type { LifetimeClient } from "./types";
 import { WorkArtifactPreview } from "./WorkArtifactPreview";
-import { followUpCommand, parseWorkThread, workThreadTitle, type FollowUpDraft, type WorkThread } from "./workThread";
+import { followUpCommand, parseWorkThread, threadProgressWork, workThreadTitle, type FollowUpDraft, type WorkThread } from "./workThread";
 
 interface Props {
   client: LifetimeClient;
@@ -70,8 +70,7 @@ export function WorkThreadDrawer({ client, goalID, target, goals, work, ghostNam
   const graph = thread?.graph;
   const workItems = graph?.work ?? work.filter(item => item.goal_id === goalID && item.goal_revision === goal?.revision);
   const linkByChild = new Map(graph?.links.map(link => [link.child_work_id, link]));
-  const currentWork = workItems.filter(item => item.state !== "stale" && (item.goal_id === goalID
-    ? item.goal_revision === goal?.revision : linkByChild.get(item.id)?.current));
+  const currentWork = threadProgressWork(goal, workItems, linkByChild);
   const workByID = new Map(workItems.map(item => [item.id, item]));
   const itemsByGoal = new Map(goals.map(item => [item.id, item]));
   const resultsByWork = new Map(graph?.results.map(result => [result.work_id, result.artifacts]));
