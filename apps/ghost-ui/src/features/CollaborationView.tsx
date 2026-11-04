@@ -14,7 +14,7 @@ type Props = { snapshot: Snapshot; route: string; mode: string; action: Action; 
 
 export function CollaborationView(props: Props) {
   const structure = new URLSearchParams(props.route.split('?')[1] ?? '').get('view') === 'structure';
-  return <><nav className="collaboration-view-tabs" aria-label="협업 보기"><button className="filter-button" aria-pressed={!structure} onClick={() => props.navigate('/together')}>협업 기록</button><button className="filter-button" aria-pressed={structure} onClick={() => props.navigate('/together?view=structure')}>작업 구조</button></nav>{structure ? <OrchestrationView {...props}/> : <CollaborationRecords {...props}/>}</>;
+  return <><nav className="collaboration-view-tabs" aria-label="협업 보기"><button className="filter-button" aria-pressed={!structure} onClick={() => props.navigate('/together')}>협업 목록</button><button className="filter-button" aria-pressed={structure} onClick={() => props.navigate('/together?view=structure')}>작업 구조</button></nav>{structure ? <OrchestrationView {...props}/> : <CollaborationRecords {...props}/>}</>;
 }
 function CollaborationRecords({ snapshot, route, mode, action, query, busy, navigate, onAssign }: Props) {
   const groups = collaborationGroups(snapshot);

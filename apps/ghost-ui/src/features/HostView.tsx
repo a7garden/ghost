@@ -17,7 +17,7 @@ export function HostView({ snapshot, status, observedAt, workObservedAt, workErr
   ];
   return <div className="page-content host-page">
     <div className="page-heading"><h1>호스트</h1><button className="button secondary" disabled={status.state === 'connecting'} onClick={reconnect}><RefreshCw size={15}/>연결 확인</button></div>
-    <section className="host-summary"><div className="host-summary-icon"><Server size={30}/></div><div><h2>Ghost Host</h2><p>대화와 작업을 보관하는 실행 호스트</p></div><span className="dashboard-status" data-state={status.state}><i/>{status.label}</span></section>
+    <section className="host-summary"><div className="host-summary-icon"><Server size={30}/></div><div><h2>Ghost Host</h2><p>{status.state === 'demo' ? '브라우저에 저장되는 예시 데이터로 화면을 둘러볼 수 있습니다.' : '대화와 작업을 보관하는 실행 호스트'}</p></div><span className="dashboard-status" data-state={status.state}><i/>{status.label}</span></section>
     {!current && status.state !== 'demo' && <p className="dashboard-read-warning" role="status">마지막으로 확인한 설정입니다. 연결을 확인하면 현재 상태를 다시 읽습니다.</p>}
     <div className="host-grid">
       <section className="host-panel"><h2>실행 상태</h2><dl className="host-facts">

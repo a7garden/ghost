@@ -10,7 +10,7 @@ function props() {
     { id: 'first', title: '첫 대화', model: 'mock', offline: true, messages: [], tasks: [] },
     { id: 'second', title: '선택한 대화', model: 'mock', offline: true, messages: [], tasks: [] },
   ];
-  return { snapshot, route: `/ghosts/${profile.id}?conversation=second`, section: 'ghosts', dotId: profile.id, views: [], attentionCount: 2, mode: 'demo', error: '', lifetimeEnabled: false, navigate() {}, onConnection() {} };
+  return { snapshot, route: `/ghosts/${profile.id}?conversation=second`, section: 'ghosts', dotId: profile.id, views: [], attentionCount: 2, mode: 'demo', error: '', lifetimeEnabled: false, navigate() {} };
 }
 
 it('shows each saved conversation once and selects only the routed row', () => {
@@ -29,7 +29,7 @@ it('shows each saved conversation once and selects only the routed row', () => {
 it('keeps current and archived Host conversations distinct', () => {
   const input = { ...props(), mode: 'live', lifetimeEnabled: true };
   const current = renderToStaticMarkup(createElement(WorkspaceSidebar, { ...input, section: 'lifetime', route: `/lifetime?ghost=${input.dotId}` }));
-  expect(current).toContain('class="nav-row selected" aria-current="page" title="현재 대화"');
+  expect(current).toContain(`class="nav-row selected" aria-current="page" title="${input.snapshot.profiles[0].name}"`);
   expect(current.match(/aria-current="page"/g)).toHaveLength(1);
 
   const archived = renderToStaticMarkup(createElement(WorkspaceSidebar, { ...input, route: `${input.route}&history=1` }));
@@ -40,6 +40,6 @@ it('keeps current and archived Host conversations distinct', () => {
 it('shows direct navigation in a single conversation group', () => {
   const html = renderToStaticMarkup(createElement(WorkspaceSidebar, props()));
   expect(html).toContain('class="sidebar-group-title">대화</h2>');
-  expect(html).toContain('협업 기록</span>');
+  expect(html).toContain('협업</span>');
   expect(html).not.toMatch(/대화 기록<|<details|<summary|aria-expanded=/);
 });

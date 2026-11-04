@@ -10,7 +10,6 @@
 .sidebar .nav-count, .mobile-sidebar .nav-count { background: none; font-size: 11px; padding: 0 3px; }
 .sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 8px 0 16px; }
 .sidebar-section { margin-top: 16px; }
-.sidebar-label { padding: 2px 9px; margin: 0 0 3px; min-height: 0; font-weight: 500; }
 .sidebar-ghost-group + .sidebar-ghost-group { margin-top: 2px; }
 .sidebar .dot-nav, .mobile-sidebar .dot-nav { min-height: 34px; padding: 4px 9px; }
 .sidebar .sidebar-bottom, .mobile-sidebar .sidebar-bottom { margin-top: 0; padding-top: 8px; flex-shrink: 0; border-top: var(--hairline) solid var(--color-border-subtle); }
@@ -81,15 +80,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-menu-group .sidebar-tools { margin-block-start: 6px; }
 
 .sidebar-menu-group { display: grid; gap: 3px; }
 .sidebar-menu-group .sidebar-section { margin-top: 5px; }
-.sidebar-thread-list .nav-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.sidebar-nested-nav { margin-inline-start: 14px; padding-inline-start: 5px; border-inline-start: 1px solid var(--color-border-subtle); }
-.sidebar .sidebar-nested-nav .nav-row { min-height: 28px; font-size: 12px; }
-.sidebar-menu-group--shared .sidebar-tools { margin-block-start: 4px; }
-.sidebar .sidebar-bottom { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; padding-top: 6px; }
+:is(.sidebar-thread-list, .sidebar-space-list) .nav-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-host-indicator { margin-inline-start: auto; }
 .sidebar-connection-status.disconnected { color: var(--color-text-error); }
 @media (prefers-reduced-motion: no-preference) {
   .sidebar .nav-row {

@@ -1,9 +1,10 @@
 import { CalendarDays, Cpu, Puzzle, Server, Folder, GitBranch, History, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
+import { useId } from 'react';
 import { ghostPath, viewPath } from '../features/PackageWorkspace';
 import type { GhostView } from '../../sdk/src/index';
 import type { Snapshot } from '../client/types';
 import { routeLabels } from '../uiText';
-import type { HostStatus } from '../features/hostStatus';
+import { hostStatus, type HostStatus } from '../features/hostStatus';
 import { legacyHistoryPath, legacyHistoryRequested } from '../features/LegacyTranscript';
 
 type Props = {
@@ -20,10 +21,11 @@ type Props = {
   lifetimeEnabled: boolean;
   status?: HostStatus;
   navigate(path: string): void;
-  onConnection(): void;
 };
 
-export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpace, views, activeView, attentionCount, mode, error, lifetimeEnabled, status, navigate, onConnection }: Props) {
+export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpace, views, activeView, attentionCount, mode, error, lifetimeEnabled, status, navigate }: Props) {
+  const hostStatusId = useId();
+  const { state: hostState, label: hostLabel } = status ?? hostStatus(mode, error, null, false);
   const durableHost = lifetimeEnabled && mode === 'live';
   const params = new URLSearchParams(route.split('?')[1] || '');
   const panel = params.get('panel');
@@ -40,8 +42,7 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
   const viewingArchive = durableHost && onProfileChat && legacyHistoryRequested(route);
   const currentSelected = !activeView && !viewingArchive
     && (durableHost ? onProfileChat || onDurableChat : onProfileChat && conversationId === currentConversation?.id);
-  const savedTitle = currentConversation?.title.trim();
-  const currentTitle = savedTitle && savedTitle !== '새 대화' ? savedTitle : '현재 대화';
+  const currentTitle = durableHost ? profile?.name ?? '대화' : currentConversation?.title.trim() || '새 대화';
   const currentPath = currentConversation
     ? `${profilePath}?${new URLSearchParams({ conversation: currentConversation.id })}` : profilePath;
   return <>
@@ -74,37 +75,39 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
             onClick={() => navigate(viewPath(profile.id, view.id))}><LayoutList size={16}/><span>{view.label}</span></button>)}
         </nav>
       </section>}
-      <section className="sidebar-menu-group sidebar-menu-group--shared" aria-label="도구">
-        <h2 className="sidebar-group-title">도구</h2>
-        {snapshot?.spaces.length ? <section className="sidebar-section">
-          <h3 className="sidebar-label">{routeLabels.spaces}</h3>
-          <nav className="sidebar-nested-nav" aria-label={routeLabels.spaces}>
-            {snapshot.spaces.map(space =>
-              <button key={space.id} className={`nav-row ${selectedSpace === space.id && section === 'spaces' ? 'selected' : ''}`}
-                aria-current={selectedSpace === space.id && section === 'spaces' ? 'page' : undefined} title={space.name}
-                onClick={() => navigate(`/spaces/${space.id}`)}><Folder size={14}/><span>{space.name}</span></button>)}
-          </nav>
-        </section> : <button className={`nav-row ${section === 'spaces' ? 'selected' : ''}`}
-          aria-current={section === 'spaces' ? 'page' : undefined} onClick={() => navigate('/spaces')}>
-          <Folder size={16}/><span>{routeLabels.spaces}</span></button>}
-        <nav className="sidebar-tools" aria-label="도구">{[
-          { path: '/planner', key: 'planner', name: routeLabels.planner, Icon: CalendarDays },
-        ].map(({ path, key, name, Icon }) => <button key={key} className={`nav-row ${section === key ? 'selected' : ''}`}
-          aria-current={section === key ? 'page' : undefined} onClick={() => navigate(path)}><Icon size={16}/><span>{name}</span></button>)}
-          <button className={`nav-row ${section === 'together' ? 'selected' : ''}`} aria-current={section === 'together' ? 'page' : undefined}
-            onClick={() => navigate('/together')}><GitBranch size={16}/><span>협업 기록</span></button>
+      <section className="sidebar-menu-group" aria-label={routeLabels.spaces}>
+        {Boolean(snapshot?.spaces.length) && <h2 className="sidebar-group-title">{routeLabels.spaces}</h2>}
+        <nav className="primary-nav sidebar-space-list" aria-label={routeLabels.spaces}>
+          {snapshot?.spaces.length ? snapshot.spaces.map(space => {
+            const active = selectedSpace === space.id && section === 'spaces';
+            return <button key={space.id} className={`nav-row ${active ? 'selected' : ''}`}
+              aria-current={active ? 'page' : undefined} title={space.name} onClick={() => navigate(`/spaces/${space.id}`)}>
+              <Folder size={16}/><span>{space.name}</span>
+            </button>;
+          }) : <button className={`nav-row ${section === 'spaces' ? 'selected' : ''}`}
+            aria-current={section === 'spaces' ? 'page' : undefined} onClick={() => navigate('/spaces')}>
+            <Folder size={16}/><span>{routeLabels.spaces}</span>
+          </button>}
         </nav>
       </section>
-      <section className="sidebar-menu-group" aria-label="호스트 관리"><h2 className="sidebar-group-title">관리</h2><nav className="primary-nav">{[
+      <nav className="sidebar-menu-group primary-nav" aria-label="일정과 협업">{[
+        { path: '/planner', key: 'planner', name: routeLabels.planner, Icon: CalendarDays },
+        { path: '/together', key: 'together', name: routeLabels.together, Icon: GitBranch },
+      ].map(({ path, key, name, Icon }) => <button key={key} className={`nav-row ${section === key ? 'selected' : ''}`}
+        aria-current={section === key ? 'page' : undefined} onClick={() => navigate(path)}><Icon size={16}/><span>{name}</span></button>)}</nav>
+    </div>
+    <footer className="sidebar-bottom">
+      <nav className="primary-nav" aria-label="관리">{[
         { path: '/host', key: 'host', name: '호스트', Icon: Server },
         { path: '/providers', key: 'providers', name: '프로바이더', Icon: Cpu },
         { path: '/integrations', key: 'integrations', name: '확장', Icon: Puzzle },
-      ].map(({path,key,name,Icon}) => <button key={key} className={`nav-row ${section === key ? 'selected' : ''}`} aria-current={section === key ? 'page' : undefined} onClick={() => navigate(path)}><Icon size={16}/><span>{name}</span></button>)}</nav></section>
-    </div>
-    <footer className="sidebar-bottom">
-      <button className={`nav-row ${section === 'settings' ? 'selected' : ''}`} aria-current={section === 'settings' ? 'page' : undefined}
-        onClick={() => navigate(`/settings?tab=appearance${dotId ? `&ghost=${encodeURIComponent(dotId)}` : ''}`)}><Settings2 size={16}/><span>앱 설정</span></button>
-      <button className="sidebar-host-status" onClick={onConnection}><span className="dashboard-status" data-state={status?.state ?? (error ? 'stale' : mode === 'demo' ? 'demo' : 'connecting')}><i/>{status?.label ?? (error ? '연결 확인 필요' : mode === 'demo' ? '예시 모드' : '연결 확인 중')}</span><Server size={14}/></button>
+        { path: `/settings?tab=appearance${dotId ? `&ghost=${encodeURIComponent(dotId)}` : ''}`, key: 'settings', name: '앱 설정', Icon: Settings2 },
+      ].map(({path,key,name,Icon}) => <button key={key} className={`nav-row ${section === key ? 'selected' : ''}`}
+        aria-current={section === key ? 'page' : undefined} aria-label={key === 'host' ? name : undefined}
+        aria-describedby={key === 'host' ? hostStatusId : undefined} onClick={() => navigate(path)}>
+        <Icon size={16}/><span>{name}</span>
+        {key === 'host' && <span className="dashboard-status sidebar-host-indicator" id={hostStatusId} data-state={hostState}><i/>{hostLabel}</span>}
+      </button>)}</nav>
     </footer>
   </>;
 }

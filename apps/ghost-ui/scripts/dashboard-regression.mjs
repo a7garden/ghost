@@ -55,6 +55,12 @@ const checks=[], pageErrors=[], writes=[], pairingWrites=[], artifactReads=[], e
 let artifactTampered=false, artifactNetworkRequests=0;
 let previewTurns=[];
 let snapshotFailure=false, workFailure=false, inferenceFailure=false, acceptPairWrite=false, pairingInvitation;
+let spaceListFailure=false;
+const spacePages=[
+  {id:'notes',locator:'notes.md',title:'프로젝트 메모',profile:'pdc-markdown/1'},
+  {id:null,locator:'archive.dj',title:'보관된 문서',profile:'pdc-djot/1',legacy:true,body:'보관된 원문'},
+  {id:'deleted',locator:'deleted.md',title:'삭제한 메모',profile:'pdc-markdown/1',deleted:true},
+];
 async function fixtureContext(theme='light') {
   const context=await browser.newContext({viewport:{width:1440,height:1000},colorScheme:theme,reducedMotion:'reduce'});
   await context.addInitScript(theme=>localStorage.setItem('ghost-ui:preferences',JSON.stringify({theme,animate:false,companion:false})),theme);
@@ -107,6 +113,15 @@ async function fixtureContext(theme='light') {
       const command=route.request().postDataJSON().command;
       if(command.type==='workspace' && command.action?.type==='memory_source_list') {
         return route.fulfill({json:{ok:true,result:reply({sources:[],truncated:false})}});
+      }
+      if(command.type==='workspace' && command.action?.type==='list_pages') {
+        if(spaceListFailure) return route.fulfill({status:502,json:{ok:false,error:'fixture document read unavailable'}});
+        return route.fulfill({json:{ok:true,result:command.action.space_id==='fixture-docs' ? spacePages : []}});
+      }
+      if(command.type==='workspace' && command.action?.type==='read_page') {
+        const {space_id,page_id,locator}=command.action;
+        const result=space_id==='fixture-docs' && spacePages.find(item=>page_id ? item.id===page_id : item.locator===locator);
+        return route.fulfill(result ? {json:{ok:true,result}} : {status:404,json:{ok:false,error:'fixture document absent'}});
       }
       if(command.type==='lifetime') {
         const {method, ghost_id, conversation_id}=command.envelope.body;
@@ -189,9 +204,13 @@ try {
     await page.getByRole('button',{name:'Z.AI Coding Plan API 키 닫기',exact:true}).click();
     assert.equal(await page.locator('input[type=password]').count(),0);
     await page.getByRole('button',{name:'전체 메뉴',exact:true}).click();
-    await menu.locator('.sidebar-host-status').click();
+    const mobileManagement=menu.getByRole('navigation',{name:'관리',exact:true});
+    const mobileHost=mobileManagement.getByRole('button',{name:'호스트',exact:true});
+    assert.equal(await menu.getByRole('button',{name:'호스트',exact:true}).count(),1);
+    await mobileHost.click();
     await menu.waitFor({state:'detached'});
     await page.getByRole('heading',{name:'호스트',exact:true,level:1}).waitFor();
+    checks.push(`${theme}/mobile-management-footer-links-to-host`);
     await page.getByRole('button',{name:'전체 메뉴',exact:true}).click();
     await menu.getByRole('button',{name:'프로바이더',exact:true}).click();
     await page.getByRole('button',{name:'명령 검색',exact:true}).click();
@@ -554,10 +573,57 @@ try {
   await archive.getByText('보존된 답변',{exact:true}).waitFor();
   assert.equal(await archive.locator('textarea').count(),0);
   assert.deepEqual(await selectedWriterChat.allTextContents(),['기존 Writer 대화']);
-  await archive.getByRole('button',{name:'현재 대화',exact:true}).click();
+  await archive.getByRole('button',{name:'대화로 돌아가기',exact:true}).click();
   await page.locator('#lifetime-message').waitFor();
-  assert.deepEqual(await selectedWriterChat.allTextContents(),['현재 대화']);
+  assert.deepEqual(await selectedWriterChat.allTextContents(),['Writer']);
   checks.push('archived-thread-is-read-only-and-links-to-current-chat');
+
+  await page.getByRole('navigation',{name:'문서 공간',exact:true}).getByRole('button',{name:'문서 공간',exact:true}).click();
+  await page.getByText('연결된 문서 공간이 없습니다.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('heading',{name:'도구',exact:true}).count(),0);
+  assert.equal(await page.getByRole('textbox',{name:'문서 검색'}).count(),0);
+  checks.push('unconnected-document-space-has-a-direct-entry-and-a-plain-empty-state');
+
+  workspace.spaces=[
+    {id:'fixture-docs',name:'프로젝트 문서',path:'fixture-docs',writable:true,profiles:[primary]},
+    {id:'fixture-empty',name:'빈 문서 공간',path:'fixture-empty',writable:false,profiles:[primary]},
+  ];
+  spaceListFailure=true;
+  await page.goto(`${origin}/#/spaces/fixture-docs`);
+  await page.reload();
+  await page.getByRole('heading',{name:'프로젝트 문서',exact:true}).waitFor();
+  await page.getByRole('alert').filter({hasText:'fixture document read unavailable'}).waitFor();
+  assert.equal(await page.getByText('아직 문서가 없습니다.',{exact:true}).count(),0);
+  spaceListFailure=false;
+  await page.getByRole('button',{name:'다시 불러오기',exact:true}).click();
+  const documents=page.getByRole('list',{name:'문서 목록',exact:true});
+  await documents.getByRole('button',{name:'프로젝트 메모',exact:true}).waitFor();
+  assert.equal(await page.getByRole('navigation',{name:'공간 선택',exact:true}).isVisible(),false);
+  assert.equal(await documents.getByRole('button',{name:/^삭제한 메모/}).count(),0);
+  await page.getByRole('button',{name:'삭제된 문서 포함',exact:true}).click();
+  await documents.getByRole('button',{name:/^삭제한 메모/}).waitFor();
+  const search=page.getByRole('textbox',{name:'문서 검색',exact:true});
+  await search.fill('검색할 수 없는 문서');
+  await page.getByText('검색 결과가 없습니다.',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'검색 지우기',exact:true}).click();
+  const archivedDocument=documents.getByRole('button',{name:'보관된 문서 읽기 전용',exact:true});
+  await archivedDocument.click();
+  const documentReader=page.getByRole('dialog',{name:'보관된 문서',exact:true});
+  await documentReader.getByText('보관된 원문',{exact:true}).waitFor();
+  await page.keyboard.press('Escape');
+  await documentReader.waitFor({state:'detached'});
+  await page.waitForFunction(()=>document.activeElement?.textContent?.includes('보관된 문서'));
+  await page.screenshot({path:`${output}/light-1440-document-list.png`});
+  checks.push('document-space-retry-search-deleted-legacy-reader-and-focus');
+
+  await page.setViewportSize({width:320,height:760});
+  await page.getByRole('navigation',{name:'공간 선택',exact:true}).getByRole('button',{name:'빈 문서 공간',exact:true}).click();
+  await page.getByText('아직 문서가 없습니다.',{exact:true}).waitFor();
+  assert.equal(await search.count(),0);
+  assert.equal(await page.getByRole('button',{name:'삭제된 문서 포함',exact:true}).count(),0);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:`${output}/light-320-empty-document-space.png`});
+  checks.push('document-space-switches-on-mobile-and-omits-unused-controls-when-empty');
   await context.close();
 
   const demoContext=await browser.newContext({viewport:{width:375,height:760}});
@@ -584,11 +650,15 @@ try {
     checks.push('demo-chat-tool-dialog-and-keyboard-send-preserve-line-breaks');
 
     await demo.setViewportSize({width:1440,height:900});
+    const desktopManagement=demo.getByRole('navigation',{name:'관리',exact:true});
+    const demoHost=desktopManagement.getByRole('button',{name:'호스트',exact:true});
+    await demoHost.getByText('예시 데이터',{exact:true}).waitFor();
+    assert.deepEqual(await desktopManagement.getByRole('button').allTextContents(),['호스트예시 데이터','프로바이더','확장','앱 설정']);
     const sageChats=demo.getByRole('navigation',{name:'Sage 대화 목록',exact:true});
     await sageChats.waitFor();
     const firstConversation=await sageChats.getByRole('button').first().textContent();
-    await demo.getByRole('button',{name:'새 대화',exact:true}).click();
-    const current=sageChats.getByRole('button',{name:'현재 대화',exact:true});
+    await demo.locator('.conversation-toolbar').getByRole('button',{name:'새 대화',exact:true}).click();
+    const current=sageChats.getByRole('button',{name:'새 대화',exact:true});
     await current.waitFor();
     const older=sageChats.getByRole('button',{name:firstConversation,exact:true});
     await older.click();
@@ -596,8 +666,16 @@ try {
     assert.deepEqual(await sageChats.locator('[aria-current="page"]').allTextContents(),[firstConversation]);
     await current.click();
     await demo.getByRole('group',{name:'대화 시작 제안'}).waitFor();
-    assert.deepEqual(await sageChats.locator('[aria-current="page"]').allTextContents(),['현재 대화']);
+    assert.deepEqual(await sageChats.locator('[aria-current="page"]').allTextContents(),['새 대화']);
     checks.push('sidebar-current-and-previous-conversations-select-exactly-one-row');
+
+    await demoHost.click();
+    await demo.getByText('브라우저에 저장되는 예시 데이터로 화면을 둘러볼 수 있습니다.',{exact:true}).waitFor();
+    await demo.getByRole('navigation',{name:'일정과 협업',exact:true}).getByRole('button',{name:'협업',exact:true}).click();
+    await demo.getByRole('heading',{name:'협업',exact:true,level:1}).waitFor();
+    const collaborationViews=demo.getByRole('navigation',{name:'협업 보기',exact:true});
+    assert.deepEqual(await collaborationViews.getByRole('button').allTextContents(),['협업 목록','작업 구조']);
+    checks.push('demo-status-describes-data-and-collaboration-entry-label-matches-page');
   } finally {
     await demoContext.close();
   }

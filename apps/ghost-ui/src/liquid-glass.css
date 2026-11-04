@@ -36,7 +36,7 @@ input:hover, textarea:hover, select:hover { border-color: var(--color-border-str
 .icon-button.small { width: 24px; height: 24px; }
 .text-button { font-size: var(--text-caption); min-height: 28px; }
 .text-button:hover { color: var(--color-accent); }
-.filter-options, .space-tabs, .collaboration-view-tabs { gap: var(--space-2xs); }
+.filter-options, .collaboration-view-tabs { gap: var(--space-2xs); }
 .filter-options { width: fit-content; max-width: 100%; border-radius: var(--radius-button); padding: var(--space-2xs); background: var(--color-background-secondary); }
 .filter-button { min-height: 28px; border-radius: var(--radius-button); padding: 4px var(--space-sm); }
 .filter-button.selected, .filter-button[aria-pressed="true"] { background: var(--color-surface-elevated); color: var(--color-text); box-shadow: var(--shadow-control); }
@@ -162,11 +162,6 @@ kbd { font-family: var(--font-body); background: var(--color-surface-elevated); 
 .integration-icon { background: var(--color-accent-soft); color: var(--color-accent); border-radius: var(--radius-input); }
 .integration-copy h2, .integration-copy h3 { font-size: 16px; }
 .integration-start { background: var(--color-paper-2); border-color: var(--color-border-subtle); border-radius: var(--radius-card); }
-.document-grid { gap: var(--space-md); }
-.document-card { background: var(--color-surface-elevated); border-color: var(--color-border-subtle); border-radius: var(--radius-card); }
-.document-card:hover { border-color: var(--color-border-strong); }
-.document-thumbnail { height: 80px; background: var(--color-paper-2); }
-.document-card h2 { line-height: 1.6; }
 .collaboration-view-tabs { padding: var(--space-md) clamp(20px, 2.5vw, 32px) 0; flex-wrap: wrap; }
 .collab-board { border-radius: var(--radius-card); }
 .collab-board-heading { background: var(--color-surface-elevated); padding: var(--space-md); }

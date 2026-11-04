@@ -19,7 +19,7 @@ export function LegacyTranscript({ profile, route, navigate }: { profile: Profil
   return <section className="thread-archive" aria-label={`${profile.name} 이전 대화`}>
     <header className="thread-toolbar thread-archive-toolbar">
       <h1>이전 대화</h1>
-      <button type="button" className="text-button" onClick={() => navigate(`/lifetime?ghost=${encodeURIComponent(profile.id)}`)}>현재 대화<ArrowRight size={14}/></button>
+      <button type="button" className="text-button" onClick={() => navigate(`/lifetime?ghost=${encodeURIComponent(profile.id)}`)}>대화로 돌아가기<ArrowRight size={14}/></button>
     </header>
     {profile.conversations.length > 0 && <label className="lifetime-field"><span className="sr-only">대화 기록</span><select className="thread-archive-select" value={conversation?.id ?? ''} onChange={event => navigate(legacyHistoryPath(profile.id, event.target.value))}>
       {!conversation && <option value="">이 대화를 찾을 수 없습니다</option>}

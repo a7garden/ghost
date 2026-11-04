@@ -1,0 +1,47 @@
+.ghost-arc .space-library.page-content {
+  max-width: calc(var(--workspace-reading-width) + 2 * var(--workspace-gutter));
+  padding-inline: var(--workspace-gutter);
+}
+
+.space-heading { margin-block-end: var(--space-lg); }
+.space-switcher { display: flex; gap: var(--space-2xs); flex-wrap: wrap; margin-block-end: var(--space-md); }
+.space-switcher .filter-button { max-width: 100%; }
+.space-switcher .filter-button > span { overflow: hidden; text-overflow: ellipsis; }
+.app-shell--desktop .space-switcher { display: none; }
+@media (min-width: 56rem) { .space-switcher { display: none; } }
+
+.space-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-block-end: var(--space-md);
+}
+
+.space-controls .space-search { flex: 1 1 12rem; max-width: 24rem; margin-bottom: 0; }
+.space-controls > .filter-button { margin-inline-start: auto; }
+
+.space-document-list { list-style: none; margin: 0; padding: 0; border-block-start: 1px solid var(--color-rule); }
+.space-document-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: calc(13 * var(--spacing));
+  padding: var(--space-sm) var(--space-xs);
+  border-block-end: 1px solid var(--color-rule);
+  text-align: start;
+  white-space: normal;
+}
+
+.space-document-row:hover:not(:disabled) { background: var(--color-background-secondary-hover); }
+.space-document-row > svg, .space-document-row > small { flex: none; color: var(--color-text-secondary); }
+.space-document-title { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
+.space-document-row > small { font-size: var(--text-caption); }
+.space-message { display: grid; gap: var(--space-2xs); justify-items: start; padding-block: var(--space-lg); color: var(--color-text-secondary); border-block-start: 1px solid var(--color-rule); }
+.space-message .button { margin-block-start: var(--space-xs); }
+.space-message .muted { font-size: var(--text-caption); }
+.space-open-error { margin-block-end: var(--space-xs); }
+
+.ghost-arc .space-document-reader.drawer { width: min(100%, calc(var(--workspace-reading-width) + 2 * var(--workspace-gutter))); }
+.space-reader-note { font-size: var(--text-caption); color: var(--color-text-secondary); }
