@@ -8,6 +8,8 @@ The native iPhone app must support direct conversation, delegation, approval, re
 
 ## Product scope
 
+See [current goals and scope](docs/current-priorities.md) for the product entry point and remaining acceptance boundaries. Dated migration plans are historical evidence, not an independent backlog.
+
 Use **맡긴 일** for work assigned to Ghost. Keep execution time limits, durable scheduling, work resumption, and completion notifications. The desktop no longer offers a personal planner or Google Calendar/Tasks presets. Preserve prior planner records and Host protocol compatibility.
 
 ## Local operations
