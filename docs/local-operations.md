@@ -56,7 +56,7 @@ launchctl bootstrap "$ghost_domain" "$HOME/Library/LaunchAgents/com.a7.ghost-ui.
 
 ## 2026-11-05 Orchestra 운영 교체
 
-Studio의 `com.a7.ghost`에 `20261105-orchestra-1d96dfd-ui`의 Rust Host와 Bun 1.4.2/Pi를 설치했다. `~/Applications/Ghost.app`의 UI는 `e3b9985` 빌드다. 앱 프로세스가 외부 Host에 인증해 프로필 9개를 조회했다. 앱이 띄운 로컬 UI에서 공개 대화와 작업 스레드를 열었고, 완료 후 공개 대화에서 `맡긴 일 검수 완료`와 작업 보고를 확인했다. 기존 기본 대화의 메시지 51개, Goal 18개, 모델과 제공자 권한은 교체 전 사본과 일치했다.
+Studio의 `com.a7.ghost`에 `20261105-orchestra-1d96dfd-ui`의 Rust Host와 Bun 1.4.2/Pi를 설치했다. `~/Applications/Ghost.app`에는 `9661c38` UI를 설치했다. 앱 프로세스가 외부 Host에 인증해 프로필 9개를 조회했다. 앱이 띄운 로컬 UI에서 공개 대화와 작업 스레드를 열고 `맡긴 일 검수 완료`와 작업 보고를 확인했다. 실행 한도가 지나 그래프가 만료된 뒤에도 최신 수용 판본의 `primary → specialist-engineering` 경로와 두 작업의 검수 완료 상태가 표시된다. 기존 기본 대화의 메시지 51개, Goal 18개, 모델과 제공자 권한은 교체 전 사본과 일치했다.
 
 기본 Ghost의 별도 공개 대화 `83a3e562-e44d-469e-b4ba-761879fe79d5`에서 합성 업무 한 건을 맡겼다. 첫 판본에서 독립 검수가 실패했고, 판정에 필요한 실행 사실과 실패 보고 경로를 보강했다. 두 번째 판본은 입력 파일이 없는 위임의 도구 입력 검증에서 멈췄고, Pi 도구 스키마를 수정했다. 같은 Goal의 세 번째 판본에서 Z.AI `glm-5.3`이 접수(`low`), 부모와 하위 Work(`high`)를 실행했다. 부모는 하위 산출물이 게시된 뒤 대기를 재개해 그 SHA-256을 결과에 포함했다. 별도 Pi 세션의 `MiniMax-M3.1-Flash-Preview`(`medium`)가 통과를 기록했다. Owner가 검수본과 게시본의 해시를 대조하고 수용했으며, 검수와 수용 보고가 원래 공개 대화에 도착했다. 테스트 대화의 리뷰 제공자 승인을 해제하고 하위 Ghost의 모델 경로를 복귀시켰다.
 
