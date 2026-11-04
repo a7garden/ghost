@@ -34,3 +34,36 @@ automatically replay a blocked execution through Pi.
 The isolated fixtures in `tests/test_pi_cutover_audit.py` verify inventory
 decisions and unchanged database bytes. They do not exercise production process
 fencing or prove that an omitted journal does not exist.
+
+## Preserve historical worker receipts
+
+Use `--preserve-history` when retiring the legacy workers without advancing
+their ACKs. In this mode the audit verifies the worker admission's digest and
+its exact Host work revision, the worker's terminal event, the corresponding
+Host result receipt at the same epoch and sequence, and the original artifact
+bytes. A never-started failure requires the original pre-start event sequence,
+no process identity or prompt intent, and zero tool receipts. A stale Work
+requires a superseding goal revision and a matching historical terminal
+receipt. It stays stale in the Host journal and remains ineligible for
+acceptance or replay. Pending commands, effects, cancellation or worker
+deliveries still block. Historical closures are evidence in the output and
+leave both journals intact.
+
+1. Run the inventory while live to identify gaps. Supply all four original
+   worker journals or the complete set for the installation being migrated.
+2. Fence admission and quiesce the Host and workers. Verify independently
+   that original writers and any active processes are stopped. Repeat the
+   same inventory against the original journal paths and archive the output.
+   Artifact locators are validated against those original paths.
+3. Make verified private backups of the stopped journals, artifacts, computer
+   registry, runtime state and configuration. Record the scope and how to
+   restore the release and state. Keep the original worker evidence; ACK
+   advancement would prune noncritical events.
+4. Verify compatibility of the release, its bundled Pi runtime, persisted
+   deliveries, computer bindings and provider privacy routes before starting
+   it. Start only the new Host and verify a new owner-scoped job including a
+   restart, effect counts, acceptance and final report. Keep the original
+   workers stopped until the outcome is known.
+
+`inventory_clear` covers the supplied legacy inventory. It does not authorize
+cutover, fence running writers, or check pending Pi deliveries.

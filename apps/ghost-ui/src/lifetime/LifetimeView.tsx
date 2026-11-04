@@ -535,6 +535,31 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
       </article>)}
     </section>}
 
+    {snapshot && registry.length > 0 && !registryError && <section className="lifetime-outbox" aria-labelledby="ghost-team-heading">
+      <div className="lifetime-section-heading"><h3 id="ghost-team-heading">Ghost 대시보드</h3></div>
+      <ul className="ghost-team-list">
+        {[...registry].sort((left, right) => Number(right.kind === "primary") - Number(left.kind === "primary")).map(target => {
+          const currentWork = snapshot.work.filter(work => work.owner === target.ghost_id
+            && snapshot.goals.some(goal => goal.id === work.goal_id && goal.revision === work.goal_revision));
+          const counts = [
+            { label: "대기·진행", count: currentWork.filter(work => ["queued", "blocked", "active", "running", "steer_requested"].includes(work.state)).length },
+            { label: "확인 필요", count: currentWork.filter(work => ["completed", "verifying", "unknown", "failed", "rejected"].includes(work.state)).length },
+            { label: "검수 완료", count: currentWork.filter(work => work.state === "accepted").length },
+          ];
+          const key = conversationTargetKey(target);
+          const roleNames: Record<string, string> = { engineering: "개발", operations: "운영", research: "조사", primary: "마스터" };
+          const name = target.kind === "primary" ? "마스터 Ghost" : target.roles.map(role => roleNames[role] ?? role).join(" · ") || "전문 Ghost";
+          return <li className="ghost-team-row" key={key}>
+            <button className="button secondary" type="button" aria-pressed={key === selectedTargetKey}
+              disabled={Boolean(busy) || pending.length > 0} onClick={() => setSelectedPairKey(key)}>{name}</button>
+            <span>{target.mode === "active" ? "활성" : "접수 중지"}</span>
+            <dl className="ghost-team-counts">{counts.map(({ label, count }) =>
+              <div key={label}><dt>{label}</dt><dd>{count}</dd></div>)}</dl>
+          </li>;
+        })}
+      </ul>
+    </section>}
+
     <section className="lifetime-conversation" aria-label="주 Ghost와의 대화">
       {mode === 'live' && selectedTarget && <InferenceSettings pair={selectedTarget} disabled={writesDisabled || Boolean(busy)}/>}
       <div className="lifetime-section-heading">

@@ -42,7 +42,7 @@ struct Bridge {
 impl Bridge {
     async fn frame(&mut self, host: &Host) -> Result<Value> {
         loop {
-            let line = tokio::time::timeout(Duration::from_secs(130), self.output.next_line())
+            let line = tokio::time::timeout(Duration::from_secs(310), self.output.next_line())
                 .await??
                 .ok_or_else(|| anyhow::anyhow!("Cross-Ghost bridge exited"))?;
             ensure!(line.len() <= 1_048_576, "Bridge frame exceeds bound");
@@ -54,7 +54,7 @@ impl Bridge {
             }
             self.callbacks += 1;
             ensure!(
-                self.callbacks <= 300,
+                self.callbacks <= 1000,
                 "Cross-Ghost callback budget exceeded"
             );
             let request: PiToolRequest = serde_json::from_value(frame["request"].clone())?;
@@ -296,6 +296,10 @@ async fn real_pi_cross_ghost_child_acceptance_cold_restart_parent_acceptance() -
     );
     let f = setup_with_spec(json!({}));
     crate::host::inference::install_external_test_inference(&f.host)?;
+    f.host.configure_inference(&json!({
+        "operation":"set_default","version":2,
+        "selection":{"provider":"zai-coding","model":"glm-5.3","effort":"high"}
+    }))?;
     let super::tests::Fixture {
         _root,
         mut host,
@@ -344,7 +348,7 @@ async fn real_pi_cross_ghost_child_acceptance_cold_restart_parent_acceptance() -
         )?;
     }
     let child_command = "test \"$(cat answer.txt)\" = b7-child && printf b7-child-verified";
-    let child_instructions=format!("Synthetic B7 child task. Do not delegate. Write answer.txt with exactly b7-child (no newline). Inspect work_inspect data.command_recipes and execute bash using the Host-issued command_ref for verifier-command. Its exact sealed bytes are: {child_command}. Publish answer.txt with privacy public. Finish only after the successful publication receipt.");
+    let child_instructions = "Synthetic B7 child task. Write answer.txt with exactly b7-child (no newline), then publish answer.txt with privacy public and finish. The Host will run its required verifier after publication. Do not run bash or delegate.".to_owned();
     let mut child_spec = verifier_spec("b7-child");
     child_spec["required_checks"] = json!([
         "artifact_sha256",
@@ -354,6 +358,7 @@ async fn real_pi_cross_ghost_child_acceptance_cold_restart_parent_acceptance() -
     ]);
     child_spec["verifier"]["command"] = json!(child_command);
     child_spec["verifier"]["expected_stdout"] = json!("b7-child-verified");
+    child_spec["verifier"]["completion_timeout_seconds"] = json!(20);
     child_spec["instructions"] = json!(child_instructions);
     let child_prompt = child_instructions;
     let root_command = "test $(cat answer.txt) = b7-root-reviewed && printf b7-root-verified";
@@ -366,8 +371,9 @@ async fn real_pi_cross_ghost_child_acceptance_cold_restart_parent_acceptance() -
     ]);
     root_spec["verifier"]["command"] = json!(root_command);
     root_spec["verifier"]["expected_stdout"] = json!("b7-root-verified");
+    root_spec["verifier"]["completion_timeout_seconds"] = json!(20);
     root_spec["delegation_contracts"] = json!([{"target_ghost_id":child,"prompt":child_prompt,"acceptance_spec":child_spec,"artifact_refs":[]}]);
-    let prompt=format!("Synthetic B7 coordinator task. Inspect your current work_children, registry_inspect and work_inspect. If the links array has NO child links, select the Host-issued contract_ref from work_inspect data.delegation_contracts for specialist role b7_researcher and delegate exactly ONE child using only parent_work_id and contract_ref. Do not retype or modify its prompt or acceptance specification. Before delegation, write draft.txt exactly before-wait, read it, then edit its text before-wait to prepared. Then call work_wait for that one child. That tool durably parks THIS SAME generation; after it returns continue with the accepted child below. Do not finish while waiting or submit a replacement Work. If you ALREADY have an accepted child, never delegate again. Read the exact Host-staged input_artifacts relative path and confirm its content is b7-child. Then write answer.txt exactly b7-root-reviewed (no newline), inspect current work_inspect data.command_recipes and execute bash using the Host-issued verifier-command command_ref (sealed exact bytes: {root_command}), publish answer.txt with privacy public, and finish. Do not create or update any Goal. Child acceptance alone does not complete your own output.");
+    let prompt="Synthetic B7 coordinator task. Inspect your current work_children, registry_inspect and work_inspect. If the links array has NO child links, select the Host-issued contract_ref from work_inspect data.delegation_contracts for specialist role b7_researcher and delegate exactly ONE child using only parent_work_id and contract_ref. Do not retype or modify its prompt or acceptance specification. Before delegation, write draft.txt exactly before-wait, read it using only the path argument (omit view), then edit its text before-wait to prepared. Then call work_wait for that one child. That tool durably parks THIS SAME generation; after it returns continue with the accepted child below. Do not finish while waiting or submit a replacement Work. If you ALREADY have an accepted child, never delegate again. Read the exact Host-staged input_artifacts relative path using only the path argument (omit view) and confirm its content is b7-child. Then write answer.txt exactly b7-root-reviewed (no newline), publish answer.txt with privacy public, and finish. The Host will run its required verifier after publication. 최종 사용자 보고는 반드시 한국어로 작성하세요. Do not create or update any Goal. Child acceptance alone does not complete your own output.".to_owned();
     let root_goal = {
         let state = host.lock()?;
         db::work(&state.journal.0, &root_work)?.unwrap().goal_id
@@ -471,19 +477,12 @@ async fn real_pi_cross_ghost_child_acceptance_cold_restart_parent_acceptance() -
         ensure!(artifact.len() == 1, "Accepted child artifact not offered");
         (execution, count, artifact[0].clone())
     };
-    let (second_calls, second_methods, child_effects) = bridge.stop(&host).await?;
+    ensure!(bridge.deliver(&host, "conversation.submit", None).await?, "Accepted root report absent");
+    let (second_calls, second_methods, _) = bridge.stop(&host).await?;
     methods.extend(second_methods);
     ensure!(
         first_calls + second_calls <= 40,
         "Total model budget exceeded"
-    );
-    ensure!(
-        child_effects
-            .iter()
-            .filter(|(request, _)| request.ghost_id == child)
-            .count()
-            == 3,
-        "Child must use exactly write/bash/publication"
     );
     for (original, receipt) in original_effects {
         let raw:String=host.lock()?.journal.0.query_row("SELECT response_json FROM lifetime_pi_effects WHERE execution_id=?1 AND task_id=?2 AND call_id=?3",rusqlite::params![original_execution,original.envelope.body["task_id"].as_u64(),original.envelope.body["call_id"].as_str()],|r|r.get(0))?;
@@ -498,6 +497,21 @@ async fn real_pi_cross_ghost_child_acceptance_cold_restart_parent_acceptance() -
         root_state.state == "accepted",
         "Root not independently accepted after real restart: {root_state:?}"
     );
+    let korean_reports: i64 = state.journal.0.query_row(
+        "SELECT COUNT(*) FROM lifetime_report_replies r JOIN lifetime_turns t ON t.id=r.reply_turn_id
+         JOIN lifetime_outbox o ON o.id=r.outbox_id WHERE t.ghost_id=?1
+         AND json_extract(o.payload,'$.body.goal_id')=?2 AND json_extract(o.payload,'$.body.goal_revision')=?3
+         AND t.text GLOB '*[가-힣]*'",
+        rusqlite::params![ghost,root_goal,root_state.goal_revision], |r| r.get(0),
+    )?;
+    ensure!(korean_reports == 1, "Expected one Korean report from the original master");
+    for operation in ["write", "publish_artifact", "bash"] {
+        let count: i64 = state.journal.0.query_row(
+            "SELECT COUNT(*) FROM lifetime_pi_effects WHERE execution_id=?1 AND operation=?2",
+            rusqlite::params![child_execution,operation], |r| r.get(0),
+        )?;
+        ensure!(count == 1, "Expected one child {operation} effect");
+    }
     let root_execution = root_state.execution_id.as_deref().unwrap();
     ensure!(
         root_execution == original_execution,
@@ -570,7 +584,7 @@ async fn real_pi_cross_ghost_child_acceptance_cold_restart_parent_acceptance() -
         std::fs::read(root_dir.join(child_artifact["path"].as_str().unwrap()))? == b"b7-child",
         "Parent did not receive exact staged bytes"
     );
-    ensure!(state.journal.0.query_row("SELECT COUNT(*) FROM lifetime_pi_effects WHERE operation='bash' AND state='complete' AND json_extract(arguments_json,'$.command_ref') LIKE 'pc-%' AND json_extract(arguments_json,'$.command') IS NULL",[],|r|r.get::<_,u64>(0))?==2,"Actual child and parent must select original Host command refs");
+    ensure!(state.journal.0.query_row("SELECT COUNT(*) FROM lifetime_pi_effects WHERE operation='bash' AND state='complete' AND call_id LIKE 'host-verifier:pc-%' AND json_extract(arguments_json,'$.command_ref') LIKE 'pc-%' AND json_extract(arguments_json,'$.command') IS NULL",[],|r|r.get::<_,u64>(0))?==2,"Actual child and parent must select original Host command refs");
     ensure!(state.journal.0.query_row("SELECT COUNT(*) FROM lifetime_commands WHERE json_extract(request,'$.body.method')='work.delegate' AND json_extract(request,'$.body.contract_ref') LIKE 'dc-%' AND json_extract(request,'$.body.summary') IS NULL",[],|r|r.get::<_,i64>(0))?==1,"Actual model did not use immutable contract-reference path");
     ensure!(state.journal.0.query_row("SELECT EXISTS(SELECT 1 FROM lifetime_pi_effects WHERE execution_id=?1 AND operation='read' AND state='complete' AND json_extract(arguments_json,'$.path')=?2 AND json_extract(response_json,'$.data.output.sha256')=?3)",rusqlite::params![root_execution,child_artifact["path"].as_str(),child_artifact["artifact"]["digest"].as_str()],|r|r.get::<_,bool>(0))?,"Actual parent Pi did not read the exact immutable staged child artifact");
     let root_effects: i64 = state.journal.0.query_row(

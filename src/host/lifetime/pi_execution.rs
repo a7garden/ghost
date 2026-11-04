@@ -479,6 +479,23 @@ pub(crate) mod tests {
         f.host.lifetime_pi_execution_action(&PiToolRequest {context_ref: None, ghost_id:f.ghost.clone(),conversation_id:f.conversation.clone(),envelope:envelope(&f.ghost,json!({"method":"work.execution.complete","assignment_id":f.assignment,"work_id":f.work,"task_id":7,"summary":"Published fixture"}))},PiInferenceScope::Public).await.unwrap()
     }
     #[tokio::test]
+    async fn legacy_verifier_without_completion_opt_in_stays_pending_when_shell_is_omitted() {
+        let mut spec = verifier_spec("expected");
+        spec["required_checks"] = json!(["artifact_sha256", "artifact_content", "command_success"]);
+        spec["verifier"]["command"] = json!("printf verified");
+        let fixture = setup_with_spec(spec);
+        let completed = publish_complete(&fixture, "expected").await;
+        assert_eq!(completed.status, ResponseStatus::Success);
+        assert_ne!(completed.data["verification"]["status"], "success");
+        let state = fixture.host.lock().unwrap();
+        assert_eq!(db::work(&state.journal.0, &fixture.work).unwrap().unwrap().state, "completed");
+        assert_eq!(state.journal.0.query_row(
+            "SELECT COUNT(*) FROM lifetime_pi_effects WHERE operation='bash'", [],
+            |row| row.get::<_, u64>(0),
+        ).unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn owner_content_expectation_is_independently_accepted_and_recovered_after_reopen() {
         let f = setup_with_spec(verifier_spec("expected"));
         let response = publish_complete(&f, "expected").await;
@@ -1115,6 +1132,17 @@ impl Host {
         request: &PiToolRequest,
         scope: PiInferenceScope,
     ) -> Result<Response> {
+        if request.envelope.body["call_id"].as_str().is_some_and(|id| id.starts_with("host-verifier:")) {
+            return Ok(failure("invalid_request", "The Host verifier call namespace is reserved"));
+        }
+        self.pi_execution_action(request, scope).await
+    }
+
+    async fn pi_execution_action(
+        &self,
+        request: &PiToolRequest,
+        scope: PiInferenceScope,
+    ) -> Result<Response> {
         request.envelope.validate()?;
         if let Some(response)=self.work_memory_effect_guard(request,scope).await? {return Ok(response);}
         if let Some((response,execution))=self.reconcile_revoked_pi_wait(request,scope)? {
@@ -1124,7 +1152,7 @@ impl Host {
         let method = apply::string_field(&request.envelope.body, "method")?;
         if method == "work.execution.complete" {
             apply::allowed_fields(&request.envelope.body,&["method","assignment_id","work_id","task_id","summary","work_memory_context_revision"],&["method","assignment_id","work_id","task_id","summary"])?;
-            let execution = {
+            let (execution, verifier_request) = {
                 let state = self.lock()?;
                 if let Some(response) = self
                     .check_pi_host_scope(&state, request, scope)?
@@ -1149,8 +1177,39 @@ impl Host {
                         "Pi completion task mismatch"
                     );
                 }
-                work.execution_id
+                let mut verifier_request = None;
+                if let Some(execution) = work.execution_id.as_deref() {
+                    let running: bool = state.journal.0.query_row(
+                        "SELECT state='running' FROM lifetime_pi_executions WHERE execution_id=?1",
+                        [execution], |row| row.get(0),
+                    )?;
+                    if running {
+                        if let Some(arguments) = command_recipes::missing_required_command(&state.journal.0, &work, execution)? {
+                            let completion = &request.envelope.body;
+                            let call = format!("host-verifier:{}", arguments["command_ref"].as_str().unwrap());
+                            let effect = json!({"operation":"bash","arguments":arguments});
+                            let mut body = json!({
+                                "method":"work.execute","assignment_id":completion["assignment_id"],
+                                "work_id":work.id,"generation_task_id":completion["task_id"],
+                                "task_id":completion["task_id"],"call_id":call,
+                                "input_digest":canonical_digest(&effect)?,"operation":"bash","arguments":arguments
+                            });
+                            if let Some(revision) = completion.get("work_memory_context_revision") {
+                                body["work_memory_context_revision"] = revision.clone();
+                            }
+                            let mut invocation = request.clone();
+                            invocation.envelope.command_id = format!("pi-verifier:{execution}");
+                            invocation.envelope.payload_digest = canonical_digest(&body)?;
+                            invocation.envelope.body = body;
+                            verifier_request = Some(invocation);
+                        }
+                    }
+                }
+                (work.execution_id, verifier_request)
             };
+            if let Some(verifier) = verifier_request {
+                Box::pin(self.pi_execution_action(&verifier, scope)).await?;
+            }
             if let Some(execution) = execution {
                 self.native_computers
                     .as_ref()
@@ -1942,9 +2001,14 @@ impl Host {
                 "expected_sha256",
                 "command",
                 "expected_stdout",
+                "completion_timeout_seconds",
             ],
             &["kind", "artifact_path", "expected_sha256"],
         )?;
+        if let Some(timeout) = verifier.get("completion_timeout_seconds") {
+            ensure!(verifier["command"].is_string() && timeout.as_u64().is_some_and(|value| (1..=180).contains(&value)),
+                "Owner completion verifier requires a command and a timeout from 1 to 180 seconds");
+        }
         let path = apply::string_field(verifier, "artifact_path")?;
         let expected = apply::string_field(verifier, "expected_sha256")?;
         ensure!(

@@ -200,6 +200,72 @@ async fn mcp_stdio_scope_pagination_persistence_and_uncertain_effects() {
 }
 
 #[tokio::test]
+async fn mcp_session_state_is_separate_for_each_granted_ghost_and_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let app = Host::open_legacy_fixture(
+        root.path(),
+        tokio::runtime::Handle::current(),
+        Some("mock"),
+    )
+    .unwrap();
+    let master = profile(&app, "master");
+    let specialist = profile(&app, "specialist");
+    let reviewer = profile(&app, "reviewer");
+    let saved = result(owner(
+        &app,
+        json!({"type":"save_integration","integration":{
+            "name":"Fixture","transport":fixture(),"profiles":[master,specialist],"enabled":true
+        }}),
+    ));
+    let id = saved["id"].as_str().unwrap();
+    let remember = |ghost| {
+        integrations::run(&app, id, ghost, Some(("remember", json!({}))), || Ok(()))
+    };
+    for (ghost, expected) in [
+        (Some(master.as_str()), "1"),
+        (Some(master.as_str()), "2"),
+        (Some(specialist.as_str()), "1"),
+        (None, "1"),
+        (Some(master.as_str()), "3"),
+    ] {
+        let value = remember(ghost).await.unwrap();
+        assert_eq!(value["content"][0]["text"], expected);
+    }
+    assert!(remember(Some(&reviewer)).await.is_err());
+
+    result(owner(
+        &app,
+        json!({"type":"save_integration","id":id,"version":1,"integration":{
+            "name":"Fixture","transport":fixture(),"profiles":[specialist],"enabled":true
+        }}),
+    ));
+    assert!(remember(Some(&master)).await.is_err());
+    assert_eq!(
+        remember(Some(&specialist)).await.unwrap()["content"][0]["text"],
+        "1",
+    );
+    app.shutdown().await.unwrap();
+    drop(app);
+
+    let reopened = Host::open_legacy_fixture(
+        root.path(),
+        tokio::runtime::Handle::current(),
+        Some("mock"),
+    )
+    .unwrap();
+    let remember = |ghost| {
+        integrations::run(&reopened, id, ghost, Some(("remember", json!({}))), || Ok(()))
+    };
+    assert!(remember(Some(&master)).await.is_err());
+    assert!(remember(Some(&reviewer)).await.is_err());
+    assert_eq!(
+        remember(Some(&specialist)).await.unwrap()["content"][0]["text"],
+        "1",
+    );
+    reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn mcp_rechecks_grants_after_connection_and_does_not_dispatch() {
     let root = tempfile::tempdir().unwrap();
     let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();

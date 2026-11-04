@@ -147,12 +147,14 @@ pub(crate) fn visible(s: &State, owner: &str) -> Result<Value> {
 }
 
 type Slot = Arc<tokio::sync::Mutex<Option<Session>>>;
+type ConnectionScope = (String, Option<String>);
+
 #[derive(Default)]
-pub(crate) struct Connections(Mutex<BTreeMap<String, Slot>>);
+pub(crate) struct Connections(Mutex<BTreeMap<ConnectionScope, Slot>>);
 impl Connections {
     pub(crate) fn remove(&self, id: &str) {
         if let Ok(mut slots) = self.0.lock() {
-            slots.remove(id);
+            slots.retain(|(integration, _), _| integration != id);
         }
     }
     pub(crate) fn clear(&self) {
@@ -160,12 +162,12 @@ impl Connections {
             slots.clear();
         }
     }
-    fn slot(&self, id: &str) -> Result<Slot> {
+    fn slot(&self, id: &str, owner: Option<&str>) -> Result<Slot> {
         Ok(self
             .0
             .lock()
             .map_err(|_| anyhow!("연동 상태를 읽지 못했습니다."))?
-            .entry(id.into())
+            .entry((id.into(), owner.map(str::to_owned)))
             .or_default()
             .clone())
     }
@@ -490,7 +492,9 @@ pub(crate) async fn run(
     check: impl Fn() -> Result<()>,
 ) -> Result<Value> {
     let item = allowed(&*app.lock()?, id, owner)?;
-    let slot = app.integrations.slot(id)?;
+    // Two Ghosts may be granted the same server, but neither inherits the
+    // other's stdio process or HTTP session. Owner diagnostics are separate too.
+    let slot = app.integrations.slot(id, owner)?;
     let operation = async {
         let mut guard = slot.lock().await;
         // Taking ownership makes cancellation discard the process and any stale response.

@@ -275,3 +275,38 @@ printf pi-physical-verified"#;
         1
     );
 }
+
+#[tokio::test]
+#[ignore = "requires the running Apple Container service and pinned task image"]
+async fn real_pi_completion_runs_omitted_required_verifier_once() {
+    assert_eq!(std::env::var("GHOST_PI_RUN_PHYSICAL_CANARY").as_deref(), Ok("1"));
+    let mut spec = verifier_spec("expected");
+    spec["required_checks"] = json!(["artifact_sha256","artifact_content","command_success","command_stdout"]);
+    spec["verifier"]["command"] = json!("test ! -e once && test $(cat answer.txt) = expected && touch once && printf verified");
+    spec["verifier"]["expected_stdout"] = json!("verified");
+    spec["verifier"]["completion_timeout_seconds"] = json!(20);
+    let mut fixture = setup_with_spec(spec);
+    fixture.host.native_computers.as_mut().unwrap()
+        .set_pi_fixture_cli(Path::new("/opt/homebrew/bin/container")).unwrap();
+    let completed = super::tests::publish_complete(&fixture, "expected").await;
+    assert_eq!(completed.data["verification"]["status"], "success", "{completed:?}");
+    let completion = PiToolRequest {
+        context_ref: None,
+        ghost_id: fixture.ghost.clone(),
+        conversation_id: fixture.conversation.clone(),
+        envelope: envelope(&fixture.ghost, json!({
+            "method":"work.execution.complete","assignment_id":fixture.assignment,
+            "work_id":fixture.work,"task_id":7,"summary":"Published fixture"
+        })),
+    };
+    let replay = fixture.host.lifetime_pi_execution_action(&completion, PiInferenceScope::Public)
+        .await.unwrap();
+    assert_eq!(replay, completed);
+    let state = fixture.host.lock().unwrap();
+    assert_eq!(db::work(&state.journal.0, &fixture.work).unwrap().unwrap().state, "accepted");
+    let count: u64 = state.journal.0.query_row(
+        "SELECT COUNT(*) FROM lifetime_pi_effects WHERE operation='bash' AND call_id LIKE 'host-verifier:pc-%'",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(count, 1);
+}

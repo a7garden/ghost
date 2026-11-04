@@ -28,6 +28,64 @@ pub(super) fn views(conn: &Connection, work: &Work) -> Result<Vec<Value>> {
     ])
 }
 
+/// Select the required Owner-sealed command only when its expected artifact
+/// was published and the execution has no unresolved effect or prior attempt.
+pub(super) fn missing_required_command(
+    conn: &Connection,
+    work: &Work,
+    execution: &str,
+) -> Result<Option<Value>> {
+    let goal = db::goal(conn, &work.goal_id)?.ok_or_else(|| anyhow!("Recipe Goal missing"))?;
+    let required = goal.acceptance_spec["required_checks"].as_array();
+    if !required.is_some_and(|checks| checks.iter().any(|check| check == "command_success" || check == "command_stdout")) {
+        return Ok(None);
+    }
+    let Some(recipe) = views(conn, work)?.into_iter().next() else {
+        return Ok(None);
+    };
+    let verifier = &goal.acceptance_spec["verifier"];
+    let Some(timeout) = verifier["completion_timeout_seconds"].as_u64().filter(|value| (1..=180).contains(value)) else {
+        return Ok(None);
+    };
+    let now = crate::host::now_ms();
+    let Some(policy) = execution_time_policy(conn, work, now)? else {
+        return Ok(None);
+    };
+    if !policy.effect_authority_alive || policy.effect_deadline_at_ms.saturating_sub(now) < (timeout + 1) * 1000 {
+        return Ok(None);
+    }
+    let mut effects = conn.prepare(
+        "SELECT task_id,call_id,operation,state,arguments_json,response_json,input_digest
+         FROM lifetime_pi_effects WHERE execution_id=?1",
+    )?;
+    let mut published = false;
+    let mut rows = effects.query([execution])?;
+    while let Some(row) = rows.next()? {
+        let state: String = row.get(3)?;
+        if state != "complete" {
+            return Ok(None);
+        }
+        let operation: String = row.get(2)?;
+        let args: Value = serde_json::from_str(&row.get::<_, String>(4)?)?;
+        if operation == "bash" {
+            let task = row.get(0)?;
+            let call: String = row.get(1)?;
+            let digest: String = row.get(6)?;
+            if receipt_command(conn, execution, task, &call, &digest, &args)?.as_deref()
+                == recipe["command"].as_str()
+            {
+                return Ok(None);
+            }
+        }
+        if operation == "publish_artifact" && args["path"] == verifier["artifact_path"] {
+            let response: Response = serde_json::from_str(&row.get::<_, String>(5)?)?;
+            published |= response.status == ResponseStatus::Success
+                && response.artifacts.iter().any(|artifact| verifier["expected_sha256"] == artifact.digest);
+        }
+    }
+    Ok(published.then(|| json!({"command_ref":recipe["command_ref"],"timeout":timeout})))
+}
+
 pub(super) fn resolve(conn: &Connection, work: &Work, args: &Value) -> Result<Value> {
     apply::allowed_fields(args, &["command", "command_ref", "timeout"], &[])?;
     ensure!(

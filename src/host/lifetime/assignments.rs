@@ -306,7 +306,12 @@ fn load_source(
             "Goal assignment ancestry, revision, or graph deadline is no longer current",
         ));
     }
-    if dispatch && can_continue && !super::pi_execution::has_binding(conn,&work,assignment_id,receiver.authority_epoch)?
+    // An exact, current Pi dependency wait can be recorded before the first
+    // filesystem effect creates a Host execution. Its own generation binding
+    // is sufficient to inspect that wait, with normal effect admission later.
+    let waiting_before_first_effect = parked && work.execution_id.is_none();
+    if dispatch && can_continue && !waiting_before_first_effect
+        && !super::pi_execution::has_binding(conn,&work,assignment_id,receiver.authority_epoch)?
         && !has_matching_work_submit(conn, &receiver, &goal, &work, ghost_id)? {
         return Err(host_apply::conflict(
             "Goal assignment continuation has no matching committed target work.submit",

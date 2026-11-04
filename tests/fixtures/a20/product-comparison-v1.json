@@ -1,0 +1,18 @@
+{
+  "version": "ghost-a20-product-comparison/1",
+  "description": "Frozen representative fixture, not live product research or current purchase advice. Fictional public headphone specifications exercise source correction, missing facts, constraints and tradeoffs.",
+  "currency": "USD",
+  "sources": [
+    {"ref":"spec-atlas-r1","product_id":"atlas","revision":1,"published":"2026-09-01","supersedes":null,"facts":{"price_usd":129,"weight_g":250,"battery_hours":32,"anc":true}},
+    {"ref":"spec-atlas-r2","product_id":"atlas","revision":2,"published":"2026-10-01","supersedes":"spec-atlas-r1","note":"Correction: the 32-hour claim measured ANC off. Comparable ANC-on battery life is 18 hours.","facts":{"price_usd":129,"weight_g":250,"battery_hours":18,"anc":true}},
+    {"ref":"spec-boreal-r1","product_id":"boreal","revision":1,"published":"2026-09-15","supersedes":null,"facts":{"price_usd":179,"weight_g":220,"battery_hours":30,"anc":true}},
+    {"ref":"spec-cedar-r1","product_id":"cedar","revision":1,"published":"2026-09-12","supersedes":null,"facts":{"price_usd":99,"weight_g":190,"battery_hours":26,"anc":false}},
+    {"ref":"spec-delta-r1","product_id":"delta","revision":1,"published":"2026-09-20","supersedes":null,"note":"Vendor has not supplied a comparable battery measurement.","facts":{"price_usd":149,"weight_g":210,"battery_hours":null,"anc":true}},
+    {"ref":"spec-ember-r1","product_id":"ember","revision":1,"published":"2026-09-18","supersedes":null,"facts":{"price_usd":159,"weight_g":240,"battery_hours":24,"anc":true}}
+  ],
+  "cases": [
+    {"id":"commute-value","request":"Compare these headphones for commuting. ANC and verified battery life are mandatory. Prefer value but account for battery life and carrying weight.","max_price_usd":200,"min_battery_hours":20,"max_weight_g":300,"anc_required":true,"weights":{"price":2,"battery":3,"weight":1}},
+    {"id":"flight-no-fit","request":"Find a light ANC headphone for a long flight. Do not relax any requirement or invent missing battery life. Report no fit if necessary.","max_price_usd":250,"min_battery_hours":28,"max_weight_g":210,"anc_required":true,"weights":{"price":1,"battery":5,"weight":1}},
+    {"id":"corrected-endurance","request":"Choose for endurance under this budget. Use the corrected comparable battery figure, exclude superseded claims and retain uncertainty for unavailable measurements.","max_price_usd":180,"min_battery_hours":24,"max_weight_g":300,"anc_required":true,"weights":{"price":1,"battery":5,"weight":1}}
+  ]
+}
