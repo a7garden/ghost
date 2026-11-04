@@ -1,5 +1,6 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-durable";
+import { createEditTool } from "@earendil-works/pi-durable/tools";
 import { isBrowserOwnerWait, waitForBrowserOwner } from "./browser-wait.js";
 import { payloadDigest, ProtocolError } from "./contract.js";
 import { directWorkIsError, directWorkObservation } from "./direct-work-observation.js";
@@ -18,6 +19,7 @@ export function assertPinnedExecutionTools(pinned, current) {
   }
 }
 const boundedPath = Type.String({ minLength: 1, maxLength: 4096, description: "Path relative to this Work's workspace, for example output/result.json. No absolute path or parent traversal." });
+const { prepareArguments: prepareEditArguments } = createEditTool();
 const schemas = {
   read: Type.Union([
     Type.Object({ path: boundedPath, offset: Type.Optional(Type.Integer({ minimum: 1 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000 })) }, { additionalProperties: false }),
@@ -99,6 +101,7 @@ export function createDirectWorkTools({ hostToolTransport, ghostId, conversation
   const uncertainAssignments = new Set();
   return DIRECT_WORK_TOOL_NAMES.map(operation => defineTool({
     name: operation, description: descriptions[operation], parameters: schemas[operation],
+    ...(operation === "edit" ? { prepareArguments: prepareEditArguments } : {}),
     replay: operation === "browser" && browserWaitTask ? "safe" : "unsafe", executionMode: "sequential",
     execute: async (args, api, context) => {
       let scope;

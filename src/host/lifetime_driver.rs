@@ -1,5 +1,5 @@
 //! Explicit per-Ghost transports. Ledger state is committed before I/O.
-use super::{lifetime, lifetime_runtime::PiProcess, Host};
+use super::{lifetime, lifetime_runtime::{PiLauncher, PiProcess}, Host};
 use crate::lifetime_contract::{canonical_digest, Envelope, Response, ResponseStatus, RetryClass, VERSION};
 use anyhow::{anyhow, bail, Context, Result};
 use rusqlite::OptionalExtension;
@@ -36,13 +36,16 @@ fn retryable_pi_response(target: &str, response: &Response) -> bool {
 }
 
 pub(crate) fn start(host: &Arc<Host>) -> Result<()> {
-    let Some(entry) = std::env::var_os("GHOST_LIFETIME_PI_ENTRY") else { return Ok(()); };
-    let entry = PathBuf::from(entry).canonicalize()?;
-    let mode = std::env::var("GHOST_LIFETIME_MODE").context("GHOST_LIFETIME_MODE must explicitly select fixture or broker")?;
+    let mode = std::env::var("GHOST_LIFETIME_MODE");
+    if matches!(mode.as_deref(), Ok("disabled")) { return Ok(()); }
+    let entry = std::env::var_os("GHOST_LIFETIME_PI_ENTRY").map(PathBuf::from);
+    let executable = std::env::current_exe()?.canonicalize()?;
+    let Some(launcher) = PiLauncher::discover(&executable, entry.as_deref())? else { return Ok(()); };
+    let mode = mode.context("GHOST_LIFETIME_MODE must explicitly select fixture or broker")?;
     anyhow::ensure!(matches!(mode.as_str(), "fixture" | "broker"), "invalid lifetime runtime mode");
     let weak = Arc::downgrade(host);
     let root = host.root.join("durable");
-    host.spawn(async move { run(weak, entry, root, mode).await; });
+    host.spawn(async move { run(weak, launcher, root, mode).await; });
     Ok(())
 }
 
@@ -98,16 +101,16 @@ where Fut:std::future::Future<Output=Result<()>>+Send+'static {
 #[cfg(test)]
 pub(crate) async fn run_fixture_driver(host:Arc<Host>,entry:PathBuf) {
     let weak=Arc::downgrade(&host);let root=host.root.join("durable");drop(host);
-    run(weak,entry,root,"fixture".into()).await;
+    run(weak,PiLauncher::NodeEntry(entry),root,"fixture".into()).await;
 }
 
 #[cfg(test)]
 pub(crate) async fn run_broker_fixture_driver(host:Arc<Host>,entry:PathBuf) {
     let weak=Arc::downgrade(&host);let root=host.root.join("durable");drop(host);
-    run(weak,entry,root,"broker".into()).await;
+    run(weak,PiLauncher::NodeEntry(entry),root,"broker".into()).await;
 }
 
-async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
+async fn run(weak: Weak<Host>, launcher: PiLauncher, root: PathBuf, mode: String) {
     let mut pi: Option<PiProcess> = None;
     let mut suspended = HashSet::new();
     let mut delivery_recovery: HashMap<i64, RecoveryBackoff> = HashMap::new();
@@ -185,7 +188,7 @@ async fn run(weak: Weak<Host>, entry: PathBuf, root: PathBuf, mode: String) {
             match bindings {
                 Ok(bindings) => {
                     if !bindings.is_empty() || pending.iter().any(|item| item.target == "pi") {
-                        match PiProcess::start(&entry, &root, &host.root, &mode, &host.pi_callback_token, authority_epoch, host.pi_local_route.as_ref()).await {
+                        match PiProcess::launch(&launcher, &root, &host.root, &mode, &host.pi_callback_token, authority_epoch, host.pi_local_route.as_ref()).await {
                             Ok(mut process) => {
                                 let mut confirmed_channel = true;
                                 for (ghost_id, conversation_id) in bindings {

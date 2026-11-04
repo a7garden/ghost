@@ -10,7 +10,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { resolve } from "node:path";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { originalGenerationAbortTarget } from "./original-generation-abort.js";
-import { Type } from "@earendil-works/pi-ai";
+import { contentText, Type } from "@earendil-works/pi-ai";
 import { getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import {
   AssistantEntry,
@@ -296,9 +296,9 @@ function validateRuntimeEnvelope(input) {
 function assistantText(entry) {
   if (!Array.isArray(entry?.model)) return "";
   return entry.model
-    .flatMap((message) => Array.isArray(message?.content) ? message.content : [])
-    .filter((part) => part?.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
+    .map((message) => Array.isArray(message?.content)
+      ? contentText(message.content.filter((part) => typeof part?.text === "string"), "")
+      : "")
     .join("");
 }
 

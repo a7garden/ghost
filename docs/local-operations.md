@@ -25,6 +25,14 @@ curl -fsS http://127.0.0.1:65164/ghost-api/bootstrap | jq '{mode, owner_pid}'
 
 운영 콘솔의 Host 연결을 확인하려면 앱에서 기존 Ghost가 열리는지 본다. 부트스트랩 값은 필요한 필드만 출력한다. iPhone 운영 앱의 연결과 Tauri의 공유 UI Preview 검증은 따로 기록한다. [패키지와 Preview 재현](ghost-packages-and-shared-client.md)
 
+## Bun을 포함한 Host 패키지
+
+`ghost`는 Rust Host이고, 같은 릴리스의 `ghost-pi`에는 Bun과 Pi SDK가 들어 있다. Host는 Ghost별 정체성, 권한, 위임과 결과 수용을 관리한다. Pi는 대화별 세션과 도구 실행을 관리하고, Host와 기존 JSONL 연결로 통신한다. 릴리스에 포함된 실행 파일을 먼저 선택하며, 이전 릴리스에서는 `GHOST_LIFETIME_PI_ENTRY`가 가리키는 Node 실행 경로를 사용할 수 있다.
+
+Bun 1.4.2와 `apps/ghost-durable`의 잠금 의존성을 준비한 뒤 `scripts/install.py --features lifetime,memory,documents`로 빌드한다. 기존 Rust 빌드에 Pi를 포함하려면 `--skip-build --bundle-pi`를 사용한다. 설치 명세에는 두 실행 파일과 Pi 의존성 잠금 파일의 SHA-256이 들어간다. 운영은 `GHOST_LIFETIME_MODE=broker`, 격리 검증은 별도 상태 루트와 `GHOST_LIFETIME_MODE=fixture`를 사용한다. Pi 실행을 끄려면 `GHOST_LIFETIME_MODE=disabled`를 사용한다. Node 릴리스로 복귀할 수 있도록 기존의 `GHOST_LIFETIME_PI_ENTRY`와 `GHOST_LIFETIME_MODE` 설정을 보관한다.
+
+일반 파일·셸 작업은 Pi의 도구와 복구 동작을 재사용할 후보로 둔다. 운영 전환에는 작업 파일만 볼 수 있는 실행 환경, 재시작 시 중단된 호출의 표시, Ghost의 최종 산출물 게시·검수가 함께 검증되어야 한다. 현재 Host 도구는 기존 작업과 결과 계약을 처리한다.
+
 ## 구형 콘솔 복구
 
 운영 앱의 대체 접점이 필요한 경우 기존 plist로 웹 콘솔을 일시 복구할 수 있다. Host는 기존 프로세스를 사용한다.

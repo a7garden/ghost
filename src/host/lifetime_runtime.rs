@@ -2,13 +2,53 @@
 use crate::lifetime_contract::{Envelope, Response, VERSION, REVISION};
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
-use std::path::Path;
+use std::{io::ErrorKind, path::{Path, PathBuf}};
 use tokio::{io::{AsyncBufReadExt, AsyncWriteExt, BufReader}, process::{Child, ChildStdin, ChildStdout, Command}};
 
 pub(crate) struct PiProcess {
     child: Child,
     input: ChildStdin,
     output: BufReader<ChildStdout>,
+}
+
+pub(crate) enum PiLauncher {
+    Bundled(PathBuf),
+    NodeEntry(PathBuf),
+}
+
+impl PiLauncher {
+    pub(crate) fn discover(host_binary: &Path, legacy_entry: Option<&Path>) -> Result<Option<Self>> {
+        let bundled = host_binary.with_file_name("ghost-pi");
+        match bundled.symlink_metadata() {
+            Ok(metadata) => {
+                anyhow::ensure!(metadata.is_file(), "bundled ghost-pi must be a regular file");
+                Ok(Some(Self::Bundled(bundled)))
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                legacy_entry.map(|entry| Ok(Self::NodeEntry(entry.canonicalize()?))).transpose()
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn command(&self) -> Result<Command> {
+        let path = match self {
+            Self::Bundled(path) | Self::NodeEntry(path) => path,
+        };
+        anyhow::ensure!(path.is_absolute() && path.is_file() && !path.is_symlink(), "invalid Pi runtime path");
+        Ok(match self {
+            Self::Bundled(_) => {
+                let mut command = Command::new(path);
+                command.env_remove("BUN_BE_BUN").env_remove("BUN_OPTIONS").env_remove("NODE_OPTIONS");
+                command
+            }
+            Self::NodeEntry(_) => {
+                let mut command = Command::new("node");
+                command.arg(path);
+                command
+            }
+        })
+    }
 }
 
 pub(crate) struct LocalPiRoute {
@@ -57,11 +97,15 @@ impl LocalPiRoute {
     }
 }
 impl PiProcess {
+    #[cfg(test)]
     pub(crate) async fn start(entry: &Path, root: &Path, host_root: &Path, mode: &str, callback_token: &str, authority_epoch: u64, local_route: Option<&LocalPiRoute>) -> Result<Self> {
-        anyhow::ensure!(entry.is_absolute() && entry.is_file() && !entry.is_symlink(), "invalid Pi entry path");
+        Self::launch(&PiLauncher::NodeEntry(entry.into()), root, host_root, mode, callback_token, authority_epoch, local_route).await
+    }
+
+    pub(crate) async fn launch(launcher: &PiLauncher, root: &Path, host_root: &Path, mode: &str, callback_token: &str, authority_epoch: u64, local_route: Option<&LocalPiRoute>) -> Result<Self> {
         anyhow::ensure!(matches!(mode, "fixture" | "broker"), "invalid Pi runtime mode");
-        let mut command = Command::new("node");
-        command.arg(entry).arg("--root").arg(root).arg("--mode").arg(mode)
+        let mut command = launcher.command()?;
+        command.arg("--root").arg(root).arg("--mode").arg(mode)
             .env("GHOST_LIFETIME_HOST_ROOT", host_root)
             .env("GHOST_PI_CALLBACK_TOKEN", callback_token)
             .env("GHOST_PI_AUTHORITY_EPOCH", authority_epoch.to_string())
@@ -139,6 +183,22 @@ impl PiProcess {
 #[cfg(test)]
 mod output_limit_tests {
     use super::*;
+    #[test]
+    fn bundled_pi_takes_precedence_and_invalid_bundles_fail_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        let host = directory.path().join("ghost");
+        let pi = directory.path().join("ghost-pi");
+        let legacy = directory.path().join("main.js");
+        std::fs::write(&legacy, "").unwrap();
+        assert!(matches!(PiLauncher::discover(&host, None).unwrap(), None));
+        assert!(matches!(PiLauncher::discover(&host, Some(&legacy)).unwrap(), Some(PiLauncher::NodeEntry(path)) if path == legacy.canonicalize().unwrap()));
+
+        std::fs::create_dir(&pi).unwrap();
+        assert!(PiLauncher::discover(&host, Some(&legacy)).is_err());
+        std::fs::remove_dir(&pi).unwrap();
+        std::fs::write(&pi, "").unwrap();
+        assert!(matches!(PiLauncher::discover(&host, Some(&legacy)).unwrap(), Some(PiLauncher::Bundled(path)) if path == pi));
+    }
     #[tokio::test]
     async fn captured_local_output_limit_reaches_the_real_production_entrypoint() {
         let root=tempfile::tempdir().unwrap();

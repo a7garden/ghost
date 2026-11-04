@@ -60,7 +60,8 @@ test("same Ghost Pi Harness performs direct tool round-trips and reports complet
   const provider = createBrokerModelProvider({ modelRef: "minimax-code/MiniMax-M2.7", invoke: async request => {
     requests.push(request);
     const step = steps[requests.length - 1];
-    return completion(request, step ? { role: "assistant", content: null, tool_calls: [{ id: `direct-call-${requests.length}`, type: "function", function: { name: step[0], arguments: JSON.stringify(step[1]) } }] } : { role: "assistant", content: "Published output; Host verification remains pending." });
+    const args = step?.[0] === "edit" ? { ...step[1], edits: JSON.stringify(step[1].edits) } : step?.[1];
+    return completion(request, step ? { role: "assistant", content: null, tool_calls: [{ id: `direct-call-${requests.length}`, type: "function", function: { name: step[0], arguments: JSON.stringify(args) } }] } : { role: "assistant", content: "Published output; Host verification remains pending." });
   } });
   let runtime;
   try {
@@ -68,6 +69,7 @@ test("same Ghost Pi Harness performs direct tool round-trips and reports complet
     assert.equal((await runtime.handle(envelope())).status, "success");
     await runtime.waitForIdle(ghost, conversation);
     assert.deepEqual(host.calls.filter(x => x.method === "work.execute").map(x => x.operation), steps.map(x => x[0]));
+    assert.deepEqual(host.calls.find(x => x.operation === "edit").arguments, steps[1][1], "Pi repairs stringified edits before sending the canonical Host request");
     assert.equal(host.calls.filter(x => x.method === "work.execution.complete").length, 1);
     assert.equal(host.calls.some(x => ["work.submit", "work.pi.admit"].includes(x.method)), false);
     const directCalls = host.calls.filter(x => x.method === "work.execute");
