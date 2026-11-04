@@ -2,9 +2,10 @@ import { useMemo } from 'react';
 import { LifetimeView } from '../lifetime/LifetimeView';
 import { createLiveLifetimeClient } from '../lifetime/client';
 import type { AuthenticatedControlAction } from '../lifetime/controlTransport';
-import type { Command, LifetimeHostAuthority, Review } from '../client/types';
+import type { ApprovalRef } from '../plugins/approvals';
+import type { Command, LifetimeHostAuthority, Review, Snapshot } from '../client/types';
 
-export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mode, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, route = '/lifetime', legacyGhostIDs, onOpenHistory }: {
+export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mode, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, route = '/lifetime', legacyGhostIDs, onOpenHistory, snapshot, onOpenApproval, navigate }: {
   action: AuthenticatedControlAction;
   /** Workspace Owner action (CSRF + envelope journal) for the Owner memory source review surface. */
   memoryAction?: (command: Command) => Promise<Record<string, any>>;
@@ -15,6 +16,9 @@ export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mo
   documentAuthorityEpoch?: number;
   onOpenDocumentReview?: (review: Review) => void;
   route?: string;
+  snapshot?: Snapshot;
+  onOpenApproval?: (ref: ApprovalRef) => void;
+  navigate?: (path: string) => void;
   legacyGhostIDs?: string[];
   onOpenHistory?: (ghostID: string) => void;
 }) {
@@ -35,10 +39,21 @@ export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mo
     }
   }, [action, workspaceId, authority?.authority_epoch, authority?.dispatch_enabled, mode]);
   if ('error' in session) return <div className="page-content" role="alert">{session.error}</div>;
+  const params = new URLSearchParams(route.split('?')[1] ?? '');
+  const panel = params.get('panel');
   return <LifetimeView mode="live" client={session.client} memoryAction={memoryAction}
     legacyGhostIDs={legacyGhostIDs} onOpenHistory={onOpenHistory}
-    initialGhostID={new URLSearchParams(route.split('?')[1] ?? '').get('ghost') ?? undefined}
-    createRequested={new URLSearchParams(route.split('?')[1] ?? '').get('create') === '1'}
+    initialGhostID={params.get('ghost') ?? undefined}
+    initialConversationID={params.get('conversation') ?? undefined}
+    initialPanel={panel === 'work' || panel === 'ghosts' ? panel : 'conversation'}
+    onPanelChange={navigate ? next => {
+      params.delete('create');
+      if (next === 'conversation') params.delete('panel');
+      else params.set('panel', next);
+      navigate(params.size ? `/lifetime?${params}` : '/lifetime');
+    } : undefined}
+    createRequested={params.get('create') === '1'}
+    workspaceSnapshot={snapshot} onOpenApproval={onOpenApproval}
     documentReviews={documentReviews}
     documentAuthorityEpoch={documentAuthorityEpoch ?? authority?.authority_epoch}
     onOpenDocumentReview={onOpenDocumentReview}/>;

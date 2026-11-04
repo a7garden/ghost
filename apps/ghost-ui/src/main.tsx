@@ -10,6 +10,7 @@ import './collaboration.css';
 import './sidebar.css';
 import '../../../tokens.css';
 import './liquid-glass.css';
+import './docket.css';
 
 // 공유·새로 고친 경로 링크(예: /spaces/notes)를 해시 라우트로 변환해 의도한 화면으로 시작한다.
 const bootRoute = pathToHash(location.pathname);

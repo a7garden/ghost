@@ -1,0 +1,72 @@
+/* Docket's neutral surfaces and state colors, mapped to Ghost's existing roles. */
+:root, .ghost-arc[data-theme] {
+  --color-paper: oklch(97.5% 0 0);
+  --color-paper-2: oklch(95.5% 0 0);
+  --color-ink: oklch(21% 0 0);
+  --color-ink-2: oklch(42% 0 0);
+  --color-card: oklch(100% 0 0);
+  --color-raised: oklch(100% 0 0);
+  --color-hover: oklch(93.5% 0 0);
+  --color-rule: oklch(88.5% 0 0);
+  --color-border-strong: oklch(78% 0 0);
+  --color-focus: oklch(46% 0 0);
+  --color-accent-hover: oklch(32% 0 0);
+  --color-accent-ink: oklch(98.5% 0 0);
+  --color-review-border: oklch(69% .13 78);
+  --color-amber-ink: oklch(50% .12 62);
+  --color-running-ink: oklch(45% .15 250);
+  --color-text-error: oklch(54% .2 27);
+  --color-verified-ink: oklch(50% .13 150);
+
+  --color-accent: var(--color-ink);
+  --color-accent-soft: var(--color-hover);
+  --color-desktop: var(--color-paper);
+  --color-glass: var(--color-paper);
+  --color-glass-solid: var(--color-paper);
+  --color-glass-edge: var(--color-rule);
+  --color-selection: var(--color-hover);
+  --color-surface: var(--color-card);
+  --color-surface-elevated: var(--color-raised);
+  --color-background-secondary: var(--color-paper-2);
+  --color-background-secondary-hover: var(--color-hover);
+  --color-border-subtle: var(--color-rule);
+  --color-border: var(--color-rule);
+  --color-amber-surface: color-mix(in oklab, var(--color-amber-ink) 9%, var(--color-card));
+  --color-running-surface: color-mix(in oklab, var(--color-running-ink) 10%, var(--color-card));
+  --radius-input: 6px;
+  --radius-button: 6px;
+  --radius-card: 8px;
+  --radius-panel: 8px;
+  --radius-shell: 8px;
+  --radius-row: 6px;
+  --radius-composer: 8px;
+  --glass-blur: none;
+  --shadow-glass: none;
+  --shadow-control: none;
+  --workspace-reading-width: 46rem;
+  --workspace-page-width: 60rem;
+  --workspace-gutter: clamp(var(--space-md), 3.3vw, var(--space-2xl));
+  --workspace-section-gap: clamp(var(--space-lg), 4vw, var(--space-2xl));
+  --workspace-row-block: var(--space-sm);
+  --workspace-row-gap: var(--space-sm);
+  --workspace-row-title: var(--text-body);
+}
+:root[data-theme="dark"], .ghost-arc[data-theme="dark"] {
+  --color-paper: oklch(20% 0 0);
+  --color-paper-2: oklch(21.5% 0 0);
+  --color-ink: oklch(93% 0 0);
+  --color-ink-2: oklch(77% 0 0);
+  --color-card: oklch(23.5% 0 0);
+  --color-raised: oklch(24.5% 0 0);
+  --color-hover: oklch(27.5% 0 0);
+  --color-rule: oklch(30.5% 0 0);
+  --color-border-strong: oklch(40% 0 0);
+  --color-focus: oklch(75% 0 0);
+  --color-accent-hover: oklch(84% 0 0);
+  --color-accent-ink: oklch(20% 0 0);
+  --color-review-border: oklch(82% .14 80);
+  --color-amber-ink: oklch(84% .13 82);
+  --color-running-ink: oklch(80% .11 250);
+  --color-text-error: oklch(71% .17 25);
+  --color-verified-ink: oklch(77% .14 152);
+}

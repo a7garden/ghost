@@ -18,7 +18,7 @@ await cp(join(app, 'scripts/local-voice.mjs'), join(destination, 'launcher/local
 for (const name of ['server.py','requirements.lock']) await cp(join(ghost, 'apps/ghost-voice-server', name), join(destination, 'voice', name));
 await cp(join(ghost, 'apps/ghost-ui/dist'), join(destination, 'ui/dist'), { recursive: true, force: true });
 for (const name of ['console.mjs','serve.mjs']) await cp(join(ghost, 'apps/ghost-ui/scripts', name), join(destination, 'ui/scripts', name));
-await cp(join(ghost, 'apps/ghost-ui/server/bridge.mjs'), join(destination, 'ui/server/bridge.mjs'));
+for (const name of ['bridge.mjs', 'packages.mjs', 'package-format.mjs']) await cp(join(ghost, 'apps/ghost-ui/server', name), join(destination, 'ui/server', name));
 for (const name of ['images.mjs','codex-client.mjs','completion-codec.mjs']) await cp(join(ghost, 'apps/ghost-omp', name), join(destination, 'ghost-omp', name));
 await writeFile(join(destination,'ui/package.json'), '{"type":"module"}\n');
 const sha = async path => createHash('sha256').update(await readFile(path)).digest('hex');

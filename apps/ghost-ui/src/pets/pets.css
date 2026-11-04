@@ -1,7 +1,7 @@
 .pet-sprite { display: inline-block; flex: none; background-repeat: no-repeat; background-position: 0 0; }
 .ghost-character { display: block; flex: none; overflow: visible; }
 .avatar-loading { width: 55%; height: 65%; border-radius: var(--radius-lg); background: var(--color-background-secondary); }
-.dot-avatar.pet-avatar { display: inline-flex; align-items: center; justify-content: center; overflow: visible; }
+.dot-avatar.pet-avatar { display: inline-flex; align-items: center; justify-content: center; overflow: visible; border-radius: 25%; }
 .avatar-edit-button { display: inline-flex; border-radius: var(--radius-xl); }
 .avatar-edit-button:hover { background: var(--color-background-secondary-hover); }
 .settings-page { max-width: 1100px; padding: 32px 40px 60px; margin: 0 auto; }
@@ -101,6 +101,7 @@
 
 /* Hallmark · pre-emit critique: P4 H4 E4 S5 R5 V4. Existing monochrome settings system. */
 .ghost-color-setting { margin: 0 0 24px; }
+.ghost-color-palette { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .ghost-color-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .ghost-color-swatch { width: 28px; height: 28px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-row); outline: 2px solid transparent; outline-offset: 3px; }
 .ghost-color-swatch[aria-pressed="true"] { outline-color: var(--color-text); }

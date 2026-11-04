@@ -347,12 +347,16 @@ pub fn apply(app: &Arc<Host>, s: &State, request: &str, action: OwnerAction) -> 
             Ok(result)
         }
         OwnerAction::DeleteIntegration { id, version } => {
-            let result = super::planner::delete(s, "integration", &id, version)?;
+            let result = super::integrations::delete(s, &id, version)?;
             app.integrations.remove(&id);
             Ok(result)
         }
         OwnerAction::CheckIntegration { .. } => {
             bail!("connection checks require async host dispatch")
+        }
+        #[cfg(feature = "lifetime")]
+        OwnerAction::InspectIntegrationApproval { .. } | OwnerAction::DecideIntegrationApproval { .. } => {
+            bail!("integration approval requires Owner control dispatch")
         }
         OwnerAction::CollaborationMessages {
             delegation_id,

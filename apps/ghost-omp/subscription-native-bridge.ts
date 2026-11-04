@@ -1316,6 +1316,13 @@ async function createInMemoryAuthStorage(runtime: PinnedRuntime): Promise<AuthSt
 
 
 export async function runSubscriptionNativeBridge(io: SubscriptionNativeBridgeIo): Promise<number> {
+  io.diagnostics.write("legacy_execution_retired: OMP subscription bridges are retired; use Ghost Pi registered inference\n");
+  return 1;
+}
+
+// Retained privately for historical source/fixture analysis. Public entry
+// points cannot read configuration, credentials or input through this body.
+async function legacySubscriptionNativeBridgeFixture(io: SubscriptionNativeBridgeIo): Promise<number> {
   const reader = new BoundedJsonlReader(io.input);
   let storage: AuthStorage | undefined;
   let releaseSessionRestriction: (() => void) | undefined;
@@ -1441,20 +1448,6 @@ export async function runSubscriptionNativeBridge(io: SubscriptionNativeBridgeIo
 }
 
 if (import.meta.main) {
-  const controller = new AbortController();
-  const cancel = (): void => controller.abort();
-  process.once("SIGTERM", cancel);
-  process.once("SIGINT", cancel);
-  process.exitCode = await runSubscriptionNativeBridge({
-    input: process.stdin,
-    output: process.stdout,
-    diagnostics: process.stderr,
-    signal: controller.signal,
-  }).catch(() => {
-    process.stderr.write("subscription-native-bridge:internal_error\n");
-    return 1;
-  });
-  process.removeListener("SIGTERM", cancel);
-  process.removeListener("SIGINT", cancel);
-  process.stdin.destroy();
+  process.stderr.write("legacy_execution_retired: OMP subscription bridges are retired; use Ghost Pi registered inference\n");
+  process.exitCode = 1;
 }

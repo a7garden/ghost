@@ -714,10 +714,11 @@ test("lost report-reply ACK reconciles the original advisory without another rep
   const firstCalls = [];
   const firstProvider = brokerProvider(async (request) => {
     firstCalls.push(request);
-    return completion(request, { role: "assistant", content: "Exact original Work report advisory." });
+    assert.match(JSON.stringify(request.body.messages), /Write user-facing Work reports in the language requested by the Owner/);
+    return completion(request, { role: "assistant", content: "검증을 마쳤습니다. 원래 작업의 결과를 한 번만 보고합니다." });
   });
   const first = await createRuntime({ provider: firstProvider, hostToolTransport: host.transport });
-  const report = workReport("work-report-lost-reply-ack", "Project the original committed SDK answer once.");
+  const report = workReport("work-report-lost-reply-ack", "원래 작업 결과를 한국어로 한 번만 보고하세요.");
   addReportSource(reports, report);
 
   assert.equal((await first.runtime.handle(report)).status, "success");
@@ -747,7 +748,7 @@ test("lost report-reply ACK reconciles the original advisory without another rep
   assert.equal(turn.reply_invocation_id, host.calls.find(({ method }) => method === "conversation.report.reply").invocation_id);
   assert.equal(recoveryCalls.length, 0);
   assert.equal(replyAttempts, 1);
-  assert.equal(reports.get(report.command_id).reply.text, "Exact original Work report advisory.");
+  assert.equal(reports.get(report.command_id).reply.text, "검증을 마쳤습니다. 원래 작업의 결과를 한 번만 보고합니다.");
 });
 test("a transient assignment inspection failure recovers the same ID with one model request across reopen", async () => {
   const assignments = new Map();

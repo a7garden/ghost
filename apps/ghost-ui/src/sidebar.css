@@ -30,9 +30,6 @@
 .navigation-toggle { display: inline-flex; }
 .mobile-sidebar { flex: 1; min-height: 0; overflow: hidden; }
 .mobile-sidebar .workspace-sidebar-header { display: none; }
-.mobile-nav-dialog { display: flex; flex-direction: column; width: min(300px, 100vw); height: 100dvh; max-height: 100dvh; margin: 0 auto 0 0; border-radius: 0; padding: 16px; }
-.mobile-nav-dialog .modal-head { flex-shrink: 0; }
-.mobile-nav-dialog .sidebar-scroll { min-height: 80px; }
 
 /* One inset right sidebar: Garden panel controls, independently disclosed cards. */
 .dot-detail { max-width: none; padding: 0; gap: 0; }
@@ -66,8 +63,6 @@
 @media (min-width: 56rem) {
   /* --app-sidebar-width는 liquid-glass.css(224px)가 소유한다. 여기서 재선언하지 않는다. */
   .app-shell > .sidebar { padding: 4px 10px 10px; overflow: hidden; }
-  .app-shell.navigation-collapsed { grid-template-columns: minmax(0, 1fr); }
-  .app-shell.navigation-collapsed > .sidebar { display: none; }
 }
 @media (min-width: 76rem) {
   /* context-open 열 너비(300px)와 포커스 링도 liquid-glass.css가 소유한다. */
@@ -80,4 +75,39 @@
 }
 @media (pointer: coarse) {
   .sidebar .nav-row, .mobile-sidebar .nav-row, .sidebar-conversation, .sidebar-section-toggle, .sidebar-connection, .context-sidebar-content .context-card-action { min-height: 44px; }
+}
+
+.sidebar-menu-group + .sidebar-menu-group {
+  border-block-start: 1px solid var(--color-border-subtle);
+  margin-block-start: 12px;
+  padding-block-start: 12px;
+}
+.sidebar-group-title {
+  margin: 0 0 6px;
+  padding-inline: 9px;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-menu-group .sidebar-tools { margin-block-start: 6px; }
+
+.sidebar-menu-group { display: grid; gap: 3px; }
+.sidebar-menu-group .sidebar-section { margin-top: 5px; }
+.sidebar-menu-group .sidebar-section-toggle { padding-inline: 2px 6px; }
+.sidebar-menu-group .sidebar-section-toggle > svg { flex: none; }
+.sidebar-nested-nav { margin-inline-start: 14px; padding-inline-start: 5px; border-inline-start: 1px solid var(--color-border-subtle); }
+.sidebar .sidebar-nested-nav .nav-row,
+.sidebar-nested-nav .sidebar-conversation { min-height: 28px; font-size: 12px; }
+.sidebar-nested-nav .sidebar-conversation { padding-inline-start: 8px; }
+.sidebar-menu-group--shared .sidebar-tools { margin-block-start: 4px; }
+.sidebar .sidebar-bottom { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; padding-top: 6px; }
+.sidebar-connection-status.disconnected { color: var(--color-text-error); }
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar :is(.nav-row, .sidebar-conversation, .sidebar-section-toggle) {
+    transition: background-color 130ms ease-out, color 130ms ease-out;
+  }
+  .sidebar-section-toggle > svg { transition: transform 140ms ease-out; }
 }

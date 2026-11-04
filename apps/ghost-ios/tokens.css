@@ -1,0 +1,35 @@
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4
+   Native contrast pass; 320/375/414/768 and accessibility-size review complete.
+   Native app · Long Document / Index First · Coral adaptation
+   Portable reference; SwiftUI GhostStyle supplies these semantic runtime roles. */
+:root {
+  --color-paper: oklch(98% 0.006 70);
+  --color-paper-2: oklch(95% 0.009 70);
+  --color-ink: oklch(23% 0.008 60);
+  --color-ink-2: rgb(40% 41% 39%);
+  --color-danger: rgb(72% 15% 12%);
+  --color-on-danger: white;
+  --color-on-ink: rgb(99% 98% 96%);
+  --color-rule: oklch(88% 0.01 70);
+  --color-accent: oklch(52% 0.13 40);
+  --color-focus: var(--color-accent);
+  --font-body: -apple-system, sans-serif;
+  --font-display: var(--font-body);
+  --space-xs: 4px; --space-sm: 8px; --space-md: 12px;
+  --space-lg: 16px; --space-xl: 24px; --space-2xl: 32px;
+  --radius-control: 16px; --radius-message: 22px;
+  --dur-micro: 120ms; --dur-minor: 200ms;
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: oklch(19% 0.008 60);
+    --color-paper-2: oklch(24% 0.008 60);
+    --color-ink: oklch(95% 0.006 70);
+    --color-ink-2: rgb(68% 69% 65%);
+    --color-danger: rgb(100% 52% 46%);
+    --color-on-ink: rgb(13% 14% 13%);
+    --color-rule: oklch(34% 0.01 70);
+    --color-accent: oklch(78% 0.09 40);
+  }
+}

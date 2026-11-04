@@ -8,7 +8,7 @@
     "dev": "vite --host 127.0.0.1 --port 5178 --strictPort",
     "build": "tsc -b && vite build",
     "serve": "node scripts/serve.mjs",
-    "test": "vitest run && node --test server/bridge.test.mjs"
+    "test": "vitest run && node --test server/bridge.test.mjs server/packages.test.mjs"
   },
   "dependencies": {
     "@garden/arc": "file:vendor/garden-arc",

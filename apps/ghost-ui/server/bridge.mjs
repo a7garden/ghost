@@ -27,6 +27,18 @@ export async function discover(root) {
   if (!r.ok || proof.protocol !== 'ghost-control' || proof.version !== 1 || !equal(proof.proof, expected)) throw new Error('실행 중인 Ghost 호스트의 신원을 확인하지 못했습니다.');
   return { origin, token: m.token };
 }
+// Package attachment is an owner console operation. Reuse the same
+// authenticated Host snapshot and bounded JSON parser as the console bridge.
+export async function readHostSnapshot(root) {
+  const host = await discover(root);
+  const response = await fetch(`${host.origin}/api/v1/snapshot`, {
+    redirect: 'error', signal: AbortSignal.timeout(5000),
+    headers: { Authorization: `Bearer ${host.token}`, 'X-Ghost-CSRF': host.token, Origin: host.origin, 'Sec-Fetch-Site': 'same-origin' },
+  });
+  if (!response.ok) throw new Error('Ghost 호스트에 연결하지 못했습니다.');
+  return boundedJSON(response);
+}
+
 async function boundedJSON(response) {
   const chunks = []; let size = 0;
   for await (const chunk of response.body ?? []) { size += chunk.length; if (size > 8 * LIMIT) throw new Error('호스트 응답이 너무 큽니다.'); chunks.push(Buffer.from(chunk)); }

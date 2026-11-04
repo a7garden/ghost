@@ -21,14 +21,24 @@ export interface Page { id: string | null; locator: string; title: string; profi
 export interface Todo { id: string; title: string; notes: string; due: string | null; completed: boolean; version: number; updated_ms: number; }
 export interface CalendarEvent { id: string; title: string; notes: string; start_ms: number; end_ms: number; version: number; updated_ms: number; }
 export type IntegrationTransport = { kind: 'stdio'; command: string; args: string[]; env_refs: Record<string, string>; cwd: string | null } | { kind: 'http'; url: string; bearer_env: string | null };
-export interface Integration { id: string; name: string; transport: IntegrationTransport; profiles: string[]; enabled: boolean; version: number; tools: { name: string; description?: string; inputSchema?: unknown }[]; checked_ms: number | null; error: string | null; }
+export interface Integration { id: string; name: string; transport: IntegrationTransport; profiles: string[]; enabled: boolean; version: number; approved_tools?: string[] | null; tools: { name: string; description?: string; inputSchema?: unknown }[]; checked_ms: number | null; error: string | null; }
+export interface IntegrationApproval {
+  id: string;
+  ghost_id: string;
+  conversation_id: string;
+  integration_id: string;
+  integration_name: string;
+  tool: string;
+  state: 'pending' | 'dispatching' | 'sent' | 'failed' | 'uncertain' | 'declined';
+  created_ms: number;
+}
 export interface Delegation { id: string; owner: string; owner_task: string; target: string; conversation_id: string; task_id: string; background: boolean; state: string; }
 export interface CollaborationMessage { protocol: string; message_id: string; correlation_id: string; sequence: number; from: string; to: string; created_ms: number; event: { type: string; prompt?: string; phase?: string; summary?: string; reason?: string; artifacts?: string[]; uncertain_effects?: string[] }; }
 export interface ModelSettings { version: number; providers: ModelProvider[]; roles: { llm: string | null; stt: string | null; tts: string | null }; catalog_updated_ms: number | null; }
 export type ModelRole = "llm" | "stt" | "tts";
 export interface ModelProvider { id: string; name: string; kind: "builtin" | "openai_compatible" | "omp_subscription"; endpoint: string; auth: { type: "sdk" | "none" | "env"; variable?: string }; roles: ModelRole[]; models: { id: string; name: string; roles: ModelRole[] }[]; enabled: boolean; checked_ms: number | null; error: string | null; }
 export interface LifetimeHostAuthority { authority_epoch: number; dispatch_enabled: boolean; }
-export interface Snapshot { orchestration_plans?: GraphPlan[]; orchestration_runs?: GraphRun[]; lifetime_authority?: LifetimeHostAuthority; routing_results?: RoutingResultProjection; routing_shares?: RoutingShare[]; connected_planner?: ConnectedPlanner; model_settings?: ModelSettings; avatars: Avatar[]; workspace_id: string; default_model: string; profiles: Profile[]; reviews: Review[]; goals: Goal[]; schedules: Schedule[]; spaces: Space[]; delegations: Delegation[]; todos: Todo[]; calendar_events: CalendarEvent[]; integrations: Integration[]; capabilities: Record<string, unknown>; connectors: Record<string, boolean>; }
+export interface Snapshot { orchestration_plans?: GraphPlan[]; orchestration_runs?: GraphRun[]; lifetime_authority?: LifetimeHostAuthority; routing_results?: RoutingResultProjection; routing_shares?: RoutingShare[]; connected_planner?: ConnectedPlanner; model_settings?: ModelSettings; avatars: Avatar[]; workspace_id: string; default_model: string; profiles: Profile[]; reviews: Review[]; goals: Goal[]; schedules: Schedule[]; spaces: Space[]; delegations: Delegation[]; todos: Todo[]; calendar_events: CalendarEvent[]; integrations: Integration[]; integrationApprovals?: IntegrationApproval[]; capabilities: Record<string, unknown>; connectors: Record<string, boolean>; }
 export type Command = Record<string, unknown> & { type: string };
 export interface RoutingPendingMetadata {
  // Disposition of the routing turn carried by this envelope. Kept beside the

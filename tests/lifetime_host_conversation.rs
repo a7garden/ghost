@@ -494,6 +494,30 @@ fn owner_goal_assignment_retains_source_and_protected_conversation_floor() {
 }
 
 #[test]
+fn delivery_diagnosis_can_recover_but_policy_execution_and_cancellation_remain_fenced() {
+    for (reason, state, execution, cancellation, allowed) in [
+        ("goal_assignment_inspection_unconfirmed", "queued", None, "none", true),
+        ("Delivery scope is unresolved; explicit reconciliation required", "queued", None, "none", true),
+        ("policy_blocked", "queued", None, "none", false),
+        ("goal_assignment_inspection_unconfirmed", "unknown", Some("existing-execution"), "none", false),
+        ("goal_assignment_inspection_unconfirmed", "queued", None, "requested", false),
+    ] {
+        let (_root, conn) = database();
+        let admitted = send(&conn, &envelope("recoverable-assignment", OWNER, json!({
+            "method":"goal.submit", "ghost_id":ROOT_GHOST, "conversation_id":ROOT_CONVERSATION,
+            "prompt":"Verify only the existing assignment", "privacy":"public", "acceptance_spec":{}
+        })), OWNER);
+        assert_success(&admitted);
+        let assignment = pending_outbox(&conn).unwrap().remove(0);
+        conn.execute("UPDATE lifetime_work SET state=?1,execution_id=?2,cancellation=?3,payload=json_set(payload,'$.state',?1,'$.execution_id',?2,'$.cancellation',?3,'$.blocker',?4)",
+            params![state,execution,cancellation,reason]).unwrap();
+        let inspected = inspect_assignment(&conn, "inspect-transport-recovery", ROOT_GHOST, ROOT_GHOST,
+            ROOT_CONVERSATION, assignment.payload["command_id"].as_str().unwrap());
+        assert_eq!(inspected.status == ResponseStatus::Success, allowed, "{reason}: {inspected:?}");
+    }
+}
+
+#[test]
 fn natural_input_is_idempotent_paged_and_does_not_create_goal_or_work() {
     let (_root, conn) = database();
     let request = envelope(

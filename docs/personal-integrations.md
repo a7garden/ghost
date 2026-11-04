@@ -21,6 +21,22 @@ Ghost의 로컬 작업실에서 개인 정리와 외부 서비스 작업을 함�
 연동 도구를 통해 원본 서비스에 수행한다. 일정 화면은 초대장, 알림, 반복 이벤트를
 발송하거나 생성하지 않는다. 에이전트 반복 실행에는 기존 예약 기능을 사용한다.
 
+## 주 Ghost에서 외부 기능 사용
+
+1. **연동**에서 연결을 등록하고 사용할 Ghost를 선택한 뒤 **연결 확인**을 실행한다.
+2. **도구 권한**에서 승인 요청을 허용할 기능을 선택한다. 새 연결은 선택 목록이 비어
+   시작한다. 기존 직접 실행 방식의 연결은 이 화면에서 승인 방식으로 전환할 수 있다.
+3. 주 Ghost 또는 해당 Ghost의 대화에서 원하는 외부 작업을 요청한다.
+   일반 대화는 같은 입력창에서 바로 이어 간다. 외부 실행 제안은 **확인할 일**에서 검토한다.
+4. 전송 입력을 확인해 승인하면 Host가 연결 권한, 입력 형식과 안건 상태를 다시 확인한 뒤 한 번 호출한다.
+   서비스 응답의 텍스트나 구조화된 결과는 승인 상세에서 확인한다. 연결이나 도구 권한 변경은
+   기존 안건을 무효화한다. 전송 결과가 미확정이면 Host는 다시 보내지 않으며
+   원본 서비스에서 결과를 확인할 수 있다.
+
+Gmail은 Workspace MCP의 Gmail OAuth 설정을 마친 뒤 **연동 → Gmail**에서 등록하고
+`send_gmail_message`를 선택한다. 검토 상세에 수신자·제목·본문과 전송 입력이 표시된다.
+승인 전용으로 전환된 연결은 이를 지원하는 Host에 표시된다. 이전 Host에는 해당 연결이 노출되지 않는다.
+
 ## Google Calendar와 Tasks
 
 [Workspace MCP](https://github.com/taylorwilsdon/google_workspace_mcp#quick-start)의
@@ -37,9 +53,61 @@ Ghost의 로컬 작업실에서 개인 정리와 외부 서비스 작업을 함�
    서버가 반환하는 인증 안내를 완료한다. 도구 목록 확인은 계정 인증 성공을 의미하지 않는다.
 
 이 저장소의 테스트에서는 실제 Google 자격 증명이나 계정을 사용하지 않았다.
-원격 OAuth 리디렉션·토큰 갱신을 Ghost 자체에서 처리하는 기능은 제공하지 않는다.
+위 MCP 연동 경로에서 Ghost가 리디렉션·토큰 갱신을 대신 처리하지는 않는다.
 OAuth가 필요한 서버는 로컬 MCP의 인증 흐름을 사용하거나, 인증을 마친 서버의
-Bearer 토큰을 호스트 환경 변수로 공급한다.
+Bearer 토큰을 호스트 환경 변수로 공급한다. 연결된 일정·할 일의 호스트 자체
+Google 인증은 아래 절을 따른다.
+
+## 연결된 Google 일정·할 일 (호스트 자체 인증)
+
+연결된 컬렉션은 로컬 목록과 별도로 원격 Google Calendar/Tasks를 읽는 창이다.
+`caldav` 기능으로 빌드된 Host와 UI의 “연결된 목록” 화면에서 사용한다.
+
+1. **OAuth client 준비**: Google Cloud에서 installed-app OAuth client를 만들고
+   Calendar/Tasks API를 켠다. client 자격은 개인 파일(0600)로 저장한다.
+   ```json
+   {"schema":"ghost-google-oauth-client/1","client_id":"...","client_secret":"..."}
+   ```
+   Host·CLI 환경에 `GHOST_GOOGLE_OAUTH_CLIENT=<파일 절대경로>`를 설정한다.
+2. **동의 및 임대 저장**: `ghost planner-google login --account <라벨>`을 실행해
+   표시된 URL에서 브라우저로 동의한다(기본 스코프는 읽기 전용이고, `--write`는
+   이벤트·작업 쓰기 스코프를 추가한다). 루프백 리디렉션으로 받은 임대는
+   `GHOST_GOOGLE_TOKEN_STORE`가 가리키는 0600 파일에 저장된다. 토큰은
+   출력되지 않고, 갱신 토큰이 있으면 Host가 만료 전 자동 갱신하며 Google이
+   교체 갱신 토큰을 반환하면 그 값이 저장된다. 콜백은 10분의 절대 마감 안에서
+   예상 state가 확인된 응답만 받아들이고, 다른 state·경로·형식의 요청은
+   무시된다. `--account` 라벨은 소유자가 붙인 로컬 이름일 뿐 Google 계정
+   신원과 대조되지 않는다( userinfo 스코프를 요청하지 않는다). 로그인 확정과
+   철회는 임대 저장소 옆 `<파일>.lock` 잠금으로 전 프로세스가 직렬화되고,
+   저장 내용 세대(compare-and-swap) 기준으로 반영된다. 동의 중 저장소가
+   다른 로그인으로 바뀌었으면 `--replace`가 있어도 같은 계정 라벨이 아니면
+   덮어쓰지 않는다. 임대 파일과 client 파일이 있는 디렉터리 체인은 소유자
+   전용이어야 한다(그룹·기타 쓰기 가능 디렉터리와 심볼릭 링크 항목은
+   거부되고, 각 구성 요소는 실행 사용자 또는 root 소유여야 한다). macOS
+   확장 ACL의 ALLOW 항목은 0600 파일 노출이나 디렉터리 항목 교체를 허용할
+   수 있어 거부되며, DENY 항목(예: "group:everyone deny delete")은 무해하게
+   허용된다. 이 강화된 격리는 libc 포함 빌드(caldav·lifetime)에서 동작하고,
+   그 외 빌드에서는 자격 파일 I/O 자체가 거부된다.
+   `ghost planner-google status`로 상태를 확인하고 `ghost planner-google
+   revoke`로 Google에서 철회한다. revoke는 갱신 토큰이 있으면 그 자격을
+   철회 대상으로 삼고, Google이 확인한 뒤 같은 세대의 파일만 제거한다(제거는
+   디렉터리 동기화로 영구 반영된다). 철회 결과를 확인할 수 없거나 철회 중에
+   새 로그인이 저장소를 바꿨으면 파일을 남겨 두고 다시 시도한다.
+3. **컬렉션 연결**: 제어 API의 `save_planner_collection`으로 `wire_format`
+   `google_calendar`(VEVENT) 또는 `google_tasks`(VTODO) 컬렉션을 만든다.
+   새 컬렉션은 항상 `read_only_import`로 시작하며, `account_ref`는 로그인에
+   쓴 라벨과 정확히 일치해야 하고 `collection_ref`는 Google의 정확한 컬렉션
+   식별자다. `primary`·`@default`는 받지 않는다.
+4. **읽기와 쓰기**: `planner_sync_once`(UI의 “원격 목록 새로 읽기”)는 항상
+   전체 원본 목록을 다시 읽고 `write:false`로는 대기 중인 쓰기를 절대 보내지
+   않는다. 원격 쓰기는 컬렉션이 `explicit_active` 단계일 때 소유자의
+   `write:true` 요청으로만 진행된다. 결과 불명(`uncertain`) 쓰기는 같은
+   요청에서 다시 보내지 않고 안정된 원격 항목 ID로 상태를 재확인하며,
+   읽어서 확인할 수 없으면 불명 상태로 남는다. 충돌은 소유자 해석 대상이다.
+
+CalDAV 컬렉션은 자격 없는 HTTPS 컬렉션 URL을 `binding`으로 쓰며 같은 단계
+모델을 따른다. 연결 상태는 네트워크 없이 임대 저장소와 바인딩 검증으로
+판정하며, 자격이 없으면 `credential_required`로 표시한다.
 
 ## 다른 MCP 추가
 

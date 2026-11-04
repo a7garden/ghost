@@ -10,7 +10,7 @@ function props() {
     { id: 'first', title: '첫 대화', model: 'mock', offline: true, messages: [], tasks: [] },
     { id: 'second', title: '선택한 대화', model: 'mock', offline: true, messages: [], tasks: [] },
   ];
-  return { snapshot, route: `/ghosts/${profile.id}?conversation=second`, section: 'ghosts', dotId: profile.id, pending: [], attentionCount: 2, mode: 'demo', error: '', lifetimeEnabled: false, navigate() {}, onSearch() {}, onAdd() {}, onConnection() {}, onCollapse() {} };
+  return { snapshot, route: `/ghosts/${profile.id}?conversation=second`, section: 'ghosts', dotId: profile.id, views: [], attentionCount: 2, mode: 'demo', error: '', lifetimeEnabled: false, navigate() {}, onConnection() {} };
 }
 
 it('marks the routed conversation rather than the first conversation as selected', () => {

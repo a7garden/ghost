@@ -15,6 +15,8 @@ catch (error) { if (error.code !== 'ENOENT') throw new Error('Ghost 콘솔 설�
 const root = process.env.GHOST_ROOT || config.root;
 const model = process.env.GHOST_MODEL || config.model;
 const auth = process.env.GHOST_AUTH_FILE || config.auth_file;
+const packageTrust = config.package_trust || join(homedir(), '.config/ghost/package-publishers.json');
+if (typeof packageTrust !== 'string' || !isAbsolute(packageTrust)) throw new Error('package_trust 경로는 절대 경로여야 합니다.');
 const port = Number(process.env.PORT || config.port || 62062);
 const binary = process.env.GHOST_BIN || fileURLToPath(new URL('../../../target/debug/ghost', import.meta.url));
 const hostMode = process.env.GHOST_HOST_MODE || config.host_mode || 'managed';
@@ -72,7 +74,7 @@ try {
     // Only UI runtime paths and the root are passed to the browser server.
     const uiEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(PATH|HOME|TMPDIR|TEMP|TMP|LANG|LC_.*|SYSTEMROOT)$/i.test(key)));
     ui = spawn(process.execPath, [fileURLToPath(new URL('./serve.mjs', import.meta.url))], {
-      env: { ...uiEnv, GHOST_ROOT: root, PORT: String(port), GHOST_CONSOLE_OWNER_PID: String(process.pid) }, stdio: ['ignore', 'inherit', 'inherit'],
+      env: { ...uiEnv, GHOST_PACKAGE_TRUST: packageTrust, GHOST_ROOT: root, PORT: String(port), GHOST_CONSOLE_OWNER_PID: String(process.pid) }, stdio: ['ignore', 'inherit', 'inherit'],
     });
     watch(ui, 'Ghost 콘솔');
   }

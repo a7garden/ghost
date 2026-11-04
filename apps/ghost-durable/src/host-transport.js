@@ -582,6 +582,22 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
           fields: memoryIdentityFields(ghostId, conversationId, turnId, { summary: args.summary }),
         });
       }
+      case "integrations.list":
+      case "integrations.propose": {
+        if (!isBoundedText(turnId, 400) || contextRef) {
+          throw new Error("An authenticated Owner turn is required for integration proposals.");
+        }
+        const list = method === "integrations.list";
+        if (list ? Object.keys(args).length !== 0 : (
+          !hasExactArguments(args, ["integration_id", "tool", "arguments"])
+          || !isBoundedText(args.integration_id, 400) || !isBoundedText(args.tool, 200)
+          || args.arguments === null || typeof args.arguments !== "object" || Array.isArray(args.arguments)
+          || Buffer.byteLength(JSON.stringify(args.arguments), "utf8") > 32_768
+        )) throw new Error("Invalid integration request arguments.");
+        return command({ ...scope, invocationId, method,
+          fields: memoryIdentityFields(ghostId, conversationId, turnId, args),
+        });
+      }
       case "documents.capabilities": {
         if (typeof turnId !== "string" || turnId.length === 0 || Object.keys(args).length !== 0) {
           throw new Error("Runtime documents.capabilities requires the trusted owner turn and no model arguments.");

@@ -377,6 +377,12 @@ function packageExportPath(packageRoot: string, exportsMap: Record<string, unkno
 }
 
 async function main(): Promise<void> {
+  throw new Error("legacy_execution_retired: scoped OMP execution is retired; use this Ghost's Pi execution");
+}
+
+// Historical implementation remains private source evidence. No public entry
+// or environment flag can invoke it after retirement.
+async function legacyScopedRpcFixture(): Promise<void> {
   // Match pinned OMP 18.8.6's CLI RPC defaults. This launcher calls the SDK
   // directly, bypassing main.ts: without this gate an unnamed worker starts
   // an auxiliary title inference on the same serialized local model while
@@ -588,6 +594,6 @@ async function main(): Promise<void> {
 }
 
 main().catch(() => {
-  process.stderr.write("scoped OMP startup failed\n");
+  process.stderr.write("legacy_execution_retired: scoped OMP execution is retired; use this Ghost's Pi execution\n");
   process.exitCode = 1;
 });

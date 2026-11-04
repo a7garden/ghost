@@ -27,15 +27,19 @@ target/release/ghost --root "$HOME/Library/Application Support/GhostServer/state
 
 ## 기기 등록과 게이트웨이
 
-서버 사용자로 실행한다. 아래 명령의 출력 중 token은 이 기기의 전체 owner 접근 키다.
-공유 로그나 URL에 넣지 말고 iPhone의 연결 화면에 입력한다. registry에는 digest만 남는다.
+새 휴대폰 연결은 PC Ghost의 **연동 → 휴대폰 연결** 화면에서 생성한 QR 또는 짧은
+코드로 접수한다. 휴대폰에 서버 URL·전체 Owner 키를 직접 입력하지 않는다. gateway와
+PC UI bridge 모두 같은 `GHOST_GATEWAY_ORIGIN`·`GHOST_GATEWAY_PORT`를 사용하고,
+gateway의 `GHOST_LIFETIME_AUTHORITY_EPOCH`는 실행 중인 Host의 실제 epoch와 일치해야 한다.
+
+아래 실행 전에 `CURRENT_HOST_AUTHORITY_EPOCH`를 해당 Host가 보고한 값으로 설정한다.
+임의로 `1`을 넣거나 다른 canary의 epoch를 사용하지 않는다.
 
 ```sh
-node apps/ghost-gateway/devices.mjs issue "$HOME/Library/Application Support/GhostServer/devices.json" "내 iPhone"
-
 GHOST_ROOT="$HOME/Library/Application Support/GhostServer/state" \
 GHOST_GATEWAY_DEVICES="$HOME/Library/Application Support/GhostServer/devices.json" \
 GHOST_GATEWAY_ORIGIN="https://ghost.example.com" \
+GHOST_LIFETIME_AUTHORITY_EPOCH="$CURRENT_HOST_AUTHORITY_EPOCH" \
 node apps/ghost-gateway/server.mjs
 ```
 
@@ -44,6 +48,23 @@ node apps/ghost-gateway/server.mjs
 한다. HTTPS origin에 path/query/사용자 정보는 사용할 수 없다. LAN이나 인터넷에
 Rust API 또는 Vite 개발 서버를 직접 노출하지 않는다.
 
+PC에서 QR·코드를 만든 뒤 iPhone에서 스캔한 HTTPS 서버를 확인한다. 같은 LAN에서
+8자리 코드를 사용할 때는 `_ghost-pair._tcp` Bonjour로 서버를 찾으며, TXT에는
+HTTPS origin만 광고한다. 외부 네트워크에서는 QR을 사용한다. 양쪽에 표시된 6자리
+확인 번호·기기 이름이 일치할 때만 PC에서 승인한다. 승인은 현재 실제 주 Ghost 1개의
+대화 읽기·쓰기에 한정되며, 승인 전에는 device grant가 없다. 카메라·로컬 네트워크
+권한은 사용자가 iOS에서 확인한다.
+gateway는 `dns-sd`의 실제 등록 성공 callback을 받은 뒤에만 discovery를 active로
+보고한다. STARTING 배너·등록 실패·timeout은 근처 서버 검색 성공으로 계산하지 않는다.
+
+QR에는 `ghost://connect?v=1&origin=…&invitation=…&ticket=…`가 들어가며 긴 기기 키는
+없다. 휴대폰은 새 키를 Keychain에 저장한 뒤 digest로 접수한다. QR·코드는 5분·1회용이고,
+불명확한 접수는 같은 nonce·키로 확인하며 자동으로 새 권한을 만들지 않는다. PC를
+새로 고치면 저장된 요청 상태만 복구한다. 잃어버린 QR·코드는 재생성하지 않고 그 요청을
+명시적으로 취소한 뒤 새 요청을 만든다. 기기 registry와 승인 상태는 같은 0600 atomic
+transaction으로 반영되며, 만료된 UUIDv7 생성 nonce는 이력을 정리한 뒤에도 재사용할 수 없다.
+
+
 gateway는 `apps/ghost-ui/server/bridge.mjs`의 discovery 코드를 재사용한다.
 gateway 폴더만 따로 복사하면 안 된다. 이 공통 코드를 포함한 프로젝트 구조를 유지한다.
 
@@ -51,6 +72,35 @@ gateway 폴더만 따로 복사하면 안 된다. 이 공통 코드를 포함한
 node apps/ghost-gateway/devices.mjs list /absolute/path/devices.json
 node apps/ghost-gateway/devices.mjs revoke /absolute/path/devices.json DEVICE_ID
 ```
+
+## iPhone 음성 통화와 알림 (선택 구성)
+
+네이티브 통화는 loopback 스트리밍 미디어 서비스를 거친다. 먼저 음성 서버를
+대화 하나에 고정해 실행하고(앱의 ghost-voice-server README 참고), gateway에
+같은 바인딩을 알린다. 두 값이 다르면 gateway는 음성 경로를 광고하지 않는다.
+
+```sh
+GHOST_VOICE_MEDIA_ORIGIN="http://127.0.0.1:62077" \
+GHOST_VOICE_CONTROL_TOKEN="<serve_streaming에 환경 변수로 전달한 동일 값>" \
+GHOST_VOICE_GHOST_ID="<등록된 Ghost UUID>" \
+GHOST_VOICE_CONVERSATION_ID="<등록된 대화 UUID>" \
+node apps/ghost-gateway/server.mjs
+```
+
+완료·수용 push는 Host의 notification outbox를 gateway가 주기적으로 읽어 APNs로
+깨운다. 알림함 조회·확인은 등록한 기기의 인증이 필요하며, APNs 자격 없이도
+동작한다. APNs 자격이 없으면 전송만 꺼지고 이유가 기록된다. 필요한 값:
+`GHOST_APNS_KEY_PATH`(p8), `GHOST_APNS_KEY_ID`, `GHOST_APNS_TEAM_ID`,
+`GHOST_APNS_TOPIC`(번들 ID), `GHOST_APNS_ENVIRONMENT`(sandbox|production).
+DEBUG 앱 빌드는 sandbox로 등록한다. push 본문에는 불투명한 notification ID와
+최소 문구만 담기고, 전달 접수와 사용자 읽음은 Host 장부에서 분리 관리된다.
+
+APNs journal은 전용 0700 디렉터리 안의 0600 파일이다. 같은 journal의 writer는
+SQLite sidecar의 프로세스 간 exclusive lease로 직렬화하며, 같은 프로세스 안의
+중복 sender도 거절한다. 공급자 요청 중 프로세스가 죽거나 응답이 불명확하면
+`unknown`으로 남기고 자동 재전송·Host 접수 확인을 하지 않는다. 임의의 journal
+삭제로 이 경계를 해제하지 않는다. 로컬 두 프로세스 경쟁과 요청 중 종료 smoke는
+검증했지만, 실기기 원격 알림과 실제 APNs 전송은 별도 수용이다.
 
 철회는 이후 요청을 차단한다. 이미 접수된 작업을 취소하는 동작과 다르다.
 기기 키 파일에 그룹/다른 사용자 권한이 있으면 gateway는 요청을 거절한다.

@@ -330,6 +330,10 @@ pub enum OwnerAction {
     CheckIntegration {
         id: String,
     },
+    #[cfg(feature = "lifetime")]
+    InspectIntegrationApproval { id: String },
+    #[cfg(feature = "lifetime")]
+    DecideIntegrationApproval { id: String, approve: bool },
     CollaborationMessages {
         delegation_id: String,
         after: u64,

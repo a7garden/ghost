@@ -25,17 +25,25 @@ def main():
     parser.add_argument("--skip-build", action="store_true",
                         help="Install the existing target/release/ghost artifact")
     parser.add_argument("--offline", action="store_true", help="Build using cached dependencies")
+    parser.add_argument("--features", default="",
+                        help="Comma-separated Cargo features to include in the installed binary")
     parser.add_argument("--jobs", type=int, default=2)
+    parser.add_argument("--target-dir", type=Path,
+                        help="Cargo target directory (defaults to the repository target directory)")
     args = parser.parse_args()
     source = Path(__file__).resolve().parents[1]
+    target_dir = (args.target_dir or source / "target").expanduser().resolve()
     if args.jobs < 1:
         parser.error("--jobs must be positive")
     if not args.skip_build:
-        command = ["cargo", "build", "--release", "--locked", "--jobs", str(args.jobs)]
+        command = ["cargo", "build", "--release", "--locked", "--jobs", str(args.jobs),
+                   "--target-dir", str(target_dir)]
         if args.offline:
             command.append("--offline")
+        if args.features:
+            command.extend(["--features", args.features])
         subprocess.run(command, cwd=source, check=True)
-    binary = source / "target/release/ghost"
+    binary = target_dir / "release/ghost"
     if not binary.is_file():
         raise RuntimeError("release artifact missing; build it before --skip-build")
     home = Path.home()
@@ -68,7 +76,7 @@ def main():
                 "binary_sha256": digest,
                 "source_directory": str(source),
                 "cargo_lock_sha256": sha256(source / "Cargo.lock"),
-                "features": "default host (headless)" if not args.skip_build else "existing artifact; features not attested",
+                "features": args.features or "default host (headless)" if not args.skip_build else "existing artifact; features not attested",
                 "previous_entry_target": previous,
                 "started": False,
                 "source_commit": None,

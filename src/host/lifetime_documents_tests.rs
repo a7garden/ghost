@@ -510,3 +510,107 @@ async fn revoked_space_grant_withholds_an_earlier_same_pair_draft() {
     assert_eq!(response.error_code.as_deref(), Some("unauthorized"));
     assert_eq!(response.data, Value::Null);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn integration_approval_fixture_executes_exactly_once_and_fails_closed() {
+    let t = setup(true);
+    let effects = t.root.path().join("fixture-mail-effects.jsonl");
+    let server = r#"
+import json,sys
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ method=r['method']
+ if method=='initialize':
+  out={'protocolVersion':'2025-06-18','capabilities':{'tools':{}},'serverInfo':{'name':'fixture','version':'1'}}
+ elif method=='tools/list':
+  schema={'type':'object','properties':{'to':{'type':'string'},'subject':{'type':'string'},'body':{'type':'string'}},'required':['to','subject','body'],'additionalProperties':False}
+  out={'tools':[{'name':name,'inputSchema':schema} for name in ['send_email','disconnect']]}
+ elif method=='tools/call':
+  with open(sys.argv[1],'a') as f: print(json.dumps(r['params']),file=f)
+  if r['params']['name']=='disconnect': sys.exit(0)
+  out={'content':[{'type':'text','text':'fixture accepted'}],'isError':False}
+ else: out={}
+ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':out}),flush=True)
+"#;
+    let mut connection = json!({"name":"Fixture email","transport":{"kind":"stdio","command":"python3",
+        "args":["-u","-c",server,effects],"env_refs":{},"cwd":null},"profiles":[t.ghost],"enabled":true});
+    let mut create_id = uuid::Uuid::new_v4().to_string();
+    let owner_action = |request_id: &str, value: Value| -> crate::control::api::Action {
+        serde_json::from_value(json!({"request_id":request_id,"command":{"type":"workspace","action":value}})).unwrap()
+    };
+    let action = |value: Value| owner_action(&uuid::Uuid::new_v4().to_string(), value);
+    let created = t.app.action_async(owner_action(&create_id,json!({"type":"save_integration","integration":connection}))).await.unwrap();
+    assert_eq!(created["ok"], true, "{created}");
+    let id = created["result"]["id"].as_str().unwrap();
+    let catalog = t.app.action_async(action(json!({"type":"check_integration","id":id}))).await.unwrap();
+    assert_eq!(catalog["result"]["tools"].as_array().unwrap().len(), 2, "{catalog}");
+    connection["approved_tools"] = json!(["send_email","disconnect"]);
+    let saved = t.app.action_async(action(json!({"type":"save_integration","id":id,"version":1,"integration":connection}))).await.unwrap();
+    assert_eq!(saved["ok"], true, "{saved}");
+    {
+        let state = t.app.lock().unwrap();
+        assert!(state.journal.get::<Value>("integration", id).unwrap().is_none(), "an older Host must not see the managed connection");
+        assert!(state.journal.get::<Value>("integration_managed_v1", id).unwrap().is_some());
+    }
+    let inspect_turn = envelope(&t,"integration-turn","conversation.turn.inspect",json!({}));
+    let inspected_turn = t.app.lifetime_pi_action(&inspect_turn,lifetime::PiInferenceScope::Local).await.unwrap();
+    assert_eq!(inspected_turn["result"]["data"]["integration_approvals"], true, "{inspected_turn}");
+    let list = envelope(&t,"integration-list","integrations.list",json!({}));
+    let listed = t.app.lifetime_pi_action(&list,lifetime::PiInferenceScope::Local).await.unwrap();
+    assert_eq!(listed["result"]["data"]["features"].as_array().unwrap().len(),2,"{listed}");
+    let args = json!({"to":"owner@example.invalid","subject":"Fixture","body":"Synthetic message"});
+    assert!(integrations::run(&t.app,id,Some(&t.ghost),Some(("send_email",args.clone())),||Ok(())).await.is_err());
+    let proposal = |cmd: &str, tool: &str, arguments: &Value| envelope(&t,cmd,"integrations.propose",
+        json!({"integration_id":id,"tool":tool,"arguments":arguments}));
+    let request = proposal("mail-proposal","send_email",&args);
+    let first = t.app.lifetime_pi_action(&request,lifetime::PiInferenceScope::Local).await.unwrap();
+    assert_eq!(first["result"]["data"]["state"],"pending","{first}");
+    assert!(!effects.exists());
+    let review = first["result"]["data"]["id"].as_str().unwrap();
+    let replay = t.app.lifetime_pi_action(&request,lifetime::PiInferenceScope::Local).await.unwrap();
+    assert_eq!(replay["result"]["data"], first["result"]["data"]);
+    let bad = t.app.lifetime_pi_action(&proposal("bad","send_email",&json!({"to":3})),lifetime::PiInferenceScope::Local).await.unwrap();
+    assert_eq!(bad["result"]["error_code"],"integration_proposal_denied","{bad}");
+    let summaries = t.app.snapshot().unwrap()["integration_approvals"].clone();
+    assert_eq!(summaries.as_array().unwrap().len(),1);
+    assert!(summaries[0].get("arguments").is_none());
+    let inspected = t.app.action_async(action(json!({"type":"inspect_integration_approval","id":review}))).await.unwrap();
+    assert_eq!(inspected["result"]["arguments"],args);
+    assert_eq!(inspected["result"]["approval_allowed"], true);
+    let decision = json!({"type":"decide_integration_approval","id":review,"approve":true});
+    create_id = uuid::Uuid::new_v4().to_string();
+    let (sent, competing) = tokio::join!(
+        t.app.action_async(owner_action(&create_id,decision.clone())),
+        t.app.action_async(action(decision.clone())),
+    );
+    let sent = sent.unwrap();
+    assert_eq!(sent["result"]["state"],"sent","{sent}");
+    assert_eq!(competing.unwrap()["ok"], false);
+    assert!(integrations::allowed(&*t.app.lock().unwrap(),id,Some(&t.ghost)).unwrap().error.is_none());
+    assert_eq!(t.app.action_async(owner_action(&create_id,decision.clone())).await.unwrap(),sent);
+    assert_eq!(t.app.action_async(action(decision)).await.unwrap()["ok"],false);
+    let completed = t.app.action_async(action(json!({"type":"inspect_integration_approval","id":review}))).await.unwrap();
+    assert_eq!(completed["result"]["result"]["text"], "fixture accepted");
+    assert!(t.app.snapshot().unwrap()["integration_approvals"][0].get("result").is_none());
+    let lines = std::fs::read_to_string(&effects).unwrap();
+    assert_eq!(lines.lines().count(),1);
+    assert_eq!(serde_json::from_str::<Value>(lines.trim()).unwrap(),json!({"name":"send_email","arguments":args}));
+    let revoked = t.app.lifetime_pi_action(&proposal("revoked","send_email",&args),lifetime::PiInferenceScope::Local).await.unwrap();
+    let revoked_id = revoked["result"]["data"]["id"].as_str().unwrap();
+    connection["approved_tools"] = json!(["disconnect"]);
+    let update = t.app.action_async(action(json!({"type":"save_integration","id":id,"version":2,"integration":connection}))).await.unwrap();
+    assert_eq!(update["ok"], true, "{update}");
+    let stale = t.app.action_async(action(json!({"type":"inspect_integration_approval","id":revoked_id}))).await.unwrap();
+    assert_eq!(stale["result"]["approval_allowed"], false);
+    assert_eq!(t.app.action_async(action(json!({"type":"decide_integration_approval","id":revoked_id,"approve":true}))).await.unwrap()["ok"],false);
+    assert_eq!(std::fs::read_to_string(&effects).unwrap().lines().count(),1);
+    assert_eq!(t.app.action_async(action(json!({"type":"decide_integration_approval","id":revoked_id,"approve":false}))).await.unwrap()["result"]["state"],"declined");
+    let lost = t.app.lifetime_pi_action(&proposal("lost","disconnect",&args),lifetime::PiInferenceScope::Local).await.unwrap();
+    let lost_id = lost["result"]["data"]["id"].as_str().unwrap();
+    let lost_decision = json!({"type":"decide_integration_approval","id":lost_id,"approve":true});
+    let receipt = t.app.action_async(action(lost_decision.clone())).await.unwrap();
+    assert_eq!(receipt["result"]["state"],"uncertain","{receipt}");
+    assert_eq!(t.app.action_async(action(lost_decision)).await.unwrap()["ok"],false);
+    assert_eq!(std::fs::read_to_string(&effects).unwrap().lines().count(),2);
+}

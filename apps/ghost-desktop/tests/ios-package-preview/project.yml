@@ -1,0 +1,23 @@
+name: GhostPackagePreviewTests
+options:
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  GhostPackagePreviewTests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - PackagePreviewUITests.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.projectoxi.ghost.package-preview.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 5.0
+schemes:
+  GhostPackagePreviewTests:
+    build:
+      targets:
+        GhostPackagePreviewTests: [test]
+    test:
+      targets:
+        - GhostPackagePreviewTests

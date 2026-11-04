@@ -341,6 +341,30 @@ fn admission_replay_and_lost_outbox_ack_recover_the_same_command() {
 }
 
 #[test]
+fn assignment_ack_clears_only_current_unexecuted_transport_blockers() {
+    for (blocker, state, execution, stale, cleared) in [
+        ("goal_assignment_inspection_unconfirmed", "queued", None, false, true),
+        ("policy_blocked", "queued", None, false, false),
+        ("goal_assignment_inspection_unconfirmed", "unknown", Some("existing-execution"), false, false),
+        ("goal_assignment_inspection_unconfirmed", "queued", None, true, false),
+    ] {
+        let (_root, conn) = database();
+        assert_success(&submit_goal(&conn, "assignment-ack-blocker"));
+        conn.execute("UPDATE lifetime_work SET state=?1,execution_id=?2,payload=json_set(payload,'$.state',?1,'$.execution_id',?2,'$.blocker',?3)",
+            rusqlite::params![state, execution, blocker]).unwrap();
+        if stale { conn.execute("UPDATE lifetime_goals SET revision=2,payload=json_set(payload,'$.revision',2)", []).unwrap(); }
+        let pending = pending_outbox(&conn).unwrap().remove(0);
+        ack_outbox(&conn, pending.id, &json!({"status":"success","data":{
+            "command_id":pending.payload["command_id"],
+            "conversation_id":pending.payload["body"]["conversation_id"],"ghost_id":pending.payload["body"]["ghost_id"],
+            "runtime_kind":"pi-durable","runtime_release":"1.1.0","storage_ref":"fixture:original-storage"
+        }})).unwrap();
+        let remaining: Option<String> = conn.query_row("SELECT json_extract(payload,'$.blocker') FROM lifetime_work", [], |row| row.get(0)).unwrap();
+        assert_eq!(remaining.as_deref(), if cleared { None } else { Some(blocker) });
+    }
+}
+
+#[test]
 fn goal_cas_stale_result_and_acceptance_require_the_current_revision() {
     let (_root, connection) = database();
     let submitted = submit_goal(&connection, "goal-submit-cas");

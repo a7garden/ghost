@@ -126,7 +126,7 @@ export class CommandQueue {
       if (e instanceof ConfirmedFailure && !(e instanceof RoutingTerminal) && command.type === 'routing_turn') {
         const current = await this.read(); delete current[key]; await this.storage.setItem(this.namespace, JSON.stringify(current));
       }
-      if (e instanceof ConfirmedFailure && command.type === 'workspace' && ['save_orchestration', 'start_orchestration', 'cancel_orchestration', 'planner_sync_once', 'conversation_model', 'check_integration', 'check_model_provider', 'model_catalog', 'discover_local_models', 'create_avatar', 'set_profile_avatar', 'delete_avatar'].includes((command.action as { type?: string })?.type ?? '')) {
+      if (e instanceof ConfirmedFailure && command.type === 'workspace' && ['save_orchestration', 'start_orchestration', 'cancel_orchestration', 'planner_sync_once', 'conversation_model', 'check_integration', 'decide_integration_approval', 'check_model_provider', 'model_catalog', 'discover_local_models', 'create_avatar', 'set_profile_avatar', 'delete_avatar'].includes((command.action as { type?: string })?.type ?? '')) {
         const current = await this.read(); delete current[key]; await this.storage.setItem(this.namespace, JSON.stringify(current));
       }
       throw e;

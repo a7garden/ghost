@@ -1,7 +1,10 @@
 import type { Snapshot, Task } from './types';
+import { approvals, approvalGroup, type ApprovalGroup } from '../plugins/approvals';
 
-/** The same visible items drive the inbox, overview and navigation counts. */
+/** Only pending decisions contribute to the approval badge. */
 export function inboxItems(snapshot: Snapshot, connected = true) {
+  const groups = { pending: [], running: [], followup: [], finished: [] } as Record<ApprovalGroup, ReturnType<typeof approvals>>;
+  for (const item of approvals(snapshot)) groups[approvalGroup(item)].push(item);
   const reviews = snapshot.reviews.filter(r => r.state === 'pending' || r.state === 'approved');
   const tasks = snapshot.profiles.flatMap(p => p.conversations.flatMap(c => c.tasks
     .filter(t => t.phase === 'failed' || t.phase === 'uncertain' || (
@@ -10,7 +13,10 @@ export function inboxItems(snapshot: Snapshot, connected = true) {
     .map(t => ({ p, c, t }))));
   const completionCount = connected && (snapshot.capabilities.routing as { runtime_dispatch?: boolean } | undefined)?.runtime_dispatch === true
     ? snapshot.routing_results?.completion_outbox.length ?? 0 : 0;
-  return { reviews, tasks, count: reviews.length + tasks.length + completionCount };
+  return {
+    reviews, tasks, groups, approvalCount: groups.pending.length,
+    count: groups.pending.length + groups.running.length + groups.followup.length + tasks.length + completionCount,
+  };
 }
 
 export function taskAttentionMessage(task: Task) {

@@ -17,6 +17,10 @@ use tokio::{
 const LIMIT: usize = 1_048_576;
 const DEADLINE: Duration = Duration::from_secs(25);
 const PROTOCOL: &str = "2025-06-18";
+const LEGACY: &str = "integration";
+// Older Hosts read only LEGACY. Managed connections must be invisible to
+// their direct call path even after a rollback or a mixed-version failover.
+const MANAGED: &str = "integration_managed_v1";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -44,6 +48,9 @@ pub struct IntegrationInput {
     pub profiles: Vec<String>,
     #[serde(default)]
     pub enabled: bool,
+    /// Absent preserves legacy access. Present grants proposal-only access to these exact tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_tools: Option<Vec<String>>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Integration {
@@ -55,6 +62,30 @@ pub struct Integration {
     pub checked_ms: Option<u64>,
     pub error: Option<String>,
 }
+impl Integration {
+    fn kind(&self) -> &'static str {
+        if self.data.approved_tools.is_some() { MANAGED } else { LEGACY }
+    }
+}
+
+fn get(state: &State, id: &str) -> Result<Option<Integration>> {
+    match state.journal.get(MANAGED, id)? {
+        Some(item) => Ok(Some(item)),
+        None => state.journal.get(LEGACY, id),
+    }
+}
+
+pub(crate) fn list(state: &State) -> Result<Vec<Integration>> {
+    let mut items = state.journal.objects(LEGACY)?;
+    items.extend(state.journal.objects::<Integration>(MANAGED)?);
+    Ok(items)
+}
+
+pub(crate) fn delete(state: &State, id: &str, version: u64) -> Result<Value> {
+    let item = get(state, id)?.ok_or_else(|| anyhow!("연동을 찾지 못했습니다."))?;
+    super::planner::delete(state, item.kind(), id, version)
+}
+
 fn env_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
@@ -68,7 +99,7 @@ pub(crate) fn save(
     key: &str,
     id: Option<&str>,
     version: Option<u64>,
-    data: IntegrationInput,
+    mut data: IntegrationInput,
 ) -> Result<Value> {
     text(&data.name, 200)?;
     if data.profiles.len() > 64 || data.profiles.iter().any(|p| !s.profiles.contains_key(p)) {
@@ -112,26 +143,47 @@ pub(crate) fn save(
             }
         }
     }
-    let old: Option<Integration> = s.journal.get("integration", id.unwrap_or(key))?;
+    let old = get(s, id.unwrap_or(key))?;
     if id.is_some() && (old.is_none() || old.as_ref().map(|i| i.version) != version) {
         bail!("연동 설정이 변경되었습니다. 다시 열어 수정해 주세요.");
+    }
+    let same_transport = old.as_ref().filter(|item| item.data.transport == data.transport);
+    // A legacy editor cannot turn an approval-only connection back into direct access.
+    if let Some(previous) = old.as_ref().and_then(|item| item.data.approved_tools.as_ref()) {
+        if same_transport.is_none() { data.approved_tools = Some(vec![]); }
+        else if data.approved_tools.is_none() { data.approved_tools = Some(previous.clone()); }
+    }
+    if let Some(names) = &data.approved_tools {
+        let unique = names.iter().collect::<std::collections::BTreeSet<_>>();
+        anyhow::ensure!(cfg!(feature = "lifetime"), "이 호스트는 기능별 승인 연동을 지원하지 않습니다.");
+        anyhow::ensure!(names.len() <= 1000 && names.len() == unique.len()
+            && names.iter().all(|name| !name.is_empty() && name.len() <= 200),
+            "연동 도구 이름을 확인해 주세요.");
+        anyhow::ensure!(names.iter().all(|name| same_transport.is_some_and(|item| {
+            item.tools.iter().any(|tool| tool["name"] == name.as_str())
+                || item.data.approved_tools.as_ref().is_some_and(|existing| existing.contains(name))
+        })), "현재 연결에서 확인한 도구만 허용할 수 있습니다.");
     }
     let integration = Integration {
         id: id.unwrap_or(key).into(),
         data,
-        version: old.map_or(1, |i| i.version + 1),
-        tools: vec![],
-        checked_ms: None,
-        error: None,
+        version: old.as_ref().map_or(1, |i| i.version + 1),
+        tools: same_transport.map(|item| item.tools.clone()).unwrap_or_default(),
+        checked_ms: same_transport.and_then(|item| item.checked_ms),
+        error: same_transport.and_then(|item| item.error.clone()),
     };
-    s.journal
-        .put("integration", &integration.id, &integration)?;
+    if old.as_ref().is_some_and(|item| item.kind() == LEGACY) && integration.kind() == MANAGED {
+        s.journal.0.execute(
+            "UPDATE workspace_objects SET kind=?1,payload=?2 WHERE kind=?3 AND id=?4",
+            rusqlite::params![MANAGED, serde_json::to_string(&integration)?, LEGACY, integration.id],
+        )?;
+    } else {
+        s.journal.put(integration.kind(), &integration.id, &integration)?;
+    }
     Ok(json!(integration))
 }
 pub(crate) fn allowed(s: &State, id: &str, owner: Option<&str>) -> Result<Integration> {
-    let item: Integration = s
-        .journal
-        .get("integration", id)?
+    let item = get(s, id)?
         .ok_or_else(|| anyhow!("연동을 찾지 못했습니다."))?;
     if !item.data.enabled || owner.is_some_and(|o| !item.data.profiles.iter().any(|p| p == o)) {
         bail!("이 Dot에 대한 연동이 꺼져 있습니다.");
@@ -140,19 +192,21 @@ pub(crate) fn allowed(s: &State, id: &str, owner: Option<&str>) -> Result<Integr
 }
 pub(crate) fn visible(s: &State, owner: &str) -> Result<Value> {
     Ok(
-        json!({"integrations":s.journal.objects::<Integration>("integration")?.into_iter()
+        json!({"integrations":list(s)?.into_iter()
         .filter(|i|i.data.enabled && i.data.profiles.iter().any(|p|p==owner))
         .map(|i|json!({"id":i.id,"name":i.data.name,"tool_count":i.tools.len(),"checked_ms":i.checked_ms,"error":i.error})).collect::<Vec<_>>()}),
     )
 }
 
 type Slot = Arc<tokio::sync::Mutex<Option<Session>>>;
+type ConnectionScope = (String, Option<String>);
+
 #[derive(Default)]
-pub(crate) struct Connections(Mutex<BTreeMap<String, Slot>>);
+pub(crate) struct Connections(Mutex<BTreeMap<ConnectionScope, Slot>>);
 impl Connections {
     pub(crate) fn remove(&self, id: &str) {
         if let Ok(mut slots) = self.0.lock() {
-            slots.remove(id);
+            slots.retain(|(integration, _), _| integration != id);
         }
     }
     pub(crate) fn clear(&self) {
@@ -160,12 +214,12 @@ impl Connections {
             slots.clear();
         }
     }
-    fn slot(&self, id: &str) -> Result<Slot> {
+    fn slot(&self, id: &str, owner: Option<&str>) -> Result<Slot> {
         Ok(self
             .0
             .lock()
             .map_err(|_| anyhow!("연동 상태를 읽지 못했습니다."))?
-            .entry(id.into())
+            .entry((id.into(), owner.map(str::to_owned)))
             .or_default()
             .clone())
     }
@@ -489,8 +543,43 @@ pub(crate) async fn run(
     call: Option<(&str, Value)>,
     check: impl Fn() -> Result<()>,
 ) -> Result<Value> {
+    run_inner(app, id, owner, call, None, check).await
+}
+
+#[cfg(feature = "lifetime")]
+pub(crate) async fn run_approved(
+    app: &Host,
+    id: &str,
+    owner: &str,
+    name: &str,
+    arguments: Value,
+    approval: (u64, &Value),
+    reserve: impl Fn() -> Result<()>,
+) -> Result<Value> {
+    run_inner(app, id, Some(owner), Some((name, arguments)), Some(approval), reserve).await
+}
+
+async fn run_inner(
+    app: &Host,
+    id: &str,
+    owner: Option<&str>,
+    call: Option<(&str, Value)>,
+    approval: Option<(u64, &Value)>,
+    check: impl Fn() -> Result<()>,
+) -> Result<Value> {
     let item = allowed(&*app.lock()?, id, owner)?;
-    let slot = app.integrations.slot(id)?;
+    if let Some((name, _)) = &call {
+        match approval {
+            None if item.data.approved_tools.is_some() => bail!("이 연결의 외부 도구는 소유자 승인이 필요합니다."),
+            Some((version, _)) if item.version != version
+                || !item.data.approved_tools.as_ref().is_some_and(|names| names.iter().any(|allowed| allowed == name))
+                => bail!("연동 설정 또는 기능 권한이 변경되었습니다."),
+            _ => {}
+        }
+    }
+    // Two Ghosts may be granted the same server, but neither inherits the
+    // other's stdio process or HTTP session. Owner diagnostics are separate too.
+    let slot = app.integrations.slot(id, owner)?;
     let operation = async {
         let mut guard = slot.lock().await;
         // Taking ownership makes cancellation discard the process and any stale response.
@@ -498,10 +587,10 @@ pub(crate) async fn run(
             Some(s) if s.version == item.version => s,
             _ => Session::open(&item).await?,
         };
-        if call.is_none() {
+        if call.is_none() || approval.is_some() {
             session.refresh().await?;
         }
-        check()?;
+        if approval.is_none() { check()?; }
         {
             let s = app.lock()?;
             let mut current = allowed(&s, id, owner)?;
@@ -511,14 +600,17 @@ pub(crate) async fn run(
             current.tools = session.tools.clone();
             current.checked_ms = Some(now_ms());
             current.error = None;
-            s.journal.put("integration", id, &current)?;
+            s.journal.put(current.kind(), id, &current)?;
         }
         let result = if let Some((name, arguments)) = call {
             if !arguments.is_object() || serde_json::to_vec(&arguments)?.len() > 65536 {
                 bail!("MCP 도구 입력은 64 KiB 이내의 JSON 객체여야 합니다.");
             }
-            if !session.tools.iter().any(|t| t["name"] == name) {
-                bail!("해당 MCP 도구가 없습니다. 도구 목록을 다시 확인하세요.");
+            let tool = session.tools.iter().find(|t| t["name"] == name)
+                .ok_or_else(|| anyhow!("해당 MCP 도구가 없습니다. 도구 목록을 다시 확인하세요."))?;
+            if let Some((_, schema)) = approval {
+                anyhow::ensure!(tool.get("inputSchema") == Some(schema), "도구 입력 형식이 변경되었습니다.");
+                check()?;
             }
             let value = session
                 .rpc("tools/call", json!({"name":name,"arguments":arguments}))
@@ -536,13 +628,17 @@ pub(crate) async fn run(
         Ok(result)
     };
     let result=tokio::time::timeout(DEADLINE,operation).await.unwrap_or_else(|_|Err(anyhow!("연동 응답 시간이 초과되었습니다. 변경 작업이었다면 서비스에서 결과를 확인한 뒤 다시 요청하세요.")));
-    if let Err(error) = &result {
-        let s = app.lock()?;
-        if let Some(mut current) = s.journal.get::<Integration>("integration", id)? {
-            if current.version == item.version {
-                current.checked_ms = Some(now_ms());
-                current.error = Some(error.to_string());
-                s.journal.put("integration", id, &current)?;
+    // Approval conflicts and uncertain calls belong to the specific receipt.
+    // A connection health check is an independent operation.
+    if approval.is_none() {
+        if let Err(error) = &result {
+            let s = app.lock()?;
+            if let Some(mut current) = get(&s, id)? {
+                if current.version == item.version {
+                    current.checked_ms = Some(now_ms());
+                    current.error = Some(error.to_string());
+                    s.journal.put(current.kind(), id, &current)?;
+                }
             }
         }
     }

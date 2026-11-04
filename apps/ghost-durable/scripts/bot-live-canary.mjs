@@ -33,7 +33,7 @@ async function command(frame) {
   let timer, parkedReceipt=null;
   const parked=new Promise(resolve=>{if(allowWorkParks) parkCommand={ghost:frame.command.body.ghost_id,conversation:frame.command.body.conversation_id,resolve};});
   try { parkedReceipt=await Promise.race([parked,runtime.waitForIdle(frame.command.body.ghost_id, frame.command.body.conversation_id),
-    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Bot canary command deadline exceeded.")), 120000); })]); }
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Bot canary command deadline exceeded.")), allowWorkParks ? 300000 : 120000); })]); }
   finally { clearTimeout(timer);parkCommand=null; }
   emit({ type: "command_result", id: frame.id, receipt, model_calls: calls,...(parkedReceipt?{parked:parkedReceipt}:{}) });
 }

@@ -891,6 +891,33 @@ mod tests {
     }
 
     #[test]
+    fn restored_local_route_can_revalidate_the_original_queued_assignment() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = super::super::Journal::open(&dir.path().join("workspace.db")).unwrap();
+        let conn = &journal.0;
+        let ghost = uuid::Uuid::new_v4().to_string();
+        let conversation = uuid::Uuid::new_v4().to_string();
+        let apply_owner = |body| {
+            let request = internal_envelope("owner", 1, body).unwrap();
+            let response = lifetime::apply(conn, &request, "owner").unwrap();
+            assert_eq!(response.status, ResponseStatus::Success, "{response:?}");
+        };
+        apply_owner(json!({"method":"registry.ensure","ghost_id":ghost,
+            "conversation_id":conversation,"kind":"primary","roles":[]}));
+        apply_owner(json!({"method":"goal.submit","ghost_id":ghost,
+            "conversation_id":conversation,"prompt":"local recovery","privacy":"local_only","acceptance_spec":{}}));
+        let item = lifetime::pending_outbox(conn).unwrap().pop().unwrap();
+        let command = outbox_envelope(item.payload).unwrap();
+        persist_delivery_blocker(conn, &command,
+            "Dispatch blocked by current graph scope or disclosure policy; no new worker/model dispatch").unwrap();
+        assert!(!lifetime::assignment_is_public_for_delivery(conn, &command).unwrap());
+        assert_eq!(lifetime::pending_outbox(conn).unwrap()[0].id, item.id);
+
+        conn.execute("UPDATE lifetime_goals SET revision=revision+1,payload=json_set(payload,'$.revision',revision+1)", []).unwrap();
+        assert!(lifetime::assignment_is_public_for_delivery(conn, &command).is_err());
+    }
+
+    #[test]
     fn stale_assignment_failure_cannot_block_a_reused_work_or_other_attempt() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(include_str!("../../contracts/lifetime/migration-005.sql")).unwrap();

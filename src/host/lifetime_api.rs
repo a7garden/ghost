@@ -193,6 +193,12 @@ impl Host {
             self.lifetime_memory_action(request, scope).await
         } else if document {
             self.lifetime_documents_action(request, scope)
+        } else if matches!(request.envelope.body["method"].as_str(), Some("integrations.list" | "integrations.propose")) {
+            Ok(self.integration_approval_pi(request, scope).unwrap_or_else(|error| Response {
+                status: ResponseStatus::Error, summary: error.to_string(), object_refs: vec![],
+                artifacts: vec![], next_actions: vec![], error_code: Some("integration_proposal_denied".into()),
+                retry_class: RetryClass::Never, data: json!({"host_effect_class":"no_effect"}),
+            }))
         } else {
             (|| -> Result<Response> {
                 let state = self.lock()?;
@@ -211,6 +217,18 @@ impl Host {
                 lifetime::pi_tool_apply(&state.journal.0, request, scope, self.native_computers.as_ref())
             })()
         };
+        if request.envelope.body["method"] == "conversation.turn.inspect" && request.context_ref.is_none() {
+            if let Ok(response) = &mut result {
+                if response.status == ResponseStatus::Success {
+                    let state = self.lock()?;
+                    let enabled = super::integration_approvals::approved_features(&state, &request.ghost_id)
+                        .is_ok_and(|features| !features.is_empty());
+                    if let Some(data) = response.data.as_object_mut() {
+                        data.insert("integration_approvals".into(), json!(enabled));
+                    }
+                }
+            }
+        }
         if request.envelope.body["method"]=="conversation.report.inspect" {
             if let Ok(response)=&mut result {if response.status==ResponseStatus::Success {
                 let state=self.lock()?;

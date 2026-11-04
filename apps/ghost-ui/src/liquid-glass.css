@@ -216,7 +216,6 @@ dialog::backdrop { background: var(--color-overlay); -webkit-backdrop-filter: bl
 .field-help { font-size: var(--text-caption); }
 .search-results > button.selected, .search-results > button:hover { background: var(--color-accent-soft); }
 .search-results > button { padding: var(--space-sm); }
-.mobile-nav-dialog { background: var(--color-glass-solid); }
 .context-sidebar-drawer { background: var(--color-glass-solid); }
 
 @media (min-width: 56rem) {

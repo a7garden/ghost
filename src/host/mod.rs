@@ -20,6 +20,8 @@ mod cli_tools;
 #[allow(dead_code)]
 mod code_worker;
 pub mod integrations;
+#[cfg(feature = "lifetime")]
+mod integration_approvals;
 pub mod models;
 #[cfg(feature = "lifetime")]
 pub(crate) mod inference;
@@ -187,6 +189,8 @@ impl Host {
         }
         let journal = Journal::open(&root.join("workspace.db"))?;
         let dispatch_enabled = journal.dispatch_enabled()?;
+        #[cfg(feature = "lifetime")]
+        if dispatch_enabled { integration_approvals::recover_interrupted(&journal)?; }
         if journal.get::<String>("meta", "workspace_id")?.is_none() {
             journal.put("meta", "workspace_id", &uuid::Uuid::now_v7().to_string())?;
         }
@@ -727,6 +731,10 @@ impl Host {
         if let Command::Lifetime { envelope } = &action.command {
             return lifetime::authority::read_only(envelope.body["method"].as_str());
         }
+        #[cfg(feature = "lifetime")]
+        if matches!(&action.command, Command::Workspace { action: OwnerAction::InspectIntegrationApproval { .. } }) {
+            return true;
+        }
         let _ = action;
         false
     }
@@ -882,6 +890,10 @@ impl Host {
         }
         // Read-only discovery has no effects to replay and does not retain large catalogs in command receipts.
         let read = match &action.command {
+            #[cfg(feature = "lifetime")]
+            Command::Workspace { action: OwnerAction::InspectIntegrationApproval { id } } => {
+                Some(self.integration_approval_inspect(id))
+            }
             Command::Workspace {
                 action: OwnerAction::ModelCatalog,
             } => Some(models::catalog(&self.root).await),
@@ -966,6 +978,10 @@ impl Host {
             Command::Workspace {
                 action: OwnerAction::RecoverProfile { profile_id },
             } => self.recover_profile(&profile_id).await,
+            #[cfg(feature = "lifetime")]
+            Command::Workspace { action: OwnerAction::DecideIntegrationApproval { id, approve } } => {
+                self.decide_integration_approval(&request_id, &id, approve).await
+            }
             Command::Workspace {
                 action: OwnerAction::CheckIntegration { id },
             } => integrations::run(self, &id, None, None, || Ok(())).await,
@@ -1008,7 +1024,7 @@ impl Host {
         #[cfg(feature = "lifetime")]
         if matches!(command, Command::Workspace {
             action: OwnerAction::MemorySourceInspect { .. } | OwnerAction::MemorySourceCorrect { .. }
-                | OwnerAction::MemorySourceResume { .. }
+                | OwnerAction::MemorySourceResume { .. } | OwnerAction::DecideIntegrationApproval { .. }
         }) {
             return true;
         }
@@ -1392,11 +1408,13 @@ impl Host {
                 .sum();
             profiles.push(json!({"id":p.id,"name":p.name,"persona":persona,"avatar_id":avatar.avatar_id,"avatar_version":avatar.version,"conversations":conversations,"grants":grants,"policy":policy,"spend":spend,"usage":{"tokens":usage_tokens,"cost_usd":usage_cost},"error":p.error}));
         }
-        Ok(
-            self.with_snapshot_authority(&s.journal.0,
-            json!({"mode":"durable_workspace","host_protocol_version":1,"capabilities":{"orchestration":true,"routing":routing_host::capability(),"code_worker":{"configured":false,"retired":true,"projects":[]},"omp_subscription":{"configured":omp_provider::configured(),"models":omp_provider::model_specs().iter().map(|(provider,model)|format!("{provider}/{model}")).collect::<Vec<_>>()},"avatars":true,"documents":cfg!(feature="documents"),"memory":memory::Brain::configured(),"channels":cfg!(feature="channels"),"computer":{"backend":self.computer.identity(),"configured":self.computer.configured(),"operations":self.computer.capabilities()}},"avatars":s.journal.objects::<avatars::Avatar>("avatar")?,"todos":s.journal.objects::<planner::Todo>("todo")?,"calendar_events":s.journal.objects::<planner::Event>("calendar_event")?,"connected_planner":connected_planner_snapshot(&s)?,"integrations":s.journal.objects::<integrations::Integration>("integration")?,"routing_shares":s.journal.objects::<routing_host::RoutingShare>("routing_share_v1")?,"routing_results":routing_dispatch::owner_results(&s)?,"workspace_id":s.journal.get::<String>("meta","workspace_id")?,"default_model":models::selected_llm(&s,&self.default_model)?,"model_settings":models::settings(&s)?,"profiles":profiles,"schedules":s.journal.list()?,"spaces":s.journal.objects::<documents::Space>("space")?,"reviews":s.journal.objects::<Review>("review")?.into_iter().filter(|r|!r.profile_id.is_empty()&&matches!(r.state.as_str(),"pending"|"approved"|"saved"|"declined")).collect::<Vec<_>>(),"goals":s.journal.objects::<Goal>("goal")?,"delegations":s.journal.objects::<Delegation>("delegation")?,"orchestration_plans":s.journal.objects::<orchestration::Plan>("orchestration_plan")?,"orchestration_runs":s.journal.objects::<orchestration::Run>("orchestration_run")?,"slack_bindings":s.journal.objects::<channels::SlackBinding>("slack_binding")?,"slack_outbox":s.journal.objects::<channels::Outbox>("slack_outbox")?,"voice_calls":s.journal.objects::<channels::Call>("voice_call")?,"connector_status":s.journal.objects::<Value>("connector_status")?,"connectors":{"computer":self.computer.configured(),"brain":memory::Brain::configured(),"voice":cfg!(feature="channels")&&std::env::var_os("OPENAI_API_KEY").is_some(),"slack":cfg!(feature="channels")&&std::env::var_os("GHOST_SLACK_APP_TOKEN").is_some()}}),
-            )?
-        )
+        #[allow(unused_mut)]
+        let mut snapshot = self.with_snapshot_authority(&s.journal.0,
+            json!({"mode":"durable_workspace","host_protocol_version":1,"capabilities":{"orchestration":true,"routing":routing_host::capability(),"code_worker":{"configured":false,"retired":true,"projects":[]},"omp_subscription":{"configured":omp_provider::configured(),"models":omp_provider::model_specs().iter().map(|(provider,model)|format!("{provider}/{model}")).collect::<Vec<_>>()},"avatars":true,"documents":cfg!(feature="documents"),"memory":memory::Brain::configured(),"channels":cfg!(feature="channels"),"computer":{"backend":self.computer.identity(),"configured":self.computer.configured(),"operations":self.computer.capabilities()}},"avatars":s.journal.objects::<avatars::Avatar>("avatar")?,"todos":s.journal.objects::<planner::Todo>("todo")?,"calendar_events":s.journal.objects::<planner::Event>("calendar_event")?,"connected_planner":connected_planner_snapshot(&s)?,"integrations":integrations::list(&s)?,"routing_shares":s.journal.objects::<routing_host::RoutingShare>("routing_share_v1")?,"routing_results":routing_dispatch::owner_results(&s)?,"workspace_id":s.journal.get::<String>("meta","workspace_id")?,"default_model":models::selected_llm(&s,&self.default_model)?,"model_settings":models::settings(&s)?,"profiles":profiles,"schedules":s.journal.list()?,"spaces":s.journal.objects::<documents::Space>("space")?,"reviews":s.journal.objects::<Review>("review")?.into_iter().filter(|r|!r.profile_id.is_empty()&&matches!(r.state.as_str(),"pending"|"approved"|"saved"|"declined")).collect::<Vec<_>>(),"goals":s.journal.objects::<Goal>("goal")?,"delegations":s.journal.objects::<Delegation>("delegation")?,"orchestration_plans":s.journal.objects::<orchestration::Plan>("orchestration_plan")?,"orchestration_runs":s.journal.objects::<orchestration::Run>("orchestration_run")?,"slack_bindings":s.journal.objects::<channels::SlackBinding>("slack_binding")?,"slack_outbox":s.journal.objects::<channels::Outbox>("slack_outbox")?,"voice_calls":s.journal.objects::<channels::Call>("voice_call")?,"connector_status":s.journal.objects::<Value>("connector_status")?,"connectors":{"computer":self.computer.configured(),"brain":memory::Brain::configured(),"voice":cfg!(feature="channels")&&std::env::var_os("OPENAI_API_KEY").is_some(),"slack":cfg!(feature="channels")&&std::env::var_os("GHOST_SLACK_APP_TOKEN").is_some()}}),
+            )?;
+        #[cfg(feature = "lifetime")]
+        { snapshot["integration_approvals"] = json!(integration_approvals::summaries(&s)?); }
+        Ok(snapshot)
     }
 
     fn with_snapshot_authority(&self, _conn: &rusqlite::Connection, snapshot: Value) -> Result<Value> {
@@ -1404,6 +1422,7 @@ impl Host {
         let snapshot = {
             let mut snapshot = snapshot;
             let authority = lifetime::authority::current(_conn)?;
+            snapshot["capabilities"]["integration_approvals"] = json!(true);
             snapshot["lifetime_authority"] = json!({
                 "authority_epoch": authority.epoch,
                 "dispatch_enabled": authority.dispatch_enabled && self.dispatch_enabled && authority.epoch == self.authority_epoch,

@@ -472,3 +472,20 @@ fn refuses_manifest_home_retargeting_to_a_directory_not_in_the_capture() {
     assert!(restore_bundle(&fixture.destination, &destination).is_err());
     assert!(!destination.exists());
 }
+
+#[test]
+fn immutable_native_backup_archive_survives_real_bundle_without_sqlite_resnapshot() {
+    use ghost::operations::native_backup_artifact;
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture=Fixture::new();
+    fs::set_permissions(&fixture.base,fs::Permissions::from_mode(0o700)).unwrap();
+    let source=fixture.base.join("native-original");fs::create_dir(&source).unwrap();fs::set_permissions(&source,fs::Permissions::from_mode(0o700)).unwrap();
+    let db=source.join("brain.db");let conn=Connection::open(&db).unwrap();conn.execute_batch("CREATE TABLE original(id TEXT PRIMARY KEY,value TEXT);INSERT INTO original VALUES('retained-uuid','immutable native bytes');PRAGMA user_version=19;").unwrap();drop(conn);fs::set_permissions(&db,fs::Permissions::from_mode(0o600)).unwrap();let original=fs::read(&db).unwrap();
+    let manifest=serde_json::to_vec_pretty(&serde_json::json!({"format":"oxibrain-backup/1","generation":"no-native-preservation","created_at_utc_ms":1,"ledger_schema_version":19,"projection_version":1,"include_projection":false,"include_cache":false,"files":[{"path":"brain.db","bytes":original.len(),"blake3":blake3::hash(&original).to_hex().to_string()}],"exclusions":[]})).unwrap();fs::write(source.join("manifest.json"),&manifest).unwrap();fs::set_permissions(source.join("manifest.json"),fs::Permissions::from_mode(0o600)).unwrap();
+    let package=fixture.base.join("native-package");fs::create_dir(&package).unwrap();fs::set_permissions(&package,fs::Permissions::from_mode(0o700)).unwrap();let archive=package.join("native-backup.tar");let pin=native_backup_artifact::pack(&source,&archive).unwrap();
+    fixture.request.roots.push(root("native-backup","memory-backup",package.clone(),vec![],vec![]));fixture.capture();
+    fs::rename(&source,fixture.base.join("quarantined-native-original")).unwrap();fs::rename(&package,fixture.base.join("quarantined-package")).unwrap();
+    let report=restore_bundle(&fixture.destination,&fixture.base.join("restored-generation")).unwrap();let restored_archive=report.restored_roots["native-backup"].join("native-backup.tar");
+    let outer:Value=serde_json::from_slice(&fs::read(fixture.destination.join("manifest.json")).unwrap()).unwrap();let entry=outer["entries"].as_array().unwrap().iter().find(|e|e["root_label"]=="native-backup"&&e["path"]=="native-backup.tar").unwrap();assert_eq!(entry["kind"],"file");assert_eq!(entry["sha256"],pin.archive_sha256);
+    let restored=fixture.base.join("restored-detached-native");native_backup_artifact::unpack(&restored_archive,entry["sha256"].as_str().unwrap(),&restored).unwrap();assert_eq!(fs::read(restored.join("brain.db")).unwrap(),original);assert_eq!(fs::read(restored.join("manifest.json")).unwrap(),manifest);
+}

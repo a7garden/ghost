@@ -6,6 +6,7 @@ import { Status } from '../components/Status';
 import { dotState, toneFor, isRunning, phaseLabel, stateLabel } from '../client/types';
 import type { Snapshot, Review, Profile, DotState } from '../client/types';
 import { inboxItems } from '../client/inbox';
+import { taskDisplayLabel } from '../client/taskLabel';
 import { profileSummary } from './profileSummary';
 
 export interface OverviewProps { snapshot: Snapshot; mode: string; connected?: boolean; navigate: (path: string) => void; onReview: (review: Review) => void; onAdd: () => void; onAssign: (profile?: Profile) => void; }
@@ -36,7 +37,7 @@ export function Overview({ snapshot, mode, connected = true, navigate, onReview,
       })}</div>
       {!profiles.length && <div className="empty-state"><ListFilter size={26}/><h3>{snapshot.profiles.length ? '조건에 맞는 Ghost 없음' : 'Ghost 없음'}</h3><p>{snapshot.profiles.length ? '다른 상태나 검색어로 검색해 주세요.' : '이름과 역할 지시를 입력해 Ghost를 추가해 주세요.'}</p><button className="button secondary" onClick={() => snapshot.profiles.length ? (setFilter('all'), setSearch('')) : onAdd()}>{snapshot.profiles.length ? '전체 보기' : 'Ghost 만들기'}</button></div>}
     </section>
-    {tasks.length > 0 && <section className="work-section"><div className="section-heading"><h2>진행 중인 일 <span className="subtle-count">{tasks.length}</span></h2><button className="text-button" onClick={() => navigate('/work')}>작업 보기<ArrowRight size={14}/></button></div><div className="work-list">{tasks.slice(0, 4).map(({ p, c, t }) => <button className="work-row" key={`${p.id}:${t.id}`} onClick={() => navigate(`/ghosts/${p.id}?conversation=${c.id}`)}><DotAvatar profileId={p.id} tone={toneFor(p.id)} size={38}/><div className="work-copy"><strong>{t.name === '응답 생성' ? c.title : t.name}</strong><span>{p.name}</span></div><span className="work-phase"><span className="activity-bars" aria-hidden="true"><i/><i/><i/></span>{phaseLabel(t.phase)}</span><ArrowUpRight className="muted" size={16}/></button>)}</div></section>}
+    {tasks.length > 0 && <section className="work-section"><div className="section-heading"><h2>진행 중인 일 <span className="subtle-count">{tasks.length}</span></h2><button className="text-button" onClick={() => navigate('/work')}>작업 보기<ArrowRight size={14}/></button></div><div className="work-list">{tasks.slice(0, 4).map(({ p, c, t }) => <button className="work-row" key={`${p.id}:${t.id}`} onClick={() => navigate(`/ghosts/${p.id}?conversation=${c.id}`)}><DotAvatar profileId={p.id} tone={toneFor(p.id)} size={38}/><div className="work-copy"><strong>{taskDisplayLabel(t, c)}</strong><span>{p.name}</span></div><span className="work-phase"><span className="activity-bars" aria-hidden="true"><i/><i/><i/></span>{phaseLabel(t.phase)}</span><ArrowUpRight className="muted" size={16}/></button>)}</div></section>}
     </div>
     <footer className="workspace-foot"><span>{mode === 'demo' ? '예시 데이터' : ''}</span></footer>
   </div>;

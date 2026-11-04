@@ -1,5 +1,9 @@
 # Ghost repository guidance
 
+## Execution architecture
+
+Each Ghost is an independently identifiable bot. The master Ghost assigns work to other Ghosts and owns acceptance and reporting. The owner subsequently shelved the proposed migration of all Ghosts to OMP SDK. The installed architecture uses Pi Durable for canonical conversations and retains its existing OMP SDK worker path. Finish and verify the current Ghost workflows, and distinguish source capabilities from what is deployed.
+
 ## Durable user documents
 
 - The Ghost document plane is PDC 2. New documents use `pdc-markdown/1` by default or `pdc-html/1` when authored HTML structure matters.

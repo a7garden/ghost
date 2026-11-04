@@ -181,12 +181,23 @@ impl GuestRunner {
     }
 
     pub(crate) fn acquire_home(&self, spec: &WorkerSpec) -> Result<GuestHomeLease> {
-        let manifest = self.registry.lock().acquire_worker_home(
-            &spec.computer_id,
-            &self.config.ghost_id,
-            &spec.execution_id,
-            spec.authority_epoch,
-        )?;
+        // The service can start after the worker or stop between executions.
+        // Refresh trusted backend facts before granting a new home lease.
+        let facts = self.config.worker_backend_facts()?;
+        ensure!(facts.available, "Apple Container service is unavailable for this execution");
+        let manifest = {
+            let mut registry = self.registry.lock();
+            registry.register_native_worker_backend(
+                facts,
+                self.config.accepted_computer_capabilities.clone(),
+            )?;
+            registry.acquire_worker_home(
+                &spec.computer_id,
+                &self.config.ghost_id,
+                &spec.execution_id,
+                spec.authority_epoch,
+            )?
+        };
         Ok(GuestHomeLease {
             manifest,
             registry: Arc::clone(&self.registry),

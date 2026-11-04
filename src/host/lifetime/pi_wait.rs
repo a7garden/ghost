@@ -591,6 +591,42 @@ mod tests {
         })
     }
     #[tokio::test]
+    async fn original_wait_is_inspectable_after_cold_reopen_before_any_effect() -> Result<()> {
+        let f = setup_with_spec(json!({}));
+        let child = delegate_child(&f).await?;
+        let original = wait(&f, &child);
+        let receipt = callback(&f, &original).await?;
+        assert_eq!(receipt["result"]["status"], "success", "{receipt}");
+        assert!(receipt["result"]["data"]["wait_receipt"]["execution_id"].is_null());
+
+        let f = cold(f)?;
+        let projection = action(&f, json!({"method":"conversation.assignment.inspect",
+            "assignment_id":f.assignment,"ghost_id":f.ghost,"conversation_id":f.conversation})).await?;
+        assert_eq!(projection.data["work_wait"]["phase"], "waiting");
+        assert_eq!(callback(&f, &inspect(&f, &original)).await?["result"]["data"]["phase"], "waiting");
+        {
+            let state = f.host.lock()?;
+            let conn = &state.journal.0;
+            assert_eq!(conn.query_row("SELECT COUNT(*) FROM lifetime_pi_executions", [], |r| r.get::<_, u64>(0))?, 0);
+            let cancel = super::super::apply(
+                conn,
+                &envelope("owner", json!({"method":"work.cancel","work_id":child})),
+                "owner",
+            )?;
+            assert_eq!(cancel.status, ResponseStatus::Success);
+        }
+        assert_eq!(callback(&f, &inspect(&f, &original)).await?["result"]["data"]["phase"], "resolved");
+        let effect = request(&f, 10, "after-first-wait", "write", json!({"path":"answer.txt","content":"original"}));
+        let first = f.host.lifetime_pi_execution_action(&effect, PiInferenceScope::Public).await?;
+        assert_eq!(first.status, ResponseStatus::Success, "{first:?}");
+        let replay = f.host.lifetime_pi_execution_action(&effect, PiInferenceScope::Public).await?;
+        assert_eq!(replay, first);
+        let state = f.host.lock()?;
+        assert_eq!(state.journal.0.query_row("SELECT COUNT(*) FROM lifetime_pi_effects", [], |r| r.get::<_, u64>(0))?, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn pi_wait_prework_exact_ack_cold_release_resumes_original_execution_without_duplicate_effects(
     ) -> Result<()> {
         let f = setup_with_spec(json!({}));

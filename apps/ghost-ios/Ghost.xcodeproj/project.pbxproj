@@ -7,11 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		16F3B252F1D1F85AA27F1321 /* PairingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 467AE9EA6E450F523CFB6699 /* PairingModel.swift */; };
+		24EB51523442C0BED5D0C526 /* LifetimeScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75432B180E0767A84F54236D /* LifetimeScreen.swift */; };
 		320EFEAB288FB17DC643C2B5 /* ChatUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCC147278078FB5258EAD57B /* ChatUITests.swift */; };
 		349ECE0AAE2A6C7D33DB26B3 /* MessageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC906B305422C78708EF199E /* MessageHistory.swift */; };
+		40A6707E415AF04A888ACE53 /* PairingDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC92841F4361B15350215F89 /* PairingDiscovery.swift */; };
+		5153EAC249CB695603EC46A5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3E420AE48AC6FD8BC694C132 /* Assets.xcassets */; };
+		53FCF163ED6B13F8668229D9 /* OwnerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26D07A7169607C2AD51CCA50 /* OwnerSurface.swift */; };
 		6394ECA05A61CCFCBFE4AC2E /* VoiceScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF93FAE8DC1F71DFA5148BC4 /* VoiceScreen.swift */; };
+		648AF699B9BB3C4EA49AD8ED /* InferencePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA0FD59F0909CDD8874DCBE /* InferencePicker.swift */; };
+		68B27F77ADC2001312AB88B7 /* MobileRedesignUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB248AF9DD251686412B859D /* MobileRedesignUITests.swift */; };
 		7647933B07EE6F77C9F330F4 /* GhostMobileCore in Frameworks */ = {isa = PBXBuildFile; productRef = E74FBD16B51A393AB8EBA64D /* GhostMobileCore */; };
 		77745434DF1D960CAD5E50CE /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5233062CDDA8ECDAD9337D86 /* Model.swift */; };
+		88AB3D004E21ABCCC58DF544 /* PushNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB97B18F4DD1FA95AA143C6 /* PushNotifications.swift */; };
+		936EC6C4E425A74A9C921974 /* QRCodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E69A25A3011B428D51B306C /* QRCodeScanner.swift */; };
+		9FFA1554C5E092072B759688 /* MobileUIFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774B7C24A75A7CB1C63425F3 /* MobileUIFixture.swift */; };
+		AB54E180E68E2F865D0A15B6 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F99C1D2600DFDC31A909717B /* WebRTC */; };
+		BCA1733046033AA30C95D4EF /* PairingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 185FB9456E25F8AE4AF12FDB /* PairingViews.swift */; };
+		D165BE6D54FF61C5553859E1 /* VoiceCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = F36156971B0AF23AB7E6BEB1 /* VoiceCall.swift */; };
+		D41742972B2DD965AAC1BF36 /* ImageComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62AD0D1EB3456F460CE558E2 /* ImageComposer.swift */; };
+		E2EACA079C84B160E4B7CD84 /* MobileComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FC087AFC373DABF24BECE87 /* MobileComponents.swift */; };
 		F9379130D7349B4A746AB49F /* GhostApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9F8310C88BC181A67965A7 /* GhostApp.swift */; };
 /* End PBXBuildFile section */
 
@@ -26,13 +41,29 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0FC087AFC373DABF24BECE87 /* MobileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileComponents.swift; sourceTree = "<group>"; };
+		185FB9456E25F8AE4AF12FDB /* PairingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingViews.swift; sourceTree = "<group>"; };
 		210C80F89E9E82E2589E8AC6 /* Ghost.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Ghost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		21103DABE74F76176F779EEF /* ghost-ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "ghost-ios"; path = .; sourceTree = SOURCE_ROOT; };
+		26D07A7169607C2AD51CCA50 /* OwnerSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OwnerSurface.swift; sourceTree = "<group>"; };
+		36A854FF01D5392AB5785ED3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		3E420AE48AC6FD8BC694C132 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		467AE9EA6E450F523CFB6699 /* PairingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingModel.swift; sourceTree = "<group>"; };
 		5233062CDDA8ECDAD9337D86 /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
+		5E69A25A3011B428D51B306C /* QRCodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeScanner.swift; sourceTree = "<group>"; };
+		62AD0D1EB3456F460CE558E2 /* ImageComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageComposer.swift; sourceTree = "<group>"; };
+		75432B180E0767A84F54236D /* LifetimeScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifetimeScreen.swift; sourceTree = "<group>"; };
+		774B7C24A75A7CB1C63425F3 /* MobileUIFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileUIFixture.swift; sourceTree = "<group>"; };
+		8D462C3EF9DDC55EB4A85802 /* Ghost.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Ghost.entitlements; sourceTree = "<group>"; };
 		9B9F8310C88BC181A67965A7 /* GhostApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostApp.swift; sourceTree = "<group>"; };
 		A2CBD3F209672C194763E595 /* GhostUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = GhostUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AC906B305422C78708EF199E /* MessageHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageHistory.swift; sourceTree = "<group>"; };
+		BB248AF9DD251686412B859D /* MobileRedesignUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRedesignUITests.swift; sourceTree = "<group>"; };
 		BF93FAE8DC1F71DFA5148BC4 /* VoiceScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceScreen.swift; sourceTree = "<group>"; };
+		DBA0FD59F0909CDD8874DCBE /* InferencePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InferencePicker.swift; sourceTree = "<group>"; };
+		EBB97B18F4DD1FA95AA143C6 /* PushNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotifications.swift; sourceTree = "<group>"; };
+		F36156971B0AF23AB7E6BEB1 /* VoiceCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCall.swift; sourceTree = "<group>"; };
+		FC92841F4361B15350215F89 /* PairingDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingDiscovery.swift; sourceTree = "<group>"; };
 		FCC147278078FB5258EAD57B /* ChatUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -42,6 +73,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7647933B07EE6F77C9F330F4 /* GhostMobileCore in Frameworks */,
+				AB54E180E68E2F865D0A15B6 /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -52,6 +84,7 @@
 			isa = PBXGroup;
 			children = (
 				FCC147278078FB5258EAD57B /* ChatUITests.swift */,
+				BB248AF9DD251686412B859D /* MobileRedesignUITests.swift */,
 			);
 			path = UITests;
 			sourceTree = "<group>";
@@ -86,9 +119,24 @@
 		E18BFCAB49BCE3B1F821C94C /* App */ = {
 			isa = PBXGroup;
 			children = (
+				3E420AE48AC6FD8BC694C132 /* Assets.xcassets */,
+				8D462C3EF9DDC55EB4A85802 /* Ghost.entitlements */,
 				9B9F8310C88BC181A67965A7 /* GhostApp.swift */,
+				62AD0D1EB3456F460CE558E2 /* ImageComposer.swift */,
+				DBA0FD59F0909CDD8874DCBE /* InferencePicker.swift */,
+				36A854FF01D5392AB5785ED3 /* Info.plist */,
+				75432B180E0767A84F54236D /* LifetimeScreen.swift */,
 				AC906B305422C78708EF199E /* MessageHistory.swift */,
+				0FC087AFC373DABF24BECE87 /* MobileComponents.swift */,
+				774B7C24A75A7CB1C63425F3 /* MobileUIFixture.swift */,
 				5233062CDDA8ECDAD9337D86 /* Model.swift */,
+				26D07A7169607C2AD51CCA50 /* OwnerSurface.swift */,
+				FC92841F4361B15350215F89 /* PairingDiscovery.swift */,
+				467AE9EA6E450F523CFB6699 /* PairingModel.swift */,
+				185FB9456E25F8AE4AF12FDB /* PairingViews.swift */,
+				EBB97B18F4DD1FA95AA143C6 /* PushNotifications.swift */,
+				5E69A25A3011B428D51B306C /* QRCodeScanner.swift */,
+				F36156971B0AF23AB7E6BEB1 /* VoiceCall.swift */,
 				BF93FAE8DC1F71DFA5148BC4 /* VoiceScreen.swift */,
 			);
 			path = App;
@@ -102,6 +150,7 @@
 			buildConfigurationList = DEECEEBFB81B438E8EE297DF /* Build configuration list for PBXNativeTarget "Ghost" */;
 			buildPhases = (
 				A8989A7FD184CA713E409A13 /* Sources */,
+				6EDB99CB764991B3120F81C1 /* Resources */,
 				E7B7E34965015AE6857F907F /* Frameworks */,
 			);
 			buildRules = (
@@ -111,6 +160,7 @@
 			name = Ghost;
 			packageProductDependencies = (
 				E74FBD16B51A393AB8EBA64D /* GhostMobileCore */,
+				F99C1D2600DFDC31A909717B /* WebRTC */,
 			);
 			productName = Ghost;
 			productReference = 210C80F89E9E82E2589E8AC6 /* Ghost.app */;
@@ -162,6 +212,7 @@
 			mainGroup = B106C7B4A6A4953429D6CA34;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				81229C9F72F900A6F415F14F /* XCRemoteSwiftPackageReference "WebRTC" */,
 				163D5A28758903B18A0CDF82 /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -175,14 +226,37 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		6EDB99CB764991B3120F81C1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5153EAC249CB695603EC46A5 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		A8989A7FD184CA713E409A13 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				F9379130D7349B4A746AB49F /* GhostApp.swift in Sources */,
+				D41742972B2DD965AAC1BF36 /* ImageComposer.swift in Sources */,
+				648AF699B9BB3C4EA49AD8ED /* InferencePicker.swift in Sources */,
+				24EB51523442C0BED5D0C526 /* LifetimeScreen.swift in Sources */,
 				349ECE0AAE2A6C7D33DB26B3 /* MessageHistory.swift in Sources */,
+				E2EACA079C84B160E4B7CD84 /* MobileComponents.swift in Sources */,
+				9FFA1554C5E092072B759688 /* MobileUIFixture.swift in Sources */,
 				77745434DF1D960CAD5E50CE /* Model.swift in Sources */,
+				53FCF163ED6B13F8668229D9 /* OwnerSurface.swift in Sources */,
+				40A6707E415AF04A888ACE53 /* PairingDiscovery.swift in Sources */,
+				16F3B252F1D1F85AA27F1321 /* PairingModel.swift in Sources */,
+				BCA1733046033AA30C95D4EF /* PairingViews.swift in Sources */,
+				88AB3D004E21ABCCC58DF544 /* PushNotifications.swift in Sources */,
+				936EC6C4E425A74A9C921974 /* QRCodeScanner.swift in Sources */,
+				D165BE6D54FF61C5553859E1 /* VoiceCall.swift in Sources */,
 				6394ECA05A61CCFCBFE4AC2E /* VoiceScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -192,6 +266,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				320EFEAB288FB17DC643C2B5 /* ChatUITests.swift in Sources */,
+				68B27F77ADC2001312AB88B7 /* MobileRedesignUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -210,13 +285,18 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/Ghost.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Ghost;
+				INFOPLIST_KEY_NSCameraUsageDescription = "PC 화면의 QR 코드를 스캔해 서버에 연결할 때 카메라를 사용합니다.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "근처의 Ghost 서버를 자동으로 찾을 때 로컬 네트워크에 연결합니다.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ghost와 음성으로 대화할 때 마이크를 사용합니다.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIBackgroundModes = audio;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -391,13 +471,18 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/Ghost.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Ghost;
+				INFOPLIST_KEY_NSCameraUsageDescription = "PC 화면의 QR 코드를 스캔해 서버에 연결할 때 카메라를 사용합니다.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "근처의 Ghost 서버를 자동으로 찾을 때 로컬 네트워크에 연결합니다.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ghost와 음성으로 대화할 때 마이크를 사용합니다.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIBackgroundModes = audio;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -450,10 +535,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		81229C9F72F900A6F415F14F /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 134.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		E74FBD16B51A393AB8EBA64D /* GhostMobileCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = GhostMobileCore;
+		};
+		F99C1D2600DFDC31A909717B /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 81229C9F72F900A6F415F14F /* XCRemoteSwiftPackageReference "WebRTC" */;
+			productName = WebRTC;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

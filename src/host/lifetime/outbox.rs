@@ -102,6 +102,7 @@ pub(crate) fn recoverable_assignment_blocker(reason: &str) -> bool {
     matches!(reason,
         "goal_assignment_inspection_unconfirmed" | "runtime_unavailable"
         | "Pi runtime recovery pending; original command remains queued"
+        | "Dispatch blocked by current graph scope or disclosure policy; no new worker/model dispatch"
         | "Delivery unconfirmed; reconcile the original command and execution IDs"
         | "Delivery scope is unresolved; explicit reconciliation required"
         | "Receiver ACK commit is unconfirmed; reconcile the same command ID"
@@ -121,8 +122,8 @@ fn clear_assignment_delivery_blocker(tx: &Transaction<'_>, command: &Envelope) -
         || command.body["conversation_id"] != goal.reply_conversation {
         return Ok(());
     }
-    // Clear only this driver's recoverable transport diagnosis. A successful
-    // receiver ACK cannot clear a policy/graph blocker or invent completion.
+    // The matching receiver ACK follows fresh scope and route validation.
+    // Only clear the transient dispatch diagnosis for a never-started Work.
     if work.blocker.as_deref().is_some_and(recoverable_assignment_blocker) {
         work.blocker = None;
         super::db::update_work(tx, &work)?;

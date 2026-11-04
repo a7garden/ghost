@@ -3,7 +3,7 @@ export { normalizeWork, normalizeDecision, normalizeAdmission, normalizeAdmissio
 import { normalizeRoutingResults, normalizeRoutingShares } from './routingResults';
 import { normalizeConnectedPlanner } from './connectedPlanner';
 import { isDesign } from '../pets/sprites';
-import type { Snapshot, ModelSettings, ModelProvider, ModelRole } from './types';
+import type { Snapshot, IntegrationApproval, ModelSettings, ModelProvider, ModelRole } from './types';
 
 const object = (v: unknown): Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
 const list = (v: unknown): Record<string, unknown>[] => Array.isArray(v) ? v.map(object) : [];
@@ -23,6 +23,18 @@ function modelSettings(v: unknown): ModelSettings | undefined {
   });
   const roles = object(s.roles);
   return { version: optionalNumber(s.version) ?? 0, providers, roles: { llm: nullableText(roles.llm), stt: nullableText(roles.stt), tts: nullableText(roles.tts) }, catalog_updated_ms: optionalNumber(s.catalog_updated_ms) };
+}
+function integrationApprovals(value: unknown): IntegrationApproval[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return list(value).flatMap(row => {
+    const { id, ghost_id, conversation_id, integration_id, integration_name, tool, state, created_ms } = row;
+    if (state !== 'pending' && state !== 'dispatching' && state !== 'sent'
+      && state !== 'failed' && state !== 'uncertain' && state !== 'declined') return [];
+    if (typeof id !== 'string' || typeof ghost_id !== 'string' || typeof conversation_id !== 'string'
+      || typeof integration_id !== 'string' || typeof integration_name !== 'string' || typeof tool !== 'string'
+      || typeof created_ms !== 'number' || !Number.isSafeInteger(created_ms)) return [];
+    return [{ id, ghost_id, conversation_id, integration_id, integration_name, tool, state, created_ms }];
+  });
 }
 export function normalizeSnapshot(value: unknown): Snapshot {
   const s = object(value);
@@ -70,7 +82,8 @@ export function normalizeSnapshot(value: unknown): Snapshot {
     spaces: list(s.spaces).map(g => ({ id: text(g.id), name: text(g.name), path: text(g.path), writable: g.writable === true, profiles: Array.isArray(g.profiles) ? g.profiles.filter((p): p is string => typeof p === 'string') : [] })),
     todos: list(s.todos).map(t => ({ id: text(t.id), title: text(t.title), notes: text(t.notes), due: typeof t.due === 'string' ? t.due : null, completed: t.completed === true, version: Number(t.version) || 1, updated_ms: Number(t.updated_ms) || 0 })),
     calendar_events: list(s.calendar_events).map(t => ({ id: text(t.id), title: text(t.title), notes: text(t.notes), start_ms: Number(t.start_ms), end_ms: Number(t.end_ms), version: Number(t.version) || 1, updated_ms: Number(t.updated_ms) || 0 })),
-    integrations: list(s.integrations).map(t => ({ id: text(t.id), name: text(t.name), transport: object(t.transport) as unknown as Snapshot['integrations'][number]['transport'], profiles: Array.isArray(t.profiles) ? t.profiles.filter((p): p is string => typeof p === 'string') : [], enabled: t.enabled === true, version: Number(t.version) || 1, tools: list(t.tools).map(v => ({ name: text(v.name), description: text(v.description), inputSchema: v.inputSchema })), checked_ms: Number(t.checked_ms) || null, error: typeof t.error === 'string' ? t.error : null })),
+    integrationApprovals: integrationApprovals(s.integration_approvals),
+    integrations: list(s.integrations).map(t => ({ id: text(t.id), name: text(t.name), transport: object(t.transport) as unknown as Snapshot['integrations'][number]['transport'], profiles: Array.isArray(t.profiles) ? t.profiles.filter((p): p is string => typeof p === 'string') : [], enabled: t.enabled === true, version: Number(t.version) || 1, approved_tools: Array.isArray(t.approved_tools) ? t.approved_tools.filter((name): name is string => typeof name === 'string') : t.approved_tools === null ? null : undefined, tools: list(t.tools).map(v => ({ name: text(v.name), description: text(v.description), inputSchema: v.inputSchema })), checked_ms: Number(t.checked_ms) || null, error: typeof t.error === 'string' ? t.error : null })),
     delegations: list(s.delegations).map(d => ({ id: text(d.id), owner: text(d.owner), owner_task: text(d.owner_task), target: text(d.target), conversation_id: text(d.conversation_id), task_id: text(d.task_id), background: d.background === true, state: text(d.state, 'unknown') })),
     capabilities: object(s.capabilities), connectors: Object.fromEntries(Object.entries(object(s.connectors)).map(([k, v]) => [k, v === true])),
   };
