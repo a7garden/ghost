@@ -1225,6 +1225,9 @@ fn work_accept(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
     }
     let (orchestra_review, owner_decision) =
         super::orchestra_review::acceptance_evidence(conn, &goal, &work, &acceptance.artifact_digest, principal)?;
+    if owner_decision && acceptance.checks.iter().any(|check| check.id == super::orchestra_review::CHECK) {
+        return Err(conflict("Only a current Orchestra verdict can substantiate the Orchestra review check"));
+    }
     let required = required_checks(&goal.acceptance_spec)?;
     let mut seen = BTreeSet::new();
     for check in &acceptance.checks {

@@ -20,7 +20,7 @@ use std::{path::Path, sync::atomic::Ordering, time::Duration};
 
 const KIND: &str = "orchestra_review_v1";
 const ACTOR: &str = "host:orchestra-review";
-const CHECK: &str = "orchestra_review";
+pub(super) const CHECK: &str = "orchestra_review";
 const INPUT_LIMIT: usize = 48 * 1024;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -637,14 +637,19 @@ mod tests {
     use super::super::pi_execution::tests::{publish_complete, setup_with_spec, Fixture};
     use super::*;
 
+    const FIXTURE_ARTIFACT: &str = "Controlled artifact, line one.\nLine two.\n";
+
     async fn completed_fixture() -> Fixture {
-        let f = setup_with_spec(json!({}));
+        let f = configured_fixture(json!({}));
         assert_eq!(
-            publish_complete(&f, "Controlled artifact, line one.\nLine two.\n")
-                .await
-                .status,
+            publish_complete(&f, FIXTURE_ARTIFACT).await.status,
             ResponseStatus::Success
         );
+        f
+    }
+
+    fn configured_fixture(spec: Value) -> Fixture {
+        let f = setup_with_spec(spec);
         let reviewer = Selection {
             provider: "zai-coding".into(),
             model: "glm-5.3".into(),
@@ -694,9 +699,14 @@ mod tests {
             command.body["artifact"],
             json!({"sha256":proof.artifact_digest,"text":"Controlled artifact, line one.\nLine two.\n"})
         );
+        let expected_checks = if goal.acceptance_spec["verifier"].is_object() {
+            json!(["artifact_content", "artifact_sha256"])
+        } else {
+            json!([])
+        };
         assert_eq!(
             command.body["requirements"],
-            json!({"prompt":goal.prompt,"required_checks":[]})
+            json!({"prompt":goal.prompt,"required_checks":expected_checks})
         );
         assert!(!command.body.to_string().contains("Published fixture"));
         assert!(!command.body.to_string().contains("answer.txt"));
@@ -806,6 +816,21 @@ mod tests {
                 .status,
             ResponseStatus::Error
         );
+        let mut false_review = body.clone();
+        false_review["acceptance"]["checks"][0]["id"] = json!(CHECK);
+        let false_review = envelope(
+            "owner",
+            "owner-accept-with-false-review".into(),
+            1,
+            false_review,
+        )
+        .unwrap();
+        assert_eq!(
+            super::super::apply(conn, &false_review, "owner")
+                .unwrap()
+                .status,
+            ResponseStatus::Error
+        );
         let owner = envelope("owner", "owner-accept-after-fail".into(), 1, body).unwrap();
         assert_eq!(
             super::super::apply(conn, &owner, "owner").unwrap().status,
@@ -853,5 +878,42 @@ mod tests {
             .unwrap()
             .reviewer
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn orchestra_owner_verify_replays_accepted_deterministic_result() {
+        use super::super::pi_execution::tests::verifier_spec;
+        for verdict in [Verdict::Passed, Verdict::Failed] {
+            let f = configured_fixture(verifier_spec(FIXTURE_ARTIFACT));
+            assert_eq!(
+                publish_complete(&f, FIXTURE_ARTIFACT).await.status,
+                ResponseStatus::Success
+            );
+            prepare_receipt(&f, verdict);
+            let automatic = if verdict == Verdict::Passed {
+                let state = f.host.lock().unwrap();
+                let source = envelope(ACTOR, "review-pass".into(), 1, Value::Null).unwrap();
+                Some(
+                    f.host
+                        .verify_pi_work(&state.journal.0, &source, &f.work)
+                        .unwrap(),
+                )
+            } else {
+                None
+            };
+            let command = envelope(
+                "owner",
+                "owner-recheck".into(),
+                1,
+                json!({"method":"work.verify","work_id":f.work}),
+            )
+            .unwrap();
+            let first = f.host.lifetime_action(&command).unwrap();
+            assert_eq!(first["result"]["status"], "success", "{first:?}");
+            if let Some(automatic) = automatic {
+                assert_eq!(first["result"], serde_json::to_value(automatic).unwrap());
+            }
+            assert_eq!(f.host.lifetime_action(&command).unwrap(), first);
+        }
     }
 }

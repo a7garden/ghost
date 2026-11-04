@@ -2036,6 +2036,19 @@ impl Host {
             .execution_id
             .as_deref()
             .ok_or_else(|| anyhow!("Pi verification execution missing"))?;
+        let manual = source.actor_ref == super::conversation::OWNER_PRINCIPAL
+            && source.body["method"] == "work.verify"
+            && super::orchestra::assignment(conn, &work)?.is_some_and(|pin| pin.reviewer.is_some());
+        if manual && work.state == "accepted" {
+            let prior: Option<String> = conn.query_row(
+                "SELECT response FROM lifetime_commands WHERE command_id IN (?1,?2)
+                 AND json_extract(response,'$.status')='success'
+                 AND json_extract(response,'$.data.work.id')=?3 LIMIT 1",
+                params![format!("pi-independent-accept:{execution}"), format!("pi-owner-independent-accept:{execution}"), work.id],
+                |row| row.get(0),
+            ).optional()?;
+            if let Some(prior) = prior { return Ok(serde_json::from_str(&prior)?); }
+        }
         let verifier = &goal.acceptance_spec["verifier"];
         ensure!(verifier["kind"]!="owner-task-verifier/1", "Independent Owner verifier runs through the asynchronous driver with fresh source authority; result remains pending review");
         ensure!(
@@ -2095,9 +2108,6 @@ impl Host {
                 "Published artifact does not match the Owner's expected path and content digest"
             )
         })?;
-        let manual = source.actor_ref == super::conversation::OWNER_PRINCIPAL
-            && source.body["method"] == "work.verify"
-            && super::orchestra::assignment(conn, &work)?.is_some_and(|pin| pin.reviewer.is_some());
         let actor = if manual { super::conversation::OWNER_PRINCIPAL } else { "host-pi-verifier" };
         let (review, _) = super::orchestra_review::acceptance_evidence(conn, &goal, &work, &artifact.digest, actor)?;
         let bytes = crate::worker::journal::read_verified_pi_artifact(
