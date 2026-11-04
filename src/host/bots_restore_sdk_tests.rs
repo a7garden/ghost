@@ -1153,7 +1153,8 @@ mod actual_sdk {
             "SELECT goal_id FROM lifetime_turn_goals WHERE turn_id='orchestra-e2e-input'", [], |r| r.get(0),
         ).unwrap();
         let thread = owner(&host, "orchestra-e2e-thread", json!({"method":"goal.thread.inspect","goal_id":goal}), None);
-        assert_eq!(thread["goal"]["state"], "accepted");
+        assert_eq!(thread["goal"]["state"], "open");
+        assert_eq!(thread["graph"]["work"][0]["state"], "completed");
         assert_eq!(thread["goal"]["acceptance_spec"]["orchestra_task"], "routine-code");
         assert!(thread["reports"].as_array().unwrap().iter().any(|report| report["text"].as_str().unwrap().contains("독립 Pi 리뷰를 통과했습니다.")));
         let trace: Vec<Value> = fs::read_to_string(trace_path).unwrap().lines().map(|line|serde_json::from_str(line).unwrap()).collect();

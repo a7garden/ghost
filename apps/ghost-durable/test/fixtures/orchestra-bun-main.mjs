@@ -47,7 +47,7 @@ globalThis.fetch = async (input, init) => {
     else if (!seen('publish_artifact')) item = call('publish_artifact', { path: 'answer.txt', privacy: 'public' });
     else item = text('산출물을 게시했습니다.');
   } else if (verified) {
-    item = text('독립 Pi 리뷰를 통과했습니다. 최종 산출물을 게시했습니다.');
+    item = text('독립 Pi 리뷰를 통과했습니다. 산출물을 게시했으며 소유자 수용을 기다립니다.');
   } else if (pendingReport) {
     item = text('산출물이 게시됐으며 리뷰를 기다리고 있습니다.');
   } else if (owner) {

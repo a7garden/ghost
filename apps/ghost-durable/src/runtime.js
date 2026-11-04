@@ -948,7 +948,7 @@ Current authenticated Goal assignment: ${JSON.stringify({
             }, ...messages.filter((message) => message.role !== "system")] });
             }
             ownerTaskObservation = { turnId: scope.turnId, confirmed: false };
-            const { task: ownerTask, creation: ownerCreation, orchestra, integration: integrationEnabled } = await currentOwnerTask(scope);
+            const { task: ownerTask, creation: ownerCreation, orchestra, integration: integrationEnabled } = (await currentOwnerTask(scope)) ?? {};
             ownerTaskObservation = { turnId: scope.turnId, task: ownerTask, creation: ownerCreation, orchestra, confirmed: true };
             const orchestraIntake = orchestra && !ownerTask && !ownerCreation ? ownerOrchestraInstructions(orchestra) : "";
             // This model-facing view exposes only the applicable branch and

@@ -2095,7 +2095,11 @@ impl Host {
                 "Published artifact does not match the Owner's expected path and content digest"
             )
         })?;
-        let review = super::orchestra_review::acceptance_check(conn, &goal, &work, &artifact.digest)?;
+        let manual = source.actor_ref == super::conversation::OWNER_PRINCIPAL
+            && source.body["method"] == "work.verify"
+            && super::orchestra::assignment(conn, &work)?.is_some_and(|pin| pin.reviewer.is_some());
+        let actor = if manual { super::conversation::OWNER_PRINCIPAL } else { "host-pi-verifier" };
+        let (review, _) = super::orchestra_review::acceptance_evidence(conn, &goal, &work, &artifact.digest, actor)?;
         let bytes = crate::worker::journal::read_verified_pi_artifact(
             &self.root,
             conn,
@@ -2158,7 +2162,7 @@ impl Host {
                 "stdout expectation requires exact Owner command"
             );
         }
-        checks.extend(review);
+        checks.extend(review.map(super::orchestra_review::passing_check));
         for required in goal.acceptance_spec["required_checks"]
             .as_array()
             .into_iter()
@@ -2183,13 +2187,13 @@ impl Host {
         };
         let body = json!({"method":"work.accept","acceptance":acceptance});
         let command = Envelope {
-            command_id: format!("pi-independent-accept:{execution}"),
-            actor_ref: "host-pi-verifier".into(),
+            command_id: if manual { format!("pi-owner-independent-accept:{execution}") } else { format!("pi-independent-accept:{execution}") },
+            actor_ref: actor.into(),
             payload_digest: canonical_digest(&body)?,
             body,
             ..source.clone()
         };
-        super::apply(conn, &command, "host-pi-verifier")
+        super::apply(conn, &command, actor)
     }
 }
 

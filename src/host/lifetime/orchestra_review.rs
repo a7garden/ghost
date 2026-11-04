@@ -8,8 +8,7 @@ use crate::{
         Host,
     },
     lifetime_contract::{
-        canonical_digest, Acceptance, Artifact, Check, Envelope, Goal, Response, ResponseStatus,
-        Work, VERSION,
+        canonical_digest, Artifact, Check, Envelope, Goal, Response, ResponseStatus, Work, VERSION,
     },
     worker::journal::read_verified_pi_artifact,
 };
@@ -107,7 +106,7 @@ fn proof(conn: &Connection, goal: &Goal, work: &Work, scope: &Scope) -> Result<(
     );
     ensure!(
         scope.producer.provider != scope.reviewer.provider
-            && orchestra::reviewer_current(conn, goal, &scope.reviewer)?,
+            && orchestra::reviewer_current(conn, goal, work, &scope.reviewer)?,
         "Review provider is unavailable or its Owner approval changed"
     );
     ensure!(
@@ -209,19 +208,40 @@ pub(super) fn require_pass(
     )))
 }
 
+pub(super) fn acceptance_evidence(
+    conn: &Connection,
+    goal: &Goal,
+    work: &Work,
+    artifact_digest: &str,
+    principal: &str,
+) -> Result<(Option<String>, bool)> {
+    match require_pass(conn, goal, work, artifact_digest) {
+        Ok(evidence) => Ok((evidence, false)),
+        Err(error)
+            if principal == conversation::OWNER_PRINCIPAL
+                && error.downcast_ref::<apply::Rejected>().is_some() =>
+        {
+            Ok((None, true))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn passing_check(evidence: String) -> Check {
+    Check {
+        id: CHECK.into(),
+        passed: true,
+        evidence,
+    }
+}
+
 pub(super) fn acceptance_check(
     conn: &Connection,
     goal: &Goal,
     work: &Work,
     artifact_digest: &str,
 ) -> Result<Option<Check>> {
-    Ok(
-        require_pass(conn, goal, work, artifact_digest)?.map(|evidence| Check {
-            id: CHECK.into(),
-            passed: true,
-            evidence,
-        }),
-    )
+    Ok(require_pass(conn, goal, work, artifact_digest)?.map(passing_check))
 }
 
 pub(super) fn ready_for_verifier(conn: &Connection, work: &Work) -> Result<bool> {
@@ -372,7 +392,50 @@ fn notice(conn: &Connection, saved: &Receipt, text: &str) -> Result<()> {
     Ok(())
 }
 
-fn finalize(conn: &Connection, saved: &mut Receipt, message: Option<&str>) -> Result<()> {
+enum Notice<'a> {
+    Fact(&'a str),
+    Report(&'a str),
+}
+
+fn enqueue_report(conn: &Connection, saved: &Receipt, text: &str) -> Result<()> {
+    let goal =
+        db::goal(conn, &saved.scope.goal_id)?.ok_or_else(|| anyhow!("Review Goal missing"))?;
+    let source_id = format!("pi-result:{}", saved.scope.execution_id);
+    let raw: String = conn.query_row(
+        "SELECT request FROM lifetime_commands WHERE command_id=?1 AND json_extract(response,'$.status')='success'",
+        [&source_id], |row| row.get(0),
+    )?;
+    let source: Envelope = serde_json::from_str(&raw)?;
+    source.validate()?;
+    ensure!(
+        source.command_id == source_id
+            && source.authority_epoch == saved.scope.epoch
+            && source.body["method"] == "work.result"
+            && source.body["execution_id"] == saved.scope.execution_id,
+        "Review report has no original Pi result source"
+    );
+    let receiver = apply::outgoing(
+        &source,
+        &source.actor_ref,
+        Some(goal.revision),
+        json!({
+            "method":"conversation.submit","ghost_id":goal.accountable_ghost,"conversation_id":goal.reply_conversation,
+            "privacy":goal.privacy,"goal_id":goal.id,"goal_revision":goal.revision,
+            "prompt":format!("Authenticated Host status for work_id={}. {text} Report the recorded review and pending acceptance to the Owner. Do not execute, delegate, or claim acceptance.", saved.scope.work_id),
+        }),
+    )?;
+    conn.execute(
+        "INSERT INTO lifetime_outbox(command_id,target,delivery_ref,payload) VALUES(?1,'pi',?2,?3)",
+        params![
+            source_id,
+            receiver["command_id"].as_str(),
+            receiver.to_string()
+        ],
+    )?;
+    Ok(())
+}
+
+fn finalize(conn: &Connection, saved: &mut Receipt, message: Option<Notice<'_>>) -> Result<()> {
     saved.finalized = true;
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
     let updated = tx.execute(
@@ -384,77 +447,58 @@ fn finalize(conn: &Connection, saved: &mut Receipt, message: Option<&str>) -> Re
         ],
     )?;
     ensure!(updated == 1, "Original Orchestra review receipt missing");
-    if let Some(message) = message {
-        notice(&tx, saved, message)?;
+    match message {
+        Some(Notice::Fact(text)) => notice(&tx, saved, text)?,
+        Some(Notice::Report(text)) => enqueue_report(&tx, saved, text)?,
+        None => {}
     }
     tx.commit()?;
     Ok(())
 }
 
 fn finish_pass(host: &Host, conn: &Connection, saved: &mut Receipt) -> Result<()> {
+    // On shutdown keep the confirmed verdict available for local continuation.
+    if host.stopping.load(Ordering::Acquire) {
+        return Ok(());
+    }
     if current(host, conn, saved).is_err() {
         return finalize(
             conn,
             saved,
-            Some("Independent Orchestra review is stale. Host acceptance is pending."),
+            Some(Notice::Fact(
+                "Independent Orchestra review is stale. Host acceptance is pending.",
+            )),
         );
     }
     let goal =
         db::goal(conn, &saved.scope.goal_id)?.ok_or_else(|| anyhow!("Review Goal missing"))?;
-    let source = envelope(
-        ACTOR,
-        format!("orchestra-review-accept:{}", saved.scope.execution_id),
-        saved.scope.epoch,
-        Value::Null,
-    )?;
     let verifier = &goal.acceptance_spec["verifier"];
     if verifier["kind"] == "owner-task-verifier/1" {
-        // The existing continuation owns this verifier and its acceptance.
         return finalize(conn, saved, None);
     }
-    let outcome = if verifier["kind"] == "pi-artifact/1" {
-        host.verify_pi_work(conn, &source, &saved.scope.work_id)
-    } else if verifier.is_null()
-        && apply::required_checks(&goal.acceptance_spec)?
-            .iter()
-            .all(|id| id == CHECK)
-    {
-        let proof = saved
-            .proof
-            .as_ref()
-            .ok_or_else(|| anyhow!("Orchestra acceptance proof missing"))?;
-        let work =
-            db::work(conn, &saved.scope.work_id)?.ok_or_else(|| anyhow!("Review Work missing"))?;
-        let check = acceptance_check(conn, &goal, &work, &proof.artifact_digest)?
-            .ok_or_else(|| anyhow!("Orchestra check missing"))?;
-        let acceptance = Acceptance {
-            work_id: work.id,
-            goal_revision: goal.revision,
-            requirement_digest: goal.requirement_digest,
-            artifact_digest: proof.artifact_digest.clone(),
-            verifier_revision: proof.verifier_revision.clone(),
-            policy_revision: proof.policy_revision,
-            checks: vec![check],
-        };
-        let command = envelope(
+    if verifier["kind"] == "pi-artifact/1" {
+        let source = envelope(
             ACTOR,
-            source.command_id,
+            format!("orchestra-review-accept:{}", saved.scope.execution_id),
             saved.scope.epoch,
-            json!({"method":"work.accept","acceptance":acceptance}),
+            Value::Null,
         )?;
-        super::apply(conn, &command, ACTOR)
-    } else {
-        return finalize(
-            conn,
-            saved,
-            Some("Independent Orchestra review passed. Additional Owner checks are pending."),
-        );
-    };
-    let message = (!outcome.is_ok_and(|response| response.status == ResponseStatus::Success))
-        .then_some(
-        "Independent Orchestra review passed. Host acceptance is pending on the remaining checks.",
+        if host
+            .verify_pi_work(conn, &source, &saved.scope.work_id)
+            .is_ok_and(|response| response.status == ResponseStatus::Success)
+        {
+            return finalize(conn, saved, None);
+        }
+    }
+    let proof = saved
+        .proof
+        .as_ref()
+        .ok_or_else(|| anyhow!("Orchestra review proof missing"))?;
+    let report = format!(
+        "Independent Orchestra Pi review passed: {} / {} ({}) for immutable artifact {}. Owner acceptance or additional checks are pending.",
+        saved.scope.reviewer.provider, saved.scope.reviewer.model, saved.scope.reviewer.effort, proof.artifact_digest,
     );
-    finalize(conn, saved, message)
+    finalize(conn, saved, Some(Notice::Report(&report)))
 }
 
 fn next_work(conn: &Connection) -> Result<Option<String>> {
@@ -500,7 +544,7 @@ impl Host {
                     saved.verdict = Verdict::Unknown;
                     "Independent Orchestra review is unconfirmed. Host acceptance is pending."
                 };
-                return finalize(conn, &mut saved, Some(message));
+                return finalize(conn, &mut saved, Some(Notice::Fact(message)));
             }
             let prepared = prepare(self, conn, &goal, &work, &scope);
             let mut saved = Receipt {
@@ -530,7 +574,7 @@ impl Host {
                 ],
             )?;
             let Some(command) = command else {
-                return finalize(conn, &mut saved, Some("Independent Orchestra review was blocked by the current disclosure, artifact, or provider requirements. Host acceptance is pending."));
+                return finalize(conn, &mut saved, Some(Notice::Fact("Independent Orchestra review was blocked by the current disclosure, artifact, or provider requirements. Host acceptance is pending.")));
             };
             (saved, command)
         };
@@ -573,12 +617,16 @@ impl Host {
             Verdict::Failed => finalize(
                 conn,
                 &mut saved,
-                Some("Independent Orchestra review failed. Host acceptance is pending."),
+                Some(Notice::Fact(
+                    "Independent Orchestra review failed. Host acceptance is pending.",
+                )),
             ),
             _ => finalize(
                 conn,
                 &mut saved,
-                Some("Independent Orchestra review is unconfirmed. Host acceptance is pending."),
+                Some(Notice::Fact(
+                    "Independent Orchestra review is unconfirmed. Host acceptance is pending.",
+                )),
             ),
         }
     }
@@ -590,7 +638,7 @@ mod tests {
     use super::*;
 
     async fn completed_fixture() -> Fixture {
-        let f = setup_with_spec(json!({"required_checks":["orchestra_review"]}));
+        let f = setup_with_spec(json!({}));
         assert_eq!(
             publish_complete(&f, "Controlled artifact, line one.\nLine two.\n")
                 .await
@@ -721,5 +769,89 @@ mod tests {
         assert!(require_pass(conn, &goal, &work, &digest).unwrap().is_some());
         conversation::persist_disclosure(conn, &f.ghost, &f.conversation, "private").unwrap();
         assert!(require_pass(conn, &goal, &work, &digest).is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_review_blocks_automatic_acceptance_but_preserves_owner_acceptance() {
+        let f = completed_fixture().await;
+        let (execution, digest) = prepare_receipt(&f, Verdict::Failed);
+        let state = f.host.lock().unwrap();
+        let conn = &state.journal.0;
+        let saved = receipt(conn, &execution).unwrap().unwrap();
+        let proof = saved.proof.unwrap();
+        let acceptance = crate::lifetime_contract::Acceptance {
+            work_id: f.work.clone(),
+            goal_revision: saved.scope.goal_revision,
+            requirement_digest: saved.scope.requirement_digest,
+            artifact_digest: digest,
+            verifier_revision: proof.verifier_revision,
+            policy_revision: proof.policy_revision,
+            checks: vec![Check {
+                id: "owner_inspected".into(),
+                passed: true,
+                evidence: "Owner inspected this artifact.".into(),
+            }],
+        };
+        let body = json!({"method":"work.accept","acceptance":acceptance});
+        let automatic = envelope(
+            "host-pi-verifier",
+            "automatic-accept-after-fail".into(),
+            1,
+            body.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            super::super::apply(conn, &automatic, "host-pi-verifier")
+                .unwrap()
+                .status,
+            ResponseStatus::Error
+        );
+        let owner = envelope("owner", "owner-accept-after-fail".into(), 1, body).unwrap();
+        assert_eq!(
+            super::super::apply(conn, &owner, "owner").unwrap().status,
+            ResponseStatus::Success
+        );
+        let prompt: String = conn.query_row(
+            "SELECT json_extract(payload,'$.body.prompt') FROM lifetime_outbox WHERE command_id=?1",
+            [&owner.command_id], |r| r.get(0),
+        ).unwrap();
+        assert!(prompt.contains(
+            "The Owner accepted this result. There is no current passing Orchestra review."
+        ));
+        assert!(!prompt.contains("Independent Orchestra Pi review passed"));
+    }
+
+    #[tokio::test]
+    async fn revoked_reviewer_cannot_review_old_work_and_is_removed_on_revision() {
+        let f = completed_fixture().await;
+        let (execution, digest) = prepare_receipt(&f, Verdict::Passed);
+        let version = f.host.inference_settings().unwrap()["settings"]["version"]
+            .as_u64()
+            .unwrap();
+        f.host
+            .configure_inference(&json!({"operation":"set_orchestra","version":version,
+            "ghost_id":f.ghost,"conversation_id":f.conversation,"profile":null}))
+            .unwrap();
+        let state = f.host.lock().unwrap();
+        let conn = &state.journal.0;
+        let work = db::work(conn, &f.work).unwrap().unwrap();
+        let goal = db::goal(conn, &work.goal_id).unwrap().unwrap();
+        assert!(require_pass(conn, &goal, &work, &digest).is_err());
+        assert!(receipt(conn, &execution).unwrap().is_some());
+        let mut update = envelope("owner", "orchestra-revised-after-revocation".into(), 1,
+            json!({"method":"goal.update","goal_id":goal.id,"prompt":"Publish the revised public artifact.","acceptance_spec":{}})).unwrap();
+        update.expected_revision = Some(1);
+        let revised = super::super::apply(conn, &update, "owner").unwrap();
+        assert_eq!(revised.status, ResponseStatus::Success, "{revised:?}");
+        let current = db::works_for_goal(conn, &goal.id)
+            .unwrap()
+            .into_iter()
+            .find(|work| work.goal_revision == 2)
+            .unwrap();
+        assert!(orchestra::assignment(conn, &current)
+            .unwrap()
+            .unwrap()
+            .reviewer
+            .is_none());
     }
 }

@@ -1223,7 +1223,8 @@ fn work_accept(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
     }) {
         return Err(conflict("acceptance artifact is not attached to the current result"));
     }
-    let orchestra_review = super::orchestra_review::require_pass(conn, &goal, &work, &acceptance.artifact_digest)?;
+    let (orchestra_review, owner_decision) =
+        super::orchestra_review::acceptance_evidence(conn, &goal, &work, &acceptance.artifact_digest, principal)?;
     let required = required_checks(&goal.acceptance_spec)?;
     let mut seen = BTreeSet::new();
     for check in &acceptance.checks {
@@ -1270,6 +1271,11 @@ fn work_accept(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
         )?;
     }
     super::mailbox::notify_work(conn, &work, &goal, "acceptance")?;
+    let review_notice = match orchestra_review {
+        Some(evidence) => format!(" {evidence}."),
+        None if owner_decision => " The Owner accepted this result. There is no current passing Orchestra review.".into(),
+        None => String::new(),
+    };
     let report = json!({
         "method":"conversation.submit",
         "ghost_id":goal.accountable_ghost,
@@ -1277,7 +1283,7 @@ fn work_accept(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
         "privacy":goal.privacy,
         "goal_id":goal.id,
         "goal_revision":goal.revision,
-        "prompt":format!("Authenticated Host verification: work_id={} is accepted at goal_revision={}. {} independent checks passed under verifier {} and policy {}. Goal state={}. Report this committed acceptance to the user; do not submit or restart any execution. Artifact contents remain in their original privacy scope.{}", work.id, goal.revision, acceptance.checks.len(), acceptance.verifier_revision, acceptance.policy_revision, goal.state, orchestra_review.map(|evidence| format!(" {evidence}.")).unwrap_or_default()),
+        "prompt":format!("Authenticated Host verification: work_id={} is accepted at goal_revision={}. {} independent checks passed under verifier {} and policy {}. Goal state={}. Report this committed acceptance to the user; do not submit or restart any execution. Artifact contents remain in their original privacy scope.{}", work.id, goal.revision, acceptance.checks.len(), acceptance.verifier_revision, acceptance.policy_revision, goal.state, review_notice),
     });
     context.enqueue("pi", outgoing(envelope, principal, Some(goal.revision), report)?);
     Ok(success(
