@@ -1266,7 +1266,6 @@ test("assignment coordination delegates from and waits on only the exact assigne
                 parent_work_id: "work-assignment-fixture",
                 target_ghost_id: OPS_GHOST,
                 summary: "Operations diagnoses the assigned incident read-only within the approved boundary.",
-                artifact_refs: [],
                 acceptance_spec: { required_checks: ["source_links"] },
               }),
             },

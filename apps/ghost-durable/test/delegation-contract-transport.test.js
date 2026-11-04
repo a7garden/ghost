@@ -27,3 +27,26 @@ test("sealed delegation forwards only its reference with revision and outer memo
   }
   assert.equal(requests.filter(request => request.envelope.body.method === "work.delegate").length, 2, "malformed or mixed authority cannot reach mutation");
 });
+
+test("ordinary delegation without input artifacts commits an empty canonical array", async () => {
+  const requests = [];
+  const transport = createHostToolTransport({
+    hostRoot: "/tmp/delegation-no-attachment-fixture", callbackToken: "fixture", authorityEpoch: 4,
+    dispatch: async ({ envelope }) => {
+      requests.push(envelope);
+      const data = envelope.body.method === "work.inspect"
+        ? { work: { id: "parent", goal_id: "goal", goal_revision: 7, owner: "ghost" } }
+        : envelope.body.method === "goal.inspect"
+          ? { goal: { id: "goal", revision: 7, accountable_ghost: "ghost", reply_conversation: "conversation", acceptance_spec: {} } }
+          : {};
+      return { ok: true, result: { status: "success", summary: "fixture", artifacts: [], next_actions: [], data } };
+    },
+  });
+  const args = { parent_work_id: "parent", target_ghost_id: "specialist", summary: "Write a synthetic result.", acceptance_spec: { delegation_allowed: false } };
+  await transport({ method: "work.delegate", ghost_id: "ghost", conversation_id: "conversation",
+    invocation_id: "no-input", inference_scope: "public", conversation_disclosure: "public", arguments: args });
+  const delegated = requests.find(envelope => envelope.body.method === "work.delegate");
+  assert.deepEqual(delegated.body, { method: "work.delegate", ...args, artifact_refs: [] });
+  assert.equal(delegated.expected_revision, 7);
+  assert.equal(delegated.payload_digest, payloadDigest(delegated.body));
+});

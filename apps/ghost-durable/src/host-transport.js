@@ -823,7 +823,7 @@ export function createHostToolTransport({ hostRoot, callbackToken, localCallback
             parent_work_id: context.work.id,
             target_ghost_id: args.target_ghost_id,
             summary: args.summary,
-            artifact_refs: args.artifact_refs,
+            artifact_refs: args.artifact_refs === undefined ? [] : args.artifact_refs,
             acceptance_spec: args.acceptance_spec,
           };
         }

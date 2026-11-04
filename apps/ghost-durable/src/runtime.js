@@ -901,7 +901,7 @@ Current authenticated Goal assignment: ${JSON.stringify({
       parent_work_id: Type.String({ minLength: 1 }),
       target_ghost_id: Type.String({ minLength: 1 }),
       summary: Type.String({ minLength: 1, maxLength: 8192 }),
-      artifact_refs: Type.Array(Type.String({ minLength: 1 }), { maxItems: 32 }),
+      artifact_refs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 32 })),
       acceptance_spec: acceptanceSpec,
     }, { additionalProperties: false })])),
     invoke("work_wait", "work.wait", "Durably wait on up to four distinct same-root dependencies; this same assignment generation resumes when the Host confirms resolution.", Type.Object({
