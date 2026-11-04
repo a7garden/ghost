@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,11 @@ import { fileURLToPath } from 'node:url';
 import { SelectedTaskAdmissionDoc, selectedTaskIntent, selectedTaskAuthority, selectedTaskObservation } from '../src/selected-task-admission.js';
 import { payloadDigest } from '../src/contract.js';
 import { openAdmissionFixture, hostState, inspection, receipt, scope, task } from './fixtures/selected-admission-fixture.mjs';
+
+const fixtureRoots = new Set();
+after(async () => {
+  for (const root of fixtureRoots) await rm(root, { recursive: true, force: true });
+});
 
 const within = (promise, ms = 5000) => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error('Controlled admission barrier expired')), ms);
@@ -245,7 +250,7 @@ test('selected-task observation projects bounded evidence without intent text, a
 
 test('a genuine process interruption retains its dispatch marker and never implicitly redispatches', async t => {
   const root = await mkdtemp(join(tmpdir(), 'ghost-selected-crash-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  fixtureRoots.add(root);
   const child = spawn(process.execPath, [fileURLToPath(new URL('./fixtures/selected-admission-crash.mjs', import.meta.url)), root], { stdio: ['ignore', 'pipe', 'pipe'] });
   const exited = once(child, 'exit'); let stderr = '';
   child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4096); });

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
-import { afterEach, test } from "node:test";
+import { after, test } from "node:test";
 import { payloadDigest } from "../src/contract.js";
 import { openGhostRuntime } from "../src/runtime.js";
 import { createFakeProvider } from "./fake-provider.js";
@@ -15,7 +15,9 @@ const tempRoots = new Set();
 const repoRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 const canaryRoot = join(repoRoot, ".lifetime-canary", "ghost-20261009T012047Z", "B6-tests");
 
-afterEach(async () => {
+// A test can own several reopened runtime handles. Close their SQLite
+// connections via test teardown before removing the fixture directories.
+after(async () => {
   for (const root of tempRoots) await rm(root, { recursive: true, force: true });
   tempRoots.clear();
 });

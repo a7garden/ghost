@@ -58,9 +58,6 @@ kbd { font-family: var(--font-body); background: var(--color-surface-elevated); 
 .sidebar .nav-count, .mobile-sidebar .nav-count { background: var(--color-accent-soft); color: var(--color-accent); padding: 0 6px; border-radius: var(--radius-button); }
 .sidebar-scroll { padding-block: var(--space-xs) var(--space-md); }
 .sidebar-section { margin-top: var(--space-sm); }
-.sidebar-conversations { margin-left: var(--space-lg); padding-left: var(--space-xs); }
-.sidebar-conversation { min-height: 28px; font-size: var(--text-caption); }
-.sidebar-conversation.selected { background: var(--color-background-secondary); }
 .sidebar-connection { min-height: 36px; }
 .sidebar .sidebar-bottom, .mobile-sidebar .sidebar-bottom { padding-top: var(--space-xs); }
 
@@ -280,7 +277,7 @@ dialog::backdrop { background: var(--color-overlay); -webkit-backdrop-filter: bl
 @media (pointer: coarse) {
   .button, .page-heading > .button, .text-button, .conversation-heading .conversation-title, .search-field, .sidebar .sidebar-search, .mobile-sidebar .sidebar-search, .filter-button, .icon-button, .icon-button.small, .send-button, .conversation-toolbar .icon-button,
   .prompt-suggestions button, .settings-nav .nav-row, .theme-options button, .context-profile-actions > button,
-  .sidebar .nav-row, .mobile-sidebar .nav-row, .sidebar-conversation, .sidebar-connection { min-height: 44px; }
+  .sidebar .nav-row, .mobile-sidebar .nav-row, .sidebar-connection { min-height: 44px; }
   .icon-button, .icon-button.small, .send-button { min-width: 44px; }
 }
 @supports not (backdrop-filter: blur(1px)) {
@@ -296,6 +293,6 @@ dialog::backdrop { background: var(--color-overlay); -webkit-backdrop-filter: bl
   button:not(:disabled):active { transform: none; }
 }
 @media (forced-colors: active) {
-  .nav-row.selected, .filter-button.selected, .sidebar-conversation.selected { outline: 1px solid Highlight; }
+  .nav-row.selected, .filter-button.selected { outline: 1px solid Highlight; }
   .button, .composer, .setting-switch { border: 1px solid ButtonText; }
 }

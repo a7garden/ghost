@@ -251,7 +251,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const safe = async (fn: () => Promise<void>) => { setFormError(''); try { await fn(); } catch (e) { setFormError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다. 다시 시도해 주세요.'); } };
   const sidebar = <WorkspaceSidebar snapshot={snapshot} route={route} section={section} dotId={selected?.id ?? null}
     selectedSpace={selectedSpace} views={views} activeView={activeView?.id} attentionCount={attentionCount} mode={mode}
-    error={error} lifetimeEnabled={lifetimeEnabled} showGhostHeading={!desktopShell} status={status} navigate={path => { setDialog(null); navigate(path); }} onConnection={() => { setDialog(null); navigate('/host'); }}/>;
+    error={error} lifetimeEnabled={lifetimeEnabled} status={status} navigate={path => { setDialog(null); navigate(path); }} onConnection={() => { setDialog(null); navigate('/host'); }}/>;
 
   const lifetimeScreen = (path: string) => {
     if (!snapshot) return null;

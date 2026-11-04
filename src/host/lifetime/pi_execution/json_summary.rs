@@ -31,7 +31,7 @@ pub(super) fn requested(operation: &str, args: &Value) -> bool {
 pub(super) fn arguments(args: &Value) -> Result<()> {
     if args.get("view").is_some() {
         apply::exact_fields(args, &["path", "view"])?;
-        ensure!(args["view"] == "json_summary", "read view is unsupported");
+        ensure!(matches!(args["view"].as_str(), Some("json_summary" | "text_snapshot")), "read view is unsupported");
         Ok(())
     } else {
         apply::allowed_fields(args, &["path", "offset", "limit"], &["path"])

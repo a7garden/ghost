@@ -2200,7 +2200,9 @@ export class GhostRuntime {
     const inputArtifacts = validateWorkInputArtifacts(response.data?.input_artifacts ?? [], assignment.privacy);
     const workMemory = validateWorkMemoryDescriptor(response.data?.work_memory);
     const executionContext=validateWorkContext(response.data?.execution_context,{assignmentId:assignment.id,workId:assignment.work_id,goalRevision:assignment.goal_revision});
-    return { ...assignment, executionContext, publications: validatePublicationDescriptor(response.data?.publications), workWait: response.data?.work_wait ?? null, skills, inputArtifacts, workMemory, execution: execution?.engine === "pi" && execution?.version === 1 ? { engine: "pi", version: 1, tools: validateExecutionTools(execution.tools) } : null };
+    return { ...assignment, executionContext, publications: validatePublicationDescriptor(response.data?.publications), workWait: response.data?.work_wait ?? null, skills, inputArtifacts, workMemory, execution: execution?.engine === "pi" && execution?.version === 1 ? {
+      engine: "pi", version: 1, tools: validateExecutionTools(execution.tools), codingTools: execution.coding_tools === "pi-durable/1",
+    } : null };
   }
 
   async #reinspectGoalAssignment(session, assignmentId) {

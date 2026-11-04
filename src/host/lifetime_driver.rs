@@ -106,8 +106,13 @@ pub(crate) async fn run_fixture_driver(host:Arc<Host>,entry:PathBuf) {
 
 #[cfg(test)]
 pub(crate) async fn run_broker_fixture_driver(host:Arc<Host>,entry:PathBuf) {
+    run_broker_fixture_launcher(host, PiLauncher::NodeEntry(entry)).await;
+}
+
+#[cfg(test)]
+pub(crate) async fn run_broker_fixture_launcher(host: Arc<Host>, launcher: PiLauncher) {
     let weak=Arc::downgrade(&host);let root=host.root.join("durable");drop(host);
-    run(weak,PiLauncher::NodeEntry(entry),root,"broker".into()).await;
+    run(weak,launcher,root,"broker".into()).await;
 }
 
 async fn run(weak: Weak<Host>, launcher: PiLauncher, root: PathBuf, mode: String) {

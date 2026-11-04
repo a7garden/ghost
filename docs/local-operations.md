@@ -31,7 +31,7 @@ curl -fsS http://127.0.0.1:65164/ghost-api/bootstrap | jq '{mode, owner_pid}'
 
 Bun 1.4.2와 `apps/ghost-durable`의 잠금 의존성을 준비한 뒤 `scripts/install.py --features lifetime,memory,documents`로 빌드한다. 기존 Rust 빌드에 Pi를 포함하려면 `--skip-build --bundle-pi`를 사용한다. 설치 명세에는 두 실행 파일과 Pi 의존성 잠금 파일의 SHA-256이 들어간다. 운영은 `GHOST_LIFETIME_MODE=broker`, 격리 검증은 별도 상태 루트와 `GHOST_LIFETIME_MODE=fixture`를 사용한다. Pi 실행을 끄려면 `GHOST_LIFETIME_MODE=disabled`를 사용한다. Node 릴리스로 복귀할 수 있도록 기존의 `GHOST_LIFETIME_PI_ENTRY`와 `GHOST_LIFETIME_MODE` 설정을 보관한다.
 
-일반 파일·셸 작업은 Pi의 도구와 복구 동작을 재사용할 후보로 둔다. 운영 전환에는 작업 파일만 볼 수 있는 실행 환경, 재시작 시 중단된 호출의 표시, Ghost의 최종 산출물 게시·검수가 함께 검증되어야 한다. 현재 Host 도구는 기존 작업과 결과 계약을 처리한다.
+Apple-container 업무는 Pi 기본 파일·셸 도구를 Host가 승인한 업무 공간에서 실행한다. Bun 번들 검증은 별도 Host에서 위임, Pi 재시작 후 대기 해제, 두 산출물의 검수, 기본 대화의 최종 보고까지 다룬다. [직접 실행 계약](pi-direct-execution.md)
 
 ## 구형 콘솔 복구
 

@@ -8,6 +8,10 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {tmpdir} from 'node:os';
 import {payloadDigest} from '../src/contract.js';
+
+// These fixtures use Node's module-loader hooks.
+const fixtureNode = process.versions.bun ? Bun.which("node") : process.execPath;
+assert.ok(fixtureNode, "The Node loader fixture requires a Node executable");
 const ghost='startup-ghost',conversation='startup-conversation',turn='startup-turn';
 function envelope(id,body){return {protocol_version:'ghost-lifetime/1',command_id:id,payload_digest:payloadDigest(body),actor_ref:'startup-owner',authority_epoch:1,expected_revision:null,correlation_id:id,body};}
 async function eventually(predicate,message){const deadline=Date.now()+5000;while(Date.now()<deadline){if(await predicate())return;await new Promise(resolve=>setTimeout(resolve,10));}throw new Error(typeof message==='function'?message():message);}
@@ -41,7 +45,7 @@ async function setup(providerId,{credentials=true,allow=true,revoke=false,keyFil
  let child,exited,output='',stderr='';
  const launch=async()=>{
  const frameCount=frames.length;
- child=spawn(process.execPath,['--import',fileURLToPath(new URL('./fixtures/startup-provider-preload.mjs',import.meta.url)),fileURLToPath(new URL('../src/main.js',import.meta.url)),'--root',join(root,'durable'),'--mode','broker'],{
+ child=spawn(fixtureNode,['--import',fileURLToPath(new URL('./fixtures/startup-provider-preload.mjs',import.meta.url)),fileURLToPath(new URL('../src/main.js',import.meta.url)),'--root',join(root,'durable'),'--mode','broker'],{
   env:{HOME:root,TMPDIR:tmpdir(),PATH:'',GHOST_LIFETIME_HOST_ROOT:root,GHOST_PI_CALLBACK_TOKEN:'startup-callback-token',GHOST_PI_AUTHORITY_EPOCH:'1',GHOST_STARTUP_FIXTURE_ROOT:root},stdio:['pipe','pipe','pipe'],
  });
  output='';child.stdout.on('data',chunk=>{output+=chunk;let split;while((split=output.indexOf('\n'))>=0){frames.push(JSON.parse(output.slice(0,split)));output=output.slice(split+1);}});child.stderr.on('data',chunk=>stderr+=chunk);

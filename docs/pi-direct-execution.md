@@ -8,6 +8,14 @@ retain the legacy producer policy.
 
 The canonical assignment runs in the assigned Ghost's Pi GenerationTask. `read`, `write`, `edit`, `bash`, `publish_artifact`, and an explicitly accepted scoped browser call the Host directly. The Host does not submit a second model task or start an OMP agent.
 
+For an Apple-container Work that advertises `coding_tools: pi-durable/1`,
+ordinary file and shell calls use the pinned Pi coding handlers. Their execution
+environment calls the existing Host authority and Work sandbox. Pi selects lines
+from a bounded Host snapshot and computes text edits. The Host checks the
+source digest at write time and applies the change atomically. JSON summaries,
+sealed commands, publication and browser approval use the Host contracts.
+Earlier Host offers continue to use their original tool path.
+
 ## Environment
 
 An operator-selected private JSON file is selected with `GHOST_PI_COMPUTERS_CONFIG`:

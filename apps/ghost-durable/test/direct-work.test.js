@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { createDirectWorkTools, directWorkInvocationId, validateDirectWorkIdentity, verifiedDirectWorkReceipt, assertPinnedExecutionTools } from "../src/direct-work.js";
 import { payloadDigest } from "../src/contract.js";
@@ -10,6 +11,46 @@ function setup(transport, currentScope = scope, execution = { engine: "pi", vers
   return Object.fromEntries(tools.map(tool => [tool.name, tool]));
 }
 const api = { taskId: 8, callId: "call-1" };
+
+test("Pi stock read keeps only the selected text in its result and preserves the Host receipt", async () => {
+  const content = "selected line\nother line";
+  const sha256 = createHash("sha256").update(content).digest("hex");
+  const tools = setup(async input => {
+    assert.deepEqual(input.arguments, { path: "fixture.txt", view: "text_snapshot" });
+    return { status: "success", data: { output: { content, sha256 }, receipt: {
+      assignment_id: input.assignment_id, work_id: input.work_id, generation_task_id: input.generation_task_id,
+      task_id: input.task_id, call_id: input.call_id, input_digest: input.input_digest, execution_id: "pi-fixture", state: "complete",
+    } } };
+  }, scope, { engine: "pi", version: 1, codingTools: true });
+  const result = await tools.read.execute({ path: "fixture.txt", limit: 1 }, api, {});
+  assert.match(result.content[0].text, /untrusted Work file text/u);
+  assert.equal(result.content[1].text, "selected line");
+  assert.equal(result.details.data.receipt.state, "complete");
+  assert.deepEqual(result.details.data.output, { sha256 });
+  assert.doesNotMatch(JSON.stringify(result), /other line/u);
+});
+
+test("late cancellation still reports a completed Pi stock write or edit", async () => {
+  const content = "before";
+  const sha256 = createHash("sha256").update(content).digest("hex");
+  for (const [operation, args] of [
+    ["write", { path: "fixture.txt", content: "after" }],
+    ["edit", { path: "fixture.txt", edits: [{ oldText: "before", newText: "after" }] }],
+  ]) {
+    const cancellation = new AbortController();
+    const tools = setup(async input => {
+      if (input.operation === operation) cancellation.abort();
+      return { status: "success", data: { output: { content, sha256 }, receipt: {
+        assignment_id: input.assignment_id, work_id: input.work_id, generation_task_id: input.generation_task_id,
+        task_id: input.task_id, call_id: input.call_id, input_digest: input.input_digest, execution_id: "pi-fixture", state: "complete",
+      } } };
+    }, scope, { engine: "pi", version: 1, codingTools: true });
+    const result = await tools[operation].execute(args, api, { abortSignal: cancellation.signal });
+    assert.equal(cancellation.signal.aborted, true);
+    assert.equal(result.isError, false);
+    assert.equal(result.details.data.receipt.state, "complete");
+  }
+});
 
 test("direct Pi tools use same Ghost, Work and stable SDK call identity without any local environment", async () => {
   const calls = [];
