@@ -15,7 +15,9 @@ await cp(host, join(destination, 'host/ghost'));
 for (const executable of ['runtime/node','host/ghost']) await chmod(join(destination, executable), 0o755);
 await cp(join(app, 'scripts/desktop-console.mjs'), join(destination, 'launcher/desktop-console.mjs'));
 await cp(join(app, 'scripts/local-voice.mjs'), join(destination, 'launcher/local-voice.mjs'));
-for (const name of ['server.py','requirements.lock']) await cp(join(ghost, 'apps/ghost-voice-server', name), join(destination, 'voice', name));
+for (const name of ['server.py', 'remote_speech.py', 'speech_contract.py', 'requirements.lock']) {
+  await cp(join(ghost, 'apps/ghost-voice-server', name), join(destination, 'voice', name));
+}
 await cp(join(ghost, 'apps/ghost-ui/dist'), join(destination, 'ui/dist'), { recursive: true, force: true });
 for (const name of ['console.mjs','serve.mjs']) await cp(join(ghost, 'apps/ghost-ui/scripts', name), join(destination, 'ui/scripts', name));
 for (const name of ['bridge.mjs', 'packages.mjs', 'package-format.mjs']) await cp(join(ghost, 'apps/ghost-ui/server', name), join(destination, 'ui/server', name));
