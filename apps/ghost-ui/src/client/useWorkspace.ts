@@ -100,7 +100,7 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
   }, []);
   const query = useCallback(async (command: Command) => {
     const operation = command.action as { type?: string } | undefined;
-    if (command.type !== 'workspace' || !['list_pages', 'read_page', 'inspect_integration_approval', 'collaboration_messages', 'read_avatar', 'list_connected_planner', 'planner_operation_status', 'planner_sync_status'].includes(operation?.type ?? '')) throw new Error('읽기 전용 요청이 아닙니다.');
+    if (command.type !== 'workspace' || !['list_pages', 'read_page', 'inspect_integration_approval', 'collaboration_messages', 'read_avatar'].includes(operation?.type ?? '')) throw new Error('읽기 전용 요청이 아닙니다.');
     if (!client.current) throw new Error('호스트 연결을 기다려 주세요.');
     return await client.current.action({ request_id: crypto.randomUUID(), command }) as Record<string, any>;
   }, []);

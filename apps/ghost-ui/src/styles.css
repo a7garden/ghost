@@ -4,37 +4,8 @@
  * Reference-driven app structure; marketing macrostructures and theme rotation are inapplicable.
  * pre-emit critique: P4 H5 E4 S5 R5 V4 */
 * { box-sizing: border-box; }
-/* Personal organizer and connections use the shared shell's semantic tokens. */
-.planner-date, .form-actions, .integration-actions, .integration-start { display: flex; align-items: center; gap: 12px; }
-.planner-date { margin: 24px 0 32px; flex-wrap: wrap; }
-.planner-date input { width: 160px; }
-.planner-date .field-help { margin-left: auto; }
-.planner-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
-.planner-columns section { min-width: 0; }
-.planner-list { display: grid; }
-.planner-row, .planner-event { display: flex; align-items: flex-start; gap: 12px; padding: 17px 0; border-bottom: 1px solid var(--color-border-subtle); min-width: 0; }
-.planner-item { display: grid; gap: 4px; text-align: left; flex: 1; min-width: 0; white-space: normal; padding: 2px 0; }
-.planner-item strong { font-weight: 500; overflow-wrap: anywhere; }
-.planner-item span, .planner-item small, .planner-caption, .planner-footnote, .integration-copy p, .integration-help p, .integration-start p { color: var(--color-text-secondary); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.planner-item span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.planner-item .overdue { color: var(--color-text-error); }
-.completed-title { text-decoration: line-through; color: var(--color-text-secondary); }
-.planner-event { width: 100%; text-align: left; }
-.planner-event:hover { background: var(--color-background-secondary-hover); }
-.planner-event > svg { margin-top: 6px; color: var(--color-text-tertiary); }
-.event-time { min-width: 65px; font-size: 13px; font-variant-numeric: tabular-nums; }
-.event-time small { display: block; font-size: 11px; color: var(--color-text-secondary); }
-.planner-caption { margin: 12px 0; }
-.planner-footnote { margin-top: 40px; }
-.planner-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin: -18px 0 32px; }
-.planner-week-cell { display: grid; justify-items: center; gap: 2px; padding: 8px 4px; border-radius: var(--radius-md); color: var(--color-quiet); font-size: 13px; font-variant-numeric: tabular-nums; }
-.planner-week-cell:hover { background: var(--color-background-secondary-hover); }
-.planner-week-cell.selected { background: var(--color-background-secondary-active); color: var(--color-text); font-weight: 500; }
-.planner-week-cell.today { box-shadow: inset 0 0 0 1px var(--color-border-strong); }
-.planner-week-day { font-size: 10px; }
-.planner-week-count { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--color-text-secondary); }
-.planner-week-cell.selected .planner-week-count { color: var(--color-text); }
-@media (max-width: 640px) { .planner-week { gap: 4px; } .planner-week-cell { padding: 6px 2px; font-size: 12px; } .planner-week-day { font-size: 9px; } }
+.form-actions, .integration-actions, .integration-start { display: flex; align-items: center; gap: 12px; }
+.integration-copy p, .integration-help p, .integration-start p { color: var(--color-text-secondary); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .form-pair { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
 .form-actions { justify-content: flex-end; }
 .form-actions .secondary { margin-right: auto; }
@@ -70,7 +41,6 @@
 .integration-tool-list .inline-checkbox { margin-top: 10px; overflow-wrap: anywhere; }
 .integration-tool-list .inline-checkbox input { flex-shrink: 0; }
 .integration-tool-list p, .integration-tool-list pre { margin-top: 10px; font-size: 12px; color: var(--color-text-secondary); }
-@media (min-width: 1050px) { .planner-columns { grid-template-columns: minmax(0,1fr) minmax(0,1fr); } }
 @media (max-width: 520px) { .form-pair { grid-template-columns: 1fr; } .integration-actions { width: 100%; } }
 html, body { margin: 0; overflow-x: clip; }
 body { color: var(--color-text); background: var(--color-surface); font: 400 14px/1.55 var(--font-sans); -webkit-font-smoothing: antialiased; }

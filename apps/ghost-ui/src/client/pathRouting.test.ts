@@ -6,11 +6,15 @@ describe('pathToHash', () => {
     expect(pathToHash('/spaces/space-ghost')).toBe('/spaces/space-ghost');
     expect(pathToHash('/ghosts/sage')).toBe('/ghosts/sage');
     expect(pathToHash('/work')).toBe('/work');
-    expect(pathToHash('/planner')).toBe('/planner');
     expect(pathToHash('/integrations')).toBe('/integrations');
     expect(pathToHash('/settings')).toBe('/settings');
     expect(pathToHash('/host')).toBe('/host');
     expect(pathToHash('/providers')).toBe('/providers');
+  });
+
+  it('passes legacy planner URLs to the app for Work redirection', () => {
+    expect(pathToHash('/planner')).toBe('/planner');
+    expect(pathToHash('/planner/?date=2026-11-04')).toBe('/planner');
   });
 
   it('preserves nested ids and query strings', () => {

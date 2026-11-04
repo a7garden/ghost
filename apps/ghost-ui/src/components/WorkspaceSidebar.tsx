@@ -1,4 +1,4 @@
-import { CalendarDays, Cpu, Puzzle, Server, Folder, GitBranch, History, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
+import { Cpu, Puzzle, Server, Folder, GitBranch, History, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
 import { useId } from 'react';
 import { ghostPath, viewPath } from '../features/PackageWorkspace';
 import type { GhostView } from '../../sdk/src/index';
@@ -90,11 +90,10 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
           </button>}
         </nav>
       </section>
-      <nav className="sidebar-menu-group primary-nav" aria-label="일정과 협업">{[
-        { path: '/planner', key: 'planner', name: routeLabels.planner, Icon: CalendarDays },
-        { path: '/together', key: 'together', name: routeLabels.together, Icon: GitBranch },
-      ].map(({ path, key, name, Icon }) => <button key={key} className={`nav-row ${section === key ? 'selected' : ''}`}
-        aria-current={section === key ? 'page' : undefined} onClick={() => navigate(path)}><Icon size={16}/><span>{name}</span></button>)}</nav>
+      <nav className="sidebar-menu-group primary-nav" aria-label={routeLabels.together}>
+        <button className={`nav-row ${section === 'together' ? 'selected' : ''}`} aria-current={section === 'together' ? 'page' : undefined}
+          onClick={() => navigate('/together')}><GitBranch size={16}/><span>{routeLabels.together}</span></button>
+      </nav>
     </div>
     <footer className="sidebar-bottom">
       <nav className="primary-nav" aria-label="관리">{[

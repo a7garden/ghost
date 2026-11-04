@@ -18,6 +18,15 @@ describe('host snapshot compatibility', () => {
     expect(snapshot.spaces).toEqual([]);
     expect(snapshot.connectors).toEqual({});
   });
+  it('keeps legacy planner records and accepts their opaque remote projection', () => {
+    const todo = { id: 'todo', title: 'Existing todo', notes: '', due: '2026-11-04', completed: true, version: 2, updated_ms: 1 };
+    const event = { id: 'event', title: 'Existing event', notes: '', start_ms: -3600000, end_ms: 0, version: 2, updated_ms: 1 };
+    const connected_planner = { collections: [{ id: 'legacy' }] };
+    const snapshot = normalizeSnapshot({ ...empty, todos: [todo], calendar_events: [event], connected_planner });
+    expect(snapshot.todos).toEqual([todo]);
+    expect(snapshot.calendar_events).toEqual([event]);
+    expect(snapshot.connected_planner).toEqual(connected_planner);
+  });
   it('keeps a broken profile visible without breaking healthy profiles', () => {
     const snapshot = normalizeSnapshot({ ...empty, profiles: [{ id: 'broken', name: 'Sage', error: 'store unavailable' }, { id: 'ok', name: 'Milo', conversations: [] }] });
     expect(dotState(snapshot.profiles[0], [])).toBe('offline');
@@ -134,4 +143,22 @@ describe('conversation model selection receipts', () => {
     await queue.send(client, choose('local/a')).catch(() => {});
     expect(ids[0]).not.toBe(ids[1]);
   });
+});
+
+it('keeps request identity behavior for legacy planner refresh commands', async () => {
+  const storage = memoryStorage();
+  const queue = new CommandQueue(storage, 'planner-sync');
+  const action = vi.fn()
+    .mockRejectedValueOnce(new ConfirmedFailure('confirmed sync error'))
+    .mockRejectedValue(new Error('lost reply'));
+  const client: Client = { mode: 'live', snapshot: async () => normalizeSnapshot(empty), action };
+  const command = { type: 'workspace', action: { type: 'planner_sync_once', collection_id: 'tasks', write: false } };
+
+  await expect(queue.send(client, command)).rejects.toThrow('confirmed');
+  expect(storage.getItem('planner-sync')).toBe('{}');
+  await expect(queue.send(client, command)).rejects.toThrow('lost reply');
+  await expect(queue.send(client, command)).rejects.toThrow('lost reply');
+  const ids = action.mock.calls.map(([envelope]) => envelope.request_id);
+  expect(ids[0]).not.toBe(ids[1]);
+  expect(ids[1]).toBe(ids[2]);
 });

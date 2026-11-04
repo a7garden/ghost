@@ -13,7 +13,6 @@ import { ArrowUpRight, Folder, LayoutList, Plus, Search, ArrowUp, RefreshCw, Cir
 import { DotAvatar, PortraitAppearances, type PortraitAppearance } from './components/DotAvatar';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { Modal } from './components/Modal';
-import { Planner } from './features/Planner';
 import { Integrations } from './features/Integrations';
 import { Overview } from './features/Overview';
 import { HostView } from './features/HostView';
@@ -53,6 +52,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const workspace = useWorkspace(connectClient), { snapshot, mode, error, busy, action, query, reconnect } = workspace;
   const lifetimeEnabled = lifetimeSetting === 'true' || (lifetimeSetting !== 'false' && Boolean(snapshot?.lifetime_authority));
   const primaryChat = lifetimeEnabled && mode === 'live';
+  const workPath = primaryChat ? '/lifetime?panel=work&scope=all' : '/work';
   const [route, setRoute] = useState(currentRoute), [dialog, setDialog] = useState<'add' | 'assign' | 'search' | 'connection' | 'package' | 'portrait' | 'views' | 'navigation' | null>(null);
   const [approval, setApproval] = useState<{ workspaceId: string; ref: ApprovalRef } | null>(null), [formError, setFormError] = useState('');
   const [assignedProfile, setAssignedProfile] = useState(''), [search, setSearch] = useState('');
@@ -69,6 +69,13 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   useEffect(() => { setFormError(''); }, [dialog]);
   const navigate = (path: string) => { resetScroll(); if (currentRoute() !== path) history.pushState(null, '', `#${path}`); setRoute(path); };
   const params = new URLSearchParams(route.split('?')[1] ?? '');
+  const retiredPlanner = /^\/planner(?:[/?]|$)/.test(route);
+  const workspaceReady = snapshot !== null;
+  useEffect(() => {
+    if (!retiredPlanner || !workspaceReady) return;
+    history.replaceState(history.state, '', `#${workPath}`);
+    setRoute(workPath);
+  }, [retiredPlanner, workspaceReady, workPath]);
   const legacyGhostIndex = /^\/ghosts\/?$/.test(route.split('?')[0]);
   useEffect(() => {
     if (!legacyGhostIndex) return;
@@ -169,16 +176,15 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const selectedSpace = route.startsWith('/spaces/') ? route.split('/')[2] : snapshot?.spaces[0]?.id;
   const addGhost = () => setDialog('add');
   const label = lifetimeDot ? 'Ghost 작업실' : dot?.name ?? routeLabels[section as keyof typeof routeLabels] ?? '찾을 수 없는 화면';
-  const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, together: true, planner: true, integrations: true, settings: true, host: true, providers: true };
+  const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, together: true, integrations: true, settings: true, host: true, providers: true };
   const commands: SearchHit[] = [
     ...views.map(view => ({ kind: 'work' as const, id: `view:${view.id}`, title: view.label, path: selected ? viewPath(selected.id, view.id) : '/' })),
     ...[
       { id: 'inbox', title: routeLabels.inbox, path: '/inbox' },
       { id: 'home', title: routeLabels.home, path: '/' },
-      { id: 'work', title: routeLabels.work, path: primaryChat ? '/lifetime?panel=work&scope=all' : '/work' },
+      { id: 'work', title: routeLabels.work, path: workPath },
       { id: 'spaces', title: routeLabels.spaces, path: '/spaces' },
       { id: 'together', title: routeLabels.together, path: '/together' },
-      { id: 'planner', title: routeLabels.planner, path: '/planner' },
       { id: 'integrations', title: routeLabels.integrations, path: '/integrations' },
       { id: 'host', title: '호스트', path: '/host' },
       { id: 'providers', title: '프로바이더', path: '/providers' },
@@ -300,7 +306,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
         {searchControl}
       </header>}
       {error && <div className="connection-error" role="alert"><CircleAlert size={17}/><span>{error}</span><button className="text-button" onClick={reconnect}><RefreshCw size={14}/>다시 연결</button></div>}
-      {!snapshot ? <main className="page-content loading-content" aria-busy={!error}><div className="skeleton heading-skeleton"/><div className="skeleton description-skeleton"/><div className="dot-grid">{[0, 1, 2, 3].map(i => <div className="skeleton dot-skeleton" key={i}/>)}</div>{error && <p>연결되면 저장된 Ghost와 작업을 표시합니다.</p>}</main> : <main ref={mainContent} id="main-content" tabIndex={-1} className={chatLayout ? 'detail-main' : ''}>
+      {!snapshot || retiredPlanner ? <main className="page-content loading-content" aria-busy={!error}><div className="skeleton heading-skeleton"/><div className="skeleton description-skeleton"/><div className="dot-grid">{[0, 1, 2, 3].map(i => <div className="skeleton dot-skeleton" key={i}/>)}</div>{error && <p>연결되면 저장된 Ghost와 작업을 표시합니다.</p>}</main> : <main ref={mainContent} id="main-content" tabIndex={-1} className={chatLayout ? 'detail-main' : ''}>
         {section === 'settings' && <Settings snapshot={snapshot} route={route} navigate={navigate} action={action} busy={busy} mode={mode} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} connected={connected}/>}
         {section === 'home' && <Overview snapshot={snapshot} mode={mode} connected={connected} navigate={navigate} onReview={openDocumentReview} onAdd={addGhost} onAssign={assign} defaultGhostId={dashboardWork.defaultGhostId} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading} status={status}/>}
         {section === 'ghosts' && dotSegment && (dot && pkg && activeView ?
@@ -308,7 +314,6 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
             onNavigate={view => navigate(viewPath(dot.id, view))} onChat={() => navigate(ghostPath(dot.id))}/> : dot ? lifetimeEnabled && mode === 'live' ? legacyHistoryRequested(route) ? <LegacyTranscript profile={dot} route={route} navigate={navigate}/> : null : <DotDetail key={dot.id} profile={dot} snapshot={snapshot} mode={mode} action={action} busy={busy} connected={!error} routing={workspace.routing} navigate={navigate} route={route} onReview={openDocumentReview}/> : <div className="empty-state"><CircleAlert size={28}/><h1>이 Ghost를 찾을 수 없습니다</h1><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>)}
         {section === 'work' && <WorkView snapshot={snapshot} action={action} busy={busy} navigate={navigateHistory} onAssign={() => assign()}/>}
         {section === 'together' && <CollaborationView snapshot={snapshot} route={route} mode={mode} action={action} query={query} busy={busy} navigate={navigateHistory} onAssign={() => primaryChat ? assign() : setCollaborate(true)}/>}
-        {section === 'planner' && <Planner snapshot={snapshot} action={action} query={query} busy={busy} connected={!error}/>}
         {section === 'providers' && <div className="page-content providers-page"><div className="page-heading"><h1>프로바이더</h1></div><ModelSettings snapshot={snapshot} action={action} busy={busy} mode={mode} connected={connected}/></div>}
         {section === 'host' && <HostView snapshot={snapshot} status={status} observedAt={workspace.observedAt} workObservedAt={dashboardWork.observedAt} workError={dashboardWork.error} reconnect={() => { reconnect(); dashboardWork.refresh(); }} navigate={navigate}/>}
         {section === 'integrations' && <Integrations snapshot={snapshot} action={action} busy={busy} mode={mode} connected={connected} navigate={navigate} packages={packagesLoading ? undefined : packages} packageError={packageError} onRefreshPackages={refresh} onImport={() => setDialog('package')}/>}
@@ -320,7 +325,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
         {!knownSections[section] && !(section === 'lifetime' && lifetimeEnabled) && <div className="empty-state"><CircleAlert size={28}/><h1>이 화면을 찾을 수 없습니다</h1><p className="muted">주소가 이동했거나 잘못되었을 수 있습니다.</p><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>}
       </main>}
     </div>
-    <MobilePrimaryTabs selectedGhostId={selected?.id} hasViews={views.length > 0} workPath={primaryChat ? '/lifetime?panel=work&scope=all' : '/work'}
+    <MobilePrimaryTabs selectedGhostId={selected?.id} hasViews={views.length > 0} workPath={workPath}
       active={activeView ? 'workspace' : section === 'home' ? 'home' : section === 'inbox' ? 'inbox'
         : section === 'work' || section === 'lifetime' && params.get('panel') === 'work' ? 'work'
           : section === 'ghosts' || section === 'lifetime' && !['work', 'ghosts'].includes(params.get('panel') ?? '') ? 'chat' : undefined}

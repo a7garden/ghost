@@ -8,10 +8,17 @@ import { ghostPath, viewPath, type PackageMap } from './PackageWorkspace';
 import './connections.css';
 
 type Action = (command: Command) => Promise<Record<string, any>>;
-const google: IntegrationTransport = { kind: 'stdio', command: 'workspace-mcp', args: ['--transport', 'stdio', '--tools', 'calendar', 'tasks'], env_refs: { GOOGLE_OAUTH_CLIENT_ID: 'GOOGLE_OAUTH_CLIENT_ID', GOOGLE_OAUTH_CLIENT_SECRET: 'GOOGLE_OAUTH_CLIENT_SECRET' }, cwd: null };
 const presets = {
-  planner: { name: 'Google 캘린더 · Tasks', transport: google },
-  gmail: { name: 'Gmail', transport: { ...google, args: ['--transport', 'stdio', '--tools', 'gmail'] } },
+  gmail: {
+    name: 'Gmail',
+    transport: {
+      kind: 'stdio',
+      command: 'workspace-mcp',
+      args: ['--transport', 'stdio', '--tools', 'gmail'],
+      env_refs: { GOOGLE_OAUTH_CLIENT_ID: 'GOOGLE_OAUTH_CLIENT_ID', GOOGLE_OAUTH_CLIENT_SECRET: 'GOOGLE_OAUTH_CLIENT_SECRET' },
+      cwd: null,
+    } satisfies IntegrationTransport,
+  },
 };
 type Preset = keyof typeof presets;
 export function parseLines(value: string): Record<string, string> {
@@ -149,18 +156,15 @@ export function Integrations({ snapshot, action, busy, mode, navigate, connected
     </section>}
 
     <div className="connection-secondary">
-      <DetailDialog title="MCP 설정 예시">
+      {supportsApprovals && <DetailDialog title="MCP 설정 예시">
         <div className="connection-settings-body">
           <p className="field-help">로컬 프로그램은 이 Mac에서 실행합니다. 인증에는 비밀 값 대신 호스트 환경 변수 이름을 사용합니다.</p>
-          <div className="connection-preset"><div><h3>Google 캘린더 · Tasks</h3>
-            <a href="https://github.com/taylorwilsdon/google_workspace_mcp#quick-start" target="_blank" rel="noreferrer">설치·인증 안내<ArrowUpRight size={13}/></a>
-          </div><button className="button secondary" disabled={locked} onClick={() => setEditor({ preset: 'planner' })}>설정 사용</button></div>
-          {supportsApprovals && <div className="connection-preset"><div><h3>Gmail</h3>
+          <div className="connection-preset"><div><h3>Gmail</h3>
             <p className="field-help">도구 권한에서 <code>send_gmail_message</code>를 선택하면 Ghost가 발송 승인을 요청할 수 있습니다.</p>
             <a href="https://github.com/taylorwilsdon/google_workspace_mcp#quick-start" target="_blank" rel="noreferrer">설치·인증 안내<ArrowUpRight size={13}/></a>
-          </div><button className="button secondary" disabled={locked} onClick={() => setEditor({ preset: 'gmail' })}>설정 사용</button></div>}
+          </div><button className="button secondary" disabled={locked} onClick={() => setEditor({ preset: 'gmail' })}>설정 사용</button></div>
         </div>
-      </DetailDialog>
+      </DetailDialog>}
       <div className="connection-surface">
         <fieldset className="connection-fieldset connection-pairing" disabled={!connected}>
           <MobilePairing mode={mode} connected={connected} profiles={snapshot.profiles}/>

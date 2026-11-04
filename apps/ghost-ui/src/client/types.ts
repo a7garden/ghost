@@ -3,7 +3,6 @@ export type * from './routingTypes';
 import type { RoutingAdapter, RoutingPendingState } from './routingTypes';
 import type { HostRoutingTransport } from './hostRouting';
 import type { RoutingResultProjection, RoutingShare } from './routingResults';
-import type { ConnectedPlanner } from './connectedPlanner';
 import type { PetDesign, SpriteVersion } from '../pets/sprites';
 export type DotState = 'working' | 'attention' | 'idle' | 'offline';
 export type Tone = 'mint' | 'peach' | 'lilac' | 'sky';
@@ -38,7 +37,7 @@ export interface ModelSettings { version: number; providers: ModelProvider[]; ro
 export type ModelRole = "llm" | "stt" | "tts";
 export interface ModelProvider { id: string; name: string; kind: "builtin" | "openai_compatible" | "omp_subscription"; endpoint: string; auth: { type: "sdk" | "none" | "env"; variable?: string }; roles: ModelRole[]; models: { id: string; name: string; roles: ModelRole[] }[]; enabled: boolean; checked_ms: number | null; error: string | null; }
 export interface LifetimeHostAuthority { authority_epoch: number; dispatch_enabled: boolean; }
-export interface Snapshot { orchestration_plans?: GraphPlan[]; orchestration_runs?: GraphRun[]; lifetime_authority?: LifetimeHostAuthority; routing_results?: RoutingResultProjection; routing_shares?: RoutingShare[]; connected_planner?: ConnectedPlanner; model_settings?: ModelSettings; avatars: Avatar[]; workspace_id: string; default_model: string; profiles: Profile[]; reviews: Review[]; goals: Goal[]; schedules: Schedule[]; spaces: Space[]; delegations: Delegation[]; todos: Todo[]; calendar_events: CalendarEvent[]; integrations: Integration[]; integrationApprovals?: IntegrationApproval[]; capabilities: Record<string, unknown>; connectors: Record<string, boolean>; }
+export interface Snapshot { orchestration_plans?: GraphPlan[]; orchestration_runs?: GraphRun[]; lifetime_authority?: LifetimeHostAuthority; routing_results?: RoutingResultProjection; routing_shares?: RoutingShare[]; connected_planner?: unknown; model_settings?: ModelSettings; avatars: Avatar[]; workspace_id: string; default_model: string; profiles: Profile[]; reviews: Review[]; goals: Goal[]; schedules: Schedule[]; spaces: Space[]; delegations: Delegation[]; todos: Todo[]; calendar_events: CalendarEvent[]; integrations: Integration[]; integrationApprovals?: IntegrationApproval[]; capabilities: Record<string, unknown>; connectors: Record<string, boolean>; }
 export type Command = Record<string, unknown> & { type: string };
 export interface RoutingPendingMetadata {
  // Disposition of the routing turn carried by this envelope. Kept beside the
