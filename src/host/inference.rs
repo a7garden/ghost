@@ -1,6 +1,6 @@
 //! Lifetime inference preferences and provider consent. Secret values are accepted
 //! only by the authenticated owner endpoint and never enter receipts/snapshots.
-use super::Host;
+use super::{lifetime::orchestra, Host};
 use anyhow::{anyhow, bail, ensure, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -20,8 +20,6 @@ pub(crate) struct Settings {
     pub external_grants: BTreeMap<String, Vec<String>>,
     pub credentials: BTreeMap<String, bool>,
     pub image_provider: String,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub orchestra: BTreeMap<String, super::lifetime::orchestra::ApprovedProfile>,
 }
 
 #[cfg(test)]
@@ -74,6 +72,38 @@ mod tests {
         assert!(!external_allowed(&app.lock().unwrap().journal.0,&ghost,&conversation).unwrap());
         app.shutdown().await.unwrap();
     }
+    #[tokio::test]
+    async fn orchestra_approval_and_cas_preserve_legacy_settings_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        let ghost = uuid::Uuid::new_v4().to_string();
+        let conversation = uuid::Uuid::new_v4().to_string();
+        app.lock().unwrap().journal.0.execute(
+            "INSERT INTO lifetime_registry(ghost_id,kind,conversation_id,roles,mode) VALUES(?1,'primary',?2,'[]','active')",
+            [&ghost, &conversation],
+        ).unwrap();
+        let mut configure = json!({"operation":"set_orchestra","version":0,"ghost_id":ghost,"conversation_id":conversation,
+            "profile":{"reviewer":{"provider":"zai-coding","model":"glm-5.3","effort":"high"}}});
+        assert!(app.configure_inference(&configure).is_err(), "missing reviewer credentials");
+        app.configure_inference(&json!({"operation":"set_api_key","version":0,"provider":"zai-coding","api_key":"test-only-no-network"})).unwrap();
+        configure["version"] = json!(1);
+        let approved = app.configure_inference(&configure).unwrap();
+        assert_eq!(approved["settings"]["orchestra"][key(&ghost, &conversation)]["version"], 2);
+        assert!(app.configure_inference(&configure).is_err(), "stale approval CAS");
+        {
+            let state = app.lock().unwrap();
+            let raw: String = state.journal.0.query_row(
+                "SELECT payload FROM workspace_objects WHERE kind=?1 AND id='workspace'", [KIND], |r| r.get(0),
+            ).unwrap();
+            assert!(serde_json::from_str::<Value>(&raw).unwrap().get("orchestra").is_none());
+            assert_eq!(load(&state.journal.0).unwrap().version, 2);
+        }
+        configure["version"] = json!(2);
+        configure["profile"] = Value::Null;
+        assert!(app.configure_inference(&configure).unwrap()["settings"].get("orchestra").is_none());
+        app.shutdown().await.unwrap();
+    }
+
     #[test]
     fn inference_catalog_rejects_unsupported_provider_reasoning() {
         let selection=|provider:&str,model:&str,effort:&str|Selection{provider:provider.into(),model:model.into(),effort:effort.into()};
@@ -107,7 +137,7 @@ mod tests {
         app.shutdown().await.unwrap();
     }
 }
-impl Default for Settings { fn default() -> Self { Self { version: 0, default: Selection::default(), conversations: BTreeMap::new(), external_grants: BTreeMap::new(), credentials: BTreeMap::new(), image_provider: "codex".into(), orchestra: BTreeMap::new() } } }
+impl Default for Settings { fn default() -> Self { Self { version: 0, default: Selection::default(), conversations: BTreeMap::new(), external_grants: BTreeMap::new(), credentials: BTreeMap::new(), image_provider: "codex".into() } } }
 pub(crate) fn key(ghost: &str, conversation: &str) -> String { format!("{ghost}/{conversation}") }
 pub(crate) fn valid_selection(s: &Selection) -> bool {
     let model = match s.provider.as_str() {
@@ -161,9 +191,16 @@ fn save_secret(path: &Path, value: &[u8]) -> Result<()> {
     if result.is_err() { let _=fs::remove_file(&temporary); } result
 }
 impl Host {
+    fn inference_settings_view(&self, conn: &rusqlite::Connection, settings: &Settings) -> Result<Value> {
+        let mut view = serde_json::to_value(settings)?;
+        let orchestra = orchestra::approved_profiles(conn)?;
+        if !orchestra.is_empty() { view["orchestra"] = serde_json::to_value(orchestra)?; }
+        Ok(json!({"ok":true,"settings":view,"providers":catalog(self.pi_local_route.as_ref())}))
+    }
+
     pub(crate) fn inference_settings(&self) -> Result<Value> {
         let state=self.lock()?; let settings=load(&state.journal.0)?;
-        Ok(json!({"ok":true,"settings":settings,"providers":catalog(self.pi_local_route.as_ref())}))
+        self.inference_settings_view(&state.journal.0, &settings)
     }
     pub(crate) fn configure_inference(&self, input: &Value) -> Result<Value> {
         ensure!(input.is_object(), "invalid inference configuration");
@@ -182,6 +219,21 @@ impl Host {
         };
         ensure!(input.as_object().unwrap().keys().all(|key|allowed.contains(&key.as_str())),"unsupported inference configuration field");
         if let Some(value)=input.get("allow_external") { ensure!(value.is_boolean(),"allow_external must be a boolean"); }
+        if operation == "set_orchestra" {
+            let ghost=input.get("ghost_id").and_then(Value::as_str).ok_or_else(||anyhow!("missing Ghost"))?;
+            let conversation=input.get("conversation_id").and_then(Value::as_str).ok_or_else(||anyhow!("missing conversation"))?;
+            let selection = settings.conversations.get(&key(ghost, conversation)).unwrap_or(&settings.default).clone();
+            settings.version = settings.version.checked_add(1).ok_or_else(||anyhow!("version exhausted"))?;
+            let tx = state.journal.0.transaction()?;
+            orchestra::configure(&tx, ghost, conversation, &selection, &settings, input.get("profile"))?;
+            tx.execute(
+                "INSERT INTO workspace_objects(kind,id,payload) VALUES(?1,'workspace',?2)
+                 ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload",
+                rusqlite::params![KIND, serde_json::to_string(&settings)?],
+            )?;
+            tx.commit()?;
+            return self.inference_settings_view(&state.journal.0, &settings);
+        }
         let mut secret_restore: Option<(std::path::PathBuf,Option<Vec<u8>>)>=None;
         match operation {
             "select" | "set_default" => {
@@ -226,29 +278,6 @@ impl Host {
                 let provider=input.get("provider").and_then(Value::as_str).ok_or_else(||anyhow!("missing provider"))?;
                 ensure!(matches!(provider,"codex"|"minimax"|"local"),"unsupported image provider"); settings.image_provider=provider.into();
             },
-            "set_orchestra" => {
-                let ghost=input.get("ghost_id").and_then(Value::as_str).ok_or_else(||anyhow!("missing Ghost"))?;
-                let conversation=input.get("conversation_id").and_then(Value::as_str).ok_or_else(||anyhow!("missing conversation"))?;
-                let bound:bool=state.journal.0.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM lifetime_bindings WHERE ghost_id=?1 AND conversation_id=?2)
-                     OR EXISTS(SELECT 1 FROM lifetime_registry WHERE ghost_id=?1 AND conversation_id=?2)",
-                    [ghost,conversation],|row|row.get(0))?;
-                ensure!(bound,"conversation is outside the selected Ghost");
-                let profile=input.get("profile").ok_or_else(||anyhow!("missing Orchestra profile"))?;
-                if profile.is_null() {
-                    settings.orchestra.remove(&key(ghost,conversation));
-                } else {
-                    let profile:super::lifetime::orchestra::Profile=serde_json::from_value(profile.clone())?;
-                    let selection=settings.conversations.get(&key(ghost,conversation)).unwrap_or(&settings.default);
-                    profile.validate(selection)?;
-                    if let Some(reviewer)=&profile.reviewer {
-                        ensure!(settings.credentials.get(&reviewer.provider).copied().unwrap_or(reviewer.provider=="codex"),
-                            "Register the independent reviewer credentials before approving the route");
-                    }
-                    let version = settings.version.checked_add(1).ok_or_else(||anyhow!("version exhausted"))?;
-                    settings.orchestra.insert(key(ghost,conversation), super::lifetime::orchestra::ApprovedProfile { version, profile });
-                }
-            },
             "revoke_external" => {
                 let ghost=input.get("ghost_id").and_then(Value::as_str).ok_or_else(||anyhow!("missing Ghost"))?;
                 let conversation=input.get("conversation_id").and_then(Value::as_str).ok_or_else(||anyhow!("missing conversation"))?;
@@ -261,7 +290,7 @@ impl Host {
             if let Some((path,previous))=secret_restore { match previous { Some(value)=>save_secret(&path,&value)?,None=>fs::remove_file(path)? } }
             return Err(error);
         }
-        Ok(json!({"ok":true,"settings":settings,"providers":catalog(self.pi_local_route.as_ref())}))
+        self.inference_settings_view(&state.journal.0, &settings)
     }
 }
 

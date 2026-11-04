@@ -2,12 +2,13 @@
 //! provider approval and exact inference selection are always Host-owned.
 use super::{apply, db, pi_tools::PiToolRequest};
 use crate::{host::inference::{self, Selection}, lifetime_contract::{Goal, Work}};
-use anyhow::{ensure, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use anyhow::{anyhow, ensure, Result};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::OnceLock};
 
+const SETTINGS: &str = "orchestra_settings_v1";
 const INTAKE: &str = "orchestra_intake_v1";
 const GOAL: &str = "orchestra_goal_v1";
 const WORK: &str = "orchestra_work_v1";
@@ -93,13 +94,13 @@ pub(super) fn admit_turn(conn: &Connection, turn: &str, ghost: &str, conversatio
     )?;
     if !primary { return Ok(()); }
 
-    let (settings, base) = inference::selected(conn, ghost, conversation)?;
+    let (_, base) = inference::selected(conn, ghost, conversation)?;
     let mut routes: BTreeMap<_, _> = builtin_routes().iter()
         .filter(|(_, route)| route.provider == base.provider && inference::valid_selection(route))
         .map(|(task, route)| (task.clone(), route.clone())).collect();
     let mut reviewer = None;
     let mut review_grant_version = None;
-    if let Some(approved) = settings.orchestra.get(&inference::key(ghost, conversation)) {
+    if let Some(approved) = load::<ApprovedProfile>(conn, SETTINGS, &inference::key(ghost, conversation))? {
         // Changing the selected provider invalidates overrides on the previous provider.
         if approved.profile.validate(&base).is_ok() {
             routes.extend(approved.profile.routes.clone());
@@ -150,10 +151,10 @@ pub(super) fn admit_assignment(conn: &Connection, work: &Work, conversation: &st
         ).optional()?;
         let Some(root_goal) = root_goal else { return Ok(()); };
         let Some(root) = load::<Assignment>(conn, GOAL, &root_goal)? else { return Ok(()); };
-        let (settings, base) = inference::selected(conn, &work.owner, conversation)?;
+        let (_, base) = inference::selected(conn, &work.owner, conversation)?;
+        let approval = load::<ApprovedProfile>(conn, SETTINGS, &inference::key(&work.owner, conversation))?;
         let task = goal.acceptance_spec["orchestra_task"].as_str().filter(|task| valid_task(task)).unwrap_or(&root.task);
-        let selection = settings.orchestra.get(&inference::key(&work.owner, conversation))
-            .and_then(|p| p.profile.routes.get(task))
+        let selection = approval.as_ref().and_then(|p| p.profile.routes.get(task))
             .or_else(|| builtin_routes().get(task))
             .filter(|route| route.provider == base.provider && inference::valid_selection(route)
                 && (base.provider != "local" || **route == base))
@@ -188,9 +189,50 @@ pub(super) fn reviewer_current(conn: &Connection, goal: &Goal, route: &Selection
     let (settings, selected) = inference::selected(conn, &goal.accountable_ghost, &goal.reply_conversation)?;
     let producer = load::<Assignment>(conn, GOAL, &goal.id)?;
     let Some(pin) = producer else { return Ok(false); };
-    let approved = settings.orchestra.get(&inference::key(&goal.accountable_ghost, &goal.reply_conversation));
+    let approved = load::<ApprovedProfile>(conn, SETTINGS, &inference::key(&goal.accountable_ghost, &goal.reply_conversation))?;
     Ok(pin.selection.provider == selected.provider && selected.provider != route.provider &&
         approved.is_some_and(|approval| Some(approval.version) == pin.review_grant_version &&
             approval.profile.reviewer.as_ref() == Some(route)) &&
         settings.credentials.get(&route.provider).copied().unwrap_or(route.provider == "codex"))
+}
+
+
+// Keep the legacy inference row's schema readable by the previous Host.
+// The Owner CAS increment and this separate approval commit together.
+pub(crate) fn configure(tx: &Transaction<'_>, ghost: &str, conversation: &str, base: &Selection,
+    settings: &inference::Settings, profile: Option<&Value>) -> Result<()> {
+    let bound: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM lifetime_bindings WHERE ghost_id=?1 AND conversation_id=?2)
+         OR EXISTS(SELECT 1 FROM lifetime_registry WHERE ghost_id=?1 AND conversation_id=?2)",
+        [ghost, conversation], |row| row.get(0),
+    )?;
+    ensure!(bound, "conversation is outside the selected Ghost");
+    let profile = profile.ok_or_else(|| anyhow!("missing Orchestra profile"))?;
+    let key = inference::key(ghost, conversation);
+    if profile.is_null() {
+        tx.execute("DELETE FROM workspace_objects WHERE kind=?1 AND id=?2", params![SETTINGS, key])?;
+    } else {
+        let profile: Profile = serde_json::from_value(profile.clone())?;
+        profile.validate(base)?;
+        if let Some(reviewer) = &profile.reviewer {
+            ensure!(settings.credentials.get(&reviewer.provider) == Some(&true),
+                "Register the independent reviewer credentials before approving the route");
+        }
+        let approved = ApprovedProfile { version: settings.version, profile };
+        tx.execute(
+            "INSERT INTO workspace_objects(kind,id,payload) VALUES(?1,?2,?3)
+             ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload",
+            params![SETTINGS, key, serde_json::to_string(&approved)?],
+        )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn approved_profiles(conn: &Connection) -> Result<BTreeMap<String, ApprovedProfile>> {
+    let mut query = conn.prepare("SELECT id,payload FROM workspace_objects WHERE kind=?1")?;
+    let rows = query.query_map([SETTINGS], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    rows.map(|row| {
+        let (key, raw) = row?;
+        Ok((key, serde_json::from_str(&raw)?))
+    }).collect()
 }

@@ -17,7 +17,7 @@ Agent Orchestra의 공통 업무 규칙과 분야별 지침은 Ghost의 기존 �
 
 웹 앱의 기본 Ghost 대화에서 **대화 모델 → 독립 리뷰**를 열고, 키가 등록된 Z.AI 또는 MiniMax를 골라 전송을 허용한다. 작성 공급자와 다른 공급자만 선택할 수 있다. 설정한 뒤 새로 접수하는 공개 업무에 적용된다. 같은 Bun 번들의 일회성 Pi 리뷰 모드는 공개 요구사항과 단일 UTF-8 산출물(합계 최대 48 KiB)을 받고 도구 없이 검토한다. 대화 전체나 로컬 스킬, 파일 경로는 보내지 않는다. 보호된 업무는 기존 로컬 실행과 검증 경로를 따른다.
 
-소유자 API `POST /api/v1/inference/settings`의 `set_orchestra`는 현재 `version`, `ghost_id`, `conversation_id`, `profile`을 받는다. `profile.routes`는 작업 유형에서 `{provider,model,effort}`로 가는 맵이고 `profile.reviewer`는 같은 형태의 선택 또는 `null`이다. 경로 지정은 해당 대화가 승인한 작성 공급자 안에서만 유효하다. `profile: null`은 대화의 Orchestra 설정을 지운다. 설정을 해제하거나 바꾸면 이전 승인이 철회된다. 진행 중 리뷰의 권한이 사라지면 현재 업무를 수용하지 않는다. 응답을 확인하지 못한 동일 리뷰는 자동 재요청하지 않는다.
+소유자 API `POST /api/v1/inference/settings`의 `set_orchestra`는 현재 `version`, `ghost_id`, `conversation_id`, `profile`을 받는다. `profile.routes`는 작업 유형에서 `{provider,model,effort}`로 가는 맵이고 `profile.reviewer`는 같은 형태의 선택 또는 `null`이다. 경로 지정은 해당 대화가 승인한 작성 공급자 안에서만 유효하다. `profile: null`은 대화의 Orchestra 설정을 지운다. 설정을 해제하거나 바꾸면 이전 승인이 철회된다. 진행 중 리뷰의 권한이 사라지면 현재 업무를 수용하지 않는다. 응답을 확인하지 못한 동일 리뷰는 자동 재요청하지 않는다. 이전 Host로 복귀할 때는 해당 버전이 리뷰 대기를 처리하지 못하므로 먼저 진행 중인 리뷰 업무를 마무리하거나 취소한다.
 
 지원되는 기본 경로를 최신 Orchestra 레지스트리에서 다시 만들 수 있다.
 
