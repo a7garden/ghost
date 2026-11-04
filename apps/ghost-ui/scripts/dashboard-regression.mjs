@@ -159,6 +159,8 @@ try {
         assert.deepEqual(overflow,[],`${theme} ${width} ${path} overflows`);
         if(path==='/') {
           assert.equal(await page.locator('.dashboard-task').count(),2);
+          const roster=page.getByRole('region',{name:'나의 Ghost',exact:true});
+          await roster.getByRole('button',{name:/^Ghost 기본/}).waitFor();
           assert.equal(await page.locator('.dashboard-metrics button').first().locator('strong').textContent(),'1');
           assert.equal(await page.getByText('이전 판본의 작업',{exact:true}).count(),0);
         }
@@ -386,13 +388,18 @@ try {
   checks.push('mobile-composer-focus-hides-tabs-320');
 
   await page.goto(`${origin}/#/ghosts`);
-  await page.getByRole('heading',{name:'Ghosts',exact:true,level:1}).waitFor();
-  await page.getByRole('button',{name:'Writer 대화 열기',exact:true}).waitFor();
-  assert.equal(ensureWrites.length,0,'Ghost directory is read-only');
+  await page.waitForURL(`${origin}/#/`);
+  const roster=page.getByRole('region',{name:'나의 Ghost',exact:true});
+  const writerRow=roster.getByRole('button',{name:/^Writer/});
+  await writerRow.waitFor();
+  await roster.getByRole('button',{name:/^Ghost 기본/}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Ghosts',exact:true}).count(),0);
+  assert.equal(ensureWrites.length,0,'the redirected dashboard roster is read-only');
   await page.goto(`${origin}/#/lifetime?ghost=${writer}&register=${crypto.randomUUID()}`);
   await page.waitForTimeout(500);
   assert.equal(ensureWrites.length,0,'a register URL parameter alone never creates a Host binding');
-  await page.goto(`${origin}/#/lifetime?panel=ghosts&ghost=${writer}`);
+  await page.goto(`${origin}/#/`);
+  await writerRow.click();
   await page.getByRole('button',{name:'새 대화 연결',exact:true}).waitFor();
   assert.equal(ensureWrites.length,0,'opening an unregistered Ghost is read-only until the explicit action');
   await page.getByRole('button',{name:'새 대화 연결',exact:true}).click();
@@ -404,10 +411,15 @@ try {
   await page.waitForTimeout(250);
   assert.equal(ensureWrites.length,1,'registration is not replayed after the refreshed pair opens');
   assert.match(new URL(page.url()).hash,new RegExp(`ghost=${writer}.*conversation=${writerEnsure.conversation_id}`));
-  checks.push('ghost-directory-url-only-no-write-explicit-registration');
+  await page.goto(`${origin}/#/`);
+  await writerRow.click();
+  await page.locator('#lifetime-message').waitFor();
+  assert.equal(await page.getByRole('heading',{name:'Writer',exact:true}).first().isVisible(),true);
+  assert.equal(ensureWrites.length,1,'the roster opens the current conversation without registering again');
+  checks.push('dashboard-roster-redirect-explicit-registration-and-open-current');
 
-  await page.goto(`${origin}/#/ghosts`);
-  await page.getByRole('button',{name:'새 Ghost',exact:true}).click();
+  await page.goto(`${origin}/#/`);
+  await roster.getByRole('button',{name:'Ghost 만들기',exact:true}).click();
   const createDialog=page.getByRole('dialog',{name:'Ghost 만들기',exact:true});
   await createDialog.getByLabel('Ghost 이름').fill('CreatedGhost');
   await createDialog.getByLabel('역할 메모').fill('새 담당 Ghost의 역할을 표시합니다.');

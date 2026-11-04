@@ -4,7 +4,7 @@ import type { FormEvent } from "react";
 import { Check, ChevronRight, CircleAlert, Clock3, LayoutGrid, MessageSquare, RefreshCw, Send, Settings2 } from "lucide-react";
 import type { Artifact, ConversationRun, Envelope, Goal, Response, Snapshot, Work } from "../../../../contracts/lifetime/bindings.ts";
 import { isArtifact, isPrivacy } from "./guards";
-import { atLeastPrivacy, conversationTargetKey, mergeConversationRuns, parseConversationPage, parseRegistryResponse } from "./conversation";
+import { atLeastPrivacy, conversationTargetKey, mergeConversationRuns, parseConversationPage, parseRegistryResponse, defaultRegistryGhostId } from "./conversation";
 import type { ConversationPage, ConversationTurn, RegistryConversation } from "./conversation";
 import type { LifetimeClient, LifetimeMode, LifetimeRecoveryCommand } from "./types";
 import type { Review, Command } from "../client/types";
@@ -283,8 +283,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     registryRef.current = entries;
     setRegistryReady(true);
     setRegistryError("");
-    const activePrimary = entries.filter(entry => entry.mode === "active" && entry.kind === "primary");
-    onDefaultGhostChange?.(activePrimary.length === 1 ? activePrimary[0]!.ghost_id : null);
+    onDefaultGhostChange?.(defaultRegistryGhostId(entries));
     const conversationInputs = commands.filter(command => command.body.method === "conversation.input");
     if (conversationInputs.length === 1) {
       const body = conversationInputs[0]!.body;
@@ -701,7 +700,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   async function submitConversation(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!selectedTarget) {
-      setError("선택한 Ghost의 활성 대화를 확인할 수 없습니다. Ghosts에서 대화를 연결해 주세요.");
+      setError("선택한 Ghost의 활성 대화를 확인할 수 없습니다. 대시보드에서 이 Ghost를 열고 대화를 연결해 주세요.");
       return;
     }
     const capturedPrompt = prompt;
@@ -907,7 +906,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     </section>}
 
     {selectedPanel === "ghosts" && snapshot && workspaceSnapshot && registryReady && !registryError && <section className="lifetime-roster" aria-labelledby="ghost-team-heading">
-      <h3 id="ghost-team-heading" className="lifetime-roster-label">Ghosts</h3>
+      <h3 id="ghost-team-heading" className="lifetime-roster-label">Ghost 목록</h3>
       <ul className="ghost-team-list">
         {workspaceSnapshot.profiles.map(profile => {
           const entries = registry.filter(target => target.ghost_id === profile.id);
@@ -951,7 +950,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         {integrationReviews.slice(0, 5).map(review => <button type="button" className="button secondary" key={review.id}
           onClick={() => onOpenApproval({ kind: "integration", id: review.id })}>{integrationApprovalTitle(review.tool)} · {integrationStatusLabels[review.state]}</button>)}
       </div>}
-      {!selectedTarget && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>{initialGhostID ? "이 Ghost에 활성 대화가 없습니다. Ghosts에서 새 대화를 연결해 주세요." : "활성 대화를 확인할 수 없습니다. Ghosts에서 대화를 선택해 주세요."}</span></p>}
+      {!selectedTarget && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>{initialGhostID ? "이 Ghost에 활성 대화가 없습니다. 대시보드에서 이 Ghost를 열고 새 대화를 연결해 주세요." : "활성 대화를 확인할 수 없습니다. 대시보드에서 Ghost를 선택해 주세요."}</span></p>}
       {conversationError && <p className="lifetime-alert" role="alert"><CircleAlert size={16}/><span>{conversationError}</span></p>}
       {hasOlder && oldestSequence !== null && <button type="button" className="button secondary" onClick={() => void loadOlderConversation()} disabled={conversationLoading || !selectedTarget}>이전 대화 불러오기</button>}
       {conversationLoading && <p className="lifetime-empty"><Clock3 size={16}/>저장된 대화를 불러오는 중입니다.</p>}

@@ -30,13 +30,12 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
   const panel = params.get('panel');
   const profile = snapshot?.profiles.find(item => item.id === dotId);
   const conversation = params.get('conversation') ?? profile?.conversations[0]?.id;
-  const primarySection = section === 'lifetime' ? panel === 'work' ? 'work' : panel === 'ghosts' ? 'ghosts' : 'ghosts' : section;
+  const primarySection = section === 'lifetime' && panel === 'work' ? 'work' : section;
   const chatSelected = Boolean(dotId && !activeView && (section === 'ghosts' || (section === 'lifetime' && !panel && !params.has('create'))));
   return <>
     <div className="sidebar-scroll">
       <nav className="primary-nav dashboard-primary-nav" aria-label="기본 메뉴">{[
         { path: '/', key: 'home', name: routeLabels.home, Icon: Home },
-        { path: '/ghosts', key: 'ghosts', name: routeLabels.ghosts, Icon: MessageCircle },
         { path: '/inbox', key: 'inbox', name: routeLabels.inbox, Icon: Inbox },
         { path: durableHost ? '/lifetime?panel=work&scope=all' : '/work', key: 'work', name: routeLabels.work, Icon: LayoutList },
       ].map(({ path, key, name, Icon }) => <button key={key} className={`nav-row ${primarySection === key ? 'selected' : ''}`} aria-current={primarySection === key ? 'page' : undefined} onClick={() => navigate(path)}><Icon size={16}/><span>{name}</span>{key === 'inbox' && attentionCount > 0 && <span className="nav-count">{attentionCount}</span>}</button>)}</nav>

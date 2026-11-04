@@ -80,21 +80,6 @@ export function GhostSwitcher({ profiles, selected, defaultGhostId, onSelect, on
   </div>;
 }
 
-export function GhostDirectory({ profiles, defaultGhostId, onOpen, onAdd }: {
-  profiles: Profile[]; defaultGhostId?: string | null; onOpen(id: string): void; onAdd(): void;
-}) {
-  return <div className="page-content ghost-directory">
-    <div className="page-heading"><h1>Ghosts</h1><button className="button primary" onClick={onAdd}><Plus size={15}/>새 Ghost</button></div>
-    {profiles.length === 0 ? <section className="empty-state large-empty"><GhostMark/><h2>아직 Ghost가 없습니다</h2><button className="button primary" onClick={onAdd}>새 Ghost 만들기<Plus size={15}/></button></section>
-      : <div className="ghost-directory-list" aria-label="Ghost 목록">{profiles.map(profile => <article className="ghost-directory-row" key={profile.id}>
-        <div className="ghost-directory-identity"><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={42}/>
-          <span><strong>{profile.name}{profile.id === defaultGhostId && <span className="ghost-default-badge">기본</span>}</strong><small>{profile.persona}</small></span>
-        </div>
-        <button className="button secondary" aria-label={`${profile.name} 대화 열기`} onClick={() => onOpen(profile.id)}>대화 열기<ArrowRight size={14}/></button>
-      </article>)}</div>}
-  </div>;
-}
-
 export function PackageImport({ workspace, profiles, selected, onClose, onInstalled }: {
   workspace: string; profiles: Profile[]; selected: string;
   onClose(): void; onInstalled(profile: string): void;

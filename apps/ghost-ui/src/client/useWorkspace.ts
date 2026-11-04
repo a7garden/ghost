@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CommandQueue, connect } from './api';
-import { readDashboardSnapshot } from './dashboardRead';
+import { readDashboardLifetime } from './dashboardRead';
 import { subscribeHostEvents } from './hostEvents';
 import { RoutingClient } from './routingClient';
 import type { RoutingConnection } from '../features/RoutingConversation';
@@ -104,7 +104,7 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
     if (!client.current) throw new Error('호스트 연결을 기다려 주세요.');
     return await client.current.action({ request_id: crypto.randomUUID(), command }) as Record<string, any>;
   }, []);
-  const lifetimeRead = useCallback((envelope: Envelope) => readDashboardSnapshot(client.current, envelope), []);
+  const lifetimeRead = useCallback((envelope: Envelope) => readDashboardLifetime(client.current, envelope), []);
   const lifetimeAction = useCallback(async (envelope: Envelope) => {
     if (!client.current || client.current.mode !== 'live') throw new Error('Lifetime 접수는 연결된 Ghost 호스트가 필요합니다.');
     const result = await client.current.action(envelope);

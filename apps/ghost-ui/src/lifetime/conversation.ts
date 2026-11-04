@@ -39,6 +39,11 @@ export function conversationTargetKey(target: Pick<RegistryConversation, "ghost_
   return JSON.stringify([target.ghost_id, target.conversation_id]);
 }
 
+export function defaultRegistryGhostId(entries: RegistryConversation[]): string | null {
+  const activePrimary = entries.filter(entry => entry.kind === "primary" && entry.mode === "active");
+  return activePrimary.length === 1 ? activePrimary[0]!.ghost_id : null;
+}
+
 export function parseRegistryResponse(response: Response): RegistryConversation[] {
   if (response.status !== "success" || !isRecord(response.data) || !Array.isArray(response.data.registry)) {
     throw new Error(response.summary || "등록된 대화 대상을 확인하지 못했습니다.");

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '../lifetime/protocol';
-import { readDashboardSnapshot } from './dashboardRead';
+import { readDashboardLifetime } from './dashboardRead';
 import type { Envelope } from './types';
 
 async function lifetimeCommand(body: Record<string, unknown>, type = 'lifetime'): Promise<Envelope> {
@@ -19,18 +19,20 @@ describe('dashboard Host read boundary', () => {
     const cancel = await lifetimeCommand({ method: 'work.cancel', work_id: 'work-1' });
     const other = await lifetimeCommand({ method: 'snapshot' }, 'workspace');
 
-    for (const command of [submit, cancel, other]) {
-      await expect(readDashboardSnapshot(live, command)).rejects.toThrow('대시보드는 상태 조회만 허용합니다.');
+    const unrelatedRead = await lifetimeCommand({ method: 'command.inspect' });
+
+    for (const command of [submit, cancel, other, unrelatedRead]) {
+      await expect(readDashboardLifetime(live, command)).rejects.toThrow('대시보드는 상태 조회만 허용합니다.');
     }
     expect(action).not.toHaveBeenCalled();
   });
 
-  it('passes the original snapshot envelope to the live client and returns its response', async () => {
-    const command = await lifetimeCommand({ method: 'snapshot' });
+  it.each(['snapshot', 'registry.inspect'])('passes the original %s envelope to the live client', async method => {
+    const command = await lifetimeCommand({ method });
     const response = { data: { work: [] } };
     const action = vi.fn().mockResolvedValue(response);
 
-    await expect(readDashboardSnapshot({ mode: 'live', action }, command)).resolves.toBe(response);
+    await expect(readDashboardLifetime({ mode: 'live', action }, command)).resolves.toBe(response);
     expect(action).toHaveBeenCalledExactlyOnceWith(command);
   });
 
@@ -38,8 +40,8 @@ describe('dashboard Host read boundary', () => {
     const command = await lifetimeCommand({ method: 'snapshot' });
     const action = vi.fn();
 
-    await expect(readDashboardSnapshot(null, command)).rejects.toThrow('연결된 Ghost 호스트가 필요합니다.');
-    await expect(readDashboardSnapshot({ mode: 'demo', action }, command)).rejects.toThrow('연결된 Ghost 호스트가 필요합니다.');
+    await expect(readDashboardLifetime(null, command)).rejects.toThrow('연결된 Ghost 호스트가 필요합니다.');
+    await expect(readDashboardLifetime({ mode: 'demo', action }, command)).rejects.toThrow('연결된 Ghost 호스트가 필요합니다.');
     expect(action).not.toHaveBeenCalled();
   });
 });

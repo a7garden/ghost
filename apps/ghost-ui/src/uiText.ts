@@ -24,6 +24,6 @@ export const routeLabels = {
   providers: '프로바이더',
   host: '호스트',
   spaces: '문서 공간',
-  ghosts: 'Ghosts',
+  ghosts: 'Ghost',
   lifetime: '대화',
 } as const;

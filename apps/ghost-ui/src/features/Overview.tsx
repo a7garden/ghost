@@ -13,9 +13,10 @@ import type { HostStatus } from './hostStatus';
 export interface OverviewProps {
   snapshot: Snapshot; mode: string; connected?: boolean; navigate: (path: string) => void;
   onReview: (review: Review) => void; onAdd: () => void; onAssign: (profile?: Profile) => void;
+  defaultGhostId?: string | null;
   lifetime?: LifetimeSnapshot; workError?: string; workLoading?: boolean; status?: HostStatus;
 }
-export function Overview({ snapshot, mode, connected = true, navigate, onReview, onAdd, onAssign, lifetime, workError, workLoading, status }: OverviewProps) {
+export function Overview({ snapshot, mode, connected = true, navigate, onReview, onAdd, onAssign, defaultGhostId, lifetime, workError, workLoading, status }: OverviewProps) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const work = projectDashboardWork(snapshot, lifetime);
@@ -59,7 +60,7 @@ export function Overview({ snapshot, mode, connected = true, navigate, onReview,
           <div className="search-field dashboard-search"><Search size={15}/><input aria-label="Ghost 이름 또는 역할 검색" placeholder="이름이나 역할 검색" value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setSearch(''); }}/>{search && <button className="icon-button small" aria-label="검색어 지우기" onClick={() => setSearch('')}><X size={14}/></button>}</div>
           <div className="dashboard-ghost-list">{profiles.map(profile => {
             const owned = work.tasks.filter(task => task.ghostId === profile.id);
-            return <button className="dashboard-ghost" key={profile.id} onClick={() => navigate(ghostPath(profile.id))}><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={40}/><span><strong>{profile.name}</strong><small>{profileSummary(profile.persona) || '대화 열기'}</small></span>{owned.length > 0 && <span className="dashboard-ghost-count">작업 {owned.length}</span>}<ArrowUpRight size={14}/></button>;
+            return <button className="dashboard-ghost" key={profile.id} onClick={() => navigate(ghostPath(profile.id))}><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={40}/><span><span className="dashboard-ghost-name"><strong>{profile.name}</strong>{profile.id === defaultGhostId && <span className="ghost-default-badge">기본</span>}</span><small>{profileSummary(profile.persona) || '대화 열기'}</small></span>{owned.length > 0 && <span className="dashboard-ghost-count">작업 {owned.length}</span>}<ArrowUpRight size={14}/></button>;
           })}</div>
           {!profiles.length && <p className="quiet-empty">{snapshot.profiles.length ? '검색 결과가 없습니다.' : '첫 Ghost를 만들어 대화를 시작하세요.'}</p>}
         </section>

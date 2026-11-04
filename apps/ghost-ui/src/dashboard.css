@@ -61,6 +61,8 @@
 .dashboard-ghost { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 16px 2px; border-bottom: 1px solid var(--color-rule); text-align: start; }
 .dashboard-ghost > .dot-avatar { flex: none; }
 .dashboard-ghost > span:not(.dot-avatar):not(.dashboard-ghost-count) { display: grid; gap: 5px; min-width: 0; flex: 1; }
+.dashboard-ghost-name { display: flex; align-items: center; min-width: 0; }
+.dashboard-ghost-name .ghost-default-badge { flex: none; }
 .dashboard-ghost strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-ghost small { font-size: 11px; color: var(--color-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dashboard-ghost-count { color: var(--color-running-ink); font-size: 10px; white-space: nowrap; }

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Snapshot as LifetimeSnapshot } from '../../../../contracts/lifetime/bindings.ts';
 import type { Snapshot } from '../client/types';
 import { createLifetimeControlTransport, type AuthenticatedControlAction } from '../lifetime/controlTransport';
+import { defaultRegistryGhostId, parseRegistryResponse } from '../lifetime/conversation';
+import { createEnvelope } from '../lifetime/protocol';
 
 interface Observation {
   scope: string;
@@ -10,16 +12,18 @@ interface Observation {
   observedAt: number | null;
 }
 
-export function useDashboardWork({ workspace, mode, read, enabled }: {
+export function useDashboardWork({ workspace, mode, read, enabled, loadRoster }: {
   workspace: Snapshot | null;
   mode: 'live' | 'demo';
   read: AuthenticatedControlAction;
   enabled: boolean;
+  loadRoster: boolean;
 }) {
   const epoch = workspace?.lifetime_authority?.authority_epoch;
   const scope = enabled && mode === 'live' && workspace && epoch !== undefined
     ? JSON.stringify([workspace.workspace_id, epoch]) : null;
   const [observation, setObservation] = useState<Observation>();
+  const [roster, setRoster] = useState<{ scope: string; defaultGhostId: string | null }>();
   const inFlight = useRef<Promise<LifetimeSnapshot> | null>(null);
   const refreshRequest = useRef<{ scope: string; run: () => void } | null>(null);
 
@@ -78,12 +82,29 @@ export function useDashboardWork({ workspace, mode, read, enabled }: {
     };
   }, [scope, epoch, read]);
 
+  useEffect(() => {
+    setRoster(undefined);
+    if (!loadRoster || scope === null || epoch === undefined) return;
+
+    let active = true;
+    const identity = { actor_ref: 'owner', authority_epoch: epoch };
+    const readDefault = async () => {
+      const transport = createLifetimeControlTransport(read, identity);
+      const envelope = await createEnvelope({ method: 'registry.inspect' }, identity);
+      const response = await transport.request(envelope);
+      if (active) setRoster({ scope, defaultGhostId: defaultRegistryGhostId(parseRegistryResponse(response)) });
+    };
+    void readDefault().catch(() => { /* The badge requires a verified registry response. */ });
+    return () => { active = false; };
+  }, [scope, epoch, read, loadRoster]);
+
   const refresh = useCallback(() => {
     if (refreshRequest.current?.scope === scope) refreshRequest.current.run();
   }, [scope]);
   const current = observation?.scope === scope ? observation : undefined;
   return {
     snapshot: current?.snapshot,
+    defaultGhostId: roster?.scope === scope ? roster?.defaultGhostId : undefined,
     error: current?.error ?? '',
     loading: scope !== null && current === undefined,
     observedAt: current?.observedAt ?? null,

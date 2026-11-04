@@ -35,7 +35,7 @@ import { LifetimeRoute } from './features/LifetimeRoute';
 import { LegacyTranscript, legacyHistoryPath, legacyHistoryRequested } from './features/LegacyTranscript';
 import { ApprovalDrawer } from './plugins/ApprovalDrawer';
 import type { Approval, ApprovalRef } from './plugins/approvals';
-import { GhostDirectory, GhostSwitcher, MobilePrimaryTabs, PackageImport, PortraitPicker } from './features/GhostPackageControls';
+import { GhostSwitcher, MobilePrimaryTabs, PackageImport, PortraitPicker } from './features/GhostPackageControls';
 import { ghostPath, PackageWorkspace, portraitColors, usePackages, viewPath } from './features/PackageWorkspace';
 import { faceColor, isHexColor } from './pets/appearance';
 import './ghost-packages.css';
@@ -68,12 +68,18 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   useEffect(() => { setFormError(''); }, [dialog]);
   const navigate = (path: string) => { resetScroll(); if (currentRoute() !== path) history.pushState(null, '', `#${path}`); setRoute(path); };
   const params = new URLSearchParams(route.split('?')[1] ?? '');
-  const section = route.startsWith('/spaces') ? 'spaces' : route.split('/')[1]?.split('?')[0] || 'home';
+  const legacyGhostIndex = /^\/ghosts\/?$/.test(route.split('?')[0]);
+  useEffect(() => {
+    if (!legacyGhostIndex) return;
+    history.replaceState(history.state, '', '#/');
+    setRoute('/');
+  }, [legacyGhostIndex]);
+  const section = legacyGhostIndex ? 'home' : route.startsWith('/spaces') ? 'spaces' : route.split('/')[1]?.split('?')[0] || 'home';
   const [clock, setClock] = useState(Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 10000); return () => clearInterval(timer); }, []);
   const status = hostStatus(mode, error, workspace.observedAt, workspace.connecting, clock);
   const connected = status.state === 'connected' || status.state === 'demo';
-  const dashboardWork = useDashboardWork({ workspace: snapshot, mode, read: workspace.lifetimeRead, enabled: section === 'home' || section === 'host' });
+  const dashboardWork = useDashboardWork({ workspace: snapshot, mode, read: workspace.lifetimeRead, enabled: section === 'home' || section === 'host', loadRoster: section === 'home' && primaryChat && connected });
   const profiles = snapshot?.profiles ?? [];
   const dotSegment = section === 'ghosts' ? route.split('/')[2]?.split('?')[0] : null;
   const dot = profiles.find(profile => section === 'lifetime' ? profile.id === params.get('ghost') : encodeURIComponent(profile.id) === dotSegment);
@@ -168,7 +174,6 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     ...[
       { id: 'inbox', title: routeLabels.inbox, path: '/inbox' },
       { id: 'home', title: routeLabels.home, path: '/' },
-      { id: 'ghosts', title: 'Ghost', path: '/ghosts' },
       { id: 'work', title: routeLabels.work, path: primaryChat ? '/lifetime?panel=work&scope=all' : '/work' },
       { id: 'spaces', title: routeLabels.spaces, path: '/spaces' },
       { id: 'together', title: routeLabels.together, path: '/together' },
@@ -296,8 +301,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
       {error && <div className="connection-error" role="alert"><CircleAlert size={17}/><span>{error}</span><button className="text-button" onClick={reconnect}><RefreshCw size={14}/>다시 연결</button></div>}
       {!snapshot ? <main className="page-content loading-content" aria-busy={!error}><div className="skeleton heading-skeleton"/><div className="skeleton description-skeleton"/><div className="dot-grid">{[0, 1, 2, 3].map(i => <div className="skeleton dot-skeleton" key={i}/>)}</div>{error && <p>연결되면 저장된 Ghost와 작업을 표시합니다.</p>}</main> : <main ref={mainContent} id="main-content" tabIndex={-1} className={chatLayout ? 'detail-main' : ''}>
         {section === 'settings' && <Settings snapshot={snapshot} route={route} navigate={navigate} action={action} busy={busy} mode={mode} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} connected={connected}/>}
-        {section === 'home' && <Overview snapshot={snapshot} mode={mode} connected={connected} navigate={navigate} onReview={openDocumentReview} onAdd={addGhost} onAssign={assign} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading} status={status}/>}
-        {section === 'ghosts' && !dot && !dotSegment && <GhostDirectory profiles={profiles} defaultGhostId={defaultGhostId} onOpen={switchGhost} onAdd={addGhost}/>}
+        {section === 'home' && <Overview snapshot={snapshot} mode={mode} connected={connected} navigate={navigate} onReview={openDocumentReview} onAdd={addGhost} onAssign={assign} defaultGhostId={dashboardWork.defaultGhostId} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading} status={status}/>}
         {section === 'ghosts' && dotSegment && (dot && pkg && activeView ?
           <PackageWorkspace key={`${dot.id}:${pkg.digest}:${activeView.id}`} info={pkg} view={activeView}
             onNavigate={view => navigate(viewPath(dot.id, view))} onChat={() => navigate(ghostPath(dot.id))}/> : dot ? lifetimeEnabled && mode === 'live' ? legacyHistoryRequested(route) ? <LegacyTranscript profile={dot} route={route} navigate={navigate}/> : null : <DotDetail key={dot.id} profile={dot} snapshot={snapshot} mode={mode} action={action} busy={busy} connected={!error} routing={workspace.routing} navigate={navigate} route={route} onReview={openDocumentReview}/> : <div className="empty-state"><CircleAlert size={28}/><h1>이 Ghost를 찾을 수 없습니다</h1><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>)}
