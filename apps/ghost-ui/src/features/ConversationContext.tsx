@@ -77,7 +77,7 @@ export function ConversationContext({ workContent, workCount, profile, conversat
         <button type="button" className="context-card-action" onClick={() => navigate('/work')}>목표 관리<ArrowUpRight size={13}/></button>
       </ContextCard>}
 
-      {(context.spaces.length > 0) && <ContextCard title="문서 공간" icon={<Folder size={16}/>} count={context.spaces.length}>
+      {(context.spaces.length > 0) && <ContextCard title="문서 폴더" icon={<Folder size={16}/>} count={context.spaces.length}>
         {context.spaces.length ? context.spaces.map(space => <button type="button" className="context-entry" key={space.id} onClick={() => navigate(`/spaces/${encodeURIComponent(space.id)}`)}><Folder size={16}/><span><strong>{space.name}</strong><small>{space.writable ? '읽기 · 쓰기' : '읽기 전용'}</small></span><ArrowUpRight size={14}/></button>) : <p className="context-card-empty">연결된 공간 없음</p>}
       </ContextCard>}
 

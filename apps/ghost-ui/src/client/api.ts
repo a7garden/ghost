@@ -4,7 +4,7 @@ import { normalizeSnapshot } from './normalize';
 import { initialWorkspace, examplePages } from '../fixtures/workspace';
 import { exampleCollaboration } from '../fixtures/collaboration';
 import type { Bootstrap, Client, Command, Envelope, Page, RoutingPendingMetadata, Snapshot } from './types';
-import { ConfirmedFailure, HttpStatusError, RoutingPending, RoutingTerminal } from './errors';
+import { ConfirmedFailure, documentPreflightMessage, HttpStatusError, RoutingPending, RoutingTerminal } from './errors';
 import type { PendingRoutingRequest, RoutingEntry, RoutingTurn } from './routingTypes';
 import { normalizeRoutingFailure } from './routingClient';
 import { HostRoutingTransport, createHostRoutingAdapter } from './hostRouting';
@@ -153,6 +153,9 @@ export class CommandQueue {
         const current = await this.read(); delete current[key]; await this.storage.setItem(this.namespace, JSON.stringify(current));
       }
       if (e instanceof ConfirmedFailure && command.type === 'workspace' && ['save_orchestration', 'start_orchestration', 'cancel_orchestration', 'planner_sync_once', 'conversation_model', 'check_integration', 'decide_integration_approval', 'check_model_provider', 'model_catalog', 'discover_local_models', 'create_avatar', 'set_profile_avatar', 'delete_avatar'].includes((command.action as { type?: string })?.type ?? '')) {
+        const current = await this.read(); delete current[key]; await this.storage.setItem(this.namespace, JSON.stringify(current));
+      }
+      if (e instanceof ConfirmedFailure && command.type === 'workspace' && documentPreflightMessage((command.action as { type?: string })?.type, e.message)) {
         const current = await this.read(); delete current[key]; await this.storage.setItem(this.namespace, JSON.stringify(current));
       }
       throw e;
@@ -366,6 +369,18 @@ class DemoClient implements Client {
         this.state.delegations.filter(d => d.target === r.profile_id && d.conversation_id === r.conversation_id).forEach(d => { d.state = 'complete'; }); return {};
       }
       case 'list_pages': return (this.pages[a.space_id] ?? []).filter(p => !a.query || p.title.includes(a.query));
+      case 'save_page': {
+        if (a.page_id != null || a.expected_hash != null || a.profile !== 'pdc-markdown/1') {
+          throw new ConfirmedFailure('예시에서는 새 Markdown 문서를 만들 수 있습니다.');
+        }
+        if (!this.state.spaces.some(space => space.id === a.space_id && space.writable)) {
+          throw new ConfirmedFailure('문서를 저장할 수 없는 폴더입니다.');
+        }
+        const id = crypto.randomUUID();
+        const page = { id, locator: `${id}.md`, title: a.title, body: a.body, profile: 'example' };
+        (this.pages[a.space_id] ??= []).push(page);
+        return page;
+      }
       case 'read_page': {
         const page = (this.pages[a.space_id] ?? []).find(p => a.page_id ? p.id === a.page_id : p.locator === a.locator); if (!page) throw new Error('문서를 찾지 못했습니다.'); return page;
       }

@@ -22,7 +22,7 @@ export const routeLabels = {
   integrations: '확장',
   providers: '프로바이더',
   host: '호스트',
-  spaces: '문서 공간',
+  spaces: '문서',
   ghosts: 'Ghost',
   lifetime: '대화',
 } as const;

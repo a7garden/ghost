@@ -3,12 +3,22 @@
   padding-inline: var(--workspace-gutter);
 }
 
-.space-heading { margin-block-end: var(--space-lg); }
-.space-switcher { display: flex; gap: var(--space-2xs); flex-wrap: wrap; margin-block-end: var(--space-md); }
-.space-switcher .filter-button { max-width: 100%; }
-.space-switcher .filter-button > span { overflow: hidden; text-overflow: ellipsis; }
-.app-shell--desktop .space-switcher { display: none; }
-@media (min-width: 56rem) { .space-switcher { display: none; } }
+.space-heading, .space-list-heading, .space-folder-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+.space-heading, .space-list-heading { justify-content: space-between; }
+.space-heading { margin-block-end: var(--space-xl); }
+.space-heading p { color: var(--color-ink-2); font-size: var(--text-control); margin-block-start: var(--space-2xs); }
+.space-reviews { margin-block-end: var(--space-lg); }
+.space-library h2 { font-size: var(--text-body); font-weight: 650; }
+.space-reviews h2 { margin-block-end: var(--space-xs); }
+.space-list-heading { margin-block-end: var(--space-xs); }
+.space-folder-controls { min-width: 0; }
+.space-folder-controls select { width: auto; min-width: 0; max-width: 100%; }
+.space-folder-name { color: var(--color-ink-2); font-size: var(--text-control); overflow-wrap: anywhere; }
 
 .space-controls {
   display: flex;
@@ -37,7 +47,7 @@
 .space-document-row:hover:not(:disabled) { background: var(--color-background-secondary-hover); }
 .space-document-row > svg, .space-document-row > small { flex: none; color: var(--color-text-secondary); }
 .space-document-title { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
-.space-document-row > small { font-size: var(--text-caption); }
+.space-document-row > small { max-inline-size: 38%; overflow-wrap: anywhere; font-size: var(--text-caption); }
 .space-message { display: grid; gap: var(--space-2xs); justify-items: start; padding-block: var(--space-lg); color: var(--color-text-secondary); border-block-start: 1px solid var(--color-rule); }
 .space-message .button { margin-block-start: var(--space-xs); }
 .space-message .muted { font-size: var(--text-caption); }
@@ -45,3 +55,7 @@
 
 .ghost-arc .space-document-reader.drawer { width: min(100%, calc(var(--workspace-reading-width) + 2 * var(--workspace-gutter))); }
 .space-reader-note { font-size: var(--text-caption); color: var(--color-text-secondary); }
+.ghost-arc .space-document-editor.modal { width: min(100% - 2 * var(--space-sm), var(--workspace-reading-width)); }
+.space-form-destination { color: var(--color-ink-2); font-size: var(--text-control); }
+.space-form .space-writable { flex-direction: row; align-items: center; }
+.space-form button[type="submit"] { align-self: flex-end; }

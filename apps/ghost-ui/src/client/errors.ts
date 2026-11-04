@@ -2,6 +2,22 @@ import type { RoutingEntry } from './routingTypes';
 
 export class ConfirmedFailure extends Error {}
 
+// Only failures before a folder registration or file write are safe to
+// discard from the request queue. Later errors may have saved a file.
+export function documentPreflightMessage(type: unknown, message: string): string | undefined {
+  if (type === 'create_space') {
+    if (message === 'read-only Space directory missing') return '호스트에서 해당 폴더를 먼저 만들어 주세요.';
+    if (message === 'choose an absolute Space directory without a symlink root') return '호스트에 있는 실제 폴더의 절대 경로를 입력해 주세요.';
+  }
+  if (type === 'save_page') {
+    if (message === 'Space missing' || message === 'Space is read-only') return '현재 폴더에 문서를 저장할 수 없습니다.';
+    if (message === 'invalid document title') return '문서 제목을 확인해 주세요.';
+    if (message === 'invalid or unsafe new PDC document' || message === 'canonical PDC 2 bodies must use UTF-8 without a BOM and LF line endings') {
+      return '본문의 Markdown 형식과 줄바꿈을 확인해 주세요.';
+    }
+  }
+}
+
 // A non-2xx host reply whose status code callers may branch on (e.g. events
 // long-polls stop permanently on 4xx but retry transient 5xx/network faults).
 export class HttpStatusError extends Error {

@@ -56,6 +56,7 @@ let artifactTampered=false, artifactNetworkRequests=0;
 let previewTurns=[];
 let snapshotFailure=false, workFailure=false, inferenceFailure=false, acceptPairWrite=false, pairingInvitation;
 let spaceListFailure=false;
+const documentWrites=[];
 const spacePages=[
   {id:'notes',locator:'notes.md',title:'프로젝트 메모',profile:'pdc-markdown/1'},
   {id:null,locator:'archive.dj',title:'보관된 문서',profile:'pdc-djot/1',legacy:true,body:'보관된 원문'},
@@ -110,7 +111,7 @@ async function fixtureContext(theme='light') {
       return route.fulfill(inferenceFailure?{status:502,json:{ok:false,error:'fixture unavailable'}}:{json:inference});
     }
     if(path.endsWith('/action')) {
-      const command=route.request().postDataJSON().command;
+      const {command,request_id}=route.request().postDataJSON();
       if(command.type==='workspace' && command.action?.type==='memory_source_list') {
         return route.fulfill({json:{ok:true,result:reply({sources:[],truncated:false})}});
       }
@@ -129,6 +130,24 @@ async function fixtureContext(theme='light') {
         const {space_id,page_id,locator}=command.action;
         const result=space_id==='fixture-docs' && spacePages.find(item=>page_id ? item.id===page_id : item.locator===locator);
         return route.fulfill(result ? {json:{ok:true,result}} : {status:404,json:{ok:false,error:'fixture document absent'}});
+      }
+      if(command.type==='workspace' && command.action?.type==='create_space') {
+        const {name,path,writable,profiles}=command.action;
+        const result={id:'fixture-linked',name,path,writable,profiles};
+        documentWrites.push({request_id,action:command.action});
+        if(documentWrites.length===1) return route.fulfill({status:409,json:{ok:false,error:'read-only Space directory missing'}});
+        workspace.spaces.push(result);
+        return route.fulfill({json:{ok:true,result}});
+      }
+      if(command.type==='workspace' && command.action?.type==='save_page') {
+        const {title,body,profile}=command.action;
+        const result={id:'fixture-written',locator:'written.md',title,body,profile};
+        documentWrites.push({request_id,action:command.action});
+        if (!spacePages.some(item=>item.id===result.id)) {
+          spacePages.push(result);
+          return route.fulfill({status:502,json:{ok:false,error:'fixture lost the save receipt'}});
+        }
+        return route.fulfill({json:{ok:true,result}});
       }
       if(command.type==='lifetime') {
         const {method, ghost_id, conversation_id}=command.envelope.body;
@@ -610,11 +629,26 @@ try {
   assert.deepEqual(await selectedWriterChat.allTextContents(),['Writer']);
   checks.push('archived-thread-is-read-only-and-links-to-current-chat');
 
-  await page.getByRole('navigation',{name:'문서 공간',exact:true}).getByRole('button',{name:'문서 공간',exact:true}).click();
-  await page.getByText('연결된 문서 공간이 없습니다.',{exact:true}).waitFor();
+  await page.getByRole('navigation',{name:'문서와 협업',exact:true}).getByRole('button',{name:'문서',exact:true}).click();
+  await page.getByText('연결된 문서 폴더가 없습니다.',{exact:true}).waitFor();
   assert.equal(await page.getByRole('heading',{name:'도구',exact:true}).count(),0);
   assert.equal(await page.getByRole('textbox',{name:'문서 검색'}).count(),0);
   checks.push('unconnected-document-space-has-a-direct-entry-and-a-plain-empty-state');
+  await page.getByRole('button',{name:'폴더 연결',exact:true}).click();
+  const folderForm=page.getByRole('dialog',{name:'문서 폴더 연결',exact:true});
+  await folderForm.getByLabel('폴더 이름').fill('연결한 자료');
+  await folderForm.getByLabel('호스트의 폴더 경로').fill('/fixture/documents');
+  await folderForm.getByRole('button',{name:'연결',exact:true}).click();
+  await folderForm.getByRole('alert').filter({hasText:'호스트에서 해당 폴더를 먼저 만들어 주세요.'}).waitFor();
+  await folderForm.getByRole('button',{name:'연결',exact:true}).click();
+  await page.waitForURL(url=>url.hash==='#/spaces/fixture-linked');
+  await page.waitForFunction(()=>document.activeElement?.matches('.space-heading h1'));
+  await page.getByText('아직 문서가 없습니다.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'새 문서',exact:true}).count(),0);
+  assert.deepEqual(documentWrites[0].action,{type:'create_space',name:'연결한 자료',path:'/fixture/documents',writable:false,profiles:[]});
+  assert.deepEqual(documentWrites[0].action,documentWrites[1].action);
+  assert.notEqual(documentWrites[0].request_id,documentWrites[1].request_id,'confirmed validation failure allows a new request');
+  checks.push('document-folder-connection-is-read-only-and-grants-no-ghost-access-by-default');
 
   workspace.spaces=[
     {id:'fixture-docs',name:'프로젝트 문서',path:'fixture-docs',writable:true,profiles:[primary]},
@@ -623,14 +657,14 @@ try {
   spaceListFailure=true;
   await page.goto(`${origin}/#/spaces/fixture-docs`);
   await page.reload();
-  await page.getByRole('heading',{name:'프로젝트 문서',exact:true}).waitFor();
+  await page.getByRole('heading',{name:'문서',exact:true}).waitFor();
   await page.getByRole('alert').filter({hasText:'fixture document read unavailable'}).waitFor();
   assert.equal(await page.getByText('아직 문서가 없습니다.',{exact:true}).count(),0);
   spaceListFailure=false;
   await page.getByRole('button',{name:'다시 불러오기',exact:true}).click();
   const documents=page.getByRole('list',{name:'문서 목록',exact:true});
   await documents.getByRole('button',{name:'프로젝트 메모',exact:true}).waitFor();
-  assert.equal(await page.getByRole('navigation',{name:'공간 선택',exact:true}).isVisible(),false);
+  assert.equal(await page.getByRole('combobox',{name:'문서 폴더',exact:true}).inputValue(),'fixture-docs');
   assert.equal(await documents.getByRole('button',{name:/^삭제한 메모/}).count(),0);
   await page.getByRole('button',{name:'삭제된 문서 포함',exact:true}).click();
   await documents.getByRole('button',{name:/^삭제한 메모/}).waitFor();
@@ -648,11 +682,33 @@ try {
   await page.screenshot({path:`${output}/light-1440-document-list.png`});
   checks.push('document-space-retry-search-deleted-legacy-reader-and-focus');
 
+  await page.getByRole('button',{name:'새 문서',exact:true}).click();
+  const documentForm=page.getByRole('dialog',{name:'새 문서',exact:true});
+  const writtenBody='# 직접 작성\n\n[[참조]]와 Markdown.';
+  await documentForm.getByLabel('제목').fill('직접 작성한 문서');
+  await documentForm.getByLabel('본문').fill(writtenBody);
+  await documentForm.getByRole('button',{name:'저장',exact:true}).click();
+  await documentForm.getByRole('alert').waitFor();
+  assert.equal(await documentForm.getByLabel('본문').inputValue(),writtenBody);
+  await documentForm.getByRole('button',{name:'다시 확인',exact:true}).click();
+  const writtenDocument=documents.getByRole('button',{name:'직접 작성한 문서',exact:true});
+  await writtenDocument.waitFor();
+  assert.deepEqual(documentWrites[3],documentWrites[2],'uncertain response retries the same document intent');
+  assert.deepEqual(documentWrites[2].action,{type:'save_page',space_id:'fixture-docs',page_id:null,expected_hash:null,title:'직접 작성한 문서',body:writtenBody,profile:'pdc-markdown/1'});
+  await writtenDocument.click();
+  const writtenReader=page.getByRole('dialog',{name:'직접 작성한 문서',exact:true});
+  assert.equal(await writtenReader.locator('pre').textContent(),writtenBody);
+  await page.keyboard.press('Escape');
+  await writtenReader.waitFor({state:'detached'});
+  checks.push('document-create-preserves-authored-source-and-retries-without-a-second-write');
+
   await page.setViewportSize({width:320,height:760});
-  await page.getByRole('navigation',{name:'공간 선택',exact:true}).getByRole('button',{name:'빈 문서 공간',exact:true}).click();
+  await page.getByRole('combobox',{name:'문서 폴더',exact:true}).selectOption('fixture-empty');
+  await page.waitForFunction(()=>document.activeElement?.matches('[data-document-folder]'));
   await page.getByText('아직 문서가 없습니다.',{exact:true}).waitFor();
   assert.equal(await search.count(),0);
   assert.equal(await page.getByRole('button',{name:'삭제된 문서 포함',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'새 문서',exact:true}).count(),0);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:`${output}/light-320-empty-document-space.png`});
   checks.push('document-space-switches-on-mobile-and-omits-unused-controls-when-empty');
@@ -790,6 +846,29 @@ try {
     await demo.getByRole('main').getByRole('button',{name:'협업',exact:true}).click();
     await map.waitFor();
     checks.push('demo-status-describes-data-and-collaboration-entry-label-matches-page');
+
+    await demo.goto(`${origin}/#/spaces/space-notes`);
+    await demo.getByRole('heading',{name:'저장된 문서',exact:true}).waitFor();
+    assert.equal(await demo.getByRole('button',{name:'폴더 연결',exact:true}).count(),0);
+    await demo.getByRole('button',{name:'새 문서',exact:true}).click();
+    const exampleForm=demo.getByRole('dialog',{name:'새 문서',exact:true});
+    await exampleForm.getByLabel('제목').fill('브라우저 예시 메모');
+    await exampleForm.getByLabel('본문').fill('예시 본문');
+    await exampleForm.getByRole('button',{name:'저장',exact:true}).click();
+    const savedExample=demo.getByRole('button',{name:'브라우저 예시 메모',exact:true});
+    await savedExample.waitFor();
+    await demo.reload();
+    await savedExample.waitFor();
+    await demo.screenshot({path:`${output}/light-1440-document-workspace.png`});
+    await demo.getByRole('combobox',{name:'문서 폴더',exact:true}).selectOption('space-ghost');
+    const drafts=demo.getByRole('region',{name:'검토할 초안',exact:true});
+    await drafts.getByRole('button',{name:/Ghost 소개 문서/}).click();
+    const draftReview=demo.getByRole('dialog',{name:'문서 저장 요청',exact:true});
+    await draftReview.getByRole('button',{name:'승인하고 저장',exact:true}).click();
+    await draftReview.getByRole('status').filter({hasText:'저장 완료'}).waitFor();
+    await draftReview.getByRole('button',{name:'닫기',exact:true}).click();
+    await demo.getByRole('button',{name:'Ghost 소개',exact:true}).waitFor();
+    checks.push('example-documents-can-be-created-and-ghost-drafts-reviewed-from-the-library');
   } finally {
     await demoContext.close();
   }

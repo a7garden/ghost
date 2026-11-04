@@ -1,4 +1,4 @@
-import { Cpu, Puzzle, Server, Folder, GitBranch, History, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
+import { Cpu, Puzzle, Server, FileText, GitBranch, History, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
 import { useId } from 'react';
 import { ghostPath, viewPath } from '../features/PackageWorkspace';
 import type { GhostView } from '../../sdk/src/index';
@@ -12,7 +12,6 @@ type Props = {
   route: string;
   section: string;
   dotId: string | null;
-  selectedSpace?: string;
   views: GhostView[];
   activeView?: string;
   attentionCount: number;
@@ -23,7 +22,7 @@ type Props = {
   navigate(path: string): void;
 };
 
-export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpace, views, activeView, attentionCount, mode, error, lifetimeEnabled, status, navigate }: Props) {
+export function WorkspaceSidebar({ snapshot, route, section, dotId, views, activeView, attentionCount, mode, error, lifetimeEnabled, status, navigate }: Props) {
   const hostStatusId = useId();
   const { state: hostState, label: hostLabel } = status ?? hostStatus(mode, error, null, false);
   const durableHost = lifetimeEnabled && mode === 'live';
@@ -75,22 +74,9 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
             onClick={() => navigate(viewPath(profile.id, view.id))}><LayoutList size={16}/><span>{view.label}</span></button>)}
         </nav>
       </section>}
-      <section className="sidebar-menu-group" aria-label={routeLabels.spaces}>
-        {Boolean(snapshot?.spaces.length) && <h2 className="sidebar-group-title">{routeLabels.spaces}</h2>}
-        <nav className="primary-nav sidebar-space-list" aria-label={routeLabels.spaces}>
-          {snapshot?.spaces.length ? snapshot.spaces.map(space => {
-            const active = selectedSpace === space.id && section === 'spaces';
-            return <button key={space.id} className={`nav-row ${active ? 'selected' : ''}`}
-              aria-current={active ? 'page' : undefined} title={space.name} onClick={() => navigate(`/spaces/${space.id}`)}>
-              <Folder size={16}/><span>{space.name}</span>
-            </button>;
-          }) : <button className={`nav-row ${section === 'spaces' ? 'selected' : ''}`}
-            aria-current={section === 'spaces' ? 'page' : undefined} onClick={() => navigate('/spaces')}>
-            <Folder size={16}/><span>{routeLabels.spaces}</span>
-          </button>}
-        </nav>
-      </section>
-      <nav className="sidebar-menu-group primary-nav" aria-label={routeLabels.together}>
+      <nav className="sidebar-menu-group primary-nav" aria-label="문서와 협업">
+        <button className={`nav-row ${section === 'spaces' ? 'selected' : ''}`} aria-current={section === 'spaces' ? 'page' : undefined}
+          onClick={() => navigate('/spaces')}><FileText size={16}/><span>{routeLabels.spaces}</span></button>
         <button className={`nav-row ${section === 'together' ? 'selected' : ''}`} aria-current={section === 'together' ? 'page' : undefined}
           onClick={() => navigate('/together')}><GitBranch size={16}/><span>{routeLabels.together}</span></button>
       </nav>

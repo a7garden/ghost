@@ -174,6 +174,11 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     setAssignedProfile(p?.id ?? snapshot?.profiles[0]?.id ?? ''); setDialog('assign');
   };
   const selectedSpace = route.startsWith('/spaces/') ? route.split('/')[2] : snapshot?.spaces[0]?.id;
+  const selectDocumentFolder = (id: string) => {
+    navigate(`/spaces/${id}`);
+    requestAnimationFrame(() => (mainContent.current?.querySelector<HTMLElement>('[data-document-folder]')
+      ?? mainContent.current?.querySelector<HTMLElement>('.space-heading h1'))?.focus({ preventScroll: true }));
+  };
   const addGhost = () => setDialog('add');
   const label = lifetimeDot ? 'Ghost 작업실' : dot?.name ?? routeLabels[section as keyof typeof routeLabels] ?? '찾을 수 없는 화면';
   const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, together: true, integrations: true, settings: true, host: true, providers: true };
@@ -251,7 +256,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   };
   const safe = async (fn: () => Promise<void>) => { setFormError(''); try { await fn(); } catch (e) { setFormError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다. 다시 시도해 주세요.'); } };
   const sidebar = <WorkspaceSidebar snapshot={snapshot} route={route} section={section} dotId={selected?.id ?? null}
-    selectedSpace={selectedSpace} views={views} activeView={activeView?.id} attentionCount={attentionCount} mode={mode}
+    views={views} activeView={activeView?.id} attentionCount={attentionCount} mode={mode}
     error={error} lifetimeEnabled={lifetimeEnabled} status={status} navigate={path => { setDialog(null); navigate(path); }}/>;
 
   const lifetimeScreen = (path: string) => {
@@ -318,7 +323,8 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
         {section === 'host' && <HostView snapshot={snapshot} status={status} observedAt={workspace.observedAt} workObservedAt={dashboardWork.observedAt} workError={dashboardWork.error} reconnect={() => { reconnect(); dashboardWork.refresh(); }} navigate={navigate}/>}
         {section === 'integrations' && <Integrations snapshot={snapshot} action={action} busy={busy} mode={mode} connected={connected} navigate={navigate} packages={packagesLoading ? undefined : packages} packageError={packageError} onRefreshPackages={refresh} onImport={() => setDialog('package')}/>}
         {section === 'inbox' && <InboxView snapshot={snapshot} onOpenApproval={openApproval} navigate={navigate} connected={!error}/>}
-        {section === 'spaces' && <SpacesView key={selectedSpace ?? 'empty'} snapshot={snapshot} selectedSpace={selectedSpace} action={query} navigate={navigate} theme={resolvedTheme}/>}
+        {section === 'spaces' && <SpacesView key={`${snapshot.workspace_id}:${selectedSpace ?? 'empty'}`} snapshot={snapshot} selectedSpace={selectedSpace}
+          query={query} action={action} connected={connected} busy={busy} mode={mode} onReview={openDocumentReview} onSelectFolder={selectDocumentFolder} theme={resolvedTheme}/>}
         {retainedLifetimePath && <div className="lifetime-route-surface" hidden={!lifetimePath}>
           {lifetimeScreen(retainedLifetimePath)}
         </div>}
