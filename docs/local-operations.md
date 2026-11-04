@@ -17,7 +17,7 @@
 정본 저장소는 `~/Workspace/Projects/ghost`의 `main`이다. 변경을 올리기 전에 실제 앱 진입점과 대상 영역 테스트를 확인한다. 개발용 Host에는 임시 루트와 별도 포트를 지정하고 종료 시 앱, UI 서버, Host를 함께 확인한다. 운영 Host 테스트는 조회부터 시작한다.
 
 ```sh
-launchctl print "gui/$(id -u)/com.a7.ghost"
+launchctl print "gui/$(id -u)/com.a7.ghost" | grep -E '^[[:space:]]+(state|pid) ='
 launchctl print-disabled "gui/$(id -u)" | grep -F com.a7.ghost-ui
 lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(62062|65164|8788|5178) '
 curl -fsS http://127.0.0.1:65164/ghost-api/bootstrap | jq '{mode, owner_pid}'

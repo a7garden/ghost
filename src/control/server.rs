@@ -782,18 +782,13 @@ mod events_tests {
             .as_str()
             .unwrap()
             .to_string();
-        let conversation = action(
-            &session,
-            &host,
-            serde_json::json!({"type": "create_conversation", "profile_id": profile, "model": "mock", "tools": true}),
-        )
-        .unwrap()["result"]["conversation_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let create_conversation = |profile: &str| {
+            serde_json::json!({"type": "create_conversation", "profile_id": profile, "model": "mock", "tools": false})
+        };
+        let first = action(&session, &host, create_conversation(&profile)).unwrap();
+        assert!(first["result"]["conversation_id"].is_string(), "{first}");
 
-        // Seed the cursor at the latest existing commit so the long-poll can
-        // only return once the submitted turn commits something new.
+        // Seed the cursor so the poll can only return after a new commit.
         let baseline = {
             let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
             let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
@@ -812,17 +807,12 @@ mod events_tests {
                 .unwrap_or(0)
         };
 
-        let submit_host = host.clone();
-        let submit_session = session.clone();
-        let submit_profile = profile.clone();
-        let submit_conversation = conversation.clone();
-        let submitter = std::thread::spawn(move || {
+        let writer_host = host.clone();
+        let writer_session = session.clone();
+        let command = create_conversation(&profile);
+        let writer = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(300));
-            action(
-                &submit_session,
-                &submit_host,
-                serde_json::json!({"type": "submit", "profile_id": submit_profile, "conversation_id": submit_conversation, "prompt": "count commits", "kind": "prompt"}),
-            )
+            action(&writer_session, &writer_host, command)
         });
 
         let started = std::time::Instant::now();
@@ -840,7 +830,8 @@ mod events_tests {
         client.read_to_string(&mut output).unwrap();
         let elapsed = started.elapsed();
 
-        assert!(submitter.join().unwrap().is_ok());
+        let written = writer.join().unwrap().unwrap();
+        assert!(written["result"]["conversation_id"].is_string(), "{written}");
         let (_, payload) = output.split_once("\r\n\r\n").unwrap();
         let events: Value = serde_json::from_str(payload).unwrap();
         let commits = events.as_array().expect("events response is an array");
@@ -850,7 +841,7 @@ mod events_tests {
         );
         assert!(
             elapsed >= Duration::from_millis(250),
-            "long-poll returned before the submitted turn committed: {elapsed:?}"
+            "long-poll returned before the conversation creation committed: {elapsed:?}"
         );
         runtime.block_on(host.shutdown()).unwrap();
     }

@@ -25,7 +25,13 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
     // the fixed 1.8s cycle becomes event-driven with a slow safety fallback.
     const wake = () => { refreshQueued = true; if (!polling && alive) { clearTimeout(timer); timer = setTimeout(poll, 0); } };
     const syncEvents = (result: Snapshot) => {
-      if (client.current?.mode !== 'live' || typeof client.current.events !== 'function') return;
+      // Legacy profile commits do not cover the Pi lifetime journal.
+      if (result.lifetime_authority || client.current?.mode !== 'live' || typeof client.current.events !== 'function') {
+        unsubEvents?.();
+        unsubEvents = null;
+        eventProfiles = '';
+        return;
+      }
       const ids = result.profiles.map(p => p.id).sort();
       const key = ids.join(',');
       if (key === eventProfiles) return;
@@ -64,7 +70,7 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
         polling = false;
         if (alive) {
           // Priority: a queued event wake beats error retry beats visibility.
-          let delay = document.hidden ? 10000 : 30000;
+          let delay = document.hidden ? 10000 : unsubEvents ? 30000 : 1800;
           if (failures > 0) delay = 5000;
           if (refreshQueued) delay = 500;
           refreshQueued = false;
