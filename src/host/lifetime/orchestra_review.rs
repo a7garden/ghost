@@ -1,6 +1,6 @@
 //! A fresh Pi process reviews one immutable public result. This continuation
 //! owns no Work effects or conversation history, and transport is never replayed.
-use super::{apply, authority, conversation, db, orchestra, pi_execution};
+use super::{apply, authority, conversation, db, graph, orchestra, pi_execution, pi_wait};
 use crate::{
     host::{
         inference::Selection,
@@ -8,7 +8,8 @@ use crate::{
         Host,
     },
     lifetime_contract::{
-        canonical_digest, Artifact, Check, Envelope, Goal, Response, ResponseStatus, Work, VERSION,
+        canonical_digest, Artifact, Check, Envelope, Goal, Response, ResponseStatus, Work,
+        WorkerArtifactInput, VERSION,
     },
     worker::journal::read_verified_pi_artifact,
 };
@@ -22,6 +23,9 @@ const KIND: &str = "orchestra_review_v1";
 const ACTOR: &str = "host:orchestra-review";
 pub(super) const CHECK: &str = "orchestra_review";
 const INPUT_LIMIT: usize = 48 * 1024;
+const ARTIFACT_FACT_LIMIT: usize = 256;
+const UNCONFIRMED: &str =
+    "Independent Orchestra review is unconfirmed. Host acceptance is pending.";
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Scope {
@@ -43,6 +47,56 @@ struct Proof {
     result_sequence: u64,
     verifier_revision: String,
     policy_revision: u64,
+    // Historical verdicts had no process evidence. Preserve their receipt
+    // format and acceptance behavior while fencing every new verdict on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    process_evidence_digest: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct SuccessfulToolOperations {
+    read: u32,
+    write: u32,
+    edit: u32,
+    bash: u32,
+    publish_artifact: u32,
+    browser: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DelegatedState {
+    Completed,
+    Accepted,
+}
+
+#[derive(Debug, Serialize)]
+struct DelegatedArtifactEvidence {
+    sha256: String,
+    accepted: bool,
+    owner_acceptance_observed: bool,
+    owner_content_match_observed: bool,
+    read_by_parent: bool,
+}
+
+struct DelegatedAcceptance {
+    artifact_digest: String,
+    owner_decision: bool,
+    content_match: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DelegatedResultEvidence {
+    state: DelegatedState,
+    parent_resumed_wait: bool,
+    artifacts: Vec<DelegatedArtifactEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProcessEvidence {
+    successful_tool_operations: SuccessfulToolOperations,
+    artifact_readback: bool,
+    delegated_results: Vec<DelegatedResultEvidence>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,6 +211,7 @@ fn proof(conn: &Connection, goal: &Goal, work: &Work, scope: &Scope) -> Result<(
             result_sequence: record.sequence,
             verifier_revision,
             policy_revision,
+            process_evidence_digest: None,
         },
         artifact.clone(),
     ))
@@ -172,6 +227,264 @@ fn receipt(conn: &Connection, execution: &str) -> Result<Option<Receipt>> {
         .optional()?;
     raw.map(|raw| serde_json::from_str(&raw).map_err(Into::into))
         .transpose()
+}
+
+fn successful_tools(conn: &Connection, execution: &str) -> Result<SuccessfulToolOperations> {
+    let mut operations = SuccessfulToolOperations::default();
+    let mut query = conn.prepare(
+        "SELECT operation,COUNT(*) FROM lifetime_pi_effects
+         WHERE execution_id=?1 AND state='complete'
+           AND json_extract(response_json,'$.status')='success'
+           AND json_extract(response_json,'$.data.receipt.state')='complete'
+           AND (operation<>'bash' OR (json_extract(response_json,'$.data.output.exit_code')=0
+               AND json_extract(response_json,'$.data.output.success')=1))
+         GROUP BY operation",
+    )?;
+    let rows = query.query_map([execution], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+    })?;
+    for row in rows {
+        let (operation, count) = row?;
+        match operation.as_str() {
+            "read" => operations.read = count,
+            "write" => operations.write = count,
+            "edit" => operations.edit = count,
+            "bash" => operations.bash = count,
+            "publish_artifact" => operations.publish_artifact = count,
+            "browser" => operations.browser = count,
+            _ => {}
+        }
+    }
+    Ok(operations)
+}
+
+fn read_digest(conn: &Connection, execution: &str, digest: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM lifetime_pi_effects
+         WHERE execution_id=?1 AND operation='read' AND state='complete'
+           AND json_extract(response_json,'$.status')='success'
+           AND json_extract(response_json,'$.data.receipt.state')='complete'
+           AND json_extract(response_json,'$.data.output.sha256')=?2)",
+        params![execution, digest],
+        |row| row.get(0),
+    )?)
+}
+
+fn delegated_acceptance(
+    conn: &Connection,
+    goal: &Goal,
+    work: &Work,
+    execution: &str,
+    epoch: u64,
+) -> Result<Option<DelegatedAcceptance>> {
+    let Some(acceptance) = db::acceptance(conn, &work.id)? else {
+        return Ok(None);
+    };
+    if acceptance.goal_revision != goal.revision
+        || acceptance.requirement_digest != goal.requirement_digest
+    {
+        return Ok(None);
+    }
+    // An Owner can accept manually with their own check text. Only an exact
+    // successful Pi verifier command establishes a deterministic content check.
+    let expected_acceptance = serde_json::to_value(&acceptance)?;
+    let owner_source: Option<(String, String)> = conn
+        .query_row(
+            "SELECT command_id,request FROM lifetime_commands
+             WHERE actor_ref=?1 AND authority_epoch=?2
+               AND json_extract(request,'$.body.method')='work.accept'
+               AND json_extract(response,'$.status')='success'
+               AND json_extract(response,'$.data.work.id')=?3
+               AND json_extract(response,'$.data.work.execution_id')=?4
+               AND json_extract(response,'$.data.acceptance.artifact_digest')=?5
+             LIMIT 1",
+            params![
+                conversation::OWNER_PRINCIPAL,
+                epoch,
+                work.id,
+                execution,
+                acceptance.artifact_digest
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let owner_decision = if let Some((id, raw)) = owner_source {
+        let source: Envelope = serde_json::from_str(&raw)?;
+        source.validate()?;
+        source.command_id == id
+            && source.authority_epoch == epoch
+            && source.actor_ref == conversation::OWNER_PRINCIPAL
+            && source.body["acceptance"] == expected_acceptance
+    } else {
+        false
+    };
+    let mut content_match = false;
+    if acceptance
+        .checks
+        .iter()
+        .any(|check| check.id == "artifact_content" && check.passed)
+        && goal.acceptance_spec["verifier"]["kind"] == "pi-artifact/1"
+        && goal.acceptance_spec["verifier"]["expected_sha256"] == acceptance.artifact_digest
+    {
+        let source_id = format!("pi-independent-accept:{execution}");
+        let raw: Option<String> = conn.query_row(
+            "SELECT request FROM lifetime_commands WHERE command_id=?1 AND actor_ref='host-pi-verifier'
+             AND json_extract(response,'$.status')='success'",
+            [&source_id],
+            |row| row.get(0),
+        ).optional()?;
+        if let Some(raw) = raw {
+            let source: Envelope = serde_json::from_str(&raw)?;
+            source.validate()?;
+            content_match = source.command_id == source_id
+                && source.authority_epoch == epoch
+                && source.actor_ref == "host-pi-verifier"
+                && source.body["method"] == "work.accept"
+                && source.body["acceptance"] == expected_acceptance;
+        }
+    }
+    Ok(Some(DelegatedAcceptance {
+        artifact_digest: acceptance.artifact_digest,
+        owner_decision,
+        content_match,
+    }))
+}
+
+fn process_evidence(
+    conn: &Connection,
+    work: &Work,
+    scope: &Scope,
+    artifact_digest: &str,
+) -> Result<(ProcessEvidence, String)> {
+    let pinned_inputs: String = conn.query_row(
+        "SELECT input_artifacts_json FROM lifetime_pi_executions WHERE execution_id=?1",
+        [&scope.execution_id],
+        |row| row.get(0),
+    )?;
+    let pinned_inputs: Vec<WorkerArtifactInput> = serde_json::from_str(&pinned_inputs)?;
+    let resumed_wait =
+        pi_wait::resumed_review_targets(conn, work, &scope.execution_id, scope.epoch)?;
+    let mut evidence = ProcessEvidence {
+        successful_tool_operations: successful_tools(conn, &scope.execution_id)?,
+        artifact_readback: read_digest(conn, &scope.execution_id, artifact_digest)?,
+        delegated_results: Vec::new(),
+    };
+    let mut sources = Vec::new();
+    let mut artifacts_seen = 0;
+    for input in graph::native_artifact_inputs(conn, work)?.unwrap_or_default() {
+        let child = db::work(conn, &input.work_id)?
+            .ok_or_else(|| anyhow!("Review delegated Work missing"))?;
+        let child_goal = db::goal(conn, &child.goal_id)?
+            .ok_or_else(|| anyhow!("Review delegated Goal missing"))?;
+        if input.protected_artifacts_withheld
+            || child_goal.privacy != "public"
+            || conversation::conversation_privacy(
+                conn,
+                &child.owner,
+                &child_goal.reply_conversation,
+            )? != "public"
+            || pi_execution::privacy(conn, &child)? != "public"
+        {
+            continue;
+        }
+        let public_pi: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM lifetime_pi_executions
+             WHERE work_id=?1 AND execution_id=?2 AND ghost_id=?3 AND conversation_id=?4
+             AND authority_epoch=?5 AND goal_revision=?6 AND privacy='public' AND state='completed')",
+            params![child.id, input.execution_id, child.owner, child_goal.reply_conversation, scope.epoch, child.goal_revision],
+            |row| row.get(0),
+        )?;
+        let Some(result) = apply::result_record(conn, &input.execution_id)? else {
+            continue;
+        };
+        if !public_pi
+            || result.epoch != scope.epoch
+            || result.producer != format!("pi-result:{}:{}", child.owner, input.execution_id)
+            || result.event["execution_id"] != input.execution_id
+            || result.event["state"] != "completed"
+            || !apply::result_is_current(conn, &result)?.0
+        {
+            continue;
+        }
+        let (state, acceptance) = if child.state == "accepted" {
+            let Some(acceptance) =
+                delegated_acceptance(conn, &child_goal, &child, &input.execution_id, scope.epoch)?
+            else {
+                continue;
+            };
+            (DelegatedState::Accepted, Some(acceptance))
+        } else {
+            (DelegatedState::Completed, None)
+        };
+        artifacts_seen += input.artifacts.len();
+        ensure!(
+            artifacts_seen <= ARTIFACT_FACT_LIMIT,
+            "Review delegated artifact evidence exceeds its bound"
+        );
+        let exact_inputs = pinned_inputs.iter().find(|pinned| {
+            pinned.work_id == input.work_id
+                && pinned.goal_id == input.goal_id
+                && pinned.goal_revision == input.goal_revision
+                && pinned.execution_id == input.execution_id
+        });
+        let wait_source = resumed_wait
+            .as_ref()
+            .filter(|(_, targets)| targets.contains(&child.id))
+            .map(|(digest, _)| digest);
+        let mut artifacts = Vec::new();
+        for artifact in &input.artifacts {
+            ensure!(
+                artifact.producing_attempt == input.execution_id && artifact.privacy == "public",
+                "Review delegated artifact is stale or protected"
+            );
+            let accepted = acceptance
+                .as_ref()
+                .filter(|acceptance| acceptance.artifact_digest == artifact.digest);
+            artifacts.push(DelegatedArtifactEvidence {
+                sha256: artifact.digest.clone(),
+                accepted: accepted.is_some(),
+                owner_acceptance_observed: accepted
+                    .is_some_and(|acceptance| acceptance.owner_decision),
+                owner_content_match_observed: accepted
+                    .is_some_and(|acceptance| acceptance.content_match),
+                read_by_parent: exact_inputs
+                    .is_some_and(|pinned| pinned.artifacts.contains(artifact))
+                    && read_digest(conn, &scope.execution_id, &artifact.digest)?,
+            });
+        }
+        evidence.delegated_results.push(DelegatedResultEvidence {
+            state,
+            parent_resumed_wait: wait_source.is_some(),
+            artifacts,
+        });
+        // Exact source identity is sealed locally even when two different
+        // attempts produce identical public facts. It never goes to inference.
+        sources.push(json!([
+            child.id,
+            child.goal_id,
+            child.goal_revision,
+            child.owner_revision,
+            input.execution_id,
+            result.sequence,
+            canonical_digest(&result.event)?,
+            wait_source,
+        ]));
+    }
+    let digest = canonical_digest(&json!([evidence, sources]))?;
+    Ok((evidence, digest))
+}
+
+fn current_proof(conn: &Connection, goal: &Goal, work: &Work, saved: &Receipt) -> Result<Proof> {
+    let (mut proof, _) = proof(conn, goal, work, &saved.scope)?;
+    if saved
+        .proof
+        .as_ref()
+        .is_some_and(|proof| proof.process_evidence_digest.is_some())
+    {
+        proof.process_evidence_digest =
+            Some(process_evidence(conn, work, &saved.scope, &proof.artifact_digest)?.1);
+    }
+    Ok(proof)
 }
 
 /// Returns Host-generated evidence only. Inference prose has no path to the
@@ -192,7 +505,7 @@ pub(super) fn require_pass(
             "Independent Orchestra review has no current passing verdict",
         ));
     }
-    let (proof, _) = proof(conn, goal, work, &scope)
+    let proof = current_proof(conn, goal, work, &saved)
         .map_err(|_| apply::conflict("Independent Orchestra review scope is no longer current"))?;
     if saved.proof.as_ref() != Some(&proof)
         || proof.artifact_digest != artifact_digest
@@ -280,7 +593,7 @@ fn prepare(
     work: &Work,
     scope: &Scope,
 ) -> Result<(Proof, Envelope)> {
-    let (proof, artifact) = proof(conn, goal, work, scope)?;
+    let (mut proof, artifact) = proof(conn, goal, work, scope)?;
     host.work_memory_verification_conn(conn, work)?;
     host.publication_work_conn(conn, work)?;
     let bytes = read_verified_pi_artifact(
@@ -299,7 +612,10 @@ fn prepare(
     let artifact = json!({"sha256":proof.artifact_digest,"text":std::str::from_utf8(&bytes)?});
     let mut required_checks = apply::required_checks(&goal.acceptance_spec)?;
     required_checks.remove(CHECK);
-    let requirements = json!({"prompt":goal.prompt,"required_checks":required_checks});
+    let (process_evidence, evidence_digest) =
+        process_evidence(conn, work, scope, &proof.artifact_digest)?;
+    proof.process_evidence_digest = Some(evidence_digest);
+    let requirements = json!({"prompt":goal.prompt,"required_checks":required_checks,"host_evidence":process_evidence});
     ensure!(
         serde_json::to_vec(&json!({"requirements":requirements,"artifact":artifact}))?.len()
             <= INPUT_LIMIT,
@@ -331,8 +647,8 @@ fn current(host: &Host, conn: &Connection, saved: &Receipt) -> Result<()> {
     host.work_memory_verification_conn(conn, &work)?;
     host.publication_work_conn(conn, &work)?;
     ensure!(
-        saved.proof.as_ref() == Some(&proof(conn, &goal, &work, &saved.scope)?.0),
-        "Review result changed"
+        saved.proof.as_ref() == Some(&current_proof(conn, &goal, &work, saved)?),
+        "Review result or process evidence changed"
     );
     Ok(())
 }
@@ -407,11 +723,22 @@ fn enqueue_report(conn: &Connection, saved: &Receipt, text: &str) -> Result<()> 
     )?;
     let source: Envelope = serde_json::from_str(&raw)?;
     source.validate()?;
+    let proof = saved
+        .proof
+        .as_ref()
+        .ok_or_else(|| anyhow!("Review report proof missing"))?;
     ensure!(
         source.command_id == source_id
             && source.authority_epoch == saved.scope.epoch
+            && source.actor_ref
+                == format!(
+                    "pi-result:{}:{}",
+                    goal.accountable_ghost, saved.scope.execution_id
+                )
             && source.body["method"] == "work.result"
-            && source.body["execution_id"] == saved.scope.execution_id,
+            && source.body["execution_id"] == saved.scope.execution_id
+            && source.body["sequence"].as_u64() == Some(proof.result_sequence)
+            && source.payload_digest == proof.result_digest,
         "Review report has no original Pi result source"
     );
     let receiver = apply::outgoing(
@@ -501,6 +828,25 @@ fn finish_pass(host: &Host, conn: &Connection, saved: &mut Receipt) -> Result<()
     finalize(conn, saved, Some(Notice::Report(&report)))
 }
 
+fn finish_failed(host: &Host, conn: &Connection, saved: &mut Receipt) -> Result<()> {
+    if current(host, conn, saved).is_err() {
+        saved.verdict = Verdict::Unknown;
+        return finalize(conn, saved, Some(Notice::Fact(UNCONFIRMED)));
+    }
+    let work =
+        db::work(conn, &saved.scope.work_id)?.ok_or_else(|| anyhow!("Review Work missing"))?;
+    if work.state == "accepted" {
+        return finalize(conn, saved, None);
+    }
+    finalize(
+        conn,
+        saved,
+        Some(Notice::Report(
+            "Independent Orchestra review failed. Host acceptance is pending.",
+        )),
+    )
+}
+
 fn next_work(conn: &Connection) -> Result<Option<String>> {
     conn.query_row(
         "SELECT w.id FROM lifetime_work w JOIN lifetime_goals g ON g.id=w.goal_id AND g.revision=w.goal_revision
@@ -536,13 +882,16 @@ impl Host {
                 if saved.verdict == Verdict::Passed {
                     return finish_pass(self, conn, &mut saved);
                 }
+                if saved.verdict == Verdict::Failed {
+                    return finish_failed(self, conn, &mut saved);
+                }
                 // This continuation has a single in-flight job. Encountering a
                 // started receipt means its original transport was interrupted.
                 let message = if saved.verdict == Verdict::Blocked {
                     "Independent Orchestra review was blocked by the current disclosure, artifact, or provider requirements. Host acceptance is pending."
                 } else {
                     saved.verdict = Verdict::Unknown;
-                    "Independent Orchestra review is unconfirmed. Host acceptance is pending."
+                    UNCONFIRMED
                 };
                 return finalize(conn, &mut saved, Some(Notice::Fact(message)));
             }
@@ -614,28 +963,22 @@ impl Host {
                 )?;
                 finish_pass(self, conn, &mut saved)
             }
-            Verdict::Failed => finalize(
-                conn,
-                &mut saved,
-                Some(Notice::Fact(
-                    "Independent Orchestra review failed. Host acceptance is pending.",
-                )),
-            ),
-            _ => finalize(
-                conn,
-                &mut saved,
-                Some(Notice::Fact(
-                    "Independent Orchestra review is unconfirmed. Host acceptance is pending.",
-                )),
-            ),
+            Verdict::Failed => finish_failed(self, conn, &mut saved),
+            _ => finalize(conn, &mut saved, Some(Notice::Fact(UNCONFIRMED))),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::pi_execution::tests::{publish_complete, setup_with_spec, Fixture};
+    use super::super::{
+        pi_execution::tests::{
+            envelope as fixture_envelope, publish_complete, request, setup_with_spec, Fixture,
+        },
+        pi_tools::{PiInferenceScope, PiToolRequest},
+    };
     use super::*;
+    use crate::store::ProfileStore;
 
     const FIXTURE_ARTIFACT: &str = "Controlled artifact, line one.\nLine two.\n";
 
@@ -706,7 +1049,14 @@ mod tests {
         };
         assert_eq!(
             command.body["requirements"],
-            json!({"prompt":goal.prompt,"required_checks":expected_checks})
+            json!({
+                "prompt":goal.prompt,"required_checks":expected_checks,
+                "host_evidence":{
+                    "successful_tool_operations":{"read":0,"write":1,"edit":0,"bash":0,"publish_artifact":1,"browser":0},
+                    "artifact_readback":false,
+                    "delegated_results":[],
+                },
+            })
         );
         assert!(!command.body.to_string().contains("Published fixture"));
         assert!(!command.body.to_string().contains("answer.txt"));
@@ -753,6 +1103,265 @@ mod tests {
         let facts:u64 = conn.query_row("SELECT COUNT(*) FROM lifetime_turns WHERE id=?1 AND kind='host_fact' AND text LIKE '%unconfirmed%'", [format!("host-orchestra-review:{execution}")], |r| r.get(0)).unwrap();
         assert_eq!(facts, 1);
         assert!(db::acceptance(conn, &f.work).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn authenticated_failure_enqueues_one_canonical_report_without_reviewer_prose() {
+        let f = completed_fixture().await;
+        let script = f.host.root.join("review-fail.mjs");
+        std::fs::write(
+            &script,
+            format!(
+                r#"import {{ createInterface }} from 'node:readline';
+console.log(JSON.stringify({{protocol_version:{VERSION:?}, contract_revision:{}, mode:"orchestra-review",
+  runtime_identity:{{durable:"@earendil-works/pi-durable@1.1.0"}}}}));
+for await (const line of createInterface({{input: process.stdin}})) {{
+  const request = JSON.parse(line);
+  console.log(JSON.stringify({{status:"success", summary:"Independent review completed.",
+    object_refs:[], artifacts:[], next_actions:[], error_code:null, retry_class:"never",
+    data:{{command_id:request.command_id, verdict:"fail", summary:"UNTRUSTED_REVIEWER_PROSE"}}}}));
+}}
+"#,
+                crate::lifetime_contract::REVISION,
+            ),
+        )
+        .unwrap();
+        let launcher = PiLauncher::NodeEntry(script);
+        f.host.advance_orchestra_reviews(&launcher).await.unwrap();
+        f.host.advance_orchestra_reviews(&launcher).await.unwrap();
+        let state = f.host.lock().unwrap();
+        let conn = &state.journal.0;
+        let work = db::work(conn, &f.work).unwrap().unwrap();
+        let execution = work.execution_id.unwrap();
+        let saved = receipt(conn, &execution).unwrap().unwrap();
+        assert_eq!(saved.verdict, Verdict::Failed);
+        assert!(saved.finalized);
+        assert!(db::acceptance(conn, &f.work).unwrap().is_none());
+        let mut query = conn
+            .prepare(
+                "SELECT payload FROM lifetime_outbox WHERE command_id=?1 AND target='pi'
+             AND json_extract(payload,'$.body.prompt') LIKE '%review failed%'",
+            )
+            .unwrap();
+        let rows = query
+            .query_map([format!("pi-result:{execution}")], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        let report: Envelope = serde_json::from_str(&rows[0]).unwrap();
+        let inspect = envelope(
+            &f.ghost,
+            "inspect-authenticated-failure-report".into(),
+            1,
+            json!({"method":"conversation.report.inspect","ghost_id":f.ghost,
+                "conversation_id":f.conversation,"report_id":report.command_id}),
+        )
+        .unwrap();
+        let inspected = super::super::apply(conn, &inspect, &f.ghost).unwrap();
+        assert_eq!(inspected.status, ResponseStatus::Success, "{inspected:?}");
+        let serialized = serde_json::to_string(&inspected).unwrap();
+        assert!(
+            serialized.contains("Independent Orchestra review failed. Host acceptance is pending.")
+        );
+        assert!(!serialized.contains("UNTRUSTED_REVIEWER_PROSE"));
+        assert!(!serde_json::to_string(&saved)
+            .unwrap()
+            .contains("UNTRUSTED_REVIEWER_PROSE"));
+    }
+
+    #[tokio::test]
+    async fn evidence_projects_exact_manually_accepted_child_and_fences_privacy_changes() {
+        let f = configured_fixture(json!({}));
+        let profile = Host::profile(
+            ProfileStore::create_profile(&f.host.root, "specialist", "Child Ghost").unwrap(),
+        )
+        .unwrap();
+        let child = profile.id.clone();
+        let child_conversation = uuid::Uuid::new_v4().to_string();
+        let (child_work, child_assignment) = {
+            let mut state = f.host.lock().unwrap();
+            state.profiles.insert(child.clone(), profile);
+            let conn = &state.journal.0;
+            let registered = super::super::apply(conn, &fixture_envelope("owner", json!({
+                "method":"registry.ensure","ghost_id":child,"conversation_id":child_conversation,
+                "kind":"specialist","roles":["researcher"],
+            })), "owner").unwrap();
+            assert_eq!(registered.status, ResponseStatus::Success, "{registered:?}");
+            f.host
+                .native_computers
+                .as_ref()
+                .unwrap()
+                .provision_pi_ghost(conn, &f.ghost, &child, 1, "pi-default/1")
+                .unwrap();
+            let mut delegate = fixture_envelope(
+                &f.ghost,
+                json!({
+                    "method":"work.delegate","parent_work_id":f.work,"target_ghost_id":child,
+                    "summary":"Child fixture has private locator names.","artifact_refs":[],"acceptance_spec":{},
+                }),
+            );
+            delegate.expected_revision = Some(1);
+            let delegated = super::super::apply(conn, &delegate, &f.ghost).unwrap();
+            assert_eq!(delegated.status, ResponseStatus::Success, "{delegated:?}");
+            let work = delegated.data["work"]["id"].as_str().unwrap().to_string();
+            let assignment: String = conn
+                .query_row(
+                    "SELECT delivery_ref FROM lifetime_outbox
+                 WHERE json_extract(payload,'$.body.method')='conversation.assignment'
+                   AND json_extract(payload,'$.body.work_id')=?1",
+                    [&work],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            (work, assignment)
+        };
+        let root_call =
+            |task, call, operation, arguments| request(&f, task, call, operation, arguments);
+        let host = &f.host;
+        let execute = |tool| async move {
+            let response = host
+                .lifetime_pi_execution_action(&tool, PiInferenceScope::Public)
+                .await
+                .unwrap();
+            assert_eq!(response.status, ResponseStatus::Success, "{response:?}");
+            response
+        };
+        execute(root_call(
+            8,
+            "parent-pre-wait",
+            "write",
+            json!({"path":"draft.txt","content":"draft"}),
+        ))
+        .await;
+        {
+            let state = f.host.lock().unwrap();
+            let mut wait = fixture_envelope(
+                &f.ghost,
+                json!({
+                    "method":"work.wait","work_id":f.work,"wait_for":[child_work],
+                    "assignment_id":f.assignment,"generation_task_id":7,
+                }),
+            );
+            wait.expected_revision = Some(1);
+            let waited = super::super::apply(&state.journal.0, &wait, &f.ghost).unwrap();
+            assert_eq!(waited.status, ResponseStatus::Success, "{waited:?}");
+        }
+        let child_call = |task, call, operation, arguments| PiToolRequest {
+            context_ref: None,
+            ghost_id: child.clone(),
+            conversation_id: child_conversation.clone(),
+            envelope: fixture_envelope(
+                &child,
+                json!({
+                    "method":"work.execute","assignment_id":child_assignment,"work_id":child_work,
+                    "generation_task_id":19,"task_id":task,"call_id":call,"operation":operation,
+                    "input_digest":canonical_digest(&json!({"operation":operation,"arguments":arguments})).unwrap(),
+                    "arguments":arguments,
+                }),
+            ),
+        };
+        execute(child_call(
+            20,
+            "child-write",
+            "write",
+            json!({"path":"child-source.txt","content":"child output"}),
+        ))
+        .await;
+        let published = execute(child_call(
+            21,
+            "child-publish",
+            "publish_artifact",
+            json!({"path":"child-source.txt","privacy":"public"}),
+        ))
+        .await;
+        execute(PiToolRequest {
+            context_ref: None,
+            ghost_id: child.clone(),
+            conversation_id: child_conversation.clone(),
+            envelope: fixture_envelope(&child, json!({
+                "method":"work.execution.complete","assignment_id":child_assignment,"work_id":child_work,
+                "task_id":19,"summary":"Child summary is withheld.",
+            })),
+        }).await;
+        let child_artifact = &published.artifacts[0];
+        let input_path = {
+            let state = f.host.lock().unwrap();
+            let conn = &state.journal.0;
+            let child_work = db::work(conn, &child_work).unwrap().unwrap();
+            let goal = db::goal(conn, &child_work.goal_id).unwrap().unwrap();
+            let (verifier_revision, policy_revision): (String,u64) = conn.query_row(
+                "SELECT verifier_revision,policy_revision FROM lifetime_verification_policy WHERE singleton=1",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            let accept = fixture_envelope(
+                "owner",
+                json!({"method":"work.accept","acceptance":{
+                    "work_id":child_work.id,"goal_revision":goal.revision,"requirement_digest":goal.requirement_digest,
+                    "artifact_digest":child_artifact.digest,"verifier_revision":verifier_revision,"policy_revision":policy_revision,
+                    "checks":[{"id":"artifact_content","passed":true,"evidence":"Manual Owner inspection."}],
+                }}),
+            );
+            let accepted = super::super::apply(conn, &accept, "owner").unwrap();
+            assert_eq!(accepted.status, ResponseStatus::Success, "{accepted:?}");
+            let work = db::work(conn, &f.work).unwrap().unwrap();
+            pi_execution::artifact_inputs(conn, &work).unwrap()[0]["path"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        execute(root_call(
+            9,
+            "parent-child-read",
+            "read",
+            json!({"path":input_path}),
+        ))
+        .await;
+        assert_eq!(
+            publish_complete(&f, FIXTURE_ARTIFACT).await.status,
+            ResponseStatus::Success
+        );
+        let state = f.host.lock().unwrap();
+        let conn = &state.journal.0;
+        let work = db::work(conn, &f.work).unwrap().unwrap();
+        let goal = db::goal(conn, &work.goal_id).unwrap().unwrap();
+        let scope = scope(conn, &goal, &work).unwrap().unwrap();
+        let (proof, command) = prepare(&f.host, conn, &goal, &work, &scope).unwrap();
+        assert_eq!(
+            command.body["requirements"]["host_evidence"],
+            json!({
+                "successful_tool_operations":{"read":1,"write":2,"edit":0,"bash":0,"publish_artifact":1,"browser":0},
+                "artifact_readback":false,
+                "delegated_results":[{
+                    "state":"accepted","parent_resumed_wait":true,
+                    "artifacts":[{"sha256":child_artifact.digest,"accepted":true,"owner_acceptance_observed":true,"owner_content_match_observed":false,"read_by_parent":true}],
+                }],
+            })
+        );
+        let outbound = command.body.to_string();
+        for withheld in [&child, &child_work, &input_path, &child_artifact.locator] {
+            assert!(!outbound.contains(withheld));
+        }
+        assert!(!outbound.contains("child output"));
+        assert!(!outbound.contains("Child summary is withheld."));
+        let saved = Receipt {
+            scope,
+            proof: Some(proof),
+            input_digest: Some(command.payload_digest),
+            verdict: Verdict::Started,
+            finalized: false,
+        };
+        assert!(current(&f.host, conn, &saved).is_ok());
+        conversation::persist_disclosure(conn, &child, &child_conversation, "private").unwrap();
+        assert!(current(&f.host, conn, &saved).is_err());
+        let (_, command) = prepare(&f.host, conn, &goal, &work, &saved.scope).unwrap();
+        assert_eq!(
+            command.body["requirements"]["host_evidence"]["delegated_results"],
+            json!([])
+        );
+        assert!(!command.body.to_string().contains(&child_artifact.digest));
     }
 
     #[tokio::test]

@@ -348,6 +348,42 @@ pub(super) fn assert_resumed(
     );
     Ok(())
 }
+
+/// Read the current resumed wait from its exact committed Pi receipt. The
+/// review caller projects public facts from these targets, never their IDs.
+pub(super) fn resumed_review_targets(
+    conn: &Connection,
+    work: &Work,
+    execution: &str,
+    epoch: u64,
+) -> Result<Option<(String, Vec<String>)>> {
+    let Some(binding) = active(conn, work)? else {
+        return Ok(None);
+    };
+    let current = binding.request.authority_epoch == epoch
+        && binding.goal_revision == work.goal_revision
+        && binding.owner_revision == work.owner_revision
+        && binding.ghost_id == work.owner
+        && binding.execution_id.as_deref().is_none_or(|id| id == execution)
+        && conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM lifetime_pi_executions
+             WHERE execution_id=?1 AND work_id=?2 AND assignment_id=?3 AND generation_task_id=?4
+             AND authority_epoch=?5 AND conversation_id=?6 AND state='completed')",
+            params![execution, work.id, binding.assignment_id, binding.generation_task_id, epoch, binding.conversation_id],
+            |row| row.get::<_, bool>(0),
+        )?;
+    if !current
+        || get(conn, "pi_work_wait_resumed", &binding.request.command_id)?
+            .is_none_or(|marker| marker["resumed"] != true)
+    {
+        return Ok(None);
+    }
+    Ok(Some((
+        binding.request.payload_digest,
+        serde_json::from_value(binding.request.body["wait_for"].clone())?,
+    )))
+}
+
 pub(super) fn ongoing_pause_ms(conn: &Connection, work: &Work, now: u64) -> Result<u64> {
     let Some(binding) = active(conn, work)? else {
         return Ok(0);
