@@ -1,5 +1,15 @@
 # Ghost
 
+## 이 Mac의 운영 구성
+
+`~/Applications/Ghost.app`을 열면 데스크톱 콘솔(`127.0.0.1:65164`)이
+기존 Host(`com.a7.ghost`, `127.0.0.1:62062`)에 연결된다.
+Host 하나가 주 Ghost와 담당 Ghost들의 대화와 작업을 보관한다.
+설치된 앱, 운영 Host 릴리스, 소스 `main`은 각각 판본을 확인한다.
+
+[실행·검증·복구 지침](docs/local-operations.md) ·
+[공유 Mac/iPhone 클라이언트와 .ghost 패키지](docs/ghost-packages-and-shared-client.md)
+
 ## 2026-10-24 봇 중심 Pi 직접 실행 — 구현 진행 중
 
 목표 구조는 Ghost가 Pi SDK를 내부 엔진으로 사용해 직접 작업하는 것이다. 새 실행에 OMP나 별도 작업자 에이전트를 두지 않는다. 현재 소스의 [직접 실행 계약](docs/pi-direct-execution.md), [봇 정의와 판본](docs/bot-definitions-2026-10-24.md), [기존 실행 전환 점검](docs/pi-cutover-inventory.md)을 참고한다.
@@ -14,15 +24,15 @@
 
 실제 운영 상태의 전체 cold capture/mini dispatch-off 복원, 원 영수증을 보존하는 worker artifact 경로 재연결, stopped-Host CAS fence와 operator rebind/runtime acceptance를 구현·검증했다. mini는 Studio 없이 직접 ZAI로 대화하고 실제 Linux Node/Python 업무의 독립 수용·같은 Primary 보고를 완료했다. PC 앱은 별도 writer 대신 기존 상시 Host에 연결한다. **현재 정본 writer는 Studio이며 mini 운영 cutover는 아직 미실행이다.** 기존 Primary의 ZAI 이력 허용 응답과 최종 fence/전환·백업 원격화를 남겼다. [구현·검증·보존 경계](docs/dual-host-2026-10-22.md).
 
-## 2026-10-19 격리 Node/Python·로컬 이미지 — 최신
+## 2026-10-19 격리 Node/Python·로컬 이미지
 
 네 native worker에 Node24.20.0/Python3.13.16 동결 runtime을 적용하고 실제 Linux 실행을 확인했다. 로컬 이미지의 유휴 모델 반환·단계별 로드·실제 weight 크기 검증을 설치해 운영 API에서512×512/40-step PNG를 생성했다. [설치·보호 경계·실제 검증](docs/runtime-and-local-images-2026-10-19.md). 같은 Primary의 언어 업무 revision5 독립검수·수용 보고도 확인했고, 이전 revision 보고가 새 보고를 막던 오류를 수정했다. 현재 실물 iPhone이 unavailable이므로 이번 변경의 폰 검증은 아직 미완료다. 아래10/18 runtime 부재/로컬 차단은 이전 관측이다.
 
-## 2026-10-18 대화 복구·제공자 전환 — 최신
+## 2026-10-18 대화 복구·제공자 전환
 
 주 Ghost 기본 대화를 Codex `gpt-6-luna`/high로 전환했다. ZAI Coding Plan·MiniMax API 키 등록과 선택형 로컬 제공자, PC/iPhone의 추론 수준 전환을 지원한다. Codex 이미지는 공식 CLI의 같은 OAuth를 사용하며 실제 iPhone 표시까지 확인했다. 기존 대화의 Codex 외부 처리 허용은 별도 grant로 기록하고 원 이력·기기 키·실패 기록은 보존했다. 실제 휴대폰의 대화→업무→독립 수용 보고→313-byte 결과 문서 열기를 통과했다. [구현·권한·검증 범위](docs/registered-models-2026-10-18.md)를 먼저 읽는다. 아래 날짜의 미연결·옛 binary 판단은 해당 시점의 기록이다.
 
-## 2026-10-17 실제 운영 적용 — 최신
+## 2026-10-17 운영 적용 이력
 
 운영 실행판을 `ba66795899cc065d`로 전환했다. 기존 다섯 profile과 모든 원래 DB 행을 유지하고 canonical Primary와 세 specialist·Pi Durable·격리 native worker 네 개를 실행한다. 실제 운영 파일34바이트의 Owner byte 검수/수용과 같은 Primary 보고, 최종판 cold 보존을 확인했다. 모델 HTTP500의 controller/native 지시 혼합을 수정했고 오류에 안전한 단계/status 진단을 추가했다. OxiBrain workspace version0.19.0의 기존 client source와 Cargo/lock을 정렬한 뒤 Rust489/39 suites/4 ignored, Pi39, UI183+bridge13, gateway96을 검증했다.
 
@@ -290,7 +300,7 @@ cd apps/ghost-ui
 GHOST_ROOT=/path/to/ghost-state npm run dev
 ```
 
-UI 주소는 `http://127.0.0.1:5178`이다. `GHOST_ROOT` 없이 UI를 실행하면
+위 개발용 UI 주소는 `http://127.0.0.1:5178`이다. `GHOST_ROOT` 없이 UI를 실행하면
 브라우저에만 저장하는 예시 모드이며 외부 MCP를 실행하지 않는다.
 호스트는 기본적으로 `mock` 모델을 사용하므로 자연어 도구 실행에는 실제 모델을
 선택해야 한다. 로컬 할 일·일정 화면의 직접 조작에는 모델이 필요 없다.

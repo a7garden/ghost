@@ -2,7 +2,13 @@
 
 ## Execution architecture
 
-Each Ghost is an independently identifiable bot. The master Ghost assigns work to other Ghosts and owns acceptance and reporting. The owner subsequently shelved the proposed migration of all Ghosts to OMP SDK. The installed architecture uses Pi Durable for canonical conversations and retains its existing OMP SDK worker path. Finish and verify the current Ghost workflows, and distinguish source capabilities from what is deployed.
+Each Ghost is an independently identifiable bot. The master Ghost assigns work to other Ghosts and owns acceptance and reporting. The owner subsequently shelved the proposed migration of all Ghosts to OMP SDK. Pi Durable owns the canonical conversations. On this Mac the installed Host release runs Pi work with the legacy worker agents disabled. Check the actual installed release before making assumptions about the SDK worker path.
+
+## Local operations
+
+- Use the canonical checkout at `~/Workspace/Projects/ghost` and integrate verified changes into `main`. Use temporary worktrees for isolation and consolidate or archive them after verification.
+- Keep one operating Host for the production state root. The installed desktop app uses external Host mode. Keep Gateway and local inference attached to that Host. Use a separate state root and loopback ports for fixture runs.
+- Before operating on a process, verify its path, listener, and state root. Close test apps and their servers when done. See [local operations](docs/local-operations.md) for checks and recovery.
 
 ## Durable user documents
 
