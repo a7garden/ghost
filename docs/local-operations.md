@@ -42,6 +42,6 @@ launchctl bootstrap "$ghost_domain" "$HOME/Library/LaunchAgents/com.a7.ghost-ui.
 
 소스 `4a6b57af33a301e331de2cc3664087f1f383844a`의 Host, Pi runtime, Gateway, Mac 앱과 실제 iPhone 14 앱을 설치했다. Host/Gateway 릴리스는 `~/.local/share/ghost/bundles/20261104-dashboard-4a6b57a`이며, Mac 앱은 기존 외부 Host 설정을 유지한다. 개발 서명 빌드이며 공증/App Store 배포는 아니다. iPhone은 기존 번들 ID에 덮어 설치했고 삭제하지 않았다. Personal Team용 별도 entitlement를 사용했으며 APNs 수용을 뜻하지 않는다.
 
-교체 전 활성 Pi 실행은 없었다. 중지된 Host 상태 전체를 `.orch/ghost-rollout-20261104/rollback/state`에 보존했다. 재시작 후 registry·binding·authority·work·Pi execution 행이 백업과 같고 기기 registry와 콘솔 설정의 bytes가 유지됨을 확인했다. 기존 프로필 9개 조회, Mac UI live bootstrap, Gateway loopback 및 운영 HTTPS health가 성공했다. 실제 새 모델 작업·음성·push는 이번 설치 검증 범위에 포함하지 않았다. iPhone 실행은 기기 잠금 때문에 검증 대기이며 Mac native 화면 검수는 다른 desktop workflow 점유로 수행하지 않았다.
+교체 전 활성 Pi 실행은 없었다. 중지된 Host 상태 전체를 `.orch/ghost-rollout-20261104/rollback/state`에 보존했다. 재시작 후 registry·binding·authority·work·Pi execution 행이 백업과 같고 기기 registry와 콘솔 설정의 bytes가 유지됨을 확인했다. 기존 프로필 9개 조회, Mac UI live bootstrap, Gateway loopback 및 운영 HTTPS health가 성공했다. 실제 새 모델 작업·음성·push는 이번 설치 검증 범위에 포함하지 않았다. 잠금 해제 후 실제 iPhone에서 `io.a7garden.ghost` 실행이 성공했다. 휴대폰 화면의 대화 조회·전송은 별도 확인이 필요하며 Mac native 화면 검수는 다른 desktop workflow 점유로 수행하지 않았다.
 
 복구 자료는 같은 rollback 디렉터리의 이전 binary link, runtime.env, Gateway plist, console.json 및 Ghost.app이다. 이전 Mac 앱은 `~/Applications/Ghost.previous-20261104.app`에도 있다. 복구 시 먼저 진행 중 작업을 확인하고 앱 및 Host/Gateway를 중지한 후 이전 실행 링크·runtime.env·Gateway plist·앱을 되돌리고 재시작한다. 상태 백업을 현재 상태에 자동 덮어쓰지 않는다. 교체 이후 업무가 생겼다면 별도 대사 없이 과거 DB를 복원해서는 안 된다.
