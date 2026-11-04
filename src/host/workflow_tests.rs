@@ -56,7 +56,7 @@ fn setup(root: &Path, call: ai::ToolCall) -> (Arc<Host>, String) {
         }),
         handle: tokio::runtime::Handle::current(),
         default_model: "mock".into(),
-        _lock: File::create(root.join("test.lock")).unwrap(),
+        _lock: super::WorkspaceLock(File::create(root.join("test.lock")).unwrap()),
         brain: memory::Brain::default(),
         computer: computer::default_backend(),
         integrations: crate::host::integrations::Connections::default(),
@@ -64,6 +64,17 @@ fn setup(root: &Path, call: ai::ToolCall) -> (Arc<Host>, String) {
         profile_workers: Mutex::new(BTreeMap::new()),
         recovery: tokio::sync::Mutex::new(()),
         stopping: AtomicBool::new(false),
+        #[cfg(test)]
+        legacy_fixture_reasoning: AtomicBool::new(false),
+        dispatch_enabled: true,
+        #[cfg(feature = "lifetime")]
+        pi_callback_token: String::new(),
+        #[cfg(feature = "lifetime")]
+        pi_local_route: None,
+        #[cfg(feature = "lifetime")]
+        native_computers: None,
+        #[cfg(feature = "lifetime")]
+        authority_epoch: 1,
     });
     app.lock().unwrap().profiles[&id]
         .host
@@ -87,7 +98,7 @@ fn start(app: &Arc<Host>, id: &str) -> String {
         let p = &s.profiles[id];
         let store = p.host.store.lock().unwrap();
         let mut c = host::config(&store, Some("mock"), true).unwrap();
-        c.tools.extend(services::tool_definitions(app));
+        c.tools.extend(services::role_tool_definitions(app, services::ToolRole::Ordinary));
         (p.runtime.session.clone(), p.runtime.clone(), c)
     };
     let conversation = session.create_conversation(config).unwrap();
@@ -99,7 +110,7 @@ fn start(app: &Arc<Host>, id: &str) -> String {
             "Propose a page",
         )
         .unwrap();
-    app.start_worker(id.into(), runtime, 2);
+    app.start_legacy_fixture_worker(id.into(), runtime, 2);
     submitted.task_id
 }
 async fn review(app: &Arc<Host>) -> Review {
@@ -195,7 +206,7 @@ async fn planner_tool_executes_through_durable_runtime_and_records_receipt() {
     app.shutdown().await.unwrap();
     drop(app);
     let reopened =
-        Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     assert_eq!(
         reopened.snapshot().unwrap()["todos"]
             .as_array()
@@ -216,7 +227,7 @@ async fn review_survives_restart_and_saves_only_after_owner_approval() {
         ai::ToolCall::new(
             "review",
             "review_page",
-            json!({"space_id":space,"title":"Owner page","body":"Approved content","profile":"pdc-djot/1"}),
+            json!({"space_id":space,"title":"Owner page","body":"Approved content","profile":"pdc-markdown/1"}),
         ),
     );
     connect_space(&app, &id, notes.path(), &space);
@@ -235,7 +246,7 @@ async fn review_survives_restart_and_saves_only_after_owner_approval() {
     .is_empty());
     app.shutdown().await.unwrap();
     drop(app);
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let approved = owner(
         &app,
         OwnerAction::DecideReview {
@@ -359,7 +370,7 @@ async fn interrupted_approved_write_uses_persisted_hash_instead_of_overwriting()
         &page_id,
         "Original",
         "old",
-        "pdc-djot/1",
+        "pdc-markdown/1",
         "2026-01-01T00:00:00.000Z",
     )
     .unwrap();
@@ -396,7 +407,7 @@ async fn interrupted_approved_write_uses_persisted_hash_instead_of_overwriting()
         .unwrap();
     app.shutdown().await.unwrap();
     drop(app);
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let declined = owner(
         &app,
         OwnerAction::DecideReview {
@@ -423,7 +434,7 @@ async fn interrupted_approved_write_uses_persisted_hash_instead_of_overwriting()
 async fn backup_restore_checks_integrity_and_refuses_overwrite_or_tampering() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("host");
-    let app = Host::open(&root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(&root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let result = app
         .action(Action {
             request_id: uuid::Uuid::new_v4().to_string(),
@@ -463,7 +474,7 @@ async fn backup_restore_checks_integrity_and_refuses_overwrite_or_tampering() {
     let restored = temp.path().join("restored");
     operations::restore(&backup, &restored).unwrap();
     assert!(operations::restore(&backup, &root).is_err());
-    let copy = Host::open(&restored, tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let copy = Host::open_legacy_fixture(&restored, tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let snapshot = copy.lock().unwrap().profiles[id]
         .runtime
         .session
@@ -508,12 +519,10 @@ async fn delegated_file_authority_is_intersection_and_revocation_is_immediate() 
     let source = source_session
         .submit(&source_convo, "input", InputKind::Prompt, "analyze")
         .unwrap();
-    let convo = session
-        .create_conversation(host::durable::AgentConfig::new(
-            host::mock_model(),
-            "recipient",
-        ))
-        .unwrap();
+    let mut config = host::durable::AgentConfig::new(host::mock_model(), "recipient");
+    config.tools = host::tool_definitions();
+    config.tools.extend(services::role_tool_definitions(&app, services::ToolRole::Ordinary));
+    let convo = session.create_conversation(config).unwrap();
     let input = session
         .submit(&convo, "child", InputKind::Prompt, "read")
         .unwrap();
@@ -690,7 +699,8 @@ fn service_configuration_is_explicit_and_escaped() {
         true,
     )
     .unwrap();
-    assert!(spec.contains("Ghost &amp; Notes") && spec.contains("--headless"));
+    assert!(spec.contains("Ghost &amp; Notes") && spec.contains("com.a7.ghost"));
+    assert!(spec.contains("<string>run</string>") && !spec.contains("--headless"));
     let systemd = operations::service_spec(
         Path::new("/tmp/%i $root"),
         Path::new("/tmp/ghost"),
@@ -820,7 +830,7 @@ async fn repaired_profile_reloads_committed_work_without_stopping_other_ghosts()
         .unwrap();
     let db = rusqlite::Connection::open(root.path().join("profiles/writer/durable.db")).unwrap();
     db.execute_batch("CREATE TRIGGER simulated_fault BEFORE UPDATE ON durable_meta BEGIN SELECT RAISE(FAIL,'simulated storage fault'); END;").unwrap();
-    app.start_worker(id.clone(), runtime.clone(), 2);
+    app.start_legacy_fixture_worker(id.clone(), runtime.clone(), 2);
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if app.lock().unwrap().profiles[&id].error.is_some() {

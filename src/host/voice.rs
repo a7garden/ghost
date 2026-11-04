@@ -134,6 +134,7 @@ fn checked(app: &Host, context: &Context, role: models::Role, operation: &str) -
 }
 /// Safe preflight before getUserMedia. No server request and no persistent call.
 pub fn config(app: &Host, profile_id: &str, conversation_id: &str) -> Result<Value> {
+    if !app.dispatch_enabled { bail!("dispatch_off"); }
     let state = app.lock()?;
     let settings = models::settings(&state)?;
     let context = Context {
@@ -263,6 +264,7 @@ fn wav(bytes: &[u8], max_seconds: u64) -> Result<()> {
     Ok(())
 }
 pub async fn transcribe(app: &Host, context: &Context, audio: Vec<u8>) -> Result<Value> {
+    if !app.dispatch_enabled { bail!("dispatch_off"); }
     if audio.len() > MAX_INPUT_BYTES {
         bail!("마이크 음성 크기 제한을 초과했습니다.");
     }
@@ -340,6 +342,7 @@ fn task_text(app: &Host, input: &SynthesizeInput) -> Result<String> {
     Ok(text)
 }
 pub async fn synthesize(app: &Host, input: &SynthesizeInput) -> Result<Audio> {
+    if !app.dispatch_enabled { bail!("dispatch_off"); }
     let destination = checked(app, &input.context, models::Role::Tts, "speech")?;
     let text = task_text(app, input)?;
     let response = authorization(client()?.post(destination.url)
@@ -378,7 +381,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn owner(root: &Path, endpoint: &str) -> (Arc<Host>, Context) {
-        let app = Host::open(root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        let app = Host::open_legacy_fixture(root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
         let profile = app
             .action(Action {
                 request_id: uuid::Uuid::new_v4().to_string(),
@@ -727,7 +730,7 @@ mod tests {
         drop(runtime);
         drop(app);
         let reopened =
-            Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+            Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
         assert_eq!(
             config(&reopened, &context.profile_id, &context.conversation_id).unwrap()["available"],
             true

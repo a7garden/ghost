@@ -3,7 +3,7 @@ import { CommandQueue, connect } from './api';
 import { subscribeHostEvents } from './hostEvents';
 import { RoutingClient } from './routingClient';
 import type { RoutingConnection } from '../features/RoutingConversation';
-import type { Client, Command, Snapshot } from './types';
+import type { Client, Command, Envelope, Snapshot } from './types';
 
 // At most the host's MAX_EVENTS_WAIT_MS (25s); the bridge aborts its upstream
 // at 35s and the client deadline is 40s — keep the headroom chain in sync.
@@ -85,15 +85,23 @@ export function useWorkspace(connectClient: () => Promise<Client> = connect) {
       // A confirmed command stays successful even when the following read fails.
       // Treating that read failure as a command failure could invite a duplicate.
       try { setSnapshot(await client.current.snapshot()); setError(''); }
-      catch { setError('요청은 저장됐지만 최신 화면을 불러오지 못했습니다. 다시 연결하고 있어요.'); }
+      catch { setError('요청은 저장됐지만 최신 화면을 불러오지 못했습니다. 다시 연결하고 있습니다.'); }
       return result as Record<string, any>;
     } finally { mutation.current = false; revision.current++; setBusy(false); }
   }, []);
   const query = useCallback(async (command: Command) => {
     const operation = command.action as { type?: string } | undefined;
-    if (command.type !== 'workspace' || !['list_pages', 'read_page', 'collaboration_messages', 'read_avatar', 'list_connected_planner', 'planner_operation_status', 'planner_sync_status'].includes(operation?.type ?? '')) throw new Error('읽기 전용 요청이 아닙니다.');
+    if (command.type !== 'workspace' || !['list_pages', 'read_page', 'inspect_integration_approval', 'collaboration_messages', 'read_avatar', 'list_connected_planner', 'planner_operation_status', 'planner_sync_status'].includes(operation?.type ?? '')) throw new Error('읽기 전용 요청이 아닙니다.');
     if (!client.current) throw new Error('호스트 연결을 기다려 주세요.');
     return await client.current.action({ request_id: crypto.randomUUID(), command }) as Record<string, any>;
   }, []);
-  return { routing, snapshot, mode, error, busy, action, query, reconnect: () => setAttempt(n => n + 1) };
+  const lifetimeAction = useCallback(async (envelope: Envelope) => {
+    if (!client.current || client.current.mode !== 'live') throw new Error('Lifetime 접수는 연결된 Ghost 호스트가 필요합니다.');
+    const result = await client.current.action(envelope);
+    // lifetime 뮤테이션도 문서 검토·인박스를 바꾸므로 성공 후 스냅샷을 동기화한다.
+    // 갱신 실패는 주기 폴링이 회복하므로 원 요청의 결과를 그대로 돌려준다.
+    try { setSnapshot(await client.current.snapshot()); setError(''); } catch { /* 다음 폴링 */ }
+    return result;
+  }, []);
+  return { routing, snapshot, mode, error, busy, action, query, lifetimeAction, reconnect: () => setAttempt(n => n + 1) };
 }

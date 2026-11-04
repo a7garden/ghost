@@ -1,0 +1,66 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+    --version)
+        printf 'container CLI version 1.4.1\n'
+        exit 0
+        ;;
+    system)
+        [ "${2:-}" = status ]
+        exit 0
+        ;;
+    image)
+        [ "${2:-}" = inspect ]
+        printf '{}\n'
+        exit 0
+        ;;
+    run)
+        mode=fail
+        for argument do
+            case "$argument" in
+                __fixture_hold__) mode=hold ;;
+                __fixture_overflow__) mode=overflow ;;
+            esac
+        done
+        case "$mode" in
+            hold)
+                while [ ! -f "$0.killed" ]; do
+                    sleep 0.01
+                done
+                exit 137
+                ;;
+            overflow)
+                index=0
+                while [ "$index" -lt 8192 ]; do
+                    printf '0123456789abcdef'
+                    index=$((index + 1))
+                done
+                exit 0
+                ;;
+            *)
+                exit 2
+                ;;
+        esac
+        ;;
+    inspect)
+        [ -n "${2:-}" ]
+        printf '[{"configuration":{"id":"fixture-id"},"status":{"state":"stopped"}}]\n'
+        exit 0
+        ;;
+    kill)
+        [ -n "${2:-}" ]
+        printf '%s\n' "$2" >> "$0.killed"
+        exit 0
+        ;;
+    stop)
+        [ -n "${2:-}" ]
+        printf '%s\n' "$2" >> "$0.stopped"
+        exit 0
+        ;;
+    delete)
+        [ -n "${2:-}" ]
+        exit 0
+        ;;
+esac
+exit 2

@@ -1,0 +1,48 @@
+{
+  "fixture_only": true,
+  "contract_revision": "ghost-google-planner-v1",
+  "account_ref": "owned-google-fixture-account",
+  "collection_ref": "owned-calendar-fixture",
+  "phase": "read_only_import",
+  "calendar": {
+    "id": "13579bdf2468ace013579bdf2468ace0",
+    "etag": "\"calendar-version-7\"",
+    "summary": "DST round trip",
+    "start": {
+      "dateTime": "2026-11-01T01:30:00-04:00",
+      "timeZone": "America/New_York"
+    },
+    "end": {
+      "dateTime": "2026-11-01T01:30:00-05:00",
+      "timeZone": "America/New_York"
+    },
+    "extendedProperties": {
+      "private": {
+        "unrelated_remote_metadata": "preserve"
+      }
+    }
+  },
+  "task": {
+    "id": "provider-task-fixture-id",
+    "etag": "\"task-version-4\"",
+    "title": "Date-only deadline",
+    "due": "2026-11-01T00:00:00.000Z",
+    "notes": "User text stays unchanged",
+    "unknown_provider_metadata": {
+      "opaque": true
+    }
+  },
+  "operation": {
+    "id": "75e26513-2dbd-4cc4-b100-22f10c56529b",
+    "state": "uncertain",
+    "write_outcome": "effect_unknown",
+    "task_provider_id": null
+  },
+  "expected": {
+    "calendar_duration_ms": 3600000,
+    "task_date": "2026-11-01",
+    "unknown_task_insert_replayed": false,
+    "source_local_records_deleted": false,
+    "google_live_accepted": false
+  }
+}

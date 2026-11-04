@@ -1,0 +1,9 @@
+{
+  "identifier": "overlay-window",
+  "description": "Overlay chat window dragging and native hide for the Ghost overlay. No filesystem, shell, or process commands are exposed to the renderer.",
+  "windows": ["overlay"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": ["core:window:allow-start-dragging", "core:window:allow-hide"]
+}

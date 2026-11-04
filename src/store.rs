@@ -104,6 +104,7 @@ impl ProfileStore {
         root: &Path,
         name: &str,
         create_persona: Option<&str>,
+        requested_uuid: Option<&str>,
     ) -> Result<ProfileStore> {
         validate_name(name)?;
         let profiles_dir = root.join("profiles");
@@ -160,10 +161,15 @@ impl ProfileStore {
             .query_row("SELECT uuid FROM meta WHERE id=1", [], |r| r.get(0))
             .optional()?;
         let uuid = match (uuid, create_persona) {
+            (Some(u), Some(persona)) if requested_uuid==Some(u.as_str()) => {
+                let existing:String=conn.query_row("SELECT persona FROM meta WHERE id=1",[],|r|r.get(0))?;
+                if existing!=persona {bail!("provisioned profile purpose conflicts with the original identity");}
+                u
+            }
             (Some(_), Some(_)) => bail!("profile '{}' already exists", name),
             (Some(u), None) => u,
             (None, Some(persona)) => {
-                let u = uuid::Uuid::new_v4().to_string();
+                let u = match requested_uuid { Some(id) => { let parsed=uuid::Uuid::parse_str(id)?; if parsed.is_nil(){bail!("profile identity must not be nil");} parsed.to_string() }, None => uuid::Uuid::new_v4().to_string() };
                 conn.execute(
                     "INSERT INTO meta(id, uuid, name, persona, created_at) VALUES(1, ?1, ?2, ?3, ?4)",
                     params![u, name, persona, now()],
@@ -189,11 +195,17 @@ impl ProfileStore {
     }
 
     pub fn create_profile(root: &Path, name: &str, persona: &str) -> Result<ProfileStore> {
-        Self::open_internal(root, name, Some(persona))
+        Self::open_internal(root, name, Some(persona), None)
+    }
+
+    /// Host provisioning pins identity before external filesystem effects.
+    /// Existing create/open contracts retain their original behavior.
+    pub(crate) fn create_profile_with_id(root: &Path, name: &str, persona: &str, id: &str) -> Result<ProfileStore> {
+        Self::open_internal(root, name, Some(persona), Some(id))
     }
 
     pub fn open_profile(root: &Path, name: &str) -> Result<ProfileStore> {
-        Self::open_internal(root, name, None)
+        Self::open_internal(root, name, None, None)
     }
 
     /// Crash recovery: any task left 'running' or effect left 'started' by a

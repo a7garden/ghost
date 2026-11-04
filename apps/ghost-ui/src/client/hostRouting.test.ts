@@ -7,7 +7,7 @@ import type { Client, Envelope } from './types';
 it('keeps actual capability fields and refuses an unknown Host schema', async () => {
  const flags = {schema:'ghost-routing-host/1',admission:true,clarification_resolution:true,runtime_dispatch:false,effect_fence:false,verified_completion_report:false,model_router:false,model_tool_registration:false};
  expect(await new HostRoutingTransport(async()=>flags).capability()).toEqual(flags);
- await expect(new HostRoutingTransport(async()=>({...flags,schema:'other/2'})).capability()).rejects.toThrow('Host 계약');
+ await expect(new HostRoutingTransport(async()=>({...flags,schema:'other/2'})).capability()).rejects.toThrow('작업 접수 형식');
  expect(normalizeRoutingFailure({error_code:'authority_changed',error:'unrelated text'})).toMatchObject({code:'authority_changed'});
  expect(normalizeRoutingFailure({error:'authority_changed'})).toBeNull();
 });

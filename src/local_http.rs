@@ -263,17 +263,22 @@ impl Session {
     /// bearer credential is accepted only on the bound loopback endpoint.
     #[cfg(feature = "host")]
     pub fn control_authorized(&self, r: &Request, write: bool) -> bool {
+        self.control_authorized_with_token(r, write, &self.control_token)
+    }
+
+    #[cfg(feature = "host")]
+    pub(crate) fn control_authorized_with_token(&self, r: &Request, write: bool, credential: &str) -> bool {
         if !self.host_ok(r)
             || !r.headers.get("authorization").is_some_and(|value| {
                 value
                     .strip_prefix("Bearer ")
-                    .is_some_and(|token| equal(token, &self.control_token))
+                    .is_some_and(|token| equal(token, credential))
             })
             || r.headers.get("origin") != Some(&self.origin)
             || !r
                 .headers
                 .get("x-ghost-csrf")
-                .is_some_and(|token| equal(token, &self.control_token))
+                .is_some_and(|token| equal(token, credential))
         {
             return false;
         }

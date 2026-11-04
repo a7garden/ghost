@@ -1,0 +1,33 @@
+{
+  "contract_id": "ghost-native-workspace-host-grant/1",
+  "depends_on": "ghost-native-workspace/1 sha256 2a8a7a4abb84e5150ca9499b9ea2ba7954aca678e78641e1e05a56547c13b73a",
+  "owner": "integration coordinator only; no change to C/D ownership or frozen APIs",
+  "wire_protocol": "ghost-lifetime/1",
+  "host_private_schema": 13,
+  "configuration": {
+    "environment": "GHOST_LIFETIME_NATIVE_WORKERS_CONFIG",
+    "file": "one operator-selected bounded no-follow JSON file; no credentials",
+    "fields": ["registry_root", "container_cli", "accepted_capabilities", "routes"],
+    "route_fields": ["ghost_id", "computer_id", "worker_root", "worker_socket", "runner_config", "model", "thinking", "privacy_classes"],
+    "rules": "Canonical private absolute roots/socket parent, unique registered Ghost and computer, exact selected provider/model/thinking and explicitly permitted privacy classes. Public subscription route cannot advertise private/local_only. No model-selected path, route, capability, credential or provider. Missing configuration means no native grant, never a canary/provider fallback",
+    "boot": "Validate each exact per-Ghost runner_config with GuestRunnerConfig::worker_backend_facts and register real apple-native-omp runtime facts, as fixed by native-worker-backend-facts-v1.json; a bare AppleContainerBackend::probe is not a shell/home capability. Provision only explicitly configured existing Ghost routes through the sole ComputerRegistry. Existing matching binding/home is observed, not rebound or reset; mismatch/revocation/stale epoch fails closed. Dispatch-off startup performs no provision/probe/effect owner startup"
+  },
+  "inspection": {
+    "method": "existing authenticated Pi work.inspect",
+    "success_data_addition": "worker_grant: null or a current registered exact Ghost/Work scope",
+    "grant_fields": ["ghost_id", "computer_id", "authority_epoch", "task_snapshot_root", "model", "thinking", "allowed_tools", "deadline_ms", "max_progress_bytes", "privacy_classes"],
+    "privacy": "Original conversation, current Goal and exact route policy all apply; no artifact/home/browser/credential contents are returned",
+    "persistent_home_policy": "Before initial binding, commit exact Ghost/computer/public-vs-protected privacy classes in the existing Host Journal meta store. Observe the same policy on restart. Do not infer public safety from only the current Goal or reclassify an existing untracked/protected home when provider/route configuration changes. Missing provenance for an existing binding or changed privacy classes fails closed pending explicit owner reconciliation; this is policy metadata, not another home store",
+    "effect": "Read-only current binding/capability/home metadata; no execution lease, mkdir, SDK/model request, receipt reset or Work mutation"
+  },
+  "node_adapter": {
+    "reuse": "work_submit(work_id) only; authenticated inspection supplies exact current Goal.prompt, current Work/Goal checks and stable execution_id=pi-sha256(invocationId). Exact committed same-invocation execution reconciliation is read-only and needs no fresh compute grant",
+    "spec": "For initial submission only, use the current Host-issued worker_grant; cwd=task_snapshot_root/sha256(execution_id UTF-8) and prompt=current authenticated Goal.prompt. Do not mkdir or provision from Node/model context. Worker creates the private attempt directory only after its exact home lease",
+    "cutover": "Remove canary-local, two-tool/native-model hardcoding and worker-root/model constructor/env parameters; update every caller. No compatibility alias or arbitrary model fallback"
+  },
+  "host_admission": "Before spec/outbox commit, current exact registered Ghost/computer/epoch/capabilities/Goal privacy, Host-issued tools/model/thinking/budgets and execution-specific path must match. The model supplies only Work identity; the authenticated adapter supplies immutable Goal prompt bytes. Foreign computer/root/tool/model, stale grant or unavailable backend rejects with no Worker admission",
+  "delivery": "Resolve worker socket from the committed Work owner and immutable configured route, not a global singleton socket or receiver/model claim. Inspect/cancel/collect/reconcile the original execution on that exact route. No lock across subprocess/model/socket I/O; old/future Host authority and dispatch-off guards precede cached/delivery paths",
+  "root_files": ["src/host/lifetime_computers.rs", "src/host/mod.rs", "src/host/lifetime_api.rs", "src/host/lifetime/mod.rs", "src/host/lifetime/pi_tools.rs", "src/host/lifetime_driver.rs", "src/host/lifetime_runtime.rs", "apps/ghost-durable/src/host-transport.js", "apps/ghost-durable/src/main.js", "apps/ghost-durable/src/runtime.js", "contracts/lifetime/**"],
+  "registry_readonly_addition": "Root adds ComputerRegistry::inspect_worker_home(&self, computer_id:&str, ghost_id:&str, authority_epoch:u64)->anyhow::Result<Option<HomeManifest>> only after DHome2 actual handback; reuse D's current binding checks without a lease or command receipt write",
+  "verification": ["Host-derived grants cannot cross Ghost/computer/Work/revision/privacy scopes", "missing/stale/unavailable/forged grants never admit a Worker", "two actual Ghost routes dispatch and reconcile to their original distinct native handles", "Node creates no home/workspace outside registered Worker lease", "dispatch-off reopen preserves data without provision or native owners", "original accepted Goal/Work/report identities remain immutable"]
+}

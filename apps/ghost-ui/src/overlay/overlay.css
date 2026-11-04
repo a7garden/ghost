@@ -1,0 +1,197 @@
+/* Ghost chat overlay. A compact composer + transcript the desktop app parks
+   off-screen and surfaces over the current work; follows the system theme. */
+
+:root {
+  color-scheme: light dark;
+  --surface: #ffffff;
+  --surface-2: #f4f4f2;
+  --border: #dddddd;
+  --text: #222222;
+  --muted: #777777;
+  --ghost: #f0f4ef;
+  --user: #e8f0fe;
+  --working: #a4a4a0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1e1f1e;
+    --surface-2: #262827;
+    --border: #3a3c3b;
+    --text: #ececea;
+    --muted: #9a9a96;
+    --ghost: #262c28;
+    --user: #24303f;
+    --working: #6d6d69;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+#overlay {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  user-select: none;
+}
+
+#dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--working);
+  flex: none;
+}
+
+#dot.idle {
+  background: #6fae7c;
+}
+
+#dot.busy {
+  background: #d9a13f;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+#dot.error {
+  background: #cc5f5f;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+h1 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#status {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#log {
+  flex: 1;
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row > div {
+  max-width: 88%;
+  padding: 7px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.row.user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.row.user > div {
+  background: var(--user);
+}
+
+.row.ghost > div {
+  background: var(--ghost);
+}
+
+.row.working > div {
+  color: var(--muted);
+  font-style: italic;
+}
+
+#log .empty {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 14px 0;
+}
+
+#composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+#input {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 10px;
+  max-height: 132px;
+}
+
+#input:focus {
+  outline: 1px solid var(--muted);
+}
+
+#send {
+  flex: none;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+#send:disabled {
+  opacity: 0.45;
+}
+
+#send:not(:disabled):active {
+  transform: translateY(0.5px);
+}

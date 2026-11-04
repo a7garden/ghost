@@ -1,4 +1,11 @@
-"""Real local-model synthetic acceptance, separate from fake boundary tests."""
+"""Real synthetic speech acceptance against the local speech adapter.
+
+The adapter protocol is unchanged, but the only speech backend is the
+Dyno-owned :7730 process through RemoteSpeech; this script exercises the
+bounded HTTP boundary and never loads model weights itself. Separate from
+fake boundary tests: real TTS audio is synthesized, transcribed back, and a
+disconnect mid-generation must cancel and drain the single queue.
+"""
 import argparse
 import hashlib
 import http.client

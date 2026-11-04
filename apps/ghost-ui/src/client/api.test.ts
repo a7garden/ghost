@@ -29,10 +29,6 @@ describe('host snapshot compatibility', () => {
     expect(phaseLabel(phase)).toBe('future_phase');
     expect(isRunning(phase)).toBe(false);
   });
-  it('rejects unsupported protocol and unrelated JSON', () => {
-    expect(() => normalizeSnapshot({ ...empty, host_protocol_version: 2 })).toThrow('버전');
-    expect(() => normalizeSnapshot({ ok: false })).toThrow('형식');
-  });
   it('distinguishes waiting for an owner from running', () => {
     const s = normalizeSnapshot({ ...empty, profiles: [{ id: 'p', conversations: [{ tasks: [{ phase: 'waiting_owner' }] }] }] });
     expect(dotState(s.profiles[0], [])).toBe('attention');

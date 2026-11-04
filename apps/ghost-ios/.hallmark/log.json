@@ -1,0 +1,48 @@
+[
+  {
+    "date": "2026-10-17",
+    "scope": "Ghost native mobile redesign",
+    "theme": "Coral adaptation / porcelain-charcoal",
+    "structure": "Long Document transcript / Index First work",
+    "nav": "native edge controls and platform tabs",
+    "font": "SF/Dynamic Type: native platform adaptation; no downloaded fonts",
+    "critique": {
+      "philosophy": 4,
+      "hierarchy": 4,
+      "execution": 4,
+      "specificity": 4,
+      "restraint": 5,
+      "variety": 4
+    },
+    "verified": {
+      "widths": [
+        320,
+        375,
+        414,
+        768
+      ],
+      "screens": [
+        "conversation",
+        "work",
+        "notifications",
+        "settings",
+        "options",
+        "voice unavailable"
+      ],
+      "appearance": [
+        "light",
+        "dark"
+      ],
+      "accessibility": "largest Dynamic Type on 375pt device; fixed icon bounds",
+      "contrast_minimum": 4.96,
+      "automated_tests": "core51, unique UI9 across finalized results"
+    },
+    "native_adaptations": [
+      "HTML/CSS grid, web footer, hover/cursor/overflow rules are not applicable",
+      "320/375/414 native width previews use compact size class on an iPad simulator; 768 uses regular",
+      "Pairing and call state transitions retain existing core contracts; real voice/push acceptance remains open"
+    ],
+    "evidence": "../../../.build/mobile-redesign-20261017-evidence/",
+    "not_claimed": "No blanket web 58/58 claim, no production message send or real voice/APNs acceptance"
+  }
+]

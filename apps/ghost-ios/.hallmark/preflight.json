@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-17",
+  "framework": "SwiftUI, iOS17+",
+  "font": "native SF / Dynamic Type",
+  "existing_palette": "semantic monochrome, GhostStyle in App/GhostApp.swift:30",
+  "motion": "minimal, reduced motion respected",
+  "scope": "all native screens; existing transport, grants, receipts, drafts and Keychain preserved",
+  "audience": "one personal owner",
+  "use_case": "conversation-first, delegated work and calls",
+  "tone": "calm, personal, concise",
+  "previous_web_macrostructure": "Workbench",
+  "selected_native_family": "Long Document transcript / Index First work list",
+  "theme": "Coral adapted to existing Ghost porcelain/charcoal identity"
+}

@@ -1,0 +1,86 @@
+{
+  "contract_revision": "ghost-google-planner-v1",
+  "run_id": "ghost-20261009T012047Z",
+  "status": "CONTRACT_READY",
+  "purpose": "Google Calendar/Tasks transport and authoritative item mapping over the existing planner cache/outbox; no second ledger or scheduler",
+  "source_integration": {
+    "module": "src/host/planner_google_transport.rs",
+    "existing_module": "src/host/planner_sync.rs",
+    "registration_owner": "Root",
+    "shared_schema_owner": "Root",
+    "wire_format": [
+      "i_calendar",
+      "google_calendar",
+      "google_tasks"
+    ],
+    "history": "Historical durable CalDAV records decode as i_calendar; migrate source callers/fixtures, no alias transport or fallback"
+  },
+  "identity": {
+    "account_ref": "Host-selected opaque credential reference; token lease must attest this exact account",
+    "collection_ref": "Exact Calendar calendarId or Tasks tasklistId; no ambient primary/default discovery",
+    "item_id": "Provider event/task id, never title, iCalUID alone, content similarity or account email",
+    "operation_id": "Existing durable planner Operation.id; not an RPC id and not a fresh retry id",
+    "etag": "Provider etag preserved exactly; conditional semantics unsupported/unobserved remain an explicit live gate"
+  },
+  "api_seams": {
+    "oauth": "Scoped async token-lease provider injected like existing CalDAV credentials; access/refresh/client-secret never serialized into public records or diagnostics",
+    "wire": "Native Google JSON preserved including unknown fields; extend the existing Adapter/ConditionalWrite/WriteOutcome/observation seams only as needed for a real created-item receipt and persisted locator; migrate every affected caller, no duplicate Google outbox",
+    "format": "Add explicit WireFormat to collection/codec selection, owned planner source only; Root updates shared Host/UI routes after handoff",
+    "production_targets": [
+      "https://www.googleapis.com/calendar/v3",
+      "https://tasks.googleapis.com/tasks/v1"
+    ],
+    "fixture_target": "Explicit loopback-only fixture transport, never automatic endpoint fallback"
+  },
+  "read_write_phases": [
+    "read_only_import",
+    "reconcile",
+    "explicit_active_cutover"
+  ],
+  "safety": {
+    "calendar_create": "Client-selected stable provider-valid event id derived before dispatch from durable operation/item identity; lost insert reconciles by that exact provider id",
+    "tasks_create": "Tasks assigns ids. Persist a genuine observed insert receipt. Lost response without a provider id stays EffectUnknown; never deduplicate by title/notes/due or inject a visible operation marker into user notes",
+    "unknown": "No resend, replacement id, account rotation or blind insert after uncertain dispatch",
+    "scope": "Validate account/collection/phase/token scopes before provider I/O. OAuth expiry is not permission to replay uncertain mutations",
+    "time": "Preserve Calendar date-only vs RFC3339+timeZone and Task date-only deadlines; DST requires explicit zone/offset, not machine local zone",
+    "source_preservation": "Local/CalDAV originals and unsupported fields remain readable; no live migration"
+  },
+  "verification": {
+    "helper": "Source only; no build/lint/tests/formatter/auth/model/service/git/native effects",
+    "root": "Deterministic real loopback HTTP fixture and actual selected production transport separately; fake tests are not live Google acceptance",
+    "required_behaviors": [
+      "lost Calendar insert receipt reconciles exact id",
+      "lost Tasks insert remains unknown without retry",
+      "duplicate operation does not dispatch twice",
+      "expired or wrong-account lease blocks writes",
+      "etag conflict preserves remote/user data",
+      "DST and date-only round trips",
+      "readonly import never writes",
+      "unknown JSON metadata survives patch"
+    ]
+  },
+  "ownership": {
+    "helper": [
+      "src/host/planner_google_transport.rs",
+      "src/host/planner_sync.rs",
+      "src/host/planner_caldav_transport.rs",
+      "src/adapters/personal_connectors/google_oauth.rs",
+      "tests/lifetime_personal_google*.rs",
+      "tests/planner*.rs"
+    ],
+    "root": [
+      "contracts/lifetime/**",
+      "src/host/mod.rs",
+      "src/host.rs",
+      "src/main.rs",
+      "src/bin/**",
+      "src/lifetime/**",
+      "src/control/**",
+      "apps/**",
+      "Cargo.toml",
+      "Cargo.lock",
+      "infra/**",
+      "all shared migrations, services, live Google and credential stores"
+    ]
+  }
+}

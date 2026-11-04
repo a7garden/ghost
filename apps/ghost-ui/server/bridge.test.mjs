@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHmac, randomUUID } from 'node:crypto';
-import { mkdtemp, writeFile, chmod, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, chmod, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge, discover } from './bridge.mjs';
+import { createGateway } from '../../ghost-gateway/server.mjs';
 
 const token = 'a'.repeat(64);
 async function listen(handler) {
@@ -14,7 +15,7 @@ async function listen(handler) {
   return { server, origin: `http://127.0.0.1:${server.address().port}`, port: server.address().port };
 }
 const stop = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
-async function fixture(t, { validProof = true } = {}) {
+async function fixture(t, { validProof = true, registryRows } = {}) {
   const requests = [], root = await mkdtemp(join(tmpdir(), 'ghost-ui-bridge-'));
   const native = await listen(async (req, res) => {
     let body = ''; for await (const c of req) body += c;
@@ -25,6 +26,9 @@ async function fixture(t, { validProof = true } = {}) {
       const proof = createHmac('sha256', token).update('ghost-control-bootstrap-v1\0').update(validProof ? nonce : 'stale-nonce').digest('hex');
       res.end(JSON.stringify({ protocol: 'ghost-control', version: 1, proof }));
     } else if (req.url.endsWith('/snapshot')) res.end(JSON.stringify({ workspace_id: 'test-workspace', host_protocol_version: 1, profiles: [] }));
+    else if (registryRows && req.url.endsWith('/action') && JSON.parse(body).command?.envelope?.body?.method === 'registry.inspect') {
+      res.end(JSON.stringify({ ok: true, result: { status: 'success', data: { registry: registryRows } } }));
+    }
     else res.end(JSON.stringify({ ok: true, result: { profile_id: 'new-dot' } }));
   });
   const file = join(root, '.ghost-control.json');
@@ -146,4 +150,81 @@ test('events proxy forwards the cursor path and wait hint, rejects malformed cur
   assert.equal(noWait.status, 200);
   const eventsCalls = requests.filter(r => r.path.startsWith('/api/v1/events/'));
   assert.equal(eventsCalls.at(-1).headers['x-ghost-events-wait-ms'], undefined); // absent hint must not be forwarded
+});
+
+test('a forged pairing gateway never receives the authenticated Host authority', async t => {
+  const existing = await fixture(t);
+  const observed = [];
+  const foreign = await listen((req, res) => {
+    observed.push({ path: req.url, authorization: req.headers.authorization, csrf: req.headers['x-ghost-csrf'] });
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ protocol: 'ghost-pairing', version: 1, origin: 'https://ghost.example', proof: 'b'.repeat(64) }));
+  });
+  const ui = await listen(createBridge({
+    root: existing.root, gatewayOrigin: 'https://ghost.example', gatewayPort: foreign.port,
+  }));
+  t.after(async () => { await stop(ui.server); await stop(foreign.server); });
+  const bootstrap = await fetch(`${ui.origin}/ghost-api/bootstrap`).then(response => response.json());
+  const response = await fetch(`${ui.origin}/ghost-api/mobile/invitations`, {
+    method: 'POST',
+    headers: { Origin: ui.origin, 'Content-Type': 'application/json', 'X-Ghost-UI-CSRF': bootstrap.csrf },
+    body: JSON.stringify({ request_id: randomUUID(), code_digest: 'c'.repeat(64), ticket_digest: 'd'.repeat(64) }),
+  });
+  assert.equal(response.status, 502);
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].authorization, undefined);
+  assert.equal(observed[0].csrf, undefined);
+  assert.equal((await response.text()).includes(token), false);
+});
+
+test('phone pairing refuses foreign origins, missing CSRF and arbitrary route targets before discovery', async t => {
+  const { ui, bootstrap, requests } = await fixture(t);
+  const headers = { Origin: ui.origin, 'Content-Type': 'application/json', 'X-Ghost-UI-CSRF': bootstrap.csrf };
+  const body = JSON.stringify({ request_id: randomUUID(), code_digest: 'c'.repeat(64), ticket_digest: 'd'.repeat(64) });
+  const unauthorized = await fetch(`${ui.origin}/ghost-api/mobile/invitations`, {
+    method: 'POST', headers: { ...headers, 'X-Ghost-UI-CSRF': '' }, body,
+  });
+  const foreign = await fetch(`${ui.origin}/ghost-api/mobile/invitations`, {
+    method: 'POST', headers: { ...headers, Origin: 'https://foreign.example' }, body,
+  });
+  const arbitrary = await fetch(`${ui.origin}/ghost-api/mobile/invitations?target=https://foreign.example`, {
+    method: 'POST', headers, body,
+  });
+  assert.equal(unauthorized.status, 403);
+  assert.equal(foreign.status, 403);
+  assert.equal(arbitrary.status, 404);
+  assert.equal(requests.length, 0);
+});
+
+test('authenticated pairing admits a real bounded invitation through the strict proxy Host guard', async t => {
+  const primary = { ghost_id: randomUUID(), conversation_id: randomUUID(), kind: 'primary', mode: 'active' };
+  const existing = await fixture(t, { registryRows: [primary] });
+  const devices = join(existing.root, 'devices.json');
+  const gateway = createGateway({
+    root: existing.root, devices, origin: 'https://ghost.example', lifetimeAuthorityEpoch: 1,
+    apns: { enabled: false, missing: [] },
+  });
+  await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
+  const ui = await listen(createBridge({
+    root: existing.root, gatewayOrigin: 'https://ghost.example', gatewayPort: gateway.address().port,
+  }));
+  t.after(async () => { await stop(ui.server); await stop(gateway); });
+  const bootstrap = await fetch(`${ui.origin}/ghost-api/bootstrap`).then(response => response.json());
+  const timestamp = Date.now().toString(16).padStart(12, '0'), random = randomUUID().split('-');
+  const request_id = `${timestamp.slice(0, 8)}-${timestamp.slice(8)}-7${random[2].slice(1)}-${random[3]}-${random[4]}`;
+  const response = await fetch(`${ui.origin}/ghost-api/mobile/invitations`, {
+    method: 'POST',
+    headers: { Origin: ui.origin, 'Content-Type': 'application/json', 'X-Ghost-UI-CSRF': bootstrap.csrf },
+    body: JSON.stringify({ request_id, code_digest: 'c'.repeat(64), ticket_digest: 'd'.repeat(64) }),
+  });
+  assert.equal(response.status, 200);
+  const invitation = await response.json();
+  assert.equal(invitation.status, 'open');
+  assert.deepEqual(invitation.scope, {
+    kind: 'lifetime', ghost_ids: [primary.ghost_id], conversation_ids: [primary.conversation_id],
+    capabilities: ['lifetime.read', 'lifetime.write'],
+  });
+  const durable = JSON.parse(await readFile(devices, 'utf8'));
+  assert.equal(durable.devices.length, 0);
+  assert.equal(durable.pairing.invitations.find(row => row.invitation_id === request_id)?.status, 'open');
 });

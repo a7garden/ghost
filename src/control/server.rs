@@ -21,6 +21,14 @@ const MAX_CONNECTIONS: usize = 32;
 /// bridge and UI poll cycles are sized above this.
 const MAX_EVENTS_WAIT_MS: u64 = 25_000;
 
+#[cfg(all(test, feature = "lifetime"))]
+#[path = "pi_test_http.rs"]
+pub(crate) mod pi_test_http;
+
+#[cfg(all(test, feature = "lifetime"))]
+#[path = "pi_report_http_tests.rs"]
+mod pi_report_http_tests;
+
 /// Serve the host on loopback. The host process owns all profile stores while
 /// this transport is alive; clients use the protected discovery file.
 pub fn serve(root: &Path, port: u16, model: Option<&str>, with_ui: bool) -> Result<()> {
@@ -289,6 +297,52 @@ fn route(
                 "capabilities": ["snapshot", "events", "action"]
             }),
         );
+    }
+    #[cfg(feature = "lifetime")]
+    if request.method == "POST" && matches!(request.target.as_str(), "/api/v1/pi/action" | "/api/v1/pi/local-action" | "/api/v1/pi/selected-action") {
+        let local = request.target == "/api/v1/pi/local-action";
+        let credential = if local {
+            host.pi_local_route.as_ref().map(|route| route.callback_token.as_str())
+        } else { Some(host.pi_callback_token.as_str()) };
+        let Some(credential) = credential else { return denied(peer); };
+        if !session.control_authorized_with_token(request, true, credential) {
+            return denied(peer);
+        }
+        if request.body.len() > 1_048_576 {
+            return respond_json(peer, 413, &json!({"ok":false,"error":"Pi callback frame limit"}));
+        }
+        let input = serde_json::from_slice::<crate::host::lifetime::PiToolRequest>(&request.body);
+        return match input {
+            Ok(input) => {
+                #[cfg(test)]
+                let _observation=pi_test_http::begin_observation(&host.root,&input);
+                let result=host.handle.block_on(host.lifetime_pi_action(&input,
+                    if local { crate::host::lifetime::PiInferenceScope::Local }
+                    else if request.target == "/api/v1/pi/selected-action" { crate::host::lifetime::PiInferenceScope::Selected }
+                    else { crate::host::lifetime::PiInferenceScope::Public }));
+                #[cfg(test)]
+                pi_test_http::observe(&host.root,&input,&result);
+                respond_result(peer,result)
+            },
+            Err(_) => respond_json(peer, 400, &json!({"ok":false,"error":"invalid Pi callback envelope"})),
+        };
+    }
+
+    #[cfg(feature = "lifetime")]
+    if request.target == "/api/v1/inference/settings" {
+        if request.method == "GET" && session.control_authorized(request, false) {
+            return respond_result(peer, host.inference_settings());
+        }
+        if request.method == "POST" && session.control_authorized(request, true) {
+            if request.body.len() > 16_384 { return respond_json(peer,413,&json!({"ok":false,"error":"inference frame limit"})); }
+            // This credential ingress deliberately bypasses the action journal.
+            // Only redacted metadata is committed by configure_inference.
+            return match serde_json::from_slice::<Value>(&request.body) {
+                Ok(value) => respond_result(peer,host.configure_inference(&value)),
+                Err(_) => respond_json(peer,400,&json!({"ok":false,"error":"invalid inference configuration"})),
+            };
+        }
+        return denied(peer);
     }
 
     match (request.method.as_str(), request.target.as_str()) {

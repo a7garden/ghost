@@ -186,7 +186,7 @@ impl Drop for Radicale {
     }
 }
 fn host(root: &std::path::Path) -> Arc<Host> {
-    Host::open(root, tokio::runtime::Handle::current(), Some("mock")).unwrap()
+    Host::open_legacy_fixture(root, tokio::runtime::Handle::current(), Some("mock")).unwrap()
 }
 fn row(app: &Arc<Host>, cid: &str, uid: &str) -> planner::Resource {
     planner::resource(&app.lock().unwrap().journal.0, cid, uid)

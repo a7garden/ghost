@@ -1,7 +1,7 @@
 import SwiftUI
 import GhostMobileCore
 
-private struct HistoryPreference: PreferenceKey {
+struct HistoryPreference: PreferenceKey {
     static let defaultValue = true
     static func reduce(value: inout Bool, nextValue: () -> Bool) { value = nextValue() }
 }
@@ -22,13 +22,10 @@ struct MessageHistory: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 20) {
                         if rows.isEmpty {
-                            ContentUnavailableView("새 대화", systemImage: "bubble.left.and.bubble.right", description: Text("메시지를 입력하거나 음성 통화를 시작하세요."))
+                            GhostEmptyConversation()
                         }
                         ForEach(rows) { row in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(row.value["role"].text == "user" ? "나" : profileName).font(.caption).foregroundStyle(GhostStyle.secondary)
-                                Text(row.value["text"].text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                            }.padding(16).background(row.value["role"].text == "user" ? GhostStyle.under : GhostStyle.surface, in: RoundedRectangle(cornerRadius: 20))
+                            GhostMessageBubble(text: row.value["text"].text, isUser: row.value["role"].text == "user", label: profileName) { EmptyView() }
                         }
                         Color.clear.frame(height: 1).id(bottomID).accessibilityHidden(true)
                     }
@@ -76,12 +73,13 @@ struct MessageHistory: View {
     }
 }
 
-private struct ObserveHistoryGeometry: ViewModifier {
+struct ObserveHistoryGeometry: ViewModifier {
     let update: (Bool) -> Void
     @State private var userScrolling = false
     func body(content: Content) -> some View {
         if #available(iOS 18, *) {
             content.defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.top, for: .alignment)
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentSize.height - geometry.visibleRect.maxY < 80
             } action: { _, nearBottom in

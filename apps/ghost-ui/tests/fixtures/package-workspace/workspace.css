@@ -1,0 +1,4 @@
+:root { font: 15px/1.5 system-ui; color-scheme: light dark; }
+main { max-width: 38rem; padding: 22px; margin: 0 auto; }
+h1 { font-size: 23px; margin: 0 0 18px; }
+button { font: inherit; display: block; min-height: 42px; margin-block: 10px; padding-inline: 12px; }

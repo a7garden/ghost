@@ -20,7 +20,7 @@ fn canonical_writes_preserve_noop_unknown_metadata_and_detect_external_edits() {
         &id,
         "Owner note",
         "# Hello\n\nneedle in body\n",
-        "pdc-djot/1",
+        "pdc-markdown/1",
         "2026-10-03T00:00:00.000Z",
     )
     .unwrap();
@@ -93,7 +93,9 @@ fn html_preview_keeps_authored_styles_and_suppresses_active_content() {
         "2026-10-03T00:00:00.000Z",
     )
     .unwrap();
-    assert_eq!(page.body.as_deref(), Some(body));
+    // Canonical PDC 2 bodies end with exactly one LF; the projection returns
+    // the exact stored source slice.
+    assert_eq!(page.body.as_deref(), Some(&format!("{body}\n")[..]));
     let html = page.preview.unwrap();
     assert!(html.contains("color:red") && html.contains("font-weight:bold"));
     assert!(!html.contains("onclick") && !html.contains("steal()") && !html.contains("<iframe"));
@@ -170,11 +172,11 @@ fn duplicate_ids_symlinks_and_bad_manifests_are_visible_and_not_followed() {
         &id,
         "Original",
         "body",
-        "pdc-djot/1",
+        "pdc-markdown/1",
         "2026-10-03T00:00:00.000Z",
     )
     .unwrap();
-    fs::copy(s.path.join(&page.locator), s.path.join("duplicate.djot")).unwrap();
+    fs::copy(s.path.join(&page.locator), s.path.join("duplicate.md")).unwrap();
     assert!(documents::read(&s, &id)
         .unwrap_err()
         .to_string()

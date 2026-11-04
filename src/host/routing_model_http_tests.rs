@@ -256,7 +256,7 @@ async fn routing_model_http_configured_provider_owner_natural_multiwork_followup
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
     let dir = tempfile::tempdir().unwrap();
-    let app = Host::open(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(dir.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let profile = Host::profile(
         ProfileStore::create_profile(dir.path(), "http-router", "synthetic anonymous fixture")
             .unwrap(),

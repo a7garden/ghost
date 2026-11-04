@@ -9,11 +9,80 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tauri::Manager;
+use tauri::{Manager, WindowEvent};
+use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, ShortcutState};
 
 struct DesktopHost {
     supervisor: Arc<ProcessSupervisor>,
     exiting: AtomicBool,
+    /// Whether the overlay currently holds window focus. Drives the
+    /// focus-loss-to-hide behavior: a `Focused(false)` only hides the overlay
+    /// when it had previously gained focus, so the show→focus sequence can't
+    /// trip a spurious self-dismiss.
+    overlay_focused: AtomicBool,
+}
+
+/// Overlay geometry: a small composer over the current work, bottom-center of
+/// the monitor the main window sits on.
+const OVERLAY_SIZE: (f64, f64) = (560.0, 420.0);
+const OVERLAY_BOTTOM_GAP: f64 = 24.0;
+/// Parked off-screen while hidden so the webview stays warm and the shortcut
+/// surfaces it in a single frame.
+const OVERLAY_PARK: (f64, f64) = (-32000.0, -32000.0);
+
+fn overlay_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
+    app.get_webview_window("overlay")
+}
+
+fn position_overlay(overlay: &tauri::WebviewWindow) {
+    let main = overlay.app_handle().get_webview_window("main");
+    let monitor = main
+        .as_ref()
+        .and_then(|window| window.current_monitor().ok().flatten())
+        .or_else(|| overlay.current_monitor().ok().flatten())
+        // Display-transition edge: without any current monitor the overlay
+        // would otherwise surface at its off-screen park position, invisible
+        // yet consuming the toggle.
+        .or_else(|| overlay.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        // Practically unreachable with the primary fallback; leave placement
+        // untouched rather than guessing.
+        return;
+    };
+    let (width, height) = OVERLAY_SIZE;
+    let scale = monitor.scale_factor();
+    let origin = monitor.position();
+    let size = monitor.size();
+    // Physical pixels throughout: converting through the parked window's
+    // monitor scale would misplace the overlay on mixed-DPI setups.
+    let width_px = (width * scale).round() as i32;
+    let height_px = (height * scale).round() as i32;
+    let gap_px = (OVERLAY_BOTTOM_GAP * scale).round() as i32;
+    let x = origin.x + (size.width as i32 - width_px) / 2;
+    let y = origin.y + size.height as i32 - height_px - gap_px;
+    let _ = overlay.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
+/// Surface the parked overlay over the current work; a visible overlay toggles
+/// away instead. Mirrors the oximemo capture overlay's warm-window toggle.
+fn toggle_overlay(app: &tauri::AppHandle) {
+    let Some(overlay) = overlay_window(app) else {
+        return;
+    };
+    // The renderer's Esc handler and the focus-loss auto-hide also hide the
+    // window: an unreadable state must not re-surface a just-dismissed
+    // overlay, so only act on a definite answer.
+    match overlay.is_visible() {
+        Ok(true) => {
+            let _ = overlay.hide();
+        }
+        Ok(false) => {
+            position_overlay(&overlay);
+            let _ = overlay.show();
+            let _ = overlay.set_focus();
+        }
+        Err(_) => {}
+    }
 }
 
 fn port() -> Result<u16, String> {
@@ -109,16 +178,8 @@ fn ready(supervisor: &ProcessSupervisor, port: u16) -> Result<(String, u32), Str
     }
 }
 
-const TITLEBAR: &str = r#"
-document.addEventListener('DOMContentLoaded', () => {
-  const style = document.createElement('style');
-  style.textContent = 'body{box-sizing:border-box;padding-top:43px!important;height:100dvh!important}.app-shell{min-height:calc(100dvh - 43px)!important}.dot-detail{height:calc(100dvh - 105px)!important}.sidebar{height:calc(100dvh - 43px)!important;top:43px!important}.main-shell.chat-shell{height:calc(100dvh - 43px)!important}.chat-shell .dot-detail{height:100%!important}.ghost-native-titlebar{position:fixed;inset:0 0 auto;height:43px;background:color-mix(in srgb,var(--color-surface-elevated-2,#ededed) 92%,var(--color-text,#222) 8%);z-index:10000;border-bottom:1px solid var(--color-border,#ddd)}';
-  document.head.appendChild(style);
-  const bar = document.createElement('div'); bar.className='ghost-native-titlebar';
-  bar.setAttribute('data-tauri-drag-region',''); bar.setAttribute('aria-hidden','true');
-  document.body.prepend(bar);
-});
-"#;
+// 창 상단 46px 타이틀바는 콘솔 UI가 렌더링한다(ghost-ui GTitleBar, Tauri 셸에서만).
+// 트래픽 라이트 overlay·드래그는 네이티브 창 플래그가 담당한다.
 
 fn fail(window: &tauri::WebviewWindow, error: &str) {
     let message = serde_json::to_string(error).unwrap_or_else(|_| "\"실행 실패\"".into());
@@ -155,6 +216,7 @@ fn main() {
         return;
     }
     tauri::Builder::default()
+        .plugin(ShortcutBuilder::new().build())
         .setup(|app| {
             let port = port()?;
             let origin = format!("http://127.0.0.1:{port}");
@@ -172,7 +234,6 @@ fn main() {
             .title_bar_style(tauri::TitleBarStyle::Overlay)
             .hidden_title(true)
             .traffic_light_position(tauri::LogicalPosition::new(14.0, 20.0))
-            .initialization_script(TITLEBAR)
             .on_permission_request(move |webview, kind| {
                 use tauri::webview::{PermissionKind, PermissionResponse};
                 if kind == PermissionKind::Microphone
@@ -195,10 +256,72 @@ fn main() {
                     || url.origin().ascii_serialization() == allowed_origin
             })
             .build()?;
+            // The chat overlay: a warm, parked second webview the ⌘⇧G global
+            // shortcut surfaces over the current work. Same navigation
+            // allowlist as the main window; it loads the console's compact
+            // overlay page once the bridge is ready.
+            let overlay_origin = origin.clone();
+            let overlay = tauri::WebviewWindowBuilder::new(
+                app,
+                "overlay",
+                // Warm placeholder only: about:blank is already allowlisted
+                // and costs nothing to boot; the compact overlay page
+                // replaces it once the bridge is ready.
+                tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+            )
+            .title("Ghost")
+            .inner_size(OVERLAY_SIZE.0, OVERLAY_SIZE.1)
+            .position(OVERLAY_PARK.0, OVERLAY_PARK.1)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .visible(false)
+            .on_navigation(move |url| {
+                // Native startup assets and this exact console origin only.
+                url.as_str() == "about:srcdoc"
+                    || url.as_str() == "about:blank"
+                    || url.scheme() == "tauri"
+                    || url.as_str().starts_with("http://tauri.localhost/")
+                    || url.origin().ascii_serialization() == overlay_origin
+            })
+            .build()?;
+            let _ = overlay.hide();
+            // A taken or rejected ⌘⇧G must not take the whole console down:
+            // register here and keep the app usable without the shortcut.
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            if let Err(error) =
+                app.global_shortcut()
+                    .on_shortcut("cmd+shift+G", |app, _shortcut, event| {
+                        if event.state == ShortcutState::Pressed {
+                            toggle_overlay(app);
+                        }
+                    })
+            {
+                eprintln!("⌘⇧G 오버레이 단축키를 등록하지 못했습니다: {error}");
+            }
+            // Click-outside and app-switch dismissal: hide only after the
+            // overlay actually held focus, so show→focus can't self-dismiss.
+            let tracked = overlay.clone();
+            overlay.on_window_event(move |event| {
+                if let WindowEvent::Focused(focused) = event {
+                    // The handler is attached before `manage`; a missing state
+                    // just means no dismiss decision is possible yet.
+                    let Some(state) = tracked.app_handle().try_state::<DesktopHost>() else {
+                        return;
+                    };
+                    if *focused {
+                        state.overlay_focused.store(true, Ordering::Release);
+                    } else if state.overlay_focused.swap(false, Ordering::AcqRel) {
+                        let _ = tracked.hide();
+                    }
+                }
+            });
             let supervisor = supervisor(&app.path().resource_dir()?.join("resources"))?;
             app.manage(DesktopHost {
                 supervisor: supervisor.clone(),
                 exiting: AtomicBool::new(false),
+                overlay_focused: AtomicBool::new(false),
             });
             // Process startup, health, and recovery stay off the native event loop.
             std::thread::spawn(move || {
@@ -210,6 +333,8 @@ fn main() {
                 let _ = window.navigate(origin.parse().unwrap());
                 let _ = window.show();
                 let _ = window.set_focus();
+                let overlay_url: tauri::Url = format!("{origin}/overlay.html").parse().unwrap();
+                let _ = overlay.navigate(overlay_url.clone());
                 let Ok(client) = reqwest::blocking::Client::builder()
                     .timeout(Duration::from_millis(300))
                     .redirect(reqwest::redirect::Policy::none())
@@ -227,9 +352,14 @@ fn main() {
                     }
                     if let Some(pid) = state.pid {
                         if pid != previous_pid && health(&client, &origin, pid) {
-                            // A restarted bridge has a new CSRF value; reload its bootstrap.
-                            let _ = window.navigate(origin.parse().unwrap());
-                            previous_pid = pid;
+                            // A restarted bridge has a new CSRF value; reload
+                            // both windows' bootstrap. A failed reload keeps
+                            // previous_pid so the next health tick retries.
+                            let reloaded = window.navigate(origin.parse().unwrap()).is_ok()
+                                && overlay.navigate(overlay_url.clone()).is_ok();
+                            if reloaded {
+                                previous_pid = pid;
+                            }
                         }
                     }
                 }

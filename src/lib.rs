@@ -16,6 +16,17 @@ pub mod domain;
 pub mod durable;
 #[cfg(feature = "host")]
 pub mod host;
+#[cfg(feature = "lifetime")]
+pub mod lifetime_contract;
+#[cfg(feature = "lifetime")]
+pub mod operations;
+#[cfg(feature = "lifetime")]
+pub mod worker;
+#[cfg(all(feature = "lifetime", unix))]
+pub mod worker_server;
+#[cfg(all(feature = "host", feature = "lifetime"))]
+#[path = "adapters/computers/mod.rs"]
+pub mod computers;
 pub mod judge;
 #[cfg(any(feature = "host", feature = "ui-fixtures"))]
 mod local_http;

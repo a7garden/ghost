@@ -187,7 +187,11 @@ fn execution_authority(
                 // These adapters can cross an asynchronous remote boundary.
                 // Bound Work must fail closed until that boundary has a lease
                 // serialized with revision admission; ordinary tasks are unchanged.
-                "shell" | "integration_call" | "memory_retain" | "planner_mutation" => {
+                "shell"
+                | "integration_call"
+                | "memory_retain"
+                | "memory_session_record"
+                | "planner_mutation" => {
                     anyhow::bail!("Work external mutation requires a fenced executor")
                 }
                 "browser" => {
@@ -200,7 +204,17 @@ fn execution_authority(
                     );
                     ensure!(policy.browser, "browser permission revoked");
                 }
-                "memory_search" => ensure!(
+                "web_search" | "web_read" => {
+                    ensure!(policy.web, "public web permission revoked");
+                }
+                "worker_analyze" => {
+                    ensure!(policy.external_worker, "external worker permission revoked");
+                }
+                "code_worker" => {
+                    ensure!(policy.code_worker, "Codex code worker permission revoked");
+                    anyhow::bail!("Work external mutation requires a fenced executor")
+                }
+                "memory_search" | "memory_recall" | "memory_session_list" => ensure!(
                     policy.memory && !assigned,
                     "memory access denied for assignment"
                 ),
@@ -770,7 +784,9 @@ fn verify_receipts(s: &State, w: &Work, b: &Binding, snap: &Snapshot, receipts: 
             | "integration_tools"
             | "list_spaces"
             | "list_ghosts"
-            | "memory_search" => Ok(json!({"kind":"actual_read_receipt"})),
+            | "memory_search"
+            | "memory_recall"
+            | "memory_session_list" => Ok(json!({"kind":"actual_read_receipt"})),
             _ => Err(anyhow!(
                 "external mutation lacks independent verification observation"
             )),
@@ -954,7 +970,14 @@ fn report(s: &State, w: &Work, b: &Binding) -> Result<()> {
     let policies = receipts.iter().all(|r| match r.tool.as_str() {
         "shell" => policy.shell,
         "browser" => policy.browser,
-        "memory_retain" | "memory_search" => policy.memory,
+        "web_search" | "web_read" => policy.web,
+        "worker_analyze" => policy.external_worker,
+        "code_worker" => policy.code_worker,
+        "memory_retain"
+        | "memory_session_record"
+        | "memory_search"
+        | "memory_recall"
+        | "memory_session_list" => policy.memory,
         "durable_delegate" | "delegate_ghost" => policy.delegation,
         _ => true,
     });
@@ -1114,12 +1137,16 @@ pub fn pump(host: &Arc<Host>) -> Result<()> {
                         s.journal.get("policy", &b.profile_id)?.unwrap_or_default();
                     let model = policy
                         .model
+                        .clone()
                         .unwrap_or(super::models::selected_llm(&s, &host.default_model)?);
                     let mut config = host::config(&store, Some(&model), true)?;
-                    config.tools.extend(super::services::role_tool_definitions(
-                        host,
-                        super::services::ToolRole::DurableWork,
-                    ));
+                    config
+                        .tools
+                        .extend(super::services::scoped_tool_definitions(
+                            host,
+                            super::services::ToolRole::DurableWork,
+                            &policy,
+                        ));
                     p.runtime
                         .session
                         .create_conversation_with_id(&b.conversation_id, config)?;

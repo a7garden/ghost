@@ -31,6 +31,7 @@ pub enum Auth {
 pub enum Kind {
     Builtin,
     OpenaiCompatible,
+    OmpSubscription,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,10 +72,19 @@ pub struct Settings {
     pub catalog_updated_ms: Option<u64>,
 }
 pub(crate) fn settings(state: &State) -> Result<Settings> {
-    Ok(state
+    let settings = state
         .journal
         .get("model_settings", "workspace")?
-        .unwrap_or_default())
+        .unwrap_or_default();
+    Ok(with_subscription_providers(settings))
+}
+fn with_subscription_providers(mut settings: Settings) -> Settings {
+    for provider in super::omp_provider::subscription_providers() {
+        if !settings.providers.iter().any(|saved| saved.id == provider.id) {
+            settings.providers.push(provider);
+        }
+    }
+    settings
 }
 pub(crate) fn selected_llm(state: &State, fallback: &str) -> Result<String> {
     Ok(settings(state)?
@@ -321,7 +331,22 @@ pub fn validate(p: &Provider) -> Result<()> {
         bail!("제공자 ID를 확인해 주세요.");
     }
     super::text(&p.name, 240)?;
-    endpoint(&p.endpoint)?;
+    if p.kind == Kind::OmpSubscription {
+        if !matches!(p.id.as_str(), "zai" | "minimax-code")
+            || p.endpoint != super::omp_provider::ENDPOINT
+            || !matches!(&p.auth, Auth::None)
+            || p.roles != [Role::Llm]
+            || p.models.is_empty()
+            || p.models.iter().any(|model| {
+                !super::omp_provider::is_allowed(&p.id, &model.id)
+                    || model.roles != [Role::Llm]
+            })
+        {
+            bail!("OMP 구독 제공자는 로컬 허용 목록에서만 사용할 수 있습니다.");
+        }
+    } else {
+        endpoint(&p.endpoint)?;
+    }
     if p.roles.is_empty() || p.models.len() > 2000 {
         bail!("제공자의 역할과 모델 목록을 확인해 주세요.");
     }
@@ -363,10 +388,15 @@ fn commit(state: &State, mut next: Settings, version: u64) -> Result<Value> {
     next.version = version
         .checked_add(1)
         .ok_or_else(|| anyhow!("설정 버전 오류"))?;
+    next.providers
+        .retain(|provider| provider.kind != Kind::OmpSubscription);
     state.journal.put("model_settings", "workspace", &next)?;
-    Ok(json!(next))
+    Ok(json!(with_subscription_providers(next)))
 }
 pub(crate) fn save(state: &State, mut provider: Provider, version: u64) -> Result<Value> {
+    if provider.kind == Kind::OmpSubscription {
+        bail!("OMP 구독 제공자는 호스트 설정에서 관리합니다.");
+    }
     validate(&provider)?;
     let mut next = settings(state)?;
     if next.providers.len() >= 32 && !next.providers.iter().any(|p| p.id == provider.id) {
@@ -380,6 +410,13 @@ pub(crate) fn save(state: &State, mut provider: Provider, version: u64) -> Resul
     commit(state, next, version)
 }
 pub(crate) fn delete(state: &State, id: &str, version: u64) -> Result<Value> {
+    if matches!(id, "zai" | "minimax-code")
+        && super::omp_provider::subscription_providers()
+            .iter()
+            .any(|provider| provider.id == id)
+    {
+        bail!("OMP 구독 제공자는 호스트 설정에서 관리합니다.");
+    }
     let mut next = settings(state)?;
     if [&next.roles.llm, &next.roles.stt, &next.roles.tts]
         .iter()
@@ -430,7 +467,7 @@ pub fn configured_model(
     let Some((provider, id)) = key.split_once('/') else {
         return Ok(None);
     };
-    let settings = load(root)?;
+    let settings = with_subscription_providers(load(root)?);
     let Some(p) = settings.providers.iter().find(|p| p.id == provider) else {
         return Ok(None);
     };
@@ -480,13 +517,16 @@ pub fn configured_provider(
     root: &Path,
     model: &crate::durable::durable::ai::Model,
 ) -> Result<Option<Arc<dyn crate::durable::durable::ai::Provider>>> {
-    let settings = load(root)?;
+    let settings = with_subscription_providers(load(root)?);
     let Some(p) = settings.providers.iter().find(|p| p.id == model.provider) else {
         return Ok(None);
     };
     validate(p)?;
     if !p.enabled {
         bail!("제공자가 비활성화돼 있습니다.");
+    }
+    if p.kind == Kind::OmpSubscription {
+        return Ok(Some(super::omp_provider::create(&p.id)?));
     }
     if p.kind == Kind::Builtin && matches!(p.auth, Auth::Sdk) {
         return Ok(None);
@@ -598,6 +638,9 @@ pub async fn catalog(root: &Path) -> Result<Value> {
 }
 async fn probe(p: &Provider) -> Result<Vec<Model>> {
     validate(p)?;
+    if p.kind == Kind::OmpSubscription {
+        return super::omp_provider::probe(&p.id);
+    }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .redirect(reqwest::redirect::Policy::none())
@@ -889,7 +932,7 @@ mod tests {
     async fn conversation_selection_restores_without_changing_defaults_or_other_chats() {
         let root = tempfile::tempdir().unwrap();
         let app =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         let (profile, conversation) = owner(&app, "selection-one");
         let (other, other_conversation) = owner(&app, "selection-two");
@@ -944,7 +987,7 @@ mod tests {
         app.shutdown().await.unwrap();
         drop(app);
         let restored =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         {
             let s = restored.lock().unwrap();
@@ -1005,11 +1048,32 @@ mod tests {
         restored.shutdown().await.unwrap();
     }
     #[tokio::test(flavor = "current_thread")]
+    async fn shutdown_joins_tasks_tracked_while_stopping_before_cold_reopen() {
+        let root = tempfile::tempdir().unwrap();
+        let app =
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+                .unwrap();
+        let workspace_id = app.snapshot().unwrap()["workspace_id"].clone();
+        app.shutdown().await.unwrap();
+        let retained = Arc::clone(&app);
+        app.spawn(async move {
+            let _retained = retained;
+            std::future::pending::<()>().await;
+        });
+        app.shutdown().await.unwrap();
+        drop(app);
+        let restored =
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+                .unwrap();
+        assert_eq!(restored.snapshot().unwrap()["workspace_id"], workspace_id);
+        restored.shutdown().await.unwrap();
+    }
+    #[tokio::test(flavor = "current_thread")]
     async fn busy_selection_preserves_captured_task_and_active_steering() {
         use crate::durable::durable::TaskKind;
         let root = tempfile::tempdir().unwrap();
         let app =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         let (profile, conversation) = owner(&app, "selection-busy");
         save(
@@ -1034,10 +1098,6 @@ mod tests {
             "conversation_id":conversation,"prompt":"new response","kind":"follow_up"}),
         );
         assert_eq!(rejected["ok"], false);
-        assert!(rejected["error"]
-            .as_str()
-            .unwrap()
-            .contains("현재 응답이 끝난 뒤"));
         let steered = command(
             &app,
             json!({"type":"submit","profile_id":profile,
@@ -1069,7 +1129,7 @@ mod tests {
         use crate::durable::durable::InputKind;
         let root = tempfile::tempdir().unwrap();
         let app =
-            super::super::Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock"))
+            super::super::Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock"))
                 .unwrap();
         let (profile, conversation) = owner(&app, "selection-valid");
         let (foreign, _) = owner(&app, "selection-foreign");

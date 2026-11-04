@@ -92,7 +92,7 @@ fn runtime_host(
     root: &std::path::Path,
     boundary: Boundary,
 ) -> (Arc<Host>, String, Arc<tokio::sync::Notify>) {
-    let app = Host::open(root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root, tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let mut p = Host::profile(
         ProfileStore::create_profile(root, "writer", "synthetic planner test").unwrap(),
     )
@@ -132,7 +132,7 @@ fn start(app: &Arc<Host>, profile: &str) -> String {
         let p = &s.profiles[profile];
         let store = p.host.store.lock().unwrap();
         let mut config = host::config(&store, Some("mock"), true).unwrap();
-        config.tools.extend(services::tool_definitions(app));
+        config.tools.extend(services::role_tool_definitions(app, services::ToolRole::Ordinary));
         (p.runtime.session.clone(), p.runtime.clone(), config)
     };
     let convo = session.create_conversation(config).unwrap();
@@ -145,7 +145,7 @@ fn start(app: &Arc<Host>, profile: &str) -> String {
         )
         .unwrap()
         .task_id;
-    app.start_worker(profile.into(), runtime, 2);
+    app.start_legacy_fixture_worker(profile.into(), runtime, 2);
     parent
 }
 async fn wait_complete(app: &Arc<Host>, profile: &str, parent: &str) {
@@ -226,7 +226,7 @@ async fn crash_case(boundary: Boundary, dispatch_before_reconcile: bool) {
     .await
     .unwrap();
     drop(probe);
-    let app = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+    let app = Host::open_legacy_fixture(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
     let recovered = effect(&app, &profile);
     assert_eq!(recovered.key, original_effect.key);
     let remote = Synthetic::new("fixture:todos");
@@ -393,7 +393,7 @@ async fn caldav_h03_delegation_intersection_and_revocation_before_dispatch() {
         let p = &s.profiles[&recipient];
         let store = p.host.store.lock().unwrap();
         let mut config = host::config(&store, Some("mock"), true).unwrap();
-        config.tools.extend(services::tool_definitions(&app));
+        config.tools.extend(services::role_tool_definitions(&app, services::ToolRole::Ordinary));
         (p.runtime.session.clone(), p.runtime.clone(), config)
     };
     let convo = session.create_conversation(config).unwrap();
@@ -437,6 +437,10 @@ async fn caldav_h03_delegation_intersection_and_revocation_before_dispatch() {
         id: "todos".into(),
         binding: "fixture:todos".into(),
         kind: Kind::Todo,
+        wire_format: WireFormat::ICalendar,
+        phase: SyncPhase::ExplicitActive,
+        account_ref: None,
+        collection_ref: None,
         profiles: vec![recipient.clone(), sender_id.clone()],
         enabled: true,
     };
@@ -451,7 +455,7 @@ async fn caldav_h03_delegation_intersection_and_revocation_before_dispatch() {
         true
     );
     assert!(bridge.prepare(&task, &call).is_ok());
-    app.start_worker(recipient.clone(), runtime, 2);
+    app.start_legacy_fixture_worker(recipient.clone(), runtime, 2);
     wait_complete(&app, &recipient, &child.task_id).await;
     let queued = operations(&app.lock().unwrap().journal.0, "todos")
         .unwrap()

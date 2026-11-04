@@ -1,0 +1,50 @@
+{
+  "fixture_only": true,
+  "contract_revision": "ghost-release-package-v1",
+  "component_contents": {
+    "host": "owned release fixture host\n",
+    "pi": "owned release fixture pi\n",
+    "bridge": "owned release fixture bridge\n",
+    "image": "owned release fixture image\n",
+    "ui": "owned release fixture ui\n",
+    "gateway": "owned release fixture gateway\n",
+    "extensions": "owned release fixture extensions\n",
+    "config": "owned release fixture config\n",
+    "schema": "owned release fixture schema\n"
+  },
+  "component_file_sha256": {
+    "host": "a3f108a5a3f0b57bcc0f9ecbf1154ee66c6f323b23e1351fc4bf2928b47aa652",
+    "pi": "79af0d3204e2195d41771aedcd7d8f4894c8309f827da36fffb121d9c5205d43",
+    "bridge": "25dbdccabdaf4a6af5fa50e78029e6fcf6c2c631101d9c595ba40b5f5c0a2c2b",
+    "image": "a9edf1fd7abbe97944bc19e765e59b639de9fdabed1ccc4ad43b0e41d326d2a0",
+    "ui": "fb47095daf0d840a7367c68d94c6670f899ee2c1c2318ce1e22956d034790ef6",
+    "gateway": "749db1349dd0f0a2383a58e31d667030abacaa70176099ecc84f7e4b5cb5f17d",
+    "extensions": "31184ffff40c43f8ac989fd52348f3ff3e22f842fa38cea04d98512b392d2a9b",
+    "config": "fdb3dc4482c8982a7a73284274ebd009d96ea2a9ffc6992ebf6cd44645eca442",
+    "schema": "c2403f1a78aefc01ca09029e2be09c4ce4141c530e55fd45fed8f83250b9b32c"
+  },
+  "release_provenance": {
+    "source_revision": "fixture-selected-source-not-operating-release",
+    "dirty_snapshot_digest": "1a587d692a6f85e892b9357266f313d7e1bcea9430ce7ddbaf34c61d0b40e3b5",
+    "schema_min": 12,
+    "schema_max": 12,
+    "protocol_revision": "ghost-lifetime-v1",
+    "pinned_runtime_versions": {
+      "omp": "18.8.6",
+      "bun": "1.4.2",
+      "container": "1.4.1"
+    },
+    "image_references": [
+      "docker.io/library/ubuntu@sha256:08571ca13e00ca07a2a84eab83a959b4242e22cceb16486a11bef1428c9e93a7"
+    ],
+    "config_digest": "fdb3dc4482c8982a7a73284274ebd009d96ea2a9ffc6992ebf6cd44645eca442"
+  },
+  "home_browser_manifest": {
+    "computers": []
+  },
+  "expected": {
+    "operating_install": false,
+    "credentials_copied": false,
+    "verify_requires_external_manifest_pin": true
+  }
+}

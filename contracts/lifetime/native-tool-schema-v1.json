@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "sdk_version": "18.8.6",
+  "wire_parameters": "The pinned SDK toolWireSchema(tool) converts executable omptype parameters to JSON Schema. Raw executable parameters must never be JSON-stringified as a descriptor.",
+  "tool_scope": "The native-workspace-v1 exact ten local OMP builtins plus publish_artifact remains unchanged. A current, explicitly bound native browser service may additionally admit exactly the browser tool; an unbound execution remains at eleven tools.",
+  "custom_format": {
+    "allowed_tool": "edit",
+    "allowed_fields": ["syntax", "definition"],
+    "syntax": "lark",
+    "definition": "Nonempty Lark grammar from the pinned SDK local edit descriptor; bounded by the existing complete model payload size limit.",
+    "custom_wire_name": "Absent or exactly the admitted tool name; no aliases or capability expansion.",
+    "completion_arguments": "Pinned SDK canonical toolCall arguments remain an object, including {input: raw_patch} for custom edit calls."
+  },
+  "optional_browser": {
+    "allowed_tool": "browser",
+    "authority": "Only the execution's current owner, computer binding, epoch, accepted browser service and browser lease admit this extra tool. Provider-native computer/browser tools remain denied.",
+    "owner_wait": "Mutating actions retain the exact original SDK tool-call identity and sealed remaining budget while waiting for the Owner. Unknown effects are not replayed and do not imply successful SDK completion.",
+    "acceptance_boundary": "Schema admission is not evidence of accepted cold SDK continuation or automatic collaboration."
+  },
+  "denied": ["provider-native tools", "unbound computer/browser tools", "custom formats on other tool names", "unknown format fields", "tool aliases", "undeclared tool calls"],
+  "observed_failure": "native-exact-payload133.json: all eleven normalized parameters are objects; local edit has customFormat {syntax:lark, definition:...}, rejected by both original Rust and native bridge guards.",
+  "r1_revision": "unchanged"
+}

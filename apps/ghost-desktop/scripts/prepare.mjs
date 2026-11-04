@@ -9,7 +9,7 @@ const runtime = process.env.GHOST_NODE_BINARY || process.execPath;
 const host = process.env.GHOST_PACKAGE_BINARY || join(ghost, 'target/debug/ghost');
 // This directory contains generated payload only; replace it to avoid stale assets.
 await rm(destination, { recursive: true, force: true });
-for (const dir of ['runtime','host','launcher','ui/scripts','ui/server','voice']) await mkdir(join(destination, dir), { recursive: true });
+for (const dir of ['runtime','host','launcher','ui/scripts','ui/server','ghost-omp','voice']) await mkdir(join(destination, dir), { recursive: true });
 await cp(runtime, join(destination, 'runtime/node'));
 await cp(host, join(destination, 'host/ghost'));
 for (const executable of ['runtime/node','host/ghost']) await chmod(join(destination, executable), 0o755);
@@ -18,7 +18,8 @@ await cp(join(app, 'scripts/local-voice.mjs'), join(destination, 'launcher/local
 for (const name of ['server.py','requirements.lock']) await cp(join(ghost, 'apps/ghost-voice-server', name), join(destination, 'voice', name));
 await cp(join(ghost, 'apps/ghost-ui/dist'), join(destination, 'ui/dist'), { recursive: true, force: true });
 for (const name of ['console.mjs','serve.mjs']) await cp(join(ghost, 'apps/ghost-ui/scripts', name), join(destination, 'ui/scripts', name));
-await cp(join(ghost, 'apps/ghost-ui/server/bridge.mjs'), join(destination, 'ui/server/bridge.mjs'));
+for (const name of ['bridge.mjs', 'packages.mjs', 'package-format.mjs']) await cp(join(ghost, 'apps/ghost-ui/server', name), join(destination, 'ui/server', name));
+for (const name of ['images.mjs','codex-client.mjs','completion-codec.mjs']) await cp(join(ghost, 'apps/ghost-omp', name), join(destination, 'ghost-omp', name));
 await writeFile(join(destination,'ui/package.json'), '{"type":"module"}\n');
 const sha = async path => createHash('sha256').update(await readFile(path)).digest('hex');
 await writeFile(join(destination,'payload.json'), JSON.stringify({

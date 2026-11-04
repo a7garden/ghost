@@ -1,5 +1,12 @@
 [
   {
+    "date": "2026-11-04",
+    "macrostructure": "workbench with a stage board",
+    "theme": "Docket",
+    "enrichment": "none",
+    "brief": "Ghost conversation, work board and management share Docket's neutral console style"
+  },
+  {
     "date": "2026-10-03",
     "macrostructure": "conversation workspace with linked collaboration graph",
     "theme": "existing Codex system",

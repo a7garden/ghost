@@ -1,116 +1,128 @@
 import SwiftUI
-import WebKit
 import GhostMobileCore
 
+// Native call UI. The CallKit controller owns the audio session and the
+// lock-screen call interface, so leaving this screen never ends the call.
+// The controller lives on the model: the call continues after this screen is
+// dismissed and ends through CallKit or the in-call controls.
 struct VoiceScreen: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var phase
-    @State private var controller: VoiceController
-    init(model: GhostModel, profileID: String, conversationID: String) {
-        self.controller = VoiceController(model: model, profileID: profileID, conversationID: conversationID)
-    }
+    let model: GhostModel
+
     var body: some View {
         NavigationStack {
-            VoiceWebView(controller: controller)
-                .navigationTitle("Ghost와 통화").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("닫기") { controller.close(); dismiss() } } }
-                .safeAreaInset(edge: .bottom) { Text("앱을 벗어나면 통화를 마칩니다. 맡긴 작업은 계속됩니다.").font(.footnote).foregroundStyle(.secondary).padding(12) }
-        }
-        .onChange(of: phase) { if phase == .background { controller.close(); dismiss() } }
-        .onDisappear { controller.close() }
-    }
-}
-
-private struct VoiceWebView: UIViewRepresentable {
-    let controller: VoiceController
-    func makeUIView(context: Context) -> WKWebView { controller.webView }
-    func updateUIView(_ uiView: WKWebView, context: Context) { }
-}
-
-// WKWebView is used specifically for its audio/WebRTC permission delegate and
-// an isolated request/reply bridge on iOS 17+. Credentials stay in URLSession.
-@MainActor final class VoiceController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
-    let webView: WKWebView
-    private let model: GhostModel
-    private let api: GhostAPI?
-    private let origin: URL?
-    private let profileID: String
-    private let conversationID: String
-    private let session: VoiceCallSession?
-    private var closed = false
-
-    init(model: GhostModel, profileID: String, conversationID: String) {
-        self.model = model; self.api = model.api; self.origin = model.connection?.origin
-        if let api = model.api {
-            session = VoiceCallSession(profileID: profileID, conversationID: conversationID, action: { try await api.action($0) })
-        } else { session = nil }
-        self.profileID = profileID; self.conversationID = conversationID
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .nonPersistent()
-        config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = []
-        self.webView = WKWebView(frame: .zero, configuration: config)
-        super.init()
-        config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "ghostVoice")
-        webView.navigationDelegate = self; webView.uiDelegate = self
-        if let url = origin?.appending(path: "mobile/voice") { webView.load(URLRequest(url: url)) }
-    }
-    private func matches(_ securityOrigin: WKSecurityOrigin) -> Bool {
-        securityOrigin.protocol == "https" && securityOrigin.host == origin?.host() && (securityOrigin.port == 0 ? 443 : securityOrigin.port) == (origin?.port ?? 443)
-    }
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-        navigationAction.request.url == origin?.appending(path: "mobile/voice") ? .allow : .cancel
-    }
-    func webView(_ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin, initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
-        !closed && frame.isMainFrame && matches(origin) && type == .microphone ? .prompt : .deny
-    }
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { model.error = "음성 화면 연결이 끊겼습니다."; close() }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { model.error = "통화 화면을 열지 못했습니다. 서버 연결을 확인해 주세요." }
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
-        guard !closed, message.frameInfo.isMainFrame, matches(message.frameInfo.securityOrigin),
-              message.frameInfo.request.url == origin?.appending(path: "mobile/voice"),
-              let fields = message.body as? [String: Any], JSONSerialization.isValidJSONObject(fields),
-              let data = try? JSONSerialization.data(withJSONObject: fields), data.count <= 131072,
-              let value = try? JSONDecoder().decode(JSON.self, from: data) else { return (nil, "허용되지 않은 음성 요청입니다.") }
-        do {
-            let result = try await handle(value)
-            let encoded = try JSONEncoder().encode(result)
-            return (try JSONSerialization.jsonObject(with: encoded, options: .fragmentsAllowed), nil)
-        } catch { return (nil, error.localizedDescription) }
-    }
-    private func handle(_ value: JSON) async throws -> JSON {
-        guard let api, let session else { throw MobileError.response("서버 연결이 없습니다.") }
-        switch value["operation"].text {
-        case "start":
-            return try await session.start(sdp: value["sdp"])
-        case "end":
-            try await session.end()
-            await model.refresh()
-            return .object(["ended": .bool(true)])
-        case "snapshot":
-            let snapshot = try await api.get("mobile/v1/snapshot")
-            return snapshot["profiles"].items.first { $0["id"].text == profileID }?["conversations"].items.first { $0["id"].text == conversationID } ?? .null
-        case "event", "work":
-            if value["operation"].text == "event" {
-                return try await session.event(id: value["event_id"], role: value["role"], transcript: value["transcript"])
+            Group {
+                if let controller = model.activeCall {
+                    CallContent(model: model, controller: controller, leave: dismiss)
+                } else {
+                    ContentUnavailableView("진행 중인 통화가 없습니다", systemImage: "phone.badge.xmark",
+                        description: Text("이 화면은 닫혀도 통화가 계속됩니다."))
             }
-            return try await session.work(id: value["function_id"], prompt: value["prompt"])
-        default: throw MobileError.response("지원하지 않는 음성 요청입니다.")
+            }
+            .navigationTitle("Ghost와 통화").navigationBarTitleDisplayMode(.inline)
+        }
+        .interactiveDismissDisabled(model.activeCall.map { $0.phase == .connecting || $0.phase == .ending } ?? false)
+    }
+}
+
+private struct CallContent: View {
+    let model: GhostModel
+    let controller: VoiceCallController
+    let leave: DismissAction
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            GhostMark(size: 96)
+            Text("Ghost").font(.largeTitle.weight(.semibold))
+            Text(statusText).font(.headline).multilineTextAlignment(.center)
+            if controller.phase == .active || controller.phase == .reconnecting {
+                Text(timeString(controller.elapsed)).font(.title2.monospacedDigit()).foregroundStyle(GhostStyle.secondary)
+                if !controller.turnState.isEmpty {
+                    Text(turnLabel).font(.callout).foregroundStyle(GhostStyle.secondary)
+                }
+            }
+            if let error = controller.errorText {
+                Text(error).font(.callout).foregroundStyle(GhostStyle.warning).multilineTextAlignment(.center).padding(.horizontal, 24)
+            }
+            Spacer()
+            controls.padding(.bottom, 48)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(GhostStyle.surface)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("닫기") { leave() }
+                    .disabled(controller.phase == .connecting || controller.phase == .ending)
+            }
+        }
+        .onChange(of: controller.phase) {
+            if controller.phase == .ended {
+                controller.stop()
+                model.activeCallDidEnd()
+            }
         }
     }
-    private func hangup() async {
-        do { try await session?.close() }
-        catch { model.error = "마이크는 닫혔지만 서버의 통화 종료는 확인하지 못했습니다. 진행 중 화면에서 확인해 주세요." }
-        await model.refresh()
+
+    private var statusText: String {
+        switch controller.phase {
+        case .idle: "통화를 시작합니다."
+        case .connecting: "통화 연결 중"
+        case .active: controller.muted ? "마이크가 꺼진 통화 중" : "Ghost와 통화 중"
+        case .reconnecting: "음성 연결 복구 중"
+        case .ending: "통화 종료 확인 중"
+        case .unconfirmed: "서버 종료 확인 필요"
+        case .ended: "통화 종료"
+        }
     }
-    func close() {
-        guard !closed else { return }
-        closed = true
-        webView.evaluateJavaScript("window.ghostStop?.()", completionHandler: nil)
-        webView.setMicrophoneCaptureState(.none, completionHandler: nil)
-        webView.setAllMediaPlaybackSuspended(true, completionHandler: nil)
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "ghostVoice", contentWorld: .page)
-        webView.stopLoading()
-        Task { await hangup() }
+
+    private var turnLabel: String {
+        switch controller.turnState {
+        case "queued": "Ghost가 요청을 준비하는 중"
+        case "running": "Ghost가 답변하는 중"
+        case "answered": "답변 완료"
+        case "cancelled": "취소된 요청"
+        default: "발화 상태: \(controller.turnState)"
+        }
+    }
+
+    @ViewBuilder private var controls: some View {
+        switch controller.phase {
+        case .connecting:
+            Button("연결 취소", role: .destructive) { controller.cancelWhileConnecting() }
+                .controlSize(.large).buttonStyle(.bordered)
+        case .active, .reconnecting:
+            HStack(spacing: 40) {
+                Button { controller.setMuted(!controller.muted) } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: controller.muted ? "mic.slash.fill" : "mic.fill").font(.title2)
+                            .frame(width: 72, height: 72)
+                            .background(GhostStyle.under, in: Circle())
+                        Text(controller.muted ? "마이크 켜기" : "마이크 끄기").font(.caption)
+                    }
+                }
+                .accessibilityLabel(controller.muted ? "마이크 켜기" : "마이크 끄기")
+                Button(role: .destructive) { controller.end() } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: "phone.down.fill").font(.title2).foregroundStyle(GhostStyle.onDestructive)
+                            .frame(width: 72, height: 72).background(GhostStyle.destructive, in: Circle())
+                        Text("통화 종료").font(.caption)
+                    }
+                }
+            }.buttonStyle(.plain).controlSize(.large)
+        case .unconfirmed:
+            VStack(spacing: 12) {
+                Button("서버 종료 다시 확인") { controller.retryServerHangup() }
+                    .controlSize(.large).buttonStyle(.borderedProminent)
+                Text("마이크는 닫혔습니다. 같은 통화에 대해 서버 종료를 다시 확인합니다. 화면을 닫아도 종료 확인은 유지됩니다.").font(.footnote).foregroundStyle(GhostStyle.secondary)
+            }
+        default:
+            Button("닫기") { leave() }.buttonStyle(.plain).controlSize(.large).buttonStyle(.bordered)
+        }
+    }
+
+    private func timeString(_ interval: TimeInterval) -> String {
+        let seconds = Int(interval)
+        return "\(seconds / 60):" + String(format: "%02d", seconds % 60)
     }
 }

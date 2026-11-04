@@ -251,6 +251,42 @@ pub fn service_spec(
     platform: &str,
     headless: bool,
 ) -> Result<String> {
+    service_spec_with_oxibrowser(root, executable, port, model, platform, headless, None)
+}
+
+pub fn service_spec_with_oxibrowser(
+    root: &Path,
+    executable: &Path,
+    port: u16,
+    model: &str,
+    platform: &str,
+    headless: bool,
+    oxibrowser_executable: Option<&Path>,
+) -> Result<String> {
+    service_spec_with_tools(
+        root,
+        executable,
+        port,
+        model,
+        platform,
+        headless,
+        oxibrowser_executable,
+        None,
+        None,
+    )
+}
+
+pub fn service_spec_with_tools(
+    root: &Path,
+    executable: &Path,
+    port: u16,
+    model: &str,
+    platform: &str,
+    headless: bool,
+    oxibrowser_executable: Option<&Path>,
+    omp_executable: Option<&Path>,
+    omp_model: Option<&str>,
+) -> Result<String> {
     if !root.is_absolute()
         || !executable.is_absolute()
         || port == 0
@@ -265,20 +301,28 @@ pub fn service_spec(
     {
         bail!("service requires absolute paths, a fixed port, and printable model identifier");
     }
+    if oxibrowser_executable.is_some_and(|path| {
+        !path.is_absolute() || path.to_string_lossy().chars().any(char::is_control)
+    }) {
+        bail!("OxiBrowser requires an absolute executable path");
+    }
+    if omp_executable.is_some() || omp_model.is_some() {
+        bail!("legacy_execution_retired: service specifications cannot configure OMP workers; configure Ghost Pi instead");
+    }
     let args = vec![
         executable.to_string_lossy().into_owned(),
         "--root".into(),
         root.to_string_lossy().into_owned(),
-        "serve".into(),
+        "run".into(),
         "--port".into(),
         port.to_string(),
         "--model".into(),
         model.into(),
     ];
     let args = if headless {
-        [args, vec!["--headless".into()]].concat()
-    } else {
         args
+    } else {
+        [args, vec!["--ui".into()]].concat()
     };
     match platform {
         "launchd" => {
@@ -293,7 +337,31 @@ pub fn service_spec(
                 .iter()
                 .map(|v| format!("<string>{}</string>", escape(v)))
                 .collect::<String>();
-            Ok(format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>org.project-oxi.ghost</string><key>ProgramArguments</key><array>{args}</array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>ProcessType</key><string>Background</string></dict></plist>\n"))
+            let mut values = Vec::new();
+            if let Some(path) = oxibrowser_executable {
+                values.push((
+                    "GHOST_OXIBROWSER_EXECUTABLE",
+                    path.to_string_lossy().into_owned(),
+                ));
+            }
+
+
+            let environment = if values.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<key>EnvironmentVariables</key><dict>{}</dict>",
+                    values
+                        .iter()
+                        .map(|(key, value)| format!(
+                            "<key>{}</key><string>{}</string>",
+                            escape(key),
+                            escape(value)
+                        ))
+                        .collect::<String>()
+                )
+            };
+            Ok(format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>com.a7.ghost</string><key>ProgramArguments</key><array>{args}</array>{environment}<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>ProcessType</key><string>Background</string></dict></plist>\n"))
         }
         "systemd" => {
             let quote = |v: &str| {
@@ -305,7 +373,16 @@ pub fn service_spec(
                         .replace('$', "$$")
                 )
             };
-            Ok(format!("[Unit]\nDescription=Ghost durable host\n[Service]\nType=simple\nExecStart={}\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=30\n[Install]\nWantedBy=default.target\n",args.iter().map(|v|quote(v)).collect::<Vec<_>>().join(" ")))
+            let mut environment = String::new();
+            if let Some(path) = oxibrowser_executable {
+                environment.push_str(&format!(
+                    "Environment=GHOST_OXIBROWSER_EXECUTABLE={}\n",
+                    quote(&path.to_string_lossy())
+                ));
+            }
+
+
+            Ok(format!("[Unit]\nDescription=Ghost durable host\n[Service]\nType=simple\nExecStart={}\n{}Restart=on-failure\nRestartSec=5\nTimeoutStopSec=30\n[Install]\nWantedBy=default.target\n",args.iter().map(|v|quote(v)).collect::<Vec<_>>().join(" "),environment))
         }
         _ => bail!("choose launchd or systemd"),
     }

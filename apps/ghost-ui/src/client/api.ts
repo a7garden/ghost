@@ -1,3 +1,4 @@
+import { validateGraph } from './orchestration';
 import { assetStorage } from './storage';
 import { normalizeSnapshot } from './normalize';
 import { initialWorkspace, examplePages } from '../fixtures/workspace';
@@ -151,7 +152,7 @@ export class CommandQueue {
       if (e instanceof ConfirmedFailure && !(e instanceof RoutingTerminal) && command.type === 'routing_turn') {
         const current = await this.read(); delete current[key]; await this.storage.setItem(this.namespace, JSON.stringify(current));
       }
-      if (e instanceof ConfirmedFailure && command.type === 'workspace' && ['planner_sync_once', 'conversation_model', 'check_integration', 'check_model_provider', 'model_catalog', 'discover_local_models', 'create_avatar', 'set_profile_avatar', 'delete_avatar'].includes((command.action as { type?: string })?.type ?? '')) {
+      if (e instanceof ConfirmedFailure && command.type === 'workspace' && ['save_orchestration', 'start_orchestration', 'cancel_orchestration', 'planner_sync_once', 'conversation_model', 'check_integration', 'decide_integration_approval', 'check_model_provider', 'model_catalog', 'discover_local_models', 'create_avatar', 'set_profile_avatar', 'delete_avatar'].includes((command.action as { type?: string })?.type ?? '')) {
         const current = await this.read(); delete current[key]; await this.storage.setItem(this.namespace, JSON.stringify(current));
       }
       throw e;
@@ -285,6 +286,21 @@ class DemoClient implements Client {
   }
   private owner(a: Record<string, any>): unknown {
     switch (a.type) {
+      case 'save_orchestration': {
+        if (!a.plan || typeof a.plan.title !== 'string' || !Array.isArray(a.plan.nodes) || !Array.isArray(a.plan.edges)) throw new Error('구조 내용을 확인할 수 없습니다. 다시 저장해 주세요.');
+        const error = validateGraph(a.plan, this.state.profiles.map(p => p.id));
+        if (error) throw new Error(error);
+        const plans = this.state.orchestration_plans ??= [];
+        const previous = plans.find(plan => plan.id === a.id);
+        const staleUpdate = a.id && (!previous || previous.version !== a.version);
+        const staleCreate = !a.id && a.version !== null && a.version !== undefined;
+        if (staleUpdate || staleCreate) throw new Error('구조가 변경되었습니다. 최신 구조를 다시 열어 주세요.');
+        const plan = { ...structuredClone(a.plan), id: a.id ?? crypto.randomUUID(), version: (previous?.version ?? 0) + 1, updated_ms: Date.now() };
+        if (previous) Object.assign(previous, plan); else plans.push(plan);
+        return plan;
+      }
+      case 'start_orchestration': throw new Error('구조 실행은 연결된 호스트에서 사용할 수 있습니다. 예시 모드에서는 실제 Ghost를 실행하지 않습니다.');
+
       case 'create_avatar': {
         if (this.state.avatars.length >= 64) throw new Error('아바타는 최대 64개까지 보관할 수 있습니다.');
         const { data_url, ...input } = a.avatar;

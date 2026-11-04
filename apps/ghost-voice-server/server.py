@@ -1,70 +1,34 @@
-"""Ghost local speech adapter. Cached weights only; no audio persistence.
+"""Ghost remote speech adapter. No local model loads or audio persistence.
 
-Whisper config adaptation follows the existing Knock voice worker; its
-environment, files, processes, and audio devices are never modified.
+The local batch endpoint protocol is unchanged for its callers (the Rust host
+posts OpenAI-style /v1/audio/* requests here), but the only speech backend is
+the Dyno-owned MLX process (:7730) through RemoteSpeech — the same backend the
+streaming media path uses. This process never loads model weights and never
+falls back to local inference: an unavailable or ambiguous speech outcome is a
+bounded error and the affected request fails without replay.
 """
+
 from __future__ import annotations
 
-import argparse
 import asyncio
 import contextlib
 import io
 import json
 import os
-import shutil
-import tempfile
 import threading
-import time
 import wave
-from email import policy
-from email.parser import BytesParser
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
-
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+from contextlib import asynccontextmanager
+from email.parser import BytesParser
+from email import policy
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-STT = "whisper-large-v3-turbo"
-TTS = "qwen3-tts-0.6b-customvoice"
-REPOS = {
-    STT: "mlx-community/whisper-large-v3-turbo-asr-fp16",
-    TTS: "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16",
-}
-LANGUAGES = {"ko": "Korean", "en": "English", "ja": "Japanese", "zh": "Chinese", "de": "German", "fr": "French", "es": "Spanish", "it": "Italian", "pt": "Portuguese", "ru": "Russian"}
-VOICES = {"sohee", "ryan", "aiden", "vivian", "serena", "ono_anna", "uncle_fu", "eric", "dylan"}
-MAX_BODY = 5 * 1024 * 1024
+from remote_speech import RemoteSpeech
+from speech_contract import LANGUAGES, MAX_BODY, MAX_SPEECH_SECONDS, SpeechError, STT, TTS, VOICES
 
 
-class SpeechError(Exception):
-    def __init__(self, code, status=400):
-        self.code, self.status = code, status
-
-
-def snapshot(repo):
-    root = Path(os.environ.get("HF_HUB_CACHE", str(Path.home() / ".cache/huggingface/hub"))) / ("models--" + repo.replace("/", "--"))
-    revision = (root / "refs/main").read_text().strip()
-    if not revision or not all(c in "0123456789abcdef" for c in revision):
-        raise SpeechError("model_cache_invalid", 503)
-    path = root / "snapshots" / revision
-    for filename in ("config.json", "model.safetensors"):
-        if not (path / filename).is_file():
-            raise SpeechError("model_cache_incomplete", 503)
-    return path
-
-
-def whisper_config(source, target):
-    raw = json.loads((source / "config.json").read_text())
-    for child in source.iterdir():
-        if child.name != "config.json":
-            (target / child.name).symlink_to(child.resolve())
-    (target / "weights.safetensors").symlink_to((source / "model.safetensors").resolve())
-    fields = {"n_mels": "num_mel_bins", "n_audio_ctx": "max_source_positions", "n_audio_state": "d_model", "n_audio_head": "encoder_attention_heads", "n_audio_layer": "encoder_layers", "n_vocab": "vocab_size", "n_text_ctx": "max_target_positions", "n_text_state": "d_model", "n_text_head": "decoder_attention_heads", "n_text_layer": "decoder_layers"}
-    (target / "config.json").write_text(json.dumps({key: raw[value] for key, value in fields.items()}))
 
 
 def decode_wav(data):
@@ -86,84 +50,38 @@ def decode_wav(data):
     return pcm, rate
 
 
-class Engines:
-    def __init__(self):
-        self.asr_path = None
-        self.tts_model = None
-        self.scratch = None
-        self.ready = {STT: False, TTS: False}
-
-    def cleanup(self):
-        if self.scratch:
-            shutil.rmtree(self.scratch, ignore_errors=True)
-
-    def transcribe(self, data, language, cancelled):
-        import numpy as np
-        import mlx_whisper
-        pcm, rate = decode_wav(data)
-        if self.asr_path is None:
-            self.scratch = Path(tempfile.mkdtemp(prefix="ghost-whisper-config-"))
-            whisper_config(snapshot(REPOS[STT]), self.scratch)
-            self.asr_path = self.scratch
-        audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768
-        if rate != 16000:
-            from scipy.signal import resample_poly
-            from math import gcd
-            divisor = gcd(rate, 16000)
-            audio = resample_poly(audio, 16000 // divisor, rate // divisor).astype(np.float32)
-        if cancelled.is_set():
-            raise SpeechError("cancelled", 499)
-        result = mlx_whisper.transcribe(audio, path_or_hf_repo=str(self.asr_path), language=language or None, condition_on_previous_text=False, verbose=False)
-        self.ready[STT] = True
-        if cancelled.is_set():
-            raise SpeechError("cancelled", 499)
-        return {"text": result["text"].strip()}
-
-    def synthesize(self, text, voice, language, cancelled):
-        import numpy as np
-        from mlx_audio.tts.utils import load_model
-        if self.tts_model is None:
-            path = snapshot(REPOS[TTS])
-            if not (path / "speech_tokenizer/model.safetensors").is_file():
-                raise SpeechError("model_cache_incomplete", 503)
-            self.tts_model = load_model(path)
-        chunks, rate, frames = [], None, 0
-        for item in self.tts_model.generate_custom_voice(text=text, speaker=voice, language=language, stream=True, streaming_interval=0.32, max_tokens=720):
-            if cancelled.is_set():
-                raise SpeechError("cancelled", 499)
-            next_rate = int(item.sample_rate)
-            if rate is not None and rate != next_rate:
-                raise SpeechError("audio_rate_changed", 503)
-            rate = next_rate
-            audio = np.asarray(item.audio, dtype=np.float32).reshape(-1)
-            if not np.isfinite(audio).all():
-                raise SpeechError("audio_invalid", 503)
-            frames += audio.size
-            if frames > rate * 60 or frames * 2 + 44 > 6 * 1024 * 1024:
-                raise SpeechError("speech_output_too_long", 413)
-            chunks.append((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
-        if not frames or cancelled.is_set():
-            raise SpeechError("cancelled" if cancelled.is_set() else "speech_output_empty", 499 if cancelled.is_set() else 503)
-        output = io.BytesIO()
-        with wave.open(output, "wb") as writer:
-            writer.setnchannels(1)
-            writer.setsampwidth(2)
-            writer.setframerate(rate)
-            writer.writeframes(b"".join(chunks))
-        self.ready[TTS] = True
-        return output.getvalue()
+def synthesize_wav(speech, text, voice, language, cancelled):
+    """Collect one bounded streaming synthesis into a whole WAV response."""
+    chunks, rate, frames = [], None, 0
+    for chunk, next_rate in speech.iter_synthesize(text, voice, language, cancelled):
+        if rate is not None and rate != next_rate:
+            raise SpeechError("audio_rate_changed", 503)
+        rate = next_rate
+        frames += len(chunk) // 2
+        if frames > rate * MAX_SPEECH_SECONDS or frames * 2 + 44 > MAX_BODY:
+            raise SpeechError("speech_output_too_long", 413)
+        chunks.append(chunk)
+    if not chunks or rate is None:
+        raise SpeechError("speech_output_empty", 503)
+    output = io.BytesIO()
+    with wave.open(output, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(rate)
+        writer.writeframes(b"".join(chunks))
+    return output.getvalue()
 
 
-def create_app(engine=None, port=62076):
-    engine = engine or Engines()
+def create_app(speech=None, port=62076, speech_url="http://127.0.0.1:7730"):
+    speech = speech or RemoteSpeech(speech_url)
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ghost-speech")
     state = {"pending": 0, "completed": 0, "cancelled": 0, "failed": 0}
 
-    @contextlib.asynccontextmanager
+    @asynccontextmanager
     async def lifespan(app):
         yield
         executor.shutdown(wait=True, cancel_futures=True)
-        engine.cleanup()
+        speech.close()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -201,7 +119,10 @@ def create_app(engine=None, port=62076):
 
     @app.get("/health")
     async def health():
-        return {"service": "ghost-local-speech", "version": 1, "pid": os.getpid(), "offline": True, "model_loaded": engine.ready, "queued_or_running": state["pending"], "requests": {k: state[k] for k in ("completed", "cancelled", "failed")}}
+        # `offline` means this adapter never leaves loopback; the model flags
+        # describe the remote owner process's LOADED state (lazy first load).
+        await asyncio.to_thread(speech.refresh_health)
+        return {"service": "ghost-local-speech", "version": 1, "pid": os.getpid(), "offline": True, "model_loaded": speech.ready, "queued_or_running": state["pending"], "requests": {k: state[k] for k in ("completed", "cancelled", "failed")}}
 
     @app.get("/v1/models")
     async def models():
@@ -216,8 +137,8 @@ def create_app(engine=None, port=62076):
         def run():
             if cancelled.is_set():
                 raise SpeechError("cancelled", 499)
-            # Model libraries must never log request text or audio; only our
-            # bounded status metadata appears in HTTP responses.
+            # The backend never logs request text or audio; only our bounded
+            # status metadata appears in HTTP responses.
             with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
                 return operation(cancelled)
 
@@ -298,11 +219,11 @@ def create_app(engine=None, port=62076):
         if not isinstance(data, bytes):
             raise SpeechError("audio_file_required")
         decode_wav(data)
-        result = await infer(request, lambda cancel: engine.transcribe(data, language, cancel))
+        result = await infer(request, lambda cancel: speech.transcribe(data, language, cancel))
         return JSONResponse(result)
 
     @app.post("/v1/audio/speech")
-    async def speech(request: Request):
+    async def audio_speech(request: Request):
         try:
             value = json.loads(await bounded_body(request))
         except Exception:
@@ -323,17 +244,20 @@ def create_app(engine=None, port=62076):
         language = LANGUAGES.get(language, language)
         if language not in LANGUAGES.values():
             raise SpeechError("language_not_supported")
-        audio = await infer(request, lambda cancel: engine.synthesize(text, voice, language, cancel))
+        audio = await infer(request, lambda cancel: synthesize_wav(speech, text, voice, language, cancel))
         return Response(audio, media_type="audio/wav")
 
     return app
 
 
 if __name__ == "__main__":
+    import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=62076)
+    parser.add_argument("--speech-url", default="http://127.0.0.1:7730")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
     import uvicorn
-    uvicorn.run(create_app(port=args.port), host="127.0.0.1", port=args.port, access_log=False, log_level="warning", timeout_graceful_shutdown=10)
+    uvicorn.run(create_app(port=args.port, speech_url=args.speech_url), host="127.0.0.1", port=args.port, access_log=False, log_level="warning", timeout_graceful_shutdown=10)
