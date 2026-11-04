@@ -3,6 +3,7 @@
 mod actual_sdk {
     use super::*;
     use crate::{control::server::pi_test_http, host::lifetime_driver};
+    use crate::host::lifetime_runtime::PiLauncher;
     use std::{
         io::Write,
         net::{Shutdown, TcpListener, TcpStream},
@@ -20,6 +21,7 @@ mod actual_sdk {
     const CHILD: &str = "A19_SDK_CHILD";
     const ANSWER: &str = "a19-sdk-output";
     const NATIVE: &str = "A19_SDK_NATIVE";
+    const STOCK: &str = "A19_STOCK_CODING_TOOLS";
 
     struct ModelServer {
         origin: String,
@@ -162,6 +164,14 @@ mod actual_sdk {
                 ))),
             }
         }
+        fn start_bundled(host: &Arc<Host>, binary: PathBuf) -> Self {
+            Self {
+                task: Some(tokio::spawn(lifetime_driver::run_broker_fixture_launcher(
+                    Arc::clone(host),
+                    PiLauncher::Bundled(binary),
+                ))),
+            }
+        }
         async fn pause(mut self,host:&Host) {
             // Stop only this disposable fixture's original driver naturally.
             // Its tail closes and waits for its owned Pi child before reuse.
@@ -189,7 +199,7 @@ mod actual_sdk {
             }
         }
     }
-    fn tool_result(body: &Value, name: &str) -> Option<Value> {
+    fn tool_message<'a>(body: &'a Value, name: &str) -> Option<&'a Value> {
         let messages = body["messages"].as_array()?;
         let ids = messages
             .iter()
@@ -200,13 +210,15 @@ mod actual_sdk {
         messages
             .iter()
             .rev()
-            .filter(|m| {
+            .find(|m| {
                 m["role"] == "tool"
                     && m["tool_call_id"]
                         .as_str()
                         .is_some_and(|id| ids.contains(&id))
             })
-            .find_map(|m| {
+    }
+    fn tool_result(body: &Value, name: &str) -> Option<Value> {
+        tool_message(body, name).and_then(|m| {
                 if let Some(s) = m["content"].as_str() {
                     serde_json::from_str(s).ok()
                 } else {
@@ -243,10 +255,15 @@ mod actual_sdk {
             .filter(|m| m["role"] == "system" || m["role"] == "developer")
             .any(|m| m.to_string().contains("assignment_id"));
         if !assignment {
+            if all.contains("Authenticated Host verification:") {
+                return Ok(json!({"role":"assistant","content":"Host 검수를 통과했습니다. 작업 결과를 게시했습니다."}));
+            }
             return Ok(
                 json!({"role":"assistant","content":"Controlled advisory; the Host owns independent acceptance."}),
             );
         }
+        let stock = all.contains(STOCK);
+        let tool_seen = |name| if stock { tool_message(body, name).is_some() } else { tool_result(body, name).is_some() };
         if all.contains(NATIVE) {
             let recall = |query| recall_result(body, query);
             if recall("A19_NATIVE_SOURCE_MARKER").is_none() {
@@ -320,7 +337,7 @@ mod actual_sdk {
                     json!({"parent_work_id":work,"contract_ref":reference}),
                 ));
             }
-            if tool_result(body, "write").is_none() {
+            if !tool_seen("write") {
                 return Ok(call(
                     "write",
                     json!({"path":"answer.txt","content":"initial-original"}),
@@ -342,21 +359,36 @@ mod actual_sdk {
                     json!({"work_id":work,"wait_for":[child]}),
                 ));
             }
-            if tool_result(body, "edit").is_none() {
+            if !tool_seen("edit") {
                 return Ok(call(
                     "edit",
                     json!({"path":"answer.txt","edits":[{"oldText":"initial-original","newText":ANSWER}]}),
                 ));
             }
         } else if all.contains(SIMPLE) || all.contains(CHILD) {
-            if tool_result(body, "write").is_none() {
+            if !tool_seen("write") {
                 return Ok(call(
                     "write",
-                    json!({"path":"answer.txt","content":if all.contains(CHILD){"child-ready"}else{ANSWER}}),
+                    json!({"path":"answer.txt","content":if all.contains(CHILD) {
+                        if stock { "child-start" } else { "child-ready" }
+                    } else { ANSWER }}),
                 ));
             }
         } else {
             return Err(anyhow!("unrecognized_actual_assignment"));
+        }
+        if stock && !all.contains(PARENT) && all.contains(CHILD) {
+            let Some(read) = tool_message(body, "read") else {
+                return Ok(call("read", json!({"path":"answer.txt","offset":1,"limit":1})));
+            };
+            ensure!(read["content"].to_string().contains("child-start"), "stock read did not return the staged text");
+            if !tool_seen("edit") {
+                return Ok(call("edit", json!({"path":"answer.txt","edits":[{"oldText":"child-start","newText":"child-ready"}]})));
+            }
+            let Some(shell) = tool_message(body, "bash") else {
+                return Ok(call("bash", json!({"command":"test \"$(cat answer.txt)\" = child-ready && printf stock-shell-ok","timeout":30})));
+            };
+            ensure!(shell["content"].to_string().contains("stock-shell-ok"), "stock bash did not return isolated stdout");
         }
         if tool_result(body, "publish_artifact").is_none() {
             return Ok(call(
@@ -991,7 +1023,21 @@ mod actual_sdk {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn actual_sdk_same_epoch_wait_resumes_original_generation_through_existing_driver() {
+        delegation_and_report(None).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "bundled Bun executable and physical Apple container required"]
+    async fn bundled_bun_stock_tools_delegate_and_report() {
+        let binary = PathBuf::from(std::env::var_os("GHOST_TEST_BUNDLED_PI").expect("explicit bundled Pi path"));
+        delegation_and_report(Some(binary.canonicalize().unwrap())).await;
+    }
+
+    async fn delegation_and_report(bundled: Option<PathBuf>) {
         let mut f = host_fixture();
+        if bundled.is_some() {
+            f.host.native_computers.as_mut().unwrap().set_pi_fixture_cli(Path::new("/opt/homebrew/bin/container")).unwrap();
+        }
         let retained = f.root.keep();
         fs::set_permissions(&retained, fs::Permissions::from_mode(0o700)).unwrap();
         eprintln!(
@@ -1028,8 +1074,10 @@ mod actual_sdk {
             &[(&f.ghost, &f.conversation), (&child, &child_conversation)],
         );
         let mut spec = lifetime::pi_execution::tests::verifier_spec(ANSWER);
-        spec["delegation_contracts"] = json!([{"target_ghost_id":child,"prompt":CHILD,"acceptance_spec":lifetime::pi_execution::tests::verifier_spec("child-ready"),"artifact_refs":[]}]);
-        let response=f.host.lifetime_action(&env("a19-sdk-parent-goal",json!({"method":"goal.submit","ghost_id":f.ghost,"conversation_id":f.conversation,"prompt":PARENT,"privacy":"public","acceptance_spec":spec}))).unwrap();
+        let parent_prompt = if bundled.is_some() { format!("{PARENT} {STOCK}") } else { PARENT.into() };
+        let child_prompt = if bundled.is_some() { format!("{CHILD} {STOCK}") } else { CHILD.into() };
+        spec["delegation_contracts"] = json!([{"target_ghost_id":child,"prompt":child_prompt,"acceptance_spec":lifetime::pi_execution::tests::verifier_spec("child-ready"),"artifact_refs":[]}]);
+        let response=f.host.lifetime_action(&env("a19-sdk-parent-goal",json!({"method":"goal.submit","ghost_id":f.ghost,"conversation_id":f.conversation,"prompt":parent_prompt,"privacy":"public","acceptance_spec":spec}))).unwrap();
         assert_eq!(response["result"]["status"], "success", "{response}");
         let work = response["result"]["data"]["work"]["id"]
             .as_str()
@@ -1045,8 +1093,9 @@ mod actual_sdk {
         let http = pi_test_http::Server::start(Arc::clone(&host), "a".repeat(64));
         // Only the parent is delivered before close. Its real delegated child
         // remains in the ordinary outbox; no synthetic wait state is supplied.
-        let mut pi = host::lifetime_runtime::PiProcess::start(
-            &entry,
+        let launcher = bundled.as_ref().map(|path| PiLauncher::Bundled(path.clone())).unwrap_or_else(|| PiLauncher::NodeEntry(entry.clone()));
+        let mut pi = host::lifetime_runtime::PiProcess::launch(
+            &launcher,
             &host.root.join("durable"),
             &host.root,
             "broker",
@@ -1081,14 +1130,41 @@ mod actual_sdk {
         let count = model.requests();
         tokio::time::sleep(Duration::from_millis(40)).await;
         assert_eq!(model.requests(), count);
-        let driver = Driver::start(&host, entry);
+        let driver = match &bundled {
+            Some(path) => Driver::start_bundled(&host, path.clone()),
+            None => Driver::start(&host, entry),
+        };
         until(&host, &model, &http, "same-epoch-resume", |conn| {
             accepted(conn, &work)
         })
         .await;
         assert_eq!(context_claim(&host, &assignment.command_id), original);
         assert_eq!(&effects(&host, &work)[..1], before.as_slice());
-        assert_eq!(effects(&host, &work).len(), 3);
+        assert_eq!(effects(&host, &work).len(), if bundled.is_some() { 4 } else { 3 });
+        if bundled.is_some() {
+            until(&host, &model, &http, "primary-final-report", |conn| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM lifetime_report_replies r
+                     JOIN lifetime_outbox o ON o.id=r.outbox_id JOIN lifetime_turns t ON t.id=r.reply_turn_id
+                     WHERE t.ghost_id=?1 AND t.conversation_id=?2
+                     AND json_extract(o.payload,'$.body.prompt') LIKE ?3
+                     AND t.text LIKE 'Host 검수를 통과했습니다.%')",
+                    rusqlite::params![f.ghost, f.conversation, format!("Authenticated Host verification: work_id={work} %")],
+                    |r| r.get(0),
+                ).unwrap_or(false)
+            }).await;
+            let s = host.lock().unwrap();
+            let operations: Vec<(String, String)> = s.journal.0.prepare(
+                "SELECT operation,arguments_json FROM lifetime_pi_effects
+                 WHERE execution_id=(SELECT execution_id FROM lifetime_pi_executions WHERE ghost_id=?1)
+                 ORDER BY task_id,call_id",
+            ).unwrap().query_map([&child], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+            for tool in ["read", "write", "edit", "bash", "publish_artifact"] {
+                assert!(operations.iter().any(|(operation, _)| operation == tool), "child did not run {tool}");
+            }
+            assert!(operations.iter().any(|(operation, args)| operation == "read" && args.contains("text_snapshot")));
+            assert!(operations.iter().any(|(operation, args)| operation == "edit" && args.contains("source_sha256")));
+        }
         {
             let s = host.lock().unwrap();
             assert_eq!(row(&s.journal.0, "pi_work_wait_active", &work), wait);

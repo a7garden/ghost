@@ -1,9 +1,9 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-durable";
-import { createEditTool } from "@earendil-works/pi-durable/tools";
 import { isBrowserOwnerWait, waitForBrowserOwner } from "./browser-wait.js";
 import { payloadDigest, ProtocolError } from "./contract.js";
 import { directWorkIsError, directWorkObservation } from "./direct-work-observation.js";
+import { executePiWorkTool, piWorkTools } from "./pi-work-tools.js";
 
 export const BASE_WORK_TOOL_NAMES = Object.freeze(["read", "write", "edit", "bash", "publish_artifact"]);
 export const DIRECT_WORK_TOOL_NAMES = Object.freeze([...BASE_WORK_TOOL_NAMES, "browser"]);
@@ -19,7 +19,7 @@ export function assertPinnedExecutionTools(pinned, current) {
   }
 }
 const boundedPath = Type.String({ minLength: 1, maxLength: 4096, description: "Path relative to this Work's workspace, for example output/result.json. No absolute path or parent traversal." });
-const { prepareArguments: prepareEditArguments } = createEditTool();
+const { prepareArguments: prepareEditArguments } = piWorkTools.get("edit");
 const schemas = {
   read: Type.Union([
     Type.Object({ path: boundedPath, offset: Type.Optional(Type.Integer({ minimum: 1 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000 })) }, { additionalProperties: false }),
@@ -99,21 +99,70 @@ function failure(summary, unknown = false) {
 // shell, ambient home, credential lookup or second agent is installed here.
 export function createDirectWorkTools({ hostToolTransport, ghostId, conversationId, resolveToolScope, controllerContext, browserWaitTask }) {
   const uncertainAssignments = new Set();
+  async function dispatch(operation, args, api, context, callId = api.callId) {
+    let scope;
+    try { scope = await resolveToolScope(); } catch { return failure("Current Work authority could not be confirmed; no execution was sent."); }
+    const assignment = controllerContext.assignment;
+    if (typeof hostToolTransport !== "function" || scope.originKind !== "goal_assignment"
+      || assignment?.id !== scope.assignmentId || assignment?.work_id !== scope.workId
+      || assignment.execution?.engine !== "pi" || assignment.execution?.version !== 1
+      || !(assignment.execution.tools ?? BASE_WORK_TOOL_NAMES).includes(operation)
+      || uncertainAssignments.has(scope.assignmentId)) {
+      return failure("Direct tools require the exact active authenticated Work with no unresolved effect; no execution was sent.");
+    }
+    if (context?.abortSignal?.aborted) return failure("This Pi tool invocation was cancelled before dispatch; no execution was sent.");
+    try { await controllerContext.memoryContext?.validate(); } catch { return failure("Retained Work evidence can no longer be authorized; no execution was sent."); }
+    const generationTaskId = await controllerContext.generationTaskId();
+    const identity = { ghostId, conversationId, assignmentId: scope.assignmentId, workId: scope.workId, taskId: api.taskId, callId };
+    const invocationId = directWorkInvocationId(identity);
+    const inputDigest = payloadDigest({ operation, arguments: args });
+    validateDirectWorkIdentity({ ...identity, generationTaskId, operation, args, inputDigest, invocationId });
+    const input = { method: "work.execute", invocation_id: invocationId,
+        ghost_id: ghostId, conversation_id: conversationId, assignment_id: scope.assignmentId, work_id: scope.workId,
+        generation_task_id: generationTaskId, task_id: api.taskId, call_id: callId, input_digest: inputDigest, operation,
+        inference_scope: scope.inferenceScope, conversation_disclosure: scope.conversationDisclosure, arguments: args };
+    const workMemoryRevision = await controllerContext.memoryContext?.workRevision();
+    if (workMemoryRevision) input.work_memory_context_revision = workMemoryRevision;
+    let response;
+    try {
+      response = await hostToolTransport(input, context);
+    } catch {
+      uncertainAssignments.add(scope.assignmentId);
+      return failure("The Host returned no verified direct execution receipt; the effect is unknown and further direct calls are blocked.", true);
+    }
+    if (!response || !["success", "warning", "error"].includes(response.status) || !verifiedDirectWorkReceipt(response, input)) {
+      uncertainAssignments.add(scope.assignmentId);
+      return failure("The Host returned no verified direct execution receipt; the effect is unknown and further direct calls are blocked.", true);
+    }
+    if (response.data?.receipt?.state === "waiting_owner") {
+      if (operation !== "browser" || !browserWaitTask || !isBrowserOwnerWait(response)) {
+        uncertainAssignments.add(scope.assignmentId);
+        return failure("The Host returned an invalid approval wait; stop and inspect the original receipt.", true);
+      }
+      try { response = await waitForBrowserOwner({ api, task: browserWaitTask, input, response, context }); }
+      catch { response = null; }
+      if (!verifiedDirectWorkReceipt(response, input) || response.data.receipt.state === "waiting_owner") {
+        uncertainAssignments.add(scope.assignmentId);
+        return failure("The browser approval result could not be reconciled; no replacement action may be sent.", true);
+      }
+    }
+    if (response.data?.receipt?.state === "unknown" || response.error_code === "pi_effect_unknown") uncertainAssignments.add(scope.assignmentId);
+    try { await controllerContext.memoryContext?.validate(); }
+    catch {
+      // The immutable Host receipt still records the completed effect.
+      // Withhold derived bytes and fence further direct calls; this is not
+      // authority to replay that effect under another tool-call identity.
+      uncertainAssignments.add(scope.assignmentId);
+      return failure("The original effect receipt was verified, but retained evidence changed before delivery. Output was withheld; inspect that original receipt and do not repeat the effect.");
+    }
+    return { isError: directWorkIsError(operation, response), content: directWorkObservation(operation, args, response), details: response };
+  }
+
   return DIRECT_WORK_TOOL_NAMES.map(operation => defineTool({
     name: operation, description: descriptions[operation], parameters: schemas[operation],
     ...(operation === "edit" ? { prepareArguments: prepareEditArguments } : {}),
     replay: operation === "browser" && browserWaitTask ? "safe" : "unsafe", executionMode: "sequential",
     execute: async (args, api, context) => {
-      let scope;
-      try { scope = await resolveToolScope(); } catch { return failure("Current Work authority could not be confirmed; no execution was sent."); }
-      const assignment = controllerContext.assignment;
-      if (typeof hostToolTransport !== "function" || scope.originKind !== "goal_assignment"
-        || assignment?.id !== scope.assignmentId || assignment?.work_id !== scope.workId
-        || assignment.execution?.engine !== "pi" || assignment.execution?.version !== 1
-        || !(assignment.execution.tools ?? BASE_WORK_TOOL_NAMES).includes(operation)
-        || uncertainAssignments.has(scope.assignmentId)) {
-        return failure("Direct tools require the exact active authenticated Work with no unresolved effect; no execution was sent.");
-      }
       if (operation === "read" && Object.hasOwn(args, "view")
         && (args.view !== "json_summary" || Object.keys(args).some(key => !["path", "view"].includes(key)) || typeof args.path !== "string")) {
         return failure("JSON summary read requires only path and view:'json_summary'; no execution was sent.");
@@ -121,52 +170,15 @@ export function createDirectWorkTools({ hostToolTransport, ghostId, conversation
       if (operation === "bash" && !validBashArguments(args)) return failure("Bash requires either a bounded command or an exact Host command reference, with an optional bounded timeout; no execution was sent.");
       const textValues = operation === "write" ? [args.content] : operation === "edit" ? args.edits.flatMap(edit => [edit.oldText, edit.newText]) : [];
       if (textValues.some(value => Buffer.byteLength(value, "utf8") > 65536)) return failure("File text exceeds the Host's 64 KiB UTF-8 operation limit; no execution was sent.");
-      if (context?.abortSignal?.aborted) return failure("This Pi tool invocation was cancelled before dispatch; no execution was sent.");
-      try { await controllerContext.memoryContext?.validate(); } catch { return failure("Retained Work evidence can no longer be authorized; no execution was sent."); }
-      const generationTaskId = await controllerContext.generationTaskId();
-      const identity = { ghostId, conversationId, assignmentId: scope.assignmentId, workId: scope.workId, taskId: api.taskId, callId: api.callId };
-      const invocationId = directWorkInvocationId(identity);
-      const inputDigest = payloadDigest({ operation, arguments: args });
-      validateDirectWorkIdentity({ ...identity, generationTaskId, operation, args, inputDigest, invocationId });
-      const input = { method: "work.execute", invocation_id: invocationId,
-          ghost_id: ghostId, conversation_id: conversationId, assignment_id: scope.assignmentId, work_id: scope.workId,
-          generation_task_id: generationTaskId, task_id: api.taskId, call_id: api.callId, input_digest: inputDigest, operation,
-          inference_scope: scope.inferenceScope, conversation_disclosure: scope.conversationDisclosure, arguments: args };
-      const workMemoryRevision = await controllerContext.memoryContext?.workRevision();
-      if (workMemoryRevision) input.work_memory_context_revision = workMemoryRevision;
-      let response;
-      try {
-        response = await hostToolTransport(input, context);
-      } catch {
-        uncertainAssignments.add(scope.assignmentId);
-        return failure("The Host returned no verified direct execution receipt; the effect is unknown and further direct calls are blocked.", true);
+      const assignment = controllerContext.assignment;
+      const tools = assignment?.execution?.tools ?? BASE_WORK_TOOL_NAMES;
+      const stock = assignment?.execution?.codingTools && tools.includes(operation) && piWorkTools.get(operation);
+      const canReadEditSource = operation !== "edit" || tools.includes("read");
+      if (stock && canReadEditSource && args.view === undefined && args.command_ref === undefined) {
+        return executePiWorkTool(stock, args, api, context, assignment.work_id,
+          (hostOperation, hostArgs, callId) => dispatch(hostOperation, hostArgs, api, context, callId));
       }
-      if (!response || !["success", "warning", "error"].includes(response.status) || !verifiedDirectWorkReceipt(response, input)) {
-        uncertainAssignments.add(scope.assignmentId);
-        return failure("The Host returned no verified direct execution receipt; the effect is unknown and further direct calls are blocked.", true);
-      }
-      if (response.data?.receipt?.state === "waiting_owner") {
-        if (operation !== "browser" || !browserWaitTask || !isBrowserOwnerWait(response)) {
-          uncertainAssignments.add(scope.assignmentId);
-          return failure("The Host returned an invalid approval wait; stop and inspect the original receipt.", true);
-        }
-        try { response = await waitForBrowserOwner({ api, task: browserWaitTask, input, response, context }); }
-        catch { response = null; }
-        if (!verifiedDirectWorkReceipt(response, input) || response.data.receipt.state === "waiting_owner") {
-          uncertainAssignments.add(scope.assignmentId);
-          return failure("The browser approval result could not be reconciled; no replacement action may be sent.", true);
-        }
-      }
-      if (response.data?.receipt?.state === "unknown" || response.error_code === "pi_effect_unknown") uncertainAssignments.add(scope.assignmentId);
-      try { await controllerContext.memoryContext?.validate(); }
-      catch {
-        // The immutable Host receipt still records the completed effect.
-        // Withhold derived bytes and fence further direct calls; this is not
-        // authority to replay that effect under another tool-call identity.
-        uncertainAssignments.add(scope.assignmentId);
-        return failure("The original effect receipt was verified, but retained evidence changed before delivery. Output was withheld; inspect that original receipt and do not repeat the effect.");
-      }
-      return { isError: directWorkIsError(operation, response), content: directWorkObservation(operation, args, response), details: response };
+      return dispatch(operation, args, api, context);
     },
   }));
 }

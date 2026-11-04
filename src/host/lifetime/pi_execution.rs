@@ -619,6 +619,28 @@ pub(crate) mod tests {
         );
     }
     #[tokio::test]
+    async fn stock_edit_never_overwrites_a_changed_snapshot() {
+        let f = setup();
+        let invoke = |id, call, operation, arguments| {
+            let request = request(&f, id, call, operation, arguments);
+            let host = &f.host;
+            async move { host.lifetime_pi_execution_action(&request, PiInferenceScope::Public).await.unwrap() }
+        };
+        let path = "answer.txt";
+        let initial = invoke(100, "initial-write", "write", json!({"path":path,"content":"before\r\n"})).await;
+        assert_eq!(initial.status, ResponseStatus::Success);
+        let snapshot = invoke(101, "edit-source", "read", json!({"path":path,"view":"text_snapshot"})).await;
+        assert_eq!(snapshot.data["output"]["content"], "before\r\n");
+        let changed = invoke(102, "concurrent-write", "write", json!({"path":path,"content":"newer\r\n"})).await;
+        assert_eq!(changed.status, ResponseStatus::Success);
+        let edit = invoke(103, "stock-edit", "edit", json!({"path":path,"content":"after\r\n","source_sha256":snapshot.data["output"]["sha256"]})).await;
+        assert_eq!(edit.status, ResponseStatus::Error);
+        assert_eq!(edit.data["receipt"]["state"], "denied");
+        let final_read = invoke(104, "final-read", "read", json!({"path":path,"view":"text_snapshot"})).await;
+        assert_eq!(final_read.data["output"]["content"], "newer\r\n");
+    }
+
+    #[tokio::test]
     async fn two_ghosts_delegate_accept_and_stage_exact_child_artifact_without_worker() {
         let mut f = setup();
         let profile = Host::profile(
@@ -925,7 +947,11 @@ pub(crate) fn offer(
             tools.push("browser");
         }
         let environment=computers.ok_or_else(||anyhow!("Pi computer missing"))?.pi_work_execution_environment(conn,&work)?.ok_or_else(||anyhow::anyhow!("accepted Pi route has no configured execution policy"))?;
-        Ok(Some(json!({"engine":"pi","version":1,"tools":tools,"cwd":"/workspace","file_paths":"work-relative","environment":environment})))
+        let mut offer = json!({"engine":"pi","version":1,"tools":tools,"cwd":"/workspace","file_paths":"work-relative","environment":environment});
+        if offer["environment"]["backend"] == "apple_container" {
+            offer["coding_tools"] = json!("pi-durable/1");
+        }
+        Ok(Some(offer))
     } else {
         Ok(None)
     }
@@ -1118,6 +1144,13 @@ fn preflight_pi_arguments(operation:&str,args:&Value,privacy:&str)->Result<()> {
     match operation {
         "read"=>json_summary::arguments(args),
         "write"=>{apply::exact_fields(args,&["path","content"])?;ensure!(apply::string_field(args,"content")?.len()<=crate::worker::scoped_tools::MAX_TOOL_CONTENT_BYTES,"Write content exceeds file tool bound");Ok(())},
+        "edit" if args.get("source_sha256").is_some() => {
+            apply::exact_fields(args, &["path", "content", "source_sha256"])?;
+            let digest = apply::string_field(args, "source_sha256")?;
+            ensure!(digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)), "Edit source digest is invalid");
+            ensure!(apply::string_field(args, "content")?.len() <= crate::worker::scoped_tools::MAX_TOOL_CONTENT_BYTES, "Edit content exceeds file tool bound");
+            Ok(())
+        }
         "edit"=>apply::exact_fields(args,&["path","edits"]),
         "publish_artifact"=>{apply::exact_fields(args,&["path","privacy"])?;ensure!(args["privacy"].as_str()==Some(privacy),"artifact privacy must match pinned execution privacy");Ok(())},
         _=>Ok(())
@@ -1725,6 +1758,9 @@ impl Host {
                     let contract=summary_contract.ok_or_else(||anyhow!("pi_no_effect:json_summary_contract_unconfirmed"))?;
                     return Ok((json_summary::summarize(&content,&digest,contract),vec![]));
                 }
+                if args["view"] == "text_snapshot" {
+                    return Ok((json!({"content":content,"sha256":digest}), vec![]));
+                }
                 let offset = args["offset"].as_u64().unwrap_or(1).saturating_sub(1) as usize;
                 let limit = args["limit"].as_u64().unwrap_or(2000).min(2000) as usize;
                 Ok((
@@ -1733,16 +1769,14 @@ impl Host {
                 ))
             }
             "write" | "edit" => {
-                let mut source_digest = None;
-                let content = if operation == "write" {
-                    apply::exact_fields(args, &["path", "content"])?;
-                    apply::string_field(args, "content")?.to_owned()
+                let (content, source_digest) = if operation == "write" || args.get("source_sha256").is_some() {
+                    (apply::string_field(args, "content")?.to_owned(), args["source_sha256"].as_str().map(str::to_owned))
                 } else {
                     apply::exact_fields(args, &["path", "edits"])?;
                     let (content, digest) =
                         workspace.read_utf8(path()?).map_err(|e| anyhow!("pi_no_effect:{}",e.code))?;
-                    source_digest = Some(digest);
-                    edited_content(&content, &args["edits"]).map_err(|e|anyhow!("pi_no_effect:{e}"))?
+                    let edited = edited_content(&content, &args["edits"]).map_err(|e|anyhow!("pi_no_effect:{e}"))?;
+                    (edited, Some(digest))
                 };
                 let intent = if let Some(digest) = source_digest {
                     plan_checked_edit(&workspace, path()?, &content, &digest).map_err(|e|anyhow!("pi_no_effect:{e}"))?
