@@ -7,11 +7,16 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { openGhostRuntime } from "../src/runtime.js";
 import { payloadDigest } from "../src/contract.js";
 import { createFakeProvider } from "./fake-provider.js";
+
+const fixtureRoots = new Set();
+after(async () => {
+  for (const root of fixtureRoots) await rm(root, { recursive: true, force: true });
+});
 
 function within(promise, milliseconds) {
   return new Promise((resolve, reject) => {
@@ -34,7 +39,7 @@ test(legacyAdmission
   const base = join(repo, ".lifetime-canary", "ghost-20261009T012047Z", "B6-tests", "crash");
   await mkdir(base, { recursive: true, mode: 0o700 });
   const root = await mkdtemp(join(base, "lost-tool-ack-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  fixtureRoots.add(root);
   const child = spawn(process.execPath, [fileURLToPath(new URL("./fixtures/pending-crash.mjs", import.meta.url)), root, ...(legacyAdmission ? [legacyMode] : [])], { stdio: ["ignore", "pipe", "pipe"] });
   let fixtureStderr = "";
   child.stderr.on("data", (chunk) => {

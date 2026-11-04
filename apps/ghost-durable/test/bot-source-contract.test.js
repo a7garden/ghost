@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,11 @@ import { openGhostRuntime } from '../src/runtime.js';
 import { createBrokerModelProvider } from '../src/models.js';
 import { createHostToolTransport } from '../src/host-transport.js';
 import { payloadDigest } from '../src/contract.js';
+
+const fixtureRoots = new Set();
+after(async () => {
+  for (const root of fixtureRoots) await rm(root, { recursive: true, force: true });
+});
 
 const reference=`bsc-${'a'.repeat(64)}`;
 const args={display_name:'Reusable labels',purpose:'Apply the accepted label procedure to new inputs',source_contract_ref:reference};
@@ -101,7 +106,8 @@ test('registered source schema preserves a cold legacy call while production Own
   const {createHash}=await import('node:crypto');
   const {DatabaseSync}=await import('node:sqlite');
   const fixture=await import('./fixtures/source-contract-call-crash.mjs');
-  const root=await mkdtemp(join(tmpdir(),'ghost-source-call-crash-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const root=await mkdtemp(join(tmpdir(),'ghost-source-call-crash-'));
+  fixtureRoots.add(root);
   const child=spawn(process.execPath,[fileURLToPath(new URL('./fixtures/source-contract-call-crash.mjs',import.meta.url)),'--child',root],{stdio:['ignore','pipe','pipe']});
   const exited=once(child,'exit');let stderr='';child.stderr.on('data',chunk=>{stderr=(stderr+chunk).slice(-4096);});
   t.after(async()=>{if(child.exitCode===null && child.signalCode===null){child.kill('SIGKILL');await exited;}});

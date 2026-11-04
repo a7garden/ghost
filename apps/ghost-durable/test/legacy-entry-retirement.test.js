@@ -6,9 +6,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// These fixtures use Node's module-loader hooks.
+const fixtureNode = process.versions.bun ? Bun.which("node") : process.execPath;
+assert.ok(fixtureNode, "The Node loader fixture requires a Node executable");
+
 const preload=fileURLToPath(new URL('./fixtures/legacy-entry-retirement-preload.mjs',import.meta.url));
 function invoke(root,args,input='UNREAD_INPUT_SENTINEL\n') {
-  return spawnSync(process.execPath,['--experimental-strip-types','--import',preload,...args],{
+  return spawnSync(fixtureNode,['--experimental-strip-types','--import',preload,...args],{
     cwd:root,timeout:5000,maxBuffer:65536,encoding:'utf8',input,
     env:{PATH:'/usr/bin:/bin',HOME:root,TMPDIR:root,NODE_DISABLE_COMPILE_CACHE:'1',
       GHOST_RETIRED_ENTRY_TRAP_ROOT:root,GHOST_OMP_SESSION_DIR:join(root,'never-read-session')},

@@ -18,7 +18,15 @@ const requirements = { display_name: 'Custom labels', purpose: 'Process new labe
 const frame = (command, body) => ({ protocol_version: 'ghost-lifetime/1', command_id: command, payload_digest: payloadDigest(body), actor_ref: 'ghost', authority_epoch: 1, expected_revision: null, correlation_id: command, body });
 
 async function scenario(t, { mode = 'create', variant = 'complete', onReady, root: rootOverride } = {}) {
-  const root = rootOverride ?? await mkdtemp(join(tmpdir(), 'ghost-creation-fulfillment-')); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = rootOverride ?? await mkdtemp(join(tmpdir(), 'ghost-creation-fulfillment-'));
+  const runtimes = [];
+  t.after(async () => {
+    try {
+      for (const opened of runtimes.reverse()) await opened.close();
+    } finally {
+      if (!rootOverride) await rm(root, { recursive: true, force: true });
+    }
+  });
   const callbacks = [], requests = [], diagnostics = [], runs = new Map(); let runtime, state = 'unprepared', cancelled = false, armed = false, terminalUnavailable = false;
   const descriptor = turn => ({ kind: 'ghost-bot-creation-descriptor/1', state: 'available', mode,
     turn_id: turn, ghost_id: 'ghost', conversation_id: 'conversation', source_contracts: mode === 'requirements' ? [] : [{ source_contract_ref: reference, source_work_id: 'source-work' }],
@@ -73,7 +81,7 @@ async function scenario(t, { mode = 'create', variant = 'complete', onReady, roo
       choices: [{ index: 0, message, finish_reason: action ? 'tool_calls' : 'stop' }] } };
   } });
   runtime = await openGhostRuntime({ root, mode: 'broker', modelProvider: provider, hostToolTransport: host, onDiagnostic: item => diagnostics.push(item) });
-  t.after(() => runtime?.close());
+  runtimes.push(runtime);
   if (onReady) {
     await runtime.handle(frame('preinspect', { method: 'conversation.inspect', ghost_id: 'ghost', conversation_id: 'conversation' }));
     await onReady(runtime, [...runtime.sessions.values()][0]);
@@ -83,7 +91,7 @@ async function scenario(t, { mode = 'create', variant = 'complete', onReady, roo
   assert.equal((await runtime.handle(input)).status, 'success'); await runtime.waitForIdle('ghost', 'conversation');
   const session = [...runtime.sessions.values()][0];
   const observation = (await session.controllerContext.creationFulfillment.observations('conversation'))[0];
-  return { runtime, session, callbacks, requests, diagnostics, runs, observation, input, root, provider, host,
+  return { runtime, runtimes, session, callbacks, requests, diagnostics, runs, observation, input, root, provider, host,
     restoreInspection: () => { terminalUnavailable = false; } };
 }
 
@@ -101,7 +109,8 @@ test('actual SDK completes source-ref and requirements creation after one premat
     assert.ok(raw.some(row => row.record.includes('The draft is ready. May I evaluate it?')), 'the original premature answer is immutable evidence');
     await s.runtime.handle(s.input); await s.runtime.waitForIdle('ghost', 'conversation'); assert.equal(s.requests.length, 5);
     await s.runtime.close();
-    const reopened = await openGhostRuntime({ root: s.root, mode: 'broker', modelProvider: s.provider, hostToolTransport: s.host }); t.after(() => reopened.close());
+    const reopened = await openGhostRuntime({ root: s.root, mode: 'broker', modelProvider: s.provider, hostToolTransport: s.host });
+    s.runtimes.push(reopened);
     await reopened.handle(frame('inspect-reopen', { method: 'conversation.inspect', ghost_id: 'ghost', conversation_id: 'conversation' }));
     const after = [...reopened.sessions.values()][0];
     for (const row of raw) assert.equal((await after.database.get('SELECT record FROM entries WHERE id=?', row.id)).record, row.record);
@@ -193,12 +202,21 @@ test('crash before the SDK yield boundary preserves one durable claimant and sam
   const { once } = await import('node:events');
   const { createInterface } = await import('node:readline');
   const { fileURLToPath } = await import('node:url');
-  const root = await mkdtemp(join(tmpdir(), 'ghost-creation-claim-crash-')); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await mkdtemp(join(tmpdir(), 'ghost-creation-claim-crash-'));
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--creation-claim-child', root], { stdio: ['ignore', 'pipe', 'pipe'] });
   const exited = once(child, 'exit'); let stderr = '';
   child.stderr.on('data', value => { stderr = (stderr + value).slice(-4096); });
-  t.after(async () => { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exited; } });
-  const lines = createInterface({ input: child.stdout }); t.after(() => lines.close());
+  const lines = createInterface({ input: child.stdout });
+  let runtime;
+  t.after(async () => {
+    try {
+      lines.close();
+      if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exited; }
+      await runtime?.close();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   const barrier = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(Error(`Claim barrier timed out: ${stderr}`)), 15000);
     lines.on('line', line => { try { const value = JSON.parse(line); if (value.stage === 'claim_before_sdk_commit') { clearTimeout(timer); resolve(value); } } catch {} });
@@ -222,7 +240,7 @@ test('crash before the SDK yield boundary preserves one durable claimant and sam
     requests.push(request); return { id: request.id, status: 200, body: { id: 'cold-yield', object: 'chat.completion', model: 'minimax-code/MiniMax-M2.7', created: 1,
       choices: [{ index: 0, message: { role: 'assistant', content: 'Draft remains incomplete.' }, finish_reason: 'stop' }] } };
   } });
-  const runtime = await openGhostRuntime({ root, mode: 'broker', modelProvider: provider, hostToolTransport: host }); t.after(() => runtime.close());
+  runtime = await openGhostRuntime({ root, mode: 'broker', modelProvider: provider, hostToolTransport: host });
   await runtime.handle(frame('cold-inspect', { method: 'conversation.inspect', ghost_id: 'ghost', conversation_id: 'conversation' }));
   const session = [...runtime.sessions.values()][0];
   const run = await session.index.get('SELECT * FROM ghost_canonical_turn_runs WHERE turn_id=?', 'create-turn');
