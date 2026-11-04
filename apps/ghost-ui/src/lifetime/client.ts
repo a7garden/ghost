@@ -83,8 +83,13 @@ class PersistedLifetimeClient implements LifetimeClient {
     const intent = canonicalJson({ body: commandBody, expected_revision: expectedRevision, actor_ref: this.identity.actor_ref, authority_epoch: this.identity.authority_epoch });
     const existing = this.activeIntents.get(intent);
     if (existing) return existing;
-    if (!readOnlyMethods.has(String(commandBody.method))) await this.ensureMutationAllowed();
-    const operation = this.requestIntent(commandBody, expectedRevision);
+    const artifactRead = commandBody.method === "work.artifact";
+    if (!artifactRead && !readOnlyMethods.has(String(commandBody.method))) await this.ensureMutationAllowed();
+    // The Host keeps artifact reads out of its receipt table. A failed read
+    // has no side effects and must not create a local request to reconcile.
+    const operation = artifactRead
+      ? createEnvelope(commandBody, this.identity, expectedRevision).then(envelope => this.transport.request(envelope)).then(parseLifetimeResponse)
+      : this.requestIntent(commandBody, expectedRevision);
     this.activeIntents.set(intent, operation);
     void operation.then(() => this.activeIntents.delete(intent), () => this.activeIntents.delete(intent));
     return operation;
@@ -109,6 +114,12 @@ class PersistedLifetimeClient implements LifetimeClient {
   async pendingCommands(): Promise<Envelope[]> {
     return this.serializeJournal(async () => (await this.readJournal()).commands
       .filter(command => command.envelope.actor_ref === this.identity.actor_ref && command.envelope.authority_epoch === this.identity.authority_epoch)
+      // A read still running in this client is not an uncertain write. Keep its
+      // journal entry, but don't let ordinary observation fence a new Owner
+      // action or appear as a request that needs recovery. Failed reads and
+      // reads owned by another client remain visible until reconciled.
+      .filter(command => !readOnlyMethods.has(String(command.envelope.body.method))
+        || !this.activeCommands.has(command.envelope.command_id))
       .map(command => structuredClone(command.envelope)));
   }
   async recoveryCommands(): Promise<LifetimeRecoveryCommand[]> {

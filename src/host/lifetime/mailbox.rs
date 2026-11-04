@@ -178,6 +178,14 @@ fn registry_ensure(tx: &Transaction<'_>, body: &Value) -> Result<Response> {
         if conversation_owner.is_some() {
             return Err(conflict("conversation is already bound to another Ghost"));
         }
+        if super::super::bots_provisioning::reserves_registry_identity(tx, ghost_id, conversation_id)? {
+            return Err(conflict("Ghost or conversation identity is reserved for bot provisioning"));
+        }
+        if super::db::binding(tx, conversation_id)?.is_some_and(|binding| {
+            binding.ghost_id != ghost_id || binding.runtime_kind != "pi-durable"
+        }) {
+            return Err(conflict("conversation is already bound to another Ghost or runtime"));
+        }
     }
 
     if kind == "primary" {

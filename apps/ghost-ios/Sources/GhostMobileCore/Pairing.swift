@@ -120,7 +120,8 @@ public enum PairingServiceTXT {
 // write capability. Arbitrary caller-chosen identifiers or a full owner
 // fallback are rejected before approval can move any state.
 public func validPairingScope(_ value: JSON) -> Bool {
-    guard case .object(let fields) = value, fields.count == 4,
+    guard case .object(let fields) = value,
+          Set(fields.keys) == Set(["kind", "ghost_ids", "conversation_ids", "capabilities"]) || Set(fields.keys) == Set(["kind", "ghost_ids", "conversation_ids", "capabilities", "targets"]),
           value["kind"].text == "lifetime",
           case .array(let ghostIDs) = value["ghost_ids"], !ghostIDs.isEmpty,
           case .array(let conversationIDs) = value["conversation_ids"], !conversationIDs.isEmpty,
@@ -133,12 +134,33 @@ public func validPairingScope(_ value: JSON) -> Bool {
         }
         return true
     }
-    return uniqueCanonicalUUIDs(ghostIDs)
+    let validBase = uniqueCanonicalUUIDs(ghostIDs)
         && uniqueCanonicalUUIDs(conversationIDs)
-        && Set(capabilities.map(\.text)).count == capabilities.count
+        && capabilities.count == 2 && Set(capabilities.map(\.text)).count == capabilities.count
         && capabilities.allSatisfy { !$0.text.isEmpty && $0.text.utf8.count <= 100 }
         && capabilities.contains(.string("lifetime.read"))
         && capabilities.contains(.string("lifetime.write"))
+    guard validBase else { return false }
+    guard fields["targets"] != nil else { return true } // Existing device receipts remain readable.
+    guard case .array(let targets) = value["targets"], !targets.isEmpty, targets.count <= 16 else { return false }
+    var pairs = Set<String>(), ghosts = Set<String>(), conversations = Set<String>()
+    for target in targets {
+        guard case .object(let fields) = target, Set(fields.keys) == Set(["ghost_id", "conversation_id"]),
+              uniqueCanonicalUUIDs([target["ghost_id"]]), uniqueCanonicalUUIDs([target["conversation_id"]]) else { return false }
+        let ghost = target["ghost_id"].text, conversation = target["conversation_id"].text
+        guard pairs.insert("\(ghost)/\(conversation)").inserted else { return false }
+        ghosts.insert(ghost); conversations.insert(conversation)
+    }
+    return ghosts.count == targets.count && conversations.count == targets.count
+        && ghosts == Set(ghostIDs.map(\.text)) && conversations == Set(conversationIDs.map(\.text))
+}
+
+/// Older grants use ID sets; new grants additionally bind each exact pair.
+public func lifetimeScopeAllowsPair(_ scope: JSON, ghostID: String, conversationID: String) -> Bool {
+    guard scope["ghost_ids"].items.contains(.string(ghostID)), scope["conversation_ids"].items.contains(.string(conversationID)) else { return false }
+    guard scope.dictionary["targets"] != nil else { return true }
+    guard case .array(let targets) = scope["targets"] else { return false }
+    return targets.contains { $0["ghost_id"].text == ghostID && $0["conversation_id"].text == conversationID }
 }
 
 // MARK: - Verification code derivation

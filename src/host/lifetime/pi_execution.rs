@@ -318,6 +318,22 @@ pub(crate) mod tests {
             .unwrap(),
             b"after"
         );
+        drop(state);
+        let read = envelope("owner", json!({
+            "method":"work.artifact",
+            "work_id":work.id,
+            "execution_id":work.execution_id,
+            "digest":artifact.digest,
+            "locator":artifact.locator
+        }));
+        let response = f.host.lifetime_action(&read).unwrap();
+        assert_eq!(response["result"]["status"], "success", "{response}");
+        let data = &response["result"]["data"];
+        assert_eq!(data["goal_id"], work.goal_id);
+        assert_eq!(data["goal_revision"], work.goal_revision);
+        assert_eq!(data["digest"], artifact.digest);
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        assert_eq!(STANDARD.decode(data["data"].as_str().unwrap()).unwrap(), b"after");
     }
     #[tokio::test]
     async fn pending_effect_blocks_replay_and_new_call_after_durable_reopen() {

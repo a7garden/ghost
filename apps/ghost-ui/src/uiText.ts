@@ -14,14 +14,16 @@ export const uiTerms = {
 } as const;
 
 export const routeLabels = {
-  home: '전체 보기',
+  home: '대시보드',
   settings: uiTerms.settings,
   inbox: uiTerms.inbox,
   work: uiTerms.work,
   together: uiTerms.collaboration,
   planner: '할 일과 일정',
-  integrations: '연동',
+  integrations: '확장',
+  providers: '프로바이더',
+  host: '호스트',
   spaces: '문서 공간',
-  ghosts: 'Ghost',
-  lifetime: '주 Ghost 대화',
+  ghosts: 'Ghosts',
+  lifetime: '대화',
 } as const;

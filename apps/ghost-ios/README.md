@@ -1,8 +1,10 @@
 # Ghost for iPhone
 
+2026-11-04 소스: 모든 Ghost를 같은 지속형 봇으로 다룬다. 상단에서 허용된 Ghost를 이름으로 전환하고 대화별 초안과 마지막 선택을 복원한다. **대화 · 맡긴 일 · 확인할 일**을 사용하며, 확인할 일에는 승인 질문과 결과 알림을 모은다. 새 QR 연결은 Owner가 선택한 정확한 Ghost·대화 쌍을 허용한다. 기존 기기 권한은 자동 확대하지 않는다. Telegram·Slack 없이 HTTPS Gateway로 직접 사용한다. [재설계 검증과 설치 범위](../../docs/dashboard-redesign-2026-11-04.md).
+
 2026-10-18: 기존 실제 iPhone 앱을 build6으로 업데이트했다. 대화 상단에서 모델·추론 수준을 바꾸고 대화 옵션에서 이미지를 만든다. 기본 Codex Luna/high, ZAI Coding Plan·MiniMax API 키는 Mac 설정에서 등록한다. 실제 대화·업무 수용 보고·원문 결과 문서와 Codex 같은 OAuth 이미지 표시를 확인했다. [제공자 계약](../../docs/registered-models-2026-10-18.md). Personal Team용 로컬 서명은 기존 APNs entitlement 원본과 별도이며 원격 push 수용을 뜻하지 않는다.
 
-SwiftUI 네이티브 앱. 현재 Lifetime 연결은 **대화 → 맡긴 일 → 알림**의 대화 우선 구조다. 연결된 주 Ghost에게 앱을 열자마자 말할 수 있고, 설정·처리 범위·복구 진단은 상단 버튼으로 연다. 기존 Owner 연결의 Ghost 목록 경로도 유지한다.
+SwiftUI 네이티브 앱. 현재 Lifetime 연결은 **대화 → 맡긴 일 → 확인할 일**의 대화 우선 구조다. 선택한 Ghost와 앱에서 바로 대화할 수 있고, 설정·처리 범위·복구 진단은 상단 버튼으로 연다. 기존 Owner 연결의 Ghost 목록 경로도 유지한다.
 같은 저장소의 `ghost-gateway`를 통해 기존 Rust host에 접속한다.
 
 ```sh
@@ -31,17 +33,16 @@ xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost \
 키체인 동작에는 시뮬레이터에서도 정상적인 ad-hoc 서명/entitlement가 필요하다.
 `CODE_SIGNING_ALLOWED=NO`는 컴파일 전용 확인에만 사용한다.
 
-휴대폰에는 서버 주소나 긴 연결 키를 입력하지 않는다. PC Ghost의 **연동 → 휴대폰 연결**
+휴대폰에는 서버 주소나 긴 연결 키를 입력하지 않는다. PC Ghost의 **확장 → 휴대폰 연결**
 화면에서 QR·연결 코드를 만들고, iPhone에서 **QR 코드로 연결**을 선택한다. 스캔한
 HTTPS 서버를 확인해 연결을 요청한 뒤, 양쪽의 6자리 확인 번호와 기기 이름이 같을
 때 PC에서 승인한다. 같은 LAN에서는 자동 검색된 서버를 선택해 `XXXX-XXXX` 코드로도
 요청할 수 있다. 다른 네트워크에서는 QR을 사용한다.
 
-서버는 휴대폰이 신뢰하는 HTTPS 인증서, 현재 실제 주 Ghost registry와 authority epoch,
+서버는 휴대폰이 신뢰하는 HTTPS 인증서, 현재 실제 Ghost registry와 authority epoch,
 기기 registry를 갖춰야 한다. [서버 설정](../../deploy/self-host/README.md)을 참고한다.
 QR·코드는 5분·1회용이며 기기 키를 포함하지 않는다. 휴대폰이 새 키를 먼저 Keychain에
-저장하고, PC 승인 전에는 기기 권한이 생성되지 않는다. 새 연결의 기본 권한은 주 Ghost
-1개·해당 대화의 `lifetime.read`/`lifetime.write`다. 기존에 저장한 Owner 연결은 유지한다.
+저장하고, PC 승인 전에는 기기 권한이 생성되지 않는다. 새 연결은 Owner가 선택한 Ghost·대화 쌍의 `lifetime.read`/`lifetime.write`만 갖는다. 최대 16개를 선택할 수 있으며 기본 Ghost는 처음 선택값일 뿐이다. 기존에 저장한 Owner 연결은 유지한다.
 카메라·로컬 네트워크 권한은 iOS에서 직접 확인한다. TLS·권한 검증을 우회하지 않는다.
 
 음성 통화는 네이티브 WebRTC(libwebrtc)와 CallKit으로 진행된다. gateway가 알린
@@ -80,7 +81,7 @@ xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost \
   -derivedDataPath /tmp/ghost-ios-build CODE_SIGN_IDENTITY=- test
 ```
 
-UI 테스트는 `--ui-testing`(기존 Owner 경로)와 `--ui-testing-lifetime`(현재 주 Ghost 경로)의 Debug 전용 fixture를 사용한다. Lifetime fixture는 예약된 `.invalid` 호스트를 URLProtocol로 처리하고 실제 네트워크와 변경 요청을 거부한다. `--review-width=320|375|414|768`은 네이티브 레이아웃 검토 전용이다. 실제 연결 키와 서버를
+UI 테스트는 `--ui-testing`(기존 Owner 경로)와 `--ui-testing-lifetime`(정본 Ghost 대화 경로)의 Debug 전용 fixture를 사용한다. Lifetime fixture는 예약된 `.invalid` 호스트를 URLProtocol로 처리하고 실제 네트워크와 변경 요청을 거부한다. `--review-width=320|375|414|768`은 네이티브 레이아웃 검토 전용이다. 실제 연결 키와 서버를
 사용하지 않고 별도 테스트 초안 디렉터리를 쓴다. Telegram 소스 참조와 적용 범위는
 [개선 기록](../../docs/telegram-ios-reference-2026-10-03.md)에 정리했다.
 

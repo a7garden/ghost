@@ -71,6 +71,61 @@ test('native route blocks revoked response bytes and does not retry failed netwo
  }
 });
 
+test('native provider errors retain the HTTP status but redact reflected credentials from the stream', async () => {
+  const streamedText = 'Text before failure';
+  const assertSafePartial = partial => {
+    assert.equal(Object.hasOwn(partial, 'errorMessage'), false);
+    assert.equal(Object.hasOwn(partial, 'rawStopReason'), false);
+    assert.doesNotMatch(JSON.stringify(partial), /unit-test-provider-key/);
+  };
+  for (const kind of ['http', 'response.failed', 'error']) {
+    const f = await fixture('zai-coding', async (_url, options) => {
+      const reflected = options.headers.authorization;
+      if (kind === 'http') {
+        return Response.json({ error: { message: reflected } }, { status: 401 });
+      }
+      const failure = kind === 'response.failed'
+        ? { type: kind, response: { status: reflected, error: { code: 'fixture_error', message: reflected } } }
+        : { type: kind, code: 'fixture_error', message: reflected };
+      const frames = [
+        { type: 'response.created', response: { id: 'resp_test' } },
+        { type: 'response.output_item.added', output_index: 0, item: { ...textItem, content: [] } },
+        { type: 'response.output_text.delta', output_index: 0, delta: streamedText },
+        failure,
+      ];
+      return new Response(frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join(''), {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    });
+    try {
+      const stream = f.bound.models.stream(f.model, context, f.bound.streamOptions);
+      const observed = [];
+      for await (const event of stream) {
+        if (event.partial) assertSafePartial(event.partial);
+        observed.push(event);
+      }
+      const message = await stream.result();
+      assert.equal(message.stopReason, 'error');
+      assert.equal(message.errorMessage, kind === 'http'
+        ? 'Native provider returned HTTP 401.'
+        : 'Native provider request failed.');
+      assert.deepEqual(message.content, []);
+      if (kind !== 'http') {
+        const delta = observed.find(event => event.type === 'text_delta');
+        assert.equal(delta?.delta, streamedText);
+        assert.deepEqual(delta.partial.content, [{ type: 'text', text: streamedText }]);
+      }
+      for (const { partial } of observed) {
+        if (partial) assertSafePartial(partial);
+      }
+      assert.doesNotMatch(JSON.stringify(observed), /unit-test-provider-key/);
+      assert.equal(f.state.calls, 1);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
 test('native route propagates cancellation without retrying or substituting another model',async()=>{
  const controller=new AbortController();
  const f=await fixture('minimax',async(_url,options)=>new Promise((_resolve,reject)=>{options.signal.addEventListener('abort',()=>reject(new DOMException('cancelled','AbortError')),{once:true});controller.abort();}));

@@ -1,14 +1,14 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
-import { Check, ChevronDown, Inbox, Layers, MessageCircle, PackagePlus, Palette, Plus } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, Home, Inbox, Layers, LayoutList, MessageCircle, PackagePlus, Palette, Plus } from 'lucide-react';
 import { DotAvatar, GhostMark, type PortraitAppearance } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { useProfileAvatar } from '../pets/AvatarProvider';
 import { GhostColorPicker } from '../pets/GhostColorPicker';
 import { toneFor, type Profile } from '../client/types';
-import { ghostPath, portraitColors, uploadPackage, type PackageInfo } from './PackageWorkspace';
+import { portraitColors, uploadPackage, type PackageInfo } from './PackageWorkspace';
 
-export function GhostSwitcher({ profiles, selected, onSelect, onAdd, onImport, onPortrait }: {
-  profiles: Profile[]; selected?: Profile; onSelect(id: string): void;
+export function GhostSwitcher({ profiles, selected, defaultGhostId, onSelect, onAdd, onImport, onPortrait }: {
+  profiles: Profile[]; selected?: Profile; defaultGhostId?: string | null; onSelect(id: string): void;
   onAdd(): void; onImport(): void; onPortrait(): void;
 }) {
   const [open, setOpen] = useState(false);
@@ -60,6 +60,7 @@ export function GhostSwitcher({ profiles, selected, onSelect, onAdd, onImport, o
       <span key={selected?.id ?? 'default'} className="ghost-switcher-identity">
         {selected ? <DotAvatar profileId={selected.id} tone={toneFor(selected.id)} size={28}/> : <GhostMark/>}
         <span>{selected?.name ?? 'Ghost'}</span>
+        {selected && selected.id === defaultGhostId && <span className="ghost-default-badge">기본</span>}
       </span>
       <ChevronDown className="ghost-switcher-chevron" size={14}/>
     </button>
@@ -67,6 +68,7 @@ export function GhostSwitcher({ profiles, selected, onSelect, onAdd, onImport, o
       <div className="ghost-switcher-list">{profiles.map(profile =>
         <button key={profile.id} className="nav-row" aria-current={selected?.id === profile.id ? 'true' : undefined} onClick={() => choose(() => onSelect(profile.id))}>
           <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={24}/><span>{profile.name}</span>
+          {profile.id === defaultGhostId && <span className="ghost-default-badge">기본</span>}
           {selected?.id === profile.id && <Check className="ghost-switcher-check" size={14} aria-hidden="true"/>}
         </button>)}</div>
       <div className="ghost-switcher-actions">
@@ -75,6 +77,21 @@ export function GhostSwitcher({ profiles, selected, onSelect, onAdd, onImport, o
         <button className="nav-row" onClick={() => choose(onAdd)}><Plus size={16}/>새 Ghost 만들기</button>
       </div>
     </div>}
+  </div>;
+}
+
+export function GhostDirectory({ profiles, defaultGhostId, onOpen, onAdd }: {
+  profiles: Profile[]; defaultGhostId?: string | null; onOpen(id: string): void; onAdd(): void;
+}) {
+  return <div className="page-content ghost-directory">
+    <div className="page-heading"><h1>Ghosts</h1><button className="button primary" onClick={onAdd}><Plus size={15}/>새 Ghost</button></div>
+    {profiles.length === 0 ? <section className="empty-state large-empty"><GhostMark/><h2>아직 Ghost가 없습니다</h2><button className="button primary" onClick={onAdd}>새 Ghost 만들기<Plus size={15}/></button></section>
+      : <div className="ghost-directory-list" aria-label="Ghost 목록">{profiles.map(profile => <article className="ghost-directory-row" key={profile.id}>
+        <div className="ghost-directory-identity"><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={42}/>
+          <span><strong>{profile.name}{profile.id === defaultGhostId && <span className="ghost-default-badge">기본</span>}</strong><small>{profile.persona}</small></span>
+        </div>
+        <button className="button secondary" aria-label={`${profile.name} 대화 열기`} onClick={() => onOpen(profile.id)}>대화 열기<ArrowRight size={14}/></button>
+      </article>)}</div>}
   </div>;
 }
 
@@ -151,15 +168,19 @@ export function PortraitPicker({ profile, appearance, choices, defaults, onSelec
   </Modal>;
 }
 
-export function MobileGhostTabs({ ghostId, hasViews, active, onNavigate, onWorkspace }: {
-  ghostId: string; hasViews: boolean; active: 'chat' | 'workspace' | 'inbox' | undefined;
-  onNavigate(path: string): void; onWorkspace(): void;
+export function MobilePrimaryTabs({ selectedGhostId, hasViews, active, workPath, onNavigate, onChat, onWorkspace }: {
+  selectedGhostId?: string; hasViews: boolean; active: 'home' | 'chat' | 'work' | 'inbox' | 'workspace' | undefined;
+  workPath: string;
+  onNavigate(path: string): void; onChat(): void; onWorkspace(): void;
 }) {
-  const activeIndex = active === 'workspace' ? 1 : active === 'inbox' ? (hasViews ? 2 : 1) : 0;
-  const style = { '--ghost-tab-count': hasViews ? 3 : 2, '--ghost-tab-active': activeIndex } as CSSProperties;
-  return <nav className="mobile-ghost-tabs" style={style} data-active={Boolean(active)} aria-label="Ghost 화면">
-    <button aria-current={active === 'chat' ? 'page' : undefined} onClick={() => onNavigate(ghostPath(ghostId))}><MessageCircle size={20}/>대화</button>
-    {hasViews && <button aria-current={active === 'workspace' ? 'page' : undefined} onClick={onWorkspace}><Layers size={20}/>작업실</button>}
-    <button aria-current={active === 'inbox' ? 'page' : undefined} onClick={() => onNavigate('/inbox')}><Inbox size={20}/>확인할 일</button>
+  const count = 4 + Number(hasViews);
+  const activeIndex = active === 'home' ? 0 : active === 'chat' ? 1 : active === 'work' ? 2 : active === 'inbox' ? 3 : 4;
+  const style = { '--mobile-tab-count': count, '--mobile-tab-active': activeIndex } as CSSProperties;
+  return <nav className="mobile-primary-tabs" style={style} data-active={Boolean(active)} aria-label="기본 메뉴">
+    <button aria-current={active === 'home' ? 'page' : undefined} onClick={() => onNavigate('/')}><Home size={18}/><span>홈</span></button>
+    <button aria-current={active === 'chat' ? 'page' : undefined} disabled={!selectedGhostId} onClick={onChat}><MessageCircle size={18}/><span>대화</span></button>
+    <button aria-current={active === 'work' ? 'page' : undefined} onClick={() => onNavigate(workPath)}><LayoutList size={18}/><span>작업</span></button>
+    <button aria-current={active === 'inbox' ? 'page' : undefined} onClick={() => onNavigate('/inbox')}><Inbox size={18}/><span>확인</span></button>
+    {hasViews && <button aria-current={active === 'workspace' ? 'page' : undefined} onClick={onWorkspace}><Layers size={18}/><span>작업실</span></button>}
   </nav>;
 }

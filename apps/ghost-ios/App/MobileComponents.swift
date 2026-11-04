@@ -95,14 +95,14 @@ struct GhostStatusBadge: View {
             .background(GhostStyle.under, in: Capsule())
             .fixedSize(horizontal: false, vertical: true)
     }
-    private var isIssue: Bool { ["failed", "unknown", "effect_unknown", "blocked"].contains(state) }
+    private var isIssue: Bool { ["failed", "unknown", "effect_unknown", "blocked", "rejected", "waiting_owner"].contains(state) }
     private var title: String {
         switch state {
         case "accepted": "확인 완료"
-        case "completed", "complete": "결과 도착"
+        case "completed", "complete": "실행 종료 · 검수 전"
         case "running", "submitted": "진행 중"
         case "queued", "open": "대기 중"
-        case "failed": "확인 필요"
+        case "failed", "rejected", "waiting_owner": "확인 필요"
         case "cancelled", "stopped": "중지됨"
         case "stale": "이전 요청"
         case "unknown", "effect_unknown": "결과 확인 필요"

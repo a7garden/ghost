@@ -22,10 +22,10 @@ function scope({ ghostIDs = [voiceMedia.ghostID], conversationIDs = [voiceMedia.
   return { kind: 'lifetime', ghost_ids: ghostIDs, conversation_ids: conversationIDs, capabilities };
 }
 
-async function fixture(t, { voice = voiceMedia, scoped = false, capabilities, fetchMedia, fetchHost } = {}) {
+async function fixture(t, { voice = voiceMedia, scoped = false, deviceScope, capabilities, fetchMedia, fetchHost } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'ghost-voice-media-'));
   const devices = join(dir, 'devices.json');
-  const device = await issueDevice(devices, 'Test phone', scoped ? scope({ capabilities }) : undefined);
+  const device = await issueDevice(devices, 'Test phone', deviceScope ?? (scoped ? scope({ capabilities }) : undefined));
   const dispatchedMedia = [];
   const server = createGateway({
     root: dir, devices, origin: 'https://ghost.example', lifetimeAuthorityEpoch: 1,
@@ -161,6 +161,21 @@ test('bootstrap advertises the media pair only to allowed devices', async t => {
     request_.on('error', reject); request_.end();
   });
   assert.equal(JSON.parse(req.data).voice_media, null);
+});
+
+test('voice authorizes the second exact pair but never a crossed combination of granted IDs', async t => {
+  const otherGhost = randomUUID(), otherConversation = randomUUID();
+  const pairs = { ...scope({ ghostIDs: [otherGhost, voiceMedia.ghostID], conversationIDs: [otherConversation, voiceMedia.conversationID] }), targets: [
+    { ghost_id: otherGhost, conversation_id: otherConversation },
+    { ghost_id: voiceMedia.ghostID, conversation_id: voiceMedia.conversationID },
+  ] };
+  const allowed = await fixture(t, { deviceScope: pairs });
+  assert.equal((await allowed.call('/mobile/v1/voice/offer', { headers: jsonHeaders, body: offerBody })).status, 200);
+  const crossed = await fixture(t, { deviceScope: pairs, voice: { ...voiceMedia, conversationID: otherConversation } });
+  assert.equal(JSON.parse((await crossed.call('/mobile/v1/bootstrap', { method: 'GET' })).data).voice_media, null);
+  assert.equal((await crossed.call('/mobile/v1/voice/offer', { headers: jsonHeaders, body: offerBody })).status, 403);
+  assert.equal((await crossed.call('/mobile/v1/voice/sessions/pc%231/hangup')).status, 403);
+  assert.equal(crossed.dispatchedMedia.length, 0);
 });
 
 test('ICE candidates are validated and opaque pc identifiers stay encoded', async t => {

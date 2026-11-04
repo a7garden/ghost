@@ -12,6 +12,7 @@ import { constants } from 'node:fs';
 import { connect as connectH2 } from 'node:http2';
 import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { scopeHasPair } from './devices.mjs';
 
 const HEX = /^[0-9a-f]{32,128}$/;
 const MAX_NOTIFICATIONS_PER_RECIPIENT = 100;
@@ -383,8 +384,7 @@ export function createNotificationOutbox({
             if (current.apns?.environment !== config.environment || !HEX.test(current.apns.token)) continue;
             if (current.scope) {
               if (!current.scope.capabilities.includes('lifetime.read')) continue;
-              if (!current.scope.ghost_ids.includes(ghost)) continue;
-              if (!current.scope.conversation_ids.includes(notification.conversation_id)) continue;
+              if (!scopeHasPair(current.scope, ghost, notification.conversation_id)) continue;
             }
             const tokenHash = tokenFingerprint(current.apns.token);
             const target = journal.target(entry, current.id, tokenHash);

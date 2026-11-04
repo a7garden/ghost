@@ -143,6 +143,9 @@ async fn mcp_stdio_scope_pagination_persistence_and_uncertain_effects() {
         .await
         .unwrap();
     assert_eq!(checked["tools"].as_array().unwrap().len(), 2);
+    let integration = || app.snapshot().unwrap()["integrations"][0].clone();
+    assert_eq!(integration()["tools"], checked["tools"]);
+    assert!(integration()["checked_ms"].is_null());
     for n in 1..=2 {
         let value = integrations::run(
             &app,
@@ -155,6 +158,17 @@ async fn mcp_stdio_scope_pagination_persistence_and_uncertain_effects() {
         .unwrap();
         assert_eq!(value["content"][0]["text"], n.to_string());
     }
+    assert!(integration()["checked_ms"].is_null());
+    let check_action = serde_json::from_value(json!({
+        "request_id": uuid::Uuid::new_v4().to_string(),
+        "command": {"type":"workspace","action":{"type":"check_integration","id":id}}
+    }))
+    .unwrap();
+    let checked = result(app.action_async(check_action).await.unwrap());
+    assert_eq!(checked["tools"].as_array().unwrap().len(), 2);
+    let last_checked = integration()["checked_ms"].clone();
+    assert!(last_checked.is_u64());
+    assert!(integration()["error"].is_null());
     let session = app.lock().unwrap().profiles[&owner_id]
         .runtime
         .session
@@ -180,6 +194,8 @@ async fn mcp_stdio_scope_pagination_persistence_and_uncertain_effects() {
     assert!(!plan.replay_safe);
     let output = bridge.execute(&task, &call, &plan).await.unwrap();
     assert_eq!(output.status, ToolStatus::Uncertain);
+    assert_eq!(integration()["checked_ms"], last_checked);
+    assert!(integration()["error"].is_null());
     result(owner(
         &app,
         json!({"type":"save_integration","id":id,"version":1,"integration":{"name":"Fixture","transport":fixture(),"profiles":[owner_id],"enabled":false}}),
@@ -319,8 +335,12 @@ async fn integration_settings_validate_endpoints_and_keep_env_references_only() 
         .await
         .unwrap_err();
     assert!(failure.to_string().contains("GHOST_TEST_MISSING_MCP_TOKEN"));
+    let snapshot = app.snapshot().unwrap();
+    let integration = &snapshot["integrations"][0];
+    assert!(integration["checked_ms"].is_u64());
+    assert_eq!(integration["error"], failure.to_string());
     assert_eq!(
-        app.snapshot().unwrap()["integrations"][0]["transport"]["bearer_env"],
+        integration["transport"]["bearer_env"],
         "GHOST_TEST_MISSING_MCP_TOKEN"
     );
     app.shutdown().await.unwrap();

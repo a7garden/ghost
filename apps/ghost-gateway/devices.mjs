@@ -8,6 +8,24 @@ const hash = token => createHash('sha256').update(token).digest('hex');
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const lifetimeCapabilities = new Set(['lifetime.read', 'lifetime.write']);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const canonicalUuid = value => typeof value === 'string' && value === value.toLowerCase() && uuidPattern.test(value);
+const MAX_PAIR_TARGETS = 16;
+
+export function validPairTargets(targets) {
+  return Array.isArray(targets) && targets.length > 0 && targets.length <= MAX_PAIR_TARGETS
+    && targets.every(pair => isRecord(pair) && Object.keys(pair).length === 2
+      && canonicalUuid(pair.ghost_id) && canonicalUuid(pair.conversation_id))
+    && new Set(targets.map(pair => pair.ghost_id)).size === targets.length
+    && new Set(targets.map(pair => pair.conversation_id)).size === targets.length;
+}
+
+export function scopeHasPair(scope, ghostId, conversationId) {
+  if (scope.targets !== undefined) {
+    return scope.targets.some(pair => pair.ghost_id === ghostId && pair.conversation_id === conversationId);
+  }
+  // Existing device grants predate exact pairs and keep their saved semantics.
+  return scopeHasLegacyIds(scope, ghostId, conversationId);
+}
 
 // APNs device tokens are opaque hex strings; the registry never sees push
 // content, only the address Apple assigned to this installation.
@@ -22,9 +40,11 @@ function validApns(apns) {
 
 export function validScope(scope) {
   if (!isRecord(scope)) return false;
-  const keys = Object.keys(scope);
-  return keys.length === 4
-    && ['kind', 'ghost_ids', 'conversation_ids', 'capabilities'].every(key => Object.prototype.hasOwnProperty.call(scope, key))
+  const fields = ['kind', 'ghost_ids', 'conversation_ids', 'capabilities'];
+  const hasTargets = Object.hasOwn(scope, 'targets');
+  if (hasTargets) fields.push('targets');
+  return Object.keys(scope).length === fields.length
+    && fields.every(key => Object.hasOwn(scope, key))
     && scope.kind === 'lifetime'
     && Array.isArray(scope.ghost_ids) && scope.ghost_ids.length > 0
     && scope.ghost_ids.every(id => typeof id === 'string' && uuidPattern.test(id))
@@ -34,7 +54,14 @@ export function validScope(scope) {
     && new Set(scope.conversation_ids).size === scope.conversation_ids.length
     && Array.isArray(scope.capabilities) && scope.capabilities.length > 0
     && scope.capabilities.every(capability => lifetimeCapabilities.has(capability))
-    && new Set(scope.capabilities).size === scope.capabilities.length;
+    && new Set(scope.capabilities).size === scope.capabilities.length
+    && (!hasTargets || (validPairTargets(scope.targets)
+      && scope.targets.length === scope.ghost_ids.length && scope.targets.length === scope.conversation_ids.length
+      && scope.targets.every(pair => scopeHasLegacyIds(scope, pair.ghost_id, pair.conversation_id))));
+}
+
+function scopeHasLegacyIds(scope, ghostId, conversationId) {
+  return scope.ghost_ids.includes(ghostId) && scope.conversation_ids.includes(conversationId);
 }
 
 function validMediaBinding(binding) {

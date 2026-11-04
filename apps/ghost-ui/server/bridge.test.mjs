@@ -193,12 +193,17 @@ test('phone pairing refuses foreign origins, missing CSRF and arbitrary route ta
   assert.equal(unauthorized.status, 403);
   assert.equal(foreign.status, 403);
   assert.equal(arbitrary.status, 404);
+  assert.equal((await fetch(`${ui.origin}/ghost-api/mobile/targets`)).status, 403);
+  assert.equal((await fetch(`${ui.origin}/ghost-api/mobile/targets?path=/pairing/invitations`, { headers })).status, 404);
+  assert.equal((await fetch(`${ui.origin}/ghost-api/mobile/targets`, { method: 'POST', headers, body })).status, 404);
   assert.equal(requests.length, 0);
 });
 
-test('authenticated pairing admits a real bounded invitation through the strict proxy Host guard', async t => {
-  const primary = { ghost_id: randomUUID(), conversation_id: randomUUID(), kind: 'primary', mode: 'active' };
-  const existing = await fixture(t, { registryRows: [primary] });
+test('authenticated pairing reads active targets and admits exact pairs through the strict proxy Host guard', async t => {
+  const primary = { ghost_id: randomUUID(), conversation_id: randomUUID(), kind: 'primary', mode: 'active', roles: ['coordination'] };
+  const specialist = { ghost_id: randomUUID(), conversation_id: randomUUID(), kind: 'specialist', mode: 'active', roles: ['research'] };
+  const draining = { ghost_id: randomUUID(), conversation_id: randomUUID(), kind: 'specialist', mode: 'draining', roles: ['research'] };
+  const existing = await fixture(t, { registryRows: [primary, specialist, draining] });
   const devices = join(existing.root, 'devices.json');
   const gateway = createGateway({
     root: existing.root, devices, origin: 'https://ghost.example', lifetimeAuthorityEpoch: 1,
@@ -210,20 +215,27 @@ test('authenticated pairing admits a real bounded invitation through the strict 
   }));
   t.after(async () => { await stop(ui.server); await stop(gateway); });
   const bootstrap = await fetch(`${ui.origin}/ghost-api/bootstrap`).then(response => response.json());
+  const headers = { Origin: ui.origin, 'Content-Type': 'application/json', 'X-Ghost-UI-CSRF': bootstrap.csrf };
+  const catalog = await fetch(`${ui.origin}/ghost-api/mobile/targets`, { headers });
+  assert.equal(catalog.status, 200);
+  const { targets: available } = await catalog.json();
+  assert.deepEqual(new Set(available.map(row => row.ghost_id)), new Set([primary.ghost_id, specialist.ghost_id]));
+  const targets = [primary, specialist].map(({ ghost_id, conversation_id }) => ({ ghost_id, conversation_id }));
   const timestamp = Date.now().toString(16).padStart(12, '0'), random = randomUUID().split('-');
   const request_id = `${timestamp.slice(0, 8)}-${timestamp.slice(8)}-7${random[2].slice(1)}-${random[3]}-${random[4]}`;
   const response = await fetch(`${ui.origin}/ghost-api/mobile/invitations`, {
     method: 'POST',
-    headers: { Origin: ui.origin, 'Content-Type': 'application/json', 'X-Ghost-UI-CSRF': bootstrap.csrf },
-    body: JSON.stringify({ request_id, code_digest: 'c'.repeat(64), ticket_digest: 'd'.repeat(64) }),
+    headers,
+    body: JSON.stringify({ request_id, code_digest: 'c'.repeat(64), ticket_digest: 'd'.repeat(64), targets }),
   });
   assert.equal(response.status, 200);
   const invitation = await response.json();
   assert.equal(invitation.status, 'open');
-  assert.deepEqual(invitation.scope, {
-    kind: 'lifetime', ghost_ids: [primary.ghost_id], conversation_ids: [primary.conversation_id],
-    capabilities: ['lifetime.read', 'lifetime.write'],
-  });
+  assert.equal(invitation.scope.kind, 'lifetime');
+  assert.deepEqual(new Set(invitation.scope.ghost_ids), new Set(targets.map(pair => pair.ghost_id)));
+  assert.deepEqual(new Set(invitation.scope.conversation_ids), new Set(targets.map(pair => pair.conversation_id)));
+  assert.deepEqual(new Set(invitation.scope.targets.map(pair => JSON.stringify(pair))), new Set(targets.map(pair => JSON.stringify(pair))));
+  assert.deepEqual(invitation.scope.capabilities, ['lifetime.read', 'lifetime.write']);
   const durable = JSON.parse(await readFile(devices, 'utf8'));
   assert.equal(durable.devices.length, 0);
   assert.equal(durable.pairing.invitations.find(row => row.invitation_id === request_id)?.status, 'open');

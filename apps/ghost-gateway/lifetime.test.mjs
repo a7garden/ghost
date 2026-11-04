@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
@@ -20,6 +20,15 @@ function allowedScope(capabilities = ['lifetime.read', 'lifetime.write'], paired
       : ['11111111-1111-7111-8111-111111111111'],
     capabilities,
   };
+}
+
+function exactScope() {
+  const scope = allowedScope(undefined, true);
+  return { ...scope, targets: scope.ghost_ids.map((ghost_id, index) => ({ ghost_id, conversation_id: scope.conversation_ids[index] })) };
+}
+
+function registryFor(scope) {
+  return scope.targets.map((target, index) => ({ ...target, kind: index === 0 ? 'primary' : 'specialist', roles: [], mode: 'active' }));
 }
 
 function snapshotFor(scope) {
@@ -100,7 +109,7 @@ async function fixture(t, {
   scope, snapshotData, fetchHost, registryEntries, conversationInputNoEffect = false,
   conversationPageData, conversationTurnRun, conversationCancelRun, conversationTurnNotFound = false,
   lifetimeAuthorityEpoch = 1, hostAuthorityEpoch, dispatchEnabled = true,
-  workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', inferenceData,
+  workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', inferenceData, computerAction,
 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'ghost-lifetime-'));
   const devices = join(dir, 'devices.json');
@@ -123,6 +132,9 @@ async function fixture(t, {
     dispatched.push({ url, options, payload });
     if (target === '/api/v1/snapshot' && options.method === 'GET') return Response.json(ownerSnapshot);
     if (target === '/api/v1/inference/settings' && inferenceData) return Response.json(inferenceData);
+    if (payload?.command?.action?.type === 'computer' && computerAction) {
+      return Response.json({ ok: true, result: computerAction(payload.command.action) });
+    }
     const envelope = payload?.command?.envelope;
     if (envelope?.body?.method === 'registry.inspect') return Response.json({ ok: true, result: response({ registry: fixtureRegistry }) });
     if (envelope?.body?.method === 'conversation.inspect') {
@@ -636,6 +648,71 @@ test('command.inspect suppresses a found receipt with foreign scoped data', asyn
   assert.equal(JSON.stringify(body).includes('FOREIGN_RECEIPT_SECRET'), false);
 });
 
+test('command.inspect returns the second peer receipt and suppresses a forged cross-pair binding', async t => {
+  const scope = exactScope();
+  const snapshotData = snapshotFor(scope);
+  const [primary, peer] = scope.targets;
+  const peerGoal = { ...snapshotData.snapshot.goals[0], id: randomUUID(), accountable_ghost: peer.ghost_id, reply_conversation: peer.conversation_id };
+  const crossedGoal = { ...peerGoal, id: randomUUID(), reply_conversation: primary.conversation_id, prompt: 'CROSS_PAIR_SECRET' };
+  snapshotData.snapshot.goals.push(peerGoal, crossedGoal);
+  snapshotData.snapshot.bindings.push({ ...snapshotData.snapshot.bindings[1], conversation_id: primary.conversation_id });
+  let returnedGoal = peerGoal;
+  const f = await fixture(t, {
+    scope,
+    fetchHost: async (_url, options) => {
+      if (options.method === 'GET') return Response.json({
+        workspace_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        lifetime_authority: { authority_epoch: 1, dispatch_enabled: true },
+      });
+      const { command: { envelope } } = JSON.parse(Buffer.from(options.body).toString('utf8'));
+      if (envelope.body.method === 'snapshot') return Response.json({ ok: true, result: response(snapshotData.snapshot) });
+      const stored = { ...response({ goal: returnedGoal }), object_refs: [returnedGoal.id] };
+      return Response.json({ ok: true, result: response({ command_id: envelope.body.command_id, found: true, authority_epoch: 1, response: stored }) });
+    },
+  });
+  const inspect = () => callLifetime(f, { method: 'command.inspect', command_id: randomUUID() });
+  const allowed = await inspect();
+  assert.equal(JSON.parse(allowed.result.body).result.data.response.data.goal.id, peerGoal.id);
+  returnedGoal = crossedGoal;
+  const denied = await inspect();
+  assert.equal(JSON.parse(denied.result.body).result.error_code, 'receipt_scope_denied');
+  assert.ok(!denied.result.body.includes('CROSS_PAIR_SECRET'));
+});
+
+test('owner questions, decisions and lifecycle use the second exact registered pair', async t => {
+  const scope = exactScope(), registryEntries = registryFor(scope);
+  const [primary, peer] = scope.targets;
+  const snapshotData = snapshotFor(scope);
+  Object.assign(snapshotData.snapshot.goals[0], { accountable_ghost: peer.ghost_id, reply_conversation: peer.conversation_id });
+  snapshotData.snapshot.work[0].owner = peer.ghost_id;
+  const question = {
+    action_id: `ba-${randomUUID()}`, computer_id: 'fixture-computer', execution_id: 'worker:exec-allowed',
+    arguments_digest: 'a'.repeat(64), requested_epoch: 1, state: 'pending', approved_by: null,
+    detail: { operation: 'click', url: 'https://example.test/private', snapshot_id: 3, profile_scope: 'private', authority_epoch: 1 },
+  };
+  const f = await fixture(t, { scope, snapshotData, registryEntries, computerAction: command => {
+    if (command.verb === 'pending_browser_actions') return command.profile_id === peer.ghost_id ? [question] : [];
+    return { action: {}, wake: {} };
+  } });
+  const decide = () => f.call('/mobile/v1/lifetime/questions/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    ghost_id: peer.ghost_id, action_id: question.action_id, decision: 'approve', execution_id: question.execution_id,
+    arguments_digest: question.arguments_digest, snapshot_id: question.detail.snapshot_id, requested_epoch: 1, url: question.detail.url,
+  }) });
+  const lifecycle = () => f.call('/mobile/v1/lifetime/computer/lifecycle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ghost_id: peer.ghost_id, operation: 'stop' }) });
+  const questions = await f.call('/mobile/v1/lifetime/questions');
+  assert.deepEqual(JSON.parse(questions.body).questions.map(item => item.ghost_id), [peer.ghost_id]);
+  assert.equal((await decide()).status, 200);
+  assert.equal((await lifecycle()).status, 200);
+  registryEntries[0].conversation_id = peer.conversation_id;
+  registryEntries[1].conversation_id = primary.conversation_id;
+  const crossedQuestions = await f.call('/mobile/v1/lifetime/questions');
+  assert.deepEqual(JSON.parse(crossedQuestions.body).questions, []);
+  assert.equal((await decide()).status, 403);
+  assert.equal((await lifecycle()).status, 403);
+  assert.deepEqual(f.dispatched.filter(item => item.payload?.command?.action?.type === 'computer')
+    .map(item => item.payload.command.action.verb), ['pending_browser_actions', 'pending_browser_actions', 'pending_browser_actions', 'approve_browser_action', 'stop']);
+});
+
 test('dispatch-disabled Host metadata preserves reads and rejects mutations', async t => {
   const scope = allowedScope();
   const f = await fixture(t, { scope, dispatchEnabled: false });
@@ -1042,4 +1119,36 @@ test('read-only phone cannot change providers or start image generation',async t
  const f=await fixture(t,{scope:allowedScope(['lifetime.read'])});
  for(const path of ['/mobile/v1/inference/settings','/mobile/v1/inference/images']){assert.equal((await f.call(path,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,403);}
  assert.equal(f.dispatched.length,0);
+});
+
+test('inference settings and image receipts use exact pairs for a two-Ghost phone', async t => {
+  const scope = exactScope();
+  const [primary, peer] = scope.targets;
+  const key = `${peer.ghost_id}/${peer.conversation_id}`;
+  const crossedKey = `${peer.ghost_id}/${primary.conversation_id}`;
+  const selection = { provider: 'codex', model: 'gpt-6-luna', effort: 'high' };
+  const inferenceData = { ok: true, settings: { version: 2, default: selection,
+    conversations: { [key]: selection, [crossedKey]: selection }, external_grants: { [key]: ['codex'], [crossedKey]: ['codex'] } }, providers: [] };
+  const registryEntries = registryFor(scope);
+  const f = await fixture(t, { scope, inferenceData, registryEntries });
+  const settings = await f.call('/mobile/v1/inference/settings');
+  assert.equal(settings.status, 200);
+  assert.deepEqual(Object.keys(JSON.parse(settings.body).settings.conversations), [key]);
+  assert.deepEqual(Object.keys(JSON.parse(settings.body).settings.external_grants), [key]);
+  const id = randomUUID();
+  const receipt = { id, ...peer, state: 'failed' };
+  const imageDir = join(f.dir, 'images', id);
+  await mkdir(imageDir, { recursive: true });
+  await writeFile(join(imageDir, 'receipt.json'), JSON.stringify(receipt));
+  const post = (path, body) => f.call(`/mobile/v1/inference/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal((await post('settings', { ...peer, operation: 'select', version: 2, selection })).status, 200);
+  const image = await post('images', { ...peer, id, operation: 'read' });
+  assert.equal(image.status, 200);
+  assert.deepEqual(JSON.parse(image.body).result, receipt);
+  registryEntries[0].conversation_id = peer.conversation_id;
+  registryEntries[1].conversation_id = primary.conversation_id;
+  const crossed = { ...peer, conversation_id: primary.conversation_id };
+  assert.equal((await post('settings', { ...crossed, operation: 'select', version: 2, selection })).status, 403);
+  assert.equal((await post('images', { ...crossed, id, operation: 'read' })).status, 403);
+  assert.equal(f.dispatched.filter(entry => entry.url.endsWith('/inference/settings')).length, 3);
 });

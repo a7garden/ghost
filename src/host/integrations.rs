@@ -59,6 +59,7 @@ pub struct Integration {
     pub data: IntegrationInput,
     pub version: u64,
     pub tools: Vec<Value>,
+    /// Result of the owner's last explicit connection check.
     pub checked_ms: Option<u64>,
     pub error: Option<String>,
 }
@@ -568,6 +569,7 @@ async fn run_inner(
     check: impl Fn() -> Result<()>,
 ) -> Result<Value> {
     let item = allowed(&*app.lock()?, id, owner)?;
+    let owner_probe = owner.is_none() && call.is_none();
     if let Some((name, _)) = &call {
         match approval {
             None if item.data.approved_tools.is_some() => bail!("이 연결의 외부 도구는 소유자 승인이 필요합니다."),
@@ -580,14 +582,19 @@ async fn run_inner(
     // Two Ghosts may be granted the same server, but neither inherits the
     // other's stdio process or HTTP session. Owner diagnostics are separate too.
     let slot = app.integrations.slot(id, owner)?;
+    let deadline = tokio::time::Instant::now() + DEADLINE;
+    let timeout_error = || anyhow!("연동 응답 시간이 초과되었습니다. 변경 작업이었다면 서비스에서 결과를 확인한 뒤 다시 요청하세요.");
+    let mut guard = tokio::time::timeout_at(deadline, slot.lock())
+        .await
+        .map_err(|_| timeout_error())?;
     let operation = async {
-        let mut guard = slot.lock().await;
         // Taking ownership makes cancellation discard the process and any stale response.
-        let mut session = match guard.take() {
-            Some(s) if s.version == item.version => s,
-            _ => Session::open(&item).await?,
+        let (mut session, opened) = match guard.take() {
+            Some(s) if s.version == item.version => (s, false),
+            _ => (Session::open(&item).await?, true),
         };
-        if call.is_none() || approval.is_some() {
+        let refresh = call.is_none() || approval.is_some();
+        if refresh {
             session.refresh().await?;
         }
         if approval.is_none() { check()?; }
@@ -597,10 +604,14 @@ async fn run_inner(
             if current.version != item.version {
                 bail!("연동 설정이 변경되었습니다. 도구 목록을 다시 확인하세요.");
             }
-            current.tools = session.tools.clone();
-            current.checked_ms = Some(now_ms());
-            current.error = None;
-            s.journal.put(current.kind(), id, &current)?;
+            if opened || refresh {
+                current.tools = session.tools.clone();
+                if owner_probe {
+                    current.checked_ms = Some(now_ms());
+                    current.error = None;
+                }
+                s.journal.put(current.kind(), id, &current)?;
+            }
         }
         let result = if let Some((name, arguments)) = call {
             if !arguments.is_object() || serde_json::to_vec(&arguments)?.len() > 65536 {
@@ -627,10 +638,12 @@ async fn run_inner(
         *guard = Some(session);
         Ok(result)
     };
-    let result=tokio::time::timeout(DEADLINE,operation).await.unwrap_or_else(|_|Err(anyhow!("연동 응답 시간이 초과되었습니다. 변경 작업이었다면 서비스에서 결과를 확인한 뒤 다시 요청하세요.")));
-    // Approval conflicts and uncertain calls belong to the specific receipt.
-    // A connection health check is an independent operation.
-    if approval.is_none() {
+    let result = tokio::time::timeout_at(deadline, operation)
+        .await
+        .unwrap_or_else(|_| Err(timeout_error()));
+    // Publish the result while holding the probe session's lock. Tool-call
+    // failures belong to their own receipts.
+    if owner_probe {
         if let Err(error) = &result {
             let s = app.lock()?;
             if let Some(mut current) = get(&s, id)? {

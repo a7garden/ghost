@@ -88,6 +88,7 @@ async function readInferenceBody(request) {
 
 function mobileRoute(method, url) {
   const id = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
+  if (method === 'GET' && url === '/ghost-api/mobile/targets') return '/pairing/targets';
   if (['GET', 'POST'].includes(method) && url === '/ghost-api/mobile/invitations') return '/pairing/invitations';
   if (method === 'GET' && new RegExp(`^/ghost-api/mobile/invitations/${id}$`, 'i').test(url)) {
     return url.replace('/ghost-api/mobile', '/pairing');

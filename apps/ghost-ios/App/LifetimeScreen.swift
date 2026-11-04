@@ -9,6 +9,8 @@ struct LifetimeScreen: View {
     @State private var mobileTab = "chat"
     @State private var workNavigationPath: [String] = []
     @State private var showingSettings = false
+    @State private var showingGhosts = false
+    @AppStorage("ghost.selectedConversation") private var savedConversationTargetKey = ""
     @State private var showingOptions = false
     @State private var optionDestination = ""
     @State private var showingInference = false
@@ -22,7 +24,6 @@ struct LifetimeScreen: View {
     @State private var followsLatest = true
     @State private var hasNewMessages = false
     @State private var goalDrafts: [String: String] = [:]
-    @State private var steerDrafts: [String: String] = [:]
     @State private var selectedConversationTargetKey = ""
     @State private var requestedConversationPrivacy = "local_only"
     @State private var selectedArtifactKeys: Set<String> = []
@@ -87,6 +88,15 @@ struct LifetimeScreen: View {
     private func captureInitialLifetimeAuthority() {
         guard lifetimeAuthorityKeyAtEntry.isEmpty, model.isLifetimeConnection else { return }
         lifetimeAuthorityKeyAtEntry = model.lifetimeAuthorityKey
+        if !pendingConversationInputs.isEmpty {
+            restorePendingConversationTarget()
+        } else if selectedConversationTargetKey.isEmpty {
+            if savedConversationTargetKey == noConversationTargetKey {
+                chooseConversation(nil, restoringSelection: true)
+            } else if let saved = targetPairs.first(where: { targetSelectionKey($0) == savedConversationTargetKey }) {
+                chooseConversation(saved, restoringSelection: true)
+            }
+        }
     }
     private var lifetimeRecoveryKey: String {
         let origin = model.connection?.origin.absoluteString ?? "unconnected"
@@ -102,40 +112,65 @@ struct LifetimeScreen: View {
     private func targetSelectionKey(_ target: LifetimeConversationTarget) -> String {
         "\(model.lifetimeAuthorityKey)|\(target.id)"
     }
-    private func targetSelectionKey(ghostID: String, conversationID: String) -> String {
-        let id = "\(ghostID.utf8.count):\(ghostID)\(conversationID.utf8.count):\(conversationID)"
-        return "\(model.lifetimeAuthorityKey)|\(id)"
-    }
     private var pendingConversationInputs: [Envelope] {
         visiblePending.filter { $0.command["envelope"]["body"]["method"].text == "conversation.input" }
     }
     private var pendingConversationTargetKey: String {
         guard pendingConversationInputs.count == 1,
               let envelope = pendingConversationInputs.first else { return "none:\(pendingConversationInputs.count)" }
-        let body = envelope.command["envelope"]["body"]
-        return "\(envelope.request_id):\(body["ghost_id"].text):\(body["conversation_id"].text)"
+        return "\(model.lifetimeAuthorityKey)|\(envelope.request_id)"
     }
-    private func restorePendingConversationTarget() {
-        guard authorityUnchanged, selectedConversationTargetKey.isEmpty,
-              pendingConversationInputs.count == 1,
-              let envelope = pendingConversationInputs.first else { return }
+    private var pendingInputTarget: LifetimeConversationTarget? {
+        guard pendingConversationInputs.count == 1, let envelope = pendingConversationInputs.first else { return nil }
         let body = envelope.command["envelope"]["body"]
-        selectedConversationTargetKey = targetSelectionKey(ghostID: body["ghost_id"].text, conversationID: body["conversation_id"].text)
+        return targetPairs.first {
+            $0.ghostID == body["ghost_id"].text && $0.conversationID == body["conversation_id"].text
+        }
+    }
+    private var targetSelectionLocked: Bool { model.busy || !pendingConversationInputs.isEmpty }
+    private var pendingTargetNotice: String { "확인 중인 메시지의 접수 결과를 확인한 뒤 다른 Ghost를 선택할 수 있습니다." }
+    private var noConversationTargetKey: String { "explicit-none|\(model.lifetimeAuthorityKey)" }
+
+    @discardableResult
+    private func chooseConversation(_ target: LifetimeConversationTarget?, restoringSelection: Bool = false) -> Bool {
+        if let target, !targetPairs.contains(where: { $0.id == target.id }) { return false }
+        if targetSelectionLocked && !restoringSelection {
+            return target != nil && selectedTarget?.id == target?.id
+        }
+        let nextKey = target.map { targetSelectionKey($0) } ?? noConversationTargetKey
+        let currentKey = selectedConversationTargetKey.isEmpty
+            ? selectedTarget.map { targetSelectionKey($0) } : selectedConversationTargetKey
+        if currentKey != nextKey {
+            model.saveDrafts()
+            selectedArtifactKeys = []
+            conversationTurns = []
+            conversationTurnRuns = [:]
+            conversationPrivacy = "local_only"
+            conversationHasOlder = false
+            conversationOldestSequence = nil
+            conversationLoadedKey = ""
+            conversationPageError = nil
+            requestedConversationPrivacy = "local_only"
+            inferenceConfiguration = .null
+        }
+        lifetimeAuthorityKeyAtEntry = model.lifetimeAuthorityKey
+        selectedConversationTargetKey = nextKey
+        savedConversationTargetKey = nextKey
+        return true
+    }
+
+    private func restorePendingConversationTarget() {
+        guard authorityUnchanged, let target = pendingInputTarget else { return }
+        chooseConversation(target, restoringSelection: true)
     }
     private var selectedTarget: LifetimeConversationTarget? {
+        guard authorityUnchanged else { return nil }
+        if !pendingConversationInputs.isEmpty { return pendingInputTarget }
         if !selectedConversationTargetKey.isEmpty {
             return targetPairs.first { targetSelectionKey($0) == selectedConversationTargetKey }
         }
-        guard authorityUnchanged else { return nil }
-        if !pendingConversationInputs.isEmpty {
-            guard pendingConversationInputs.count == 1, let envelope = pendingConversationInputs.first else { return nil }
-            let body = envelope.command["envelope"]["body"]
-            return targetPairs.first {
-                $0.ghostID == body["ghost_id"].text && $0.conversationID == body["conversation_id"].text
-            }
-        }
         let primaries = activeTargetPairs.filter { $0.kind == "primary" }
-        return primaries.count == 1 ? primaries[0] : nil
+        return primaries.count == 1 ? primaries[0] : activeTargetPairs.count == 1 ? activeTargetPairs[0] : nil
     }
     private var targetIsInScope: Bool {
         guard validScope, model.lifetimeTargetIssue == nil, let target = selectedTarget else { return false }
@@ -183,9 +218,10 @@ struct LifetimeScreen: View {
 
 
     private var visibleWork: [LifetimeScreenRecord] {
-        let goalIDs = Set(visibleGoals.map { $0.value["id"].text })
+        let goals = Dictionary(uniqueKeysWithValues: visibleGoals.map { ($0.id, $0.value["revision"]) })
         return lifetimeRecords(model.snapshot["work"].items, key: "id").filter { record in
-            goalIDs.contains(record.value["goal_id"].text)
+            goals[record.value["goal_id"].text] == record.value["goal_revision"]
+                && record.value["state"].text != "stale"
                 && ghostIDs.contains(record.value["owner"].text)
         }
     }
@@ -243,6 +279,19 @@ struct LifetimeScreen: View {
         guard let target = selectedTarget else { return .null }
         return inferenceSelection(inferenceConfiguration, ghostID: target.ghostID, conversationID: target.conversationID)
     }
+    private var inferenceLoadKey: String {
+        "\(model.lifetimeAuthorityKey)|\(model.isOnline)|\(selectedTarget?.id ?? "")"
+    }
+    private var inferencePickerEnabled: Bool { model.isOnline && selectedTarget != nil && !targetSelectionLocked }
+    private func refreshInferenceConfiguration() async {
+        guard !Task.isCancelled else { return }
+        let key = inferenceLoadKey
+        inferenceConfiguration = .null
+        guard model.isOnline, selectedTarget != nil, let api = model.api else { return }
+        let next = try? await api.inferenceSettings()
+        guard !Task.isCancelled, key == inferenceLoadKey else { return }
+        inferenceConfiguration = next ?? .null
+    }
     private var currentInferenceLabel: String { inferenceLabel(currentInferenceSelection) }
     private var currentInferenceDisclosure: String {
         let provider = currentInferenceSelection["provider"].text
@@ -267,7 +316,7 @@ struct LifetimeScreen: View {
             }
                 .tabItem { Label("맡긴 일", systemImage: "checklist") }.tag("work")
             ActivityView(model: model)
-                .tabItem { Label("알림", systemImage: "bell") }.tag("inbox")
+                .tabItem { Label("확인할 일", systemImage: "tray") }.tag("inbox")
         }
         .tint(GhostStyle.ink)
         .toolbarBackground(GhostStyle.surface, for: .tabBar)
@@ -275,22 +324,19 @@ struct LifetimeScreen: View {
         .task(id: ownerQuestionsKey) { await model.loadOwnerQuestions() }
         .task(id: model.lifetimeAuthorityKey) { captureInitialLifetimeAuthority() }
         .task(id: conversationLoadKey) { await observeConversation() }
-        .task(id: selectedTarget?.id) {
-            guard let api = model.api else { return }
-            inferenceConfiguration = (try? await api.inferenceSettings()) ?? .null
-        }
+        .task(id: inferenceLoadKey) { await refreshInferenceConfiguration() }
         .task(id: pendingConversationTargetKey) { restorePendingConversationTarget() }
         .onChange(of: model.lifetimeRouteTarget) {
-            guard let target = model.lifetimeRouteTarget else { return }
-            selectedConversationTargetKey = targetSelectionKey(ghostID: target.ghostID, conversationID: target.conversationID)
-            lifetimeAuthorityKeyAtEntry = model.lifetimeAuthorityKey
-            mobileTab = "chat"
+            guard let route = model.lifetimeRouteTarget,
+                  let target = targetPairs.first(where: { $0.ghostID == route.ghostID && $0.conversationID == route.conversationID }) else { return }
+            if chooseConversation(target) || !pendingConversationInputs.isEmpty { mobileTab = "chat" }
         }
         .task(id: selectedDraft?.revision) {
             do { try await Task.sleep(for: .milliseconds(300)); model.saveDrafts() } catch { }
         }
         .sheet(item: $presentedArtifact) { item in NavigationStack { ArtifactDocumentView(content: item.content) } }
         .sheet(isPresented: $showingSettings) { SettingsView(model: model, showsCloseButton: true) }
+        .sheet(isPresented: $showingGhosts) { ghostPicker }
         .sheet(isPresented: $showingOptions, onDismiss: {
             if optionDestination == "model" { showingInference = true }
             if optionDestination == "image" { showingImageComposer = true }
@@ -298,7 +344,10 @@ struct LifetimeScreen: View {
         }) { conversationOptions }
         .sheet(isPresented: $showingInference) {
             if let api = model.api, let target = selectedTarget {
-                InferencePicker(api: api, ghostID: target.ghostID, conversationID: target.conversationID) { inferenceConfiguration = $0 }
+                let key = targetSelectionKey(target)
+                InferencePicker(api: api, ghostID: target.ghostID, conversationID: target.conversationID, connected: inferencePickerEnabled) { value in
+                    if model.isOnline, selectedTarget.map({ targetSelectionKey($0) }) == key { inferenceConfiguration = value }
+                }.id(key)
             }
         }
         .sheet(isPresented: $showingImageComposer) {
@@ -337,15 +386,19 @@ struct LifetimeScreen: View {
                 }
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
-                        Text(selectedTarget?.kind == "specialist" ? (selectedTarget?.label ?? "Ghost") : "Ghost")
-                            .font(.headline).foregroundStyle(GhostStyle.text)
+                        Button { composerFocused = false; showingGhosts = true } label: {
+                            HStack(spacing: 5) {
+                                Text(selectedTarget?.label ?? "Ghost 선택").lineLimit(1)
+                                Image(systemName: "chevron.down").font(.caption2)
+                            }.font(.headline).foregroundStyle(GhostStyle.text)
+                        }.accessibilityLabel("Ghost 전환").accessibilityIdentifier("ghost-switcher-open")
                         Button { showingInference = true } label: {
                             HStack(spacing: 3) {
                                 Text(model.isOnline ? currentInferenceLabel : "연결 확인 중")
                                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
                             }.font(.caption2).foregroundStyle(GhostStyle.secondary)
-                        }.accessibilityLabel("모델과 추론 수준 변경").accessibilityIdentifier("inference-picker-open")
-                    }.accessibilityElement(children: .combine)
+                        }.disabled(!inferencePickerEnabled).accessibilityLabel("모델과 추론 수준 변경").accessibilityIdentifier("inference-picker-open")
+                    }.accessibilityElement(children: .contain)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { openVoice() } label: { Image(systemName: model.activeCall == nil ? "phone" : "phone.fill").frame(width: 40, height: 44) }
@@ -444,6 +497,12 @@ struct LifetimeScreen: View {
             if !model.isOnline {
                 Text("다시 연결되면 보낼 수 있어요. 작성한 내용은 보관됩니다.")
                     .font(.footnote).foregroundStyle(GhostStyle.secondary)
+            } else if !pendingConversationInputs.isEmpty {
+                Button(pendingTargetNotice) { showingRecovery = true }
+                    .font(.footnote).foregroundStyle(GhostStyle.warning)
+            } else if selectedTarget == nil && !targetPairs.isEmpty {
+                Button("대화할 Ghost를 선택하세요") { showingGhosts = true }
+                    .font(.footnote)
             } else if !composerAvailable && !conversationLoading {
                 Button("대화를 이어가기 위한 상태 확인") { showingRecovery = true }
                     .font(.footnote).foregroundStyle(GhostStyle.warning)
@@ -491,7 +550,6 @@ struct LifetimeScreen: View {
 
     private var workExperience: some View {
         List {
-            if !model.ownerQuestions.isEmpty || model.ownerQuestionsError != nil { OwnerQuestionsSection(model: model) }
             if needsAttention {
                 Section { Button { showingRecovery = true } label: { GhostNotice(title: "확인이 필요한 요청", symbol: "exclamationmark.circle") } }
             }
@@ -509,8 +567,11 @@ struct LifetimeScreen: View {
                     ForEach(visibleGoals) { record in
                         NavigationLink(value: record.id) {
                             VStack(alignment: .leading, spacing: 12) {
-                                GhostStatusBadge(state: record.value["state"].text)
+                                GhostStatusBadge(state: goalDisplayState(record.value))
                                 Text(record.value["prompt"].text).font(.body.weight(.medium)).lineLimit(3)
+                                if let target = targetPairs.first(where: { $0.ghostID == record.value["accountable_ghost"].text && $0.conversationID == record.value["reply_conversation"].text }) {
+                                    Text(target.label).font(.caption).foregroundStyle(GhostStyle.secondary)
+                                }
                                 let count = visibleWork.filter { $0.value["goal_id"].text == record.value["id"].text }.count
                                 if count > 1 { Text("\(count)개 작업으로 진행").font(.caption).foregroundStyle(GhostStyle.secondary) }
                             }.padding(.vertical, 10)
@@ -524,12 +585,22 @@ struct LifetimeScreen: View {
             .refreshable { await model.refresh(); await model.loadOwnerQuestions() }
     }
 
+    private func goalDisplayState(_ goal: JSON) -> String {
+        if ["accepted", "cancelled"].contains(goal["state"].text) { return goal["state"].text }
+        let states = Set(visibleWork.filter { $0.value["goal_id"] == goal["id"] }.map { $0.value["state"].text })
+        for state in ["effect_unknown", "unknown", "failed", "rejected", "blocked", "waiting_owner"] where states.contains(state) { return state }
+        if !states.isDisjoint(with: ["running", "submitted", "steering", "verifying"]) { return "running" }
+        if !states.isDisjoint(with: ["completed", "complete", "accepted"]) { return "completed" }
+        return goal["state"].text
+    }
+
     private var conversationOptions: some View {
         NavigationStack {
             Form {
                 targetSection
                 Section {
                     Button("모델과 추론 수준") { optionDestination = "model"; showingOptions = false }
+                        .disabled(!inferencePickerEnabled)
                     Button("이미지 만들기", systemImage: "photo.badge.plus") { optionDestination = "image"; showingOptions = false }
                 }
                 Section("처리 범위") {
@@ -538,6 +609,8 @@ struct LifetimeScreen: View {
                         Text("비공개").tag("private")
                         Text("공개 자료 허용").tag("public")
                     }
+                    .accessibilityIdentifier("conversation-privacy")
+                    .accessibilityValue(requestedConversationPrivacy == "local_only" ? "보호된 기록" : privacyLabel(requestedConversationPrivacy))
                     Text("외부 전송은 모델 설정에서 제공자별로 허용합니다. 기존 기록의 보호 표시는 유지됩니다.").font(.footnote).foregroundStyle(GhostStyle.secondary)
                 }
                 if canRead && !eligibleConversationArtifacts.isEmpty {
@@ -559,6 +632,34 @@ struct LifetimeScreen: View {
                 .navigationTitle("대화 옵션").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("완료") { showingOptions = false } } }
         }
+    }
+
+    private var ghostPicker: some View {
+        NavigationStack {
+            List {
+                if !pendingConversationInputs.isEmpty { Text(pendingTargetNotice).font(.footnote).foregroundStyle(GhostStyle.warning) }
+                ForEach(targetPairs) { target in
+                    Button {
+                        if chooseConversation(target) { showingGhosts = false }
+                    } label: {
+                        HStack(spacing: 14) {
+                            GhostMark(size: 32)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(target.label).font(.body.weight(.semibold))
+                                if target.mode != "active" { Text("읽기 전용").font(.caption).foregroundStyle(GhostStyle.secondary) }
+                                else if target.kind == "primary" { Text("기본 Ghost").font(.caption).foregroundStyle(GhostStyle.secondary) }
+                            }
+                            Spacer(minLength: 8)
+                            if selectedTarget?.id == target.id { Image(systemName: "checkmark").accessibilityLabel("선택됨") }
+                        }.padding(.vertical, 8).contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(targetSelectionLocked && selectedTarget?.id != target.id)
+                        .accessibilityIdentifier("ghost-select-\(target.ghostID)")
+                }
+                if targetPairs.isEmpty { Text("이 기기에 허용된 Ghost가 없습니다.").foregroundStyle(GhostStyle.secondary) }
+            }.listStyle(.insetGrouped).scrollContentBackground(.hidden).background(GhostStyle.canvas)
+                .navigationTitle("Ghost").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("닫기") { showingGhosts = false } } }
+        }.presentationDetents([.medium, .large])
     }
 
     private var advancedScreen: some View {
@@ -1004,13 +1105,9 @@ struct LifetimeScreen: View {
                 Picker("대화 대상", selection: Binding(
                     get: { selectedTarget.map { targetSelectionKey($0) } ?? "" },
                     set: { selection in
-                        if selection.isEmpty {
-                            selectedConversationTargetKey = "explicit-none|\(model.lifetimeAuthorityKey)"
-                        } else {
-                            if targetPairs.contains(where: { targetSelectionKey($0) == selection }) {
-                                lifetimeAuthorityKeyAtEntry = model.lifetimeAuthorityKey
-                            }
-                            selectedConversationTargetKey = selection
+                        if selection.isEmpty { chooseConversation(nil) }
+                        else if let target = targetPairs.first(where: { targetSelectionKey($0) == selection }) {
+                            chooseConversation(target)
                         }
                     }
                 )) {
@@ -1019,7 +1116,8 @@ struct LifetimeScreen: View {
                         let status = target.mode == "active" ? "활성" : "읽기 전용 · 종료 중"
                         Text("\(target.label) · \(status)").tag(targetSelectionKey(target))
                     }
-                }
+                }.disabled(targetSelectionLocked).accessibilityIdentifier("conversation-target")
+                if !pendingConversationInputs.isEmpty { Text(pendingTargetNotice).font(.footnote).foregroundStyle(GhostStyle.warning) }
                 if let target = selectedTarget {
                     DisclosureGroup("기술 식별자") {
                         LabeledContent("Ghost ID", value: target.ghostID)
@@ -1027,15 +1125,11 @@ struct LifetimeScreen: View {
                         LabeledContent("Conversation ID", value: target.conversationID)
                             .font(.caption.monospaced()).textSelection(.enabled)
                     }
-                    if target.kind == "specialist" {
-                        Text("전문 담당 대화는 Host가 광고한 정확한 pair입니다. 역할 밖의 conversation ID는 선택할 수 없습니다.")
-                            .font(.footnote).foregroundStyle(GhostStyle.secondary)
-                    }
                 } else if !authorityUnchanged {
                     Text("Host workspace 또는 authority epoch이 변경되었습니다. 현재 authority에서 target pair를 명시적으로 선택하세요.")
                         .font(.footnote).foregroundStyle(GhostStyle.secondary)
                 } else if activeTargetPairs.filter({ $0.kind == "primary" }).count != 1 {
-                    Text("활성 Primary 대화가 하나로 확인되지 않았습니다. 전송 전에 광고된 대상을 명시적으로 선택하세요.")
+                    Text("대화할 Ghost를 선택하세요.")
                         .font(.footnote).foregroundStyle(GhostStyle.secondary)
                 }
             }
@@ -1055,7 +1149,7 @@ struct LifetimeScreen: View {
     private var conversationSection: some View {
         Section("대화") {
             if let target = selectedTarget, targetIsInScope {
-                Text(target.kind == "primary" ? "주 Ghost 대화 · \(target.label)" : "전문 담당 대화 · \(target.label)")
+                Text(target.label)
                     .font(.headline)
                 if target.mode != "active" {
                     Text("이 대화는 종료 중입니다. 기록은 확인할 수 있지만 새 입력은 차단됩니다.")
@@ -1195,13 +1289,10 @@ struct LifetimeScreen: View {
 
     private func conversationTurnRow(_ turn: JSON) -> some View {
         let isUser = turn["kind"].text == "user"
+        let speaker = targetPairs.first { $0.ghostID == turn["sender_ref"].text }?.label ?? selectedTarget?.label ?? "Ghost"
         return VStack(alignment: .leading, spacing: 10) {
             GhostMessageBubble(text: turn["text"].text, isUser: isUser,
-                               label: turn["kind"].text == "host_fact" ? "서버 확인" : "Ghost") {
-                if turn["kind"].text == "assistant_advisory" {
-                    Text("제안 · 실행 결과는 맡긴 일에서 확인")
-                        .font(.caption2).foregroundStyle(GhostStyle.secondary)
-                }
+                               label: turn["kind"].text == "host_fact" ? "서버 확인" : speaker + (turn["kind"].text == "assistant_advisory" ? " · 제안" : "")) {
                 ForEach(turn["attachments"].items.map { LifetimeScreenRecord(id: artifactKey($0), value: $0) }) { row in
                     Label("첨부 결과 · \(String(row.value["digest"].text.prefix(8)))", systemImage: "doc.text")
                         .font(.caption)
@@ -1384,7 +1475,7 @@ struct LifetimeScreen: View {
         let workItems = visibleWork.filter { $0.value["goal_id"].text == goalID }
 
         Section {
-            GhostStatusBadge(state: goal["state"].text)
+            GhostStatusBadge(state: goalDisplayState(goal))
             DisclosureGroup("요청 기록") {
             LabeledContent("목표 ID", value: goalID)
                 .font(.caption.monospaced())
@@ -1411,7 +1502,7 @@ struct LifetimeScreen: View {
             .disabled(!canMutate || goalRevision == nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft == savedPrompt || !isObject(goal["acceptance_spec"]))
 
             if workItems.isEmpty {
-                Text("이 snapshot에는 연결된 work가 없습니다.")
+                Text("아직 접수된 작업이 없습니다.")
                     .font(.footnote)
                     .foregroundStyle(GhostStyle.secondary)
             } else {
@@ -1435,9 +1526,6 @@ struct LifetimeScreen: View {
         let acceptances = acceptanceRecords(for: work)
         let acceptedDigests = Set(acceptances.map { $0.value["artifact_digest"].text })
         let terminal = ["accepted", "complete", "completed", "cancelled", "failed", "rejected"].contains(state)
-        let steerDraft = steerDrafts[workID] ?? ""
-        let canSteer = canMutate && !terminal && cancellation == "none" && workRevision != nil
-            && !steerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let canCancel = canMutate && !terminal && cancellation == "none" && workRevision != nil
 
         VStack(alignment: .leading, spacing: 10) {
@@ -1467,28 +1555,28 @@ struct LifetimeScreen: View {
             }
             if cancellation != "none" { LabeledContent("중지 상태", value: cancellationStateLabel(cancellation)) }
             if cancellation == "requested" || state == "cancel_requested" {
-                Text("취소 요청이 장부에 기록됐지만 실행 종료는 아직 확인되지 않았습니다. 종료 receipt가 도착해야 취소가 확정되고, 이미 발생한 외부 효과는 사실대로 별도 대사됩니다.")
+                Text("취소를 요청했습니다. 실행이 멈췄는지 확인하고 있습니다.")
                     .font(.footnote)
                     .foregroundStyle(GhostStyle.secondary)
             }
             if ["cancelled", "failed", "rejected", "stale"].contains(state) {
-                Text("이 work는 종료 상태입니다. 결과는 참조 기록으로만 남고 새 실행이 만들어지지 않습니다.")
+                Text("종료된 작업입니다. 기록과 결과를 확인할 수 있습니다.")
                     .font(.footnote)
                     .foregroundStyle(GhostStyle.secondary)
             }
             if ["complete", "completed"].contains(state) {
-                Text("실행 완료는 독립 acceptance와 다릅니다. 검수 기록을 별도로 확인하세요.")
+                Text("실행이 끝났습니다. 결과 검수가 남아 있습니다.")
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(GhostStyle.secondary)
             }
 
             if artifacts.isEmpty {
-                Text("이 소유 work의 producing execution에 연결된 artifact metadata가 snapshot에 없습니다.")
+                Text("아직 결과물이 없습니다.")
                     .font(.footnote)
                     .foregroundStyle(GhostStyle.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("결과 metadata")
+                    Text("결과물")
                         .font(.subheadline.weight(.semibold))
                     ForEach(artifacts) { record in
                         artifactCard(record.value, acceptedDigests: acceptedDigests, workID: workID, executionID: executionID)
@@ -1497,12 +1585,12 @@ struct LifetimeScreen: View {
             }
 
             if acceptances.isEmpty {
-                Text("이 work의 독립 acceptance 기록이 없습니다.")
+                Text("아직 검수 기록이 없습니다.")
                     .font(.footnote)
                     .foregroundStyle(GhostStyle.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("독립 acceptance 기록")
+                    Text("검수 기록")
                         .font(.subheadline.weight(.semibold))
                     ForEach(acceptances) { record in
                         acceptanceCard(record.value, currentGoal: goal)
@@ -1511,27 +1599,16 @@ struct LifetimeScreen: View {
             }
 
             if !terminal {
-                TextField("다음 방향", text: Binding(
-                    get: { steerDrafts[workID] ?? "" },
-                    set: { steerDrafts[workID] = $0 }
-                ), axis: .vertical)
-                .lineLimit(2...5)
-                .disabled(!canWrite || model.busy)
                 HStack {
-                    Button("방향 전달") {
-                        Task { await steerWork(work, prompt: steerDraft) }
+                    if let target = targetPairs.first(where: { $0.ghostID == work["owner"].text }) {
+                        Button("대화 열기") {
+                            if chooseConversation(target) { mobileTab = "chat" }
+                        }.buttonStyle(.bordered).disabled(targetSelectionLocked && selectedTarget?.id != target.id)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!canSteer)
                     Button("취소 요청", role: .destructive) {
                         Task { await cancelWork(work) }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!canCancel)
+                    }.buttonStyle(.bordered).disabled(!canCancel)
                 }
-                Text("방향 전달 및 취소 요청에는 화면에 표시된 goal revision \(lifetimeRevisionText(work["goal_revision"]))을 사용합니다.")
-                    .font(.caption)
-                    .foregroundStyle(GhostStyle.secondary)
                 delegationControls(work, goal)
             }
         }
@@ -1544,7 +1621,7 @@ struct LifetimeScreen: View {
         let digest = artifact["digest"].text
         let state = model.artifactState(workID: workID, digest: digest)
         return VStack(alignment: .leading, spacing: 4) {
-            Text(acceptedDigests.contains(digest) ? "독립 검수 기록이 이 결과 digest를 참조합니다" : "결과 metadata 보고됨 · 일치하는 검수 기록 없음")
+            Text(acceptedDigests.contains(digest) ? "검수 기록 있음" : "검수 전")
                 .font(.callout.weight(.medium))
             Text("\(privacyLabel(artifact["privacy"].text)) · SHA-256 \(String(digest.prefix(12)))")
                 .font(.caption.monospaced())
@@ -1615,9 +1692,9 @@ struct LifetimeScreen: View {
                 artifactRecords(for: work).first { $0.value["digest"].text == key }?.value["digest"].text
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text("다른 담당자에게 위임")
+                Text("다른 Ghost에게 맡기기")
                     .font(.subheadline.weight(.semibold))
-                Text("위임은 같은 work 장부에 child work로 기록됩니다. 대상은 이 기기의 등록된 활성 Ghost 중에서만 고를 수 있고, 선택한 결과물은 원문 복사 없이 참조로 전달됩니다. 위임에도 화면의 goal revision을 CAS로 사용합니다.")
+                Text("맡길 범위와 함께 전달할 결과물을 선택하세요.")
                     .font(.caption)
                     .foregroundStyle(GhostStyle.secondary)
                 Picker("위임 대상", selection: Binding(
@@ -1644,7 +1721,7 @@ struct LifetimeScreen: View {
                             delegationArtifactKeys[workID] = current
                         }))
                 }
-                Button("위임 · revision \(lifetimeRevisionText(work["goal_revision"]))") {
+                Button("일 맡기기") {
                     Task { await delegateWork(work, goal, refs: refs) }
                 }
                 .buttonStyle(.bordered)
@@ -1688,7 +1765,7 @@ struct LifetimeScreen: View {
                 .font(.caption)
                 .foregroundStyle(GhostStyle.secondary)
             if acceptance["checks"].items.isEmpty {
-                Text("독립 검수 check가 없습니다.")
+                Text("검수 항목이 없습니다.")
                     .font(.footnote)
             } else {
                 ForEach(acceptance["checks"].items.indices, id: \.self) { index in
@@ -1750,19 +1827,6 @@ struct LifetimeScreen: View {
         if let response = await sendLifetime(body, expectedRevision: revision), response["status"] == .string("success"),
            goalDrafts[goalID]?.trimmingCharacters(in: .whitespacesAndNewlines) == prompt.trimmingCharacters(in: .whitespacesAndNewlines) {
             goalDrafts.removeValue(forKey: goalID)
-        }
-    }
-
-    private func steerWork(_ work: JSON, prompt: String) async {
-        guard let revision = lifetimeRevision(work["goal_revision"]) else { return }
-        let body = JSON.object([
-            "method": .string("work.steer"),
-            "work_id": .string(work["id"].text),
-            "prompt": .string(prompt.trimmingCharacters(in: .whitespacesAndNewlines)),
-        ])
-        if let response = await sendLifetime(body, expectedRevision: revision), response["status"] == .string("success"),
-           steerDrafts[work["id"].text]?.trimmingCharacters(in: .whitespacesAndNewlines) == prompt.trimmingCharacters(in: .whitespacesAndNewlines) {
-            steerDrafts.removeValue(forKey: work["id"].text)
         }
     }
 

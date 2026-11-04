@@ -25,6 +25,24 @@
 .ghost-switcher-actions { display: grid; gap: 1px; border-top: 1px solid var(--color-border-subtle); margin-top: 4px; padding-top: 4px; }
 
 .ghost-view-nav .nav-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ghost-default-badge { display: inline-flex; align-items: center; margin-inline-start: 6px; padding: 2px 6px; border-radius: 999px; background: var(--color-selection); color: var(--color-text-secondary); font-size: 10px; font-weight: 600; line-height: 1.3; vertical-align: middle; }
+.ghost-directory { display: grid; align-content: start; gap: 24px; }
+.ghost-directory-list { display: grid; gap: 8px; max-width: 860px; }
+.ghost-directory-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; padding: 14px; border: 1px solid var(--color-border-subtle); border-radius: 14px; background: var(--color-surface); }
+.ghost-directory-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ghost-directory-identity > span { display: grid; gap: 3px; min-width: 0; }
+.ghost-directory-identity strong { overflow-wrap: anywhere; }
+.ghost-directory-identity small { overflow: hidden; color: var(--color-text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.ghost-directory-row > .button { flex: none; }
+.lifetime-panel .ghost-team-card--unregistered { display: grid; align-content: start; justify-content: stretch; height: 100%; }
+.lifetime-panel .ghost-team-card-heading { align-items: flex-start; flex-direction: column; justify-content: flex-start; }
+.lifetime-panel .ghost-team-card-heading strong { overflow-wrap: anywhere; white-space: normal; }
+.lifetime-panel .ghost-team-card-heading small { color: var(--color-text-secondary); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.lifetime-panel .ghost-team-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.lifetime-panel .ghost-team-registration-state { color: var(--color-text-secondary); font-size: 11px; }
+.lifetime-panel .lifetime-goal-owner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lifetime-panel .lifetime-artifact > .button { margin-top: 8px; }
+.lifetime-panel .lifetime-work:focus { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .package-shell { display: flex; flex-direction: column; }
 .package-shell > main, .package-workspace { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .package-workspace > iframe { flex: 1; width: 100%; min-height: 300px; border: 0; background: transparent; }
@@ -34,63 +52,101 @@
 .portrait-picker .ghost-color-setting { min-width: 0; margin: 0; }
 .portrait-picker .ghost-color-palette { display: grid; grid-template-columns: repeat(auto-fit, 32px); gap: 8px; }
 .portrait-picker .ghost-color-swatch { width: 32px; height: 32px; border-radius: 8px; }
-.mobile-ghost-tabs { display: none; }
+.mobile-primary-tabs { display: none; }
 @media (max-width: 55.999rem) {
-  .ghost-shell-toolbar { padding: calc(6px + env(safe-area-inset-top)) 12px 6px 8px; }
-  .mobile-ghost-tabs {
+  .ghost-shell-toolbar { padding: calc(6px + env(safe-area-inset-top)) 12px 6px; }
+  .ghost-shell-toolbar .ghost-switcher-trigger { max-width: min(34vw, 210px); padding-inline: 4px; }
+  .mobile-primary-tabs {
     position: fixed;
-    inset: auto 0 calc(10px + env(safe-area-inset-bottom));
-    z-index: 7;
+    inset-inline: 12px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 20;
     display: grid;
-    grid-template-columns: repeat(var(--ghost-tab-count), minmax(0, 1fr));
-    width: fit-content;
-    max-width: calc(100% - 24px);
+    grid-template-columns: repeat(var(--mobile-tab-count), minmax(0, 1fr));
+    width: min(100% - 24px, 520px);
     margin-inline: auto;
-    padding: 4px;
-    border: 1px solid color-mix(in oklab, var(--color-ink) 14%, transparent);
-    border-radius: 999px;
+    padding: 5px;
+    border: 1px solid color-mix(in oklab, var(--color-ink) 13%, transparent);
+    border-radius: 18px;
     background: var(--color-paper);
-    background: color-mix(in oklab, var(--color-paper) 76%, transparent);
-    -webkit-backdrop-filter: blur(22px) saturate(145%);
-    backdrop-filter: blur(22px) saturate(145%);
+    background: color-mix(in oklab, var(--color-paper) 88%, transparent);
+    -webkit-backdrop-filter: blur(18px) saturate(135%);
+    backdrop-filter: blur(18px) saturate(135%);
     box-shadow: inset 0 1px 0 #fff3, 0 5px 16px #0002;
     -webkit-user-select: none;
     user-select: none;
   }
-  .mobile-ghost-tabs::before {
+  .mobile-primary-tabs::before {
     content: "";
     position: absolute;
-    inset: 4px auto 4px 4px;
-    width: calc((100% - 8px) / var(--ghost-tab-count));
-    border-radius: 999px;
+    inset: 5px auto 5px 5px;
+    width: calc((100% - 10px) / var(--mobile-tab-count));
+    border-radius: 12px;
     background: color-mix(in oklab, var(--color-ink) 9%, transparent);
     opacity: 0;
-    transform: translateX(calc(var(--ghost-tab-active) * 100%));
+    transform: translateX(calc(var(--mobile-tab-active) * 100%));
     pointer-events: none;
   }
-  .mobile-ghost-tabs[data-active=true]::before { opacity: 1; }
-  .mobile-ghost-tabs > button {
+  .mobile-primary-tabs[data-active=true]::before { opacity: 1; }
+  .mobile-primary-tabs > button {
     position: relative;
     display: grid;
     justify-items: center;
     align-content: center;
     gap: 3px;
-    min-width: min(88px, 26vw);
-    min-height: 46px;
-    padding: 2px 6px;
+    min-width: 0;
+    min-height: 48px;
+    padding: 2px 1px;
     border: 0;
-    border-radius: 999px;
+    border-radius: 12px;
     background: transparent;
     font: inherit;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--color-text-secondary);
   }
-  .mobile-ghost-tabs > button[aria-current=page] {
+  .mobile-primary-tabs > button[aria-current=page] {
     color: var(--color-text);
     font-weight: 650;
   }
-  .app-shell:has(.mobile-ghost-tabs) > .main-shell {
-    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  .mobile-primary-tabs > button:disabled { opacity: .42; }
+  .app-shell:has(.mobile-primary-tabs) > .main-shell { padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
+  .app-shell:has(.lifetime-submit:focus-within) .mobile-primary-tabs { display: none; }
+  .app-shell:has(.lifetime-submit:focus-within) > .main-shell { padding-bottom: 0; }
+  .lifetime-panel[data-panel="conversation"] { min-height: calc(100dvh - 54px - 78px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .lifetime-panel[data-panel="conversation"] .lifetime-submit { position: sticky; bottom: env(safe-area-inset-bottom); z-index: 2; }
+  .ghost-directory-row { align-items: flex-start; padding: 12px; }
+  .ghost-directory-row > .button { min-height: 40px; padding-inline: 9px; }
+  .ghost-directory-identity { gap: 9px; }
+  .ghost-directory-identity small { max-width: 45vw; }
+  .lifetime-panel .ghost-team-list { grid-template-columns: minmax(0, 1fr); }
+  .lifetime-panel .ghost-team-card--unregistered { align-items: flex-start; flex-wrap: wrap; }
+  .lifetime-panel .ghost-team-actions { width: 100%; flex-wrap: wrap; }
+  .lifetime-panel .ghost-team-actions > .button { flex: 1 1 135px; }
+  .lifetime-panel .lifetime-work:focus { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+  .lifetime-panel .lifetime-goal-owner-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .lifetime-panel .lifetime-goal-owner-actions .button { min-height: 38px; }
+  .lifetime-panel .lifetime-goal-heading { align-items: flex-start; }
+  .ghost-arc .navigation-dialog { padding: 0; }
+  .ghost-arc .mobile-sidebar { max-height: min(76dvh, 720px); overflow: auto; }
+  .ghost-arc .mobile-sidebar .sidebar { display: flex; position: static; height: auto; max-height: none; border: 0; box-shadow: none; padding: 0; }
+  .ghost-arc .mobile-sidebar .sidebar-bottom { position: sticky; bottom: 0; background: var(--color-surface); }
+  .shell-quick-actions { display: flex; align-items: center; gap: 2px; }
+  .mobile-menu-trigger { width: 36px; height: 36px; }
+  .ghost-shell-toolbar .mobile-menu-trigger { width: 34px; height: 34px; }
+  .ghost-shell-toolbar .ghost-search-button { margin-inline-start: 0; }
+  .ghost-shell-toolbar .ghost-switcher { flex: none; }
+  .ghost-shell-toolbar .ghost-switcher-identity { gap: 5px; }
+  .ghost-shell-toolbar .ghost-switcher-identity > .dot-avatar { width: 24px !important; height: 24px !important; }
+  .ghost-shell-toolbar .ghost-default-badge { margin-inline-start: 2px; padding-inline: 4px; }
+  .ghost-shell-toolbar .ghost-switcher-chevron { width: 12px; }
+  .ghost-shell-toolbar .ghost-switcher-trigger > span { min-width: 0; }
+  .ghost-shell-toolbar .ghost-switcher-trigger > span > span { font-size: 12px; }
+  .ghost-shell-toolbar .ghost-shell-location { flex: 1; }
+  .app-shell--desktop .mobile-primary-tabs { display: none; }
+  .app-shell:has(.mobile-primary-tabs) > .main-shell > main { scroll-padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+  .lifetime-panel[data-panel="conversation"] .lifetime-submit:focus-within { bottom: 0; }
+  @supports (bottom: env(keyboard-inset-height)) {
+    .mobile-primary-tabs { bottom: calc(env(keyboard-inset-height) + 8px + env(safe-area-inset-bottom)); }
   }
   dialog.mobile-workspace-dialog {
     position: fixed;
@@ -105,7 +161,7 @@
   .mobile-workspace-menu .nav-row[aria-current=page] { background: var(--color-selection); }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .mobile-ghost-tabs {
+  .mobile-primary-tabs {
     background: var(--color-paper);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -122,8 +178,8 @@
     animation: ghost-menu-enter 165ms cubic-bezier(.2,.75,.25,1) both;
   }
   dialog.mobile-workspace-dialog[open] { --ghost-menu-offset: 8px; }
-  .mobile-ghost-tabs::before { transition: transform 210ms cubic-bezier(.2,.75,.25,1), opacity 130ms ease-out; }
-  .mobile-ghost-tabs > button { transition: color 135ms ease-out; }
+  .mobile-primary-tabs::before { transition: transform 210ms cubic-bezier(.2,.75,.25,1), opacity 130ms ease-out; }
+  .mobile-primary-tabs > button { transition: color 135ms ease-out; }
 }
 @keyframes ghost-menu-enter {
   from { opacity: 0; translate: 0 var(--ghost-menu-offset, -4px); }

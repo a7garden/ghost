@@ -651,3 +651,57 @@ private func runThroughPoll(
     #expect(captured.last?.path == "/mobile/v1/bootstrap")
     #expect(captured.last?.authorization == "Bearer \(key1)")
 }
+
+private func exactPeerScope() -> JSON {
+    .object([
+        "kind": .string("lifetime"),
+        "ghost_ids": .array([.string("00000000-0000-4000-8000-000000000001"), .string("00000000-0000-4000-8000-000000000002")]),
+        "conversation_ids": .array([.string("00000000-0000-4000-8000-000000000011"), .string("00000000-0000-4000-8000-000000000012")]),
+        "capabilities": .array([.string("lifetime.read"), .string("lifetime.write")]),
+        "targets": .array([
+            .object(["ghost_id": .string("00000000-0000-4000-8000-000000000001"), "conversation_id": .string("00000000-0000-4000-8000-000000000011")]),
+            .object(["ghost_id": .string("00000000-0000-4000-8000-000000000002"), "conversation_id": .string("00000000-0000-4000-8000-000000000012")])
+        ])
+    ])
+}
+
+@Test func exactPeerGrantKeepsPairBoundariesAndSurvivesApproval() async throws {
+    let scope = exactPeerScope()
+    #expect(validPairingScope(scope))
+    #expect(lifetimeScopeAllowsPair(scope, ghostID: scope["ghost_ids"].items[0].text, conversationID: scope["conversation_ids"].items[0].text))
+    #expect(!lifetimeScopeAllowsPair(scope, ghostID: scope["ghost_ids"].items[0].text, conversationID: scope["conversation_ids"].items[1].text))
+    let outcome = try await runThroughPoll(
+        report: { statusJSON(status: "approved", origin: $0.absoluteString, scope: scope, device: deviceID) }, receiptScope: scope)
+    #expect(outcome.pollError == nil)
+    #expect(outcome.attempt?.scope == scope)
+    #expect(outcome.attempt?.status == .approved)
+}
+
+@Test func exactPeerGrantRejectsWidenedProjectionDuplicatesAndEmptyTargets() {
+    var fields = exactPeerScope().dictionary
+    fields["ghost_ids"] = .array(fields["ghost_ids"]!.items + [.string("00000000-0000-4000-8000-000000000003")])
+    #expect(!validPairingScope(.object(fields)))
+    fields = exactPeerScope().dictionary
+    fields["targets"] = .array([fields["targets"]!.items[0], fields["targets"]!.items[0]])
+    #expect(!validPairingScope(.object(fields)))
+    fields["targets"] = .array([])
+    #expect(!validPairingScope(.object(fields)))
+    fields["targets"] = .string("invalid")
+    #expect(!validPairingScope(.object(fields)))
+    #expect(!lifetimeScopeAllowsPair(.object(fields), ghostID: fields["ghost_ids"]!.items[0].text, conversationID: fields["conversation_ids"]!.items[0].text))
+}
+
+@Test func exactPeerGrantCannotBeSwappedDuringApproval() async throws {
+    let scope = exactPeerScope()
+    var fields = scope.dictionary
+    fields["targets"] = .array([
+        .object(["ghost_id": scope["ghost_ids"].items[0], "conversation_id": scope["conversation_ids"].items[1]]),
+        .object(["ghost_id": scope["ghost_ids"].items[1], "conversation_id": scope["conversation_ids"].items[0]])
+    ])
+    #expect(validPairingScope(.object(fields)))
+    let swapped = JSON.object(fields)
+    let outcome = try await runThroughPoll(
+        report: { statusJSON(status: "approved", origin: $0.absoluteString, scope: swapped, device: deviceID) }, receiptScope: scope)
+    #expect(outcome.pollError != nil)
+    #expect(outcome.attempt?.status == .pending)
+}

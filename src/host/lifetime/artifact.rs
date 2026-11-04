@@ -114,8 +114,26 @@ pub(super) fn read_work_artifact(
         let bytes = match crate::worker::journal::read_verified_pi_artifact(pi_root.parent().ok_or_else(||anyhow!("Pi Host root missing"))?,conn,execution_id,digest,Path::new(locator)) {
             Ok(bytes)=>bytes, Err(error)=>return unavailable(format!("Pi immutable artifact verification refused this read: {error}")),
         };
-        return Ok(Response { status:ResponseStatus::Success,summary:"Current Pi artifact verified".into(),object_refs:vec![work.id,goal.id],artifacts:vec![artifact.clone()],next_actions:vec![],error_code:None,retry_class:RetryClass::SameId,
-            data:json!({"work_id":work_id,"execution_id":execution_id,"goal_revision":goal.revision,"digest":digest,"privacy":artifact.privacy,"byte_length":bytes.len(),"encoding":"base64","data":STANDARD.encode(bytes)}) });
+        return Ok(Response {
+            status: ResponseStatus::Success,
+            summary: "Current Pi artifact verified".into(),
+            object_refs: vec![work.id, goal.id.clone()],
+            next_actions: vec![],
+            error_code: None,
+            retry_class: RetryClass::SameId,
+            data: json!({
+                "work_id": work_id,
+                "goal_id": goal.id,
+                "goal_revision": goal.revision,
+                "execution_id": execution_id,
+                "digest": digest,
+                "privacy": artifact.privacy,
+                "byte_length": bytes.len(),
+                "encoding": "base64",
+                "data": STANDARD.encode(bytes),
+            }),
+            artifacts: vec![artifact],
+        });
     }
     let Some(computers) = computers else {
         return unavailable("owner artifact reads require the native worker route on this host".into());

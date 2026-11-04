@@ -2,7 +2,9 @@
 
 ## Execution architecture
 
-Each Ghost is an independently identifiable bot. The master Ghost assigns work to other Ghosts and owns acceptance and reporting. The owner subsequently shelved the proposed migration of all Ghosts to OMP SDK. Pi Durable owns the canonical conversations. On this Mac the installed Host release runs Pi work with the legacy worker agents disabled. Check the actual installed release before making assumptions about the SDK worker path.
+Every Ghost is the same kind of independently identifiable, durable bot. Pi Durable is built into each Ghost, including direct conversation, work and recovery. One Ghost is selected as the default entry point; it does not have a unique durability tier. The protocol kinds `primary` and `specialist` are existing registry/default-role metadata, not separate runtime capabilities. The owner confirmed this model on 2026-11-04. The owner previously shelved the proposed migration of all Ghosts to OMP SDK. Pi Durable owns the canonical conversations. On this Mac the installed Host release runs Pi work with the legacy worker agents disabled. Check the actual installed release before making assumptions about the SDK worker path.
+
+The native iPhone app must support direct conversation, delegation, approval, results and reconnect without Telegram, Slack or another messenger. Device grants remain explicit and scoped to the reviewed Ghost/conversation pairs.
 
 ## Local operations
 

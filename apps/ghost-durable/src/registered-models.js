@@ -111,9 +111,11 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
       }
     };
     const options=(opts)=>({...opts,fetch:fetchModel,apiKey:'ghost-owned-transport',maxRetries:0,maxRetryDelayMs:0});
-    const nativeOptions=(opts,model,allowedTools)=>{
+    const nativeOptions=(opts,model,allowedTools,onHttpFailure)=>{
       const expected=selected && {...selected};
       return {...opts,apiKey:'ghost-owned-transport',maxRetries:0,maxRetryDelayMs:0,transport:'sse',
+        // Raw stream events include untrusted provider error payloads.
+        onProviderStreamEvent:undefined,
         reasoningEffort:expected?.effort,reasoning:expected?.effort,
         fetch:async(input,init)=>{
           const request=input instanceof Request ? input : new Request(input,init);
@@ -140,6 +142,11 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
           // catches revocation during transport, then every chunk is gated too.
           try { await assertSelected(expected);request.signal.throwIfAborted(); }
           catch(error) { await response.body?.cancel().catch(()=>{});throw error; }
+          if(!response.ok) {
+            onHttpFailure(response.status);
+            await response.body?.cancel().catch(()=>{});
+            throw new Error('Native provider returned an HTTP error.');
+          }
           if(!response.body) throw new Error('Native provider returned no response body.');
           const reader=response.body.getReader();
           let responseBytes=0, lastGate=-65536;
@@ -171,29 +178,64 @@ export function createRegisteredModelProvider({ hostRoot, executable, localModel
       const result=createAssistantMessageEventStream(), allowedTools=new Set();
       const expected=selected && {...selected};
       (async()=>{
-        let terminal;
+        let errorMessage = 'Native provider request failed.';
+        let aborted = false;
+        let usage;
         try {
-          for await(const event of responses[method](model,context,nativeOptions(opts,model,allowedTools))){
-            if(event.type==='error') event.error.content=[];
+          const options = nativeOptions(opts, model, allowedTools, status => {
+            errorMessage = `Native provider returned HTTP ${status}.`;
+          });
+          for await(const event of responses[method](model,context,options)){
+            if(event.type==='error') {
+              aborted = event.reason === 'aborted';
+              usage = event.error.usage;
+              break;
+            }
             if(event.type==='done') {
-              terminal=event.message;
+              const terminal = event.message;
+              usage = terminal.usage;
               await assertSelected(expected);
               opts?.signal?.throwIfAborted();
               const calls=terminal.content.filter(block=>block.type==='toolCall');
-              if(calls.length>32 || calls.some(call=>!allowedTools.has(call.name)||call.arguments===null||typeof call.arguments!=='object'||Array.isArray(call.arguments))) throw new Error('Native provider returned an unexposed or invalid tool call.');
-              if(!calls.length&&!terminal.content.some(block=>block.type==='text'&&block.text.trim())) throw new Error('Native provider returned no answer or tool call.');
+              if(calls.length>32 || calls.some(call=>!allowedTools.has(call.name)||call.arguments===null||typeof call.arguments!=='object'||Array.isArray(call.arguments))) {
+                errorMessage = 'Native provider returned an unexposed or invalid tool call.';
+                break;
+              }
+              if(!calls.length&&!terminal.content.some(block=>block.type==='text'&&block.text.trim())) {
+                errorMessage = 'Native provider returned no answer or tool call.';
+                break;
+              }
+              result.push(event);
+              result.end();
+              return;
             }
-            result.push(event);
+            // The SDK reuses its partial message and writes terminal errors
+            // onto it. Forward a copy without the upstream error fields.
+            const { errorMessage: _message, rawStopReason: _reason, ...partial } = event.partial;
+            result.push({ ...event, partial });
           }
+        } catch {
+          // Transport, SDK and authority exceptions may contain private data.
+        } finally {
           // The committed generation settled; later fences re-resolve scope
           // fresh so a selection change between turns is never masked.
           scopeGenerationCache=null;
-          result.end();
-        } catch(error) {
-          scopeGenerationCache=null;
-          const failure={...(terminal ?? {role:'assistant',api:model.api,provider:model.provider,model:model.id,timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}}),content:[],stopReason:opts?.signal?.aborted?'aborted':'error',errorMessage:error.message};
-          result.push({type:'error',reason:failure.stopReason,error:failure});result.end();
         }
+        const stopReason = aborted || opts?.signal?.aborted ? 'aborted' : 'error';
+        const numberOrZero = value => Number.isFinite(value) ? value : 0;
+        const failure = {
+          role: 'assistant', api: model.api, provider: model.provider, model: model.id,
+          timestamp: Date.now(), content: [], stopReason,
+          errorMessage: stopReason === 'aborted' ? 'Request was aborted.' : errorMessage,
+          usage: {
+            input: numberOrZero(usage?.input), output: numberOrZero(usage?.output),
+            cacheRead: numberOrZero(usage?.cacheRead), cacheWrite: numberOrZero(usage?.cacheWrite),
+            totalTokens: numberOrZero(usage?.totalTokens), reasoning: numberOrZero(usage?.reasoning),
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+        };
+        result.push({ type: 'error', reason: stopReason, error: failure });
+        result.end();
       })();
       return result;
     };

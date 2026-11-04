@@ -20,7 +20,8 @@ it('counts exactly the review and task items shown in the inbox, including a fai
   conversation.tasks.push({ id: 'failure', name: '응답 생성', phase: 'failed', partial: '', output: 'command interrupted; inspect the saved state before issuing a new request' });
   const overview = renderToStaticMarkup(createElement(Overview, { snapshot, mode: 'live', ...callbacks }));
   const inbox = renderToStaticMarkup(createElement(InboxView, { snapshot, ...callbacks }));
-  expect(overview).toContain('확인 필요 1');
+  expect(overview).toContain('확인 필요<span>1</span>');
+  expect(overview).toContain('data-tone="attention">실패');
   expect(inbox.match(/class="inbox-item"/g)).toHaveLength(1);
   expect(inbox).not.toContain('확인이 필요한 항목 없음');
   expect(inbox).toContain('두 원인을 구분할 수 없습니다');
@@ -59,13 +60,14 @@ it('counts completion results only when the inbox can display them', () => {
 });
 
 
-it('keeps overview search available and only allocates the activity rail for running tasks', () => {
+it('keeps Ghost search available and replaces the empty work state with live task rows', () => {
   const snapshot = workspace();
   const render = () => renderToStaticMarkup(createElement(Overview, { snapshot, mode: 'live', ...callbacks }));
   const idle = render();
   expect(idle).toContain('aria-label="Ghost 이름 또는 역할 검색"');
-  expect(idle).not.toContain('class="work-section"');
+  expect(idle).toContain('진행 중인 작업이 없어요');
   snapshot.profiles[0].conversations[0].tasks.push({ id: 'running', name: '자료 찾기', phase: 'model_running', partial: '', output: '' });
-  expect(render()).toContain('class="work-section"');
+  expect(render()).not.toContain('진행 중인 작업이 없어요');
+  expect(render()).toContain('data-tone="running"');
   expect(render()).toContain('자료 찾기');
 });

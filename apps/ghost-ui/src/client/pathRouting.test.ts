@@ -9,6 +9,8 @@ describe('pathToHash', () => {
     expect(pathToHash('/planner')).toBe('/planner');
     expect(pathToHash('/integrations')).toBe('/integrations');
     expect(pathToHash('/settings')).toBe('/settings');
+    expect(pathToHash('/host')).toBe('/host');
+    expect(pathToHash('/providers')).toBe('/providers');
   });
 
   it('preserves nested ids and query strings', () => {

@@ -22,11 +22,13 @@ workspace별로 기록된다. 전송은 콘솔과 같은 routing 절차(`routing
 # Ghost root에서 먼저 실행
 cargo build --offline --features workspace-ui
 npm --prefix apps/ghost-ui run build
-# 이 폴더에서, 정확한 Tauri 2.12 CLI 설치 후
-GHOST_NODE_BINARY=/path/to/standalone/node npm run build
+# 이 폴더에서, 정확한 Tauri 2.12 CLI와 macOS용 독립 실행 Node를 준비한 뒤
+GHOST_NODE_BINARY=/path/to/node-v24.21.0-darwin-arm64/bin/node npm run build
 npm run check
 npm test
 ```
+
+`GHOST_NODE_BINARY`는 [공식 Node.js macOS 배포본](https://nodejs.org/dist/)의 standalone 실행 파일을 가리킨다. Homebrew Node처럼 `/opt/homebrew` dylib에 연결된 실행 파일은 다른 Mac에서 열리지 않으므로 패키징 단계에서 거부된다. `prepare.mjs`는 복사하기 전에 Node 버전을 실행 확인하고, macOS에서는 `otool -L`로 `/System/Library`와 `/usr/lib` 외부의 dylib 의존성을 검사한다.
 
 번들은 로컬 개발용 `Ghost.app`이며 Apple Developer ID 서명/공증 배포를 주장하지 않는다. 사용자가 승인한 닫힌 몸체·짧은 두 눈·작은 원형 입의 Ghost PNG/SVG 원본을 `src-tauri/brand-source`에 보존하고 Tauri 아이콘 변환으로 번들·Dock에 적용한다. 기본 펫도 같은 캐릭터를 사용한다.
 

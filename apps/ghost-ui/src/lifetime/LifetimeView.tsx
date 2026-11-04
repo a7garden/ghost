@@ -16,12 +16,15 @@ import { integrationApprovalTitle, type ApprovalRef } from '../plugins/approvals
 import { AgentPluginSurfaces } from '../plugins/AgentPluginSurfaces';
 import type { Snapshot as WorkspaceSnapshot } from '../client/types';
 import { Modal } from '../components/Modal';
+import { WorkArtifactPreview } from './WorkArtifactPreview';
 import { createAgentStatusReadFence, projectAgentStatus, runAgentStatusOwnerRead } from './agentStatus';
 import type { AgentStatusReadToken } from './agentStatus';
 
 type LifetimePanel = "conversation" | "work" | "ghosts";
 
 export interface LifetimeViewProps {
+  active?: boolean;
+  connected?: boolean;
   mode: LifetimeMode;
   client: LifetimeClient;
   /** Host workspace reviews for the current authority, or undefined while offline. */
@@ -34,8 +37,18 @@ export interface LifetimeViewProps {
   memoryAction?: (command: Command) => Promise<Record<string, any>>;
   initialGhostID?: string;
   initialConversationID?: string;
+  initialRegisterConversationID?: string;
+  initialGoalID?: string;
+  initialWorkID?: string;
+  workScope?: 'all' | 'conversation';
   initialPanel?: LifetimePanel;
   onPanelChange?: (panel: LifetimePanel) => void;
+  onOpenTarget?: (ghostID: string, conversationID: string, preserveWorkRoute?: boolean) => void;
+  onDefaultGhostChange?: (ghostID: string | null) => void;
+  onTargetChange?: (ghostID: string | null) => void;
+  authorizedRegistration?: { ghostID: string; conversationID: string };
+  onRegistrationConsumed?: (ghostID: string, conversationID: string) => void;
+  onClearWorkLink?: () => void;
   workspaceSnapshot?: WorkspaceSnapshot;
   onOpenApproval?: (ref: ApprovalRef) => void;
   createRequested?: boolean;
@@ -156,6 +169,7 @@ const turnStateLabels: Record<ConversationRun["state"], string> = {
 
 const pendingCommandLabels: Record<string, string> = {
   "conversation.input": "대화 메시지",
+  "registry.ensure": "Ghost 대화 연결",
   "conversation.cancel_turn": "이 응답 취소 요청",
   "goal.submit": "목표 등록",
   "goal.update": "목표 수정",
@@ -172,11 +186,6 @@ function attachmentKey(artifact: Artifact): string {
   return JSON.stringify([artifact.digest, artifact.producing_attempt, artifact.locator, artifact.privacy]);
 }
 
-function conversationLabel(target: RegistryConversation): string {
-  const role = target.roles.join(" · ");
-  if (target.kind === "primary") return role ? `주 Ghost · ${role}` : "주 Ghost";
-  return role || "전문 담당";
-}
 async function fetchConversationPage(client: LifetimeClient, target: RegistryConversation, beforeSequence?: number): Promise<ConversationPage> {
   const body = {
     method: "conversation.inspect",
@@ -187,7 +196,7 @@ async function fetchConversationPage(client: LifetimeClient, target: RegistryCon
   };
   return parseConversationPage(await client.request(body), target);
 }
-export function LifetimeView({ mode, client, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, memoryAction, initialGhostID, initialConversationID, initialPanel = "conversation", onPanelChange, createRequested, legacyGhostIDs = [], onOpenHistory, workspaceSnapshot, onOpenApproval }: LifetimeViewProps) {
+export function LifetimeView({ active: routeActive = true, mode, client, connected = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, memoryAction, initialGhostID, initialConversationID, initialRegisterConversationID, initialGoalID, initialWorkID, workScope = 'conversation', initialPanel = "conversation", onPanelChange, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, onClearWorkLink, createRequested, legacyGhostIDs = [], onOpenHistory, workspaceSnapshot, onOpenApproval }: LifetimeViewProps) {
   const [selectedPanel, setSelectedPanel] = useState<LifetimePanel>(initialPanel);
   useEffect(() => setSelectedPanel(initialPanel), [initialPanel]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -204,6 +213,7 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   const [attachmentDrafts, setAttachmentDrafts] = useState(() => new Map<string, Artifact[]>());
   const [registry, setRegistry] = useState<RegistryConversation[]>([]);
   const [registryError, setRegistryError] = useState("");
+  const [registryReady, setRegistryReady] = useState(false);
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [turnRuns, setTurnRuns] = useState<Map<string, ConversationRun>>(() => new Map());
   const [conversationPrivacy, setConversationPrivacy] = useState<Artifact["privacy"]>("local_only");
@@ -217,7 +227,6 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   const transcriptAtBottom = useRef(true);
   const [goalDetailID, setGoalDetailID] = useState<string | null>(null);
   const [goalDrafts, setGoalDrafts] = useState(() => new Map<string, { text: string; revision: number }>());
-  const [steerDrafts, setSteerDrafts] = useState<Map<string, string>>(() => new Map());
   const [inspectSummaries, setInspectSummaries] = useState<Map<string, string>>(() => new Map());
   const [selectedPairKey, setSelectedPairKey] = useState("");
   const [snapshotObservedAt, setSnapshotObservedAt] = useState(0);
@@ -225,6 +234,12 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   const snapshotReads = useRef(createAgentStatusReadFence());
   const foregroundReads = useRef(new Set<AgentStatusReadToken>());
   const [pairRefreshRequest, setPairRefreshRequest] = useState(0);
+  const registryRef = useRef<RegistryConversation[]>([]);
+  const registrationLocks = useRef(new Set<string>());
+  const automaticRegistrationAttempts = useRef(new Set<string>());
+  const openedRegistration = useRef("");
+  const currentRouteScope = useRef("");
+  currentRouteScope.current = JSON.stringify([routeActive, initialGhostID, initialConversationID, initialRegisterConversationID, initialPanel, initialGoalID, initialWorkID]);
 
   function updatePrompt(key: string, update: (current: string) => string) {
     setPromptDrafts(drafts => {
@@ -264,12 +279,17 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
     setPending(commands);
     setRecovery(unresolved);
     setRegistry(entries);
+    registryRef.current = entries;
+    setRegistryReady(true);
     setRegistryError("");
     const activePrimary = entries.filter(entry => entry.mode === "active" && entry.kind === "primary");
+    onDefaultGhostChange?.(activePrimary.length === 1 ? activePrimary[0]!.ghost_id : null);
     const conversationInputs = commands.filter(command => command.body.method === "conversation.input");
     if (conversationInputs.length === 1) {
       const body = conversationInputs[0]!.body;
-      if (typeof body.ghost_id === "string" && typeof body.conversation_id === "string") {
+      const matchesExplicitTarget = !initialGhostID || body.ghost_id === initialGhostID
+        && (!initialConversationID || body.conversation_id === initialConversationID);
+      if (matchesExplicitTarget && typeof body.ghost_id === "string" && typeof body.conversation_id === "string") {
         const key = conversationTargetKey({ ghost_id: body.ghost_id, conversation_id: body.conversation_id });
         setSelectedPairKey(key);
         const pendingText = body.text;
@@ -278,8 +298,8 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
         if (Array.isArray(savedAttachments) && savedAttachments.every(isArtifact)) {
           updateAttachments(key, () => savedAttachments);
         }
+        if (isPrivacy(body.privacy)) setPrivacy(body.privacy);
       }
-      if (isPrivacy(body.privacy)) setPrivacy(body.privacy);
     } else if (conversationInputs.length === 0 && !selectedPairKey && !initialGhostID && activePrimary.length === 1) {
       setSelectedPairKey(conversationTargetKey(activePrimary[0]!));
     }
@@ -300,6 +320,7 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
       onError: reason => {
         const message = reason instanceof Error ? reason.message : "최신 상태를 불러오지 못했습니다.";
         setRegistryError(message);
+        setRegistryReady(false);
         setSyncWarning(message);
       },
       onSettled: () => setLoading(false),
@@ -307,8 +328,10 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   }
 
   useEffect(() => {
+    if (!routeActive) return;
     snapshotReads.current.activate();
     setLoading(true);
+    setRegistryReady(false);
     void runAgentStatusOwnerRead({
       fence: snapshotReads.current, foregroundReads: foregroundReads.current,
       currentScope: () => currentTargetKey.current,
@@ -322,11 +345,12 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
         const message = reason instanceof Error ? reason.message : "지속 작업을 불러오지 못했습니다.";
         setError(message);
         setRegistryError(message);
+        setRegistryReady(false);
       },
       onSettled: () => setLoading(false),
     });
     return () => { snapshotReads.current.deactivate(); };
-  }, [client, mode]);
+  }, [routeActive, client, mode]);
 
   async function refresh(): Promise<void> {
     setRefreshing(true);
@@ -372,6 +396,78 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
     }
   }
 
+  function openRegisteredTarget(target: RegistryConversation, preserveWorkRoute = true): void {
+    const key = conversationTargetKey(target);
+    setSelectedPairKey(key);
+    setSelectedPanel("conversation");
+    openedRegistration.current = key;
+    if (onOpenTarget) onOpenTarget(target.ghost_id, target.conversation_id, preserveWorkRoute);
+    else onPanelChange?.("conversation");
+  }
+
+  async function ensureProfileConversation(profileID: string, conversationID: string): Promise<void> {
+    const sourceRoute = currentRouteScope.current;
+    const profile = workspaceSnapshot?.profiles.find(item => item.id === profileID);
+    if (!profile) { setError("Ghost 목록을 새로 고친 뒤 다시 시도해 주세요."); return; }
+    if (!registryReady || loading || refreshing || registryError) { setError("Host의 등록 대화 목록을 먼저 새로 고쳐 주세요."); return; }
+    const existing = registryRef.current.filter(item => item.ghost_id === profileID);
+    const alreadyActive = existing.find(item => item.mode === "active");
+    if (alreadyActive) { openRegisteredTarget(alreadyActive, false); return; }
+    if (existing.length) { setError("이 Ghost의 등록 대화가 마무리 중입니다. 새 대화를 연결할 수 없습니다."); return; }
+    if (!connected || !client.dispatch_enabled || pending.length || recovery.length || busy || registryError) {
+      setError("연결과 저장 요청을 확인한 뒤 다시 시도해 주세요.");
+      return;
+    }
+    if (registrationLocks.current.has(profileID)) return;
+    registrationLocks.current.add(profileID);
+    try {
+      await run(`registry.ensure:${profileID}`, () => client.request({
+        method: "registry.ensure", ghost_id: profileID, kind: "specialist",
+        conversation_id: conversationID, roles: [],
+      }));
+      const refreshed = registryRef.current.find(item => item.ghost_id === profileID && item.mode === "active");
+      if (refreshed && routeActive && currentRouteScope.current === sourceRoute) openRegisteredTarget(refreshed, false);
+      else if (registryRef.current.some(item => item.ghost_id === profileID)) {
+        setError("이 Ghost의 기존 등록은 마무리 중입니다. Host 상태를 확인해 주세요.");
+      }
+    } finally {
+      registrationLocks.current.delete(profileID);
+    }
+  }
+
+  useEffect(() => {
+    const authorized = authorizedRegistration;
+    if (!routeActive || !authorized || authorized.ghostID !== initialGhostID
+      || authorized.conversationID !== initialRegisterConversationID
+      || !registryReady || loading || refreshing || registryError
+      || pending.length || recovery.length || busy) return;
+    const attemptKey = `${authorized.ghostID}:${authorized.conversationID}`;
+    if (automaticRegistrationAttempts.current.has(attemptKey)) return;
+    const existing = registryRef.current.filter(item => item.ghost_id === authorized.ghostID);
+    const active = existing.find(item => item.mode === "active");
+    if (active) {
+      automaticRegistrationAttempts.current.add(attemptKey);
+      onRegistrationConsumed?.(authorized.ghostID, authorized.conversationID);
+      openRegisteredTarget(active, false);
+      return;
+    }
+    if (existing.length || !workspaceSnapshot?.profiles.some(profile => profile.id === authorized.ghostID)) return;
+    automaticRegistrationAttempts.current.add(attemptKey);
+    onRegistrationConsumed?.(authorized.ghostID, authorized.conversationID);
+    void ensureProfileConversation(authorized.ghostID, authorized.conversationID);
+  }, [routeActive, authorizedRegistration, initialGhostID, initialRegisterConversationID, registryReady, loading, refreshing, registryError, pending.length, recovery.length, busy, registry, workspaceSnapshot, connected]);
+
+  useEffect(() => {
+    if (!routeActive || !initialGhostID || initialPanel !== 'conversation' || !registryReady) return;
+    const active = registryRef.current.find(item => item.ghost_id === initialGhostID && item.mode === "active");
+    if (!active) return;
+    const key = conversationTargetKey(active);
+    if (openedRegistration.current === key) return;
+    openedRegistration.current = key;
+    // Read-only recovery from a lost ensure response is safe after inspect confirms it.
+    if (initialRegisterConversationID || !initialConversationID || active.conversation_id === initialConversationID) openRegisteredTarget(active);
+  }, [routeActive, registryReady, registry, initialGhostID, initialConversationID, initialRegisterConversationID, initialPanel]);
+
   async function reconcile(recoveryId: string): Promise<void> {
     if (busy) return;
     setBusy(`reconcile:${recoveryId}`);
@@ -396,12 +492,19 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   const activePrimary = activeTargets.filter(target => target.kind === "primary");
   const appliedEntry = useRef('');
   useEffect(() => {
-    const entry = JSON.stringify([initialGhostID, initialConversationID, Boolean(createRequested)]);
-    if (!registry.length || appliedEntry.current === entry || pending.length > 0) return;
+    const entry = JSON.stringify([initialGhostID, initialConversationID, initialPanel, Boolean(createRequested)]);
+    if (!registryReady || appliedEntry.current === entry) return;
     const requested = initialGhostID
       ? registry.filter(target => target.ghost_id === initialGhostID && (!initialConversationID || target.conversation_id === initialConversationID))
       : activePrimary;
-    if (requested.length !== 1) { if (initialGhostID) setSelectedPairKey(''); return; }
+    if (requested.length !== 1) {
+      if (initialGhostID) {
+        setSelectedPairKey('');
+        if (initialPanel !== 'work' && workspaceSnapshot?.profiles.some(profile => profile.id === initialGhostID)) setSelectedPanel("ghosts");
+      }
+      appliedEntry.current = entry;
+      return;
+    }
     const key = conversationTargetKey(requested[0]!);
     setSelectedPairKey(key);
     if (createRequested) {
@@ -410,12 +513,15 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
       updatePrompt(key, current => current || '이걸 봇으로 만들어 줘');
     }
     appliedEntry.current = entry;
-  }, [initialGhostID, initialConversationID, createRequested, registry, pending.length]);
-  const selectedTarget = selectedPairKey
-    ? registry.find(target => conversationTargetKey(target) === selectedPairKey)
-    : initialGhostID ? registry.find(target => target.ghost_id === initialGhostID && (!initialConversationID || target.conversation_id === initialConversationID))
+  }, [initialGhostID, initialConversationID, createRequested, initialPanel, registry, registryReady, workspaceSnapshot]);
+  const explicitTarget = initialGhostID
+    ? registry.find(target => target.ghost_id === initialGhostID && (!initialConversationID || target.conversation_id === initialConversationID))
+    : undefined;
+  const selectedTarget = initialGhostID ? explicitTarget
+    : selectedPairKey ? registry.find(target => conversationTargetKey(target) === selectedPairKey)
       : activePrimary.length === 1 ? activePrimary[0] : undefined;
   const selectedTargetKey = selectedTarget ? conversationTargetKey(selectedTarget) : "";
+  useEffect(() => { onTargetChange?.(routeActive ? selectedTarget?.ghost_id ?? null : null); }, [routeActive, selectedTarget?.ghost_id, onTargetChange]);
   const prompt = promptDrafts.get(selectedTargetKey) ?? "";
   const currentTargetKey = useRef(selectedTargetKey);
   const previousTargetKey = useRef(selectedTargetKey);
@@ -424,13 +530,14 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   useLayoutEffect(() => {
     if (previousTargetKey.current !== selectedTargetKey) {
       snapshotReads.current.invalidate();
+      setPrivacy("local_only");
       setGoalDetailID(null);
       previousTargetKey.current = selectedTargetKey;
       if (loading) void loadLatest();
     }
   }, [selectedTargetKey]);
-  const writesDisabled = !client.dispatch_enabled || recovery.length > 0 || pending.length > 0
-    || Boolean(registryError) || Boolean(conversationError) || Boolean(selectedTarget && loadedConversationKey !== selectedTargetKey);
+  const writesDisabled = !connected || !client.dispatch_enabled || recovery.length > 0 || pending.length > 0
+    || Boolean(registryError || syncWarning) || Boolean(conversationError) || Boolean(selectedTarget && loadedConversationKey !== selectedTargetKey);
   const conversationGoals = snapshot?.goals.filter(goal => goal.accountable_ghost === selectedTarget?.ghost_id
     && goal.reply_conversation === selectedTarget?.conversation_id) ?? [];
   const goalRevisions = new Map(conversationGoals.map(goal => [goal.id, goal.revision]));
@@ -446,10 +553,12 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   const effectivePrivacy = atLeastPrivacy(privacy, privacyFloor, ...attachments.map(artifact => artifact.privacy));
   const awaitingController = [...turnRuns.values()].some(run => !["answered", "failed", "cancelled"].includes(run.state));
   const awaitingWork = (snapshot?.work ?? []).some(work => goalRevisions.has(work.goal_id) && !terminalWorkStates[work.state]);
+  const awaitingAllWork = Boolean(snapshot && snapshot.work.some(work => !terminalWorkStates[work.state]
+    && snapshot.goals.some(goal => goal.id === work.goal_id && goal.revision === work.goal_revision)));
 
   useEffect(() => {
     let mounted = true;
-    if (!selectedTarget) {
+    if (!routeActive || !selectedTarget) {
       setTurns([]);
       setTurnRuns(new Map());
       setHasOlder(false);
@@ -485,7 +594,7 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
       if (mounted) setConversationLoading(false);
     });
     return () => { mounted = false; };
-  }, [client, selectedTarget?.ghost_id, selectedTarget?.conversation_id, conversationRefresh]);
+  }, [routeActive, client, selectedTarget?.ghost_id, selectedTarget?.conversation_id, conversationRefresh]);
 
   useEffect(() => {
     const transcript = transcriptRef.current;
@@ -494,7 +603,7 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   }, [turns, conversationLoading, selectedPanel]);
 
   useEffect(() => {
-    if (mode !== "live" || !selectedTarget || loading) return;
+    if (!routeActive || mode !== "live" || !selectedTarget || loading || selectedPanel === 'work' && workScope === 'all') return;
     const target = selectedTarget;
     let mounted = true;
     let timer = 0;
@@ -530,7 +639,39 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
     }
     timer = window.setTimeout(() => void observeProgress(), awaitingController || awaitingWork ? 1000 : 5000);
     return () => { mounted = false; window.clearTimeout(timer); };
-  }, [client, mode, selectedTargetKey, awaitingController, awaitingWork, loading]);
+  }, [routeActive, client, mode, selectedTargetKey, awaitingController, awaitingWork, loading, selectedPanel, workScope]);
+
+  const workBoardRouteScope = currentRouteScope.current;
+  useEffect(() => {
+    if (!routeActive || mode !== 'live' || selectedPanel !== 'work' || workScope !== 'all' || loading) return;
+    let mounted = true;
+    let timer = 0;
+    const routeScope = workBoardRouteScope;
+    async function observeBoard(): Promise<void> {
+      let read: AgentStatusReadToken | null = null;
+      try {
+        const ownerReadPending = [...foregroundReads.current].some(token => snapshotReads.current.isCurrent(token, currentTargetKey.current));
+        if (document.visibilityState !== 'hidden' && !ownerReadPending) {
+          read = snapshotReads.current.begin(currentTargetKey.current);
+          if (!read) return;
+          foregroundReads.current.add(read);
+          const latest = await client.snapshot();
+          if (mounted && routeScope === currentRouteScope.current && snapshotReads.current.isCurrent(read, currentTargetKey.current)) {
+            setSnapshot(latest);
+            setSnapshotObservedAt(Date.now());
+            setSyncWarning('');
+          }
+        }
+      } catch {
+        if (mounted && routeScope === currentRouteScope.current && snapshotReads.current.isCurrent(read, currentTargetKey.current)) setSyncWarning('작업판의 최신 상태를 확인하지 못했습니다. 새 실행은 요청하지 않았습니다.');
+      } finally {
+        if (read) foregroundReads.current.delete(read);
+        if (mounted) timer = window.setTimeout(() => void observeBoard(), document.visibilityState === 'hidden' ? 10000 : awaitingAllWork ? 1500 : 5000);
+      }
+    }
+    timer = window.setTimeout(() => void observeBoard(), document.visibilityState === 'hidden' ? 10000 : awaitingAllWork ? 1500 : 5000);
+    return () => { mounted = false; window.clearTimeout(timer); };
+  }, [routeActive, client, mode, selectedPanel, workScope, loading, awaitingAllWork, selectedTargetKey, workBoardRouteScope]);
 
   async function loadOlderConversation(): Promise<void> {
     if (!selectedTarget || !hasOlder || oldestSequence === null || conversationLoading) return;
@@ -559,7 +700,7 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   async function submitConversation(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!selectedTarget) {
-      setError("등록된 주 Ghost의 활성 대화를 확인할 수 없습니다.");
+      setError("선택한 Ghost의 활성 대화를 확인할 수 없습니다. Ghosts에서 대화를 연결해 주세요.");
       return;
     }
     const capturedPrompt = prompt;
@@ -600,7 +741,7 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
 
   async function inspectWork(workID: string): Promise<void> {
     const work = snapshot?.work.find(item => item.id === workID);
-    if (!work || !goalRevisions.has(work.goal_id)) return;
+    if (!work || !snapshot?.goals.some(goal => goal.id === work.goal_id && goal.revision === work.goal_revision)) return;
     await run(`work.inspect:${workID}`, async () => {
       const response = await client.request({ method: "work.inspect", work_id: workID });
       if (response.status !== "error") setInspectSummaries(current => new Map(current).set(workID, response.summary));
@@ -620,15 +761,34 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
     setConversationRefresh(current => current + 1);
   }
 
-  const boardGoals = selectedPanel === "work" && snapshot ? conversationGoals.map(goal => {
+  const boardSourceGoals = workScope === 'all' ? snapshot?.goals ?? [] : conversationGoals;
+  const boardGoals = selectedPanel === "work" && snapshot ? boardSourceGoals.map(goal => {
     const workItems = snapshot.work.filter(work => work.goal_id === goal.id);
     return { goal, workItems, ...boardState(goal, workItems) };
   }) : [];
+
+  const appliedGoalLink = useRef('');
+  useEffect(() => {
+    if (!routeActive || selectedPanel !== 'work' || !initialGoalID || loading || !snapshot) return;
+    const key = `${initialGoalID}:${initialWorkID ?? ''}:${workScope}`;
+    if (appliedGoalLink.current === key) return;
+    const goal = boardGoals.find(item => item.goal.id === initialGoalID);
+    if (!goal) return;
+    appliedGoalLink.current = key;
+    setGoalDetailID(goal.goal.id);
+  }, [routeActive, selectedPanel, initialGoalID, initialWorkID, workScope, loading, snapshot, boardGoals]);
 
   const goalDetail = boardGoals.find(item => item.goal.id === goalDetailID);
   const detailGoal = goalDetail?.goal;
   const detailDraft = detailGoal && goalDrafts.get(detailGoal.id);
   const staleGoalDraft = detailDraft && detailDraft.revision !== detailGoal?.revision;
+  const focusedWorkLink = useRef('');
+  useEffect(() => {
+    if (routeActive) return;
+    setGoalDetailID(null);
+    appliedGoalLink.current = '';
+    focusedWorkLink.current = '';
+  }, [routeActive]);
   function clearGoalDraft(id: string) {
     setGoalDrafts(current => {
       const next = new Map(current);
@@ -639,10 +799,25 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   function closeGoalDetail() {
     const id = goalDetailID;
     setGoalDetailID(null);
+    appliedGoalLink.current = '';
+    focusedWorkLink.current = '';
+    onClearWorkLink?.();
     requestAnimationFrame(() => {
       if (id) document.querySelector<HTMLButtonElement>(`[data-lifetime-goal="${CSS.escape(id)}"]`)?.focus();
     });
   }
+
+  useEffect(() => {
+    if (!routeActive || !initialGoalID || !initialWorkID || goalDetailID !== initialGoalID || !goalDetail?.workItems.some(work => work.id === initialWorkID)) return;
+    const key = `${initialGoalID}:${initialWorkID}`;
+    if (focusedWorkLink.current === key) return;
+    focusedWorkLink.current = key;
+    requestAnimationFrame(() => {
+      const item = document.querySelector<HTMLElement>(`[data-lifetime-work="${CSS.escape(initialWorkID)}"]`);
+      item?.scrollIntoView({ block: 'nearest' });
+      item?.focus({ preventScroll: true });
+    });
+  }, [routeActive, initialGoalID, initialWorkID, goalDetailID, goalDetail]);
 
   // Actual lifetime document proposals for exactly the current Primary ghost,
   // conversation and authority epoch. State is always the Host's saved state;
@@ -669,9 +844,9 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
     review.ghost_id === selectedTarget?.ghost_id && review.conversation_id === selectedTarget?.conversation_id);
   const submissionBlocked = writesDisabled || Boolean(busy) || loading || !prompt.trim()
     || selectedTarget?.mode !== "active" || new TextEncoder().encode(prompt).length > 65_536 || attachments.length > 16;
-  const chatTitle = selectedTarget?.kind === "specialist"
-    ? workspaceSnapshot?.profiles.find(profile => profile.id === selectedTarget.ghost_id)?.name ?? conversationLabel(selectedTarget)
-    : "주 Ghost";
+  const chatTitle = selectedTarget
+    ? workspaceSnapshot?.profiles.find(profile => profile.id === selectedTarget.ghost_id)?.name ?? "Ghost"
+    : "대화";
   const feedback = <>
       {error && <p className="lifetime-alert" role="alert"><CircleAlert size={16}/><span>{error}</span></p>}
       {syncWarning && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>{syncWarning}</span></p>}
@@ -730,27 +905,35 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
       </article>)}
     </section>}
 
-    {selectedPanel === "ghosts" && snapshot && registry.length > 0 && !registryError && <section className="lifetime-roster" aria-labelledby="ghost-team-heading">
-      <h3 id="ghost-team-heading" className="lifetime-roster-label">대화 상대</h3>
+    {selectedPanel === "ghosts" && snapshot && workspaceSnapshot && registryReady && !registryError && <section className="lifetime-roster" aria-labelledby="ghost-team-heading">
+      <h3 id="ghost-team-heading" className="lifetime-roster-label">Ghosts</h3>
       <ul className="ghost-team-list">
-        {[...registry].sort((left, right) => Number(right.kind === "primary") - Number(left.kind === "primary")).map(target => {
-          const currentWork = snapshot.work.filter(work => work.owner === target.ghost_id
+        {workspaceSnapshot.profiles.map(profile => {
+          const entries = registry.filter(target => target.ghost_id === profile.id);
+          const target = entries.find(item => conversationTargetKey(item) === selectedTargetKey)
+            ?? entries.find(item => item.mode === "active") ?? entries[0];
+          const currentWork = snapshot.work.filter(work => work.owner === profile.id
             && snapshot.goals.some(goal => goal.id === work.goal_id && goal.revision === work.goal_revision));
           const counts = [
             { label: "대기·진행", tone: "neutral", count: currentWork.filter(work => work.state === "queued" || work.state === "blocked" || movingWorkStates.has(work.state)).length },
             { label: "확인 필요", tone: "review", count: currentWork.filter(work => ["completed", "verifying", "unknown", "failed", "rejected"].includes(work.state)).length },
             { label: "검수 완료", tone: "neutral", count: currentWork.filter(work => work.state === "accepted").length },
           ];
-          const key = conversationTargetKey(target);
-          const roleNames: Record<string, string> = { engineering: "개발", operations: "운영", research: "조사", primary: "마스터" };
-          const name = target.kind === "primary" ? "마스터" : target.roles.map(role => roleNames[role] ?? role).join(" · ") || "전문 Ghost";
-          return <li className="ghost-team-row" key={key}>
-            <button className="ghost-team-card" type="button" aria-pressed={key === selectedTargetKey}
-              disabled={Boolean(busy) || pending.length > 0} onClick={() => setSelectedPairKey(key)}>
-              <span className="ghost-team-card-heading"><strong>{name}</strong>{target.mode !== "active" && <span>접수 중지</span>}</span>
+          const key = target ? conversationTargetKey(target) : "";
+          return <li className="ghost-team-row" key={profile.id}>
+            {target?.mode === "active" ? <button className="ghost-team-card" type="button" aria-pressed={key === selectedTargetKey}
+              onClick={() => openRegisteredTarget(target, false)}>
+              <span className="ghost-team-card-heading"><strong>{profile.name}{target.kind === 'primary' && <span className="ghost-default-badge">기본</span>}</strong></span>
               <span className="ghost-team-counts">{counts.filter(({ count }) => count > 0).map(({ label, tone, count }) =>
                 <span key={label} data-tone={tone}>{label} {count}</span>)}</span>
-            </button>
+            </button> : <div className="ghost-team-card ghost-team-card--unregistered">
+              <span className="ghost-team-card-heading"><strong>{profile.name}</strong><small>{profile.persona}</small></span>
+              {target ? <span className="ghost-team-registration-state">등록 대화 마무리 중</span> : <div className="ghost-team-actions">
+                <button type="button" className="button primary" disabled={!connected || !client.dispatch_enabled || loading || refreshing || Boolean(busy) || pending.length > 0 || recovery.length > 0}
+                  onClick={() => void ensureProfileConversation(profile.id, crypto.randomUUID())}>새 대화 연결</button>
+                {profile.conversations.length > 0 && <button type="button" className="button secondary" onClick={() => onOpenHistory?.(profile.id)}>이전 대화 {profile.conversations.length}</button>}
+              </div>}
+            </div>}
           </li>;
         })}
       </ul>
@@ -767,7 +950,7 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
         {integrationReviews.slice(0, 5).map(review => <button type="button" className="button secondary" key={review.id}
           onClick={() => onOpenApproval({ kind: "integration", id: review.id })}>{integrationApprovalTitle(review.tool)} · {integrationStatusLabels[review.state]}</button>)}
       </div>}
-      {!selectedTarget && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>{activePrimary.length === 1 ? "활성 상태인 등록 대화를 선택해 주세요." : "활성 주 Ghost 대화를 하나로 확인할 수 없습니다. 등록된 대상을 직접 선택해 주세요."}</span></p>}
+      {!selectedTarget && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>{initialGhostID ? "이 Ghost에 활성 대화가 없습니다. Ghosts에서 새 대화를 연결해 주세요." : "활성 대화를 확인할 수 없습니다. Ghosts에서 대화를 선택해 주세요."}</span></p>}
       {conversationError && <p className="lifetime-alert" role="alert"><CircleAlert size={16}/><span>{conversationError}</span></p>}
       {hasOlder && oldestSequence !== null && <button type="button" className="button secondary" onClick={() => void loadOlderConversation()} disabled={conversationLoading || !selectedTarget}>이전 대화 불러오기</button>}
       {conversationLoading && <p className="lifetime-empty"><Clock3 size={16}/>저장된 대화를 불러오는 중입니다.</p>}
@@ -806,7 +989,7 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
     {workspaceSnapshot && selectedTarget && onOpenApproval && <AgentPluginSurfaces
       snapshot={workspaceSnapshot} ghostId={selectedTarget.ghost_id} workspaceKey={workspaceSnapshot.workspace_id}
       onOpenApproval={onOpenApproval}/>}
-    {mode === 'live' && selectedTarget && <InferenceSettings pair={selectedTarget} disabled={writesDisabled || Boolean(busy)}/>}
+    {mode === 'live' && selectedTarget && <InferenceSettings pair={selectedTarget} connected={connected} disabled={writesDisabled || Boolean(busy)}/>}
     {(!workspaceSnapshot || !onOpenApproval) && <section className="lifetime-outbox" aria-label="문서 저장 제안 검토">
       <div className="lifetime-section-heading"><div><h3>문서 저장 요청</h3></div></div>
       {selectedTarget !== undefined && documentReviews !== undefined && documentAuthorityEpoch !== undefined && lifetimeDocumentReviews.length === 0
@@ -827,9 +1010,9 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
     {mode === 'live' && selectedTarget && <BotRoster key={`${client.workspace_id}:${selectedTargetKey}`} client={client} target={selectedTarget}
       disabled={writesDisabled || Boolean(busy)} onRun={run}
       onSelect={target => {
-        setSelectedPairKey(conversationTargetKey(target));
+        const registered = registry.find(item => item.ghost_id === target.ghost_id && item.conversation_id === target.conversation_id);
+        if (registered) openRegisteredTarget(registered, false);
         setPairRefreshRequest(request => request + 1);
-        showPanel("conversation");
       }}
       onCreate={() => {
         updatePrompt(selectedTargetKey, current => current || '이걸 봇으로 만들어 줘');
@@ -857,9 +1040,14 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
       }} placeholder="메시지 쓰기" required disabled={Boolean(busy)}/></label>
       <details className="lifetime-compose-options">
         <summary>전송 옵션 <span>{privacyLabels[effectivePrivacy]}{attachments.length > 0 && ` · 첨부 ${attachments.length}`}</span></summary>
-        <label className="lifetime-field">대화 대상<select value={selectedTarget ? conversationTargetKey(selectedTarget) : selectedPairKey} onChange={event => setSelectedPairKey(event.target.value)} disabled={Boolean(busy) || writesDisabled && pending.length > 0}>
+        <label className="lifetime-field">대화 대상<select value={selectedTarget ? conversationTargetKey(selectedTarget) : selectedPairKey} onChange={event => {
+          const target = registry.find(item => conversationTargetKey(item) === event.target.value);
+          if (target) openRegisteredTarget(target, false);
+        }} disabled={Boolean(busy) || writesDisabled && pending.length > 0}>
           <option value="">등록 대화를 선택하세요</option>
-          {registry.map(target => <option value={conversationTargetKey(target)} key={conversationTargetKey(target)}>{conversationLabel(target)}{target.mode === "draining" ? " · 마무리 중" : ""}</option>)}
+          {registry.map(target => <option value={conversationTargetKey(target)} key={conversationTargetKey(target)}>
+            {workspaceSnapshot?.profiles.find(profile => profile.id === target.ghost_id)?.name ?? 'Ghost'}{target.kind === 'primary' ? ' · 기본' : ''}{target.mode === "draining" ? " · 마무리 중" : ""}
+          </option>)}
         </select></label>
         <div className="lifetime-form-row">
           <label className="lifetime-field">자료 범위<select value={privacy} onChange={event => setPrivacy(event.target.value as Artifact["privacy"])} disabled={Boolean(busy)}>
@@ -919,7 +1107,12 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
           <div><span className="lifetime-state">{goalStateLabels[goalDetail.state] ?? goalDetail.state}</span>
             <span className="lifetime-revision">판본 {detailGoal.revision}</span>
             <span className="lifetime-privacy">{privacyLabels[detailGoal.privacy]}</span></div>
-          <span className="lifetime-owner">담당 {detailGoal.accountable_ghost}</span>
+          <div className="lifetime-goal-owner-actions"><span className="lifetime-owner">담당 {workspaceSnapshot?.profiles.find(profile => profile.id === detailGoal.accountable_ghost)?.name ?? detailGoal.accountable_ghost}</span>
+            {(() => {
+              const target = registry.find(item => item.ghost_id === detailGoal.accountable_ghost && item.conversation_id === detailGoal.reply_conversation && item.mode === 'active');
+              return target && <button type="button" className="button secondary" onClick={() => openRegisteredTarget(target, false)}>담당 Ghost와 대화</button>;
+            })()}
+          </div>
         </header>
         <label className="lifetime-field">목표<textarea value={detailDraft?.text ?? detailGoal.prompt}
           onChange={event => {
@@ -945,11 +1138,9 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
             }}>목표 수정</button>
         </div>
         {goalDetail.workItems.length === 0 && <p className="lifetime-empty">연결된 진행 항목이 없습니다.</p>}
-        {goalDetail.workItems.map(work => <WorkItem key={work.id} work={work} snapshot={snapshot} busy={Boolean(busy)} writeDisabled={writesDisabled}
-          steerDraft={steerDrafts.get(work.id) ?? ""} inspectSummary={inspectSummaries.get(work.id)}
-          onSteerDraft={value => setSteerDrafts(current => new Map(current).set(work.id, value))}
+        {goalDetail.workItems.map(work => <WorkItem key={work.id} client={client} connected={connected} work={work} snapshot={snapshot} busy={Boolean(busy)} writeDisabled={writesDisabled}
+          ownerName={workspaceSnapshot?.profiles.find(profile => profile.id === work.owner)?.name ?? work.owner} inspectSummary={inspectSummaries.get(work.id)}
           onInspect={() => void inspectWork(work.id)}
-          onSteer={() => void run(`work.steer:${work.id}`, () => client.request({ method: "work.steer", work_id: work.id, prompt: steerDrafts.get(work.id) ?? "" }))}
           onCancel={() => void run(`work.cancel:${work.id}`, () => client.request({ method: "work.cancel", work_id: work.id }))}
         />)}
       </div>
@@ -957,25 +1148,25 @@ export function LifetimeView({ mode, client, documentReviews, documentAuthorityE
   </section>;
 }
 
-function WorkItem({ work, snapshot, busy, writeDisabled, steerDraft, inspectSummary, onSteerDraft, onInspect, onSteer, onCancel }: {
+function WorkItem({ client, connected, work, snapshot, busy, writeDisabled, ownerName, inspectSummary, onInspect, onCancel }: {
+  client: LifetimeClient;
+  connected: boolean;
   work: Work;
   snapshot: Snapshot;
   busy: boolean;
   writeDisabled: boolean;
-  steerDraft: string;
+  ownerName: string;
   inspectSummary?: string;
-  onSteerDraft(value: string): void;
   onInspect(): void;
-  onSteer(): void;
   onCancel(): void;
 }) {
   const acceptances = snapshot.acceptances.filter(item => item.work_id === work.id);
   const acceptedDigests = new Set(acceptances.map(item => item.artifact_digest));
   const artifacts = snapshot.artifacts.filter(item => work.execution_id !== null && item.producing_attempt === work.execution_id);
   const canCancel = !terminalWorkStates[work.state] && !pendingCancellations[work.cancellation];
-  return <section className="lifetime-work" data-state={work.state} aria-label="진행 항목">
+  return <section className="lifetime-work" data-lifetime-work={work.id} data-state={work.state} aria-label="진행 항목" tabIndex={-1}>
     <header className="lifetime-work-heading">
-      <div><strong>{workStateLabels[work.state] ?? work.state}</strong><span>담당 {work.owner} · {work.state === "completed" ? "실행 종료 · 검수 전" : work.state === "accepted" ? "현재 목표 검수 완료" : work.execution_id ? "실행 또는 실행 결과 확인 중" : "실행 배정 대기"}</span></div>
+      <div><strong>{workStateLabels[work.state] ?? work.state}</strong><span>담당 {ownerName} · {work.state === "completed" ? "실행 종료 · 검수 전" : work.state === "accepted" ? "현재 목표 검수 완료" : work.execution_id ? "실행 또는 실행 결과 확인 중" : "실행 배정 대기"}</span></div>
       <button type="button" className="button secondary" onClick={onInspect} disabled={busy}><RefreshCw size={14}/>상태 확인</button>
     </header>
     {work.blocker && <p className="lifetime-blocker"><Clock3 size={14}/><span>대기 이유: {work.blocker}</span></p>}
@@ -985,16 +1176,16 @@ function WorkItem({ work, snapshot, busy, writeDisabled, steerDraft, inspectSumm
       const accepted = acceptedDigests.has(artifact.digest);
       return <div className="lifetime-artifact" key={`${work.id}:${artifact.digest}`}>
         <div><strong>{accepted ? "검수 기록에 연결됨" : "도착함 · 수용 전"}</strong><span>{privacyLabels[artifact.privacy]} · {artifact.digest.slice(0, 12)}</span><code>{artifact.locator}</code></div>
+        <WorkArtifactPreview client={client} work={work} artifact={artifact} disabled={!connected}/>
       </div>;
     })}</div>}
     {acceptances.map(acceptance => <div className="lifetime-checks" key={`${work.id}:${acceptance.artifact_digest}`}>
       <h4>검수 결과</h4>
       {acceptance.checks.map(check => <p className={check.passed ? "lifetime-check-passed" : "lifetime-check-failed"} key={check.id}><Check size={14}/><span>{check.id}: {check.passed ? "통과" : "미통과"} · {check.evidence}</span></p>)}
     </div>)}
-    {!terminalWorkStates[work.state] && <div className="lifetime-work-actions">
-      <label className="lifetime-field">진행 방향<textarea value={steerDraft} onChange={event => onSteerDraft(event.target.value)} placeholder="다음 단계나 바꿀 점" disabled={busy || writeDisabled}/></label>
-      <div><button type="button" className="button secondary" onClick={onSteer} disabled={busy || writeDisabled || !steerDraft.trim()}>방향 전달</button>
-        {canCancel && <button type="button" className="button secondary lifetime-cancel" onClick={onCancel} disabled={busy || writeDisabled}>취소 요청</button>}</div>
+    {!terminalWorkStates[work.state] && canCancel && <div className="lifetime-work-actions">
+      <p>새 지시는 담당 Ghost 대화에서 보낼 수 있습니다.</p>
+      <button type="button" className="button secondary lifetime-cancel" onClick={onCancel} disabled={busy || writeDisabled}>취소 요청</button>
     </div>}
   </section>;
 }

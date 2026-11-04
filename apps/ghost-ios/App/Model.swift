@@ -39,12 +39,13 @@ struct LifetimeConversationTarget: Identifiable, Equatable {
     let ghostID: String
     let conversationID: String
     let kind: String
+    let displayName: String
     let roles: [String]
     let mode: String
     var id: String { "\(ghostID.utf8.count):\(ghostID)\(conversationID.utf8.count):\(conversationID)" }
     var label: String {
         let role = roles.joined(separator: " · ")
-        return kind == "primary" ? (role.isEmpty ? "주 Ghost" : "주 Ghost · \(role)") : (role.isEmpty ? "전문 담당" : role)
+        return displayName.isEmpty ? (role.isEmpty ? "Ghost" : role) : displayName
     }
 }
 
@@ -194,6 +195,11 @@ struct LifetimeConversationTarget: Identifiable, Equatable {
         pairing.handleDeepLink(url)
     }
     private func storageDirectory(_ connection: Connection) -> URL {
+        #if DEBUG
+        if MobileUIFixture.enabled && connection.origin.host() == "ui-test.invalid" {
+            return URL.applicationSupportDirectory.appending(path: "GhostUITests")
+        }
+        #endif
         let key = SHA256.hash(data: Data(connection.origin.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
         return URL.applicationSupportDirectory.appending(path: "Ghost/\(key)")
     }
@@ -286,13 +292,15 @@ struct LifetimeConversationTarget: Identifiable, Equatable {
             }
             let ghostID = item["ghost_id"].text
             let conversationID = item["conversation_id"].text
-            guard ghostScope.contains(ghostID), conversationScope.contains(conversationID) else {
+            guard ghostScope.contains(ghostID), conversationScope.contains(conversationID),
+                  lifetimeScopeAllowsPair(value["scope"], ghostID: ghostID, conversationID: conversationID) else {
                 throw MobileError.response("Gateway advertised a target outside the exact device scope.")
             }
             let target = LifetimeConversationTarget(
                 ghostID: ghostID,
                 conversationID: conversationID,
                 kind: item["kind"].text,
+                displayName: String(item["name"].text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)),
                 roles: roleValues.map(\.text),
                 mode: item["mode"].text
             )
@@ -301,7 +309,10 @@ struct LifetimeConversationTarget: Identifiable, Equatable {
             }
             targets[target.id] = target
         }
-        return targets.values.sorted { $0.id.utf8.lexicographicallyPrecedes($1.id.utf8) }
+        return targets.values.sorted {
+            if ($0.kind == "primary") != ($1.kind == "primary") { return $0.kind == "primary" }
+            return $0.label == $1.label ? $0.id < $1.id : $0.label.localizedStandardCompare($1.label) == .orderedAscending
+        }
     }
 
     private func acceptBootstrap(_ value: JSON) {
@@ -810,6 +821,7 @@ struct LifetimeConversationTarget: Identifiable, Equatable {
         guard ProcessInfo.processInfo.arguments.contains("--ui-testing") || MobileUIFixture.enabled else { return false }
         let directory = URL.applicationSupportDirectory.appending(path: "GhostUITests")
         do {
+            if ProcessInfo.processInfo.arguments.contains("--reset-fixture") { UserDefaults.standard.removeObject(forKey: "ghost.selectedConversation") }
             if ProcessInfo.processInfo.arguments.contains("--reset-fixture"), FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
             connection = try Connection(server: "https://ui-test.invalid", token: String(repeating: "0", count: 64))
             drafts = try ConversationDrafts(file: directory.appending(path: "drafts.json"))

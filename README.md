@@ -8,7 +8,8 @@ Host 하나가 주 Ghost와 담당 Ghost들의 대화와 작업을 보관한다.
 설치된 앱, 운영 Host 릴리스, 소스 `main`은 각각 판본을 확인한다.
 
 [실행·검증·복구 지침](docs/local-operations.md) ·
-[공유 Mac/iPhone 클라이언트와 .ghost 패키지](docs/ghost-packages-and-shared-client.md)
+[공유 Mac/iPhone 클라이언트와 .ghost 패키지](docs/ghost-packages-and-shared-client.md) ·
+[대시보드·Host·연결 재설계와 검증](docs/dashboard-redesign-2026-11-04.md)
 
 ## 2026-10-24 봇 중심 Pi 직접 실행 — 구현 진행 중
 

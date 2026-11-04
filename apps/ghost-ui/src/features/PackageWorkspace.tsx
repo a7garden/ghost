@@ -18,16 +18,22 @@ export function viewPath(id: string, view: string) { return `${ghostPath(id)}?vi
 export function usePackages(workspace: string | undefined, profileIds: string[]) {
   const [current, setCurrent] = useState<{ key: string; packages: PackageMap }>();
   const [revision, setRevision] = useState(0);
+  const [failure, setFailure] = useState<{key: string; error: string}>();
   const key = new URLSearchParams([['workspace', workspace ?? ''], ...profileIds.map(id => ['profile', id])]).toString();
   useEffect(() => {
     if (!workspace) return;
     const controller = new AbortController();
+    setFailure(undefined);
     fetch(`/ghost-packages/list?${key}`, { headers: clientHeader, signal: controller.signal })
-      .then(async res => setCurrent({ key, packages: res.ok ? await res.json() : {} }))
-      .catch(() => {});
+      .then(async res => {
+        if (!res.ok) throw new Error('설치된 패키지를 불러오지 못했습니다.');
+        const packages = await res.json();
+        if (!controller.signal.aborted) setCurrent({ key, packages });
+      })
+      .catch(() => { if (!controller.signal.aborted) setFailure({key, error: '설치된 패키지를 불러오지 못했습니다.'}); });
     return () => controller.abort();
   }, [workspace, key, revision]);
-  return { packages: current?.key === key ? current.packages : {}, refresh: () => setRevision(value => value + 1) };
+  return { packages: current?.key === key ? current.packages : {}, error: failure?.key === key ? failure.error : '', loading: Boolean(workspace && current?.key !== key && failure?.key !== key), refresh: () => setRevision(value => value + 1) };
 }
 
 export async function uploadPackage(file: File, target?: { workspace: string; profile: string; digest: string }): Promise<PackageInfo> {

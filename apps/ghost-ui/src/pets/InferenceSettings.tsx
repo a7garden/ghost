@@ -1,51 +1,204 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, Cpu, Image, KeyRound, Terminal } from 'lucide-react';
 import { ImageComposer } from './ImageComposer';
+import '../features/connections.css';
 
+type Pair = { ghost_id: string; conversation_id: string };
 type Selection = { provider: string; model: string; effort: string };
-type Provider = { id: string; name: string; auth: string; models: string[]; efforts: string[]; default_model: string; default_effort: string; image: boolean };
-type Configuration = { settings: { version: number; default: Selection; conversations: Record<string, Selection>; external_grants: Record<string,string[]>; credentials: Record<string,boolean>; image_provider: string }; providers: Provider[] };
-export async function inferenceRequest(body?: Record<string,unknown>): Promise<Configuration> {
-  const bootstrapResponse=await fetch('/ghost-api/bootstrap',{cache:'no-store'});
-  if(!bootstrapResponse.ok) throw new Error('연결된 Ghost 호스트가 필요합니다.');
-  const bootstrap=await bootstrapResponse.json();
-  if(bootstrap.mode!=='live'||!bootstrap.csrf) throw new Error('연결된 Ghost 호스트가 필요합니다.');
-  const response=await fetch('/ghost-api/inference/settings',{method:body?'POST':'GET',cache:'no-store',
-    headers:{'Content-Type':'application/json','X-Ghost-UI-CSRF':bootstrap.csrf},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});
-  const value=await response.json();
-  if(!response.ok||value.ok!==true||!value.settings) throw new Error(typeof value.error==='string'?value.error:'모델 설정을 저장하지 못했습니다. 새로고침 후 확인해 주세요.');
+type Provider = { id: string; name: string; auth: string; models: string[]; efforts: string[]; default_model: string | null; default_effort: string; image: boolean; image_note?: string };
+type Configuration = {
+  settings: { version: number; default: Selection; conversations: Record<string, Selection>; external_grants: Record<string, string[]>; credentials: Record<string, boolean>; image_provider: string };
+  providers: Provider[];
+};
+
+export async function inferenceRequest(body?: Record<string, unknown>): Promise<Configuration> {
+  const signal = AbortSignal.timeout(15000);
+  const bootstrapResponse = await fetch('/ghost-api/bootstrap', { cache: 'no-store', signal });
+  if (!bootstrapResponse.ok) throw new Error('연결된 Ghost 호스트가 필요합니다.');
+  const bootstrap = await bootstrapResponse.json();
+  if (bootstrap.mode !== 'live' || !bootstrap.csrf) throw new Error('연결된 Ghost 호스트가 필요합니다.');
+  const response = await fetch('/ghost-api/inference/settings', {
+    method: body ? 'POST' : 'GET', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', 'X-Ghost-UI-CSRF': bootstrap.csrf },
+    ...(body ? { body: JSON.stringify(body) } : {}), signal,
+  });
+  const value = await response.json();
+  if (!response.ok || value.ok !== true || !value.settings || !Array.isArray(value.providers)) {
+    throw new Error(typeof value.error === 'string' ? value.error : body ? '모델 설정을 저장하지 못했습니다.' : '모델 설정을 불러오지 못했습니다.');
+  }
   return value;
 }
-const effortName:Record<string,string>={off:'사용 안 함',low:'빠르게',medium:'균형',high:'깊게',xhigh:'더 깊게',max:'최대'};
 
-export function InferenceSettings({ pair, disabled=false }: { pair?:{ghost_id:string;conversation_id:string}; disabled?:boolean }) {
-  const [data,setData]=useState<Configuration>(),[error,setError]=useState(''),[busy,setBusy]=useState(false),[expanded,setExpanded]=useState(!pair);
-  const [draft,setDraft]=useState<Selection>(),[allow,setAllow]=useState(false),[keys,setKeys]=useState<Record<string,string>>({}),[notice,setNotice]=useState('');
-  const pairKey=pair?`${pair.ghost_id}/${pair.conversation_id}`:'';
-  const [reload,setReload]=useState(0);
-  useEffect(()=>{let stale=false;void (async()=>{try{const next=await inferenceRequest();if(stale)return;setData(next);setDraft(next.settings.conversations[pairKey]??next.settings.default);setError('');}catch(e){if(!stale)setError(e instanceof Error?e.message:'설정을 불러오지 못했습니다.');}})();return()=>{stale=true;};},[pairKey,reload]);
-  const save=async(body:Record<string,unknown>)=>{if(!data||busy)return false;setBusy(true);setError('');setNotice('');try{const next=await inferenceRequest({version:data.settings.version,...body});setData(next);setDraft(next.settings.conversations[pairKey]??next.settings.default);setAllow(false);return true;}catch(e){setError(e instanceof Error?e.message:'저장 결과를 확인하지 못했습니다.');return false;}finally{setBusy(false);}};
-  const provider=data?.providers.find(p=>p.id===draft?.provider);
-  const granted=Boolean(pairKey&&draft&&data?.settings.external_grants[pairKey]?.includes(draft.provider));
-  const registered=provider?.auth!=='api_key'||data?.settings.credentials[provider.id]===true;
-  return <section className="inference-settings" aria-label={pair?'이 대화의 모델':'Ghost 대화 모델'}>
-    {pair?<button className="button secondary" onClick={()=>setExpanded(!expanded)} aria-expanded={expanded}>{draft?.model??'모델 선택'} · {effortName[draft?.effort??'high']??draft?.effort}</button>:<><h2>대화 모델</h2><p className="field-help">기본값은 Codex GPT-6 Luna입니다. 이 설정은 주 Ghost의 대화에 적용됩니다.</p></>}
-    {expanded&&data&&draft&&<div className="form-stack">
-      <label>제공자<select aria-label="대화 제공자" disabled={disabled||busy} value={draft.provider} onChange={e=>{const p=data.providers.find(p=>p.id===e.target.value)!;setDraft({provider:p.id,model:p.default_model,effort:p.default_effort});setAllow(false);}}>{data.providers.map(p=><option value={p.id} key={p.id} disabled={!p.models.length}>{p.name}</option>)}</select></label>
-      <label>모델<select aria-label="Ghost 모델" value={draft.model} disabled={disabled||busy} onChange={e=>setDraft({...draft,model:e.target.value})}>{provider?.models.map(model=><option key={model}>{model}</option>)}</select></label>
-      <label>추론 수준<select aria-label="추론 수준" value={draft.effort} disabled={disabled||busy} onChange={e=>setDraft({...draft,effort:e.target.value})}>{provider?.efforts.map(effort=><option key={effort} value={effort}>{effortName[effort]??effort}</option>)}</select></label>
-      {pair&&draft.provider!=='local'&&!granted&&<label><input type="checkbox" checked={allow} onChange={e=>setAllow(e.target.checked)}/>이 대화의 기존 기록과 새 메시지를 {provider?.name}에 전송하는 것을 허용</label>}
-      {pair&&granted&&<p className="field-help">이 대화의 {provider?.name} 외부 처리가 허용돼 있습니다.</p>}
-      {!registered&&<p role="status">먼저 설정에서 이 제공자의 API 키를 등록해 주세요.</p>}
-      <button className="button primary" disabled={disabled||busy||!registered||(!!pair&&draft.provider!=='local'&&!granted&&!allow)} onClick={()=>void save(pair?{operation:'select',...pair,selection:draft,allow_external:allow}:{operation:'set_default',selection:draft})}>{busy?'저장 중…':pair?'이 대화에 적용':'기본 모델 저장'}</button>
-      {!pair&&<>
-        <p className="field-help">Codex는 이 Mac의 공식 Codex CLI 로그인을 사용합니다. 별도 OpenAI API 키를 입력하지 않습니다.</p>
-        {data.providers.filter(p=>p.auth==='api_key').map(p=><div key={p.id} className="model-provider"><strong>{p.name}</strong><p className="field-help">{data.settings.credentials[p.id]?'API 키 등록됨 · 실제 응답 시 권한 확인':'API 키 등록 필요'}</p><input type="password" autoComplete="off" aria-label={`${p.name} API 키`} placeholder="API 키" value={keys[p.id]??''} onChange={e=>setKeys({...keys,[p.id]:e.target.value})}/><button className="button secondary" disabled={busy||!(keys[p.id]?.length>=8)} onClick={()=>{const key=keys[p.id];void save({operation:'set_api_key',provider:p.id,api_key:key}).then(ok=>{if(ok){setKeys(current=>({...current,[p.id]:''}));setNotice(`${p.name} API 키를 저장했습니다.`);}});}}>키 저장</button></div>)}
-        <label>이미지 생성<select aria-label="이미지 제공자" value={data.settings.image_provider} disabled={busy} onChange={e=>void save({operation:'image_provider',provider:e.target.value})}>{data.providers.filter(p=>p.image).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-        <p className="field-help">Codex 이미지는 같은 OAuth 로그인, MiniMax 이미지는 등록한 API 키를 사용합니다.</p>
+const effortNames: Record<string, string> = { off: '사용 안 함', low: '빠르게', medium: '균형', high: '깊게', xhigh: '더 깊게', max: '최대' };
+const effortLabel = (effort: string) => effortNames[effort] ?? effort;
+type Status = { label: string; tone: 'neutral' | 'info' | 'warning' | 'success'; detail: string };
+
+export function inferenceProviderStatus(provider: Pick<Provider, 'id' | 'auth' | 'models'>, credentialPresent: boolean): Status {
+  if (provider.auth === 'api_key') {
+    return credentialPresent
+      ? { label: '키 등록됨', tone: 'success', detail: '응답을 생성할 때 계정 권한을 확인합니다.' }
+      : { label: '인증 필요', tone: 'warning', detail: 'API 키를 등록해 사용하세요.' };
+  }
+  if (provider.auth === 'codex_oauth') return { label: 'CLI 로그인', tone: 'info', detail: '이 Mac의 Codex CLI 로그인을 사용합니다.' };
+  if (provider.id === 'local') {
+    return provider.models.length
+      ? { label: '로컬 설정됨', tone: 'neutral', detail: provider.models.join(', ') }
+      : { label: '로컬 미설정', tone: 'warning', detail: '호스트에 대화용 로컬 모델이 설정되어 있지 않습니다.' };
+  }
+  return { label: '카탈로그', tone: 'neutral', detail: '' };
+}
+
+type InferenceProps = { pair?: Pair; disabled?: boolean; connected?: boolean };
+export function InferenceSettings({ pair, ...props }: InferenceProps) {
+  // Project registry entries onto the two fields accepted by inference requests.
+  const target: Pair | undefined = pair && { ghost_id: pair.ghost_id, conversation_id: pair.conversation_id };
+  const pairKey = target ? `${target.ghost_id}/${target.conversation_id}` : '';
+  // Bind drafts, consent and request results to one Ghost and conversation.
+  return <InferencePanel key={pairKey} {...props} pair={target} pairKey={pairKey}/>;
+}
+
+function InferencePanel({ pair, pairKey, disabled = false, connected = true }: InferenceProps & { pairKey: string }) {
+  const [data, setData] = useState<Configuration>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(!pair), [draft, setDraft] = useState<Selection>(), [allow, setAllow] = useState(false);
+  const [keyEditor, setKeyEditor] = useState<{ provider: string; value: string }>();
+  const [notice, setNotice] = useState(''), [reload, setReload] = useState(0);
+  const saving = useRef(false);
+  const refresh = () => {
+    setData(undefined); setDraft(undefined); setAllow(false); setKeyEditor(undefined); setError(''); setNotice('');
+    setReload(value => value + 1);
+  };
+  useEffect(() => {
+    if (!connected) { setAllow(false); setKeyEditor(undefined); return; }
+    let current = true;
+    setData(undefined); setDraft(undefined); setAllow(false); setError(''); setNotice('');
+    void inferenceRequest().then(next => {
+      if (!current) return;
+      setData(next);
+      setDraft(next.settings.conversations[pairKey] ?? next.settings.default);
+    }).catch(reason => {
+      if (current) setError(reason instanceof Error ? reason.message : '설정을 불러오지 못했습니다.');
+    });
+    return () => { current = false; };
+  }, [connected, pairKey, reload]);
+  useEffect(() => { if (disabled) setAllow(false); }, [disabled]);
+
+  const locked = disabled || !connected || busy || Boolean(error);
+  const save = async (body: Record<string, unknown>, message: string) => {
+    if (!data || locked || saving.current) return;
+    saving.current = true;
+    setBusy(true); setNotice('');
+    try {
+      const next = await inferenceRequest({ version: data.settings.version, ...body });
+      setData(next);
+      if (body.operation === 'set_api_key') setKeyEditor(undefined);
+      if (body.operation === 'select' || body.operation === 'set_default') {
+        setDraft(next.settings.conversations[pairKey] ?? next.settings.default);
+        setAllow(false);
+      }
+      setNotice(message);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '저장 결과를 확인하지 못했습니다.');
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
+  };
+  const selected = data && (data.settings.conversations[pairKey] ?? data.settings.default);
+  const provider = data?.providers.find(item => item.id === draft?.provider);
+  const registered = provider?.auth !== 'api_key' || data?.settings.credentials[provider.id] === true;
+  const granted = Boolean(pair && draft && data?.settings.external_grants[pairKey]?.includes(draft.provider));
+  const needsGrant = Boolean(pair && draft?.provider !== 'local' && !granted);
+  const usableSelection = Boolean(draft && provider?.models.includes(draft.model) && provider.efforts.includes(draft.effort));
+  const imageProviders = data?.providers.filter(item => item.image) ?? [];
+
+  return <section className={pair ? 'inference-settings inference-settings--pair' : 'inference-settings connections-stack'} aria-label={pair ? '이 대화의 모델' : '추론 설정'}>
+    {pair && <button className="button secondary inference-pair-toggle" type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded}>
+      <span>{selected ? `${selected.model} · ${effortLabel(selected.effort)}` : '대화 모델'}</span><ChevronDown size={14}/>
+    </button>}
+    {(!pair || expanded) && !connected && <p className="connection-message" role="status">호스트에 연결하면 설정을 변경할 수 있습니다.</p>}
+    {(!pair || expanded) && connected && !data && !error && <p className="connection-message" role="status">모델 설정을 불러오는 중…</p>}
+    {expanded && data && draft && <>
+      <section className={pair ? 'inference-pair-body' : 'connection-section'} aria-label="대화 모델">
+        {!pair && <div className="connection-heading"><h2>기본 대화 모델</h2></div>}
+        <div className={pair ? 'inference-pair-settings' : 'connection-surface inference-default'}>
+          <div className="inference-fields">
+            <label>제공자<select aria-label="대화 제공자" disabled={locked} value={draft.provider} onChange={event => {
+              const next = data.providers.find(item => item.id === event.target.value);
+              if (!next?.default_model) return;
+              setDraft({ provider: next.id, model: next.default_model, effort: next.default_effort });
+              setAllow(false);
+            }}>
+              {!provider && <option value={draft.provider}>{draft.provider} · 사용 불가</option>}
+              {data.providers.map(item => <option value={item.id} key={item.id} disabled={!item.models.length}>{item.name}</option>)}
+            </select></label>
+            <label>모델<select aria-label="Ghost 모델" value={draft.model} disabled={locked || !provider?.models.length} onChange={event => setDraft({ ...draft, model: event.target.value })}>
+              {!provider?.models.includes(draft.model) && <option value={draft.model}>{draft.model} · 사용 불가</option>}
+              {provider?.models.map(model => <option key={model}>{model}</option>)}
+            </select></label>
+            <label>추론 수준<select aria-label="추론 수준" value={draft.effort} disabled={locked || !provider?.efforts.length} onChange={event => setDraft({ ...draft, effort: event.target.value })}>
+              {!provider?.efforts.includes(draft.effort) && <option value={draft.effort}>{effortLabel(draft.effort)} · 사용 불가</option>}
+              {provider?.efforts.map(effort => <option key={effort} value={effort}>{effortLabel(effort)}</option>)}
+            </select></label>
+          </div>
+          {needsGrant && <label className="inference-consent"><input type="checkbox" checked={allow} disabled={locked} onChange={event => setAllow(event.target.checked)}/>이 대화의 기존 기록과 새 메시지를 {provider?.name ?? draft.provider}에 전송하는 것을 허용합니다.</label>}
+          {granted && <p className="field-help">이 대화의 {provider?.name ?? draft.provider} 외부 처리가 허용돼 있습니다.</p>}
+          {!registered && <p className="field-help">먼저 제공자의 API 키를 등록하세요.</p>}
+          <div className="inference-footer">
+            <button className="button primary" type="button" disabled={locked || !usableSelection || !registered || (needsGrant && !allow)} onClick={() => void save(
+              pair ? { operation: 'select', ...pair, selection: draft, allow_external: allow } : { operation: 'set_default', selection: draft },
+              pair ? '이 대화의 모델을 저장했습니다.' : '기본 대화 모델을 저장했습니다.',
+            )}>{busy ? '저장 중…' : pair ? '이 대화에 적용' : '기본 모델 저장'}</button>
+          </div>
+        </div>
+      </section>
+      {!pair && <>
+        <section className="connection-section" aria-label="추론 제공자">
+          <div className="connection-heading"><h2>제공자</h2></div>
+          <ul className="connection-surface connection-list" role="list">
+            {data.providers.map(item => {
+              const status = inferenceProviderStatus(item, data.settings.credentials[item.id] === true);
+              const editing = keyEditor?.provider === item.id;
+              const Icon = item.auth === 'api_key' ? KeyRound : item.auth === 'codex_oauth' ? Terminal : Cpu;
+              return <li className="connection-row connection-provider" key={item.id}>
+                <span className="connection-icon"><Icon size={17} aria-hidden="true"/></span>
+                <div className="connection-row-copy"><div className="connection-row-title"><h3>{item.name}</h3><span className="connection-status" data-tone={status.tone}>{status.label}</span></div>
+                  {status.detail && <p>{status.detail}</p>}
+                </div>
+                {item.auth === 'api_key' && <button type="button" className="button secondary" disabled={locked} aria-expanded={editing} aria-label={`${item.name} API 키 ${editing ? '닫기' : data.settings.credentials[item.id] ? '변경' : '등록'}`}
+                  onClick={() => setKeyEditor(editing ? undefined : { provider: item.id, value: '' })}>
+                  {editing ? '닫기' : data.settings.credentials[item.id] ? '키 변경' : '키 등록'}
+                </button>}
+                {editing && <form className="inference-key-form" onSubmit={event => {
+                  event.preventDefault();
+                  if (keyEditor.value.length >= 8 && !/\s/u.test(keyEditor.value)) void save({ operation: 'set_api_key', provider: item.id, api_key: keyEditor.value }, `${item.name} API 키를 저장했습니다.`);
+                }}>
+                  <input type="password" autoComplete="off" autoFocus required maxLength={4096} aria-label={`${item.name} API 키`} placeholder="API 키" value={keyEditor.value} disabled={locked}
+                    onChange={event => setKeyEditor({ provider: item.id, value: event.target.value })}/>
+                  <button className="button primary" disabled={locked || keyEditor.value.length < 8 || /\s/u.test(keyEditor.value)}>키 저장</button>
+                </form>}
+              </li>;
+            })}
+          </ul>
+        </section>
+        <section className="connection-section" aria-label="이미지 생성">
+          <div className="connection-heading"><h2>이미지 생성</h2></div>
+          <div className="connection-surface connection-row inference-image-row">
+            <span className="connection-icon"><Image size={17} aria-hidden="true"/></span>
+            <div className="connection-row-copy"><h3>기본 제공자</h3>
+              <p>{imageProviders.find(item => item.id === data.settings.image_provider)?.image_note ?? 'Codex는 CLI 로그인, MiniMax는 등록된 API 키를 사용합니다.'}</p>
+            </div>
+            <select aria-label="이미지 제공자" value={data.settings.image_provider} disabled={locked || !imageProviders.length} onChange={event => void save({ operation: 'image_provider', provider: event.target.value }, '이미지 제공자를 저장했습니다.')}>
+              {!imageProviders.some(item => item.id === data.settings.image_provider) && <option value={data.settings.image_provider}>{data.settings.image_provider} · 사용 불가</option>}
+              {imageProviders.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </div>
+        </section>
       </>}
+      {pair && <fieldset className="connection-fieldset inference-pair-images" disabled={locked}><ImageComposer pair={pair}/></fieldset>}
+    </>}
+    {(!pair || expanded) && notice && <p className="connection-message" role="status">{notice}</p>}
+    {(!pair || expanded) && error && <div className="connection-message connection-message--error" role="alert"><span>{error}</span>
+      <button type="button" className="button secondary" disabled={disabled || busy || !connected} onClick={refresh}>다시 확인</button>
     </div>}
-    {notice&&<p role="status">{notice}</p>}
-    {error&&<p role="alert" className="form-error">{error}<button className="text-button" onClick={()=>setReload(n=>n+1)}>다시 확인</button></p>}
-    {pair&&expanded&&<ImageComposer key={pairKey} pair={pair}/>}
   </section>;
 }

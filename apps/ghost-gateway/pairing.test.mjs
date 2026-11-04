@@ -11,7 +11,7 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { createGateway } from './server.mjs';
 import { issueDevice, readDevices, registerApnsToken, updateDevices } from './devices.mjs';
 import {
-  pairingRoute, normalizePairingCode, codeDigest, ticketDigest, generatePairingSecrets,
+  createPairingService, pairingRoute, normalizePairingCode, codeDigest, ticketDigest, generatePairingSecrets,
   verificationCode, PAIRING_CODE_ALPHABET,
   pairingAdvertisementRegistered,
 } from './pairing.mjs';
@@ -30,13 +30,15 @@ const CONVERSATION_ID = randomUUID();
 const PRIMARY_ROW = { ghost_id: GHOST_ID, conversation_id: CONVERSATION_ID, kind: 'primary', mode: 'active', roles: ['owner'] };
 const HOST_TOKEN = 'a'.repeat(64);
 const EPOCH = 7;
+const pairOf = ({ ghost_id, conversation_id }) => ({ ghost_id, conversation_id });
+const peer = (mode = 'active') => ({ ghost_id: randomUUID(), conversation_id: randomUUID(), kind: 'specialist', mode, roles: ['research'] });
 
 function clockAt(iso) {
   const state = { now: Date.parse(iso) };
   return { state, now: () => new Date(state.now) };
 }
 
-async function fixture(t, { rows = [PRIMARY_ROW], clock = clockAt('2026-10-12T10:00:00Z') } = {}) {
+async function fixture(t, { rows = [PRIMARY_ROW], profiles = [], clock = clockAt('2026-10-12T10:00:00Z') } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'ghost-pairing-'));
   const devices = join(dir, 'devices.json');
   const legacy = await issueDevice(devices, 'Legacy owner phone');
@@ -45,9 +47,18 @@ async function fixture(t, { rows = [PRIMARY_ROW], clock = clockAt('2026-10-12T10
     root: dir, devices, origin: 'https://ghost.example', lifetimeAuthorityEpoch: EPOCH, clock: clock.now,
     discoverHost: async () => ({ origin: 'http://127.0.0.1:54321', token: HOST_TOKEN }),
     fetchHost: async (url, options) => {
+      if (options.method === 'GET') {
+        return Response.json({ workspace_id: GHOST_ID, profiles, lifetime_authority: { authority_epoch: EPOCH, dispatch_enabled: true } });
+      }
       const body = JSON.parse(Buffer.from(options.body).toString('utf8'));
       if (body.command?.envelope?.body?.method === 'registry.inspect') {
         return Response.json({ ok: true, result: { status: 'success', data: { registry: structuredClone(rows) } } });
+      }
+      if (body.command?.envelope?.body?.method === 'snapshot') {
+        return Response.json({ ok: true, result: { status: 'success', data: {
+          protocol_version: 'ghost-lifetime/1', contract_revision: 1, mode: 'live',
+          goals: [], work: [], acceptances: [], artifacts: [], bindings: rows.map(pairOf),
+        } } });
       }
       return Response.json({ ok: true, result: { saved: true } });
     },
@@ -72,17 +83,21 @@ async function fixture(t, { rows = [PRIMARY_ROW], clock = clockAt('2026-10-12T10
     });
   }
   const adminHeaders = { Authorization: `Bearer ${HOST_TOKEN}`, 'X-Ghost-CSRF': HOST_TOKEN };
-  async function makeInvitation() {
+  async function invite(body) {
+    return call('/pairing/invitations', { method: 'POST', headers: { ...adminHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  }
+  function invitationRequest(targets) {
     const { code, ticket } = generatePairingSecrets();
     const timestamp = clock.state.now.toString(16).padStart(12, '0');
     const random = randomUUID().split('-');
     const request_id = `${timestamp.slice(0, 8)}-${timestamp.slice(8)}-7${random[2].slice(1)}-${random[3]}-${random[4]}`;
-    const response = await call('/pairing/invitations', {
-      method: 'POST', headers: { ...adminHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_id, code_digest: codeDigest(code), ticket_digest: ticketDigest(ticket) }),
-    });
+    return { code, ticket, body: { request_id, code_digest: codeDigest(code), ticket_digest: ticketDigest(ticket), ...(targets === undefined ? {} : { targets }) } };
+  }
+  async function makeInvitation(targets) {
+    const { code, ticket, body } = invitationRequest(targets);
+    const response = await invite(body);
     assert.equal(response.status, 200);
-    return { code, ticket, request_id, ...response.data };
+    return { code, ticket, request_id: body.request_id, ...response.data };
   }
   async function claim(invitation, overrides = {}) {
     const response = await call('/pairing/claims', {
@@ -97,7 +112,7 @@ async function fixture(t, { rows = [PRIMARY_ROW], clock = clockAt('2026-10-12T10
     });
     return response;
   }
-  return { dir, devices, legacy, phoneKey, port: server.address().port, call, adminHeaders, makeInvitation, claim };
+  return { dir, devices, legacy, phoneKey, port: server.address().port, call, adminHeaders, invite, invitationRequest, makeInvitation, claim };
 }
 
 function approveBody(invitation, claim, code = claim.verification_code) {
@@ -160,6 +175,126 @@ test('invitation scope is the actual active Primary row, read/write, current epo
   // No caller-chosen UUIDs or legacy full-owner fallback in the scope.
   assert.equal(invitation.scope.ghost_ids.length, 1);
   assert.ok(!JSON.stringify(invitation).includes(f.phoneKey));
+});
+
+test('explicit default-only invitation remains compatible with the four-field phone validator', async t => {
+  const f = await fixture(t, { rows: [PRIMARY_ROW, peer()] });
+  const attempt = f.invitationRequest([pairOf(PRIMARY_ROW)]);
+  const issued = await f.invite(attempt.body);
+  assert.equal(issued.status, 200);
+  const retry = await f.invite(attempt.body);
+  assert.deepEqual(retry, issued);
+  const { targets, ...implicit } = attempt.body;
+  assert.deepEqual(await f.invite(implicit), { status: 409, data: { error: 'invitation_conflict' } });
+
+  const claim = await f.claim(attempt);
+  assert.equal(claim.status, 200);
+  // The previous iOS parser requires exactly these four fields at claim and status.
+  const assertLegacyScope = scope => assert.deepEqual(scope, {
+    kind: 'lifetime', ghost_ids: [GHOST_ID], conversation_ids: [CONVERSATION_ID], capabilities: ['lifetime.read', 'lifetime.write'],
+  });
+  assertLegacyScope(claim.data.scope);
+  const approval = await f.call(`/pairing/invitations/${issued.data.invitation_id}/approve`, {
+    method: 'POST', headers: { ...f.adminHeaders, 'Content-Type': 'application/json' }, body: approveBody(issued.data, claim.data),
+  });
+  assert.equal(approval.status, 200);
+  const status = await f.call(`/pairing/claims/${claim.data.claim_id}/status`, {
+    method: 'POST', headers: { Authorization: `Bearer ${f.phoneKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: randomUUID() }),
+  });
+  assert.equal(status.data.status, 'approved');
+  assertLegacyScope(status.data.scope);
+});
+
+test('owner can pair exact selected Ghosts and phone bootstrap only names those granted targets', async t => {
+  const selected = peer(), hidden = peer(), draining = peer('draining');
+  const rows = [PRIMARY_ROW, selected, hidden, draining];
+  const f = await fixture(t, { rows, profiles: [
+    { id: GHOST_ID, name: 'Default Ghost' }, { id: selected.ghost_id, name: 'Research Ghost' },
+    { id: hidden.ghost_id, name: 'Another Ghost' }, { id: draining.ghost_id, name: 'Archived Ghost' },
+  ] });
+  assert.equal((await f.call('/pairing/targets', { headers: { Authorization: `Bearer ${f.phoneKey}` } })).status, 401);
+  const catalog = await f.call('/pairing/targets', { headers: f.adminHeaders });
+  assert.equal(catalog.status, 200);
+  assert.deepEqual(catalog.data.targets.map(target => target.name), ['Default Ghost', 'Research Ghost', 'Another Ghost']);
+  const targets = [pairOf(PRIMARY_ROW), pairOf(selected)];
+  const invitation = await f.makeInvitation(targets);
+  assert.deepEqual(new Set(invitation.scope.targets.map(target => target.ghost_id)), new Set([GHOST_ID, selected.ghost_id]));
+  const claim = await f.claim(invitation);
+  assert.deepEqual(claim.data.scope, invitation.scope);
+  rows.push(peer()); // Registering another Ghost never broadens the pending invitation.
+  const approval = await f.call(`/pairing/invitations/${invitation.invitation_id}/approve`, {
+    method: 'POST', headers: { ...f.adminHeaders, 'Content-Type': 'application/json' }, body: approveBody(invitation, claim.data),
+  });
+  assert.equal(approval.status, 200);
+  const device = (await readDevices(f.devices)).devices.find(device => device.id === approval.data.device_id);
+  assert.deepEqual(device.scope, invitation.scope);
+  const phone = { Authorization: `Bearer ${f.phoneKey}` };
+  const bootstrap = await f.call('/mobile/v1/bootstrap', { headers: phone });
+  assert.equal(bootstrap.status, 200);
+  assert.deepEqual(bootstrap.data.target_pairs.map(target => target.name), ['Default Ghost', 'Research Ghost']);
+
+  // Even if a registry/snapshot were to later advertise cross-pairs using
+  // identifiers individually in scope, the issued device gains neither pair.
+  rows.splice(0, 2, { ...PRIMARY_ROW, conversation_id: selected.conversation_id }, { ...selected, conversation_id: CONVERSATION_ID });
+  const updated = await f.call('/mobile/v1/bootstrap', { headers: phone });
+  assert.deepEqual(updated.data.target_pairs, []);
+  const snapshot = await f.call('/mobile/v1/lifetime/snapshot', { headers: phone });
+  assert.equal(snapshot.status, 200);
+  assert.deepEqual(snapshot.data.bindings, []);
+});
+
+test('invitation rejects crossed, duplicate, inactive and empty selections without writing an invitation', async t => {
+  const selected = peer(), draining = peer('draining');
+  const f = await fixture(t, { rows: [PRIMARY_ROW, selected, draining] });
+  for (const targets of [[], [pairOf(selected), pairOf(selected)], Array.from({ length: 17 }, () => pairOf(peer()))]) {
+    const response = await f.invite(f.invitationRequest(targets).body);
+    assert.deepEqual(response, { status: 400, data: { error: 'invalid_invitation_request' } });
+  }
+  for (const targets of [[pairOf(draining)], [{ ghost_id: GHOST_ID, conversation_id: selected.conversation_id }]]) {
+    const response = await f.invite(f.invitationRequest(targets).body);
+    assert.deepEqual(response, { status: 409, data: { error: 'invitation_stale_scope' } });
+  }
+  assert.deepEqual((await readDevices(f.devices)).pairing?.invitations ?? [], []);
+});
+
+test('a retry preserves its exact selection and approval fails if any selected pair is no longer active', async t => {
+  const selected = peer(), rows = [PRIMARY_ROW, selected];
+  const f = await fixture(t, { rows });
+  const attempt = f.invitationRequest(rows.map(pairOf));
+  const created = await f.invite(attempt.body);
+  assert.equal(created.status, 200);
+  const claim = await f.claim(attempt);
+  assert.equal(claim.status, 200);
+  rows[1] = { ...selected, mode: 'draining' };
+  const retry = await f.invite({ ...attempt.body, targets: [...attempt.body.targets].reverse() });
+  assert.equal(retry.status, 200);
+  assert.deepEqual(retry.data.scope, created.data.scope);
+  const changed = await f.invite({ ...attempt.body, targets: [pairOf(PRIMARY_ROW)] });
+  assert.deepEqual(changed, { status: 409, data: { error: 'invitation_conflict' } });
+  const approval = await f.call(`/pairing/invitations/${created.data.invitation_id}/approve`, {
+    method: 'POST', headers: { ...f.adminHeaders, 'Content-Type': 'application/json' }, body: approveBody(created.data, claim.data),
+  });
+  assert.deepEqual(approval, { status: 409, data: { error: 'invitation_stale_scope' } });
+  assert.deepEqual((await readDevices(f.devices)).devices.map(device => device.id), [f.legacy.id]);
+});
+
+test('an explicit non-default Ghost can pair, but an old-generation proposal cannot be approved', async t => {
+  const selected = peer();
+  const f = await fixture(t, { rows: [PRIMARY_ROW, selected] });
+  const invitation = await f.makeInvitation([pairOf(selected)]);
+  assert.deepEqual(invitation.scope.ghost_ids, [selected.ghost_id]);
+  const claim = await f.claim(invitation);
+  assert.equal(claim.status, 200);
+  const nextAuthority = createPairingService({
+    devices: f.devices, origin: 'https://ghost.example', epoch: EPOCH + 1,
+    now: () => new Date('2026-10-12T10:00:00Z'), hostRegistry: async () => [PRIMARY_ROW, selected],
+  });
+  await assert.rejects(
+    () => nextAuthority.approveInvitation(invitation.invitation_id, JSON.parse(approveBody(invitation, claim.data))),
+    error => error.code === 'invitation_stale_scope',
+  );
+  assert.deepEqual((await readDevices(f.devices)).devices.map(device => device.id), [f.legacy.id]);
 });
 
 test('no device exists before owner approval; approval inserts exactly one scoped device', async t => {
@@ -437,7 +572,6 @@ test('stale scope: approval fails closed when the Primary row moved to another c
   const invitation = await f.makeInvitation();
   const claim = await f.claim(invitation);
   const moved = [{ ...PRIMARY_ROW, conversation_id: randomUUID() }];
-  const { createPairingService } = await import('./pairing.mjs');
   // Drive the service directly with a moved Primary row: approval must
   // re-prove the exact recorded scope and current epoch before any grant.
   const service = createPairingService({

@@ -8,7 +8,7 @@
 // private atomic updateDevices transaction as device grants.
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { validScope } from './devices.mjs';
+import { validPairTargets, validScope } from './devices.mjs';
 
 export const PAIRING_PROTOCOL = 'ghost-pairing';
 export const PAIRING_BOOTSTRAP_CONTEXT = 'ghost-pairing-bootstrap-v1';
@@ -66,6 +66,7 @@ export function verificationCode(invitationId, claimId, tokenDigest) {
 export function pairingRoute(method, path) {
   const bootstrap = /^\/pairing\/admin\/bootstrap\/([a-f0-9]{32})$/.exec(path);
   if (bootstrap && method === 'GET') return { kind: 'bootstrap', nonce: bootstrap[1] };
+  if (method === 'GET' && path === '/pairing/targets') return { kind: 'targets' };
   if (method === 'POST' && path === '/pairing/invitations') return { kind: 'invitation_create' };
   if (method === 'GET' && path === '/pairing/invitations') return { kind: 'invitation_list' };
   const id = /^\/pairing\/invitations\/([0-9a-f-]{36})$/.exec(path);
@@ -95,6 +96,11 @@ function validInvitation(invitation) {
     && typeof invitation.created_at === 'string' && !Number.isNaN(Date.parse(invitation.created_at))
     && typeof invitation.expires_at === 'string' && !Number.isNaN(Date.parse(invitation.expires_at))
     && validScope(invitation.scope)
+    && (!Object.hasOwn(invitation, 'requested_targets') || (invitation.scope.targets === undefined
+      && validPairTargets(invitation.requested_targets) && invitation.requested_targets.length === 1
+      && invitation.scope.ghost_ids.length === 1 && invitation.scope.conversation_ids.length === 1
+      && invitation.requested_targets[0].ghost_id === invitation.scope.ghost_ids[0]
+      && invitation.requested_targets[0].conversation_id === invitation.scope.conversation_ids[0]))
     && Number.isSafeInteger(invitation.epoch) && invitation.epoch > 0
     && ['open', 'pending', 'approved', 'cancelled', 'expired', 'revoked'].includes(invitation.status)
     && Number.isSafeInteger(invitation.attempts) && invitation.attempts >= 0
@@ -113,7 +119,7 @@ function validClaim(claim) {
 }
 
 export function createPairingService({
-  devices, origin: publicOrigin, epoch, hostRegistry,
+  devices, origin: publicOrigin, epoch, hostRegistry, hostNames,
   now = () => new Date(),
 }) {
   if (!Number.isSafeInteger(epoch) || epoch < 1) throw new Error('Pairing requires a current lifetime authority epoch.');
@@ -155,28 +161,67 @@ export function createPairingService({
     return invitation.status;
   }
 
-  // The one canonical scope a new pairing device may receive: the actual
-  // active Primary registry row of the current epoch, read/write lifetime
-  // capabilities. Nothing caller-chosen is ever accepted.
-  function canonicalScope(registryRows) {
-    if (!Array.isArray(registryRows)) throw httpError(503, 'pairing_scope_unavailable');
-    const primaries = registryRows.filter(entry => isRecord(entry)
-      && entry.kind === 'primary' && entry.mode === 'active'
-      && typeof entry.ghost_id === 'string' && uuidPattern.test(entry.ghost_id)
-      && typeof entry.conversation_id === 'string' && uuidPattern.test(entry.conversation_id));
-    if (primaries.length !== 1) throw httpError(503, 'pairing_scope_unavailable');
-    return {
-      kind: 'lifetime',
-      ghost_ids: [primaries[0].ghost_id],
-      conversation_ids: [primaries[0].conversation_id],
-      capabilities: ['lifetime.read', 'lifetime.write'],
-    };
+  async function activeTargets() {
+    const rows = await hostRegistry();
+    if (!Array.isArray(rows)) throw httpError(503, 'pairing_scope_unavailable');
+    const ghosts = new Set(), conversations = new Set();
+    const targets = [];
+    for (const row of rows) {
+      if (!isRecord(row) || typeof row.ghost_id !== 'string' || !uuidPattern.test(row.ghost_id)
+        || typeof row.conversation_id !== 'string' || !uuidPattern.test(row.conversation_id)
+        || !['primary', 'specialist'].includes(row.kind) || !['active', 'draining'].includes(row.mode)
+        || !Array.isArray(row.roles) || !row.roles.every(role => typeof role === 'string' && role.trim())
+        || ghosts.has(row.ghost_id) || conversations.has(row.conversation_id)) {
+        throw httpError(503, 'pairing_scope_unavailable');
+      }
+      ghosts.add(row.ghost_id);
+      conversations.add(row.conversation_id);
+      if (row.mode === 'active') targets.push({ ghost_id: row.ghost_id, conversation_id: row.conversation_id, kind: row.kind, roles: row.roles });
+    }
+    if (targets.filter(target => target.kind === 'primary').length > 1) throw httpError(503, 'pairing_scope_unavailable');
+    return targets;
   }
 
-  async function currentScope() {
-    const scope = canonicalScope(await hostRegistry());
+  async function listTargets() {
+    const targets = await activeTargets();
+    const names = hostNames ? await hostNames().catch(() => new Map()) : new Map();
+    return { targets: targets.map(target => {
+      const name = names.get(target.ghost_id);
+      return name ? { ...target, name } : target;
+    }) };
+  }
+
+  function primaryTarget(targets) {
+    const primaries = targets.filter(target => target.kind === 'primary');
+    if (primaries.length !== 1) throw httpError(503, 'pairing_scope_unavailable');
+    return primaries[0];
+  }
+
+  function samePair(left, right) {
+    return left.ghost_id === right.ghost_id && left.conversation_id === right.conversation_id;
+  }
+
+  function selectedScope(targets, requested) {
+    // Older desktop clients did not send selections. Their grants keep the
+    // legacy singleton shape and can still pair to the designated default.
+    const selected = requested ?? [primaryTarget(targets)];
+    if (selected.some(pair => !targets.some(target => samePair(pair, target)))) throw httpError(409, 'invitation_stale_scope');
+    // A singleton default has no pair ambiguity and retains the four-field
+    // scope understood by existing iPhone builds.
+    const explicitDefault = requested?.length === 1 && targets.some(target => target.kind === 'primary' && samePair(target, requested[0]));
+    const scope = {
+      kind: 'lifetime',
+      ghost_ids: selected.map(pair => pair.ghost_id),
+      conversation_ids: selected.map(pair => pair.conversation_id),
+      capabilities: ['lifetime.read', 'lifetime.write'],
+      ...(requested && !explicitDefault ? { targets: requested } : {}),
+    };
     if (!validScope(scope)) throw httpError(503, 'pairing_scope_unavailable');
     return scope;
+  }
+
+  function requestedTargets(invitation) {
+    return invitation.requested_targets ?? invitation.scope.targets;
   }
 
   function invitationReceipt(invitation) {
@@ -204,21 +249,27 @@ export function createPairingService({
   }
 
   async function createInvitation(body) {
-    if (!isRecord(body) || Object.keys(body).length !== 3
+    if (!isRecord(body) || Object.keys(body).some(key => !['request_id', 'code_digest', 'ticket_digest', 'targets'].includes(key))
       || typeof body.request_id !== 'string' || !uuidPattern.test(body.request_id)
       || typeof body.code_digest !== 'string' || !hex64.test(body.code_digest)
-      || typeof body.ticket_digest !== 'string' || !hex64.test(body.ticket_digest)) {
+      || typeof body.ticket_digest !== 'string' || !hex64.test(body.ticket_digest)
+      || (Object.hasOwn(body, 'targets') && !validPairTargets(body.targets))) {
       throw httpError(400, 'invalid_invitation_request');
     }
     if (body.code_digest === body.ticket_digest) throw httpError(400, 'invalid_invitation_request');
-    const scope = await currentScope();
+    const requested = body.targets?.map(({ ghost_id, conversation_id }) => ({ ghost_id, conversation_id }))
+      .sort((left, right) => left.ghost_id.localeCompare(right.ghost_id));
+    // A receipt is still readable if its original selection has since become
+    // stale or the registry is temporarily unavailable.
+    const lookup = await activeTargets().then(targets => ({ targets }), error => ({ error }));
     const instant = now();
     return updateTransaction(registry => {
       const state = pairingState(registry);
       const existing = state.invitations.find(entry => entry.invitation_id === body.request_id);
       if (existing) {
         if (existing.code_digest !== body.code_digest || existing.ticket_digest !== body.ticket_digest
-          || existing.origin !== publicOrigin) throw httpError(409, 'invitation_conflict');
+          || existing.origin !== publicOrigin
+          || JSON.stringify(requestedTargets(existing)) !== JSON.stringify(requested)) throw httpError(409, 'invitation_conflict');
         expireIfDue(existing, instant.getTime());
         return invitationReceipt(existing);
       }
@@ -232,6 +283,8 @@ export function createPairingService({
       if (state.invitations.filter(entry => entry.status === 'open' || entry.status === 'pending').length >= MAX_ACTIVE_INVITATIONS) {
         throw httpError(503, 'pairing_busy');
       }
+      if (lookup.error) throw lookup.error;
+      const scope = selectedScope(lookup.targets, requested);
       const invitation = {
         invitation_id: body.request_id,
         code_digest: body.code_digest,
@@ -240,6 +293,7 @@ export function createPairingService({
         created_at: instant.toISOString(),
         expires_at: new Date(Math.min(instant.getTime(), issuedAt) + INVITATION_TTL_MS).toISOString(),
         scope,
+        ...(requested && !scope.targets ? { requested_targets: requested } : {}),
         epoch,
         status: 'open',
         attempts: 0,
@@ -285,7 +339,7 @@ export function createPairingService({
     }
     // Authority is re-proven at approval time: scope and epoch must still be
     // exactly the invitation's recorded generation.
-    const scope = await currentScope();
+    const lookup = await activeTargets().then(targets => ({ targets }), error => ({ error }));
     const instant = now();
     const outcome = await updateTransaction(registry => {
       const state = pairingState(registry);
@@ -305,9 +359,14 @@ export function createPairingService({
         return { denied: httpError(429, 'pairing_rate_limited') };
       }
       invitation.attempts += 1;
-      if (scope.ghost_ids[0] !== invitation.scope.ghost_ids[0]
-        || scope.conversation_ids[0] !== invitation.scope.conversation_ids[0]
-        || invitation.epoch !== epoch) {
+      if (invitation.epoch !== epoch) return { denied: httpError(409, 'invitation_stale_scope') };
+      if (lookup.error) throw lookup.error;
+      const requested = requestedTargets(invitation);
+      const available = requested
+        ? requested.every(pair => lookup.targets.some(target => samePair(pair, target)))
+        : lookup.targets.some(target => target.kind === 'primary'
+          && target.ghost_id === invitation.scope.ghost_ids[0] && target.conversation_id === invitation.scope.conversation_ids[0]);
+      if (!available) {
         return { denied: httpError(409, 'invitation_stale_scope') };
       }
       const expected = verificationCode(invitation.invitation_id, invitation.claim.claim_id, invitation.claim.device_token_digest);
@@ -515,7 +574,7 @@ export function createPairingService({
     });
   }
 
-  return { createInvitation, invitationMeta, listInvitations, approveInvitation, cancelInvitation, createClaim, claimStatus };
+  return { listTargets, createInvitation, invitationMeta, listInvitations, approveInvitation, cancelInvitation, createClaim, claimStatus };
 }
 
 // One Bonjour advertisement of the configured public HTTPS origin over the

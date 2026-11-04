@@ -9,12 +9,20 @@ import { createGateway, parseOrigin } from './server.mjs';
 import { createNotificationOutbox, providerJWT, alertPayload, readApnsConfig } from './apns.mjs';
 import { issueDevice, registerApnsToken } from './devices.mjs';
 
-function scope({ ghostIDs, conversationIDs, capabilities = ['lifetime.read', 'lifetime.write'] } = {}) {
-  return { kind: 'lifetime', ghost_ids: ghostIDs, conversation_ids: conversationIDs, capabilities };
+function scope({ ghostIDs, conversationIDs, capabilities = ['lifetime.read', 'lifetime.write'], targets } = {}) {
+  return { kind: 'lifetime', ghost_ids: ghostIDs, conversation_ids: conversationIDs, capabilities, ...(targets ? { targets } : {}) };
 }
 
 const ghost = '11111111-1111-4111-8111-111111111111';
 const conversation = '22222222-2222-4222-8222-222222222222';
+const peerGhost = '33333333-3333-4333-8333-333333333333';
+const peerConversation = '44444444-4444-4444-8444-444444444444';
+function twoPairScope(crossed = false) {
+  return scope({ ghostIDs: [ghost, peerGhost], conversationIDs: [conversation, peerConversation], targets: [
+    { ghost_id: ghost, conversation_id: crossed ? peerConversation : conversation },
+    { ghost_id: peerGhost, conversation_id: crossed ? conversation : peerConversation },
+  ] });
+}
 const notification = {
   id: 'notification:abc123', conversation_id: conversation, work_id: 'work-1',
   goal_revision: 3, event_kind: 'result', state: 'pending',
@@ -28,10 +36,10 @@ function inboxResponse(items = [notification]) {
   };
 }
 
-async function fixture(t, { scoped = false, capabilities, hostNotifications, hostAck } = {}) {
+async function fixture(t, { scoped = false, deviceScope, capabilities, hostNotifications, hostAck } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'ghost-notifications-'));
   const devices = join(dir, 'devices.json');
-  const device = await issueDevice(devices, 'Test phone', scoped ? scope({ ghostIDs: [ghost], conversationIDs: [conversation], capabilities }) : undefined);
+  const device = await issueDevice(devices, 'Test phone', deviceScope ?? (scoped ? scope({ ghostIDs: [ghost], conversationIDs: [conversation], capabilities }) : undefined));
   const dispatched = [];
   const server = createGateway({
     root: dir, devices, origin: 'https://ghost.example', lifetimeAuthorityEpoch: 1,
@@ -45,7 +53,7 @@ async function fixture(t, { scoped = false, capabilities, hostNotifications, hos
       if (payload.command.envelope?.body?.method === 'notification.inspect') {
         return Response.json({ ok: true, result: hostNotifications?.() ?? inboxResponse() });
       }
-      return Response.json({ ok: true, result: hostAck?.(payload) ?? { status: 'success', summary: 'notification delivery state recorded', object_refs: [payload.command.envelope.body.notification_id], artifacts: [], next_actions: [], error_code: null, retry_class: 'same_id', data: { recipient_id: ghost, notification_id: payload.command.envelope.body.notification_id, state: payload.command.envelope.body.state } } });
+      return Response.json({ ok: true, result: hostAck?.(payload) ?? { status: 'success', summary: 'notification delivery state recorded', object_refs: [payload.command.envelope.body.notification_id], artifacts: [], next_actions: [], error_code: null, retry_class: 'same_id', data: { recipient_id: payload.command.envelope.body.recipient_id, notification_id: payload.command.envelope.body.notification_id, state: payload.command.envelope.body.state } } });
     },
     apns: { enabled: false, missing: [] },
   });
@@ -125,6 +133,23 @@ test('scoped devices stay within their ghost and conversation scope', async t =>
   const foreign = await foreignConversation.call('/mobile/v1/notifications/inspect', { body: JSON.stringify({ recipient_id: ghost }) });
   assert.equal(foreign.status, 502);
   assert.ok(!foreign.data.includes(conversation));
+});
+
+test('inspect and ack authorize the second exact recipient pair and deny crossed pairs', async t => {
+  let observedConversation = peerConversation;
+  const f = await fixture(t, {
+    deviceScope: twoPairScope(), hostNotifications: () => inboxResponse([{ ...notification, conversation_id: observedConversation }]),
+  });
+  const inspect = { body: JSON.stringify({ recipient_id: peerGhost }) };
+  const ack = { body: JSON.stringify({ recipient_id: peerGhost, notification_id: notification.id, state: 'client_seen' }) };
+  assert.equal((await f.call('/mobile/v1/notifications/inspect', inspect)).status, 200);
+  assert.equal((await f.call('/mobile/v1/notifications/ack', ack)).status, 200);
+  observedConversation = conversation;
+  const crossedInspect = await f.call('/mobile/v1/notifications/inspect', inspect);
+  assert.equal(crossedInspect.status, 502);
+  assert.ok(!crossedInspect.data.includes(notification.id));
+  assert.equal((await f.call('/mobile/v1/notifications/ack', ack)).status, 403);
+  assert.equal(f.dispatched.filter(entry => entry.payload.command.envelope?.body?.method === 'notification.ack').length, 1);
 });
 
 test('read-only devices can inspect but not acknowledge; write-only the reverse', async t => {
@@ -395,20 +420,24 @@ test('fanout authorizes each target against current scope, conversation, and rea
   const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const dir = await mkdtemp(join(tmpdir(), 'ghost-outbox-'));
   const devices = join(dir, 'devices.json');
-  const elsewhere = await issueDevice(devices, 'Scoped elsewhere', scope({ ghostIDs: ['99999999-9999-4999-8999-999999999999'], conversationIDs: [conversation], capabilities: ['lifetime.read', 'lifetime.write'] }));
+  const elsewhere = await issueDevice(devices, 'Scoped elsewhere', scope({ ghostIDs: [ghost], conversationIDs: [peerConversation], capabilities: ['lifetime.read', 'lifetime.write'] }));
   await registerApnsToken(devices, elsewhere.id, 'c'.repeat(64), 'sandbox');
-  const readOnly = await issueDevice(devices, 'Wrong conversation', scope({ ghostIDs: [ghost], conversationIDs: ['88888888-8888-4888-8888-888888888888'], capabilities: ['lifetime.read'] }));
+  const readOnly = await issueDevice(devices, 'Wrong conversation', scope({ ghostIDs: [peerGhost], conversationIDs: [conversation], capabilities: ['lifetime.read'] }));
   await registerApnsToken(devices, readOnly.id, 'd'.repeat(64), 'sandbox');
-  const noRead = await issueDevice(devices, 'No read capability', scope({ ghostIDs: [ghost], conversationIDs: [conversation], capabilities: ['lifetime.write'] }));
+  const noRead = await issueDevice(devices, 'No read capability', scope({ ghostIDs: [peerGhost], conversationIDs: [peerConversation], capabilities: ['lifetime.write'] }));
   await registerApnsToken(devices, noRead.id, 'e'.repeat(64), 'sandbox');
+  const exact = await issueDevice(devices, 'Second exact pair', twoPairScope());
+  await registerApnsToken(devices, exact.id, 'a'.repeat(64), 'sandbox');
+  const crossed = await issueDevice(devices, 'Crossed pairs', twoPairScope(true));
+  await registerApnsToken(devices, crossed.id, 'b'.repeat(64), 'sandbox');
   const deliveries = [];
   const outbox = createNotificationOutbox({
     config: { enabled: true, keyId: 'ABCDEF1234', teamId: 'TEAM123456', topic: 'io.a7garden.ghost', environment: 'sandbox', host: 'api.sandbox.push.apple.com' },
     devicesPath: devices,
     readDevices: async (path) => JSON.parse(await readFile(path, 'utf8')),
     hostLifetimeAction: async body => body.method === 'registry.inspect'
-      ? outboxResult({ registry: [{ ghost_id: ghost }] })
-      : outboxResult({ notifications: [{ ...notification, state: 'pending' }] }),
+      ? outboxResult({ registry: [{ ghost_id: peerGhost }] })
+      : outboxResult({ notifications: [{ ...notification, conversation_id: peerConversation, state: 'pending' }] }),
     sendAlert: async request_ => {
       deliveries.push(request_);
       return { status: 200, reason: null };
@@ -416,9 +445,8 @@ test('fanout authorizes each target against current scope, conversation, and rea
     providerKey: privateKey.export({ type: 'sec1', format: 'pem' }),
   });
   const outcome = await outbox.tick();
-  assert.equal(outcome.sent, 0);
-  assert.equal(deliveries.length, 0);
-  // Nothing was eligible, so no Host ack may claim transport acceptance either.
+  assert.equal(outcome.sent, 1);
+  assert.deepEqual(deliveries.map(delivery => delivery.token), ['a'.repeat(64)]);
   await rm(dir, { recursive: true, force: true });
 });
 

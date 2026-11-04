@@ -1,11 +1,13 @@
-import { cp, mkdir, readFile, writeFile, chmod, rm } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile, chmod, rm, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { assertPortableNodeRuntime } from './node-runtime.mjs';
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ghost = resolve(app, '../..');
 const destination = join(app, 'src-tauri/resources');
-const runtime = process.env.GHOST_NODE_BINARY || process.execPath;
+const runtime = await realpath(resolve(process.env.GHOST_NODE_BINARY || process.execPath));
+assertPortableNodeRuntime(runtime);
 const host = process.env.GHOST_PACKAGE_BINARY || join(ghost, 'target/debug/ghost');
 // This directory contains generated payload only; replace it to avoid stale assets.
 await rm(destination, { recursive: true, force: true });

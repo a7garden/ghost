@@ -25,6 +25,16 @@ pub(crate) struct Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn catalog_reports_actual_provider_transport() {
+        let providers = catalog(None);
+        let rows = providers.as_array().unwrap();
+        assert_eq!(rows.iter().find(|p| p["id"] == "codex").unwrap()["transport"], "official_codex_cli");
+        for id in ["zai-coding", "minimax"] {
+            assert_eq!(rows.iter().find(|p| p["id"] == id).unwrap()["transport"], "native_responses");
+        }
+        assert_eq!(rows.iter().find(|p| p["id"] == "local").unwrap()["transport"], "loopback");
+    }
     #[tokio::test]
     async fn inference_defaults_keys_and_cas_are_separate_from_action_receipts() {
         use std::os::unix::fs::PermissionsExt;
@@ -134,8 +144,8 @@ pub(crate) fn selection_view(conn: &rusqlite::Connection, ghost: &str, conversat
 fn catalog(local: Option<&super::lifetime_runtime::LocalPiRoute>) -> Value {
     json!([
         {"id":"codex","name":"Codex · ChatGPT OAuth","auth":"codex_oauth","models":["gpt-6-luna","gpt-6-sol","gpt-6.1-sol","gpt-6-astra"],"efforts":["low","medium","high","xhigh","max"],"default_model":"gpt-6-luna","default_effort":"high","image":true,"transport":"official_codex_cli"},
-        {"id":"zai-coding","name":"Z.AI Coding Plan","auth":"api_key","models":["glm-5.3"],"efforts":["low","high","max"],"default_model":"glm-5.3","default_effort":"high","image":false,"transport":"official_codex_cli"},
-        {"id":"minimax","name":"MiniMax","auth":"api_key","models":["MiniMax-M3.1-Flash-Preview"],"efforts":["low","medium","high","xhigh","max"],"default_model":"MiniMax-M3.1-Flash-Preview","default_effort":"high","image":true,"transport":"official_codex_cli"},
+        {"id":"zai-coding","name":"Z.AI Coding Plan","auth":"api_key","models":["glm-5.3"],"efforts":["low","high","max"],"default_model":"glm-5.3","default_effort":"high","image":false,"transport":"native_responses"},
+        {"id":"minimax","name":"MiniMax","auth":"api_key","models":["MiniMax-M3.1-Flash-Preview"],"efforts":["low","medium","high","xhigh","max"],"default_model":"MiniMax-M3.1-Flash-Preview","default_effort":"high","image":true,"transport":"native_responses"},
         {"id":"local","name":"로컬 모델","auth":"none","models":local.map(|route|vec![route.model_id.clone()]).unwrap_or_default(),"efforts":["off"],"default_model":local.map(|route|route.model_id.clone()),"default_effort":"off","image":true,"transport":"loopback","image_note":"Dyno 로컬 평가 · 자원 조건에 따라 차단"}
     ])
 }

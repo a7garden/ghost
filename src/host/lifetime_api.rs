@@ -301,3 +301,130 @@ impl Host {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{lifetime_contract::{canonical_digest, VERSION}, store::ProfileStore};
+    use uuid::Uuid;
+
+    fn owner_request(host: &Host, command_id: &str, body: Value) -> Envelope {
+        Envelope {
+            protocol_version: VERSION.into(),
+            payload_digest: canonical_digest(&body).unwrap(),
+            actor_ref: "owner".into(),
+            authority_epoch: host.authority_epoch,
+            expected_revision: None,
+            correlation_id: command_id.into(),
+            command_id: command_id.into(),
+            body,
+        }
+    }
+
+    fn registration(ghost: &str, conversation: &str, kind: &str) -> Value {
+        json!({"method":"registry.ensure","ghost_id":ghost,"conversation_id":conversation,"kind":kind,"roles":[]})
+    }
+
+    #[tokio::test]
+    async fn profile_only_ghost_can_open_its_own_pi_conversation_and_keep_legacy_history() {
+        let root = tempfile::tempdir().unwrap();
+        let ghost = ProfileStore::create_profile(root.path(), "legacy-ghost", "Original persona").unwrap().uuid;
+        let default = ProfileStore::create_profile(root.path(), "default-ghost", "Default persona").unwrap().uuid;
+        let host = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        let action = serde_json::from_value(json!({
+            "request_id": Uuid::new_v4().to_string(),
+            "command":{"type":"create_conversation","profile_id":ghost,"model":"mock","tools":false}
+        })).unwrap();
+        let legacy = host.action(action).unwrap();
+        assert_eq!(legacy["ok"], true, "{legacy}");
+        let legacy_id = legacy["result"]["conversation_id"].as_str().unwrap();
+        host.lock().unwrap().profiles[&ghost].runtime.session.observe(
+            legacy_id, "legacy-history", "fixture", "Original legacy transcript.",
+        ).unwrap();
+        let default_pair = Uuid::new_v4().to_string();
+        let default_request = owner_request(&host, "default-pair", registration(&default, &default_pair, "primary"));
+        assert_eq!(host.lifetime_action(&default_request).unwrap()["result"]["status"], "success");
+
+        let conflict = owner_request(&host, "legacy-conflict", registration(&ghost, legacy_id, "specialist"));
+        assert_eq!(host.lifetime_action(&conflict).unwrap()["ok"], false);
+        let canonical = Uuid::new_v4().to_string();
+        let register = owner_request(&host, "enable-peer", registration(&ghost, &canonical, "specialist"));
+        let receipt = host.lifetime_action(&register).unwrap();
+        assert_eq!(receipt["result"]["status"], "success", "{receipt}");
+        assert_eq!(receipt["result"]["data"]["registry"]["ghost_id"], ghost);
+        assert_eq!(receipt["result"]["data"]["registry"]["conversation_id"], canonical);
+        assert_eq!(host.lifetime_action(&register).unwrap(), receipt);
+        let new_pair = Uuid::new_v4().to_string();
+        let replace = owner_request(&host, "replace-peer-pair", registration(&ghost, &new_pair, "specialist"));
+        assert_eq!(host.lifetime_action(&replace).unwrap()["result"]["error_code"], "conflict");
+
+        let input = owner_request(&host, "peer-turn", json!({
+            "method":"conversation.input","ghost_id":ghost,"conversation_id":canonical,
+            "text":"Speak to this Ghost directly.","privacy":"public","attachments":[]
+        }));
+        let turn = host.lifetime_action(&input).unwrap();
+        assert_eq!(turn["result"]["status"], "success", "{turn}");
+        assert_eq!(host.lifetime_action(&input).unwrap(), turn);
+        {
+            let state = host.lock().unwrap();
+            let pending = lifetime::pending_outbox(&state.journal.0).unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].target, "pi");
+            assert_eq!(pending[0].payload["body"]["ghost_id"], ghost);
+            assert_eq!(pending[0].payload["body"]["conversation_id"], canonical);
+            let snapshot = lifetime::snapshot(&state.journal.0).unwrap();
+            assert_eq!(snapshot.bindings.len(), 1);
+            assert_eq!(snapshot.bindings[0].ghost_id, ghost);
+            assert_eq!(snapshot.bindings[0].runtime_kind, "pi-durable");
+        }
+        host.shutdown().await.unwrap();
+        drop(host);
+
+        let reopened = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        assert_eq!(reopened.lifetime_action(&register).unwrap(), receipt);
+        let read = owner_request(&reopened, "inspect-peer", json!({
+            "method":"conversation.inspect","ghost_id":ghost,"conversation_id":canonical
+        }));
+        let history = reopened.lifetime_action(&read).unwrap();
+        assert_eq!(history["result"]["data"]["turns"][0]["text"], "Speak to this Ghost directly.");
+        let snapshot = reopened.snapshot().unwrap();
+        let profile = snapshot["profiles"].as_array().unwrap().iter().find(|profile| profile["id"] == ghost).unwrap();
+        assert_eq!(profile["persona"], "Original persona");
+        assert_eq!(profile["conversations"][0]["id"], legacy_id);
+        assert_eq!(profile["conversations"][0]["messages"][0]["text"], "Original legacy transcript.");
+        reopened.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn peer_registration_cannot_take_a_provisioning_identity_or_runtime_binding() {
+        let root = tempfile::tempdir().unwrap();
+        let ghost = ProfileStore::create_profile(root.path(), "peer-ghost", "").unwrap().uuid;
+        let reserved_ghost = ProfileStore::create_profile(root.path(), "pending-bot", "").unwrap().uuid;
+        let host = Host::open(root.path(), tokio::runtime::Handle::current(), Some("mock")).unwrap();
+        let reserved_pair = Uuid::new_v4().to_string();
+        let bound_pair = Uuid::new_v4().to_string();
+        {
+            let state = host.lock().unwrap();
+            state.journal.put("bot_provisioning_v1", "pending-bot", &json!({
+                "ghost_id":reserved_ghost,"conversation_id":reserved_pair,"state":"provisioning"
+            })).unwrap();
+            state.journal.0.execute(
+                "INSERT INTO lifetime_bindings(conversation_id,ghost_id,runtime_kind,runtime_release,storage_ref)
+                 VALUES(?1,?2,'pi-durable','test','test')",
+                [&bound_pair, &reserved_ghost],
+            ).unwrap();
+        }
+        let other_pair = Uuid::new_v4().to_string();
+        for (command_id, profile_id, pair) in [
+            ("take-reserved-ghost", &reserved_ghost, &other_pair),
+            ("take-reserved-pair", &ghost, &reserved_pair),
+            ("take-binding", &ghost, &bound_pair),
+        ] {
+            let request = owner_request(&host, command_id, registration(profile_id, pair, "specialist"));
+            assert_eq!(host.lifetime_action(&request).unwrap()["result"]["error_code"], "conflict");
+        }
+        let registry = owner_request(&host, "inspect-registry", json!({"method":"registry.inspect"}));
+        assert_eq!(host.lifetime_action(&registry).unwrap()["result"]["data"]["registry"], json!([]));
+        host.shutdown().await.unwrap();
+    }
+}

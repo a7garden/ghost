@@ -12,7 +12,8 @@ import GhostMobileCore
                 RootView(model: model)
                     .environment(\.horizontalSizeClass, width < 600 ? .compact : .regular)
                     .frame(width: width).frame(maxWidth: .infinity)
-            } else { RootView(model: model) }
+                    .preferredColorScheme(MobileUIFixture.dark ? .dark : nil)
+            } else { RootView(model: model).preferredColorScheme(MobileUIFixture.dark ? .dark : nil) }
             #else
             RootView(model: model)
             #endif
@@ -280,6 +281,7 @@ struct ActivityView: View {
     var body: some View {
         NavigationStack {
             List {
+                if model.isLifetimeConnection && (!model.ownerQuestions.isEmpty || model.ownerQuestionsError != nil) { OwnerQuestionsSection(model: model) }
                 if !model.notifications.isEmpty {
                     Section("결과 알림") {
                         ForEach(model.notifications) { entry in
@@ -344,7 +346,7 @@ struct ActivityView: View {
                     }
                 }
                 }
-                if model.isLifetimeConnection && model.notifications.isEmpty && model.pending.isEmpty {
+                if model.isLifetimeConnection && model.notifications.isEmpty && model.pending.isEmpty && model.ownerQuestions.isEmpty && model.ownerQuestionsError == nil {
                     Section {
                         VStack(alignment: .leading, spacing: 16) {
                             Image(systemName: "bell").font(.largeTitle).foregroundStyle(GhostStyle.accent)
@@ -355,10 +357,11 @@ struct ActivityView: View {
                     }.listRowBackground(Color.clear)
                 }
             }.listStyle(.insetGrouped).scrollContentBackground(.hidden).background(GhostStyle.canvas)
-                .navigationTitle(model.isLifetimeConnection ? "알림" : "진행 중")
+                .navigationTitle(model.isLifetimeConnection ? "확인할 일" : "진행 중")
                 .refreshable {
                     await model.refresh()
                     await model.loadNotifications()
+                    if model.isLifetimeConnection { await model.loadOwnerQuestions() }
                 }
                 .task { await model.loadNotifications() }
         }

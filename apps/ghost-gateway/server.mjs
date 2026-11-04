@@ -3,7 +3,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { discover } from '../ghost-ui/server/bridge.mjs';
-import { authenticate, readDevices, registerApnsToken, updateDevices } from './devices.mjs';
+import { authenticate, readDevices, registerApnsToken, scopeHasPair, updateDevices } from './devices.mjs';
 import { createNotificationOutbox, readApnsConfig } from './apns.mjs';
 import { createOwnerSurface, ownerSurfaceRoute } from './owner_surface.mjs';
 import { pairingRoute, createPairingService, bootstrapProof, startPairingAdvertiser } from './pairing.mjs';
@@ -192,8 +192,7 @@ function scopedSnapshot(snapshot, scope) {
   const bindings = snapshot.bindings.filter(binding => isRecord(binding)
     && typeof binding.ghost_id === 'string'
     && typeof binding.conversation_id === 'string'
-    && scope.ghost_ids.includes(binding.ghost_id)
-    && scope.conversation_ids.includes(binding.conversation_id));
+    && scopeHasPair(scope, binding.ghost_id, binding.conversation_id));
   const bindingPairs = new Set(bindings.map(binding => bindingPairKey(binding.ghost_id, binding.conversation_id)));
   const goals = snapshot.goals.filter(goal => goalInScope(goal, bindingPairs));
   const goalIds = new Set(goals.map(goal => goal.id));
@@ -231,7 +230,7 @@ function scopedTargetPairs(registry, scope) {
     }
     ghosts.add(entry.ghost_id);
     conversations.add(entry.conversation_id);
-    if (!scope.ghost_ids.includes(entry.ghost_id) || !scope.conversation_ids.includes(entry.conversation_id)) continue;
+    if (!scopeHasPair(scope, entry.ghost_id, entry.conversation_id)) continue;
     targets.push({
       ghost_id: entry.ghost_id,
       kind: entry.kind,
@@ -241,6 +240,17 @@ function scopedTargetPairs(registry, scope) {
     });
   }
   return targets;
+}
+
+function profileNames(snapshot) {
+  const names = new Map();
+  for (const profile of Array.isArray(snapshot?.profiles) ? snapshot.profiles : []) {
+    if (!isRecord(profile) || typeof profile.id !== 'string' || !uuidPattern.test(profile.id)
+      || typeof profile.name !== 'string' || !profile.name.trim() || profile.name.length > 120
+      || /[\u0000-\u001f]/.test(profile.name)) continue;
+    names.set(profile.id, profile.name.trim());
+  }
+  return names;
 }
 
 function safeLifetimeResponse(response, data, objectRefs = []) {
@@ -446,8 +456,7 @@ function receiptResponseInScope(response, snapshot, scope, expectedCommandId) {
       return false;
     }
     const pairs = new Set(snapshot.bindings.map(binding => bindingPairKey(binding.ghost_id, binding.conversation_id)));
-    return scope.ghost_ids.includes(run.ghost_id)
-      && scope.conversation_ids.includes(run.conversation_id)
+    return scopeHasPair(scope, run.ghost_id, run.conversation_id)
       && pairs.has(bindingPairKey(run.ghost_id, run.conversation_id))
       && (response.object_refs.length === 0 || (response.object_refs.length === 1 && response.object_refs[0] === run.turn_id))
       && response.artifacts.length === 0 && response.next_actions.length === 0;
@@ -861,15 +870,13 @@ export function createGateway({
     if (!voiceMedia) return false;
     if (!device.scope) return true;
     return device.scope.capabilities.includes('lifetime.write')
-      && device.scope.ghost_ids.includes(voiceMedia.ghostID)
-      && device.scope.conversation_ids.includes(voiceMedia.conversationID);
+      && scopeHasPair(device.scope, voiceMedia.ghostID, voiceMedia.conversationID);
   }
 
   function teardownAllowed(device) {
     if (!voiceMedia) return false;
     if (!device.scope) return true;
-    return device.scope.ghost_ids.includes(voiceMedia.ghostID)
-      && device.scope.conversation_ids.includes(voiceMedia.conversationID);
+    return scopeHasPair(device.scope, voiceMedia.ghostID, voiceMedia.conversationID);
   }
 
   // Forward one bounded media control request to the loopback streaming
@@ -973,7 +980,7 @@ export function createGateway({
     }
   }
 
-  async function lifetimeHostAuthority(host, device, authorization, res) {
+  async function lifetimeHostAuthority(host, device, authorization, res, includeNames = false) {
     if (!lifetimeIdentity) throw new Error('Lifetime transport is not configured.');
     const result = await hostRequest(host, '/api/v1/snapshot', 'GET', null, device, authorization, res);
     if (result.revoked || result.clientClosed) return result;
@@ -992,6 +999,7 @@ export function createGateway({
         authority_epoch: authority.authority_epoch,
         dispatch_enabled: authority.dispatch_enabled,
       },
+      ...(includeNames ? { names: profileNames(result.data) } : {}),
     };
   }
 
@@ -1028,8 +1036,8 @@ export function createGateway({
   });
 
   // Phone pairing state machine: invitations and claims are recognized before
-  // device authentication; owner approvals re-prove the exact current Root
-  // registry Primary row and epoch before any device grant is written.
+  // device authentication; owner approvals re-prove the selected registered
+  // pairs and authority epoch before any device grant is written.
   const pairing = lifetimeIdentity ? createPairingService({
     devices,
     origin: publicOrigin.origin,
@@ -1041,6 +1049,16 @@ export function createGateway({
         throw Object.assign(new Error('pairing_scope_unavailable'), { status: 503, code: 'pairing_scope_unavailable' });
       }
       return result.data.registry;
+    },
+    hostNames: async () => {
+      const host = await discoverHost(root);
+      const response = await fetchHost(`${host.origin}/api/v1/snapshot`, {
+        method: 'GET', redirect: 'error', signal: AbortSignal.timeout(5000),
+        headers: { Authorization: `Bearer ${host.token}`, 'X-Ghost-CSRF': host.token, Origin: host.origin, 'Sec-Fetch-Site': 'same-origin' },
+      });
+      if (!response.ok) return new Map();
+      const snapshot = JSON.parse((await bounded(response.body, MAX_RESPONSE)).toString('utf8'));
+      return snapshot.lifetime_authority?.authority_epoch === lifetimeIdentity.authority_epoch ? profileNames(snapshot) : new Map();
     },
   }) : null;
 
@@ -1084,6 +1102,7 @@ export function createGateway({
       if (!pairingTokenEqual(bearer, `Bearer ${host.token}`) || !pairingTokenEqual(csrf, host.token)) {
         return json(res, 401, { error: 'pairing_admin_unauthorized' });
       }
+      if (match.kind === 'targets') return json(res, 200, await pairing.listTargets());
       if (match.kind === 'invitation_create') return json(res, 200, await pairing.createInvitation(body));
       if (match.kind === 'invitation_list') return json(res, 200, await pairing.listInvitations());
       if (match.kind === 'invitation_get') return json(res, 200, await pairing.invitationMeta(match.id));
@@ -1170,7 +1189,7 @@ export function createGateway({
         }
         if (!lifetimeIdentity) return json(res, 503, { error: 'lifetime_transport_unconfigured' });
         const host = await discoverHost(root);
-        const metadata = await lifetimeHostAuthority(host, device, req.headers.authorization, res);
+        const metadata = await lifetimeHostAuthority(host, device, req.headers.authorization, res, true);
         if (metadata.revoked) return json(res, 401, { error: 'device_not_authorized' });
         if (metadata.clientClosed) return;
         const registry = await lifetimeTargetPairs(host, device, req.headers.authorization, res);
@@ -1181,7 +1200,10 @@ export function createGateway({
           scope: device.scope,
           lifetime_identity: lifetimeIdentity,
           lifetime_host: metadata.authority,
-          target_pairs: registry.target_pairs,
+          target_pairs: registry.target_pairs.map(target => {
+            const name = metadata.names.get(target.ghost_id);
+            return name ? { ...target, name } : target;
+          }),
           voice_media: advertisedMedia,
         });
       }
@@ -1296,7 +1318,7 @@ export function createGateway({
             const failed = notificationRpcFailed(error);
             return failed;
           }
-          if (scoped && result.data.notifications.some(item => !device.scope.conversation_ids.includes(item.conversation_id))) {
+          if (scoped && result.data.notifications.some(item => !scopeHasPair(device.scope, body.recipient_id, item.conversation_id))) {
             return json(res, 502, { ok: false, error: 'host_notification_outside_device_scope' });
           }
           return json(res, 200, { ok: true, result });
@@ -1320,7 +1342,7 @@ export function createGateway({
         }
         const record = inbox.data.notifications.find(item => item.id === body.notification_id);
         if (!record) return json(res, 404, { ok: false, error: 'notification_not_found' });
-        if (scoped && !device.scope.conversation_ids.includes(record.conversation_id)) {
+        if (scoped && !scopeHasPair(device.scope, body.recipient_id, record.conversation_id)) {
           return json(res, 403, { error: 'scope_denied' });
         }
         let result;

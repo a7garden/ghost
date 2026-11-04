@@ -7,6 +7,11 @@ import GhostMobileCore
 enum MobileUIFixture {
     static let ghostID = "00000000-0000-4000-8000-000000000001"
     static let conversationID = "fixture-conversation"
+    static let peerGhostID = "00000000-0000-4000-8000-000000000004"
+    static let peerConversationID = "peer-conversation"
+    static var dark: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--dark") }
+    static var noDefaultGhost: Bool { ProcessInfo.processInfo.arguments.contains("--no-default-ghost") }
+    static var multipleGhosts: Bool { ProcessInfo.processInfo.arguments.contains("--multiple-ghosts") }
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--ui-testing-lifetime") }
     static var reviewWidth: CGFloat? {
         let prefix = "--review-width="
@@ -14,6 +19,8 @@ enum MobileUIFixture {
               let width = Double(argument.dropFirst(prefix.count)), [320.0, 375.0, 414.0, 768.0].contains(width) else { return nil }
         return CGFloat(width)
     }
+    static var publicHistory: Bool { ProcessInfo.processInfo.arguments.contains("--public-history") }
+    static var pendingInput: Bool { ProcessInfo.processInfo.arguments.contains("--pending-input") }
     static var empty: Bool { ProcessInfo.processInfo.arguments.contains("--empty-conversation") }
     static var session: URLSession {
         let config = URLSessionConfiguration.ephemeral
@@ -21,22 +28,24 @@ enum MobileUIFixture {
         return URLSession(configuration: config)
     }
     static var bootstrap: JSON {
-        .object([
+        let targets: [JSON] = [.object(["ghost_id": .string(ghostID), "conversation_id": .string(conversationID), "kind": .string(noDefaultGhost ? "specialist" : "primary"), "mode": .string("active"), "name": .string("Ghost"), "roles": .array([])])]
+            + (multipleGhosts ? [.object(["ghost_id": .string(peerGhostID), "conversation_id": .string(peerConversationID), "kind": .string("specialist"), "mode": .string("active"), "name": .string("Research"), "roles": .array([.string("research")])])] : [])
+        return .object([
             "protocol": .string("ghost-mobile"), "version": .number(1), "role": .string("lifetime"),
             "device": .object(["id": .string("00000000-0000-4000-8000-000000000002")]),
             "lifetime_host": .object(["workspace_id": .string("00000000-0000-4000-8000-000000000003"), "authority_epoch": .number(1), "dispatch_enabled": .bool(true)]),
             "lifetime_identity": .object(["actor_ref": .string("owner"), "authority_epoch": .number(1)]),
-            "scope": .object(["kind": .string("lifetime"), "ghost_ids": .array([.string(ghostID)]), "conversation_ids": .array([.string(conversationID)]), "capabilities": .array([.string("lifetime.read"), .string("lifetime.write")])]),
-            "target_pairs": .array([.object(["ghost_id": .string(ghostID), "conversation_id": .string(conversationID), "kind": .string("primary"), "mode": .string("active"), "roles": .array([])])])
+            "scope": .object(["kind": .string("lifetime"), "ghost_ids": .array(targets.map { $0["ghost_id"] }), "conversation_ids": .array(targets.map { $0["conversation_id"] }), "capabilities": .array([.string("lifetime.read"), .string("lifetime.write")])]),
+            "target_pairs": .array(targets)
         ])
     }
     static var snapshot: JSON {
         .object(["protocol_version": .string("ghost-lifetime/1"), "contract_revision": .number(1),
                  "goals": .array(empty ? [] : [.object(["id": .string("fixture-goal"), "state": .string("open"), "prompt": .string("주말에 읽을 책 목록 정리하기"), "revision": .number(1), "accountable_ghost": .string(ghostID), "reply_conversation": .string(conversationID), "privacy": .string("local_only"), "acceptance_spec": .object([:])])]),
-                 "work": .array([]), "bindings": .array([]), "artifacts": .array([]), "acceptances": .array([])])
+                 "work": .array(empty ? [] : [.object(["id": .string("fixture-work"), "goal_id": .string("fixture-goal"), "goal_revision": .number(1), "state": .string("running"), "owner": .string(ghostID), "cancellation": .string("none")])]), "bindings": .array([]), "artifacts": .array([]), "acceptances": .array([])])
     }
     private static let firstPageTime = ProcessInfo.processInfo.systemUptime
-    static var page: JSON {
+    static func page(ghost: String, conversation: String) -> JSON {
         let age = ProcessInfo.processInfo.systemUptime - firstPageTime
         var messages = [
             ("user", "이번 주말에 읽을 책 목록을 정리해 줘."),
@@ -49,10 +58,12 @@ enum MobileUIFixture {
             }
             if age >= 12 { messages.append(("assistant_advisory", "Incoming lifetime message")) }
         }
+        if ghost == peerGhostID { messages = [("assistant_advisory", "Research의 독립 대화입니다.")] }
+        let privacy: JSON = .string(publicHistory ? "public" : "local_only")
         let turns: [JSON] = empty ? [] : messages.enumerated().map { index, item in
-            .object(["id": .string("fixture-turn-\(index)"), "sequence": .number(Double(index + 1)), "kind": .string(item.0), "sender_kind": .string(item.0 == "user" ? "owner" : "ghost"), "sender_ref": .string(item.0 == "user" ? "owner" : ghostID), "text": .string(item.1), "privacy": .string("local_only"), "attachments": .array([]), "created_at_ms": .number(1)])
+            .object(["id": .string("fixture-turn-\(index)"), "sequence": .number(Double(index + 1)), "kind": .string(item.0), "sender_kind": .string(item.0 == "user" ? "owner" : "ghost"), "sender_ref": .string(item.0 == "user" ? "owner" : ghost), "text": .string(item.1), "privacy": privacy, "attachments": .array([]), "created_at_ms": .number(1)])
         }
-        return .object(["ghost_id": .string(ghostID), "conversation_id": .string(conversationID), "privacy": .string("local_only"), "turns": .array(turns), "turn_runs": .array([]), "has_older": .bool(false), "oldest_sequence": turns.isEmpty ? .null : .number(1)])
+        return .object(["ghost_id": .string(ghost), "conversation_id": .string(conversation), "privacy": privacy, "turns": .array(turns), "turn_runs": .array([]), "has_older": .bool(false), "oldest_sequence": turns.isEmpty ? .null : .number(1)])
     }
     static func result(_ data: JSON) -> JSON {
         .object(["status": .string("success"), "summary": .string("UI fixture"), "data": data, "error_code": .null, "retry_class": .string("never"), "object_refs": .array([]), "artifacts": .array([]), "next_actions": .array([])])
@@ -73,6 +84,15 @@ private final class MobileFixtureProtocol: URLProtocol, @unchecked Sendable {
         case "/mobile/v1/lifetime/snapshot": value = MobileUIFixture.snapshot
         case "/mobile/v1/lifetime/questions": value = .object(["ok": .bool(true), "questions": .array([])])
         case "/mobile/v1/notifications/inspect": value = .object(["ok": .bool(true), "result": MobileUIFixture.result(.object(["notifications": .array([])]))])
+        case "/mobile/v1/inference/settings":
+            if request.httpMethod == "POST" {
+                status = 409; value = .object(["ok": .bool(false), "error": .string("설정이 변경되었습니다. 다시 확인하세요.")])
+            } else {
+                value = .object(["ok": .bool(true), "settings": .object(["version": .number(1), "default": .object(["provider": .string("local"), "model": .string("Local"), "effort": .string("off")]), "conversations": .object([:]), "credentials": .object([:]), "external_grants": .object([:])]), "providers": .array([
+                    .object(["id": .string("local"), "name": .string("로컬 모델"), "auth": .string("none"), "models": .array([.string("Local")]), "efforts": .array([.string("off")]), "default_model": .string("Local"), "default_effort": .string("off")]),
+                    .object(["id": .string("codex"), "name": .string("Codex"), "auth": .string("codex_oauth"), "models": .array([.string("Luna")]), "efforts": .array([.string("high")]), "default_model": .string("Luna"), "default_effort": .string("high")])
+                ])])
+            }
         case "/mobile/v1/lifetime/action":
             var bytes = request.httpBody ?? Data()
             if bytes.isEmpty, let stream = request.httpBodyStream {
@@ -84,8 +104,12 @@ private final class MobileFixtureProtocol: URLProtocol, @unchecked Sendable {
                 }
             }
             let payload = try? JSONDecoder().decode(JSON.self, from: bytes)
-            if payload?["command"]["envelope"]["body"]["method"].text == "conversation.inspect" {
-                value = .object(["ok": .bool(true), "result": MobileUIFixture.result(MobileUIFixture.page)])
+            let method = payload?["command"]["envelope"]["body"]["method"].text
+            if method == "conversation.inspect" {
+                value = .object(["ok": .bool(true), "result": MobileUIFixture.result(MobileUIFixture.page(ghost: payload?["command"]["envelope"]["body"]["ghost_id"].text ?? "", conversation: payload?["command"]["envelope"]["body"]["conversation_id"].text ?? ""))])
+            } else if method == "conversation.input" && MobileUIFixture.pendingInput {
+                status = 502
+                value = .object(["ok": .bool(false), "error": .string("UI fixture lost the input response")])
             } else { status = 405; value = .object(["error": .string("UI fixture refuses mutations")]) }
         default: status = 404; value = .object(["error": .string("Unsupported fixture route")])
         }

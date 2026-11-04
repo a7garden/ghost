@@ -3,13 +3,57 @@ import QRCode from 'qrcode';
 import { QrCode, Smartphone } from 'lucide-react';
 
 const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-type Scope = { kind: 'lifetime'; ghost_ids: string[]; conversation_ids: string[]; capabilities: string[] };
+const maxTargets = 16;
+const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+type TargetPair = { ghost_id: string; conversation_id: string };
+type PairingTarget = TargetPair & { kind: 'primary' | 'specialist'; roles: string[]; name?: string };
+type Scope = { kind: 'lifetime'; ghost_ids: string[]; conversation_ids: string[]; capabilities: string[]; targets?: TargetPair[] };
+type PairingProfile = { id: string; name: string };
+const pairKey = (target: TargetPair) => `${target.ghost_id}/${target.conversation_id}`;
+const validPair = (item: unknown): item is TargetPair => {
+  const pair = item as Partial<TargetPair> | null;
+  return Boolean(pair && typeof pair.ghost_id === 'string' && uuid.test(pair.ghost_id)
+    && typeof pair.conversation_id === 'string' && uuid.test(pair.conversation_id));
+};
+
+function invitationTargets(scope: Scope): TargetPair[] {
+  // The preceding protocol issued only a single canonical pair. The two ID
+  // lists cannot be joined to reconstruct an exact multi-Ghost grant.
+  const targets = scope.targets === undefined && scope.ghost_ids.length === 1 && scope.conversation_ids.length === 1
+    ? [{ ghost_id: scope.ghost_ids[0], conversation_id: scope.conversation_ids[0] }]
+    : scope.targets;
+  if (!Array.isArray(targets) || !targets.length || targets.length > maxTargets || !targets.every(validPair)
+    || new Set(targets.map(target => target.ghost_id)).size !== targets.length
+    || new Set(targets.map(target => target.conversation_id)).size !== targets.length
+    || !sameIDs(scope.ghost_ids, targets.map(target => target.ghost_id))
+    || !sameIDs(scope.conversation_ids, targets.map(target => target.conversation_id))) {
+    throw new Error('휴대폰이 접근할 Ghost 대화 범위를 확인하지 못했습니다.');
+  }
+  return targets;
+}
+
+function sameIDs(ids: string[], expected: string[]) {
+  const unique = new Set(expected);
+  return ids.length === unique.size && new Set(ids).size === ids.length && ids.every(id => unique.has(id));
+}
+
+function targetCatalog(value: unknown): PairingTarget[] {
+  if (!value || typeof value !== 'object' || !('targets' in value) || !Array.isArray(value.targets)) {
+    throw new Error('연결할 수 있는 Ghost 목록을 읽지 못했습니다.');
+  }
+  const targets: PairingTarget[] = value.targets;
+  if (!targets.every(item => validPair(item) && (item.kind === 'primary' || item.kind === 'specialist')
+    && Array.isArray(item.roles) && item.roles.every(role => typeof role === 'string')
+    && (item.name === undefined || typeof item.name === 'string'))
+    || new Set(targets.map(pairKey)).size !== targets.length) throw new Error('등록된 Ghost 대화 정보를 확인하지 못했습니다.');
+  return targets;
+}
 type Claim = { claim_id: string; device_name: string; verification_code: string; device_fingerprint: string; status: string };
 type Invitation = {
   invitation_id: string; origin: string; expires_at: string; scope: Scope;
   status: 'open' | 'pending' | 'approved' | 'cancelled' | 'expired' | 'revoked'; claim?: Claim;
 };
-type Attempt = { request_id: string; code: string; ticket: string; code_digest: string; ticket_digest: string };
+type Attempt = { request_id: string; code: string; ticket: string; code_digest: string; ticket_digest: string; targets: TargetPair[] };
 const hex = (bytes: Uint8Array) => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 const digest = async (value: string) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))));
 
@@ -19,10 +63,10 @@ function invitationNonce() {
   return `${timestamp.slice(0, 8)}-${timestamp.slice(8)}-7${random[2].slice(1)}-${random[3]}-${random[4]}`;
 }
 
-async function makeAttempt(): Promise<Attempt> {
+async function makeAttempt(targets: TargetPair[]): Promise<Attempt> {
   const code = Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => alphabet[byte & 31]).join('');
   const ticket = hex(crypto.getRandomValues(new Uint8Array(32)));
-  return { request_id: invitationNonce(), code, ticket, code_digest: await digest(code), ticket_digest: await digest(ticket) };
+  return { request_id: invitationNonce(), code, ticket, code_digest: await digest(code), ticket_digest: await digest(ticket), targets };
 }
 
 function invitationResponse(value: unknown): Invitation {
@@ -33,9 +77,11 @@ function invitationResponse(value: unknown): Invitation {
       || !Number.isFinite(Date.parse(item.expires_at))
       || !['open', 'pending', 'approved', 'cancelled', 'expired', 'revoked'].includes(item.status)
       || item.scope?.kind !== 'lifetime' || !Array.isArray(item.scope.ghost_ids)
-      || !Array.isArray(item.scope.conversation_ids) || !Array.isArray(item.scope.capabilities)) {
+      || !Array.isArray(item.scope.conversation_ids) || !Array.isArray(item.scope.capabilities)
+      || !sameIDs(item.scope.capabilities, ['lifetime.read', 'lifetime.write'])) {
     throw new Error('연결 요청의 서버·권한을 확인하지 못했습니다.');
   }
+  invitationTargets(item.scope);
   let origin: URL;
   try { origin = new URL(item.origin); } catch { throw new Error('HTTPS 연결 주소를 확인하지 못했습니다.'); }
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) {
@@ -50,7 +96,12 @@ function invitationResponse(value: unknown): Invitation {
 
 class OperatorError extends Error {
   constructor(readonly code: string) {
-    super(code === 'invitation_expired' ? '이 연결 요청은 만료되었습니다. 새 요청을 직접 만들어 주세요.' : code);
+    super({
+      invitation_expired: '이 연결 요청은 만료되었습니다. 새 요청을 직접 만들어 주세요.',
+      invitation_stale_scope: '등록된 Ghost 대화 범위가 바뀌었습니다. 현재 Ghost를 확인하고 새 연결을 준비하세요.',
+      pairing_scope_unavailable: '현재 연결할 수 있는 Ghost 대화를 확인하지 못했습니다.',
+      invitation_conflict: '이 연결 요청과 서버 기록이 일치하지 않습니다. 저장된 요청을 먼저 확인하세요.',
+    }[code] ?? code);
   }
 }
 
@@ -72,58 +123,93 @@ async function operatorJSON(path: string, body?: Record<string, unknown>, signal
   // Reuse the existing same-origin UI bootstrap/CSRF convention; no Host or
   // device credential crosses this browser boundary.
   const config = await pairingConfig(signal);
-  const response = await fetch(`/ghost-api/mobile/invitations${path}`, {
+  const response = await fetch(`/ghost-api/mobile${path}`, {
     method: body ? 'POST' : 'GET', cache: 'no-store', redirect: 'error', signal,
     headers: { 'X-Ghost-UI-CSRF': config.csrf, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const value = await response.json();
+  if (response.status === 403) pairingBootstrap = undefined;
   if (!response.ok) throw new OperatorError(typeof value.error === 'string' ? value.error : '연결 요청 결과가 불명확합니다. 같은 요청으로 상태를 확인해 주세요.');
   return value;
 }
 
 async function operatorRequest(path: string, body?: Record<string, unknown>, signal?: AbortSignal): Promise<Invitation> {
-  return invitationResponse(await operatorJSON(path, body, signal));
+  return invitationResponse(await operatorJSON(`/invitations${path}`, body, signal));
 }
 
-export function MobilePairing({ mode }: { mode: 'demo' | 'live' }) {
+export function MobilePairing({ mode, connected = true, profiles = [] }: {
+  mode: 'demo' | 'live'; connected?: boolean; profiles?: PairingProfile[];
+}) {
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [busy, setBusy] = useState(false);
+  const [catalog, setCatalog] = useState<PairingTarget[]>();
+  const [selectedKeys, setSelectedKeys] = useState<string[]>();
+  const [setupReady, setSetupReady] = useState(false);
+  const [setupError, setSetupError] = useState('');
+  const [reload, setReload] = useState(0);
   const [error, setError] = useState('');
   const [creationExpired, setCreationExpired] = useState(false);
+  const [scopeMismatch, setScopeMismatch] = useState(false);
   const [now, setNow] = useState(Date.now());
   const canvas = useRef<HTMLCanvasElement>(null);
   const creation = useRef<Attempt | null>(null);
   const mounted = useRef(true);
+  const online = useRef(connected);
+  online.current = connected;
+  const submitting = useRef(false);
   const mutation = useRef<{ invitation: string; action: 'approve' | 'cancel'; request_id: string; claim?: Claim } | null>(null);
   const expires = invitation ? Date.parse(invitation.expires_at) : 0;
   const active = invitation && ['open', 'pending'].includes(invitation.status) && now < expires;
+  const locked = busy || !connected;
+  const defaultTarget = catalog?.find(item => item.kind === 'primary') ?? catalog?.[0];
+  const pickedKeys = selectedKeys ?? (defaultTarget ? [pairKey(defaultTarget)] : []);
+  const picked = catalog?.filter(item => pickedKeys.includes(pairKey(item))) ?? [];
+  const approvedTargets = invitation ? invitationTargets(invitation.scope) : [];
+  const scopeIsCurrent = Boolean(!scopeMismatch && catalog && approvedTargets.every(pair => catalog.some(item => pairKey(item) === pairKey(pair))));
+  const canStart = Boolean(mode === 'live' && !locked && !creationExpired
+    && (creation.current || (setupReady && picked.length && picked.length <= maxTargets)));
+  const targetLabel = (pair: TargetPair, index: number) => {
+    const target = catalog?.find(item => pairKey(item) === pairKey(pair));
+    return profiles.find(profile => profile.id === pair.ghost_id)?.name.trim()
+      || target?.name?.trim()
+      || (target?.roles.length ? target.roles.join(' · ') : `Ghost ${index + 1}`);
+  };
+  const refresh = () => {
+    setSetupReady(false); setCatalog(undefined); setSetupError('');
+    setReload(value => value + 1);
+  };
 
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; creation.current = null; mutation.current = null; };
   }, []);
   useEffect(() => {
-    if (mode !== 'live') return;
+    setSetupReady(false); setCatalog(undefined); setSetupError('');
+    if (mode !== 'live' || !connected) return;
     const controller = new AbortController();
-    void operatorJSON('', undefined, controller.signal).then(value => {
+    const loadTargets = operatorJSON('/targets', undefined, controller.signal).then(targetCatalog).then(targets => {
+      if (!controller.signal.aborted) setCatalog(targets);
+    });
+    const recoverInvitation = operatorJSON('/invitations', undefined, controller.signal).then(value => {
       if (!value || typeof value !== 'object' || !('invitations' in value)
           || !Array.isArray(value.invitations)) throw new Error('저장된 연결 요청을 확인하지 못했습니다.');
       const saved = value.invitations.map(invitationResponse);
-      // Recovery never manufactures a code or key. Pending claims remain
-      // approvable; an open invitation whose secrets were lost must be
-      // explicitly cancelled before replacing it.
-      const recover = saved.find(item => item.status === 'pending')
-        ?? saved.find(item => item.status === 'open');
-      if (!controller.signal.aborted && recover && !creation.current) setInvitation(recover);
+      // A pending claim can be recovered; lost QR secrets cannot be recreated.
+      const recover = saved.find(item => item.status === 'pending') ?? saved.find(item => item.status === 'open');
+      if (!controller.signal.aborted && recover && !creation.current) setInvitation(current => current ?? recover);
+    });
+    void Promise.all([loadTargets, recoverInvitation]).then(() => {
+      if (!controller.signal.aborted) setSetupReady(true);
     }).catch(reason => {
-      if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '연결 요청 상태를 확인하지 못했습니다.');
+      if (!controller.signal.aborted) setSetupError(reason instanceof Error ? reason.message : '휴대폰 연결 정보를 읽지 못했습니다.');
     });
     return () => controller.abort();
-  }, [mode]);
+  }, [mode, connected, reload]);
   useEffect(() => {
-    if (!invitation || !['open', 'pending'].includes(invitation.status)) return;
+    if (!connected || !invitation || !['open', 'pending'].includes(invitation.status)) return;
+    setNow(Date.now());
     const controller = new AbortController();
     let timer: number | undefined;
     const poll = async () => {
@@ -138,7 +224,7 @@ export function MobilePairing({ mode }: { mode: 'demo' | 'live' }) {
     timer = window.setTimeout(poll, 1000);
     const clock = setInterval(() => setNow(Date.now()), 1000);
     return () => { controller.abort(); clearTimeout(timer); clearInterval(clock); };
-  }, [invitation?.invitation_id, invitation?.status]);
+  }, [connected, invitation?.invitation_id, invitation?.status]);
   useEffect(() => {
     if (!invitation || !active) {
       if (invitation) { creation.current = null; setAttempt(null); }
@@ -155,56 +241,96 @@ export function MobilePairing({ mode }: { mode: 'demo' | 'live' }) {
   }, [invitation?.invitation_id, invitation?.status, invitation?.origin, attempt, active]);
 
   const create = async () => {
+    if (!canStart || submitting.current) return;
+    submitting.current = true;
     setBusy(true); setError('');
     try {
       // Keep the same nonce/secrets after an unknown acknowledgement; never
       // mint a second authority merely because the first response was lost.
-      const next = creation.current ?? await makeAttempt();
+      const next = creation.current ?? await makeAttempt(picked.map(({ ghost_id, conversation_id }) => ({ ghost_id, conversation_id })));
+      if (!mounted.current || !online.current) return;
       creation.current = next;
       const observed = await operatorRequest('', {
-        request_id: next.request_id, code_digest: next.code_digest, ticket_digest: next.ticket_digest,
+        request_id: next.request_id, code_digest: next.code_digest, ticket_digest: next.ticket_digest, targets: next.targets,
       });
       if (!mounted.current) return;
       if (observed.invitation_id !== next.request_id) throw new Error('연결 요청 ID가 일치하지 않습니다.');
+      if (!sameIDs(invitationTargets(observed.scope).map(pairKey), next.targets.map(pairKey))) {
+        // Do not reveal a QR for a scope other than the one the owner chose.
+        setScopeMismatch(true);
+        setInvitation(observed);
+        setNow(Date.now());
+        return;
+      }
       setInvitation(observed); setAttempt(next); setNow(Date.now());
     } catch (reason) {
       if (mounted.current) {
         setError(reason instanceof Error ? reason.message : '연결 요청을 만들지 못했습니다.');
-        if (reason instanceof OperatorError && reason.code === 'invitation_expired') setCreationExpired(true);
+        if (reason instanceof OperatorError) {
+          if (reason.code === 'invitation_expired') setCreationExpired(true);
+          if (reason.code === 'invitation_stale_scope') {
+            creation.current = null;
+            refresh();
+          }
+        }
       }
     }
-    finally { if (mounted.current) setBusy(false); }
+    finally { submitting.current = false; if (mounted.current) setBusy(false); }
   };
   const change = async (action: 'approve' | 'cancel') => {
-    if (!invitation || (action === 'approve' && !invitation.claim)) return;
+    if (!invitation || !active || mode !== 'live' || locked || submitting.current || (action === 'approve' && (!invitation.claim || !scopeIsCurrent))) return;
+    submitting.current = true;
     setBusy(true); setError('');
     const previous = mutation.current;
     const request = previous?.invitation === invitation.invitation_id && previous.action === action
       ? previous : { invitation: invitation.invitation_id, action, request_id: crypto.randomUUID(), claim: invitation.claim };
     mutation.current = request;
     try {
-      await operatorJSON(`/${request.invitation}/${action}`, {
+      await operatorJSON(`/invitations/${request.invitation}/${action}`, {
         request_id: request.request_id,
         ...(action === 'approve' ? { claim_id: request.claim!.claim_id, verification_code: request.claim!.verification_code } : {}),
       });
       const observed = await operatorRequest(`/${request.invitation}`);
       if (mounted.current) { setInvitation(observed); mutation.current = null; }
-    } catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : '기기의 연결 상태를 확인하지 못했습니다.'); }
-    finally { if (mounted.current) setBusy(false); }
+    } catch (reason) {
+      if (!mounted.current) return;
+      setError(reason instanceof Error ? reason.message : '기기의 연결 상태를 확인하지 못했습니다.');
+      if (reason instanceof OperatorError && reason.code === 'invitation_stale_scope') refresh();
+    } finally {
+      submitting.current = false;
+      if (mounted.current) setBusy(false);
+    }
   };
   const terminal = invitation && (!active || !['open', 'pending'].includes(invitation.status));
 
   return <section className="mobile-pairing integration-start" aria-labelledby="mobile-pairing-heading">
     <div className="mobile-pairing-copy">
       <h2 id="mobile-pairing-heading"><Smartphone size={19}/>휴대폰 연결</h2>
-      <p>iPhone의 Ghost에서 QR을 스캔하세요. 같은 네트워크에서는 짧은 코드로도 연결할 수 있습니다.</p>
-      <p className="field-help">기기 키는 QR에 들어가지 않습니다. 휴대폰에 표시된 확인 번호가 같을 때만 이 PC에서 연결을 승인하세요.</p>
-      {!invitation && <button className="button secondary" disabled={busy || mode !== 'live' || creationExpired} onClick={() => void create()}><QrCode size={16}/>{creation.current ? '같은 연결 요청 확인' : 'QR·연결 코드 만들기'}</button>}
-      {!invitation && creationExpired && <button className="button secondary" disabled={busy} onClick={() => { creation.current = null; setCreationExpired(false); setError(''); }}>만료된 요청 지우고 새 연결 준비</button>}
+      <p>iPhone의 Ghost에서 QR을 스캔하거나 같은 네트워크의 연결 코드를 입력하세요.</p>
+      {!invitation && mode === 'live' && <>
+        {catalog?.length ? <fieldset className="mobile-pairing-targets" disabled={locked || Boolean(creation.current)}>
+          <legend>휴대폰에서 사용할 Ghost</legend>
+          {catalog.map((target, index) => {
+            const key = pairKey(target), checked = pickedKeys.includes(key);
+            return <label className="mobile-pairing-target" key={key}>
+              <input type="checkbox" checked={checked} disabled={!checked && picked.length >= maxTargets}
+                onChange={event => setSelectedKeys(event.target.checked ? [...picked.map(pairKey), key] : picked.map(pairKey).filter(value => value !== key))}/>
+              <span>{targetLabel(target, index)}</span>
+            </label>;
+          })}
+        </fieldset> : setupReady && <p className="field-help">연결할 수 있는 활성 Ghost가 없습니다.</p>}
+        {!setupReady && !setupError && connected && <p className="field-help" role="status">등록된 Ghost를 확인하는 중…</p>}
+        <button className="button secondary" disabled={!canStart} onClick={() => void create()}><QrCode size={16}/>{creation.current ? '같은 연결 요청 확인' : 'QR·연결 코드 만들기'}</button>
+      </>}
+      {!invitation && creationExpired && <button className="button secondary" disabled={locked} onClick={() => { creation.current = null; setCreationExpired(false); setError(''); }}>만료된 요청 지우고 새 연결 준비</button>}
       {mode !== 'live' && <p className="field-help">실행 중인 PC Ghost에서만 기기를 연결할 수 있습니다.</p>}
       {invitation && <>
         <p className="mobile-pairing-origin">{invitation.origin}</p>
-        <p className="field-help">주 Ghost 1개 · 대화 읽기·쓰기 · 만료 {new Date(invitation.expires_at).toLocaleTimeString('ko-KR')}</p>
+        <p className="field-help">대화·맡긴 일 읽기 및 변경 · 만료 {new Date(invitation.expires_at).toLocaleTimeString('ko-KR')}</p>
+        <ul className="connection-views mobile-pairing-scope" role="list" aria-label="휴대폰에 허용할 Ghost">
+          {approvedTargets.map((target, index) => <li key={pairKey(target)}>{targetLabel(target, index)}</li>)}
+        </ul>
+        {scopeMismatch && <p className="inline-error" role="alert">선택한 Ghost와 서버 연결 범위가 다릅니다. 연결 요청을 취소하세요.</p>}
         {active && invitation.status === 'open' && attempt && <div className="mobile-pairing-invite">
           <canvas ref={canvas} aria-label="Ghost 휴대폰 연결 QR" width={256} height={256}/>
           <div><span className="field-help">같은 네트워크의 연결 코드</span><output className="mobile-pairing-code">{attempt.code.slice(0, 4)}-{attempt.code.slice(4)}</output><p>{Math.max(0, Math.ceil((expires - now) / 1000))}초 뒤 만료</p></div>
@@ -215,12 +341,16 @@ export function MobilePairing({ mode }: { mode: 'demo' | 'live' }) {
           <p>휴대폰과 같은 확인 번호인지 확인하세요.</p>
           <output className="mobile-pairing-code">{invitation.claim.verification_code}</output>
           <p className="field-help">기기 확인 {invitation.claim.device_fingerprint}</p>
-          <button className="button primary" disabled={busy} onClick={() => void change('approve')}>숫자가 같아요 · 이 기기 연결 승인</button>
+          {catalog && !scopeIsCurrent && <p className="field-help" role="status">선택한 Ghost 범위가 바뀌었습니다. 요청을 취소하고 새로 연결하세요.</p>}
+          <button className="button primary" disabled={locked || !scopeIsCurrent} onClick={() => void change('approve')}>숫자가 같아요 · 이 기기 연결 승인</button>
         </div>}
-        {active && <button className="button secondary" disabled={busy} onClick={() => void change('cancel')}>이 연결 요청 취소</button>}
+        {active && <button className="button secondary" disabled={locked} onClick={() => void change('cancel')}>이 연결 요청 취소</button>}
         {terminal && <p role="status">{invitation.status === 'approved' ? '기기 접근을 승인했습니다. 휴대폰에서 연결 상태를 확인하세요.' : invitation.status === 'revoked' ? '이 기기의 연결 권한이 해제되었습니다.' : invitation.status === 'cancelled' ? '연결 요청을 취소했습니다.' : '연결 요청이 만료되었습니다.'}</p>}
-        {terminal && <button className="button secondary" disabled={busy} onClick={() => { setInvitation(null); setAttempt(null); creation.current = null; mutation.current = null; }}>{invitation.status === 'approved' ? '다른 휴대폰 연결 준비' : '새 연결 요청 준비'}</button>}
+        {terminal && <button className="button secondary" disabled={locked} onClick={() => { setInvitation(null); setAttempt(null); setSelectedKeys(undefined); setScopeMismatch(false); setCreationExpired(false); setError(''); creation.current = null; mutation.current = null; refresh(); }}>{invitation.status === 'approved' ? '다른 휴대폰 연결 준비' : '새 연결 요청 준비'}</button>}
       </>}
+      {setupError && <div className="connection-message connection-message--error" role="alert"><span>{setupError}</span>
+        <button className="button secondary" disabled={locked} onClick={refresh}>다시 확인</button>
+      </div>}
       {error && <p className="inline-error" role="alert">{error}</p>}
     </div>
   </section>;

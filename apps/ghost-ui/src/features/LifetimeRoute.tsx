@@ -5,25 +5,32 @@ import type { AuthenticatedControlAction } from '../lifetime/controlTransport';
 import type { ApprovalRef } from '../plugins/approvals';
 import type { Command, LifetimeHostAuthority, Review, Snapshot } from '../client/types';
 
-export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mode, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, route = '/lifetime', legacyGhostIDs, onOpenHistory, snapshot, onOpenApproval, navigate }: {
+export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mode, connected = true, active = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, route = '/lifetime', legacyGhostIDs, onOpenHistory, snapshot, onOpenApproval, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, navigate }: {
   action: AuthenticatedControlAction;
   /** Workspace Owner action (CSRF + envelope journal) for the Owner memory source review surface. */
   memoryAction?: (command: Command) => Promise<Record<string, any>>;
   workspaceId: string;
   authority?: LifetimeHostAuthority;
   mode: 'demo' | 'live';
+  connected?: boolean;
+  active?: boolean;
   documentReviews?: Review[];
   documentAuthorityEpoch?: number;
   onOpenDocumentReview?: (review: Review) => void;
   route?: string;
   snapshot?: Snapshot;
   onOpenApproval?: (ref: ApprovalRef) => void;
+  onOpenTarget?: (ghostID: string, conversationID: string, preserveWorkRoute?: boolean) => void;
+  onDefaultGhostChange?: (ghostID: string | null) => void;
+  onTargetChange?: (ghostID: string | null) => void;
+  authorizedRegistration?: { ghostID: string; conversationID: string };
+  onRegistrationConsumed?: (ghostID: string, conversationID: string) => void;
   navigate?: (path: string) => void;
   legacyGhostIDs?: string[];
   onOpenHistory?: (ghostID: string) => void;
 }) {
   const session = useMemo(() => {
-    if (mode !== 'live') return { error: '주 Ghost 대화는 연결된 호스트에서 사용할 수 있습니다.' };
+    if (mode !== 'live') return { error: 'Ghost 대화는 연결된 호스트에서 사용할 수 있습니다.' };
     if (!authority) return { error: '호스트의 현재 실행 권한을 확인하지 못했습니다. 저장된 요청은 다시 전송하지 않습니다.' };
     try {
       const client = createLiveLifetimeClient(action, {
@@ -41,16 +48,31 @@ export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mo
   if ('error' in session) return <div className="page-content" role="alert">{session.error}</div>;
   const params = new URLSearchParams(route.split('?')[1] ?? '');
   const panel = params.get('panel');
-  return <LifetimeView mode="live" client={session.client} memoryAction={memoryAction}
+  return <LifetimeView mode="live" client={session.client} connected={connected} active={active} memoryAction={memoryAction}
     legacyGhostIDs={legacyGhostIDs} onOpenHistory={onOpenHistory}
     initialGhostID={params.get('ghost') ?? undefined}
     initialConversationID={params.get('conversation') ?? undefined}
+    initialRegisterConversationID={params.get('register') ?? undefined}
+    initialGoalID={params.get('goal') ?? undefined}
+    initialWorkID={params.get('work') ?? undefined}
+    workScope={params.get('scope') === 'all' ? 'all' : 'conversation'}
     initialPanel={panel === 'work' || panel === 'ghosts' ? panel : 'conversation'}
     onPanelChange={navigate ? next => {
       params.delete('create');
       if (next === 'conversation') params.delete('panel');
       else params.set('panel', next);
+      if (next !== 'work') { params.delete('scope'); params.delete('goal'); params.delete('work'); }
       navigate(params.size ? `/lifetime?${params}` : '/lifetime');
+    } : undefined}
+    onOpenTarget={onOpenTarget}
+    onDefaultGhostChange={onDefaultGhostChange}
+    onTargetChange={onTargetChange}
+    authorizedRegistration={authorizedRegistration}
+    onRegistrationConsumed={onRegistrationConsumed}
+    onClearWorkLink={navigate ? () => {
+      const next = new URLSearchParams(route.split('?')[1] ?? '');
+      next.delete('goal'); next.delete('work');
+      navigate(next.size ? `/lifetime?${next}` : '/lifetime');
     } : undefined}
     createRequested={params.get('create') === '1'}
     workspaceSnapshot={snapshot} onOpenApproval={onOpenApproval}

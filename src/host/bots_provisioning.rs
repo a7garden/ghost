@@ -260,6 +260,20 @@ pub(crate) fn progress(conn: &Connection, id: &str) -> Result<Progress> {
     );
     Ok(p)
 }
+
+pub(super) fn reserves_registry_identity(
+    conn: &Connection,
+    ghost_id: &str,
+    conversation_id: &str,
+) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM workspace_objects WHERE kind=?1
+         AND (json_extract(payload,'$.ghost_id')=?2 OR json_extract(payload,'$.conversation_id')=?3))",
+        params![PROGRESS, ghost_id, conversation_id],
+        |row| row.get(0),
+    )?)
+}
+
 fn success(summary: &str, data: Value) -> Response {
     Response {
         status: ResponseStatus::Success,

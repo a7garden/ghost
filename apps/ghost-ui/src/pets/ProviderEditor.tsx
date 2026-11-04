@@ -4,7 +4,7 @@ import type { ModelProvider, ModelRole } from '../client/types';
 import { Modal } from '../components/Modal';
 
 const roles: ModelRole[] = ['llm', 'stt', 'tts'];
-export function ProviderEditor({ initial, version, existing, busy, onClose, onSave }: { initial: ModelProvider; version: number; existing: boolean; busy: boolean; onClose: () => void; onSave: (provider: ModelProvider, version: number) => Promise<void> }) {
+export function ProviderEditor({ initial, version, existing, busy, saveBlocked, onClose, onSave }: { initial: ModelProvider; version: number; existing: boolean; busy: boolean; saveBlocked?: string; onClose: () => void; onSave: (provider: ModelProvider, version: number) => Promise<void> }) {
   const [value, setValue] = useState(initial), [search, setSearch] = useState(''), [newModel, setNewModel] = useState(''), [error, setError] = useState(''), [saving, setSaving] = useState(false);
   const locked = busy || saving;
   const patch = (p: Partial<ModelProvider>) => setValue(v => ({ ...v, ...p }));
@@ -16,7 +16,7 @@ export function ProviderEditor({ initial, version, existing, busy, onClose, onSa
     patch({ models: [...value.models, { id, name: id, roles: [value.roles[0] ?? 'llm'] }] }); setNewModel(''); setSearch(id); setError('');
   };
   return <Modal title={existing ? `${initial.name} 편집` : '제공자 등록'} onClose={() => !locked && onClose()} className="provider-editor-modal"><form className="form-stack" onSubmit={e => {
-    e.preventDefault(); if (locked) return;
+    e.preventDefault(); if (locked || saveBlocked) return;
     if (!value.roles.length || value.models.some(m => !m.roles.length)) { setError('제공자와 각 모델의 역할을 선택해 주세요.'); return; }
     if (value.models.length > 2000) { setError('모델은 최대 2,000개까지 등록할 수 있습니다.'); return; }
     setSaving(true); setError(''); void onSave(value, version).catch(e => setError(e instanceof Error ? e.message : '저장하지 못했습니다.')).finally(() => setSaving(false));
@@ -36,6 +36,7 @@ export function ProviderEditor({ initial, version, existing, busy, onClose, onSa
       {!value.models.length && <p className="field-help">서버를 등록한 다음 ‘목록 확인’으로 모델을 불러올 수도 있습니다.</p>}
     </div></details>
     {error && <p className="form-error" role="alert">{error}</p>}
-    <div className="form-actions"><button type="button" className="button secondary" disabled={locked} onClick={onClose}>취소</button><button className="button primary" disabled={locked}>{saving ? '저장 중…' : '설정 저장'}</button></div>
+    {saveBlocked && <p className="field-help" role="status">{saveBlocked}</p>}
+    <div className="form-actions"><button type="button" className="button secondary" disabled={locked} onClick={onClose}>취소</button><button className="button primary" disabled={locked || Boolean(saveBlocked)}>{saving ? '저장 중…' : '설정 저장'}</button></div>
   </form></Modal>;
 }
