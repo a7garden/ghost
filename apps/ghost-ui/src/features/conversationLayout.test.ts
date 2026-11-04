@@ -13,11 +13,11 @@ function emptyWorkspace() {
   profile.conversations = [{ id: 'test-chat', title: '테스트 대화', model: 'mock', selected_model: 'mock', model_available: true, offline: true, messages: [], tasks: [] }];
   return snapshot;
 }
-function renderChat(snapshot: Snapshot, wide = true, contextOpen = false) {
+function renderChat(snapshot: Snapshot, wide = true, contextOpen = false, mode = 'demo') {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: wide, addListener() {}, removeListener() {} }), addEventListener() {}, removeEventListener() {} });
   vi.stubGlobal('localStorage', { getItem: () => String(contextOpen), setItem() {} });
   const profile = snapshot.profiles[0];
-  return renderToStaticMarkup(createElement(DotDetail, { profile, snapshot, mode: 'demo', action: async () => ({}), busy: false, connected: true, navigate: () => {}, route: `/ghosts/${profile.id}`, onReview: () => {} }));
+  return renderToStaticMarkup(createElement(DotDetail, { profile, snapshot, mode, action: async () => ({}), busy: false, connected: true, navigate: () => {}, route: `/ghosts/${profile.id}`, onReview: () => {} }));
 }
 it('keeps the compact welcome and starters in the transcript before the persistent composer', () => {
   const snapshot = emptyWorkspace();
@@ -29,7 +29,8 @@ it('keeps the compact welcome and starters in the transcript before the persiste
   snapshot.profiles[0].conversations[0].messages.push({ role: 'user', text: '안녕하세요' });
   const active = renderChat(snapshot);
   expect(active).not.toContain('conversation-is-empty'); expect(active).not.toContain('conversation-start'); expect(active).not.toContain('dot-introduction'); expect(active).not.toContain('prompt-suggestions'); expect(active).toContain('안녕하세요');
-  expect(active).toContain('이 대화의 모델'); expect(active).toContain('작업과 자료 보기');
+  expect(active).toContain('thread-demo-label">예시 모드'); expect(active).toContain('작업과 자료 보기');
+  expect(active).not.toContain('role="combobox"');
 });
 it('uses one toggled sidebar on desktop and the same content in a narrow drawer', () => {
   const snapshot = emptyWorkspace();
@@ -85,10 +86,10 @@ it('names simultaneous responses and queued work instead of repeating an anonymo
   expect(html).not.toContain('작업 진행 중');
 });
 
-it('keeps the Ghost identity visible in the conversation header at narrow widths', () => {
+it('names the narrow conversation and retains live model selection', () => {
   const snapshot = emptyWorkspace(); snapshot.profiles[0].name = 'Research Ghost';
-  const html = renderChat(snapshot, false);
-  expect(html).toContain('<span class="conversation-profile-name">Research Ghost</span>');
+  const html = renderChat(snapshot, false, false, 'live');
+  expect(html).toContain('aria-label="Research Ghost와 대화"');
   expect(html).toContain('테스트 대화 · Research Ghost 대화 기록');
   expect(html).toContain('이 대화의 모델</label>'); expect(html).toContain('role="combobox"');
 });

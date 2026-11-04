@@ -32,7 +32,7 @@ const workspace = {
   profiles: [
     { id: primary, name: 'Ghost', persona: '일을 나누고 결과를 살펴봅니다.', conversations: [], policy: {} },
     { id: scout, name: 'Scout', persona: '필요한 자료를 조사하고 정리합니다.', conversations: [], policy: {} },
-    { id: writer, name: 'Writer', persona: '기존 기록을 정리합니다.', conversations: ['legacy-writer-chat'], policy: {} },
+    { id: writer, name: 'Writer', persona: '기존 기록을 정리합니다.', conversations: [{id:'legacy-writer-chat',title:'기존 Writer 대화',model:'mock',offline:true,tasks:[],messages:[{role:'user',text:'보존된 요청'},{role:'assistant',text:'보존된 답변'}]}], policy: {} },
   ],
   avatars: [], reviews: [], goals: [], schedules: [], spaces: [], delegations: [], todos: [], calendar_events: [], integration_approvals: [],
   integrations: [{ id: 'notes', name: 'Research tools', transport: {kind:'http',url:'https://example.invalid/mcp',bearer_env:null}, profiles:[scout], enabled:true, version:1, approved_tools:['search'], tools:[{name:'search',description:'공개 자료 검색',inputSchema:{type:'object'}}], checked_ms:1793761200000,error:null }],
@@ -53,6 +53,7 @@ const inference = {ok:true,settings:{version:1,default:{provider:'local',model:'
 const reply = data => ({status:'success',summary:'',object_refs:[],artifacts:[],next_actions:[],error_code:null,retry_class:'same_id',data});
 const checks=[], pageErrors=[], writes=[], pairingWrites=[], artifactReads=[], ensureWrites=[], profileCreates=[];
 let artifactTampered=false, artifactNetworkRequests=0;
+let previewTurns=[];
 let snapshotFailure=false, workFailure=false, inferenceFailure=false, acceptPairWrite=false, pairingInvitation;
 async function fixtureContext(theme='light') {
   const context=await browser.newContext({viewport:{width:1440,height:1000},colorScheme:theme,reducedMotion:'reduce'});
@@ -128,7 +129,10 @@ async function fixtureContext(theme='light') {
           currentRegistry.push(target);
           return route.fulfill({json:{ok:true,result:reply({registry:target})}});
         }
-        if(method==='conversation.inspect') return route.fulfill({json:{ok:true,result:reply({ghost_id,conversation_id,privacy:'public',turns:[],turn_runs:[],has_older:false,oldest_sequence:null})}});
+        if(method==='conversation.inspect') {
+          const turns=ghost_id===primary ? previewTurns : [];
+          return route.fulfill({json:{ok:true,result:reply({ghost_id,conversation_id,privacy:'public',turns,turn_runs:[],has_older:false,oldest_sequence:turns[0]?.sequence??null})}});
+        }
         if(method.endsWith('.inspect')) return route.fulfill({json:{ok:true,result:reply({})}});
       }
       if(command.type==='create_profile') {
@@ -518,7 +522,65 @@ try {
   assert.equal(pairingWrites[2].claim_id,pairingInvitation.claim.claim_id);
   assert.equal(pairingWrites[2].verification_code,'314159');
   checks.push('pairing-default-explicit-pairs-lost-receipt-review-approval-320');
+
+  previewTurns=Array.from({length:28},(_,index)=>({
+    id:`turn-${index+1}`,sequence:index+1,sender_kind:index%2?'ghost':'owner',sender_ref:index%2?primary:'owner',
+    kind:index%2?'assistant_advisory':'user',text:`대화 ${index+1} · 읽고 있는 위치와 입력창을 확인하는 메시지입니다.`,
+    privacy:'private',source_turn_id:null,attachments:[],created_at_ms:1793761200000+index*1000,
+  }));
+  await page.setViewportSize({width:320,height:760});
+  await page.goto(`${origin}/#/lifetime?ghost=${primary}&conversation=${chat}`);
+  const thread=page.getByRole('log',{name:'대화 기록',exact:true});
+  await thread.getByText(/^대화 28 ·/).waitFor({state:'attached'});
+  const threadComposer=page.locator('.thread-composer');
+  const composerBounds=await threadComposer.boundingBox();
+  assert.ok(composerBounds && composerBounds.y+composerBounds.height<=760,'the composer is anchored above the mobile bottom edge');
+  assert.equal(await thread.evaluate(node=>node.scrollHeight>node.clientHeight),true);
+  await page.waitForFunction(()=>document.querySelector('.thread-messages')?.scrollTop>0);
+  await page.screenshot({path:`${output}/light-320-current-chat.png`});
+  await thread.getByRole('article',{name:'참고 의견',exact:true}).last().getByRole('button',{name:'메시지 정보'}).click();
+  const messageInfo=page.getByRole('dialog',{name:'메시지 정보',exact:true});
+  await messageInfo.getByText('작업의 완료와 검수 상태는 맡긴 일에서 확인할 수 있습니다.',{exact:true}).waitFor();
+  await messageInfo.getByRole('button',{name:'닫기',exact:true}).click();
+  await thread.evaluate(node=>{node.scrollTop=0;});
+  assert.equal((await threadComposer.boundingBox()).y,composerBounds.y,'reading earlier messages keeps the composer in place');
+  checks.push('current-chat-scrolls-independently-of-anchored-composer-320');
+
+  await page.goto(`${origin}/#/ghosts/${writer}?history=1&conversation=legacy-writer-chat`);
+  const archive=page.getByRole('region',{name:'Writer 이전 대화',exact:true});
+  await archive.getByText('보존된 답변',{exact:true}).waitFor();
+  assert.equal(await archive.locator('textarea').count(),0);
+  await archive.getByRole('button',{name:'현재 대화',exact:true}).click();
+  await page.locator('#lifetime-message').waitFor();
+  checks.push('archived-thread-is-read-only-and-links-to-current-chat');
   await context.close();
+
+  const demoContext=await browser.newContext({viewport:{width:375,height:760}});
+  try {
+    const demo=await demoContext.newPage();
+    demo.on('pageerror',error=>pageErrors.push(error.message));
+    await demo.goto(`${origin}/#/ghosts/sage?conversation=sage-chat`);
+    const demoInput=demo.getByRole('textbox',{name:'Sage에게 메시지',exact:true});
+    await demoInput.waitFor();
+    await demo.getByRole('button',{name:'예시 조사 노트',exact:true}).click();
+    const toolNote=demo.getByRole('dialog',{name:'예시 조사 노트',exact:true});
+    await toolNote.getByText(/공식 문서/).waitFor();
+    await toolNote.getByRole('button',{name:'닫기',exact:true}).click();
+    await demoInput.fill('첫 줄');
+    await demoInput.press('Shift+Enter');
+    assert.equal(await demoInput.inputValue(),'첫 줄\n');
+    const draft='첫 줄\n둘째 줄';
+    await demoInput.fill(draft);
+    await demoInput.press('Enter');
+    const sent=demo.locator('.thread-turn[data-kind="user"] .thread-body').filter({hasText:'둘째 줄'});
+    await sent.waitFor();
+    assert.equal(await sent.textContent(),draft);
+    assert.equal(await demoInput.inputValue(),'');
+    checks.push('demo-chat-tool-dialog-and-keyboard-send-preserve-line-breaks');
+  } finally {
+    await demoContext.close();
+  }
+
   assert.deepEqual(writes.map(body=>body.operation),['set_default','select','select']);
   assert.deepEqual(pageErrors,[]);
   await writeFile(`${output}/result.json`,JSON.stringify({status:'passed',checks,explicitWrites:writes.length,pageErrors,fixtureOnly:true},null,2));

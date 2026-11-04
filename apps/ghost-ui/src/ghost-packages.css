@@ -102,8 +102,8 @@
   }
   .mobile-primary-tabs > button:disabled { opacity: .42; }
   .app-shell:has(.mobile-primary-tabs) > .main-shell { padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
-  .app-shell:has(.lifetime-submit:focus-within) .mobile-primary-tabs { display: none; }
-  .app-shell:has(.lifetime-submit:focus-within) > .main-shell { padding-bottom: 0; }
+  .app-shell:has(.thread-composer:focus-within) .mobile-primary-tabs { display: none; }
+  .app-shell:has(.thread-composer:focus-within) > .main-shell { padding-bottom: 0; }
   .lifetime-panel[data-panel="conversation"] { min-height: calc(100dvh - 54px - 78px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   .lifetime-panel[data-panel="conversation"] .lifetime-submit { position: sticky; bottom: env(safe-area-inset-bottom); z-index: 2; }
   .lifetime-panel .ghost-team-list { grid-template-columns: minmax(0, 1fr); }

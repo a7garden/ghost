@@ -15,7 +15,7 @@ it('keeps original identities and transcript reachable without any registry or m
   expect(legacyHistoryRequested(path)).toBe(true);
   expect(legacyHistoryRequested('/ghosts/bot-looking-name')).toBe(false);
   const html = renderToStaticMarkup(createElement(LegacyTranscript, { profile, route: path, navigate: () => {} }));
-  for (const text of ['원래 사용자 입력', '보존된 결과 원문', '과거 작업 · 기록된 상태: complete', 'Ghost로 돌아가기']) expect(html).toContain(text);
+  for (const text of ['원래 사용자 입력', '보존된 결과 원문', '과거 작업 · 기록된 상태: complete', '현재 대화']) expect(html).toContain(text);
   expect(html).toContain('aria-haspopup="dialog"');
   for (const action of ['OMP', '만들기', '메시지 보내기', '설정 저장', '<textarea', '<form']) expect(html).not.toContain(action);
 });
@@ -29,7 +29,7 @@ it('keeps the history entry reachable on cold Pi-screen reopen even without a re
   const client: LifetimeClient = { workspace_id: 'original-workspace', actor_ref: 'owner', authority_epoch: 1, dispatch_enabled: false,
     request: unavailable, snapshot: unavailable, retry: unavailable, pendingCommands: unavailable, recoveryCommands: unavailable, reconcile: unavailable };
   const html = renderToStaticMarkup(createElement(LifetimeView, { mode: 'live', client, initialGhostID: profile.id, legacyGhostIDs: [profile.id], onOpenHistory: () => {} }));
-  expect(html).toContain('이전 대화</button>');
+  expect(html).toContain('aria-label="이전 대화"');
   expect(html).toContain('disabled');
   expect(html).not.toContain('OMP');
 });

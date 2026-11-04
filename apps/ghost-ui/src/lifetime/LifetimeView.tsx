@@ -1,7 +1,7 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Check, ChevronRight, CircleAlert, Clock3, LayoutGrid, MessageSquare, RefreshCw, Send, Settings2 } from "lucide-react";
+import { ArrowUp, Check, ChevronRight, CircleAlert, Clock3, History, Info, LayoutGrid, MessageSquare, RefreshCw, Settings2, SlidersHorizontal } from "lucide-react";
 import type { Artifact, ConversationRun, Envelope, Goal, Response, Snapshot, Work } from "../../../../contracts/lifetime/bindings.ts";
 import { isArtifact, isPrivacy } from "./guards";
 import { atLeastPrivacy, conversationTargetKey, mergeConversationRuns, parseConversationPage, parseRegistryResponse, defaultRegistryGhostId } from "./conversation";
@@ -853,20 +853,23 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       {notice && <p className="lifetime-notice" role="status"><Check size={16}/><span>{notice}</span></p>}
   </>;
 
+  const inConversation = selectedPanel === "conversation";
   return <section className="lifetime-panel" data-panel={selectedPanel} aria-labelledby="lifetime-heading">
-    <header className="lifetime-heading">
+    <header className={`lifetime-heading${inConversation ? " thread-toolbar" : ""}`}>
       <div>
         <h2 id="lifetime-heading">{selectedPanel === "conversation" ? chatTitle : selectedPanel === "work" ? "맡긴 일" : "Ghost 관리"}</h2>
       </div>
       <div className="lifetime-heading-actions">
-        <button type="button" className="button secondary" onClick={() => showPanel(selectedPanel === "conversation" ? "ghosts" : "conversation")}>
-          {selectedPanel === "conversation" ? <Settings2 size={14}/> : <MessageSquare size={14}/>}
-          {selectedPanel === "conversation" ? "Ghost 관리" : "대화"}
+        <button type="button" className="button secondary" onClick={() => showPanel(inConversation ? "ghosts" : "conversation")}
+          aria-label={inConversation ? "Ghost 관리" : "대화"} title={inConversation ? "Ghost 관리" : "대화"}>
+          {inConversation ? <Settings2 size={14}/> : <MessageSquare size={14}/>}
+          <span className="thread-toolbar-label">{inConversation ? "Ghost 관리" : "대화"}</span>
         </button>
-        {(!onPanelChange || selectedTarget?.kind === "specialist") && selectedPanel !== "work" && <button type="button" className="button secondary" onClick={() => showPanel("work")}><LayoutGrid size={14}/>맡긴 일</button>}
-        {onOpenHistory && historyGhostID && legacyGhostIDs.includes(historyGhostID) && <button type="button" className="button secondary" onClick={() => onOpenHistory(historyGhostID)}>이전 대화</button>}
-        <button type="button" className="button secondary" onClick={() => void refresh()} disabled={refreshing || loading}>
-          <RefreshCw size={14}/>{refreshing ? "새로 고치는 중" : "새로 고침"}
+        {(!onPanelChange || selectedTarget?.kind === "specialist") && selectedPanel !== "work" && <button type="button" className="button secondary" onClick={() => showPanel("work")} aria-label="맡긴 일" title="맡긴 일"><LayoutGrid size={14}/><span className="thread-toolbar-label">맡긴 일</span></button>}
+        {onOpenHistory && historyGhostID && legacyGhostIDs.includes(historyGhostID) && <button type="button" className="button secondary" onClick={() => onOpenHistory(historyGhostID)} aria-label="이전 대화" title="이전 대화"><History size={14}/><span className="thread-toolbar-label">이전 대화</span></button>}
+        <button type="button" className={inConversation ? "icon-button" : "button secondary"} onClick={() => void refresh()}
+          aria-label={refreshing ? "새로 고치는 중" : "새로 고침"} title="새로 고침" disabled={refreshing || loading}>
+          <RefreshCw size={14}/>{!inConversation && (refreshing ? "새로 고치는 중" : "새로 고침")}
         </button>
       </div>
     </header>
@@ -954,8 +957,8 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       {conversationError && <p className="lifetime-alert" role="alert"><CircleAlert size={16}/><span>{conversationError}</span></p>}
       {hasOlder && oldestSequence !== null && <button type="button" className="button secondary" onClick={() => void loadOlderConversation()} disabled={conversationLoading || !selectedTarget}>이전 대화 불러오기</button>}
       {conversationLoading && <p className="lifetime-empty"><Clock3 size={16}/>저장된 대화를 불러오는 중입니다.</p>}
-      {!conversationLoading && selectedTarget && turns.length === 0 && !conversationError && <p className="lifetime-empty">이 등록 대화에 아직 기록된 메시지가 없습니다.</p>}
-      <div ref={transcriptRef} className="lifetime-transcript" aria-label="대화 기록" aria-live="polite" tabIndex={0}
+      {!conversationLoading && selectedTarget && turns.length === 0 && !conversationError && <p className="lifetime-empty thread-empty">이 대화에 아직 메시지가 없습니다.</p>}
+      <div ref={transcriptRef} className="lifetime-transcript thread-messages" role="log" aria-label="대화 기록" aria-live="polite" tabIndex={0}
         onScroll={event => {
           const transcript = event.currentTarget;
           transcriptAtBottom.current = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 48;
@@ -963,29 +966,42 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         {turns.map(turn => {
           const controller = turn.kind === "user" ? turnRuns.get(turn.id) : undefined;
           const canCancel = controller && !["answered", "failed", "cancelled"].includes(controller.state);
-          return <article className="lifetime-turn" data-kind={turn.kind} key={turn.id}>
-          <header>
-            <strong>{turn.kind === "user" ? "나" : turn.origin_report_id ? "Ghost · 작업 보고 (원장 상태 별도 확인)" : turn.kind === "assistant_advisory" ? "Ghost · 참고 의견 (완료 검증 아님)" : "호스트 상태 기록"}</strong>
-            <span>{privacyLabels[turn.privacy]} · {new Date(turn.created_at_ms).toLocaleString()}</span>
-          </header>
-          <p>{turn.text}</p>
-          {controller && <div className="lifetime-submit-actions">
+          const eventLabel = turn.origin_report_id ? "작업 보고" : turn.kind === "assistant_advisory" ? "참고 의견" : "호스트 상태 기록";
+          const recordedAt = new Date(turn.created_at_ms).toLocaleString();
+          return <article className="lifetime-turn thread-turn" data-kind={turn.kind} key={turn.id}
+            aria-label={turn.kind === "user" ? "나" : eventLabel}>
+          {(turn.kind === "host_fact" || turn.origin_report_id) && <strong className="thread-event-label">
+            {eventLabel}{turn.origin_report_id && " · 검수 상태 별도"}
+          </strong>}
+          <p className="thread-body">{turn.text}</p>
+          {controller && <div className="lifetime-submit-actions thread-turn-actions">
             <span>{controller.cancel_requested && canCancel ? "취소 요청됨 · 응답 중지 확인 전" : turnStateLabels[controller.state]}</span>
             {canCancel && <button type="button" className="button secondary" title="이미 맡긴 일은 맡긴 일 화면에서 따로 취소할 수 있습니다."
               aria-label={`이 응답 취소 요청 · 메시지 ${turn.sequence}`}
               disabled={writesDisabled || Boolean(busy) || controller.cancel_requested}
               onClick={() => void cancelConversationTurn(turn.id)}>이 응답 취소 요청</button>}
           </div>}
-          {turn.attachments.length > 0 && <div><strong>첨부 자료 {turn.attachments.length}개</strong>
+          {turn.attachments.length > 0 && <div className="thread-attachments">
+            <strong>첨부 자료 {turn.attachments.length}개</strong>
             {turn.attachments.map(artifact => <code key={`${artifact.digest}:${artifact.producing_attempt}`}>{artifact.digest} · {privacyLabels[artifact.privacy]}</code>)}
           </div>}
-          <DetailDialog title="기술 정보"><code>{turn.id} · {turn.sender_kind}:{turn.sender_ref} · 순서 {turn.sequence}{turn.origin_report_id && ` · 원본 보고 ${turn.origin_report_id}`}</code></DetailDialog>
+          <footer className="thread-turn-meta">
+            <span>{privacyLabels[turn.privacy]}</span>
+            <span className="thread-turn-time">· {recordedAt}</span>
+            <DetailDialog title="메시지 정보" className="thread-meta-action"
+              label={<><Info size={14} aria-hidden="true"/><span className="sr-only">메시지 정보</span></>}>
+              {turn.kind !== "user" && <strong>{eventLabel}</strong>}
+              <p>{privacyLabels[turn.privacy]} · {recordedAt}</p>
+              {(turn.origin_report_id || turn.kind === "assistant_advisory") && <p>작업의 완료와 검수 상태는 맡긴 일에서 확인할 수 있습니다.</p>}
+              <code>{turn.id} · {turn.sender_kind}:{turn.sender_ref} · 순서 {turn.sequence}{turn.origin_report_id && ` · 원본 보고 ${turn.origin_report_id}`}</code>
+            </DetailDialog>
+          </footer>
         </article>; })}
       </div>
-      {selectedTarget && <DetailDialog title="현재 등록된 대화 식별자"><code>{selectedTarget.ghost_id} · {selectedTarget.conversation_id}</code></DetailDialog>}
     </section>}
 
     {selectedPanel === "ghosts" && <>
+    {selectedTarget && <DetailDialog title="현재 등록된 대화 식별자"><code>{selectedTarget.ghost_id} · {selectedTarget.conversation_id}</code></DetailDialog>}
     {workspaceSnapshot && selectedTarget && onOpenApproval && <AgentPluginSurfaces
       snapshot={workspaceSnapshot} ghostId={selectedTarget.ghost_id} workspaceKey={workspaceSnapshot.workspace_id}
       onOpenApproval={onOpenApproval}/>}
@@ -1027,7 +1043,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       action={memoryAction}/>}
     </>}
 
-    {selectedPanel === "conversation" && <form className="lifetime-submit" aria-label="메시지 보내기" onSubmit={event => void submitConversation(event)}>
+    {selectedPanel === "conversation" && <form className="lifetime-submit thread-composer" aria-label="메시지 보내기" onSubmit={event => void submitConversation(event)}>
       {activeTargets.length === 0 && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>메시지를 받을 수 있는 Ghost가 없습니다.</span></p>}
       <label className="lifetime-field"><span className="lifetime-visually-hidden">메시지</span><textarea id="lifetime-message" value={prompt} onChange={event => {
         const text = event.currentTarget.value;
@@ -1037,8 +1053,9 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
           event.preventDefault();
           if (!submissionBlocked) event.currentTarget.form?.requestSubmit();
         }
-      }} placeholder="메시지 쓰기" required disabled={Boolean(busy)}/></label>
-      <DetailDialog title="전송 옵션" label={<>전송 옵션 · {privacyLabels[effectivePrivacy]}{attachments.length > 0 && ` · 첨부 ${attachments.length}`}</>} className="lifetime-compose-options">
+      }} rows={2} placeholder="메시지 쓰기" required disabled={Boolean(busy)}/></label>
+      {new TextEncoder().encode(prompt).length > 65_536 && <p className="lifetime-compose-limit" role="status">메시지 한도 65,536바이트를 넘었습니다.</p>}
+      <DetailDialog title="전송 옵션" label={<><SlidersHorizontal size={14} aria-hidden="true"/>전송 옵션 · {privacyLabels[effectivePrivacy]}{attachments.length > 0 && ` · 첨부 ${attachments.length}`}</>} className="lifetime-compose-options">
         <label className="lifetime-field">대화 대상<select aria-label="대화 대상" value={selectedTarget ? conversationTargetKey(selectedTarget) : selectedPairKey} onChange={event => {
           const target = registry.find(item => conversationTargetKey(item) === event.target.value);
           if (target) openRegisteredTarget(target, false);
@@ -1076,9 +1093,9 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         <p>대화의 기존 보호 수준은 유지됩니다. UTF-8 {new TextEncoder().encode(prompt).length}/65,536바이트.</p>
       </DetailDialog>
       <div className="lifetime-submit-actions lifetime-compose-actions">
-        {new TextEncoder().encode(prompt).length > 65_536 && <span role="status">메시지 한도 65,536바이트를 넘었습니다.</span>}
-        <button type="submit" className="button primary" disabled={submissionBlocked}>
-          <Send size={14}/>{busy === "conversation.input" ? "저장 중" : "대화에 보내기"}
+        <button type="submit" className="send-button" disabled={submissionBlocked}
+          aria-label={busy === "conversation.input" ? "저장 중" : "대화에 보내기"}>
+          {busy === "conversation.input" ? <span className="button-loading"/> : <ArrowUp size={18}/>}
         </button>
       </div>
     </form>}
