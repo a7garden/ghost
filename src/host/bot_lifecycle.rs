@@ -619,6 +619,10 @@ pub(crate) fn surface(conn: &Connection, e: &Envelope, principal: &str) -> Resul
         params![ghost, conversation],
         |r| r.get(0),
     )?;
+    if super::lifetime::is_public_secondary(conn, ghost, conversation)? {
+        return Ok(success("Separate public conversation has no bot administration",
+            json!({"target":{"ghost_id":ghost,"conversation_id":conversation},"bots":[],"operations":[],"truncated":false})));
+    }
     ensure!(registered, "selected bot conversation is not registered");
     let mut query=conn.prepare("SELECT c.id FROM workspace_objects c WHERE c.kind='bot_candidate_v1' AND ((json_extract(c.payload,'$.definition.ghost_id')=?1 AND json_extract(c.payload,'$.conversation_id')=?2) OR EXISTS(SELECT 1 FROM lifetime_turns t WHERE t.id=json_extract(c.payload,'$.intent_turn_id') AND t.ghost_id=?1 AND t.conversation_id=?2 AND json_extract(c.payload,'$.issuer_ghost')=?1) OR EXISTS(SELECT 1 FROM workspace_objects x WHERE x.kind='bot_candidate_target_v1' AND x.id=c.id AND json_extract(x.payload,'$.source_ghost')=?1)) ORDER BY c.rowid DESC LIMIT 129")?;
     let mut ids = query

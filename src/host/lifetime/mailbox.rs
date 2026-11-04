@@ -122,7 +122,7 @@ fn apply_inner(tx: &Transaction<'_>, envelope: &Envelope, principal: &str) -> Re
     }
     match method {
         "registry.ensure" => registry_ensure(tx, body),
-        "registry.inspect" => registry_inspect(tx, body),
+        "registry.inspect" => registry_inspect(tx, body, principal),
         "registry.mode" => registry_mode(tx, body),
         "mailbox.send" => mailbox_send(tx, body, principal, &envelope.payload_digest),
         "mailbox.inspect" => mailbox_inspect(tx, body, principal),
@@ -222,8 +222,13 @@ fn registry_ensure(tx: &Transaction<'_>, body: &Value) -> Result<Response> {
 }
 
 
-fn registry_inspect(tx: &Transaction<'_>, body: &Value) -> Result<Response> {
-    exact_fields(body, &["method"])?;
+fn registry_inspect(tx: &Transaction<'_>, body: &Value, principal: &str) -> Result<Response> {
+    super::apply::allowed_fields(body, &["method", "include_secondary"], &["method"])?;
+    let include_secondary = match body.get("include_secondary") {
+        None => false,
+        Some(Value::Bool(value)) if principal == "owner" => *value,
+        Some(_) => return Err(unauthorized("only the Owner can enumerate separate conversation pairs")),
+    };
     let mut statement = tx.prepare(
         "SELECT ghost_id,kind,conversation_id,roles,mode FROM lifetime_registry ORDER BY ghost_id",
     )?;
@@ -250,6 +255,7 @@ fn registry_inspect(tx: &Transaction<'_>, body: &Value) -> Result<Response> {
             "mode": mode,
         }));
     }
+    if include_secondary { registry.extend(super::conversation::public_secondary_entries(tx)?); }
     Ok(success(
         "registered Ghost identities inspected",
         refs,

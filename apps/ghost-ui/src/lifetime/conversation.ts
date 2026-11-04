@@ -9,6 +9,7 @@ export interface RegistryConversation {
   conversation_id: string;
   roles: string[];
   mode: "active" | "draining";
+  secondary?: true;
 }
 
 export interface ConversationTurn {
@@ -40,9 +41,18 @@ export function conversationTargetKey(target: Pick<RegistryConversation, "ghost_
   return JSON.stringify([target.ghost_id, target.conversation_id]);
 }
 
+export function defaultRegistryConversation(entries: RegistryConversation[]): RegistryConversation | undefined {
+  const activePrimary = entries.filter(entry => entry.kind === "primary" && entry.mode === "active" && !entry.secondary);
+  return activePrimary.length === 1 ? activePrimary[0] : undefined;
+}
+
 export function defaultRegistryGhostId(entries: RegistryConversation[]): string | null {
-  const activePrimary = entries.filter(entry => entry.kind === "primary" && entry.mode === "active");
-  return activePrimary.length === 1 ? activePrimary[0]!.ghost_id : null;
+  return defaultRegistryConversation(entries)?.ghost_id ?? null;
+}
+
+export function findRegisteredConversation(entries: RegistryConversation[], ghostId: string, conversationId?: string): RegistryConversation | undefined {
+  return entries.find(entry => entry.ghost_id === ghostId
+    && (conversationId !== undefined ? entry.conversation_id === conversationId : !entry.secondary));
 }
 
 export function parseRegistryResponse(response: Response): RegistryConversation[] {
@@ -56,6 +66,7 @@ export function parseRegistryResponse(response: Response): RegistryConversation[
       || typeof item.conversation_id !== "string" || !item.conversation_id.trim()
       || (item.kind !== "primary" && item.kind !== "specialist")
       || (item.mode !== "active" && item.mode !== "draining")
+      || (item.secondary !== undefined && typeof item.secondary !== "boolean")
       || !Array.isArray(item.roles) || !item.roles.every(role => typeof role === "string" && role.trim())) {
       throw new Error("Host가 반환한 등록 대화 목록에 올바르지 않은 항목이 있습니다.");
     }
@@ -65,10 +76,11 @@ export function parseRegistryResponse(response: Response): RegistryConversation[
       conversation_id: item.conversation_id,
       roles: item.roles,
       mode: item.mode,
+      ...(item.secondary === true ? { secondary: true } : {}),
     };
     const key = conversationTargetKey(entry);
     const previous = pairs.get(key);
-    if (previous && (previous.kind !== entry.kind || previous.mode !== entry.mode || previous.roles.join("\u0000") !== entry.roles.join("\u0000"))) {
+    if (previous && (previous.kind !== entry.kind || previous.mode !== entry.mode || previous.secondary !== entry.secondary || previous.roles.join("\u0000") !== entry.roles.join("\u0000"))) {
       throw new Error("Host registry returned conflicting metadata for one conversation target.");
     }
     pairs.set(key, entry);

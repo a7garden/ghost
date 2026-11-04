@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationRun, Response } from "../../../../contracts/lifetime/bindings.ts";
-import { mergeConversationRuns, mergeConversationTurns, parseConversationPage } from "./conversation";
+import { defaultRegistryGhostId, findRegisteredConversation, mergeConversationRuns, mergeConversationTurns, parseConversationPage, parseRegistryResponse } from "./conversation";
 
 const target = {
   ghost_id: "11111111-1111-4111-8111-111111111111",
@@ -40,6 +40,28 @@ function pageResponse(conversationId = target.conversation_id, turns = [canonica
     },
   };
 }
+
+describe("registered conversation selection", () => {
+  const canonical = { ...target, kind: "primary", roles: [], mode: "active" };
+  const secondary = { ...canonical, conversation_id: "11111111-1111-4111-8111-111111111111", secondary: true };
+  const read = (...registry: unknown[]) => parseRegistryResponse({ ...pageResponse(), data: { registry } });
+
+  it("keeps the canonical default when a secondary pair sorts first and requires exact IDs for secondary routes", () => {
+    const entries = read(canonical, secondary);
+    expect(entries[0]).toEqual(secondary);
+    expect(defaultRegistryGhostId(entries)).toBe(canonical.ghost_id);
+    expect(findRegisteredConversation(entries, canonical.ghost_id)).toEqual(canonical);
+    expect(findRegisteredConversation(entries, canonical.ghost_id, secondary.conversation_id)).toEqual(secondary);
+    expect(findRegisteredConversation(entries, canonical.ghost_id, "unregistered")).toBeUndefined();
+    expect(findRegisteredConversation(entries, "other-ghost", secondary.conversation_id)).toBeUndefined();
+    expect(defaultRegistryGhostId(read(secondary))).toBeNull();
+    expect(findRegisteredConversation(read(secondary), canonical.ghost_id)).toBeUndefined();
+  });
+
+  it("rejects contradictory classifications for the same pair", () => {
+    expect(() => read(canonical, { ...canonical, secondary: true })).toThrow();
+  });
+});
 
 describe("canonical conversation pages", () => {
   it("keeps a link learned after the original turn when an older page omits it", () => {

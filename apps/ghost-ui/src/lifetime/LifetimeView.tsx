@@ -1,10 +1,10 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { ArrowUp, Check, ChevronRight, CircleAlert, Clock3, GitBranch, History, Info, LayoutGrid, MessageSquare, RefreshCw, Settings2, SlidersHorizontal } from "lucide-react";
+import { ArrowUp, Check, ChevronRight, CircleAlert, Clock3, GitBranch, History, Info, LayoutGrid, MessageSquare, Plus, RefreshCw, Settings2, SlidersHorizontal } from "lucide-react";
 import type { Artifact, ConversationRun, Envelope, Goal, Response, Snapshot, Work } from "../../../../contracts/lifetime/bindings.ts";
 import { isArtifact, isPrivacy } from "./guards";
-import { atLeastPrivacy, conversationTargetKey, mergeConversationRuns, mergeConversationTurns, parseConversationPage, parseRegistryResponse, defaultRegistryGhostId } from "./conversation";
+import { atLeastPrivacy, conversationTargetKey, defaultRegistryConversation, findRegisteredConversation, mergeConversationRuns, mergeConversationTurns, parseConversationPage, parseRegistryResponse } from "./conversation";
 import type { ConversationPage, ConversationTurn, RegistryConversation } from "./conversation";
 import type { LifetimeClient, LifetimeMode, LifetimeRecoveryCommand } from "./types";
 import type { Review, Command } from "../client/types";
@@ -172,6 +172,7 @@ const turnStateLabels: Record<ConversationRun["state"], string> = {
 
 const pendingCommandLabels: Record<string, string> = {
   "conversation.input": "대화 메시지",
+  "conversation.open": "공개 대화 만들기",
   "registry.ensure": "Ghost 대화 연결",
   "conversation.cancel_turn": "이 응답 취소 요청",
   "goal.submit": "목표 등록",
@@ -244,7 +245,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const automaticRegistrationAttempts = useRef(new Set<string>());
   const openedRegistration = useRef("");
   const currentRouteScope = useRef("");
-  currentRouteScope.current = JSON.stringify([routeActive, initialGhostID, initialConversationID, initialRegisterConversationID, initialPanel, initialGoalID, initialWorkID]);
+  currentRouteScope.current = JSON.stringify([client.workspace_id, client.authority_epoch, routeActive, initialGhostID, initialConversationID, initialRegisterConversationID, initialPanel, initialGoalID, initialWorkID]);
 
   function updatePrompt(key: string, update: (current: string) => string) {
     setPromptDrafts(drafts => {
@@ -287,25 +288,27 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     registryRef.current = entries;
     setRegistryReady(true);
     setRegistryError("");
-    onDefaultGhostChange?.(defaultRegistryGhostId(entries));
+    const defaultTarget = defaultRegistryConversation(entries);
+    onDefaultGhostChange?.(defaultTarget?.ghost_id ?? null);
     const conversationInputs = commands.filter(command => command.body.method === "conversation.input");
     if (conversationInputs.length === 1) {
       const body = conversationInputs[0]!.body;
       const matchesExplicitTarget = !initialGhostID || body.ghost_id === initialGhostID
         && (!initialConversationID || body.conversation_id === initialConversationID);
       if (matchesExplicitTarget && typeof body.ghost_id === "string" && typeof body.conversation_id === "string") {
+        const target = findRegisteredConversation(entries, body.ghost_id, body.conversation_id);
         const key = conversationTargetKey({ ghost_id: body.ghost_id, conversation_id: body.conversation_id });
-        setSelectedPairKey(key);
+        if (!target?.secondary || initialConversationID === body.conversation_id) setSelectedPairKey(key);
         const pendingText = body.text;
         if (typeof pendingText === "string") updatePrompt(key, current => current || pendingText);
         const savedAttachments = body.attachments;
         if (Array.isArray(savedAttachments) && savedAttachments.every(isArtifact)) {
           updateAttachments(key, () => savedAttachments);
         }
-        if (isPrivacy(body.privacy)) setPrivacy(body.privacy);
+        if (!target?.secondary && isPrivacy(body.privacy)) setPrivacy(body.privacy);
       }
-    } else if (conversationInputs.length === 0 && !selectedPairKey && !initialGhostID && activePrimary.length === 1) {
-      setSelectedPairKey(conversationTargetKey(activePrimary[0]!));
+    } else if (conversationInputs.length === 0 && !selectedPairKey && !initialGhostID && defaultTarget) {
+      setSelectedPairKey(conversationTargetKey(defaultTarget));
     }
     return true;
   }
@@ -318,7 +321,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         client.snapshot(),
         client.pendingCommands(),
         client.recoveryCommands(),
-        client.request({ method: "registry.inspect" }),
+        client.request({ method: "registry.inspect", ...(mode === "live" ? { include_secondary: true } : {}) }),
       ]),
       onSuccess: ([latest, commands, unresolved, registryResponse], read) => acceptLatest(read, latest, commands, unresolved, registryResponse),
       onError: reason => {
@@ -339,7 +342,8 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     void runAgentStatusOwnerRead({
       fence: snapshotReads.current, foregroundReads: foregroundReads.current,
       currentScope: () => currentTargetKey.current,
-      fetch: () => Promise.all([client.snapshot(), client.pendingCommands(), client.recoveryCommands(), client.request({ method: "registry.inspect" })]),
+      fetch: () => Promise.all([client.snapshot(), client.pendingCommands(), client.recoveryCommands(),
+        client.request({ method: "registry.inspect", ...(mode === "live" ? { include_secondary: true } : {}) })]),
       onSuccess: ([latest, commands, unresolved, registryResponse], read) => {
         const applied = acceptLatest(read, latest, commands, unresolved, registryResponse);
         if (applied) setError("");
@@ -409,13 +413,28 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     else onPanelChange?.("conversation");
   }
 
+  async function openPublicConversation(): Promise<void> {
+    if (!defaultTarget || publicOpenDisabled || registrationLocks.current.has("conversation.open")) return;
+    const sourceRoute = currentRouteScope.current;
+    const ghostID = defaultTarget.ghost_id;
+    const conversationID = crypto.randomUUID();
+    registrationLocks.current.add("conversation.open");
+    try {
+      await run("conversation.open", () => client.request({ method: "conversation.open", ghost_id: ghostID, conversation_id: conversationID }));
+      const opened = findRegisteredConversation(registryRef.current, ghostID, conversationID);
+      if (opened?.secondary && opened.mode === "active" && currentRouteScope.current === sourceRoute) openRegisteredTarget(opened, false);
+    } finally {
+      registrationLocks.current.delete("conversation.open");
+    }
+  }
+
   async function ensureProfileConversation(profileID: string, conversationID: string): Promise<void> {
     const sourceRoute = currentRouteScope.current;
     const profile = workspaceSnapshot?.profiles.find(item => item.id === profileID);
     if (!profile) { setError("Ghost 목록을 새로 고친 뒤 다시 시도해 주세요."); return; }
     if (!registryReady || loading || refreshing || registryError) { setError("Host의 등록 대화 목록을 먼저 새로 고쳐 주세요."); return; }
     const existing = registryRef.current.filter(item => item.ghost_id === profileID);
-    const alreadyActive = existing.find(item => item.mode === "active");
+    const alreadyActive = existing.find(item => item.mode === "active" && !item.secondary);
     if (alreadyActive) { openRegisteredTarget(alreadyActive, false); return; }
     if (existing.length) { setError("이 Ghost의 등록 대화가 마무리 중입니다. 새 대화를 연결할 수 없습니다."); return; }
     if (!connected || !client.dispatch_enabled || pending.length || recovery.length || busy || registryError) {
@@ -429,8 +448,8 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         method: "registry.ensure", ghost_id: profileID, kind: "specialist",
         conversation_id: conversationID, roles: [],
       }));
-      const refreshed = registryRef.current.find(item => item.ghost_id === profileID && item.mode === "active");
-      if (refreshed && routeActive && currentRouteScope.current === sourceRoute) openRegisteredTarget(refreshed, false);
+      const refreshed = findRegisteredConversation(registryRef.current, profileID);
+      if (refreshed?.mode === "active" && routeActive && currentRouteScope.current === sourceRoute) openRegisteredTarget(refreshed, false);
       else if (registryRef.current.some(item => item.ghost_id === profileID)) {
         setError("이 Ghost의 기존 등록은 마무리 중입니다. Host 상태를 확인해 주세요.");
       }
@@ -448,7 +467,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     const attemptKey = `${authorized.ghostID}:${authorized.conversationID}`;
     if (automaticRegistrationAttempts.current.has(attemptKey)) return;
     const existing = registryRef.current.filter(item => item.ghost_id === authorized.ghostID);
-    const active = existing.find(item => item.mode === "active");
+    const active = existing.find(item => item.mode === "active" && !item.secondary);
     if (active) {
       automaticRegistrationAttempts.current.add(attemptKey);
       onRegistrationConsumed?.(authorized.ghostID, authorized.conversationID);
@@ -463,13 +482,13 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
 
   useEffect(() => {
     if (!routeActive || !initialGhostID || initialPanel !== 'conversation' || !registryReady) return;
-    const active = registryRef.current.find(item => item.ghost_id === initialGhostID && item.mode === "active");
-    if (!active) return;
+    const active = findRegisteredConversation(registryRef.current, initialGhostID, initialConversationID);
+    if (active?.mode !== "active") return;
     const key = conversationTargetKey(active);
     if (openedRegistration.current === key) return;
     openedRegistration.current = key;
     // Read-only recovery from a lost ensure response is safe after inspect confirms it.
-    if (initialRegisterConversationID || !initialConversationID || active.conversation_id === initialConversationID) openRegisteredTarget(active);
+    openRegisteredTarget(active);
   }, [routeActive, registryReady, registry, initialGhostID, initialConversationID, initialRegisterConversationID, initialPanel]);
 
   async function reconcile(recoveryId: string): Promise<void> {
@@ -493,15 +512,15 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   }
 
   const activeTargets = registry.filter(target => target.mode === "active");
-  const activePrimary = activeTargets.filter(target => target.kind === "primary");
+  const defaultTarget = defaultRegistryConversation(registry);
   const appliedEntry = useRef('');
   useEffect(() => {
     const entry = JSON.stringify([initialGhostID, initialConversationID, initialPanel, Boolean(createRequested)]);
     if (!registryReady || appliedEntry.current === entry) return;
     const requested = initialGhostID
-      ? registry.filter(target => target.ghost_id === initialGhostID && (!initialConversationID || target.conversation_id === initialConversationID))
-      : activePrimary;
-    if (requested.length !== 1) {
+      ? findRegisteredConversation(registry, initialGhostID, initialConversationID)
+      : defaultTarget;
+    if (!requested) {
       if (initialGhostID) {
         setSelectedPairKey('');
         if (initialPanel !== 'work' && workspaceSnapshot?.profiles.some(profile => profile.id === initialGhostID)) setSelectedPanel("ghosts");
@@ -509,7 +528,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       appliedEntry.current = entry;
       return;
     }
-    const key = conversationTargetKey(requested[0]!);
+    const key = conversationTargetKey(requested);
     setSelectedPairKey(key);
     if (createRequested) {
       setGoalDetailID(null);
@@ -519,11 +538,12 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     appliedEntry.current = entry;
   }, [initialGhostID, initialConversationID, createRequested, initialPanel, registry, registryReady, workspaceSnapshot]);
   const explicitTarget = initialGhostID
-    ? registry.find(target => target.ghost_id === initialGhostID && (!initialConversationID || target.conversation_id === initialConversationID))
+    ? findRegisteredConversation(registry, initialGhostID, initialConversationID)
     : undefined;
   const selectedTarget = initialGhostID ? explicitTarget
     : selectedPairKey ? registry.find(target => conversationTargetKey(target) === selectedPairKey)
-      : activePrimary.length === 1 ? activePrimary[0] : undefined;
+      : defaultTarget;
+  const publicConversation = selectedTarget?.secondary === true;
   const selectedTargetKey = selectedTarget ? conversationTargetKey(selectedTarget) : "";
   const threadAuthority = JSON.stringify([client.workspace_id, client.actor_ref, client.authority_epoch]);
   const threadScope = JSON.stringify([threadAuthority, selectedTargetKey, selectedPanel, currentRouteScope.current]);
@@ -569,6 +589,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   }, [selectedTargetKey]);
   const writesDisabled = !connected || !client.dispatch_enabled || recovery.length > 0 || pending.length > 0
     || Boolean(registryError || syncWarning) || Boolean(conversationError) || Boolean(selectedTarget && loadedConversationKey !== selectedTargetKey);
+  const publicOpenDisabled = !routeActive || !defaultTarget || !registryReady || loading || refreshing || Boolean(busy) || writesDisabled;
   const conversationGoals = snapshot?.goals.filter(goal => goal.accountable_ghost === selectedTarget?.ghost_id
     && goal.reply_conversation === selectedTarget?.conversation_id) ?? [];
   const goalRevisions = new Map(conversationGoals.map(goal => [goal.id, goal.revision]));
@@ -576,12 +597,12 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     .filter(work => goalRevisions.get(work.goal_id) === work.goal_revision && work.state !== "stale" && work.execution_id !== null)
     .map(work => work.execution_id!));
   const attachmentChoices = (snapshot?.artifacts ?? [])
-    .filter(artifact => targetExecutions.has(artifact.producing_attempt));
+    .filter(artifact => targetExecutions.has(artifact.producing_attempt) && (!publicConversation || artifact.privacy === "public"));
   const eligibleAttachments = new Set(attachmentChoices.map(attachmentKey));
   const savedAttachments = attachmentDrafts.get(selectedTargetKey);
   const attachments = savedAttachments?.filter(artifact => eligibleAttachments.has(attachmentKey(artifact))) ?? [];
   const privacyFloor = turns.length > 0 ? conversationPrivacy : "public";
-  const effectivePrivacy = atLeastPrivacy(privacy, privacyFloor, ...attachments.map(artifact => artifact.privacy));
+  const effectivePrivacy = atLeastPrivacy(publicConversation ? "public" : privacy, privacyFloor, ...attachments.map(artifact => artifact.privacy));
   const awaitingController = [...turnRuns.values()].some(run => !["answered", "failed", "cancelled"].includes(run.state));
   const awaitingWork = (snapshot?.work ?? []).some(work => goalRevisions.has(work.goal_id) && !terminalWorkStates[work.state]);
   const awaitingAllWork = Boolean(snapshot && snapshot.work.some(work => !terminalWorkStates[work.state]
@@ -739,6 +760,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       setError("메시지는 비어 있을 수 없고 UTF-8 65,536바이트 및 첨부 자료 16개 한도 안이어야 합니다.");
       return;
     }
+    if (submissionBlocked) return;
     const response = await run("conversation.input", () => client.request({
       method: "conversation.input",
       ghost_id: selectedTarget.ghost_id,
@@ -879,9 +901,13 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const integrationReviews = (workspaceSnapshot?.integrationApprovals ?? []).filter(review =>
     review.ghost_id === selectedTarget?.ghost_id && review.conversation_id === selectedTarget?.conversation_id);
   const submissionBlocked = writesDisabled || Boolean(busy) || loading || !prompt.trim()
-    || selectedTarget?.mode !== "active" || new TextEncoder().encode(prompt).length > 65_536 || attachments.length > 16;
+    || selectedTarget?.mode !== "active" || publicConversation && effectivePrivacy !== "public"
+    || new TextEncoder().encode(prompt).length > 65_536 || attachments.length > 16;
+  const ghostName = (id: string) => workspaceSnapshot?.profiles.find(profile => profile.id === id)?.name ?? id;
+  const publicLabel = (target: RegistryConversation) => registry.filter(item => item.ghost_id === target.ghost_id && item.secondary).length > 1
+    ? `공개 대화 ${target.conversation_id.slice(0, 8)}` : "공개 대화";
   const chatTitle = selectedTarget
-    ? workspaceSnapshot?.profiles.find(profile => profile.id === selectedTarget.ghost_id)?.name ?? "Ghost"
+    ? `${workspaceSnapshot?.profiles.find(profile => profile.id === selectedTarget.ghost_id)?.name ?? "Ghost"}${publicConversation ? ` · ${publicLabel(selectedTarget)}` : ""}`
     : "대화";
   const feedback = <>
       {error && <p className="lifetime-alert" role="alert"><CircleAlert size={16}/><span>{error}</span></p>}
@@ -891,20 +917,24 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
 
   const inConversation = selectedPanel === "conversation";
   const displayedTurns = routeActive && loadedConversationKey === selectedTargetKey ? turns : [];
-  const ghostName = (id: string) => workspaceSnapshot?.profiles.find(profile => profile.id === id)?.name ?? id;
   return <section className="lifetime-panel" data-panel={selectedPanel} aria-labelledby="lifetime-heading">
     <header className={`lifetime-heading${inConversation ? " thread-toolbar" : ""}`}>
       <div>
         <h2 id="lifetime-heading">{selectedPanel === "conversation" ? chatTitle : selectedPanel === "work" ? "맡긴 일" : "Ghost 관리"}</h2>
       </div>
       <div className="lifetime-heading-actions">
+        {inConversation && mode === "live" && client.actor_ref === "owner" && defaultTarget && selectedTarget?.ghost_id === defaultTarget.ghost_id &&
+          <button type="button" className="button secondary" onClick={() => void openPublicConversation()}
+            disabled={publicOpenDisabled} aria-label="새 공개 대화" title="새 공개 대화">
+            <Plus size={14}/><span className="thread-toolbar-label">새 공개 대화</span>
+          </button>}
         <button type="button" className="button secondary" onClick={() => showPanel(inConversation ? "ghosts" : "conversation")}
           aria-label={inConversation ? "Ghost 관리" : "대화"} title={inConversation ? "Ghost 관리" : "대화"}>
           {inConversation ? <Settings2 size={14}/> : <MessageSquare size={14}/>}
           <span className="thread-toolbar-label">{inConversation ? "Ghost 관리" : "대화"}</span>
         </button>
         {(!onPanelChange || selectedTarget?.kind === "specialist") && selectedPanel !== "work" && <button type="button" className="button secondary" onClick={() => showPanel("work")} aria-label="맡긴 일" title="맡긴 일"><LayoutGrid size={14}/><span className="thread-toolbar-label">맡긴 일</span></button>}
-        {onOpenHistory && historyGhostID && legacyGhostIDs.includes(historyGhostID) && <button type="button" className="button secondary" onClick={() => onOpenHistory(historyGhostID)} aria-label="이전 대화" title="이전 대화"><History size={14}/><span className="thread-toolbar-label">이전 대화</span></button>}
+        {!publicConversation && onOpenHistory && historyGhostID && legacyGhostIDs.includes(historyGhostID) && <button type="button" className="button secondary" onClick={() => onOpenHistory(historyGhostID)} aria-label="이전 대화" title="이전 대화"><History size={14}/><span className="thread-toolbar-label">이전 대화</span></button>}
         <button type="button" className={inConversation ? "icon-button" : "button secondary"} onClick={() => void refresh()}
           aria-label={refreshing ? "새로 고치는 중" : "새로 고침"} title="새로 고침" disabled={refreshing || loading}>
           <RefreshCw size={14}/>{!inConversation && (refreshing ? "새로 고치는 중" : "새로 고침")}
@@ -950,8 +980,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       <ul className="ghost-team-list">
         {workspaceSnapshot.profiles.map(profile => {
           const entries = registry.filter(target => target.ghost_id === profile.id);
-          const target = entries.find(item => conversationTargetKey(item) === selectedTargetKey)
-            ?? entries.find(item => item.mode === "active") ?? entries[0];
+          const target = findRegisteredConversation(entries, profile.id);
           const currentWork = snapshot.work.filter(work => work.owner === profile.id
             && snapshot.goals.some(goal => goal.id === work.goal_id && goal.revision === work.goal_revision));
           const counts = [
@@ -1055,7 +1084,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     {workspaceSnapshot && selectedTarget && onOpenApproval && <AgentPluginSurfaces
       snapshot={workspaceSnapshot} ghostId={selectedTarget.ghost_id} workspaceKey={workspaceSnapshot.workspace_id}
       onOpenApproval={onOpenApproval}/>}
-    {mode === 'live' && selectedTarget && <InferenceSettings pair={selectedTarget} primary={selectedTarget.kind === "primary"} connected={connected} disabled={writesDisabled || Boolean(busy)}/>}
+    {mode === 'live' && selectedTarget && <InferenceSettings pair={selectedTarget} primary={selectedTarget.kind === "primary"} publicOnly={publicConversation} connected={connected} disabled={writesDisabled || Boolean(busy)}/>}
     {(!workspaceSnapshot || !onOpenApproval) && <section className="lifetime-outbox" aria-label="문서 저장 제안 검토">
       <div className="lifetime-section-heading"><div><h3>문서 저장 요청</h3></div></div>
       {selectedTarget !== undefined && documentReviews !== undefined && documentAuthorityEpoch !== undefined && lifetimeDocumentReviews.length === 0
@@ -1112,13 +1141,13 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         }} disabled={Boolean(busy) || writesDisabled && pending.length > 0}>
           <option value="">등록 대화를 선택하세요</option>
           {registry.map(target => <option value={conversationTargetKey(target)} key={conversationTargetKey(target)}>
-            {workspaceSnapshot?.profiles.find(profile => profile.id === target.ghost_id)?.name ?? 'Ghost'}{target.kind === 'primary' ? ' · 기본' : ''}{target.mode === "draining" ? " · 마무리 중" : ""}
+            {workspaceSnapshot?.profiles.find(profile => profile.id === target.ghost_id)?.name ?? 'Ghost'}{target.secondary ? ` · ${publicLabel(target)}` : target.kind === 'primary' ? ' · 기본' : ''}{target.mode === "draining" ? " · 마무리 중" : ""}
           </option>)}
         </select></label>
         <div className="lifetime-form-row">
-          <label className="lifetime-field">자료 범위<select aria-label="자료 범위" value={privacy} onChange={event => setPrivacy(event.target.value as Artifact["privacy"])} disabled={Boolean(busy)}>
+          {!publicConversation && <label className="lifetime-field">자료 범위<select aria-label="자료 범위" value={privacy} onChange={event => setPrivacy(event.target.value as Artifact["privacy"])} disabled={Boolean(busy)}>
             <option value="local_only">이 기기에서만</option><option value="private">비공개</option><option value="public">공개 자료 허용</option>
-          </select></label>
+          </select></label>}
           <div className="lifetime-existing-artifacts">
             <strong>기존 자료 첨부</strong>
             {attachmentChoices.length === 0 && <span>이 대화에서 선택할 수 있는 기존 첨부 자료가 없습니다. 새 파일은 여기서 열거나 업로드하지 않습니다.</span>}
@@ -1140,7 +1169,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
             })}
           </div>
         </div>
-        <p>대화의 기존 보호 수준은 유지됩니다. UTF-8 {new TextEncoder().encode(prompt).length}/65,536바이트.</p>
+        <p>{!publicConversation && "대화의 기존 보호 수준은 유지됩니다. "}UTF-8 {new TextEncoder().encode(prompt).length}/65,536바이트.</p>
       </DetailDialog>
       <div className="lifetime-submit-actions lifetime-compose-actions">
         <button type="submit" className="send-button" disabled={submissionBlocked}

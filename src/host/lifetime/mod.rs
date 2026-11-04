@@ -9,6 +9,7 @@ mod artifact;
 mod assignments;
 pub(crate) mod authority;
 mod conversation;
+pub(crate) use conversation::is_public_secondary;
 mod delegation_contracts;
 pub(crate) mod evaluation_inputs;
 mod pi_wait;

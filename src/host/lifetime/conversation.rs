@@ -12,12 +12,14 @@ const MAX_ATTACHMENTS: usize = 16;
 const DEFAULT_PAGE_LIMIT: u64 = 100;
 const MAX_PAGE_LIMIT: u64 = 100;
 const MAX_DERIVED_GOALS_PER_TURN: i64 = 4;
+const SECONDARY_KIND: &str = "public_ghost_conversation_v1";
 pub(super) const OWNER_PRINCIPAL: &str = "owner";
 
 pub(super) fn handles(method: &str) -> bool {
     matches!(
         method,
-        "conversation.input"
+        "conversation.open"
+            | "conversation.input"
             | "conversation.inspect"
             | "conversation.cancel_turn"
             | "conversation.turn_status"
@@ -38,6 +40,10 @@ pub(super) fn apply(
 ) -> Result<Response> {
     let method = host_apply::string_field(&envelope.body, "method")?;
     match method {
+        "conversation.open" => {
+            require_owner(principal)?;
+            open_public(tx, &envelope.body)
+        }
         "conversation.input" => {
             require_owner(principal)?;
             conversation_input(tx, envelope, context)
@@ -100,6 +106,64 @@ fn require_owner(principal: &str) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn is_public_secondary(conn: &Connection, ghost: &str, conversation: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM workspace_objects WHERE kind=?1 AND id=?2 AND json_extract(payload,'$.ghost_id')=?3)",
+        params![SECONDARY_KIND, conversation, ghost], |row| row.get(0),
+    )?)
+}
+
+fn open_public(tx: &Transaction<'_>, body: &Value) -> Result<Response> {
+    host_apply::exact_fields(body, &["method", "ghost_id", "conversation_id"])?;
+    let ghost = host_apply::string_field(body, "ghost_id")?;
+    let conversation = host_apply::string_field(body, "conversation_id")?;
+    if uuid::Uuid::parse_str(conversation).is_err() {
+        return Err(host_apply::invalid("a new public conversation requires a UUID"));
+    }
+    let active: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM lifetime_registry WHERE ghost_id=?1 AND kind='primary' AND mode='active')",
+        [ghost], |row| row.get(0),
+    )?;
+    if !active { return Err(host_apply::invalid("only the active default Ghost opens a public conversation")); }
+    let used: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM lifetime_registry WHERE conversation_id=?1)
+          OR EXISTS(SELECT 1 FROM lifetime_bindings WHERE conversation_id=?1)",
+        [conversation], |row| row.get(0),
+    )?;
+    if used || super::super::bots_provisioning::reserves_registry_identity(tx, "", conversation)? {
+        return Err(host_apply::conflict("public conversation requires a fresh identity"));
+    }
+    let count: u32 = tx.query_row(
+        "SELECT count(*) FROM workspace_objects WHERE kind=?1", [SECONDARY_KIND], |row| row.get(0),
+    )?;
+    if count >= 16 { return Err(host_apply::conflict("public conversation limit reached")); }
+    ensure_pi_binding(tx, ghost, conversation)?;
+    tx.execute(
+        "INSERT INTO workspace_objects(kind,id,payload) VALUES(?1,?2,?3)",
+        params![SECONDARY_KIND, conversation, json!({"ghost_id":ghost}).to_string()],
+    )?;
+    Ok(host_apply::success("fresh public conversation opened", vec![conversation.into()],
+        json!({"ghost_id":ghost,"conversation_id":conversation,"privacy":"public"})))
+}
+
+pub(super) fn public_secondary_entries(conn: &Connection) -> Result<Vec<Value>> {
+    let mut query = conn.prepare(
+        "SELECT r.ghost_id,r.kind,c.id,r.roles,r.mode FROM workspace_objects c
+         JOIN lifetime_registry r ON r.ghost_id=json_extract(c.payload,'$.ghost_id')
+         JOIN lifetime_bindings b ON b.conversation_id=c.id AND b.ghost_id=r.ghost_id
+         WHERE c.kind=?1 ORDER BY c.rowid",
+    )?;
+    let rows = query.query_map([SECONDARY_KIND], |row| Ok((
+        row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+        row.get::<_, String>(3)?, row.get::<_, String>(4)?,
+    )))?;
+    rows.map(|row| {
+        let (ghost, kind, conversation, roles, mode) = row?;
+        Ok(json!({"ghost_id":ghost,"kind":kind,"conversation_id":conversation,
+            "roles":serde_json::from_str::<Vec<String>>(&roles)?,"mode":mode,"secondary":true}))
+    }).collect()
+}
+
 pub(super) fn registered_mode(
     conn: &Connection,
     ghost_id: &str,
@@ -117,7 +181,7 @@ pub(super) fn registered_mode(
     let Some((registered_conversation, kind, mode)) = registered else {
         return Err(host_apply::not_found("Ghost is not registered"));
     };
-    if registered_conversation != conversation_id {
+    if registered_conversation != conversation_id && !is_public_secondary(conn, ghost_id, conversation_id)? {
         return Err(host_apply::reject(
             "unauthorized",
             "conversation does not match the Ghost's immutable registered pair",
@@ -271,6 +335,9 @@ pub(super) fn persist_disclosure(
     privacy: &str,
 ) -> Result<()> {
     validate_privacy(privacy)?;
+    if privacy != "public" && is_public_secondary(conn, ghost_id, conversation_id)? {
+        return Err(host_apply::invalid("Protected sources cannot enter the separate public conversation"));
+    }
     conn.execute(
         "INSERT INTO lifetime_conversation_disclosure(ghost_id,conversation_id,privacy)
          VALUES(?1,?2,?3)
@@ -313,6 +380,11 @@ fn conversation_input(
     validate_privacy(requested_privacy)?;
     require_active(tx, ghost_id, conversation_id)?;
     ensure_pi_binding(tx, ghost_id, conversation_id)?;
+    if is_public_secondary(tx, ghost_id, conversation_id)?
+        && (requested_privacy != "public" || envelope.body.get("task_contract").is_some())
+    {
+        return Err(host_apply::invalid("This separate conversation accepts only public messages and ordinary Work"));
+    }
 
     let task_privacy=super::task_contracts::bind_input(tx,envelope)?;
     let attachments: Vec<Artifact> = serde_json::from_value(

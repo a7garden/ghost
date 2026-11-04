@@ -58,7 +58,7 @@ impl Host {
                     bail!("bot profile missing");
                 }
             }
-            if matches!(method, "goal.submit" | "registry.ensure" | "conversation.input" | "conversation.inspect" | "conversation.cancel_turn" | "conversation.turn.inspect") {
+            if matches!(method, "goal.submit" | "registry.ensure" | "conversation.open" | "conversation.input" | "conversation.inspect" | "conversation.cancel_turn" | "conversation.turn.inspect") {
                 let ghost_id = envelope.body.get("ghost_id").and_then(Value::as_str)
                     .ok_or_else(|| anyhow::anyhow!("missing ghost identity"))?;
                 let profile = state.profiles.get(ghost_id)
@@ -161,6 +161,26 @@ impl Host {
         if self.stopping.load(std::sync::atomic::Ordering::Acquire) {
             bail!("Ghost host is stopping");
         }
+        let secondary = {
+            let state = self.lock()?;
+            let conn = &state.journal.0;
+            let secondary = lifetime::is_public_secondary(conn, &request.ghost_id, &request.conversation_id)?;
+            let method = request.envelope.body["method"].as_str().unwrap_or_default();
+            if secondary && (scope == lifetime::PiInferenceScope::Local
+                || !lifetime::conversation_is_public(conn, &request.ghost_id, &request.conversation_id)?
+                || matches!(method, "mailbox.send" | "mailbox.inspect")
+                || ["memory.", "work.memory.", "documents.", "integrations.", "bot."].iter()
+                    .any(|prefix| method.starts_with(prefix)))
+            {
+                return Ok(json!({"ok":true,"result":Response {
+                    status: ResponseStatus::Error,
+                    summary: "The separate public conversation only grants public conversation and Work actions".into(),
+                    object_refs: vec![], artifacts: vec![], next_actions: vec![],
+                    error_code: Some("public_conversation_scope".into()), retry_class: RetryClass::Never, data: Value::Null,
+                }}));
+            }
+            secondary
+        };
         if let Some(response)=self.publication_effect_guard(request,scope).await? {
             return Ok(json!({"ok":true,"result":response}));
         }
@@ -221,7 +241,7 @@ impl Host {
             if let Ok(response) = &mut result {
                 if response.status == ResponseStatus::Success {
                     let state = self.lock()?;
-                    let enabled = super::integration_approvals::approved_features(&state, &request.ghost_id)
+                    let enabled = !secondary && super::integration_approvals::approved_features(&state, &request.ghost_id)
                         .is_ok_and(|features| !features.is_empty());
                     if let Some(data) = response.data.as_object_mut() {
                         data.insert("integration_approvals".into(), json!(enabled));
@@ -232,18 +252,25 @@ impl Host {
         if request.envelope.body["method"]=="conversation.report.inspect" {
             if let Ok(response)=&mut result {if response.status==ResponseStatus::Success {
                 let state=self.lock()?;
-                if let Some(descriptor)=super::bots_provisioning::repair_descriptor(&state.journal.0,request,scope)? {
+                if !secondary { if let Some(descriptor)=super::bots_provisioning::repair_descriptor(&state.journal.0,request,scope)? {
                     response.data.as_object_mut().ok_or_else(||anyhow::anyhow!("report inspection data missing"))?.insert("bot_repair".into(),descriptor);
-                }
+                }}
             }}
         }
         if request.envelope.body["method"]=="registry.inspect" {
             if let Ok(response)=&mut result {
                 if response.status==ResponseStatus::Success {
                     let state=self.lock()?;
-                    let mut ready=super::bots_provisioning::discovery_records(&state.journal.0,&[],scope==lifetime::PiInferenceScope::Local)?;
-                    ready.retain(|bot|bot["ghost_id"].as_str().is_some_and(|ghost|self.native_computers.as_ref().is_some_and(|computers|computers.pi_available(ghost,self.authority_epoch,bot["disclosure"].as_str().unwrap_or("local_only")).unwrap_or(false))));
-                    response.data.as_object_mut().ok_or_else(||anyhow::anyhow!("registry inspection data missing"))?.insert("ready_bots".into(),json!(ready));
+                    if secondary {
+                        let entries = response.data["registry"].as_array_mut()
+                            .ok_or_else(||anyhow::anyhow!("registry inspection data missing"))?;
+                        entries.retain(|item| item["ghost_id"].as_str().zip(item["conversation_id"].as_str())
+                            .is_some_and(|(ghost, conversation)| lifetime::conversation_is_public(&state.journal.0, ghost, conversation).unwrap_or(false)));
+                    } else {
+                        let mut ready=super::bots_provisioning::discovery_records(&state.journal.0,&[],scope==lifetime::PiInferenceScope::Local)?;
+                        ready.retain(|bot|bot["ghost_id"].as_str().is_some_and(|ghost|self.native_computers.as_ref().is_some_and(|computers|computers.pi_available(ghost,self.authority_epoch,bot["disclosure"].as_str().unwrap_or("local_only")).unwrap_or(false))));
+                        response.data.as_object_mut().ok_or_else(||anyhow::anyhow!("registry inspection data missing"))?.insert("ready_bots".into(),json!(ready));
+                    }
                 }
             }
         }

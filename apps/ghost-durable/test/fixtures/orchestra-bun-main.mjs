@@ -28,7 +28,7 @@ globalThis.fetch = async (input, init) => {
   await appendFile(join(process.env.GHOST_LIFETIME_HOST_ROOT, 'orchestra-provider-trace.jsonl'),
     JSON.stringify({ reviewer, owner, assignment, intake, verified, model: body.model,
       effort: body.reasoning?.effort, credentialMatches, tools, store: body.store,
-      containsOwnerTurn: frame.includes(ownerMarker), containsArtifact: frame.includes(answer) }) + '\n');
+      containsOwnerTurn: frame.includes(ownerMarker), containsPrivateHistory: frame.includes('ORCHESTRA_PRIVATE_HISTORY_MUST_NOT_REACH_PROVIDER'), containsArtifact: frame.includes(answer) }) + '\n');
 
   let item;
   const text = content => ({ type: 'message', id: 'msg_orchestra', role: 'assistant', status: 'completed',

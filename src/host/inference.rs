@@ -256,6 +256,12 @@ impl Host {
                     let active:bool=state.journal.0.query_row("SELECT EXISTS(SELECT 1 FROM lifetime_turn_runs WHERE ghost_id=?1 AND conversation_id=?2 AND state IN ('queued','running','effect_unknown'))",[ghost,conversation],|row|row.get(0))?;
                     ensure!(!active,"finish or reconcile the current turn before switching models");
                     let k=key(ghost,conversation);
+                    if super::lifetime::is_public_secondary(&state.journal.0,ghost,conversation)? {
+                        ensure!(selection.provider != "local",
+                            "Choose a registered external provider for the separate public conversation");
+                        ensure!(input.get("allow_external").and_then(Value::as_bool) != Some(true),
+                            "A separate public conversation cannot authorize external handling of protected history");
+                    }
                     if input.get("allow_external").and_then(Value::as_bool)==Some(true) && selection.provider!="local" {
                         let grants=settings.external_grants.entry(k.clone()).or_default();
                         if !grants.contains(&selection.provider) { grants.push(selection.provider.clone()); }

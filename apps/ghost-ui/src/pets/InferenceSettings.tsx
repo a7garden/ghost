@@ -50,7 +50,7 @@ export function inferenceProviderStatus(provider: Pick<Provider, 'id' | 'auth' |
   return { label: '카탈로그', tone: 'neutral', detail: '' };
 }
 
-type InferenceProps = { pair?: Pair; primary?: boolean; disabled?: boolean; connected?: boolean };
+type InferenceProps = { pair?: Pair; primary?: boolean; publicOnly?: boolean; disabled?: boolean; connected?: boolean };
 export function InferenceSettings({ pair, ...props }: InferenceProps) {
   // Project registry entries onto the two fields accepted by inference requests.
   const target: Pair | undefined = pair && { ghost_id: pair.ghost_id, conversation_id: pair.conversation_id };
@@ -59,7 +59,7 @@ export function InferenceSettings({ pair, ...props }: InferenceProps) {
   return <InferencePanel key={pairKey} {...props} pair={target} pairKey={pairKey}/>;
 }
 
-function InferencePanel({ pair, pairKey, primary = false, disabled = false, connected = true }: InferenceProps & { pairKey: string }) {
+function InferencePanel({ pair, pairKey, primary = false, publicOnly = false, disabled = false, connected = true }: InferenceProps & { pairKey: string }) {
   const [data, setData] = useState<Configuration>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false), [draft, setDraft] = useState<Selection>(), [allow, setAllow] = useState(false);
   const [keyEditor, setKeyEditor] = useState<{ provider: string; value: string }>();
@@ -110,9 +110,9 @@ function InferencePanel({ pair, pairKey, primary = false, disabled = false, conn
   const selected = data && (data.settings.conversations[pairKey] ?? data.settings.default);
   const provider = data?.providers.find(item => item.id === draft?.provider);
   const registered = provider?.auth !== 'api_key' || data?.settings.credentials[provider.id] === true;
-  const granted = Boolean(pair && draft && data?.settings.external_grants[pairKey]?.includes(draft.provider));
-  const needsGrant = Boolean(pair && draft?.provider !== 'local' && !granted);
-  const usableSelection = Boolean(draft && provider?.models.includes(draft.model) && provider.efforts.includes(draft.effort));
+  const granted = Boolean(pair && !publicOnly && draft && data?.settings.external_grants[pairKey]?.includes(draft.provider));
+  const needsGrant = Boolean(pair && !publicOnly && draft?.provider !== 'local' && !granted);
+  const usableSelection = Boolean(draft && !(publicOnly && draft.provider === 'local') && provider?.models.includes(draft.model) && provider.efforts.includes(draft.effort));
   const imageProviders = data?.providers.filter(item => item.image) ?? [];
   const orchestra = data?.settings.orchestra?.[pairKey]?.profile;
   const savedReviewer = orchestra?.reviewer?.provider ?? '';
@@ -135,7 +135,7 @@ function InferencePanel({ pair, pairKey, primary = false, disabled = false, conn
               setAllow(false);
             }}>
               {!provider && <option value={draft.provider}>{draft.provider} · 사용 불가</option>}
-              {data.providers.map(item => <option value={item.id} key={item.id} disabled={!item.models.length}>{item.name}</option>)}
+              {data.providers.map(item => <option value={item.id} key={item.id} disabled={!item.models.length || publicOnly && item.id === 'local'}>{item.name}</option>)}
             </select></label>
             <label>모델<select aria-label="Ghost 모델" value={draft.model} disabled={locked || !provider?.models.length} onChange={event => setDraft({ ...draft, model: event.target.value })}>
               {!provider?.models.includes(draft.model) && <option value={draft.model}>{draft.model} · 사용 불가</option>}
@@ -151,7 +151,7 @@ function InferencePanel({ pair, pairKey, primary = false, disabled = false, conn
           {!registered && <p className="field-help">먼저 제공자의 API 키를 등록하세요.</p>}
           <div className="inference-footer">
             <button className="button primary" type="button" disabled={locked || !usableSelection || !registered || (needsGrant && !allow)} onClick={() => void save(
-              pair ? { operation: 'select', ...pair, selection: draft, allow_external: allow } : { operation: 'set_default', selection: draft },
+              pair ? { operation: 'select', ...pair, selection: draft, ...(!publicOnly ? { allow_external: allow } : {}) } : { operation: 'set_default', selection: draft },
               pair ? '이 대화의 모델을 저장했습니다.' : '기본 대화 모델을 저장했습니다.',
             )}>{busy ? '저장 중…' : pair ? '이 대화에 적용' : '기본 모델 저장'}</button>
           </div>

@@ -630,6 +630,13 @@ fn work_delegate(
     if target_mode != "active" {
         return Err(apply::conflict("target Ghost is not active"));
     }
+    if let Some(root) = db::goal(conn, &scope.root_goal_id)? {
+        if super::conversation::is_public_secondary(conn, &root.accountable_ghost, &root.reply_conversation)?
+            && !super::conversation_is_public(conn, target_ghost_id, &target_conversation)?
+        {
+            return Err(apply::conflict("Separate public Work requires a public delegation target"));
+        }
+    }
     if !super::super::bot_lifecycle::admission_allowed(conn,target_ghost_id)? {
         return Err(apply::conflict("target bot is paused, retired, or not independently ready"));
     }

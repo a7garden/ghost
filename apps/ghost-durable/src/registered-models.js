@@ -21,13 +21,11 @@ function flattenAnyOfParameters(tool) {
   const parameters = tool?.parameters;
   if (!parameters || !Array.isArray(parameters.anyOf)) return tool;
   const merged = { type: 'object', properties: {}, required: [], additionalProperties: false };
-  for (const variant of parameters.anyOf) {
-    if (variant?.type !== 'object') continue;
-    Object.assign(merged.properties, variant.properties ?? {});
-    for (const name of variant.required ?? []) {
-      if (merged.properties[name] !== undefined && !merged.required.includes(name)) merged.required.push(name);
-    }
-  }
+  const variants = parameters.anyOf.filter(variant => variant?.type === 'object');
+  for (const variant of variants) Object.assign(merged.properties, variant.properties ?? {});
+  // Fields unique to one branch cannot be mandatory in the flattened view.
+  merged.required = (variants[0]?.required ?? []).filter(name =>
+    variants.every(variant => variant.required?.includes(name)));
   return { ...tool, parameters: merged };
 }
 // These are existing Host credential profiles, not aliases for Pi's built-in

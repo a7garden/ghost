@@ -332,6 +332,9 @@ pub(super) fn admit_goal(
     validate_identity("conversation_id", conversation_id)?;
     validate_text("prompt", prompt)?;
     validate_privacy(privacy)?;
+    if privacy != "public" && super::conversation::is_public_secondary(conn, ghost_id, conversation_id)? {
+        return Err(invalid("A separate public conversation cannot admit protected Work"));
+    }
     let acceptance_spec = value_field(&envelope.body, "acceptance_spec")?;
     if !super::super::bot_lifecycle::admission_allowed(conn,ghost_id)? {
         return Err(reject("bot_unavailable","Bot is paused, retired, or lacks an evaluated selected definition",RetryClass::NewRevision));

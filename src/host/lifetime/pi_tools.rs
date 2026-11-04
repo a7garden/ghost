@@ -180,7 +180,11 @@ pub(crate) fn apply(conn: &Connection, request: &PiToolRequest, scope: PiInferen
     }
     let mut response=super::apply_with_admission(conn,envelope,&request.ghost_id,|_|Ok(None))?;
     if method=="conversation.turn.inspect" && response.status==ResponseStatus::Success {
-        let descriptor=super::super::bots_provisioning::creation_descriptor(conn,apply::string_field(body,"turn_id")?,&request.ghost_id,&request.conversation_id,envelope.authority_epoch)?;
+        let descriptor = if super::conversation::is_public_secondary(conn, &request.ghost_id, &request.conversation_id)? {
+            None
+        } else {
+            super::super::bots_provisioning::creation_descriptor(conn,apply::string_field(body,"turn_id")?,&request.ghost_id,&request.conversation_id,envelope.authority_epoch)?
+        };
         let data = response.data.as_object_mut().unwrap();
         data.insert("bot_creation".into(),descriptor.unwrap_or(Value::Null));
         data.insert("orchestra".into(), super::orchestra::intake_view(conn,apply::string_field(body,"turn_id")?)?);

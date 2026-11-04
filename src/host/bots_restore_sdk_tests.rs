@@ -1120,19 +1120,40 @@ mod actual_sdk {
         let mut f = host_fixture();
         let _environment = isolated_environment(f.root.path(), &f.ghost).await;
         f.host.pi_callback_token = "orchestra-fixture-host-callback".into();
+        let private_pair = f.conversation.clone();
+        {
+            let state = f.host.lock().unwrap();
+            state.journal.0.execute(
+                "INSERT INTO lifetime_turns(id,ghost_id,conversation_id,sequence,sender_kind,sender_ref,text,privacy,kind,attachments,created_at_ms)
+                 VALUES('orchestra-private-fixture',?1,?2,1,'owner','owner','ORCHESTRA_PRIVATE_HISTORY_MUST_NOT_REACH_PROVIDER','local_only','user','[]',1)",
+                [&f.ghost, &private_pair],
+            ).unwrap();
+        }
+        let public_pair = uuid::Uuid::new_v4().to_string();
+        owner(&f.host, "orchestra-open-public", json!({"method":"conversation.open",
+            "ghost_id":f.ghost,"conversation_id":public_pair}), None);
+        let canonical = owner(&f.host, "orchestra-canonical-registry", json!({"method":"registry.inspect"}), None);
+        assert_eq!(canonical["registry"].as_array().unwrap().len(), 1);
+        assert_eq!(canonical["registry"][0]["conversation_id"], private_pair);
+        let pairs = owner(&f.host, "orchestra-owner-registry", json!({"method":"registry.inspect","include_secondary":true}), None);
+        assert_eq!(pairs["registry"].as_array().unwrap().len(), 2);
+        assert_eq!(pairs["registry"][1]["conversation_id"], public_pair);
+        let rejected = f.host.lifetime_action(&env("orchestra-public-private-rejected", json!({"method":"conversation.input",
+            "ghost_id":f.ghost,"conversation_id":public_pair,"privacy":"private","text":"not allowed","attachments":[]}))).unwrap();
+        assert_eq!(rejected["result"]["status"], "error");
         let configure = |input| f.host.configure_inference(&input).unwrap();
         configure(json!({"operation":"set_api_key","version":0,"provider":"zai-coding","api_key":"orchestra-fixture-producer"}));
         configure(json!({"operation":"set_api_key","version":1,"provider":"minimax","api_key":"orchestra-fixture-reviewer"}));
-        configure(json!({"operation":"select","version":2,"ghost_id":f.ghost,"conversation_id":f.conversation,
+        configure(json!({"operation":"select","version":2,"ghost_id":f.ghost,"conversation_id":public_pair,
             "selection":{"provider":"zai-coding","model":"glm-5.3","effort":"low"}}));
-        configure(json!({"operation":"set_orchestra","version":3,"ghost_id":f.ghost,"conversation_id":f.conversation,
+        configure(json!({"operation":"set_orchestra","version":3,"ghost_id":f.ghost,"conversation_id":public_pair,
             "profile":{"routes":{"routine-code":{"provider":"zai-coding","model":"glm-5.3","effort":"max"}},
                 "reviewer":{"provider":"minimax","model":"MiniMax-M3.1-Flash-Preview","effort":"medium"}}}));
         let host = Arc::new(f.host);
         let http = pi_test_http::Server::start(Arc::clone(&host), "a".repeat(64));
         let driver = Driver::start_bundled(&host, binary.canonicalize().unwrap());
         owner(&host, "orchestra-e2e-input", json!({
-            "method":"conversation.input","ghost_id":f.ghost,"conversation_id":f.conversation,
+            "method":"conversation.input","ghost_id":f.ghost,"conversation_id":public_pair,
             "text":"ORCHESTRA_E2E_OWNER 결과 파일을 만들고 독립 검수 결과를 알려줘.",
             "privacy":"public","attachments":[],
         }), None);
@@ -1141,7 +1162,7 @@ mod actual_sdk {
         loop {
             let reported: bool = host.lock().unwrap().journal.0.query_row(
                 "SELECT EXISTS(SELECT 1 FROM lifetime_turns WHERE conversation_id=?1 AND text LIKE '독립 Pi 리뷰를 통과했습니다.%')",
-                [&f.conversation], |r| r.get(0),
+                [&public_pair], |r| r.get(0),
             ).unwrap();
             if reported { break; }
             assert!(Instant::now() < deadline, "Orchestra report did not arrive. Host errors: {:?}. Provider trace: {}",
@@ -1170,6 +1191,11 @@ mod actual_sdk {
         assert_eq!(review[0]["containsArtifact"], true);
         assert_eq!(review[0]["credentialMatches"], true);
         assert!(trace.iter().any(|call| call["verified"] == true && call["reviewer"] == false));
+        assert!(trace.iter().all(|call| call["containsPrivateHistory"] == false));
+        let private = owner(&host, "orchestra-private-unchanged", json!({"method":"conversation.inspect",
+            "ghost_id":f.ghost,"conversation_id":private_pair}), None);
+        assert_eq!(private["privacy"], "local_only");
+        assert_eq!(private["turns"].as_array().unwrap().len(), 1);
         assert!(http.errors().is_empty());
         driver.close(&host).await;
     }
