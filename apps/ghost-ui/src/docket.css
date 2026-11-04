@@ -1,0 +1,260 @@
+/* Hallmark · macrostructure: Workbench with a stage board · tone: compact · anchor hue: amber
+ * Reference: a7garden/docket · pre-emit critique: P5 H4 E4 S5 R5 V4 */
+@import "./docket-tokens.css";
+
+.ghost-arc .main-shell { background: var(--color-paper); }
+.ghost-arc .topbar {
+  min-height: 42px;
+  background: var(--color-paper);
+  border-radius: 0;
+}
+.ghost-arc .g-titlebar.ghost-desktop-titlebar { background: var(--color-paper-2); }
+.ghost-arc .workspace-wordmark { font-size: 15px; letter-spacing: -.02em; }
+.ghost-arc .button.primary,
+.ghost-arc .send-button,
+.ghost-arc .ghost-row:hover { box-shadow: none; }
+.ghost-arc .sidebar .nav-count,
+.ghost-arc .mobile-sidebar .nav-count {
+  background: var(--color-amber-surface);
+  color: var(--color-amber-ink);
+}
+.ghost-arc dialog::backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+.ghost-arc .app-shell--desktop { min-height: calc(100dvh - 46px); }
+.ghost-arc .app-shell--desktop .main-shell.chat-shell { height: calc(100dvh - 46px); }
+.ghost-arc .app-shell--desktop .topbar { top: 46px; }
+
+@media (min-width: 56rem) {
+  .ghost-arc .app-shell { --app-sidebar-width: 196px; gap: 0; padding: 0; }
+  .ghost-arc .app-shell > .sidebar {
+    top: 0;
+    height: 100dvh;
+    border: 0;
+    border-inline-end: 1px solid var(--color-rule);
+    border-radius: 0;
+    padding: var(--space-xs);
+    background: var(--color-paper-2);
+  }
+  .ghost-arc .main-shell { min-height: 100dvh; border: 0; border-radius: 0; }
+  .ghost-arc .main-shell.chat-shell { height: 100dvh; }
+  .ghost-arc .app-shell--desktop > .sidebar { top: 46px; height: calc(100dvh - 46px); }
+  .ghost-arc .app-shell--desktop .main-shell { min-height: calc(100dvh - 46px); }
+}
+
+.ghost-arc .lifetime-panel {
+  container-type: inline-size;
+  max-width: 1440px;
+  gap: var(--space-md);
+  padding: var(--space-md) clamp(12px, 2vw, 24px) var(--space-xl);
+}
+.lifetime-panel .lifetime-heading { border: 0; padding: 0; }
+.lifetime-panel .lifetime-heading h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.lifetime-panel .lifetime-heading-actions { gap: var(--space-xs); }
+.lifetime-panel .lifetime-heading-actions button,
+.lifetime-panel .lifetime-nav button { white-space: nowrap; }
+
+.lifetime-panel .lifetime-roster { gap: var(--space-xs); }
+.lifetime-roster-label { font-size: var(--text-caption); font-weight: 550; color: var(--color-quiet); }
+.lifetime-panel .ghost-team-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: var(--space-xs);
+}
+.lifetime-panel .ghost-team-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  height: 100%;
+  min-height: 44px;
+  gap: var(--space-2xs);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-card);
+}
+.lifetime-panel .ghost-team-card[aria-pressed="true"] {
+  border-color: var(--color-focus);
+  background: var(--color-selection);
+  box-shadow: none;
+}
+.lifetime-panel .ghost-team-card-heading strong { font-size: var(--text-control); }
+.lifetime-panel .ghost-team-counts { justify-content: flex-start; gap: 2px var(--space-xs); }
+.lifetime-panel .ghost-team-counts:empty { display: none; }
+.lifetime-panel .ghost-team-counts > span { color: var(--color-quiet); font-size: 11px; }
+.lifetime-panel .ghost-team-counts > span[data-tone="review"] { color: var(--color-amber-ink); }
+
+.lifetime-panel .lifetime-nav {
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-button);
+  background: var(--color-paper-2);
+  overflow: visible;
+}
+.lifetime-panel .lifetime-nav button {
+  min-height: 32px;
+  gap: var(--space-2xs);
+  padding: 0 var(--space-xs);
+  border: 1px solid transparent;
+  border-radius: var(--radius-button);
+}
+.lifetime-panel .lifetime-nav button[aria-pressed="true"] {
+  border-color: var(--color-border-strong);
+  background: var(--color-card);
+}
+.lifetime-panel .lifetime-nav button > span { background: transparent; padding-inline: 2px; }
+
+.lifetime-panel .lifetime-conversation,
+.lifetime-panel .lifetime-submit { width: min(100%, 840px); margin-inline: auto; }
+.lifetime-panel .lifetime-transcript {
+  gap: var(--space-xs);
+  min-height: min(180px, 25dvh);
+  max-height: min(45dvh, 460px);
+  padding: var(--space-xs);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
+  background: var(--color-card);
+}
+.lifetime-panel .lifetime-transcript:empty { display: none; }
+.lifetime-panel .lifetime-turn {
+  width: 100%;
+  padding: var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-card);
+}
+.lifetime-panel .lifetime-turn[data-kind="user"] { background: var(--color-paper-2); }
+.lifetime-panel .lifetime-turn p { font-size: var(--text-body); }
+.lifetime-panel .lifetime-turn header strong { font-size: var(--text-control); }
+.lifetime-panel .lifetime-turn header,
+.lifetime-panel .lifetime-turn details { font-size: var(--text-caption); }
+.lifetime-panel .lifetime-conversation > details {
+  font-size: var(--text-caption);
+  color: var(--color-quiet);
+  overflow-wrap: anywhere;
+}
+.lifetime-panel .agent-status { width: min(100%, 22rem); }
+.lifetime-panel .agent-status-trigger { min-height: 40px; border-radius: var(--radius-button); }
+.lifetime-panel .agent-status-mark { width: 28px; height: 28px; }
+.lifetime-panel .agent-status:is([data-state="running"], [data-state="verifying"]) { --agent-status-ink: var(--color-running-ink); }
+.lifetime-panel .agent-status[data-state="accepted"],
+.lifetime-panel .agent-status-record[data-record-state="accepted"] .agent-status-record-icon,
+.lifetime-panel .lifetime-checks p.lifetime-check-passed { --agent-status-ink: var(--color-verified-ink); color: var(--color-verified-ink); }
+
+.lifetime-panel .lifetime-submit {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border-color: var(--color-border-strong);
+}
+.lifetime-panel .lifetime-submit > :is(.lifetime-field, .lifetime-sync-warning) { grid-column: 1 / -1; }
+.lifetime-panel .lifetime-submit > .lifetime-field textarea {
+  min-height: 58px;
+  background: var(--color-card);
+  border-color: var(--color-rule);
+  font-size: var(--text-body);
+}
+.lifetime-compose-options { min-width: 0; font-size: var(--text-caption); color: var(--color-quiet); }
+.lifetime-compose-options summary { width: fit-content; padding: var(--space-xs) 0; cursor: pointer; }
+.lifetime-compose-options summary span { margin-inline-start: var(--space-2xs); }
+.lifetime-compose-options[open] { grid-column: 1 / -1; }
+.lifetime-compose-options > :not(summary) { margin-top: var(--space-xs); }
+.lifetime-panel .lifetime-compose-actions { grid-column: 2; justify-content: end; }
+.lifetime-compose-actions .button { white-space: nowrap; }
+.lifetime-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+.lifetime-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--space-sm);
+}
+.lifetime-lane { display: grid; gap: var(--space-xs); min-width: 0; }
+.lifetime-lane > h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: 28px;
+  padding-inline: var(--space-2xs);
+  font-size: var(--text-control);
+  font-weight: 600;
+}
+.lifetime-lane > h3 span { color: var(--color-quiet); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.lifetime-lane[data-stage="review"] > h3 span { color: var(--color-amber-ink); }
+.lifetime-lane-empty {
+  min-height: 64px;
+  padding: var(--space-sm);
+  border: 1px dashed var(--color-rule);
+  border-radius: var(--radius-card);
+  color: var(--color-quiet);
+  font-size: var(--text-caption);
+}
+.lifetime-panel .lifetime-goal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
+  background: var(--color-card);
+  text-align: start;
+  cursor: pointer;
+}
+.lifetime-panel .lifetime-goal[data-state="review"] {
+  border-color: var(--color-review-border);
+}
+.lifetime-panel .lifetime-goal:hover { background: var(--color-paper-2); }
+.lifetime-goal > svg { grid-column: 2; grid-row: 1; color: var(--color-quiet); }
+.lifetime-goal-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: var(--text-body);
+  font-weight: 550;
+}
+.lifetime-goal > .lifetime-state { justify-self: start; font-size: 11px; }
+.lifetime-goal[data-state="active"] > .lifetime-state {
+  background: var(--color-running-surface);
+  color: var(--color-running-ink);
+}
+.lifetime-goal[data-state="review"] > .lifetime-state {
+  background: var(--color-amber-surface);
+  color: var(--color-amber-ink);
+}
+.lifetime-goal:is([data-state="rejected"], [data-state="failed"]) > .lifetime-state,
+.lifetime-work[data-state="failed"] .lifetime-work-heading strong { color: var(--color-text-error); }
+.lifetime-goal-detail {
+  display: grid;
+  gap: var(--space-sm);
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2xs);
+}
+.lifetime-goal-detail .lifetime-work { padding: var(--space-xs); }
+.lifetime-goal-detail .lifetime-work-heading { flex-wrap: wrap; }
+.lifetime-goal-detail .button { white-space: nowrap; }
+
+@container (max-width: 910px) {
+  .lifetime-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (max-width: 500px) {
+  .lifetime-board { grid-template-columns: minmax(0, 1fr); }
+  .lifetime-panel .ghost-team-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lifetime-panel .lifetime-submit { grid-template-columns: minmax(0, 1fr); }
+  .lifetime-panel .lifetime-compose-actions { grid-column: 1; }
+  .lifetime-panel .lifetime-compose-actions .button { width: auto; }
+}
+@media (pointer: coarse) {
+  .lifetime-panel .lifetime-nav button,
+  .lifetime-panel .agent-status-trigger { min-height: 44px; }
+}
