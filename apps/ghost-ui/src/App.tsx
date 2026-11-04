@@ -176,7 +176,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const selectedSpace = route.startsWith('/spaces/') ? route.split('/')[2] : snapshot?.spaces[0]?.id;
   const selectDocumentFolder = (id: string) => {
     navigate(`/spaces/${id}`);
-    requestAnimationFrame(() => (mainContent.current?.querySelector<HTMLElement>('[data-document-folder]')
+    requestAnimationFrame(() => (mainContent.current?.querySelector<HTMLElement>('#document-folder')
       ?? mainContent.current?.querySelector<HTMLElement>('.space-heading h1'))?.focus({ preventScroll: true }));
   };
   const addGhost = () => setDialog('add');

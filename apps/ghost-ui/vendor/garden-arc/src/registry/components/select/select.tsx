@@ -14,6 +14,7 @@ import styles from "./select.module.css";
 
 export interface SelectProps extends Omit<ComponentPropsWithoutRef<typeof SelectPrimitive.Root>, "children"> {
   label: string;
+  hideLabel?: boolean;
   description?: string;
   placeholder?: string;
   id?: string;
@@ -30,7 +31,7 @@ const valueRoll: Variants = {
 const valueFade: Variants = { enter: { opacity: 0 }, center: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: motionTokens.duration.instant } }, exit: { opacity: 0, transition: { duration: motionTokens.duration.instant } } };
 
 export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select(
-  { label, description, placeholder = "Select an option", options, id, className, disabled, onValueChange, ...rootProps },
+  { label, hideLabel, description, placeholder = "Select an option", options, id, className, disabled, onValueChange, ...rootProps },
   ref,
 ) {
   const generatedId = useId();
@@ -47,7 +48,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
 
   return (
     <div className={styles.field}>
-      <label htmlFor={controlId}>{label}</label>
+      <label htmlFor={controlId} className={hideLabel ? styles.srOnly : undefined}>{label}</label>
       <SelectPrimitive.Root {...rootProps} disabled={disabled} onValueChange={(next) => { setUncontrolledValue(next); onValueChange?.(next); }}>
         <SelectPrimitive.Trigger
           ref={ref}
@@ -63,11 +64,11 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
             </AnimatePresence>
           </span>
           <SelectPrimitive.Icon className={styles.chevron}>
-            <ChevronDown size={16} strokeWidth={1.75} aria-hidden="true" />
+            <ChevronDown size={14} strokeWidth={1.6} aria-hidden="true" />
           </SelectPrimitive.Icon>
         </SelectPrimitive.Trigger>
         <ArcPortal portal={SelectPrimitive.Portal}>
-          <SelectPrimitive.Content className={styles.content} position="popper" sideOffset={4} collisionPadding={12}>
+          <SelectPrimitive.Content data-arc-select-content className={styles.content} position="popper" sideOffset={4} collisionPadding={12}>
             <SelectPrimitive.ScrollUpButton className={styles.scrollButton}>
               <ChevronUp size={16} strokeWidth={1.75} aria-hidden="true" />
             </SelectPrimitive.ScrollUpButton>

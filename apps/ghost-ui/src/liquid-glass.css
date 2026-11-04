@@ -17,6 +17,39 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 button:disabled { opacity: .45; }
 input, textarea, select { border-radius: var(--radius-input); background: var(--color-surface-elevated); }
 input:hover, textarea:hover, select:hover { border-color: var(--color-border-strong); }
+.ghost-arc select:not([multiple], [size], [aria-hidden="true"]) {
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  appearance: none;
+  background-image: var(--select-chevron);
+  background-position: right var(--space-xs) center;
+  background-repeat: no-repeat;
+  background-size: 14px;
+  padding-inline-end: calc(var(--space-xs) + 22px);
+  text-overflow: ellipsis;
+}
+.ghost-arc select:not([multiple], [size], [aria-hidden="true"]):dir(rtl) {
+  background-position: left var(--space-xs) center;
+}
+.ghost-arc [data-arc-select-content] {
+  border-radius: var(--radius-card);
+  background: var(--color-surface-elevated);
+  padding: 4px;
+}
+.ghost-arc [data-arc-select-content] [role="option"] { border-radius: var(--radius-sm); }
+.ghost-arc [data-arc-select-content] [data-highlighted] { background: var(--color-background-secondary-hover); }
+.ghost-arc [data-arc-select-content]:focus-visible,
+.ghost-arc [data-arc-select-content] [role="option"]:focus-visible { outline: none !important; }
+@media (forced-colors: active) {
+  .ghost-arc select:not([multiple], [size], [aria-hidden="true"]) {
+    appearance: auto;
+    background-image: none;
+    padding-inline-end: var(--space-xs);
+  }
+  .ghost-arc [data-arc-select-content] [role="option"][data-highlighted]:focus-visible {
+    outline: 1px solid Highlight !important;
+    outline-offset: -1px;
+  }
+}
 .main-shell { background: var(--color-paper); }
 .topbar, .conversation-toolbar { background: var(--color-glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
 .topbar { min-height: 52px; padding-inline: var(--space-lg); position: sticky; top: 0; z-index: var(--z-sticky); }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Select as ArcSelect } from '@garden/arc/select';
 import { ArrowRight, FileText, FolderPlus, Plus, Search, Trash2, X } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { ConfirmedFailure, documentPreflightMessage } from '../client/errors';
@@ -112,10 +113,10 @@ export function SpacesView({ snapshot, selectedSpace, query: read, action, onRev
       <h2>저장된 문서</h2>
       <div className="space-folder-controls">
         {(snapshot.spaces.length > 1 || (!space && snapshot.spaces.length > 0)) ?
-          <select aria-label="문서 폴더" data-document-folder value={spaceId ?? ''} onChange={event => onSelectFolder(event.target.value)}>
-            {!space && <option value="" disabled>폴더 선택</option>}
-            {snapshot.spaces.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select> : space && <span className="space-folder-name">{space.name}</span>}
+          <ArcSelect id="document-folder" className="space-folder-select" label="문서 폴더" hideLabel placeholder="폴더 선택"
+            value={spaceId ?? ''} onValueChange={onSelectFolder}
+            options={snapshot.spaces.map(item => ({ value: item.id, label: item.name }))}/>
+          : space && <span className="space-folder-name">{space.name}</span>}
         {space && !space.writable && <span className="space-folder-name">읽기 전용</span>}
         {canConnect && <button type="button" className="button secondary" disabled={!connected || busy} onClick={() => setForm('folder')}>
           <FolderPlus size={15}/>폴더 연결
