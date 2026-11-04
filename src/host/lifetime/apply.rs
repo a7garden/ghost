@@ -339,7 +339,7 @@ pub(super) fn admit_goal(
     if !acceptance_spec.is_object() {
         return Err(invalid("acceptance_spec must be an object"));
     }
-    validate_required_checks(acceptance_spec)?;
+    validate_acceptance_spec(acceptance_spec, None)?;
     let requirement_digest = canonical_digest(&json!({
         "prompt": prompt,
         "acceptance_spec": acceptance_spec,
@@ -437,7 +437,7 @@ fn goal_update(
     if !acceptance_spec.is_object() {
         return Err(invalid("acceptance_spec must be an object"));
     }
-    validate_required_checks(acceptance_spec)?;
+
     let expected_revision = envelope
         .expected_revision
         .ok_or_else(|| conflict("goal.update requires expected_revision"))?;
@@ -455,6 +455,16 @@ fn goal_update(
     }
     if goal.revision != expected_revision {
         return Err(conflict("goal revision changed; inspect before updating"));
+    }
+    validate_acceptance_spec(acceptance_spec, Some(&goal.acceptance_spec))?;
+    if goal.acceptance_spec["delegation_allowed"] == false
+        && acceptance_spec["delegation_allowed"] != false
+    {
+        return Err(reject(
+            "unauthorized",
+            "A bounded Work revision cannot widen its delegation authority",
+            RetryClass::Never,
+        ));
     }
     let retained_owner_expectations = if envelope.body.get("follow_up").is_some() {
         super::work_threads::validate_follow_up(conn, &envelope.body, &goal, principal, prompt, acceptance_spec)?;
@@ -1274,6 +1284,19 @@ fn work_accept(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
         vec![work.id.clone(), goal.id.clone()],
         json!({ "work": work, "goal": goal, "acceptance": acceptance }),
     ))
+}
+
+fn validate_acceptance_spec(spec: &Value, previous: Option<&Value>) -> Result<()> {
+    if let Some(allowed) = spec.get("delegation_allowed") {
+        // The key was previously unconstrained. Preserve old opaque values
+        // through a revision, while only accepting a boolean for a new value.
+        if !allowed.is_boolean()
+            && previous.and_then(|prior| prior.get("delegation_allowed")) != Some(allowed)
+        {
+            return Err(invalid("acceptance_spec.delegation_allowed must be a boolean"));
+        }
+    }
+    validate_required_checks(spec)
 }
 
 // Admission/revision-time validation of typed Pi acceptance criteria. Borrowed

@@ -122,6 +122,9 @@ pub(super) fn admitted(conn: &Connection, receiver: &Value) -> Result<()> {
     if prior {
         return Ok(());
     }
+    // A queued assignment retains the skill revision selected at admission,
+    // even when the Owner updates that skill before Pi first inspects it.
+    super::pi_execution::skill_refs(conn, &work)?;
     let digest = canonical_digest(&serde_json::to_value(&receiver)?)?;
     let execution = execution_id(&work.owner, &work, &receiver.command_id)?;
     let mut context = Context {

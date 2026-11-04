@@ -210,8 +210,16 @@ pub(crate) fn apply(conn: &Connection, request: &PiToolRequest, scope: PiInferen
         if let Some(work)=inspect_work.as_ref() {
             response.data.as_object_mut().unwrap().insert("independent_verification".into(),serde_json::to_value(super::task_verification::view(conn,work)?)?);
             response.data.as_object_mut().unwrap().insert("command_recipes".into(),serde_json::to_value(super::pi_execution::command_recipe_views(conn,work)?)?);
-            response.data.as_object_mut().unwrap().insert("delegation_contracts".into(),serde_json::to_value(super::delegation_contracts::views(conn,work)?)?);
-            response.data.as_object_mut().unwrap().insert("delegation_templates".into(),serde_json::to_value(super::task_contracts::delegation_views(conn,work)?)?);
+            let leaf = db::goal(conn, &work.goal_id)?
+                .is_some_and(|goal| goal.acceptance_spec["delegation_allowed"] == false);
+            let (contracts, templates) = if leaf {
+                response.data["delegation_allowed"] = Value::Bool(false);
+                (vec![], vec![])
+            } else {
+                (super::delegation_contracts::views(conn, work)?, super::task_contracts::delegation_views(conn, work)?)
+            };
+            response.data["delegation_contracts"] = Value::Array(contracts);
+            response.data["delegation_templates"] = Value::Array(templates);
             let task_input=super::task_contracts::work_input_descriptor(conn,work)?;
             let evaluation_input=super::evaluation_inputs::work_input_descriptor(conn,work)?;
             ensure!(task_input.is_none() || evaluation_input.is_none(),"Work has conflicting immutable input sources");

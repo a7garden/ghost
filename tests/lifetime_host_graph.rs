@@ -49,6 +49,8 @@ fn database() -> (TempDir, Connection) {
     connection.execute_batch(include_str!("../contracts/lifetime/migration-012.sql")).unwrap();
     connection.execute_batch(include_str!("../contracts/lifetime/migration-013.sql")).unwrap();
     connection.execute_batch(include_str!("../contracts/lifetime/migration-014.sql")).unwrap();
+    connection.execute_batch(include_str!("../contracts/lifetime/migration-015.sql")).unwrap();
+    connection.execute_batch(include_str!("../contracts/lifetime/migration-016.sql")).unwrap();
     connection.execute(
         "UPDATE lifetime_verification_policy SET verifier_revision='fixture-verifier/1' WHERE singleton=1",
         [],
@@ -2057,8 +2059,15 @@ fn last_child_acceptance_reassigns_original_parent_and_preserves_closed_artifact
     let parent_id = root.data["work"]["id"].as_str().unwrap();
     let initial = pending_outbox(&conn).unwrap().into_iter()
         .find(|item| item.target == "pi" && item.payload["body"]["work_id"] == parent_id).unwrap();
+    let context_ref: String = conn.query_row(
+        "SELECT json_extract(payload,'$.reference') FROM workspace_objects
+         WHERE kind='ghost_work_context_v1' AND id=?1",
+        [initial.payload["command_id"].as_str().unwrap()],
+        |row| row.get(0),
+    ).unwrap();
     ghost::host::lifetime::ack_outbox(&conn, initial.id, &json!({
         "status":"success", "data":{
+            "context_ref":context_ref,
             "command_id":initial.payload["command_id"],
             "ghost_id":ROOT_GHOST,"conversation_id":ROOT_CONVERSATION,
             "runtime_kind":"pi-durable","runtime_release":"1.1.0",
@@ -2177,4 +2186,38 @@ fn child_revision_invalidates_parent_result_bound_to_older_input_artifacts() {
     assert_ne!(accepted.status, ResponseStatus::Success);
     assert_eq!(snapshot(&conn).unwrap().goals.iter()
         .find(|goal| goal.id == root.data["goal"]["id"].as_str().unwrap()).unwrap().state, "open");
+}
+
+#[test]
+fn bounded_delegation_cannot_widen_its_scope_on_revision() {
+    let (_root, conn) = database();
+    let root = submit_root(&conn, "bounded-root", "Coordinate a bounded research task.");
+    assert_success(&root);
+    let parent = root.data["work"]["id"].as_str().unwrap();
+    let mut child_body = json!({
+        "method":"work.delegate", "parent_work_id":parent, "target_ghost_id":TARGET_A,
+        "summary":"Inspect the assigned evidence and report it.", "artifact_refs":[],
+        "acceptance_spec":{"required_checks":["artifact_content"],"delegation_allowed":false}
+    });
+    let child = send(&conn, &envelope("bounded-child", ROOT_GHOST, 1, Some(1), child_body.clone()), ROOT_GHOST);
+    assert_success(&child);
+    let work_id = child.data["work"]["id"].as_str().unwrap();
+    let goal_id = child.data["goal"]["id"].as_str().unwrap();
+    let re_delegation = |id, revision| delegate(&conn, id, work_id, TARGET_A, revision, TARGET_B, "Pass it on.", vec![]);
+    assert_error(&re_delegation("bounded-grandchild", 1), "unauthorized");
+    assert_error(
+        &update_goal(&conn, "bounded-widen", TARGET_A, goal_id, 1, "Drop my delegation restriction."),
+        "unauthorized",
+    );
+    let revise = envelope("bounded-revise", TARGET_A, 1, Some(1), json!({
+        "method":"goal.update", "goal_id":goal_id, "prompt":"Inspect the same scope with the revised instructions.",
+        "acceptance_spec":child_body["acceptance_spec"],
+    }));
+    assert_success(&send(&conn, &revise, TARGET_A));
+    assert_error(&re_delegation("bounded-grandchild-after-revision", 2), "unauthorized");
+    child_body["target_ghost_id"] = json!(TARGET_B);
+    child_body["acceptance_spec"]["delegation_allowed"] = json!("false");
+    let invalid = envelope("invalid-delegation-limit", ROOT_GHOST, 1, Some(1), child_body);
+    assert_error(&send(&conn, &invalid, ROOT_GHOST), "invalid_request");
+    assert_eq!(snapshot(&conn).unwrap().goals.len(), 2);
 }

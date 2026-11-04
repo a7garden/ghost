@@ -17,6 +17,7 @@ mod actual_sdk {
 
     const MODEL: &str = "fixture/a19-sdk";
     const SIMPLE: &str = "A19_SDK_SIMPLE";
+    const ORCHESTRA: &str = "GHOST_ORCHESTRA_SKILL_CANARY";
     const PARENT: &str = "A19_SDK_PARENT";
     const CHILD: &str = "A19_SDK_CHILD";
     const ANSWER: &str = "a19-sdk-output";
@@ -405,11 +406,16 @@ mod actual_sdk {
             };
             ensure!(shell["content"].to_string().contains("stock-shell-ok"), "stock bash did not return isolated stdout");
         }
+        let orchestra = all.contains(ORCHESTRA);
+        if orchestra {
+            let Some(read) = tool_message(body, "read") else {
+                return Ok(call("read", json!({"path":"answer.txt"})));
+            };
+            ensure!(read["content"].to_string().contains(ANSWER), "Orchestra check did not read the exact output");
+        }
         if tool_result(body, "publish_artifact").is_none() {
-            return Ok(call(
-                "publish_artifact",
-                json!({"path":"answer.txt","privacy":"public"}),
-            ));
+            let privacy = if orchestra { "local_only" } else { "public" };
+            return Ok(call("publish_artifact", json!({"path":"answer.txt","privacy":privacy})));
         }
         Ok(
             json!({"role":"assistant","content":"The artifact is published; independent Host acceptance is separate."}),
@@ -1046,6 +1052,65 @@ mod actual_sdk {
     async fn bundled_bun_stock_tools_delegate_and_report() {
         let binary = PathBuf::from(std::env::var_os("GHOST_TEST_BUNDLED_PI").expect("explicit bundled Pi path"));
         delegation_and_report(Some(binary.canonicalize().unwrap()), false).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires an exported Orchestra skill and an explicit bundled Pi binary"]
+    async fn bundled_bun_applies_exported_orchestra_skill_in_scoped_work() {
+        let binary = PathBuf::from(std::env::var_os("GHOST_TEST_BUNDLED_PI").expect("explicit bundled Pi path"));
+        let exported = PathBuf::from(std::env::var_os("GHOST_TEST_ORCHESTRA_SKILL").expect("explicit exported skill path"));
+        let skill = fs::read_to_string(exported).unwrap();
+        assert!(skill.contains("privacy: local_only") && skill.contains("## Source: `references/shared-defaults.md`"));
+        let digest = format!("{:x}", Sha256::digest(skill.as_bytes()));
+        let mut f = host_fixture();
+        f.host.native_computers.as_mut().unwrap().pi_fixture_allow_private(&f.ghost).unwrap();
+        let _environment = isolated_environment(f.root.path(), &f.ghost).await;
+        let model = ModelServer::start(f.root.path());
+        configure_local(&mut f.host, &model, &[(&f.ghost, &f.conversation)]);
+        {
+            let state = f.host.lock().unwrap();
+            let installed = host::skills::save(
+                &state, &f.host.root, "orchestra-canary-install", &f.ghost, "agent-orchestra", &skill, None,
+            ).unwrap();
+            assert_eq!(installed["skill"]["digest"], digest);
+            assert_eq!(installed["skill"]["privacy"], "local_only");
+        }
+        let admitted = owner(&f.host, "orchestra-canary-work", json!({
+            "method":"goal.submit","ghost_id":f.ghost,"conversation_id":f.conversation,
+            "prompt":format!("{SIMPLE} {ORCHESTRA}"),
+            "privacy":"local_only","acceptance_spec":lifetime::pi_execution::tests::verifier_spec(ANSWER),
+        }), None);
+        let work = admitted["work"]["id"].as_str().unwrap();
+        {
+            let state = f.host.lock().unwrap();
+            let replacement = format!("{skill}\nThis new revision applies to future Work.\n");
+            let saved = host::skills::save(
+                &state, &f.host.root, "orchestra-canary-replace", &f.ghost, "agent-orchestra", &replacement, Some(1),
+            ).unwrap();
+            assert_eq!(saved["skill"]["revision"], 2);
+        }
+        let host = Arc::new(f.host);
+        let http = pi_test_http::Server::start(Arc::clone(&host), "a".repeat(64));
+        let driver = Driver::start_bundled(&host, binary.canonicalize().unwrap());
+        until(&host, &model, &http, "orchestra-skill-accepted", |conn| accepted(conn, work)).await;
+        {
+            let requests = model.requests.lock().unwrap();
+            let prompts = requests.iter().flat_map(|request| request["messages"].as_array().unwrap())
+                .filter(|message| matches!(message["role"].as_str(), Some("system" | "developer")))
+                .filter_map(|message| message["content"].as_str());
+            let delivered = prompts.flat_map(str::lines)
+                .filter_map(|line| serde_json::from_str::<Vec<Value>>(line).ok())
+                .flatten()
+                .find(|value| value["name"] == "agent-orchestra").expect("exact installed skill did not reach Pi");
+            assert_eq!(delivered["content"], skill);
+            assert_eq!(delivered["sha256"], digest);
+            assert_eq!(delivered["privacy"], "local_only");
+        }
+        assert_eq!(effects(&host, work).len(), 3, "write, reread and publish");
+        model.clean();
+        model.owner_tools_absent();
+        assert!(http.errors().is_empty());
+        driver.close(&host).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

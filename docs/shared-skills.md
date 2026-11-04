@@ -32,6 +32,10 @@ Running Work retains its admitted definition, asset bytes, aliases and exact gra
 
 The catalogue and grants are Host control APIs. Models cannot publish or grant catalogue access. This implementation does not migrate installed data, replace local skill storage, or infer project membership permissions.
 
+## Agent Orchestra guidance
+
+Export the common contract, bounded worker guidance and selected domain flows as one local-only Ghost skill. See [Ghost Orchestra workflow](orchestra-workflow.md).
+
 ## Source-derived functionality still open
 
 New Work snapshots current authorized retained references even when its Ghost has no selected definition. Original Work pins never widen during inference. New assignments carry a Host-sealed `ghost-work-context/1` descriptor, bound to the original canonical Ghost/conversation, assignment bytes, Work revisions, execution lineage and admission authority epoch. A trusted runtime binds one exact SDK generation/provider-session/storage tuple before invoking inference. Its outer `context_ref` is accepted only for explicitly scoped Work operations; inference requires the exact assignment/Work pair. An isolated v1 Work can continue after unrelated v2 Owner history, while current v1 grant revocation still blocks inference and cached effect disclosure. Owner history remains independently guarded; attaching a clean Work reference to an unbound Owner request does not bypass it. Contextless cancellation remains available under the existing owned Work/epoch checks without disclosing source history.

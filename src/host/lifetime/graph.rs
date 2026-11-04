@@ -595,6 +595,13 @@ fn work_delegate(
     if parent_goal.state != "open" {
         return Err(apply::conflict("delegation parent Goal is not open"));
     }
+    if parent_goal.acceptance_spec["delegation_allowed"] == false {
+        return Err(apply::reject(
+            "unauthorized",
+            "This bounded Work cannot delegate",
+            RetryClass::Never,
+        ));
+    }
     let Some(scope) = current_scope(conn, &parent_work, false, false)? else {
         return Err(apply::conflict(
             "terminal, cancelled, expired, or superseded ancestors cannot delegate",
