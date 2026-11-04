@@ -664,7 +664,13 @@ try {
   await page.getByRole('button',{name:'다시 불러오기',exact:true}).click();
   const documents=page.getByRole('list',{name:'문서 목록',exact:true});
   await documents.getByRole('button',{name:'프로젝트 메모',exact:true}).waitFor();
-  assert.equal(await page.getByRole('combobox',{name:'문서 폴더',exact:true}).inputValue(),'fixture-docs');
+  const folderSelect=page.getByRole('combobox',{name:'문서 폴더',exact:true});
+  await folderSelect.press('Enter');
+  const selectedFolder=page.getByRole('option',{name:'프로젝트 문서',exact:true});
+  await selectedFolder.waitFor();
+  assert.equal(await selectedFolder.getAttribute('aria-selected'),'true');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>document.activeElement?.id==='document-folder');
   assert.equal(await documents.getByRole('button',{name:/^삭제한 메모/}).count(),0);
   await page.getByRole('button',{name:'삭제된 문서 포함',exact:true}).click();
   await documents.getByRole('button',{name:/^삭제한 메모/}).waitFor();
@@ -703,8 +709,16 @@ try {
   checks.push('document-create-preserves-authored-source-and-retries-without-a-second-write');
 
   await page.setViewportSize({width:320,height:760});
-  await page.getByRole('combobox',{name:'문서 폴더',exact:true}).selectOption('fixture-empty');
-  await page.waitForFunction(()=>document.activeElement?.matches('[data-document-folder]'));
+  await folderSelect.press('Enter');
+  await page.getByRole('option',{name:'프로젝트 문서',exact:true}).waitFor();
+  await page.waitForFunction(()=>document.activeElement?.getAttribute('data-state')==='checked');
+  await page.waitForFunction(()=>getComputedStyle(document.querySelector('[role="listbox"]')).opacity==='1');
+  await page.screenshot({path:`${output}/light-320-document-picker.png`});
+  await page.keyboard.press('ArrowDown');
+  await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='빈 문서 공간');
+  await page.keyboard.press('Enter');
+  await page.waitForURL(url=>url.hash==='#/spaces/fixture-empty');
+  await page.waitForFunction(()=>document.activeElement?.id==='document-folder');
   await page.getByText('아직 문서가 없습니다.',{exact:true}).waitFor();
   assert.equal(await search.count(),0);
   assert.equal(await page.getByRole('button',{name:'삭제된 문서 포함',exact:true}).count(),0);
@@ -860,7 +874,8 @@ try {
     await demo.reload();
     await savedExample.waitFor();
     await demo.screenshot({path:`${output}/light-1440-document-workspace.png`});
-    await demo.getByRole('combobox',{name:'문서 폴더',exact:true}).selectOption('space-ghost');
+    await demo.getByRole('combobox',{name:'문서 폴더',exact:true}).click();
+    await demo.getByRole('option',{name:'Ghost 프로젝트',exact:true}).click();
     const drafts=demo.getByRole('region',{name:'검토할 초안',exact:true});
     await drafts.getByRole('button',{name:/Ghost 소개 문서/}).click();
     const draftReview=demo.getByRole('dialog',{name:'문서 저장 요청',exact:true});
