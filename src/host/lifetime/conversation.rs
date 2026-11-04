@@ -662,7 +662,14 @@ fn goal_create(
     let goal_id = response.data["goal"]["id"]
         .as_str()
         .ok_or_else(|| anyhow!("Goal admission response omitted its Goal identity"))?;
-    super::orchestra::admit_goal(tx, turn_id, goal_id, &acceptance_spec)?;
+    // Registered tasks carry immutable Owner contracts, including historical
+    // opaque fields. Only the unsealed proposal selects a new task route.
+    let task = if envelope.body.get("task_contract_ref").is_none() {
+        acceptance_spec.get("orchestra_task")
+    } else {
+        None
+    };
+    super::orchestra::admit_goal(tx, turn_id, goal_id, task)?;
     tx.execute(
         "INSERT INTO lifetime_turn_goals(turn_id,goal_id) VALUES(?1,?2)",
         params![turn_id, goal_id],

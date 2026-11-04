@@ -122,9 +122,9 @@ pub(super) fn intake_view(conn: &Connection, turn: &str) -> Result<Value> {
     })))
 }
 
-pub(super) fn admit_goal(conn: &Connection, turn: &str, goal: &str, spec: &Value) -> Result<()> {
+pub(super) fn admit_goal(conn: &Connection, turn: &str, goal: &str, proposed_task: Option<&Value>) -> Result<()> {
     let Some(intake) = load::<Intake>(conn, INTAKE, turn)? else { return Ok(()); };
-    let task = match spec.get("orchestra_task") {
+    let task = match proposed_task {
         Some(value) => value.as_str().filter(|task| intake.routes.contains_key(*task))
             .ok_or_else(|| apply::invalid("orchestra_task must match a task offered for the original Owner turn"))?,
         None => DIRECT,
