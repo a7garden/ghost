@@ -1,7 +1,7 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { useId, useState } from 'react';
 import { Card, GPanel } from '@garden/ui';
-import { ArrowUpRight, CircleAlert, GitBranch, Play, Plus, Save, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, CircleAlert, GitBranch, Play, Plus, Save, Square, Trash2 } from 'lucide-react';
 import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { toneFor } from '../client/types';
@@ -37,10 +37,11 @@ export function OrchestrationView({ snapshot, mode, busy, action, navigate }: Pr
     setEditing({ plan, selected, draft: plan ? structuredClone({ title: plan.title, nodes: plan.nodes, edges: plan.edges }) : { title: '', nodes: snapshot.profiles.length ? [newNode(snapshot.profiles[0].id)] : [], edges: [] } });
   };
   return <div className="page-content orchestration-page">
+    <button type="button" className="text-button collab-map-back" onClick={() => navigate('/together')}><ArrowLeft size={15}/>협업</button>
     <div className="page-heading"><h1>작업 구조</h1><button className="button primary" disabled={locked || !snapshot.profiles.length} onClick={() => edit()}><Plus size={16}/>구조 만들기</button></div>
     {!available && <p className="inline-error" role="status"><CircleAlert size={16}/>연결된 호스트가 구조 저장과 실행을 지원하지 않습니다. 새 호스트 버전으로 실행해 주세요.</p>}
     {error && !editing && <p className="inline-error" role="alert">{error}</p>}
-    {!plans.length ? <div className="empty-state large-empty"><GitBranch size={32}/><h2>저장된 작업 구조 없음</h2><p>작업마다 담당 Ghost를 지정하고, 결과를 전달할 다음 작업을 연결하세요.</p><button className="button secondary" disabled={!snapshot.profiles.length || locked} onClick={() => edit()}>구조 만들기<Plus size={16}/></button></div> : <>
+    {!plans.length ? <div className="empty-state large-empty"><GitBranch size={32}/><h2>저장된 작업 구조 없음</h2><p>작업마다 담당 Ghost를 지정하고, 결과를 전달할 다음 작업을 연결하세요.</p></div> : <>
       <div className="graph-plan-tabs" aria-label="저장된 작업 구조">{plans.map(plan => <button className="filter-button" key={plan.id} aria-pressed={selected?.id === plan.id} onClick={() => { setSelectedId(plan.id); setRunId(''); setError(''); }}>{plan.title}</button>)}</div>
       {selected && <>
         <div className="graph-heading"><div><h2>{viewing?.plan.title ?? selected.title}</h2><span>{viewing ? `실행 당시 구조 · 버전 ${viewing.plan.version}` : `저장된 구조 · 버전 ${selected.version}`}</span></div><div className="graph-actions"><button className="button secondary" disabled={locked || !available} onClick={() => edit(selected)}>{viewing ? '저장된 구조 편집' : '구조 편집'}</button><button className="button primary" disabled={locked || Boolean(active) || mode === 'demo' || !available} onClick={() => setConfirmRun(true)}><Play size={14}/>{viewing ? '저장된 구조 실행' : '구조 실행'}</button></div></div>

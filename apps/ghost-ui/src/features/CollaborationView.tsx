@@ -1,7 +1,7 @@
 import { OrchestrationView } from './OrchestrationView';
 import { uiTerms } from '../uiText';
 import { useEffect, useState } from 'react';
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, ChevronRight, CircleAlert, GitBranch, MessageCircle, Plus, RefreshCw, Square, Users } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, CircleAlert, GitBranch, MessageCircle, Plus, RefreshCw, Square } from 'lucide-react';
 import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { Status } from '../components/Status';
@@ -13,46 +13,112 @@ type Action = (command: Command) => Promise<Record<string, any>>;
 type Props = { snapshot: Snapshot; route: string; mode: string; action: Action; query: Action; busy: boolean; navigate: (route: string) => void; onAssign: () => void };
 
 export function CollaborationView(props: Props) {
-  const structure = new URLSearchParams(props.route.split('?')[1] ?? '').get('view') === 'structure';
-  return <><nav className="collaboration-view-tabs" aria-label="협업 보기"><button className="filter-button" aria-pressed={!structure} onClick={() => props.navigate('/together')}>협업 목록</button><button className="filter-button" aria-pressed={structure} onClick={() => props.navigate('/together?view=structure')}>작업 구조</button></nav>{structure ? <OrchestrationView {...props}/> : <CollaborationRecords {...props}/>}</>;
+  const [groupId, setGroupId] = useState('');
+  const params = new URLSearchParams(props.route.split('?')[1] ?? '');
+  if (params.get('view') === 'structure') return <OrchestrationView {...props}/>;
+  return <CollaborationRecords {...props} requested={params.get('delegation')} groupId={groupId} onGroupChange={setGroupId}/>;
 }
-function CollaborationRecords({ snapshot, route, mode, action, query, busy, navigate, onAssign }: Props) {
-  const groups = collaborationGroups(snapshot);
-  const requested = new URLSearchParams(route.split('?')[1] ?? '').get('delegation');
-  const [selected, setSelected] = useState(requested ?? ''), [groupId, setGroupId] = useState(''), [filter, setFilter] = useState('active');
-  useEffect(() => { if (requested) setSelected(requested); }, [requested]);
-  const visible = groups.filter(g => filter === 'all' || g.delegations.some(d => !finishedDelegation(d)));
-  const group = groups.find(g => g.delegations.some(d => d.id === requested)) ?? visible.find(g => g.id === groupId) ?? visible[0];
-  const owner = snapshot.profiles.find(p => p.id === group?.owner);
-  const detail = snapshot.delegations.find(d => d.id === selected);
-  const completed = group?.delegations.filter(d => d.state === 'complete').length ?? 0;
-  const involved = group ? new Set([group.owner, ...group.delegations.map(d => d.target)]).size : 0;
+
+type Group = ReturnType<typeof collaborationGroups>[number];
+const activeGroup = (group: Group) => group.delegations.some(item => !finishedDelegation(item));
+
+function CollaborationRecords({ snapshot, requested, groupId, onGroupChange, mode, action, query, busy, navigate, onAssign }: Props & {
+  requested: string | null; groupId: string; onGroupChange(id: string): void;
+}) {
+  const [selected, setSelected] = useState(requested ?? '');
+  useEffect(() => { setSelected(requested ?? ''); }, [requested]);
+
+  const groups = collaborationGroups(snapshot).sort((a, b) => Number(activeGroup(b)) - Number(activeGroup(a)));
+  const group = groups.find(item => item.delegations.some(delegation => delegation.id === requested))
+    ?? groups.find(item => item.id === groupId) ?? groups[0];
+  const displayedGroupId = group?.id;
+  useEffect(() => {
+    if (displayedGroupId) onGroupChange(displayedGroupId);
+  }, [displayedGroupId, onGroupChange]);
+  const detail = snapshot.delegations.find(item => item.id === selected);
+
   return <div className="page-content collaboration-page">
-    <div className="page-heading"><div><h1>{uiTerms.collaboration}</h1></div><button className="button primary" onClick={onAssign} disabled={!snapshot.profiles.length}><Plus size={16}/>협업 요청</button></div>
-    <div className="collab-filters"><div className="filter-options"><button className={`filter-button ${filter === 'active' ? 'selected' : ''}`} aria-pressed={filter === 'active'} onClick={() => { setFilter('active'); navigate('/together'); }}>진행 중</button><button className={`filter-button ${filter === 'all' ? 'selected' : ''}`} aria-pressed={filter === 'all'} onClick={() => { setFilter('all'); navigate('/together'); }}>모든 협업</button></div><span className="muted">{visible.length}건의 협업</span></div>
-    {visible.length > 1 && <div className="collab-group-tabs" aria-label="협업 선택">{visible.map(g => <button key={g.id} className={`filter-button ${g.id === group?.id ? 'selected' : ''}`} onClick={() => { setGroupId(g.id); navigate('/together'); }}><DotAvatar profileId={g.owner} tone={toneFor(g.owner)} size={25}/><span>{g.title}</span></button>)}</div>}
-    {group ? <>
-      <section className="collab-board" aria-label={`${group.title} 협업 관계`}>
-        <div className="collab-board-heading"><div><h2>{group.title}</h2><p>{involved}명의 Ghost · {completed}/{group.delegations.length}개 결과 전달</p></div><button className="text-button" onClick={() => navigate(`/ghosts/${group.owner}${group.sourceId ? `?conversation=${group.sourceId}` : ''}`)}>시작한 대화<ArrowUpRight size={14}/></button></div>
-        <div className="collab-flow">
-          <div className="collab-lead"><span className="flow-role">요청한 Ghost</span><button className="leader-node" onClick={() => navigate(`/ghosts/${group.owner}${group.sourceId ? `?conversation=${group.sourceId}` : ''}`)}><DotAvatar profileId={group.owner} tone={toneFor(group.owner)} size={64}/><strong>{owner?.name ?? '연결되지 않은 Ghost'}</strong><span>{owner?.persona ?? '저장된 협업 기록'}</span><span className="leader-action"><MessageCircle size={13}/>대화 열기<ArrowUpRight size={13}/></span></button></div>
-          <div className="flow-bridge" aria-hidden="true"><span/><ArrowRight size={17}/><small>위임</small></div>
-          <div className="collab-branches"><span className="flow-role">참여 Ghost</span><div className="collab-workers">{group.delegations.map(d => {
-            const ctx = delegationContext(snapshot, d);
-            return <button key={d.id} className={`worker-node ${ctx.status === 'attention' ? 'needs-owner' : ''}`} aria-label={`${ctx.owner?.name ?? 'Ghost'}에서 ${ctx.target?.name ?? 'Ghost'}로 맡긴 협업 기록`} onClick={() => setSelected(d.id)}>
-              <div className="worker-identity"><DotAvatar profileId={d.target} tone={toneFor(d.target)} size={40}/><div><strong>{ctx.target?.name ?? '연결되지 않은 Ghost'}</strong><Status state={ctx.status} label={ctx.label}/></div><ChevronRight size={16}/></div>
-              <h3>{ctx.title}</h3>{ctx.summary && <p>{ctx.summary}</p>}
-              <div className="worker-footer"><span><span className={`mini-dot ${!finishedDelegation(d) ? 'active' : ''}`}/>{finishedDelegation(d) ? (d.state === 'complete' ? '결과 전달됨' : ctx.label) : d.background ? '백그라운드 협업' : '결과 대기'}</span><span>기록 보기<ArrowUpRight size={13}/></span></div>
-            </button>;
-          })}</div></div>
-        </div>
-        <div className="collab-return"><ArrowDownLeft size={18}/><p>결과 수신: <strong>{owner?.name ?? '요청한 Ghost'}</strong></p><span className="return-progress">{completed} / {group.delegations.length}</span></div>
-      </section>
-      <section className="collab-under"><div><h2>연결된 대화</h2></div><div className="collab-conversations">{group.delegations.map(d => { const ctx = delegationContext(snapshot, d); return <button key={d.id} onClick={() => navigate(`/ghosts/${d.target}?conversation=${d.conversation_id}`)}><DotAvatar profileId={d.target} tone={toneFor(d.target)} size={36}/><span><strong>{ctx.target?.name ?? 'Ghost'}</strong><small>{ctx.title}</small></span><ArrowUpRight size={15}/></button>; })}</div></section>
-      <p className="workspace-foot">{mode === 'demo' ? '예시 데이터' : ''}</p>
-    </> : <div className="empty-state large-empty"><GitBranch size={34}/><h2>{groups.length ? '진행 중인 협업 없음' : '협업 기록 없음'}</h2><p>{groups.length ? '모든 협업에서 이전 기록과 결과를 살펴보세요.' : 'Ghost에게 다른 Ghost와 함께 일해 달라고 요청해 보세요. 실제로 전달된 요청이 여기에 나타납니다.'}</p><button className="button secondary" onClick={() => groups.length ? setFilter('all') : onAssign()}>{groups.length ? '모든 협업 보기' : '협업 요청하기'}<ArrowRight size={14}/></button></div>}
-    {detail && <CollaborationRecord snapshot={snapshot} delegation={detail} query={query} action={action} busy={busy} navigate={navigate} onClose={() => setSelected('')}/>}
+    <header className="page-heading collab-heading">
+      <div className="collab-heading-title"><h1>{uiTerms.collaboration}</h1>
+        {mode === 'demo' && <span>예시 데이터</span>}
+      </div>
+      <div className="collab-actions">
+        <button type="button" className="button secondary" onClick={() => navigate('/together?view=structure')}><GitBranch size={15}/>작업 구조</button>
+        <button type="button" className="button primary" onClick={onAssign} disabled={!snapshot.profiles.length}><Plus size={16}/>협업 요청</button>
+      </div>
+    </header>
+
+    {group ? <div className={`collab-workbench ${groups.length > 1 ? 'has-index' : ''}`}>
+      {groups.length > 1 && <nav className="collab-index" aria-label="협업 선택">
+        {groups.map(item => {
+          const open = item.id === group.id;
+          const active = item.delegations.filter(delegation => !finishedDelegation(delegation)).length;
+          return <button type="button" className="collab-index-row" aria-current={open ? 'true' : undefined} key={item.id}
+            title={item.title} onClick={() => { onGroupChange(item.id); if (requested) navigate('/together'); }}>
+            <DotAvatar profileId={item.owner} tone={toneFor(item.owner)} size={28}/>
+            <span className="collab-index-copy"><strong>{item.title}</strong>
+              <small data-active={active > 0}>{active ? `진행 중 ${active}개` : '종료'}</small></span>
+          </button>;
+        })}
+      </nav>}
+      <CollaborationMap snapshot={snapshot} group={group} onOpen={setSelected} navigate={navigate}/>
+    </div> : <div className="collab-empty">
+      <h2>아직 협업이 없습니다.</h2>
+      {snapshot.profiles.length > 0 && <p>Ghost에게 다른 Ghost와 함께 일해 달라고 요청하면 여기에 표시됩니다.</p>}
+    </div>}
+
+    {detail && <CollaborationRecord key={detail.id} snapshot={snapshot} delegation={detail} query={query} action={action}
+      busy={busy} navigate={navigate} onClose={() => setSelected('')}/>}
   </div>;
+}
+
+function CollaborationMap({ snapshot, group, onOpen, navigate }: {
+  snapshot: Snapshot; group: Group; onOpen(id: string): void; navigate: Props['navigate'];
+}) {
+  const owner = snapshot.profiles.find(profile => profile.id === group.owner);
+  const recipients = new Map<string, { name: string; tasks: { delegation: Delegation; context: ReturnType<typeof delegationContext> }[] }>();
+  for (const delegation of group.delegations) {
+    const context = delegationContext(snapshot, delegation);
+    const recipient = recipients.get(delegation.target) ?? { name: context.target?.name ?? '연결되지 않은 Ghost', tasks: [] };
+    recipient.tasks.push({ delegation, context });
+    recipients.set(delegation.target, recipient);
+  }
+  const completed = group.delegations.filter(item => item.state === 'complete').length;
+  return <section className="collab-map" aria-label={`${group.title} 협업 관계`}>
+    <header className="collab-map-heading">
+      <h2>{group.title}</h2>
+      <span>결과 전달 {completed}/{group.delegations.length}</span>
+    </header>
+    <div className="collab-map-surface">
+      <div className="collab-map-flow">
+        <button type="button" className="collab-map-source"
+          onClick={() => navigate(`/ghosts/${group.owner}${group.sourceId ? `?conversation=${encodeURIComponent(group.sourceId)}` : ''}`)}
+          aria-label={`${owner?.name ?? '요청한 Ghost'} · 시작한 대화`}>
+          <DotAvatar profileId={group.owner} tone={toneFor(group.owner)} size={40}/>
+          <span><small>요청한 Ghost</small><strong>{owner?.name ?? '연결되지 않은 Ghost'}</strong></span>
+          <ArrowUpRight size={15} aria-hidden="true"/>
+        </button>
+        <ul className="collab-map-branches" aria-label="참여 Ghost">
+          {[...recipients].map(([id, recipient]) => {
+            const flow = recipient.tasks.some(({ context }) => context.status === 'attention') ? 'attention'
+              : recipient.tasks.some(({ context }) => context.status === 'working') ? 'working' : 'idle';
+            return <li className="collab-map-branch" data-flow={flow} key={id}>
+              <div className="collab-map-recipient">
+                <h3><DotAvatar profileId={id} tone={toneFor(id)} size={32}/><span>{recipient.name}</span></h3>
+                <ul className="collab-map-tasks">{recipient.tasks.map(({ delegation, context }) => <li key={delegation.id}>
+                  <button type="button" className="collab-map-task" aria-haspopup="dialog" title={context.title}
+                    onClick={() => onOpen(delegation.id)}>
+                    <span><strong>{context.title}</strong><Status state={context.status} label={context.label}/></span>
+                    <ArrowUpRight size={15} aria-hidden="true"/>
+                  </button>
+                </li>)}</ul>
+              </div>
+            </li>;
+          })}
+        </ul>
+      </div>
+    </div>
+  </section>;
 }
 
 function CollaborationRecord({ snapshot, delegation: d, query, action, busy, navigate, onClose }: { snapshot: Snapshot; delegation: Delegation; query: Action; action: Action; busy: boolean; navigate: Props['navigate']; onClose: () => void }) {
@@ -67,9 +133,12 @@ function CollaborationRecord({ snapshot, delegation: d, query, action, busy, nav
     };
     void load(); return () => { alive = false; clearTimeout(timer); };
   }, [d.id, query, attempt]);
-  return <Modal title="협업 기록" onClose={onClose} drawer><div className="collab-record">
+  return <Modal title="협업 기록" onClose={onClose} drawer focusClose><div className="collab-record">
     <div className="record-pair"><div><DotAvatar profileId={d.owner} tone={toneFor(d.owner)} size={48}/><strong>{ctx.owner?.name ?? 'Ghost'}</strong><span>요청</span></div><ArrowRight size={22}/><div><DotAvatar profileId={d.target} tone={toneFor(d.target)} size={48}/><strong>{ctx.target?.name ?? 'Ghost'}</strong><span>함께 진행</span></div></div>
-    <div className="record-heading"><h2>{ctx.title}</h2><Status state={ctx.status} label={ctx.label}/></div>
+    <div className="record-heading"><h2>{ctx.title}</h2><div className="record-state"><Status state={ctx.status} label={ctx.label}/>
+      {d.background && !finishedDelegation(d) && <small>백그라운드 협업</small>}</div>
+      {ctx.summary && !messages.some(message => message.event.summary === ctx.summary) && <p className="record-summary">{ctx.summary}</p>}
+    </div>
     {error && <div className="inline-error" role="alert"><CircleAlert size={16}/><span>{error}</span><button className="icon-button" aria-label="협업 기록 다시 불러오기" onClick={() => setAttempt(n => n + 1)}><RefreshCw size={15}/></button></div>}
     {loading ? <div className="skeleton record-skeleton" aria-label="협업 기록 불러오는 중"/> : <ol className="collab-timeline">{messages.map(m => { const sender = snapshot.profiles.find(p => p.id === m.from); const type = ({ requested: '요청', accepted: '수락', progress: '진행 보고', result: '결과 전달', cancel_requested: '취소 요청', cancel_receipt: '취소 확인' }[m.event.type] ?? m.event.type); return <li key={m.message_id}><div className="timeline-marker">{m.event.type === 'result' ? <Check size={14}/> : <DotAvatar profileId={m.from} tone={toneFor(m.from)} size={29}/>}</div><div className="timeline-copy"><div><strong>{sender?.name ?? 'Ghost'}</strong><time dateTime={new Date(m.created_ms).toISOString()}>{new Date(m.created_ms).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</time></div><h3>{type}</h3>{(m.event.prompt || m.event.summary || m.event.reason) && <p>{m.event.prompt || m.event.summary || m.event.reason}</p>}{m.event.artifacts?.length ? <div className="timeline-artifacts">{m.event.artifacts.map((a, i) => <span key={i}>{a}</span>)}</div> : null}{m.event.uncertain_effects?.length ? <p className="form-error">결과 확인이 필요한 작업이 {m.event.uncertain_effects.length}개 있습니다.</p> : null}</div></li>; })}</ol>}
     {!loading && !messages.length && !error && <p className="quiet-empty">저장된 협업 메시지가 아직 없습니다.</p>}

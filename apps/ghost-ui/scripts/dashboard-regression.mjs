@@ -114,6 +114,13 @@ async function fixtureContext(theme='light') {
       if(command.type==='workspace' && command.action?.type==='memory_source_list') {
         return route.fulfill({json:{ok:true,result:reply({sources:[],truncated:false})}});
       }
+      if(command.type==='workspace' && command.action?.type==='collaboration_messages') {
+        const {delegation_id}=command.action;
+        return route.fulfill({json:{ok:true,result:[{
+          message_id:`${delegation_id}-message`, from:scout, created_ms:1793761200000,
+          event:{type:'progress',summary:`${delegation_id} 진행 기록`},
+        }]}});
+      }
       if(command.type==='workspace' && command.action?.type==='list_pages') {
         if(spaceListFailure) return route.fulfill({status:502,json:{ok:false,error:'fixture document read unavailable'}});
         return route.fulfill({json:{ok:true,result:command.action.space_id==='fixture-docs' ? spacePages : []}});
@@ -482,6 +489,8 @@ try {
   const beforeCollaborationRequest=writes.length;
   await page.goto(`${origin}/#/together`);
   await page.getByRole('heading',{name:'협업',exact:true,level:1}).waitFor();
+  await page.getByRole('heading',{name:'아직 협업이 없습니다.',exact:true}).waitFor();
+  assert.equal(await page.getByRole('navigation',{name:'협업 선택'}).count(),0);
   await page.getByRole('button',{name:'협업 요청',exact:true}).click();
   await page.locator('#lifetime-message').waitFor();
   assert.equal(new URL(page.url()).hash,'#/lifetime','the retired collaboration form routes to the durable Ghost conversation');
@@ -647,6 +656,57 @@ try {
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:`${output}/light-320-empty-document-space.png`});
   checks.push('document-space-switches-on-mobile-and-omits-unused-controls-when-empty');
+
+  const fixtureConversation = (id, title, tasks=[]) => ({id,title,tasks,model:'mock',offline:true,messages:[]});
+  workspace.profiles[0].conversations=[
+    fixtureConversation('past-source','완료한 협업',[{id:'past-delegate'}]),
+    fixtureConversation('active-source','진행하는 협업',[{id:'active-delegate'}]),
+  ];
+  workspace.profiles[1].conversations=[
+    fixtureConversation('scout-first','첫 번째 조사'),
+    fixtureConversation('scout-second','두 번째 조사',[{id:'scout-task',phase:'model_running',partial:'진행 중인 초안'}]),
+    fixtureConversation('scout-past','이전 조사'),
+  ];
+  workspace.delegations=[
+    {id:'past',owner:primary,owner_task:'past-delegate',target:scout,conversation_id:'scout-past',state:'complete'},
+    {id:'first',owner:primary,owner_task:'active-delegate',target:scout,conversation_id:'scout-first',state:'complete'},
+    {id:'second',owner:primary,owner_task:'active-delegate',target:scout,conversation_id:'scout-second',task_id:'scout-task',state:'running'},
+  ];
+  await page.setViewportSize({width:1440,height:900});
+  await page.goto(`${origin}/#/together`);
+  await page.reload();
+  const collaborationIndex=page.getByRole('navigation',{name:'협업 선택',exact:true});
+  const currentMap=page.getByRole('region',{name:'진행하는 협업 협업 관계',exact:true});
+  await currentMap.waitFor();
+  assert.equal(await collaborationIndex.getByRole('button').first().getAttribute('aria-current'),'true');
+  assert.equal(await currentMap.getByRole('heading',{name:'Scout',exact:true}).count(),1);
+  const secondTask=currentMap.getByRole('button',{name:/^두 번째 조사/});
+  await secondTask.click();
+  const record=page.getByRole('dialog',{name:'협업 기록',exact:true});
+  await record.getByText('second 진행 기록',{exact:true}).waitFor();
+  await record.getByText('진행 중인 초안',{exact:true}).waitFor();
+  await page.keyboard.press('Escape');
+  await record.waitFor({state:'detached'});
+  assert.equal(await secondTask.evaluate(button=>document.activeElement===button),true);
+  await collaborationIndex.getByRole('button',{name:/^완료한 협업/}).click();
+  const pastMap=page.getByRole('region',{name:'완료한 협업 협업 관계',exact:true});
+  await pastMap.waitFor();
+  await page.getByRole('button',{name:'작업 구조',exact:true}).click();
+  await page.getByRole('heading',{name:'작업 구조',exact:true,level:1}).waitFor();
+  await page.getByRole('main').getByRole('button',{name:'협업',exact:true}).click();
+  await pastMap.waitFor();
+  await page.goto(`${origin}/#/together?delegation=first`);
+  await record.getByText('first 진행 기록',{exact:true}).waitFor();
+  await page.keyboard.press('Escape');
+  await currentMap.waitFor();
+  await page.screenshot({path:`${output}/light-1440-collaboration-index.png`});
+  await secondTask.click();
+  await record.getByRole('button',{name:'대화 열기',exact:true}).click();
+  await page.waitForURL(url=>{
+    const [path,query]=url.hash.split('?');
+    return path===`#/ghosts/${scout}` && new URLSearchParams(query).get('conversation')==='scout-second';
+  });
+  checks.push('collaboration-groups-by-actual-recipient-and-keeps-history-deep-links-and-focus');
   await context.close();
 
   const demoContext=await browser.newContext({viewport:{width:375,height:760}});
@@ -710,8 +770,25 @@ try {
     await demo.getByText('브라우저에 저장되는 예시 데이터로 화면을 둘러볼 수 있습니다.',{exact:true}).waitFor();
     await demo.getByRole('complementary',{name:'작업실 탐색',exact:true}).getByRole('button',{name:'협업',exact:true}).click();
     await demo.getByRole('heading',{name:'협업',exact:true,level:1}).waitFor();
-    const collaborationViews=demo.getByRole('navigation',{name:'협업 보기',exact:true});
-    assert.deepEqual(await collaborationViews.getByRole('button').allTextContents(),['협업 목록','작업 구조']);
+    const map=demo.getByRole('region',{name:/협업 관계$/});
+    await map.getByRole('heading',{name:'Nova',exact:true}).waitFor();
+    assert.equal(await demo.getByRole('navigation',{name:'협업 보기',exact:true}).count(),0);
+    for(const width of [320,375,414,768,1440]) {
+      await demo.setViewportSize({width,height:900});
+      assert.deepEqual(await demo.locator('main button, .collab-map').evaluateAll(nodes=>nodes.filter(node=>{
+        const bounds=node.getBoundingClientRect();
+        return bounds.width>0 && (bounds.left<0 || bounds.right>innerWidth+1);
+      }).map(node=>node.className)),[],`collaboration map overflows at ${width}px`);
+      if(width===320||width===1440) await demo.screenshot({path:`${output}/light-${width}-collaboration-map.png`});
+      checks.push(`collaboration-map-fits-${width}px`);
+    }
+    await demo.getByRole('button',{name:'작업 구조',exact:true}).click();
+    await demo.getByRole('heading',{name:'작업 구조',exact:true,level:1}).waitFor();
+    await demo.getByRole('button',{name:'구조 만들기',exact:true}).click();
+    await demo.getByRole('dialog',{name:'작업 구조 만들기',exact:true}).getByLabel('구조 이름').waitFor();
+    await demo.keyboard.press('Escape');
+    await demo.getByRole('main').getByRole('button',{name:'협업',exact:true}).click();
+    await map.waitFor();
     checks.push('demo-status-describes-data-and-collaboration-entry-label-matches-page');
   } finally {
     await demoContext.close();

@@ -1,8 +1,7 @@
-.collaboration-view-tabs { display:flex; gap:4px; max-width:1240px; margin:0 auto; padding:20px 20px 0; }
 .page-content.orchestration-page { padding-top:24px; }
 .orchestration-page .page-heading { margin-bottom:24px; }
 .graph-plan-tabs, .graph-run-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
-.graph-plan-tabs [aria-pressed="true"], .graph-run-tabs [aria-pressed="true"], .collaboration-view-tabs [aria-pressed="true"] { background:var(--color-background-secondary-active); color:var(--color-text); }
+.graph-plan-tabs [aria-pressed="true"], .graph-run-tabs [aria-pressed="true"] { background:var(--color-background-secondary-active); color:var(--color-text); }
 .graph-heading, .graph-history-heading { display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; margin:16px 0; }
 .graph-heading h2, .graph-history-heading h2 { font-size:15px; font-weight:550; }
 .graph-heading > div:first-child { display:grid; gap:6px; }
@@ -46,7 +45,6 @@
 .graph-node-editor .graph-dependencies label { display:flex; flex-direction:row; gap:8px; align-items:flex-start; overflow-wrap:anywhere; }
 .graph-dependencies input[type="checkbox"] { width:16px; min-height:16px; margin-top:2px; }
 .graph-editor-footer { display:flex; justify-content:flex-end; gap:8px; }
-@media (min-width:40rem) { .collaboration-view-tabs { padding-inline:32px; } }
-@media (min-width:56rem) { .collaboration-view-tabs { padding-inline:36px; } }
-@media (min-width:76rem) { .collaboration-view-tabs { padding-inline:44px; } }
 @media (max-width:800px) { .graph-editor-layout { grid-template-columns:minmax(0,1fr); } .graph-editor-layout .graph-canvas-scroll { max-height:260px; } }
+
+.orchestration-page > .collab-map-back { margin-bottom: var(--space-xs); }
