@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationRun, Response } from "../../../../contracts/lifetime/bindings.ts";
-import { mergeConversationRuns, parseConversationPage } from "./conversation";
+import { mergeConversationRuns, mergeConversationTurns, parseConversationPage } from "./conversation";
 
 const target = {
   ghost_id: "11111111-1111-4111-8111-111111111111",
@@ -42,6 +42,20 @@ function pageResponse(conversationId = target.conversation_id, turns = [canonica
 }
 
 describe("canonical conversation pages", () => {
+  it("keeps a link learned after the original turn when an older page omits it", () => {
+    const read = (turn: typeof canonicalTurn) => parseConversationPage(pageResponse(target.conversation_id, [turn]), target).turns;
+    const first = read(canonicalTurn);
+    const later = read(Object.assign({}, canonicalTurn, { work_thread_ids: ["work-a"] }));
+    const second = read(Object.assign({}, canonicalTurn, { work_thread_ids: ["work-b"] }));
+    expect(mergeConversationTurns(mergeConversationTurns(mergeConversationTurns(first, later), second), first))
+      .toEqual([{ ...canonicalTurn, work_thread_ids: ["work-a", "work-b"] }]);
+  });
+
+  it("allows a canonical report to link back to its work and rejects advisory links without a report origin", () => {
+    const report = { ...canonicalTurn, kind: "assistant_advisory", sender_kind: "ghost", origin_report_id: "report-1", work_thread_ids: ["work-a"] };
+    expect(parseConversationPage(pageResponse(target.conversation_id, [report]), target).turns[0]?.work_thread_ids).toEqual(["work-a"]);
+    expect(() => parseConversationPage(pageResponse(target.conversation_id, [{ ...report, origin_report_id: undefined }]), target)).toThrow();
+  });
 
   it("rejects a page for a different registered conversation", () => {
     expect(() => parseConversationPage(

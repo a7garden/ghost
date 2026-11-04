@@ -724,6 +724,10 @@ impl NativeComputers {
         self.registry.lock().release_worker_home(&route.computer_id, ghost, execution, epoch)
     }
 
+    pub(crate) fn pi_release_cancelled(&self, computer: &str, ghost: &str, execution: &str, epoch: u64) -> Result<()> {
+        self.registry.lock().release_worker_home_if_acquired(computer, ghost, execution, epoch)
+    }
+
     /// Provision only the caller's already accepted Pi execution profile.
     /// All paths, capabilities and computer identity are Host-derived. This
     /// crosses the registry database boundary; call outside a Host transaction.

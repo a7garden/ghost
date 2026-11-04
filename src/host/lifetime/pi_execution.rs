@@ -2196,7 +2196,17 @@ pub(super) fn owner_goal_expectations(
     goal: &crate::lifetime_contract::Goal,
 ) -> Result<bool> {
     if super::task_contracts::authorizes_goal(conn,goal)? {return Ok(true);}
-    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM lifetime_commands WHERE actor_ref='owner' AND json_extract(response,'$.status')='success' AND json_extract(response,'$.data.goal.id')=?1 AND json_extract(response,'$.data.goal.revision')=?2 AND json_extract(response,'$.data.goal.requirement_digest')=?3 AND json_extract(request,'$.body.method') IN ('goal.submit','goal.update','work.delegate'))",
+    // A follow-up inherits existing authority for the unchanged acceptance
+    // spec. It cannot promote model-written expectations to Owner approval.
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM lifetime_commands
+         WHERE actor_ref='owner' AND json_extract(response,'$.status')='success'
+           AND json_extract(response,'$.data.goal.id')=?1
+           AND json_extract(response,'$.data.goal.revision')=?2
+           AND json_extract(response,'$.data.goal.requirement_digest')=?3
+           AND json_extract(request,'$.body.method') IN ('goal.submit','goal.update','work.delegate')
+           AND (json_type(request,'$.body.follow_up') IS NULL
+                OR json_extract(response,'$.data.retained_owner_expectations')=1))",
         params![goal.id,goal.revision,goal.requirement_digest],|r|r.get(0))?)
 }
 

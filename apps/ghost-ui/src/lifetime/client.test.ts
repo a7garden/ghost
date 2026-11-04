@@ -21,6 +21,18 @@ function options(workspace_id: string, authority_epoch: number, dispatch_enabled
 }
 
 describe("lifetime client outbox", () => {
+  it("does not fence Owner writes after a receiptless work thread read loses its response", async () => {
+    const client = createLifetimeClient({
+      snapshot: async () => fixtureSnapshot,
+      async request(envelope) {
+        if (envelope.body.method === "goal.thread.inspect") throw new Error("read response lost");
+        return durableResponse;
+      },
+    }, memoryStorage(), options("11111111-1111-4111-8111-111111111111", 1));
+    await expect(client.request({ method: "goal.thread.inspect", goal_id: "goal-a" })).rejects.toThrow("read response lost");
+    expect(await client.pendingCommands()).toEqual([]);
+    await expect(client.request(command)).resolves.toEqual(durableResponse);
+  });
   it("keeps a live read journal without presenting it as an uncertain write", async () => {
     const storage = memoryStorage();
     const authority = options("11111111-1111-4111-8111-111111111111", 1);

@@ -94,7 +94,9 @@ pub(super) fn apply(conn: &Connection, envelope: &Envelope, principal: &str,
         ));
     }
 
-    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let thread_read = envelope.body["method"] == "goal.thread.inspect";
+    let behavior = if thread_read { TransactionBehavior::Deferred } else { TransactionBehavior::Immediate };
+    let tx = Transaction::new_unchecked(conn, behavior)?;
     let epoch = revision(envelope.authority_epoch)?;
     if let Some(response) = super::authority::guard(&tx, envelope)? {
         return Ok(response);
@@ -104,6 +106,17 @@ pub(super) fn apply(conn: &Connection, envelope: &Envelope, principal: &str,
             return Ok(error_response("unauthorized", "command receipts require owner authentication", RetryClass::Never));
         }
         let response = super::receipts::inspect(&tx, envelope, principal)?;
+        tx.commit()?;
+        return Ok(response);
+    }
+    if thread_read {
+        let response = match super::work_threads::inspect(&tx, &envelope.body, principal) {
+            Ok(response) => response,
+            Err(error) => match error.downcast_ref::<Rejected>() {
+                Some(rejection) => error_response(rejection.code, &rejection.summary, rejection.retry_class.clone()),
+                None => return Err(error),
+            },
+        };
         tx.commit()?;
         return Ok(response);
     }
@@ -416,10 +429,7 @@ fn goal_update(
     principal: &str,
     context: &mut ApplyContext,
 ) -> Result<Response> {
-    exact_fields(
-        &envelope.body,
-        &["method", "goal_id", "prompt", "acceptance_spec"],
-    )?;
+    super::work_threads::goal_update_fields(&envelope.body)?;
     let goal_id = string_field(&envelope.body, "goal_id")?;
     let prompt = string_field(&envelope.body, "prompt")?;
     validate_text("prompt", prompt)?;
@@ -446,6 +456,12 @@ fn goal_update(
     if goal.revision != expected_revision {
         return Err(conflict("goal revision changed; inspect before updating"));
     }
+    let retained_owner_expectations = if envelope.body.get("follow_up").is_some() {
+        super::work_threads::validate_follow_up(conn, &envelope.body, &goal, principal, prompt, acceptance_spec)?;
+        Some(super::pi_execution::owner_goal_expectations(conn, &goal)?)
+    } else {
+        None
+    };
     let next_revision = goal
         .revision
         .checked_add(1)
@@ -482,6 +498,16 @@ fn goal_update(
                 work.blocker = Some("goal requirement changed".to_owned());
                 db::update_work(conn, work)?;
             }
+        } else if was_current && retained_owner_expectations.is_some()
+            && work.execution_id.is_none()
+            && work.blocker.as_deref().is_some_and(|blocker| blocker.starts_with(super::graph::WAIT_BLOCKER))
+        {
+            // A parked Pi generation remains bound to its original revision.
+            superseded_work_ids.insert(work.id.clone());
+            work.state = "cancelled".to_owned();
+            work.cancellation = "confirmed".to_owned();
+            work.blocker = None;
+            db::update_work(conn, work)?;
         } else if work.goal_revision == expected_revision && work.execution_id.is_none() {
             work.goal_revision = next_revision;
             // An explicit new requirement rearms unassigned delivery stops,
@@ -560,11 +586,11 @@ fn goal_update(
     }
     let mut refs = vec![goal.id.clone()];
     refs.extend(works.iter().map(|work| work.id.clone()));
-    Ok(success(
-        "goal requirement updated",
-        refs,
-        json!({ "goal": goal, "work": works }),
-    ))
+    let mut data = json!({ "goal": goal, "work": works });
+    if let Some(retained) = retained_owner_expectations {
+        data["retained_owner_expectations"] = json!(retained);
+    }
+    Ok(success("goal requirement updated", refs, data))
 }
 
 fn work_inspect(conn: &Connection, body: &Value) -> Result<Response> {
@@ -978,6 +1004,13 @@ fn work_result(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
             work.state = "cancelled".to_owned();
             work.blocker = None;
             db::update_work(conn, &work)?;
+            if producer == format!("pi-result:{}:{execution_id}", work.owner) {
+                conn.execute(
+                    "UPDATE lifetime_pi_executions SET state='cancelled'
+                     WHERE execution_id=?1 AND authority_epoch=?2 AND state='running'",
+                    params![execution_id, epoch_sql],
+                )?;
+            }
         } else if current {
             work.state = state.to_owned();
             work.blocker = None;
@@ -995,7 +1028,7 @@ fn work_result(conn: &Transaction<'_>, envelope: &Envelope, principal: &str, con
     {
         super::mailbox::notify_work(conn, &work, &goal, "result")?;
     }
-    if is_newer && state != "running" {
+    if is_newer && state != "running" && !(state == "cancelled" && goal_revision != goal.revision) {
         let report_summary=if super::super::work_memory::has_lineage(conn,&work)? || super::super::memory_publication::has_work_dependencies(conn,&work)? {"Work-scoped source content is retained in its original execution; this report contains status metadata only."}else{_summary};
         let body = json!({
             "method":"conversation.submit","ghost_id":goal.accountable_ghost,

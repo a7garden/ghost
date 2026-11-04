@@ -638,10 +638,7 @@ fn verify_goal_update_source(
             RetryClass::Never,
         ));
     }
-    host_apply::exact_fields(
-        &source.envelope.body,
-        &["method", "goal_id", "prompt", "acceptance_spec"],
-    )?;
+    super::work_threads::goal_update_fields(&source.envelope.body)?;
     let previous_revision = source
         .envelope
         .expected_revision
@@ -958,10 +955,7 @@ fn verify_revision_source(
     ghost_id: &str,
     conversation_id: &str,
 ) -> Result<()> {
-    host_apply::exact_fields(
-        &source.envelope.body,
-        &["method", "goal_id", "prompt", "acceptance_spec"],
-    )?;
+    super::work_threads::goal_update_fields(&source.envelope.body)?;
     let prompt = host_apply::string_field(&source.envelope.body, "prompt")?;
     let acceptance_spec = host_apply::value_field(&source.envelope.body, "acceptance_spec")?;
     let requirement_digest = canonical_digest(&json!({

@@ -397,7 +397,7 @@ function scopedConversationInspectResponse(response, body) {
     ghost_id: page.ghost_id,
     conversation_id: page.conversation_id,
     privacy: page.privacy,
-    turns: page.turns,
+    turns: page.turns.map(({ work_thread_ids: _workThreads, ...turn }) => turn),
     turn_runs: turnRuns,
     has_older: page.has_older,
     oldest_sequence: page.oldest_sequence,

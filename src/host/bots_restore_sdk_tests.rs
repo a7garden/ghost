@@ -22,6 +22,8 @@ mod actual_sdk {
     const ANSWER: &str = "a19-sdk-output";
     const NATIVE: &str = "A19_SDK_NATIVE";
     const STOCK: &str = "A19_STOCK_CODING_TOOLS";
+    const THREAD_OWNER: &str = "A19_OWNER_WORK_THREAD";
+    const THREAD_FOLLOW_UP: &str = "Keep the filename and return the verified result in Korean.";
 
     struct ModelServer {
         origin: String,
@@ -257,6 +259,19 @@ mod actual_sdk {
         if !assignment {
             if all.contains("Authenticated Host verification:") {
                 return Ok(json!({"role":"assistant","content":"Host 검수를 통과했습니다. 작업 결과를 게시했습니다."}));
+            }
+            if all.contains(THREAD_OWNER) && all.contains("Authoritative Host report for work") {
+                return Ok(json!({"role":"assistant","content":"작업 결과를 게시했습니다. 검수가 필요합니다."}));
+            }
+            if all.contains(THREAD_OWNER) && all.contains("Current authenticated input kind: owner.") {
+                if let Some(created) = tool_result(body, "goal_create") {
+                    ensure!(created["status"] == "success", "thread goal admission failed: {created}");
+                    return Ok(json!({"role":"assistant","content":"작업을 시작했습니다."}));
+                }
+                return Ok(call("goal_create", json!({
+                    "prompt": SIMPLE,
+                    "acceptance_spec": lifetime::pi_execution::tests::verifier_spec(ANSWER),
+                })));
             }
             return Ok(
                 json!({"role":"assistant","content":"Controlled advisory; the Host owns independent acceptance."}),
@@ -1023,17 +1038,142 @@ mod actual_sdk {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn actual_sdk_same_epoch_wait_resumes_original_generation_through_existing_driver() {
-        delegation_and_report(None).await;
+        delegation_and_report(None, false).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "bundled Bun executable and physical Apple container required"]
     async fn bundled_bun_stock_tools_delegate_and_report() {
         let binary = PathBuf::from(std::env::var_os("GHOST_TEST_BUNDLED_PI").expect("explicit bundled Pi path"));
-        delegation_and_report(Some(binary.canonicalize().unwrap())).await;
+        delegation_and_report(Some(binary.canonicalize().unwrap()), false).await;
     }
 
-    async fn delegation_and_report(bundled: Option<PathBuf>) {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_sdk_owner_chat_opens_work_thread_and_follow_up_reports_back() {
+        let mut f = host_fixture();
+        let _environment = isolated_environment(f.root.path(), &f.ghost).await;
+        let model = ModelServer::start(f.root.path());
+        configure_local(&mut f.host, &model, &[(&f.ghost, &f.conversation)]);
+        let host = Arc::new(f.host);
+        let entry = production_entry(f.root.path());
+        let http = pi_test_http::Server::start(Arc::clone(&host), "a".repeat(64));
+
+        let thread_input = format!("{THREAD_OWNER} 결과 파일을 만들고 검수 결과를 알려줘.");
+        owner(&host, "work-thread-owner", json!({
+            "method":"conversation.input","ghost_id":f.ghost,"conversation_id":f.conversation,
+            "text":thread_input,"privacy":"public","attachments":[],
+        }), None);
+        let (outbox_id, raw): (i64, String) = host.lock().unwrap().journal.0.query_row(
+            "SELECT id,payload FROM lifetime_outbox WHERE command_id='work-thread-owner' AND target='pi'",
+            [], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        let submitted: Envelope = serde_json::from_str(&raw).unwrap();
+        let mut pi = host::lifetime_runtime::PiProcess::start(
+            &entry, &host.root.join("durable"), &host.root, "broker",
+            &host.pi_callback_token, 1, host.pi_local_route.as_ref(),
+        ).await.unwrap();
+        let ack = pi.request(&submitted).await.unwrap();
+        assert_eq!(ack.status, ResponseStatus::Success, "{ack:?}");
+        lifetime::ack_outbox(
+            &host.lock().unwrap().journal.0, outbox_id, &serde_json::to_value(&ack).unwrap(),
+        ).unwrap();
+        until(&host, &model, &http, "thread-origin-answered", |conn| conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM lifetime_turns WHERE source_turn_id='work-thread-owner' AND text='작업을 시작했습니다.')",
+            [], |r| r.get(0),
+        ).unwrap()).await;
+        pi.close().await.unwrap();
+        let goal: String = host.lock().unwrap().journal.0.query_row(
+            "SELECT goal_id FROM lifetime_turn_goals WHERE turn_id='work-thread-owner'",
+            [], |r| r.get(0),
+        ).unwrap();
+        let chat = json!({"method":"conversation.inspect","ghost_id":f.ghost,"conversation_id":f.conversation});
+        // Browsing does not require a new command receipt and does not
+        // change the source turn when another Goal revision is committed.
+        let opened = owner(&host, "work-thread-chat-first", chat.clone(), None);
+        assert_eq!(opened["turns"][0]["work_thread_ids"], json!([goal]));
+        let inspect = json!({"method":"goal.thread.inspect","goal_id":goal});
+        let initial = owner(&host, "work-thread-live-view", inspect.clone(), None);
+        assert_eq!(initial["origin"]["text"], thread_input);
+        assert_eq!(initial["graph"]["work"][0]["state"], "queued");
+        assert_eq!(initial["follow_ups"], json!([]));
+
+        let mut update = env("work-thread-follow-up", json!({
+            "method":"goal.update","goal_id":goal,
+            "prompt":format!("{SIMPLE}\n\nOwner follow-up:\n{THREAD_FOLLOW_UP}"),
+            "acceptance_spec":initial["goal"]["acceptance_spec"],"follow_up":THREAD_FOLLOW_UP,
+        }));
+        update.expected_revision = Some(1);
+        let mut bad = update.clone();
+        bad.command_id = "work-thread-invalid-follow-up".into();
+        bad.body["prompt"] = json!("silently replace the prior instructions");
+        bad.payload_digest = crate::lifetime_contract::canonical_digest(&bad.body).unwrap();
+        assert_eq!(host.lifetime_action(&bad).unwrap()["result"]["error_code"], "invalid_request");
+        let revised = host.lifetime_action(&update).unwrap();
+        assert_eq!(revised["result"]["status"], "success", "{revised}");
+        assert_eq!(revised["result"]["data"]["retained_owner_expectations"], false);
+        assert_eq!(host.lifetime_action(&update).unwrap(), revised);
+        let mut stale = update.clone();
+        stale.command_id = "work-thread-stale-follow-up".into();
+        assert_eq!(host.lifetime_action(&stale).unwrap()["result"]["error_code"], "conflict");
+
+        let driver = Driver::start(&host, entry);
+        until(&host, &model, &http, "thread-revision-report", |conn| conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM lifetime_report_replies r
+             JOIN lifetime_outbox o ON o.id=r.outbox_id JOIN lifetime_turns t ON t.id=r.reply_turn_id
+             WHERE t.ghost_id=?1 AND t.conversation_id=?2
+               AND json_extract(o.payload,'$.body.goal_id')=?3
+               AND json_extract(o.payload,'$.body.goal_revision')=2
+               AND t.text='작업 결과를 게시했습니다. 검수가 필요합니다.')",
+            rusqlite::params![f.ghost, f.conversation, goal],
+            |r| r.get(0),
+        ).unwrap()).await;
+        let thread = owner(&host, "work-thread-live-view", inspect, None);
+        assert_eq!(thread["goal"]["revision"], 2);
+        assert_eq!(thread["follow_ups"], json!([{
+            "id":"work-thread-follow-up","text":THREAD_FOLLOW_UP,"revision":2
+        }]));
+        assert_eq!(thread["reports"].as_array().unwrap().len(), 1);
+        assert_eq!(thread["reports"][0]["revision"], 2);
+        assert_eq!(thread["graph"]["work"][0]["state"], "completed");
+        assert_eq!(host.lock().unwrap().journal.0.query_row(
+            "SELECT count(*) FROM lifetime_acceptances", [], |r| r.get::<_, u64>(0)
+        ).unwrap(), 0, "an Owner follow-up must not approve model-authored verification");
+        let returned = owner(&host, "work-thread-chat-final", chat, None);
+        let final_turn = returned["turns"].as_array().unwrap().iter()
+            .find(|turn| turn["id"] == thread["reports"][0]["id"]).unwrap();
+        assert_eq!(final_turn["work_thread_ids"], json!([goal]));
+        assert_eq!(final_turn["text"], thread["reports"][0]["text"]);
+        assert_eq!(host.lock().unwrap().journal.0.query_row(
+            "SELECT count(*) FROM lifetime_commands WHERE command_id='work-thread-live-view'", [],
+            |row| row.get::<_, u64>(0),
+        ).unwrap(), 0);
+        owner(&host, "work-thread-private-chat", json!({
+            "method":"conversation.input","ghost_id":f.ghost,"conversation_id":f.conversation,
+            "text":"Raise the conversation's disclosure floor.","privacy":"private","attachments":[],
+        }), None);
+        let restricted = owner(&host, "work-thread-live-view", json!({"method":"goal.thread.inspect","goal_id":goal}), None);
+        assert_eq!(restricted["follow_up_blocker"], "disclosure_changed");
+        let mut private_follow_up = env("work-thread-private-follow-up", json!({
+            "method":"goal.update","goal_id":goal,
+            "prompt":format!("{}\n\nOwner follow-up:\nPrivate note", thread["goal"]["prompt"].as_str().unwrap()),
+            "acceptance_spec":thread["goal"]["acceptance_spec"],"follow_up":"Private note",
+        }));
+        private_follow_up.expected_revision = Some(2);
+        assert_eq!(host.lifetime_action(&private_follow_up).unwrap()["result"]["error_code"], "follow_up_unavailable");
+        assert!(model.requests.lock().unwrap().iter().any(|request| {
+            request["messages"].to_string().contains(THREAD_FOLLOW_UP)
+        }), "the revised assignment must carry the follow-up into Pi");
+        model.clean();
+        assert!(http.errors().is_empty());
+        driver.close(&host).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_sdk_follow_up_replaces_parked_work_and_its_current_delegation() {
+        delegation_and_report(None, true).await;
+    }
+
+    async fn delegation_and_report(bundled: Option<PathBuf>, revise_parked_work: bool) {
         let mut f = host_fixture();
         if bundled.is_some() {
             f.host.native_computers.as_mut().unwrap().set_pi_fixture_cli(Path::new("/opt/homebrew/bin/container")).unwrap();
@@ -1079,13 +1219,20 @@ mod actual_sdk {
         spec["delegation_contracts"] = json!([{"target_ghost_id":child,"prompt":child_prompt,"acceptance_spec":lifetime::pi_execution::tests::verifier_spec("child-ready"),"artifact_refs":[]}]);
         let response=f.host.lifetime_action(&env("a19-sdk-parent-goal",json!({"method":"goal.submit","ghost_id":f.ghost,"conversation_id":f.conversation,"prompt":parent_prompt,"privacy":"public","acceptance_spec":spec}))).unwrap();
         assert_eq!(response["result"]["status"], "success", "{response}");
+        let goal = &response["result"]["data"]["goal"];
         let work = response["result"]["data"]["work"]["id"]
             .as_str()
             .unwrap()
             .to_owned();
+        let revision = owner(&f.host, "a19-sdk-parent-follow-up", json!({
+            "method":"goal.update","goal_id":goal["id"],
+            "prompt":format!("{parent_prompt}\n\nOwner follow-up:\n{THREAD_FOLLOW_UP}"),
+            "acceptance_spec":spec,"follow_up":THREAD_FOLLOW_UP,
+        }), Some(1));
+        assert_eq!(revision["retained_owner_expectations"], true);
         let (outbox, assignment) = {
             let s = f.host.lock().unwrap();
-            s.journal.0.query_row("SELECT id,payload FROM lifetime_outbox WHERE json_extract(payload,'$.body.work_id')=?1 AND json_extract(payload,'$.body.method')='conversation.assignment'",[&work],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?))).unwrap()
+            s.journal.0.query_row("SELECT id,payload FROM lifetime_outbox WHERE json_extract(payload,'$.body.work_id')=?1 AND json_extract(payload,'$.body.method')='conversation.assignment' AND json_extract(payload,'$.body.goal_revision')=2",[&work],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?))).unwrap()
         };
         let assignment: Envelope = serde_json::from_str(&assignment).unwrap();
         let entry = production_entry(&retained);
@@ -1114,6 +1261,16 @@ mod actual_sdk {
         )
         .unwrap();
         until(&host,&model,&http,"original-wait",|conn|conn.query_row("SELECT state='blocked' AND json_extract(payload,'$.blocker') LIKE 'wait_for:%' FROM lifetime_work WHERE id=?1",[&work],|r|r.get(0)).unwrap_or(false)).await;
+        let thread = owner(&host, "a19-sdk-thread-progress",
+            json!({"method":"goal.thread.inspect","goal_id":response["result"]["data"]["goal"]["id"]}), None);
+        assert_eq!(thread["graph"]["work_id"], work);
+        let links = thread["graph"]["links"].as_array().unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0]["parent_work_id"], work);
+        assert_eq!(links[0]["current"], true);
+        assert!(thread["graph"]["work"].as_array().unwrap().iter().any(|item| {
+            item["id"] == links[0]["child_work_id"] && item["owner"] == child
+        }));
         let original = context_claim(&host, &assignment.command_id);
         assert_eq!(original.0["assignment_id"], assignment.command_id);
         assert_eq!(original.0["work_id"], work);
@@ -1130,6 +1287,58 @@ mod actual_sdk {
         let count = model.requests();
         tokio::time::sleep(Duration::from_millis(40)).await;
         assert_eq!(model.requests(), count);
+        if revise_parked_work {
+            let instruction = "Publish the verified artifact and include the reasoning in the report.";
+            let body = json!({
+                "method":"goal.update","goal_id":goal["id"],
+                "prompt":format!("{}\n\nOwner follow-up:\n{instruction}", revision["goal"]["prompt"].as_str().unwrap()),
+                "acceptance_spec":spec,"follow_up":instruction,
+            });
+            // Simulate the durable reservation made just before a tool runs.
+            // An edit during this interval must leave revision 2 authorized.
+            {
+                let state = host.lock().unwrap();
+                state.journal.0.execute(
+                    "INSERT INTO lifetime_pi_effects(execution_id,task_id,call_id,input_digest,operation,arguments_json,state)
+                     SELECT execution_id,task_id,'thread-test-pending',input_digest,operation,arguments_json,'pending'
+                     FROM lifetime_pi_effects WHERE execution_id=(SELECT execution_id FROM lifetime_work WHERE id=?1) LIMIT 1",
+                    [&work],
+                ).unwrap();
+            }
+            let mut blocked = env("a19-sdk-follow-up-during-effect", body.clone());
+            blocked.expected_revision = Some(2);
+            let result = host.lifetime_action(&blocked).unwrap();
+            assert_eq!(result["result"]["error_code"], "follow_up_unavailable");
+            assert_eq!(result["result"]["summary"], "effect_unsettled");
+            {
+                let state = host.lock().unwrap();
+                state.journal.0.execute(
+                    "DELETE FROM lifetime_pi_effects WHERE call_id='thread-test-pending'", [],
+                ).unwrap();
+            }
+            let revised = owner(&host, "a19-sdk-parked-follow-up", body, Some(2));
+            let replacement = revised["work"].as_array().unwrap().iter()
+                .find(|item| item["goal_revision"] == 3).unwrap()["id"].as_str().unwrap();
+            assert_ne!(replacement, work);
+            let driver = Driver::start(&host, entry);
+            until(&host, &model, &http, "thread-parked-replacement", |conn| accepted(conn, replacement)).await;
+            let updated = owner(&host, "a19-sdk-thread-progress-after-follow-up",
+                json!({"method":"goal.thread.inspect","goal_id":goal["id"]}), None);
+            assert_eq!(updated["graph"]["work_id"], replacement);
+            assert!(updated["graph"]["work"].as_array().unwrap().iter().any(|item| {
+                item["id"] == work && item["cancellation"] == "confirmed"
+            }));
+            assert!(updated["graph"]["links"].as_array().unwrap().iter().any(|link| {
+                link["parent_work_id"] == work && link["current"] == false
+            }));
+            assert!(updated["graph"]["links"].as_array().unwrap().iter().any(|link| {
+                link["parent_work_id"] == replacement && link["current"] == true
+            }));
+            model.clean();
+            assert!(http.errors().is_empty());
+            driver.close(&host).await;
+            return;
+        }
         let driver = match &bundled {
             Some(path) => Driver::start_bundled(&host, path.clone()),
             None => Driver::start(&host, entry),

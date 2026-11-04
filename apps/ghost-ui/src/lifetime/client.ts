@@ -83,11 +83,10 @@ class PersistedLifetimeClient implements LifetimeClient {
     const intent = canonicalJson({ body: commandBody, expected_revision: expectedRevision, actor_ref: this.identity.actor_ref, authority_epoch: this.identity.authority_epoch });
     const existing = this.activeIntents.get(intent);
     if (existing) return existing;
-    const artifactRead = commandBody.method === "work.artifact";
-    if (!artifactRead && !readOnlyMethods.has(String(commandBody.method))) await this.ensureMutationAllowed();
-    // The Host keeps artifact reads out of its receipt table. A failed read
-    // has no side effects and must not create a local request to reconcile.
-    const operation = artifactRead
+    const receiptlessRead = commandBody.method === "work.artifact" || commandBody.method === "goal.thread.inspect";
+    if (!receiptlessRead && !readOnlyMethods.has(String(commandBody.method))) await this.ensureMutationAllowed();
+    // These reads do not create Host receipts and have no effects to reconcile.
+    const operation = receiptlessRead
       ? createEnvelope(commandBody, this.identity, expectedRevision).then(envelope => this.transport.request(envelope)).then(parseLifetimeResponse)
       : this.requestIntent(commandBody, expectedRevision);
     this.activeIntents.set(intent, operation);

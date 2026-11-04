@@ -764,6 +764,28 @@ impl ComputerRegistry {
         execution_id: &str,
         authority_epoch: u64,
     ) -> Result<()> {
+        self.release_worker_home_inner(computer_id, ghost_id, execution_id, authority_epoch, false)
+    }
+
+    /// Cleanup may precede lease acquisition after native effects are fenced.
+    pub(crate) fn release_worker_home_if_acquired(
+        &mut self,
+        computer_id: &str,
+        ghost_id: &str,
+        execution_id: &str,
+        authority_epoch: u64,
+    ) -> Result<()> {
+        self.release_worker_home_inner(computer_id, ghost_id, execution_id, authority_epoch, true)
+    }
+
+    fn release_worker_home_inner(
+        &mut self,
+        computer_id: &str,
+        ghost_id: &str,
+        execution_id: &str,
+        authority_epoch: u64,
+        allow_absent: bool,
+    ) -> Result<()> {
         check_component_arg("computer_id", computer_id)?;
         check_component_arg("ghost_id", ghost_id)?;
         check_component_arg("execution_id", execution_id)?;
@@ -772,6 +794,11 @@ impl ComputerRegistry {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let leases = worker_home_lease_rows(&tx, computer_id, execution_id, epoch)?;
+        if allow_absent && !leases.has_records() {
+            tx.commit()?;
+            return Ok(());
+        }
         let (binding, state) = stored_binding(&tx, computer_id)?
             .ok_or_else(|| anyhow!("computer binding is missing"))?;
         ensure!(
@@ -782,7 +809,6 @@ impl ComputerRegistry {
             authority_epoch <= binding.epoch,
             "cleanup lease epoch is in the future"
         );
-        let leases = worker_home_lease_rows(&tx, computer_id, execution_id, epoch)?;
         ensure!(
             leases.process_epoch == Some(epoch) && leases.collect_epoch == Some(epoch),
             "exact process and collection lease pair is missing"

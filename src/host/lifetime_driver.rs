@@ -126,6 +126,7 @@ async fn run(weak: Weak<Host>, launcher: PiLauncher, root: PathBuf, mode: String
     let mut experience_continuation:Option<ContinuationJob>=None;
     let mut publication_continuation:Option<ContinuationJob>=None;
     let mut verification_continuation:Option<ContinuationJob>=None;
+    let mut pi_cancellation: Option<ContinuationJob> = None;
     loop {
         let Some(host) = weak.upgrade() else { break; };
         if host.stopping.load(std::sync::atomic::Ordering::Acquire) { break; }
@@ -180,6 +181,12 @@ async fn run(weak: Weak<Host>, launcher: PiLauncher, root: PathBuf, mode: String
             anyhow::ensure!(advancing.advance_memory_publications_bounded(Duration::from_secs(30)).await?,"publication continuation deadline exceeded");Ok(())
         }).await,Some(Err(_))) {
             eprintln!("source-view publication continuation is pending; inspect its original occurrence");
+        }
+        let cancelling = Arc::clone(&host);
+        if matches!(poll_continuation_job(&host, &mut pi_cancellation, move || async move {
+            settle_pi_cancellations(&cancelling, authority_epoch).await
+        }).await, Some(Err(_))) {
+            eprintln!("Pi cancellation remains unresolved; original effects are fenced");
         }
         let pending = match host.lock().and_then(|state| lifetime::pending_outbox(&state.journal.0)) {
             Ok(items) => items,
@@ -268,6 +275,16 @@ async fn run(weak: Weak<Host>, launcher: PiLauncher, root: PathBuf, mode: String
                 block_delivery(&host,&command,"Legacy OMP admission is retired; reconcile the original execution before explicit Pi migration");
                 suspended.insert(item.id);continue;
             }
+            if item.target == "pi" && command.body["method"] == "conversation.assignment" {
+                match pi_assignment_waits_for_cancellation(&host, &command) {
+                    Ok(false) => {}
+                    Ok(true) => continue,
+                    Err(error) => {
+                        eprintln!("Pi replacement cancellation scope unavailable: {error}");
+                        continue;
+                    }
+                }
+            }
             let delivery = match delivery_route(&host, &command, &item.target, &mode) {
                 Ok(Some(delivery)) => delivery,
                 Ok(None) => {
@@ -351,10 +368,103 @@ async fn run(weak: Weak<Host>, launcher: PiLauncher, root: PathBuf, mode: String
     if let Some(validation)=bot_memory_validation {if let Some(host)=weak.upgrade(){cancel_continuation_job(&host,validation).await;}}
     if let Some(host)=weak.upgrade() {
         if let Some(continuation)=verification_continuation {cancel_continuation_job(&host,continuation).await;}
+        if let Some(continuation) = pi_cancellation { cancel_continuation_job(&host, continuation).await; }
         if let Some(continuation)=experience_continuation {cancel_continuation_job(&host,continuation).await;}
         if let Some(continuation)=publication_continuation {cancel_continuation_job(&host,continuation).await;}
     }
     if let Some(process) = pi { if let Err(error) = process.close().await { eprintln!("Pi close unconfirmed: {error}"); } }
+}
+
+// Keep the original delivery pending until older Pi effects have settled.
+// Dispatching it earlier can strand its single permitted generation.
+fn pi_assignment_waits_for_cancellation(host: &Host, command: &Envelope) -> Result<bool> {
+    let state = host.lock()?;
+    Ok(state.journal.0.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM lifetime_work w
+           JOIN lifetime_pi_executions p ON p.work_id=w.id AND p.execution_id=w.execution_id
+           WHERE w.cancellation='requested' AND (
+             (w.goal_id=?1 AND w.goal_revision<>?2) OR EXISTS(
+               SELECT 1 FROM lifetime_work_links l
+               WHERE l.child_work_id=w.id AND l.root_goal_id=?1 AND l.current=0
+             )
+           )
+         )",
+        rusqlite::params![command.body["goal_id"].as_str(), command.body["goal_revision"].as_i64()],
+        |row| row.get(0),
+    )?)
+}
+
+async fn settle_pi_cancellations(host: &Host, epoch: u64) -> Result<()> {
+    let Some(computers) = host.native_computers.as_ref() else { return Ok(()); };
+    let candidates = {
+        let state = host.lock()?;
+        let authority = lifetime::authority::current(&state.journal.0)?;
+        if !authority.dispatch_enabled || authority.epoch != epoch {
+            return Ok(());
+        }
+        let mut query = state.journal.0.prepare(
+            "SELECT w.id,p.execution_id,p.ghost_id,p.goal_revision,p.computer_id,EXISTS(
+                 SELECT 1 FROM lifetime_pi_effects e WHERE e.execution_id=p.execution_id AND e.operation='browser'
+             )
+             FROM lifetime_pi_executions p JOIN lifetime_work w
+               ON w.id=p.work_id AND w.execution_id=p.execution_id AND w.owner=p.ghost_id
+                AND w.goal_revision=p.goal_revision
+             WHERE p.authority_epoch=?1 AND p.state='running' AND w.cancellation='requested'
+               AND NOT EXISTS(
+                 SELECT 1 FROM lifetime_pi_effects e WHERE e.execution_id=p.execution_id AND e.state<>'complete'
+               )
+             ORDER BY w.id",
+        )?;
+        let rows = query.query_map([epoch], |row| Ok((
+            row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+            row.get::<_, u64>(3)?, row.get::<_, String>(4)?, row.get::<_, bool>(5)?,
+        )))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (work, execution, ghost, revision, computer, used_browser) in candidates {
+        if used_browser {
+            let stopped = tokio::time::timeout(Duration::from_secs(5), computers.pi_browser_stop(&ghost, &execution)).await;
+            if !matches!(stopped, Ok(Ok(()))) {
+                eprintln!("Pi browser cleanup for Work {work} remains unresolved");
+                continue;
+            }
+        }
+        let state = host.lock()?;
+        let conn = &state.journal.0;
+        let authority = lifetime::authority::current(conn)?;
+        if !authority.dispatch_enabled || authority.epoch != epoch
+            || host.stopping.load(std::sync::atomic::Ordering::Acquire) {
+            break;
+        }
+        // A requested cancellation closes the tool gate. Recheck after
+        // browser cleanup before releasing the exact execution's lease pair.
+        let settled = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM lifetime_work w JOIN lifetime_pi_executions p ON p.work_id=w.id
+             WHERE w.id=?1 AND w.execution_id=?2 AND w.cancellation='requested'
+               AND p.state='running' AND p.authority_epoch=?3 AND p.execution_id=?2
+               AND p.ghost_id=?4 AND p.goal_revision=?5 AND p.computer_id=?6
+               AND NOT EXISTS(SELECT 1 FROM lifetime_pi_effects e WHERE e.execution_id=?2 AND e.state<>'complete'))",
+            rusqlite::params![work, execution, epoch, ghost, revision, computer],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !settled {
+            continue;
+        }
+        if computers.pi_release_cancelled(&computer, &ghost, &execution, epoch).is_err() {
+            eprintln!("Pi lease cleanup for Work {work} remains unresolved");
+            continue;
+        }
+        let producer = format!("pi-result:{ghost}:{execution}");
+        let command = internal_envelope(&producer, epoch, json!({
+            "method": "work.result", "execution_id": execution, "producer": producer,
+            "sequence": 1, "goal_revision": revision, "state": "cancelled", "artifacts": [],
+            "summary": "Host confirmed cancellation after all recorded Pi effects settled."
+        }))?;
+        let response = lifetime::apply(conn, &command, &producer)?;
+        anyhow::ensure!(response.status != ResponseStatus::Error, "Pi cancellation result was rejected");
+    }
+    Ok(())
 }
 
 fn runnable_bindings(host: &Host) -> Result<Vec<(String, String)>> {

@@ -62,6 +62,18 @@ async fn owner_task_goal_reports_exact_automatic_assignment_and_compatibility_re
     let reference = register_task_template(&f, "automatic-assignment-observation");
     assert_eq!(task_input(&f, "automatic-owner", reference, "direct", json!({"value":"alpha"}))["result"]["status"], "success");
     let (created, work) = task_goal(&f, "automatic-owner", "automatic-goal").await;
+    let goal = &created["result"]["data"]["goal"];
+    let thread = f.host.lifetime_action(&env("fixed-work-thread", json!({
+        "method":"goal.thread.inspect","goal_id":goal["id"]
+    }))).unwrap();
+    assert_eq!(thread["result"]["data"]["follow_up_blocker"], "fixed_contract");
+    let mut follow_up = env("fixed-work-thread-follow-up", json!({
+        "method":"goal.update","goal_id":goal["id"],
+        "prompt":format!("{}\n\nOwner follow-up:\nChange the output", goal["prompt"].as_str().unwrap()),
+        "acceptance_spec":goal["acceptance_spec"],"follow_up":"Change the output"
+    }));
+    follow_up.expected_revision = Some(1);
+    assert_eq!(f.host.lifetime_action(&follow_up).unwrap()["result"]["error_code"], "follow_up_unavailable");
     let admission = &created["result"]["data"]["automatic_admission"];
     let assignment: String = {
         let state = f.host.lock().unwrap();

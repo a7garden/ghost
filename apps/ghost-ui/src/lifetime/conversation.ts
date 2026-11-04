@@ -21,6 +21,7 @@ export interface ConversationTurn {
   kind: "user" | "assistant_advisory" | "host_fact";
   source_turn_id: string | null;
   origin_report_id?: string | null;
+  work_thread_ids?: string[];
   attachments: Artifact[];
   created_at_ms: number;
 }
@@ -90,6 +91,10 @@ function parseTurn(value: unknown): ConversationTurn {
       || value.origin_report_id !== null && (
         value.kind !== "assistant_advisory" || value.sender_kind !== "ghost" || value.source_turn_id !== null
       )
+    )
+    || value.work_thread_ids !== undefined && (
+      !Array.isArray(value.work_thread_ids) || !value.work_thread_ids.every(id => id !== null && nullableIdentity(id))
+      || value.work_thread_ids.length > 0 && value.kind !== "user" && !value.origin_report_id
     )
     || !Array.isArray(value.attachments) || !value.attachments.every(isArtifact)
     || !Number.isSafeInteger(value.created_at_ms) || (value.created_at_ms as number) < 0) {
@@ -177,6 +182,18 @@ export function mergeConversationRuns(current: ReadonlyMap<string, ConversationR
     merged.set(run.turn_id, run);
   }
   return merged;
+}
+
+// Thread associations are additive. A slower response or an older Host may
+// omit an association that another page already observed for the same turn.
+export function mergeConversationTurns(current: readonly ConversationTurn[], incoming: readonly ConversationTurn[]): ConversationTurn[] {
+  const merged = new Map(current.map(turn => [turn.id, turn]));
+  for (const turn of incoming) {
+    const previous = merged.get(turn.id);
+    const links = new Set([...(previous?.work_thread_ids ?? []), ...(turn.work_thread_ids ?? [])]);
+    merged.set(turn.id, links.size ? { ...turn, work_thread_ids: [...links] } : turn);
+  }
+  return [...merged.values()].sort((left, right) => left.sequence - right.sequence);
 }
 
 const privacyRank: Record<Artifact["privacy"], number> = { public: 0, private: 1, local_only: 2 };

@@ -55,7 +55,7 @@ pub(super) fn apply(
                 }
                 require_pi_binding(tx, ghost_id, conversation_id)?;
             }
-            conversation_inspect(tx, &envelope.body)
+            conversation_inspect(tx, &envelope.body, principal == OWNER_PRINCIPAL)
         }
         "conversation.cancel_turn" => {
             require_owner(principal)?;
@@ -417,7 +417,11 @@ fn artifact_is_in_scope(
     Ok(false)
 }
 
-fn conversation_inspect(tx: &Transaction<'_>, body: &Value) -> Result<Response> {
+fn conversation_inspect(
+    tx: &Transaction<'_>,
+    body: &Value,
+    include_work_threads: bool,
+) -> Result<Response> {
     allowed_fields(
         body,
         &["method", "ghost_id", "conversation_id", "before_sequence", "limit"],
@@ -499,7 +503,7 @@ fn conversation_inspect(tx: &Transaction<'_>, body: &Value) -> Result<Response> 
         if !attachments.is_array() {
             bail!("stored conversation attachments are not an array");
         }
-        turns.push(json!({
+        let mut turn = json!({
             "id": id,
             "sequence": sequence,
             "sender_kind": sender_kind,
@@ -511,7 +515,14 @@ fn conversation_inspect(tx: &Transaction<'_>, body: &Value) -> Result<Response> 
             "origin_report_id": origin_report_id,
             "attachments": attachments,
             "created_at_ms": created_at_ms,
-        }));
+        });
+        if include_work_threads {
+            let thread_ids = super::work_threads::turn_goal_ids(tx, &id)?;
+            if !thread_ids.is_empty() {
+                turn["work_thread_ids"] = json!(thread_ids);
+            }
+        }
+        turns.push(turn);
     }
     turns.reverse();
     let oldest_sequence = turns

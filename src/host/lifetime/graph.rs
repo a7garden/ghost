@@ -854,7 +854,7 @@ fn work_wait(conn: &Connection, envelope: &Envelope, principal: &str) -> Result<
     ))
 }
 
-fn work_children(conn: &Connection, body: &Value, principal: &str) -> Result<Response> {
+pub(super) fn work_children(conn: &Connection, body: &Value, principal: &str) -> Result<Response> {
     apply::exact_fields(body, &["method", "work_id"])?;
     let work_id = apply::string_field(body, "work_id")?;
     apply::validate_identity("work_id", work_id)?;

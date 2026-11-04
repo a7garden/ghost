@@ -10,6 +10,39 @@
 .lifetime-turn code, .lifetime-turn pre { max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; word-break: break-word; }
 .lifetime-turn details { min-width: 0; color: var(--color-quiet); font-size: 10px; }
 .lifetime-turn details code { display: block; }
+.lifetime-thread-links { display: grid; justify-items: start; gap: 5px; min-width: 0; }
+.lifetime-thread-link { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; min-height: 32px; padding: 4px 8px; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); text-align: left; font: inherit; font-size: var(--text-caption); cursor: pointer; }
+.lifetime-thread-link > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lifetime-thread-link > small, .lifetime-thread-link > svg { flex: 0 0 auto; color: var(--color-text-secondary); }
+.lifetime-thread-link > small { font-size: inherit; }
+.lifetime-thread-link:hover { border-color: var(--color-border-strong); background: var(--color-background-secondary-hover); }
+.lifetime-thread-link:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.lifetime-thread-drawer .modal-head { margin-bottom: 12px; }
+.lifetime-thread-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; align-content: start; gap: 20px; padding: 2px 4px 12px 0; }
+.lifetime-thread-content :is(h3, h4, p) { margin: 0; overflow-wrap: anywhere; }
+.lifetime-thread-summary { display: grid; gap: 8px; }
+.lifetime-thread-summary h3 { font-size: var(--text-body); font-weight: 650; line-height: 1.5; }
+.lifetime-thread-summary > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--color-text-secondary); font-size: var(--text-caption); }
+.lifetime-thread-progress, .lifetime-thread-progress li { display: grid; gap: 6px; }
+.lifetime-thread-progress h4 { font-size: var(--text-ui); }
+.lifetime-thread-progress ul, .lifetime-thread-timeline { list-style: none; margin: 0; padding: 0; min-width: 0; }
+.lifetime-thread-progress li { padding-block: 9px; border-top: 1px solid var(--color-border-subtle); font-size: var(--text-caption); }
+.lifetime-thread-progress-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+.lifetime-thread-progress-row strong { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.lifetime-thread-progress-row strong svg { flex-shrink: 0; }
+.lifetime-thread-muted { color: var(--color-text-secondary); font-size: var(--text-caption); }
+.lifetime-thread-artifacts { display: flex; flex-wrap: wrap; gap: 6px; }
+.lifetime-thread-timeline { display: grid; gap: 8px; }
+.lifetime-thread-timeline:empty { display: none; }
+.lifetime-thread-timeline li { min-width: 0; padding: 8px 10px; border-inline-start: 2px solid var(--color-border-subtle); background: var(--color-background-secondary); }
+.lifetime-thread-timeline li[data-kind="report"] { border-inline-start-color: var(--color-border-strong); }
+.lifetime-thread-timeline strong, .lifetime-thread-requirement summary { font-size: var(--text-caption); }
+.lifetime-thread-timeline p, .lifetime-thread-requirement p { white-space: pre-wrap; margin-top: 4px; font-size: var(--text-body); line-height: 1.6; }
+.lifetime-thread-requirement summary { color: var(--color-text-secondary); cursor: pointer; }
+.lifetime-thread-read-error { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--color-text-secondary); font-size: var(--text-caption); }
+.lifetime-thread-compose { display: grid; gap: 8px; flex: 0 0 auto; padding-top: 12px; border-top: 1px solid var(--color-border-subtle); }
+.lifetime-thread-compose textarea { max-height: 28dvh; }
+.lifetime-thread-compose-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .lifetime-heading, .lifetime-heading-actions, .lifetime-section-heading, .lifetime-outbox-row, .lifetime-goal-heading, .lifetime-work-heading, .lifetime-submit-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .lifetime-heading { align-items: center; padding-bottom: 14px; border-bottom: 1px solid var(--color-border-subtle); }
 .lifetime-heading h2 { margin-top: 3px; }

@@ -25,6 +25,7 @@ mod selected_tasks;
 mod reports;
 mod snapshot;
 mod turn_runs;
+mod work_threads;
 
 pub use outbox::OutboxItem;
 pub(crate) use outbox::recoverable_assignment_blocker;

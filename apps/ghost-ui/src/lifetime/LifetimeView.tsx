@@ -1,10 +1,10 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { ArrowUp, Check, ChevronRight, CircleAlert, Clock3, History, Info, LayoutGrid, MessageSquare, RefreshCw, Settings2, SlidersHorizontal } from "lucide-react";
+import { ArrowUp, Check, ChevronRight, CircleAlert, Clock3, GitBranch, History, Info, LayoutGrid, MessageSquare, RefreshCw, Settings2, SlidersHorizontal } from "lucide-react";
 import type { Artifact, ConversationRun, Envelope, Goal, Response, Snapshot, Work } from "../../../../contracts/lifetime/bindings.ts";
 import { isArtifact, isPrivacy } from "./guards";
-import { atLeastPrivacy, conversationTargetKey, mergeConversationRuns, parseConversationPage, parseRegistryResponse, defaultRegistryGhostId } from "./conversation";
+import { atLeastPrivacy, conversationTargetKey, mergeConversationRuns, mergeConversationTurns, parseConversationPage, parseRegistryResponse, defaultRegistryGhostId } from "./conversation";
 import type { ConversationPage, ConversationTurn, RegistryConversation } from "./conversation";
 import type { LifetimeClient, LifetimeMode, LifetimeRecoveryCommand } from "./types";
 import type { Review, Command } from "../client/types";
@@ -18,6 +18,8 @@ import { AgentPluginSurfaces } from '../plugins/AgentPluginSurfaces';
 import type { Snapshot as WorkspaceSnapshot } from '../client/types';
 import { Modal } from '../components/Modal';
 import { WorkArtifactPreview } from './WorkArtifactPreview';
+import { WorkThreadDrawer } from './WorkThreadDrawer';
+import { followUpCommand, workThreadTitle, type FollowUpDraft } from './workThread';
 import { createAgentStatusReadFence, projectAgentStatus, runAgentStatusOwnerRead } from './agentStatus';
 import type { AgentStatusReadToken } from './agentStatus';
 
@@ -228,6 +230,8 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const transcriptAtBottom = useRef(true);
   const [goalDetailID, setGoalDetailID] = useState<string | null>(null);
   const [goalDrafts, setGoalDrafts] = useState(() => new Map<string, { text: string; revision: number }>());
+  const [openThread, setOpenThread] = useState<{ goalID: string; scope: string } | null>(null);
+  const [followUpDrafts, setFollowUpDrafts] = useState(() => new Map<string, FollowUpDraft>());
   const [inspectSummaries, setInspectSummaries] = useState<Map<string, string>>(() => new Map());
   const [selectedPairKey, setSelectedPairKey] = useState("");
   const [snapshotObservedAt, setSnapshotObservedAt] = useState(0);
@@ -521,6 +525,33 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     : selectedPairKey ? registry.find(target => conversationTargetKey(target) === selectedPairKey)
       : activePrimary.length === 1 ? activePrimary[0] : undefined;
   const selectedTargetKey = selectedTarget ? conversationTargetKey(selectedTarget) : "";
+  const threadAuthority = JSON.stringify([client.workspace_id, client.actor_ref, client.authority_epoch]);
+  const threadScope = JSON.stringify([threadAuthority, selectedTargetKey, selectedPanel, currentRouteScope.current]);
+  const threadID = routeActive && openThread?.scope === threadScope ? openThread.goalID : null;
+  useEffect(() => setOpenThread(null), [threadScope, client]);
+  function openWorkThread(goalID: string) {
+    setError("");
+    setNotice("");
+    setOpenThread({ goalID, scope: threadScope });
+  }
+  function updateFollowUp(goalID: string, update: (current: FollowUpDraft | undefined) => FollowUpDraft | undefined) {
+    const key = JSON.stringify([threadAuthority, goalID]);
+    setFollowUpDrafts(current => {
+      const before = current.get(key);
+      const after = update(before);
+      if (after === before) return current;
+      const next = new Map(current);
+      if (after?.text) next.set(key, after);
+      else next.delete(key);
+      return next;
+    });
+  }
+  async function sendFollowUp(goal: Goal, draft: FollowUpDraft) {
+    const body = followUpCommand(goal, draft);
+    if (!body || writesDisabled) return;
+    const response = await run(`goal.update:${goal.id}`, () => client.request(body, draft.revision));
+    if (response?.status === "success") updateFollowUp(goal.id, current => current === draft ? undefined : current);
+  }
   useEffect(() => { onTargetChange?.(routeActive ? selectedTarget?.ghost_id ?? null : null); }, [routeActive, selectedTarget?.ghost_id, onTargetChange]);
   const prompt = promptDrafts.get(selectedTargetKey) ?? "";
   const currentTargetKey = useRef(selectedTargetKey);
@@ -568,20 +599,25 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       setConversationError("");
       return () => { mounted = false; };
     }
-    if (loadedConversationKey !== selectedTargetKey) {
+    const sameTarget = loadedConversationKey === selectedTargetKey;
+    if (!sameTarget) {
       setTurns([]);
       setTurnRuns(new Map());
+      setHasOlder(false);
+      setOldestSequence(null);
+      setLoadedConversationKey("");
     }
-    setLoadedConversationKey("");
     setConversationLoading(true);
     setConversationError("");
     fetchConversationPage(client, selectedTarget).then(page => {
       if (mounted) {
-        setTurns(page.turns);
+        setTurns(current => sameTarget ? mergeConversationTurns(current, page.turns) : page.turns);
         setTurnRuns(current => mergeConversationRuns(current, page.turn_runs));
         setConversationPrivacy(page.privacy);
-        setHasOlder(page.has_older);
-        setOldestSequence(page.oldest_sequence);
+        if (!sameTarget || oldestSequence === null) {
+          setHasOlder(page.has_older);
+          setOldestSequence(page.oldest_sequence);
+        }
         setLoadedConversationKey(conversationTargetKey(selectedTarget));
         setConversationObservedAt(Date.now());
       }
@@ -603,7 +639,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   }, [turns, conversationLoading, selectedPanel]);
 
   useEffect(() => {
-    if (!routeActive || mode !== "live" || !selectedTarget || loading || selectedPanel === 'work' && workScope === 'all') return;
+    if (!routeActive || mode !== "live" || !selectedTarget || loadedConversationKey !== selectedTargetKey || loading || selectedPanel === 'work' && workScope === 'all') return;
     const target = selectedTarget;
     let mounted = true;
     let timer = 0;
@@ -616,11 +652,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
           if (!read) return;
           const [page, latest] = await Promise.all([fetchConversationPage(client, target), client.snapshot()]);
           if (mounted && snapshotReads.current.isCurrent(read, currentTargetKey.current)) {
-            setTurns(current => {
-              const merged = new Map(current.map(turn => [turn.id, turn]));
-              for (const turn of page.turns) merged.set(turn.id, turn);
-              return [...merged.values()].sort((left, right) => left.sequence - right.sequence);
-            });
+            setTurns(current => mergeConversationTurns(current, page.turns));
             setTurnRuns(current => mergeConversationRuns(current, page.turn_runs));
             setConversationPrivacy(page.privacy);
             setSnapshot(latest);
@@ -639,7 +671,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     }
     timer = window.setTimeout(() => void observeProgress(), awaitingController || awaitingWork ? 1000 : 5000);
     return () => { mounted = false; window.clearTimeout(timer); };
-  }, [routeActive, client, mode, selectedTargetKey, awaitingController, awaitingWork, loading, selectedPanel, workScope]);
+  }, [routeActive, client, mode, selectedTargetKey, loadedConversationKey, awaitingController, awaitingWork, loading, selectedPanel, workScope]);
 
   const workBoardRouteScope = currentRouteScope.current;
   useEffect(() => {
@@ -681,11 +713,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     try {
       const page = await fetchConversationPage(client, selectedTarget, oldestSequence);
       if (currentTargetKey.current !== targetKey) return;
-      setTurns(current => {
-        const unique = new Map(page.turns.map(turn => [turn.id, turn]));
-        for (const turn of current) unique.set(turn.id, turn);
-        return [...unique.values()].sort((left, right) => left.sequence - right.sequence);
-      });
+      setTurns(current => mergeConversationTurns(current, page.turns));
       setTurnRuns(current => mergeConversationRuns(current, page.turn_runs));
       setConversationPrivacy(page.privacy);
       setHasOlder(page.has_older);
@@ -749,9 +777,17 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     });
   }
 
-  async function inspectPendingInput(envelope: Envelope): Promise<void> {
+  async function inspectPendingCommand(envelope: Envelope): Promise<void> {
     const response = await run(`inspect:${envelope.command_id}`, () => client.retry(envelope.command_id));
-    if (response?.status !== "success" || envelope.body.method !== "conversation.input") return;
+    if (response?.status !== "success") return;
+    if (envelope.body.method === "goal.update") {
+      const { goal_id, follow_up } = envelope.body;
+      if (typeof goal_id === "string" && typeof follow_up === "string") {
+        updateFollowUp(goal_id, current => current?.revision === envelope.expected_revision && current.text.trim() === follow_up ? undefined : current);
+      }
+      return;
+    }
+    if (envelope.body.method !== "conversation.input") return;
     const { ghost_id, conversation_id, text } = envelope.body;
     if (typeof ghost_id === "string" && typeof conversation_id === "string") {
       const key = conversationTargetKey({ ghost_id, conversation_id });
@@ -854,6 +890,8 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   </>;
 
   const inConversation = selectedPanel === "conversation";
+  const displayedTurns = routeActive && loadedConversationKey === selectedTargetKey ? turns : [];
+  const ghostName = (id: string) => workspaceSnapshot?.profiles.find(profile => profile.id === id)?.name ?? id;
   return <section className="lifetime-panel" data-panel={selectedPanel} aria-labelledby="lifetime-heading">
     <header className={`lifetime-heading${inConversation ? " thread-toolbar" : ""}`}>
       <div>
@@ -874,7 +912,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       </div>
     </header>
     {mode === "fixture" && <p className="lifetime-fixture-note">예시 모드입니다. 요청은 이 브라우저의 예시 기록에만 반영되며 실제 호스트나 작업 실행자에게 전달되지 않습니다.</p>}
-    {!goalDetail && feedback}
+    {!goalDetail && !threadID && feedback}
     {!client.dispatch_enabled && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>호스트 복구 모드: 저장된 상태는 읽을 수 있지만 새 변경과 재전송은 사용할 수 없습니다.</span></p>}
     {recovery.length > 0 && <section className="lifetime-outbox" aria-label="이전 연결의 미확정 요청">
       <div className="lifetime-section-heading"><div><h3>이전 요청 확인 필요</h3><p>이전 작업실 또는 권한 버전의 요청은 다시 보내지 않습니다. 확인 전까지 새 변경을 차단합니다.</p></div></div>
@@ -894,15 +932,14 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       <div className="lifetime-section-heading"><div><h3>접수 결과 확인 필요</h3><p>미확정 저장 요청은 다시 보내지 않습니다. 같은 요청 ID의 접수 기록을 확인합니다.</p></div></div>
       {pending.map(envelope => <article className="lifetime-outbox-row" key={envelope.command_id}>
         <div>
-          <strong>{typeof envelope.body.method === "string" ? pendingCommandLabels[envelope.body.method] ?? "저장된 요청" : "저장된 요청"}</strong>
+          <strong>{typeof envelope.body.follow_up === "string" && envelope.body.method === "goal.update" ? "후속 지시"
+            : typeof envelope.body.method === "string" ? pendingCommandLabels[envelope.body.method] ?? "저장된 요청" : "저장된 요청"}</strong>
           <span>원래 요청 ID와 권한 버전을 보존했습니다.</span>
           {envelope.body.method === "conversation.input" && <p>{String(envelope.body.text ?? "")}</p>}
           {typeof envelope.body.ghost_id === "string" && typeof envelope.body.conversation_id === "string"
             && <DetailDialog title="저장된 대상"><code>{envelope.body.ghost_id} · {envelope.body.conversation_id}</code></DetailDialog>}
         </div>
-        <button type="button" className="button secondary" disabled={Boolean(busy)} onClick={() => void (envelope.body.method === "conversation.input"
-          ? inspectPendingInput(envelope)
-          : run(`inspect:${envelope.command_id}`, () => client.retry(envelope.command_id)))}>
+        <button type="button" className="button secondary" disabled={Boolean(busy)} onClick={() => void inspectPendingCommand(envelope)}>
           <RefreshCw size={14}/>접수 기록 확인
         </button>
       </article>)}
@@ -963,7 +1000,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
           const transcript = event.currentTarget;
           transcriptAtBottom.current = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 48;
         }}>
-        {turns.map(turn => {
+        {displayedTurns.map(turn => {
           const controller = turn.kind === "user" ? turnRuns.get(turn.id) : undefined;
           const canCancel = controller && !["answered", "failed", "cancelled"].includes(controller.state);
           const eventLabel = turn.origin_report_id ? "작업 보고" : turn.kind === "assistant_advisory" ? "참고 의견" : "호스트 상태 기록";
@@ -974,6 +1011,19 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
             {eventLabel}{turn.origin_report_id && " · 검수 상태 별도"}
           </strong>}
           <p className="thread-body">{turn.text}</p>
+          {Boolean(turn.work_thread_ids?.length) && <div className="lifetime-thread-links">
+            {turn.work_thread_ids?.map((id, index) => {
+              const goal = conversationGoals.find(item => item.id === id);
+              const title = goal ? workThreadTitle(goal.prompt) : turn.work_thread_ids!.length > 1 ? `작업 스레드 ${index + 1}` : "작업 스레드";
+              const state = goal && boardState(goal, snapshot?.work.filter(work => work.goal_id === id) ?? []).state;
+              return <button type="button" className="lifetime-thread-link" key={id} aria-haspopup="dialog"
+                onClick={() => openWorkThread(id)} aria-label={goal ? `작업 스레드 열기: ${title}${state ? ` · ${goalStateLabels[state] ?? state}` : ""}` : `${title} 열기`} title={title}>
+                <GitBranch size={14} aria-hidden="true"/><span>{title}</span>
+                {state && <small>{goalStateLabels[state] ?? state}</small>}
+                <ChevronRight size={14} aria-hidden="true"/>
+              </button>;
+            })}
+          </div>}
           {controller && <div className="lifetime-submit-actions thread-turn-actions">
             <span>{controller.cancel_requested && canCancel ? "취소 요청됨 · 응답 중지 확인 전" : turnStateLabels[controller.state]}</span>
             {canCancel && <button type="button" className="button secondary" title="이미 맡긴 일은 맡긴 일 화면에서 따로 취소할 수 있습니다."
@@ -1116,7 +1166,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         </section>;
       })}</div>}
     </section>}
-    {goalDetail && detailGoal && snapshot && <Modal title="목표 상세" onClose={closeGoalDetail} drawer>
+    {goalDetail && detailGoal && snapshot && !threadID && <Modal title="목표 상세" onClose={closeGoalDetail} drawer>
       <div className="lifetime-goal-detail">
         {feedback}
         <header className="lifetime-goal-heading">
@@ -1124,6 +1174,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
             <span className="lifetime-revision">판본 {detailGoal.revision}</span>
             <span className="lifetime-privacy">{privacyLabels[detailGoal.privacy]}</span></div>
           <div className="lifetime-goal-owner-actions"><span className="lifetime-owner">담당 {workspaceSnapshot?.profiles.find(profile => profile.id === detailGoal.accountable_ghost)?.name ?? detailGoal.accountable_ghost}</span>
+            <button type="button" className="button secondary" aria-haspopup="dialog" onClick={() => openWorkThread(detailGoal.id)}><GitBranch size={14}/>작업 스레드</button>
             {(() => {
               const target = registry.find(item => item.ghost_id === detailGoal.accountable_ghost && item.conversation_id === detailGoal.reply_conversation && item.mode === 'active');
               return target && <button type="button" className="button secondary" onClick={() => openRegisteredTarget(target, false)}>담당 Ghost와 대화</button>;
@@ -1161,6 +1212,12 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         />)}
       </div>
     </Modal>}
+    {threadID && <WorkThreadDrawer key={JSON.stringify([threadScope, threadID])} client={client} goalID={threadID}
+      target={inConversation ? selectedTarget : undefined} goals={snapshot?.goals ?? []} work={snapshot?.work ?? []} ghostName={ghostName}
+      goalStatus={(goal, work) => { const state = boardState(goal, work).state; return goalStateLabels[state] ?? state; }}
+      workStatus={state => workStateLabels[state] ?? state} connected={connected} busy={Boolean(busy)} writeDisabled={writesDisabled}
+      feedback={feedback} draft={followUpDrafts.get(JSON.stringify([threadAuthority, threadID]))}
+      onDraft={draft => updateFollowUp(threadID, () => draft)} onSend={sendFollowUp} onClose={() => setOpenThread(null)}/>}
   </section>;
 }
 

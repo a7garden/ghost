@@ -825,7 +825,7 @@ test('canonical conversation page preserves only exact referenced controller run
     conversation_id: scope.conversation_ids[0],
     privacy: 'private',
     turns: [
-      ownerConversationTurn(turnID),
+      { ...ownerConversationTurn(turnID), work_thread_ids: ['HOST_PRIVATE_WORK_THREAD'] },
       sourcedConversationTurn(randomUUID(), sourceTurnID, 'host_fact', 2),
     ],
     turn_runs: [run, sourceRun],
@@ -845,6 +845,7 @@ test('canonical conversation page preserves only exact referenced controller run
   assert.deepEqual(sanitized.data.turn_runs, [run, sourceRun]);
   assert.equal(sanitized.data.internal_message, undefined);
   assert.equal(result.body.includes('HOST_PRIVATE_PAGE_DETAIL'), false);
+  assert.equal(result.body.includes('HOST_PRIVATE_WORK_THREAD'), false);
 });
 
 test('canonical conversation page rejects foreign, malformed, unreferenced, and extra-field runs', async t => {
