@@ -1,4 +1,4 @@
-import { CalendarDays, Cpu, Puzzle, Server, Folder, GitBranch, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
+import { Cpu, Puzzle, Server, Folder, GitBranch, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
 import { ghostPath, viewPath } from '../features/PackageWorkspace';
 import type { GhostView } from '../../sdk/src/index';
 import type { Snapshot } from '../client/types';
@@ -74,10 +74,7 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
         </section> : <button className={`nav-row ${section === 'spaces' ? 'selected' : ''}`}
           aria-current={section === 'spaces' ? 'page' : undefined} onClick={() => navigate('/spaces')}>
           <Folder size={16}/><span>{routeLabels.spaces}</span></button>}
-        <nav className="sidebar-tools" aria-label="도구">{[
-          { path: '/planner', key: 'planner', name: routeLabels.planner, Icon: CalendarDays },
-        ].map(({ path, key, name, Icon }) => <button key={key} className={`nav-row ${section === key ? 'selected' : ''}`}
-          aria-current={section === key ? 'page' : undefined} onClick={() => navigate(path)}><Icon size={16}/><span>{name}</span></button>)}
+        <nav className="sidebar-tools" aria-label="도구">
           <button className={`nav-row ${section === 'together' ? 'selected' : ''}`} aria-current={section === 'together' ? 'page' : undefined}
             onClick={() => navigate('/together')}><GitBranch size={16}/><span>협업 기록</span></button>
         </nav>

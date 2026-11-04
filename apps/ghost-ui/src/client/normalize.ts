@@ -1,7 +1,6 @@
 import { normalizeGraphs, normalizeGraphRuns } from './orchestration';
 export { normalizeWork, normalizeDecision, normalizeAdmission, normalizeAdmissionView, normalizeResolution, normalizeRoutingCapability, normalizeRoutingView } from './routingNormalize';
 import { normalizeRoutingResults, normalizeRoutingShares } from './routingResults';
-import { normalizeConnectedPlanner } from './connectedPlanner';
 import { isDesign } from '../pets/sprites';
 import type { Snapshot, IntegrationApproval, ModelSettings, ModelProvider, ModelRole } from './types';
 
@@ -53,7 +52,7 @@ export function normalizeSnapshot(value: unknown): Snapshot {
       authority_epoch: authority.authority_epoch as number, dispatch_enabled: authority.dispatch_enabled as boolean,
     },
     model_settings: modelSettings(s.model_settings),
-    connected_planner: normalizeConnectedPlanner(s.connected_planner),
+    connected_planner: s.connected_planner,
     routing_results: normalizeRoutingResults(s.routing_results), routing_shares: normalizeRoutingShares(s.routing_shares),
     avatars: list(s.avatars).filter(a => a.sprite_version === 1 || a.sprite_version === 2).map(a => ({ id: text(a.id), name: text(a.name), description: text(a.description), sprite_version: a.sprite_version as 1 | 2, design: isDesign(a.design) ? a.design : null, source_manifest: a.source_manifest && typeof a.source_manifest === "object" ? object(a.source_manifest) : null, created_ms: Number(a.created_ms) || 0 })),
     profiles: list(s.profiles).map(p => ({ id: text(p.id), avatar_id: typeof p.avatar_id === 'string' ? p.avatar_id : null, avatar_version: Number(p.avatar_version) || 0, name: text(p.name, 'Ghost'), persona: text(p.persona), policy: object(p.policy), error: typeof p.error === 'string' ? p.error : undefined,

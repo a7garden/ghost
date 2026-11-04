@@ -21,7 +21,9 @@ const server = createServer((req, res) => packages(req, res, () => bridge(req, r
   if (req.headers.host !== host || !['GET', 'HEAD'].includes(req.method)) { res.writeHead(403); res.end(); return; }
   try {
     const path = decodeURIComponent(new URL(req.url, `http://${host}`).pathname);
-    const file = path === '/' ? resolve(base, 'index.html') : resolve(base, `.${path}`);
+    // The app sends bookmarks for the retired planner to the current Work view.
+    const file = path === '/' || path === '/planner' || path === '/planner/'
+      ? resolve(base, 'index.html') : resolve(base, `.${path}`);
     if (!file.startsWith(resolve(base) + sep)) throw new Error('invalid path');
     const data = await readFile(file);
     res.writeHead(200, { 'Content-Type': types[extname(file)] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src http://${host}/ghost-package-assets/ about:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'`, 'Cache-Control': extname(file) === '.html' ? 'no-store' : 'no-cache' });

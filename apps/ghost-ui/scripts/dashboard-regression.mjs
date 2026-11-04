@@ -336,6 +336,24 @@ try {
   checks.push('provider-first-load-failure-no-stale-form');
 
   await page.setViewportSize({width:320,height:900});
+  for (const path of ['/planner?date=2026-11-04', '/#/planner']) {
+    await page.goto(`${origin}${path}`);
+    await page.locator('[data-lifetime-goal="a"]').waitFor();
+    const url = new URL(page.url());
+    assert.equal(url.pathname, '/');
+    assert.equal(url.hash.split('?')[0], '#/lifetime');
+    assert.equal(new URLSearchParams(url.hash.split('?')[1]).get('panel'), 'work');
+    assert.equal(await page.getByRole('button', { name: '할 일과 일정', exact: true }).count(), 0);
+    await page.getByRole('button', { name: '명령 검색', exact: true }).click();
+    const search = page.getByRole('combobox', { name: '작업실 검색' });
+    await search.fill('할 일과 일정');
+    assert.equal(await page.getByRole('option').count(), 0);
+    await search.fill('맡긴 일');
+    await page.getByRole('option', { name: /맡긴 일/ }).waitFor();
+    await search.press('Escape');
+  }
+  checks.push('retired-planner-path-and-hash-open-durable-work-without-sidebar-or-search-entry');
+
   await page.goto(`${origin}/#/lifetime?panel=work&scope=all&ghost=${primary}&conversation=${chat}`);
   await page.locator('[data-lifetime-goal="a"]').waitFor();
   await page.locator('[data-lifetime-goal="b"]').waitFor();
@@ -483,14 +501,19 @@ try {
   await page.goto(`${origin}/#/integrations`);
   await page.getByRole('button',{name:'MCP 설정 예시',exact:true}).click();
   const examples=page.getByRole('dialog',{name:'MCP 설정 예시',exact:true});
-  await examples.getByRole('button',{name:'설정 사용',exact:true}).first().click();
+  assert.equal(await examples.getByText(/Google 캘린더|Google Tasks/).count(), 0);
+  await examples.getByRole('heading', { name: 'Gmail', exact: true }).waitFor();
+  assert.equal(await examples.getByRole('button', { name: '설정 사용', exact: true }).count(), 1);
+  await examples.getByRole('button', { name: '설정 사용', exact: true }).click();
   const preset=page.getByRole('dialog').filter({has:page.getByRole('button',{name:'설정 저장',exact:true})});
   await preset.waitFor();
+  assert.equal(await preset.getByRole('textbox', { name: '연동 이름' }).inputValue(), 'Gmail');
+  assert.deepEqual(JSON.parse(await preset.locator('textarea[name=args]').inputValue()), ['--transport', 'stdio', '--tools', 'gmail']);
   await page.keyboard.press('Escape');
   await preset.waitFor({state:'hidden'});
   await examples.waitFor();
   await examples.getByRole('button',{name:'닫기',exact:true}).click();
-  checks.push('integration-preset-escape-returns-to-parent-dialog');
+  checks.push('integration-gmail-only-preset-escape-returns-to-parent-dialog');
   const pairing=page.getByRole('region',{name:'휴대폰 연결',exact:true});
   const primaryPair=pairing.getByRole('checkbox',{name:'Ghost',exact:true});
   const specialistPair=pairing.getByRole('checkbox',{name:'Scout',exact:true});
@@ -559,6 +582,20 @@ try {
   try {
     const demo=await demoContext.newPage();
     demo.on('pageerror',error=>pageErrors.push(error.message));
+    await demo.goto(`${origin}/#/planner?date=2026-11-04`);
+    await demo.getByRole('heading', { name: '맡긴 일', exact: true }).waitFor();
+    assert.equal(new URL(demo.url()).hash, '#/work');
+    checks.push('retired-planner-opens-existing-work-in-demo-mode');
+    await demo.goto(`${origin}/#/integrations`);
+    const addMcp = demo.getByRole('button', { name: 'MCP 추가', exact: true });
+    await addMcp.waitFor();
+    assert.equal(await demo.getByRole('button', { name: 'MCP 설정 예시', exact: true }).count(), 0);
+    await addMcp.click();
+    const newIntegration = demo.getByRole('dialog', { name: '새 연동', exact: true });
+    await newIntegration.getByRole('textbox', { name: '연동 이름' }).waitFor();
+    await demo.keyboard.press('Escape');
+    await newIntegration.waitFor({ state: 'hidden' });
+    checks.push('unsupported-gmail-example-hidden-while-generic-mcp-editor-remains');
     await demo.goto(`${origin}/#/ghosts/sage?conversation=sage-chat`);
     const demoInput=demo.getByRole('textbox',{name:'Sage에게 메시지',exact:true});
     await demoInput.waitFor();

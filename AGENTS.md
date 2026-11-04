@@ -6,6 +6,10 @@ Every Ghost is the same kind of independently identifiable, durable bot. Pi Dura
 
 The native iPhone app must support direct conversation, delegation, approval, results and reconnect without Telegram, Slack or another messenger. Device grants remain explicit and scoped to the reviewed Ghost/conversation pairs.
 
+## Product scope
+
+Use **맡긴 일** for work assigned to Ghost. Keep execution time limits, durable scheduling, work resumption, and completion notifications. The desktop no longer offers a personal planner or Google Calendar/Tasks presets. Preserve prior planner records and Host protocol compatibility.
+
 ## Local operations
 
 - Use the canonical checkout at `~/Workspace/Projects/ghost` and integrate verified changes into `main`. Use temporary worktrees for isolation and consolidate or archive them after verification.

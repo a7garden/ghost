@@ -288,12 +288,13 @@ Codex 펫 v1/v2 스프라이트를 가져와 지정합니다. 색·형태·표�
 호스트 연결 시 아바타와 지정 상태는 `workspace.db`에 보존합니다.
 [사용 방법과 호환 규격](apps/ghost-ui/README.md#펫과-아바타)을 참고하세요.
 
-## 개인 할 일·일정과 외부 연동
+## 맡긴 일과 외부 연동
 
-`apps/ghost-ui`의 **할 일과 일정**에서 개인 할 일(마감일·완료 상태)과 시간대가
-반영된 일정을 관리한다. **연동**에서 로컬 MCP 프로그램(stdio) 또는
-Streamable HTTP 서버를 등록하고, 사용할 Ghost를 선택한 뒤 연결을 확인한다.
-Google Calendar·Tasks용 Workspace MCP 설정 예시도 포함한다.
+`apps/ghost-ui`의 **맡긴 일**에서 Ghost에 맡긴 작업의 상태와 결과를 확인한다.
+Host의 실행 시간 제한, 지속형 예약 실행, 작업 재개와 완료 알림은 유지한다.
+**확장**에서 로컬 MCP 프로그램(stdio) 또는 Streamable HTTP 서버를 등록하고,
+사용할 Ghost를 선택한 뒤 연결을 확인한다. 도구 승인 기능을 지원하는 Host에서는
+Gmail용 MCP 설정 예시를 제공한다.
 
 ```sh
 cargo run --features workspace-ui -- --root /path/to/ghost-state serve --headless
@@ -302,12 +303,9 @@ GHOST_ROOT=/path/to/ghost-state npm run dev
 ```
 
 위 개발용 UI 주소는 `http://127.0.0.1:5178`이다. `GHOST_ROOT` 없이 UI를 실행하면
-브라우저에만 저장하는 예시 모드이며 외부 MCP를 실행하지 않는다.
-호스트는 기본적으로 `mock` 모델을 사용하므로 자연어 도구 실행에는 실제 모델을
-선택해야 한다. 로컬 할 일·일정 화면의 직접 조작에는 모델이 필요 없다.
-
-계정 로그인, 지원 범위와 제어 API 예시는
-[개인용 연동 안내](docs/personal-integrations.md)를 참고한다.
+브라우저에 저장하는 예시 모드로 열린다. 외부 MCP를 실행하려면 Host에 연결한다.
+Host 기본 모델은 `mock`이며 자연어 도구 실행에는 실제 모델이 필요하다.
+[외부 연동 안내](docs/personal-integrations.md)에 권한과 제어 API를 정리했다.
 
 ## Grammar
 
@@ -658,42 +656,14 @@ coordinated payload-and-manifest rewrite and still verified the untouched
 original. Its selected payloads and provenance were fixtures, not a production
 release, installation, or restore.
 
-## Google planner transport — source integration only
+## Legacy planner compatibility
 
-The `caldav` feature now includes native Google Calendar and Google Tasks JSON
-transport alongside the existing iCalendar route. Fixed production HTTPS
-endpoints require an account- and scope-bound, unexpired token lease. Complete
-bounded pagination precedes inventory reconciliation; sparse updates preserve
-unmodified provider fields. Import, reconciliation, and explicit active phases
-remain distinct. An unknown-effect Tasks insertion is not blindly resent.
-
-The source includes the concrete private lease store, installed-app PKCE/loopback
-OAuth enrollment and production Host sync dispatch. No live Google account or
-write has been exercised. Configure `GHOST_GOOGLE_OAUTH_CLIENT` with an absolute
-owner-controlled private JSON file using schema `ghost-google-oauth-client/1`
-and fields `client_id`/`client_secret`; configure `GHOST_GOOGLE_TOKEN_STORE` with
-an absolute private store path. Never paste credential contents into a prompt.
-The credential parser rejects unsafe paths, ownership or permissions.
-
-```sh
-ghost planner-google login --account personal
-ghost planner-google status
-```
-
-`personal` is an Owner-assigned local routing label, not verified Google account
-identity. Confirm the actual account and exact scopes on the consent surface.
-Login defaults to Calendar-events/Tasks read-only; `--write` additionally requests
-event/task write scopes and requires explicit approval. The CLI prints the consent
-URL and credential-free status, never tokens. The consent window is bounded to
-ten minutes; an unavailable client/store or denied consent has no fake fallback.
-The latest actual canary status refused because `GHOST_GOOGLE_TOKEN_STORE` was
-unconfigured. Owner permission to authenticate does not configure a Google
-OAuth client or grant desktop control.
-
-The isolated loopback transport cases pass. Google Tasks conditional-write
-enforcement is not established by the provider documentation, so fixture
-`If-Match` behavior does not authorize active Tasks writes. Source integration
-and controlled fixtures are not live account/calendar or installed UI acceptance.
+Prior personal todos, calendar records and remote collection bindings remain in
+Host storage. The control API and optional `caldav` transport, including existing
+Google OAuth lease and collection support, are retained for compatibility.
+The desktop's old `/planner` link opens Work. The desktop Extensions screen
+continues to manage existing MCP connections. See [legacy credential management](docs/personal-integrations.md#기존-플래너-호환)
+for the retained status and revoke commands.
 
 ## Lifetime worker isolation and cancellation
 

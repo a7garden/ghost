@@ -149,18 +149,6 @@ kbd { font-family: var(--font-body); background: var(--color-surface-elevated); 
 .goal-item, .schedule-row { padding: var(--space-md) var(--space-xs); }
 .inbox-item { padding: var(--space-md) var(--space-xs); }
 .inbox-item h2 { font-size: 18px; }
-.planner-date { margin: 0 0 var(--space-md); padding: 0; background: transparent; }
-.planner-date input { background: var(--color-surface-elevated); }
-.planner-week { margin: 0 0 var(--space-lg); background: var(--color-surface-elevated); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-card); padding: var(--space-xs); }
-.planner-week-cell { min-height: 52px; border-radius: var(--radius-input); }
-.planner-week-cell.selected { background: var(--color-accent); color: var(--color-accent-ink); }
-.planner-week-cell.selected .planner-week-count { color: inherit; }
-.planner-week-day { font-size: 11px; }
-.planner-columns { gap: var(--space-md); }
-.planner-columns > section { padding: var(--space-md); border: 1px solid var(--color-border-subtle); background: var(--color-surface-elevated); border-radius: var(--radius-card); }
-.planner-columns .section-heading { gap: var(--space-sm); flex-wrap: wrap; }
-.planner-columns .section-heading h2 { font-size: var(--text-body); }
-.planner-item strong { font-size: var(--text-control); }
 .integration-row { padding: var(--space-md) 0; gap: var(--space-md); }
 .integration-icon { background: var(--color-accent-soft); color: var(--color-accent); border-radius: var(--radius-input); }
 .integration-copy h2, .integration-copy h3 { font-size: 16px; }
@@ -273,15 +261,11 @@ dialog::backdrop { background: var(--color-overlay); -webkit-backdrop-filter: bl
   .composer { padding: var(--space-sm); border-radius: var(--radius-composer); }
   .composer textarea { font-size: 16px; }
   .composer-caption { font-size: 10px; }
-  .settings-content, .planner-columns > section { padding: var(--space-md); }
+  .settings-content { padding: var(--space-md); }
   .setting-row { flex-wrap: wrap; }
   .setting-row > div:first-child { flex: 1; min-width: 160px; }
   .theme-options { width: 100%; }
   .theme-options button { flex: 1; flex-direction: row; }
-  .planner-date { gap: var(--space-xs); }
-  .planner-date .field-help { flex-basis: 100%; }
-  .planner-week { gap: 2px; padding: var(--space-2xs); }
-  .planner-week-cell { min-height: 52px; }
   .collaboration-view-tabs { padding-inline: var(--space-md); }
   .work-row { flex-wrap: wrap; }
   .work-copy { flex-basis: calc(100% - 64px); }

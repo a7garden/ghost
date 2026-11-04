@@ -12,7 +12,7 @@ owner, and Ghosts. Conversations remain directly accessible from Ghost selection
 the sidebar, and existing deep links. Host, providers, and extensions are dedicated
 management destinations rather than overlapping configuration dialogs.
 
-The sidebar groups work, personal workspace tools, and management. A shared toolbar
+The sidebar groups work, document and collaboration tools, and management. A shared toolbar
 keeps Ghost switching and command search. The mobile menu exposes every destination.
 Page headings identify the destination without promotional subtitles.
 
@@ -58,11 +58,13 @@ reduced motion; avoid ongoing animation for data updates.
 | Providers | Registered inference providers; disclosed compatibility and voice settings |
 | Extensions | MCP tools and permissions, packages, device pairing |
 | Conversation | Continuous transcript, anchored composer, scoped model choice |
-| Work and inbox | Persisted task/review state and explicit owner actions |
-| Documents and planner | Existing document and planning flows |
+| Work and inbox | Assigned work, review decisions, and task status and notifications |
+| Documents | Existing library and review flows |
 
-No user document storage, source bytes, parsing, preview isolation or migration
-semantics change. Follow `docs/pdc-adoption.md` for those planes.
+The Host retains execution time limits, durable scheduling, work resumption, and completion notifications.
+Old planner links open Work. Existing planner records and Host APIs are retained for compatibility.
+
+Follow `docs/pdc-adoption.md` for the user document plane.
 
 ## References and verification
 

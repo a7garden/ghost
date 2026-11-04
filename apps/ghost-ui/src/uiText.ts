@@ -19,7 +19,6 @@ export const routeLabels = {
   inbox: uiTerms.inbox,
   work: uiTerms.work,
   together: uiTerms.collaboration,
-  planner: '할 일과 일정',
   integrations: '확장',
   providers: '프로바이더',
   host: '호스트',
