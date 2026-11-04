@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { useId, useState } from 'react';
 import { Card, GPanel } from '@garden/ui';
 import { ArrowUpRight, CircleAlert, GitBranch, Play, Plus, Save, Square, Trash2 } from 'lucide-react';
@@ -53,7 +54,7 @@ export function OrchestrationView({ snapshot, mode, busy, action, navigate }: Pr
         {!history.length ? <p className="quiet-empty">아직 실행한 기록이 없습니다.</p> : <div className="graph-run-tabs" aria-label="구조 실행 선택">{history.map(run => <button className="filter-button" aria-pressed={viewing?.id === run.id} key={run.id} onClick={() => setRunId(run.id)}><time dateTime={new Date(run.created_ms).toISOString()}>{new Date(run.created_ms).toLocaleString('ko-KR')}</time><span>{graphStateLabels[run.state]}</span></button>)}</div>}
         {viewing && <section className="graph-run-results" aria-label="작업별 실행 결과">{viewing.jobs.map(job => {
           const node = viewing.plan.nodes.find(node => node.id === job.node_id)!;
-          return <Card key={job.node_id} className="graph-result"><div><h3>{node.title}</h3><span>{graphStateLabels[job.state]}</span></div>{job.output && <details><summary>결과 보기</summary><pre>{job.output}</pre></details>}{job.task_id && <button className="text-button" onClick={() => navigate(`/ghosts/${node.profile_id}?conversation=${encodeURIComponent(job.conversation_id)}`)}>작업 대화<ArrowUpRight size={14}/></button>}</Card>;
+          return <Card key={job.node_id} className="graph-result"><div><h3>{node.title}</h3><span>{graphStateLabels[job.state]}</span></div>{job.output && <DetailDialog title="결과 보기"><pre>{job.output}</pre></DetailDialog>}{job.task_id && <button className="text-button" onClick={() => navigate(`/ghosts/${node.profile_id}?conversation=${encodeURIComponent(job.conversation_id)}`)}>작업 대화<ArrowUpRight size={14}/></button>}</Card>;
         })}{activeRunStates.includes(viewing.state) && <button className="button secondary" disabled={locked || viewing.state === 'cancelling'} onClick={() => void perform({ type:'workspace', action:{ type:'cancel_orchestration', run_id:viewing.id } })}><Square size={13}/>{viewing.state === 'cancelling' ? '취소 확인 중' : '이 실행 취소'}</button>}</section>}
         {active && !viewing && <button className="text-button" onClick={() => setRunId(active.id)}>진행 중인 실행 보기<ArrowUpRight size={14}/></button>}
       </>}

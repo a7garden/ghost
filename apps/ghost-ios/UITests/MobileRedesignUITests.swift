@@ -217,6 +217,16 @@ import XCTest
         XCTAssertFalse(app.buttons["방향 전달"].exists)
         XCTAssertTrue(app.buttons["대화 열기"].exists)
         capture("Dark current work detail", app: app)
+        app.buttons["요청 기록"].tap()
+        XCTAssertTrue(app.navigationBars["요청 기록"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["목표 ID"].exists)
+        app.navigationBars["요청 기록"].buttons["닫기"].tap()
+        XCTAssertTrue(app.navigationBars["맡긴 일"].waitForExistence(timeout: 5))
+        app.buttons["실행 기록"].tap()
+        XCTAssertTrue(app.navigationBars["실행 기록"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Work ID"].exists)
+        app.navigationBars["실행 기록"].buttons["닫기"].tap()
+        XCTAssertTrue(app.buttons["대화 열기"].exists)
     }
 
     func testLifetimeReceivesMessagesWithoutMovingEarlierReading() {

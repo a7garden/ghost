@@ -28,8 +28,7 @@
 .routing-decision+ .routing-decision { border-top:1px solid var(--color-border); margin-top:18px; padding-top:18px; }
 .routing-decision h3 { display:flex; justify-content:space-between; gap:10px; font-size:13px; margin:0 0 8px; font-weight:500; }
 .routing-decision p { margin:4px 0; }
-.routing-decision details { font-size:11px; color:var(--color-text-secondary); margin-top:8px; }
-.routing-decision summary { cursor:pointer; }
+.routing-decision .detail-trigger { font-size:11px; color:var(--color-text-secondary); margin-top:8px; }
 .routing-source { display:block; }
 .routing-read-error { display:flex; gap:9px; align-items:center; flex-wrap:wrap; padding:10px 3px; font-size:12px; color:var(--color-text-secondary); }
 @media(pointer:coarse) { .routing-choices button,.routing-work-row { min-height:44px; } }

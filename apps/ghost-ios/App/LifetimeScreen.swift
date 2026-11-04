@@ -389,13 +389,13 @@ struct LifetimeScreen: View {
                         Button { composerFocused = false; showingGhosts = true } label: {
                             HStack(spacing: 5) {
                                 Text(selectedTarget?.label ?? "Ghost 선택").lineLimit(1)
-                                Image(systemName: "chevron.down").font(.caption2)
+                                Image(systemName: "arrow.left.arrow.right").font(.caption2)
                             }.font(.headline).foregroundStyle(GhostStyle.text)
                         }.accessibilityLabel("Ghost 전환").accessibilityIdentifier("ghost-switcher-open")
                         Button { showingInference = true } label: {
                             HStack(spacing: 3) {
                                 Text(model.isOnline ? currentInferenceLabel : "연결 확인 중")
-                                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                                Image(systemName: "slider.horizontal.3").font(.system(size: 8, weight: .semibold))
                             }.font(.caption2).foregroundStyle(GhostStyle.secondary)
                         }.disabled(!inferencePickerEnabled).accessibilityLabel("모델과 추론 수준 변경").accessibilityIdentifier("inference-picker-open")
                     }.accessibilityElement(children: .contain)
@@ -767,7 +767,7 @@ struct LifetimeScreen: View {
                             .font(.footnote)
                             .foregroundStyle(GhostStyle.secondary)
                     }
-                    DisclosureGroup("기술 식별자") {
+                    GhostDetailButton("기술 식별자") {
                         LabeledContent("Workspace", value: item.workspaceID ?? "확인 불가")
                             .font(.caption.monospaced())
                             .textSelection(.enabled)
@@ -1119,7 +1119,7 @@ struct LifetimeScreen: View {
                 }.disabled(targetSelectionLocked).accessibilityIdentifier("conversation-target")
                 if !pendingConversationInputs.isEmpty { Text(pendingTargetNotice).font(.footnote).foregroundStyle(GhostStyle.warning) }
                 if let target = selectedTarget {
-                    DisclosureGroup("기술 식별자") {
+                    GhostDetailButton("기술 식별자") {
                         LabeledContent("Ghost ID", value: target.ghostID)
                             .font(.caption.monospaced()).textSelection(.enabled)
                         LabeledContent("Conversation ID", value: target.conversationID)
@@ -1421,7 +1421,7 @@ struct LifetimeScreen: View {
                             .foregroundStyle(GhostStyle.secondary)
                             .textSelection(.enabled)
                         if body["method"].text == "conversation.input" {
-                            DisclosureGroup("보존된 입력·대상 · 다시 보내지 않음") {
+                            GhostDetailButton("보존된 입력·대상 · 다시 보내지 않음") {
                                 LabeledContent("Ghost ID", value: body["ghost_id"].text)
                                     .font(.caption.monospaced()).textSelection(.enabled)
                                 LabeledContent("Conversation ID", value: body["conversation_id"].text)
@@ -1431,7 +1431,7 @@ struct LifetimeScreen: View {
                                     .font(.caption).foregroundStyle(GhostStyle.secondary)
                             }
                         } else if body["method"].text == "conversation.cancel_turn" {
-                            DisclosureGroup("보존된 취소 대상 · 다시 보내지 않음") {
+                            GhostDetailButton("보존된 취소 대상 · 다시 보내지 않음") {
                                 LabeledContent("Ghost ID", value: body["ghost_id"].text)
                                     .font(.caption.monospaced()).textSelection(.enabled)
                                 LabeledContent("Conversation ID", value: body["conversation_id"].text)
@@ -1476,17 +1476,17 @@ struct LifetimeScreen: View {
 
         Section {
             GhostStatusBadge(state: goalDisplayState(goal))
-            DisclosureGroup("요청 기록") {
-            LabeledContent("목표 ID", value: goalID)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-            LabeledContent("revision", value: lifetimeRevisionText(goal["revision"]))
-            LabeledContent("담당 Ghost", value: goal["accountable_ghost"].text)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-            LabeledContent("회신 대화", value: goal["reply_conversation"].text)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
+            GhostDetailButton("요청 기록") {
+                LabeledContent("목표 ID", value: goalID)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                LabeledContent("revision", value: lifetimeRevisionText(goal["revision"]))
+                LabeledContent("담당 Ghost", value: goal["accountable_ghost"].text)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                LabeledContent("회신 대화", value: goal["reply_conversation"].text)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
             }
             LabeledContent("자료 범위", value: privacyLabel(goal["privacy"].text))
             TextField("목표 내용", text: Binding(
@@ -1530,24 +1530,24 @@ struct LifetimeScreen: View {
 
         VStack(alignment: .leading, spacing: 10) {
             GhostStatusBadge(state: state)
-            DisclosureGroup("실행 기록") {
-            LabeledContent("Work ID", value: workID)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-            LabeledContent("담당자", value: work["owner"].text)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-            LabeledContent("Goal revision", value: lifetimeRevisionText(work["goal_revision"]))
-            LabeledContent("Owner revision", value: lifetimeRevisionText(work["owner_revision"]))
-            if executionID.isEmpty {
-                Text("실행 ID가 아직 snapshot에 없습니다.")
-                    .font(.footnote)
-                    .foregroundStyle(GhostStyle.secondary)
-            } else {
-                LabeledContent("Execution ID", value: executionID)
+            GhostDetailButton("실행 기록") {
+                LabeledContent("Work ID", value: workID)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
-            }
+                LabeledContent("담당자", value: work["owner"].text)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                LabeledContent("Goal revision", value: lifetimeRevisionText(work["goal_revision"]))
+                LabeledContent("Owner revision", value: lifetimeRevisionText(work["owner_revision"]))
+                if executionID.isEmpty {
+                    Text("실행 ID가 아직 snapshot에 없습니다.")
+                        .font(.footnote)
+                        .foregroundStyle(GhostStyle.secondary)
+                } else {
+                    LabeledContent("Execution ID", value: executionID)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
             }
             if !work["blocker"].text.isEmpty {
                 Label("대기 이유: \(work["blocker"].text)", systemImage: "clock")
@@ -2062,4 +2062,38 @@ private func pendingLabel(_ method: String) -> String {
 private func isObject(_ value: JSON) -> Bool {
     if case .object = value { return true }
     return false
+}
+
+private struct GhostDetailButton<Content: View>: View {
+    let title: String
+    let content: () -> Content
+    @State private var presented = false
+
+    init(_ title: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.content = content
+    }
+
+    var body: some View {
+        Button {
+            presented = true
+        } label: {
+            Text(title)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+            .buttonStyle(.borderless)
+            .sheet(isPresented: $presented) {
+                NavigationStack {
+                    Form { content() }
+                        .navigationTitle(title)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("닫기") { presented = false }
+                            }
+                        }
+                }
+            }
+    }
 }

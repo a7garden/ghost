@@ -33,7 +33,6 @@
 .lifetime-form-row { display: grid; grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1.3fr); gap: 14px; align-items: start; }
 .lifetime-form-row select { min-height: 40px; }
 .lifetime-acceptance { min-width: 0; }
-.lifetime-acceptance summary { width: fit-content; padding: 8px 0; color: var(--color-quiet); font-size: 11px; cursor: pointer; }
 .lifetime-acceptance textarea { min-height: 72px; font: 11px/1.5 var(--font-mono); }
 .lifetime-submit-actions { align-items: flex-end; flex-wrap: wrap; }
 .lifetime-submit-actions > span { color: var(--color-quiet); font-size: 10px; }

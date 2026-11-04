@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import type { Profile } from '../client/types';
 
 export function legacyHistoryRequested(route: string): boolean {
@@ -25,9 +26,9 @@ export function LegacyTranscript({ profile, route, navigate }: { profile: Profil
       {conversation.messages.map((message, index) => <article className="lifetime-turn" key={`${message.role}:${index}`}>
         <header><strong>{message.role === 'user' ? '나' : message.role === 'tool' ? '도구 기록' : profile.name}</strong></header>
         <pre>{message.text}</pre>
-        {message.tool?.output && <details><summary>{message.tool.output.summary ?? message.tool.name}</summary><pre>{JSON.stringify(message.tool.output.content ?? message.tool.output, null, 2)}</pre></details>}
+        {message.tool?.output && <DetailDialog title={message.tool.output.summary ?? message.tool.name}><pre>{JSON.stringify(message.tool.output.content ?? message.tool.output, null, 2)}</pre></DetailDialog>}
       </article>)}
-      {conversation.tasks.map(task => <details key={task.id} className="lifetime-artifact"><summary>{task.name} · 기록된 상태: {task.phase}</summary>{task.output && <pre>{task.output}</pre>}{task.partial && <pre>{task.partial}</pre>}<code>{task.id}</code></details>)}
+      {conversation.tasks.map(task => <DetailDialog key={task.id} title={task.name} label={<>{task.name} · 기록된 상태: {task.phase}</>} className="lifetime-artifact">{task.output && <pre>{task.output}</pre>}{task.partial && <pre>{task.partial}</pre>}<code>{task.id}</code></DetailDialog>)}
     </div>}
   </section>;
 }

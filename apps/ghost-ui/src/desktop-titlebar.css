@@ -25,7 +25,7 @@
   font-size: 13px;
 }
 .ghost-desktop-titlebar .ghost-switcher-identity > .dot-avatar { width: 24px !important; height: 24px !important; }
-.ghost-desktop-titlebar .ghost-switcher-chevron { opacity: .7; }
+.ghost-desktop-titlebar .ghost-switcher-icon { opacity: .7; }
 .ghost-desktop-titlebar .ghost-switcher-menu {
   inset-inline-start: 50%;
   top: calc(100% + 4px);

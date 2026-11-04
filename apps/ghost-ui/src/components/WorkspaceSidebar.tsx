@@ -1,5 +1,4 @@
-import { useId, useState } from 'react';
-import { CalendarDays, ChevronDown, Cpu, Puzzle, Server, Folder, GitBranch, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
+import { CalendarDays, Cpu, Puzzle, Server, Folder, GitBranch, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
 import { ghostPath, viewPath } from '../features/PackageWorkspace';
 import type { GhostView } from '../../sdk/src/index';
 import type { Snapshot } from '../client/types';
@@ -28,14 +27,11 @@ type Props = {
 
 export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpace, views, activeView, attentionCount, mode, error, lifetimeEnabled, showGhostHeading = true, status, navigate, onConnection }: Props) {
   const durableHost = lifetimeEnabled && mode === 'live';
-  const [spacesOpen, setSpacesOpen] = useState(true);
   const params = new URLSearchParams(route.split('?')[1] || '');
   const panel = params.get('panel');
   const profile = snapshot?.profiles.find(item => item.id === dotId);
   const conversation = params.get('conversation') ?? profile?.conversations[0]?.id;
-  const [conversationsOpen, setConversationsOpen] = useState(true);
   const primarySection = section === 'lifetime' ? panel === 'work' ? 'work' : panel === 'ghosts' ? 'ghosts' : 'ghosts' : section;
-  const spacesId = useId(), conversationsId = useId();
   const chatSelected = Boolean(dotId && !activeView && (section === 'ghosts' || (section === 'lifetime' && !panel && !params.has('create'))));
   return <>
     <button className="sidebar-brand" onClick={() => navigate('/')} aria-label="Ghost 대시보드"><GhostMark/><strong>Ghost</strong></button>
@@ -56,11 +52,8 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
             onClick={() => navigate(viewPath(profile.id, view.id))}><LayoutList size={16}/><span>{view.label}</span></button>)}
         </nav>
         {profile.conversations.length > 0 && <section className="sidebar-section sidebar-history">
-          <div className="sidebar-label">
-            <button className="sidebar-section-toggle" aria-expanded={conversationsOpen} aria-controls={conversationsId}
-              onClick={() => setConversationsOpen(!conversationsOpen)}><ChevronDown size={13}/><span>대화 기록</span></button>
-          </div>
-          <nav className="sidebar-nested-nav" id={conversationsId} aria-label={`${profile.name} 대화 기록`} hidden={!conversationsOpen}>
+          <h3 className="sidebar-label">대화 기록</h3>
+          <nav className="sidebar-nested-nav" aria-label={`${profile.name} 대화 기록`}>
             {profile.conversations.map((item, index) => {
               const active = chatSelected && conversation === item.id;
               const path = legacyHistoryPath(profile.id, item.id);
@@ -74,10 +67,8 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
       <section className="sidebar-menu-group sidebar-menu-group--shared" aria-label="도구">
         <h2 className="sidebar-group-title">도구</h2>
         {snapshot?.spaces.length ? <section className="sidebar-section">
-          <div className="sidebar-label"><button className="sidebar-section-toggle" aria-expanded={spacesOpen} aria-controls={spacesId}
-            onClick={() => setSpacesOpen(!spacesOpen)}><ChevronDown size={13}/><span>{routeLabels.spaces}</span>
-            <span className="sidebar-section-count">{snapshot.spaces.length}</span></button></div>
-          <nav className="sidebar-nested-nav" id={spacesId} aria-label={routeLabels.spaces} hidden={!spacesOpen}>
+          <h3 className="sidebar-label">{routeLabels.spaces}</h3>
+          <nav className="sidebar-nested-nav" aria-label={routeLabels.spaces}>
             {snapshot.spaces.map(space =>
               <button key={space.id} className={`nav-row ${selectedSpace === space.id && section === 'spaces' ? 'selected' : ''}`}
                 aria-current={selectedSpace === space.id && section === 'spaces' ? 'page' : undefined} title={space.name}
@@ -89,12 +80,10 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
         <nav className="sidebar-tools" aria-label="도구">{[
           { path: '/planner', key: 'planner', name: routeLabels.planner, Icon: CalendarDays },
         ].map(({ path, key, name, Icon }) => <button key={key} className={`nav-row ${section === key ? 'selected' : ''}`}
-          aria-current={section === key ? 'page' : undefined} onClick={() => navigate(path)}><Icon size={16}/><span>{name}</span></button>)}</nav>
-        <details className="sidebar-advanced" open={section === 'together'}>
-          <summary>고급</summary>
+          aria-current={section === key ? 'page' : undefined} onClick={() => navigate(path)}><Icon size={16}/><span>{name}</span></button>)}
           <button className={`nav-row ${section === 'together' ? 'selected' : ''}`} aria-current={section === 'together' ? 'page' : undefined}
             onClick={() => navigate('/together')}><GitBranch size={16}/><span>협업 기록</span></button>
-        </details>
+        </nav>
       </section>
       <section className="sidebar-menu-group" aria-label="호스트 관리"><h2 className="sidebar-group-title">관리</h2><nav className="primary-nav">{[
         { path: '/host', key: 'host', name: '호스트', Icon: Server },

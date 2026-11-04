@@ -28,13 +28,13 @@ export function ProviderEditor({ initial, version, existing, busy, saveBlocked, 
     {value.auth.type === 'sdk' && <p className="field-help">해당 제공자에 이미 저장된 인증을 사용합니다.</p>}
     <fieldset className="pet-fieldset"><legend>서버에서 사용할 역할</legend><div className="model-role-checks">{roles.map(role => <label key={role}><input type="checkbox" checked={value.roles.includes(role)} disabled={locked} onChange={e => toggleRole(role, e.target.checked)}/>{role.toUpperCase()}</label>)}</div></fieldset>
     <label className="provider-enabled"><input type="checkbox" checked={value.enabled} disabled={locked} onChange={e => patch({ enabled: e.target.checked })}/>제공자 사용</label>
-    <details className="provider-model-editor" open={value.models.length < 10}><summary>등록할 모델 · {value.models.length}개</summary><div className="form-stack">
+    <section className="provider-model-editor"><h3>등록할 모델 · {value.models.length}개</h3><div className="form-stack">
       {value.models.length > 10 && <input aria-label="등록할 모델 검색" placeholder="모델 ID 검색" value={search} onChange={e => setSearch(e.target.value)}/>}
       {matches.slice(0, 30).map(({ m, index }) => <div className="provider-model-row" key={m.id}><strong title={m.id}>{m.id}</strong><div className="model-role-checks">{roles.filter(role => value.roles.includes(role)).map(role => <label key={role}><input type="checkbox" aria-label={`${m.id} ${role.toUpperCase()}`} checked={m.roles.includes(role)} disabled={locked} onChange={e => patch({ models: value.models.map((item, i) => i === index ? { ...item, roles: e.target.checked ? [...item.roles, role] : item.roles.filter(r => r !== role) } : item) })}/>{role.toUpperCase()}</label>)}</div><button type="button" className="icon-button" aria-label={`${m.id} 목록에서 제외`} disabled={locked} onClick={() => patch({ models: value.models.filter((_, i) => i !== index) })}><X size={14}/></button></div>)}
       {matches.length > 30 && <p className="field-help">검색 결과 {matches.length}개 중 30개 표시</p>}
       <div className="provider-model-add"><input aria-label="추가할 모델 ID" placeholder="모델 ID" value={newModel} maxLength={300} disabled={locked} onChange={e => setNewModel(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}/><button className="button secondary" type="button" disabled={locked || !newModel.trim() || !value.roles.length} onClick={add}><Plus size={14}/>추가</button></div>
       {!value.models.length && <p className="field-help">서버를 등록한 다음 ‘목록 확인’으로 모델을 불러올 수도 있습니다.</p>}
-    </div></details>
+    </div></section>
     {error && <p className="form-error" role="alert">{error}</p>}
     {saveBlocked && <p className="field-help" role="status">{saveBlocked}</p>}
     <div className="form-actions"><button type="button" className="button secondary" disabled={locked} onClick={onClose}>취소</button><button className="button primary" disabled={locked || Boolean(saveBlocked)}>{saving ? '저장 중…' : '설정 저장'}</button></div>

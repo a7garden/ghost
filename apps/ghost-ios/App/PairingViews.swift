@@ -244,9 +244,7 @@ private struct LinkConfirmSheet: View {
                 Section("PC의 연결 요청") {
                     LabeledContent("서버", value: invitation.origin.absoluteString)
                         .font(.footnote)
-                    DisclosureGroup("초대 정보") {
-                        LabeledContent("초대 ID", value: invitation.invitationID.uuidString).font(.footnote).textSelection(.enabled)
-                    }
+                    LabeledContent("초대 ID", value: invitation.invitationID.uuidString).font(.footnote).textSelection(.enabled)
                 }
                 Section("이 기기") {
                     DeviceNameField(pairing: pairing)

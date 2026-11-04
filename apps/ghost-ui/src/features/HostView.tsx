@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { ArrowUpRight, Check, Cpu, Database, Layers, Pause, RefreshCw, Server, ShieldCheck } from 'lucide-react';
 import type { Snapshot } from '../client/types';
 import type { HostStatus } from './hostStatus';
@@ -29,6 +30,6 @@ export function HostView({ snapshot, status, observedAt, workObservedAt, workErr
       <section className="host-panel"><h2>모델과 확장</h2><button className="host-link-row" onClick={() => navigate('/providers')}><Cpu size={19}/><span><strong>프로바이더 연결</strong><small>사용할 모델과 인증 설정</small></span><ArrowUpRight size={16}/></button><button className="host-link-row" onClick={() => navigate('/integrations')}><Layers size={19}/><span><strong>확장 관리</strong><small>패키지, 도구 권한, 휴대폰 연결</small></span><ArrowUpRight size={16}/></button></section>
     </div>
     <section className="host-capabilities"><div className="section-heading"><h2>호스트 기능</h2><span className="field-help">Host가 보고한 지원 여부</span></div><div>{capabilities.map(({title,supported,Icon,path}) => <button key={title} onClick={() => navigate(path)} disabled={!supported}><Icon size={19}/><strong>{title}</strong><span>{supported ? '지원' : '미지원'}</span><ArrowUpRight size={14}/></button>)}</div><p className="field-help">기능 지원과 Ghost별 실행 권한은 별개입니다.</p></section>
-    <details className="host-diagnostics"><summary>연결 정보</summary><dl className="host-facts"><div><dt>작업실 ID</dt><dd><code>{snapshot.workspace_id}</code></dd></div><div><dt>실행 권한 판본</dt><dd>{authority?.authority_epoch ?? '제공 안 함'}</dd></div><div><dt>전송 모드</dt><dd>{status.state === 'demo' ? '브라우저 예시' : '인증된 Host 연결'}</dd></div></dl></details>
+    <DetailDialog title="연결 정보" className="host-diagnostics"><dl className="host-facts"><div><dt>작업실 ID</dt><dd><code>{snapshot.workspace_id}</code></dd></div><div><dt>실행 권한 판본</dt><dd>{authority?.authority_epoch ?? '제공 안 함'}</dd></div><div><dt>전송 모드</dt><dd>{status.state === 'demo' ? '브라우저 예시' : '인증된 Host 연결'}</dd></div></dl></DetailDialog>
   </div>;
 }

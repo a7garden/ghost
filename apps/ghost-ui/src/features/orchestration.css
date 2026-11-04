@@ -29,8 +29,7 @@
 .graph-result { padding:16px; border:var(--hairline) solid var(--color-border); border-radius:var(--radius-xl); background:var(--color-surface-elevated); }
 .graph-result > div { display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center; }
 .graph-result h3 { font-size:13px; }
-.graph-result > div > span, .graph-result summary { font-size:12px; color:var(--color-text-secondary); }
-.graph-result details { margin:12px 0; }
+.graph-result > div > span { font-size:12px; color:var(--color-text-secondary); }
 .graph-result pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; max-height:320px; overflow:auto; margin-top:12px; }
 .modal.graph-editor-dialog { width:min(1120px,calc(100vw - 32px)); max-width:none; overflow:auto; }
 .graph-editor-form { display:flex; flex-direction:column; gap:16px; min-width:0; }

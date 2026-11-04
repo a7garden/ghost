@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Cpu, Image, KeyRound, Terminal } from 'lucide-react';
+import { Cpu, Image, KeyRound, Terminal } from 'lucide-react';
+import { Modal } from '../components/Modal';
 import { ImageComposer } from './ImageComposer';
 import '../features/connections.css';
 
@@ -59,7 +60,7 @@ export function InferenceSettings({ pair, ...props }: InferenceProps) {
 
 function InferencePanel({ pair, pairKey, disabled = false, connected = true }: InferenceProps & { pairKey: string }) {
   const [data, setData] = useState<Configuration>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
-  const [expanded, setExpanded] = useState(!pair), [draft, setDraft] = useState<Selection>(), [allow, setAllow] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false), [draft, setDraft] = useState<Selection>(), [allow, setAllow] = useState(false);
   const [keyEditor, setKeyEditor] = useState<{ provider: string; value: string }>();
   const [notice, setNotice] = useState(''), [reload, setReload] = useState(0);
   const saving = useRef(false);
@@ -111,13 +112,10 @@ function InferencePanel({ pair, pairKey, disabled = false, connected = true }: I
   const usableSelection = Boolean(draft && provider?.models.includes(draft.model) && provider.efforts.includes(draft.effort));
   const imageProviders = data?.providers.filter(item => item.image) ?? [];
 
-  return <section className={pair ? 'inference-settings inference-settings--pair' : 'inference-settings connections-stack'} aria-label={pair ? '이 대화의 모델' : '추론 설정'}>
-    {pair && <button className="button secondary inference-pair-toggle" type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded}>
-      <span>{selected ? `${selected.model} · ${effortLabel(selected.effort)}` : '대화 모델'}</span><ChevronDown size={14}/>
-    </button>}
-    {(!pair || expanded) && !connected && <p className="connection-message" role="status">호스트에 연결하면 설정을 변경할 수 있습니다.</p>}
-    {(!pair || expanded) && connected && !data && !error && <p className="connection-message" role="status">모델 설정을 불러오는 중…</p>}
-    {expanded && data && draft && <>
+  const fields = <>
+    {!connected && <p className="connection-message" role="status">호스트에 연결하면 설정을 변경할 수 있습니다.</p>}
+    {connected && !data && !error && <p className="connection-message" role="status">모델 설정을 불러오는 중…</p>}
+    {data && draft && <>
       <section className={pair ? 'inference-pair-body' : 'connection-section'} aria-label="대화 모델">
         {!pair && <div className="connection-heading"><h2>기본 대화 모델</h2></div>}
         <div className={pair ? 'inference-pair-settings' : 'connection-surface inference-default'}>
@@ -196,9 +194,22 @@ function InferencePanel({ pair, pairKey, disabled = false, connected = true }: I
       </>}
       {pair && <fieldset className="connection-fieldset inference-pair-images" disabled={locked}><ImageComposer pair={pair}/></fieldset>}
     </>}
-    {(!pair || expanded) && notice && <p className="connection-message" role="status">{notice}</p>}
-    {(!pair || expanded) && error && <div className="connection-message connection-message--error" role="alert"><span>{error}</span>
+    {notice && <p className="connection-message" role="status">{notice}</p>}
+    {error && <div className="connection-message connection-message--error" role="alert"><span>{error}</span>
       <button type="button" className="button secondary" disabled={disabled || busy || !connected} onClick={refresh}>다시 확인</button>
     </div>}
+  </>;
+
+  return <section className={pair ? 'inference-settings inference-settings--pair' : 'inference-settings connections-stack'} aria-label={pair ? '이 대화의 모델' : '추론 설정'}>
+    {pair ? <>
+      <button className="button secondary inference-pair-trigger" type="button" aria-haspopup="dialog" onClick={() => setSettingsOpen(true)}>
+        <Cpu size={14}/><span>{selected ? `${selected.model} · ${effortLabel(selected.effort)}` : '대화 모델'}</span>
+      </button>
+      {settingsOpen && <Modal title="대화 모델" onClose={() => {
+        if (saving.current) return;
+        setSettingsOpen(false);
+        setAllow(false);
+      }}><div className="form-stack">{fields}</div></Modal>}
+    </> : fields}
   </section>;
 }

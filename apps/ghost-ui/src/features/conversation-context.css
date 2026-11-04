@@ -4,16 +4,11 @@
 .context-card-stack { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; padding: 4px 14px 24px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
 .context-card { flex: 0 0 auto; min-width: 0; border: var(--hairline) solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-surface); }
 .context-card > h3 { margin: 0; font-size: 12px; font-weight: 550; }
-.context-card-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 12px; text-align: left; border-radius: var(--radius-xl); }
-.context-card-toggle:hover { background: var(--color-background-secondary-hover); }
-.context-card-toggle:focus-visible { outline-offset: -3px; }
+.context-card-heading { display: flex; align-items: center; gap: 8px; width: 100%; margin: 0; padding: 12px; text-align: left; border-radius: var(--radius-xl); }
 .context-card-icon { display: flex; color: var(--color-text-secondary); }
 .context-card-title { min-width: 0; flex: 1; }
 .context-card-count, .context-card-status { font-size: 11px; color: var(--color-text-tertiary); font-weight: 400; font-variant-numeric: tabular-nums; }
-.context-card-chevron { color: var(--color-text-tertiary); transform: rotate(-90deg); transition: transform var(--dur-micro) var(--ease-out); }
-.context-card-toggle[aria-expanded="true"] .context-card-chevron { transform: rotate(0); }
 .context-card-body { display: grid; min-width: 0; padding: 0 12px 12px; }
-.context-card-body[hidden] { display: none; }
 .context-card-attention .context-card-icon, .context-card-attention .context-card-count, .needs-attention .context-task-mark, .context-phase.needs-attention { color: var(--color-amber-ink); }
 .context-card-empty { padding: 4px 0; color: var(--color-text-secondary); font-size: 11px; line-height: 1.7; }
 .context-entry { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 9px 0; border-radius: var(--radius-md); text-align: left; white-space: normal; }
@@ -30,11 +25,6 @@
 .context-task-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .context-task-entry > .icon-button { margin-top: -2px; }
 .context-task-history { margin-top: 6px; padding-top: 8px; border-top: var(--hairline) solid var(--color-border-subtle); }
-.context-task-history > summary { display: flex; align-items: center; gap: 6px; padding: 3px 0; list-style: none; cursor: pointer; font-size: 11px; color: var(--color-text-secondary); }
-.context-task-history > summary::-webkit-details-marker { display: none; }
-.context-task-history > summary > svg { transform: rotate(-90deg); }
-.context-task-history[open] > summary > svg { transform: rotate(0); }
-.context-task-history > summary > span:last-child { margin-left: auto; color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
 .context-collaboration { padding: 5px 0 2px; min-width: 0; }
 .context-collaboration + .context-collaboration { border-top: var(--hairline) solid var(--color-border-subtle); margin-top: 10px; padding-top: 12px; }
 .context-collaborator { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -64,14 +54,13 @@
 .mobile-context.context-stack-shell { min-height: 0; overflow: hidden; margin-inline: -12px; }
 .mobile-context .context-stack-heading { display: none; }
 .mobile-context .context-card-stack { padding-top: 3px; }
-@media (prefers-reduced-motion: reduce) { .context-card-chevron { transition: none; } }
 
 /* Shared independent card rules for the deck and on-demand drawer. */
 .conversation-context { flex: 0 0 auto; }
 .context-card-stack { flex: 0 0 auto; padding: 0; overflow: visible; gap: 12px; }
 .context-card { background: var(--color-surface-elevated); }
 .context-card > h3 { font-size: 13px; }
-.context-card-toggle { padding: 12px 16px; }
+.context-card-heading { padding: 12px 16px; }
 .context-card-body { padding: 0 16px 16px; }
 .context-card-count, .context-card-status { color: var(--color-text-secondary); }
 .context-entry strong, .context-task-copy strong, .context-goal-entry strong, .context-schedule-entry strong { font-size: 13px; line-height: 1.55; }

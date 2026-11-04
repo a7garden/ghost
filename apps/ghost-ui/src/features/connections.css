@@ -36,7 +36,7 @@
   overflow-wrap: anywhere;
 }
 
-.connection-surface, .connection-disclosure {
+.connection-surface {
   min-width: 0;
   border: 1px solid var(--color-rule);
   border-radius: var(--radius-card);
@@ -85,7 +85,7 @@
   font-weight: 600;
 }
 
-.connection-row-copy p, .connection-empty p, .connection-disclosure .field-help {
+.connection-row-copy p, .connection-empty p, .connection-settings-body .field-help {
   color: var(--color-ink-2);
   font-size: var(--text-caption);
   line-height: 1.5;
@@ -182,28 +182,7 @@
 
 .connection-views a:hover { background: var(--color-hover); }
 
-.connection-disclosure > summary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-sm);
-  min-height: 44px;
-  padding: var(--space-xs) var(--space-md);
-  cursor: pointer;
-  list-style: none;
-  font-size: var(--text-control);
-  font-weight: 600;
-}
-
-.connection-disclosure > summary::-webkit-details-marker { display: none; }
-.connection-disclosure > summary:hover { background: var(--color-paper-2); border-radius: var(--radius-card); }
-.connection-disclosure[open] > summary > svg, .inference-pair-toggle[aria-expanded='true'] > svg { transform: rotate(180deg); }
-
-.connection-disclosure-body {
-  min-width: 0;
-  padding: var(--space-md);
-  border-top: 1px solid var(--color-rule);
-}
+.connection-settings-body { min-width: 0; }
 
 .connection-secondary {
   display: grid;
@@ -232,8 +211,7 @@
   padding: 0;
 }
 
-.connection-fieldset.connection-disclosure-body {
-  border-top: 1px solid var(--color-rule);
+.connection-fieldset.connection-pairing {
   padding: var(--space-md);
 }
 
@@ -296,9 +274,9 @@
   min-width: 0;
 }
 
-.inference-pair-toggle { max-width: 100%; }
-.inference-pair-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.inference-pair-toggle svg { flex: none; }
+.inference-pair-trigger { max-width: 100%; }
+.inference-pair-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inference-pair-trigger svg { flex: none; }
 
 .inference-pair-body {
   width: 100%;
@@ -317,13 +295,6 @@
 }
 
 .inference-consent input { flex: none; margin-top: 2px; }
-
-.inference-pair-images summary {
-  cursor: pointer;
-  padding-block: var(--space-2xs);
-  color: var(--color-ink-2);
-  font-size: var(--text-caption);
-}
 
 @media (max-width: 760px) {
   .ghost-arc .connection-mcp { grid-template-columns: auto minmax(0, 1fr); }
@@ -345,7 +316,7 @@
 }
 
 @media (pointer: coarse) {
-  .connection-views a, .connection-actions .integration-switch, .inference-pair-images summary {
+  .connection-views a, .connection-actions .integration-switch {
     min-height: 44px;
     align-content: center;
   }
@@ -381,6 +352,8 @@
 
 .mobile-pairing-target input {
   flex: none;
+  width: 16px;
+  height: 16px;
   accent-color: var(--color-accent);
 }
 

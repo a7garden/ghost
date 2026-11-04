@@ -1,8 +1,9 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { Card } from '@garden/ui';
 import { uiTerms } from '../uiText';
-import { createContext, useContext, useId } from 'react';
+import { useId } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowRight, ArrowUpRight, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, FileText, Folder, GitBranch, ListTodo, Monitor, Phone, Settings2, Plus, Square, Target } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, CircleAlert, CircleCheck, Clock3, FileText, Folder, GitBranch, ListTodo, Monitor, Phone, Settings2, Plus, Square, Target } from 'lucide-react';
 import { DotAvatar } from '../components/DotAvatar';
 import { delegationContext, finishedDelegation } from '../client/collaboration';
 import { dotState, stateLabel, isRunning, phaseLabel, toneFor } from '../client/types';
@@ -26,74 +27,73 @@ type Props = {
   onVoice?: () => void;
   onSettings?: () => void;
   voiceAvailable?: boolean;
-  disclosure: Record<string, boolean>;
-  onDisclosure: (category: string, open: boolean) => void;
 };
 
-const DisclosureContext = createContext<{ values: Record<string, boolean>; change: (category: string, open: boolean) => void }>({ values: {}, change: () => {} });
-
-export function ConversationContext({ workContent, workCount, profile, conversation, snapshot, busy, connected, navigate, onReview, onCancel, onSchedule, management = false, disclosure, onDisclosure, onVoice, onSettings, voiceAvailable = false }: Props) {
+export function ConversationContext({ workContent, workCount, profile, conversation, snapshot, busy, connected, navigate, onReview, onCancel, onSchedule, management = false, onVoice, onSettings, voiceAvailable = false }: Props) {
   const context = contextualCards(snapshot, profile.id, conversation?.id);
   const connectedComputer = snapshot.connectors.computer;
-  return <DisclosureContext.Provider value={{ values: disclosure, change: onDisclosure }}><div className="conversation-context context-card-stack" aria-label={`${profile.name} 프로필과 활동`}>
+  return <div className="conversation-context context-card-stack" aria-label={`${profile.name} 프로필과 활동`}>
     <Card className="context-profile-card" role="region" aria-label={`${profile.name} 프로필`}>
     <div className="context-profile-header"><button type="button" className="avatar-edit-button" aria-label={`${profile.name} 아바타 변경`} onClick={() => navigate(`/settings?tab=pets&ghost=${encodeURIComponent(profile.id)}`)}><DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={56}/></button><div><strong>{profile.name}</strong><span>{stateLabel[dotState(profile, snapshot.reviews)]}</span></div></div>
     <div className="context-profile-actions">{onVoice && <button type="button" disabled={!voiceAvailable} onClick={onVoice}><Phone size={16}/>전화</button>}{onSettings && <button type="button" aria-label={`${profile.name} 설정`} onClick={onSettings}><Settings2 size={16}/>Ghost 설정</button>}</div>
     </Card>
-    <ContextCard category="computer" title="컴퓨터" icon={<Monitor size={16}/>} defaultOpen={false}><button type="button" className="context-entry" onClick={() => navigate('/integrations')}><Monitor size={17}/><span><strong>{connectedComputer ? '실행 환경' : '연결된 실행 환경 없음'}</strong><small>{connectedComputer ? '사용 가능 · 도구 연결 보기' : '도구 연결'}</small></span><ArrowUpRight size={14}/></button><dl className="context-permissions"><div><dt>웹 검색·읽기</dt><dd>{profile.policy.web === true ? '허용' : '허용 안 됨'}</dd></div><div><dt>OMP 분석 작업자</dt><dd>{profile.policy.external_worker === true ? '허용' : '허용 안 됨'}</dd></div><div><dt>Codex 코드 작업자</dt><dd>{profile.policy.code_worker === true ? '허용' : '허용 안 됨'}</dd></div>{connectedComputer && <><div><dt>브라우저</dt><dd>{profile.policy.browser === true ? '허용' : '허용 안 됨'}</dd></div><div><dt>셸</dt><dd>{profile.policy.shell === true ? '허용' : '허용 안 됨'}</dd></div></>}</dl></ContextCard>
-      {context.reviews.length > 0 && <ContextCard category="reviews" title={uiTerms.reviews} icon={<CircleAlert size={16}/>} count={context.reviews.length} attention>
+    <ContextCard title="컴퓨터" icon={<Monitor size={16}/>}><button type="button" className="context-entry" onClick={() => navigate('/integrations')}><Monitor size={17}/><span><strong>{connectedComputer ? '실행 환경' : '연결된 실행 환경 없음'}</strong><small>{connectedComputer ? '사용 가능 · 도구 연결 보기' : '도구 연결'}</small></span><ArrowUpRight size={14}/></button><dl className="context-permissions"><div><dt>웹 검색·읽기</dt><dd>{profile.policy.web === true ? '허용' : '허용 안 됨'}</dd></div><div><dt>OMP 분석 작업자</dt><dd>{profile.policy.external_worker === true ? '허용' : '허용 안 됨'}</dd></div><div><dt>Codex 코드 작업자</dt><dd>{profile.policy.code_worker === true ? '허용' : '허용 안 됨'}</dd></div>{connectedComputer && <><div><dt>브라우저</dt><dd>{profile.policy.browser === true ? '허용' : '허용 안 됨'}</dd></div><div><dt>셸</dt><dd>{profile.policy.shell === true ? '허용' : '허용 안 됨'}</dd></div></>}</dl></ContextCard>
+      {context.reviews.length > 0 && <ContextCard title={uiTerms.reviews} icon={<CircleAlert size={16}/>} count={context.reviews.length} attention>
         {context.reviews.map(review => <button type="button" className="context-entry context-review-entry" key={review.id} onClick={() => onReview(review)}><FileText size={16}/><span><strong>{review.title}</strong><small>{review.state === 'approved' ? '승인됨 · 저장 대기' : '검토 대기'}</small></span><ArrowUpRight size={14}/></button>)}
       </ContextCard>}
 
-      {workContent && <ContextCard category="works" title={uiTerms.work} icon={<ListTodo size={16}/>} count={workCount}>{workContent}</ContextCard>}
+      {workContent && <ContextCard title={uiTerms.work} icon={<ListTodo size={16}/>} count={workCount}>{workContent}</ContextCard>}
 
-      {(context.currentTasks.length > 0 || (management && context.pastTasks.length > 0)) && <ContextCard category="tasks" title="활동" icon={<ListTodo size={16}/>} count={context.currentTasks.length + context.pastTasks.length} defaultOpen={context.currentTasks.length > 0}>
+      {(context.currentTasks.length > 0 || (management && context.pastTasks.length > 0)) && <ContextCard title="활동" icon={<ListTodo size={16}/>} count={context.currentTasks.length + context.pastTasks.length}>
         <div className="context-task-list">
           {context.currentTasks.map(task => <TaskRow key={task.id} task={task} disabled={busy || !connected} onCancel={onCancel}/>)}
         </div>
-        {context.pastTasks.length > 0 && <details className="context-task-history"><summary><ChevronDown size={13}/><span>지난 작업</span><span>{context.pastTasks.length}</span></summary><div className="context-task-list">{context.pastTasks.map(task => <TaskRow key={task.id} task={task} disabled onCancel={onCancel}/>)}</div></details>}
+        {context.pastTasks.length > 0 && <DetailDialog title="지난 작업" label={<>지난 작업 {context.pastTasks.length}개</>} className="context-task-history"><div className="context-task-list">{context.pastTasks.map(task => <TaskRow key={task.id} task={task} disabled onCancel={onCancel}/>)}</div></DetailDialog>}
       </ContextCard>}
 
-      {(context.activeDelegations.length > 0 || (management && context.delegations.length > 0)) && <ContextCard category="collaboration" title="협업" icon={<GitBranch size={16}/>} count={context.delegations.length} defaultOpen={context.activeDelegations.length > 0}>
+      {(context.activeDelegations.length > 0 || (management && context.delegations.length > 0)) && <ContextCard title="협업" icon={<GitBranch size={16}/>} count={context.delegations.length}>
         {context.delegations.length ? context.delegations.map(delegation => {
           const item = delegationContext(snapshot, delegation);
           const outgoing = delegation.owner === profile.id;
           const peer = outgoing ? delegation.target : delegation.owner;
           const peerProfile = outgoing ? item.target : item.owner;
-          const entry = <div className="context-collaboration">
+          const openRecord = () => navigate(`/together?delegation=${encodeURIComponent(delegation.id)}`);
+          if (finishedDelegation(delegation)) {
+            return <button key={delegation.id} type="button" className="context-entry" onClick={openRecord}>
+              <GitBranch size={16}/><span><strong>{item.title}</strong><small>{item.label}</small></span><ArrowUpRight size={14}/>
+            </button>;
+          }
+          return <div key={delegation.id} className="context-collaboration">
             <div className="context-collaborator"><DotAvatar profileId={peer} tone={toneFor(peer)} size={34}/><div><strong>{peerProfile?.name ?? 'Ghost'}</strong><span>{outgoing ? '작업을 맡김' : '작업을 받음'}</span></div><span className={`context-phase ${item.status === 'attention' ? 'needs-attention' : ''}`}><span className={`mini-dot ${!finishedDelegation(delegation) ? 'active' : ''}`} aria-hidden="true"/>{item.label}</span></div>
             <p className="context-collaboration-title">{item.title}</p>
             {item.summary && <p className="context-collaboration-summary">{item.summary}</p>}
-            <button type="button" className="context-card-action" onClick={() => navigate(`/together?delegation=${encodeURIComponent(delegation.id)}`)}>협업 기록<ArrowUpRight size={13}/></button>
+            <button type="button" className="context-card-action" onClick={openRecord}>협업 기록<ArrowUpRight size={13}/></button>
           </div>;
-          return ['complete', 'cancelled'].includes(delegation.state) ? <details className="context-task-history" key={delegation.id}><summary><ChevronDown size={13}/><span>{item.title} · {item.label}</span></summary>{entry}</details> : <div key={delegation.id}>{entry}</div>;
         }) : <p className="context-card-empty">이 대화의 협업 없음</p>}
       </ContextCard>}
 
-      {context.goals.length > 0 && <ContextCard category="goals" title={uiTerms.goals} defaultOpen={false} icon={<Target size={16}/>} count={context.goals.length}>
+      {context.goals.length > 0 && <ContextCard title={uiTerms.goals} icon={<Target size={16}/>} count={context.goals.length}>
         {context.goals.map(goal => <div className="context-goal-entry" key={goal.id}><span className={`context-goal-mark ${goal.state === 'complete' ? 'is-complete' : ''}`} aria-label={goal.state === 'complete' ? '완료' : '미완료'}>{goal.state === 'complete' ? <Check size={12}/> : null}</span><div><strong>{goal.title}</strong>{(goal.note || goal.criteria) && <p>{goal.note || goal.criteria}</p>}</div></div>)}
         <button type="button" className="context-card-action" onClick={() => navigate('/work')}>목표 관리<ArrowUpRight size={13}/></button>
       </ContextCard>}
 
-      {(context.spaces.length > 0) && <ContextCard category="spaces" title="문서 공간" icon={<Folder size={16}/>} count={context.spaces.length} defaultOpen={false}>
+      {(context.spaces.length > 0) && <ContextCard title="문서 공간" icon={<Folder size={16}/>} count={context.spaces.length}>
         {context.spaces.length ? context.spaces.map(space => <button type="button" className="context-entry" key={space.id} onClick={() => navigate(`/spaces/${encodeURIComponent(space.id)}`)}><Folder size={16}/><span><strong>{space.name}</strong><small>{space.writable ? '읽기 · 쓰기' : '읽기 전용'}</small></span><ArrowUpRight size={14}/></button>) : <p className="context-card-empty">연결된 공간 없음</p>}
       </ContextCard>}
 
-      {(context.schedules.length > 0 || management) && <ContextCard category="schedules" title={uiTerms.schedules} icon={<Clock3 size={16}/>} count={context.schedules.length} defaultOpen={false}>
+      {(context.schedules.length > 0 || management) && <ContextCard title={uiTerms.schedules} icon={<Clock3 size={16}/>} count={context.schedules.length}>
         {context.schedules.length ? context.schedules.map(schedule => <div className="context-schedule-entry" key={schedule.id}><strong>{schedule.prompt}</strong><span>{schedule.paused ? '일시정지' : `다음 ${new Date(schedule.next_run_ms).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`}</span></div>) : <p className="context-card-empty">예약된 작업 없음</p>}
         <div className="context-card-actions"><button type="button" className="context-card-action" disabled={!conversation || busy || !connected} onClick={onSchedule}><Plus size={14}/>{uiTerms.schedules} 예약</button>{context.schedules.length > 0 && <button type="button" className="context-card-action" onClick={() => navigate('/work')}>관리<ArrowRight size={13}/></button>}</div>
       </ContextCard>}
 
-  </div></DisclosureContext.Provider>;
+  </div>;
 }
 
-function ContextCard({ category, title, icon, count, status, defaultOpen = true, attention = false, children }: { category: string; title: string; icon: ReactNode; count?: number; status?: string; defaultOpen?: boolean; attention?: boolean; children: ReactNode }) {
-  const disclosure = useContext(DisclosureContext);
-  const open = disclosure.values[category] ?? defaultOpen;
+function ContextCard({ title, icon, count, status, attention = false, children }: { title: string; icon: ReactNode; count?: number; status?: string; attention?: boolean; children: ReactNode }) {
   const id = useId();
   return <Card className={`context-card ${attention ? 'context-card-attention' : ''}`} role="region" aria-labelledby={`${id}-label`}>
-    <h3><button type="button" className="context-card-toggle" aria-expanded={open} aria-controls={`${id}-body`} id={`${id}-label`} onClick={() => disclosure.change(category, !open)}><span className="context-card-icon" aria-hidden="true">{icon}</span><span className="context-card-title">{title}</span>{count !== undefined && <span className="context-card-count">{count}</span>}{status && <span className="context-card-status">{status}</span>}<ChevronDown size={14} className="context-card-chevron" aria-hidden="true"/></button></h3>
-    <div className="context-card-body" id={`${id}-body`} aria-labelledby={`${id}-label`} hidden={!open}>{children}</div>
+    <h3 className="context-card-heading" id={`${id}-label`}><span className="context-card-icon" aria-hidden="true">{icon}</span><span className="context-card-title">{title}</span>{count !== undefined && <span className="context-card-count">{count}</span>}{status && <span className="context-card-status">{status}</span>}</h3>
+    <div className="context-card-body">{children}</div>
   </Card>;
 }
 

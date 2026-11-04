@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, CircleAlert, Clock3, MessageCircle, Search, Square, X } from 'lucide-react';
+import { Check, CircleAlert, Clock3, List, MessageCircle, Search, Square, X } from 'lucide-react';
 import { DotAvatar } from './DotAvatar';
 import { elapsedAgentTime } from '../lifetime/agentStatus';
 import type { AgentActivityState, AgentObservation, AgentStatusModel } from '../lifetime/agentStatus';
@@ -147,7 +147,7 @@ export function AgentStatus({ model: projectedModel, ghostID, observedAt, fixtur
       <span className="agent-status-activity-icon"><ActivityIcon state={model.state}/></span>
       <span className="agent-status-label">{model.label}</span>
       <span className="agent-status-time" aria-hidden="true" title={elapsed === '—' ? '호스트 시간 기록 없음' : '응답 접수 후 경과'}>{elapsed}</span>
-      <ChevronDown size={13} className="agent-status-chevron" aria-hidden="true"/>
+      <List size={13} className="agent-status-list-icon" aria-hidden="true"/>
     </button>
     {open && <div ref={panel} id={panelID} className="agent-status-popover" data-placement={panelBounds?.placement ?? 'below'}
       style={panelBounds ? { maxBlockSize: `min(32rem, ${panelBounds.availableHeight}px)` } : undefined}

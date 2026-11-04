@@ -66,10 +66,9 @@
 .mobile-pairing-claim { margin: 20px 0; }
 .mobile-pairing-origin { font-family: var(--font-mono); }
 .integration-tool-list { max-height: 60vh; overflow: auto; margin: 16px 0; }
-.integration-tool-list details { padding: 12px 0; border-bottom: 1px solid var(--color-border-subtle); }
+.integration-tool-list .detail-trigger { margin-block-start: 6px; }
 .integration-tool-list .inline-checkbox { margin-top: 10px; overflow-wrap: anywhere; }
 .integration-tool-list .inline-checkbox input { flex-shrink: 0; }
-.integration-tool-list summary { cursor: pointer; overflow-wrap: anywhere; }
 .integration-tool-list p, .integration-tool-list pre { margin-top: 10px; font-size: 12px; color: var(--color-text-secondary); }
 @media (min-width: 1050px) { .planner-columns { grid-template-columns: minmax(0,1fr) minmax(0,1fr); } }
 @media (max-width: 520px) { .form-pair { grid-template-columns: 1fr; } .integration-actions { width: 100%; } }
@@ -214,7 +213,7 @@ kbd { margin-left: auto; font: 10px var(--font-sans); border: 1px solid var(--co
 .dot-introduction { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 4px 12px 34px; }.dot-introduction .dot-avatar { margin-bottom: 3px; }.dot-introduction h1 { font-size: 28px; letter-spacing: -.035em; }.dot-introduction > p { margin-top: 5px; margin-bottom: 10px; max-width: 310px; font-size: 12px; color: var(--color-quiet); line-height: 1.75; }
 .messages { display: flex; flex-direction: column; gap: 28px; }.message { min-width: 0; }.message-user { display: flex; justify-content: flex-end; }.user-bubble { max-width: 86%; background: var(--color-background-secondary); border-radius: var(--radius-2xl); padding: 12px 17px; font-size: 14px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message-speaker { display: flex; gap: 5px; align-items: center; margin: 0 0 9px -5px; font-size: 12px; }.message-speaker strong { font-weight: 600; }.message-speaker > span:last-child:not(.dot-avatar) { margin-left: 4px; font-size: 11px; }.message-body { font-size: 14px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
-.tool-result { border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 12px 14px; max-width: 450px; font-size: 12px; }.tool-result summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; }.tool-result summary > svg:first-child { color: var(--color-running-ink); }.tool-result summary > svg:last-child { margin-left: auto; color: var(--color-quiet); }.tool-result pre { padding-top: 14px; color: var(--color-quiet); font-size: 11px; }.tool-result summary::-webkit-details-marker { display: none; }
+.tool-result { border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 12px 14px; max-width: 450px; font-size: 12px; }.tool-result pre { padding-top: 14px; color: var(--color-quiet); font-size: 11px; }
 .working-note { display: flex; align-items: center; gap: 9px; color: var(--color-quiet); font-size: 11px; margin-top: 2px; }
 .inline-review { border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: 20px; }.inline-review-header { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--color-amber-ink); margin-bottom: 12px; }.inline-review h3 { font-size: 15px; margin-bottom: 8px; }.inline-review p { color: var(--color-quiet); font-size: 12px; line-height: 1.85; margin-bottom: 16px; }
 .composer-area { flex-shrink: 0; padding: 16px 20px 6px; }.composer-inner { max-width: 690px; margin: 0 auto; }.composer { border: 1px solid var(--color-border-strong); border-radius: var(--radius-composer); corner-shape: superellipse(1.1); background: var(--color-surface-elevated); box-shadow: var(--elevation-composer); padding: 13px 17px 11px; }.composer textarea { border: 0; padding: 3px 0; border-radius: var(--radius-sm); background: var(--color-transparent); min-height: 48px; max-height: 160px; font-size: 13px; line-height: 1.7; }.composer textarea:focus-visible { outline-offset: 4px; }.composer-bottom { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 5px; }.composer-context { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 11px; color: var(--color-quiet); }.composer-dot { width: 9px; height: 9px; background: var(--avatar-dark); border-radius: var(--radius-circle); }.composer-separator { color: var(--gray-350); }.composer-actions { display: flex; align-items: center; gap: 8px; }.send-button { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-circle); padding: 0; background: var(--color-background-primary-solid); color: var(--color-text-inverse); }.send-button:disabled { background: var(--color-background-secondary); color: var(--color-quiet); opacity: .8; }.composer-caption { margin: 9px 0 5px; color: var(--color-quiet); font-size: 10px; text-align: center; }
@@ -255,7 +254,6 @@ dialog::backdrop { background: var(--color-overlay); }.modal-head { display: fle
 .role-instructions-link { font-size: 11px; margin-bottom: 10px; }
 .inbox-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .inbox-task-record { margin-bottom: 16px; font-size: 12px; color: var(--color-quiet); }
-.inbox-task-record summary { cursor: pointer; }
 .inbox-task-record pre { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .conversation-empty { padding: 0 0 24px; }
 /* .prompt-suggestions 레이아웃(display·margin)은 liquid-glass.css가 소유한다. */
@@ -320,3 +318,8 @@ dialog::backdrop { background: var(--color-overlay); }.modal-head { display: fle
   .conversation-profile-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .conversation-heading .conversation-title { min-height: 20px; }
 }
+
+.detail-trigger { max-width: 100%; height: auto; min-height: 32px; text-align: start; white-space: normal; overflow-wrap: anywhere; }
+.detail-dialog-body { display: grid; gap: 12px; min-width: 0; overflow-wrap: anywhere; }
+.detail-dialog-body pre { max-width: 100%; overflow: auto; white-space: pre-wrap; }
+@media (pointer: coarse) { .detail-trigger { min-height: 44px; } }

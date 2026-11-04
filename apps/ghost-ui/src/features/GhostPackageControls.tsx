@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
-import { ArrowRight, Check, ChevronDown, Home, Inbox, Layers, LayoutList, MessageCircle, PackagePlus, Palette, Plus } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, Check, Home, Inbox, Layers, LayoutList, MessageCircle, PackagePlus, Palette, Plus } from 'lucide-react';
 import { DotAvatar, GhostMark, type PortraitAppearance } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { useProfileAvatar } from '../pets/AvatarProvider';
@@ -62,7 +62,7 @@ export function GhostSwitcher({ profiles, selected, defaultGhostId, onSelect, on
         <span>{selected?.name ?? 'Ghost'}</span>
         {selected && selected.id === defaultGhostId && <span className="ghost-default-badge">기본</span>}
       </span>
-      <ChevronDown className="ghost-switcher-chevron" size={14}/>
+      <ArrowLeftRight className="ghost-switcher-icon" size={14} aria-hidden="true"/>
     </button>
     {open && <div ref={menuRef} className="ghost-switcher-menu" id={menu}>
       <div className="ghost-switcher-list">{profiles.map(profile =>

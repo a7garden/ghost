@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { Fragment, useEffect, useRef, useState, type ComponentType } from 'react';
 import { ArrowUpRight, Check } from 'lucide-react';
 import { DotAvatar } from '../components/DotAvatar';
@@ -150,9 +151,9 @@ function DocumentReviewBody({ item, review, snapshot, query, action, connected, 
           : '요청 이후 문서가 바뀌었습니다. 최신 내용으로 새 요청이 필요합니다.'}</p>}
       </>}
       <div className="approval-prose">{review.body || '본문이 비어 있습니다.'}</div>
-      {base && <details className="approval-compare"><summary>기존 내용과 비교</summary>
+      {base && <DetailDialog title="기존 내용과 비교" className="approval-compare">
         <div className="approval-prose">{base.source}</div>
-      </details>}
+      </DetailDialog>}
     </div>
     {isOpen && decision !== 'saved' && decision !== 'declined' && <div className="drawer-footer">
       {decisionError && <p className="inline-error" role="alert">{decisionError}</p>}
@@ -262,15 +263,13 @@ function IntegrationReviewBody({ item, action, query, connected, busy }: ReviewP
       {!args && !error && <p className="muted">{connected ? '요청 내용을 불러오는 중…' : '연결을 기다리는 중…'}</p>}
       {emailFields.length > 0 && <ApprovalFields fields={emailFields}/>}
       {emailBody !== undefined && <div className="approval-prose">{emailBody || '본문이 비어 있습니다.'}</div>}
-      {extraFields.length > 0 && (email ? <details className="approval-compare">
-        <summary>메일 세부 내용</summary><ApprovalFields fields={extraFields}/>
-      </details> : <ApprovalFields fields={extraFields}/>)}
+      {extraFields.length > 0 && (email ? <DetailDialog title="메일 세부 내용" className="approval-compare"><ApprovalFields fields={extraFields}/>
+      </DetailDialog> : <ApprovalFields fields={extraFields}/>)}
       {args && !email && extraFields.length === 0 && <p className="muted">이 작업에 따로 보낼 내용은 없습니다.</p>}
-      {inspected?.output && (!email || state !== 'sent') && <details className="approval-compare">
-        <summary>서비스 응답</summary>
+      {inspected?.output && (!email || state !== 'sent') && <DetailDialog title="서비스 응답" className="approval-compare">
         {inspected.output.text && <div className="approval-prose">{inspected.output.text}</div>}
         {inspected.output.truncated && <p className="muted">나머지 응답은 서비스에서 확인해 주세요.</p>}
-      </details>}
+      </DetailDialog>}
     </div>
     {(state === 'pending' || error) && <div className="drawer-footer">
       {error && <p className="inline-error" role="alert">{error}</p>}

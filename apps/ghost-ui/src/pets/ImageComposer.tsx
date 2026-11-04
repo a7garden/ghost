@@ -25,7 +25,7 @@ export function ImageComposer({pair}: {pair:{ghost_id:string;conversation_id:str
  const reset=()=>{localStorage.removeItem(key);setID('');setResult(undefined);};
  const generate=async()=>{if(busy||id)return;const next=crypto.randomUUID();localStorage.setItem(key,next);setID(next);setBusy(true);setError('');try{setResult(await request({operation:'generate',id:next,provider,prompt,allow_external:true}));}catch(e){reset();setError((e as Error).message);}finally{setBusy(false);}};
  const url=result?.image?`data:${result.image.mime};base64,${result.image.base64}`:null;
- return <details><summary>이미지 만들기</summary><div className="form-stack">
+ return <section><h3>이미지 만들기</h3><div className="form-stack">
   <select aria-label="이미지 생성 제공자" value={provider} disabled={!!id} onChange={e=>setProvider(e.target.value)}><option value="codex">Codex · 같은 OAuth</option><option value="minimax">MiniMax · 등록한 API 키</option><option value="local">로컬 · Dyno 평가</option></select>
   <p className="field-help">선택한 제공자에 이미지 설명만 보냅니다. 대화 이력은 포함하지 않습니다.</p>
   <textarea aria-label="이미지 설명" placeholder="만들고 싶은 이미지를 설명하세요" maxLength={1500} value={prompt} disabled={!!id} onChange={e=>setPrompt(e.target.value)}/>
@@ -34,5 +34,5 @@ export function ImageComposer({pair}: {pair:{ghost_id:string;conversation_id:str
   {url&&<img src={url} alt="요청한 생성 이미지" style={{maxWidth:'100%',maxHeight:480,objectFit:'contain'}}/>}
   {id&&(!result||result.state==='completed'||result.state==='blocked')&&<button className="text-button" onClick={reset}>새 이미지</button>}
   {error&&<p role="alert">{error}</p>}
- </div></details>;
+ </div></section>;
 }

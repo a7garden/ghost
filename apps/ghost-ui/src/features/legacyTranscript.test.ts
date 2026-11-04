@@ -15,7 +15,8 @@ it('keeps original identities and transcript reachable without any registry or m
   expect(legacyHistoryRequested(path)).toBe(true);
   expect(legacyHistoryRequested('/ghosts/bot-looking-name')).toBe(false);
   const html = renderToStaticMarkup(createElement(LegacyTranscript, { profile, route: path, navigate: () => {} }));
-  for (const text of ['원래 사용자 입력', '보존된 결과 원문', '원래 산출물', 'original-work', 'Ghost로 돌아가기']) expect(html).toContain(text);
+  for (const text of ['원래 사용자 입력', '보존된 결과 원문', '과거 작업 · 기록된 상태: complete', 'Ghost로 돌아가기']) expect(html).toContain(text);
+  expect(html).toContain('aria-haspopup="dialog"');
   for (const action of ['OMP', '만들기', '메시지 보내기', '설정 저장', '<textarea', '<form']) expect(html).not.toContain(action);
 });
 it('does not substitute another transcript when an explicit original conversation is absent', () => {

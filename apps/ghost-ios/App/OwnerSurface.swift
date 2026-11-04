@@ -134,7 +134,6 @@ struct OwnerQuestionsSection: View {
 struct ComputerControlSection: View {
     let model: GhostModel
     @State private var pendingOperation: LifecycleDraft?
-    @State private var expanded = false
 
     struct LifecycleDraft: Identifiable {
         let id = UUID()
@@ -146,17 +145,13 @@ struct ComputerControlSection: View {
     private var scopedGhosts: [String] { model.lifetimeGhostIDs.sorted() }
 
     var body: some View {
-        Section("이 Ghost의 컴퓨터 · 브라우저 수명") {
+        Section("전용 컴퓨터·브라우저") {
             if !model.lifetimeCapabilities.contains("lifetime.write") {
                 Text("이 연결에는 컴퓨터 제어 권한이 없습니다. 상태는 표시하지 않습니다.")
                     .foregroundStyle(GhostStyle.secondary)
             } else {
-                DisclosureGroup(isExpanded: $expanded) {
-                    ForEach(scopedGhosts, id: \.self) { ghostID in
-                        lifecycleControls(ghostID)
-                    }
-                } label: {
-                    Label("전용 컴퓨터·브라우저 중지/재생성", systemImage: "desktopcomputer")
+                ForEach(scopedGhosts, id: \.self) { ghostID in
+                    lifecycleControls(ghostID)
                 }
                 if let result = model.lifecycleResult {
                     lifecycleResultCard(result)

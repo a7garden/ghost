@@ -198,6 +198,7 @@ try {
   const context=await fixtureContext(),page=await context.newPage();
   page.on('pageerror',error=>pageErrors.push(error.message));
   await page.goto(origin);await page.locator('.dashboard-task').first().waitFor();
+  assert.equal(await page.locator('.app-shell').evaluate(el=>getComputedStyle(el).display),'grid','shared application styles are loaded');
   assert.equal(writes.length,0,'navigation and reads never mutate');
   workFailure=true;
   await page.getByText('최신 작업 상태를 확인하지 못했습니다.',{exact:false}).waitFor({timeout:15000});
@@ -248,10 +249,11 @@ try {
 
   await page.goto(`${origin}/#/lifetime?panel=ghosts`);
   const pair=page.getByRole('region',{name:'이 대화의 모델',exact:true});
-  const toggle=pair.locator('.inference-pair-toggle');
-  const provider=pair.getByLabel('대화 제공자',{exact:true});
-  const consent=pair.getByRole('checkbox',{name:/기존 기록과 새 메시지/});
-  const apply=pair.getByRole('button',{name:'이 대화에 적용',exact:true});
+  const toggle=pair.getByRole('button', {name:/Local model|gpt-6-luna|MiniMax-M3.1-Flash-Preview/});
+  const modelDialog=page.getByRole('dialog',{name:'대화 모델',exact:true});
+  const provider=modelDialog.getByLabel('대화 제공자',{exact:true});
+  const consent=modelDialog.getByRole('checkbox',{name:/기존 기록과 새 메시지/});
+  const apply=modelDialog.getByRole('button',{name:'이 대화에 적용',exact:true});
   await toggle.filter({hasText:'Local model'}).click();
   await provider.selectOption('minimax');
   await consent.check();
@@ -262,6 +264,12 @@ try {
 
   await provider.selectOption('minimax');
   await consent.check();
+  await modelDialog.getByRole('button',{name:'닫기',exact:true}).click();
+  await toggle.click();
+  assert.equal(await provider.inputValue(),'minimax');
+  assert.equal(await consent.isChecked(),false);
+  await modelDialog.getByRole('button',{name:'닫기',exact:true}).click();
+  checks.push('closing-model-settings-preserves-selection-and-clears-consent');
   await page.getByRole('button',{name:/^Scout/}).click();
   await page.waitForFunction(({id,conversation})=>{
     const params=new URLSearchParams(location.hash.split('?')[1]??'');
@@ -276,12 +284,12 @@ try {
 
   await consent.check();
   snapshotFailure=true;
-  await pair.getByText('호스트에 연결하면 설정을 변경할 수 있습니다.',{exact:true}).waitFor({timeout:12000});
+  await modelDialog.getByText('호스트에 연결하면 설정을 변경할 수 있습니다.',{exact:true}).waitFor({timeout:12000});
   assert.equal(await consent.isDisabled(),true);
   assert.equal(await consent.isChecked(),false);
   assert.equal(await apply.isDisabled(),true);
   snapshotFailure=false;
-  await page.getByRole('button',{name:'다시 연결',exact:true}).first().click();
+  await page.waitForFunction(() => document.querySelector('dialog[open] select[aria-label="대화 제공자"]')?.disabled === false, null, {timeout:12000});
   await consent.waitFor();
   assert.equal(await consent.isChecked(),false);
   assert.equal(await apply.isDisabled(),true);
@@ -290,14 +298,13 @@ try {
   await consent.check();
   const beforePairWrite=writes.length;
   await apply.click();
-  await pair.getByText('설정이 변경되었습니다. 다시 확인해 주세요.',{exact:true}).waitFor();
+  await modelDialog.getByText('설정이 변경되었습니다. 다시 확인해 주세요.',{exact:true}).waitFor();
   assert.equal(await consent.isDisabled(),true);
   assert.equal(await apply.isDisabled(),true);
-  await pair.getByText('이미지 만들기',{exact:true}).click();
-  assert.equal(await pair.getByLabel('이미지 생성 제공자',{exact:true}).isDisabled(),true);
+  assert.equal(await modelDialog.getByLabel('이미지 생성 제공자',{exact:true}).isDisabled(),true);
   assert.equal(writes.length,beforePairWrite+1);
   assert.deepEqual(writes.at(-1),{version:1,operation:'select',ghost_id:scout,conversation_id:scoutChat,selection:{provider:'codex',model:'gpt-6-luna',effort:'high'},allow_external:true});
-  await pair.getByRole('button',{name:'다시 확인',exact:true}).click();
+  await modelDialog.getByRole('button',{name:'다시 확인',exact:true}).click();
   await consent.waitFor();
   assert.equal(await consent.isChecked(),false);
   assert.equal(await apply.isDisabled(),true);
@@ -308,11 +315,12 @@ try {
   await provider.selectOption('minimax');
   await consent.check();
   await apply.click();
-  await pair.getByText('이 대화의 모델을 저장했습니다.',{exact:true}).waitFor();
-  await pair.getByText('이 대화의 MiniMax 외부 처리가 허용돼 있습니다.',{exact:true}).waitFor();
+  await modelDialog.getByText('이 대화의 모델을 저장했습니다.',{exact:true}).waitFor();
+  await modelDialog.getByText('이 대화의 MiniMax 외부 처리가 허용돼 있습니다.',{exact:true}).waitFor();
   assert.equal(await consent.count(),0);
   assert.match(await toggle.textContent(),/MiniMax-M3.1-Flash-Preview/);
   assert.deepEqual(writes.at(-1),{version:1,operation:'select',ghost_id:scout,conversation_id:scoutChat,selection:{provider:'minimax',model:'MiniMax-M3.1-Flash-Preview',effort:'high'},allow_external:true});
+  await modelDialog.getByRole('button',{name:'닫기',exact:true}).click();
   checks.push('pair-saves-exact-target-and-renders-host-grant');
 
   await page.goto(`${origin}/#/providers`);
@@ -327,7 +335,7 @@ try {
   await page.locator('[data-lifetime-goal="b"]').waitFor();
   assert.equal(await page.locator('[data-lifetime-goal="a"]').count(),1);
   assert.equal(await page.locator('[data-lifetime-goal="b"]').count(),1,'global work includes a goal assigned to another Ghost');
-  const mobileTabs=page.getByRole('navigation',{name:'기본 메뉴',exact:true});
+  const mobileTabs=page.locator('.mobile-primary-tabs');
   assert.equal(await mobileTabs.isVisible(),true);
   assert.equal(await mobileTabs.getByRole('button',{name:'작업',exact:true}).getAttribute('aria-current'),'page');
   await mobileTabs.getByRole('button',{name:'홈',exact:true}).click();
@@ -353,16 +361,26 @@ try {
   assert.equal(await mobileTabs.isVisible(),true);
   assert.equal(await mobileTabs.getByRole('button',{name:'대화',exact:true}).getAttribute('aria-current'),'page');
   const composeOptions=page.locator('.lifetime-compose-options');
-  await composeOptions.evaluate(element=>{element.open=true;});
-  const privacySelect=composeOptions.locator('select').nth(1);
+  const optionsTrigger=composeOptions.getByRole('button',{name:/^전송 옵션/});
+  const optionsDialog=page.getByRole('dialog',{name:'전송 옵션',exact:true});
+  await optionsTrigger.focus();
+  await optionsTrigger.press('Enter');
+  await optionsDialog.waitFor();
+  await page.screenshot({path:`${output}/light-320-compose-options.png`});
+  const privacySelect=optionsDialog.getByLabel('자료 범위',{exact:true});
   await privacySelect.selectOption('public');
-  const targetSelect=composeOptions.locator('select').nth(0);
+  const targetSelect=optionsDialog.getByLabel('대화 대상',{exact:true});
   const scoutValue=await targetSelect.locator('option').filter({hasText:'Scout'}).first().getAttribute('value');
   assert.ok(scoutValue);
   await targetSelect.selectOption(scoutValue);
   await page.waitForFunction(id=>new URLSearchParams(location.hash.split('?')[1]??'').get('ghost')===id,scout);
+  if (!await optionsDialog.isVisible()) await optionsTrigger.click();
   assert.equal(await privacySelect.inputValue(),'local_only','changing Ghosts resets the compose privacy scope');
-  checks.push('pair-switch-resets-compose-privacy-320');
+  await page.keyboard.press('Escape');
+  await optionsDialog.waitFor({state:'hidden'});
+  assert.equal(await page.locator('details, summary').count(),0);
+  assert.equal(await optionsTrigger.evaluate(element=>element === document.activeElement),true);
+  checks.push('pair-switch-resets-compose-privacy-320', 'compose-options-keyboard-dialog-restores-focus');
   await composer.focus();
   assert.equal(await mobileTabs.isVisible(),false,'mobile tabs yield to the focused composer at 320px');
   checks.push('mobile-composer-focus-hides-tabs-320');
@@ -447,11 +465,21 @@ try {
 
   await page.setViewportSize({width:320,height:900});
   await page.goto(`${origin}/#/integrations`);
-  await page.locator('.connection-disclosure summary').filter({hasText:'휴대폰 연결'}).click();
+  await page.getByRole('button',{name:'MCP 설정 예시',exact:true}).click();
+  const examples=page.getByRole('dialog',{name:'MCP 설정 예시',exact:true});
+  await examples.getByRole('button',{name:'설정 사용',exact:true}).first().click();
+  const preset=page.getByRole('dialog').filter({has:page.getByRole('button',{name:'설정 저장',exact:true})});
+  await preset.waitFor();
+  await page.keyboard.press('Escape');
+  await preset.waitFor({state:'hidden'});
+  await examples.waitFor();
+  await examples.getByRole('button',{name:'닫기',exact:true}).click();
+  checks.push('integration-preset-escape-returns-to-parent-dialog');
   const pairing=page.getByRole('region',{name:'휴대폰 연결',exact:true});
   const primaryPair=pairing.getByRole('checkbox',{name:'Ghost',exact:true});
   const specialistPair=pairing.getByRole('checkbox',{name:'Scout',exact:true});
   await primaryPair.waitFor();
+  assert.ok((await primaryPair.boundingBox())?.width <= 24,'pairing checkbox leaves space for the Ghost name');
   assert.equal(await primaryPair.isChecked(),true);
   assert.equal(await specialistPair.isChecked(),false);
   await specialistPair.check();

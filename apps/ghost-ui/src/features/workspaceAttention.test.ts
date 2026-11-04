@@ -25,8 +25,8 @@ it('counts exactly the review and task items shown in the inbox, including a fai
   expect(inbox.match(/class="inbox-item"/g)).toHaveLength(1);
   expect(inbox).not.toContain('확인이 필요한 항목 없음');
   expect(inbox).toContain('두 원인을 구분할 수 없습니다');
-  expect(inbox).toContain('<summary>실행 기록</summary>');
-  expect(inbox).toContain(conversation.tasks[0].output);
+  expect(inbox).toContain('aria-haspopup="dialog">실행 기록</button>');
+  expect(inbox).not.toContain(conversation.tasks[0].output);
   expect(inbox).toContain('모델 설정');
 });
 

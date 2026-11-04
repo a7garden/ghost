@@ -58,8 +58,6 @@ kbd { font-family: var(--font-body); background: var(--color-surface-elevated); 
 .sidebar .nav-count, .mobile-sidebar .nav-count { background: var(--color-accent-soft); color: var(--color-accent); padding: 0 6px; border-radius: var(--radius-button); }
 .sidebar-scroll { padding-block: var(--space-xs) var(--space-md); }
 .sidebar-section { margin-top: var(--space-sm); }
-.sidebar-section-toggle { font-size: var(--text-caption); min-height: 28px; }
-.sidebar-section-count { font-size: 11px; }
 .sidebar-conversations { margin-left: var(--space-lg); padding-left: var(--space-xs); }
 .sidebar-conversation { min-height: 28px; font-size: var(--text-caption); }
 .sidebar-conversation.selected { background: var(--color-background-secondary); }
@@ -135,7 +133,6 @@ kbd { font-family: var(--font-body); background: var(--color-surface-elevated); 
 .context-stack-panel > .g-panel__header { min-height: 36px; }
 .context-stack-panel > .g-panel__body { padding: var(--space-xs) 0; }
 .context-card, .context-profile-card { border-radius: var(--radius-card); box-shadow: none; }
-.context-card-toggle { border-radius: var(--radius-card); }
 
 /* Center the compact welcome in the transcript area. Both empty and active
    conversations keep the same bottom-anchored composer; short screens scroll
@@ -146,7 +143,6 @@ kbd { font-family: var(--font-body); background: var(--color-surface-elevated); 
 .context-profile-card { padding: var(--space-sm); }
 .context-profile-actions { margin-top: var(--space-sm); }
 .context-profile-actions > button { min-height: 32px; border-radius: var(--radius-button); }
-.context-card-toggle { min-height: 38px; padding: var(--space-xs) var(--space-sm); }
 
 /* Work, planning, integrations and documents share density, not a forced card grid. */
 .goals-list, .inbox-list { border-top: 1px solid var(--color-border-subtle); }
@@ -299,8 +295,8 @@ dialog::backdrop { background: var(--color-overlay); -webkit-backdrop-filter: bl
 }
 @media (pointer: coarse) {
   .button, .page-heading > .button, .text-button, .conversation-heading .conversation-title, .search-field, .sidebar .sidebar-search, .mobile-sidebar .sidebar-search, .filter-button, .icon-button, .icon-button.small, .send-button, .conversation-toolbar .icon-button,
-  .prompt-suggestions button, .settings-nav .nav-row, .theme-options button, .context-profile-actions > button, .context-card-toggle,
-  .sidebar .nav-row, .mobile-sidebar .nav-row, .sidebar-conversation, .sidebar-section-toggle, .sidebar-connection { min-height: 44px; }
+  .prompt-suggestions button, .settings-nav .nav-row, .theme-options button, .context-profile-actions > button,
+  .sidebar .nav-row, .mobile-sidebar .nav-row, .sidebar-conversation, .sidebar-connection { min-height: 44px; }
   .icon-button, .icon-button.small, .send-button { min-width: 44px; }
 }
 @supports not (backdrop-filter: blur(1px)) {

@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { uiTerms } from '../uiText';
 import {useState} from 'react';
 import {ArrowUpRight,FileText} from 'lucide-react';
@@ -16,7 +17,7 @@ export function RoutingResultContent({result,capability}:{result:RoutingExecutio
   {result.model_output&&<div className="routing-result-output">{result.model_output}</div>}
   {result.artifacts.length>0&&<div className="routing-result-artifacts"><h3>결과 자료</h3>{result.artifacts.map(path=><p key={path}>{path}</p>)}</div>}
   {result.receipts.length>0&&<p className="field-help">실행 기록 {result.receipts.length}개{capability?.verified_completion_report===true&&<> · 근거 확인 {result.receipts.filter(r=>r.verified).length}개</>}</p>}
-  <details className="routing-result-source"><summary>요청과 실행 기록</summary><small>요구사항 {result.work_revision}판 · 결정 {result.decision_revision}판</small>{result.source_fragments.map(f=><p key={f.segment_id}>{f.text}</p>)}</details>
+  <DetailDialog title="요청과 실행 기록" className="routing-result-source"><small>요구사항 {result.work_revision}판 · 결정 {result.decision_revision}판</small>{result.source_fragments.map(f=><p key={f.segment_id}>{f.text}</p>)}</DetailDialog>
  </article>;
 }
 export function RoutingCompletionInbox({snapshot,connected=true}:{snapshot:Snapshot;connected?:boolean}) {

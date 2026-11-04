@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Check, ChevronRight, CircleAlert, Clock3, LayoutGrid, MessageSquare, RefreshCw, Send, Settings2 } from "lucide-react";
@@ -879,7 +880,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         <div>
           <strong>미확정 요청 · {item.authority_epoch === null ? "권한 버전 알 수 없음" : `권한 버전 ${item.authority_epoch}`}</strong>
           <span>{item.issue ? "저장 기록을 해석할 수 없어 자동 확인할 수 없습니다." : "원래 요청 ID와 권한 버전을 보존하고 있습니다."}</span>
-          <details><summary>기술 정보</summary><span>작업실 ID: {item.workspace_id ?? "알 수 없음"}</span><code>{item.command_id ?? "원래 요청 ID 알 수 없음"}</code></details>
+          <DetailDialog title="기술 정보"><span>작업실 ID: {item.workspace_id ?? "알 수 없음"}</span><code>{item.command_id ?? "원래 요청 ID 알 수 없음"}</code></DetailDialog>
         </div>
         <button type="button" className="button secondary" disabled={Boolean(busy) || !item.envelope || !item.command_id} onClick={() => void reconcile(item.id)}>
           <RefreshCw size={14}/>접수 기록 확인
@@ -895,7 +896,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
           <span>원래 요청 ID와 권한 버전을 보존했습니다.</span>
           {envelope.body.method === "conversation.input" && <p>{String(envelope.body.text ?? "")}</p>}
           {typeof envelope.body.ghost_id === "string" && typeof envelope.body.conversation_id === "string"
-            && <details><summary>저장된 대상</summary><code>{envelope.body.ghost_id} · {envelope.body.conversation_id}</code></details>}
+            && <DetailDialog title="저장된 대상"><code>{envelope.body.ghost_id} · {envelope.body.conversation_id}</code></DetailDialog>}
         </div>
         <button type="button" className="button secondary" disabled={Boolean(busy)} onClick={() => void (envelope.body.method === "conversation.input"
           ? inspectPendingInput(envelope)
@@ -976,13 +977,13 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
               disabled={writesDisabled || Boolean(busy) || controller.cancel_requested}
               onClick={() => void cancelConversationTurn(turn.id)}>이 응답 취소 요청</button>}
           </div>}
-          {turn.attachments.length > 0 && <details><summary>첨부 자료 {turn.attachments.length}개</summary>
+          {turn.attachments.length > 0 && <div><strong>첨부 자료 {turn.attachments.length}개</strong>
             {turn.attachments.map(artifact => <code key={`${artifact.digest}:${artifact.producing_attempt}`}>{artifact.digest} · {privacyLabels[artifact.privacy]}</code>)}
-          </details>}
-          <details><summary>기술 정보</summary><code>{turn.id} · {turn.sender_kind}:{turn.sender_ref} · 순서 {turn.sequence}{turn.origin_report_id && ` · 원본 보고 ${turn.origin_report_id}`}</code></details>
+          </div>}
+          <DetailDialog title="기술 정보"><code>{turn.id} · {turn.sender_kind}:{turn.sender_ref} · 순서 {turn.sequence}{turn.origin_report_id && ` · 원본 보고 ${turn.origin_report_id}`}</code></DetailDialog>
         </article>; })}
       </div>
-      {selectedTarget && <details><summary>현재 등록된 대화 식별자</summary><code>{selectedTarget.ghost_id} · {selectedTarget.conversation_id}</code></details>}
+      {selectedTarget && <DetailDialog title="현재 등록된 대화 식별자"><code>{selectedTarget.ghost_id} · {selectedTarget.conversation_id}</code></DetailDialog>}
     </section>}
 
     {selectedPanel === "ghosts" && <>
@@ -1000,7 +1001,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         <div>
           <strong>{review.title}</strong>
           <span>{documentReviewStateLabels[review.state] ?? "상태 확인 필요"}</span>
-          <details><summary>제안 본문</summary><pre className="garden-document-source-readonly"><code>{review.body}</code></pre></details>
+          <DetailDialog title="제안 본문"><pre className="garden-document-source-readonly"><code>{review.body}</code></pre></DetailDialog>
         </div>
         {(review.state === "pending" || review.state === "approved") && <button type="button" className="button secondary" disabled={onOpenDocumentReview === undefined}
           onClick={() => onOpenDocumentReview?.(review)}>내용 보기</button>}
@@ -1038,9 +1039,8 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
           if (!submissionBlocked) event.currentTarget.form?.requestSubmit();
         }
       }} placeholder="메시지 쓰기" required disabled={Boolean(busy)}/></label>
-      <details className="lifetime-compose-options">
-        <summary>전송 옵션 <span>{privacyLabels[effectivePrivacy]}{attachments.length > 0 && ` · 첨부 ${attachments.length}`}</span></summary>
-        <label className="lifetime-field">대화 대상<select value={selectedTarget ? conversationTargetKey(selectedTarget) : selectedPairKey} onChange={event => {
+      <DetailDialog title="전송 옵션" label={<>전송 옵션 · {privacyLabels[effectivePrivacy]}{attachments.length > 0 && ` · 첨부 ${attachments.length}`}</>} className="lifetime-compose-options">
+        <label className="lifetime-field">대화 대상<select aria-label="대화 대상" value={selectedTarget ? conversationTargetKey(selectedTarget) : selectedPairKey} onChange={event => {
           const target = registry.find(item => conversationTargetKey(item) === event.target.value);
           if (target) openRegisteredTarget(target, false);
         }} disabled={Boolean(busy) || writesDisabled && pending.length > 0}>
@@ -1050,7 +1050,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
           </option>)}
         </select></label>
         <div className="lifetime-form-row">
-          <label className="lifetime-field">자료 범위<select value={privacy} onChange={event => setPrivacy(event.target.value as Artifact["privacy"])} disabled={Boolean(busy)}>
+          <label className="lifetime-field">자료 범위<select aria-label="자료 범위" value={privacy} onChange={event => setPrivacy(event.target.value as Artifact["privacy"])} disabled={Boolean(busy)}>
             <option value="local_only">이 기기에서만</option><option value="private">비공개</option><option value="public">공개 자료 허용</option>
           </select></label>
           <div className="lifetime-existing-artifacts">
@@ -1075,7 +1075,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
           </div>
         </div>
         <p>대화의 기존 보호 수준은 유지됩니다. UTF-8 {new TextEncoder().encode(prompt).length}/65,536바이트.</p>
-      </details>
+      </DetailDialog>
       <div className="lifetime-submit-actions lifetime-compose-actions">
         {new TextEncoder().encode(prompt).length > 65_536 && <span role="status">메시지 한도 65,536바이트를 넘었습니다.</span>}
         <button type="submit" className="button primary" disabled={submissionBlocked}>

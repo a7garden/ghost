@@ -47,7 +47,6 @@
 .pet-library-actions { display: flex; flex-wrap: wrap; gap: 18px; margin: 20px 0 12px; }
 .pet-delete { margin-left: auto; }
 .pet-compatibility { font-size: 12px; margin-top: 24px; padding: 17px 0; border-top: var(--hairline) solid var(--color-border); color: var(--color-text-secondary); line-height: 1.7; }
-.pet-compatibility summary { cursor: pointer; color: var(--color-text); }
 .pet-compatibility p { margin-top: 12px; overflow-wrap: anywhere; }
 .pet-compatibility code { font-size: 11px; }
 .pet-notice, .pet-valid { color: var(--color-text-success); font-size: 12px; line-height: 1.6; margin-top: 12px; }
@@ -151,7 +150,7 @@
 .model-role-checks label, .provider-enabled { display: flex; align-items: center; gap: 7px; font-size: 11px; }
 .model-role-checks input, .provider-enabled input { width: 14px; height: 14px; accent-color: var(--color-text); }
 .provider-model-editor { border-top: var(--hairline) solid var(--color-border); padding-top: 16px; }
-.provider-model-editor > summary { font-size: 12px; cursor: pointer; margin-bottom: 14px; }
+.provider-model-editor > h3 { font-size: 12px; margin-bottom: 14px; }
 .provider-model-editor > .form-stack { max-height: 40dvh; overflow: auto; padding: 4px; }
 .provider-model-row { display: flex; align-items: center; gap: 10px; min-width: 0; border-bottom: var(--hairline) solid var(--color-border); padding-bottom: 10px; }
 .provider-model-row > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 11px; font-weight: 400; }

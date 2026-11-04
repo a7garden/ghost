@@ -20,10 +20,9 @@ it('marks the routed conversation rather than the first conversation as selected
   expect(html).toContain('nav-count">2');
 });
 
-it('gives desktop and mobile section controls separate target IDs', () => {
-  const html = renderToStaticMarkup(createElement('div', null, createElement(WorkspaceSidebar, props()), createElement(WorkspaceSidebar, props())));
-  const targets = [...html.matchAll(/aria-controls="([^"]+)"/g)].map(match => match[1]);
-  expect(targets).toHaveLength(4);
-  expect(new Set(targets).size).toBe(4);
-  for (const target of targets) expect(html).toContain(`id="${target}"`);
+it('shows history, spaces and collaboration as direct navigation', () => {
+  const html = renderToStaticMarkup(createElement(WorkspaceSidebar, props()));
+  expect(html).toContain('대화 기록</h3>');
+  expect(html).toContain('협업 기록</span>');
+  expect(html).not.toMatch(/<details|<summary|aria-expanded=/);
 });

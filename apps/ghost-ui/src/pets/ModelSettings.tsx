@@ -1,5 +1,6 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { useState } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, RefreshCw, Server, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, Plus, RefreshCw, Server, Trash2 } from 'lucide-react';
 import type { Command, ModelProvider, ModelRole, Snapshot } from '../client/types';
 import { Modal } from '../components/Modal';
 import { ProviderEditor } from './ProviderEditor';
@@ -37,9 +38,8 @@ export function ModelSettings({ snapshot, action, busy, mode, connected = true }
     {mode === 'live'
       ? <InferenceSettings disabled={working} connected={connected}/>
       : <p className="connection-message">모델 설정은 연결된 Ghost 호스트에서 사용할 수 있습니다.</p>}
-    <details className="connection-disclosure">
-      <summary><span>음성 및 호환 서버</span><ChevronDown size={16} aria-hidden="true"/></summary>
-      <div className="connection-disclosure-body">
+    <DetailDialog title="음성 및 호환 서버">
+      <div className="connection-settings-body">
     {!available && <p className="settings-footnote">{mode === 'demo' ? '음성 설정은 호스트에 연결하면 사용할 수 있습니다.' : '모델 설정을 지원하는 호스트로 업데이트해 주세요.'}</p>}
     <div className="model-role-list">{MODEL_ROLES.filter(role => role.id !== 'llm').map(role => {
       const selected = settings?.roles[role.id] ?? '';
@@ -70,6 +70,6 @@ export function ModelSettings({ snapshot, action, busy, mode, connected = true }
     {editor && <ProviderEditor initial={editor.provider} version={editor.version} existing={Boolean(settings?.providers.some(p => p.id === editor.provider.id))} busy={working} saveBlocked={!connected ? '호스트에 연결하면 저장할 수 있습니다.' : !available ? '호스트에서 모델 설정을 읽을 수 없습니다.' : undefined} onClose={() => setEditor(undefined)} onSave={async (provider, version) => { if (locked) throw new Error('호스트에 연결한 뒤 다시 시도해 주세요.'); await action({ type: 'workspace', action: { type: 'save_model_provider', provider, version } }); setEditor(undefined); setNotice(`${provider.name}을 저장했습니다.`); }}/>}
     {remove && <Modal title="제공자 삭제" onClose={() => !working && setRemove(undefined)}><p>{remove.name}의 서버 설정을 삭제합니다.</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button className="button secondary" disabled={working} onClick={() => setRemove(undefined)}>취소</button><button className="button primary" disabled={locked} onClick={() => void run('delete', { type: 'delete_model_provider', id: remove.id, version: settings?.version }, () => { setRemove(undefined); setNotice('제공자 설정을 삭제했습니다.'); })}>삭제</button></div></Modal>}
       </div>
-    </details>
+    </DetailDialog>
   </section>;
 }

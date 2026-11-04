@@ -183,10 +183,6 @@
   font-size: var(--text-body);
 }
 .lifetime-compose-options { min-width: 0; font-size: var(--text-caption); color: var(--color-quiet); }
-.lifetime-compose-options summary { width: fit-content; padding: var(--space-xs) 0; cursor: pointer; }
-.lifetime-compose-options summary span { margin-inline-start: var(--space-2xs); }
-.lifetime-compose-options[open] { grid-column: 1 / -1; }
-.lifetime-compose-options > :not(summary) { margin-top: var(--space-xs); }
 .lifetime-panel .lifetime-compose-actions { grid-column: 2; justify-content: end; }
 .lifetime-compose-actions .button { white-space: nowrap; }
 .lifetime-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

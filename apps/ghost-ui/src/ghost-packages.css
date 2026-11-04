@@ -12,7 +12,7 @@
 .ghost-switcher-trigger:hover, .ghost-switcher-trigger[aria-expanded=true] { background: var(--color-surface-under); }
 .ghost-switcher-identity { display: flex; align-items: center; min-width: 0; gap: 8px; }
 .ghost-switcher-identity > span:not(.dot-avatar) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ghost-switcher-chevron, .ghost-switcher-identity > :is(svg, .dot-avatar) { flex-shrink: 0; }
+.ghost-switcher-icon, .ghost-switcher-identity > :is(svg, .dot-avatar) { flex-shrink: 0; }
 .ghost-switcher-menu {
   position: absolute; top: calc(100% + 5px); inset-inline-start: 0; width: min(255px, 72vw); padding: 5px;
   border: 1px solid var(--color-border-subtle); border-radius: 12px; background: var(--color-surface-elevated);
@@ -138,7 +138,7 @@
   .ghost-shell-toolbar .ghost-switcher-identity { gap: 5px; }
   .ghost-shell-toolbar .ghost-switcher-identity > .dot-avatar { width: 24px !important; height: 24px !important; }
   .ghost-shell-toolbar .ghost-default-badge { margin-inline-start: 2px; padding-inline: 4px; }
-  .ghost-shell-toolbar .ghost-switcher-chevron { width: 12px; }
+  .ghost-shell-toolbar .ghost-switcher-icon { width: 12px; }
   .ghost-shell-toolbar .ghost-switcher-trigger > span { min-width: 0; }
   .ghost-shell-toolbar .ghost-switcher-trigger > span > span { font-size: 12px; }
   .ghost-shell-toolbar .ghost-shell-location { flex: 1; }
@@ -168,9 +168,7 @@
   }
 }
 
-.ghost-switcher-trigger[aria-expanded=true] .ghost-switcher-chevron { transform: rotate(180deg); }
 @media (prefers-reduced-motion: no-preference) {
-  .ghost-switcher-chevron { transition: transform 140ms cubic-bezier(.2,.7,.2,1); }
   .ghost-switcher-identity { animation: ghost-identity-enter 140ms ease-out both; }
   .ghost-switcher-menu,
   dialog.mobile-workspace-dialog[open],

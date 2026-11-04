@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { useState } from 'react';
 import { ArrowUpRight, Puzzle } from 'lucide-react';
 import type { Snapshot } from '../client/types';
@@ -30,8 +31,7 @@ export function AgentPluginSurfaces({ snapshot, ghostId, definitionVersion, work
         </ul>}
       </section>;
     })}
-    <details className="ghost-plugin-settings">
-      <summary><Puzzle size={15}/>플러그인 관리</summary>
+    <DetailDialog title="플러그인 관리" label={<><Puzzle size={15}/>플러그인 관리</>} className="ghost-plugin-settings">
       <p className="muted">이 Ghost에 표시할 검토 화면을 선택합니다.</p>
       {installedPlugins.map(plugin => {
         const supported = pluginAvailable(plugin, snapshot, ghostId);
@@ -45,6 +45,6 @@ export function AgentPluginSurfaces({ snapshot, ghostId, definitionVersion, work
         </label>;
       })}
       {error && <p className="inline-error" role="alert">화면 설정을 저장하지 못했습니다.</p>}
-    </details>
+    </DetailDialog>
   </section>;
 }

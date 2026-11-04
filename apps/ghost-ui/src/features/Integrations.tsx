@@ -1,5 +1,6 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { Fragment, useState } from 'react';
-import { ArrowUpRight, Check, ChevronDown, Package, Plug, Plus, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import { ArrowUpRight, Check, Package, Plug, Plus, RefreshCw, Settings2, Trash2 } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import type { Command, Integration, IntegrationTransport, Snapshot } from '../client/types';
 import { MobilePairing } from './MobilePairing';
@@ -52,7 +53,7 @@ type IntegrationProps = {
 export function Integrations({ snapshot, action, busy, mode, navigate, connected = true, packages, packageError, onImport, onRefreshPackages }: IntegrationProps) {
   const [editor, setEditor] = useState<{ item?: Integration; preset?: Preset } | null>(null);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [tools, setTools] = useState<Integration | null>(null);
-  const [checking, setChecking] = useState(''), [pairingOpened, setPairingOpened] = useState(false);
+  const [checking, setChecking] = useState('');
   const supportsApprovals = snapshot.capabilities.integration_approvals === true;
   const locked = busy || !connected;
   const installed = Object.entries(packages ?? {}).flatMap(([id, item]) => {
@@ -148,9 +149,8 @@ export function Integrations({ snapshot, action, busy, mode, navigate, connected
     </section>}
 
     <div className="connection-secondary">
-      <details className="connection-disclosure">
-        <summary><span>MCP 설정 예시</span><ChevronDown size={16} aria-hidden="true"/></summary>
-        <div className="connection-disclosure-body">
+      <DetailDialog title="MCP 설정 예시">
+        <div className="connection-settings-body">
           <p className="field-help">로컬 프로그램은 이 Mac에서 실행합니다. 인증에는 비밀 값 대신 호스트 환경 변수 이름을 사용합니다.</p>
           <div className="connection-preset"><div><h3>Google 캘린더 · Tasks</h3>
             <a href="https://github.com/taylorwilsdon/google_workspace_mcp#quick-start" target="_blank" rel="noreferrer">설치·인증 안내<ArrowUpRight size={13}/></a>
@@ -160,13 +160,12 @@ export function Integrations({ snapshot, action, busy, mode, navigate, connected
             <a href="https://github.com/taylorwilsdon/google_workspace_mcp#quick-start" target="_blank" rel="noreferrer">설치·인증 안내<ArrowUpRight size={13}/></a>
           </div><button className="button secondary" disabled={locked} onClick={() => setEditor({ preset: 'gmail' })}>설정 사용</button></div>}
         </div>
-      </details>
-      <details className="connection-disclosure" onToggle={event => { if (event.currentTarget.open) setPairingOpened(true); }}>
-        <summary><span>휴대폰 연결</span><ChevronDown size={16} aria-hidden="true"/></summary>
-        {pairingOpened && <fieldset className="connection-fieldset connection-disclosure-body connection-pairing" disabled={!connected}>
+      </DetailDialog>
+      <div className="connection-surface">
+        <fieldset className="connection-fieldset connection-pairing" disabled={!connected}>
           <MobilePairing mode={mode} connected={connected} profiles={snapshot.profiles}/>
-        </fieldset>}
-      </details>
+        </fieldset>
+      </div>
     </div>
 
     {editor && <IntegrationEditor key={editor.item?.id ?? editor.preset ?? 'new'} initial={editor.item} preset={editor.preset}
@@ -226,11 +225,10 @@ function IntegrationTools({ item, supportsApprovals, action, busy, connected, st
           <input type="checkbox" checked={selected.includes(tool.name)} disabled={locked}
             onChange={e => toggle(tool.name, e.target.checked)}/><code>{tool.name}</code>
         </label>}
-        <details>
-          <summary aria-label={supportsApprovals ? `${tool.name} 설명 및 입력 형식` : undefined}>{supportsApprovals ? '설명 및 입력 형식' : tool.name}</summary>
+        <DetailDialog title={`${tool.name} · 설명 및 입력 형식`} label={<>{supportsApprovals ? <><span className="sr-only">{tool.name} </span>설명 및 입력 형식</> : tool.name}</>}>
           <p>{tool.description || '설명 없음'}</p>
           <pre>{JSON.stringify(tool.inputSchema, null, 2)}</pre>
-        </details>
+        </DetailDialog>
       </div>)}
       {supportsApprovals && unavailable.map(name => <label className="inline-checkbox" key={name}>
         <input type="checkbox" checked disabled={locked} onChange={() => toggle(name, false)}/>

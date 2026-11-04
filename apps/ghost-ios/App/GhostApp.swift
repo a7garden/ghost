@@ -421,11 +421,9 @@ struct SettingsView: View {
                     if model.pendingPushToken != nil { Text("등록되지 않은 알림 토큰이 보존되어 있습니다. 연결이 회복되면 다시 등록됩니다.").font(.footnote).foregroundStyle(GhostStyle.secondary) }
                     Text("완료·수용 알림만 전송되며 알림 본문에는 결과 내용이 담기지 않습니다.").font(.footnote).foregroundStyle(GhostStyle.secondary)
                 }
-                Section {
-                    DisclosureGroup("서버의 컴퓨터 정보") {
+                Section("서버의 컴퓨터 정보") {
                     LabeledContent("서버의 컴퓨터", value: model.snapshot["capabilities"]["computer"]["backend"].text)
                     Text("컴퓨터 제어와 실행 진단은 대화 옵션의 연결 및 요청 상태에서 확인할 수 있습니다.").font(.footnote).foregroundStyle(GhostStyle.secondary)
-                }
                 }
                 Section {
                     Button("이 iPhone에서 연결 해제", role: .destructive) { confirmingDisconnect = true }

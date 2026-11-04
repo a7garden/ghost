@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useRef, useState } from 'react';
 import { Check, CircleAlert, Clock3, RefreshCw } from 'lucide-react';
 import type { Command } from '../client/types';
@@ -338,7 +339,7 @@ function MemorySourceRow({ row, busy, intentBlocked, receipt, rowError, onInspec
       {intentBlocked && !pending && <p className="memory-source-pending" role="status">이 출처의 교정 접수가 미확정 상태로 기록됐습니다. 목록에 원래 요청 이어가기가 나타날 때까지 새 교정을 만들 수 없습니다.</p>}
       {row.content === null
         ? <p className="memory-source-unavailable">원문 확인 불가 — 이 출처의 원본 내용이 접수 기록에서 복원되지 않았습니다. 원문 없이는 교정할 수 없습니다.</p>
-        : <details><summary>출처 원문</summary><pre className="garden-document-source-readonly memory-source-text"><code>{row.content}</code></pre></details>}
+        : <DetailDialog title="출처 원문"><pre className="garden-document-source-readonly memory-source-text"><code>{row.content}</code></pre></DetailDialog>}
       <p className="memory-source-note">위 내용은 보존된 출처 본문과 접수 상태이며 이 Ghost가 수용한 믿음이나 검증된 사실이 아닙니다.</p>
       {receipt && <div className="memory-source-inspect">
         <strong>접수 기록 검토 결과</strong>
@@ -347,10 +348,10 @@ function MemorySourceRow({ row, busy, intentBlocked, receipt, rowError, onInspec
         <code>{receipt.source_locator}</code>
       </div>}
       {rowError && <p className="lifetime-alert" role="alert"><CircleAlert size={16}/><span>{rowError}</span></p>}
-      <details><summary>기술 정보</summary>
+      <DetailDialog title="기술 정보">
         <code>owner {row.origin.owner} · 접수 판본 {row.receipt.revision}{row.receipt.prior_episode_id ? ` · 이전 에피소드 ${row.receipt.prior_episode_id}` : ''}{row.receipt.redaction_closure_sha256 ? ` · 편집 마감 해시 ${row.receipt.redaction_closure_sha256}` : ''}</code>
         <code>{row.receipt.source_locator}</code>
-      </details>
+      </DetailDialog>
     </div>
     <div className="memory-source-actions">
       {row.content !== null && <button type="button" className="button secondary" disabled={busy !== ''} onClick={onInspect}>

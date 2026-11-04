@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { Response } from '../../../../contracts/lifetime/bindings.ts';
@@ -62,8 +63,7 @@ export function BotRoster({ client, target, disabled, onRun, onSelect, onCreate 
     {!surface && !error && <p role="status">Ghost 상태 확인 중</p>}
     {surface && <BotStatusList surface={surface}/>}
     {surface?.truncated && <p className="lifetime-empty">최근 생성 요청 128개를 표시합니다.</p>}
-    {surface?.bots.map(bot => <details key={bot.ghost_id} className="lifetime-artifact">
-      <summary>{bot.display_name} · {botAvailability(bot)}</summary>
+    {surface?.bots.map(bot => <section key={bot.ghost_id} className="lifetime-artifact"><h3>{bot.display_name} · {botAvailability(bot)}</h3>
       <p>{bot.purpose}</p>
       {bot.memory && bot.memory.state !== 'verified' && <p role="status">{botBlocker(bot.memory.reason)}</p>}
       {bot.required_capabilities.length > 0 && <p>{bot.required_capabilities.join(' · ')}</p>}
@@ -74,9 +74,9 @@ export function BotRoster({ client, target, disabled, onRun, onSelect, onCreate 
         {bot.mode !== 'retired' && <button type="button" className="button secondary" disabled={blocked} onClick={() => void setMode(bot, bot.mode === 'paused' ? 'active' : 'paused')}>{bot.mode === 'paused' ? '재개' : '일시정지'}</button>}
         {bot.mode !== 'retired' && <button type="button" className="button secondary lifetime-cancel" disabled={blocked} onClick={() => void setMode(bot, 'retired')}>사용 종료</button>}
       </div>
-      <details><summary>입력과 결과</summary><pre>{JSON.stringify({ input: bot.input_contract, output: bot.output_contract }, null, 2)}</pre></details>
-      <details><summary>판본과 기록</summary><p>Pi · 정의 {bot.definition_ref.revision}</p><code>{bot.ghost_id} · {bot.definition_ref.digest}</code><p>일시정지와 사용 종료 후에도 기존 작업과 기록은 유지됩니다.</p></details>
-    </details>)}
+      <DetailDialog title="입력과 결과"><pre>{JSON.stringify({ input: bot.input_contract, output: bot.output_contract }, null, 2)}</pre></DetailDialog>
+      <DetailDialog title="판본과 기록"><p>Pi · 정의 {bot.definition_ref.revision}</p><code>{bot.ghost_id} · {bot.definition_ref.digest}</code><p>일시정지와 사용 종료 후에도 기존 작업과 기록은 유지됩니다.</p></DetailDialog>
+    </section>)}
     {flow && <form className="form-stack" onSubmit={event => { event.preventDefault(); void submitDefinition(); }}>
       <h4>{flow.bot.display_name} · {flow.action === 'update' ? '역할 수정' : '새 Ghost로 복제'}</h4>
       {flow.action === 'update' ? <label>역할 지시<textarea value={flow.value} maxLength={32768} required rows={4} onChange={event => setFlow({ ...flow, value: event.target.value })}/></label>

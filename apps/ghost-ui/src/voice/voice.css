@@ -1,10 +1,8 @@
 .voice-panel { padding: 0; font-size: 13px; overflow: hidden; }
 .voice-card-header { display: flex; align-items: center; min-height: 44px; padding-right: 8px; }
-.voice-card-toggle { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: 44px; padding: 12px 16px; text-align: left; }
-.voice-card-toggle > svg { flex-shrink: 0; color: var(--color-text-secondary); }
-.voice-card-toggle strong { font-size: 13px; font-weight: 550; white-space: nowrap; }
-.voice-card-toggle > span { flex: 1; min-width: 0; color: var(--color-text-secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.voice-card-toggle[aria-expanded="false"] > svg:last-child { transform: rotate(-90deg); }
+.voice-card-identity { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: 44px; padding: 12px 16px; text-align: left; }
+.voice-card-identity strong { font-size: 13px; font-weight: 550; white-space: nowrap; }
+.voice-card-identity > span { flex: 1; min-width: 0; color: var(--color-text-secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .voice-call-status { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 16px 12px; line-height: 1.55; }
 .voice-indicator { width: 7px; height: 7px; flex-shrink: 0; border-radius: var(--radius-circle); background: currentColor; opacity: .35; }
 .voice-active .voice-indicator { opacity: 1; color: var(--color-running-ink); }
@@ -26,10 +24,10 @@
 /* Compact call surface matching the profile card footprint. */
 .voice-panel { border-radius: 18px; background: var(--color-surface-elevated-2); }
 .voice-card-header { min-height: 60px; padding-right: 10px; }
-.voice-card-toggle { padding: 12px; gap: 9px; }
-.voice-card-toggle .voice-identity { line-height: 1.25; display: grid; gap: 3px; color: var(--color-text); }
+.voice-card-identity { padding: 12px; gap: 9px; }
+.voice-card-identity .voice-identity { line-height: 1.25; display: grid; gap: 3px; color: var(--color-text); }
 .voice-identity > span { color: var(--color-text-secondary); font-size: 12px; }
-.voice-card-toggle > .dot-avatar { flex: 0 0 auto; }
+.voice-card-identity > .dot-avatar { flex: 0 0 auto; }
 .voice-actions { padding: 0 12px 12px; gap: 8px; flex-wrap: nowrap; }
 .voice-actions > .icon-button, .voice-actions > .button { flex: 1; min-height: 36px; border-radius: 999px; background: var(--color-background-secondary-hover); }
 .voice-panel .voice-actions .voice-end { background: #df2929; color: #fff; border-color: transparent; }

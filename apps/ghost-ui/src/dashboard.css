@@ -107,7 +107,6 @@
 .host-capabilities button span { margin-inline-start: auto; font-size: 11px; color: var(--color-ink-2); }
 .host-capabilities > .field-help { margin-top: 12px; }
 .host-diagnostics { margin-top: 28px; font-size: 12px; color: var(--color-ink-2); }
-.host-diagnostics summary { cursor: pointer; padding: 12px 0; }
 .ghost-arc :is(.dashboard-metrics button,.dashboard-task,.dashboard-ghost,.dashboard-manage button,.host-link-row):hover { background: var(--color-hover); }
 @media (min-width: 56rem) {
   .ghost-arc .app-shell { --app-sidebar-width: 216px; }

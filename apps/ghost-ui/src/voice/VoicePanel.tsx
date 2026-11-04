@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Mic, MicOff, Phone, Square, X } from 'lucide-react';
+import { Mic, MicOff, Phone, Square, X } from 'lucide-react';
 import { VoiceController } from './controller';
 import type { VoiceReply, VoiceState } from './controller';
 import { BrowserVoiceCapture, BrowserVoiceOutput } from './media';
@@ -44,15 +44,14 @@ export function useVoiceCall(props: VoiceCallProps) {
 }
 export type VoiceCall = ReturnType<typeof useVoiceCall>;
 
-export function VoicePanel({ call, profileId, profileName, enabled, disabledReason, runningTasks, collapsed, onCollapse, onDismiss }: { call: VoiceCall; profileId?: string; profileName: string; enabled: boolean; disabledReason?: string; runningTasks: number; collapsed: boolean; onCollapse(): void; onDismiss(): void }) {
+export function VoicePanel({ call, profileId, profileName, enabled, disabledReason, runningTasks, onDismiss }: { call: VoiceCall; profileId?: string; profileName: string; enabled: boolean; disabledReason?: string; runningTasks: number; onDismiss(): void }) {
   const { state } = call;
   const connecting = state.phase === 'connecting', live = state.active || connecting;
   const ended = call.attempted && state.phase === 'idle';
-  const title = live ? '전화 중' : ended ? '통화 종료됨' : '음성 통화';
   return <section className={`context-card voice-panel ${live ? 'voice-active' : ''}`} aria-label={`${profileName}와 음성 통화`}>
-    <div className="voice-card-header"><button type="button" className="voice-card-toggle" aria-label={`${title} 상세 ${collapsed ? '펼치기' : '접기'}`} aria-expanded={!collapsed} onClick={onCollapse}><DotAvatar profileId={profileId ?? profileName} tone={toneFor(profileId ?? profileName)} size={32}/><span className="voice-identity"><strong>{profileName}</strong><span role="status">{ended ? '통화 종료됨' : voicePhaseLabel(state)}</span></span><ChevronDown size={14}/></button>{!live && <button type="button" className="icon-button small" aria-label="음성 통화 카드 닫기" onClick={onDismiss}><X size={15}/></button>}</div>
+    <div className="voice-card-header"><div className="voice-card-identity"><DotAvatar profileId={profileId ?? profileName} tone={toneFor(profileId ?? profileName)} size={32}/><span className="voice-identity"><strong>{profileName}</strong><span role="status">{ended ? '통화 종료됨' : voicePhaseLabel(state)}</span></span></div>{!live && <button type="button" className="icon-button small" aria-label="음성 통화 카드 닫기" onClick={onDismiss}><X size={15}/></button>}</div>
 
-    {(live || !collapsed) && <div className="voice-actions">{live ? <><button type="button" className="icon-button" aria-label={state.muted ? '마이크 켜기' : '마이크 끄기'} aria-pressed={state.muted} disabled={connecting} onClick={call.mute}>{state.muted ? <MicOff size={17}/> : <Mic size={17}/>}</button><button type="button" className="button secondary voice-end" aria-label={connecting ? '연결 취소' : '통화 종료'} title={connecting ? '연결 취소' : '통화 종료'} onClick={call.end}><Phone size={17} className="voice-hangup"/></button></> : <button type="button" className="button secondary" disabled={!enabled} onClick={call.start}><Phone size={15}/>{state.error ? '다시 연결' : ended ? '다시 통화' : '통화 시작'}</button>}</div>}
-    {!collapsed && <div className="voice-card-body">{state.transcript && <p className="voice-transcript"><span>내가 한 말</span>{state.transcript}</p>}{state.error && <p className="voice-error" role="alert">{state.error}</p>}{!live && !ended && <p className="voice-help">{!enabled ? disabledReason ?? 'Ghost 설정에서 음성 사용을 허용해 주세요.' : '통화 시작을 누르면 로컬 음성 모델 연결 후 마이크를 엽니다.'}</p>}{state.active && runningTasks > 0 && <button type="button" className="context-card-action voice-cancel-work" onClick={call.cancelWork}><Square size={13}/>작업 취소</button>}</div>}
+    <div className="voice-actions">{live ? <><button type="button" className="icon-button" aria-label={state.muted ? '마이크 켜기' : '마이크 끄기'} aria-pressed={state.muted} disabled={connecting} onClick={call.mute}>{state.muted ? <MicOff size={17}/> : <Mic size={17}/>}</button><button type="button" className="button secondary voice-end" aria-label={connecting ? '연결 취소' : '통화 종료'} title={connecting ? '연결 취소' : '통화 종료'} onClick={call.end}><Phone size={17} className="voice-hangup"/></button></> : <button type="button" className="button secondary" disabled={!enabled} onClick={call.start}><Phone size={15}/>{state.error ? '다시 연결' : ended ? '다시 통화' : '통화 시작'}</button>}</div>
+    <div className="voice-card-body">{state.transcript && <p className="voice-transcript"><span>내가 한 말</span>{state.transcript}</p>}{state.error && <p className="voice-error" role="alert">{state.error}</p>}{!live && !ended && <p className="voice-help">{!enabled ? disabledReason ?? 'Ghost 설정에서 음성 사용을 허용해 주세요.' : '통화 시작을 누르면 로컬 음성 모델 연결 후 마이크를 엽니다.'}</p>}{state.active && runningTasks > 0 && <button type="button" className="context-card-action voice-cancel-work" onClick={call.cancelWork}><Square size={13}/>작업 취소</button>}</div>
   </section>;
 }

@@ -38,8 +38,7 @@
 .agent-status-activity-icon { display: inline-flex; color: var(--agent-status-ink); flex: 0 0 auto; }
 .agent-status-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-control); font-weight: 500; }
 .agent-status-time { color: var(--color-text-secondary); font-size: var(--text-control); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
-.agent-status-chevron { color: var(--color-text-secondary); flex: 0 0 auto; transition: transform var(--dur-micro) var(--ease-out); }
-.agent-status-trigger[aria-expanded="true"] .agent-status-chevron { transform: rotate(180deg); }
+.agent-status-list-icon { color: var(--color-text-secondary); flex: 0 0 auto; }
 .agent-status-popover {
   position: absolute;
   z-index: var(--z-popover, 40);
@@ -95,6 +94,5 @@
 @media (prefers-reduced-motion: reduce) {
   .agent-status[data-moving] .agent-status-ring { animation: none; }
   .agent-status-popover { animation: none; }
-  .agent-status-chevron { transition: none; }
   .agent-status-action:active:not(:disabled), .agent-status-trigger:active:not(:disabled), .agent-status-close:active:not(:disabled) { transform: none; }
 }

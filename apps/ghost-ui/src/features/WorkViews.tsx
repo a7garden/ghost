@@ -1,3 +1,4 @@
+import { DetailDialog } from '../components/DetailDialog';
 import { uiTerms } from '../uiText';
 import { RoutingCompletionInbox } from './RoutingResults';
 import { useEffect, useState } from 'react';
@@ -55,7 +56,7 @@ export function InboxView({ snapshot, onReview, onOpenApproval, navigate, connec
         <CircleAlert size={24}/><div>
           <span className="eyeline">{p.name} · {phaseLabel(t.phase)}</span><h3>{c.title}</h3>
           <p>{taskAttentionMessage(t)}</p>
-          {t.output && <details className="inbox-task-record"><summary>실행 기록</summary><pre>{t.output}</pre></details>}
+          {t.output && <DetailDialog title="실행 기록" className="inbox-task-record"><pre>{t.output}</pre></DetailDialog>}
           <div className="inbox-actions">
             <button className="button secondary" onClick={() => navigate(`/ghosts/${p.id}?conversation=${c.id}`)}>대화와 작업 보기<ArrowRight size={14}/></button>
             {t.phase === 'failed' && <button className="button secondary" onClick={() => navigate(`/settings?tab=models&ghost=${encodeURIComponent(p.id)}`)}>모델 설정</button>}
@@ -65,10 +66,9 @@ export function InboxView({ snapshot, onReview, onOpenApproval, navigate, connec
     </section>}
     {!count && <div className="empty-state large-empty"><CheckCheck size={34}/><h2>확인이 필요한 항목 없음</h2><button className="button secondary" onClick={() => navigate('/')}>나의 Ghost 보기</button></div>}
     <RoutingCompletionInbox snapshot={snapshot} connected={connected}/>
-    {groups.finished.length > 0 && <details className="approval-inbox-group approval-inbox-history">
-      <summary>{approvalGroups.finished} <span className="muted">{groups.finished.length}</span></summary>
+    {groups.finished.length > 0 && <section className="approval-inbox-group approval-inbox-history"><h2>{approvalGroups.finished} <span className="muted">{groups.finished.length}</span></h2>
       {groups.finished.map(approvalRow)}
-    </details>}
+    </section>}
   </div>;
 }
 

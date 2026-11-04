@@ -50,24 +50,24 @@ it('keeps tools, past work and reservation available in the open sidebar even wi
   const snapshot = emptyWorkspace();
   snapshot.profiles[0].conversations[0].tasks.push({ id: 'past', name: '완료한 일', phase: 'complete', partial: '', output: '' });
   const html = renderChat(snapshot, true, true);
-  expect(html).toContain('완료한 일'); expect(html).toContain('반복 작업 예약');
+  expect(html).toContain('지난 작업 1개'); expect(html).toContain('반복 작업 예약');
   expect(html).toContain('도구 연결'); expect(html).not.toContain('<dialog');
 });
 it('keeps manually requested task history, reservation and tools management available', () => {
   const snapshot = emptyWorkspace(), profile = snapshot.profiles[0];
   profile.conversations[0].tasks.push({ id: 'past', name: '완료한 일', phase: 'complete', partial: '', output: '' });
-  const common = { profile, snapshot, conversation: profile.conversations[0], busy: false, connected: true, navigate: () => {}, onReview: () => {}, onCancel: () => {}, onSchedule: () => {}, disclosure: {}, onDisclosure: () => {} };
+  const common = { profile, snapshot, conversation: profile.conversations[0], busy: false, connected: true, navigate: () => {}, onReview: () => {}, onCancel: () => {}, onSchedule: () => {} };
   const automatic = renderToStaticMarkup(createElement(ConversationContext, common));
   const manual = renderToStaticMarkup(createElement(ConversationContext, { ...common, management: true }));
-  expect(automatic).toContain('context-profile-card'); expect(automatic).not.toContain('완료한 일'); expect(automatic).toContain('연결된 실행 환경 없음'); expect(manual).toContain('완료한 일'); expect(manual).toContain('예약'); expect(manual).toContain('도구 연결');
+  expect(automatic).toContain('context-profile-card'); expect(automatic).not.toContain('지난 작업'); expect(automatic).toContain('연결된 실행 환경 없음'); expect(manual).toContain('지난 작업 1개'); expect(manual).toContain('예약'); expect(manual).toContain('도구 연결');
 });
-it('respects a collapsed category across snapshots instead of reopening for a review count change', () => {
+it('shows review rows directly across snapshot updates', () => {
   const snapshot = emptyWorkspace(), profile = snapshot.profiles[0], conversation = profile.conversations[0];
   snapshot.reviews.push({ id: 'one', profile_id: profile.id, conversation_id: conversation.id, title: '검토', body: '', state: 'pending', space_id: '' });
-  const render = () => renderToStaticMarkup(createElement(ConversationContext, { profile, snapshot, conversation, busy: false, connected: true, navigate: () => {}, onReview: () => {}, onCancel: () => {}, onSchedule: () => {}, disclosure: { reviews: false }, onDisclosure: () => {} }));
-  expect(render()).toContain('aria-expanded="false"');
+  const render = () => renderToStaticMarkup(createElement(ConversationContext, { profile, snapshot, conversation, busy: false, connected: true, navigate: () => {}, onReview: () => {}, onCancel: () => {}, onSchedule: () => {} }));
+  expect(render()).not.toMatch(/<details|aria-expanded=/);
   snapshot.reviews.push({ ...snapshot.reviews[0], id: 'two' });
-  expect(render()).toContain('aria-expanded="false"'); expect(render()).toContain('context-card-count">2');
+  expect(render()).not.toMatch(/<details|aria-expanded=/); expect(render()).toContain('context-card-count">2');
 });
 
 it('names simultaneous responses and queued work instead of repeating an anonymous thinking block', () => {
