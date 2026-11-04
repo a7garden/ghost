@@ -1,10 +1,10 @@
-import { CalendarDays, Cpu, Puzzle, Server, Folder, GitBranch, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
+import { CalendarDays, Cpu, Puzzle, Server, Folder, GitBranch, History, Home, Inbox, LayoutList, MessageCircle, Settings2 } from 'lucide-react';
 import { ghostPath, viewPath } from '../features/PackageWorkspace';
 import type { GhostView } from '../../sdk/src/index';
 import type { Snapshot } from '../client/types';
 import { routeLabels } from '../uiText';
 import type { HostStatus } from '../features/hostStatus';
-import { legacyHistoryPath } from '../features/LegacyTranscript';
+import { legacyHistoryPath, legacyHistoryRequested } from '../features/LegacyTranscript';
 
 type Props = {
   snapshot: Snapshot | null;
@@ -18,20 +18,32 @@ type Props = {
   mode: string;
   error: string;
   lifetimeEnabled: boolean;
-  showGhostHeading?: boolean;
   status?: HostStatus;
   navigate(path: string): void;
   onConnection(): void;
 };
 
-export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpace, views, activeView, attentionCount, mode, error, lifetimeEnabled, showGhostHeading = true, status, navigate, onConnection }: Props) {
+export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpace, views, activeView, attentionCount, mode, error, lifetimeEnabled, status, navigate, onConnection }: Props) {
   const durableHost = lifetimeEnabled && mode === 'live';
   const params = new URLSearchParams(route.split('?')[1] || '');
   const panel = params.get('panel');
   const profile = snapshot?.profiles.find(item => item.id === dotId);
-  const conversation = params.get('conversation') ?? profile?.conversations[0]?.id;
+  const conversations = profile?.conversations ?? [];
+  const currentConversation = durableHost ? undefined : conversations[0];
+  const previousConversations = durableHost ? conversations : conversations.slice(1);
+  const conversationId = params.get('conversation') ?? conversations[0]?.id;
   const primarySection = section === 'lifetime' && panel === 'work' ? 'work' : section;
-  const chatSelected = Boolean(dotId && !activeView && (section === 'ghosts' || (section === 'lifetime' && !panel && !params.has('create'))));
+  const profilePath = profile ? ghostPath(profile.id) : '';
+  const onProfileChat = section === 'ghosts' && route.split('?')[0].replace(/\/+$/, '') === profilePath;
+  const onDurableChat = section === 'lifetime' && !panel && !params.has('create')
+    && (!params.has('ghost') || params.get('ghost') === profile?.id);
+  const viewingArchive = durableHost && onProfileChat && legacyHistoryRequested(route);
+  const currentSelected = !activeView && !viewingArchive
+    && (durableHost ? onProfileChat || onDurableChat : onProfileChat && conversationId === currentConversation?.id);
+  const savedTitle = currentConversation?.title.trim();
+  const currentTitle = savedTitle && savedTitle !== '새 대화' ? savedTitle : '현재 대화';
+  const currentPath = currentConversation
+    ? `${profilePath}?${new URLSearchParams({ conversation: currentConversation.id })}` : profilePath;
   return <>
     <div className="sidebar-scroll">
       <nav className="primary-nav dashboard-primary-nav" aria-label="기본 메뉴">{[
@@ -39,27 +51,28 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
         { path: '/inbox', key: 'inbox', name: routeLabels.inbox, Icon: Inbox },
         { path: durableHost ? '/lifetime?panel=work&scope=all' : '/work', key: 'work', name: routeLabels.work, Icon: LayoutList },
       ].map(({ path, key, name, Icon }) => <button key={key} className={`nav-row ${primarySection === key ? 'selected' : ''}`} aria-current={primarySection === key ? 'page' : undefined} onClick={() => navigate(path)}><Icon size={16}/><span>{name}</span>{key === 'inbox' && attentionCount > 0 && <span className="nav-count">{attentionCount}</span>}</button>)}</nav>
-      {profile && <section className="sidebar-menu-group" aria-label={`${profile.name} 메뉴`}>
-        {showGhostHeading && <h2 className="sidebar-group-title">{profile.name}</h2>}
+      {profile && <section className="sidebar-menu-group" aria-label={`${profile.name} 대화`}>
+        <h2 className="sidebar-group-title">대화</h2>
+        <nav className="primary-nav sidebar-thread-list" aria-label={`${profile.name} 대화 목록`}>
+          <button className={`nav-row ${currentSelected ? 'selected' : ''}`} aria-current={currentSelected ? 'page' : undefined}
+            title={currentTitle} onClick={() => navigate(currentPath)}><MessageCircle size={16}/><span>{currentTitle}</span></button>
+          {previousConversations.map((item, index) => {
+            const active = !activeView && onProfileChat && (!durableHost || viewingArchive) && conversationId === item.id;
+            const title = item.title || `대화 ${index + (durableHost ? 1 : 2)}`;
+            return <button key={item.id} className={`nav-row ${active ? 'selected' : ''}`} aria-current={active ? 'page' : undefined}
+              title={title} onClick={() => navigate(legacyHistoryPath(profile.id, item.id))}>
+              <History size={16}/><span>{title}</span>
+            </button>;
+          })}
+        </nav>
+      </section>}
+      {profile && views.length > 0 && <section className="sidebar-menu-group" aria-label={`${profile.name} 전용 화면`}>
+        <h2 className="sidebar-group-title">전용 화면</h2>
         <nav className="primary-nav ghost-view-nav" aria-label={`${profile.name} 화면`}>
-          <button className={`nav-row ${chatSelected ? 'selected' : ''}`} aria-current={chatSelected ? 'page' : undefined}
-            onClick={() => navigate(ghostPath(profile.id))}><MessageCircle size={16}/>대화</button>
           {views.map(view => <button key={view.id} className={`nav-row ${activeView === view.id ? 'selected' : ''}`}
             aria-current={activeView === view.id ? 'page' : undefined}
             onClick={() => navigate(viewPath(profile.id, view.id))}><LayoutList size={16}/><span>{view.label}</span></button>)}
         </nav>
-        {profile.conversations.length > 0 && <section className="sidebar-section sidebar-history">
-          <h3 className="sidebar-label">대화 기록</h3>
-          <nav className="sidebar-nested-nav" aria-label={`${profile.name} 대화 기록`}>
-            {profile.conversations.map((item, index) => {
-              const active = chatSelected && conversation === item.id;
-              const path = legacyHistoryPath(profile.id, item.id);
-              return <button key={item.id} className={`sidebar-conversation ${active ? 'selected' : ''}`}
-                aria-current={active ? 'page' : undefined} title={item.title} onClick={() => navigate(path)}>
-                <span>{item.title || `대화 ${index + 1}`}</span></button>;
-            })}
-          </nav>
-        </section>}
       </section>}
       <section className="sidebar-menu-group sidebar-menu-group--shared" aria-label="도구">
         <h2 className="sidebar-group-title">도구</h2>

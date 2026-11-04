@@ -546,12 +546,17 @@ try {
   assert.equal((await threadComposer.boundingBox()).y,composerBounds.y,'reading earlier messages keeps the composer in place');
   checks.push('current-chat-scrolls-independently-of-anchored-composer-320');
 
+  await page.setViewportSize({width:1440,height:900});
   await page.goto(`${origin}/#/ghosts/${writer}?history=1&conversation=legacy-writer-chat`);
+  const writerChats=page.getByRole('navigation',{name:'Writer 대화 목록',exact:true});
+  const selectedWriterChat=writerChats.locator('[aria-current="page"]');
   const archive=page.getByRole('region',{name:'Writer 이전 대화',exact:true});
   await archive.getByText('보존된 답변',{exact:true}).waitFor();
   assert.equal(await archive.locator('textarea').count(),0);
+  assert.deepEqual(await selectedWriterChat.allTextContents(),['기존 Writer 대화']);
   await archive.getByRole('button',{name:'현재 대화',exact:true}).click();
   await page.locator('#lifetime-message').waitFor();
+  assert.deepEqual(await selectedWriterChat.allTextContents(),['현재 대화']);
   checks.push('archived-thread-is-read-only-and-links-to-current-chat');
   await context.close();
 
@@ -577,6 +582,22 @@ try {
     assert.equal(await sent.textContent(),draft);
     assert.equal(await demoInput.inputValue(),'');
     checks.push('demo-chat-tool-dialog-and-keyboard-send-preserve-line-breaks');
+
+    await demo.setViewportSize({width:1440,height:900});
+    const sageChats=demo.getByRole('navigation',{name:'Sage 대화 목록',exact:true});
+    await sageChats.waitFor();
+    const firstConversation=await sageChats.getByRole('button').first().textContent();
+    await demo.getByRole('button',{name:'새 대화',exact:true}).click();
+    const current=sageChats.getByRole('button',{name:'현재 대화',exact:true});
+    await current.waitFor();
+    const older=sageChats.getByRole('button',{name:firstConversation,exact:true});
+    await older.click();
+    await sent.waitFor();
+    assert.deepEqual(await sageChats.locator('[aria-current="page"]').allTextContents(),[firstConversation]);
+    await current.click();
+    await demo.getByRole('group',{name:'대화 시작 제안'}).waitFor();
+    assert.deepEqual(await sageChats.locator('[aria-current="page"]').allTextContents(),['현재 대화']);
+    checks.push('sidebar-current-and-previous-conversations-select-exactly-one-row');
   } finally {
     await demoContext.close();
   }
