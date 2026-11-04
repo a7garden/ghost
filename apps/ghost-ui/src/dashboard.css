@@ -77,7 +77,6 @@
 .dashboard-note p, .host-runtime-note p { color: var(--color-ink-2); font-size: 12px; line-height: 1.8; margin: 8px 0; }
 .dashboard-read-warning { padding: 12px; border-radius: 6px; background: var(--color-amber-surface); color: var(--color-amber-ink); font-size: 12px; line-height: 1.6; }
 .dashboard-demo-note { margin: 28px 0 0; font-size: 11px; color: var(--color-ink-2); }
-.ghost-arc .sidebar-brand { display: flex; gap: 9px; align-items: center; min-height: 52px; width: 100%; padding: 10px; font-size: 17px; text-align: start; letter-spacing: -.025em; }
 .ghost-arc .dashboard-primary-nav { margin-bottom: 20px; }
 .ghost-arc .sidebar-menu-group { margin-top: 18px; padding-top: 0; border: 0; }
 .ghost-arc .sidebar-group-title { color: var(--color-ink-2); font-size: 11px; font-weight: 500; margin-bottom: 8px; }
@@ -126,7 +125,6 @@
   .mobile-menu-trigger { display: inline-flex; flex: none; }
   .navigation-dialog { width: min(340px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); }
   .navigation-dialog .mobile-sidebar { display: flex; flex-direction: column; max-height: 75dvh; }
-  .navigation-dialog .sidebar-brand { display: none; }
   .navigation-dialog .sidebar-bottom { display: grid; gap: 6px; border-top: 1px solid var(--color-rule); padding-top: 8px; }
   .navigation-dialog .nav-row { min-height: 42px; }
 }

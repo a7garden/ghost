@@ -3,7 +3,6 @@ import { ghostPath, viewPath } from '../features/PackageWorkspace';
 import type { GhostView } from '../../sdk/src/index';
 import type { Snapshot } from '../client/types';
 import { routeLabels } from '../uiText';
-import { GhostMark } from './DotAvatar';
 import type { HostStatus } from '../features/hostStatus';
 import { legacyHistoryPath } from '../features/LegacyTranscript';
 
@@ -34,7 +33,6 @@ export function WorkspaceSidebar({ snapshot, route, section, dotId, selectedSpac
   const primarySection = section === 'lifetime' ? panel === 'work' ? 'work' : panel === 'ghosts' ? 'ghosts' : 'ghosts' : section;
   const chatSelected = Boolean(dotId && !activeView && (section === 'ghosts' || (section === 'lifetime' && !panel && !params.has('create'))));
   return <>
-    <button className="sidebar-brand" onClick={() => navigate('/')} aria-label="Ghost 대시보드"><GhostMark/><strong>Ghost</strong></button>
     <div className="sidebar-scroll">
       <nav className="primary-nav dashboard-primary-nav" aria-label="기본 메뉴">{[
         { path: '/', key: 'home', name: routeLabels.home, Icon: Home },
