@@ -200,6 +200,18 @@ impl Host {
         if dispatch_enabled && std::env::var("GHOST_LIFETIME_MODE").as_deref() == Ok("broker") {
             use crate::lifetime_contract::{canonical_digest, Envelope, ResponseStatus, VERSION};
             use rusqlite::OptionalExtension;
+            const STARTER_POLICY: &str = "lifetime_bootstrap_specialists";
+            let bootstrap_specialists = match std::env::var("GHOST_LIFETIME_BOOTSTRAP_SPECIALISTS").as_deref() {
+                Ok(value @ ("0" | "1")) => {
+                    let enabled = value == "1";
+                    journal.put("meta", STARTER_POLICY, &enabled)?;
+                    enabled
+                }
+                Err(std::env::VarError::NotPresent) => {
+                    journal.get("meta", STARTER_POLICY)?.unwrap_or(true)
+                }
+                _ => bail!("GHOST_LIFETIME_BOOTSTRAP_SPECIALISTS must be 0 or 1"),
+            };
             let primary: Option<(String, String)> = journal.0.query_row(
                 "SELECT ghost_id,conversation_id FROM lifetime_registry WHERE kind='primary'",
                 [], |row| Ok((row.get(0)?, row.get(1)?)),
@@ -253,6 +265,9 @@ impl Host {
                         "registered specialist conversation conflicts with legacy runtime ownership");
                     // A draining specialist is still the user's configured role;
                     // startup must not reactivate it or create a replacement.
+                    continue;
+                }
+                if !bootstrap_specialists {
                     continue;
                 }
                 let ghost_id = match profiles.values().find(|profile| profile.name == name) {

@@ -7,7 +7,7 @@
 | 상태와 작업 | `com.a7.ghost`, `127.0.0.1:62062` | `~/.local/bin/ghost`가 `20261105-orchestra-1d96dfd-ui/ghost` 릴리스를 가리킨다. 기존 Ghost 프로필 9개를 읽었다. |
 | Mac 앱 | `~/Applications/Ghost.app`, `127.0.0.1:65164` | `~/.config/ghost/console.json`의 `host_mode: external`을 사용한다. 앱이 기존 Host에 인증해 상태를 읽었다. |
 | 휴대폰 연결 | `com.a7.ghost-gateway`, `127.0.0.1:8788` | 동일 운영 상태 루트에 연결된 Gateway다. |
-| 로컬 추론 | `com.a7.ghost-local-inference` | 기존 모델 경로를 유지한다. |
+| 로컬 추론 | `com.a7.ghost-local-inference` | 모델 목록 조회는 성공하지만 Qwen 가중치 캐시가 없어 실제 생성은 HTTP 500을 반환한다. |
 | 구형 콘솔 | `com.a7.ghost-ui`, `127.0.0.1:5178` | Studio에서 중지하고 자동 실행을 비활성화했다. plist는 복구용으로 보존한다. |
 
 정본 상태는 `~/Library/Application Support/Ghost`에 있다. 앱을 열고 닫는 동안 상시 Host가 이 상태의 writer를 맡는다. 주 Ghost는 담당 Ghost에 위임할 수 있다. 기존 논리 Ghost와 연결된 기기는 보존한다. 운영 Host를 교체할 때는 실행 중 업무와 원장 보존을 먼저 확인하고, 이전 릴리스로 복구할 경로를 기록한다.
@@ -32,6 +32,14 @@ curl -fsS http://127.0.0.1:65164/ghost-api/bootstrap | jq '{mode, owner_pid}'
 Bun 1.4.2와 `apps/ghost-durable`의 잠금 의존성을 준비한다. 운영 LaunchAgent는 `run --ui`를 사용하므로 `lifetime,workspace-ui` 기능으로 빌드한다. `scripts/install.py --features lifetime,workspace-ui`는 관리되는 releases 링크에만 사용한다. Studio의 bundles 설치는 검증한 버전 디렉터리와 실행 링크를 교체한다. 기존 Rust 빌드에 Pi를 포함하려면 `--skip-build --bundle-pi`를 사용한다. 설치 명세에는 두 실행 파일과 Pi 의존성 잠금 파일의 SHA-256이 들어간다. 운영은 `GHOST_LIFETIME_MODE=broker`, 격리 검증은 별도 상태 루트와 `GHOST_LIFETIME_MODE=fixture`를 사용한다. Pi 실행을 끄려면 `GHOST_LIFETIME_MODE=disabled`를 사용한다. Node 릴리스로 복귀할 수 있도록 기존의 `GHOST_LIFETIME_PI_ENTRY`와 `GHOST_LIFETIME_MODE` 설정을 보관한다.
 
 Apple-container 업무는 Pi 기본 파일·셸 도구를 Host가 승인한 업무 공간에서 실행한다. Bun 번들 검증은 별도 Host에서 위임, Pi 재시작 후 대기 해제, 두 산출물의 검수, 기본 대화의 최종 보고까지 다룬다. [직접 실행 계약](pi-direct-execution.md)
+
+## Ghost 하나로 시작
+
+빈 상태 루트에 `GHOST_LIFETIME_MODE=broker GHOST_LIFETIME_BOOTSTRAP_SPECIALISTS=0`을 설정하면 Host가 기본 Ghost 하나와 그 Pi 대화를 등록한다. 명시한 값은 등록 전에 상태 루트에 저장되어 다음 시작에도 적용된다. 별도 선택이 없는 환경과 `GHOST_LIFETIME_BOOTSTRAP_SPECIALISTS=1`은 기본 전문 Ghost도 등록한다. 이미 등록된 Ghost와 대화에는 그대로 접근할 수 있다. 선택을 저장하기 전의 사본을 복구할 때 단독으로 시작하려면 `0`을 다시 설정한다. 직접 업무를 실행하려면 그 Ghost의 모델과 Pi 작업 환경을 지정한다. [Pi 실행 환경](pi-direct-execution.md#environment)
+
+2026-11-05 별도 Host에서 운영과 같은 Qwen 모델과 루프백 경로를 선택해 실제 응답을 요청했다. 서버는 오프라인 캐시에서 모델을 찾지 못했다. 운영 기본 대화도 해당 모델을 선택하고 있다. 가중치는 전날 디스크 정리에서 제거됐다. [디스크 정리 기록](../../infra/reports/2026-11-04/disk-space-reclaim.md)
+
+같은 날 별도 루트의 새 Rust Host와 운영판 Bun/Pi 바이너리로 Ghost 하나를 검증했다. Z.AI `glm-5.3`으로 공개 합성 대화와 직접 업무를 접수했다. Pi가 파일을 작성하고 셸에서 확인해 게시했다. Owner가 게시본 바이트와 SHA-256을 확인해 수용했고, 원래 대화에 실행과 수용 보고가 도착했다. Host와 Bun/Pi 종료 후 설정 변수를 생략한 채 다시 띄워 Ghost 하나, 동일 대화, 수용 보고와 산출물을 조회했다. 실제 후속 답변이 이전 확인 코드를 기억했고 실행은 한 건으로 유지됐다. 기존 기본 설정의 네 Ghost, 단독 시작, 잘못된 값 거부, 명시적인 전문 Ghost 추가도 별도 시작 시험으로 확인했다.
 
 ## 구형 콘솔 복구
 
