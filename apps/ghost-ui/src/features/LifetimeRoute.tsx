@@ -5,7 +5,7 @@ import type { AuthenticatedControlAction } from '../lifetime/controlTransport';
 import type { ApprovalRef } from '../plugins/approvals';
 import type { Command, LifetimeHostAuthority, Review, Snapshot } from '../client/types';
 
-export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mode, connected = true, active = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, route = '/lifetime', legacyGhostIDs, onOpenHistory, snapshot, onOpenApproval, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, navigate, handoff, onHandoffConsumed }: {
+export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mode, connected = true, active = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, route = '/lifetime', onOpenHistory, snapshot, onOpenApproval, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, navigate, handoff, onHandoffConsumed }: {
   action: AuthenticatedControlAction;
   /** Workspace Owner action (CSRF + envelope journal) for the Owner memory source review surface. */
   memoryAction?: (command: Command) => Promise<Record<string, any>>;
@@ -26,7 +26,6 @@ export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mo
   authorizedRegistration?: { ghostID: string; conversationID: string };
   onRegistrationConsumed?: (ghostID: string, conversationID: string) => void;
   navigate?: (path: string) => void;
-  legacyGhostIDs?: string[];
   onOpenHistory?: (ghostID: string) => void;
   handoff?: { id: string; text: string };
   onHandoffConsumed?: (id: string) => void;
@@ -51,7 +50,7 @@ export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mo
   const params = new URLSearchParams(route.split('?')[1] ?? '');
   const panel = params.get('panel');
   return <LifetimeView mode="live" client={session.client} connected={connected} active={active} memoryAction={memoryAction}
-    legacyGhostIDs={legacyGhostIDs} onOpenHistory={onOpenHistory} handoff={handoff} onHandoffConsumed={onHandoffConsumed}
+    onOpenHistory={onOpenHistory} handoff={handoff} onHandoffConsumed={onHandoffConsumed}
     initialGhostID={params.get('ghost') ?? undefined}
     initialConversationID={params.get('conversation') ?? undefined}
     initialRegisterConversationID={params.get('register') ?? undefined}

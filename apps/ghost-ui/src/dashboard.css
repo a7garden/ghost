@@ -58,7 +58,10 @@
 
 .ghost-arc .sidebar-menu-group { margin-top: 18px; padding-top: 0; border: 0; }
 .ghost-arc .sidebar-group-title { color: var(--color-ink-2); font-size: 11px; font-weight: 500; margin-bottom: 8px; }
-.sidebar-ghost-views { padding-inline-start: 22px; }
+.sidebar-ghosts { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.ghost-arc .sidebar-ghost.open > .sidebar-ghost-row { font-weight: 600; }
+.ghost-arc .sidebar-ghost-menu { display: grid; gap: 1px; margin: 2px 0 6px 17px; padding-inline-start: 6px; border-inline-start: 1px solid var(--color-rule); }
+.ghost-arc .sidebar .sidebar-ghost-menu .nav-row { min-height: 30px; font-size: 12px; }
 .ghost-arc .sidebar .sidebar-quiet-row { color: var(--color-ink-2); }
 .mobile-menu-trigger { display: none; }
 .shell-quick-actions { display: flex; align-items: center; gap: 6px; }

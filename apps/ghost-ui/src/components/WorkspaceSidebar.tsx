@@ -1,22 +1,25 @@
-import { Folder, Home, LayoutList, Plus, Settings2 } from 'lucide-react';
+import { Folder, History, Home, LayoutGrid, LayoutList, MessageCircle, Plus, Settings2 } from 'lucide-react';
 import { useId } from 'react';
-import { viewPath } from '../features/PackageWorkspace';
-import type { GhostView } from '../../sdk/src/index';
 import type { Snapshot } from '../client/types';
 import { toneFor } from '../client/types';
 import { DotAvatar } from './DotAvatar';
 import { routeLabels } from '../uiText';
 import type { HostStatus } from '../features/hostStatus';
+import { ghostDisplayName } from '../features/profileSummary';
+
+/** One page inside the open Ghost: its conversation, its work, package views and earlier conversations. */
+export interface GhostMenuItem { key: string; label: string; path: string; kind: 'chat' | 'work' | 'view' | 'history' }
 
 type Props = {
   snapshot: Snapshot | null;
   section: string;
-  /** Ghost whose conversation or package view is on screen; null on workspace pages. */
-  chatGhostId: string | null;
+  /** Ghost whose pages are on screen; null on workspace pages. */
+  openGhostId: string | null;
+  /** Pages of the open Ghost, and which one is on screen. */
+  ghostMenu: GhostMenuItem[];
+  currentGhostPage: string | null;
   defaultGhostId: string | null;
   selectedSpace?: string;
-  views: GhostView[];
-  activeView?: string;
   attentionCount: number;
   status: HostStatus;
   /** The host can connect a project folder; otherwise 새 프로젝트 would open nothing. */
@@ -25,9 +28,11 @@ type Props = {
   openGhost(id: string): void;
 };
 
-export function WorkspaceSidebar({ snapshot, section, chatGhostId, defaultGhostId, selectedSpace, views, activeView, attentionCount, status, canCreateProject, navigate, openGhost }: Props) {
+const menuIcons = { chat: MessageCircle, work: LayoutList, view: LayoutGrid, history: History };
+
+export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, currentGhostPage, defaultGhostId, selectedSpace, attentionCount, status, canCreateProject, navigate, openGhost }: Props) {
   // The sidebar renders twice on mobile (aside + navigation dialog), so ids must be per instance.
-  const hostStatusId = useId(), chatsId = useId(), projectsId = useId();
+  const hostStatusId = useId(), ghostsId = useId(), projectsId = useId();
   const profiles = snapshot?.profiles ?? [];
   // The default Ghost is the entry point, so it always leads the list.
   const ghosts = [...profiles].sort((a, b) => Number(b.id === defaultGhostId) - Number(a.id === defaultGhostId));
@@ -39,20 +44,24 @@ export function WorkspaceSidebar({ snapshot, section, chatGhostId, defaultGhostI
           <Home size={16}/><span>{routeLabels.home}</span>{attentionCount > 0 && <span className="nav-count"><span className="sr-only">확인 필요 </span>{attentionCount}</span>}
         </button>
       </nav>
-      {ghosts.length > 0 && <section className="sidebar-menu-group" aria-labelledby={chatsId}>
-        <h2 className="sidebar-group-title" id={chatsId}>대화</h2>
-        <nav className="primary-nav" aria-label="Ghost 대화">{ghosts.map(profile => {
-          const current = profile.id === chatGhostId;
-          return <div key={profile.id}>
-            <button className={`nav-row ${current && !activeView ? 'selected' : ''}`} aria-current={current && !activeView ? 'page' : undefined} onClick={() => openGhost(profile.id)}>
-              <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={18}/><span>{profile.name}</span>
+      {ghosts.length > 0 && <section className="sidebar-menu-group" aria-labelledby={ghostsId}>
+        <h2 className="sidebar-group-title" id={ghostsId}>Ghost</h2>
+        <ul className="sidebar-ghosts">{ghosts.map(profile => {
+          const open = profile.id === openGhostId;
+          const name = ghostDisplayName(profile.name);
+          return <li key={profile.id} className={open ? 'sidebar-ghost open' : 'sidebar-ghost'}>
+            <button className="nav-row sidebar-ghost-row" onClick={() => openGhost(profile.id)}>
+              <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={18}/><span>{name}</span>
               {profile.id === defaultGhostId && <span className="ghost-default-badge">기본</span>}
             </button>
-            {current && views.length > 0 && <nav className="primary-nav sidebar-ghost-views" aria-label={`${profile.name} 화면`}>{views.map(view =>
-              <button key={view.id} className={`nav-row ${activeView === view.id ? 'selected' : ''}`} aria-current={activeView === view.id ? 'page' : undefined}
-                onClick={() => navigate(viewPath(profile.id, view.id))}><LayoutList size={14}/><span>{view.label}</span></button>)}</nav>}
-          </div>;
-        })}</nav>
+            {open && ghostMenu.length > 0 && <nav className="primary-nav sidebar-ghost-menu" aria-label={`${name} 메뉴`}>{ghostMenu.map(item => {
+              const Icon = menuIcons[item.kind];
+              const current = item.key === currentGhostPage;
+              return <button key={item.key} className={`nav-row ${current ? 'selected' : ''}`} aria-current={current ? 'page' : undefined}
+                onClick={() => navigate(item.path)}><Icon size={14}/><span>{item.label}</span></button>;
+            })}</nav>}
+          </li>;
+        })}</ul>
       </section>}
       {(Boolean(snapshot?.spaces.length) || canCreateProject) && <section className="sidebar-menu-group" aria-labelledby={projectsId}>
         <h2 className="sidebar-group-title" id={projectsId}>프로젝트</h2>

@@ -1,5 +1,6 @@
 import type { Snapshot } from './types';
 import { taskDisplayLabel } from './taskLabel';
+import { ghostDisplayName } from '../features/profileSummary';
 
 export type SearchHit = { kind: 'ghost' | 'work' | 'space'; id: string; title: string; subtitle?: string; path: string; profile_id?: string };
 
@@ -9,7 +10,8 @@ export function searchWorkspace(snapshot: Pick<Snapshot, 'profiles' | 'goals' | 
   const q = query.trim().toLowerCase();
   const hits: SearchHit[] = [];
   for (const p of snapshot.profiles) {
-    if (`${p.name} ${p.persona}`.toLowerCase().includes(q)) hits.push({ kind: 'ghost', id: p.id, title: p.name, subtitle: p.persona, path: `/ghosts/${p.id}`, profile_id: p.id });
+    const name = ghostDisplayName(p.name);
+    if (`${p.name} ${name} ${p.persona}`.toLowerCase().includes(q)) hits.push({ kind: 'ghost', id: p.id, title: name, subtitle: p.persona, path: `/ghosts/${p.id}`, profile_id: p.id });
     for (const g of snapshot.goals) {
       if (g.profile_id !== p.id || !g.title.toLowerCase().includes(q)) continue;
       hits.push({ kind: 'work', id: `goal:${g.id}`, title: g.title, path: '/work' });

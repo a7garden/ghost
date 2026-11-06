@@ -3,8 +3,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 import { LegacyTranscript, legacyHistoryPath, legacyHistoryRequested } from './LegacyTranscript';
 import type { Profile } from '../client/types';
-import { LifetimeView } from '../lifetime/LifetimeView';
-import type { LifetimeClient } from '../lifetime/types';
 
 const profile: Profile = { id: 'original-legacy-uuid', name: '원래 Ghost', persona: '기존 원문', policy: { external_worker: true }, conversations: [
   { id: 'original-conversation', title: '기존 대화', model: 'legacy', offline: true, messages: [{ role: 'user', text: '원래 사용자 입력' }, { role: 'assistant', text: '보존된 결과 원문' }], tasks: [{ id: 'original-work', name: '과거 작업', phase: 'complete', output: '원래 산출물', partial: '' }] },
@@ -23,13 +21,4 @@ it('does not substitute another transcript when an explicit original conversatio
   const html = renderToStaticMarkup(createElement(LegacyTranscript, { profile, route: legacyHistoryPath(profile.id, 'different-conversation'), navigate: () => {} }));
   expect(html).toContain('해당 대화 기록을 찾을 수 없습니다');
   expect(html).not.toContain('보존된 결과 원문');
-});
-it('keeps the history entry reachable on cold Pi-screen reopen even without a registry target', () => {
-  const unavailable = async () => { throw new Error('not called during cold render'); };
-  const client: LifetimeClient = { workspace_id: 'original-workspace', actor_ref: 'owner', authority_epoch: 1, dispatch_enabled: false,
-    request: unavailable, snapshot: unavailable, retry: unavailable, pendingCommands: unavailable, recoveryCommands: unavailable, reconcile: unavailable };
-  const html = renderToStaticMarkup(createElement(LifetimeView, { mode: 'live', client, initialGhostID: profile.id, legacyGhostIDs: [profile.id], onOpenHistory: () => {} }));
-  expect(html).toContain('aria-label="이전 대화"');
-  expect(html).toContain('disabled');
-  expect(html).not.toContain('OMP');
 });

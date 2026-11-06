@@ -11,7 +11,8 @@ import { usePreferences } from './pets/preferences';
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ArrowUpRight, Folder, LayoutList, Plus, Search, RefreshCw, CircleAlert, Monitor, Menu, Puzzle, Server, Users } from 'lucide-react';
 import { DotAvatar, PortraitAppearances, type PortraitAppearance } from './components/DotAvatar';
-import { WorkspaceSidebar } from './components/WorkspaceSidebar';
+import { WorkspaceSidebar, type GhostMenuItem } from './components/WorkspaceSidebar';
+import { ghostDisplayName } from './features/profileSummary';
 import { Modal } from './components/Modal';
 import { Integrations } from './features/Integrations';
 import { Overview } from './features/Overview';
@@ -211,8 +212,22 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     requestAnimationFrame(() => mainContent.current?.querySelector<HTMLElement>('.space-heading h1')?.focus({ preventScroll: true }));
   };
   const addGhost = () => setDialog('add');
-  const chatGhostId = section === 'lifetime' && params.get('panel') !== 'work' ? selected?.id ?? null : section === 'ghosts' ? dotId : null;
-  const label = (chatGhostId && profiles.find(profile => profile.id === chatGhostId)?.name)
+  // A Ghost is "open" on its conversation, its work, its package views and its earlier conversations; scope=all is the workspace-wide work board.
+  const allWork = section === 'lifetime' && params.get('scope') === 'all';
+  const openGhostId = section === 'lifetime' && !allWork ? selected?.id ?? null : section === 'ghosts' ? dotId : null;
+  const openGhost = profiles.find(profile => profile.id === openGhostId);
+  const ghostMenu: GhostMenuItem[] = openGhost ? [
+    { key: 'chat', label: '대화', path: primaryChat ? `/lifetime?ghost=${encodeURIComponent(openGhost.id)}` : ghostPath(openGhost.id), kind: 'chat' as const },
+    ...(primaryChat ? [{ key: 'work', label: '맡은 일', path: `/lifetime?ghost=${encodeURIComponent(openGhost.id)}&panel=work`, kind: 'work' as const }] : []),
+    ...views.map(view => ({ key: `view:${view.id}`, label: view.label, path: viewPath(openGhost.id, view.id), kind: 'view' as const })),
+    ...(primaryChat && openGhost.conversations.length > 0 ? [{ key: 'history', label: '이전 대화', path: legacyHistoryPath(openGhost.id), kind: 'history' as const }] : []),
+  ] : [];
+  const currentGhostPage = !openGhost ? null
+    : section === 'lifetime' ? params.get('panel') === 'work' ? 'work' : params.get('panel') === 'ghosts' ? null : 'chat'
+    : activeView ? `view:${activeView.id}` : legacyHistoryRequested(route) ? 'history' : 'chat';
+  const ghostPageLabel = ghostMenu.find(item => item.key === currentGhostPage && item.key !== 'chat')?.label;
+  const label = (openGhost && `${ghostDisplayName(openGhost.name)}${ghostPageLabel ? ` · ${ghostPageLabel}` : ''}`)
+    || (allWork && '모든 일')
     || (section === 'spaces' && snapshot?.spaces.find(space => space.id === selectedSpace)?.name)
     || (section === 'lifetime' ? routeLabels.work : routeLabels[section as keyof typeof routeLabels]) || '찾을 수 없는 화면';
   const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, together: true, integrations: true, settings: true, host: true, providers: true };
@@ -290,8 +305,8 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     } else navigate(path);
   };
   const safe = async (fn: () => Promise<void>) => { setFormError(''); try { await fn(); } catch (e) { setFormError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다. 다시 시도해 주세요.'); } };
-  const sidebar = <WorkspaceSidebar snapshot={snapshot} section={section} chatGhostId={chatGhostId} defaultGhostId={homeGhostId}
-    selectedSpace={params.has('new') ? undefined : selectedSpace} views={views} activeView={activeView?.id} attentionCount={attentionCount} status={status}
+  const sidebar = <WorkspaceSidebar snapshot={snapshot} section={section} openGhostId={openGhostId} ghostMenu={ghostMenu} currentGhostPage={currentGhostPage} defaultGhostId={homeGhostId}
+    selectedSpace={params.has('new') ? undefined : selectedSpace} attentionCount={attentionCount} status={status}
     canCreateProject={mode === 'live' && snapshot?.capabilities.documents === true}
     navigate={path => { setDialog(null); navigate(path); }} openGhost={id => { setDialog(null); switchGhost(id); }}/>;
   const settingsSections: SettingsSection[] = snapshot ? [
@@ -311,7 +326,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     const authorizedRegistration = lifetimePath === path && pendingRegistration && pendingRegistration.ghostID === ghostID
       && pendingRegistration.conversationID === registerID && pendingRegistration.workspaceID === snapshot.workspace_id
       && pendingRegistration.authorityEpoch === snapshot.lifetime_authority?.authority_epoch ? pendingRegistration : undefined;
-    return <LifetimeRoute connected={connected} active={Boolean(lifetimePath)} route={path} legacyGhostIDs={snapshot.profiles.map(profile => profile.id)}
+    return <LifetimeRoute connected={connected} active={Boolean(lifetimePath)} route={path}
       handoff={lifetimePath === path ? chatHandoff ?? undefined : undefined}
       onHandoffConsumed={id => setChatHandoff(current => current?.id === id ? null : current)}
       onOpenHistory={ghost => { if (snapshot.profiles.some(profile => profile.id === ghost)) navigate(legacyHistoryPath(ghost)); }}
@@ -376,9 +391,9 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
         {!knownSections[section] && !(section === 'lifetime' && lifetimeEnabled) && <div className="empty-state"><CircleAlert size={28}/><h1>이 화면을 찾을 수 없습니다</h1><p className="muted">주소가 이동했거나 잘못되었을 수 있습니다.</p><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>}
       </main>}
     </div>
-    <MobilePrimaryTabs canChat={Boolean(chatGhostId ?? homeGhostId ?? profiles[0])} hasViews={views.length > 0}
-      active={activeView ? 'workspace' : section === 'home' ? 'home' : section === 'spaces' ? 'projects' : chatGhostId ? 'chat' : undefined}
-      onNavigate={navigate} onChat={() => { const id = chatGhostId ?? homeGhostId ?? profiles[0]?.id; if (id) switchGhost(id); }} onWorkspace={() => {
+    <MobilePrimaryTabs canChat={Boolean(openGhostId ?? homeGhostId ?? profiles[0])} hasViews={views.length > 0}
+      active={activeView ? 'workspace' : section === 'home' ? 'home' : section === 'spaces' ? 'projects' : openGhostId ? 'chat' : undefined}
+      onNavigate={navigate} onChat={() => { const id = openGhostId ?? homeGhostId ?? profiles[0]?.id; if (id) switchGhost(id); }} onWorkspace={() => {
         if (!selected) return;
         if (views.length === 1) navigate(viewPath(selected.id, views[0].id));
         else setDialog('views');

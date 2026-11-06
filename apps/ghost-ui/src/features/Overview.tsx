@@ -7,6 +7,7 @@ import type { Snapshot as LifetimeSnapshot } from '../lifetime/types';
 import { inboxItems } from '../client/inbox';
 import { approvalTitle, type ApprovalRef } from '../plugins/approvals';
 import { projectDashboardWork } from './dashboardState';
+import { ghostDisplayName } from './profileSummary';
 
 export interface OverviewProps {
   snapshot: Snapshot; connected?: boolean; navigate: (path: string) => void;
@@ -20,7 +21,7 @@ export interface OverviewProps {
 export function Overview({ snapshot, connected = true, navigate, onOpenApproval, onStartChat, chatTarget, workPath, lifetime, workError, workLoading }: OverviewProps) {
   const work = projectDashboardWork(snapshot, lifetime);
   const decisions = inboxItems(snapshot, connected).groups.pending;
-  const names = new Map(snapshot.profiles.map(profile => [profile.id, profile.name]));
+  const names = new Map(snapshot.profiles.map(profile => [profile.id, ghostDisplayName(profile.name)]));
   const ongoing = work.tasks.filter(task => task.tone === 'running' || task.tone === 'attention');
   const projects = snapshot.spaces.slice(0, 4);
   const stale = Boolean(workError) || !connected;
@@ -49,7 +50,7 @@ export function Overview({ snapshot, connected = true, navigate, onOpenApproval,
         <Folder size={16}/><span>{space.name}</span>
       </button>)}</div>
     </section>}
-    <button className="text-button home-all-work" onClick={() => navigate(workPath)}>모든 일<ArrowRight size={14}/></button>
+    {work.tasks.length > 0 && <button className="text-button home-all-work" onClick={() => navigate(workPath)}>모든 일<ArrowRight size={14}/></button>}
   </div>;
 }
 
@@ -65,13 +66,13 @@ function DashboardComposer({ target, onStart }: { target?: Profile; onStart: (te
     finally { inFlight.current = false; setSending(false); }
   };
   return <form className="home-composer composer thread-composer" aria-label="Ghost에게 메시지 보내기" onSubmit={event => { event.preventDefault(); void send(); }}>
-    <label className="sr-only" htmlFor="dashboard-message">{target ? `${target.name}에게 메시지` : '메시지'}</label>
+    <label className="sr-only" htmlFor="dashboard-message">{target ? `${ghostDisplayName(target.name)}에게 메시지` : '메시지'}</label>
     <textarea id="dashboard-message" rows={3} maxLength={8192} placeholder="무엇을 맡길까요?" value={text} disabled={!target || sending}
       onChange={event => setText(event.target.value)}
       onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); } }}/>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="home-composer-bottom">
-      {target && <span className="home-composer-target"><DotAvatar profileId={target.id} tone={toneFor(target.id)} size={20}/>{target.name}</span>}
+      {target && <span className="home-composer-target"><DotAvatar profileId={target.id} tone={toneFor(target.id)} size={20}/>{ghostDisplayName(target.name)}</span>}
       <button type="submit" className="send-button" disabled={blocked} aria-label="보내기">{sending ? <span className="button-loading"/> : <ArrowUp size={18}/>}</button>
     </div>
   </form>;

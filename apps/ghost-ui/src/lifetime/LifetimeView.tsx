@@ -1,6 +1,6 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, CircleAlert, Clock3, GitBranch, History, Info, LayoutGrid, MessageSquare, Plus, RefreshCw, Settings2, SlidersHorizontal } from "lucide-react";
+import { ArrowUp, Check, ChevronRight, CircleAlert, Clock3, GitBranch, Info, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
 import type { Artifact, ConversationRun, Envelope, Goal, Response, Snapshot, Work } from "../../../../contracts/lifetime/bindings.ts";
 import { isArtifact, isPrivacy } from "./guards";
 import { atLeastPrivacy, conversationTargetKey, defaultRegistryConversation, findRegisteredConversation, mergeConversationRuns, mergeConversationTurns, parseConversationPage, parseRegistryResponse } from "./conversation";
@@ -21,6 +21,7 @@ import { WorkThreadDrawer } from './WorkThreadDrawer';
 import { followUpCommand, workThreadTitle, type FollowUpDraft } from './workThread';
 import { createAgentStatusReadFence, projectAgentStatus, runAgentStatusOwnerRead } from './agentStatus';
 import type { AgentStatusReadToken } from './agentStatus';
+import { ghostDisplayName } from '../features/profileSummary';
 
 type LifetimePanel = "conversation" | "work" | "ghosts";
 
@@ -54,7 +55,6 @@ export interface LifetimeViewProps {
   workspaceSnapshot?: WorkspaceSnapshot;
   onOpenApproval?: (ref: ApprovalRef) => void;
   createRequested?: boolean;
-  legacyGhostIDs?: string[];
   onOpenHistory?: (ghostID: string) => void;
   /** Dashboard text for the requested Ghost's conversation; sent once through the normal composer path. */
   handoff?: { id: string; text: string };
@@ -202,7 +202,7 @@ async function fetchConversationPage(client: LifetimeClient, target: RegistryCon
   };
   return parseConversationPage(await client.request(body), target);
 }
-export function LifetimeView({ active: routeActive = true, mode, client, connected = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, memoryAction, initialGhostID, initialConversationID, initialRegisterConversationID, initialGoalID, initialWorkID, workScope = 'conversation', initialPanel = "conversation", onPanelChange, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, onClearWorkLink, createRequested, legacyGhostIDs = [], onOpenHistory, workspaceSnapshot, onOpenApproval, handoff, onHandoffConsumed }: LifetimeViewProps) {
+export function LifetimeView({ active: routeActive = true, mode, client, connected = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, memoryAction, initialGhostID, initialConversationID, initialRegisterConversationID, initialGoalID, initialWorkID, workScope = 'conversation', initialPanel = "conversation", onPanelChange, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, onClearWorkLink, createRequested, onOpenHistory, workspaceSnapshot, onOpenApproval, handoff, onHandoffConsumed }: LifetimeViewProps) {
   const [selectedPanel, setSelectedPanel] = useState<LifetimePanel>(initialPanel);
   useEffect(() => setSelectedPanel(initialPanel), [initialPanel]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -578,7 +578,6 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const prompt = promptDrafts.get(selectedTargetKey) ?? "";
   const currentTargetKey = useRef(selectedTargetKey);
   const previousTargetKey = useRef(selectedTargetKey);
-  const historyGhostID = selectedTarget?.ghost_id ?? initialGhostID;
   currentTargetKey.current = selectedTargetKey;
   useLayoutEffect(() => {
     if (previousTargetKey.current !== selectedTargetKey) {
@@ -927,11 +926,11 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     handoffSend.current = null;
     void submitConversation();
   });
-  const ghostName = (id: string) => workspaceSnapshot?.profiles.find(profile => profile.id === id)?.name ?? id;
+  const ghostName = (id: string) => ghostDisplayName(workspaceSnapshot?.profiles.find(profile => profile.id === id)?.name ?? id);
   const publicLabel = (target: RegistryConversation) => registry.filter(item => item.ghost_id === target.ghost_id && item.secondary).length > 1
     ? `공개 대화 ${target.conversation_id.slice(0, 8)}` : "공개 대화";
   const chatTitle = selectedTarget
-    ? `${workspaceSnapshot?.profiles.find(profile => profile.id === selectedTarget.ghost_id)?.name ?? "Ghost"}${publicConversation ? ` · ${publicLabel(selectedTarget)}` : ""}`
+    ? `${ghostName(selectedTarget.ghost_id)}${publicConversation ? ` · ${publicLabel(selectedTarget)}` : ""}`
     : "대화";
   const feedback = <>
       {error && <p className="lifetime-alert" role="alert"><CircleAlert size={16}/><span>{error}</span></p>}
@@ -944,25 +943,17 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   return <section className="lifetime-panel" data-panel={selectedPanel} aria-labelledby="lifetime-heading">
     <header className={`lifetime-heading${inConversation ? " thread-toolbar" : ""}`}>
       <div>
-        <h2 id="lifetime-heading">{selectedPanel === "conversation" ? chatTitle : selectedPanel === "work" ? "맡긴 일" : "Ghost 관리"}</h2>
+        {/* The title bar names the page; the heading stays for screen readers unless it adds the public conversation. */}
+        <h2 id="lifetime-heading" className={selectedPanel !== "ghosts" && !publicConversation ? "sr-only" : undefined}>
+          {inConversation ? chatTitle : selectedPanel === "work" ? workScope === "all" ? "모든 일" : "맡은 일" : "Ghost 관리"}
+        </h2>
       </div>
       <div className="lifetime-heading-actions">
         {inConversation && mode === "live" && client.actor_ref === "owner" && defaultTarget && selectedTarget?.ghost_id === defaultTarget.ghost_id &&
-          <button type="button" className="button secondary" onClick={() => void openPublicConversation()}
-            disabled={publicOpenDisabled} aria-label="새 공개 대화" title="새 공개 대화">
-            <Plus size={14}/><span className="thread-toolbar-label">새 공개 대화</span>
-          </button>}
-        <button type="button" className="button secondary" onClick={() => showPanel(inConversation ? "ghosts" : "conversation")}
-          aria-label={inConversation ? "Ghost 관리" : "대화"} title={inConversation ? "Ghost 관리" : "대화"}>
-          {inConversation ? <Settings2 size={14}/> : <MessageSquare size={14}/>}
-          <span className="thread-toolbar-label">{inConversation ? "Ghost 관리" : "대화"}</span>
-        </button>
-        {(!onPanelChange || selectedTarget?.kind === "specialist") && selectedPanel !== "work" && <button type="button" className="button secondary" onClick={() => showPanel("work")} aria-label="맡긴 일" title="맡긴 일"><LayoutGrid size={14}/><span className="thread-toolbar-label">맡긴 일</span></button>}
-        {!publicConversation && onOpenHistory && historyGhostID && legacyGhostIDs.includes(historyGhostID) && <button type="button" className="button secondary" onClick={() => onOpenHistory(historyGhostID)} aria-label="이전 대화" title="이전 대화"><History size={14}/><span className="thread-toolbar-label">이전 대화</span></button>}
-        <button type="button" className={inConversation ? "icon-button" : "button secondary"} onClick={() => void refresh()}
-          aria-label={refreshing ? "새로 고치는 중" : "새로 고침"} title="새로 고침" disabled={refreshing || loading}>
-          <RefreshCw size={14}/>{!inConversation && (refreshing ? "새로 고치는 중" : "새로 고침")}
-        </button>
+          <button type="button" className="icon-button" onClick={() => void openPublicConversation()}
+            disabled={publicOpenDisabled} aria-label="새 공개 대화" title="새 공개 대화"><Plus size={15}/></button>}
+        <button type="button" className="icon-button" onClick={() => void refresh()}
+          aria-label={refreshing ? "새로 고치는 중" : "새로 고침"} title="새로 고침" disabled={refreshing || loading}><RefreshCw size={14}/></button>
       </div>
     </header>
     {mode === "fixture" && <p className="lifetime-fixture-note">예시 모드입니다. 요청은 이 브라우저의 예시 기록에만 반영되며 실제 호스트나 작업 실행자에게 전달되지 않습니다.</p>}
@@ -1016,11 +1007,11 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
           return <li className="ghost-team-row" key={profile.id}>
             {target?.mode === "active" ? <button className="ghost-team-card" type="button" aria-pressed={key === selectedTargetKey}
               onClick={() => openRegisteredTarget(target, false)}>
-              <span className="ghost-team-card-heading"><strong>{profile.name}{target.kind === 'primary' && <span className="ghost-default-badge">기본</span>}</strong></span>
+              <span className="ghost-team-card-heading"><strong>{ghostDisplayName(profile.name)}{target.kind === 'primary' && <span className="ghost-default-badge">기본</span>}</strong></span>
               <span className="ghost-team-counts">{counts.filter(({ count }) => count > 0).map(({ label, tone, count }) =>
                 <span key={label} data-tone={tone}>{label} {count}</span>)}</span>
             </button> : <div className="ghost-team-card ghost-team-card--unregistered">
-              <span className="ghost-team-card-heading"><strong>{profile.name}</strong><small>{profile.persona}</small></span>
+              <span className="ghost-team-card-heading"><strong>{ghostDisplayName(profile.name)}</strong><small>{profile.persona}</small></span>
               {target ? <span className="ghost-team-registration-state">등록 대화 마무리 중</span> : <div className="ghost-team-actions">
                 <button type="button" className="button primary" disabled={!connected || !client.dispatch_enabled || loading || refreshing || Boolean(busy) || pending.length > 0 || recovery.length > 0}
                   onClick={() => void ensureProfileConversation(profile.id, crypto.randomUUID())}>새 대화 연결</button>
@@ -1160,14 +1151,14 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         }
       }} rows={2} placeholder="메시지 쓰기" required disabled={Boolean(busy)}/></label>
       {new TextEncoder().encode(prompt).length > 65_536 && <p className="lifetime-compose-limit" role="status">메시지 한도 65,536바이트를 넘었습니다.</p>}
-      <DetailDialog title="전송 옵션" label={<><SlidersHorizontal size={14} aria-hidden="true"/>전송 옵션 · {privacyLabels[effectivePrivacy]}{attachments.length > 0 && ` · 첨부 ${attachments.length}`}</>} className="lifetime-compose-options">
+      <DetailDialog title="전송 옵션" label={<><SlidersHorizontal size={15} aria-hidden="true"/><span className="sr-only">전송 옵션 · {privacyLabels[effectivePrivacy]}</span>{attachments.length > 0 && <span>첨부 {attachments.length}</span>}</>} className="lifetime-compose-options">
         <label className="lifetime-field">대화 대상<select aria-label="대화 대상" value={selectedTarget ? conversationTargetKey(selectedTarget) : selectedPairKey} onChange={event => {
           const target = registry.find(item => conversationTargetKey(item) === event.target.value);
           if (target) openRegisteredTarget(target, false);
         }} disabled={Boolean(busy) || writesDisabled && pending.length > 0}>
           <option value="">등록 대화를 선택하세요</option>
           {registry.map(target => <option value={conversationTargetKey(target)} key={conversationTargetKey(target)}>
-            {workspaceSnapshot?.profiles.find(profile => profile.id === target.ghost_id)?.name ?? 'Ghost'}{target.secondary ? ` · ${publicLabel(target)}` : target.kind === 'primary' ? ' · 기본' : ''}{target.mode === "draining" ? " · 마무리 중" : ""}
+            {ghostName(target.ghost_id)}{target.secondary ? ` · ${publicLabel(target)}` : target.kind === 'primary' ? ' · 기본' : ''}{target.mode === "draining" ? " · 마무리 중" : ""}
           </option>)}
         </select></label>
         <div className="lifetime-form-row">
@@ -1207,7 +1198,8 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
 
     {selectedPanel === "work" && <section className="lifetime-goals" aria-label="선택한 대화에서 맡긴 일" aria-busy={loading}>
       {loading && <p className="lifetime-empty"><Clock3 size={16}/>저장된 상태를 불러오는 중입니다.</p>}
-      {!loading && <div className="lifetime-board">{goalStages.map(stage => {
+      {!loading && boardGoals.length === 0 && <p className="lifetime-empty thread-empty">맡은 일이 없습니다.</p>}
+      {!loading && boardGoals.length > 0 && <div className="lifetime-board">{goalStages.map(stage => {
         const goals = boardGoals.filter(goal => goal.stage === stage.id);
         return <section className="lifetime-lane" data-stage={stage.id} key={stage.id}>
           <h3>{stage.label}<span>{goals.length}</span></h3>
