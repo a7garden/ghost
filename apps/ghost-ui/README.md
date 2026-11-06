@@ -8,18 +8,9 @@ Ghost와의 대화를 중심으로 여러 Ghost, 협업, 승인, 작업, 문서�
 
 ## 구조와 UI 기준
 
-Garden 프레임워크(`garden.json`, `vendor/garden`)를 채택했습니다. 컨트롤은 Garden의 shadcn/ui 방식 컴포넌트(`@garden/ui`, Radix 기반)만 사용하고, 배치와 색은 Tailwind 4와 Garden 토큰으로 지정합니다. 화면마다 따로 만든 컨트롤이나 별도 컴포넌트 라이브러리를 더하지 않습니다. 예외는 `garden.json`과 `docs/decisions/`에 기록합니다.
+Garden 프레임워크(`garden.json`, `vendor/garden`)에서 컴포넌트만 채택했습니다. 컨트롤은 Garden의 shadcn/ui 방식 컴포넌트(`@garden/ui`, Radix 기반)를 사용하고, 색과 간격은 Tailwind 4와 Garden 토큰으로 지정합니다. 화면 배치는 Garden 표준 레이아웃이 아니라 Ghost의 기존 구조를 유지합니다(`docs/decisions/0003-ghost-owns-its-layout.md`).
 
-앱 틀은 `GAppShell`입니다. 왼쪽 레일이 작업 공간 넷을 고르고, 사이드바는 고른 작업 공간의 목적지만 보여 줍니다.
-
-| 레일 | 사이드바 |
-|---|---|
-| 대화 | 새 요청, Ghost 목록(기본 Ghost 우선). 열린 Ghost 아래에 대화 · 맡은 일 · 전용 화면 · 이전 대화 |
-| 일 | 확인 필요 · 모든 일 · 협업 |
-| 프로젝트 | 프로젝트 목록과 새 프로젝트 |
-| 설정 | 없음 (설정 화면이 팀 · 모델 · 확장 · 호스트 · 화면 · 아바타 섹션을 가짐) |
-
-명령 검색은 오른쪽 위 입력란 또는 `⌘P`/`⌘K`로 엽니다.
+사이드바는 홈(확인 필요 개수), Ghost 목록(기본 Ghost 우선, 열린 Ghost 아래에 대화 · 맡은 일 · 전용 화면 · 이전 대화), 프로젝트, 설정 순서입니다. 확인할 일 · 맡긴 일 · 협업은 홈과 명령 검색(`⌘K`/`⌘P`)에서 엽니다.
 
 ## 실행
 

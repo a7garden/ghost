@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Response, Snapshot } from "../../../../contracts/lifetime/bindings.ts";
+import { VERSION, type Response, type Snapshot } from "../../../../contracts/lifetime/bindings.ts";
 import { createLifetimeClient } from "./client";
+import { createEnvelope, digestValue } from "./protocol";
 import type { LifetimeClientOptions, LifetimeStorage, LifetimeTransport } from "./types";
 
 const durableResponse: Response = { status: "success", summary: "Durable command receipt recovered.", object_refs: [], artifacts: [], next_actions: [], error_code: null, retry_class: "same_id", data: null };
@@ -33,48 +34,37 @@ describe("lifetime client outbox", () => {
     expect(await client.pendingCommands()).toEqual([]);
     await expect(client.request(command)).resolves.toEqual(durableResponse);
   });
-  it("keeps a live read journal without presenting it as an uncertain write", async () => {
-    const storage = memoryStorage();
-    const authority = options("11111111-1111-4111-8111-111111111111", 1);
-    let startRead!: () => void;
-    const started = new Promise<void>(resolve => { startRead = resolve; });
-    let finishRead!: (response: Response) => void;
-    const readingResponse = new Promise<Response>(resolve => { finishRead = resolve; });
-    let writes = 0;
-    const transport: LifetimeTransport = {
-      snapshot: async () => fixtureSnapshot,
-      async request(envelope) {
-        if (envelope.body.method === "registry.inspect") { startRead(); return readingResponse; }
-        writes++;
-        return durableResponse;
-      },
-    };
-    const client = createLifetimeClient(transport, storage, authority);
-    const reading = client.request({ method: "registry.inspect" });
-    await started;
-    expect(await client.pendingCommands()).toEqual([]);
-    // Another client cannot assume this client will finish the saved request.
-    const other = createLifetimeClient(transport, storage, authority);
-    expect(await other.pendingCommands()).toHaveLength(1);
-    await expect(other.request(command)).rejects.toThrow("persisted Lifetime command");
-    expect(writes).toBe(0);
-    await expect(client.request(command)).resolves.toEqual(durableResponse);
-    expect(writes).toBe(1);
-    finishRead(durableResponse);
-    await reading;
-    expect(await other.pendingCommands()).toEqual([]);
-  });
-
-  it("shows a failed read again and blocks changes without replaying it", async () => {
+  it("lets a write through after a read loses its response", async () => {
     const methods: string[] = [];
     const client = createLifetimeClient({
       snapshot: async () => fixtureSnapshot,
-      async request(envelope) { methods.push(String(envelope.body.method)); throw new Error("read response lost"); },
+      async request(envelope) {
+        methods.push(String(envelope.body.method));
+        if (envelope.body.method === "conversation.inspect") throw new Error("read response lost");
+        return durableResponse;
+      },
     }, memoryStorage(), options("11111111-1111-4111-8111-111111111111", 1));
-    await expect(client.request({ method: "registry.inspect" })).rejects.toThrow("read response lost");
-    expect((await client.pendingCommands()).map(item => item.body.method)).toEqual(["registry.inspect"]);
-    await expect(client.request(command)).rejects.toThrow("persisted Lifetime command");
-    expect(methods).toEqual(["registry.inspect"]);
+    await expect(client.request({ method: "conversation.inspect", ghost_id: command.ghost_id, conversation_id: command.conversation_id, limit: 100 })).rejects.toThrow("read response lost");
+    expect(await client.pendingCommands()).toEqual([]);
+    await expect(client.request(command)).resolves.toEqual(durableResponse);
+    expect(methods).toEqual(["conversation.inspect", "goal.submit"]);
+  });
+
+  it("drops a read an earlier client left in the outbox instead of fencing writes", async () => {
+    const storage = memoryStorage();
+    const authority = options("11111111-1111-4111-8111-111111111111", 1);
+    const transport: LifetimeTransport = { snapshot: async () => fixtureSnapshot, request: async () => durableResponse };
+    const identity = { actor_ref: "owner", authority_epoch: 1 };
+    const body = { method: "conversation.inspect", ghost_id: command.ghost_id, conversation_id: command.conversation_id, limit: 100 };
+    const stranded = await createEnvelope(body, identity, null);
+    const fingerprint = await digestValue({ body, expected_revision: null, ...identity });
+    const key = `ghost:lifetime:${VERSION}:workspace:${authority.workspace_id}:actor:owner:epoch:1:outbox`;
+    await storage.setItem(key, JSON.stringify({ protocol_version: VERSION, commands: [{ fingerprint, envelope: stranded }] }));
+    const client = createLifetimeClient(transport, storage, authority);
+    expect(await client.pendingCommands()).toEqual([]);
+    expect(await client.recoveryCommands()).toEqual([]);
+    await expect(client.request(command)).resolves.toEqual(durableResponse);
+    expect(JSON.parse((await storage.getItem(key))!).commands).toEqual([]);
   });
 
   it("still fences another write while a mutation is actively in flight", async () => {

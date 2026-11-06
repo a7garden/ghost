@@ -230,6 +230,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const [error, setError] = useState("");
   const [syncWarning, setSyncWarning] = useState("");
   const [notice, setNotice] = useState("");
+  const [warning, setWarning] = useState("");
   const [promptDrafts, setPromptDrafts] = useState(() => new Map<string, string>());
   const [privacy, setPrivacy] = useState<Artifact["privacy"]>("local_only");
   const [attachmentDrafts, setAttachmentDrafts] = useState(() => new Map<string, Artifact[]>());
@@ -397,6 +398,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     setError("");
     setSyncWarning("");
     setNotice("");
+    setWarning("");
     try {
       let response: Response;
       try {
@@ -411,8 +413,10 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         await loadLatest();
         return null;
       }
+      // Host summaries are internal English diagnostics: errors stay visible,
+      // warnings get plain wording, and success shows in the updated view.
       if (response.status === "error") setError(response.summary || "요청을 처리하지 못했습니다.");
-      else setNotice(response.summary);
+      else if (response.status === "warning") setWarning("요청 결과를 확정하지 못했습니다.");
       await loadLatest();
       return response;
     } finally {
@@ -513,12 +517,13 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     setError("");
     setSyncWarning("");
     setNotice("");
+    setWarning("");
     try {
       const result = await client.reconcile(recoveryId);
-      if (result.status === "confirmed_success") setNotice("이전 요청이 성공으로 처리된 접수 기록을 확인했습니다.");
-      else if (result.status === "confirmed_no_effect") setNotice("이전 요청이 효과 없이 거절된 접수 기록을 확인했습니다.");
-      else if (result.status === "not_found") setError("호스트에 접수 기록이 없습니다. 원래 요청은 미확정으로 유지되며 새 요청은 차단됩니다.");
-      else setError("이전 요청의 실행 결과를 확정할 수 없습니다. 원래 기록은 그대로 보존됩니다.");
+      if (result.status === "confirmed_success") setNotice("이전 요청이 처리된 것을 확인했습니다.");
+      else if (result.status === "confirmed_no_effect") setNotice("이전 요청은 적용되지 않았습니다. 필요하면 다시 보내 주세요.");
+      else if (result.status === "not_found") setWarning("Host에 이 요청 기록이 없어 결과를 확정할 수 없습니다.");
+      else setWarning("이전 요청의 결과를 아직 확정할 수 없습니다.");
       await loadLatest();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "이전 요청의 접수 기록을 확인하지 못했습니다.");
@@ -568,6 +573,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   function openWorkThread(goalID: string) {
     setError("");
     setNotice("");
+    setWarning("");
     setOpenThread({ goalID, scope: threadScope });
   }
   function updateFollowUp(goalID: string, update: (current: FollowUpDraft | undefined) => FollowUpDraft | undefined) {
@@ -943,75 +949,61 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const feedback = <>
       {error && <Alert variant="destructive"><CircleAlert aria-hidden="true"/><AlertTitle>{error}</AlertTitle></Alert>}
       {syncWarning && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>{syncWarning}</AlertTitle></Alert>}
+      {warning && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>{warning}</AlertTitle></Alert>}
       {notice && <Alert role="status" variant="success"><Check aria-hidden="true"/><AlertTitle>{notice}</AlertTitle></Alert>}
   </>;
 
   const inConversation = selectedPanel === "conversation";
   const displayedTurns = routeActive && loadedConversationKey === selectedTargetKey ? turns : [];
   const promptBytes = new TextEncoder().encode(prompt).length;
-  return <section data-panel={selectedPanel} aria-labelledby="lifetime-heading" className="mx-auto grid min-w-0 max-w-[1120px] gap-[18px] pb-9 pt-[22px]">
-    <header className="flex items-center justify-between gap-3.5 border-b border-line pb-3.5">
-      <div className="min-w-0">
-        {/* The title bar names the page; the heading stays for screen readers unless it adds the public conversation. */}
-        <h2 id="lifetime-heading" className={selectedPanel !== "ghosts" && !publicConversation ? "sr-only" : "m-0 text-headingSm font-semibold text-ink"}>
-          {inConversation ? chatTitle : selectedPanel === "work" ? workScope === "all" ? "모든 일" : "맡은 일" : "Ghost 관리"}
-        </h2>
-      </div>
-      <div className="flex flex-wrap justify-end gap-2">
-        {inConversation && mode === "live" && client.actor_ref === "owner" && defaultTarget && selectedTarget?.ghost_id === defaultTarget.ghost_id &&
-          <Button type="button" variant="ghost" size="icon" onClick={() => void openPublicConversation()}
-            disabled={publicOpenDisabled} aria-label="새 공개 대화" title="새 공개 대화"><Plus size={15}/></Button>}
-        <Button type="button" variant="ghost" size="icon" onClick={() => void refresh()}
-          aria-label={refreshing ? "새로 고치는 중" : "새로 고침"} title="새로 고침" disabled={refreshing || loading}><RefreshCw size={14}/></Button>
-      </div>
-    </header>
+  const requestLabel = (body: Envelope["body"] | undefined) => body?.method === "goal.update" && typeof body.follow_up === "string" ? "후속 지시"
+    : typeof body?.method === "string" ? pendingCommandLabels[body.method] ?? "요청" : "요청";
+  const toolbarActions = <div className="flex shrink-0 items-center gap-1">
+    {inConversation && mode === "live" && client.actor_ref === "owner" && defaultTarget && selectedTarget?.ghost_id === defaultTarget.ghost_id &&
+      <Button type="button" variant="ghost" size="icon" onClick={() => void openPublicConversation()}
+        disabled={publicOpenDisabled} aria-label="새 공개 대화" title="새 공개 대화"><Plus size={15}/></Button>}
+    <Button type="button" variant="ghost" size="icon" onClick={() => void refresh()}
+      aria-label={refreshing ? "새로 고치는 중" : "새로 고침"} title="새로 고침" disabled={refreshing || loading}><RefreshCw size={14} className={refreshing ? "animate-spin motion-reduce:animate-none" : undefined}/></Button>
+  </div>;
+  // Unconfirmed writes fence new changes; one compact notice lists them with their check action.
+  const notices = <>
     {mode === "fixture" && <Banner variant="info">예시 모드입니다. 요청은 이 브라우저의 예시 기록에만 반영되며 실제 호스트나 작업 실행자에게 전달되지 않습니다.</Banner>}
     {!goalDetail && !threadID && feedback}
-    {!client.dispatch_enabled && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>호스트 복구 모드: 저장된 상태는 읽을 수 있지만 새 변경과 재전송은 사용할 수 없습니다.</AlertTitle></Alert>}
-    {recovery.length > 0 && <section aria-label="이전 연결의 미확정 요청" className="min-w-0">
-      <Card className="gap-0">
-        <CardHeader className="grid gap-0.5 border-b border-line py-0 pb-3 pt-4">
-          <h3 className="m-0 text-body font-semibold text-ink">이전 요청 확인 필요</h3>
-          <p className="m-0 text-caption text-ink-2">확인할 때까지 새 변경이 차단되므로 접수 기록을 확인해 주세요.</p>
-        </CardHeader>
-        <CardContent className="grid gap-0 pt-0">
-          {recovery.map(item => <article key={item.id} className="grid gap-3 border-t border-line py-2.5 first:border-t-0 md:grid-cols-[minmax(140px,1fr)_auto]">
-            <div className="grid min-w-0 gap-0.5">
-              <strong className="text-ui font-medium text-ink">미확정 요청 · {item.authority_epoch === null ? "권한 버전 알 수 없음" : `권한 버전 ${item.authority_epoch}`}</strong>
-              <span className="text-caption text-ink-2">{item.issue ? "접수 기록을 해석할 수 없습니다." : "원래 요청 ID를 보존했습니다."}</span>
-              <div><DetailDialog title="기술 정보"><span>작업실 ID: {item.workspace_id ?? "알 수 없음"}</span><code className="block font-mono text-caption [overflow-wrap:anywhere]">{item.command_id ?? "원래 요청 ID 알 수 없음"}</code></DetailDialog></div>
-            </div>
-            <Button type="button" variant="secondary" disabled={Boolean(busy) || !item.envelope || !item.command_id} onClick={() => void reconcile(item.id)}>
-              <RefreshCw size={14}/>접수 기록 확인
-            </Button>
-          </article>)}
-        </CardContent>
-      </Card>
-    </section>}
-
-    {pending.length > 0 && <section aria-label="확인되지 않은 저장 요청" className="min-w-0">
-      <Card className="gap-0">
-        <CardHeader className="grid gap-0.5 border-b border-line py-0 pb-3 pt-4">
-          <h3 className="m-0 text-body font-semibold text-ink">접수 결과 확인 필요</h3>
-          <p className="m-0 text-caption text-ink-2">같은 요청 ID의 접수 기록을 확인할 때까지 새 요청이 차단됩니다.</p>
-        </CardHeader>
-        <CardContent className="grid gap-0 pt-0">
-          {pending.map(envelope => <article key={envelope.command_id} className="grid gap-3 border-t border-line py-2.5 first:border-t-0 md:grid-cols-[minmax(140px,1fr)_auto]">
-            <div className="grid min-w-0 gap-0.5">
-              <strong className="text-ui font-medium text-ink">{typeof envelope.body.follow_up === "string" && envelope.body.method === "goal.update" ? "후속 지시"
-                : typeof envelope.body.method === "string" ? pendingCommandLabels[envelope.body.method] ?? "저장된 요청" : "저장된 요청"}</strong>
-              <span className="text-caption text-ink-2">원래 요청 ID와 권한 버전을 보존했습니다.</span>
-              {envelope.body.method === "conversation.input" && <p className="m-0 text-caption [overflow-wrap:anywhere]">{String(envelope.body.text ?? "")}</p>}
-              {typeof envelope.body.ghost_id === "string" && typeof envelope.body.conversation_id === "string"
-                && <div><DetailDialog title="저장된 대상"><code className="block font-mono text-caption [overflow-wrap:anywhere]">{envelope.body.ghost_id} · {envelope.body.conversation_id}</code></DetailDialog></div>}
-            </div>
-            <Button type="button" variant="secondary" disabled={Boolean(busy)} onClick={() => void inspectPendingCommand(envelope)}>
-              <RefreshCw size={14}/>접수 기록 확인
-            </Button>
-          </article>)}
-        </CardContent>
-      </Card>
-    </section>}
+    {!client.dispatch_enabled && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>Host 복구 모드입니다. 기록은 볼 수 있지만 새 요청은 보낼 수 없습니다.</AlertTitle></Alert>}
+    {pending.length + recovery.length > 0 && <Alert role="status" variant="warning" aria-label="결과를 확인하지 못한 요청">
+      <CircleAlert aria-hidden="true"/>
+      <AlertTitle>보낸 요청의 결과를 확인하면 새 요청을 보낼 수 있습니다.</AlertTitle>
+      <AlertDescription className="w-full gap-0">
+        <ul className="m-0 grid w-full list-none p-0">
+          {pending.map(envelope => {
+            const text = envelope.body.method === "conversation.input" ? String(envelope.body.text ?? "") : "";
+            return <li key={envelope.command_id} className="flex min-w-0 items-center gap-3 border-t border-line py-1.5 first:border-t-0">
+              <span className="min-w-0 flex-1 truncate"><span className="text-ink">{requestLabel(envelope.body)}</span>{text && ` · ${text}`}</span>
+              <Button type="button" variant="secondary" size="sm" disabled={Boolean(busy)} onClick={() => void inspectPendingCommand(envelope)}>결과 확인</Button>
+            </li>;
+          })}
+          {recovery.map(item => <li key={item.id} className="flex min-w-0 items-center gap-3 border-t border-line py-1.5 first:border-t-0">
+            <span className="min-w-0 flex-1 truncate"><span className="text-ink">{item.issue ? "읽을 수 없는 이전 요청" : requestLabel(item.envelope?.body)}</span> · 이전 연결</span>
+            <Button type="button" variant="secondary" size="sm" disabled={Boolean(busy) || !item.envelope || !item.command_id} onClick={() => void reconcile(item.id)}>결과 확인</Button>
+          </li>)}
+        </ul>
+      </AlertDescription>
+    </Alert>}
+  </>;
+  return <section data-panel={selectedPanel} aria-labelledby="lifetime-heading" className={inConversation
+    ? "flex min-h-0 w-full min-w-0 flex-1 flex-col"
+    : "mx-auto grid w-full min-w-0 max-w-[1120px] gap-4"}>
+    {/* The title bar names the page; the heading stays for screen readers except in Ghost management. */}
+    {inConversation ? <h2 id="lifetime-heading" className="sr-only">{chatTitle}</h2> : <>
+      <div className="flex min-h-9 items-center justify-between gap-3">
+        <h2 id="lifetime-heading" className={selectedPanel === "ghosts" ? "m-0 text-headingSm font-semibold text-ink" : "sr-only"}>
+          {selectedPanel === "work" ? workScope === "all" ? "모든 일" : "맡긴 일" : "Ghost 관리"}
+        </h2>
+        <span className="flex-1"/>
+        {toolbarActions}
+      </div>
+      {notices}
+    </>}
 
     {selectedPanel === "ghosts" && snapshot && workspaceSnapshot && registryReady && !registryError && <section aria-labelledby="ghost-team-heading" className="grid min-w-0 gap-2.5">
       <h3 id="ghost-team-heading" className="m-0 text-body font-semibold text-ink">Ghost 목록</h3>
@@ -1060,7 +1052,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       transcriptLabel="대화 기록"
       jumpToLatestLabel="최신 메시지로 이동"
       scrollKey={displayedTurns.length}
-      className="h-[min(72dvh,680px)] min-h-80"
+      className="min-h-0 flex-1"
       header={(selectedTarget || conversationError) ? <div className="grid gap-2 pt-1">
         {selectedTarget && <AgentStatus key={selectedTargetKey} model={agentStatus} ghostID={selectedTarget.ghost_id}
           observedAt={Math.min(snapshotObservedAt, conversationObservedAt) || undefined} fixture={mode === 'fixture'}
@@ -1128,17 +1120,33 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         const controller = turn.kind === "user" ? turnRuns.get(turn.id) : undefined;
         const canCancel = controller && !["answered", "failed", "cancelled"].includes(controller.state);
         const eventLabel = turn.origin_report_id ? "작업 보고" : turn.kind === "assistant_advisory" ? "참고 의견" : "호스트 상태 기록";
-        const recordedAt = new Date(turn.created_at_ms).toLocaleString();
+        const created = new Date(turn.created_at_ms);
+        const recordedAt = created.toLocaleString();
+        const shortTime = created.toDateString() === new Date().toDateString()
+          ? created.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+          : created.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+        const runState = controller && controller.state !== "answered"
+          ? controller.cancel_requested && canCancel ? "취소 요청됨" : turnStateLabels[controller.state]
+          : "";
         return <GConversationMessage key={turn.id}
           role={turn.kind === "user" ? "user" : "assistant"}
           label={turn.kind === "user" ? "나" : eventLabel}
-          actions={controller ? <div className="flex flex-wrap items-center gap-2">
-            <span className="text-caption text-ink-2">{controller.cancel_requested && canCancel ? "취소 요청됨 · 응답 중지 확인 전" : turnStateLabels[controller.state]}</span>
-            {canCancel && <Button type="button" variant="secondary" title="이미 맡긴 일은 맡긴 일 화면에서 따로 취소할 수 있습니다."
-              aria-label={`이 응답 취소 요청 · 메시지 ${turn.sequence}`}
-              disabled={writesDisabled || Boolean(busy) || controller.cancel_requested}
-              onClick={() => void cancelConversationTurn(turn.id)}>이 응답 취소 요청</Button>}
-          </div> : undefined}>
+          actions={<div className="flex items-center gap-1 text-caption text-ink-2">
+            {runState && <span className={controller?.state === "failed" || controller?.state === "effect_unknown" ? "text-orange" : undefined}>{runState} ·</span>}
+            {canCancel && !controller.cancel_requested && <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-caption"
+              aria-label={`응답 취소 · 메시지 ${turn.sequence}`}
+              disabled={writesDisabled || Boolean(busy)}
+              onClick={() => void cancelConversationTurn(turn.id)}>취소</Button>}
+            {canCancel && !controller.cancel_requested && <span aria-hidden="true">·</span>}
+            <time dateTime={created.toISOString()} title={recordedAt} className="[font-variant-numeric:tabular-nums]">{shortTime}</time>
+            <DetailDialog title="메시지 정보" className="[&>button]:size-6 [&>button]:p-0"
+              label={<><Info size={13} aria-hidden="true"/><span className="sr-only">메시지 정보</span></>}>
+              {turn.kind !== "user" && <strong>{eventLabel}</strong>}
+              <p>{privacyLabels[turn.privacy]} · {recordedAt}</p>
+              {(turn.origin_report_id || turn.kind === "assistant_advisory") && <p>작업의 완료와 검수 상태는 맡긴 일에서 확인할 수 있습니다.</p>}
+              <code>{turn.id} · {turn.sender_kind}:{turn.sender_ref} · 순서 {turn.sequence}{turn.origin_report_id && ` · 원본 보고 ${turn.origin_report_id}`}</code>
+            </DetailDialog>
+          </div>}>
           {(turn.kind === "host_fact" || turn.origin_report_id) && <p className="m-0 font-semibold text-caption text-ink-2">
             {eventLabel}{turn.origin_report_id && " · 검수 상태 별도"}
           </p>}
@@ -1166,17 +1174,6 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
             <strong className="font-medium text-ink-2">첨부 자료 {turn.attachments.length}개</strong>
             {turn.attachments.map(artifact => <code key={`${artifact.digest}:${artifact.producing_attempt}`} className="block font-mono text-ink-2 [overflow-wrap:anywhere]">{artifact.digest} · {privacyLabels[artifact.privacy]}</code>)}
           </div>}
-          <footer className="mt-2 flex flex-wrap items-center gap-1 text-caption text-ink-2">
-            <span>{privacyLabels[turn.privacy]}</span>
-            <span>· {recordedAt}</span>
-            <DetailDialog title="메시지 정보"
-              label={<><Info size={14} aria-hidden="true"/><span className="sr-only">메시지 정보</span></>}>
-              {turn.kind !== "user" && <strong>{eventLabel}</strong>}
-              <p>{privacyLabels[turn.privacy]} · {recordedAt}</p>
-              {(turn.origin_report_id || turn.kind === "assistant_advisory") && <p>작업의 완료와 검수 상태는 맡긴 일에서 확인할 수 있습니다.</p>}
-              <code>{turn.id} · {turn.sender_kind}:{turn.sender_ref} · 순서 {turn.sequence}{turn.origin_report_id && ` · 원본 보고 ${turn.origin_report_id}`}</code>
-            </DetailDialog>
-          </footer>
         </GConversationMessage>;
       })}
     </GConversation>}

@@ -1,5 +1,5 @@
 import { MessageCircle, PackagePlus, Palette, Plus, Settings2 } from 'lucide-react';
-import { Button, GSettingsGroup, GSettingsRow } from '@garden/ui';
+import { Badge, Button, GSettingsGroup, GSettingsRow } from '@garden/ui';
 import { DotAvatar } from '../components/DotAvatar';
 import { toneFor, type Profile } from '../client/types';
 import { ghostDisplayName, profileSummary } from './profileSummary';
@@ -21,7 +21,7 @@ export function TeamSettings({ profiles, defaultGhostId, connected, onChat, onMa
       return <GSettingsRow key={profile.id} label={<span className="flex min-w-0 items-center gap-3">
         <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={36}/>
         <span className="flex min-w-0 flex-col gap-1">
-          <span className="flex flex-wrap items-center text-ui font-medium text-ink [overflow-wrap:anywhere]">{name}{profile.id === defaultGhostId && <span className="ghost-default-badge">기본</span>}</span>
+          <span className="flex flex-wrap items-center gap-1.5 text-ui font-medium text-ink [overflow-wrap:anywhere]">{name}{profile.id === defaultGhostId && <Badge variant="outline">기본</Badge>}</span>
           <span className="text-caption text-ink-3">{profileSummary(profile.persona)}</span>
         </span>
       </span>}>

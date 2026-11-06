@@ -9,27 +9,27 @@
 - Keep this package independent from the Rust host and the existing embedded UI. Concurrent backend and integrations work must be preserved.
 - Keep the current Ghost icon, per the latest owner instruction.
 
-## Garden system — 2026-11-06
+## Garden components — 2026-11-06
 
-The console adopts Garden (`garden.json`, `vendor/garden`). Controls are Garden's
-shadcn/ui-style, Radix-backed `@garden/ui` components; layout and color use Tailwind 4
-utilities bound to Garden's generated tokens. There is no app-level control library or
-global stylesheet beyond `src/app.css` (root sizing) and `src/pets/pets.css` (avatar
-sprites). Deliberate departures are recorded in `garden.json` and `docs/decisions/`.
+The console uses Garden (`garden.json`, `vendor/garden`) for its components only:
+Garden's shadcn/ui-style, Radix-backed `@garden/ui` controls, styled with Tailwind 4
+utilities bound to Garden's generated tokens. The layout stays Ghost's own (recorded
+exception `shell.layout`, `docs/decisions/0003-ghost-owns-its-layout.md`). There is no
+app-level control library or global stylesheet beyond `src/app.css` (root sizing) and
+`src/pets/pets.css` (avatar sprites).
 
-`GAppShell` owns the frame. The activity rail selects one of four workspaces and the
-sidebar lists only that workspace's destinations:
+`src/components/AppFrame.tsx` draws one sidebar beside one main region:
 
-| Rail | Sidebar | Main |
-|---|---|---|
-| 대화 | 새 요청, Ghosts (default first); the open Ghost expands into 대화 · 맡은 일 · package views · 이전 대화 | `GConversation` with `GComposer` |
-| 일 | 확인 필요 · 모든 일 · 협업 | `GPage` lists of `WorkRow` |
-| 프로젝트 | Projects (document spaces) and 새 프로젝트 | Project page |
-| 설정 | — | `GSettings`: 팀 · 모델 · 확장 · 호스트 · 화면 · 아바타 |
+- 홈 with the pending-decision count: a composer to the default Ghost, 확인 필요, 진행 중,
+  프로젝트 and a link to 모든 일.
+- Ghosts, default first. The open Ghost expands into 대화 · 맡은 일 · package views ·
+  이전 대화.
+- 프로젝트 (document spaces) and 새 프로젝트.
+- 설정 at the bottom (팀 · 모델 · 확장 · 호스트 · 화면 · 아바타); host trouble shows there
+  only when the host is not connected.
 
-The title bar shows the current location and the shell's command field (`⌘P`, also `⌘K`).
-Host trouble surfaces on the settings rail item and as a banner; healthy state is silent.
-Theme follows the `.dark` class on `<html>`.
+The title bar names the location and opens command search (`⌘K`, also `⌘P`). Below 56rem
+the sidebar opens from the title bar menu. Theme follows the `.dark` class on `<html>`.
 
 Earlier designs (Docket console, dashboard of 2026-11-04) are history:
 [redesign report](../../docs/dashboard-redesign-2026-11-04.md),

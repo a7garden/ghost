@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
-import { ChatNavigation, WorkspaceRail, type GhostMenuItem } from './WorkspaceSidebar';
+import { WorkspaceSidebar, type GhostMenuItem } from './WorkspaceSidebar';
 import { initialWorkspace } from '../fixtures/workspace';
 
 const menu: GhostMenuItem[] = [
@@ -9,24 +9,26 @@ const menu: GhostMenuItem[] = [
   { key: 'work', label: '맡은 일', path: '/work', kind: 'work' },
 ];
 
-function chat(overrides: Partial<Parameters<typeof ChatNavigation>[0]> = {}) {
-  const snapshot = initialWorkspace();
-  const props = { snapshot, home: true, openGhostId: null, ghostMenu: [], currentGhostPage: null, defaultGhostId: snapshot.profiles[1].id, navigate() {}, openGhost() {}, ...overrides };
-  return { snapshot, html: renderToStaticMarkup(createElement(ChatNavigation, props)) };
+function render(overrides: Partial<Parameters<typeof WorkspaceSidebar>[0]> = {}) {
+  const snapshot = overrides.snapshot ?? initialWorkspace();
+  return { snapshot, html: renderToStaticMarkup(createElement(WorkspaceSidebar, {
+    snapshot, section: 'home', openGhostId: null, ghostMenu: [], currentGhostPage: null, defaultGhostId: snapshot.profiles[1].id,
+    attentionCount: 2, status: { state: 'connected', label: '연결됨' }, canCreateProject: true, navigate() {}, openGhost() {}, ...overrides,
+  })) };
 }
 
-it('lists the default Ghost first and opens no Ghost on the new-request page', () => {
-  const { snapshot, html } = chat();
+it('opens no Ghost on workspace pages and lists the default Ghost first', () => {
+  const { snapshot, html } = render();
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
-  expect(html.slice(html.indexOf('aria-current="page"'))).toMatch(/^[^<]*>[\s\S]*?새 요청/);
+  expect(html).toContain('<span class="sr-only">확인 필요 </span>2');
+  expect(html).not.toContain('맡은 일');
   const ghosts = html.slice(html.indexOf('Ghost</p>'));
   expect(ghosts.indexOf(snapshot.profiles[1].name)).toBeLessThan(ghosts.indexOf(snapshot.profiles[0].name));
-  expect(html).not.toContain('맡은 일');
 });
 
 it('shows pages only under the open Ghost and marks the page on screen', () => {
   const snapshot = initialWorkspace();
-  const { html } = chat({ snapshot, home: false, openGhostId: snapshot.profiles[0].id, ghostMenu: menu, currentGhostPage: 'work' });
+  const { html } = render({ snapshot, section: 'lifetime', openGhostId: snapshot.profiles[0].id, ghostMenu: menu, currentGhostPage: 'work' });
   expect(html.match(/맡은 일/g)).toHaveLength(1);
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   const current = html.slice(html.indexOf('aria-current="page"'));
@@ -36,18 +38,13 @@ it('shows pages only under the open Ghost and marks the page on screen', () => {
 it('shows Host starter Ghosts by role name instead of their identifiers', () => {
   const snapshot = initialWorkspace();
   snapshot.profiles[0].name = 'specialist-research';
-  const { html } = chat({ snapshot });
+  const { html } = render({ snapshot });
   expect(html).toContain('리서치');
   expect(html).not.toContain('specialist-research');
 });
 
-it('names pending decisions and host trouble in the rail', () => {
-  const open = () => {};
-  const healthy = renderToStaticMarkup(createElement(WorkspaceRail, { workspace: 'chat', attentionCount: 0, status: { state: 'connected', label: '연결됨' }, open }));
-  expect(healthy).toContain('aria-label="일"');
-  expect(healthy).toContain('aria-label="설정"');
-  const trouble = renderToStaticMarkup(createElement(WorkspaceRail, { workspace: 'work', attentionCount: 2, status: { state: 'offline', label: '연결 끊김' }, open }));
-  expect(trouble).toContain('aria-label="일 · 확인 필요 2"');
-  expect(trouble).toContain('aria-label="설정 · 호스트 연결 끊김"');
-  expect(trouble.match(/aria-current="page"/g)).toHaveLength(1);
+it('shows host trouble on the settings entry only when the host is not connected', () => {
+  expect(render().html).not.toContain('연결 끊김');
+  const { html } = render({ status: { state: 'offline', label: '연결 끊김' } });
+  expect(html).toContain('연결 끊김');
 });

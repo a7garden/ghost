@@ -1,5 +1,6 @@
 import { routeLabels, uiTerms } from './uiText';
-import { Banner, Button, EmptyState, FormField, GAppShell, Input, InlineError, Skeleton, Textarea, type GCommandItem } from '@garden/ui';
+import { Banner, Button, EmptyState, FormField, Input, InlineError, Skeleton, Textarea, type GCommandItem } from '@garden/ui';
+import { AppFrame } from './components/AppFrame';
 import { AvatarProvider } from './pets/AvatarProvider';
 import { Settings, type SettingsSection } from './pets/Settings';
 import { FloatingPet } from './pets/FloatingPet';
@@ -7,7 +8,7 @@ import { usePreferences } from './pets/preferences';
 import { useEffect, useRef, useState } from 'react';
 import { CircleAlert, Puzzle, Server, Users } from 'lucide-react';
 import { PortraitAppearances, type PortraitAppearance } from './components/DotAvatar';
-import { ChatNavigation, ProjectNavigation, WorkNavigation, WorkspaceRail, type GhostMenuItem, type Workspace } from './components/WorkspaceSidebar';
+import { WorkspaceSidebar, type GhostMenuItem } from './components/WorkspaceSidebar';
 import { ghostDisplayName } from './features/profileSummary';
 import { Modal } from './components/Modal';
 import { Integrations } from './features/Integrations';
@@ -37,8 +38,9 @@ import { faceColor, isHexColor } from './pets/appearance';
 
 const lifetimeSetting = import.meta.env.VITE_GHOST_LIFETIME;
 
-// Tauri 웹뷰는 모든 내비게이션에 __TAURI_INTERNALS__를 주입한다. macOS 창에서만 신호등 버튼 자리를 비운다.
-const desktopMac = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window && /Mac/.test(navigator.platform) && !/iPhone|iPad/.test(navigator.userAgent);
+// Tauri 웹뷰는 모든 내비게이션에 __TAURI_INTERNALS__를 주입한다. 데스크톱 창에서만 끌 수 있는 타이틀바를 그린다.
+const desktopShell = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window && !/iPhone|iPad/.test(navigator.userAgent);
+const desktopMac = desktopShell && /Mac/.test(navigator.platform);
 
 const currentRoute = () => location.hash.replace(/^#/, '').replace(/^\/dots\//, '/ghosts/') || '/';
 export function App({ connectClient = connect }: { connectClient?: () => Promise<Client> } = {}) {
@@ -54,8 +56,8 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const [chatHandoff, setChatHandoff] = useState<{ id: string; text: string } | null>(null);
   const approvalOpener = useRef<HTMLElement | null>(null);
   const [collaborate, setCollaborate] = useState(false);
-  // GAppShell owns the scrolling content region; a new destination starts at its top.
-  const resetScroll = () => { document.querySelector('.g-app-shell__content')?.scrollTo(0, 0); };
+  // The main region owns scrolling; a new destination starts at its top.
+  const resetScroll = () => { document.getElementById('main-content')?.scrollTo(0, 0); };
   useEffect(() => { const change = () => setRoute(currentRoute()); window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
   useEffect(() => { const key = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); location.hash = '/settings?tab=appearance'; } if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setPaletteOpen(true); } }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, []);
   useEffect(() => { setFormError(''); }, [dialog]);
@@ -90,7 +92,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const [defaultGhostId, setDefaultGhostId] = useState<string | null | undefined>(undefined);
   // The default Ghost labels every page, so it is loaded once even when the first page is not home.
   const needDefault = primaryChat && defaultGhostId === undefined;
-  const dashboardWork = useDashboardWork({ workspace: snapshot, mode, read: workspace.lifetimeRead, enabled: section === 'settings' && params.get('tab') === 'host' || needDefault, loadRoster: connected && needDefault });
+  const dashboardWork = useDashboardWork({ workspace: snapshot, mode, read: workspace.lifetimeRead, enabled: section === 'home' || section === 'settings' && params.get('tab') === 'host' || needDefault, loadRoster: connected && (needDefault || section === 'home' && primaryChat) });
   useEffect(() => { if (dashboardWork.defaultGhostId !== undefined) setDefaultGhostId(dashboardWork.defaultGhostId); }, [dashboardWork.defaultGhostId]);
   const profiles = snapshot?.profiles ?? [];
   const dotSegment = section === 'ghosts' ? route.split('/')[2]?.split('?')[0] : null;
@@ -199,7 +201,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const selectedSpace = route.startsWith('/spaces/') ? route.split('/')[2] : snapshot?.spaces[0]?.id;
   // Move keyboard focus to the new page's heading; GPageHeader titles are not focusable by themselves.
   const focusPageHeading = () => {
-    const heading = document.querySelector<HTMLElement>('main.g-app-shell__main h1');
+    const heading = document.querySelector<HTMLElement>('#main-content h1');
     if (!heading) return;
     heading.tabIndex = -1;
     heading.focus({ preventScroll: true });
@@ -228,14 +230,9 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     || (section === 'spaces' && snapshot?.spaces.find(space => space.id === selectedSpace)?.name)
     || (section === 'lifetime' ? routeLabels.work : routeLabels[section as keyof typeof routeLabels]) || '찾을 수 없는 화면';
   const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, together: true, integrations: true, settings: true, host: true, providers: true };
-  // The rail selects one of four workspaces; the sidebar then lists only that workspace's destinations.
-  const workspaceKey: Workspace = section === 'settings' ? 'settings' : section === 'spaces' ? 'projects'
-    : section === 'inbox' || section === 'work' || section === 'together' || allWork ? 'work' : 'chat';
-  const openWorkspace = (next: Workspace) => navigate(next === 'chat' ? '/' : next === 'work' ? attentionCount ? '/inbox' : workPath
-    : next === 'projects' ? snapshot?.spaces[0] ? `/spaces/${snapshot.spaces[0].id}` : '/spaces' : '/settings');
   const go = (path: string) => () => navigate(path);
   const commandItems: GCommandItem[] = snapshot ? [
-    { id: 'new', label: '새 요청', group: '이동', onSelect: go('/') },
+    { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: routeLabels.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: routeLabels.work, group: '이동', onSelect: go(workPath) },
     { id: 'together', label: routeLabels.together, group: '이동', onSelect: go('/together') },
@@ -289,14 +286,9 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     } else navigate(path);
   };
   const safe = async (fn: () => Promise<void>) => { setFormError(''); try { await fn(); } catch (e) { setFormError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다. 다시 시도해 주세요.'); } };
-  const sidebar = !snapshot ? undefined
-    : workspaceKey === 'chat' ? <ChatNavigation snapshot={snapshot} home={section === 'home'} openGhostId={openGhostId} ghostMenu={ghostMenu}
-      currentGhostPage={currentGhostPage} defaultGhostId={homeGhostId} navigate={navigate} openGhost={switchGhost}/>
-    : workspaceKey === 'work' ? <WorkNavigation current={section === 'inbox' ? 'inbox' : section === 'together' ? 'together' : 'all'}
-      attentionCount={attentionCount} workPath={workPath} navigate={navigate}/>
-    : workspaceKey === 'projects' ? <ProjectNavigation snapshot={snapshot} selectedSpace={params.has('new') ? undefined : selectedSpace}
-      canCreate={mode === 'live' && snapshot.capabilities.documents === true} navigate={navigate}/>
-    : undefined;
+  const sidebar = <WorkspaceSidebar snapshot={snapshot} section={section} openGhostId={openGhostId} ghostMenu={ghostMenu} currentGhostPage={currentGhostPage}
+    defaultGhostId={homeGhostId} selectedSpace={params.has('new') ? undefined : selectedSpace} attentionCount={attentionCount} status={status}
+    canCreateProject={mode === 'live' && snapshot?.capabilities.documents === true} navigate={navigate} openGhost={switchGhost}/>;
   const settingsSections: SettingsSection[] = snapshot ? [
     { id: 'team', label: '팀', icon: Users, content: <TeamSettings profiles={profiles} defaultGhostId={homeGhostId} connected={connected}
       onChat={switchGhost} onAdd={addGhost} onImport={() => setDialog('package')}
@@ -340,7 +332,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
       }}
       navigate={navigate}/>;
   };
-  const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>새 요청으로</Button>}/>;
+  const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>;
   const lifetimeVisible = Boolean(lifetimePath);
   // Conversations and settings own their geometry; everything else scrolls in the shell's padded region.
   const ownsGeometry = section === 'settings' || chatLayout || Boolean(activeView) || lifetimeVisible && (params.get('panel') ?? 'conversation') === 'conversation';
@@ -360,22 +352,12 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     });
   };
   return <div className="ghost-root"><PortraitAppearances.Provider value={portraits}><AvatarProvider key={snapshot?.workspace_id ?? 'loading'} snapshot={snapshot} query={query} animate={preferences.animate}>
-    <GAppShell appName="Ghost"
-      titleBar={{ macOSInset: desktopMac ? 80 : 0, left: <span className="truncate text-ui font-medium text-ink">{label}</span> }}
-      activityRail={<WorkspaceRail workspace={workspaceKey} attentionCount={attentionCount} status={status} open={openWorkspace}/>}
-      sidebar={sidebar}
-      contentPadding={ownsGeometry ? 'none' : 'default'}
-      contentLayout={ownsGeometry && section !== 'settings' ? 'fill' : 'scroll'}
-      commandItems={commandItems} commandPaletteOpen={paletteOpen} onCommandPaletteOpenChange={setPaletteOpen}
-      strings={{
-        mainLabel: label, sidebarLabel: '작업 공간 탐색', sidebarToggleLabel: '탐색 패널 전환',
-        rightPanelLabel: '맥락', rightPanelToggleLabel: '맥락 패널 전환', bottomPanelLabel: '활동', composerLabel: '메시지',
-        commandPalette: { ariaLabel: '명령', searchPlaceholder: '명령 검색…', emptyTitle: '일치하는 항목이 없습니다', emptyHint: '다른 이름이나 단어로 검색해 주세요.', closeLabel: '닫기' },
-      }}>
+    <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0} location={label} sidebar={sidebar} fill={ownsGeometry}
+      commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
       {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={reconnect}>다시 연결</Button>}>{error}</Banner>}
       {!snapshot || retiredPlanner ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
         {section === 'settings' && <Settings snapshot={snapshot} route={route} navigate={navigate} action={action} busy={busy} mode={mode} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} connected={connected} sections={settingsSections}/>}
-        {section === 'home' && <Overview snapshot={snapshot} connected={connected} navigate={navigate} onOpenApproval={openApproval} onStartChat={startChat} chatTarget={chatTarget}/>}
+        {section === 'home' && <Overview snapshot={snapshot} connected={connected} navigate={navigate} onOpenApproval={openApproval} onStartChat={startChat} chatTarget={chatTarget} workPath={workPath} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading}/>}
         {section === 'ghosts' && dotSegment && (dot && pkg && activeView
           ? <PackageWorkspace key={`${dot.id}:${pkg.digest}:${activeView.id}`} info={pkg} view={activeView}
             onNavigate={view => navigate(viewPath(dot.id, view))} onChat={() => navigate(ghostPath(dot.id))}/>
@@ -392,11 +374,11 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
             history.replaceState(history.state, '', `#${path}`);
             setRoute(path);
           }}/>}
-        {retainedLifetimePath && <div className="h-full min-h-0" hidden={!lifetimeVisible}>{lifetimeScreen(retainedLifetimePath)}</div>}
+        {retainedLifetimePath && <div hidden={!lifetimeVisible} className={lifetimeVisible ? "flex flex-col" : undefined}>{lifetimeScreen(retainedLifetimePath)}</div>}
         {!knownSections[section] && !(section === 'lifetime' && lifetimeEnabled) && <EmptyState icon={<CircleAlert/>} title="이 화면을 찾을 수 없습니다" description="주소가 이동했거나 잘못되었을 수 있습니다."
-          action={<Button variant="outline" onClick={() => navigate('/')}>새 요청으로</Button>}/>}
+          action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>}
       </>}
-    </GAppShell>
+    </AppFrame>
     {dialog === 'package' && snapshot && <PackageImport workspace={snapshot.workspace_id} profiles={profiles} selected={selected?.id ?? ''}
       onClose={close} onInstalled={id => { refresh(); setDialog(null); navigate(ghostPath(id)); }}/>}
     {dialog === 'portrait' && selected && <PortraitPicker key={selected.id} profile={selected}

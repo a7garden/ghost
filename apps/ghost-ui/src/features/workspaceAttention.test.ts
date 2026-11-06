@@ -4,7 +4,7 @@ import { expect, it } from 'vitest';
 import { initialWorkspace } from '../fixtures/workspace';
 import { inboxItems } from '../client/inbox';
 import { normalizeRoutingResults } from '../client/routingResults';
-import { InboxView, WorkView } from './WorkViews';
+import { InboxView } from './WorkViews';
 import { Overview } from './Overview';
 
 function workspace() {
@@ -59,13 +59,11 @@ it('counts completion results only when the inbox can display them', () => {
 });
 
 
-it('keeps running work off home and lists it in the 일 workspace instead', () => {
+it('shows no work section on home while idle and lists running work once it starts', () => {
   const snapshot = workspace();
   const render = () => renderToStaticMarkup(createElement(Overview, { snapshot, ...callbacks }));
-  expect(render()).not.toContain('자료 찾기');
+  expect(render()).not.toContain('id="home-ongoing"');
   snapshot.profiles[0].conversations[0].tasks.push({ id: 'running', name: '자료 찾기', phase: 'model_running', partial: '', output: '' });
-  expect(render()).not.toContain('자료 찾기');
-  const work = renderToStaticMarkup(createElement(WorkView, { snapshot, action: async () => ({}), busy: false, navigate: () => {}, onAssign: () => {} }));
-  expect(work).toContain('자료 찾기');
-  expect(work).toContain('data-slot="work-row"');
+  expect(render()).toContain('id="home-ongoing"');
+  expect(render()).toContain('자료 찾기');
 });

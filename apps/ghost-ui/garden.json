@@ -17,6 +17,11 @@
         "rule": "documents.properties",
         "reason": "Project documents keep the Ghost PDC adoption plan; replacing the editor needs a separate approved document migration.",
         "decision": "docs/decisions/0002-documents-follow-ghost-pdc-plan.md"
+      },
+      {
+        "rule": "shell.layout",
+        "reason": "The owner adopted Garden for its controls; the console keeps its own sidebar-and-main layout without the activity rail.",
+        "decision": "docs/decisions/0003-ghost-owns-its-layout.md"
       }
     ]
   }

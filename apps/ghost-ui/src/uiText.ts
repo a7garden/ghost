@@ -14,7 +14,7 @@ export const uiTerms = {
 } as const;
 
 export const routeLabels = {
-  home: '새 요청',
+  home: '홈',
   settings: uiTerms.settings,
   inbox: uiTerms.inbox,
   work: uiTerms.work,

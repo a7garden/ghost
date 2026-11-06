@@ -8,7 +8,9 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '/src/App.tsx';
 import { initialWorkspace } from '/src/fixtures/workspace.ts';
-import '/src/styles.css';
+import '@garden/ui/styles.css';
+import '/src/app.css';
+import '/src/pets/pets.css';
 const primary='11111111-1111-4111-8111-111111111111', chat='22222222-2222-4222-8222-222222222222', ghost='33333333-3333-4333-8333-333333333333', conversation='44444444-4444-4444-8444-444444444444';
 const key='ghost-bot-ui-fixture-state';
 const initial={mode:'active',revision:0,failed:false,operations:1,cloneLost:false,receipts:{},turns:{}};
@@ -57,7 +59,7 @@ const server = await createServer({ root, define: { 'import.meta.env.VITE_GHOST_
   load(id) { if (id === '\0bot-fixture.js') return entry; },
   configureServer(server) { server.middlewares.use((req, res, next) => {
     if (req.url?.split('?')[0] !== '/__bot_fixture') return next();
-    void server.transformIndexHtml('/__bot_fixture', '<!doctype html><html lang="ko"><head><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Ghost bot UI fixture</title></head><body><div id="fixture-controls">격리된 UI fixture · <span id="fixture-count"></span></div><div id="root"></div><script type="module" src="/__bot_fixture_entry.js"></script></body></html>').then(html => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
+    void server.transformIndexHtml('/__bot_fixture', '<!doctype html><html lang="ko"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Ghost bot UI fixture</title></head><body><div id="fixture-controls" style="position:fixed;right:8px;bottom:8px;z-index:100;font:11px system-ui;opacity:.6">격리된 UI fixture · <span id="fixture-count"></span></div><div id="root"></div><script type="module" src="/__bot_fixture_entry.js"></script></body></html>').then(html => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
   }); },
 }] });
 await server.listen();

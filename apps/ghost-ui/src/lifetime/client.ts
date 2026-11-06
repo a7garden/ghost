@@ -27,7 +27,8 @@ type RecoverableCommand = LifetimeRecoveryCommand & {
   command_id: string;
   envelope: Envelope;
 };
-const readOnlyMethods = new Set(["snapshot", "goal.inspect", "work.inspect", "work.children", "registry.inspect", "conversation.inspect", "conversation.turn.inspect", "mailbox.inspect", "notification.inspect", "command.inspect", "bot.surface.inspect", "bot.candidate.inspect", "bot.definition.inspect", "bot.lifecycle.inspect", "bot.discover"]);
+// Reads have no Host effect and no receipt, so they never enter the outbox.
+const readOnlyMethods = new Set(["snapshot", "goal.inspect", "goal.thread.inspect", "work.inspect", "work.artifact", "work.children", "registry.inspect", "conversation.inspect", "conversation.turn.inspect", "mailbox.inspect", "notification.inspect", "command.inspect", "bot.surface.inspect", "bot.candidate.inspect", "bot.definition.inspect", "bot.lifecycle.inspect", "bot.discover"]);
 const authoritativeNoEffectCodes = new Set(["authority_fenced", "conflict", "dispatch_off", "invalid_request", "not_found", "unauthorized", "unsupported_version"]);
 const outboxPrefix = "ghost:lifetime:";
 const workspacePattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -83,12 +84,10 @@ class PersistedLifetimeClient implements LifetimeClient {
     const intent = canonicalJson({ body: commandBody, expected_revision: expectedRevision, actor_ref: this.identity.actor_ref, authority_epoch: this.identity.authority_epoch });
     const existing = this.activeIntents.get(intent);
     if (existing) return existing;
-    const receiptlessRead = commandBody.method === "work.artifact" || commandBody.method === "goal.thread.inspect";
-    if (!receiptlessRead && !readOnlyMethods.has(String(commandBody.method))) await this.ensureMutationAllowed();
-    // These reads do not create Host receipts and have no effects to reconcile.
-    const operation = receiptlessRead
+    // A lost read response is an error, not an uncertain write.
+    const operation = readOnlyMethods.has(String(commandBody.method))
       ? createEnvelope(commandBody, this.identity, expectedRevision).then(envelope => this.transport.request(envelope)).then(parseLifetimeResponse)
-      : this.requestIntent(commandBody, expectedRevision);
+      : this.ensureMutationAllowed().then(() => this.requestIntent(commandBody, expectedRevision));
     this.activeIntents.set(intent, operation);
     void operation.then(() => this.activeIntents.delete(intent), () => this.activeIntents.delete(intent));
     return operation;
@@ -113,12 +112,6 @@ class PersistedLifetimeClient implements LifetimeClient {
   async pendingCommands(): Promise<Envelope[]> {
     return this.serializeJournal(async () => (await this.readJournal()).commands
       .filter(command => command.envelope.actor_ref === this.identity.actor_ref && command.envelope.authority_epoch === this.identity.authority_epoch)
-      // A read still running in this client is not an uncertain write. Keep its
-      // journal entry, but don't let ordinary observation fence a new Owner
-      // action or appear as a request that needs recovery. Failed reads and
-      // reads owned by another client remain visible until reconciled.
-      .filter(command => !readOnlyMethods.has(String(command.envelope.body.method))
-        || !this.activeCommands.has(command.envelope.command_id))
       .map(command => structuredClone(command.envelope)));
   }
   async recoveryCommands(): Promise<LifetimeRecoveryCommand[]> {
@@ -346,6 +339,9 @@ class PersistedLifetimeClient implements LifetimeClient {
       const envelope = await parseLifetimeEnvelope(item.envelope);
       const expectedFingerprint = await digestValue({ body: envelope.body, expected_revision: envelope.expected_revision, actor_ref: envelope.actor_ref, authority_epoch: envelope.authority_epoch });
       if (item.fingerprint !== expectedFingerprint) throw new Error("Lifetime outbox command identity does not match its envelope.");
+      // Earlier clients journaled reads; they have no receipt to reconcile, so
+      // drop them here and the next journal write removes them from storage.
+      if (readOnlyMethods.has(String(envelope.body.method))) continue;
       commands.push({ fingerprint: item.fingerprint, envelope });
     }
     return { protocol_version: VERSION, commands };
