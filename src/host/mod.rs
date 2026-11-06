@@ -1326,7 +1326,7 @@ impl Host {
             let snap = match p.runtime.session.committed() {
                 Ok(snapshot) => snapshot,
                 Err(_) => {
-                    profiles.push(json!({"id":p.id,"name":p.name,"persona":p.persona,"avatar_id":avatar.avatar_id,"avatar_version":avatar.version,"conversations":[],"grants":[],"policy":s.journal.get::<Policy>("policy", &p.id)?.unwrap_or_default(),"spend":s.journal.get::<Spend>("spend", &p.id)?.unwrap_or_default(),"usage":{"tokens":0,"cost_usd":0.0,"unavailable":true},"error":"이 Ghost의 저장소를 읽을 수 없습니다. 다른 Ghost의 작업은 계속됩니다."}));
+                    profiles.push(json!({"id":p.id,"name":p.name,"display_name":s.journal.get::<String>("display_name",&p.id)?,"persona":p.persona,"avatar_id":avatar.avatar_id,"avatar_version":avatar.version,"conversations":[],"grants":[],"policy":s.journal.get::<Policy>("policy", &p.id)?.unwrap_or_default(),"spend":s.journal.get::<Spend>("spend", &p.id)?.unwrap_or_default(),"usage":{"tokens":0,"cost_usd":0.0,"unavailable":true},"error":"이 Ghost의 저장소를 읽을 수 없습니다. 다른 Ghost의 작업은 계속됩니다."}));
                     continue;
                 }
             };
@@ -1421,12 +1421,14 @@ impl Host {
                         + t.usage.cost.cache_write
                 })
                 .sum();
-            profiles.push(json!({"id":p.id,"name":p.name,"persona":persona,"avatar_id":avatar.avatar_id,"avatar_version":avatar.version,"conversations":conversations,"grants":grants,"policy":policy,"spend":spend,"usage":{"tokens":usage_tokens,"cost_usd":usage_cost},"error":p.error}));
+            profiles.push(json!({"id":p.id,"name":p.name,"display_name":s.journal.get::<String>("display_name",&p.id)?,"persona":persona,"avatar_id":avatar.avatar_id,"avatar_version":avatar.version,"conversations":conversations,"grants":grants,"policy":policy,"spend":spend,"usage":{"tokens":usage_tokens,"cost_usd":usage_cost},"error":p.error}));
         }
         #[allow(unused_mut)]
         let mut snapshot = self.with_snapshot_authority(&s.journal.0,
             json!({"mode":"durable_workspace","host_protocol_version":1,"capabilities":{"orchestration":true,"routing":routing_host::capability(),"code_worker":{"configured":false,"retired":true,"projects":[]},"omp_subscription":{"configured":omp_provider::configured(),"models":omp_provider::model_specs().iter().map(|(provider,model)|format!("{provider}/{model}")).collect::<Vec<_>>()},"avatars":true,"documents":cfg!(feature="documents"),"memory":memory::Brain::configured(),"channels":cfg!(feature="channels"),"computer":{"backend":self.computer.identity(),"configured":self.computer.configured(),"operations":self.computer.capabilities()}},"avatars":s.journal.objects::<avatars::Avatar>("avatar")?,"todos":s.journal.objects::<planner::Todo>("todo")?,"calendar_events":s.journal.objects::<planner::Event>("calendar_event")?,"connected_planner":connected_planner_snapshot(&s)?,"integrations":integrations::list(&s)?,"routing_shares":s.journal.objects::<routing_host::RoutingShare>("routing_share_v1")?,"routing_results":routing_dispatch::owner_results(&s)?,"workspace_id":s.journal.get::<String>("meta","workspace_id")?,"default_model":models::selected_llm(&s,&self.default_model)?,"model_settings":models::settings(&s)?,"profiles":profiles,"schedules":s.journal.list()?,"spaces":s.journal.objects::<documents::Space>("space")?,"reviews":s.journal.objects::<Review>("review")?.into_iter().filter(|r|!r.profile_id.is_empty()&&matches!(r.state.as_str(),"pending"|"approved"|"saved"|"declined")).collect::<Vec<_>>(),"goals":s.journal.objects::<Goal>("goal")?,"delegations":s.journal.objects::<Delegation>("delegation")?,"orchestration_plans":s.journal.objects::<orchestration::Plan>("orchestration_plan")?,"orchestration_runs":s.journal.objects::<orchestration::Run>("orchestration_run")?,"slack_bindings":s.journal.objects::<channels::SlackBinding>("slack_binding")?,"slack_outbox":s.journal.objects::<channels::Outbox>("slack_outbox")?,"voice_calls":s.journal.objects::<channels::Call>("voice_call")?,"connector_status":s.journal.objects::<Value>("connector_status")?,"connectors":{"computer":self.computer.configured(),"brain":memory::Brain::configured(),"voice":cfg!(feature="channels")&&std::env::var_os("OPENAI_API_KEY").is_some(),"slack":cfg!(feature="channels")&&std::env::var_os("GHOST_SLACK_APP_TOKEN").is_some()}}),
             )?;
+        // The owner's main Ghost; a removed Ghost no longer counts.
+        snapshot["default_ghost"] = json!(s.journal.get::<String>("meta", "default_ghost")?.filter(|id| s.profiles.contains_key(id)));
         #[cfg(feature = "lifetime")]
         { snapshot["integration_approvals"] = json!(integration_approvals::summaries(&s)?); }
         Ok(snapshot)
@@ -1441,6 +1443,7 @@ impl Host {
             snapshot["lifetime_authority"] = json!({
                 "authority_epoch": authority.epoch,
                 "dispatch_enabled": authority.dispatch_enabled && self.dispatch_enabled && authority.epoch == self.authority_epoch,
+                "runtime_available": self.dispatch_enabled && lifetime_driver::runtime_configured(),
             });
             snapshot
         };
@@ -1677,6 +1680,8 @@ mod workflow_tests;
 mod lifetime_documents_tests;
 #[cfg(all(test, feature = "lifetime"))]
 mod incidents_tests;
+#[cfg(test)]
+mod ghost_settings_tests;
 
 fn connected_planner_snapshot(s: &State) -> Result<Value> {
     #[cfg(feature = "caldav")]

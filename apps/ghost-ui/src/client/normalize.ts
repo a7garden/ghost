@@ -48,14 +48,16 @@ export function normalizeSnapshot(value: unknown): Snapshot {
   return {
     orchestration_plans: normalizeGraphs(s.orchestration_plans, profiles), orchestration_runs: normalizeGraphRuns(s.orchestration_runs, profiles),
     workspace_id: s.workspace_id, default_model: text(s.default_model, 'mock'),
+    default_ghost: typeof s.default_ghost === 'string' && profiles.includes(s.default_ghost) ? s.default_ghost : null,
     lifetime_authority: s.lifetime_authority === undefined ? undefined : {
       authority_epoch: authority.authority_epoch as number, dispatch_enabled: authority.dispatch_enabled as boolean,
+      ...(typeof authority.runtime_available === 'boolean' ? { runtime_available: authority.runtime_available } : {}),
     },
     model_settings: modelSettings(s.model_settings),
     connected_planner: s.connected_planner,
     routing_results: normalizeRoutingResults(s.routing_results), routing_shares: normalizeRoutingShares(s.routing_shares),
     avatars: list(s.avatars).filter(a => a.sprite_version === 1 || a.sprite_version === 2).map(a => ({ id: text(a.id), name: text(a.name), description: text(a.description), sprite_version: a.sprite_version as 1 | 2, design: isDesign(a.design) ? a.design : null, source_manifest: a.source_manifest && typeof a.source_manifest === "object" ? object(a.source_manifest) : null, created_ms: Number(a.created_ms) || 0 })),
-    profiles: list(s.profiles).map(p => ({ id: text(p.id), avatar_id: typeof p.avatar_id === 'string' ? p.avatar_id : null, avatar_version: Number(p.avatar_version) || 0, name: text(p.name, 'Ghost'), persona: text(p.persona), policy: object(p.policy), error: typeof p.error === 'string' ? p.error : undefined,
+    profiles: list(s.profiles).map(p => ({ id: text(p.id), avatar_id: typeof p.avatar_id === 'string' ? p.avatar_id : null, avatar_version: Number(p.avatar_version) || 0, name: text(p.name, 'Ghost'), display_name: nullableText(p.display_name), persona: text(p.persona), policy: object(p.policy), error: typeof p.error === 'string' ? p.error : undefined,
       conversations: list(p.conversations).map(c => ({ id: text(c.id), title: text(c.title, '새 대화'), model: text(c.model), selected_model: typeof c.selected_model === 'string' ? c.selected_model : undefined, model_pending: typeof c.model_pending === 'boolean' ? c.model_pending : undefined, model_available: typeof c.model_available === 'boolean' ? c.model_available : undefined, model_error: nullableText(c.model_error), offline: c.offline === true,
         messages: list(c.messages).map(m => ({ ...m, role: text(m.role), text: text(m.text) })) as Snapshot['profiles'][number]['conversations'][number]['messages'],
         tasks: list(c.tasks).map(t => ({ id: text(t.id), name: text(t.name, '작업'), phase: text(t.phase, 'unknown'), partial: text(t.partial), output: text(t.output), parent_id: text(t.parent_id) })),

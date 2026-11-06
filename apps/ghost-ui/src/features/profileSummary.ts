@@ -17,7 +17,7 @@ const starterNames: Record<string, string> = {
   'specialist-operations': '운영',
 };
 
-/** Name shown for a Ghost; owner-chosen names are shown as saved. */
-export function ghostDisplayName(name: string) {
-  return starterNames[name] ?? name;
+/** Name shown for a Ghost: the owner's display name, else a readable name for Host starter identifiers, else the profile name. */
+export function ghostDisplayName(profile: { name: string; display_name?: string | null }) {
+  return profile.display_name?.trim() || starterNames[profile.name] || profile.name;
 }

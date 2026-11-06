@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, History, ListTodo, Palette, Settings2, X } from 'lucide-react';
-import { Button, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
+import { Badge, Button, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
 import { DotAvatar } from './DotAvatar';
 import { AgentActivityList, type AgentActivityProps } from './AgentStatus';
 import { toneFor } from '../client/types';
@@ -18,10 +18,12 @@ export interface GhostProfileProps {
   onManage?: () => void;
   /** Inline editor for the Ghost's look and role; opens in place of the profile. */
   design?: ReactNode;
+  /** The owner's main Ghost. */
+  isMain?: boolean;
 }
 
 /** The Ghost's avatar at the top of its conversation; it opens the Ghost's profile, after OpenAI dots. */
-export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWork, historyCount = 0, onOpenHistory, onManage, design }: GhostProfileProps) {
+export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWork, historyCount = 0, onOpenHistory, onManage, design, isMain = false }: GhostProfileProps) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'profile' | 'design'>('profile');
   const go = (action: () => void) => () => { setOpen(false); action(); };
@@ -49,7 +51,7 @@ export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWor
           {design != null && !editing
             ? <button type="button" aria-label={`${name} 꾸미기`} title="꾸미기" onClick={() => setView('design')} className="cursor-pointer rounded-full outline-none hover:opacity-80 focus-visible:outline-2 focus-visible:outline-ink-3"><DotAvatar profileId={ghostID} tone={toneFor(ghostID)} size={64}/></button>
             : <DotAvatar profileId={ghostID} tone={toneFor(ghostID)} size={64}/>}
-          <strong className="mt-1 text-body font-semibold text-ink [overflow-wrap:anywhere]">{name}</strong>
+          <strong className="mt-1 flex items-center gap-1.5 text-body font-semibold text-ink [overflow-wrap:anywhere]">{name}{isMain && <Badge variant="outline">메인</Badge>}</strong>
           {!editing && summary && summary.replace(/[.。]\s*$/, '') !== name && <p className="m-0 line-clamp-2 text-caption leading-relaxed text-ink-2">{summary}</p>}
         </div>
         {editing ? <div className="border-t border-line pt-3">{design}</div> : <>

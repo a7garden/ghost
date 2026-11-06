@@ -42,15 +42,15 @@ function GhostChooser({ profiles, value, onChange, disabled }: { profiles: Profi
   const [open, setOpen] = useState(false);
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      <button type="button" disabled={disabled} aria-label={`받는 Ghost: ${ghostDisplayName(value.name)}`}
+      <button type="button" disabled={disabled} aria-label={`받는 Ghost: ${ghostDisplayName(value)}`}
         className="inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-full pr-2 pl-1 text-caption text-ink-2 outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3 disabled:cursor-not-allowed disabled:opacity-50">
-        <DotAvatar profileId={value.id} tone={toneFor(value.id)} size={18}/><span className="truncate">{ghostDisplayName(value.name)}</span><ChevronDown size={12} aria-hidden="true"/>
+        <DotAvatar profileId={value.id} tone={toneFor(value.id)} size={18}/><span className="truncate">{ghostDisplayName(value)}</span><ChevronDown size={12} aria-hidden="true"/>
       </button>
     </PopoverTrigger>
     <PopoverContent side="top" align="start" aria-label="받는 Ghost" className="grid w-60 gap-0.5 p-1.5">
       {profiles.map(profile => <button key={profile.id} type="button" aria-pressed={profile.id === value.id} onClick={() => { onChange(profile.id); setOpen(false); }}
         className="flex min-h-9 w-full items-center gap-2 rounded-control px-2 text-left text-ui text-ink outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3">
-        <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={20}/><span className="min-w-0 flex-1 truncate">{ghostDisplayName(profile.name)}</span>
+        <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={20}/><span className="min-w-0 flex-1 truncate">{ghostDisplayName(profile)}</span>
         {profile.id === value.id && <Check size={14} className="text-ink-2" aria-hidden="true"/>}
       </button>)}
     </PopoverContent>
@@ -61,7 +61,7 @@ function GhostChooser({ profiles, value, onChange, disabled }: { profiles: Profi
 export function Overview({ snapshot, connected = true, navigate, onOpenApproval, onStartChat, onOpenGhost, chatTarget, chooseModel = false, workPath, lifetime, workError, workLoading }: OverviewProps) {
   const work = projectDashboardWork(snapshot, lifetime);
   const decisions = inboxItems(snapshot, connected).groups.pending;
-  const names = new Map(snapshot.profiles.map(profile => [profile.id, ghostDisplayName(profile.name)]));
+  const names = new Map(snapshot.profiles.map(profile => [profile.id, ghostDisplayName(profile)]));
   const ongoing = work.tasks.filter(task => task.tone === 'running' || task.tone === 'attention');
   const projects = snapshot.spaces.slice(0, 4);
   const stale = Boolean(workError) || !connected;
@@ -80,7 +80,7 @@ export function Overview({ snapshot, connected = true, navigate, onOpenApproval,
   return <GPage width="content" className="grid content-start gap-8 pt-8">
     <div className="grid gap-2">
       <GComposer variant="conversation" inputId="dashboard-message" rows={1} value={text} onValueChange={setText} onSubmit={value => void send(value)}
-        label={target ? `${ghostDisplayName(target.name)}에게 메시지` : '메시지'} placeholder="무엇을 맡길까요?" submitLabel="보내기"
+        label={target ? `${ghostDisplayName(target)}에게 메시지` : '메시지'} placeholder="무엇을 맡길까요?" submitLabel="보내기"
         disabled={!target} pending={sending}
         footer={target && <div className="flex min-w-0 items-center gap-1">
           <GhostChooser profiles={ghosts} value={target} disabled={sending} onChange={id => { setGhostId(id); setModel(undefined); }}/>
@@ -94,7 +94,7 @@ export function Overview({ snapshot, connected = true, navigate, onOpenApproval,
         const attention = decisions.filter(item => item.ghostId === profile.id).length + work.tasks.filter(task => task.ghostId === profile.id && task.tone === 'attention').length;
         const running = work.tasks.filter(task => task.ghostId === profile.id && task.tone === 'running');
         const latest = work.tasks.find(task => task.ghostId === profile.id && (task.tone === 'attention' || task.tone === 'running'));
-        const name = ghostDisplayName(profile.name);
+        const name = ghostDisplayName(profile);
         return <li key={profile.id}><button type="button" onClick={() => onOpenGhost(profile.id)} aria-label={`${name} 열기`}
           className="flex w-full min-w-0 items-center gap-3 rounded-card border border-line bg-surface px-3 py-3 text-left outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3">
           <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={40}/>

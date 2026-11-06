@@ -400,6 +400,15 @@ pub enum OwnerAction {
         profile_id: String,
         persona: String,
     },
+    /// Owner-chosen name shown for a Ghost; an empty name clears it.
+    ProfileDisplayName {
+        profile_id: String,
+        display_name: String,
+    },
+    /// The owner's main Ghost: the UI's default entry point. It does not change registry kinds.
+    DefaultGhost {
+        profile_id: Option<String>,
+    },
     ConversationModel {
         profile_id: String,
         conversation_id: String,

@@ -958,7 +958,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     handoffSend.current = null;
     void submitConversation();
   });
-  const ghostName = (id: string) => ghostDisplayName(workspaceSnapshot?.profiles.find(profile => profile.id === id)?.name ?? id);
+  const ghostName = (id: string) => ghostDisplayName(workspaceSnapshot?.profiles.find(profile => profile.id === id) ?? { name: id });
   const publicLabel = (target: RegistryConversation) => registry.filter(item => item.ghost_id === target.ghost_id && item.secondary).length > 1
     ? `공개 대화 ${target.conversation_id.slice(0, 8)}` : "공개 대화";
   const selectedProfile = selectedTarget ? workspaceSnapshot?.profiles.find(profile => profile.id === selectedTarget.ghost_id) : undefined;
@@ -987,6 +987,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     {mode === "fixture" && <Banner variant="info">예시 모드입니다. 요청은 이 브라우저의 예시 기록에만 반영되며 실제 호스트나 작업 실행자에게 전달되지 않습니다.</Banner>}
     {!goalDetail && !threadID && feedback}
     {!client.dispatch_enabled && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>Host 복구 모드입니다. 기록은 볼 수 있지만 새 요청은 보낼 수 없습니다.</AlertTitle></Alert>}
+    {mode === "live" && workspaceSnapshot?.lifetime_authority?.runtime_available === false && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>이 Host에는 응답을 만드는 Pi 실행기가 연결되어 있지 않습니다. 보낸 메시지는 저장되지만 답장은 오지 않습니다.</AlertTitle></Alert>}
     {pending.length + recovery.length > 0 && <Alert role="status" variant="warning" aria-label="결과를 확인하지 못한 요청">
       <CircleAlert aria-hidden="true"/>
       <AlertTitle>보낸 요청의 결과를 확인하면 새 요청을 보낼 수 있습니다.</AlertTitle>
@@ -1037,7 +1038,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
               onClick={() => openRegisteredTarget(target, false)}
               className={`h-auto w-full flex-col items-start justify-start gap-2.5 rounded-card px-3 py-2.5 text-left whitespace-normal ${key === selectedTargetKey ? "border-line-strong bg-inset" : ""}`}>
               <span className="flex w-full min-w-0 items-center justify-between gap-2">
-                <strong className="min-w-0 truncate text-ui font-semibold text-ink">{ghostDisplayName(profile.name)}</strong>
+                <strong className="min-w-0 truncate text-ui font-semibold text-ink">{ghostDisplayName(profile)}</strong>
                 {target.kind === 'primary' && <Badge>기본</Badge>}
               </span>
               <span className="flex flex-wrap gap-1.5">
@@ -1046,7 +1047,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
               </span>
             </Button> : <div className="grid w-full gap-2.5 rounded-card border border-dashed border-line bg-surface px-3 py-2.5">
               <span className="flex w-full min-w-0 items-center justify-between gap-2">
-                <strong className="min-w-0 truncate text-ui font-semibold text-ink">{ghostDisplayName(profile.name)}</strong>
+                <strong className="min-w-0 truncate text-ui font-semibold text-ink">{ghostDisplayName(profile)}</strong>
                 <small className="shrink-0 truncate text-caption text-ink-2">{profile.persona}</small>
               </span>
               {target ? <span className="text-caption text-ink-2">등록 대화 마무리 중</span> : <div className="flex flex-wrap gap-2">
@@ -1074,7 +1075,8 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         historyCount={selectedProfile?.conversations.length}
         onOpenHistory={onOpenHistory ? () => onOpenHistory(selectedTarget.ghost_id) : undefined}
         onManage={() => showPanel("ghosts")}
-        design={ghostDesign?.(selectedTarget.ghost_id)}/> : undefined}
+        design={ghostDesign?.(selectedTarget.ghost_id)}
+        isMain={selectedTarget.ghost_id === (workspaceSnapshot?.default_ghost ?? defaultTarget?.ghost_id)}/> : undefined}
       composer={<div className="grid gap-2">
         {selectedTarget && <AgentStatus key={selectedTargetKey} {...activityProps}/>}
         {onOpenApproval && (pendingDocumentReviews.length > 0 || integrationReviews.length > 0) && <div className="flex flex-wrap justify-center gap-2" aria-label="이 대화의 확인할 일">

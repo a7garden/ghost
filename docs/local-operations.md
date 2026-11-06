@@ -33,6 +33,8 @@ curl -fsS http://127.0.0.1:65164/ghost-api/bootstrap | jq '{mode, owner_pid}'
 
 Bun 1.4.2와 `apps/ghost-durable`의 잠금 의존성을 준비한다. 운영 LaunchAgent는 `run --ui`를 사용하므로 `lifetime,workspace-ui` 기능으로 빌드한다. `scripts/install.py --features lifetime,workspace-ui`는 관리되는 releases 링크에만 사용한다. Studio의 bundles 설치는 검증한 버전 디렉터리와 실행 링크를 교체한다. 기존 Rust 빌드에 Pi를 포함하려면 `--skip-build --bundle-pi`를 사용한다. 설치 명세에는 두 실행 파일과 Pi 의존성 잠금 파일의 SHA-256이 들어간다. 운영은 `GHOST_LIFETIME_MODE=broker`, 격리 검증은 별도 상태 루트와 `GHOST_LIFETIME_MODE=fixture`를 사용한다. Pi 실행을 끄려면 `GHOST_LIFETIME_MODE=disabled`를 사용한다. Node 릴리스로 복귀할 수 있도록 기존의 `GHOST_LIFETIME_PI_ENTRY`와 `GHOST_LIFETIME_MODE` 설정을 보관한다.
 
+Pi 실행 파일이 Host 옆에 없고 `GHOST_LIFETIME_PI_ENTRY`도 없으면 Host는 Pi 없이 시작한다. 이때 대화 메시지는 저장되지만 응답 실행은 `queued`에 머문다. `apps/ghost-desktop`의 `tauri dev`가 관리 모드로 띄우는 개발 Host(`target/debug/resources/host/ghost --model mock`)가 이 경우다. 데스크톱 패키지에는 `ghost-pi`가 들어 있지 않다. Snapshot의 `lifetime_authority.runtime_available`이 `false`이면 대화 화면이 이 상태를 알린다. 실제 응답을 확인하려면 Pi가 포함된 외부 Host에 연결한다.
+
 Apple-container 업무는 Pi 기본 파일·셸 도구를 Host가 승인한 업무 공간에서 실행한다. Bun 번들 검증은 별도 Host에서 위임, Pi 재시작 후 대기 해제, 두 산출물의 검수, 기본 대화의 최종 보고까지 다룬다. [직접 실행 계약](pi-direct-execution.md)
 
 ## Ghost 하나로 시작

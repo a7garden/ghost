@@ -43,7 +43,7 @@ export function PackageImport({ workspace, profiles, selected, onClose, onInstal
           <span className="text-caption text-ink-2">{info.ui?.views.map(view => view.label).join(' · ') || '기본 대화'}</span>
         </div>
         <SelectField label="연결할 Ghost" value={profile} onValueChange={setProfile} disabled={busy}
-          options={profiles.map(item => ({ value: item.id, label: ghostDisplayName(item.name) }))}/>
+          options={profiles.map(item => ({ value: item.id, label: ghostDisplayName(item) }))}/>
       </>}
       {error && <InlineError>{error}</InlineError>}
       <Button type="submit" className="justify-self-end" disabled={busy || !info || !profile}>패키지 연결</Button>
@@ -56,7 +56,7 @@ export function PortraitPicker({ profile, onClose, ...colors }: PortraitColorPro
     <div className="grid gap-5">
       <div className="grid justify-items-center gap-2">
         <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={96}/>
-        <span className="text-ui font-medium text-ink">{ghostDisplayName(profile.name)}</span>
+        <span className="text-ui font-medium text-ink">{ghostDisplayName(profile)}</span>
       </div>
       <PortraitColors profileId={profile.id} {...colors}/>
     </div>

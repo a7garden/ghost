@@ -10,7 +10,7 @@ export function searchWorkspace(snapshot: Pick<Snapshot, 'profiles' | 'goals' | 
   const q = query.trim().toLowerCase();
   const hits: SearchHit[] = [];
   for (const p of snapshot.profiles) {
-    const name = ghostDisplayName(p.name);
+    const name = ghostDisplayName(p);
     if (`${p.name} ${name} ${p.persona}`.toLowerCase().includes(q)) hits.push({ kind: 'ghost', id: p.id, title: name, subtitle: p.persona, path: `/ghosts/${p.id}`, profile_id: p.id });
     for (const g of snapshot.goals) {
       if (g.profile_id !== p.id || !g.title.toLowerCase().includes(q)) continue;

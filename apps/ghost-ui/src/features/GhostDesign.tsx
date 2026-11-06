@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Check } from 'lucide-react';
-import { Button, InlineError, Textarea } from '@garden/ui';
+import { Button, InlineError, Input, Switch, Textarea } from '@garden/ui';
 import { DotAvatar, type PortraitAppearance } from '../components/DotAvatar';
 import { useAvatarSource, useProfileAvatar } from '../pets/AvatarProvider';
 import { GhostColorPicker } from '../pets/GhostColorPicker';
@@ -8,6 +8,7 @@ import { PetSprite } from '../pets/PetSprite';
 import { toneFor, type Avatar, type Command, type Profile } from '../client/types';
 import { portraitColors } from './PackageWorkspace';
 import { uiTerms } from '../uiText';
+import { ghostDisplayName } from './profileSummary';
 
 const boldColors = [
   { name: '빨강', color: '#e92b37' }, { name: '주황', color: '#ff7a18' }, { name: '노랑', color: '#ffd600' },
@@ -49,14 +50,18 @@ function AvatarTile({ avatar, selected, disabled, onSelect }: { avatar: Avatar; 
   </button>;
 }
 
-/** The Ghost's look and role in one place: avatar, colours and role instructions. Saves each change directly. */
-export function GhostDesignEditor({ profile, avatars, action, connected, colors }: {
+/** The Ghost's name, look and role in one place. Each change saves directly. */
+export function GhostDesignEditor({ profile, avatars, action, connected, colors, isMain }: {
   profile: Profile; avatars: Avatar[]; connected: boolean;
   action(command: Command): Promise<Record<string, any>>;
   colors: ReactNode;
+  /** This Ghost is the owner's main Ghost. */
+  isMain: boolean;
 }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [persona, setPersona] = useState(profile.persona);
+  const savedName = ghostDisplayName(profile);
+  const [name, setName] = useState(savedName);
   const locked = busy || !connected;
   const run = async (command: Command, done: string) => {
     setBusy(true); setError(''); setNotice('');
@@ -67,6 +72,23 @@ export function GhostDesignEditor({ profile, avatars, action, connected, colors 
   const assign = (id: string | null) => void run({ type: 'workspace', action: { type: 'set_profile_avatar', profile_id: profile.id, avatar_id: id, version: profile.avatar_version ?? 0 } }, '아바타를 바꿨습니다.');
 
   return <div className="grid gap-4">
+    <form className="grid gap-2" onSubmit={event => {
+      event.preventDefault();
+      const next = name.trim();
+      if (next && next !== savedName) void run({ type: 'workspace', action: { type: 'profile_display_name', profile_id: profile.id, display_name: next } }, '이름을 바꿨습니다.');
+    }}>
+      <label className="grid gap-2 text-caption text-ink-2">이름
+        <div className="flex gap-2">
+          <Input value={name} onChange={event => setName(event.target.value)} maxLength={40} required disabled={locked} className="min-w-0 flex-1"/>
+          {name.trim() !== savedName && <Button type="submit" size="sm" disabled={locked || !name.trim()}>저장</Button>}
+        </div>
+      </label>
+    </form>
+    <label className="flex items-center justify-between gap-3 text-caption text-ink-2">메인 Ghost
+      <Switch checked={isMain} disabled={locked || isMain} onCheckedChange={checked => {
+        if (checked) void run({ type: 'workspace', action: { type: 'default_ghost', profile_id: profile.id } }, `${savedName}을(를) 메인 Ghost로 지정했습니다.`);
+      }}/>
+    </label>
     <fieldset className="m-0 grid gap-2"><legend className="mb-2 text-caption text-ink-2">아바타</legend>
       <div className="grid grid-cols-5 gap-1.5">
         <button type="button" aria-pressed={!profile.avatar_id} disabled={locked} onClick={() => profile.avatar_id && assign(null)} title="기본 Ghost"

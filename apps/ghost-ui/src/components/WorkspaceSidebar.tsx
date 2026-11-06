@@ -1,14 +1,14 @@
-import { Folder, History, Home, LayoutGrid, LayoutList, Plus, Settings2 } from 'lucide-react';
-import { useId } from 'react';
+import { ChevronRight, Folder, History, Home, LayoutGrid, LayoutList, Plus, Settings2 } from 'lucide-react';
+import { useEffect, useId, useState } from 'react';
 import { Badge, GNavigation, GNavigationGroup, GNavigationItem } from '@garden/ui';
-import type { DotState, Snapshot } from '../client/types';
+import type { DotState, Profile, Snapshot } from '../client/types';
 import { dotState, stateLabel, toneFor } from '../client/types';
 import { DotAvatar } from './DotAvatar';
 import { routeLabels } from '../uiText';
 import type { HostStatus } from '../features/hostStatus';
 import { ghostDisplayName } from '../features/profileSummary';
 
-/** One page inside the open Ghost besides its conversation: its work, package views and earlier conversations. */
+/** One page of a Ghost besides its conversation: its work, package views and earlier conversations. */
 export interface GhostMenuItem { key: string; label: string; path: string; kind: 'work' | 'view' | 'history' }
 
 const menuIcons = { work: LayoutList, view: LayoutGrid, history: History };
@@ -25,8 +25,9 @@ export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, cu
   section: string;
   /** Ghost whose pages are on screen; null on workspace pages. */
   openGhostId: string | null;
-  ghostMenu: GhostMenuItem[];
+  ghostMenu(profile: Profile): GhostMenuItem[];
   currentGhostPage: string | null;
+  /** The owner's main Ghost: listed first and marked. */
   defaultGhostId: string | null;
   selectedSpace?: string;
   attentionCount: number;
@@ -39,6 +40,14 @@ export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, cu
   const hostStatusId = useId();
   // The default Ghost is the entry point, so it always leads the list.
   const ghosts = [...snapshot?.profiles ?? []].sort((a, b) => Number(b.id === defaultGhostId) - Number(a.id === defaultGhostId));
+  // Each Ghost folds on its own; opening a Ghost unfolds it, and the chevron folds or unfolds without navigating.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(openGhostId ? [openGhostId] : []));
+  useEffect(() => { if (openGhostId) setExpanded(current => current.has(openGhostId) ? current : new Set(current).add(openGhostId)); }, [openGhostId]);
+  const toggle = (id: string) => setExpanded(current => {
+    const next = new Set(current);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
   const spaces = snapshot?.spaces ?? [];
   const hostTrouble = status.state !== 'connected' && status.state !== 'demo';
   return <>
@@ -48,16 +57,26 @@ export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, cu
       </GNavigationItem>
       {ghosts.length > 0 && <GNavigationGroup label="Ghost">{ghosts.map(profile => {
         const open = profile.id === openGhostId;
-        const name = ghostDisplayName(profile.name);
+        const name = ghostDisplayName(profile);
         const state = dotState(profile, snapshot?.reviews ?? []);
+        const menu = ghostMenu(profile);
+        const unfolded = menu.length > 0 && expanded.has(profile.id);
         return <div key={profile.id} className="grid gap-1">
-          <GNavigationItem current={open && currentGhostPage === 'chat'} className={open ? 'text-ink' : undefined} onClick={() => openGhost(profile.id)}>
-            <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={18}/><span className="flex-1">{name}</span>
-            {stateDot[state] && <span className={`size-1.5 shrink-0 rounded-full ${stateDot[state]}`} title={stateLabel[state]}><span className="sr-only">{stateLabel[state]}</span></span>}
-          </GNavigationItem>
-          {open && ghostMenu.length > 0 && <div className="ml-[17px] grid gap-1 border-l border-line pl-1.5">{ghostMenu.map(item => {
+          <div className="relative">
+            {/* Garden's unlayered item padding beats utilities; the chevron's room is set inline. */}
+            <GNavigationItem current={open && currentGhostPage === 'chat'} className={`w-full ${open ? 'text-ink' : ''}`} style={menu.length ? { paddingRight: 34 } : undefined} onClick={() => openGhost(profile.id)}>
+              <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={18}/><span className="min-w-0 flex-1 truncate">{name}</span>
+              {profile.id === defaultGhostId && <Badge variant="outline">메인</Badge>}
+              {stateDot[state] && <span className={`size-1.5 shrink-0 rounded-full ${stateDot[state]}`} title={stateLabel[state]}><span className="sr-only">{stateLabel[state]}</span></span>}
+            </GNavigationItem>
+            {menu.length > 0 && <button type="button" aria-expanded={unfolded} aria-label={`${name} 하위 메뉴 ${unfolded ? '접기' : '펼치기'}`} onClick={() => toggle(profile.id)}
+              className="absolute top-1/2 right-1 grid size-6 -translate-y-1/2 cursor-pointer place-items-center rounded-full text-ink-3 outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3">
+              <ChevronRight size={14} aria-hidden="true" className={`transition-transform motion-reduce:transition-none ${unfolded ? 'rotate-90' : ''}`}/>
+            </button>}
+          </div>
+          {unfolded && <div className="ml-[17px] grid gap-1 border-l border-line pl-1.5">{menu.map(item => {
             const Icon = menuIcons[item.kind];
-            return <GNavigationItem key={item.key} current={item.key === currentGhostPage} onClick={() => navigate(item.path)}><Icon/><span>{item.label}</span></GNavigationItem>;
+            return <GNavigationItem key={item.key} current={open && item.key === currentGhostPage} onClick={() => navigate(item.path)}><Icon/><span>{item.label}</span></GNavigationItem>;
           })}</div>}
         </div>;
       })}</GNavigationGroup>}

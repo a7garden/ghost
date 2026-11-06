@@ -35,14 +35,27 @@ fn retryable_pi_response(target: &str, response: &Response) -> bool {
         && response.retry_class == RetryClass::SameId
 }
 
-pub(crate) fn start(host: &Arc<Host>) -> Result<()> {
+/// The Pi launcher and runtime mode this process would use, or None when Pi
+/// is disabled or absent (conversation turns then stay queued).
+fn configured_runtime() -> Result<Option<(PiLauncher, String)>> {
     let mode = std::env::var("GHOST_LIFETIME_MODE");
-    if matches!(mode.as_deref(), Ok("disabled")) { return Ok(()); }
+    if matches!(mode.as_deref(), Ok("disabled")) { return Ok(None); }
     let entry = std::env::var_os("GHOST_LIFETIME_PI_ENTRY").map(PathBuf::from);
     let executable = std::env::current_exe()?.canonicalize()?;
-    let Some(launcher) = PiLauncher::discover(&executable, entry.as_deref())? else { return Ok(()); };
+    let Some(launcher) = PiLauncher::discover(&executable, entry.as_deref())? else { return Ok(None); };
     let mode = mode.context("GHOST_LIFETIME_MODE must explicitly select fixture or broker")?;
     anyhow::ensure!(matches!(mode.as_str(), "fixture" | "broker"), "invalid lifetime runtime mode");
+    Ok(Some((launcher, mode)))
+}
+
+/// Whether this process can run Pi for conversations; reported to clients so a
+/// Host without Pi does not look like a slow one.
+pub(crate) fn runtime_configured() -> bool {
+    matches!(configured_runtime(), Ok(Some(_)))
+}
+
+pub(crate) fn start(host: &Arc<Host>) -> Result<()> {
+    let Some((launcher, mode)) = configured_runtime()? else { return Ok(()); };
     let weak = Arc::downgrade(host);
     let root = host.root.join("durable");
     host.spawn(async move { run(weak, launcher, root, mode).await; });

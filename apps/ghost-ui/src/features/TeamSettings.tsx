@@ -17,11 +17,11 @@ export function TeamSettings({ profiles, defaultGhostId, connected, onChat, onMa
       </div>
     </div>
     <GSettingsGroup title={<span className="sr-only">Ghost 목록</span>}>{[...profiles].sort((a, b) => Number(b.id === defaultGhostId) - Number(a.id === defaultGhostId)).map(profile => {
-      const name = ghostDisplayName(profile.name);
+      const name = ghostDisplayName(profile);
       return <GSettingsRow key={profile.id} label={<span className="flex min-w-0 items-center gap-3">
         <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={36}/>
         <span className="flex min-w-0 flex-col gap-1">
-          <span className="flex flex-wrap items-center gap-1.5 text-ui font-medium text-ink [overflow-wrap:anywhere]">{name}{profile.id === defaultGhostId && <Badge variant="outline">기본</Badge>}</span>
+          <span className="flex flex-wrap items-center gap-1.5 text-ui font-medium text-ink [overflow-wrap:anywhere]">{name}{profile.id === defaultGhostId && <Badge variant="outline">메인</Badge>}</span>
           <span className="text-caption text-ink-3">{profileSummary(profile.persona)}</span>
         </span>
       </span>}>

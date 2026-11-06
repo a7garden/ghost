@@ -626,6 +626,36 @@ pub fn apply(app: &Arc<Host>, s: &State, request: &str, action: OwnerAction) -> 
             store.persona = persona;
             Ok(json!({"updated":true,"applies_to_new_conversations":true}))
         }
+        OwnerAction::ProfileDisplayName {
+            profile_id,
+            display_name,
+        } => {
+            if !s.profiles.contains_key(&profile_id) {
+                bail!("Ghost missing");
+            }
+            let name = display_name.trim();
+            if name.is_empty() {
+                s.journal.delete("display_name", &profile_id)?;
+                return Ok(json!({"display_name":null}));
+            }
+            if name.chars().count() > 40 || name.chars().any(char::is_control) {
+                bail!("display name must be 1-40 characters without control characters");
+            }
+            s.journal.put("display_name", &profile_id, &name)?;
+            Ok(json!({"display_name":name}))
+        }
+        OwnerAction::DefaultGhost { profile_id } => {
+            match &profile_id {
+                Some(id) => {
+                    if !s.profiles.contains_key(id) {
+                        bail!("Ghost missing");
+                    }
+                    s.journal.put("meta", "default_ghost", id)?;
+                }
+                None => s.journal.delete("meta", "default_ghost")?,
+            }
+            Ok(json!({"default_ghost":profile_id}))
+        }
         OwnerAction::ConversationModel {
             profile_id,
             conversation_id,

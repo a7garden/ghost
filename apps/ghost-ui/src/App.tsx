@@ -27,7 +27,7 @@ import { searchWorkspace } from './client/searchIndex';
 import { inboxItems } from './client/inbox';
 import type { Client } from './client/types';
 import { useWorkspace } from './client/useWorkspace';
-import type { Review } from './client/types';
+import type { Profile, Review } from './client/types';
 import { CollaborationView } from './features/CollaborationView';
 import { CollaborateForm } from './features/CollaborateForm';
 import { LifetimeRoute } from './features/LifetimeRoute';
@@ -177,7 +177,9 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   useEffect(resetScroll, [section, dotId]);
   const inbox = snapshot ? inboxItems(snapshot, !error) : null;
   const attentionCount = inbox?.approvalCount ?? 0;
-  const homeGhostId = dashboardWork.defaultGhostId ?? defaultGhostId ?? null;
+  // The owner's chosen main Ghost wins; otherwise the registered Primary is the entry point.
+  const homeGhostId = (snapshot?.default_ghost && profiles.some(profile => profile.id === snapshot.default_ghost) ? snapshot.default_ghost : null)
+    ?? dashboardWork.defaultGhostId ?? defaultGhostId ?? null;
   // The primary conversation is the only valid default in Pi mode; legacy mode falls back to the first Ghost.
   const chatTarget = profiles.find(profile => profile.id === homeGhostId) ?? (primaryChat ? undefined : profiles[0]);
   const assign = () => {
@@ -220,16 +222,16 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const openGhostId = section === 'lifetime' && !allWork ? selected?.id ?? null : section === 'ghosts' ? dotId : null;
   const openGhost = profiles.find(profile => profile.id === openGhostId);
   // The Ghost's own row opens its conversation; the sub-items are the Ghost's other pages.
-  const ghostMenu: GhostMenuItem[] = openGhost ? [
-    ...(primaryChat ? [{ key: 'work', label: '맡은 일', path: `/lifetime?ghost=${encodeURIComponent(openGhost.id)}&panel=work`, kind: 'work' as const }] : []),
-    ...views.map(view => ({ key: `view:${view.id}`, label: view.label, path: viewPath(openGhost.id, view.id), kind: 'view' as const })),
-    ...(primaryChat && openGhost.conversations.length > 0 ? [{ key: 'history', label: '이전 대화', path: legacyHistoryPath(openGhost.id), kind: 'history' as const }] : []),
-  ] : [];
+  const ghostMenu = (ghost: Profile): GhostMenuItem[] => [
+    ...(primaryChat ? [{ key: 'work', label: '맡은 일', path: `/lifetime?ghost=${encodeURIComponent(ghost.id)}&panel=work`, kind: 'work' as const }] : []),
+    ...(packages[ghost.id]?.ui?.views ?? []).map(view => ({ key: `view:${view.id}`, label: view.label, path: viewPath(ghost.id, view.id), kind: 'view' as const })),
+    ...(primaryChat && ghost.conversations.length > 0 ? [{ key: 'history', label: '이전 대화', path: legacyHistoryPath(ghost.id), kind: 'history' as const }] : []),
+  ];
   const currentGhostPage = !openGhost ? null
     : section === 'lifetime' ? params.get('panel') === 'work' ? 'work' : params.get('panel') === 'ghosts' ? null : 'chat'
     : activeView ? `view:${activeView.id}` : legacyHistoryRequested(route) ? 'history' : 'chat';
-  const ghostPageLabel = ghostMenu.find(item => item.key === currentGhostPage && item.key !== 'chat')?.label;
-  const label = (openGhost && `${ghostDisplayName(openGhost.name)}${ghostPageLabel ? ` · ${ghostPageLabel}` : ''}`)
+  const ghostPageLabel = openGhost && ghostMenu(openGhost).find(item => item.key === currentGhostPage)?.label;
+  const label = (openGhost && `${ghostDisplayName(openGhost)}${ghostPageLabel ? ` · ${ghostPageLabel}` : ''}`)
     || (allWork && routeLabels.work)
     || (section === 'spaces' && snapshot?.spaces.find(space => space.id === selectedSpace)?.name)
     || (section === 'lifetime' ? routeLabels.work : routeLabels[section as keyof typeof routeLabels]) || '찾을 수 없는 화면';
@@ -317,7 +319,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   });
   const ghostDesign = (id: string) => {
     const profile = profiles.find(item => item.id === id);
-    return profile && snapshot ? <GhostDesignEditor key={id} profile={profile} avatars={snapshot.avatars} action={action} connected={connected}
+    return profile && snapshot ? <GhostDesignEditor key={id} profile={profile} avatars={snapshot.avatars} action={action} connected={connected} isMain={id === homeGhostId}
       colors={<PortraitColors profileId={id} {...portraitColorProps(id)}/>}/> : null;
   };
   const lifetimeScreen = (path: string) => {
