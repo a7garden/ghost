@@ -51,3 +51,12 @@ body {
 .ghost-root .ghost-chat .g-conversation__transcript-content {
   padding-top: 88px;
 }
+
+/* Sidebar sections follow each other at row spacing; the group label alone marks the section. */
+.ghost-root .ghost-sidebar {
+  gap: var(--g-space-1, 4px);
+}
+
+.ghost-root .ghost-sidebar .g-navigation-group__label {
+  padding-top: var(--g-space-2, 8px);
+}

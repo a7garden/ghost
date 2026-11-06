@@ -42,7 +42,7 @@ export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, cu
   const spaces = snapshot?.spaces ?? [];
   const hostTrouble = status.state !== 'connected' && status.state !== 'demo';
   return <>
-    <GNavigation label="작업실" className="min-h-0 flex-1 gap-3 overflow-y-auto p-3">
+    <GNavigation label="작업실" className="ghost-sidebar min-h-0 flex-1 overflow-y-auto p-3">
       <GNavigationItem current={section === 'home'} onClick={() => navigate('/')}>
         <Home/><span className="flex-1">{routeLabels.home}</span>{attentionCount > 0 && <Badge variant="warning"><span className="sr-only">확인 필요 </span>{attentionCount}</Badge>}
       </GNavigationItem>
