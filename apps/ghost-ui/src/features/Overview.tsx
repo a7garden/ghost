@@ -1,5 +1,5 @@
-import { ArrowUpRight, ArrowRight, Plus, Search, X, Activity, Inbox, Cpu, Puzzle, Server, Check, MessageCircle } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowUpRight, ArrowRight, ArrowUp, Plus, Search, X, Activity, Inbox, Cpu, Puzzle, Server, Check, MessageCircle } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { DotAvatar } from '../components/DotAvatar';
 import { toneFor } from '../client/types';
 import type { Snapshot, Review, Profile } from '../client/types';
@@ -12,11 +12,13 @@ import type { HostStatus } from './hostStatus';
 
 export interface OverviewProps {
   snapshot: Snapshot; mode: string; connected?: boolean; navigate: (path: string) => void;
-  onReview: (review: Review) => void; onAdd: () => void; onAssign: (profile?: Profile) => void;
+  onReview: (review: Review) => void; onAdd: () => void;
+  /** Sends the first message to `chatTarget`; rejects with a displayable error. */
+  onStartChat: (text: string) => Promise<void>; chatTarget?: Profile;
   defaultGhostId?: string | null;
   lifetime?: LifetimeSnapshot; workError?: string; workLoading?: boolean; status?: HostStatus;
 }
-export function Overview({ snapshot, mode, connected = true, navigate, onReview, onAdd, onAssign, defaultGhostId, lifetime, workError, workLoading, status }: OverviewProps) {
+export function Overview({ snapshot, mode, connected = true, navigate, onReview, onAdd, onStartChat, chatTarget, defaultGhostId, lifetime, workError, workLoading, status }: OverviewProps) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const work = projectDashboardWork(snapshot, lifetime);
@@ -30,7 +32,8 @@ export function Overview({ snapshot, mode, connected = true, navigate, onReview,
   const workPath = snapshot.lifetime_authority ? '/lifetime?panel=work&scope=all' : '/work';
   const host = status ?? { state: mode === 'demo' ? 'demo' : connected ? 'connected' : 'stale', label: mode === 'demo' ? '예시 모드' : connected ? '연결됨' : '갱신 지연' };
   return <div className="dashboard page-content">
-    <div className="page-heading"><h1>대시보드</h1><button className="button primary" onClick={() => onAssign()} disabled={!connected || !snapshot.profiles.length}><Plus size={16}/>일 맡기기</button></div>
+    <div className="page-heading"><h1>대시보드</h1></div>
+    <DashboardComposer target={connected ? chatTarget : undefined} onStart={onStartChat}/>
     <button className="dashboard-host-strip" onClick={() => navigate('/host')}>
       <span className="dashboard-host-symbol"><Server size={18}/></span>
       <strong>Ghost Host</strong><span className="dashboard-status" data-state={host.state}><i/>{host.label}</span>
@@ -53,7 +56,7 @@ export function Overview({ snapshot, mode, connected = true, navigate, onReview,
           {(workError || !connected) && <p className="dashboard-read-warning" role="status">최신 작업 상태를 확인하지 못했습니다. {known ? '마지막으로 확인한 기록입니다.' : '다시 연결해 주세요.'}</p>}
           {!known ? <div className="dashboard-empty" aria-busy={workLoading}><Activity size={24}/><h3>{workLoading ? '작업을 불러오는 중' : '작업 상태 확인 필요'}</h3><p>Host의 현재 작업 기록을 확인하고 있습니다.</p></div>
             : tasks.length ? <div className="dashboard-task-list">{tasks.slice(0, 6).map(task => <button className="dashboard-task" key={task.id} onClick={() => navigate(task.path)}><span className="dashboard-task-indicator" data-tone={task.tone}><Activity size={16}/></span><span className="dashboard-task-copy"><strong>{task.title}</strong><small>{snapshot.profiles.find(p => p.id === task.ghostId)?.name ?? task.ghostId}</small></span><span className="dashboard-task-state" data-tone={task.tone}>{task.label}</span><ArrowUpRight size={14}/></button>)}</div>
-            : <div className="dashboard-empty"><Check size={24}/><h3>{filter === 'attention' ? '확인이 필요한 작업이 없어요' : '진행 중인 작업이 없어요'}</h3><p>Ghost에게 새 일을 맡기면 여기에 표시됩니다.</p><button className="text-button" disabled={!connected || !snapshot.profiles.length} onClick={() => onAssign()}>Ghost와 대화하기<ArrowRight size={14}/></button></div>}
+            : <div className="dashboard-empty"><Check size={24}/><h3>{filter === 'attention' ? '확인이 필요한 작업이 없어요' : '진행 중인 작업이 없어요'}</h3><p>Ghost에게 새 일을 맡기면 여기에 표시됩니다.</p><button className="text-button" disabled={!connected || !chatTarget} onClick={() => document.getElementById('dashboard-message')?.focus()}>Ghost와 대화하기<ArrowRight size={14}/></button></div>}
         </section>
         <section id="dashboard-ghosts" className="dashboard-roster" aria-label="나의 Ghost">
           <div className="section-heading"><h2>나의 Ghost <span className="subtle-count">{snapshot.profiles.length}</span></h2><button className="text-button" disabled={!connected} onClick={onAdd}><Plus size={15}/>Ghost 만들기</button></div>
@@ -75,4 +78,28 @@ export function Overview({ snapshot, mode, connected = true, navigate, onReview,
     </div>
     {mode === 'demo' && <p className="dashboard-demo-note">예시 데이터 · 실제 작업을 실행하지 않습니다.</p>}
   </div>;
+}
+
+function DashboardComposer({ target, onStart }: { target?: Profile; onStart: (text: string) => Promise<void> }) {
+  const [text, setText] = useState(''), [sending, setSending] = useState(false), [error, setError] = useState('');
+  const inFlight = useRef(false);
+  const blocked = !target || sending || !text.trim();
+  const send = async () => {
+    if (blocked || inFlight.current) return;
+    inFlight.current = true; setSending(true); setError('');
+    try { await onStart(text); setText(''); }
+    catch (e) { setError(e instanceof Error ? e.message : '메시지를 보내지 못했습니다.'); }
+    finally { inFlight.current = false; setSending(false); }
+  };
+  return <form className="dashboard-composer composer thread-composer" aria-label="Ghost에게 메시지 보내기" onSubmit={event => { event.preventDefault(); void send(); }}>
+    <label className="sr-only" htmlFor="dashboard-message">{target ? `${target.name}에게 메시지` : '메시지'}</label>
+    <textarea id="dashboard-message" rows={2} maxLength={8192} placeholder="무엇을 맡길까요?" value={text} disabled={!target || sending}
+      onChange={event => setText(event.target.value)}
+      onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); } }}/>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <div className="dashboard-composer-bottom">
+      {target && <span className="dashboard-composer-target"><DotAvatar profileId={target.id} tone={toneFor(target.id)} size={20}/>{target.name}</span>}
+      <button type="submit" className="send-button" disabled={blocked} aria-label="보내기">{sending ? <span className="button-loading"/> : <ArrowUp size={18}/>}</button>
+    </div>
+  </form>;
 }

@@ -53,10 +53,11 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const lifetimeEnabled = lifetimeSetting === 'true' || (lifetimeSetting !== 'false' && Boolean(snapshot?.lifetime_authority));
   const primaryChat = lifetimeEnabled && mode === 'live';
   const workPath = primaryChat ? '/lifetime?panel=work&scope=all' : '/work';
-  const [route, setRoute] = useState(currentRoute), [dialog, setDialog] = useState<'add' | 'assign' | 'search' | 'connection' | 'package' | 'portrait' | 'views' | 'navigation' | null>(null);
+  const [route, setRoute] = useState(currentRoute), [dialog, setDialog] = useState<'add' | 'search' | 'connection' | 'package' | 'portrait' | 'views' | 'navigation' | null>(null);
   const [approval, setApproval] = useState<{ workspaceId: string; ref: ApprovalRef } | null>(null), [formError, setFormError] = useState('');
-  const [assignedProfile, setAssignedProfile] = useState(''), [search, setSearch] = useState('');
-  const assignmentConversation = useRef<Record<string, string>>({});
+  const [search, setSearch] = useState('');
+  // A dashboard message waiting for the primary conversation view to send it.
+  const [chatHandoff, setChatHandoff] = useState<{ id: string; text: string } | null>(null);
   const approvalOpener = useRef<HTMLElement | null>(null);
   const [collaborate, setCollaborate] = useState(false);
   const mainContent = useRef<HTMLElement>(null);
@@ -169,9 +170,28 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   useEffect(resetScroll, [section, dotId]);
   const inbox = snapshot ? inboxItems(snapshot, !error) : null;
   const attentionCount = inbox?.approvalCount ?? 0;
-  const assign = (p?: Profile) => {
-    if (lifetimeEnabled && mode === 'live') { navigate(p ? `/lifetime?ghost=${encodeURIComponent(p.id)}` : '/lifetime'); return; }
-    setAssignedProfile(p?.id ?? snapshot?.profiles[0]?.id ?? ''); setDialog('assign');
+  // The primary conversation is the only valid default in Pi mode; legacy mode falls back to the first Ghost.
+  const chatTarget = profiles.find(profile => profile.id === dashboardWork.defaultGhostId) ?? (primaryChat ? undefined : profiles[0]);
+  const assign = () => {
+    if (primaryChat) { navigate('/lifetime'); return; }
+    navigate('/');
+    requestAnimationFrame(() => document.getElementById('dashboard-message')?.focus());
+  };
+  // The primary conversation view owns privacy, retry and recovery for
+  // `conversation.input`, so the dashboard hands the text to it instead of
+  // sending a second, divergent command path.
+  const startChat = async (text: string) => {
+    if (!snapshot || !chatTarget) throw new Error('메시지를 받을 Ghost를 확인하지 못했습니다.');
+    if (primaryChat) {
+      setChatHandoff({ id: crypto.randomUUID(), text });
+      navigate(`/lifetime?ghost=${encodeURIComponent(chatTarget.id)}`);
+      return;
+    }
+    const created = await action({ type: 'create_conversation', profile_id: chatTarget.id, model: snapshot.default_model, tools: true });
+    const conversation = String(created.conversation_id ?? '');
+    if (!conversation) throw new Error('새 대화를 만들지 못했습니다.');
+    await action({ type: 'submit', profile_id: chatTarget.id, conversation_id: conversation, prompt: text, kind: 'prompt' });
+    navigate(`${ghostPath(chatTarget.id)}?conversation=${encodeURIComponent(conversation)}`);
   };
   const selectedSpace = route.startsWith('/spaces/') ? route.split('/')[2] : snapshot?.spaces[0]?.id;
   const selectDocumentFolder = (id: string) => {
@@ -268,6 +288,8 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
       && pendingRegistration.conversationID === registerID && pendingRegistration.workspaceID === snapshot.workspace_id
       && pendingRegistration.authorityEpoch === snapshot.lifetime_authority?.authority_epoch ? pendingRegistration : undefined;
     return <LifetimeRoute connected={connected} active={Boolean(lifetimePath)} route={path} legacyGhostIDs={snapshot.profiles.map(profile => profile.id)}
+      handoff={lifetimePath === path ? chatHandoff ?? undefined : undefined}
+      onHandoffConsumed={id => setChatHandoff(current => current?.id === id ? null : current)}
       onOpenHistory={ghost => { if (snapshot.profiles.some(profile => profile.id === ghost)) navigate(legacyHistoryPath(ghost)); }}
       action={workspace.lifetimeAction} memoryAction={action} workspaceId={snapshot.workspace_id} authority={snapshot.lifetime_authority} mode={mode}
       documentReviews={snapshot.reviews} documentAuthorityEpoch={snapshot.lifetime_authority?.authority_epoch} onOpenDocumentReview={openDocumentReview}
@@ -313,7 +335,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
       {error && <div className="connection-error" role="alert"><CircleAlert size={17}/><span>{error}</span><button className="text-button" onClick={reconnect}><RefreshCw size={14}/>다시 연결</button></div>}
       {!snapshot || retiredPlanner ? <main className="page-content loading-content" aria-busy={!error}><div className="skeleton heading-skeleton"/><div className="skeleton description-skeleton"/><div className="dot-grid">{[0, 1, 2, 3].map(i => <div className="skeleton dot-skeleton" key={i}/>)}</div>{error && <p>연결되면 저장된 Ghost와 작업을 표시합니다.</p>}</main> : <main ref={mainContent} id="main-content" tabIndex={-1} className={chatLayout ? 'detail-main' : ''}>
         {section === 'settings' && <Settings snapshot={snapshot} route={route} navigate={navigate} action={action} busy={busy} mode={mode} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} connected={connected}/>}
-        {section === 'home' && <Overview snapshot={snapshot} mode={mode} connected={connected} navigate={navigate} onReview={openDocumentReview} onAdd={addGhost} onAssign={assign} defaultGhostId={dashboardWork.defaultGhostId} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading} status={status}/>}
+        {section === 'home' && <Overview snapshot={snapshot} mode={mode} connected={connected} navigate={navigate} onReview={openDocumentReview} onAdd={addGhost} onStartChat={startChat} chatTarget={chatTarget} defaultGhostId={dashboardWork.defaultGhostId} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading} status={status}/>}
         {section === 'ghosts' && dotSegment && (dot && pkg && activeView ?
           <PackageWorkspace key={`${dot.id}:${pkg.digest}:${activeView.id}`} info={pkg} view={activeView}
             onNavigate={view => navigate(viewPath(dot.id, view))} onChat={() => navigate(ghostPath(dot.id))}/> : dot ? lifetimeEnabled && mode === 'live' ? legacyHistoryRequested(route) ? <LegacyTranscript profile={dot} route={route} navigate={navigate}/> : null : <DotDetail key={dot.id} profile={dot} snapshot={snapshot} mode={mode} action={action} busy={busy} connected={!error} routing={workspace.routing} navigate={navigate} route={route} onReview={openDocumentReview}/> : <div className="empty-state"><CircleAlert size={28}/><h1>이 Ghost를 찾을 수 없습니다</h1><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>)}
@@ -366,29 +388,6 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
       setPendingRegistration({ ghostID: id, conversationID, workspaceID: snapshot.workspace_id, authorityEpoch: snapshot.lifetime_authority.authority_epoch });
       navigate(`/lifetime?ghost=${encodeURIComponent(id)}&register=${encodeURIComponent(conversationID)}`);
     } else navigate(ghostPath(id)); }); }}><div className="new-dot-illustration"><DotAvatar tone="mint" size={94}/><DotAvatar tone="lilac" size={74}/></div><label>Ghost 이름<input name="name" placeholder="예: Scout" required maxLength={64} pattern="[A-Za-z0-9_-]+" autoComplete="off"/><span className="field-help">영문, 숫자, 밑줄과 하이픈을 사용할 수 있습니다.</span></label><label>{primaryChat ? "역할 메모" : uiTerms.roleInstructions}<textarea name="persona" placeholder={primaryChat ? "예: 여행 자료와 참고 문헌 정리" : "자료를 조사하고, 확인한 근거와 함께 요약합니다."} required maxLength={4096} rows={3}/></label>{formError && <p className="form-error" role="alert">{formError}</p>}<button className="button primary full-width" disabled={busy || !connected}>{busy ? '만드는 중…' : 'Ghost 만들기'}<Plus size={16}/></button></form></Modal>}
-    {dialog === 'assign' && snapshot && <Modal title="일 맡기기" onClose={close}><form className="form-stack" onSubmit={e => {
-      e.preventDefault();
-      const form = e.currentTarget;
-      const prompt = String(new FormData(form).get('prompt') ?? '');
-      void safe(async () => {
-        if (!prompt.trim()) {
-          (form.elements.namedItem('prompt') as HTMLTextAreaElement)?.focus();
-          throw new Error('맡길 일을 입력해 주세요.');
-        }
-        const p = snapshot.profiles.find(p => p.id === assignedProfile);
-        if (!p) throw new Error('담당 Ghost를 선택해 주세요.');
-        let cid = assignmentConversation.current[p.id];
-        if (!cid) {
-          const created = await action({ type: 'create_conversation', profile_id: p.id, model: snapshot.default_model, tools: true });
-          cid = created.conversation_id;
-          assignmentConversation.current[p.id] = cid;
-        }
-        await action({ type: 'submit', profile_id: p.id, conversation_id: cid, prompt, kind: 'prompt' });
-        delete assignmentConversation.current[p.id];
-        setDialog(null);
-        navigate(`/ghosts/${p.id}?conversation=${cid}`);
-      });
-    }}><label>담당 Ghost<select value={assignedProfile} onChange={e => setAssignedProfile(e.target.value)} disabled={busy}>{snapshot.profiles.map(p => <option key={p.id} value={p.id}>{p.name} · {p.persona.slice(0, 24)}</option>)}</select></label><label>어떤 결과가 필요한가요?<textarea name="prompt" rows={5} placeholder="하고 싶은 일과 원하는 결과를 알려주세요." required maxLength={8192}/></label><p className="field-help">선택한 Ghost의 새 대화에서 진행합니다. 현재 허용된 도구와 권한이 적용됩니다.</p>{formError && <p className="form-error" role="alert">{formError}</p>}<button className="button primary full-width" disabled={busy || !assignedProfile}>{busy ? '요청 저장 중…' : '일 맡기기'}<ArrowUp size={16}/></button></form></Modal>}
     {dialog === 'search' && snapshot && <Modal title={`${uiTerms.workspace} 검색`} onClose={close} className="search-dialog"><label className="search-field"><Search size={18}/><input role="combobox" aria-expanded="true" aria-controls="ghost-search-results" aria-label="작업실 검색" aria-activedescendant={`search-hit-${searchIndex}`} placeholder="Ghost, 화면, 맡긴 일 검색" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={searchKeyDown}/></label><div className="search-results" role="listbox" id="ghost-search-results" aria-label="검색 결과">{searchHits.map((hit, i) => <button key={`${hit.kind}:${hit.id}`} id={`search-hit-${i}`} role="option" aria-selected={i === searchIndex} className={i === searchIndex ? 'selected' : undefined} onClick={() => { runSearch(hit); }}>{hit.kind === 'ghost' && hit.profile_id ? <DotAvatar profileId={hit.profile_id} tone={toneFor(hit.profile_id)} size={36}/> : hit.kind === 'space' ? <Folder size={18}/> : <LayoutList size={18}/>}<span><strong>{hit.title}</strong>{hit.subtitle && <small>{hit.subtitle}</small>}</span><ArrowUpRight size={16}/></button>)}{!searchHits.length && <p className="quiet-empty">다른 이름이나 단어로 검색해 주세요.</p>}</div></Modal>}
     {dialog === 'connection' && <Modal title="작업실 연결" onClose={close}><div className="form-stack"><div className="connection-illustration"><Monitor size={36}/></div><h3>{mode === 'demo' ? '예시 모드입니다' : '로컬 Ghost 호스트를 사용합니다'}</h3><p className="muted">{mode === 'demo' ? '여기 있는 Ghost와 작업은 UI를 살펴보기 위한 예시입니다. 대화, 문서 검토, 반복 작업 변경은 이 브라우저의 예시에만 반영됩니다.' : 'Ghost의 역할, 대화와 맡은 일은 호스트에 저장됩니다. 호스트가 실행 중이면 화면을 닫아도 작업이 이어집니다.'}</p><div className="connection-detail"><span>상태</span><strong>{error ? '다시 연결 필요' : mode === 'demo' ? '예시 모드' : '연결됨'}</strong></div><button className="button secondary" onClick={reconnect}><RefreshCw size={16}/>연결 다시 확인</button></div></Modal>}
     {approval && snapshot?.workspace_id === approval.workspaceId && <ApprovalDrawer

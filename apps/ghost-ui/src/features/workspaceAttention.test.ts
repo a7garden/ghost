@@ -13,7 +13,7 @@ function workspace() {
   snapshot.reviews = [];
   return snapshot;
 }
-const callbacks = { navigate: () => {}, onReview: () => {}, onAdd: () => {}, onAssign: () => {} };
+const callbacks = { navigate: () => {}, onReview: () => {}, onAdd: () => {}, onStartChat: async () => {} };
 
 it('counts exactly the review and task items shown in the inbox, including a failure without reviews', () => {
   const snapshot = workspace(), conversation = snapshot.profiles[0].conversations[0];

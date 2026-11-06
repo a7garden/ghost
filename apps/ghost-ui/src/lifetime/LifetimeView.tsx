@@ -1,6 +1,5 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
 import { ArrowUp, Check, ChevronRight, CircleAlert, Clock3, GitBranch, History, Info, LayoutGrid, MessageSquare, Plus, RefreshCw, Settings2, SlidersHorizontal } from "lucide-react";
 import type { Artifact, ConversationRun, Envelope, Goal, Response, Snapshot, Work } from "../../../../contracts/lifetime/bindings.ts";
 import { isArtifact, isPrivacy } from "./guards";
@@ -57,6 +56,9 @@ export interface LifetimeViewProps {
   createRequested?: boolean;
   legacyGhostIDs?: string[];
   onOpenHistory?: (ghostID: string) => void;
+  /** Dashboard text for the requested Ghost's conversation; sent once through the normal composer path. */
+  handoff?: { id: string; text: string };
+  onHandoffConsumed?: (id: string) => void;
 }
 
 const integrationStatusLabels = {
@@ -200,7 +202,7 @@ async function fetchConversationPage(client: LifetimeClient, target: RegistryCon
   };
   return parseConversationPage(await client.request(body), target);
 }
-export function LifetimeView({ active: routeActive = true, mode, client, connected = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, memoryAction, initialGhostID, initialConversationID, initialRegisterConversationID, initialGoalID, initialWorkID, workScope = 'conversation', initialPanel = "conversation", onPanelChange, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, onClearWorkLink, createRequested, legacyGhostIDs = [], onOpenHistory, workspaceSnapshot, onOpenApproval }: LifetimeViewProps) {
+export function LifetimeView({ active: routeActive = true, mode, client, connected = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, memoryAction, initialGhostID, initialConversationID, initialRegisterConversationID, initialGoalID, initialWorkID, workScope = 'conversation', initialPanel = "conversation", onPanelChange, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, onClearWorkLink, createRequested, legacyGhostIDs = [], onOpenHistory, workspaceSnapshot, onOpenApproval, handoff, onHandoffConsumed }: LifetimeViewProps) {
   const [selectedPanel, setSelectedPanel] = useState<LifetimePanel>(initialPanel);
   useEffect(() => setSelectedPanel(initialPanel), [initialPanel]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -746,8 +748,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     }
   }
 
-  async function submitConversation(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
+  async function submitConversation(): Promise<void> {
     if (!selectedTarget) {
       setError("선택한 Ghost의 활성 대화를 확인할 수 없습니다. 대시보드에서 이 Ghost를 열고 대화를 연결해 주세요.");
       return;
@@ -903,6 +904,29 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const submissionBlocked = writesDisabled || Boolean(busy) || loading || !prompt.trim()
     || selectedTarget?.mode !== "active" || publicConversation && effectivePrivacy !== "public"
     || new TextEncoder().encode(prompt).length > 65_536 || attachments.length > 16;
+  // Seed the dashboard text into the requested target's draft, then send it
+  // once the composer would accept it. An existing draft is kept and the text
+  // appended without sending, so nothing the owner typed is sent unseen.
+  const seededHandoff = useRef("");
+  const handoffSend = useRef<{ key: string; text: string } | null>(null);
+  useEffect(() => {
+    if (!routeActive || !handoff || seededHandoff.current === handoff.id || initialPanel !== "conversation") return;
+    if (!selectedTarget || initialGhostID && selectedTarget.ghost_id !== initialGhostID) return;
+    seededHandoff.current = handoff.id;
+    const existing = promptDrafts.get(selectedTargetKey) ?? "";
+    updatePrompt(selectedTargetKey, () => existing.trim() ? `${existing}\n\n${handoff.text}` : handoff.text);
+    handoffSend.current = existing.trim() ? null : { key: selectedTargetKey, text: handoff.text };
+    onHandoffConsumed?.(handoff.id);
+  }, [routeActive, handoff, initialPanel, initialGhostID, selectedTarget, selectedTargetKey, promptDrafts, onHandoffConsumed]);
+  useEffect(() => {
+    const queued = handoffSend.current;
+    if (!routeActive || !queued || queued.key !== selectedTargetKey) return;
+    // An empty draft means the seed has not rendered yet; any other edit cancels the send.
+    if (prompt !== queued.text) { if (prompt) handoffSend.current = null; return; }
+    if (submissionBlocked) return;
+    handoffSend.current = null;
+    void submitConversation();
+  });
   const ghostName = (id: string) => workspaceSnapshot?.profiles.find(profile => profile.id === id)?.name ?? id;
   const publicLabel = (target: RegistryConversation) => registry.filter(item => item.ghost_id === target.ghost_id && item.secondary).length > 1
     ? `공개 대화 ${target.conversation_id.slice(0, 8)}` : "공개 대화";
@@ -1122,7 +1146,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       action={memoryAction}/>}
     </>}
 
-    {selectedPanel === "conversation" && <form className="lifetime-submit thread-composer" aria-label="메시지 보내기" onSubmit={event => void submitConversation(event)}>
+    {selectedPanel === "conversation" && <form className="lifetime-submit thread-composer" aria-label="메시지 보내기" onSubmit={event => { event.preventDefault(); void submitConversation(); }}>
       {activeTargets.length === 0 && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>메시지를 받을 수 있는 Ghost가 없습니다.</span></p>}
       <label className="lifetime-field"><span className="lifetime-visually-hidden">메시지</span><textarea id="lifetime-message" value={prompt} onChange={event => {
         const text = event.currentTarget.value;
