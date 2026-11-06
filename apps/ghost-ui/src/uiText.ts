@@ -14,7 +14,7 @@ export const uiTerms = {
 } as const;
 
 export const routeLabels = {
-  home: '대시보드',
+  home: '홈',
   settings: uiTerms.settings,
   inbox: uiTerms.inbox,
   work: uiTerms.work,
@@ -22,7 +22,7 @@ export const routeLabels = {
   integrations: '확장',
   providers: '프로바이더',
   host: '호스트',
-  spaces: '문서',
+  spaces: '프로젝트',
   ghosts: 'Ghost',
   lifetime: '대화',
 } as const;

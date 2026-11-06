@@ -192,8 +192,6 @@
   .ghost-arc .thread-composer textarea,
   .ghost-arc .lifetime-panel .thread-composer > .lifetime-field textarea { font-size: 16px; }
 
-  .ghost-arc .main-shell:is(.chat-shell, :has(> main > .thread-archive, > main > .lifetime-route-surface:not([hidden]) > .lifetime-panel[data-panel="conversation"]))
-    .ghost-shell-toolbar .ghost-switcher-trigger { max-width: min(55vw, 15rem); }
   .ghost-arc .thread-toolbar .conversation-title { font-size: var(--text-caption); }
   .ghost-arc .thread-toolbar .thread-toolbar-label { display: none; }
   .ghost-arc .thread-toolbar .lifetime-heading-actions { margin-inline-start: auto; }

@@ -5,18 +5,18 @@ import './arc-adoption.css';
 import { GTitleBar } from '@garden/ui';
 import './desktop-titlebar.css';
 import { AvatarProvider } from './pets/AvatarProvider';
-import { Settings } from './pets/Settings';
+import { Settings, type SettingsSection } from './pets/Settings';
 import { FloatingPet } from './pets/FloatingPet';
 import { usePreferences } from './pets/preferences';
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { ArrowUpRight, Folder, LayoutList, Plus, Search, ArrowUp, RefreshCw, CircleAlert, Monitor, Menu } from 'lucide-react';
+import { ArrowUpRight, Folder, LayoutList, Plus, Search, RefreshCw, CircleAlert, Monitor, Menu, Puzzle, Server, Users } from 'lucide-react';
 import { DotAvatar, PortraitAppearances, type PortraitAppearance } from './components/DotAvatar';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { Modal } from './components/Modal';
 import { Integrations } from './features/Integrations';
 import { Overview } from './features/Overview';
 import { HostView } from './features/HostView';
-import { ModelSettings } from './pets/ModelSettings';
+import { TeamSettings } from './features/TeamSettings';
 import { hostStatus } from './features/hostStatus';
 import { useDashboardWork } from './features/useDashboardWork';
 import { DotDetail } from './features/DotDetail';
@@ -28,14 +28,14 @@ import { inboxItems } from './client/inbox';
 import type { Client } from './client/types';
 import { useWorkspace } from './client/useWorkspace';
 import { toneFor } from './client/types';
-import type { Profile, Review } from './client/types';
+import type { Review } from './client/types';
 import { CollaborationView } from './features/CollaborationView';
 import { CollaborateForm } from './features/CollaborateForm';
 import { LifetimeRoute } from './features/LifetimeRoute';
 import { LegacyTranscript, legacyHistoryPath, legacyHistoryRequested } from './features/LegacyTranscript';
 import { ApprovalDrawer } from './plugins/ApprovalDrawer';
 import type { Approval, ApprovalRef } from './plugins/approvals';
-import { GhostSwitcher, MobilePrimaryTabs, PackageImport, PortraitPicker } from './features/GhostPackageControls';
+import { MobilePrimaryTabs, PackageImport, PortraitPicker } from './features/GhostPackageControls';
 import { ghostPath, PackageWorkspace, portraitColors, usePackages, viewPath } from './features/PackageWorkspace';
 import { faceColor, isHexColor } from './pets/appearance';
 import './ghost-packages.css';
@@ -77,6 +77,13 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     history.replaceState(history.state, '', `#${workPath}`);
     setRoute(workPath);
   }, [retiredPlanner, workspaceReady, workPath]);
+  // Owner-level pages now live in settings; old links land on the matching tab.
+  const settingsTab = ({ '/host': 'host', '/providers': 'models', '/integrations': 'extensions' } as Record<string, string>)[route.split('?')[0]];
+  useEffect(() => {
+    if (!settingsTab) return;
+    history.replaceState(history.state, '', `#/settings?tab=${settingsTab}`);
+    setRoute(`/settings?tab=${settingsTab}`);
+  }, [settingsTab]);
   const legacyGhostIndex = /^\/ghosts\/?$/.test(route.split('?')[0]);
   useEffect(() => {
     if (!legacyGhostIndex) return;
@@ -88,13 +95,17 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 10000); return () => clearInterval(timer); }, []);
   const status = hostStatus(mode, error, workspace.observedAt, workspace.connecting, clock);
   const connected = status.state === 'connected' || status.state === 'demo';
-  const dashboardWork = useDashboardWork({ workspace: snapshot, mode, read: workspace.lifetimeRead, enabled: section === 'home' || section === 'host', loadRoster: section === 'home' && primaryChat && connected });
+  // undefined = not read yet; null = the Host has no default Ghost.
+  const [defaultGhostId, setDefaultGhostId] = useState<string | null | undefined>(undefined);
+  // The default Ghost labels every page, so it is loaded once even when the first page is not home.
+  const needDefault = primaryChat && defaultGhostId === undefined;
+  const dashboardWork = useDashboardWork({ workspace: snapshot, mode, read: workspace.lifetimeRead, enabled: section === 'home' || section === 'settings' && params.get('tab') === 'host' || needDefault, loadRoster: connected && (needDefault || section === 'home' && primaryChat) });
+  useEffect(() => { if (dashboardWork.defaultGhostId !== undefined) setDefaultGhostId(dashboardWork.defaultGhostId); }, [dashboardWork.defaultGhostId]);
   const profiles = snapshot?.profiles ?? [];
   const dotSegment = section === 'ghosts' ? route.split('/')[2]?.split('?')[0] : null;
   const dot = profiles.find(profile => section === 'lifetime' ? profile.id === params.get('ghost') : encodeURIComponent(profile.id) === dotSegment);
   const dotId = dot?.id ?? null;
   const [lastGhostId, setLastGhostId] = useState<string | null>(null);
-  const [defaultGhostId, setDefaultGhostId] = useState<string | null>(null);
   const [lifetimeGhostId, setLifetimeGhostId] = useState<string | null>(null);
   const [pendingRegistration, setPendingRegistration] = useState<{ ghostID: string; conversationID: string; workspaceID: string; authorityEpoch: number } | null>(null);
   useEffect(() => { if (dotId) setLastGhostId(dotId); }, [dotId]);
@@ -170,8 +181,9 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   useEffect(resetScroll, [section, dotId]);
   const inbox = snapshot ? inboxItems(snapshot, !error) : null;
   const attentionCount = inbox?.approvalCount ?? 0;
+  const homeGhostId = dashboardWork.defaultGhostId ?? defaultGhostId ?? null;
   // The primary conversation is the only valid default in Pi mode; legacy mode falls back to the first Ghost.
-  const chatTarget = profiles.find(profile => profile.id === dashboardWork.defaultGhostId) ?? (primaryChat ? undefined : profiles[0]);
+  const chatTarget = profiles.find(profile => profile.id === homeGhostId) ?? (primaryChat ? undefined : profiles[0]);
   const assign = () => {
     if (primaryChat) { navigate('/lifetime'); return; }
     navigate('/');
@@ -196,24 +208,27 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const selectedSpace = route.startsWith('/spaces/') ? route.split('/')[2] : snapshot?.spaces[0]?.id;
   const selectDocumentFolder = (id: string) => {
     navigate(`/spaces/${id}`);
-    requestAnimationFrame(() => (mainContent.current?.querySelector<HTMLElement>('#document-folder')
-      ?? mainContent.current?.querySelector<HTMLElement>('.space-heading h1'))?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => mainContent.current?.querySelector<HTMLElement>('.space-heading h1')?.focus({ preventScroll: true }));
   };
   const addGhost = () => setDialog('add');
-  const label = lifetimeDot ? 'Ghost 작업실' : dot?.name ?? routeLabels[section as keyof typeof routeLabels] ?? '찾을 수 없는 화면';
+  const chatGhostId = section === 'lifetime' && params.get('panel') !== 'work' ? selected?.id ?? null : section === 'ghosts' ? dotId : null;
+  const label = (chatGhostId && profiles.find(profile => profile.id === chatGhostId)?.name)
+    || (section === 'spaces' && snapshot?.spaces.find(space => space.id === selectedSpace)?.name)
+    || (section === 'lifetime' ? routeLabels.work : routeLabels[section as keyof typeof routeLabels]) || '찾을 수 없는 화면';
   const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, together: true, integrations: true, settings: true, host: true, providers: true };
   const commands: SearchHit[] = [
     ...views.map(view => ({ kind: 'work' as const, id: `view:${view.id}`, title: view.label, path: selected ? viewPath(selected.id, view.id) : '/' })),
     ...[
-      { id: 'inbox', title: routeLabels.inbox, path: '/inbox' },
       { id: 'home', title: routeLabels.home, path: '/' },
-      { id: 'work', title: routeLabels.work, path: workPath },
+      { id: 'inbox', title: routeLabels.inbox, path: '/inbox' },
+      { id: 'work', title: '모든 일', path: workPath },
       { id: 'spaces', title: routeLabels.spaces, path: '/spaces' },
       { id: 'together', title: routeLabels.together, path: '/together' },
-      { id: 'integrations', title: routeLabels.integrations, path: '/integrations' },
-      { id: 'host', title: '호스트', path: '/host' },
-      { id: 'providers', title: '프로바이더', path: '/providers' },
-      { id: 'settings', title: '앱 설정', path: '/settings' },
+      { id: 'team', title: '팀', path: '/settings?tab=team' },
+      { id: 'models', title: '모델', path: '/settings?tab=models' },
+      { id: 'extensions', title: routeLabels.integrations, path: '/settings?tab=extensions' },
+      { id: 'host', title: routeLabels.host, path: '/settings?tab=host' },
+      { id: 'settings', title: routeLabels.settings, path: '/settings' },
     ].map(command => ({ ...command, kind: 'work' as const })),
     { kind: 'work', id: 'package', title: '패키지 추가…', path: '' },
     ...(selected ? [{ kind: 'work' as const, id: 'portrait', title: '초상화 색상', path: '' }] : []),
@@ -275,9 +290,18 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     } else navigate(path);
   };
   const safe = async (fn: () => Promise<void>) => { setFormError(''); try { await fn(); } catch (e) { setFormError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다. 다시 시도해 주세요.'); } };
-  const sidebar = <WorkspaceSidebar snapshot={snapshot} route={route} section={section} dotId={selected?.id ?? null}
-    views={views} activeView={activeView?.id} attentionCount={attentionCount} mode={mode}
-    error={error} lifetimeEnabled={lifetimeEnabled} status={status} navigate={path => { setDialog(null); navigate(path); }}/>;
+  const sidebar = <WorkspaceSidebar snapshot={snapshot} section={section} chatGhostId={chatGhostId} defaultGhostId={homeGhostId}
+    selectedSpace={params.has('new') ? undefined : selectedSpace} views={views} activeView={activeView?.id} attentionCount={attentionCount} status={status}
+    canCreateProject={mode === 'live' && snapshot?.capabilities.documents === true}
+    navigate={path => { setDialog(null); navigate(path); }} openGhost={id => { setDialog(null); switchGhost(id); }}/>;
+  const settingsSections: SettingsSection[] = snapshot ? [
+    { id: 'team', label: '팀', icon: Users, content: <TeamSettings profiles={profiles} defaultGhostId={homeGhostId} connected={connected}
+      onChat={switchGhost} onAdd={addGhost} onImport={() => setDialog('package')}
+      onManage={primaryChat ? id => navigate(`/lifetime?ghost=${encodeURIComponent(id)}&panel=ghosts`) : undefined}
+      onPortrait={id => { setLastGhostId(id); setDialog('portrait'); }}/> },
+    { id: 'extensions', label: routeLabels.integrations, icon: Puzzle, content: <Integrations snapshot={snapshot} action={action} busy={busy} mode={mode} connected={connected} navigate={navigate} packages={packagesLoading ? undefined : packages} packageError={packageError} onRefreshPackages={refresh} onImport={() => setDialog('package')}/> },
+    { id: 'host', label: routeLabels.host, icon: Server, content: <HostView snapshot={snapshot} status={status} observedAt={workspace.observedAt} workObservedAt={dashboardWork.observedAt} workError={dashboardWork.error} reconnect={() => { reconnect(); dashboardWork.refresh(); }} navigate={navigate}/> },
+  ] : [];
 
   const lifetimeScreen = (path: string) => {
     if (!snapshot) return null;
@@ -313,14 +337,12 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
       }}
       navigate={navigate}/>;
   };
-  const ghostSwitcher = <GhostSwitcher profiles={profiles} selected={selected} onSelect={switchGhost} onAdd={addGhost}
-    defaultGhostId={defaultGhostId} onImport={() => setDialog('package')} onPortrait={() => setDialog('portrait')}/>;
   const searchControl = <button className={desktopShell ? 'desktop-command-trigger' : 'icon-button ghost-search-button'} title="명령 검색 · ⌘K" aria-label="명령 검색"
     onClick={() => { setSearch(''); setDialog('search'); }}><Search size={desktopShell ? 16 : 18}/>{desktopShell && <kbd aria-hidden="true">⌘K</kbd>}</button>;
   return <ArcProvider theme={resolvedTheme} density="compact" motion={preferences.animate ? 'user' : 'reduce'} className="ghost-arc"><PortraitAppearances.Provider value={portraits}><AvatarProvider key={snapshot?.workspace_id ?? 'loading'} snapshot={snapshot} query={query} animate={preferences.animate}>
     {desktopShell && <GTitleBar className="ghost-desktop-titlebar" aria-label="Ghost"
       center={<div className="ghost-desktop-titlebar__drag" data-tauri-drag-region>
-        {ghostSwitcher}
+        <span className="shell-location">{label}</span>
       </div>}
       right={<div className="shell-quick-actions"><button className="icon-button mobile-menu-trigger" aria-label="전체 메뉴" onClick={() => setDialog('navigation')}><Menu size={19}/></button>{searchControl}</div>}/>}
     <div className={`app-shell ${desktopShell ? 'app-shell--desktop' : ''}`}>
@@ -328,36 +350,35 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     <div className={`main-shell ${chatLayout ? 'chat-shell' : ''} ${activeView ? 'package-shell' : ''}`}>
       {!desktopShell && <header className="ghost-shell-toolbar">
         <button className="icon-button mobile-menu-trigger" aria-label="전체 메뉴" onClick={() => setDialog('navigation')}><Menu size={19}/></button>
-        {ghostSwitcher}
-        <span className="ghost-shell-location">{activeView?.label ?? (!dot ? label : '')}</span>
+        <span className="ghost-shell-location">{label}</span>
         {searchControl}
       </header>}
       {error && <div className="connection-error" role="alert"><CircleAlert size={17}/><span>{error}</span><button className="text-button" onClick={reconnect}><RefreshCw size={14}/>다시 연결</button></div>}
       {!snapshot || retiredPlanner ? <main className="page-content loading-content" aria-busy={!error}><div className="skeleton heading-skeleton"/><div className="skeleton description-skeleton"/><div className="dot-grid">{[0, 1, 2, 3].map(i => <div className="skeleton dot-skeleton" key={i}/>)}</div>{error && <p>연결되면 저장된 Ghost와 작업을 표시합니다.</p>}</main> : <main ref={mainContent} id="main-content" tabIndex={-1} className={chatLayout ? 'detail-main' : ''}>
-        {section === 'settings' && <Settings snapshot={snapshot} route={route} navigate={navigate} action={action} busy={busy} mode={mode} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} connected={connected}/>}
-        {section === 'home' && <Overview snapshot={snapshot} mode={mode} connected={connected} navigate={navigate} onReview={openDocumentReview} onAdd={addGhost} onStartChat={startChat} chatTarget={chatTarget} defaultGhostId={dashboardWork.defaultGhostId} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading} status={status}/>}
+        {section === 'settings' && <Settings snapshot={snapshot} route={route} navigate={navigate} action={action} busy={busy} mode={mode} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} connected={connected} sections={settingsSections}/>}
+        {section === 'home' && <Overview snapshot={snapshot} connected={connected} navigate={navigate} onOpenApproval={openApproval} onStartChat={startChat} chatTarget={chatTarget} workPath={workPath} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading}/>}
         {section === 'ghosts' && dotSegment && (dot && pkg && activeView ?
           <PackageWorkspace key={`${dot.id}:${pkg.digest}:${activeView.id}`} info={pkg} view={activeView}
             onNavigate={view => navigate(viewPath(dot.id, view))} onChat={() => navigate(ghostPath(dot.id))}/> : dot ? lifetimeEnabled && mode === 'live' ? legacyHistoryRequested(route) ? <LegacyTranscript profile={dot} route={route} navigate={navigate}/> : null : <DotDetail key={dot.id} profile={dot} snapshot={snapshot} mode={mode} action={action} busy={busy} connected={!error} routing={workspace.routing} navigate={navigate} route={route} onReview={openDocumentReview}/> : <div className="empty-state"><CircleAlert size={28}/><h1>이 Ghost를 찾을 수 없습니다</h1><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>)}
         {section === 'work' && <WorkView snapshot={snapshot} action={action} busy={busy} navigate={navigateHistory} onAssign={() => assign()}/>}
         {section === 'together' && <CollaborationView snapshot={snapshot} route={route} mode={mode} action={action} query={query} busy={busy} navigate={navigateHistory} onAssign={() => primaryChat ? assign() : setCollaborate(true)}/>}
-        {section === 'providers' && <div className="page-content providers-page"><div className="page-heading"><h1>프로바이더</h1></div><ModelSettings snapshot={snapshot} action={action} busy={busy} mode={mode} connected={connected}/></div>}
-        {section === 'host' && <HostView snapshot={snapshot} status={status} observedAt={workspace.observedAt} workObservedAt={dashboardWork.observedAt} workError={dashboardWork.error} reconnect={() => { reconnect(); dashboardWork.refresh(); }} navigate={navigate}/>}
-        {section === 'integrations' && <Integrations snapshot={snapshot} action={action} busy={busy} mode={mode} connected={connected} navigate={navigate} packages={packagesLoading ? undefined : packages} packageError={packageError} onRefreshPackages={refresh} onImport={() => setDialog('package')}/>}
         {section === 'inbox' && <InboxView snapshot={snapshot} onOpenApproval={openApproval} navigate={navigate} connected={!error}/>}
-        {section === 'spaces' && <SpacesView key={`${snapshot.workspace_id}:${selectedSpace ?? 'empty'}`} snapshot={snapshot} selectedSpace={selectedSpace}
-          query={query} action={action} connected={connected} busy={busy} mode={mode} onReview={openDocumentReview} onSelectFolder={selectDocumentFolder} theme={resolvedTheme}/>}
+        {section === 'spaces' && <SpacesView key={`${snapshot.workspace_id}:${selectedSpace ?? 'empty'}:${params.get('new') ?? ''}`} snapshot={snapshot} selectedSpace={selectedSpace}
+          query={query} action={action} connected={connected} busy={busy} mode={mode} onReview={openDocumentReview} onSelectFolder={selectDocumentFolder} theme={resolvedTheme}
+          createRequested={params.get('new') === '1'} onCreateClosed={() => {
+            const path = route.startsWith('/spaces/') ? route.split('?')[0] : '/spaces';
+            history.replaceState(history.state, '', `#${path}`);
+            setRoute(path);
+          }}/>}
         {retainedLifetimePath && <div className="lifetime-route-surface" hidden={!lifetimePath}>
           {lifetimeScreen(retainedLifetimePath)}
         </div>}
         {!knownSections[section] && !(section === 'lifetime' && lifetimeEnabled) && <div className="empty-state"><CircleAlert size={28}/><h1>이 화면을 찾을 수 없습니다</h1><p className="muted">주소가 이동했거나 잘못되었을 수 있습니다.</p><button className="button secondary" onClick={() => navigate('/')}>작업실로</button></div>}
       </main>}
     </div>
-    <MobilePrimaryTabs selectedGhostId={selected?.id} hasViews={views.length > 0} workPath={workPath}
-      active={activeView ? 'workspace' : section === 'home' ? 'home' : section === 'inbox' ? 'inbox'
-        : section === 'work' || section === 'lifetime' && params.get('panel') === 'work' ? 'work'
-          : section === 'ghosts' || section === 'lifetime' && !['work', 'ghosts'].includes(params.get('panel') ?? '') ? 'chat' : undefined}
-      onNavigate={navigate} onChat={() => { if (selected) switchGhost(selected.id); }} onWorkspace={() => {
+    <MobilePrimaryTabs canChat={Boolean(chatGhostId ?? homeGhostId ?? profiles[0])} hasViews={views.length > 0}
+      active={activeView ? 'workspace' : section === 'home' ? 'home' : section === 'spaces' ? 'projects' : chatGhostId ? 'chat' : undefined}
+      onNavigate={navigate} onChat={() => { const id = chatGhostId ?? homeGhostId ?? profiles[0]?.id; if (id) switchGhost(id); }} onWorkspace={() => {
         if (!selected) return;
         if (views.length === 1) navigate(viewPath(selected.id, views[0].id));
         else setDialog('views');

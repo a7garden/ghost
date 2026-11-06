@@ -5,41 +5,35 @@ import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { initialWorkspace } from '../fixtures/workspace';
 
 function props() {
-  const snapshot = initialWorkspace(), profile = snapshot.profiles[0];
-  profile.conversations = [
-    { id: 'first', title: '첫 대화', model: 'mock', offline: true, messages: [], tasks: [] },
-    { id: 'second', title: '선택한 대화', model: 'mock', offline: true, messages: [], tasks: [] },
-  ];
-  return { snapshot, route: `/ghosts/${profile.id}?conversation=second`, section: 'ghosts', dotId: profile.id, views: [], attentionCount: 2, mode: 'demo', error: '', lifetimeEnabled: false, navigate() {} };
+  const snapshot = initialWorkspace();
+  return {
+    snapshot, section: 'home', chatGhostId: null as string | null, defaultGhostId: snapshot.profiles[1].id,
+    views: [], attentionCount: 2, status: { state: 'connected', label: '연결됨' } as const, canCreateProject: true, navigate() {}, openGhost() {},
+  };
 }
 
-it('shows each saved conversation once and selects only the routed row', () => {
+it('marks no Ghost as current on workspace pages and lists the default Ghost first', () => {
   const input = props();
-  const earlier = renderToStaticMarkup(createElement(WorkspaceSidebar, input));
-  expect(earlier.match(/aria-current="page"/g)).toHaveLength(1);
-  expect(earlier).toContain('class="nav-row selected" aria-current="page" title="선택한 대화"');
-  expect(earlier.match(/title="첫 대화"/g)).toHaveLength(1);
-
-  const current = renderToStaticMarkup(createElement(WorkspaceSidebar, { ...input, route: `/ghosts/${input.dotId}` }));
-  expect(current.match(/aria-current="page"/g)).toHaveLength(1);
-  expect(current).toContain('class="nav-row selected" aria-current="page" title="첫 대화"');
-  expect(current).toContain('nav-count">2');
+  const html = renderToStaticMarkup(createElement(WorkspaceSidebar, input));
+  expect(html.match(/aria-current="page"/g)).toHaveLength(1);
+  expect(html).toContain('class="nav-row selected" aria-current="page"><svg');
+  expect(html).toContain('<span class="sr-only">확인 필요 </span>2');
+  const chats = html.slice(html.indexOf('aria-label="Ghost 대화"'));
+  expect(chats.indexOf(input.snapshot.profiles[1].name)).toBeLessThan(chats.indexOf(input.snapshot.profiles[0].name));
 });
 
-it('keeps current and archived Host conversations distinct', () => {
-  const input = { ...props(), mode: 'live', lifetimeEnabled: true };
-  const current = renderToStaticMarkup(createElement(WorkspaceSidebar, { ...input, section: 'lifetime', route: `/lifetime?ghost=${input.dotId}` }));
-  expect(current).toContain(`class="nav-row selected" aria-current="page" title="${input.snapshot.profiles[0].name}"`);
-  expect(current.match(/aria-current="page"/g)).toHaveLength(1);
-
-  const archived = renderToStaticMarkup(createElement(WorkspaceSidebar, { ...input, route: `${input.route}&history=1` }));
-  expect(archived).toContain('class="nav-row selected" aria-current="page" title="선택한 대화"');
-  expect(archived.match(/aria-current="page"/g)).toHaveLength(1);
+it('marks exactly the Ghost whose conversation is open', () => {
+  const input = { ...props(), section: 'lifetime', chatGhostId: props().snapshot.profiles[0].id };
+  const html = renderToStaticMarkup(createElement(WorkspaceSidebar, input));
+  expect(html.match(/aria-current="page"/g)).toHaveLength(1);
+  const current = html.slice(html.indexOf('aria-current="page"'));
+  expect(current.slice(0, current.indexOf('</button>'))).toContain(input.snapshot.profiles[0].name);
 });
 
-it('shows direct navigation in a single conversation group', () => {
-  const html = renderToStaticMarkup(createElement(WorkspaceSidebar, props()));
-  expect(html).toContain('class="sidebar-group-title">대화</h2>');
-  expect(html).toContain('협업</span>');
-  expect(html).not.toMatch(/대화 기록<|<details|<summary|aria-expanded=/);
+it('shows host trouble on the settings entry only when the host is not connected', () => {
+  const healthy = renderToStaticMarkup(createElement(WorkspaceSidebar, props()));
+  expect(healthy).not.toContain('sidebar-host-indicator');
+  const html = renderToStaticMarkup(createElement(WorkspaceSidebar, { ...props(), status: { state: 'offline', label: '연결 끊김' } as const }));
+  expect(html).toContain('data-state="offline"');
+  expect(html).toContain('연결 끊김');
 });

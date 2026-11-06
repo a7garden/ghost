@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ArrowLeft, Check, Copy, Download, Monitor, Moon, Palette, PawPrint, Plug, Plus, Sun, Trash2, RefreshCw, FolderInput, Cpu } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Check, Copy, Download, Monitor, Moon, Palette, PawPrint, Plus, Sun, Trash2, RefreshCw, FolderInput, Cpu, type LucideIcon } from 'lucide-react';
 import type { Avatar, Command, Snapshot } from '../client/types';
 import { toneFor } from '../client/types';
 import { DotAvatar } from '../components/DotAvatar';
@@ -18,16 +18,21 @@ import { CodexPetImport } from './CodexPetImport';
 import { ModelSettings } from './ModelSettings';
 
 type Action = (command: Command) => Promise<Record<string, any>>;
-export function Settings({ snapshot, route, navigate, action, busy, mode, preferences, updatePreferences, storageError, connected = true }: { snapshot: Snapshot; route: string; navigate: (path: string) => void; action: Action; busy: boolean; mode: 'demo' | 'live'; preferences: Preferences; updatePreferences: (p: Partial<Preferences>) => void; storageError: string; connected?: boolean }) {
+export interface SettingsSection { id: string; label: string; icon: LucideIcon; content: ReactNode }
+/** `sections` are owner-level areas rendered by the app shell (team, extensions, host). */
+export function Settings({ snapshot, route, navigate, action, busy, mode, preferences, updatePreferences, storageError, connected = true, sections }: { snapshot: Snapshot; route: string; navigate: (path: string) => void; action: Action; busy: boolean; mode: 'demo' | 'live'; preferences: Preferences; updatePreferences: (p: Partial<Preferences>) => void; storageError: string; connected?: boolean; sections: SettingsSection[] }) {
   const params = new URLSearchParams(route.split('?')[1]);
-  const tab = params.get('tab') ?? 'pets';
+  const items = [...sections.slice(0, 1), { id: 'models', label: '모델', icon: Cpu }, ...sections.slice(1), { id: 'appearance', label: '화면', icon: Palette }, { id: 'pets', label: '아바타', icon: PawPrint }];
+  const requested = params.get('tab');
+  const tab = items.some(item => item.id === requested) ? requested! : items[0].id;
   const profileId = params.get('ghost') ?? snapshot.profiles[0]?.id ?? '';
   const profile = snapshot.profiles.find(p => p.id === profileId) ?? snapshot.profiles[0];
   const changeTab = (next: string) => navigate(`/settings?tab=${next}${profile ? `&ghost=${encodeURIComponent(profile.id)}` : ''}`);
-  return <div className="settings-page"><div className="settings-page-heading"><button className="icon-button" aria-label="작업실로 돌아가기" onClick={() => navigate(profile ? `/ghosts/${profile.id}` : '/')}><ArrowLeft size={18}/></button><h1>설정</h1></div><div className="settings-layout"><nav className="settings-nav" aria-label="설정 항목">{[{ id: 'appearance', label: '화면', icon: Palette }, { id: 'pets', label: '아바타', icon: PawPrint }, { id: 'models', label: '모델', icon: Cpu }, { id: 'connections', label: '연결', icon: Plug }].map(item => <button key={item.id} className={`nav-row ${tab === item.id ? 'selected' : ''}`} aria-current={tab === item.id ? 'page' : undefined} onClick={() => changeTab(item.id)}><item.icon size={17}/>{item.label}</button>)}</nav><div className={`settings-content ${tab === 'appearance' ? 'settings-content--appearance' : ''}`}>
+  const shellSection = sections.find(section => section.id === tab);
+  return <div className="settings-page"><div className="settings-page-heading"><h1>설정</h1></div><div className="settings-layout"><nav className="settings-nav" aria-label="설정 항목">{items.map(item => <button key={item.id} className={`nav-row ${tab === item.id ? 'selected' : ''}`} aria-current={tab === item.id ? 'page' : undefined} onClick={() => changeTab(item.id)}><item.icon size={17}/>{item.label}</button>)}</nav><div className={`settings-content ${tab === 'appearance' ? 'settings-content--appearance' : ''}`}>
+    {shellSection?.content}
     {storageError && <p className="form-error" role="alert">{storageError}</p>}
     {tab === 'appearance' && <><h2 className="sr-only">화면</h2><div className="setting-row"><div><strong>테마</strong></div><div className="theme-options">{[{ key: 'system', label: '시스템', Icon: Monitor }, { key: 'light', label: '밝게', Icon: Sun }, { key: 'dark', label: '어둡게', Icon: Moon }].map(v => <button key={v.key} aria-pressed={preferences.theme === v.key} onClick={() => updatePreferences({ theme: v.key as Preferences['theme'] })}><v.Icon size={17}/>{v.label}</button>)}</div></div><Toggle title="아바타 애니메이션" description="작업 중에 움직입니다. 시스템의 동작 줄이기 설정을 따릅니다." checked={preferences.animate} onChange={animate => updatePreferences({ animate })}/><p className="settings-footnote">표시 설정은 이 브라우저에 저장됩니다.</p></>}
-    {tab === 'connections' && <><h2>연결</h2><div className="setting-row"><div><strong>Ghost 호스트</strong><p>{mode === 'live' ? 'Ghost와 아바타를 연결된 로컬 호스트에 저장합니다.' : '예시 작업실입니다. 아바타와 변경 사항은 이 브라우저에 저장됩니다.'}</p></div><span className="mode-badge">{mode === 'live' ? connected ? '호스트 연결됨' : '연결 확인 필요' : '예시 모드'}</span></div><div className="setting-row"><div><strong>외부 도구와 앱</strong><p>Ghost가 사용할 MCP 연결과 권한을 관리합니다.</p></div><button className="button secondary" onClick={() => navigate('/integrations')}>연동 관리</button></div></>}
     {tab === 'models' && <ModelSettings snapshot={snapshot} action={action} busy={busy} mode={mode} connected={connected}/>}
     {tab === 'pets' && <><h2>아바타</h2>
       <PetLibrary key={profile?.id ?? 'empty'} snapshot={snapshot} profileId={profile?.id} action={action} busy={busy} navigate={navigate} animate={preferences.animate} color={preferences.ghostColor} onColor={ghostColor => updatePreferences({ ghostColor })}/>

@@ -17,12 +17,6 @@
 .space-reviews h2 { margin-block-end: var(--space-xs); }
 .space-list-heading { margin-block-end: var(--space-xs); }
 .space-folder-controls { min-width: 0; }
-.space-folder-controls .space-folder-select {
-  width: 10rem;
-  max-width: 100%;
-  min-height: 36px;
-  border-radius: var(--radius-input);
-}
 .space-folder-name { color: var(--color-ink-2); font-size: var(--text-control); overflow-wrap: anywhere; }
 
 .space-controls {
@@ -62,5 +56,6 @@
 .space-reader-note { font-size: var(--text-caption); color: var(--color-text-secondary); }
 .ghost-arc .space-document-editor.modal { width: min(100% - 2 * var(--space-sm), var(--workspace-reading-width)); }
 .space-form-destination { color: var(--color-ink-2); font-size: var(--text-control); }
-.space-form .space-writable { flex-direction: row; align-items: center; }
+.space-form .space-writable { flex-direction: row; align-items: center; justify-content: flex-start; }
+.space-form .space-writable input { width: auto; flex: none; margin: 0; }
 .space-form button[type="submit"] { align-self: flex-end; }

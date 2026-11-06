@@ -1067,13 +1067,15 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
           {Boolean(turn.work_thread_ids?.length) && <div className="lifetime-thread-links">
             {turn.work_thread_ids?.map((id, index) => {
               const goal = conversationGoals.find(item => item.id === id);
-              const title = goal ? workThreadTitle(goal.prompt) : turn.work_thread_ids!.length > 1 ? `작업 스레드 ${index + 1}` : "작업 스레드";
-              const state = goal && boardState(goal, snapshot?.work.filter(work => work.goal_id === id) ?? []).state;
-              return <button type="button" className="lifetime-thread-link" key={id} aria-haspopup="dialog"
-                onClick={() => openWorkThread(id)} aria-label={goal ? `작업 스레드 열기: ${title}${state ? ` · ${goalStateLabels[state] ?? state}` : ""}` : `${title} 열기`} title={title}>
-                <GitBranch size={14} aria-hidden="true"/><span>{title}</span>
-                {state && <small>{goalStateLabels[state] ?? state}</small>}
-                <ChevronRight size={14} aria-hidden="true"/>
+              const title = goal ? workThreadTitle(goal.prompt) : turn.work_thread_ids!.length > 1 ? `일 ${index + 1}` : "일";
+              const workItems = snapshot?.work.filter(work => work.goal_id === id) ?? [];
+              const board = goal && boardState(goal, workItems);
+              const owners = [...new Set(workItems.map(work => ghostName(work.owner)))].join(", ");
+              return <button type="button" className="work-card" data-tone={board?.stage === "active" ? "running" : board?.stage === "review" ? "attention" : undefined}
+                key={id} aria-haspopup="dialog" onClick={() => openWorkThread(id)}
+                aria-label={`일 열기: ${title}${board ? ` · ${goalStateLabels[board.state] ?? board.state}` : ""}`}>
+                <span className="work-card-copy"><strong>{title}</strong>{owners && <small>{owners}</small>}</span>
+                {board && <span className="work-card-state">{goalStateLabels[board.state] ?? board.state}</span>}
               </button>;
             })}
           </div>}

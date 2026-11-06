@@ -87,6 +87,7 @@ export function useDashboardWork({ workspace, mode, read, enabled, loadRoster }:
     if (!loadRoster || scope === null || epoch === undefined) return;
 
     let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const identity = { actor_ref: 'owner', authority_epoch: epoch };
     const readDefault = async () => {
       const transport = createLifetimeControlTransport(read, identity);
@@ -94,8 +95,10 @@ export function useDashboardWork({ workspace, mode, read, enabled, loadRoster }:
       const response = await transport.request(envelope);
       if (active) setRoster({ scope, defaultGhostId: defaultRegistryGhostId(parseRegistryResponse(response)) });
     };
-    void readDefault().catch(() => { /* The badge requires a verified registry response. */ });
-    return () => { active = false; };
+    // The default Ghost addresses the home composer, so a failed read is retried rather than left unknown.
+    const attempt = () => { readDefault().catch(() => { if (active) retry = setTimeout(attempt, 5000); }); };
+    attempt();
+    return () => { active = false; clearTimeout(retry); };
   }, [scope, epoch, read, loadRoster]);
 
   const refresh = useCallback(() => {

@@ -13,7 +13,7 @@ export function HostView({ snapshot, status, observedAt, workObservedAt, workErr
   const capabilities = [
     { title: '문서', supported: snapshot.capabilities.documents === true, Icon: Layers, path: '/spaces' },
     { title: '기억', supported: snapshot.capabilities.memory === true, Icon: Database, path: '/lifetime' },
-    { title: '도구 승인', supported: snapshot.capabilities.integration_approvals === true, Icon: ShieldCheck, path: '/integrations' },
+    { title: '도구 승인', supported: snapshot.capabilities.integration_approvals === true, Icon: ShieldCheck, path: '/settings?tab=extensions' },
   ];
   return <div className="page-content host-page">
     <div className="page-heading"><h1>호스트</h1><button className="button secondary" disabled={status.state === 'connecting'} onClick={reconnect}><RefreshCw size={15}/>연결 확인</button></div>
@@ -27,7 +27,7 @@ export function HostView({ snapshot, status, observedAt, workObservedAt, workErr
         <div><dt>새 작업 접수</dt><dd>{authority ? <><span className="host-inline-icon">{authority.dispatch_enabled ? <Check size={14}/> : <Pause size={14}/>}</span>{authority.dispatch_enabled ? '허용' : '중지'}</> : '상태 제공 안 함'}</dd></div>
         <div><dt>나의 Ghost</dt><dd>{snapshot.profiles.length}</dd></div>
       </dl><p className="field-help">접수 허용은 실행 정책입니다. 모델과 도구의 실제 실행 결과는 작업에서 확인합니다.</p><button className="text-button" onClick={() => navigate(authority ? '/lifetime?panel=work&scope=all' : '/work')}>작업 확인<ArrowUpRight size={14}/></button></section>
-      <section className="host-panel"><h2>모델과 확장</h2><button className="host-link-row" onClick={() => navigate('/providers')}><Cpu size={19}/><span><strong>프로바이더 연결</strong><small>사용할 모델과 인증 설정</small></span><ArrowUpRight size={16}/></button><button className="host-link-row" onClick={() => navigate('/integrations')}><Layers size={19}/><span><strong>확장 관리</strong><small>패키지, 도구 권한, 휴대폰 연결</small></span><ArrowUpRight size={16}/></button></section>
+      <section className="host-panel"><h2>모델과 확장</h2><button className="host-link-row" onClick={() => navigate('/settings?tab=models')}><Cpu size={19}/><span><strong>프로바이더 연결</strong><small>사용할 모델과 인증 설정</small></span><ArrowUpRight size={16}/></button><button className="host-link-row" onClick={() => navigate('/settings?tab=extensions')}><Layers size={19}/><span><strong>확장 관리</strong><small>패키지, 도구 권한, 휴대폰 연결</small></span><ArrowUpRight size={16}/></button></section>
     </div>
     <section className="host-capabilities"><div className="section-heading"><h2>호스트 기능</h2><span className="field-help">Host가 보고한 지원 여부</span></div><div>{capabilities.map(({title,supported,Icon,path}) => <button key={title} onClick={() => navigate(path)} disabled={!supported}><Icon size={19}/><strong>{title}</strong><span>{supported ? '지원' : '미지원'}</span><ArrowUpRight size={14}/></button>)}</div><p className="field-help">기능 지원과 Ghost별 실행 권한은 별개입니다.</p></section>
     <DetailDialog title="연결 정보" className="host-diagnostics"><dl className="host-facts"><div><dt>작업실 ID</dt><dd><code>{snapshot.workspace_id}</code></dd></div><div><dt>실행 권한 판본</dt><dd>{authority?.authority_epoch ?? '제공 안 함'}</dd></div><div><dt>전송 모드</dt><dd>{status.state === 'demo' ? '브라우저 예시' : '인증된 Host 연결'}</dd></div></dl></DetailDialog>

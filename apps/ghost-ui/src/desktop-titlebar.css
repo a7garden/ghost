@@ -18,23 +18,7 @@
   height: 100%;
   min-width: 0;
 }
-.ghost-desktop-titlebar .ghost-switcher-trigger {
-  gap: 7px;
-  min-height: 34px;
-  max-width: min(33vw, 252px);
-  font-size: 13px;
-}
-.ghost-desktop-titlebar .ghost-switcher-identity > .dot-avatar { width: 24px !important; height: 24px !important; }
-.ghost-desktop-titlebar .ghost-switcher-icon { opacity: .7; }
-.ghost-desktop-titlebar .ghost-switcher-menu {
-  inset-inline-start: 50%;
-  top: calc(100% + 4px);
-  width: 244px;
-  transform: translateX(-50%);
-}
-.ghost-desktop-titlebar .ghost-switcher-menu .nav-row { min-height: 36px; }
-.ghost-desktop-titlebar .ghost-switcher-menu,
-.ghost-desktop-titlebar .ghost-switcher { -webkit-app-region: no-drag; }
+.ghost-desktop-titlebar .shell-location { max-width: min(40vw, 360px); }
 .desktop-command-trigger {
   display: inline-flex;
   align-items: center;
@@ -96,7 +80,6 @@ html:has(.app-shell--desktop), body:has(.app-shell--desktop) {
 }
 .app-shell--desktop > .chat-shell > main { overflow: hidden; }
 .app-shell--desktop :is(.sidebar-scroll, .conversation-scroll, .lifetime-transcript, .context-deck, .context-sidebar-content),
-.ghost-desktop-titlebar .ghost-switcher-list,
 .ghost-arc:has(.app-shell--desktop) :is(dialog, .search-results, .history-list) { overscroll-behavior: none; }
 
 .ghost-desktop-titlebar, .app-shell--desktop :is(.sidebar, .conversation-toolbar, .connection-error),

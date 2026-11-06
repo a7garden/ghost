@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { Select as ArcSelect } from '@garden/arc/select';
 import { ArrowRight, FileText, FolderPlus, Plus, Search, Trash2, X } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { ConfirmedFailure, documentPreflightMessage } from '../client/errors';
@@ -11,7 +10,7 @@ import './spaces.css';
 
 type WorkspaceAction = (command: Command) => Promise<Record<string, unknown>>;
 
-export function SpacesView({ snapshot, selectedSpace, query: read, action, onReview, connected, busy, mode, onSelectFolder, theme }: {
+export function SpacesView({ snapshot, selectedSpace, query: read, action, onReview, connected, busy, mode, onSelectFolder, theme, createRequested = false, onCreateClosed }: {
   snapshot: Snapshot;
   selectedSpace?: string;
   query: (command: Command) => Promise<unknown>;
@@ -22,6 +21,10 @@ export function SpacesView({ snapshot, selectedSpace, query: read, action, onRev
   mode: 'live' | 'demo';
   onSelectFolder: (id: string) => void;
   theme: 'light' | 'dark';
+  /** Opens the new project (folder) form once, from the sidebar's 새 프로젝트. */
+  createRequested?: boolean;
+  /** Clears the request from the route so the same entry can open the form again. */
+  onCreateClosed?: () => void;
 }) {
   const space = snapshot.spaces.find(item => item.id === selectedSpace);
   const spaceId = space?.id;
@@ -38,7 +41,7 @@ export function SpacesView({ snapshot, selectedSpace, query: read, action, onRev
   const [listError, setListError] = useState('');
   const [openError, setOpenError] = useState('');
   const [reload, setReload] = useState(0);
-  const [form, setForm] = useState<'document' | 'folder'>();
+  const [form, setForm] = useState<'document' | 'folder' | undefined>(() => createRequested && canConnect ? 'folder' : undefined);
   const opener = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
 
@@ -89,9 +92,7 @@ export function SpacesView({ snapshot, selectedSpace, query: read, action, onRev
 
   return <div className="page-content space-library">
     <header className="space-heading">
-      <div><h1 tabIndex={-1}>{routeLabels.spaces}</h1>
-        <p>{mode === 'demo' ? '예시 모드에서는 이 브라우저에 문서를 저장합니다.' : '직접 쓴 문서와 검토를 마친 Ghost 초안을 연결한 폴더에 저장합니다.'}</p>
-      </div>
+      <div><h1 tabIndex={-1}>{space?.name ?? routeLabels.spaces}</h1></div>
       {canCreate && <button type="button" className="button primary" disabled={!connected || busy} onClick={() => setForm('document')}>
         <Plus size={16}/>새 문서
       </button>}
@@ -112,14 +113,9 @@ export function SpacesView({ snapshot, selectedSpace, query: read, action, onRev
     <div className="space-list-heading">
       <h2>저장된 문서</h2>
       <div className="space-folder-controls">
-        {(snapshot.spaces.length > 1 || (!space && snapshot.spaces.length > 0)) ?
-          <ArcSelect id="document-folder" className="space-folder-select" label="문서 폴더" hideLabel placeholder="폴더 선택"
-            value={spaceId ?? ''} onValueChange={onSelectFolder}
-            options={snapshot.spaces.map(item => ({ value: item.id, label: item.name }))}/>
-          : space && <span className="space-folder-name">{space.name}</span>}
         {space && !space.writable && <span className="space-folder-name">읽기 전용</span>}
-        {canConnect && <button type="button" className="button secondary" disabled={!connected || busy} onClick={() => setForm('folder')}>
-          <FolderPlus size={15}/>폴더 연결
+        {!space && canConnect && <button type="button" className="button secondary" disabled={!connected || busy} onClick={() => setForm('folder')}>
+          <FolderPlus size={15}/>새 프로젝트
         </button>}
       </div>
     </div>
@@ -136,7 +132,7 @@ export function SpacesView({ snapshot, selectedSpace, query: read, action, onRev
       </button>}
     </div>}
 
-    {!space ? <p className="space-message">{snapshot.spaces.length ? '문서 폴더를 찾을 수 없습니다.' : '연결된 문서 폴더가 없습니다.'}</p>
+    {!space ? <p className="space-message">{snapshot.spaces.length ? '프로젝트를 찾을 수 없습니다.' : '프로젝트가 없습니다.'}</p>
       : loading ? <p className="space-message" role="status">문서를 불러오는 중…</p>
       : listError ? <div className="space-message"><p className="form-error" role="alert">{listError}</p>
         <button type="button" className="button secondary" onClick={() => setReload(value => value + 1)}>다시 불러오기</button>
@@ -160,7 +156,7 @@ export function SpacesView({ snapshot, selectedSpace, query: read, action, onRev
       </>}
 
     {form && <DocumentForm kind={form} folder={space} demo={mode === 'demo'} disabled={!connected || busy || (form === 'document' ? !canCreate : !canConnect)}
-      action={action} onClose={checkList => { setForm(undefined); if (checkList) setReload(value => value + 1); }} onSaved={result => {
+      action={action} onClose={checkList => { setForm(undefined); if (checkList) setReload(value => value + 1); if (form === 'folder' && createRequested) onCreateClosed?.(); }} onSaved={result => {
         setForm(undefined);
         if (form === 'folder' && typeof result.id === 'string') onSelectFolder(result.id);
         else { setQuery(''); setReload(value => value + 1); }
@@ -189,7 +185,7 @@ function DocumentForm({ kind, folder, demo, disabled, action, onClose, onSaved }
   const [checkList, setCheckList] = useState(false);
   const [writable, setWritable] = useState(false);
   const [error, setError] = useState('');
-  return <Modal title={editing ? '새 문서' : '문서 폴더 연결'} className={editing ? 'space-document-editor' : undefined}
+  return <Modal title={editing ? '새 문서' : '새 프로젝트'} className={editing ? 'space-document-editor' : undefined}
     onClose={() => { if (!inFlight.current) onClose(Boolean(retry) || checkList); }}>
     <form className="form-stack space-form" onSubmit={async event => {
       event.preventDefault();
@@ -236,15 +232,15 @@ function DocumentForm({ kind, folder, demo, disabled, action, onClose, onSaved }
         <label>제목<input name="title" required maxLength={200} readOnly={saving || Boolean(retry) || checkList}/></label>
         <label>본문<textarea name="body" rows={10} readOnly={saving || Boolean(retry) || checkList}/></label>
       </> : <>
-        <label>폴더 이름<input name="title" required maxLength={65} readOnly={saving || Boolean(retry) || checkList}/></label>
-        <label>호스트의 폴더 경로<input name="path" placeholder="/로 시작하는 절대 경로" required readOnly={saving || Boolean(retry) || checkList}/></label>
+        <label>이름<input name="title" required maxLength={65} readOnly={saving || Boolean(retry) || checkList}/></label>
+        <label>폴더<input name="path" placeholder="/로 시작하는 호스트의 절대 경로" required readOnly={saving || Boolean(retry) || checkList}/></label>
         <label className="space-writable"><input type="checkbox" name="writable" checked={writable} onChange={event => setWritable(event.target.checked)}
-          disabled={saving || Boolean(retry) || checkList}/>이 폴더에 문서 저장 허용</label>
+          disabled={saving || Boolean(retry) || checkList}/>문서 저장 허용</label>
         {writable && <p className="field-help">해당 경로에 폴더가 없으면 새로 만듭니다.</p>}
       </>}
       {error && <p className="form-error" role="alert">{error}</p>}
       {checkList ? <button type="button" className="button secondary" onClick={() => onClose(true)}>목록 보기</button>
-        : <button type="submit" className="button primary" disabled={disabled || saving}>{saving ? '처리 중…' : retry ? '다시 확인' : editing ? '저장' : '연결'}</button>}
+        : <button type="submit" className="button primary" disabled={disabled || saving}>{saving ? '처리 중…' : retry ? '다시 확인' : editing ? '저장' : '만들기'}</button>}
     </form>
   </Modal>;
 }
