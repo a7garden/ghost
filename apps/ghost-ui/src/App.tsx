@@ -379,7 +379,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
       {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={reconnect}>다시 연결</Button>}>{error}</Banner>}
       {!snapshot || retiredPlanner ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
         {section === 'settings' && <Settings snapshot={snapshot} route={route} navigate={navigate} action={action} busy={busy} mode={mode} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} connected={connected} sections={settingsSections}/>}
-        {section === 'home' && <Overview snapshot={snapshot} connected={connected} navigate={navigate} onOpenApproval={openApproval} onStartChat={startChat} chatTarget={chatTarget} chooseModel={primaryChat && mode === 'live'} workPath={workPath} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading}/>}
+        {section === 'home' && <Overview snapshot={snapshot} connected={connected} navigate={navigate} onOpenApproval={openApproval} onStartChat={startChat} onOpenGhost={switchGhost} chatTarget={chatTarget} chooseModel={primaryChat && mode === 'live'} workPath={workPath} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading}/>}
         {section === 'ghosts' && dotSegment && (dot && pkg && activeView
           ? <PackageWorkspace key={`${dot.id}:${pkg.digest}:${activeView.id}`} info={pkg} view={activeView}
             onNavigate={view => navigate(viewPath(dot.id, view))} onChat={() => navigate(ghostPath(dot.id))}/>

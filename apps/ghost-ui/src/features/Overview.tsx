@@ -16,6 +16,8 @@ export interface OverviewProps {
   onOpenApproval: (ref: ApprovalRef) => void;
   /** Sends the first message to the chosen Ghost; rejects with a displayable error. */
   onStartChat: (text: string, ghostId: string, model?: ModelChoice) => Promise<void>;
+  /** Opens the Ghost's own conversation screen. */
+  onOpenGhost: (ghostId: string) => void;
   /** Default recipient; the composer can switch to any other Ghost. */
   chatTarget?: Profile;
   /** The Host can save a conversation model for the message. */
@@ -55,8 +57,8 @@ function GhostChooser({ profiles, value, onChange, disabled }: { profiles: Profi
   </Popover>;
 }
 
-/** Home: one composer to a chosen Ghost, then only what needs the owner or is moving. */
-export function Overview({ snapshot, connected = true, navigate, onOpenApproval, onStartChat, chatTarget, chooseModel = false, workPath, lifetime, workError, workLoading }: OverviewProps) {
+/** Home dashboard: a one-line hand-off composer, every Ghost's state, then what needs the owner or is moving. */
+export function Overview({ snapshot, connected = true, navigate, onOpenApproval, onStartChat, onOpenGhost, chatTarget, chooseModel = false, workPath, lifetime, workError, workLoading }: OverviewProps) {
   const work = projectDashboardWork(snapshot, lifetime);
   const decisions = inboxItems(snapshot, connected).groups.pending;
   const names = new Map(snapshot.profiles.map(profile => [profile.id, ghostDisplayName(profile.name)]));
@@ -74,36 +76,61 @@ export function Overview({ snapshot, connected = true, navigate, onOpenApproval,
     finally { setSending(false); }
   };
   const heading = 'flex items-center gap-2 text-ui font-semibold text-ink';
-  return <GPage width="reading" className="grid content-start gap-8 pt-[8vh]">
+  const ghosts = [...snapshot.profiles].sort((a, b) => Number(b.id === chatTarget?.id) - Number(a.id === chatTarget?.id));
+  return <GPage width="content" className="grid content-start gap-8 pt-8">
     <div className="grid gap-2">
-      <GComposer variant="conversation" inputId="dashboard-message" rows={3} value={text} onValueChange={setText} onSubmit={value => void send(value)}
+      <GComposer variant="conversation" inputId="dashboard-message" rows={1} value={text} onValueChange={setText} onSubmit={value => void send(value)}
         label={target ? `${ghostDisplayName(target.name)}에게 메시지` : '메시지'} placeholder="무엇을 맡길까요?" submitLabel="보내기"
         disabled={!target} pending={sending}
         footer={target && <div className="flex min-w-0 items-center gap-1">
-          <GhostChooser profiles={[...snapshot.profiles].sort((a, b) => Number(b.id === chatTarget?.id) - Number(a.id === chatTarget?.id))} value={target} disabled={sending} onChange={id => { setGhostId(id); setModel(undefined); }}/>
+          <GhostChooser profiles={ghosts} value={target} disabled={sending} onChange={id => { setGhostId(id); setModel(undefined); }}/>
           {chooseModel && <ModelPicker key={target.id} value={model} onChange={setModel} connected={connected} disabled={sending}/>}
         </div>}/>
       {error && <InlineError>{error}</InlineError>}
     </div>
-    {decisions.length > 0 && <section className="grid gap-2" aria-labelledby="home-decisions">
-      <div className="flex items-center justify-between gap-2">
-        <h2 id="home-decisions" className={heading}>확인 필요 <Badge variant="warning">{decisions.length}</Badge></h2>
-        {decisions.length > 3 && <Button variant="ghost" onClick={() => navigate('/inbox')}>모두 보기<ArrowRight/></Button>}
-      </div>
-      <ul className="grid">{decisions.slice(0, 3).map(item => <Row key={`${item.kind}:${item.id}`} title={approvalTitle(item)} owner={names.get(item.ghostId) ?? 'Ghost'}
-        state="확인하기" tone="warning" disabled={!connected} onClick={() => onOpenApproval({ kind: item.kind, id: item.id })}/>)}</ul>
+    {ghosts.length > 0 && <section className="grid gap-2" aria-labelledby="home-ghosts">
+      <h2 id="home-ghosts" className={heading}>Ghost</h2>
+      <ul className="grid list-none gap-2 p-0 [grid-template-columns:repeat(auto-fill,minmax(210px,1fr))]">{ghosts.map(profile => {
+        const attention = decisions.filter(item => item.ghostId === profile.id).length + work.tasks.filter(task => task.ghostId === profile.id && task.tone === 'attention').length;
+        const running = work.tasks.filter(task => task.ghostId === profile.id && task.tone === 'running');
+        const latest = work.tasks.find(task => task.ghostId === profile.id && (task.tone === 'attention' || task.tone === 'running'));
+        const name = ghostDisplayName(profile.name);
+        return <li key={profile.id}><button type="button" onClick={() => onOpenGhost(profile.id)} aria-label={`${name} 열기`}
+          className="flex w-full min-w-0 items-center gap-3 rounded-card border border-line bg-surface px-3 py-3 text-left outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3">
+          <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={40}/>
+          <span className="grid min-w-0 flex-1 gap-0.5">
+            <span className="truncate text-ui font-medium text-ink">{name}</span>
+            {(attention > 0 || running.length > 0) && <span className={`flex min-w-0 items-center gap-1.5 text-caption ${attention ? 'text-orange' : 'text-ink-2'}`}>
+              <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${attention ? 'bg-orange' : 'bg-ink animate-pulse motion-reduce:animate-none'}`}/>
+              <span className="truncate">{attention ? `확인 필요 ${attention}` : latest?.title ?? `진행 중 ${running.length}`}</span>
+            </span>}
+          </span>
+        </button></li>;
+      })}</ul>
     </section>}
     {stale && <InlineError>{ongoing.length ? '마지막으로 확인한 작업 상태입니다.' : '작업 상태를 확인하지 못했습니다.'}</InlineError>}
-    {(ongoing.length > 0 || work.source === 'unavailable' && workLoading) && <section className="grid gap-2" aria-labelledby="home-ongoing" aria-busy={workLoading}>
-      <h2 id="home-ongoing" className={heading}>진행 중</h2>
-      <ul className="grid">{ongoing.slice(0, 6).map(task => <Row key={task.id} title={task.title} owner={names.get(task.ghostId) ?? 'Ghost'}
-        state={task.label} tone={tones[task.tone]} onClick={() => navigate(task.path)}/>)}</ul>
-    </section>}
+    {(decisions.length > 0 || ongoing.length > 0 || work.source === 'unavailable' && workLoading) && <div className="grid items-start gap-8 lg:grid-cols-2">
+      {decisions.length > 0 && <section className="grid gap-2" aria-labelledby="home-decisions">
+        <div className="flex min-h-8 items-center justify-between gap-2">
+          <h2 id="home-decisions" className={heading}>확인 필요 <Badge variant="warning">{decisions.length}</Badge></h2>
+          {decisions.length > 4 && <Button variant="ghost" size="sm" onClick={() => navigate('/inbox')}>모두 보기<ArrowRight/></Button>}
+        </div>
+        <ul className="grid">{decisions.slice(0, 4).map(item => <Row key={`${item.kind}:${item.id}`} title={approvalTitle(item)} owner={names.get(item.ghostId) ?? 'Ghost'}
+          state="확인하기" tone="warning" disabled={!connected} onClick={() => onOpenApproval({ kind: item.kind, id: item.id })}/>)}</ul>
+      </section>}
+      {(ongoing.length > 0 || work.source === 'unavailable' && workLoading) && <section className="grid gap-2" aria-labelledby="home-ongoing" aria-busy={workLoading}>
+        <div className="flex min-h-8 items-center justify-between gap-2">
+          <h2 id="home-ongoing" className={heading}>진행 중 {ongoing.length > 0 && <Badge variant="outline">{ongoing.length}</Badge>}</h2>
+          <Button variant="ghost" size="sm" onClick={() => navigate(workPath)}>모든 일<ArrowRight/></Button>
+        </div>
+        <ul className="grid">{ongoing.slice(0, 6).map(task => <Row key={task.id} title={task.title} owner={names.get(task.ghostId) ?? 'Ghost'}
+          state={task.label} tone={tones[task.tone]} onClick={() => navigate(task.path)}/>)}</ul>
+      </section>}
+    </div>}
     {projects.length > 0 && <section className="grid gap-2" aria-labelledby="home-projects">
       <h2 id="home-projects" className={heading}>프로젝트</h2>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2">{projects.map(space =>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-2">{projects.map(space =>
         <Button key={space.id} variant="outline" size="lg" className="justify-start" onClick={() => navigate(`/spaces/${space.id}`)}><Folder/><span className="truncate">{space.name}</span></Button>)}</div>
     </section>}
-    {work.tasks.length > 0 && <Button variant="ghost" className="justify-self-start" onClick={() => navigate(workPath)}>모든 일<ArrowRight/></Button>}
   </GPage>;
 }
