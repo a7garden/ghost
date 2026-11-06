@@ -1,6 +1,5 @@
 import { DetailDialog } from '../components/DetailDialog';
-import { DotAvatar } from '../components/DotAvatar';
-import { toneFor } from '../client/types';
+import { GhostProfile } from '../components/GhostProfile';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronRight, CircleAlert, Clock3, GitBranch, Info, RefreshCw, SlidersHorizontal } from "lucide-react";
 import {
@@ -40,7 +39,7 @@ import { WorkThreadDrawer } from './WorkThreadDrawer';
 import { followUpCommand, workThreadTitle, type FollowUpDraft } from './workThread';
 import { createAgentStatusReadFence, projectAgentStatus, runAgentStatusOwnerRead } from './agentStatus';
 import type { AgentStatusReadToken } from './agentStatus';
-import { ghostDisplayName } from '../features/profileSummary';
+import { ghostDisplayName, profileSummary } from '../features/profileSummary';
 
 type LifetimePanel = "conversation" | "work" | "ghosts";
 
@@ -944,6 +943,12 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const ghostName = (id: string) => ghostDisplayName(workspaceSnapshot?.profiles.find(profile => profile.id === id)?.name ?? id);
   const publicLabel = (target: RegistryConversation) => registry.filter(item => item.ghost_id === target.ghost_id && item.secondary).length > 1
     ? `공개 대화 ${target.conversation_id.slice(0, 8)}` : "공개 대화";
+  const selectedProfile = selectedTarget ? workspaceSnapshot?.profiles.find(profile => profile.id === selectedTarget.ghost_id) : undefined;
+  const activityProps = {
+    model: agentStatus, observedAt: Math.min(snapshotObservedAt, conversationObservedAt) || undefined, fixture: mode === 'fixture',
+    busy: Boolean(busy), actionsDisabled: writesDisabled || loading || agentStatus.state === 'unknown' || agentStatus.state === 'stale',
+    onInspectWork: (workID: string) => void inspectWork(workID), onCancelTurn: (turnID: string) => void cancelConversationTurn(turnID),
+  };
   const chatTitle = selectedTarget
     ? `${ghostName(selectedTarget.ghost_id)}${publicConversation ? ` · ${publicLabel(selectedTarget)}` : ""}`
     : "대화";
@@ -1043,15 +1048,16 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       jumpToLatestLabel="최신 메시지로 이동"
       scrollKey={displayedTurns.length}
       className="ghost-chat min-h-0 flex-1"
-      header={selectedTarget ? <div className="flex flex-col items-center gap-1">
-        <DotAvatar profileId={selectedTarget.ghost_id} tone={toneFor(selectedTarget.ghost_id)} size={44}/>
-        {publicConversation && <span className="text-caption text-ink-2">{publicLabel(selectedTarget)}</span>}
-      </div> : undefined}
+      header={selectedTarget ? <GhostProfile key={selectedTargetKey} ghostID={selectedTarget.ghost_id} name={ghostName(selectedTarget.ghost_id)}
+        summary={selectedProfile ? profileSummary(selectedProfile.persona) : undefined}
+        note={publicConversation ? publicLabel(selectedTarget) : undefined}
+        activity={activityProps}
+        onOpenWork={() => showPanel("work")}
+        historyCount={selectedProfile?.conversations.length}
+        onOpenHistory={onOpenHistory ? () => onOpenHistory(selectedTarget.ghost_id) : undefined}
+        onManage={() => showPanel("ghosts")}/> : undefined}
       composer={<div className="grid gap-2">
-        {selectedTarget && <AgentStatus key={selectedTargetKey} model={agentStatus}
-          observedAt={Math.min(snapshotObservedAt, conversationObservedAt) || undefined} fixture={mode === 'fixture'}
-          busy={Boolean(busy)} actionsDisabled={writesDisabled || loading || agentStatus.state === 'unknown' || agentStatus.state === 'stale'}
-          onInspectWork={workID => void inspectWork(workID)} onCancelTurn={turnID => void cancelConversationTurn(turnID)}/>}
+        {selectedTarget && <AgentStatus key={selectedTargetKey} {...activityProps}/>}
         {onOpenApproval && (pendingDocumentReviews.length > 0 || integrationReviews.length > 0) && <div className="flex flex-wrap justify-center gap-2" aria-label="이 대화의 확인할 일">
           {pendingDocumentReviews.map(review => <Button type="button" variant="secondary" size="sm" key={review.id}
             onClick={() => onOpenApproval({ kind: "document", id: review.id })}>{review.title} · {review.state === "pending" ? "검토 대기" : "저장 대기"}</Button>)}
