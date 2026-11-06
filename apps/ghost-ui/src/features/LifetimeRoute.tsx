@@ -1,15 +1,17 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { InlineError } from '@garden/ui';
-import { LifetimeView } from '../lifetime/LifetimeView';
+import { LifetimeView, type LifetimeHandoff } from '../lifetime/LifetimeView';
 import { createLiveLifetimeClient } from '../lifetime/client';
 import type { AuthenticatedControlAction } from '../lifetime/controlTransport';
 import type { ApprovalRef } from '../plugins/approvals';
 import type { Command, LifetimeHostAuthority, Review, Snapshot } from '../client/types';
 
-export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mode, connected = true, active = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, route = '/lifetime', onOpenHistory, snapshot, onOpenApproval, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, navigate, handoff, onHandoffConsumed }: {
+export function LifetimeRoute({ action, memoryAction, ghostDesign, workspaceId, authority, mode, connected = true, active = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, route = '/lifetime', onOpenHistory, snapshot, onOpenApproval, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, navigate, handoff, onHandoffConsumed }: {
   action: AuthenticatedControlAction;
   /** Workspace Owner action (CSRF + envelope journal) for the Owner memory source review surface. */
   memoryAction?: (command: Command) => Promise<Record<string, any>>;
+  /** Inline editor for a Ghost's avatar, colours and role, shown inside its profile. */
+  ghostDesign?: (ghostID: string) => ReactNode;
   workspaceId: string;
   authority?: LifetimeHostAuthority;
   mode: 'demo' | 'live';
@@ -28,7 +30,7 @@ export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mo
   onRegistrationConsumed?: (ghostID: string, conversationID: string) => void;
   navigate?: (path: string) => void;
   onOpenHistory?: (ghostID: string) => void;
-  handoff?: { id: string; text: string };
+  handoff?: LifetimeHandoff;
   onHandoffConsumed?: (id: string) => void;
 }) {
   const session = useMemo(() => {
@@ -50,7 +52,7 @@ export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mo
   if ('error' in session) return <div className="p-8"><InlineError>{session.error}</InlineError></div>;
   const params = new URLSearchParams(route.split('?')[1] ?? '');
   const panel = params.get('panel');
-  return <LifetimeView mode="live" client={session.client} connected={connected} active={active} memoryAction={memoryAction}
+  return <LifetimeView mode="live" client={session.client} connected={connected} active={active} memoryAction={memoryAction} ghostDesign={ghostDesign}
     onOpenHistory={onOpenHistory} handoff={handoff} onHandoffConsumed={onHandoffConsumed}
     initialGhostID={params.get('ghost') ?? undefined}
     initialConversationID={params.get('conversation') ?? undefined}

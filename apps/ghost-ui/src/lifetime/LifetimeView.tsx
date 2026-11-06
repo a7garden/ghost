@@ -1,6 +1,6 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { GhostProfile } from '../components/GhostProfile';
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronRight, CircleAlert, Clock3, GitBranch, Info, RefreshCw, SlidersHorizontal } from "lucide-react";
 import {
   Alert,
@@ -28,6 +28,7 @@ import type { LifetimeClient, LifetimeMode, LifetimeRecoveryCommand } from "./ty
 import type { Review, Command } from "../client/types";
 import { MemorySourceReview } from "./MemorySourceReview";
 import { InferenceSettings } from '../pets/InferenceSettings';
+import { applyConversationModel, ModelPicker, type ModelChoice } from '../pets/ModelPicker';
 import { BotRoster } from './BotRoster';
 import { AgentStatus } from '../components/AgentStatus';
 import { integrationApprovalTitle, type ApprovalRef } from '../plugins/approvals';
@@ -75,9 +76,14 @@ export interface LifetimeViewProps {
   createRequested?: boolean;
   onOpenHistory?: (ghostID: string) => void;
   /** Dashboard text for the requested Ghost's conversation; sent once through the normal composer path. */
-  handoff?: { id: string; text: string };
+  handoff?: LifetimeHandoff;
   onHandoffConsumed?: (id: string) => void;
+  /** Inline editor for a Ghost's avatar, colours and role, shown inside its profile. */
+  ghostDesign?: (ghostID: string) => ReactNode;
 }
+
+/** A home message for a Ghost, with the model chosen there; the model is saved for the conversation before the text is sent. */
+export interface LifetimeHandoff { id: string; text: string; model?: ModelChoice }
 
 const integrationStatusLabels = {
   pending: "승인 대기", dispatching: "실행 확인 중", sent: "응답 받음",
@@ -220,7 +226,7 @@ async function fetchConversationPage(client: LifetimeClient, target: RegistryCon
   };
   return parseConversationPage(await client.request(body), target);
 }
-export function LifetimeView({ active: routeActive = true, mode, client, connected = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, memoryAction, initialGhostID, initialConversationID, initialRegisterConversationID, initialGoalID, initialWorkID, workScope = 'conversation', initialPanel = "conversation", onPanelChange, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, onClearWorkLink, createRequested, onOpenHistory, workspaceSnapshot, onOpenApproval, handoff, onHandoffConsumed }: LifetimeViewProps) {
+export function LifetimeView({ active: routeActive = true, mode, client, connected = true, documentReviews, documentAuthorityEpoch, onOpenDocumentReview, memoryAction, initialGhostID, initialConversationID, initialRegisterConversationID, initialGoalID, initialWorkID, workScope = 'conversation', initialPanel = "conversation", onPanelChange, onOpenTarget, onDefaultGhostChange, onTargetChange, authorizedRegistration, onRegistrationConsumed, onClearWorkLink, createRequested, onOpenHistory, workspaceSnapshot, onOpenApproval, handoff, onHandoffConsumed, ghostDesign }: LifetimeViewProps) {
   const [selectedPanel, setSelectedPanel] = useState<LifetimePanel>(initialPanel);
   useEffect(() => setSelectedPanel(initialPanel), [initialPanel]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -920,15 +926,27 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   // Seed the dashboard text into the requested target's draft, then send it
   // once the composer would accept it. An existing draft is kept and the text
   // appended without sending, so nothing the owner typed is sent unseen.
+  // A model chosen on home is saved for this conversation first; if that
+  // fails the text stays in the draft unsent.
   const seededHandoff = useRef("");
-  const handoffSend = useRef<{ key: string; text: string } | null>(null);
+  const handoffSend = useRef<{ key: string; text: string; modelReady: boolean } | null>(null);
+  const [, setHandoffModelSettled] = useState(0);
   useEffect(() => {
     if (!routeActive || !handoff || seededHandoff.current === handoff.id || initialPanel !== "conversation") return;
     if (!selectedTarget || initialGhostID && selectedTarget.ghost_id !== initialGhostID) return;
     seededHandoff.current = handoff.id;
     const existing = promptDrafts.get(selectedTargetKey) ?? "";
     updatePrompt(selectedTargetKey, () => existing.trim() ? `${existing}\n\n${handoff.text}` : handoff.text);
-    handoffSend.current = existing.trim() ? null : { key: selectedTargetKey, text: handoff.text };
+    const queued = existing.trim() ? null : { key: selectedTargetKey, text: handoff.text, modelReady: !handoff.model };
+    handoffSend.current = queued;
+    if (handoff.model) {
+      void applyConversationModel(selectedTarget, handoff.model, publicConversation).then(() => {
+        if (queued && handoffSend.current === queued) queued.modelReady = true;
+      }).catch(reason => {
+        if (queued && handoffSend.current === queued) handoffSend.current = null;
+        setError(`모델을 바꾸지 못해 메시지를 보내지 않았습니다. ${reason instanceof Error ? reason.message : ""}`.trim());
+      }).finally(() => setHandoffModelSettled(value => value + 1));
+    }
     onHandoffConsumed?.(handoff.id);
   }, [routeActive, handoff, initialPanel, initialGhostID, selectedTarget, selectedTargetKey, promptDrafts, onHandoffConsumed]);
   useEffect(() => {
@@ -936,7 +954,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     if (!routeActive || !queued || queued.key !== selectedTargetKey) return;
     // An empty draft means the seed has not rendered yet; any other edit cancels the send.
     if (prompt !== queued.text) { if (prompt) handoffSend.current = null; return; }
-    if (submissionBlocked) return;
+    if (submissionBlocked || !queued.modelReady) return;
     handoffSend.current = null;
     void submitConversation();
   });
@@ -1055,7 +1073,8 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         onOpenWork={() => showPanel("work")}
         historyCount={selectedProfile?.conversations.length}
         onOpenHistory={onOpenHistory ? () => onOpenHistory(selectedTarget.ghost_id) : undefined}
-        onManage={() => showPanel("ghosts")}/> : undefined}
+        onManage={() => showPanel("ghosts")}
+        design={ghostDesign?.(selectedTarget.ghost_id)}/> : undefined}
       composer={<div className="grid gap-2">
         {selectedTarget && <AgentStatus key={selectedTargetKey} {...activityProps}/>}
         {onOpenApproval && (pendingDocumentReviews.length > 0 || integrationReviews.length > 0) && <div className="flex flex-wrap justify-center gap-2" aria-label="이 대화의 확인할 일">
@@ -1072,7 +1091,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         label="메시지" placeholder="메시지 쓰기"
         submitLabel={busy === "conversation.input" ? "저장 중" : "대화에 보내기"}
         disabled={Boolean(busy)} pending={busy === "conversation.input"}
-        footer={<DetailDialog title="전송 옵션" label={<><SlidersHorizontal size={15} aria-hidden="true"/><span className="sr-only">전송 옵션 · {privacyLabels[effectivePrivacy]}</span>{attachments.length > 0 && <span>첨부 {attachments.length}</span>}</>}>
+        footer={<div className="flex min-w-0 items-center gap-1"><DetailDialog title="전송 옵션" label={<><SlidersHorizontal size={15} aria-hidden="true"/><span className="sr-only">전송 옵션 · {privacyLabels[effectivePrivacy]}</span>{attachments.length > 0 && <span>첨부 {attachments.length}</span>}</>}>
           <SelectField label="대화 대상" value={selectedTarget ? conversationTargetKey(selectedTarget) : selectedPairKey || "lifetime:none"}
             onValueChange={value => {
               const target = registry.find(item => conversationTargetKey(item) === value);
@@ -1107,7 +1126,9 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
             })}
           </div>
           <p className="m-0 text-caption text-ink-2">{!publicConversation && "대화의 기존 보호 수준은 유지됩니다. "}UTF-8 {promptBytes}/65,536바이트.</p>
-        </DetailDialog>}/></div>}
+        </DetailDialog>
+        {mode === 'live' && selectedTarget && <ModelPicker key={selectedTargetKey} pair={selectedTarget} publicOnly={publicConversation} connected={connected}
+          disabled={writesDisabled || Boolean(busy)} turnActive={awaitingController}/>}</div>}/></div>}
       footer={activeTargets.length === 0 || promptBytes > 65_536 ? <div className="grid justify-items-center gap-1">
         {activeTargets.length === 0 && <p className="m-0" role="status">메시지를 받을 수 있는 Ghost가 없습니다.</p>}
         {promptBytes > 65_536 && <p className="m-0" role="status">메시지 한도 65,536바이트를 넘었습니다.</p>}

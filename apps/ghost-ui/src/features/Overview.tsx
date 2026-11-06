@@ -1,20 +1,25 @@
 import { useState, type ReactNode } from 'react';
-import { ArrowRight, ChevronRight, Folder } from 'lucide-react';
-import { Badge, Button, GComposer, GPage, InlineError } from '@garden/ui';
+import { ArrowRight, Check, ChevronDown, ChevronRight, Folder } from 'lucide-react';
+import { Badge, Button, GComposer, GPage, InlineError, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
 import { DotAvatar } from '../components/DotAvatar';
 import { toneFor } from '../client/types';
 import type { Snapshot, Profile } from '../client/types';
 import type { Snapshot as LifetimeSnapshot } from '../lifetime/types';
 import { inboxItems } from '../client/inbox';
 import { approvalTitle, type ApprovalRef } from '../plugins/approvals';
+import { ModelPicker, type ModelChoice } from '../pets/ModelPicker';
 import { projectDashboardWork, type DashboardTask } from './dashboardState';
 import { ghostDisplayName } from './profileSummary';
 
 export interface OverviewProps {
   snapshot: Snapshot; connected?: boolean; navigate: (path: string) => void;
   onOpenApproval: (ref: ApprovalRef) => void;
-  /** Sends the first message to `chatTarget`; rejects with a displayable error. */
-  onStartChat: (text: string) => Promise<void>; chatTarget?: Profile;
+  /** Sends the first message to the chosen Ghost; rejects with a displayable error. */
+  onStartChat: (text: string, ghostId: string, model?: ModelChoice) => Promise<void>;
+  /** Default recipient; the composer can switch to any other Ghost. */
+  chatTarget?: Profile;
+  /** The Host can save a conversation model for the message. */
+  chooseModel?: boolean;
   workPath: string;
   lifetime?: LifetimeSnapshot; workError?: string; workLoading?: boolean;
 }
@@ -30,8 +35,28 @@ function Row({ title, owner, state, tone, onClick, disabled }: { title: string; 
   </button></li>;
 }
 
-/** Home: one composer to the default Ghost, then only what needs the owner or is moving. */
-export function Overview({ snapshot, connected = true, navigate, onOpenApproval, onStartChat, chatTarget, workPath, lifetime, workError, workLoading }: OverviewProps) {
+/** Recipient chip: the Ghost that receives the home message. */
+function GhostChooser({ profiles, value, onChange, disabled }: { profiles: Profile[]; value: Profile; onChange(id: string): void; disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild>
+      <button type="button" disabled={disabled} aria-label={`받는 Ghost: ${ghostDisplayName(value.name)}`}
+        className="inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-full pr-2 pl-1 text-caption text-ink-2 outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3 disabled:cursor-not-allowed disabled:opacity-50">
+        <DotAvatar profileId={value.id} tone={toneFor(value.id)} size={18}/><span className="truncate">{ghostDisplayName(value.name)}</span><ChevronDown size={12} aria-hidden="true"/>
+      </button>
+    </PopoverTrigger>
+    <PopoverContent side="top" align="start" aria-label="받는 Ghost" className="grid w-60 gap-0.5 p-1.5">
+      {profiles.map(profile => <button key={profile.id} type="button" aria-pressed={profile.id === value.id} onClick={() => { onChange(profile.id); setOpen(false); }}
+        className="flex min-h-9 w-full items-center gap-2 rounded-control px-2 text-left text-ui text-ink outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3">
+        <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={20}/><span className="min-w-0 flex-1 truncate">{ghostDisplayName(profile.name)}</span>
+        {profile.id === value.id && <Check size={14} className="text-ink-2" aria-hidden="true"/>}
+      </button>)}
+    </PopoverContent>
+  </Popover>;
+}
+
+/** Home: one composer to a chosen Ghost, then only what needs the owner or is moving. */
+export function Overview({ snapshot, connected = true, navigate, onOpenApproval, onStartChat, chatTarget, chooseModel = false, workPath, lifetime, workError, workLoading }: OverviewProps) {
   const work = projectDashboardWork(snapshot, lifetime);
   const decisions = inboxItems(snapshot, connected).groups.pending;
   const names = new Map(snapshot.profiles.map(profile => [profile.id, ghostDisplayName(profile.name)]));
@@ -39,11 +64,12 @@ export function Overview({ snapshot, connected = true, navigate, onOpenApproval,
   const projects = snapshot.spaces.slice(0, 4);
   const stale = Boolean(workError) || !connected;
   const [text, setText] = useState(''), [sending, setSending] = useState(false), [error, setError] = useState('');
-  const target = connected ? chatTarget : undefined;
+  const [ghostId, setGhostId] = useState<string>(), [model, setModel] = useState<ModelChoice>();
+  const target = connected ? snapshot.profiles.find(profile => profile.id === ghostId) ?? chatTarget : undefined;
   const send = async (value: string) => {
     if (!target || sending) return;
     setSending(true); setError('');
-    try { await onStartChat(value); setText(''); }
+    try { await onStartChat(value, target.id, model); setText(''); }
     catch (e) { setError(e instanceof Error ? e.message : '메시지를 보내지 못했습니다.'); }
     finally { setSending(false); }
   };
@@ -53,7 +79,10 @@ export function Overview({ snapshot, connected = true, navigate, onOpenApproval,
       <GComposer variant="conversation" inputId="dashboard-message" rows={3} value={text} onValueChange={setText} onSubmit={value => void send(value)}
         label={target ? `${ghostDisplayName(target.name)}에게 메시지` : '메시지'} placeholder="무엇을 맡길까요?" submitLabel="보내기"
         disabled={!target} pending={sending}
-        footer={target && <span className="inline-flex items-center gap-1.5 text-caption text-ink-2"><DotAvatar profileId={target.id} tone={toneFor(target.id)} size={18}/>{ghostDisplayName(target.name)}</span>}/>
+        footer={target && <div className="flex min-w-0 items-center gap-1">
+          <GhostChooser profiles={[...snapshot.profiles].sort((a, b) => Number(b.id === chatTarget?.id) - Number(a.id === chatTarget?.id))} value={target} disabled={sending} onChange={id => { setGhostId(id); setModel(undefined); }}/>
+          {chooseModel && <ModelPicker key={target.id} value={model} onChange={setModel} connected={connected} disabled={sending}/>}
+        </div>}/>
       {error && <InlineError>{error}</InlineError>}
     </div>
     {decisions.length > 0 && <section className="grid gap-2" aria-labelledby="home-decisions">

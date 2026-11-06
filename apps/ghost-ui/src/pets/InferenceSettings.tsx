@@ -8,12 +8,12 @@ type Pair = { ghost_id: string; conversation_id: string };
 type Selection = { provider: string; model: string; effort: string };
 type Provider = { id: string; name: string; auth: string; models: string[]; efforts: string[]; default_model: string | null; default_effort: string; image: boolean; image_note?: string };
 type OrchestraProfile = { routes: Record<string, Selection>; reviewer: Selection | null };
-type Configuration = {
+export type InferenceConfiguration = {
   settings: { version: number; default: Selection; conversations: Record<string, Selection>; external_grants: Record<string, string[]>; credentials: Record<string, boolean>; image_provider: string; orchestra?: Record<string, { version: number; profile: OrchestraProfile }> };
   providers: Provider[];
 };
 
-export async function inferenceRequest(body?: Record<string, unknown>): Promise<Configuration> {
+export async function inferenceRequest(body?: Record<string, unknown>): Promise<InferenceConfiguration> {
   const signal = AbortSignal.timeout(15000);
   const bootstrapResponse = await fetch('/ghost-api/bootstrap', { cache: 'no-store', signal });
   if (!bootstrapResponse.ok) throw new Error('연결된 Ghost 호스트가 필요합니다.');
@@ -32,7 +32,7 @@ export async function inferenceRequest(body?: Record<string, unknown>): Promise<
 }
 
 const effortNames: Record<string, string> = { off: '사용 안 함', low: '빠르게', medium: '균형', high: '깊게', xhigh: '더 깊게', max: '최대' };
-const effortLabel = (effort: string) => effortNames[effort] ?? effort;
+export const effortLabel = (effort: string) => effortNames[effort] ?? effort;
 type Status = { label: string; tone: 'neutral' | 'info' | 'warning' | 'success'; detail: string };
 // Radix Select는 빈 값을 항목으로 가질 수 없으므로 '끄기' 선택값을 치환한다.
 const REVIEW_OFF = '__off__';
@@ -64,7 +64,7 @@ export function InferenceSettings({ pair, ...props }: InferenceProps) {
 }
 
 function InferencePanel({ pair, pairKey, primary = false, publicOnly = false, disabled = false, connected = true }: InferenceProps & { pairKey: string }) {
-  const [data, setData] = useState<Configuration>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [data, setData] = useState<InferenceConfiguration>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false), [draft, setDraft] = useState<Selection>(), [allow, setAllow] = useState(false);
   const [keyEditor, setKeyEditor] = useState<{ provider: string; value: string }>();
   const [notice, setNotice] = useState(''), [reload, setReload] = useState(0);

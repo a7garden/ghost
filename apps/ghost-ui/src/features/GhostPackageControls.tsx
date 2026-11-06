@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { Button, FormField, Input, InlineError, SelectField } from '@garden/ui';
-import { DotAvatar, type PortraitAppearance } from '../components/DotAvatar';
+import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
-import { useProfileAvatar } from '../pets/AvatarProvider';
-import { GhostColorPicker } from '../pets/GhostColorPicker';
 import { toneFor, type Profile } from '../client/types';
-import { portraitColors, uploadPackage, type PackageInfo } from './PackageWorkspace';
+import { uploadPackage, type PackageInfo } from './PackageWorkspace';
+import { PortraitColors, type PortraitColorProps } from './GhostDesign';
 import { ghostDisplayName } from './profileSummary';
 
 export function PackageImport({ workspace, profiles, selected, onClose, onInstalled }: {
@@ -52,35 +51,14 @@ export function PackageImport({ workspace, profiles, selected, onClose, onInstal
   </Modal>;
 }
 
-const boldColors = [
-  { name: '빨강', color: '#e92b37' }, { name: '주황', color: '#ff7a18' }, { name: '노랑', color: '#ffd600' },
-  { name: '초록', color: '#008a45' }, { name: '파랑', color: '#0058ef' }, { name: '보라', color: '#7135db' },
-];
-const neutralColors = [{ name: '검정', color: '#191919' }, { name: '흰색', color: '#ffffff' }];
-const bodyColors = [...neutralColors, ...boldColors];
-const backgroundColors = [
-  ...boldColors,
-  { name: '하늘', color: portraitColors.sky }, { name: '민트', color: portraitColors.mint },
-  { name: '라일락', color: portraitColors.lilac }, { name: '복숭아', color: portraitColors.peach },
-  { name: '모래', color: portraitColors.sand }, { name: '슬레이트', color: portraitColors.slate },
-  ...neutralColors,
-];
-
-export function PortraitPicker({ profile, appearance, choices, defaults, onSelect, onClose }: {
-  profile: Profile; appearance?: PortraitAppearance; choices: PortraitAppearance; defaults: Required<PortraitAppearance>;
-  onSelect(part: keyof PortraitAppearance, color?: string): void; onClose(): void;
-}) {
-  const { isDefault } = useProfileAvatar(profile.id);
+export function PortraitPicker({ profile, onClose, ...colors }: PortraitColorProps & { profile: Profile; onClose(): void }) {
   return <Modal title="초상화 색상" focusClose onClose={onClose}>
     <div className="grid gap-5">
       <div className="grid justify-items-center gap-2">
         <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={96}/>
         <span className="text-ui font-medium text-ink">{ghostDisplayName(profile.name)}</span>
       </div>
-      {isDefault && <GhostColorPicker label="본체 색" resetLabel="자동" presets={bodyColors} value={choices.body ?? 'auto'}
-        fallback={appearance?.body ?? defaults.body} onChange={color => onSelect('body', color === 'auto' ? undefined : color)}/>}
-      <GhostColorPicker label="배경색" resetLabel="기본" presets={backgroundColors} value={choices.background ?? 'auto'}
-        fallback={appearance?.background ?? defaults.background} onChange={color => onSelect('background', color === 'auto' ? undefined : color)}/>
+      <PortraitColors profileId={profile.id} {...colors}/>
     </div>
   </Modal>;
 }

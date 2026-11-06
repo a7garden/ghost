@@ -5,6 +5,8 @@ import { AvatarProvider } from './pets/AvatarProvider';
 import { Settings, type SettingsSection } from './pets/Settings';
 import { FloatingPet } from './pets/FloatingPet';
 import { usePreferences } from './pets/preferences';
+import type { ModelChoice } from './pets/ModelPicker';
+import type { LifetimeHandoff } from './lifetime/LifetimeView';
 import { useEffect, useRef, useState } from 'react';
 import { CircleAlert, Puzzle, Server, Users } from 'lucide-react';
 import { PortraitAppearances, type PortraitAppearance } from './components/DotAvatar';
@@ -33,6 +35,7 @@ import { LegacyTranscript, legacyHistoryPath, legacyHistoryRequested } from './f
 import { ApprovalDrawer } from './plugins/ApprovalDrawer';
 import type { Approval, ApprovalRef } from './plugins/approvals';
 import { PackageImport, PortraitPicker } from './features/GhostPackageControls';
+import { GhostDesignEditor, PortraitColors, type PortraitColorProps } from './features/GhostDesign';
 import { ghostPath, PackageWorkspace, portraitColors, usePackages, viewPath } from './features/PackageWorkspace';
 import { faceColor, isHexColor } from './pets/appearance';
 
@@ -53,7 +56,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   const [approval, setApproval] = useState<{ workspaceId: string; ref: ApprovalRef } | null>(null), [formError, setFormError] = useState('');
   const [paletteOpen, setPaletteOpen] = useState(false);
   // A dashboard message waiting for the primary conversation view to send it.
-  const [chatHandoff, setChatHandoff] = useState<{ id: string; text: string } | null>(null);
+  const [chatHandoff, setChatHandoff] = useState<LifetimeHandoff | null>(null);
   const approvalOpener = useRef<HTMLElement | null>(null);
   const [collaborate, setCollaborate] = useState(false);
   // The main region owns scrolling; a new destination starts at its top.
@@ -185,18 +188,19 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
   // The primary conversation view owns privacy, retry and recovery for
   // `conversation.input`, so the dashboard hands the text to it instead of
   // sending a second, divergent command path.
-  const startChat = async (text: string) => {
-    if (!snapshot || !chatTarget) throw new Error('메시지를 받을 Ghost를 확인하지 못했습니다.');
+  const startChat = async (text: string, ghostId: string, model?: ModelChoice) => {
+    const target = profiles.find(profile => profile.id === ghostId);
+    if (!snapshot || !target) throw new Error('메시지를 받을 Ghost를 확인하지 못했습니다.');
     if (primaryChat) {
-      setChatHandoff({ id: crypto.randomUUID(), text });
-      navigate(`/lifetime?ghost=${encodeURIComponent(chatTarget.id)}`);
+      setChatHandoff({ id: crypto.randomUUID(), text, model });
+      navigate(`/lifetime?ghost=${encodeURIComponent(target.id)}`);
       return;
     }
-    const created = await action({ type: 'create_conversation', profile_id: chatTarget.id, model: snapshot.default_model, tools: true });
+    const created = await action({ type: 'create_conversation', profile_id: target.id, model: snapshot.default_model, tools: true });
     const conversation = String(created.conversation_id ?? '');
     if (!conversation) throw new Error('새 대화를 만들지 못했습니다.');
-    await action({ type: 'submit', profile_id: chatTarget.id, conversation_id: conversation, prompt: text, kind: 'prompt' });
-    navigate(`${ghostPath(chatTarget.id)}?conversation=${encodeURIComponent(conversation)}`);
+    await action({ type: 'submit', profile_id: target.id, conversation_id: conversation, prompt: text, kind: 'prompt' });
+    navigate(`${ghostPath(target.id)}?conversation=${encodeURIComponent(conversation)}`);
   };
   const selectedSpace = route.startsWith('/spaces/') ? route.split('/')[2] : snapshot?.spaces[0]?.id;
   // Move keyboard focus to the new page's heading; GPageHeader titles are not focusable by themselves.
@@ -298,6 +302,24 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView snapshot={snapshot} status={status} observedAt={workspace.observedAt} workObservedAt={dashboardWork.observedAt} workError={dashboardWork.error} reconnect={() => { reconnect(); dashboardWork.refresh(); }} navigate={navigate}/> },
   ] : [];
 
+  const portraitColorProps = (id: string): PortraitColorProps => ({
+    appearance: portraits[id],
+    choices: { body: portraitChoice(id, 'body'), background: portraitChoice(id, 'background') },
+    defaults: {
+      body: preferences.ghostColor === 'auto' ? (resolvedTheme === 'dark' ? '#f5f5f5' : '#191919') : preferences.ghostColor,
+      background: resolvedTheme === 'dark' ? '#191919' : '#ffffff',
+    },
+    onSelect: (part, color) => {
+      const key = portraitKey(id, part);
+      remember(key, color);
+      setPortraitOverrides(previous => ({ ...previous, [storageKey + key]: color ?? null }));
+    },
+  });
+  const ghostDesign = (id: string) => {
+    const profile = profiles.find(item => item.id === id);
+    return profile && snapshot ? <GhostDesignEditor key={id} profile={profile} avatars={snapshot.avatars} action={action} connected={connected}
+      colors={<PortraitColors profileId={id} {...portraitColorProps(id)}/>}/> : null;
+  };
   const lifetimeScreen = (path: string) => {
     if (!snapshot) return null;
     const routeParams = new URLSearchParams(path.split('?')[1] ?? '');
@@ -310,7 +332,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
       handoff={lifetimePath === path ? chatHandoff ?? undefined : undefined}
       onHandoffConsumed={id => setChatHandoff(current => current?.id === id ? null : current)}
       onOpenHistory={ghost => { if (snapshot.profiles.some(profile => profile.id === ghost)) navigate(legacyHistoryPath(ghost)); }}
-      action={workspace.lifetimeAction} memoryAction={action} workspaceId={snapshot.workspace_id} authority={snapshot.lifetime_authority} mode={mode}
+      action={workspace.lifetimeAction} memoryAction={action} ghostDesign={ghostDesign} workspaceId={snapshot.workspace_id} authority={snapshot.lifetime_authority} mode={mode}
       documentReviews={snapshot.reviews} documentAuthorityEpoch={snapshot.lifetime_authority?.authority_epoch} onOpenDocumentReview={openDocumentReview}
       snapshot={snapshot} onOpenApproval={openApproval} onDefaultGhostChange={setDefaultGhostId} onTargetChange={setLifetimeGhostId}
       authorizedRegistration={authorizedRegistration}
@@ -357,7 +379,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
       {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={reconnect}>다시 연결</Button>}>{error}</Banner>}
       {!snapshot || retiredPlanner ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
         {section === 'settings' && <Settings snapshot={snapshot} route={route} navigate={navigate} action={action} busy={busy} mode={mode} preferences={preferences} updatePreferences={updatePreferences} storageError={storageError} connected={connected} sections={settingsSections}/>}
-        {section === 'home' && <Overview snapshot={snapshot} connected={connected} navigate={navigate} onOpenApproval={openApproval} onStartChat={startChat} chatTarget={chatTarget} workPath={workPath} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading}/>}
+        {section === 'home' && <Overview snapshot={snapshot} connected={connected} navigate={navigate} onOpenApproval={openApproval} onStartChat={startChat} chatTarget={chatTarget} chooseModel={primaryChat && mode === 'live'} workPath={workPath} lifetime={dashboardWork.snapshot} workError={dashboardWork.error} workLoading={dashboardWork.loading}/>}
         {section === 'ghosts' && dotSegment && (dot && pkg && activeView
           ? <PackageWorkspace key={`${dot.id}:${pkg.digest}:${activeView.id}`} info={pkg} view={activeView}
             onNavigate={view => navigate(viewPath(dot.id, view))} onChat={() => navigate(ghostPath(dot.id))}/>
@@ -381,18 +403,7 @@ export function App({ connectClient = connect }: { connectClient?: () => Promise
     </AppFrame>
     {dialog === 'package' && snapshot && <PackageImport workspace={snapshot.workspace_id} profiles={profiles} selected={selected?.id ?? ''}
       onClose={close} onInstalled={id => { refresh(); setDialog(null); navigate(ghostPath(id)); }}/>}
-    {dialog === 'portrait' && selected && <PortraitPicker key={selected.id} profile={selected}
-      appearance={portraits[selected.id]}
-      choices={{ body: portraitChoice(selected.id, 'body'), background: portraitChoice(selected.id, 'background') }}
-      defaults={{
-        body: preferences.ghostColor === 'auto' ? (resolvedTheme === 'dark' ? '#f5f5f5' : '#191919') : preferences.ghostColor,
-        background: resolvedTheme === 'dark' ? '#191919' : '#ffffff',
-      }}
-      onClose={close} onSelect={(part, color) => {
-        const key = portraitKey(selected.id, part);
-        remember(key, color);
-        setPortraitOverrides(previous => ({ ...previous, [storageKey + key]: color ?? null }));
-      }}/>}
+    {dialog === 'portrait' && selected && <PortraitPicker key={selected.id} profile={selected} onClose={close} {...portraitColorProps(selected.id)}/>}
     {collaborate && snapshot && !primaryChat && <CollaborateForm snapshot={snapshot} action={action} busy={busy} mode={mode} onClose={() => !busy && setCollaborate(false)} onCreated={path => { setCollaborate(false); navigate(path); }}/>}
     {dialog === 'add' && <Modal title="새 Ghost" onClose={close}>
       <form className="grid gap-4" onSubmit={e => { e.preventDefault(); createGhost(new FormData(e.currentTarget)); }}>

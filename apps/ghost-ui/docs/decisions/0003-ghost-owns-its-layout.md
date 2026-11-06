@@ -18,7 +18,9 @@ rail, inset canvas or shell-owned pane toggle.
 - Command search is Garden's `GCommandPalette` (`⌘P`, also `⌘K`).
 - Conversation transcript: Garden's `GConversation` stays, after OpenAI dots. The Ghost's
   avatar floats at the top centre over a short fade and is a button that opens the Ghost's
-  profile (recent activity, 맡은 일, 이전 대화, Ghost 관리); the Owner's message is a full-width
+  profile (recent activity, 꾸미기 for avatar, colours and role instructions in place, 맡은 일, 이전 대화,
+  Ghost 관리); the composer carries the conversation's model chip, and the home composer picks
+  the recipient Ghost and model at its bottom left; the Owner's message is a full-width
   block in reading order instead of a trailing phone-style bubble; activity shows as a
   minimal capsule centred above the composer only while there is something to report
   (`src/app.css`, `AgentStatus`). The conversation has no refresh or new-conversation
