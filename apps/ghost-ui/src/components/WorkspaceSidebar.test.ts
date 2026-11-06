@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
-import { WorkspaceSidebar, type GhostMenuItem } from './WorkspaceSidebar';
+import { ChatNavigation, WorkspaceRail, type GhostMenuItem } from './WorkspaceSidebar';
 import { initialWorkspace } from '../fixtures/workspace';
 
 const menu: GhostMenuItem[] = [
@@ -9,48 +9,45 @@ const menu: GhostMenuItem[] = [
   { key: 'work', label: '맡은 일', path: '/work', kind: 'work' },
 ];
 
-function props() {
+function chat(overrides: Partial<Parameters<typeof ChatNavigation>[0]> = {}) {
   const snapshot = initialWorkspace();
-  return {
-    snapshot, section: 'home', openGhostId: null as string | null, ghostMenu: [] as GhostMenuItem[], currentGhostPage: null as string | null,
-    defaultGhostId: snapshot.profiles[1].id, attentionCount: 2, status: { state: 'connected', label: '연결됨' } as const,
-    canCreateProject: true, navigate() {}, openGhost() {},
-  };
+  const props = { snapshot, home: true, openGhostId: null, ghostMenu: [], currentGhostPage: null, defaultGhostId: snapshot.profiles[1].id, navigate() {}, openGhost() {}, ...overrides };
+  return { snapshot, html: renderToStaticMarkup(createElement(ChatNavigation, props)) };
 }
 
-it('opens no Ghost on workspace pages and lists the default Ghost first', () => {
-  const input = props();
-  const html = renderToStaticMarkup(createElement(WorkspaceSidebar, input));
+it('lists the default Ghost first and opens no Ghost on the new-request page', () => {
+  const { snapshot, html } = chat();
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
-  expect(html).toContain('<span class="sr-only">확인 필요 </span>2');
-  expect(html).not.toContain('sidebar-ghost-menu');
-  const ghosts = html.slice(html.indexOf('class="sidebar-ghosts"'));
-  expect(ghosts.indexOf(input.snapshot.profiles[1].name)).toBeLessThan(ghosts.indexOf(input.snapshot.profiles[0].name));
+  expect(html.slice(html.indexOf('aria-current="page"'))).toMatch(/^[^<]*>[\s\S]*?새 요청/);
+  const ghosts = html.slice(html.indexOf('Ghost</p>'));
+  expect(ghosts.indexOf(snapshot.profiles[1].name)).toBeLessThan(ghosts.indexOf(snapshot.profiles[0].name));
+  expect(html).not.toContain('맡은 일');
 });
 
-it('shows the menu only under the open Ghost and marks the page on screen', () => {
-  const input = props(), open = input.snapshot.profiles[0];
-  const html = renderToStaticMarkup(createElement(WorkspaceSidebar, { ...input, section: 'lifetime', openGhostId: open.id, ghostMenu: menu, currentGhostPage: 'work' }));
-  expect(html.match(/sidebar-ghost-menu/g)).toHaveLength(1);
+it('shows pages only under the open Ghost and marks the page on screen', () => {
+  const snapshot = initialWorkspace();
+  const { html } = chat({ snapshot, home: false, openGhostId: snapshot.profiles[0].id, ghostMenu: menu, currentGhostPage: 'work' });
+  expect(html.match(/맡은 일/g)).toHaveLength(1);
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   const current = html.slice(html.indexOf('aria-current="page"'));
   expect(current.slice(0, current.indexOf('</button>'))).toContain('맡은 일');
-  const openItem = html.slice(html.indexOf('sidebar-ghost open'));
-  expect(openItem.slice(0, openItem.indexOf('</li>'))).toContain(open.name);
 });
 
 it('shows Host starter Ghosts by role name instead of their identifiers', () => {
-  const input = props();
-  input.snapshot.profiles[0].name = 'specialist-research';
-  const html = renderToStaticMarkup(createElement(WorkspaceSidebar, input));
-  expect(html).toContain('<span>리서치</span>');
+  const snapshot = initialWorkspace();
+  snapshot.profiles[0].name = 'specialist-research';
+  const { html } = chat({ snapshot });
+  expect(html).toContain('리서치');
   expect(html).not.toContain('specialist-research');
 });
 
-it('shows host trouble on the settings entry only when the host is not connected', () => {
-  const healthy = renderToStaticMarkup(createElement(WorkspaceSidebar, props()));
-  expect(healthy).not.toContain('sidebar-host-indicator');
-  const html = renderToStaticMarkup(createElement(WorkspaceSidebar, { ...props(), status: { state: 'offline', label: '연결 끊김' } as const }));
-  expect(html).toContain('data-state="offline"');
-  expect(html).toContain('연결 끊김');
+it('names pending decisions and host trouble in the rail', () => {
+  const open = () => {};
+  const healthy = renderToStaticMarkup(createElement(WorkspaceRail, { workspace: 'chat', attentionCount: 0, status: { state: 'connected', label: '연결됨' }, open }));
+  expect(healthy).toContain('aria-label="일"');
+  expect(healthy).toContain('aria-label="설정"');
+  const trouble = renderToStaticMarkup(createElement(WorkspaceRail, { workspace: 'work', attentionCount: 2, status: { state: 'offline', label: '연결 끊김' }, open }));
+  expect(trouble).toContain('aria-label="일 · 확인 필요 2"');
+  expect(trouble).toContain('aria-label="설정 · 호스트 연결 끊김"');
+  expect(trouble.match(/aria-current="page"/g)).toHaveLength(1);
 });

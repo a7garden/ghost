@@ -6,7 +6,7 @@ import type { IntegrationApproval } from '../client/types';
 import { InboxView } from '../features/WorkViews';
 import { initialWorkspace } from '../fixtures/workspace';
 import { inspectedIntegrationApproval, integrationReceipt } from './approvals';
-import { ApprovalDrawer } from './ApprovalDrawer';
+import { ApprovalDrawerContent } from './ApprovalDrawer';
 import { installedPlugins, pluginEnabled, reviewPlugin } from './registry';
 
 const external: IntegrationApproval = {
@@ -70,7 +70,7 @@ it('resolves a bundled renderer by capability and review kind for any Ghost ID',
 it('falls back to metadata and the original conversation when the renderer is unavailable', () => {
   const snapshot = initialWorkspace();
   snapshot.integrationApprovals = [external];
-  const html = renderToStaticMarkup(createElement(ApprovalDrawer, {
+  const html = renderToStaticMarkup(createElement(ApprovalDrawerContent, {
     snapshot, selected: { kind: 'integration', id: external.id },
     connected: true, busy: false, action: async () => ({}), query: async () => ({}),
     onClose: () => {}, onOpenConversation: () => {},
@@ -91,7 +91,7 @@ it('presents a document request by title and content without showing its interna
     page_id: 'private-page-reference', space_id: 'private-space-reference',
     expected_hash: 'private-revision-reference',
   });
-  const html = renderToStaticMarkup(createElement(ApprovalDrawer, {
+  const html = renderToStaticMarkup(createElement(ApprovalDrawerContent, {
     snapshot, selected: { kind: 'document', id: review.id },
     connected: true, busy: false, action: async () => ({}), query: async () => ({}),
     onClose: () => {}, onOpenConversation: () => {},

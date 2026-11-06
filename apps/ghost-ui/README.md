@@ -6,6 +6,21 @@ Ghost와의 대화를 중심으로 여러 Ghost, 협업, 승인, 작업, 문서�
 
 메뉴와 상태 안내의 용어는 [UI 용어 기준](../../docs/ui-terminology.md)을 따릅니다. 공통 이름은 `src/uiText.ts`에서 관리합니다.
 
+## 구조와 UI 기준
+
+Garden 프레임워크(`garden.json`, `vendor/garden`)를 채택했습니다. 컨트롤은 Garden의 shadcn/ui 방식 컴포넌트(`@garden/ui`, Radix 기반)만 사용하고, 배치와 색은 Tailwind 4와 Garden 토큰으로 지정합니다. 화면마다 따로 만든 컨트롤이나 별도 컴포넌트 라이브러리를 더하지 않습니다. 예외는 `garden.json`과 `docs/decisions/`에 기록합니다.
+
+앱 틀은 `GAppShell`입니다. 왼쪽 레일이 작업 공간 넷을 고르고, 사이드바는 고른 작업 공간의 목적지만 보여 줍니다.
+
+| 레일 | 사이드바 |
+|---|---|
+| 대화 | 새 요청, Ghost 목록(기본 Ghost 우선). 열린 Ghost 아래에 대화 · 맡은 일 · 전용 화면 · 이전 대화 |
+| 일 | 확인 필요 · 모든 일 · 협업 |
+| 프로젝트 | 프로젝트 목록과 새 프로젝트 |
+| 설정 | 없음 (설정 화면이 팀 · 모델 · 확장 · 호스트 · 화면 · 아바타 섹션을 가짐) |
+
+명령 검색은 오른쪽 위 입력란 또는 `⌘P`/`⌘K`로 엽니다.
+
 ## 실행
 
 Node.js 22.12 이상 또는 24 이상에서 실행합니다.
@@ -13,7 +28,7 @@ Node.js 22.12 이상 또는 24 이상에서 실행합니다.
 ### 실제 콘솔
 
 프로젝트 루트에서 `cargo build --features workspace-ui`를 실행하고, 이 폴더에서
-`npm ci && npm run build`를 실행한 뒤 `npm run console`로 시작합니다.
+`bun install && bun run build`를 실행한 뒤 `bun run console`로 시작합니다.
 Rust 호스트와 이 React UI를 함께 실행하며 기본 UI 주소는
 `http://127.0.0.1:62062`입니다. 콘솔 프로세스를 종료하면 두 자식 프로세스도
 종료합니다. 브라우저를 닫는 것은 호스트 실행에 영향을 주지 않습니다.
@@ -42,8 +57,8 @@ SDK 인증 형식은 `{"version":1,"providers":{"zai":{"api_key":"YOUR_KEY"}}}`�
 
 ```sh
 cd apps/ghost-ui
-npm ci
-npm run dev
+bun install
+bun run dev
 ```
 
 미리보기는 `http://127.0.0.1:5178`입니다. 기본값은 **예시 모드**이며 브라우저에 예시 상태를 저장합니다. 실제 모델이나 외부 도구를 실행하지 않습니다. 공유하거나 새로 고친 경로 링크(`/spaces/...`, `/ghosts/...`, `/work` 등)는 시작 시 해시 라우트로 변환되어 해당 화면으로 열립니다.
@@ -51,14 +66,14 @@ npm run dev
 이미 실행 중인 Ghost 호스트에 연결하려면, 호스트의 루트 디렉터리를 지정해 UI 서버를 시작합니다.
 
 ```sh
-GHOST_ROOT=/absolute/path/to/ghost-workspace npm run dev
+GHOST_ROOT=/absolute/path/to/ghost-workspace bun run dev
 ```
 
-호스트는 해당 루트에 `.ghost-control.json`을 제공해야 합니다. 연결에 실패해도 예시 모드로 자동 전환하지 않습니다. 빌드한 UI는 `npm run build` 후 `npm run serve`로 실행합니다. 동일한 `GHOST_ROOT` 설정을 지원합니다.
+호스트는 해당 루트에 `.ghost-control.json`을 제공해야 합니다. 연결에 실패해도 예시 모드로 자동 전환하지 않습니다. 빌드한 UI는 `bun run build` 후 `bun run serve`로 실행합니다. 동일한 `GHOST_ROOT` 설정을 지원합니다.
 
 ## 펫과 아바타
 
-사이드바 **앱 설정 → 아바타** 또는 대화 화면의 Ghost 아바타를 누릅니다. `⌘ ,` / `Ctrl ,`로 설정을 열 수도 있습니다.
+**설정 → 아바타** 또는 대화 화면의 Ghost 아바타를 누릅니다. `⌘ ,` / `Ctrl ,`로 설정을 열 수도 있습니다.
 
 - Ghost별로 아바타를 선택하고 저장합니다. 선택은 사이드바, 대화, 검토와 협업 화면에 함께 반영됩니다.
 - **아바타 만들기 → 직접 만들기**에서 색, 형태, 표정, 장식을 조합합니다. 로컬 캔버스 제작기로서 별도 모델/API 없이 동작합니다. 원본은 복사해서 수정할 수 있습니다.
@@ -84,13 +99,14 @@ GHOST_ROOT=/absolute/path/to/ghost-workspace npm run dev
 
 **협업 → 작업 구조**에서는 작업별 담당 Ghost와 요청 내용을 지정하고 선행 작업의 성공·실패 조건을 연결합니다. 연결 없는 작업은 병렬로 시작하며, 여러 선행 작업이 있으면 모든 조건을 충족해야 시작합니다. 저장, 실행, 취소와 작업별 대화·결과 조회를 지원합니다. 실행 기록에는 시작 당시 구조 버전이 보존됩니다. 예시 모드는 구조 편집·저장만 지원합니다. 최신 호스트가 필요하며, 자세한 실행·복구 규칙은 [작업 구조](../../docs/orchestration.md)에 있습니다.
 
-문서 공간은 기존 Host의 읽기 및 검토 API를 사용합니다. Ghost에 맡긴 작업은 **맡긴 일**에서 확인합니다. 이전 플래너 링크도 이 화면으로 연결됩니다. MCP와 패키지 설정은 **확장**에서 관리합니다.
+문서 공간은 기존 Host의 읽기 및 검토 API를 사용하며 **프로젝트**에 표시합니다. Ghost에 맡긴 작업은 **일**에서 확인합니다. 이전 플래너 링크도 이 화면으로 연결됩니다. MCP와 패키지 설정은 **설정 → 확장**에서 관리합니다.
 
 ## 검증
 
 ```sh
-npm test
-npm run build
+bun run test
+bun run build
+bun run garden:doctor
 node scripts/verify-host.mjs
 ```
 

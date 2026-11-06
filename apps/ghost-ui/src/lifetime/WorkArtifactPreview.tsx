@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { FileText } from 'lucide-react';
+import { Button, InlineError } from '@garden/ui';
 import { Modal } from '../components/Modal';
 import { isRecord } from './guards';
 import type { Artifact, LifetimeClient, Work } from './types';
@@ -87,21 +88,21 @@ function ArtifactReader({ client, work, artifact, disabled = false }: Props) {
   const close = () => { request.current++; setReader(undefined); };
 
   return <>
-    <button type="button" className="button secondary" disabled={disabled} onClick={() => void load()}><FileText size={15}/>결과 열기</button>
+    <Button type="button" variant="secondary" disabled={disabled} onClick={() => void load()}><FileText size={15}/>결과 열기</Button>
     {reader && <Modal title="결과 문서" onClose={close} drawer focusClose>
-      <div className="page-reader" aria-busy={reader.status === 'loading'}>
-        {reader.status === 'loading' && <p role="status">호스트에서 결과물을 읽는 중…</p>}
-        {reader.status === 'error' && <>
-          <p className="inline-error" role="alert">{reader.message}</p>
-          <button type="button" className="button secondary" disabled={disabled} onClick={() => void load()}>다시 읽기</button>
-        </>}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain" aria-busy={reader.status === 'loading'}>
+        {reader.status === 'loading' && <p role="status" className="m-0 text-ui text-ink-2">호스트에서 결과물을 읽는 중…</p>}
+        {reader.status === 'error' && <div className="grid justify-items-start gap-3">
+          <InlineError>{reader.message}</InlineError>
+          <Button type="button" variant="secondary" disabled={disabled} onClick={() => void load()}>다시 읽기</Button>
+        </div>}
         {reader.status === 'ready' && (reader.source === null
-          ? <p role="status">검증된 결과물이지만 이 형식은 여기에서 열 수 없습니다.</p>
+          ? <p role="status" className="m-0 text-ui text-ink-2">검증된 결과물이지만 이 형식은 여기에서 열 수 없습니다.</p>
           : <>
-            <p className="field-help">원문 · 읽기 전용</p>
+            <p className="m-0 text-caption text-ink-2">원문 · 읽기 전용</p>
             {reader.source.length
               ? <pre className="garden-document-source-readonly"><code>{reader.source}</code></pre>
-              : <p className="field-help">빈 문서입니다.</p>}
+              : <p className="m-0 text-caption text-ink-2">빈 문서입니다.</p>}
           </>)}
       </div>
     </Modal>}

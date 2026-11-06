@@ -4,7 +4,7 @@ import { expect, it } from 'vitest';
 import { initialWorkspace } from '../fixtures/workspace';
 import { inboxItems } from '../client/inbox';
 import { normalizeRoutingResults } from '../client/routingResults';
-import { InboxView } from './WorkViews';
+import { InboxView, WorkView } from './WorkViews';
 import { Overview } from './Overview';
 
 function workspace() {
@@ -20,9 +20,8 @@ it('counts exactly the review and task items shown in the inbox, including a fai
   conversation.tasks.push({ id: 'failure', name: '응답 생성', phase: 'failed', partial: '', output: 'command interrupted; inspect the saved state before issuing a new request' });
   const overview = renderToStaticMarkup(createElement(Overview, { snapshot, ...callbacks }));
   const inbox = renderToStaticMarkup(createElement(InboxView, { snapshot, ...callbacks }));
-  expect(overview).toContain('class="work-card" data-tone="attention"');
-  expect(overview).toContain('class="work-card-state">실패');
-  expect(inbox.match(/class="inbox-item"/g)).toHaveLength(1);
+  expect(overview).not.toContain('자료 찾기');
+  expect(inbox.match(/data-slot="work-row"/g)).toHaveLength(1);
   expect(inbox).not.toContain('확인이 필요한 항목 없음');
   expect(inbox).toContain('두 원인을 구분할 수 없습니다');
   expect(inbox).toContain('aria-haspopup="dialog">실행 기록</button>');
@@ -38,7 +37,7 @@ it('shows an owner wait once when a document review already represents it, but r
   other.tasks.push({ id: 'waiting', name: '확인 요청', phase: 'waiting_owner', partial: '', output: '' });
   const html = renderToStaticMarkup(createElement(InboxView, { snapshot, ...callbacks }));
   expect(inboxItems(snapshot).count).toBe(4);
-  expect(html.match(/class="inbox-item"/g)).toHaveLength(4);
+  expect(html.match(/data-slot="work-row"/g)).toHaveLength(4);
   expect(html).toContain('다시 요청하기 전에');
   expect(html).toContain('작업이 확인을 기다리고 있습니다');
 });
@@ -60,12 +59,13 @@ it('counts completion results only when the inbox can display them', () => {
 });
 
 
-it('shows no work section while idle and lists running work once it starts', () => {
+it('keeps running work off home and lists it in the 일 workspace instead', () => {
   const snapshot = workspace();
   const render = () => renderToStaticMarkup(createElement(Overview, { snapshot, ...callbacks }));
-  expect(render()).not.toContain('id="home-ongoing"');
+  expect(render()).not.toContain('자료 찾기');
   snapshot.profiles[0].conversations[0].tasks.push({ id: 'running', name: '자료 찾기', phase: 'model_running', partial: '', output: '' });
-  expect(render()).toContain('id="home-ongoing"');
-  expect(render()).toContain('data-tone="running"');
-  expect(render()).toContain('자료 찾기');
+  expect(render()).not.toContain('자료 찾기');
+  const work = renderToStaticMarkup(createElement(WorkView, { snapshot, action: async () => ({}), busy: false, navigate: () => {}, onAssign: () => {} }));
+  expect(work).toContain('자료 찾기');
+  expect(work).toContain('data-slot="work-row"');
 });

@@ -1,6 +1,23 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, CircleAlert, Clock3, GitBranch, Info, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { Check, ChevronRight, CircleAlert, Clock3, GitBranch, Info, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
+import {
+  Alert,
+  AlertTitle,
+  Banner,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  Checkbox,
+  EmptyState,
+  GComposer,
+  GConversation,
+  GConversationMessage,
+  SelectField,
+  Textarea,
+} from '@garden/ui';
 import type { Artifact, ConversationRun, Envelope, Goal, Response, Snapshot, Work } from "../../../../contracts/lifetime/bindings.ts";
 import { isArtifact, isPrivacy } from "./guards";
 import { atLeastPrivacy, conversationTargetKey, defaultRegistryConversation, findRegisteredConversation, mergeConversationRuns, mergeConversationTurns, parseConversationPage, parseRegistryResponse } from "./conversation";
@@ -8,7 +25,6 @@ import type { ConversationPage, ConversationTurn, RegistryConversation } from ".
 import type { LifetimeClient, LifetimeMode, LifetimeRecoveryCommand } from "./types";
 import type { Review, Command } from "../client/types";
 import { MemorySourceReview } from "./MemorySourceReview";
-import "./lifetime.css";
 import { InferenceSettings } from '../pets/InferenceSettings';
 import { BotRoster } from './BotRoster';
 import { AgentStatus } from '../components/AgentStatus';
@@ -229,8 +245,6 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const [conversationError, setConversationError] = useState("");
   const [conversationRefresh, setConversationRefresh] = useState(0);
   const [loadedConversationKey, setLoadedConversationKey] = useState("");
-  const transcriptRef = useRef<HTMLDivElement>(null);
-  const transcriptAtBottom = useRef(true);
   const [goalDetailID, setGoalDetailID] = useState<string | null>(null);
   const [goalDrafts, setGoalDrafts] = useState(() => new Map<string, { text: string; revision: number }>());
   const [openThread, setOpenThread] = useState<{ goalID: string; scope: string } | null>(null);
@@ -655,12 +669,6 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   }, [routeActive, client, selectedTarget?.ghost_id, selectedTarget?.conversation_id, conversationRefresh]);
 
   useEffect(() => {
-    const transcript = transcriptRef.current;
-    if (conversationLoading || !transcript || !transcriptAtBottom.current) return;
-    transcript.scrollTop = transcript.scrollHeight;
-  }, [turns, conversationLoading, selectedPanel]);
-
-  useEffect(() => {
     if (!routeActive || mode !== "live" || !selectedTarget || loadedConversationKey !== selectedTargetKey || loading || selectedPanel === 'work' && workScope === 'all') return;
     const target = selectedTarget;
     let mounted = true;
@@ -933,66 +941,81 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     ? `${ghostName(selectedTarget.ghost_id)}${publicConversation ? ` · ${publicLabel(selectedTarget)}` : ""}`
     : "대화";
   const feedback = <>
-      {error && <p className="lifetime-alert" role="alert"><CircleAlert size={16}/><span>{error}</span></p>}
-      {syncWarning && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>{syncWarning}</span></p>}
-      {notice && <p className="lifetime-notice" role="status"><Check size={16}/><span>{notice}</span></p>}
+      {error && <Alert variant="destructive"><CircleAlert aria-hidden="true"/><AlertTitle>{error}</AlertTitle></Alert>}
+      {syncWarning && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>{syncWarning}</AlertTitle></Alert>}
+      {notice && <Alert role="status" variant="success"><Check aria-hidden="true"/><AlertTitle>{notice}</AlertTitle></Alert>}
   </>;
 
   const inConversation = selectedPanel === "conversation";
   const displayedTurns = routeActive && loadedConversationKey === selectedTargetKey ? turns : [];
-  return <section className="lifetime-panel" data-panel={selectedPanel} aria-labelledby="lifetime-heading">
-    <header className={`lifetime-heading${inConversation ? " thread-toolbar" : ""}`}>
-      <div>
+  const promptBytes = new TextEncoder().encode(prompt).length;
+  return <section data-panel={selectedPanel} aria-labelledby="lifetime-heading" className="mx-auto grid min-w-0 max-w-[1120px] gap-[18px] pb-9 pt-[22px]">
+    <header className="flex items-center justify-between gap-3.5 border-b border-line pb-3.5">
+      <div className="min-w-0">
         {/* The title bar names the page; the heading stays for screen readers unless it adds the public conversation. */}
-        <h2 id="lifetime-heading" className={selectedPanel !== "ghosts" && !publicConversation ? "sr-only" : undefined}>
+        <h2 id="lifetime-heading" className={selectedPanel !== "ghosts" && !publicConversation ? "sr-only" : "m-0 text-headingSm font-semibold text-ink"}>
           {inConversation ? chatTitle : selectedPanel === "work" ? workScope === "all" ? "모든 일" : "맡은 일" : "Ghost 관리"}
         </h2>
       </div>
-      <div className="lifetime-heading-actions">
+      <div className="flex flex-wrap justify-end gap-2">
         {inConversation && mode === "live" && client.actor_ref === "owner" && defaultTarget && selectedTarget?.ghost_id === defaultTarget.ghost_id &&
-          <button type="button" className="icon-button" onClick={() => void openPublicConversation()}
-            disabled={publicOpenDisabled} aria-label="새 공개 대화" title="새 공개 대화"><Plus size={15}/></button>}
-        <button type="button" className="icon-button" onClick={() => void refresh()}
-          aria-label={refreshing ? "새로 고치는 중" : "새로 고침"} title="새로 고침" disabled={refreshing || loading}><RefreshCw size={14}/></button>
+          <Button type="button" variant="ghost" size="icon" onClick={() => void openPublicConversation()}
+            disabled={publicOpenDisabled} aria-label="새 공개 대화" title="새 공개 대화"><Plus size={15}/></Button>}
+        <Button type="button" variant="ghost" size="icon" onClick={() => void refresh()}
+          aria-label={refreshing ? "새로 고치는 중" : "새로 고침"} title="새로 고침" disabled={refreshing || loading}><RefreshCw size={14}/></Button>
       </div>
     </header>
-    {mode === "fixture" && <p className="lifetime-fixture-note">예시 모드입니다. 요청은 이 브라우저의 예시 기록에만 반영되며 실제 호스트나 작업 실행자에게 전달되지 않습니다.</p>}
+    {mode === "fixture" && <Banner variant="info">예시 모드입니다. 요청은 이 브라우저의 예시 기록에만 반영되며 실제 호스트나 작업 실행자에게 전달되지 않습니다.</Banner>}
     {!goalDetail && !threadID && feedback}
-    {!client.dispatch_enabled && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>호스트 복구 모드: 저장된 상태는 읽을 수 있지만 새 변경과 재전송은 사용할 수 없습니다.</span></p>}
-    {recovery.length > 0 && <section className="lifetime-outbox" aria-label="이전 연결의 미확정 요청">
-      <div className="lifetime-section-heading"><div><h3>이전 요청 확인 필요</h3><p>이전 작업실 또는 권한 버전의 요청은 다시 보내지 않습니다. 확인 전까지 새 변경을 차단합니다.</p></div></div>
-      {recovery.map(item => <article className="lifetime-outbox-row" key={item.id}>
-        <div>
-          <strong>미확정 요청 · {item.authority_epoch === null ? "권한 버전 알 수 없음" : `권한 버전 ${item.authority_epoch}`}</strong>
-          <span>{item.issue ? "저장 기록을 해석할 수 없어 자동 확인할 수 없습니다." : "원래 요청 ID와 권한 버전을 보존하고 있습니다."}</span>
-          <DetailDialog title="기술 정보"><span>작업실 ID: {item.workspace_id ?? "알 수 없음"}</span><code>{item.command_id ?? "원래 요청 ID 알 수 없음"}</code></DetailDialog>
-        </div>
-        <button type="button" className="button secondary" disabled={Boolean(busy) || !item.envelope || !item.command_id} onClick={() => void reconcile(item.id)}>
-          <RefreshCw size={14}/>접수 기록 확인
-        </button>
-      </article>)}
+    {!client.dispatch_enabled && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>호스트 복구 모드: 저장된 상태는 읽을 수 있지만 새 변경과 재전송은 사용할 수 없습니다.</AlertTitle></Alert>}
+    {recovery.length > 0 && <section aria-label="이전 연결의 미확정 요청" className="min-w-0">
+      <Card className="gap-0">
+        <CardHeader className="grid gap-0.5 border-b border-line py-0 pb-3 pt-4">
+          <h3 className="m-0 text-body font-semibold text-ink">이전 요청 확인 필요</h3>
+          <p className="m-0 text-caption text-ink-2">확인할 때까지 새 변경이 차단되므로 접수 기록을 확인해 주세요.</p>
+        </CardHeader>
+        <CardContent className="grid gap-0 pt-0">
+          {recovery.map(item => <article key={item.id} className="grid gap-3 border-t border-line py-2.5 first:border-t-0 md:grid-cols-[minmax(140px,1fr)_auto]">
+            <div className="grid min-w-0 gap-0.5">
+              <strong className="text-ui font-medium text-ink">미확정 요청 · {item.authority_epoch === null ? "권한 버전 알 수 없음" : `권한 버전 ${item.authority_epoch}`}</strong>
+              <span className="text-caption text-ink-2">{item.issue ? "접수 기록을 해석할 수 없습니다." : "원래 요청 ID를 보존했습니다."}</span>
+              <div><DetailDialog title="기술 정보"><span>작업실 ID: {item.workspace_id ?? "알 수 없음"}</span><code className="block font-mono text-caption [overflow-wrap:anywhere]">{item.command_id ?? "원래 요청 ID 알 수 없음"}</code></DetailDialog></div>
+            </div>
+            <Button type="button" variant="secondary" disabled={Boolean(busy) || !item.envelope || !item.command_id} onClick={() => void reconcile(item.id)}>
+              <RefreshCw size={14}/>접수 기록 확인
+            </Button>
+          </article>)}
+        </CardContent>
+      </Card>
     </section>}
 
-    {pending.length > 0 && <section className="lifetime-outbox" aria-label="확인되지 않은 저장 요청">
-      <div className="lifetime-section-heading"><div><h3>접수 결과 확인 필요</h3><p>미확정 저장 요청은 다시 보내지 않습니다. 같은 요청 ID의 접수 기록을 확인합니다.</p></div></div>
-      {pending.map(envelope => <article className="lifetime-outbox-row" key={envelope.command_id}>
-        <div>
-          <strong>{typeof envelope.body.follow_up === "string" && envelope.body.method === "goal.update" ? "후속 지시"
-            : typeof envelope.body.method === "string" ? pendingCommandLabels[envelope.body.method] ?? "저장된 요청" : "저장된 요청"}</strong>
-          <span>원래 요청 ID와 권한 버전을 보존했습니다.</span>
-          {envelope.body.method === "conversation.input" && <p>{String(envelope.body.text ?? "")}</p>}
-          {typeof envelope.body.ghost_id === "string" && typeof envelope.body.conversation_id === "string"
-            && <DetailDialog title="저장된 대상"><code>{envelope.body.ghost_id} · {envelope.body.conversation_id}</code></DetailDialog>}
-        </div>
-        <button type="button" className="button secondary" disabled={Boolean(busy)} onClick={() => void inspectPendingCommand(envelope)}>
-          <RefreshCw size={14}/>접수 기록 확인
-        </button>
-      </article>)}
+    {pending.length > 0 && <section aria-label="확인되지 않은 저장 요청" className="min-w-0">
+      <Card className="gap-0">
+        <CardHeader className="grid gap-0.5 border-b border-line py-0 pb-3 pt-4">
+          <h3 className="m-0 text-body font-semibold text-ink">접수 결과 확인 필요</h3>
+          <p className="m-0 text-caption text-ink-2">같은 요청 ID의 접수 기록을 확인할 때까지 새 요청이 차단됩니다.</p>
+        </CardHeader>
+        <CardContent className="grid gap-0 pt-0">
+          {pending.map(envelope => <article key={envelope.command_id} className="grid gap-3 border-t border-line py-2.5 first:border-t-0 md:grid-cols-[minmax(140px,1fr)_auto]">
+            <div className="grid min-w-0 gap-0.5">
+              <strong className="text-ui font-medium text-ink">{typeof envelope.body.follow_up === "string" && envelope.body.method === "goal.update" ? "후속 지시"
+                : typeof envelope.body.method === "string" ? pendingCommandLabels[envelope.body.method] ?? "저장된 요청" : "저장된 요청"}</strong>
+              <span className="text-caption text-ink-2">원래 요청 ID와 권한 버전을 보존했습니다.</span>
+              {envelope.body.method === "conversation.input" && <p className="m-0 text-caption [overflow-wrap:anywhere]">{String(envelope.body.text ?? "")}</p>}
+              {typeof envelope.body.ghost_id === "string" && typeof envelope.body.conversation_id === "string"
+                && <div><DetailDialog title="저장된 대상"><code className="block font-mono text-caption [overflow-wrap:anywhere]">{envelope.body.ghost_id} · {envelope.body.conversation_id}</code></DetailDialog></div>}
+            </div>
+            <Button type="button" variant="secondary" disabled={Boolean(busy)} onClick={() => void inspectPendingCommand(envelope)}>
+              <RefreshCw size={14}/>접수 기록 확인
+            </Button>
+          </article>)}
+        </CardContent>
+      </Card>
     </section>}
 
-    {selectedPanel === "ghosts" && snapshot && workspaceSnapshot && registryReady && !registryError && <section className="lifetime-roster" aria-labelledby="ghost-team-heading">
-      <h3 id="ghost-team-heading" className="lifetime-roster-label">Ghost 목록</h3>
-      <ul className="ghost-team-list">
+    {selectedPanel === "ghosts" && snapshot && workspaceSnapshot && registryReady && !registryError && <section aria-labelledby="ghost-team-heading" className="grid min-w-0 gap-2.5">
+      <h3 id="ghost-team-heading" className="m-0 text-body font-semibold text-ink">Ghost 목록</h3>
+      <ul className="grid list-none gap-2.5 p-0 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
         {workspaceSnapshot.profiles.map(profile => {
           const entries = registry.filter(target => target.ghost_id === profile.id);
           const target = findRegisteredConversation(entries, profile.id);
@@ -1004,18 +1027,27 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
             { label: "검수 완료", tone: "neutral", count: currentWork.filter(work => work.state === "accepted").length },
           ];
           const key = target ? conversationTargetKey(target) : "";
-          return <li className="ghost-team-row" key={profile.id}>
-            {target?.mode === "active" ? <button className="ghost-team-card" type="button" aria-pressed={key === selectedTargetKey}
-              onClick={() => openRegisteredTarget(target, false)}>
-              <span className="ghost-team-card-heading"><strong>{ghostDisplayName(profile.name)}{target.kind === 'primary' && <span className="ghost-default-badge">기본</span>}</strong></span>
-              <span className="ghost-team-counts">{counts.filter(({ count }) => count > 0).map(({ label, tone, count }) =>
-                <span key={label} data-tone={tone}>{label} {count}</span>)}</span>
-            </button> : <div className="ghost-team-card ghost-team-card--unregistered">
-              <span className="ghost-team-card-heading"><strong>{ghostDisplayName(profile.name)}</strong><small>{profile.persona}</small></span>
-              {target ? <span className="ghost-team-registration-state">등록 대화 마무리 중</span> : <div className="ghost-team-actions">
-                <button type="button" className="button primary" disabled={!connected || !client.dispatch_enabled || loading || refreshing || Boolean(busy) || pending.length > 0 || recovery.length > 0}
-                  onClick={() => void ensureProfileConversation(profile.id, crypto.randomUUID())}>새 대화 연결</button>
-                {profile.conversations.length > 0 && <button type="button" className="button secondary" onClick={() => onOpenHistory?.(profile.id)}>이전 대화 {profile.conversations.length}</button>}
+          return <li className="min-w-0" key={profile.id}>
+            {target?.mode === "active" ? <Button type="button" variant="outline" aria-pressed={key === selectedTargetKey}
+              onClick={() => openRegisteredTarget(target, false)}
+              className={`h-auto w-full flex-col items-start justify-start gap-2.5 rounded-card px-3 py-2.5 text-left whitespace-normal ${key === selectedTargetKey ? "border-line-strong bg-inset" : ""}`}>
+              <span className="flex w-full min-w-0 items-center justify-between gap-2">
+                <strong className="min-w-0 truncate text-ui font-semibold text-ink">{ghostDisplayName(profile.name)}</strong>
+                {target.kind === 'primary' && <Badge>기본</Badge>}
+              </span>
+              <span className="flex flex-wrap gap-1.5">
+                {counts.filter(({ count }) => count > 0).map(({ label, tone, count }) =>
+                  <Badge key={label} variant={tone === "review" ? "warning" : "outline"}>{label} {count}</Badge>)}
+              </span>
+            </Button> : <div className="grid w-full gap-2.5 rounded-card border border-dashed border-line bg-surface px-3 py-2.5">
+              <span className="flex w-full min-w-0 items-center justify-between gap-2">
+                <strong className="min-w-0 truncate text-ui font-semibold text-ink">{ghostDisplayName(profile.name)}</strong>
+                <small className="shrink-0 truncate text-caption text-ink-2">{profile.persona}</small>
+              </span>
+              {target ? <span className="text-caption text-ink-2">등록 대화 마무리 중</span> : <div className="flex flex-wrap gap-2">
+                <Button type="button" disabled={!connected || !client.dispatch_enabled || loading || refreshing || Boolean(busy) || pending.length > 0 || recovery.length > 0}
+                  onClick={() => void ensureProfileConversation(profile.id, crypto.randomUUID())}>새 대화 연결</Button>
+                {profile.conversations.length > 0 && <Button type="button" variant="secondary" onClick={() => onOpenHistory?.(profile.id)}>이전 대화 {profile.conversations.length}</Button>}
               </div>}
             </div>}
           </li>;
@@ -1023,68 +1055,121 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       </ul>
     </section>}
 
-    {selectedPanel === "conversation" && <section className="lifetime-conversation" aria-label="선택한 Ghost와의 대화">
-      {selectedTarget && <AgentStatus key={selectedTargetKey} model={agentStatus} ghostID={selectedTarget.ghost_id}
-        observedAt={Math.min(snapshotObservedAt, conversationObservedAt) || undefined} fixture={mode === 'fixture'}
-        busy={Boolean(busy)} actionsDisabled={writesDisabled || loading || agentStatus.state === 'unknown' || agentStatus.state === 'stale'}
-        onInspectWork={workID => void inspectWork(workID)} onCancelTurn={turnID => void cancelConversationTurn(turnID)}/>}
-      {onOpenApproval && (pendingDocumentReviews.length > 0 || integrationReviews.length > 0) && <div className="lifetime-chat-approvals" aria-label="이 대화의 확인할 일">
-        {pendingDocumentReviews.map(review => <button type="button" className="button secondary" key={review.id}
-          onClick={() => onOpenApproval({ kind: "document", id: review.id })}>{review.title} · {review.state === "pending" ? "검토 대기" : "저장 대기"}</button>)}
-        {integrationReviews.slice(0, 5).map(review => <button type="button" className="button secondary" key={review.id}
-          onClick={() => onOpenApproval({ kind: "integration", id: review.id })}>{integrationApprovalTitle(review.tool)} · {integrationStatusLabels[review.state]}</button>)}
-      </div>}
-      {!selectedTarget && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>{initialGhostID ? "이 Ghost에 활성 대화가 없습니다. 대시보드에서 이 Ghost를 열고 새 대화를 연결해 주세요." : "활성 대화를 확인할 수 없습니다. 대시보드에서 Ghost를 선택해 주세요."}</span></p>}
-      {conversationError && <p className="lifetime-alert" role="alert"><CircleAlert size={16}/><span>{conversationError}</span></p>}
-      {hasOlder && oldestSequence !== null && <button type="button" className="button secondary" onClick={() => void loadOlderConversation()} disabled={conversationLoading || !selectedTarget}>이전 대화 불러오기</button>}
-      {conversationLoading && <p className="lifetime-empty"><Clock3 size={16}/>저장된 대화를 불러오는 중입니다.</p>}
-      {!conversationLoading && selectedTarget && turns.length === 0 && !conversationError && <p className="lifetime-empty thread-empty">이 대화에 아직 메시지가 없습니다.</p>}
-      <div ref={transcriptRef} className="lifetime-transcript thread-messages" role="log" aria-label="대화 기록" aria-live="polite" tabIndex={0}
-        onScroll={event => {
-          const transcript = event.currentTarget;
-          transcriptAtBottom.current = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 48;
-        }}>
-        {displayedTurns.map(turn => {
-          const controller = turn.kind === "user" ? turnRuns.get(turn.id) : undefined;
-          const canCancel = controller && !["answered", "failed", "cancelled"].includes(controller.state);
-          const eventLabel = turn.origin_report_id ? "작업 보고" : turn.kind === "assistant_advisory" ? "참고 의견" : "호스트 상태 기록";
-          const recordedAt = new Date(turn.created_at_ms).toLocaleString();
-          return <article className="lifetime-turn thread-turn" data-kind={turn.kind} key={turn.id}
-            aria-label={turn.kind === "user" ? "나" : eventLabel}>
-          {(turn.kind === "host_fact" || turn.origin_report_id) && <strong className="thread-event-label">
+    {selectedPanel === "conversation" && <GConversation
+      label="선택한 Ghost와의 대화"
+      transcriptLabel="대화 기록"
+      jumpToLatestLabel="최신 메시지로 이동"
+      scrollKey={displayedTurns.length}
+      className="h-[min(72dvh,680px)] min-h-80"
+      header={(selectedTarget || conversationError) ? <div className="grid gap-2 pt-1">
+        {selectedTarget && <AgentStatus key={selectedTargetKey} model={agentStatus} ghostID={selectedTarget.ghost_id}
+          observedAt={Math.min(snapshotObservedAt, conversationObservedAt) || undefined} fixture={mode === 'fixture'}
+          busy={Boolean(busy)} actionsDisabled={writesDisabled || loading || agentStatus.state === 'unknown' || agentStatus.state === 'stale'}
+          onInspectWork={workID => void inspectWork(workID)} onCancelTurn={turnID => void cancelConversationTurn(turnID)}/>}
+        {onOpenApproval && (pendingDocumentReviews.length > 0 || integrationReviews.length > 0) && <div className="flex flex-wrap gap-2" aria-label="이 대화의 확인할 일">
+          {pendingDocumentReviews.map(review => <Button type="button" variant="secondary" key={review.id}
+            onClick={() => onOpenApproval({ kind: "document", id: review.id })}>{review.title} · {review.state === "pending" ? "검토 대기" : "저장 대기"}</Button>)}
+          {integrationReviews.slice(0, 5).map(review => <Button type="button" variant="secondary" key={review.id}
+            onClick={() => onOpenApproval({ kind: "integration", id: review.id })}>{integrationApprovalTitle(review.tool)} · {integrationStatusLabels[review.state]}</Button>)}
+        </div>}
+        {!selectedTarget && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>{initialGhostID ? "이 Ghost에 활성 대화가 없습니다. 대시보드에서 이 Ghost를 열고 새 대화를 연결해 주세요." : "활성 대화를 확인할 수 없습니다. 대시보드에서 Ghost를 선택해 주세요."}</AlertTitle></Alert>}
+        {conversationError && <Alert variant="destructive"><CircleAlert aria-hidden="true"/><AlertTitle>{conversationError}</AlertTitle></Alert>}
+      </div> : undefined}
+      composer={<GComposer variant="conversation" inputId="lifetime-message" value={prompt}
+        onValueChange={text => updatePrompt(selectedTargetKey, () => text)}
+        onSubmit={() => void submitConversation()}
+        label="메시지" placeholder="메시지 쓰기"
+        submitLabel={busy === "conversation.input" ? "저장 중" : "대화에 보내기"}
+        disabled={Boolean(busy)} pending={busy === "conversation.input"}
+        footer={<DetailDialog title="전송 옵션" label={<><SlidersHorizontal size={15} aria-hidden="true"/><span className="sr-only">전송 옵션 · {privacyLabels[effectivePrivacy]}</span>{attachments.length > 0 && <span>첨부 {attachments.length}</span>}</>}>
+          <SelectField label="대화 대상" value={selectedTarget ? conversationTargetKey(selectedTarget) : selectedPairKey || "lifetime:none"}
+            onValueChange={value => {
+              const target = registry.find(item => conversationTargetKey(item) === value);
+              if (target) openRegisteredTarget(target, false);
+            }}
+            disabled={Boolean(busy) || writesDisabled && pending.length > 0}
+            options={[
+              { value: "lifetime:none", label: "등록 대화를 선택하세요" },
+              ...registry.map(target => ({ value: conversationTargetKey(target), label: `${ghostName(target.ghost_id)}${target.secondary ? ` · ${publicLabel(target)}` : target.kind === 'primary' ? ' · 기본' : ''}${target.mode === "draining" ? " · 마무리 중" : ""}` })),
+            ]}/>
+          {!publicConversation && <SelectField label="자료 범위" value={privacy} onValueChange={value => setPrivacy(value as Artifact["privacy"])} disabled={Boolean(busy)}
+            options={[{ value: "local_only", label: "이 기기에서만" }, { value: "private", label: "비공개" }, { value: "public", label: "공개 자료 허용" }]}/>}
+          <div className="grid gap-1.5">
+            <strong className="text-ui font-medium text-ink">기존 자료 첨부</strong>
+            {attachmentChoices.length === 0 && <span className="text-caption text-ink-2">이 대화에서 선택할 수 있는 기존 첨부 자료가 없습니다. 새 파일은 여기서 열거나 업로드하지 않습니다.</span>}
+            {attachmentChoices.map(artifact => {
+              const key = attachmentKey(artifact);
+              const checked = attachments.some(item => attachmentKey(item) === key);
+              return <label key={key} className="flex items-center gap-2 text-caption text-ink">
+                <Checkbox checked={checked} disabled={Boolean(busy) || (!checked && attachments.length >= 16)}
+                  onCheckedChange={include => {
+                    updateAttachments(selectedTargetKey, current => {
+                      const remaining = (current ?? []).filter(item => {
+                        const itemKey = attachmentKey(item);
+                        return eligibleAttachments.has(itemKey) && itemKey !== key;
+                      });
+                      return include === true && remaining.length < 16 ? [...remaining, artifact] : remaining;
+                    });
+                  }}/>
+                <span>{artifact.digest.slice(0, 12)} · {privacyLabels[artifact.privacy]}</span>
+              </label>;
+            })}
+          </div>
+          <p className="m-0 text-caption text-ink-2">{!publicConversation && "대화의 기존 보호 수준은 유지됩니다. "}UTF-8 {promptBytes}/65,536바이트.</p>
+        </DetailDialog>}/>}
+      footer={activeTargets.length === 0 || promptBytes > 65_536 ? <div className="grid justify-items-center gap-1">
+        {activeTargets.length === 0 && <p className="m-0" role="status">메시지를 받을 수 있는 Ghost가 없습니다.</p>}
+        {promptBytes > 65_536 && <p className="m-0" role="status">메시지 한도 65,536바이트를 넘었습니다.</p>}
+      </div> : undefined}>
+      {hasOlder && oldestSequence !== null && <Button type="button" variant="secondary" onClick={() => void loadOlderConversation()} disabled={conversationLoading || !selectedTarget}>이전 대화 불러오기</Button>}
+      {conversationLoading && <p className="m-0 flex items-center gap-2 text-ui text-ink-2"><Clock3 size={16}/>저장된 대화를 불러오는 중입니다.</p>}
+      {!conversationLoading && selectedTarget && turns.length === 0 && !conversationError && <EmptyState title="이 대화에 아직 메시지가 없습니다."/>}
+      {displayedTurns.map(turn => {
+        const controller = turn.kind === "user" ? turnRuns.get(turn.id) : undefined;
+        const canCancel = controller && !["answered", "failed", "cancelled"].includes(controller.state);
+        const eventLabel = turn.origin_report_id ? "작업 보고" : turn.kind === "assistant_advisory" ? "참고 의견" : "호스트 상태 기록";
+        const recordedAt = new Date(turn.created_at_ms).toLocaleString();
+        return <GConversationMessage key={turn.id}
+          role={turn.kind === "user" ? "user" : "assistant"}
+          label={turn.kind === "user" ? "나" : eventLabel}
+          actions={controller ? <div className="flex flex-wrap items-center gap-2">
+            <span className="text-caption text-ink-2">{controller.cancel_requested && canCancel ? "취소 요청됨 · 응답 중지 확인 전" : turnStateLabels[controller.state]}</span>
+            {canCancel && <Button type="button" variant="secondary" title="이미 맡긴 일은 맡긴 일 화면에서 따로 취소할 수 있습니다."
+              aria-label={`이 응답 취소 요청 · 메시지 ${turn.sequence}`}
+              disabled={writesDisabled || Boolean(busy) || controller.cancel_requested}
+              onClick={() => void cancelConversationTurn(turn.id)}>이 응답 취소 요청</Button>}
+          </div> : undefined}>
+          {(turn.kind === "host_fact" || turn.origin_report_id) && <p className="m-0 font-semibold text-caption text-ink-2">
             {eventLabel}{turn.origin_report_id && " · 검수 상태 별도"}
-          </strong>}
-          <p className="thread-body">{turn.text}</p>
-          {Boolean(turn.work_thread_ids?.length) && <div className="lifetime-thread-links">
+          </p>}
+          <p className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{turn.text}</p>
+          {Boolean(turn.work_thread_ids?.length) && <div className="mt-2 grid gap-1.5">
             {turn.work_thread_ids?.map((id, index) => {
               const goal = conversationGoals.find(item => item.id === id);
               const title = goal ? workThreadTitle(goal.prompt) : turn.work_thread_ids!.length > 1 ? `일 ${index + 1}` : "일";
               const workItems = snapshot?.work.filter(work => work.goal_id === id) ?? [];
               const board = goal && boardState(goal, workItems);
               const owners = [...new Set(workItems.map(work => ghostName(work.owner)))].join(", ");
-              return <button type="button" className="work-card" data-tone={board?.stage === "active" ? "running" : board?.stage === "review" ? "attention" : undefined}
-                key={id} aria-haspopup="dialog" onClick={() => openWorkThread(id)}
-                aria-label={`일 열기: ${title}${board ? ` · ${goalStateLabels[board.state] ?? board.state}` : ""}`}>
-                <span className="work-card-copy"><strong>{title}</strong>{owners && <small>{owners}</small>}</span>
-                {board && <span className="work-card-state">{goalStateLabels[board.state] ?? board.state}</span>}
-              </button>;
+              return <Button type="button" variant="ghost" key={id} aria-haspopup="dialog" onClick={() => openWorkThread(id)}
+                aria-label={`일 열기: ${title}${board ? ` · ${goalStateLabels[board.state] ?? board.state}` : ""}`}
+                className="h-auto w-full justify-start gap-3 rounded-card border border-line px-3 py-2.5 text-left whitespace-normal">
+                <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${board?.stage === "active" ? "bg-green" : board?.stage === "review" ? "bg-orange" : "bg-ink-2"}`}/>
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <strong className="truncate text-body font-medium text-ink">{title}</strong>
+                  {owners && <small className="truncate text-caption text-ink-2">{owners}</small>}
+                </span>
+                {board && <Badge variant={board.stage === "active" ? "success" : board.stage === "review" ? "warning" : "outline"}>{goalStateLabels[board.state] ?? board.state}</Badge>}
+              </Button>;
             })}
           </div>}
-          {controller && <div className="lifetime-submit-actions thread-turn-actions">
-            <span>{controller.cancel_requested && canCancel ? "취소 요청됨 · 응답 중지 확인 전" : turnStateLabels[controller.state]}</span>
-            {canCancel && <button type="button" className="button secondary" title="이미 맡긴 일은 맡긴 일 화면에서 따로 취소할 수 있습니다."
-              aria-label={`이 응답 취소 요청 · 메시지 ${turn.sequence}`}
-              disabled={writesDisabled || Boolean(busy) || controller.cancel_requested}
-              onClick={() => void cancelConversationTurn(turn.id)}>이 응답 취소 요청</button>}
+          {turn.attachments.length > 0 && <div className="mt-2 grid gap-1 text-caption">
+            <strong className="font-medium text-ink-2">첨부 자료 {turn.attachments.length}개</strong>
+            {turn.attachments.map(artifact => <code key={`${artifact.digest}:${artifact.producing_attempt}`} className="block font-mono text-ink-2 [overflow-wrap:anywhere]">{artifact.digest} · {privacyLabels[artifact.privacy]}</code>)}
           </div>}
-          {turn.attachments.length > 0 && <div className="thread-attachments">
-            <strong>첨부 자료 {turn.attachments.length}개</strong>
-            {turn.attachments.map(artifact => <code key={`${artifact.digest}:${artifact.producing_attempt}`}>{artifact.digest} · {privacyLabels[artifact.privacy]}</code>)}
-          </div>}
-          <footer className="thread-turn-meta">
+          <footer className="mt-2 flex flex-wrap items-center gap-1 text-caption text-ink-2">
             <span>{privacyLabels[turn.privacy]}</span>
-            <span className="thread-turn-time">· {recordedAt}</span>
-            <DetailDialog title="메시지 정보" className="thread-meta-action"
+            <span>· {recordedAt}</span>
+            <DetailDialog title="메시지 정보"
               label={<><Info size={14} aria-hidden="true"/><span className="sr-only">메시지 정보</span></>}>
               {turn.kind !== "user" && <strong>{eventLabel}</strong>}
               <p>{privacyLabels[turn.privacy]} · {recordedAt}</p>
@@ -1092,9 +1177,9 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
               <code>{turn.id} · {turn.sender_kind}:{turn.sender_ref} · 순서 {turn.sequence}{turn.origin_report_id && ` · 원본 보고 ${turn.origin_report_id}`}</code>
             </DetailDialog>
           </footer>
-        </article>; })}
-      </div>
-    </section>}
+        </GConversationMessage>;
+      })}
+    </GConversation>}
 
     {selectedPanel === "ghosts" && <>
     {selectedTarget && <DetailDialog title="현재 등록된 대화 식별자"><code>{selectedTarget.ghost_id} · {selectedTarget.conversation_id}</code></DetailDialog>}
@@ -1102,21 +1187,25 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       snapshot={workspaceSnapshot} ghostId={selectedTarget.ghost_id} workspaceKey={workspaceSnapshot.workspace_id}
       onOpenApproval={onOpenApproval}/>}
     {mode === 'live' && selectedTarget && <InferenceSettings pair={selectedTarget} primary={selectedTarget.kind === "primary"} publicOnly={publicConversation} connected={connected} disabled={writesDisabled || Boolean(busy)}/>}
-    {(!workspaceSnapshot || !onOpenApproval) && <section className="lifetime-outbox" aria-label="문서 저장 제안 검토">
-      <div className="lifetime-section-heading"><div><h3>문서 저장 요청</h3></div></div>
-      {selectedTarget !== undefined && documentReviews !== undefined && documentAuthorityEpoch !== undefined && lifetimeDocumentReviews.length === 0
-        && <p className="lifetime-empty">이 대화에 기록된 문서 저장 제안이 없습니다.</p>}
-      {documentReviews === undefined && selectedTarget !== undefined
-        && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>문서 저장 요청을 불러오지 못했습니다.</span></p>}
-      {lifetimeDocumentReviews.map(review => <article className="lifetime-outbox-row" key={review.id}>
-        <div>
-          <strong>{review.title}</strong>
-          <span>{documentReviewStateLabels[review.state] ?? "상태 확인 필요"}</span>
-          <DetailDialog title="제안 본문"><pre className="garden-document-source-readonly"><code>{review.body}</code></pre></DetailDialog>
-        </div>
-        {(review.state === "pending" || review.state === "approved") && <button type="button" className="button secondary" disabled={onOpenDocumentReview === undefined}
-          onClick={() => onOpenDocumentReview?.(review)}>내용 보기</button>}
-      </article>)}
+    {(!workspaceSnapshot || !onOpenApproval) && <section aria-label="문서 저장 제안 검토" className="min-w-0">
+      <Card className="gap-0">
+        <CardHeader className="border-b border-line py-0 pb-3 pt-4"><h3 className="m-0 text-body font-semibold text-ink">문서 저장 요청</h3></CardHeader>
+        <CardContent className="grid gap-2 pt-3">
+          {selectedTarget !== undefined && documentReviews !== undefined && documentAuthorityEpoch !== undefined && lifetimeDocumentReviews.length === 0
+            && <EmptyState title="이 대화에 기록된 문서 저장 제안이 없습니다."/>}
+          {documentReviews === undefined && selectedTarget !== undefined
+            && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>문서 저장 요청을 불러오지 못했습니다.</AlertTitle></Alert>}
+          {lifetimeDocumentReviews.map(review => <article key={review.id} className="grid gap-3 rounded-card border border-line bg-inset p-3 md:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="grid min-w-0 gap-0.5">
+              <strong className="text-ui font-medium text-ink [overflow-wrap:anywhere]">{review.title}</strong>
+              <span className="text-caption text-ink-2">{documentReviewStateLabels[review.state] ?? "상태 확인 필요"}</span>
+              <div><DetailDialog title="제안 본문"><pre className="garden-document-source-readonly"><code>{review.body}</code></pre></DetailDialog></div>
+            </div>
+            {(review.state === "pending" || review.state === "approved") && <Button type="button" variant="secondary" disabled={onOpenDocumentReview === undefined}
+              onClick={() => onOpenDocumentReview?.(review)}>내용 보기</Button>}
+          </article>)}
+        </CardContent>
+      </Card>
     </section>}
 
     {mode === 'live' && selectedTarget && <BotRoster key={`${client.workspace_id}:${selectedTargetKey}`} client={client} target={selectedTarget}
@@ -1139,106 +1228,55 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       action={memoryAction}/>}
     </>}
 
-    {selectedPanel === "conversation" && <form className="lifetime-submit thread-composer" aria-label="메시지 보내기" onSubmit={event => { event.preventDefault(); void submitConversation(); }}>
-      {activeTargets.length === 0 && <p className="lifetime-sync-warning" role="status"><CircleAlert size={16}/><span>메시지를 받을 수 있는 Ghost가 없습니다.</span></p>}
-      <label className="lifetime-field"><span className="lifetime-visually-hidden">메시지</span><textarea id="lifetime-message" value={prompt} onChange={event => {
-        const text = event.currentTarget.value;
-        updatePrompt(selectedTargetKey, () => text);
-      }} onKeyDown={event => {
-        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
-          event.preventDefault();
-          if (!submissionBlocked) event.currentTarget.form?.requestSubmit();
-        }
-      }} rows={2} placeholder="메시지 쓰기" required disabled={Boolean(busy)}/></label>
-      {new TextEncoder().encode(prompt).length > 65_536 && <p className="lifetime-compose-limit" role="status">메시지 한도 65,536바이트를 넘었습니다.</p>}
-      <DetailDialog title="전송 옵션" label={<><SlidersHorizontal size={15} aria-hidden="true"/><span className="sr-only">전송 옵션 · {privacyLabels[effectivePrivacy]}</span>{attachments.length > 0 && <span>첨부 {attachments.length}</span>}</>} className="lifetime-compose-options">
-        <label className="lifetime-field">대화 대상<select aria-label="대화 대상" value={selectedTarget ? conversationTargetKey(selectedTarget) : selectedPairKey} onChange={event => {
-          const target = registry.find(item => conversationTargetKey(item) === event.target.value);
-          if (target) openRegisteredTarget(target, false);
-        }} disabled={Boolean(busy) || writesDisabled && pending.length > 0}>
-          <option value="">등록 대화를 선택하세요</option>
-          {registry.map(target => <option value={conversationTargetKey(target)} key={conversationTargetKey(target)}>
-            {ghostName(target.ghost_id)}{target.secondary ? ` · ${publicLabel(target)}` : target.kind === 'primary' ? ' · 기본' : ''}{target.mode === "draining" ? " · 마무리 중" : ""}
-          </option>)}
-        </select></label>
-        <div className="lifetime-form-row">
-          {!publicConversation && <label className="lifetime-field">자료 범위<select aria-label="자료 범위" value={privacy} onChange={event => setPrivacy(event.target.value as Artifact["privacy"])} disabled={Boolean(busy)}>
-            <option value="local_only">이 기기에서만</option><option value="private">비공개</option><option value="public">공개 자료 허용</option>
-          </select></label>}
-          <div className="lifetime-existing-artifacts">
-            <strong>기존 자료 첨부</strong>
-            {attachmentChoices.length === 0 && <span>이 대화에서 선택할 수 있는 기존 첨부 자료가 없습니다. 새 파일은 여기서 열거나 업로드하지 않습니다.</span>}
-            {attachmentChoices.map(artifact => {
-              const key = attachmentKey(artifact);
-              const checked = attachments.some(item => attachmentKey(item) === key);
-              return <label key={key}><input type="checkbox" checked={checked} disabled={Boolean(busy) || (!checked && attachments.length >= 16)}
-                onChange={event => {
-                  const include = event.currentTarget.checked;
-                  updateAttachments(selectedTargetKey, current => {
-                    const remaining = (current ?? []).filter(item => {
-                      const itemKey = attachmentKey(item);
-                      return eligibleAttachments.has(itemKey) && itemKey !== key;
-                    });
-                    return include && remaining.length < 16 ? [...remaining, artifact] : remaining;
-                  });
-                }}/>
-                <span>{artifact.digest.slice(0, 12)} · {privacyLabels[artifact.privacy]}</span></label>;
-            })}
-          </div>
-        </div>
-        <p>{!publicConversation && "대화의 기존 보호 수준은 유지됩니다. "}UTF-8 {new TextEncoder().encode(prompt).length}/65,536바이트.</p>
-      </DetailDialog>
-      <div className="lifetime-submit-actions lifetime-compose-actions">
-        <button type="submit" className="send-button" disabled={submissionBlocked}
-          aria-label={busy === "conversation.input" ? "저장 중" : "대화에 보내기"}>
-          {busy === "conversation.input" ? <span className="button-loading"/> : <ArrowUp size={18}/>}
-        </button>
-      </div>
-    </form>}
-
-    {selectedPanel === "work" && <section className="lifetime-goals" aria-label="선택한 대화에서 맡긴 일" aria-busy={loading}>
-      {loading && <p className="lifetime-empty"><Clock3 size={16}/>저장된 상태를 불러오는 중입니다.</p>}
-      {!loading && boardGoals.length === 0 && <p className="lifetime-empty thread-empty">맡은 일이 없습니다.</p>}
-      {!loading && boardGoals.length > 0 && <div className="lifetime-board">{goalStages.map(stage => {
+    {selectedPanel === "work" && <section aria-label="선택한 대화에서 맡긴 일" aria-busy={loading} className="grid min-w-0 gap-3.5">
+      {loading && <p role="status" className="m-0 flex items-center gap-2 py-3.5 text-ui text-ink-2"><Clock3 size={16}/>저장된 상태를 불러오는 중입니다.</p>}
+      {!loading && boardGoals.length === 0 && <EmptyState title="맡은 일이 없습니다."/>}
+      {!loading && boardGoals.length > 0 && <div className="grid min-w-0 gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">{goalStages.map(stage => {
         const goals = boardGoals.filter(goal => goal.stage === stage.id);
-        return <section className="lifetime-lane" data-stage={stage.id} key={stage.id}>
-          <h3>{stage.label}<span>{goals.length}</span></h3>
-          {goals.length === 0 && <p className="lifetime-lane-empty">없음</p>}
-          {goals.map(({ goal, state }) => <button type="button" className="lifetime-goal" data-state={state}
-            data-lifetime-goal={goal.id} key={goal.id} aria-haspopup="dialog" onClick={() => setGoalDetailID(goal.id)}>
-            <span className="lifetime-goal-title">{goal.prompt}</span>
-            <span className="lifetime-state">{goalStateLabels[state] ?? state}</span>
-            <ChevronRight size={14} aria-hidden="true"/>
-          </button>)}
+        return <section data-stage={stage.id} key={stage.id} className="grid min-w-0 content-start gap-2 rounded-card border border-line bg-surface p-3">
+          <h3 className="m-0 flex items-center justify-between text-ui font-semibold text-ink">{stage.label}<span className="text-caption font-normal text-ink-2">{goals.length}</span></h3>
+          {goals.length === 0 && <p className="m-0 text-caption text-ink-2">없음</p>}
+          {goals.map(({ goal, state }) => <Button type="button" variant="ghost" data-state={state}
+            data-lifetime-goal={goal.id} key={goal.id} aria-haspopup="dialog" onClick={() => setGoalDetailID(goal.id)}
+            className="h-auto w-full flex-col items-start gap-1.5 rounded-card border border-line px-3 py-2.5 text-left whitespace-normal">
+            <span className="w-full min-w-0 text-left text-ui font-medium [overflow-wrap:anywhere]">{goal.prompt}</span>
+            <span className="flex w-full items-center justify-between gap-2">
+              <Badge variant="outline">{goalStateLabels[state] ?? state}</Badge>
+              <ChevronRight size={14} aria-hidden="true"/>
+            </span>
+          </Button>)}
         </section>;
       })}</div>}
     </section>}
     {goalDetail && detailGoal && snapshot && !threadID && <Modal title="목표 상세" onClose={closeGoalDetail} drawer>
-      <div className="lifetime-goal-detail">
+      <div className="grid min-w-0 gap-3.5">
         {feedback}
-        <header className="lifetime-goal-heading">
-          <div><span className="lifetime-state">{goalStateLabels[goalDetail.state] ?? goalDetail.state}</span>
-            <span className="lifetime-revision">판본 {detailGoal.revision}</span>
-            <span className="lifetime-privacy">{privacyLabels[detailGoal.privacy]}</span></div>
-          <div className="lifetime-goal-owner-actions"><span className="lifetime-owner">담당 {workspaceSnapshot?.profiles.find(profile => profile.id === detailGoal.accountable_ghost)?.name ?? detailGoal.accountable_ghost}</span>
-            <button type="button" className="button secondary" aria-haspopup="dialog" onClick={() => openWorkThread(detailGoal.id)}><GitBranch size={14}/>작업 스레드</button>
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline">{goalStateLabels[goalDetail.state] ?? goalDetail.state}</Badge>
+            <Badge variant="outline">판본 {detailGoal.revision}</Badge>
+            <Badge variant="outline">{privacyLabels[detailGoal.privacy]}</Badge>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-caption text-ink-2 [overflow-wrap:anywhere]">담당 {workspaceSnapshot?.profiles.find(profile => profile.id === detailGoal.accountable_ghost)?.name ?? detailGoal.accountable_ghost}</span>
+            <Button type="button" variant="secondary" aria-haspopup="dialog" onClick={() => openWorkThread(detailGoal.id)}><GitBranch size={14}/>작업 스레드</Button>
             {(() => {
               const target = registry.find(item => item.ghost_id === detailGoal.accountable_ghost && item.conversation_id === detailGoal.reply_conversation && item.mode === 'active');
-              return target && <button type="button" className="button secondary" onClick={() => openRegisteredTarget(target, false)}>담당 Ghost와 대화</button>;
+              return target && <Button type="button" variant="secondary" onClick={() => openRegisteredTarget(target, false)}>담당 Ghost와 대화</Button>;
             })()}
           </div>
         </header>
-        <label className="lifetime-field">목표<textarea value={detailDraft?.text ?? detailGoal.prompt}
+        <label className="grid gap-1.5 text-caption text-ink-2">목표<Textarea value={detailDraft?.text ?? detailGoal.prompt}
           onChange={event => {
             const text = event.currentTarget.value;
             setGoalDrafts(current => new Map(current).set(detailGoal.id, {
               text, revision: current.get(detailGoal.id)?.revision ?? detailGoal.revision,
             }));
           }} readOnly={Boolean(busy)}/></label>
-        {staleGoalDraft && <p className="lifetime-sync-warning" role="status">편집을 시작한 뒤 목표가 바뀌었습니다. 최신 목표를 불러온 뒤 다시 수정해 주세요.</p>}
-        <div className="lifetime-goal-actions">
-          {staleGoalDraft && <button type="button" className="button secondary" onClick={() => clearGoalDraft(detailGoal.id)}>최신 목표 불러오기</button>}
-          <button type="button" className="button secondary" disabled={writesDisabled || Boolean(busy) || Boolean(staleGoalDraft)
+        {staleGoalDraft && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>편집을 시작한 뒤 목표가 바뀌었습니다. 최신 목표를 불러온 뒤 다시 수정해 주세요.</AlertTitle></Alert>}
+        <div className="flex flex-wrap justify-end gap-2">
+          {staleGoalDraft && <Button type="button" variant="secondary" onClick={() => clearGoalDraft(detailGoal.id)}>최신 목표 불러오기</Button>}
+          <Button type="button" variant="secondary" disabled={writesDisabled || Boolean(busy) || Boolean(staleGoalDraft)
             || !detailDraft?.text.trim() || detailDraft.text === detailGoal.prompt}
             onClick={() => {
               if (!detailDraft || staleGoalDraft) return;
@@ -1249,9 +1287,9 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
                 if (response.status === "success") clearGoalDraft(detailGoal.id);
                 return response;
               });
-            }}>목표 수정</button>
+            }}>목표 수정</Button>
         </div>
-        {goalDetail.workItems.length === 0 && <p className="lifetime-empty">연결된 진행 항목이 없습니다.</p>}
+        {goalDetail.workItems.length === 0 && <p className="m-0 text-ui text-ink-2">연결된 진행 항목이 없습니다.</p>}
         {goalDetail.workItems.map(work => <WorkItem key={work.id} client={client} connected={connected} work={work} snapshot={snapshot} busy={Boolean(busy)} writeDisabled={writesDisabled}
           ownerName={workspaceSnapshot?.profiles.find(profile => profile.id === work.owner)?.name ?? work.owner} inspectSummary={inspectSummaries.get(work.id)}
           onInspect={() => void inspectWork(work.id)}
@@ -1284,28 +1322,38 @@ function WorkItem({ client, connected, work, snapshot, busy, writeDisabled, owne
   const acceptedDigests = new Set(acceptances.map(item => item.artifact_digest));
   const artifacts = snapshot.artifacts.filter(item => work.execution_id !== null && item.producing_attempt === work.execution_id);
   const canCancel = !terminalWorkStates[work.state] && !pendingCancellations[work.cancellation];
-  return <section className="lifetime-work" data-lifetime-work={work.id} data-state={work.state} aria-label="진행 항목" tabIndex={-1}>
-    <header className="lifetime-work-heading">
-      <div><strong>{workStateLabels[work.state] ?? work.state}</strong><span>담당 {ownerName} · {work.state === "completed" ? "실행 종료 · 검수 전" : work.state === "accepted" ? "현재 목표 검수 완료" : work.execution_id ? "실행 또는 실행 결과 확인 중" : "실행 배정 대기"}</span></div>
-      <button type="button" className="button secondary" onClick={onInspect} disabled={busy}><RefreshCw size={14}/>상태 확인</button>
+  return <section data-lifetime-work={work.id} data-state={work.state} aria-label="진행 항목" tabIndex={-1}
+    className="grid min-w-0 gap-3 rounded-card border border-line bg-inset p-4">
+    <header className="flex flex-wrap items-start justify-between gap-3">
+      <div className="grid min-w-0 gap-0.5">
+        <Badge variant="outline" className="w-fit">{workStateLabels[work.state] ?? work.state}</Badge>
+        <span className="text-caption text-ink-2">담당 {ownerName} · {work.state === "completed" ? "실행 종료 · 검수 전" : work.state === "accepted" ? "현재 목표 검수 완료" : work.execution_id ? "실행 또는 실행 결과 확인 중" : "실행 배정 대기"}</span>
+      </div>
+      <Button type="button" variant="secondary" onClick={onInspect} disabled={busy}><RefreshCw size={14}/>상태 확인</Button>
     </header>
-    {work.blocker && <p className="lifetime-blocker"><Clock3 size={14}/><span>대기 이유: {work.blocker}</span></p>}
-    <p className="lifetime-cancellation">취소 상태: {cancellationLabels[work.cancellation] ?? work.cancellation}</p>
-    {inspectSummary && <p className="lifetime-result-summary">{inspectSummary}</p>}
-    {artifacts.length > 0 && <div className="lifetime-results"><h4>도착한 결과물</h4>{artifacts.map(artifact => {
+    {work.blocker && <p className="m-0 flex items-start gap-1.5 text-caption text-orange [overflow-wrap:anywhere]"><Clock3 size={14} className="mt-0.5 shrink-0"/>대기 이유: {work.blocker}</p>}
+    <p className="m-0 text-caption text-ink-2 [overflow-wrap:anywhere]">취소 상태: {cancellationLabels[work.cancellation] ?? work.cancellation}</p>
+    {inspectSummary && <p className="m-0 rounded-control bg-surface p-2.5 text-ui [overflow-wrap:anywhere]">{inspectSummary}</p>}
+    {artifacts.length > 0 && <div className="grid gap-2"><h4 className="m-0 text-caption font-semibold text-ink">도착한 결과물</h4>{artifacts.map(artifact => {
       const accepted = acceptedDigests.has(artifact.digest);
-      return <div className="lifetime-artifact" key={`${work.id}:${artifact.digest}`}>
-        <div><strong>{accepted ? "검수 기록에 연결됨" : "도착함 · 수용 전"}</strong><span>{privacyLabels[artifact.privacy]} · {artifact.digest.slice(0, 12)}</span><code>{artifact.locator}</code></div>
+      return <div className="grid gap-2 rounded-control bg-surface p-3 md:grid-cols-[minmax(0,1fr)_auto]" key={`${work.id}:${artifact.digest}`}>
+        <div className="grid min-w-0 gap-0.5">
+          <strong className="text-caption font-medium text-ink">{accepted ? "검수 기록에 연결됨" : "도착함 · 수용 전"}</strong>
+          <span className="text-caption text-ink-2">{privacyLabels[artifact.privacy]} · {artifact.digest.slice(0, 12)}</span>
+          <code className="block font-mono text-caption text-ink-2 [overflow-wrap:anywhere]">{artifact.locator}</code>
+        </div>
         <WorkArtifactPreview client={client} work={work} artifact={artifact} disabled={!connected}/>
       </div>;
     })}</div>}
-    {acceptances.map(acceptance => <div className="lifetime-checks" key={`${work.id}:${acceptance.artifact_digest}`}>
-      <h4>검수 결과</h4>
-      {acceptance.checks.map(check => <p className={check.passed ? "lifetime-check-passed" : "lifetime-check-failed"} key={check.id}><Check size={14}/><span>{check.id}: {check.passed ? "통과" : "미통과"} · {check.evidence}</span></p>)}
+    {acceptances.map(acceptance => <div className="grid gap-2" key={`${work.id}:${acceptance.artifact_digest}`}>
+      <h4 className="m-0 text-caption font-semibold text-ink">검수 결과</h4>
+      {acceptance.checks.map(check => <p className={`m-0 flex items-start gap-1.5 text-caption [overflow-wrap:anywhere] ${check.passed ? "text-green" : "text-red"}`} key={check.id}><Check size={14} className="mt-0.5 shrink-0"/><span>{check.id}: {check.passed ? "통과" : "미통과"} · {check.evidence}</span></p>)}
     </div>)}
-    {!terminalWorkStates[work.state] && canCancel && <div className="lifetime-work-actions">
-      <p>새 지시는 담당 Ghost 대화에서 보낼 수 있습니다.</p>
-      <button type="button" className="button secondary lifetime-cancel" onClick={onCancel} disabled={busy || writeDisabled}>취소 요청</button>
+    {!terminalWorkStates[work.state] && canCancel && <div className="grid gap-2">
+      <p className="m-0 text-caption text-ink-2">새 지시는 담당 Ghost 대화에서 보낼 수 있습니다.</p>
+      <div className="flex justify-end">
+        <Button type="button" variant="ghost" className="text-red" onClick={onCancel} disabled={busy || writeDisabled}>취소 요청</Button>
+      </div>
     </div>}
   </section>;
 }

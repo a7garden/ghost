@@ -1,11 +1,12 @@
-import { useState, type CSSProperties } from 'react';
-import { Folder, Home, Layers, MessageCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Button, FormField, Input, InlineError, SelectField } from '@garden/ui';
 import { DotAvatar, type PortraitAppearance } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { useProfileAvatar } from '../pets/AvatarProvider';
 import { GhostColorPicker } from '../pets/GhostColorPicker';
 import { toneFor, type Profile } from '../client/types';
 import { portraitColors, uploadPackage, type PackageInfo } from './PackageWorkspace';
+import { ghostDisplayName } from './profileSummary';
 
 export function PackageImport({ workspace, profiles, selected, onClose, onInstalled }: {
   workspace: string; profiles: Profile[]; selected: string;
@@ -17,7 +18,7 @@ export function PackageImport({ workspace, profiles, selected, onClose, onInstal
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   return <Modal title="패키지 추가" onClose={() => { if (!busy) onClose(); }}>
-    <form className="form-stack" onSubmit={async event => {
+    <form className="grid gap-4" onSubmit={async event => {
       event.preventDefault();
       if (!file || !info || !profile || busy) return;
       setBusy(true);
@@ -25,24 +26,28 @@ export function PackageImport({ workspace, profiles, selected, onClose, onInstal
       try { await uploadPackage(file, { workspace, profile, digest: info.digest }); onInstalled(profile); }
       catch (failure) { setError((failure as Error).message); setBusy(false); }
     }}>
-      <label>.ghost 파일<input type="file" accept=".ghost,application/zip" disabled={busy} onChange={async event => {
-        const next = event.currentTarget.files?.[0];
-        setFile(next); setInfo(undefined); setError('');
-        if (!next) return;
-        setBusy(true);
-        try { setInfo(await uploadPackage(next)); }
-        catch (failure) { setError((failure as Error).message); }
-        finally { setBusy(false); }
-      }}/></label>
+      <FormField label=".ghost 파일">
+        {control => <Input {...control} type="file" accept=".ghost,application/zip" disabled={busy} onChange={async event => {
+          const next = event.currentTarget.files?.[0];
+          setFile(next); setInfo(undefined); setError('');
+          if (!next) return;
+          setBusy(true);
+          try { setInfo(await uploadPackage(next)); }
+          catch (failure) { setError((failure as Error).message); }
+          finally { setBusy(false); }
+        }}/>}
+      </FormField>
       {info && <>
-        <div><strong>{info.name}</strong><p className="muted">{info.id} · {info.version}</p></div>
-        <p>{info.ui?.views.map(view => view.label).join(' · ') || '기본 대화'}</p>
-        <label>연결할 Ghost<select value={profile} onChange={e => setProfile(e.target.value)} disabled={busy}>
-          {profiles.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select></label>
+        <div className="grid gap-0.5">
+          <strong className="text-ui text-ink">{info.name}</strong>
+          <span className="text-caption text-ink-2">{info.id} · {info.version}</span>
+          <span className="text-caption text-ink-2">{info.ui?.views.map(view => view.label).join(' · ') || '기본 대화'}</span>
+        </div>
+        <SelectField label="연결할 Ghost" value={profile} onValueChange={setProfile} disabled={busy}
+          options={profiles.map(item => ({ value: item.id, label: ghostDisplayName(item.name) }))}/>
       </>}
-      {error && <p role="alert" className="form-error">{error}</p>}
-      <button type="submit" className="button primary" disabled={busy || !info || !profile}>패키지 연결</button>
+      {error && <InlineError>{error}</InlineError>}
+      <Button type="submit" className="justify-self-end" disabled={busy || !info || !profile}>패키지 연결</Button>
     </form>
   </Modal>;
 }
@@ -66,11 +71,11 @@ export function PortraitPicker({ profile, appearance, choices, defaults, onSelec
   onSelect(part: keyof PortraitAppearance, color?: string): void; onClose(): void;
 }) {
   const { isDefault } = useProfileAvatar(profile.id);
-  return <Modal title="초상화 색상" className="portrait-modal" focusClose onClose={onClose}>
-    <div className="portrait-picker">
-      <div className="portrait-preview">
+  return <Modal title="초상화 색상" focusClose onClose={onClose}>
+    <div className="grid gap-5">
+      <div className="grid justify-items-center gap-2">
         <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={96}/>
-        <span>{profile.name}</span>
+        <span className="text-ui font-medium text-ink">{ghostDisplayName(profile.name)}</span>
       </div>
       {isDefault && <GhostColorPicker label="본체 색" resetLabel="자동" presets={bodyColors} value={choices.body ?? 'auto'}
         fallback={appearance?.body ?? defaults.body} onChange={color => onSelect('body', color === 'auto' ? undefined : color)}/>}
@@ -78,19 +83,4 @@ export function PortraitPicker({ profile, appearance, choices, defaults, onSelec
         fallback={appearance?.background ?? defaults.background} onChange={color => onSelect('background', color === 'auto' ? undefined : color)}/>
     </div>
   </Modal>;
-}
-
-export function MobilePrimaryTabs({ canChat, hasViews, active, onNavigate, onChat, onWorkspace }: {
-  canChat: boolean; hasViews: boolean; active: 'home' | 'chat' | 'projects' | 'workspace' | undefined;
-  onNavigate(path: string): void; onChat(): void; onWorkspace(): void;
-}) {
-  const count = 3 + Number(hasViews);
-  const activeIndex = active === 'home' ? 0 : active === 'chat' ? 1 : active === 'projects' ? 2 : 3;
-  const style = { '--mobile-tab-count': count, '--mobile-tab-active': activeIndex } as CSSProperties;
-  return <nav className="mobile-primary-tabs" style={style} data-active={Boolean(active)} aria-label="기본 메뉴">
-    <button aria-current={active === 'home' ? 'page' : undefined} onClick={() => onNavigate('/')}><Home size={18}/><span>홈</span></button>
-    <button aria-current={active === 'chat' ? 'page' : undefined} disabled={!canChat} onClick={onChat}><MessageCircle size={18}/><span>대화</span></button>
-    <button aria-current={active === 'projects' ? 'page' : undefined} onClick={() => onNavigate('/spaces')}><Folder size={18}/><span>프로젝트</span></button>
-    {hasViews && <button aria-current={active === 'workspace' ? 'page' : undefined} onClick={onWorkspace}><Layers size={18}/><span>작업실</span></button>}
-  </nav>;
 }

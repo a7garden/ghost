@@ -25,11 +25,11 @@ it('keeps the compact welcome and starters in the transcript before the persiste
   expect(empty).toContain('conversation-is-empty'); expect(empty).toContain('conversation-start');
   expect(empty).not.toContain('dot-introduction'); expect(empty).not.toContain('<aside');
   expect(empty).toContain('aria-label="대화 시작 제안"');
-  expect(empty.indexOf('class="prompt-suggestions"')).toBeLessThan(empty.indexOf('class="composer-area"'));
+  expect(empty.indexOf('prompt-suggestions')).toBeLessThan(empty.indexOf('data-slot="g-composer"'));
   snapshot.profiles[0].conversations[0].messages.push({ role: 'user', text: '안녕하세요' });
   const active = renderChat(snapshot);
   expect(active).not.toContain('conversation-is-empty'); expect(active).not.toContain('conversation-start'); expect(active).not.toContain('dot-introduction'); expect(active).not.toContain('prompt-suggestions'); expect(active).toContain('안녕하세요');
-  expect(active).toContain('thread-demo-label">예시 모드'); expect(active).toContain('작업과 자료 보기');
+  expect(active).toContain('>예시 모드</span>'); expect(active).toContain('작업과 자료 보기');
   expect(active).not.toContain('role="combobox"');
 });
 it('uses one toggled sidebar on desktop and the same content in a narrow drawer', () => {
@@ -38,13 +38,14 @@ it('uses one toggled sidebar on desktop and the same content in a narrow drawer'
   const closed = renderChat(snapshot), desktop = renderChat(snapshot, true, true), narrow = renderChat(snapshot, false, true);
   expect(closed).not.toContain('<aside'); expect(closed).not.toContain('<dialog');
   expect(closed).toContain('작업과 자료 보기 · 1개 항목');
-  expect(desktop).toContain('class="context-sidebar context-stack-sidebar"'); expect(desktop).not.toContain('<dialog');
-  expect(desktop.match(/context-profile-card/g)).toHaveLength(1);
+  expect(desktop).toContain('<aside'); expect(desktop).not.toContain('<dialog');
+  expect(desktop.match(/class="g-panel[ "]/g)).toHaveLength(1);
   expect(desktop.match(/data-slot="card"/g)).toHaveLength(4);
-  expect(desktop.match(/context-card-stack/g)).toHaveLength(1);
+  expect(desktop.match(/Sage 프로필과 활동/g)).toHaveLength(1);
   expect(desktop).toContain('작업과 자료 숨기기'); expect(desktop).toContain('aria-expanded="true"');
-  expect(narrow).not.toContain('<aside'); expect(narrow).toContain('context-sidebar-drawer');
-  expect(narrow.match(/context-profile-card/g)).toHaveLength(1);
+  // Radix drawer content renders into a portal, invisible to renderToStaticMarkup
+  // (contract rule 7); the expanded toggle and its aria-controls prove the drawer path.
+  expect(narrow).not.toContain('<aside'); expect(narrow).toContain('aria-expanded="true"'); expect(narrow).toContain('aria-controls');
   expect(narrow).not.toContain('dot-introduction');
 });
 it('keeps tools, past work and reservation available in the open sidebar even without active cards', () => {
@@ -60,7 +61,7 @@ it('keeps manually requested task history, reservation and tools management avai
   const common = { profile, snapshot, conversation: profile.conversations[0], busy: false, connected: true, navigate: () => {}, onReview: () => {}, onCancel: () => {}, onSchedule: () => {} };
   const automatic = renderToStaticMarkup(createElement(ConversationContext, common));
   const manual = renderToStaticMarkup(createElement(ConversationContext, { ...common, management: true }));
-  expect(automatic).toContain('context-profile-card'); expect(automatic).not.toContain('지난 작업'); expect(automatic).toContain('연결된 실행 환경 없음'); expect(manual).toContain('지난 작업 1개'); expect(manual).toContain('예약'); expect(manual).toContain('도구 연결');
+  expect(automatic).toContain('data-slot="card"'); expect(automatic).not.toContain('지난 작업'); expect(automatic).toContain('연결된 실행 환경 없음'); expect(manual).toContain('지난 작업 1개'); expect(manual).toContain('예약'); expect(manual).toContain('도구 연결');
 });
 it('shows review rows directly across snapshot updates', () => {
   const snapshot = emptyWorkspace(), profile = snapshot.profiles[0], conversation = profile.conversations[0];
@@ -68,7 +69,7 @@ it('shows review rows directly across snapshot updates', () => {
   const render = () => renderToStaticMarkup(createElement(ConversationContext, { profile, snapshot, conversation, busy: false, connected: true, navigate: () => {}, onReview: () => {}, onCancel: () => {}, onSchedule: () => {} }));
   expect(render()).not.toMatch(/<details|aria-expanded=/);
   snapshot.reviews.push({ ...snapshot.reviews[0], id: 'two' });
-  expect(render()).not.toMatch(/<details|aria-expanded=/); expect(render()).toContain('context-card-count">2');
+  expect(render()).not.toMatch(/<details|aria-expanded=/); expect(render()).toMatch(/data-slot="badge"[^>]*>2</);
 });
 
 it('names simultaneous responses and queued work instead of repeating an anonymous thinking block', () => {

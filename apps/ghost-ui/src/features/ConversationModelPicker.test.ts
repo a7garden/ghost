@@ -14,6 +14,7 @@ vi.mock('react', async importOriginal => {
       return [slot.value, (next: any) => { const value = typeof next === 'function' ? next(slot.value) : next; if (!Object.is(value, slot.value)) { slot.value = value; host.dirty = true; } }];
     },
     useRef: (initial: any) => { const host = mounted.current; return host.slots[host.index++] ??= { current: initial }; },
+    useId: () => ':model-picker:',
     useEffect: (effect: () => void, dependencies: any[]) => {
       const host = mounted.current, index = host.index++, previous = host.slots[index];
       if (!previous || dependencies.some((value, i) => !Object.is(value, previous.dependencies[i]))) { host.effects.push(effect); host.slots[index] = { dependencies }; }
@@ -37,8 +38,9 @@ function mount(snapshot: Snapshot, action: (command: any) => Promise<any>) {
     } while (host.dirty);
   };
   render();
-  const choose = (value: string) => { host.tree.props.children[0].props.children.props.onValueChange(value); render(); };
-  return { props, host, render, choose };
+  const field = () => host.tree.props.children[0] as { props: { children: (control: { id: string }) => { props: { onValueChange(value: string): void } }; description?: string } };
+  const choose = (value: string) => { field().props.children({ id: 'model-select' }).props.onValueChange(value); render(); };
+  return { props, host, render, choose, field };
 }
 const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
 
@@ -84,7 +86,7 @@ it('keeps the ordinary picker compact and identifies both models when a change a
   Object.assign(snapshot.profiles[0].conversations[0], { model: 'local/a', selected_model: 'local/a', model_pending: false });
   const view = mount(snapshot, vi.fn().mockResolvedValue({}));
   expect(view.host.tree.props.children[1].props.children).toBeNull();
-  expect(view.host.tree.props.children[0].props.children.props.description).toContain('다음 응답부터');
+  expect(view.field().props.description).toContain('다음 응답부터');
   Object.assign(view.props.conversation, { selected_model: 'local/b', model_pending: true });
   view.props.running = true; view.render();
   expect(view.host.tree.props.children[1].props.children).toBe('현재: A · Local · 다음: B · Local');

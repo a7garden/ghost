@@ -31,8 +31,8 @@ export function GhostCharacter({ size = 48, state = 'idle', animate = true, colo
   const style = { width: size, height: size, ...(color && color !== 'auto' ? { '--ghost-body-color': color, '--ghost-face-color': faceColor(color) } : {}) } as CSSProperties;
   return <svg className={`ghost-character ${className}`} style={style} viewBox="100 100 800 800" fill="none" aria-hidden="true" data-ghost-state={state}>
     <g ref={body}>
-      <path fill="var(--ghost-body-color, var(--color-text))" d={GHOST_BODY}/>
-      <g fill="var(--ghost-face-color, var(--color-surface))">
+      <path fill="var(--ghost-body-color, var(--g-ink))" d={GHOST_BODY}/>
+      <g fill="var(--ghost-face-color, var(--g-canvas))">
         <rect x="384" y="403" width="78" height="27" rx="13.5"/>
         <rect x="538" y="403" width="78" height="27" rx="13.5"/>
         <ellipse ref={mouth} cx="500" cy="484" rx="15" ry="15"/>

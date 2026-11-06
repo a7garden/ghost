@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, FileText, FolderPlus, Plus, Search, Trash2, X } from 'lucide-react';
+import { Button, Checkbox, EmptyState, FormField, GPage, GPageHeader, InlineError, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Textarea } from '@garden/ui';
 import { Modal } from '../components/Modal';
 import { ConfirmedFailure, documentPreflightMessage } from '../client/errors';
 import type { Command, Page, Review, Snapshot } from '../client/types';
 import { routeLabels } from '../uiText';
 import { GardenMarkdownPreview } from './GardenMarkdownPreview';
-import './garden-document-preview.css';
-import './spaces.css';
 
 type WorkspaceAction = (command: Command) => Promise<Record<string, unknown>>;
 
@@ -90,70 +89,67 @@ export function SpacesView({ snapshot, selectedSpace, query: read, action, onRev
   const visiblePages = pages.filter(item => (showDeleted || !item.deleted) && item.title.toLowerCase().includes(search));
   const hasDeleted = pages.some(item => item.deleted);
 
-  return <div className="page-content space-library">
-    <header className="space-heading">
-      <div><h1 tabIndex={-1}>{space?.name ?? routeLabels.spaces}</h1></div>
-      {canCreate && <button type="button" className="button primary" disabled={!connected || busy} onClick={() => setForm('document')}>
-        <Plus size={16}/>새 문서
-      </button>}
-    </header>
+  return <GPage width="reading">
+    <GPageHeader title={space?.name ?? routeLabels.spaces}
+      actions={canCreate && <Button type="button" disabled={!connected || busy} onClick={() => setForm('document')}>
+        <Plus size={16} aria-hidden="true"/>새 문서
+      </Button>}/>
 
-    {reviews.length > 0 && <section className="space-reviews" aria-label="검토할 초안">
-      <h2>검토할 초안</h2>
-      <ul className="space-document-list">{reviews.map(review => <li key={review.id}>
-        <button type="button" className="space-document-row" aria-haspopup="dialog" onClick={() => onReview(review)}>
-          <FileText size={18} aria-hidden="true"/>
-          <span className="space-document-title">{review.title}</span>
-          <small>{snapshot.spaces.find(item => item.id === review.space_id)?.name}</small>
-          <ArrowRight size={15} aria-hidden="true"/>
-        </button>
-      </li>)}</ul>
+    {reviews.length > 0 && <section className="mb-8 grid gap-2" aria-label="검토할 초안">
+      <h2 className="text-ui font-semibold text-ink">검토할 초안</h2>
+      <ul className="m-0 grid list-none gap-1 p-0">
+        {reviews.map(review => <li key={review.id}>
+          <button type="button" aria-haspopup="dialog" onClick={() => onReview(review)}
+            className="flex w-full min-w-0 items-center gap-3 rounded-control px-2 py-2 text-left hover:bg-hover">
+            <FileText size={18} className="shrink-0 text-ink-3" aria-hidden="true"/>
+            <span className="min-w-0 flex-1 text-ui font-medium text-ink [overflow-wrap:anywhere]">{review.title}</span>
+            <span className="shrink-0 text-caption text-ink-2">{snapshot.spaces.find(item => item.id === review.space_id)?.name}</span>
+            <ArrowRight size={15} className="shrink-0 text-ink-3" aria-hidden="true"/>
+          </button>
+        </li>)}
+      </ul>
     </section>}
 
-    <div className="space-list-heading">
-      <h2>저장된 문서</h2>
-      <div className="space-folder-controls">
-        {space && !space.writable && <span className="space-folder-name">읽기 전용</span>}
-        {!space && canConnect && <button type="button" className="button secondary" disabled={!connected || busy} onClick={() => setForm('folder')}>
-          <FolderPlus size={15}/>새 프로젝트
-        </button>}
+    <section className="grid gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-ui font-semibold text-ink">저장된 문서</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {space && !space.writable && <span className="text-ui text-ink-2">읽기 전용</span>}
+          {!space && canConnect && <Button variant="outline" type="button" disabled={!connected || busy} onClick={() => setForm('folder')}>
+            <FolderPlus size={15} aria-hidden="true"/>새 프로젝트
+          </Button>}
+        </div>
       </div>
-    </div>
 
-    {space && pages.length > 0 && <div className="space-controls">
-      <div className="search-field space-search"><Search size={16}/>
-        <input ref={searchInput} aria-label="문서 검색" placeholder="문서 검색" value={query} onChange={event => setQuery(event.target.value)}/>
-        {query && <button type="button" className="icon-button small" aria-label="검색 지우기"
-          onClick={() => { setQuery(''); searchInput.current?.focus(); }}><X size={15}/></button>}
-      </div>
-      {hasDeleted && <button type="button" className={`filter-button ${showDeleted ? 'selected' : ''}`}
-        aria-pressed={showDeleted} onClick={() => setShowDeleted(value => !value)}>
-        <Trash2 size={14}/>삭제된 문서 포함
-      </button>}
-    </div>}
+      {space && pages.length > 0 && <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search size={16} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" aria-hidden="true"/>
+          <Input ref={searchInput} className="pl-8 pr-8" aria-label="문서 검색" placeholder="문서 검색" value={query}
+            onChange={event => setQuery(event.target.value)}/>
+          {query && <Button variant="ghost" size="icon" type="button" aria-label="검색 지우기"
+            className="absolute right-0.5 top-1/2 -translate-y-1/2"
+            onClick={() => { setQuery(''); searchInput.current?.focus(); }}><X size={15} aria-hidden="true"/></Button>}
+        </div>
+        {hasDeleted && <Button variant={showDeleted ? 'secondary' : 'outline'} type="button" aria-pressed={showDeleted}
+          onClick={() => setShowDeleted(value => !value)}>
+          <Trash2 size={14} aria-hidden="true"/>삭제된 문서 포함
+        </Button>}
+      </div>}
 
-    {!space ? <p className="space-message">{snapshot.spaces.length ? '프로젝트를 찾을 수 없습니다.' : '프로젝트가 없습니다.'}</p>
-      : loading ? <p className="space-message" role="status">문서를 불러오는 중…</p>
-      : listError ? <div className="space-message"><p className="form-error" role="alert">{listError}</p>
-        <button type="button" className="button secondary" onClick={() => setReload(value => value + 1)}>다시 불러오기</button>
-      </div> : <>
-        {openError && <p className="space-open-error form-error" role="alert">{openError}</p>}
-        {opening && <p className="sr-only" role="status">문서를 여는 중…</p>}
-        {visiblePages.length > 0 ? <ul className="space-document-list" aria-label="문서 목록" aria-busy={opening}>
-          {visiblePages.map(item => {
-            const status = item.deleted ? '삭제됨' : item.diagnostic ? '확인 필요' : item.legacy ? '읽기 전용' : '';
-            return <li key={item.diagnostic || !item.id ? item.locator : item.id}>
-              <button type="button" className="space-document-row" disabled={opening} aria-haspopup="dialog"
-                onClick={event => void openPage(item, event.currentTarget)}>
-                <FileText size={18} aria-hidden="true"/><span className="space-document-title">{item.title}</span>
-                {status && <small>{status}</small>}<ArrowRight size={15} aria-hidden="true"/>
-              </button>
-            </li>;
-          })}
-        </ul> : <div className="space-message">
-          <p>{search ? '검색 결과가 없습니다.' : pages.length ? '표시할 문서가 없습니다.' : '아직 문서가 없습니다.'}</p>
-        </div>}
-      </>}
+      {!space ? <EmptyState title={snapshot.spaces.length ? '프로젝트를 찾을 수 없습니다.' : '프로젝트가 없습니다.'}/>
+        : loading ? <p role="status" className="text-ui text-ink-2">문서를 불러오는 중…</p>
+        : listError ? <InlineError onRetry={() => setReload(value => value + 1)} retryLabel="다시 불러오기">{listError}</InlineError>
+        : <>
+          {openError && <InlineError>{openError}</InlineError>}
+          {opening && <p className="sr-only" role="status">문서를 여는 중…</p>}
+          {visiblePages.length > 0 ? <DocumentList pages={visiblePages} opening={opening}
+            onOpen={(item, trigger) => void openPage(item, trigger)}/>
+          : <EmptyState title={search ? '검색 결과가 없습니다.' : pages.length ? '표시할 문서를 없습니다.' : '아직 문서가 없습니다.'}
+            action={canCreate && <Button type="button" disabled={!connected || busy} onClick={() => setForm('document')}>
+              <Plus size={16} aria-hidden="true"/>새 문서
+            </Button>}/>}
+        </>}
+    </section>
 
     {form && <DocumentForm kind={form} folder={space} demo={mode === 'demo'} disabled={!connected || busy || (form === 'document' ? !canCreate : !canConnect)}
       action={action} onClose={checkList => { setForm(undefined); if (checkList) setReload(value => value + 1); if (form === 'folder' && createRequested) onCreateClosed?.(); }} onSaved={result => {
@@ -162,16 +158,50 @@ export function SpacesView({ snapshot, selectedSpace, query: read, action, onRev
         else { setQuery(''); setReload(value => value + 1); }
       }}/>}
 
-    {page && <Modal title={page.title} className="space-document-reader" onClose={closePage} drawer focusClose>
-      <div className="page-reader">
-        {page.diagnostic && <p className="inline-error" role="alert">{page.diagnostic}</p>}
-        {page.legacy && <p className="space-reader-note">이전 형식 · 읽기 전용</p>}
+    {page && <Modal title={page.title} onClose={closePage} drawer focusClose className="sm:max-w-[760px]">
+      <div className="grid gap-3">
+        {page.diagnostic && <InlineError>{page.diagnostic}</InlineError>}
+        {page.legacy && <p className="text-caption text-ink-2">이전 형식 · 읽기 전용</p>}
         {page.preview ? page.profile === 'pdc-markdown/1' ? <GardenMarkdownPreview html={page.preview} title={page.title} theme={theme}/>
-          : <iframe title={`${page.title} 미리보기`} sandbox="" referrerPolicy="no-referrer" srcDoc={`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">${page.preview}`}/>
-          : <pre className="garden-document-source-readonly"><code>{page.body ?? page.source ?? '표시할 본문이 없습니다.'}</code></pre>}
+          : <iframe title={`${page.title} 미리보기`} sandbox="" referrerPolicy="no-referrer" className="min-h-[65dvh] w-full rounded-control bg-surface"
+            srcDoc={`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">${page.preview}`}/>
+          : <pre className="max-h-[65dvh] max-w-full overflow-auto rounded-control border border-line bg-inset p-3 font-mono text-caption text-ink-2 [overflow-wrap:anywhere] [white-space:pre-wrap]"><code>{page.body ?? page.source ?? '표시할 본문이 없습니다.'}</code></pre>}
       </div>
     </Modal>}
-  </div>;
+  </GPage>;
+}
+
+/** The project's saved documents, one row per document. */
+export function DocumentList({ pages, opening, onOpen }: {
+  pages: Page[];
+  opening: boolean;
+  onOpen: (item: Page, trigger: HTMLButtonElement) => void;
+}) {
+  return <Table aria-label="문서 목록" aria-busy={opening}>
+    <TableHeader>
+      <TableRow>
+        <TableHead>문서</TableHead>
+        <TableHead className="w-32">상태</TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {pages.map(item => {
+        const status = item.deleted ? '삭제됨' : item.diagnostic ? '확인 필요' : item.legacy ? '읽기 전용' : '';
+        return <TableRow key={item.diagnostic || !item.id ? item.locator : item.id}>
+          <TableCell>
+            <button type="button" disabled={opening} aria-haspopup="dialog"
+              onClick={event => onOpen(item, event.currentTarget)}
+              className="flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1.5 text-left hover:bg-hover disabled:opacity-50">
+              <FileText size={16} className="shrink-0 text-ink-3" aria-hidden="true"/>
+              <span className="min-w-0 flex-1 text-ui font-medium text-ink [overflow-wrap:anywhere]">{item.title}</span>
+              <ArrowRight size={14} className="shrink-0 text-ink-3" aria-hidden="true"/>
+            </button>
+          </TableCell>
+          <TableCell className="text-caption text-ink-2">{status}</TableCell>
+        </TableRow>;
+      })}
+    </TableBody>
+  </Table>;
 }
 
 function DocumentForm({ kind, folder, demo, disabled, action, onClose, onSaved }: {
@@ -185,9 +215,10 @@ function DocumentForm({ kind, folder, demo, disabled, action, onClose, onSaved }
   const [checkList, setCheckList] = useState(false);
   const [writable, setWritable] = useState(false);
   const [error, setError] = useState('');
-  return <Modal title={editing ? '새 문서' : '새 프로젝트'} className={editing ? 'space-document-editor' : undefined}
+  const locked = saving || Boolean(retry) || checkList;
+  return <Modal title={editing ? '새 문서' : '새 프로젝트'}
     onClose={() => { if (!inFlight.current) onClose(Boolean(retry) || checkList); }}>
-    <form className="form-stack space-form" onSubmit={async event => {
+    <form className="grid gap-4" onSubmit={async event => {
       event.preventDefault();
       if (disabled || checkList || inFlight.current || (editing && !folder?.writable)) return;
       const values = new FormData(event.currentTarget);
@@ -228,19 +259,33 @@ function DocumentForm({ kind, folder, demo, disabled, action, onClose, onSaved }
       }
     }}>
       {editing ? <>
-        <p className="space-form-destination">저장 위치 · {folder?.name}</p>
-        <label>제목<input name="title" required maxLength={200} readOnly={saving || Boolean(retry) || checkList}/></label>
-        <label>본문<textarea name="body" rows={10} readOnly={saving || Boolean(retry) || checkList}/></label>
+        <p className="text-ui text-ink-2">저장 위치 · {folder?.name}</p>
+        <FormField label="제목" required>
+          {control => <Input name="title" required maxLength={200} readOnly={locked} {...control}/>}
+        </FormField>
+        <FormField label="본문">
+          {control => <Textarea name="body" rows={10} readOnly={locked} className="min-h-[220px]" {...control}/>}
+        </FormField>
       </> : <>
-        <label>이름<input name="title" required maxLength={65} readOnly={saving || Boolean(retry) || checkList}/></label>
-        <label>폴더<input name="path" placeholder="/로 시작하는 호스트의 절대 경로" required readOnly={saving || Boolean(retry) || checkList}/></label>
-        <label className="space-writable"><input type="checkbox" name="writable" checked={writable} onChange={event => setWritable(event.target.checked)}
-          disabled={saving || Boolean(retry) || checkList}/>문서 저장 허용</label>
-        {writable && <p className="field-help">해당 경로에 폴더가 없으면 새로 만듭니다.</p>}
+        <FormField label="이름" required>
+          {control => <Input name="title" required maxLength={65} readOnly={locked} {...control}/>}
+        </FormField>
+        <FormField label="폴더" required>
+          {control => <Input name="path" placeholder="/로 시작하는 호스트의 절대 경로" required readOnly={locked} {...control}/>}
+        </FormField>
+        <div className="grid gap-1">
+          <div className="flex items-center gap-2">
+            <Checkbox id="document-writable" name="writable" checked={writable} disabled={locked}
+              aria-labelledby="document-writable-label"
+              onCheckedChange={value => setWritable(value === true)}/>
+            <label id="document-writable-label" htmlFor="document-writable" className="text-ui text-ink">문서 저장 허용</label>
+          </div>
+          {writable && <p className="text-caption text-ink-2">해당 경로에 폴더가 없으면 새로 만듭니다.</p>}
+        </div>
       </>}
-      {error && <p className="form-error" role="alert">{error}</p>}
-      {checkList ? <button type="button" className="button secondary" onClick={() => onClose(true)}>목록 보기</button>
-        : <button type="submit" className="button primary" disabled={disabled || saving}>{saving ? '처리 중…' : retry ? '다시 확인' : editing ? '저장' : '만들기'}</button>}
+      {error && <InlineError>{error}</InlineError>}
+      {checkList ? <Button variant="outline" type="button" className="justify-self-end" onClick={() => onClose(true)}>목록 보기</Button>
+        : <Button type="submit" className="justify-self-end" disabled={disabled || saving}>{saving ? '처리 중…' : retry ? '다시 확인' : editing ? '저장' : '만들기'}</Button>}
     </form>
   </Modal>;
 }

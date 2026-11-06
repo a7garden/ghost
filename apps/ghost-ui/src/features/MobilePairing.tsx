@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import QRCode from 'qrcode';
+import { Button, Checkbox, InlineError } from '@garden/ui';
 import { QrCode, Smartphone } from 'lucide-react';
 
 const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -303,55 +304,59 @@ export function MobilePairing({ mode, connected = true, profiles = [] }: {
   };
   const terminal = invitation && (!active || !['open', 'pending'].includes(invitation.status));
 
-  return <section className="mobile-pairing integration-start" aria-labelledby="mobile-pairing-heading">
-    <div className="mobile-pairing-copy">
-      <h2 id="mobile-pairing-heading"><Smartphone size={19}/>휴대폰 연결</h2>
-      <p>iPhone의 Ghost에서 QR을 스캔하거나 같은 네트워크의 연결 코드를 입력하세요.</p>
+  const headingId = useId();
+
+  return <section aria-labelledby={headingId} className="min-w-0">
+    <div className="flex min-w-0 flex-col gap-3">
+      <h2 id={headingId} className="inline-flex items-center gap-2 text-body font-medium"><Smartphone size={16} aria-hidden="true"/>휴대폰 연결</h2>
+      <p className="text-caption text-ink-2">iPhone의 Ghost에서 QR을 스캔하거나 같은 네트워크의 연결 코드를 입력하세요.</p>
       {!invitation && mode === 'live' && <>
-        {catalog?.length ? <fieldset className="mobile-pairing-targets" disabled={locked || Boolean(creation.current)}>
-          <legend>휴대폰에서 사용할 Ghost</legend>
+        {catalog?.length ? <fieldset className="flex min-w-0 flex-col gap-1 border-0 p-0" disabled={locked || Boolean(creation.current)}>
+          <legend className="mb-1 text-caption text-ink-2">휴대폰에서 사용할 Ghost</legend>
           {catalog.map((target, index) => {
             const key = pairKey(target), checked = pickedKeys.includes(key);
-            return <label className="mobile-pairing-target" key={key}>
-              <input type="checkbox" checked={checked} disabled={!checked && picked.length >= maxTargets}
-                onChange={event => setSelectedKeys(event.target.checked ? [...picked.map(pairKey), key] : picked.map(pairKey).filter(value => value !== key))}/>
+            return <label className="inline-flex items-center gap-2 py-0.5 text-ui" key={key}>
+              <Checkbox checked={checked} disabled={!checked && picked.length >= maxTargets}
+                onCheckedChange={checked => setSelectedKeys(checked === true ? [...picked.map(pairKey), key] : picked.map(pairKey).filter(value => value !== key))}/>
               <span>{targetLabel(target, index)}</span>
             </label>;
           })}
-        </fieldset> : setupReady && <p className="field-help">연결할 수 있는 활성 Ghost가 없습니다.</p>}
-        {!setupReady && !setupError && connected && <p className="field-help" role="status">등록된 Ghost를 확인하는 중…</p>}
-        <button className="button secondary" disabled={!canStart} onClick={() => void create()}><QrCode size={16}/>{creation.current ? '같은 연결 요청 확인' : 'QR·연결 코드 만들기'}</button>
+        </fieldset> : setupReady && <p className="text-caption text-ink-2">연결할 수 있는 활성 Ghost가 없습니다.</p>}
+        {!setupReady && !setupError && connected && <p role="status" className="text-caption text-ink-2">등록된 Ghost를 확인하는 중…</p>}
+        <div><Button type="button" variant="outline" disabled={!canStart} onClick={() => void create()}><QrCode size={16}/>{creation.current ? '같은 연결 요청 확인' : 'QR·연결 코드 만들기'}</Button></div>
       </>}
-      {!invitation && creationExpired && <button className="button secondary" disabled={locked} onClick={() => { creation.current = null; setCreationExpired(false); setError(''); }}>만료된 요청 지우고 새 연결 준비</button>}
-      {mode !== 'live' && <p className="field-help">실행 중인 PC Ghost에서만 기기를 연결할 수 있습니다.</p>}
+      {!invitation && creationExpired && <div><Button type="button" variant="outline" disabled={locked} onClick={() => { creation.current = null; setCreationExpired(false); setError(''); }}>만료된 요청 지우고 새 연결 준비</Button></div>}
+      {mode !== 'live' && <p className="text-caption text-ink-2">실행 중인 PC Ghost에서만 기기를 연결할 수 있습니다.</p>}
       {invitation && <>
-        <p className="mobile-pairing-origin">{invitation.origin}</p>
-        <p className="field-help">대화·맡긴 일 읽기 및 변경 · 만료 {new Date(invitation.expires_at).toLocaleTimeString('ko-KR')}</p>
-        <ul className="connection-views mobile-pairing-scope" role="list" aria-label="휴대폰에 허용할 Ghost">
-          {approvedTargets.map((target, index) => <li key={pairKey(target)}>{targetLabel(target, index)}</li>)}
+        <p className="font-mono text-ui [overflow-wrap:anywhere]">{invitation.origin}</p>
+        <p className="text-caption text-ink-2">대화·맡긴 일 읽기 및 변경 · 만료 {new Date(invitation.expires_at).toLocaleTimeString('ko-KR')}</p>
+        <ul role="list" aria-label="휴대폰에 허용할 Ghost" className="flex flex-wrap gap-1.5">
+          {approvedTargets.map((target, index) => <li key={pairKey(target)} className="inline-flex items-center rounded-chip bg-inset px-2 py-0.5 text-caption">{targetLabel(target, index)}</li>)}
         </ul>
-        {scopeMismatch && <p className="inline-error" role="alert">선택한 Ghost와 서버 연결 범위가 다릅니다. 연결 요청을 취소하세요.</p>}
-        {active && invitation.status === 'open' && attempt && <div className="mobile-pairing-invite">
-          <canvas ref={canvas} aria-label="Ghost 휴대폰 연결 QR" width={256} height={256}/>
-          <div><span className="field-help">같은 네트워크의 연결 코드</span><output className="mobile-pairing-code">{attempt.code.slice(0, 4)}-{attempt.code.slice(4)}</output><p>{Math.max(0, Math.ceil((expires - now) / 1000))}초 뒤 만료</p></div>
+        {scopeMismatch && <InlineError>선택한 Ghost와 서버 연결 범위가 다릅니다. 연결 요청을 취소하세요.</InlineError>}
+        {active && invitation.status === 'open' && attempt && <div className="flex flex-wrap items-center gap-4">
+          <canvas ref={canvas} aria-label="Ghost 휴대폰 연결 QR" width={256} height={256} className="h-auto w-64 max-w-full"/>
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-caption text-ink-2">같은 네트워크의 연결 코드</span>
+            <output className="text-body font-semibold tracking-widest">{attempt.code.slice(0, 4)}-{attempt.code.slice(4)}</output>
+            <p className="text-caption text-ink-2">{Math.max(0, Math.ceil((expires - now) / 1000))}초 뒤 만료</p>
+          </div>
         </div>}
-        {active && invitation.status === 'open' && !attempt && <p role="status">저장된 연결 요청이 있습니다. QR·코드는 다시 만들지 않습니다. 이 요청을 취소한 뒤 새 요청을 만들어 주세요.</p>}
-        {active && invitation.status === 'pending' && invitation.claim && <div className="mobile-pairing-claim">
-          <strong>{invitation.claim.device_name}</strong>
-          <p>휴대폰과 같은 확인 번호인지 확인하세요.</p>
-          <output className="mobile-pairing-code">{invitation.claim.verification_code}</output>
-          <p className="field-help">기기 확인 {invitation.claim.device_fingerprint}</p>
-          {catalog && !scopeIsCurrent && <p className="field-help" role="status">선택한 Ghost 범위가 바뀌었습니다. 요청을 취소하고 새로 연결하세요.</p>}
-          <button className="button primary" disabled={locked || !scopeIsCurrent} onClick={() => void change('approve')}>숫자가 같아요 · 이 기기 연결 승인</button>
+        {active && invitation.status === 'open' && !attempt && <p role="status" className="text-ui">저장된 연결 요청이 있습니다. QR·코드는 다시 만들지 않습니다. 이 요청을 취소한 뒤 새 요청을 만들어 주세요.</p>}
+        {active && invitation.status === 'pending' && invitation.claim && <div className="flex min-w-0 flex-col gap-2 rounded-card bg-inset p-3">
+          <strong className="text-ui">{invitation.claim.device_name}</strong>
+          <p className="text-caption text-ink-2">휴대폰과 같은 확인 번호인지 확인하세요.</p>
+          <output className="text-headingSm font-semibold tracking-widest">{invitation.claim.verification_code}</output>
+          <p className="text-caption text-ink-2">기기 확인 {invitation.claim.device_fingerprint}</p>
+          {catalog && !scopeIsCurrent && <p role="status" className="text-caption text-ink-2">선택한 Ghost 범위가 바뀌었습니다. 요청을 취소하고 새로 연결하세요.</p>}
+          <div><Button type="button" disabled={locked || !scopeIsCurrent} onClick={() => void change('approve')}>숫자가 같아요 · 이 기기 연결 승인</Button></div>
         </div>}
-        {active && <button className="button secondary" disabled={locked} onClick={() => void change('cancel')}>이 연결 요청 취소</button>}
-        {terminal && <p role="status">{invitation.status === 'approved' ? '기기 접근을 승인했습니다. 휴대폰에서 연결 상태를 확인하세요.' : invitation.status === 'revoked' ? '이 기기의 연결 권한이 해제되었습니다.' : invitation.status === 'cancelled' ? '연결 요청을 취소했습니다.' : '연결 요청이 만료되었습니다.'}</p>}
-        {terminal && <button className="button secondary" disabled={locked} onClick={() => { setInvitation(null); setAttempt(null); setSelectedKeys(undefined); setScopeMismatch(false); setCreationExpired(false); setError(''); creation.current = null; mutation.current = null; refresh(); }}>{invitation.status === 'approved' ? '다른 휴대폰 연결 준비' : '새 연결 요청 준비'}</button>}
+        {active && <div><Button type="button" variant="outline" disabled={locked} onClick={() => void change('cancel')}>이 연결 요청 취소</Button></div>}
+        {terminal && <p role="status" className="text-ui">{invitation.status === 'approved' ? '기기 접근을 승인했습니다. 휴대폰에서 연결 상태를 확인하세요.' : invitation.status === 'revoked' ? '이 기기의 연결 권한이 해제되었습니다.' : invitation.status === 'cancelled' ? '연결 요청을 취소했습니다.' : '연결 요청이 만료되었습니다.'}</p>}
+        {terminal && <div><Button type="button" variant="outline" disabled={locked} onClick={() => { setInvitation(null); setAttempt(null); setSelectedKeys(undefined); setScopeMismatch(false); setCreationExpired(false); setError(''); creation.current = null; mutation.current = null; refresh(); }}>{invitation.status === 'approved' ? '다른 휴대폰 연결 준비' : '새 연결 요청 준비'}</Button></div>}
       </>}
-      {setupError && <div className="connection-message connection-message--error" role="alert"><span>{setupError}</span>
-        <button className="button secondary" disabled={locked} onClick={refresh}>다시 확인</button>
-      </div>}
-      {error && <p className="inline-error" role="alert">{error}</p>}
+      {setupError && <InlineError onRetry={refresh} retryLabel="다시 확인">{setupError}</InlineError>}
+      {error && <InlineError>{error}</InlineError>}
     </div>
   </section>;
 }

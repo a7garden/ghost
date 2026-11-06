@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Button } from '@garden/ui';
 import { protocol, type GhostView } from '../../sdk/src/index';
 
 export const portraitColors = {
@@ -74,10 +75,12 @@ export function PackageWorkspace({ info, view, onNavigate, onChat }: {
     window.addEventListener('message', receive);
     return () => { clearTimeout(timer); port?.close(); window.removeEventListener('message', receive); };
   }, [info, view]);
-  return <section className="package-workspace" aria-label={view.label} aria-busy={status === 'loading'}>
-    {status === 'failed' ? <div className="empty-state"><h1>전용 화면을 열 수 없습니다</h1>
-      <button className="button secondary" onClick={onChat}>대화로 돌아가기</button></div>
+  return <section className="flex min-h-0 w-full flex-1 flex-col" aria-label={view.label} aria-busy={status === 'loading'}>
+    {status === 'failed' ? <div className="grid flex-1 content-center justify-items-center gap-4 p-8 text-center">
+      <h1 className="text-headingSm font-semibold text-ink">전용 화면을 열 수 없습니다</h1>
+      <Button type="button" variant="secondary" onClick={onChat}>대화로 돌아가기</Button></div>
       : <iframe ref={frame} title={view.label} sandbox="allow-scripts" referrerPolicy="no-referrer"
+        className="min-h-[300px] w-full flex-1 border-0 bg-transparent"
         src={`/ghost-package-assets/${info.digest}/index.html#${view.route}`}/>}
   </section>;
 }

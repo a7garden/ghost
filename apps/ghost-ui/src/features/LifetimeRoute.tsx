@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { InlineError } from '@garden/ui';
 import { LifetimeView } from '../lifetime/LifetimeView';
 import { createLiveLifetimeClient } from '../lifetime/client';
 import type { AuthenticatedControlAction } from '../lifetime/controlTransport';
@@ -46,7 +47,7 @@ export function LifetimeRoute({ action, memoryAction, workspaceId, authority, mo
       return { error: `접수 ID와 재시도 큐를 준비하지 못했습니다. 브라우저 저장 권한을 확인하세요.${detail}` };
     }
   }, [action, workspaceId, authority?.authority_epoch, authority?.dispatch_enabled, mode]);
-  if ('error' in session) return <div className="page-content" role="alert">{session.error}</div>;
+  if ('error' in session) return <div className="p-8"><InlineError>{session.error}</InlineError></div>;
   const params = new URLSearchParams(route.split('?')[1] ?? '');
   const panel = params.get('panel');
   return <LifetimeView mode="live" client={session.client} connected={connected} active={active} memoryAction={memoryAction}

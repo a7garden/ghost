@@ -1,11 +1,11 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { Fragment, useState } from 'react';
 import { ArrowUpRight, Check, Package, Plug, Plus, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import { Badge, Banner, Button, Card, Checkbox, EmptyState, FormField, GSettingsGroup, InlineError, Input, SelectField, Switch, Textarea } from '@garden/ui';
 import { Modal } from '../components/Modal';
 import type { Command, Integration, IntegrationTransport, Snapshot } from '../client/types';
 import { MobilePairing } from './MobilePairing';
 import { ghostPath, viewPath, type PackageMap } from './PackageWorkspace';
-import './connections.css';
 
 type Action = (command: Command) => Promise<Record<string, any>>;
 const presets = {
@@ -36,8 +36,9 @@ const dataFor = (i: Integration, supportsApprovals: boolean) => ({
   ...(supportsApprovals ? { approved_tools: i.approved_tools } : {}),
 });
 const checkedTime = new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const catalogBadge = { neutral: 'default', danger: 'danger', success: 'success' } as const;
 
-export function integrationCatalogStatus(item: Pick<Integration, 'enabled' | 'error' | 'checked_ms' | 'tools'>) {
+export function integrationCatalogStatus(item: Pick<Integration, 'enabled' | 'error' | 'checked_ms' | 'tools'>): { tone: 'neutral' | 'danger' | 'success'; label: string } {
   if (!item.enabled) return { tone: 'neutral', label: '사용 안 함' };
   if (item.error) return { tone: 'danger', label: '확인 실패' };
   if (item.checked_ms) return { tone: 'success', label: `도구 목록 확인 · ${item.tools.length}개` };
@@ -82,94 +83,100 @@ export function Integrations({ snapshot, action, busy, mode, navigate, connected
     finally { setChecking(''); }
   };
 
-  return <div className="page-content integrations-page connections-stack">
-    <div className="page-heading"><h1>확장</h1></div>
-    {mode === 'demo' && <p className="connection-message">예시 모드입니다. 실제 연결은 로컬 호스트에서 실행됩니다.</p>}
-    {!connected && <p className="connection-message" role="status">호스트에 연결하면 설정을 변경할 수 있습니다.</p>}
-    {error && <p className="connection-message connection-message--error" role="alert">{error}</p>}
-    {notice && <p className="connection-message" role="status">{notice}</p>}
+  return <div className="flex min-w-0 flex-col gap-6">
+    {mode === 'demo' && <Banner variant="info">예시 모드입니다. 실제 연결은 로컬 호스트에서 실행됩니다.</Banner>}
+    {!connected && <Banner variant="warning">호스트에 연결하면 설정을 변경할 수 있습니다.</Banner>}
+    {error && <InlineError>{error}</InlineError>}
+    {notice && <p role="status" className="text-ui text-ink-2">{notice}</p>}
 
-    <section className="connection-section" aria-labelledby="mcp-heading">
-      <div className="connection-heading"><h2 id="mcp-heading">MCP 도구</h2>
-        <button className="button primary" disabled={locked} onClick={() => setEditor({})}><Plus size={16}/>MCP 추가</button>
-      </div>
-      {snapshot.integrations.length ? <ul className="connection-surface connection-list" role="list">
+    <GSettingsGroup title="MCP 도구">
+      {snapshot.integrations.length ? <div className="flex min-w-0 flex-col gap-3 p-3">
+        <div className="flex justify-end">
+          <Button type="button" disabled={locked} onClick={() => setEditor({})}><Plus size={16}/>MCP 추가</Button>
+        </div>
         {snapshot.integrations.map(item => {
           const status = integrationCatalogStatus(item);
           const assigned = item.profiles.map(id => snapshot.profiles.find(profile => profile.id === id)?.name).filter(Boolean).join(', ');
           const permission = !supportsApprovals || item.approved_tools == null
             ? '기존 실행 경로'
             : item.approved_tools.length ? `승인 요청 가능 · ${item.approved_tools.length}개` : '도구 사용 차단';
-          return <li className="connection-row connection-mcp" key={item.id}>
-            <span className="connection-icon"><Plug size={17} aria-hidden="true"/></span>
-            <div className="connection-row-copy">
-              <div className="connection-row-title"><h3>{item.name}</h3><span className="connection-status" data-tone={status.tone}>{status.label}</span></div>
-              <p>Ghost <span className="connection-value">{assigned || '미지정'}</span><span aria-hidden="true"> · </span>{permission}</p>
-              <p>{item.checked_ms
+          return <Card key={item.id} className="flex-row items-center gap-4 px-4">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-body font-medium">{item.name}</h3>
+                <Badge variant={catalogBadge[status.tone]}>{status.label}</Badge>
+              </div>
+              <p className="text-caption text-ink-2">Ghost {assigned || '미지정'}<span aria-hidden="true"> · </span>{permission}</p>
+              <p className="text-caption text-ink-2">{item.checked_ms
                 ? <>최근 확인 <time dateTime={new Date(item.checked_ms).toISOString()}>{checkedTime.format(item.checked_ms)}</time></>
                 : '도구 목록 확인 전'}</p>
-              {item.error && <p className="connection-row-error">{item.error}</p>}
+              {item.error && <p className="text-caption text-danger">{item.error}</p>}
             </div>
-            <div className="connection-actions">
-              <button className="button secondary" disabled={locked || Boolean(checking) || !item.enabled || mode !== 'live'} onClick={() => void check(item.id)}>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button type="button" variant="outline" disabled={locked || Boolean(checking) || !item.enabled || mode !== 'live'} onClick={() => void check(item.id)}>
                 <RefreshCw size={14}/>{checking === item.id ? '확인 중…' : '목록 확인'}
-              </button>
-              <button className="button secondary" disabled={busy || (!supportsApprovals && !item.tools.length)} onClick={() => setTools(item)}>
+              </Button>
+              <Button type="button" variant="outline" disabled={busy || (!supportsApprovals && !item.tools.length)} onClick={() => setTools(item)}>
                 {supportsApprovals ? '도구 권한' : '도구 보기'}
-              </button>
-              <button className="icon-button" disabled={locked} aria-label={`${item.name} 설정`} onClick={() => setEditor({ item })}><Settings2 size={17}/></button>
-              <label className="integration-switch">
-                <input type="checkbox" checked={item.enabled} disabled={locked} aria-label={`${item.name} 사용`}
-                  onChange={event => void run({ type: 'save_integration', id: item.id, version: item.version,
-                    integration: { ...dataFor(item, supportsApprovals), enabled: event.target.checked } })}/>
-                <span>{item.enabled ? '켬' : '끔'}</span>
+              </Button>
+              <Button type="button" variant="ghost" size="icon" disabled={locked} aria-label={`${item.name} 설정`} onClick={() => setEditor({ item })}><Settings2 size={16}/></Button>
+              <label className="inline-flex items-center gap-2 text-caption text-ink-2">
+                <Switch checked={item.enabled} disabled={locked} aria-label={`${item.name} 사용`}
+                  onCheckedChange={checked => void run({ type: 'save_integration', id: item.id, version: item.version,
+                    integration: { ...dataFor(item, supportsApprovals), enabled: checked } })}/>
+                <span aria-hidden="true">{item.enabled ? '켬' : '끔'}</span>
               </label>
             </div>
-          </li>;
+          </Card>;
         })}
-      </ul> : <div className="connection-surface connection-row connection-empty">
-        <span className="connection-icon"><Plug size={17} aria-hidden="true"/></span><p>등록된 MCP 도구가 없습니다.</p>
-      </div>}
-    </section>
+      </div> : <EmptyState icon={<Plug size={18} aria-hidden="true"/>} title="등록된 MCP 도구가 없습니다."
+        action={<Button type="button" disabled={locked} onClick={() => setEditor({})}><Plus size={16}/>MCP 추가</Button>}/>}
+    </GSettingsGroup>
 
-    {(packages || packageError || onImport) && <section className="connection-section" aria-labelledby="installed-packages-heading">
-      <div className="connection-heading"><h2 id="installed-packages-heading">.ghost 패키지</h2>
-        {onImport && <button className="button secondary" disabled={locked} onClick={onImport}><Plus size={16}/>가져오기</button>}
+    {(packages || packageError || onImport) && <GSettingsGroup title=".ghost 패키지">
+      <div className="flex min-w-0 flex-col gap-3 p-3">
+        {packageError && <InlineError onRetry={onRefreshPackages} retryLabel="다시 확인">{packageError}</InlineError>}
+        {onImport && <div className="flex justify-end">
+          <Button type="button" variant="outline" disabled={locked} onClick={onImport}><Plus size={16}/>가져오기</Button>
+        </div>}
+        {installed.length ? <div className="flex min-w-0 flex-col gap-3">
+          {installed.map(({ profile, item }) => <Card key={profile.id} className="flex-row items-center gap-4 px-4">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-body font-medium">{item.name}</h3>
+                <Badge variant="outline">{item.version}</Badge>
+              </div>
+              <p className="text-caption text-ink-2">Ghost {profile.name}</p>
+              {item.ui?.views.length ? <ul role="list" aria-label={`${item.name} 화면`} className="flex flex-wrap gap-1.5">
+                {item.ui.views.map(view => <li key={view.id}>
+                  <a className="inline-flex items-center gap-1 rounded-chip bg-inset px-2 py-0.5 text-caption text-ink hover:bg-hover" href={`#${viewPath(profile.id, view.id)}`}>{view.label}</a>
+                </li>)}
+              </ul> : <p className="text-caption text-ink-2">전용 화면 없음</p>}
+            </div>
+            <Button type="button" variant="outline" onClick={() => navigate(ghostPath(profile.id))}>Ghost 열기<ArrowUpRight size={14}/></Button>
+          </Card>)}
+        </div> : !packageError && <EmptyState role="status" icon={<Package size={18} aria-hidden="true"/>}
+          title={packages ? '설치된 .ghost 패키지가 없습니다.' : '설치된 패키지를 불러오는 중…'}/>}
       </div>
-      {packageError && <p className="connection-message connection-message--error" role="alert">{packageError}{onRefreshPackages && <button className="text-button" onClick={onRefreshPackages}>다시 확인</button>}</p>}
-      {installed.length ? <ul className="connection-surface connection-list" role="list">
-        {installed.map(({ profile, item }) => <li className="connection-row connection-package" key={profile.id}>
-          <span className="connection-icon"><Package size={17} aria-hidden="true"/></span>
-          <div className="connection-row-copy">
-            <div className="connection-row-title"><h3>{item.name}</h3><span className="connection-status">{item.version}</span></div>
-            <p>Ghost <span className="connection-value">{profile.name}</span></p>
-            {item.ui?.views.length ? <ul className="connection-views" role="list" aria-label={`${item.name} 화면`}>
-              {item.ui.views.map(view => <li key={view.id}><a href={`#${viewPath(profile.id, view.id)}`}>{view.label}</a></li>)}
-            </ul> : <p>전용 화면 없음</p>}
-          </div>
-          <button className="button secondary" onClick={() => navigate(ghostPath(profile.id))}>Ghost 열기<ArrowUpRight size={14}/></button>
-        </li>)}
-      </ul> : !packageError && <div className="connection-surface connection-row connection-empty" role="status">
-        <span className="connection-icon"><Package size={17} aria-hidden="true"/></span>
-        <p>{packages ? '설치된 .ghost 패키지가 없습니다.' : '설치된 패키지를 불러오는 중…'}</p>
-      </div>}
-    </section>}
+    </GSettingsGroup>}
 
-    <div className="connection-secondary">
+    <div className="flex min-w-0 flex-col gap-4">
       {supportsApprovals && <DetailDialog title="MCP 설정 예시">
-        <div className="connection-settings-body">
-          <p className="field-help">로컬 프로그램은 이 Mac에서 실행합니다. 인증에는 비밀 값 대신 호스트 환경 변수 이름을 사용합니다.</p>
-          <div className="connection-preset"><div><h3>Gmail</h3>
-            <p className="field-help">도구 권한에서 <code>send_gmail_message</code>를 선택하면 Ghost가 발송 승인을 요청할 수 있습니다.</p>
-            <a href="https://github.com/taylorwilsdon/google_workspace_mcp#quick-start" target="_blank" rel="noreferrer">설치·인증 안내<ArrowUpRight size={13}/></a>
-          </div><button className="button secondary" disabled={locked} onClick={() => setEditor({ preset: 'gmail' })}>설정 사용</button></div>
+        <p className="text-caption text-ink-2">로컬 프로그램은 이 Mac에서 실행합니다. 인증에는 비밀 값 대신 호스트 환경 변수 이름을 사용합니다.</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-card bg-inset p-3">
+          <div className="min-w-0">
+            <h3 className="text-ui font-medium">Gmail</h3>
+            <p className="mt-1 text-caption text-ink-2">도구 권한에서 <code>send_gmail_message</code>를 선택하면 Ghost가 발송 승인을 요청할 수 있습니다.</p>
+            <a className="mt-1 inline-flex items-center gap-1 text-caption underline-offset-2 hover:underline" href="https://github.com/taylorwilsdon/google_workspace_mcp#quick-start" target="_blank" rel="noreferrer">설치·인증 안내<ArrowUpRight size={13} aria-hidden="true"/></a>
+          </div>
+          <Button type="button" variant="outline" disabled={locked} onClick={() => setEditor({ preset: 'gmail' })}>설정 사용</Button>
         </div>
       </DetailDialog>}
-      <div className="connection-surface">
-        <fieldset className="connection-fieldset connection-pairing" disabled={!connected}>
+      <Card className="px-4">
+        <fieldset disabled={!connected} className="min-w-0">
           <MobilePairing mode={mode} connected={connected} profiles={snapshot.profiles}/>
         </fieldset>
-      </div>
+      </Card>
     </div>
 
     {editor && <IntegrationEditor key={editor.item?.id ?? editor.preset ?? 'new'} initial={editor.item} preset={editor.preset}
@@ -215,38 +222,38 @@ function IntegrationTools({ item, supportsApprovals, action, busy, connected, st
   };
 
   return <Modal title={`${item.name}의 도구`} onClose={() => { if (!busy) close(); }}>
-    {supportsApprovals && <p className="field-help">
+    {supportsApprovals && <p className="text-caption text-ink-2">
       {legacy
         ? '이 연결은 기존 실행 경로에서 직접 실행을 허용합니다. 승인 방식으로 전환하면 선택한 도구만 실행을 요청할 수 있습니다.'
         : '선택한 도구는 Ghost가 실행을 요청할 수 있습니다. 요청마다 소유자의 승인이 필요합니다.'}
       {' '}선택을 비워 두면 Ghost의 도구 사용이 차단됩니다.
     </p>}
-    {stale && <p className="field-help" role="status">설정이 변경됐습니다. 최신 도구 권한을 다시 열어 주세요.</p>}
-    <div className="integration-tool-list">
-      {item.tools.length === 0 && <p>목록을 확인한 뒤 도구를 선택할 수 있습니다.</p>}
-      {item.tools.map(tool => <div className="integration-tool" key={tool.name}>
-        {supportsApprovals && <label className="inline-checkbox">
-          <input type="checkbox" checked={selected.includes(tool.name)} disabled={locked}
-            onChange={e => toggle(tool.name, e.target.checked)}/><code>{tool.name}</code>
+    {stale && <p role="status" className="text-caption text-ink-2">설정이 변경됐습니다. 최신 도구 권한을 다시 열어 주세요.</p>}
+    <div className="max-h-[60vh] min-w-0 overflow-y-auto">
+      {item.tools.length === 0 && <p className="text-caption text-ink-2">목록을 확인한 뒤 도구를 선택할 수 있습니다.</p>}
+      {item.tools.map(tool => <div className="min-w-0 py-2" key={tool.name}>
+        {supportsApprovals && <label className="flex items-center gap-2 text-caption [overflow-wrap:anywhere]">
+          <Checkbox checked={selected.includes(tool.name)} disabled={locked}
+            onCheckedChange={checked => toggle(tool.name, checked === true)}/><code>{tool.name}</code>
         </label>}
         <DetailDialog title={`${tool.name} · 설명 및 입력 형식`} label={<>{supportsApprovals ? <><span className="sr-only">{tool.name} </span>설명 및 입력 형식</> : tool.name}</>}>
           <p>{tool.description || '설명 없음'}</p>
-          <pre>{JSON.stringify(tool.inputSchema, null, 2)}</pre>
+          <pre className="min-w-0 overflow-auto rounded-card bg-inset p-3 text-caption">{JSON.stringify(tool.inputSchema, null, 2)}</pre>
         </DetailDialog>
       </div>)}
-      {supportsApprovals && unavailable.map(name => <label className="inline-checkbox" key={name}>
-        <input type="checkbox" checked disabled={locked} onChange={() => toggle(name, false)}/>
-        <code>{name}</code><span className="muted">현재 도구 목록에 없음</span>
+      {supportsApprovals && unavailable.map(name => <label className="flex items-center gap-2 py-2 text-caption [overflow-wrap:anywhere]" key={name}>
+        <Checkbox checked disabled={locked} onCheckedChange={() => toggle(name, false)}/>
+        <code>{name}</code><span className="text-ink-2">현재 도구 목록에 없음</span>
       </label>)}
     </div>
-    {error && <p className="form-error" role="alert">{error}</p>}
+    {error && <InlineError>{error}</InlineError>}
     {supportsApprovals
-      ? <button className="button primary full-width" disabled={locked || !changed || unavailable.length > 0} onClick={() => void save()}>
+      ? <Button type="button" className="w-full" disabled={locked || !changed || unavailable.length > 0} onClick={() => void save()}>
         {legacy ? '승인 방식으로 전환' : '도구 권한 저장'}<Check size={15}/>
-      </button>
-      : item.profiles[0] && <button className="button primary full-width" onClick={() => openGhost(item.profiles[0])}>
+      </Button>
+      : item.profiles[0] && <Button type="button" className="w-full" onClick={() => openGhost(item.profiles[0])}>
         Ghost와 대화하기<ArrowUpRight size={15}/>
-      </button>}
+      </Button>}
   </Modal>;
 }
 
@@ -273,16 +280,35 @@ function IntegrationEditor({ initial, preset, snapshot, action, busy, connected,
     } catch (e) { setError(e instanceof Error ? e.message : '연동 설정을 저장하지 못했습니다.'); }
   };
   const remove = async () => { if (!initial || locked) return; try { await action({ type: 'workspace', action: { type: 'delete_integration', id: initial.id, version: initial.version } }); close(); } catch (e) { setError(e instanceof Error ? e.message : '연동을 제거하지 못했습니다.'); } };
-  return <Modal title={initial ? '연동 설정' : '새 연동'} onClose={() => { if (!busy) close(); }}><form className="form-stack" onSubmit={e => { e.preventDefault(); void save(e.currentTarget); }}>
-    {stale && <p className="field-help" role="status">설정이 변경됐습니다. 최신 설정을 다시 열어 주세요.</p>}
-    <fieldset className="connection-fieldset form-stack" disabled={locked}>
-    {preset && <p className="integration-notice">먼저 <code>uv tool install workspace-mcp</code>로 설치하고 Google OAuth를 설정하세요. 아래에는 비밀 값 대신 호스트 환경 변수 이름을 넣습니다.</p>}
-    <label>연동 이름<input name="name" defaultValue={initial?.name ?? presetConfig?.name ?? ''} required maxLength={200} placeholder="예: 나의 업무 도구" autoFocus/></label>
-    <label>연결 방식<select value={kind} onChange={e => setKind(e.target.value as typeof kind)}><option value="stdio">로컬 프로그램 (stdio)</option><option value="http">서버 주소 (Streamable HTTP)</option></select></label>
-    {kind === 'stdio' ? <Fragment key="stdio"><label>실행 프로그램<input name="command" required defaultValue={transport?.kind === 'stdio' ? transport.command : ''} placeholder="예: workspace-mcp 또는 /절대/경로/프로그램"/></label><label>실행 인자<textarea name="args" rows={2} defaultValue={transport?.kind === 'stdio' ? JSON.stringify(transport.args) : '[]'} spellCheck={false}/><span className="field-help">JSON 배열로 입력합니다. 예: ["--transport", "stdio"]</span></label><label>환경 변수 연결<textarea name="env" rows={2} defaultValue={transport?.kind === 'stdio' ? Object.entries(transport.env_refs).map(([k,v]) => `${k}=${v}`).join('\n') : ''} placeholder="API_TOKEN=MY_SERVICE_TOKEN" spellCheck={false}/></label><label>작업 폴더 <span className="muted">선택</span><input name="cwd" defaultValue={transport?.kind === 'stdio' ? transport.cwd ?? '' : ''} placeholder="절대 경로"/></label></Fragment> : <Fragment key="http"><label>MCP 주소<input name="url" type="url" required defaultValue={transport?.kind === 'http' ? transport.url : ''} placeholder="https://example.com/mcp"/></label><label>Bearer 토큰 환경 변수 <span className="muted">선택</span><input name="bearer" defaultValue={transport?.kind === 'http' ? transport.bearer_env ?? '' : ''} placeholder="MY_MCP_TOKEN" pattern="[A-Za-z_][A-Za-z0-9_]*"/><span className="field-help">OAuth 로그인이 필요한 서버는 먼저 서버 측 인증 또는 로컬 MCP를 설정하세요.</span></label></Fragment>}
-    <fieldset className="integration-profiles"><legend>이 연동을 사용할 Ghost</legend>{snapshot.profiles.map(p => <label key={p.id}><input type="checkbox" checked={profiles.includes(p.id)} onChange={e => setProfiles(e.target.checked ? [...profiles, p.id] : profiles.filter(id => id !== p.id))}/>{p.name}</label>)}{!snapshot.profiles.length && <p className="field-help">Ghost를 만든 뒤 이 설정에서 선택해 주세요.</p>}</fieldset>
-    <label className="inline-checkbox"><input type="checkbox" name="enabled" defaultChecked={initial?.enabled ?? true}/>이 연동 사용</label>
-    {error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions">{initial && <button type="button" className="button secondary" disabled={busy} onClick={() => void remove()}><Trash2 size={15}/>연동 제거</button>}<button className="button primary" disabled={busy}>{busy ? '저장 중…' : '설정 저장'}<Check size={15}/></button></div>
+  return <Modal title={initial ? '연동 설정' : '새 연동'} onClose={() => { if (!busy) close(); }}><form className="flex min-w-0 flex-col gap-4" onSubmit={e => { e.preventDefault(); void save(e.currentTarget); }}>
+    {stale && <p role="status" className="text-caption text-ink-2">설정이 변경됐습니다. 최신 설정을 다시 열어 주세요.</p>}
+    <fieldset disabled={locked} className="flex min-w-0 flex-col gap-4 border-0 p-0">
+    {preset && <p className="rounded-card bg-inset p-3 text-caption text-ink-2">먼저 <code>uv tool install workspace-mcp</code>로 설치하고 Google OAuth를 설정하세요. 아래에는 비밀 값 대신 호스트 환경 변수 이름을 넣습니다.</p>}
+    <FormField label="연동 이름" required>{props => <Input {...props} name="name" defaultValue={initial?.name ?? presetConfig?.name ?? ''} maxLength={200} placeholder="예: 나의 업무 도구" autoFocus/>}</FormField>
+    <FormField label="연결 방식">{props => <SelectField {...props} label="연결 방식" value={kind} onValueChange={value => setKind(value as typeof kind)}
+      options={[{ value: 'stdio', label: '로컬 프로그램 (stdio)' }, { value: 'http', label: '서버 주소 (Streamable HTTP)' }]}/>}</FormField>
+    {kind === 'stdio' ? <Fragment key="stdio">
+      <FormField label="실행 프로그램" required>{props => <Input {...props} name="command" defaultValue={transport?.kind === 'stdio' ? transport.command : ''} placeholder="예: workspace-mcp 또는 /절대/경로/프로그램"/>}</FormField>
+      <FormField label="실행 인자" description='JSON 배열로 입력합니다. 예: ["--transport", "stdio"]'>{props => <Textarea {...props} name="args" rows={2} defaultValue={transport?.kind === 'stdio' ? JSON.stringify(transport.args) : '[]'} spellCheck={false}/>}</FormField>
+      <FormField label="환경 변수 연결">{props => <Textarea {...props} name="env" rows={2} defaultValue={transport?.kind === 'stdio' ? Object.entries(transport.env_refs).map(([k, v]) => `${k}=${v}`).join('\n') : ''} placeholder="API_TOKEN=MY_SERVICE_TOKEN" spellCheck={false}/>}</FormField>
+      <FormField label="작업 폴더 (선택)">{props => <Input {...props} name="cwd" defaultValue={transport?.kind === 'stdio' ? transport.cwd ?? '' : ''} placeholder="절대 경로"/>}</FormField>
+    </Fragment> : <Fragment key="http">
+      <FormField label="MCP 주소" required>{props => <Input {...props} name="url" type="url" defaultValue={transport?.kind === 'http' ? transport.url : ''} placeholder="https://example.com/mcp"/>}</FormField>
+      <FormField label="Bearer 토큰 환경 변수 (선택)" description="OAuth 로그인이 필요한 서버는 먼저 서버 측 인증 또는 로컬 MCP를 설정하세요.">{props => <Input {...props} name="bearer" defaultValue={transport?.kind === 'http' ? transport.bearer_env ?? '' : ''} placeholder="MY_MCP_TOKEN" pattern="[A-Za-z_][A-Za-z0-9_]*"/>}</FormField>
+    </Fragment>}
+    <fieldset className="flex min-w-0 flex-col gap-2 border-0 p-0">
+      <legend className="text-ui font-medium">이 연동을 사용할 Ghost</legend>
+      {snapshot.profiles.map(p => <label key={p.id} className="inline-flex items-center gap-2 text-ui">
+        <Checkbox checked={profiles.includes(p.id)} onCheckedChange={checked => setProfiles(checked === true ? [...profiles, p.id] : profiles.filter(id => id !== p.id))}/>{p.name}
+      </label>)}
+      {!snapshot.profiles.length && <p className="text-caption text-ink-2">Ghost를 만든 뒤 이 설정에서 선택해 주세요.</p>}
+    </fieldset>
+    <label className="inline-flex items-center gap-2 text-ui"><Checkbox name="enabled" defaultChecked={initial?.enabled ?? true}/>이 연동 사용</label>
+    {error && <InlineError>{error}</InlineError>}
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {initial && <Button type="button" variant="outline" disabled={busy} onClick={() => void remove()}><Trash2 size={15}/>연동 제거</Button>}
+      <Button type="submit" disabled={busy}>{busy ? '저장 중…' : '설정 저장'}<Check size={15}/></Button>
+    </div>
     </fieldset>
   </form></Modal>;
 }

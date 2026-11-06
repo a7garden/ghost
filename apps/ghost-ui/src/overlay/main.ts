@@ -11,7 +11,14 @@ import { RoutingClient } from '../client/routingClient';
 import { isRunning, phaseLabel, type Client, type Profile, type Snapshot } from '../client/types';
 import type { RoutingTurn } from '../client/routingTypes';
 import { legacySubmitKind, pickConversation, pickProfile, routingKind, type Target } from './target';
+import '@garden/ui/styles.css';
 import './overlay.css';
+
+// Garden tokens switch on the root `.dark` class; the overlay follows the system theme.
+const systemDark = matchMedia('(prefers-color-scheme: dark)');
+const applyTheme = () => document.documentElement.classList.toggle('dark', systemDark.matches);
+applyTheme();
+systemDark.addEventListener('change', applyTheme);
 
 // Known static overlay markup; getElementById is untyped.
 const inputEl = document.getElementById('input') as HTMLTextAreaElement;

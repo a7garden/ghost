@@ -8,16 +8,21 @@
     "dev": "vite --host 127.0.0.1 --port 5178 --strictPort",
     "build": "tsc -b && vite build",
     "serve": "node scripts/serve.mjs",
-    "test": "vitest run && node --test server/bridge.test.mjs server/packages.test.mjs"
+    "test": "vitest run && node --test server/bridge.test.mjs server/packages.test.mjs",
+    "garden:sync": "node vendor/garden/cli/garden.mjs sync",
+    "garden:doctor": "node vendor/garden/cli/garden.mjs doctor"
   },
   "dependencies": {
-    "@garden/arc": "file:vendor/garden-arc",
-    "@garden/ui": "file:vendor/garden-ui",
+    "@garden/ui": "workspace:*",
     "lucide-react": "1.50.0",
     "onnxruntime-web": "1.30.0",
     "qrcode": "1.5.4",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "@garden/editor": "workspace:*",
+    "@garden/markdown": "workspace:*",
+    "@tauri-apps/api": "2.12.0",
+    "@garden/native": "workspace:*"
   },
   "devDependencies": {
     "@types/qrcode": "1.5.6",
@@ -26,6 +31,12 @@
     "@vitejs/plugin-react": "6.1.1",
     "typescript": "5.9.3",
     "vite": "8.3.2",
-    "vitest": "5.0.3"
-  }
+    "vitest": "5.0.3",
+    "@tauri-apps/cli": "2.12.0",
+    "@tailwindcss/vite": "4.1.18"
+  },
+  "workspaces": [
+    "vendor/garden/packages/*"
+  ],
+  "packageManager": "bun@1.4.2"
 }

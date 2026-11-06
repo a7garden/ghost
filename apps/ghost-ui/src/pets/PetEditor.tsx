@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Download, Upload, WandSparkles } from 'lucide-react';
+import { Button, FormField, InlineError, Input, SegmentedControl, SelectField } from '@garden/ui';
 import { Modal } from '../components/Modal';
 import { PetSprite } from './PetSprite';
 import { COLORS, DEFAULT_DESIGN, STATES, createSpriteSheet, importSprite, isDesign } from './sprites';
@@ -18,22 +19,53 @@ export function PetEditor({ name: initialName, seed, animate, busy, onClose, onS
   const version = mode === 'create' ? 2 : imported?.sprite_version ?? 2;
   const patch = (value: Partial<PetDesign>) => setDesign(d => ({ ...d, ...value }));
   const locked = busy || reading;
-  return <Modal title={seed ? '아바타를 복사해서 만들기' : '아바타 만들기'} onClose={() => !locked && onClose()} className="pet-editor-modal">
+  return <Modal title={seed ? '아바타를 복사해서 만들기' : '아바타 만들기'} onClose={() => !locked && onClose()} className="w-[min(760px,calc(100vw-2rem))] sm:max-w-[760px]">
     <form onSubmit={e => { e.preventDefault(); if (!source || locked) return; setError(''); void onSave({ name: name.trim(), description: description.trim(), sprite_version: version, data_url: source, design: mode === 'create' ? design : null }).catch(e => setError(e.message)); }}>
-      <div className="pet-editor-grid">
-        <div className="pet-editor-preview"><div className="pet-preview-stage">{source ? <PetSprite source={source} version={version} size={192} state={state} animate={animate} follow/> : <Upload size={36}/>}</div><strong>{name || '새 Ghost'}</strong><span className="field-help">{version === 2 ? '커서를 움직이면 시선이 따라가요.' : 'Codex 펫 v1'}</span><label className="pet-motion-picker">동작 미리보기<select value={state} onChange={e => setState(e.target.value as PetState)}>{STATES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label></div>
-        <div className="pet-editor-controls form-stack"><div className="pet-mode-tabs" aria-label="아바타 제작 방식"><button type="button" aria-pressed={mode === 'create'} onClick={() => { setMode('create'); setError(''); }} disabled={locked}><WandSparkles size={15}/>직접 만들기</button><button type="button" aria-pressed={mode === 'import'} onClick={() => { setMode('import'); setError(''); }} disabled={locked}><Upload size={15}/>가져오기</button></div>
-          <label>아바타 이름<input value={name} onChange={e => setName(e.target.value)} required maxLength={80} disabled={locked}/></label>
+      <div className="grid grid-cols-[minmax(0,.9fr)_minmax(0,1fr)] gap-7 max-[760px]:grid-cols-1 max-[760px]:gap-5">
+        <div className="flex min-w-0 flex-col items-center justify-center gap-2 rounded-xl bg-inset px-3 py-4 max-[760px]:p-2 max-[760px]:[&_.pet-sprite]:scale-[.65]">
+          <div className="flex min-h-[230px] items-center justify-center text-ink-3 max-[760px]:h-[130px] max-[760px]:min-h-[120px] max-[760px]:max-w-full">
+            {source ? <PetSprite source={source} version={version} size={192} state={state} animate={animate} follow/> : <Upload size={36}/>}
+          </div>
+          <strong className="max-w-full text-body text-ink [overflow-wrap:anywhere]">{name || '새 Ghost'}</strong>
+          <span className="text-caption text-ink-3">{version === 2 ? '커서를 움직이면 시선이 따라가요.' : 'Codex 펫 v1'}</span>
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-caption text-ink-2 max-[760px]:mt-1">
+            <span>동작 미리보기</span>
+            <SelectField className="w-auto max-w-[160px]" label="동작 미리보기" value={state} disabled={locked} onValueChange={value => setState(value as PetState)}
+              options={STATES.map(s => ({ value: s.key, label: s.label }))}/>
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-col gap-4">
+          <SegmentedControl aria-label="아바타 제작 방식" value={mode} onValueChange={value => { setMode(value as 'create' | 'import'); setError(''); }}
+            options={[{ value: 'create', label: <span className="flex items-center gap-1.5"><WandSparkles size={15}/>직접 만들기</span>, disabled: locked },
+              { value: 'import', label: <span className="flex items-center gap-1.5"><Upload size={15}/>가져오기</span>, disabled: locked }]}/>
+          <FormField label="아바타 이름">{control => <Input {...control} value={name} onChange={e => setName(e.target.value)} required maxLength={80} disabled={locked}/>}</FormField>
           {mode === 'create' ? <>
-            <fieldset className="pet-fieldset"><legend>색</legend><div className="pet-swatches">{COLORS.map(color => <button type="button" key={color.value} aria-label={color.name} aria-pressed={design.color === color.value} style={{ background: color.value }} onClick={() => patch({ color: color.value })} disabled={locked}/>)}</div></fieldset>
-            <label>형태<select value={design.shape} onChange={e => patch({ shape: e.target.value as PetDesign['shape'] })} disabled={locked}><option value="ghost">고스트</option><option value="cloud">구름</option><option value="round">동그라미</option></select></label>
-            <div className="form-pair"><label>표정<select value={design.eyes} onChange={e => patch({ eyes: e.target.value as PetDesign['eyes'] })} disabled={locked}><option value="classic">초롱초롱</option><option value="happy">웃는 눈</option><option value="sleepy">졸린 눈</option></select></label><label>장식<select value={design.accessory} onChange={e => patch({ accessory: e.target.value as PetDesign['accessory'] })} disabled={locked}><option value="none">없음</option><option value="sprout">새싹</option><option value="halo">헤일로</option><option value="glasses">안경</option></select></label></div>
-          </> : <label className="pet-file-input">펫 스프라이트<input type="file" accept="image/png,image/webp" disabled={locked} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (!file) return; setReading(true); setError(''); setImported(undefined); void importSprite(file).then(setImported).catch(e => setError(e.message)).finally(() => setReading(false)); }}/><span className="field-help">투명 PNG·WebP, 최대 4 MiB.<br/>1536 × 1872(v1) 또는 1536 × 2288(v2). Codex 펫 폴더의 spritesheet 파일을 선택하세요.</span>{imported && <span className="pet-valid">v{imported.sprite_version} · 모든 동작과 투명 배경 확인됨</span>}</label>}
-          <label>설명 <span className="muted">선택</span><input value={description} onChange={e => setDescription(e.target.value)} maxLength={500} disabled={locked}/></label>
+            <fieldset className="m-0 min-w-0"><legend className="mb-2.5 text-caption text-ink-2">색</legend>
+              <div className="flex flex-wrap gap-2.5">{COLORS.map(color => <button type="button" key={color.value} aria-label={color.name} aria-pressed={design.color === color.value}
+                className="size-7 cursor-pointer rounded-full outline-2 outline-offset-[3px] outline-transparent aria-pressed:outline-ink disabled:pointer-events-none disabled:opacity-50"
+                style={{ background: color.value }} onClick={() => patch({ color: color.value })} disabled={locked}/>)}</div></fieldset>
+            <FormField label="형태">{control => <SelectField {...control} label="형태" value={design.shape} disabled={locked} onValueChange={value => patch({ shape: value as PetDesign['shape'] })}
+              options={[{ value: 'ghost', label: '고스트' }, { value: 'cloud', label: '구름' }, { value: 'round', label: '동그라미' }]}/>}</FormField>
+            <div className="grid gap-4 max-[480px]:grid-cols-1 sm:grid-cols-2">
+              <FormField label="표정">{control => <SelectField {...control} label="표정" value={design.eyes} disabled={locked} onValueChange={value => patch({ eyes: value as PetDesign['eyes'] })}
+                options={[{ value: 'classic', label: '초롱초롱' }, { value: 'happy', label: '웃는 눈' }, { value: 'sleepy', label: '졸린 눈' }]}/>}</FormField>
+              <FormField label="장식">{control => <SelectField {...control} label="장식" value={design.accessory} disabled={locked} onValueChange={value => patch({ accessory: value as PetDesign['accessory'] })}
+                options={[{ value: 'none', label: '없음' }, { value: 'sprout', label: '새싹' }, { value: 'halo', label: '헤일로' }, { value: 'glasses', label: '안경' }]}/>}</FormField>
+            </div>
+          </> : <>
+            <FormField label="펫 스프라이트" description="투명 PNG·WebP, 최대 4 MiB. 1536 × 1872(v1) 또는 1536 × 2288(v2). Codex 펫 폴더의 spritesheet 파일을 선택하세요.">
+              {control => <Input {...control} type="file" accept="image/png,image/webp" disabled={locked} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (!file) return; setReading(true); setError(''); setImported(undefined); void importSprite(file).then(setImported).catch(e => setError(e.message)).finally(() => setReading(false)); }}/>}
+            </FormField>
+            {imported && <span className="text-caption leading-relaxed text-success">v{imported.sprite_version} · 모든 동작과 투명 배경 확인됨</span>}
+          </>}
+          <FormField label="설명 (선택)">{control => <Input {...control} value={description} onChange={e => setDescription(e.target.value)} maxLength={500} disabled={locked}/>}</FormField>
         </div>
       </div>
-      {(error || generated.error) && <p className="form-error pet-editor-error" role="alert">{error || generated.error}</p>}
-      <footer className="pet-editor-footer"><button className="button secondary" type="button" disabled={!source || !name.trim() || locked} onClick={() => { if (source) { try { downloadPet(name.trim(), description, version, source); } catch (e) { setError(String(e)); } } }}><Download size={15}/>Codex용 내보내기</button><button className="button primary" disabled={!source || !name.trim() || locked}>{reading ? '파일 확인 중…' : busy ? '저장 중…' : '저장하고 적용'}</button></footer>
+      {(error || generated.error) && <InlineError className="mt-4">{error || generated.error}</InlineError>}
+      <footer className="mt-6 flex flex-wrap justify-between gap-3 border-t border-line pt-4">
+        <Button variant="outline" type="button" disabled={!source || !name.trim() || locked} onClick={() => { if (source) { try { downloadPet(name.trim(), description, version, source); } catch (e) { setError(String(e)); } } }}><Download size={15}/>Codex용 내보내기</Button>
+        <Button type="submit" disabled={!source || !name.trim() || locked}>{reading ? '파일 확인 중…' : busy ? '저장 중…' : '저장하고 적용'}</Button>
+      </footer>
     </form>
   </Modal>;
 }

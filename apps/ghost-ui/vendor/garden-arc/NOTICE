@@ -1,8 +1,0 @@
-Arc free source: https://github.com/kuratlielia/arc-library
-Revision: 7238f98196b147a8d50ce467abcbad310d4d8414
-Copyright (c) 2026 Elia Kuratli. MIT license in LICENSE.
-Original registry/lib source is preserved in vendor/. Adapted source is in src/.
-No Pro source or paid install endpoints were used.
-Garden adaptations: package-local imports, namespaced tokens, scoped foundation/portals, portable image/link, visible keyboard focus and motion override.
-Demo media is replaced by an original inline illustration; photo licensing is unverified and photos are not distributed.
-Third-party npm dependencies remain under their own licenses, summarized in manifest.json.

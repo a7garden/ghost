@@ -21,7 +21,7 @@ workspace별로 기록된다. 전송은 콘솔과 같은 routing 절차(`routing
 ```sh
 # Ghost root에서 먼저 실행
 cargo build --offline --features workspace-ui
-npm --prefix apps/ghost-ui run build
+(cd apps/ghost-ui && bun install && bun run build)
 # 이 폴더에서, 정확한 Tauri 2.12 CLI와 macOS용 독립 실행 Node를 준비한 뒤
 GHOST_NODE_BINARY=/path/to/node-v24.21.0-darwin-arm64/bin/node npm run build
 npm run check

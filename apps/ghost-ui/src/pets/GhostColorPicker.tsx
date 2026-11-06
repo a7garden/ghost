@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { InlineError, Input } from '@garden/ui';
 import { isHexColor } from './appearance';
 
 export type ColorPreset = { name: string; color: string };
@@ -18,26 +19,29 @@ export function GhostColorPicker({
     setTouched(false);
     onChange(color);
   };
-  return <fieldset className="ghost-color-setting pet-fieldset"><legend>{label}</legend>
-    <div className="ghost-color-palette">
-      {presets.map(item => <button type="button" className="ghost-color-swatch" key={item.color}
+  return <fieldset className="m-0 mb-6 flex min-w-0 flex-col gap-2.5"><legend className="text-caption text-ink-2">{label}</legend>
+    <div className="flex flex-wrap gap-2">
+      {presets.map(item => <button type="button" key={item.color}
+        className="size-7 cursor-pointer rounded-full border border-line-strong outline-2 outline-offset-[3px] outline-transparent aria-pressed:outline-ink"
         style={{ backgroundColor: item.color }} title={item.name} aria-label={item.name}
         aria-pressed={value === item.color} onClick={() => choose(item.color)}/>)}
     </div>
-    <div className="ghost-color-controls">
-      <button type="button" className="filter-button" aria-pressed={value === 'auto'} onClick={() => choose('auto')}>{resetLabel}</button>
-      <label className="ghost-custom-color" title="직접 색 선택">
-        <input type="color" value={value === 'auto' ? fallback : value}
+    <div className="flex flex-wrap items-center gap-3">
+      <button type="button" className="inline-flex h-7 cursor-pointer items-center rounded-control px-3 text-ui font-medium transition-[color,background-color] outline-none hover:bg-hover hover:text-ink focus-visible:ring-[2px] focus-visible:ring-ring/40 aria-pressed:bg-secondary aria-pressed:text-secondary-foreground"
+        aria-pressed={value === 'auto'} onClick={() => choose('auto')}>{resetLabel}</button>
+      <label className="flex" title="직접 색 선택">
+        <input type="color" className="h-7 w-9 cursor-pointer rounded-control border-0 bg-transparent p-0.5 outline-none"
+          value={value === 'auto' ? fallback : value}
           onChange={e => choose(e.target.value)} aria-label={`${label} 직접 선택`}/>
       </label>
-      <input className="ghost-color-value" aria-label={`${label} HEX`} placeholder="#RRGGBB"
+      <Input className="w-[100px] text-caption" aria-label={`${label} HEX`} placeholder="#RRGGBB"
         value={draft} maxLength={7} spellCheck={false} autoCapitalize="off" autoComplete="off"
         onChange={e => {
           setDraft(e.target.value);
           if (isHexColor(e.target.value)) onChange(e.target.value.toLowerCase());
         }}
-        onBlur={() => setTouched(true)} aria-invalid={invalid}/>
+        onBlur={() => setTouched(true)} aria-invalid={invalid || undefined}/>
     </div>
-    {invalid && <p className="form-error" role="alert"># 뒤에 여섯 자리 색상 코드를 입력해 주세요.</p>}
+    {invalid && <InlineError># 뒤에 여섯 자리 색상 코드를 입력해 주세요.</InlineError>}
   </fieldset>;
 }
