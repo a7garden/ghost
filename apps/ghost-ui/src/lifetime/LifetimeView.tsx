@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronRight, CircleAlert, Clock3, GitBranch, Info, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
 import {
   Alert,
+  AlertDescription,
   AlertTitle,
   Banner,
   Badge,
@@ -906,7 +907,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     pending: "검토 대기", approved: "승인됨 · 저장 대기", saved: "저장 완료", declined: "저장하지 않음",
   };
   const agentStatus = projectAgentStatus({
-    target: selectedTarget, snapshot, runs: turnRuns.values(),
+    target: selectedTarget, snapshot, runs: turnRuns.values(), turns,
     availability: loading || conversationLoading || Boolean(selectedTarget && loadedConversationKey !== selectedTargetKey) ? "loading"
       : !client.dispatch_enabled || Boolean(registryError || conversationError || syncWarning) ? "unavailable" : "current",
   });
@@ -1131,14 +1132,14 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         return <GConversationMessage key={turn.id}
           role={turn.kind === "user" ? "user" : "assistant"}
           label={turn.kind === "user" ? "나" : eventLabel}
-          actions={<div className="flex items-center gap-1 text-caption text-ink-2">
-            {runState && <span className={controller?.state === "failed" || controller?.state === "effect_unknown" ? "text-orange" : undefined}>{runState} ·</span>}
+          actions={<div className="flex items-center gap-1.5 text-caption text-ink-2">
+            {runState && <span className={controller?.state === "failed" || controller?.state === "effect_unknown" ? "text-orange" : undefined}>{runState}</span>}
+            {runState && <span aria-hidden="true">·</span>}
+            <time dateTime={created.toISOString()} title={recordedAt} className="[font-variant-numeric:tabular-nums]">{shortTime}</time>
             {canCancel && !controller.cancel_requested && <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-caption"
               aria-label={`응답 취소 · 메시지 ${turn.sequence}`}
               disabled={writesDisabled || Boolean(busy)}
               onClick={() => void cancelConversationTurn(turn.id)}>취소</Button>}
-            {canCancel && !controller.cancel_requested && <span aria-hidden="true">·</span>}
-            <time dateTime={created.toISOString()} title={recordedAt} className="[font-variant-numeric:tabular-nums]">{shortTime}</time>
             <DetailDialog title="메시지 정보" className="[&>button]:size-6 [&>button]:p-0"
               label={<><Info size={13} aria-hidden="true"/><span className="sr-only">메시지 정보</span></>}>
               {turn.kind !== "user" && <strong>{eventLabel}</strong>}

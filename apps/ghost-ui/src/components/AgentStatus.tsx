@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, CircleAlert, Clock3, List, MessageCircle, Search, Square, X } from 'lucide-react';
+import { Check, CircleAlert, Clock3, MessageCircle, Search, Square, X } from 'lucide-react';
 import { Button, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
 import { DotAvatar } from './DotAvatar';
 import { elapsedAgentTime } from '../lifetime/agentStatus';
@@ -39,7 +39,7 @@ export function AgentStatus({ model: projectedModel, ghostID, observedAt, fixtur
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const model = !fixture && observedAt !== undefined && now - observedAt > 15_000 && projectedModel.state !== 'loading'
-    ? { ...projectedModel, state: 'unknown' as const, label: '최신 상태 확인 필요', detail: '마지막으로 읽은 기록입니다.', activityCount: 0 }
+    ? { ...projectedModel, state: 'unknown' as const, label: '최신 상태 확인 필요', detail: '마지막으로 읽은 기록입니다.' }
     : projectedModel;
   const current = model.state !== 'unknown' && model.state !== 'stale';
   const moving = current && ['running', 'verifying', 'loading'].includes(model.state);
@@ -59,6 +59,8 @@ export function AgentStatus({ model: projectedModel, ghostID, observedAt, fixtur
   // Status announcements contain no clock values. Clock updates stay outside the live region.
   const announcement = `${fixture ? '예시 모드. ' : ''}${model.label}${model.detail ? `. ${model.detail}` : ''}`;
   const elapsed = elapsedAgentTime(model.current, now, current);
+  // The list already names the current activity; repeat the summary only when it says something else.
+  const summary = !model.current || model.label !== model.current.label;
 
   function observationActions(item: AgentObservation) {
     const inspect = item.workID && onInspectWork;
@@ -68,7 +70,7 @@ export function AgentStatus({ model: projectedModel, ghostID, observedAt, fixtur
       {inspect && <Button type="button" variant="outline" size="sm" disabled={busy || actionsDisabled}
         aria-label={`이 작업 상태 확인 · ${item.label}`} onClick={() => onInspectWork!(item.workID!)}><Search size={13} aria-hidden="true"/>상태 확인</Button>}
       {cancel && <Button type="button" variant="outline" size="sm" disabled={busy || actionsDisabled}
-        aria-label={`이 응답 취소 요청 · ${item.label}`} onClick={() => onCancelTurn!(item.cancelTurnID!)}><Square size={12} aria-hidden="true"/>응답 취소</Button>}
+        aria-label={`응답 취소 · ${item.subject ?? item.label}`} onClick={() => onCancelTurn!(item.cancelTurnID!)}>응답 취소</Button>}
     </div>;
   }
 
@@ -84,8 +86,7 @@ export function AgentStatus({ model: projectedModel, ghostID, observedAt, fixtur
           </span>
           <span className={`inline-flex shrink-0 ${ink}`}><ActivityIcon state={model.state}/></span>
           <span className="min-w-0 flex-1 overflow-hidden font-medium text-ui text-ink [text-overflow:ellipsis]">{model.label}</span>
-          <span className="shrink-0 text-ui text-ink-2 [font-variant-numeric:tabular-nums]" aria-hidden="true" title={elapsed === '—' ? '호스트 시간 기록 없음' : '응답 접수 후 경과'}>{elapsed}</span>
-          <List size={13} className="shrink-0 text-ink-2" aria-hidden="true"/>
+          {elapsed && <span className="shrink-0 text-ui text-ink-2 [font-variant-numeric:tabular-nums]" aria-hidden="true" title="요청 후 경과">{elapsed}</span>}
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" aria-label="Ghost 상태" className="grid w-80 max-w-[calc(100vw-1rem)] gap-2">
@@ -93,20 +94,25 @@ export function AgentStatus({ model: projectedModel, ghostID, observedAt, fixtur
           <h4 className="flex items-center gap-2 text-ui font-semibold text-ink">Ghost 상태{fixture && <span className="font-normal text-caption text-orange">예시</span>}</h4>
           <Button type="button" variant="ghost" size="icon" aria-label="상태 패널 닫기" onClick={() => setOpen(false)}><X size={16} aria-hidden="true"/></Button>
         </div>
-        <div className={`flex items-start gap-2 text-ui ${ink}`}><ActivityIcon state={model.state} size={16}/><strong className="font-medium [overflow-wrap:anywhere]">{model.label}</strong></div>
-        {model.detail && <p className="text-caption leading-relaxed text-ink-2 [overflow-wrap:anywhere]">{model.detail}</p>}
+        {summary && <div className={`flex items-start gap-2 text-ui ${ink}`}><ActivityIcon state={model.state} size={16}/><strong className="font-medium [overflow-wrap:anywhere]">{model.label}</strong></div>}
+        {summary && model.detail && <p className="text-caption leading-relaxed text-ink-2 [overflow-wrap:anywhere]">{model.detail}</p>}
         {observations.length > 0 && <>
-          <p className="mt-2 flex flex-wrap justify-between gap-2 text-caption text-ink-2">확인한 기록{model.activityCount > 1 && <span className="[font-variant-numeric:tabular-nums]">진행 {model.activityCount}개</span>}</p>
           <ul className="grid list-none p-0">
-            {observations.map(item => <li key={item.id} className="flex min-w-0 gap-2 border-t border-line py-2 first:border-t-0 first:pt-0">
-              <span className={`flex shrink-0 pt-0.5 ${activityInk[item.state] ?? 'text-ink-2'}`}><ActivityIcon state={item.state} size={14}/></span>
-              <div className="min-w-0 flex-1">
-                <div className="flex justify-between gap-2 text-caption text-ink-2"><span>{item.kind === 'response' ? '응답' : item.kind === 'goal' ? '목표' : '맡긴 일'}</span><time className="[font-variant-numeric:tabular-nums]" title={item.startedAt === null ? '호스트 시간 기록 없음' : '응답 접수 후 경과'}>{elapsedAgentTime(item, now, current)}</time></div>
-                <strong className="mt-0.5 block font-medium text-ui [overflow-wrap:anywhere]">{item.label}</strong>
-                {item.detail && <p className="text-caption leading-relaxed text-ink-2 [overflow-wrap:anywhere]">{item.detail}</p>}
-                {observationActions(item)}
-              </div>
-            </li>)}
+            {observations.map(item => {
+              const itemElapsed = elapsedAgentTime(item, now, current);
+              return <li key={item.id} className="flex min-w-0 gap-2 border-t border-line py-2 first:border-t-0 first:pt-0">
+                <span className={`flex shrink-0 pt-0.5 ${activityInk[item.state] ?? 'text-ink-2'}`}><ActivityIcon state={item.state} size={14}/></span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <strong className="min-w-0 font-medium text-ui [overflow-wrap:anywhere]">{item.label}</strong>
+                    {itemElapsed && <time className="shrink-0 text-caption text-ink-2 [font-variant-numeric:tabular-nums]" title="요청 후 경과">{itemElapsed}</time>}
+                  </div>
+                  {item.subject && <p className="truncate text-caption text-ink-2" title={item.subject}>{item.subject}</p>}
+                  {item.detail && <p className="text-caption leading-relaxed text-ink-2 [overflow-wrap:anywhere]">{item.detail}</p>}
+                  {observationActions(item)}
+                </div>
+              </li>;
+            })}
           </ul>
           {model.observations.length > observations.length && <p className="text-caption leading-relaxed text-ink-2">다른 기록은 아래 대화와 맡긴 일에서 확인할 수 있습니다.</p>}
         </>}

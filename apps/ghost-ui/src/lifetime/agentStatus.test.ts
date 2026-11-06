@@ -84,7 +84,6 @@ describe('agent status from Host records', () => {
   it('does not call an unavailable Host ready, running or complete', () => {
     const model = projectAgentStatus({ target, snapshot: snapshot([goal], [{ ...work, state: 'accepted' }]), runs: [], availability: 'unavailable' });
     expect(model.state).toBe('unknown');
-    expect(model.activityCount).toBe(0);
     expect(model.observations[0]?.state).toBe('accepted');
     expect(projectAgentStatus({ target, snapshot: null, runs: [], availability: 'current' }).state).toBe('unknown');
   });
@@ -108,33 +107,43 @@ describe('agent status from Host records', () => {
     expect(model.current?.cancelTurnID).toBeUndefined();
     expect(project([{ ...work, cancellation: 'requested' }]).state).toBe('running');
   });
+
+  it('names each response by its message and each work item by its goal', () => {
+    const model = projectAgentStatus({ target, snapshot: snapshot([goal], [work]), availability: 'current',
+      runs: [run, { ...run, turn_id: 'turn-b', created_at_ms: 20_000 }],
+      turns: [{ id: 'turn-a', text: '첫 메시지\n둘째 줄' }, { id: 'turn-b', text: '다음 메시지' }] });
+    expect(model.observations.map(item => item.subject)).toEqual(['실제 목표', '다음 메시지', '첫 메시지']);
+  });
 });
 
 describe('Host timestamp elapsed time', () => {
+  const minute = 60_000;
   it('uses the original Host start across rerenders and does not reset on a read', () => {
     const model = project([], [run], []);
-    expect(elapsedAgentTime(model.current, 75_000)).toBe('1:05');
-    expect(elapsedAgentTime(project([], [run], []).current, 76_000)).toBe('1:06');
+    expect(elapsedAgentTime(model.current, run.created_at_ms + 30_000)).toBe('1분 미만');
+    expect(elapsedAgentTime(model.current, run.created_at_ms + 9 * minute)).toBe('9분');
+    expect(elapsedAgentTime(project([], [run], []).current, run.created_at_ms + 110 * minute)).toBe('1시간 50분');
+    expect(elapsedAgentTime(model.current, run.created_at_ms + 120 * minute)).toBe('2시간');
   });
 
   it('freezes terminal runs at the Host update time', () => {
     for (const state of ['answered', 'failed', 'cancelled'] as const) {
-      const model = project([], [{ ...run, state, updated_at_ms: 75_000 }], []);
-      expect(elapsedAgentTime(model.current, 90_000)).toBe('1:05');
-      expect(elapsedAgentTime(model.current, 180_000)).toBe('1:05');
+      const model = project([], [{ ...run, state, updated_at_ms: run.created_at_ms + 5 * minute }], []);
+      expect(elapsedAgentTime(model.current, run.created_at_ms + 6 * minute)).toBe('5분');
+      expect(elapsedAgentTime(model.current, run.created_at_ms + 60 * minute)).toBe('5분');
     }
   });
 
   it('freezes an uncertain read at its last Host timestamp', () => {
-    const model = project([], [run], []);
-    expect(elapsedAgentTime(model.current, 90_000, false)).toBe('0:05');
-    expect(elapsedAgentTime(project([], [{ ...run, state: 'effect_unknown' }], []).current, 90_000)).toBe('0:05');
+    const later = { ...run, updated_at_ms: run.created_at_ms + 3 * minute };
+    expect(elapsedAgentTime(project([], [later], []).current, run.created_at_ms + 9 * minute, false)).toBe('3분');
+    expect(elapsedAgentTime(project([], [{ ...later, state: 'effect_unknown' }], []).current, run.created_at_ms + 9 * minute)).toBe('3분');
   });
 
-  it('uses a dash for missing Work time and invalid Host timestamp order', () => {
-    expect(elapsedAgentTime(project([work]).current, 90_000)).toBe('—');
-    expect(elapsedAgentTime(project([], [{ ...run, state: 'answered', updated_at_ms: 1 }], []).current, 90_000)).toBe('—');
-    expect(elapsedAgentTime(null, 90_000)).toBe('—');
+  it('shows no time for missing Work time and invalid Host timestamp order', () => {
+    expect(elapsedAgentTime(project([work]).current, 90_000)).toBeNull();
+    expect(elapsedAgentTime(project([], [{ ...run, state: 'answered', updated_at_ms: 1 }], []).current, 90_000)).toBeNull();
+    expect(elapsedAgentTime(null, 90_000)).toBeNull();
   });
 });
 
