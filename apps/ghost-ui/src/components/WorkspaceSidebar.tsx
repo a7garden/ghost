@@ -42,11 +42,11 @@ export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, cu
   const spaces = snapshot?.spaces ?? [];
   const hostTrouble = status.state !== 'connected' && status.state !== 'demo';
   return <>
-    <GNavigation label="작업실" className="min-h-0 flex-1 overflow-y-auto p-3">
+    <GNavigation label="작업실" className="min-h-0 flex-1 gap-3 overflow-y-auto p-3">
       <GNavigationItem current={section === 'home'} onClick={() => navigate('/')}>
         <Home/><span className="flex-1">{routeLabels.home}</span>{attentionCount > 0 && <Badge variant="warning"><span className="sr-only">확인 필요 </span>{attentionCount}</Badge>}
       </GNavigationItem>
-      {ghosts.length > 0 && <GNavigationGroup label="Ghost" className="mt-3">{ghosts.map(profile => {
+      {ghosts.length > 0 && <GNavigationGroup label="Ghost">{ghosts.map(profile => {
         const open = profile.id === openGhostId;
         const name = ghostDisplayName(profile.name);
         const state = dotState(profile, snapshot?.reviews ?? []);
@@ -61,7 +61,7 @@ export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, cu
           })}</div>}
         </div>;
       })}</GNavigationGroup>}
-      {(spaces.length > 0 || canCreateProject) && <GNavigationGroup label="프로젝트" className="relative mt-3">
+      {(spaces.length > 0 || canCreateProject) && <GNavigationGroup label="프로젝트" className="relative">
         {canCreateProject && <button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/spaces?new=1')}
           className="absolute top-1.5 right-1 grid size-6 cursor-pointer place-items-center rounded-full text-ink-3 outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3"><Plus size={14} aria-hidden="true"/></button>}
         {spaces.map(space => <GNavigationItem key={space.id} current={section === 'spaces' && space.id === selectedSpace} onClick={() => navigate(`/spaces/${space.id}`)}>
