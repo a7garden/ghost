@@ -16,6 +16,10 @@ rail, inset canvas or shell-owned pane toggle.
   host trouble shown only when the host is not connected.
 - Below 56rem the sidebar moves into a menu dialog opened from the title bar.
 - Command search is Garden's `GCommandPalette` (`⌘P`, also `⌘K`).
+- Conversation transcript: Garden's `GConversation` stays, but the Owner's message is a
+  full-width block in reading order instead of the trailing phone-style bubble
+  (`src/app.css`). The conversation has no refresh or new-conversation buttons; reads
+  poll, and a failed read retries when the window is used again.
 - All controls, settings, conversation and feedback components remain `@garden/ui`.
 
 ## Verification

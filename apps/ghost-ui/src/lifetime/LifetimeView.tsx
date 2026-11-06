@@ -1,6 +1,6 @@
 import { DetailDialog } from '../components/DetailDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Check, ChevronRight, CircleAlert, Clock3, GitBranch, Info, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { Check, ChevronRight, CircleAlert, Clock3, GitBranch, Info, RefreshCw, SlidersHorizontal } from "lucide-react";
 import {
   Alert,
   AlertDescription,
@@ -393,6 +393,20 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     if (pairRefreshRequest > 0) void refresh();
   }, [pairRefreshRequest]);
 
+  // There is no manual refresh: a failed read is retried when the window is used again.
+  useEffect(() => {
+    if (!routeActive || refreshing || !(error || registryError || conversationError || syncWarning)) return;
+    const retry = () => { if (document.visibilityState !== "hidden") void refresh(); };
+    window.addEventListener("focus", retry);
+    window.addEventListener("online", retry);
+    document.addEventListener("visibilitychange", retry);
+    return () => {
+      window.removeEventListener("focus", retry);
+      window.removeEventListener("online", retry);
+      document.removeEventListener("visibilitychange", retry);
+    };
+  }, [routeActive, refreshing, error, registryError, conversationError, syncWarning]);
+
   async function run(key: string, operation: () => Promise<Response>): Promise<Response | null> {
     if (busy) return null;
     setBusy(key);
@@ -432,21 +446,6 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     openedRegistration.current = key;
     if (onOpenTarget) onOpenTarget(target.ghost_id, target.conversation_id, preserveWorkRoute);
     else onPanelChange?.("conversation");
-  }
-
-  async function openPublicConversation(): Promise<void> {
-    if (!defaultTarget || publicOpenDisabled || registrationLocks.current.has("conversation.open")) return;
-    const sourceRoute = currentRouteScope.current;
-    const ghostID = defaultTarget.ghost_id;
-    const conversationID = crypto.randomUUID();
-    registrationLocks.current.add("conversation.open");
-    try {
-      await run("conversation.open", () => client.request({ method: "conversation.open", ghost_id: ghostID, conversation_id: conversationID }));
-      const opened = findRegisteredConversation(registryRef.current, ghostID, conversationID);
-      if (opened?.secondary && opened.mode === "active" && currentRouteScope.current === sourceRoute) openRegisteredTarget(opened, false);
-    } finally {
-      registrationLocks.current.delete("conversation.open");
-    }
   }
 
   async function ensureProfileConversation(profileID: string, conversationID: string): Promise<void> {
@@ -611,7 +610,6 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   }, [selectedTargetKey]);
   const writesDisabled = !connected || !client.dispatch_enabled || recovery.length > 0 || pending.length > 0
     || Boolean(registryError || syncWarning) || Boolean(conversationError) || Boolean(selectedTarget && loadedConversationKey !== selectedTargetKey);
-  const publicOpenDisabled = !routeActive || !defaultTarget || !registryReady || loading || refreshing || Boolean(busy) || writesDisabled;
   const conversationGoals = snapshot?.goals.filter(goal => goal.accountable_ghost === selectedTarget?.ghost_id
     && goal.reply_conversation === selectedTarget?.conversation_id) ?? [];
   const goalRevisions = new Map(conversationGoals.map(goal => [goal.id, goal.revision]));
@@ -959,13 +957,6 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
   const promptBytes = new TextEncoder().encode(prompt).length;
   const requestLabel = (body: Envelope["body"] | undefined) => body?.method === "goal.update" && typeof body.follow_up === "string" ? "후속 지시"
     : typeof body?.method === "string" ? pendingCommandLabels[body.method] ?? "요청" : "요청";
-  const toolbarActions = <div className="flex shrink-0 items-center gap-1">
-    {inConversation && mode === "live" && client.actor_ref === "owner" && defaultTarget && selectedTarget?.ghost_id === defaultTarget.ghost_id &&
-      <Button type="button" variant="ghost" size="icon" onClick={() => void openPublicConversation()}
-        disabled={publicOpenDisabled} aria-label="새 공개 대화" title="새 공개 대화"><Plus size={15}/></Button>}
-    <Button type="button" variant="ghost" size="icon" onClick={() => void refresh()}
-      aria-label={refreshing ? "새로 고치는 중" : "새로 고침"} title="새로 고침" disabled={refreshing || loading}><RefreshCw size={14} className={refreshing ? "animate-spin motion-reduce:animate-none" : undefined}/></Button>
-  </div>;
   // Unconfirmed writes fence new changes; one compact notice lists them with their check action.
   const notices = <>
     {mode === "fixture" && <Banner variant="info">예시 모드입니다. 요청은 이 브라우저의 예시 기록에만 반영되며 실제 호스트나 작업 실행자에게 전달되지 않습니다.</Banner>}
@@ -996,13 +987,9 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
     : "mx-auto grid w-full min-w-0 max-w-[1120px] gap-4"}>
     {/* The title bar names the page; the heading stays for screen readers except in Ghost management. */}
     {inConversation ? <h2 id="lifetime-heading" className="sr-only">{chatTitle}</h2> : <>
-      <div className="flex min-h-9 items-center justify-between gap-3">
-        <h2 id="lifetime-heading" className={selectedPanel === "ghosts" ? "m-0 text-headingSm font-semibold text-ink" : "sr-only"}>
-          {selectedPanel === "work" ? workScope === "all" ? "모든 일" : "맡긴 일" : "Ghost 관리"}
-        </h2>
-        <span className="flex-1"/>
-        {toolbarActions}
-      </div>
+      <h2 id="lifetime-heading" className={selectedPanel === "ghosts" ? "m-0 text-headingSm font-semibold text-ink" : "sr-only"}>
+        {selectedPanel === "work" ? workScope === "all" ? "모든 일" : "맡긴 일" : "Ghost 관리"}
+      </h2>
       {notices}
     </>}
 
@@ -1054,21 +1041,24 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       jumpToLatestLabel="최신 메시지로 이동"
       scrollKey={displayedTurns.length}
       className="min-h-0 flex-1"
-      header={(selectedTarget || conversationError) ? <div className="grid gap-2 pt-1">
-        {selectedTarget && <AgentStatus key={selectedTargetKey} model={agentStatus} ghostID={selectedTarget.ghost_id}
-          observedAt={Math.min(snapshotObservedAt, conversationObservedAt) || undefined} fixture={mode === 'fixture'}
-          busy={Boolean(busy)} actionsDisabled={writesDisabled || loading || agentStatus.state === 'unknown' || agentStatus.state === 'stale'}
-          onInspectWork={workID => void inspectWork(workID)} onCancelTurn={turnID => void cancelConversationTurn(turnID)}/>}
+      header={<div className="grid gap-2">
+        {selectedTarget && <div className="flex min-w-0 items-center gap-2">
+          <AgentStatus key={selectedTargetKey} model={agentStatus} ghostID={selectedTarget.ghost_id}
+            observedAt={Math.min(snapshotObservedAt, conversationObservedAt) || undefined} fixture={mode === 'fixture'}
+            busy={Boolean(busy)} actionsDisabled={writesDisabled || loading || agentStatus.state === 'unknown' || agentStatus.state === 'stale'}
+            onInspectWork={workID => void inspectWork(workID)} onCancelTurn={turnID => void cancelConversationTurn(turnID)}/>
+          {publicConversation && <Badge variant="outline">{publicLabel(selectedTarget)}</Badge>}
+        </div>}
         {onOpenApproval && (pendingDocumentReviews.length > 0 || integrationReviews.length > 0) && <div className="flex flex-wrap gap-2" aria-label="이 대화의 확인할 일">
-          {pendingDocumentReviews.map(review => <Button type="button" variant="secondary" key={review.id}
+          {pendingDocumentReviews.map(review => <Button type="button" variant="secondary" size="sm" key={review.id}
             onClick={() => onOpenApproval({ kind: "document", id: review.id })}>{review.title} · {review.state === "pending" ? "검토 대기" : "저장 대기"}</Button>)}
-          {integrationReviews.slice(0, 5).map(review => <Button type="button" variant="secondary" key={review.id}
+          {integrationReviews.slice(0, 5).map(review => <Button type="button" variant="secondary" size="sm" key={review.id}
             onClick={() => onOpenApproval({ kind: "integration", id: review.id })}>{integrationApprovalTitle(review.tool)} · {integrationStatusLabels[review.state]}</Button>)}
         </div>}
-        {!selectedTarget && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>{initialGhostID ? "이 Ghost에 활성 대화가 없습니다. 대시보드에서 이 Ghost를 열고 새 대화를 연결해 주세요." : "활성 대화를 확인할 수 없습니다. 대시보드에서 Ghost를 선택해 주세요."}</AlertTitle></Alert>}
+        {!selectedTarget && !loading && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>{initialGhostID ? "이 Ghost에 연결된 대화가 없습니다. 홈에서 이 Ghost를 열고 새 대화를 연결해 주세요." : "열 수 있는 대화가 없습니다. 홈에서 Ghost를 선택해 주세요."}</AlertTitle></Alert>}
         {conversationError && <Alert variant="destructive"><CircleAlert aria-hidden="true"/><AlertTitle>{conversationError}</AlertTitle></Alert>}
-      </div> : undefined}
-      composer={<GComposer variant="conversation" inputId="lifetime-message" value={prompt}
+      </div>}
+      composer={<div className="grid gap-2">{notices}<GComposer variant="conversation" inputId="lifetime-message" value={prompt}
         onValueChange={text => updatePrompt(selectedTargetKey, () => text)}
         onSubmit={() => void submitConversation()}
         label="메시지" placeholder="메시지 쓰기"
@@ -1109,7 +1099,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
             })}
           </div>
           <p className="m-0 text-caption text-ink-2">{!publicConversation && "대화의 기존 보호 수준은 유지됩니다. "}UTF-8 {promptBytes}/65,536바이트.</p>
-        </DetailDialog>}/>}
+        </DetailDialog>}/></div>}
       footer={activeTargets.length === 0 || promptBytes > 65_536 ? <div className="grid justify-items-center gap-1">
         {activeTargets.length === 0 && <p className="m-0" role="status">메시지를 받을 수 있는 Ghost가 없습니다.</p>}
         {promptBytes > 65_536 && <p className="m-0" role="status">메시지 한도 65,536바이트를 넘었습니다.</p>}
