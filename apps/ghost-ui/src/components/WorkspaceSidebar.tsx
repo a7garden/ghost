@@ -1,17 +1,24 @@
-import { Folder, History, Home, LayoutGrid, LayoutList, MessageCircle, Plus, Settings2 } from 'lucide-react';
+import { Folder, History, Home, LayoutGrid, LayoutList, Plus, Settings2 } from 'lucide-react';
 import { useId } from 'react';
 import { Badge, GNavigation, GNavigationGroup, GNavigationItem } from '@garden/ui';
-import type { Snapshot } from '../client/types';
-import { toneFor } from '../client/types';
+import type { DotState, Snapshot } from '../client/types';
+import { dotState, stateLabel, toneFor } from '../client/types';
 import { DotAvatar } from './DotAvatar';
 import { routeLabels } from '../uiText';
 import type { HostStatus } from '../features/hostStatus';
 import { ghostDisplayName } from '../features/profileSummary';
 
-/** One page inside the open Ghost: its conversation, its work, package views and earlier conversations. */
-export interface GhostMenuItem { key: string; label: string; path: string; kind: 'chat' | 'work' | 'view' | 'history' }
+/** One page inside the open Ghost besides its conversation: its work, package views and earlier conversations. */
+export interface GhostMenuItem { key: string; label: string; path: string; kind: 'work' | 'view' | 'history' }
 
-const menuIcons = { chat: MessageCircle, work: LayoutList, view: LayoutGrid, history: History };
+const menuIcons = { work: LayoutList, view: LayoutGrid, history: History };
+
+/** Only states that need a glance get a mark; an idle Ghost stays quiet. */
+const stateDot: Partial<Record<DotState, string>> = {
+  working: 'bg-ink animate-pulse motion-reduce:animate-none',
+  attention: 'bg-orange',
+  offline: 'bg-red',
+};
 
 export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, currentGhostPage, defaultGhostId, selectedSpace, attentionCount, status, canCreateProject, navigate, openGhost }: {
   snapshot: Snapshot | null;
@@ -42,10 +49,11 @@ export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, cu
       {ghosts.length > 0 && <GNavigationGroup label="Ghost" className="mt-3">{ghosts.map(profile => {
         const open = profile.id === openGhostId;
         const name = ghostDisplayName(profile.name);
+        const state = dotState(profile, snapshot?.reviews ?? []);
         return <div key={profile.id} className="grid gap-1">
-          <GNavigationItem className={open ? 'font-semibold text-ink' : undefined} onClick={() => openGhost(profile.id)}>
+          <GNavigationItem current={open && currentGhostPage === 'chat'} className={open ? 'text-ink' : undefined} onClick={() => openGhost(profile.id)}>
             <DotAvatar profileId={profile.id} tone={toneFor(profile.id)} size={18}/><span className="flex-1">{name}</span>
-            {profile.id === defaultGhostId && <Badge variant="outline">기본</Badge>}
+            {stateDot[state] && <span className={`size-1.5 shrink-0 rounded-full ${stateDot[state]}`} title={stateLabel[state]}><span className="sr-only">{stateLabel[state]}</span></span>}
           </GNavigationItem>
           {open && ghostMenu.length > 0 && <div className="ml-[17px] grid gap-1 border-l border-line pl-1.5">{ghostMenu.map(item => {
             const Icon = menuIcons[item.kind];
@@ -53,11 +61,12 @@ export function WorkspaceSidebar({ snapshot, section, openGhostId, ghostMenu, cu
           })}</div>}
         </div>;
       })}</GNavigationGroup>}
-      {(spaces.length > 0 || canCreateProject) && <GNavigationGroup label="프로젝트" className="mt-3">
+      {(spaces.length > 0 || canCreateProject) && <GNavigationGroup label="프로젝트" className="relative mt-3">
+        {canCreateProject && <button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/spaces?new=1')}
+          className="absolute top-1.5 right-1 grid size-6 cursor-pointer place-items-center rounded-full text-ink-3 outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3"><Plus size={14} aria-hidden="true"/></button>}
         {spaces.map(space => <GNavigationItem key={space.id} current={section === 'spaces' && space.id === selectedSpace} onClick={() => navigate(`/spaces/${space.id}`)}>
           <Folder/><span>{space.name}</span>
         </GNavigationItem>)}
-        {canCreateProject && <GNavigationItem className="text-ink-3" onClick={() => navigate('/spaces?new=1')}><Plus/><span>새 프로젝트</span></GNavigationItem>}
       </GNavigationGroup>}
     </GNavigation>
     <div className="shrink-0 border-t border-line p-3">

@@ -5,7 +5,6 @@ import { WorkspaceSidebar, type GhostMenuItem } from './WorkspaceSidebar';
 import { initialWorkspace } from '../fixtures/workspace';
 
 const menu: GhostMenuItem[] = [
-  { key: 'chat', label: '대화', path: '/chat', kind: 'chat' },
   { key: 'work', label: '맡은 일', path: '/work', kind: 'work' },
 ];
 
@@ -33,6 +32,14 @@ it('shows pages only under the open Ghost and marks the page on screen', () => {
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   const current = html.slice(html.indexOf('aria-current="page"'));
   expect(current.slice(0, current.indexOf('</button>'))).toContain('맡은 일');
+});
+
+it('marks the open Ghost itself while its conversation is on screen', () => {
+  const snapshot = initialWorkspace();
+  const { html } = render({ snapshot, section: 'lifetime', openGhostId: snapshot.profiles[0].id, ghostMenu: menu, currentGhostPage: 'chat' });
+  const current = html.slice(html.indexOf('aria-current="page"'));
+  expect(html.match(/aria-current="page"/g)).toHaveLength(1);
+  expect(current.slice(0, current.indexOf('</button>'))).toContain(snapshot.profiles[0].name);
 });
 
 it('shows Host starter Ghosts by role name instead of their identifiers', () => {
