@@ -27,3 +27,27 @@ body {
   max-width: 100%;
   border-radius: var(--radius-lg, 10px);
 }
+
+/* The Ghost floats at the top centre; the transcript scrolls under a short fade. */
+.ghost-root .ghost-chat {
+  position: relative;
+}
+
+.ghost-root .ghost-chat > .g-conversation__header {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  left: 0;
+  padding-block: var(--g-space-3, 12px) var(--g-space-6, 24px);
+  background: linear-gradient(var(--g-canvas) 55%, transparent);
+  pointer-events: none;
+}
+
+.ghost-root .ghost-chat > .g-conversation__header > * {
+  pointer-events: auto;
+}
+
+.ghost-root .ghost-chat .g-conversation__transcript-content {
+  padding-top: 88px;
+}

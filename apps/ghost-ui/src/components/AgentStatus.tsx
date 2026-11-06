@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Check, CircleAlert, Clock3, MessageCircle, Search, Square, X } from 'lucide-react';
 import { Button, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
-import { DotAvatar } from './DotAvatar';
 import { elapsedAgentTime } from '../lifetime/agentStatus';
 import type { AgentActivityState, AgentObservation, AgentStatusModel } from '../lifetime/agentStatus';
 
 export interface AgentStatusProps {
   model: AgentStatusModel;
-  ghostID: string;
   /** Local read time is only a freshness fence, never the start of an activity timer. */
   observedAt?: number;
   fixture?: boolean;
@@ -35,16 +33,27 @@ const activityInk: Partial<Record<AgentActivityState, string>> = {
   responded: 'text-green',
 };
 
-export function AgentStatus({ model: projectedModel, ghostID, observedAt, fixture, busy = false, actionsDisabled = false, onInspectWork, onCancelTurn }: AgentStatusProps) {
+const activityDot: Partial<Record<AgentActivityState, string>> = {
+  unknown: 'bg-orange',
+  stale: 'bg-orange',
+  needs_input: 'bg-orange',
+  failed: 'bg-red',
+  running: 'bg-ink',
+  verifying: 'bg-ink',
+};
+
+/** Quiet states have nothing to report above the composer. */
+const quietStates = new Set<AgentActivityState>(['ready', 'loading', 'responded', 'accepted', 'cancelled']);
+
+export function AgentStatus({ model: projectedModel, observedAt, fixture, busy = false, actionsDisabled = false, onInspectWork, onCancelTurn }: AgentStatusProps) {
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const model = !fixture && observedAt !== undefined && now - observedAt > 15_000 && projectedModel.state !== 'loading'
     ? { ...projectedModel, state: 'unknown' as const, label: '최신 상태 확인 필요', detail: '마지막으로 읽은 기록입니다.' }
     : projectedModel;
   const current = model.state !== 'unknown' && model.state !== 'stale';
-  const moving = current && ['running', 'verifying', 'loading'].includes(model.state);
+  const moving = current && ['running', 'verifying'].includes(model.state);
   const ink = activityInk[model.state] ?? 'text-ink-2';
-  const ringDashed = model.state === 'queued' || model.state === 'unknown' || model.state === 'stale';
   const ticking = Boolean((!fixture && observedAt !== undefined)
     || (current && (model.current?.runningClock || open && model.observations.some(item => item.runningClock))));
 
@@ -74,22 +83,21 @@ export function AgentStatus({ model: projectedModel, ghostID, observedAt, fixtur
     </div>;
   }
 
-  return <div className="relative min-w-0 max-w-full text-ink sm:max-w-96">
-    <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</span>
+  const live = <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</span>;
+  if (quietStates.has(model.state)) return live;
+
+  return <div className="flex min-w-0 max-w-full justify-center">
+    {live}
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button type="button" title={model.label}
-          className="flex w-full min-w-0 cursor-pointer items-center gap-2 min-h-12 rounded-full border border-line bg-surface py-1 pr-3 pl-2 text-left whitespace-nowrap shadow-btn transition-[background-color,color] outline-none hover:bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink-3 active:translate-y-px">
-          <span className="relative grid size-8.5 shrink-0 place-items-center" aria-hidden="true">
-            <span className={`absolute inset-0 rounded-full border-[1.5px] ${ringDashed ? 'border-dashed' : ''} ${moving ? 'border-t-ink border-r-ink border-line animate-[spin_2.4s_linear_infinite] motion-reduce:animate-none' : 'border-line'}`}/>
-            <DotAvatar size={28} profileId={ghostID}/>
-          </span>
-          <span className={`inline-flex shrink-0 ${ink}`}><ActivityIcon state={model.state}/></span>
-          <span className="min-w-0 flex-1 overflow-hidden font-medium text-ui text-ink [text-overflow:ellipsis]">{model.label}</span>
-          {elapsed && <span className="shrink-0 text-ui text-ink-2 [font-variant-numeric:tabular-nums]" aria-hidden="true" title="요청 후 경과">{elapsed}</span>}
+          className="inline-flex h-7 min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-full border border-line bg-surface px-3 text-caption whitespace-nowrap shadow-btn transition-colors outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3">
+          <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${activityDot[model.state] ?? 'bg-ink-3'} ${moving ? 'animate-pulse motion-reduce:animate-none' : ''}`}/>
+          <span className="min-w-0 truncate text-ink">{model.label}</span>
+          {elapsed && <span className="shrink-0 text-ink-2 [font-variant-numeric:tabular-nums]" aria-hidden="true" title="요청 후 경과">{elapsed}</span>}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" aria-label="Ghost 상태" className="grid w-80 max-w-[calc(100vw-1rem)] gap-2">
+      <PopoverContent side="top" align="center" aria-label="Ghost 상태" className="grid w-80 max-w-[calc(100vw-1rem)] gap-2">
         <div className="flex items-center justify-between gap-2">
           <h4 className="flex items-center gap-2 text-ui font-semibold text-ink">Ghost 상태{fixture && <span className="font-normal text-caption text-orange">예시</span>}</h4>
           <Button type="button" variant="ghost" size="icon" aria-label="상태 패널 닫기" onClick={() => setOpen(false)}><X size={16} aria-hidden="true"/></Button>

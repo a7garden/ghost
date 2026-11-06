@@ -1,4 +1,6 @@
 import { DetailDialog } from '../components/DetailDialog';
+import { DotAvatar } from '../components/DotAvatar';
+import { toneFor } from '../client/types';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronRight, CircleAlert, Clock3, GitBranch, Info, RefreshCw, SlidersHorizontal } from "lucide-react";
 import {
@@ -1040,16 +1042,17 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
       transcriptLabel="대화 기록"
       jumpToLatestLabel="최신 메시지로 이동"
       scrollKey={displayedTurns.length}
-      className="min-h-0 flex-1"
-      header={<div className="grid gap-2">
-        {selectedTarget && <div className="flex min-w-0 items-center gap-2">
-          <AgentStatus key={selectedTargetKey} model={agentStatus} ghostID={selectedTarget.ghost_id}
-            observedAt={Math.min(snapshotObservedAt, conversationObservedAt) || undefined} fixture={mode === 'fixture'}
-            busy={Boolean(busy)} actionsDisabled={writesDisabled || loading || agentStatus.state === 'unknown' || agentStatus.state === 'stale'}
-            onInspectWork={workID => void inspectWork(workID)} onCancelTurn={turnID => void cancelConversationTurn(turnID)}/>
-          {publicConversation && <Badge variant="outline">{publicLabel(selectedTarget)}</Badge>}
-        </div>}
-        {onOpenApproval && (pendingDocumentReviews.length > 0 || integrationReviews.length > 0) && <div className="flex flex-wrap gap-2" aria-label="이 대화의 확인할 일">
+      className="ghost-chat min-h-0 flex-1"
+      header={selectedTarget ? <div className="flex flex-col items-center gap-1">
+        <DotAvatar profileId={selectedTarget.ghost_id} tone={toneFor(selectedTarget.ghost_id)} size={44}/>
+        {publicConversation && <span className="text-caption text-ink-2">{publicLabel(selectedTarget)}</span>}
+      </div> : undefined}
+      composer={<div className="grid gap-2">
+        {selectedTarget && <AgentStatus key={selectedTargetKey} model={agentStatus}
+          observedAt={Math.min(snapshotObservedAt, conversationObservedAt) || undefined} fixture={mode === 'fixture'}
+          busy={Boolean(busy)} actionsDisabled={writesDisabled || loading || agentStatus.state === 'unknown' || agentStatus.state === 'stale'}
+          onInspectWork={workID => void inspectWork(workID)} onCancelTurn={turnID => void cancelConversationTurn(turnID)}/>}
+        {onOpenApproval && (pendingDocumentReviews.length > 0 || integrationReviews.length > 0) && <div className="flex flex-wrap justify-center gap-2" aria-label="이 대화의 확인할 일">
           {pendingDocumentReviews.map(review => <Button type="button" variant="secondary" size="sm" key={review.id}
             onClick={() => onOpenApproval({ kind: "document", id: review.id })}>{review.title} · {review.state === "pending" ? "검토 대기" : "저장 대기"}</Button>)}
           {integrationReviews.slice(0, 5).map(review => <Button type="button" variant="secondary" size="sm" key={review.id}
@@ -1057,8 +1060,7 @@ export function LifetimeView({ active: routeActive = true, mode, client, connect
         </div>}
         {!selectedTarget && !loading && <Alert role="status" variant="warning"><CircleAlert aria-hidden="true"/><AlertTitle>{initialGhostID ? "이 Ghost에 연결된 대화가 없습니다. 홈에서 이 Ghost를 열고 새 대화를 연결해 주세요." : "열 수 있는 대화가 없습니다. 홈에서 Ghost를 선택해 주세요."}</AlertTitle></Alert>}
         {conversationError && <Alert variant="destructive"><CircleAlert aria-hidden="true"/><AlertTitle>{conversationError}</AlertTitle></Alert>}
-      </div>}
-      composer={<div className="grid gap-2">{notices}<GComposer variant="conversation" inputId="lifetime-message" value={prompt}
+        {notices}<GComposer variant="conversation" inputId="lifetime-message" value={prompt}
         onValueChange={text => updatePrompt(selectedTargetKey, () => text)}
         onSubmit={() => void submitConversation()}
         label="메시지" placeholder="메시지 쓰기"
