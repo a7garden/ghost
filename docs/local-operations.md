@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-95ac4bc` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-f7ea509` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`, `console.json` = `{host_mode: external, root}` |
@@ -35,6 +35,15 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 앱 전체 리디자인 운영 반영 — 2026-11-07
+
+- 소스 `f7ea509`의 UI를 새 릴리스 `releases/20261107-bun-f7ea509`에 설치했다. `95ac4bc` 이후 Host·계약·데스크톱 소스 변경이 없어 컴파일 Host는 이전 릴리스 파일을 복사했고 SHA-256이 같다. UI 85개 파일의 해시가 빌드 원본과 일치한다. 설치 사본을 임시 루트·포트에서 실행해 새 번들(`main-BGd13iw2.js`)과 health를 확인했다.
+- UI 테스트 66개·타입 검사·빌드를 통과했다. 별도 Host 루트(모의 OpenAI 호환 제공자로 실제 Host가 만든 위임 트리·질문·결과 확인·실패 일, 스트리밍)에서 홈·확인할 일·맡긴 일·상세·대화·설정·프로젝트를 1440/390px, 밝게·어둡게 확인하고 숫자 키 답변으로 실제 결정이 처리되는 것을 봤다. 콘솔 오류는 없었다.
+- 백업: `~/.local/share/ghost/backups/pre-ui-redesign-20261107-f7ea509/`, DB는 `ghost-backup/2`, `complete: true`, 시각 `2026-11-07T12:12:42Z`, 두 DB `integrity_check` ok. artifacts·secrets·config·console 설정을 권한 유지로 복사·비교했다. 이전 릴리스 `20261107-bun-95ac4bc`는 보관했다.
+- 처리 중 대화·작업이 없을 때 `current`를 원자적으로 교체하고 LaunchAgent Host(PID 9125)를 `SIGTERM`으로 재기동했다. 새 Host PID 67086의 실행 파일이 새 릴리스이고 운영 DB·포트 62062 단일 리스너·준비 상태를 확인했다. Ghost 4개·대화 9개·맡긴 일 32개, config·secrets 바이트가 보존됐다.
+- 외부 모드의 Mac 앱을 정상 종료 후 백그라운드로 다시 실행했다. `--desktop-probe`가 새 Host PID의 external 연결·health를 확인했고, 설치된 앱 창을 백그라운드 캡처해 운영 데이터 위의 새 화면(존재 표시가 있는 사이드바, 새 대화 헤더·작성기)을 확인했다. 앱 번들은 바꾸지 않았다.
+- 데이터·인증 저장 형식 변경은 없다. 되돌릴 때는 `current`를 `releases/20261107-bun-95ac4bc`로 원자적으로 교체하고 LaunchAgent를 정상 재시작한다.
 
 ### 인증 링크 브라우저 열기 수정 운영 반영 — 2026-11-07
 
