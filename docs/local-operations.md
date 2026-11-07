@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-f1e1a64` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-95ac4bc` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`, `console.json` = `{host_mode: external, root}` |
@@ -35,6 +35,16 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 인증 링크 브라우저 열기 수정 운영 반영 — 2026-11-07
+
+- 소스 `95ac4bc`의 Host/UI와 Mac 앱을 설치했다. 외부 `target=_blank` 이동은 기존 웹뷰 정책에 막혔다. 이동 허용 범위를 넓히지 않고 main·overlay에 HTTP(S) 전용 `open_external_url` 권한을 부여했다. 인증·키 발급·대화 링크가 이 명령으로 macOS 기본 브라우저를 연다.
+- Rust 테스트 7개·fmt·clippy, UI 테스트 66개·타입 검사·빌드를 통과했다. 별도 Host 루트의 실제 Mac 앱에서 `Button asChild`와 새 링크 컴포넌트를 활성화해 Safari의 HTTP 요청을 관찰했다. main·overlay 모두 위험한 URI 5종을 거부하고 잘못된 주소에는 오류를 표시했다. 일반 브라우저는 링크 기본 동작을 유지했다. 독립 Claude 검토에 차단 사항이 없었다.
+- 기존 로컬 배포 방식인 ad-hoc 서명으로 앱을 서명하고, 서명된 설치 대기 사본에서도 같은 Safari 열기를 확인했다. 설치 전후 `codesign --verify --strict`가 통과했다. Developer ID 서명·공증 배포는 아니다. Host·UI 설치 사본은 원본 바이트와 일치하며 임시 루트에서 컴파일 Host와 실제 번들도 실행했다.
+- 백업: `~/.local/share/ghost/backups/pre-browser-open-20261107-95ac4bc/`, DB는 `db/backup.json`의 `ghost-backup/2`, `complete: true`, 시각 `2026-11-07T11:12:30.673Z`. artifacts·secrets·config·console 설정을 복사하고 이전 Mac 앱은 `Ghost.app`으로 보존했다. 이전 Host/UI 릴리스 `20261107-bun-f1e1a64`도 보존했다.
+- 유휴 확인 후 외부 모드의 기존 Mac 앱을 정상 종료하고 설치 번들을 교체했다. `current`를 원자적으로 교체한 뒤 LaunchAgent Host만 정상 재기동했다. 새 Host PID 9125의 실행 파일·운영 DB 경로·포트 62062 단일 리스너·준비 상태를 확인했다. Ghost 4개·대화 9개·맡긴 일 32개의 기존 ID, 설정과 인증 파일 바이트가 보존됐다.
+- 설치된 앱을 백그라운드로 다시 실행했고 `--desktop-probe`가 새 Host에 대한 external 연결·health를 확인했다. 창이 목록에 나왔다가 접근되지 않아 운영 네이티브 화면의 직접 클릭은 검증하지 못했으며 강제로 앞으로 가져오지 않았다. 운영 웹 UI에서는 모델 설정·Codex 설정의 공식 키 발급 링크와 새 번들을 확인했다. 운영 인증 저장·로그인은 하지 않았고 검증용 앱·Host·스크립트·상태 루트를 정리했다.
+- DB·인증 저장 형식 변경은 없다. 되돌릴 때는 `current`를 이전 릴리스로 교체하고 LaunchAgent를 정상 재시작하며, 앱 종료 후 이 백업의 `Ghost.app`을 설치 경로로 돌린다. secrets나 DB를 덮어쓸 필요는 없다.
 
 ### OAuth·제공자 설정 운영 반영 — 2026-11-07
 
