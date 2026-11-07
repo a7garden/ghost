@@ -42,7 +42,8 @@ it('keeps every Ghost folded on workspace pages and lists the main Ghost first w
   const html = render();
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   expect(html).toContain('<span class="sr-only">확인 필요 </span>2');
-  expect(html).not.toContain('맡긴 일</span>');
+  // Only the workspace-wide 맡긴 일 entry; no Ghost submenu is unfolded.
+  expect(html.match(/맡긴 일/g)).toHaveLength(1);
   expect(html.match(/aria-expanded="false"/g)).toHaveLength(2);
   const ghosts = html.slice(html.indexOf('Ghost</p>'));
   expect(ghosts.indexOf('sage')).toBeLessThan(ghosts.indexOf('milo'));
@@ -52,7 +53,8 @@ it('keeps every Ghost folded on workspace pages and lists the main Ghost first w
 
 it('shows pages only under the open Ghost and marks the page on screen', () => {
   const html = render({ section: 'work', openGhostId: 'sage', currentGhostPage: 'work' });
-  expect(html.match(/맡긴 일/g)).toHaveLength(1);
+  // The workspace-wide entry plus the open Ghost's own page.
+  expect(html.match(/맡긴 일/g)).toHaveLength(2);
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   const current = html.slice(html.indexOf('aria-current="page"'));
   expect(current.slice(0, current.indexOf('</button>'))).toContain('맡긴 일');

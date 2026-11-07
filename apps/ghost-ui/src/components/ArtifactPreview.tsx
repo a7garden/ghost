@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from '../ui'
+import { FileCode2, FileImage, FileText, File as FileIcon } from 'lucide-react';
 import type { ArtifactRef } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { Modal } from './Modal';
@@ -32,7 +32,12 @@ export function ArtifactPreview({ artifact, label }: { artifact: ArtifactRef; la
     setContent(null);
   };
   return <>
-    <Button variant="outline" size="sm" onClick={openPreview}>{label ?? artifact.name}<span className="text-caption text-ink-3">{sizeLabel(artifact.size)}</span></Button>
+    <button type="button" className="artifact-tile" onClick={openPreview} title={artifact.name}>
+      <span className="artifact-tile__icon" aria-hidden="true">
+        {artifact.mediaType.startsWith('image/') ? <FileImage/> : artifact.mediaType === 'application/json' || /\.(ts|js|py|sh|json|ya?ml|toml)$/i.test(artifact.name) ? <FileCode2/> : artifact.mediaType.startsWith('text/') ? <FileText/> : <FileIcon/>}
+      </span>
+      <span className="artifact-tile__copy"><span>{label ?? artifact.name}</span><small className="tabular">{sizeLabel(artifact.size)}</small></span>
+    </button>
     {open && <Modal title={artifact.name} onClose={close}>
       {error && <p className="m-0 text-caption text-red" role="alert">{error}</p>}
       {!error && !content && <p className="m-0 text-caption text-ink-2" aria-busy="true">읽는 중…</p>}

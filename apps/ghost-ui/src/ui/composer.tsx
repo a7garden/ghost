@@ -1,30 +1,37 @@
 // App-owned UI. Retained-source notices: ./LICENSE.
 import * as React from "react"
-import { ArrowUp, Send } from "lucide-react"
+import { ArrowUp } from "lucide-react"
 
 import { Button } from "./button"
-import { Textarea } from "./textarea"
 import { cn } from "./utils"
 
 export interface ComposerProps {
   value: string
   onValueChange: (value: string) => void
   onSubmit: (value: string) => void
-  label: React.ReactNode
+  /** Accessible name of the text field; visually carried by the placeholder and header. */
+  label: string
   placeholder: string
   submitLabel: string
   inputId?: string
   disabled?: boolean
   pending?: boolean
+  /** The addressed Ghost is generating: the surface carries a travelling signal edge. */
+  running?: boolean
+  /** Above the text: addressing and mode. */
+  header?: React.ReactNode
+  /** Between the text and the controls: fields a mode adds. */
+  extension?: React.ReactNode
   footer?: React.ReactNode
   trailing?: React.ReactNode
-  rows?: number
-  variant?: "default" | "conversation"
   inputRef?: React.Ref<HTMLTextAreaElement>
+  describedBy?: string
   className?: string
 }
 
-/** Controlled message composer. The owner clears the draft after submission. */
+const MAX_HEIGHT = 240
+
+/** Controlled, auto-growing message composer. The owner clears the draft after submission. */
 export function Composer({
   value,
   onValueChange,
@@ -35,17 +42,18 @@ export function Composer({
   inputId,
   disabled = false,
   pending = false,
+  running = false,
+  header,
+  extension,
   footer,
   trailing,
-  rows = 2,
-  variant = "default",
   inputRef,
+  describedBy,
   className,
 }: ComposerProps) {
   const generatedId = React.useId()
   const resolvedInputId = inputId ?? generatedId
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
-  const previousVariantRef = React.useRef(variant)
   const canSubmit = value.trim().length > 0 && !disabled && !pending
 
   const setInputRef = React.useCallback(
@@ -57,46 +65,30 @@ export function Composer({
     [inputRef],
   )
 
-  const resizeConversationTextarea = React.useCallback(() => {
-    const textarea = textareaRef.current
-    if (!textarea || variant !== "conversation") return
-
-    textarea.style.height = "auto"
-    const maxHeight = 200
-    const contentHeight = textarea.scrollHeight
-    textarea.style.height = `${Math.min(contentHeight, maxHeight)}px`
-    textarea.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden"
-  }, [variant])
-
-  React.useLayoutEffect(() => {
+  const resize = React.useCallback(() => {
     const textarea = textareaRef.current
     if (!textarea) return
-    if (variant !== "conversation") {
-      if (previousVariantRef.current === "conversation") {
-        textarea.style.removeProperty("height")
-        textarea.style.removeProperty("overflow-y")
-      }
-      previousVariantRef.current = variant
-      return
-    }
-    previousVariantRef.current = variant
-    resizeConversationTextarea()
-  }, [resizeConversationTextarea, value, variant])
+    textarea.style.height = "auto"
+    const contentHeight = textarea.scrollHeight
+    textarea.style.height = `${Math.min(contentHeight, MAX_HEIGHT)}px`
+    textarea.style.overflowY = contentHeight > MAX_HEIGHT ? "auto" : "hidden"
+  }, [])
+
+  React.useLayoutEffect(resize, [resize, value])
 
   React.useEffect(() => {
     const textarea = textareaRef.current
-    if (!textarea || variant !== "conversation") return
-
+    if (!textarea) return
     let previousWidth = textarea.getBoundingClientRect().width
     const observer = new ResizeObserver(() => {
       const nextWidth = textarea.getBoundingClientRect().width
       if (nextWidth === previousWidth) return
       previousWidth = nextWidth
-      resizeConversationTextarea()
+      resize()
     })
     observer.observe(textarea)
     return () => observer.disconnect()
-  }, [resizeConversationTextarea, variant])
+  }, [resize])
 
   const submit = () => {
     const trimmedValue = value.trim()
@@ -105,71 +97,37 @@ export function Composer({
   }
 
   return (
-    <div
-      data-slot="ghost-composer"
-      data-variant={variant}
-      aria-busy={pending || undefined}
-      className={cn("ghost-composer", className)}
-    >
-      <label
-        className={cn(
-          "ghost-composer__label",
-          variant === "conversation" && "ghost-composer__label--visually-hidden",
-        )}
-        htmlFor={resolvedInputId}
-      >
-        {label}
-      </label>
+    <div data-slot="ghost-composer" data-running={running || undefined} aria-busy={pending || undefined} className={cn("ghost-composer", className)}>
+      <label className="ghost-composer__label ghost-composer__label--visually-hidden" htmlFor={resolvedInputId}>{label}</label>
       <div className="ghost-composer__surface">
-        <Textarea
+        {header}
+        <textarea
           ref={setInputRef}
           id={resolvedInputId}
           value={value}
           onChange={(event) => onValueChange(event.target.value)}
           onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing &&
-              event.nativeEvent.keyCode !== 229
-            ) {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
               event.preventDefault()
               submit()
             }
           }}
           placeholder={placeholder}
-          rows={rows}
+          rows={1}
           disabled={disabled || pending}
+          aria-describedby={describedBy}
           className="ghost-composer__textarea"
         />
+        {extension}
         <div className="ghost-composer__footer">
           <div className="ghost-composer__footer-slot">{footer}</div>
-          {trailing != null ? (
-            <div className="ghost-composer__footer-actions">
-              <div className="ghost-composer__footer-trailing">{trailing}</div>
-              <Button
-                type="button"
-                size="icon"
-                aria-label={submitLabel}
-                disabled={!canSubmit}
-                onClick={submit}
-                className={variant === "conversation" ? "ghost-composer__submit--conversation" : undefined}
-              >
-                {variant === "conversation" ? <ArrowUp aria-hidden="true" /> : <Send aria-hidden="true" />}
-              </Button>
-            </div>
-          ) : (
-            <Button
-              type="button"
-              size="icon"
-              aria-label={submitLabel}
-              disabled={!canSubmit}
-              onClick={submit}
-              className={variant === "conversation" ? "ghost-composer__submit--conversation" : undefined}
-            >
-              {variant === "conversation" ? <ArrowUp aria-hidden="true" /> : <Send aria-hidden="true" />}
+          <div className="ghost-composer__footer-actions">
+            {trailing}
+            <Button type="button" size="icon" aria-label={submitLabel} title={submitLabel} disabled={!canSubmit} onClick={submit}
+              className="size-[34px] rounded-pill disabled:opacity-100 disabled:bg-hover-2 disabled:text-ink-3">
+              <ArrowUp aria-hidden="true" />
             </Button>
-          )}
+          </div>
         </div>
       </div>
     </div>

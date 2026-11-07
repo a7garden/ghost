@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check } from 'lucide-react';
-import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Switch } from '../ui'
+import { Badge, Button, InlineError, Input, SegmentedControl, SelectField, SettingsGroup, SettingsRow, Switch } from '../ui'
 import type { Ghost, GhostState } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -26,7 +26,6 @@ const backgroundColors = [
   ...neutralColors,
 ];
 const stateChoices: { value: GhostState; label: string }[] = [{ value: 'active', label: '활성' }, { value: 'paused', label: '일시정지' }, { value: 'retired', label: '은퇴' }];
-const sandboxLabel: Record<string, string> = { none: '샌드박스 없음', stopped: '정지됨', running: '실행 중', error: '오류' };
 
 /**
  * 한 Ghost의 이름·모델·모습·상태·샌드박스를 고치는 꾸미기 편집기.
@@ -56,57 +55,64 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
   const bodyColor = ghost.look.body || 'auto';
   const backgroundColor = ghost.look.background || 'auto';
   return <div className="grid gap-4">
-    <form className="grid gap-2" onSubmit={event => {
-      event.preventDefault();
-      const next = name.trim();
-      if (next && next !== ghost.name) void run(() => client.send({ type: 'ghost.update', ghostId, name: next }), '이름을 바꿨습니다.');
-    }}>
-      <label className="grid gap-2 text-caption text-ink-2">이름
-        <div className="flex gap-2">
-          <Input value={name} onChange={event => setNameDraft(event.target.value)} maxLength={128} required disabled={locked} className="min-w-0 flex-1"/>
-          {name.trim() !== ghost.name && <Button type="submit" size="sm" disabled={locked || !name.trim()}>저장</Button>}
+    <SettingsGroup title={<span className="sr-only">기본 정보</span>}>
+      <form onSubmit={event => {
+        event.preventDefault();
+        const next = name.trim();
+        if (next && next !== ghost.name) void run(() => client.send({ type: 'ghost.update', ghostId, name: next }), '이름을 바꿨습니다.');
+      }} className="ghost-settings-row">
+        <div className="ghost-settings-row__copy">
+          <label className="ghost-settings-row__label" htmlFor="ghost-design-name">이름</label>
         </div>
-      </label>
-    </form>
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <label className="flex items-center justify-between gap-3 text-caption text-ink-2">메인 Ghost
+        <div className="ghost-settings-row__control">
+          <div className="flex w-full min-w-0 gap-2">
+            <Input id="ghost-design-name" value={name} onChange={event => setNameDraft(event.target.value)} maxLength={128} required disabled={locked} className="min-w-0 flex-1"/>
+            {name.trim() !== ghost.name && <Button type="submit" size="sm" disabled={locked || !name.trim()}>저장</Button>}
+          </div>
+        </div>
+      </form>
+      <SettingsRow label="메인 Ghost">
         <Switch checked={ghost.isDefault} disabled={locked || ghost.isDefault} onCheckedChange={checked => {
           if (checked) void run(() => client.send({ type: 'ghost.set_default', ghostId }), `${ghost.name}을(를) 메인 Ghost로 지정했습니다.`);
         }}/>
-      </label>
-      <SegmentedControl aria-label="Ghost 상태" value={ghost.state} onValueChange={value => void run(() => client.send({ type: 'ghost.update', ghostId, state: value as GhostState }), '상태를 바꿨습니다.')}
-        options={stateChoices.map(({ value, label }) => ({ value, label }))}/>
-    </div>
-    <FormField label="모델" description="기본 모델을 따르거나 이 Ghost만의 모델을 씁니다.">
-      {control => <SelectField {...control} label="모델" value={ghost.model ? `${ghost.model.provider}/${ghost.model.model}` : NO_MODEL} disabled={locked}
-        onValueChange={key => void run(() => client.send({ type: 'ghost.update', ghostId, model: modelFromKey(state?.settings, key) ?? null }), '모델을 저장했습니다.')}
-        options={[{ value: NO_MODEL, label: '기본 모델 따름' }, ...modelSelectOptions(state?.settings)]}/>}
-    </FormField>
-    <fieldset className="m-0 grid gap-2"><legend className="mb-2 text-caption text-ink-2">아바타</legend>
-      <div className="grid grid-cols-5 gap-1.5">
-        <button type="button" aria-pressed={!ghost.look.avatarId} disabled={locked} onClick={() => ghost.look.avatarId && assign(null)} title="기본 Ghost"
-          className="relative grid aspect-square cursor-pointer place-items-center rounded-control border border-line outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 disabled:cursor-not-allowed aria-pressed:border-ink aria-pressed:bg-hover">
-          <DotAvatar tone={toneFor(ghost.id)} size={36}/><span className="sr-only">기본 Ghost</span>
-          {!ghost.look.avatarId && <Check size={12} className="absolute top-1 right-1" aria-hidden="true"/>}
-        </button>
-        {avatars.map(avatar => <AvatarTile key={avatar.id} avatar={avatar} selected={ghost.look.avatarId === avatar.id} disabled={locked}
-          onSelect={() => ghost.look.avatarId !== avatar.id && assign(avatar.id)}/>)}
+      </SettingsRow>
+      <SettingsRow label="상태">
+        <SegmentedControl aria-label="Ghost 상태" value={ghost.state} onValueChange={value => void run(() => client.send({ type: 'ghost.update', ghostId, state: value as GhostState }), '상태를 바꿨습니다.')}
+          options={stateChoices.map(({ value, label }) => ({ value, label }))}/>
+      </SettingsRow>
+      <SettingsRow label="모델">
+        <SelectField label="모델" className="w-full max-w-[260px]" value={ghost.model ? `${ghost.model.provider}/${ghost.model.model}` : NO_MODEL} disabled={locked}
+          onValueChange={key => void run(() => client.send({ type: 'ghost.update', ghostId, model: modelFromKey(state?.settings, key) ?? null }), '모델을 저장했습니다.')}
+          options={[{ value: NO_MODEL, label: '기본 모델 따름' }, ...modelSelectOptions(state?.settings)]}/>
+      </SettingsRow>
+    </SettingsGroup>
+    <SettingsGroup title="아바타">
+      <div className="grid gap-4 p-4">
+        <fieldset className="m-0 grid gap-2 border-0 p-0"><legend className="sr-only">아바타</legend>
+          <div className="grid grid-cols-5 gap-1.5">
+            <button type="button" aria-pressed={!ghost.look.avatarId} disabled={locked} onClick={() => ghost.look.avatarId && assign(null)} title="기본 Ghost"
+              className="avatar-choice avatar-choice--tile p-2 outline-none disabled:cursor-not-allowed">
+              <DotAvatar tone={toneFor(ghost.id)} size={36}/><span className="sr-only">기본 Ghost</span>
+              {!ghost.look.avatarId && <Check size={12} className="absolute top-1 right-1" aria-hidden="true"/>}
+            </button>
+            {avatars.map(avatar => <AvatarTile key={avatar.id} avatar={avatar} selected={ghost.look.avatarId === avatar.id} disabled={locked}
+              onSelect={() => ghost.look.avatarId !== avatar.id && assign(avatar.id)}/>)}
+          </div>
+        </fieldset>
+        {!ghost.look.avatarId && <GhostColorPicker label="본체 색" resetLabel="자동" presets={bodyColors} value={bodyColor}
+          onChange={color => void run(() => patchLook({ body: color === 'auto' ? '' : color }), '본체 색을 저장했습니다.')}/>}
+        <GhostColorPicker label="배경색" resetLabel="기본" presets={backgroundColors} value={backgroundColor}
+          onChange={color => void run(() => patchLook({ background: color === 'auto' ? '' : color }), '배경색을 저장했습니다.')}/>
       </div>
-    </fieldset>
-    {!ghost.look.avatarId && <GhostColorPicker label="본체 색" resetLabel="자동" presets={bodyColors} value={bodyColor}
-      onChange={color => void run(() => patchLook({ body: color === 'auto' ? '' : color }), '본체 색을 저장했습니다.')}/>}
-    <GhostColorPicker label="배경색" resetLabel="기본" presets={backgroundColors} value={backgroundColor}
-      onChange={color => void run(() => patchLook({ background: color === 'auto' ? '' : color }), '배경색을 저장했습니다.')}/>
-    {sandbox && <section className="grid gap-2 border-t border-line pt-3" aria-label="샌드박스">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-caption text-ink-2">샌드박스 <Badge variant="outline">{sandboxLabel[sandbox.state] ?? sandbox.state}</Badge></span>
-        <span className="flex items-center gap-2">
+    </SettingsGroup>
+    {sandbox && <SettingsGroup title="샌드박스">
+      <SettingsRow label={<span className="flex items-center gap-2">샌드박스 <SandboxBadge state={sandbox.state}/></span>} description={sandbox.detail}>
+        <span className="flex items-center gap-1">
           {sandbox.state === 'running' && <Button variant="ghost" size="sm" type="button" disabled={locked} onClick={() => void run(() => client.send({ type: 'sandbox.control', ghostId, action: 'stop' }), '샌드박스를 정지했습니다.')}>정지</Button>}
           {sandbox.state !== 'none' && <Button variant="ghost" size="sm" type="button" disabled={locked} onClick={() => setResetting(true)}>초기화</Button>}
         </span>
-      </div>
-      {sandbox.detail && <p className="m-0 text-caption text-ink-3 [overflow-wrap:anywhere]">{sandbox.detail}</p>}
-    </section>}
+      </SettingsRow>
+    </SettingsGroup>}
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
     {error && <InlineError>{error}</InlineError>}
     {resetting && <Modal title="샌드박스 초기화" onClose={() => !busy && setResetting(false)}>
@@ -120,10 +126,22 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
   </div>;
 }
 
+const sandboxBadge: Record<string, { label: string; variant: 'default' | 'outline' | 'danger' }> = {
+  none: { label: '샌드박스 없음', variant: 'outline' },
+  stopped: { label: '정지됨', variant: 'outline' },
+  running: { label: '실행 중', variant: 'default' },
+  error: { label: '오류', variant: 'danger' },
+};
+
+function SandboxBadge({ state }: { state: string }) {
+  const badge = sandboxBadge[state] ?? { label: state, variant: 'outline' as const };
+  return <Badge variant={badge.variant}>{badge.label}</Badge>;
+}
+
 function AvatarTile({ avatar, selected, disabled, onSelect }: { avatar: GhostAndAvatar; selected: boolean; disabled: boolean; onSelect(): void }) {
   const { source, animate } = useAvatarSource(avatar.imageDigest);
   return <button type="button" aria-pressed={selected} disabled={disabled} onClick={onSelect} title={avatar.name}
-    className="relative grid aspect-square cursor-pointer place-items-center rounded-control border border-line outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 disabled:cursor-not-allowed aria-pressed:border-ink aria-pressed:bg-hover">
+    className="avatar-choice avatar-choice--tile p-2 outline-none disabled:cursor-not-allowed">
     {source ? <PetSprite source={source} version={spriteVersionOf(avatar.design)} size={44} animate={animate}/> : <span className="size-10 rounded-md bg-inset"/>}
     <span className="sr-only">{avatar.name}</span>
     {selected && <Check size={12} className="absolute top-1 right-1" aria-hidden="true"/>}

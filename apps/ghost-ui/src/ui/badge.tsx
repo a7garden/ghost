@@ -7,15 +7,15 @@ import { cn } from "./utils"
 
 
 const badgeVariants = cva(
-  "inline-flex items-center justify-center gap-1 rounded-chip border px-2 h-5 text-micro font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 [&>svg]:pointer-events-none transition-[color,box-shadow] overflow-hidden",
+  "inline-flex items-center justify-center gap-1 rounded-pill px-2 h-5 text-micro font-semibold w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 [&>svg]:pointer-events-none transition-[color,box-shadow] overflow-hidden",
   {
     variants: {
       variant: {
-        default: "border-transparent bg-inset text-ink",
-        success: "border-transparent bg-green-tint text-green",
-        warning: "border-transparent bg-orange-tint text-orange",
-        danger: "border-transparent bg-red-tint text-red",
-        outline: "text-ink-2 border-line-strong",
+        default: "bg-hover text-ink-2",
+        success: "bg-green-tint text-green",
+        warning: "bg-amber-tint text-amber-ink",
+        danger: "bg-red-tint text-red",
+        outline: "text-ink-3 shadow-[inset_0_0_0_1px_var(--ghost-line-strong)]",
       },
     },
     defaultVariants: {

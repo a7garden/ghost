@@ -28,7 +28,7 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "data-[state=open]:animate-[fade-in_150ms_ease-out] data-[state=closed]:animate-[fade-in_100ms_ease-in_reverse] fixed inset-0 z-50 bg-ink/30",
+        "data-[state=open]:animate-[fade-in_150ms_ease-out] data-[state=closed]:animate-[fade-in_100ms_ease-in_reverse] fixed inset-0 z-50 bg-[color-mix(in_srgb,var(--ghost-page)_55%,transparent)] backdrop-blur-[3px]",
         className
       )}
       {...props}
@@ -56,7 +56,7 @@ function DialogContent({
         data-slot="dialog-content"
         aria-modal={modal || undefined}
         className={cn(
-          "bg-surface text-body text-ink data-[state=open]:animate-[pop-in_150ms_var(--ease-enter)] data-[state=closed]:animate-[pop-in_100ms_var(--ease-exit)_reverse] fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto overscroll-contain rounded-xl border border-line-strong p-5 shadow-overlay sm:max-w-lg",
+          "bg-raised text-body text-ink data-[state=open]:animate-[pop-in_180ms_var(--ease-enter)] data-[state=closed]:animate-[pop-in_100ms_var(--ease-exit)_reverse] fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-5 overflow-y-auto overscroll-contain rounded-xl p-6 shadow-overlay sm:max-w-lg",
           className
         )}
         {...props}

@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react';
-import { ChevronLeft, ChevronRight, History, ListTodo, Palette, Settings2, X } from 'lucide-react';
-import { Badge, Button, Popover, PopoverContent, PopoverTrigger } from '../ui'
+import { ChevronLeft, ChevronRight, ListTodo, Palette, Settings2, X } from 'lucide-react';
+import { Button, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import { DotAvatar } from './DotAvatar';
 import { AgentActivityList, type AgentActivityProps } from './AgentStatus';
-import { toneFor } from '../features/ghostState';
+import { PresenceAvatar } from './agent';
+import { toneFor, type DotState } from '../features/ghostState';
 import { uiTerms } from '../uiText';
 
 export interface GhostProfileProps {
@@ -14,24 +15,22 @@ export interface GhostProfileProps {
   note?: string;
   activity: AgentActivityProps;
   onOpenWork?: () => void;
-  historyCount?: number;
-  onOpenHistory?: () => void;
   onManage?: () => void;
   /** Inline editor for the Ghost's look (꾸미기); opens in place of the profile. */
   design?: ReactNode;
   /** The owner's main Ghost. */
   isMain?: boolean;
+  presence: DotState;
 }
 
-/** The Ghost's avatar at the top of its conversation; it opens the Ghost's profile, after OpenAI dots. */
-export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWork, historyCount = 0, onOpenHistory, onManage, design, isMain = false }: GhostProfileProps) {
+/** The Ghost's portrait at the head of its conversation; it opens the Ghost's profile. */
+export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWork, onManage, design, isMain = false, presence }: GhostProfileProps) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'profile' | 'design'>('profile');
   const go = (action: () => void) => () => { setOpen(false); action(); };
   const hasActivity = activity.model.observations.length > 0;
   const rows = [
     onOpenWork && { key: 'work', icon: ListTodo, label: '맡긴 일', action: go(onOpenWork) },
-    onOpenHistory && historyCount > 0 && { key: 'history', icon: History, label: `이전 대화 ${historyCount}`, action: go(onOpenHistory) },
     onManage && { key: 'manage', icon: Settings2, label: uiTerms.ghostSettings, action: go(onManage) },
   ].filter(Boolean) as { key: string; icon: typeof ListTodo; label: string; action: () => void }[];
   const editing = view === 'design' && design != null;
@@ -39,9 +38,8 @@ export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWor
   return <div className="flex flex-col items-center gap-1">
     <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) setView('profile'); }}>
       <PopoverTrigger asChild>
-        <button type="button" aria-label={`${name} 프로필 ${open ? '닫기' : '열기'}`} title={name}
-          className="grid cursor-pointer place-items-center rounded-full p-1 outline-none transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-ink-3 active:scale-95 motion-reduce:transition-none">
-          <DotAvatar profileId={ghostID} tone={toneFor(ghostID)} size={44}/>
+        <button type="button" aria-label={`${name} 프로필 ${open ? '닫기' : '열기'}`} title={name} className="profile-trigger">
+          <PresenceAvatar ghostId={ghostID} state={presence} size={30}/>
         </button>
       </PopoverTrigger>
       <PopoverContent side="bottom" align="center" aria-label={editing ? `${name} 꾸미기` : `${name} 프로필`}
@@ -52,7 +50,7 @@ export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWor
           {design != null && !editing
             ? <button type="button" aria-label={`${name} 꾸미기`} title="꾸미기" onClick={() => setView('design')} className="cursor-pointer rounded-full outline-none hover:opacity-80 focus-visible:outline-2 focus-visible:outline-ink-3"><DotAvatar profileId={ghostID} tone={toneFor(ghostID)} size={64}/></button>
             : <DotAvatar profileId={ghostID} tone={toneFor(ghostID)} size={64}/>}
-          <strong className="mt-1 flex items-center gap-1.5 text-body font-semibold text-ink [overflow-wrap:anywhere]">{name}{isMain && <Badge variant="outline">메인</Badge>}</strong>
+          <strong className="mt-1 flex items-center gap-1.5 text-body font-semibold text-ink [overflow-wrap:anywhere]">{name}{isMain && <span className="presence-row__main-mark">메인</span>}</strong>
           {!editing && summary && summary.replace(/[.。]\s*$/, '') !== name && <p className="m-0 line-clamp-2 text-caption leading-relaxed text-ink-2">{summary}</p>}
         </div>
         {editing ? <div className="border-t border-line pt-3">{design}</div> : <>

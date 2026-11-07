@@ -19,10 +19,10 @@ export function GhostColorPicker({
     setTouched(false);
     onChange(color);
   };
-  return <fieldset className="m-0 mb-6 flex min-w-0 flex-col gap-2.5"><legend className="text-caption text-ink-2">{label}</legend>
+  return <fieldset className="m-0 flex min-w-0 flex-col gap-2.5"><legend className="text-caption text-ink-2">{label}</legend>
     <div className="flex flex-wrap gap-2">
       {presets.map(item => <button type="button" key={item.color}
-        className="size-7 cursor-pointer rounded-full border border-line-strong outline-2 outline-offset-[3px] outline-transparent aria-pressed:outline-ink"
+        className="ghost-color-swatch"
         style={{ backgroundColor: item.color }} title={item.name} aria-label={item.name}
         aria-pressed={value === item.color} onClick={() => choose(item.color)}/>)}
     </div>

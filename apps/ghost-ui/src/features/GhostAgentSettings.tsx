@@ -31,13 +31,13 @@ const toolLabels: Record<GhostTool, string> = {
 };
 
 /** 용도별 묶음. 목록은 contract의 GHOST_TOOLS를 따르고, 여기 없는 새 도구는 기타 도구로 내려간다. */
-const toolGroups: readonly { title: string; description: string; tools: readonly GhostTool[] }[] = [
-  { title: '맡긴 일', description: '작업을 만들고 상황을 보고 고칩니다.', tools: ['work_create', 'work_list', 'work_inspect', 'work_update', 'work_cancel'] },
-  { title: '반복 작업', description: '정해진 시간에 실행할 작업을 관리합니다.', tools: ['schedule_create', 'schedule_list', 'schedule_cancel'] },
-  { title: '파일과 명령', description: '샌드박스 안의 파일을 읽고 고치고 명령을 실행합니다.', tools: ['read', 'write', 'edit', 'bash'] },
-  { title: '기억', description: '오래 기억할 것을 저장하고 다시 찾아봅니다.', tools: ['memory_search', 'memory_recall', 'memory_retain'] },
-  { title: '문서 공간', description: '프로젝트 문서를 읽고 수정을 제안합니다.', tools: ['document_spaces', 'document_list', 'document_read', 'document_propose'] },
-  { title: '협업', description: '다른 Ghost와 함께 일하고 결과물을 공유합니다.', tools: ['ghost_list', 'publish_artifact', 'delegate'] },
+const toolGroups: readonly { title: string; tools: readonly GhostTool[] }[] = [
+  { title: '맡긴 일', tools: ['work_create', 'work_list', 'work_inspect', 'work_update', 'work_cancel'] },
+  { title: '반복 작업', tools: ['schedule_create', 'schedule_list', 'schedule_cancel'] },
+  { title: '파일과 명령', tools: ['read', 'write', 'edit', 'bash'] },
+  { title: '기억', tools: ['memory_search', 'memory_recall', 'memory_retain'] },
+  { title: '문서 공간', tools: ['document_spaces', 'document_list', 'document_read', 'document_propose'] },
+  { title: '협업', tools: ['ghost_list', 'publish_artifact', 'delegate'] },
 ];
 
 /** 대화 종류에 따라 항상 제공되는 도구. 선택 목록에 없다. */
@@ -92,38 +92,37 @@ export function GhostAgentSettingsEditor({ ghostId }: { ghostId: string }) {
     </SettingsRow>;
   };
   return <div className="grid gap-4">
-    <form className="grid gap-2" onSubmit={event => {
-      event.preventDefault();
-      if (persona.trim() && persona !== ghost.persona) void run(async () => {
-        await client.send({ type: 'ghost.update', ghostId, persona });
-        setPersonaDraft(null);
-      }, '역할 지시를 저장했습니다.');
-    }}>
-      <label className="grid gap-2 text-caption text-ink-2">{uiTerms.roleInstructions}
-        <Textarea value={persona} onChange={event => setPersonaDraft(event.target.value)} rows={4} maxLength={8192} required disabled={locked}/>
-      </label>
-      {persona !== ghost.persona && <Button type="submit" size="sm" className="justify-self-end" disabled={locked || !persona.trim()}>저장</Button>}
-    </form>
+    <SettingsGroup title={uiTerms.roleInstructions}>
+      <form className="grid gap-2 p-4" onSubmit={event => {
+        event.preventDefault();
+        if (persona.trim() && persona !== ghost.persona) void run(async () => {
+          await client.send({ type: 'ghost.update', ghostId, persona });
+          setPersonaDraft(null);
+        }, '역할 지시를 저장했습니다.');
+      }}>
+        <Textarea aria-label={uiTerms.roleInstructions} value={persona} onChange={event => setPersonaDraft(event.target.value)} rows={4} maxLength={8192} required disabled={locked}/>
+        {persona !== ghost.persona && <Button type="submit" size="sm" className="justify-self-end" disabled={locked || !persona.trim()}>저장</Button>}
+      </form>
+    </SettingsGroup>
     <section className="grid gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="m-0 text-caption font-medium text-ink-2">도구 권한</h4>
+        <h4 className="section-title">도구 권한</h4>
         {toolsChanged && <Button size="sm" type="button" disabled={locked} onClick={() => void run(async () => {
           await client.send({ type: 'ghost.update', ghostId, tools: draft });
           setToolsDraft({});
         }, '도구 권한을 저장했습니다.')}>저장</Button>}
       </div>
-      {toolGroups.map(group => <SettingsGroup key={group.title} title={group.title} description={group.description}>
+      {toolGroups.map(group => <SettingsGroup key={group.title} title={group.title}>
         {group.tools.map(toolRow)}
       </SettingsGroup>)}
       {extra.length > 0 && <SettingsGroup title="기타 도구">{extra.map(toolRow)}</SettingsGroup>}
-      <SettingsGroup title="항상 제공되는 도구" description="Ghost가 일을 안전하게 진행하도록 대화 종류에 따라 항상 쓰는 도구입니다. 선택 목록에 없고 끌 수 없습니다.">
-        <ul className="m-0 grid list-none gap-1.5 p-0">
+      <SettingsGroup title="항상 제공되는 도구" description="대화 종류에 따라 항상 쓰는 도구입니다. 선택 목록에 없고 끌 수 없습니다.">
+        <ul className="m-0 grid list-none gap-1.5 p-4">
           {lifecycleTools.map(({ tool, label, note }) => <li key={tool} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-caption">
             <span className="text-ink">{label}</span><span className="text-ink-3">{note}</span>
           </li>)}
         </ul>
       </SettingsGroup>
-      <p className="m-0 text-caption text-ink-3">메인 Ghost만 직접 대화에서 다른 Ghost의 설정을 바꿀 수 있습니다. 자기 설정과 메인 지정은 소유자만 바꿉니다.</p>
       {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
       {error && <InlineError>{error}</InlineError>}
     </section>

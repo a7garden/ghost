@@ -99,14 +99,14 @@ export function PageEditorDrawer({ spaceId, pageId, onClose, onSaved }: {
             <SegmentedControl aria-label="HTML 표시 방식" value={htmlView} onValueChange={value => setHtmlView(value as 'preview' | 'source')}
               options={[{ value: 'preview', label: '미리보기' }, { value: 'source', label: '원문' }]}/>
             {htmlView === 'preview'
-              ? <iframe title="HTML 미리보기" sandbox="" referrerPolicy="no-referrer" className="min-h-[50dvh] w-full rounded-control border border-line bg-surface"
+              ? <iframe title="HTML 미리보기" sandbox="" referrerPolicy="no-referrer" className="min-h-[50dvh] w-full rounded-xl border-0 bg-surface shadow-card"
                 srcDoc={`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">${draft.body}`}/>
               : <FormField label="본문">
                 {control => <Textarea {...control} value={draft.body} rows={16} disabled={!editable || saving} className="min-h-[50dvh] font-mono text-caption" spellCheck={false}
                   onChange={event => setDraft(current => ({ ...current, body: event.target.value }))}/>}
               </FormField>}
           </section>
-          : <div className="grid gap-1 rounded-control border border-line bg-surface p-1">
+          : <div className="grid gap-1 rounded-xl bg-surface p-1 shadow-card">
             <MarkdownEditor value={draft.body} onChange={body => setDraft(current => ({ ...current, body }))}
               label="본문" readOnly={!editable || saving} documentId={view?.pageId ?? 'new'} className="min-h-[50dvh]"
               unsupportedLabel="이 브라우저에서 문서 편집기를 사용할 수 없습니다."/>

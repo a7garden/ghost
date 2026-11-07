@@ -4,13 +4,18 @@
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-x: contain;
+  border-radius: var(--radius-xl);
+  background: var(--ghost-surface);
+  box-shadow: var(--shadow-card);
   scrollbar-color: var(--ghost-line-strong) transparent;
 }
 
 .ghost-table {
   width: max-content;
   min-width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  padding: 4px;
   color: var(--ghost-ink);
   font-size: var(--text-ui, 13px);
   line-height: 1.45;
@@ -23,23 +28,27 @@
 .ghost-table__head,
 .ghost-table__cell {
   min-width: 0;
-  padding: var(--ghost-space-2) var(--ghost-space-3);
-  border-bottom: 1px solid var(--ghost-line);
+  padding: 8px var(--ghost-space-3);
   text-align: left;
   vertical-align: middle;
   overflow-wrap: anywhere;
 }
 
 .ghost-table__head {
-  color: var(--ghost-ink2);
+  padding-top: 10px;
+  color: var(--ghost-ink3);
   font-size: var(--text-caption, 12px);
   font-weight: 600;
+  letter-spacing: .005em;
   white-space: nowrap;
 }
 
+.ghost-table__body .ghost-table__cell { padding-block: 10px; }
+.ghost-table__body .ghost-table__row:first-child > .ghost-table__cell { padding-top: 6px; }
+.ghost-table__body .ghost-table__row:last-child > .ghost-table__cell { padding-bottom: 12px; }
+
 .ghost-table__footer .ghost-table__cell {
-  border-top: 1px solid var(--ghost-line-strong);
-  border-bottom: 0;
+  border-top: 1px dashed var(--ghost-line-strong);
   font-weight: 500;
 }
 
@@ -50,6 +59,8 @@
   text-align: left;
 }
 
-.ghost-table__body .ghost-table__row:hover > .ghost-table__cell {
-  background: var(--ghost-hover);
-}
+/* Borderless hover rows, rounded like list lanes. */
+.ghost-table__body .ghost-table__row > .ghost-table__cell { background: transparent; transition: background-color var(--duration-fast) ease; }
+.ghost-table__body .ghost-table__row:hover > .ghost-table__cell { background: var(--ghost-hover); }
+.ghost-table__body .ghost-table__row:hover > .ghost-table__cell:first-child { border-radius: var(--radius-control) 0 0 var(--radius-control); }
+.ghost-table__body .ghost-table__row:hover > .ghost-table__cell:last-child { border-radius: 0 var(--radius-control) var(--radius-control) 0; }

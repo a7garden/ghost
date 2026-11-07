@@ -11,7 +11,7 @@ import { profileSummary } from './profileSummary';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from '../pets/ModelPicker';
 import { Modal } from '../components/Modal';
 
-const stateBadge: Record<Ghost['state'], string | null> = { active: null, paused: '일시정지', retired: '은퇴' };
+const stateBadge: Record<Ghost['state'], { label: string; variant: 'warning' | 'outline' } | null> = { active: null, paused: { label: '일시정지', variant: 'warning' }, retired: { label: '은퇴', variant: 'outline' } };
 
 /** Ghost 목록과 새 Ghost 만들기. 대화·꾸미기 이동은 App이 콜백으로 연결하고, 선택한 Ghost의 설정(역할·도구)은 이 탭에서 고친다. */
 export function TeamSettings({ onChat, onManage, onPortrait, onImport, selectedGhostId }: {
@@ -27,19 +27,16 @@ export function TeamSettings({ onChat, onManage, onPortrait, onImport, selectedG
   const ghosts = [...(state?.ghosts ?? [])].sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.createdAt - b.createdAt);
   const selected = ghosts.find(ghost => ghost.id === selectedGhostId) ?? ghosts[0] ?? null;
   const [creating, setCreating] = useState(false);
-  return <section className="flex min-w-0 flex-col gap-3" aria-labelledby="team-heading">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="team-heading" className="m-0 text-ui font-semibold text-ink">팀</h2>
-      <div className="flex flex-wrap gap-2">
-        {onImport && <Button variant="outline" type="button" onClick={onImport}><PackagePlus size={15}/>패키지 추가</Button>}
-        <Button type="button" disabled={!state} onClick={() => setCreating(true)}><Plus size={15}/>새 Ghost</Button>
-      </div>
-    </div>
-    <SettingsGroup title={<span className="sr-only">Ghost 목록</span>}>{ghosts.map(ghost => {
+  return <section className="flex min-w-0 flex-col gap-6" aria-label="팀">
+    <SettingsGroup title="Ghost" actions={<>
+      {onImport && <Button variant="outline" type="button" onClick={onImport}><PackagePlus size={15}/>패키지 추가</Button>}
+      <Button type="button" disabled={!state} onClick={() => setCreating(true)}><Plus size={15}/>새 Ghost</Button>
+    </>}>{ghosts.map(ghost => {
       const badge = stateBadge[ghost.state];
       return <SettingsRow key={ghost.id} label={<span className="flex min-w-0 items-center gap-3">
         <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={36}/>
         <span className="flex min-w-0 flex-col gap-1">
-          <span className="flex flex-wrap items-center gap-1.5 text-ui font-medium text-ink [overflow-wrap:anywhere]">{ghost.name}{ghost.isDefault && <Badge variant="outline">메인</Badge>}{badge && <Badge variant="outline">{badge}</Badge>}</span>
+          <span className="flex flex-wrap items-center gap-1.5 text-ui font-medium text-ink [overflow-wrap:anywhere]">{ghost.name}{ghost.isDefault && <Badge variant="outline">메인</Badge>}{badge && <Badge variant={badge.variant}>{badge.label}</Badge>}</span>
           <span className="text-caption text-ink-3">{profileSummary(ghost.persona)}</span>
         </span>
       </span>}>
@@ -50,8 +47,8 @@ export function TeamSettings({ onChat, onManage, onPortrait, onImport, selectedG
         </span>
       </SettingsRow>;
     })}</SettingsGroup>
-    {selected && <section className="grid gap-3" aria-labelledby="ghost-settings-heading">
-      <h3 id="ghost-settings-heading" className="m-0 text-ui font-semibold text-ink">{selected.name} 설정</h3>
+    {selected && <section className="grid gap-3" aria-label={`${selected.name} 설정`}>
+      <h3 className="section-title">{selected.name} 설정</h3>
       <GhostAgentSettingsEditor key={selected.id} ghostId={selected.id}/>
     </section>}
     {creating && <GhostCreateDialog onClose={() => setCreating(false)} onCreate={async input => {

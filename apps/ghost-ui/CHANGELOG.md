@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Redesigned the whole app around supervising agents. New visual language (neutral
+  layered surfaces; color only for agent state, each with its own glyph shape) and
+  purpose-built components: presence rings with a live "now" line per Ghost, an activity
+  island in the title bar, state glyphs, lifecycle tracks, work lanes with delegation
+  branches, a decision deck (numbered answer tiles, exact-request approvals, result
+  receipts, keyboard resolution), an addressed hand-off composer whose 맡기기 mode adds
+  completion criteria and deadline in place, tool trails in transcripts, a composer edge
+  that signals a running reply, and a work detail with delegation map and effect timeline.
+  확인할 일 joins the sidebar; work detail resolves its own decisions. 일 맡기기 accepts
+  completion criteria. Editing a deadline now shows local time instead of UTC.
+  The dev server proxy now actually reaches `$GHOST_ROOT`'s host.
+
 - Added model-generated interactive responses through the direct-only `present_ui`
   capability: bar/line charts with exact-data view, comparisons, choices, forms and
   isolated static HTML. UI actions send ordinary owner messages, retain tab-scoped

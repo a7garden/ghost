@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toDataURL } from 'qrcode';
 import { Pencil, QrCode, Smartphone, Trash2 } from 'lucide-react';
-import { Badge, Button, Checkbox, FormField, InlineError, Input } from '../ui'
+import { Badge, Button, Checkbox, FormField, InlineError, Input, SettingsGroup, SettingsRow } from '../ui'
 import type { Device, DeviceGrant } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -59,12 +59,12 @@ export function MobilePairing() {
     catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); return false; }
     finally { setPending(''); }
   };
-  return <section className="flex min-w-0 flex-col gap-4" aria-label="기기">
+  return <section className="flex min-w-0 flex-col gap-6" aria-label="기기">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <h2 className="m-0 text-ui font-semibold text-ink">기기</h2>
+      <h2 className="section-title">기기</h2>
       <Button type="button" disabled={!state} onClick={() => { setError(''); setCreating(true); }}><QrCode size={15}/>기기 페어링</Button>
     </div>
-    {offer && <section className="grid justify-items-center gap-3 rounded-xl bg-inset px-5 py-6" aria-label="페어링 코드">
+    {offer && <section className="grid justify-items-center gap-3 rounded-xl bg-surface p-6 shadow-card" aria-label="페어링 코드">
       <div className="flex items-center gap-2 text-ui font-semibold text-ink"><Smartphone size={17} aria-hidden="true"/>iPhone에서 QR 코드를 스캔해 주세요</div>
       {qr && !expired ? <img src={qr} alt={`페어링 코드 ${offer.code}`} width={240} height={240} className="rounded-lg bg-canvas p-2"/> : null}
       {expired
@@ -75,21 +75,23 @@ export function MobilePairing() {
         <Button variant="ghost" type="button" onClick={() => setOffer(undefined)}>닫기</Button>
       </div>
     </section>}
-    <div className="flex min-w-0 flex-col">
-      {devices.map(device => <div className="flex min-w-0 items-center gap-3 border-b border-line py-3.5 last:border-b-0" key={device.id}>
+    {devices.length
+      ? <SettingsGroup title={<span className="sr-only">등록된 기기</span>}>{devices.map(device => <SettingsRow key={device.id} label={<span className="flex min-w-0 items-center gap-3">
         <Smartphone size={17} className="shrink-0 text-ink-3" aria-hidden="true"/>
-        <div className="min-w-0 flex-1">
+        <span className="flex min-w-0 flex-col gap-1">
           <span className="flex flex-wrap items-center gap-2 text-ui font-medium text-ink [overflow-wrap:anywhere]">{device.name}
             {device.pushEnabled && <Badge variant="outline">알림</Badge>}
-            {device.lastSeenAt && <span className="text-caption text-ink-3">마지막 연결 {seen(device.lastSeenAt)}</span>}
+            {device.lastSeenAt && <span className="text-caption font-normal text-ink-3">마지막 연결 {seen(device.lastSeenAt)}</span>}
           </span>
-          <span className="block text-caption text-ink-2">{grantsLabel(device.grants, ghostName)}</span>
-        </div>
-        <Button variant="ghost" size="icon" type="button" aria-label={`${device.name} 권한 편집`} disabled={pending !== ''} onClick={() => { setError(''); setEditing(device); }}><Pencil size={15}/></Button>
-        <Button variant="ghost" size="icon" type="button" aria-label={`${device.name} 연결 해제`} disabled={pending !== ''} onClick={() => { setError(''); setRevoking(device); }}><Trash2 size={15}/></Button>
-      </div>)}
-      {state && !devices.length && <p className="m-0 py-2 text-ui text-ink-3">페어링된 기기 없음</p>}
-    </div>
+          <span className="text-caption font-normal text-ink-2">{grantsLabel(device.grants, ghostName)}</span>
+        </span>
+      </span>}>
+        <span className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" type="button" aria-label={`${device.name} 권한 편집`} disabled={pending !== ''} onClick={() => { setError(''); setEditing(device); }}><Pencil size={15}/></Button>
+          <Button variant="ghost" size="icon" type="button" aria-label={`${device.name} 연결 해제`} disabled={pending !== ''} onClick={() => { setError(''); setRevoking(device); }}><Trash2 size={15}/></Button>
+        </span>
+      </SettingsRow>)}</SettingsGroup>
+      : state && <div className="calm"><Smartphone size={16} aria-hidden="true"/><p>페어링된 기기 없음</p></div>}
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
     {creating && <GrantEditor title="기기 페어링" ghosts={ghosts} nameHint="iPhone 15 Pro" busy={pending !== ''} onClose={() => setCreating(false)} onSave={async input => {
@@ -146,7 +148,7 @@ function GrantEditor({ title, ghosts, initialName = '', initialGrants, nameHint,
   return <Modal title={title} onClose={() => !locked && onClose()} className="w-[min(560px,calc(100vw-2rem))] sm:max-w-[560px]">
     <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
       <FormField label="기기 이름">{control => <Input {...control} value={name} onChange={event => setName(event.target.value)} required maxLength={128} placeholder={nameHint} disabled={locked}/>}</FormField>
-      <fieldset className="m-0 flex min-w-0 flex-col gap-2.5 border-t border-line pt-4">
+      <fieldset className="m-0 flex min-w-0 flex-col gap-2.5 border-t border-dashed border-line-strong pt-4">
         <legend className="mb-1 text-caption text-ink-2">이 기기가 대화할 수 있는 Ghost</legend>
         {ghosts.map(ghost => <label key={ghost.id} className="flex items-center gap-2.5 text-caption text-ink">
           <Checkbox aria-label={`${ghost.name} 권한`} checked={grants.some(grant => grant.ghostId === ghost.id)} disabled={locked} onCheckedChange={checked => toggle(ghost.id, checked === true)}/>

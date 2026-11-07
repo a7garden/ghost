@@ -1,23 +1,16 @@
-import { ChevronRight, Folder, History, Home, LayoutList, Plus, Settings2 } from 'lucide-react';
+import { ChevronRight, Folder, History, Home, Inbox, LayoutList, Plus, Settings2 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
-import { Badge, Navigation, NavigationGroup, NavigationItem } from '../ui'
+import { Navigation, NavigationGroup, NavigationItem } from '../ui'
 import type { Ghost, State } from '@ghost/contract';
-import { dotState, stateLabel, toneFor, type DotState } from '../features/ghostState';
-import { DotAvatar } from './DotAvatar';
-import { routeLabels } from '../uiText';
+import { ghostPresence, liveWorks } from '../features/ghostState';
+import { PresenceAvatar } from './agent';
+import { routeLabels, uiTerms } from '../uiText';
 import type { HostStatus } from '../features/hostStatus';
 
 /** One page of a Ghost besides its conversation: its work and its earlier conversations. */
 export interface GhostMenuItem { key: string; label: string; path: string; kind: 'work' | 'history' }
 
 const menuIcons = { work: LayoutList, history: History };
-
-/** Only states that need a glance get a mark; an idle Ghost stays quiet. */
-const stateDot: Partial<Record<DotState, string>> = {
-  working: 'bg-ink animate-pulse motion-reduce:animate-none',
-  attention: 'bg-orange',
-  offline: 'bg-red',
-};
 
 export function WorkspaceSidebar({ state, section, openGhostId, ghostMenu, currentGhostPage, selectedSpace, attentionCount, status, navigate, openGhost }: {
   state: State | null;
@@ -45,49 +38,57 @@ export function WorkspaceSidebar({ state, section, openGhostId, ghostMenu, curre
     return next;
   });
   const spaces = state?.spaces ?? [];
+  const live = state ? liveWorks(state).length : 0;
   const hostTrouble = status.state !== 'connected';
   return <>
-    <Navigation label="작업실" className="ghost-sidebar min-h-0 flex-1 overflow-y-auto p-3">
-      <NavigationItem current={section === 'home'} onClick={() => navigate('/')}>
-        <Home/><span className="flex-1">{routeLabels.home}</span>{attentionCount > 0 && <Badge variant="warning"><span className="sr-only">확인 필요 </span>{attentionCount}</Badge>}
-      </NavigationItem>
+    <Navigation label="작업실" className="ghost-sidebar min-h-0 flex-1 overflow-y-auto">
+      <div className="sidebar-primary">
+        <NavigationItem current={section === 'home'} onClick={() => navigate('/')}>
+          <Home/><span className="flex-1">{routeLabels.home}</span>
+        </NavigationItem>
+        <NavigationItem current={section === 'inbox'} onClick={() => navigate('/inbox')}>
+          <Inbox/><span className="flex-1">{uiTerms.inbox}</span>
+          {attentionCount > 0 && <span className="sidebar-count" data-tone="amber"><span className="sr-only">확인 필요 </span>{attentionCount}</span>}
+        </NavigationItem>
+        <NavigationItem current={section === 'work' && !openGhostId} onClick={() => navigate('/work')}>
+          <LayoutList/><span className="flex-1">{uiTerms.work}</span>
+          {live > 0 && <span className="sidebar-count"><span className="sr-only">진행 중 </span>{live}</span>}
+        </NavigationItem>
+      </div>
       {ghosts.length > 0 && <NavigationGroup label="Ghost">{ghosts.map(ghost => {
         const open = ghost.id === openGhostId;
-        const name = ghost.name;
-        const mood = state ? dotState(ghost, state) : 'idle';
+        const presence = state ? ghostPresence(ghost, state) : { state: 'idle' as const, line: null };
         const menu = ghostMenu(ghost);
         const unfolded = menu.length > 0 && expanded.has(ghost.id);
-        return <div key={ghost.id} className="grid gap-1">
-          <div className="relative">
-            <NavigationItem current={open && currentGhostPage === 'chat'} className={`w-full ${open ? 'text-ink' : ''}`} style={menu.length ? { paddingRight: 34 } : undefined} onClick={() => openGhost(ghost.id)}>
-              <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={18}/><span className="min-w-0 flex-1 truncate">{name}</span>
-              {ghost.isDefault && <Badge variant="outline">메인</Badge>}
-              {stateDot[mood] && <span className={`size-1.5 shrink-0 rounded-full ${stateDot[mood]}`} title={stateLabel[mood]}><span className="sr-only">{stateLabel[mood]}</span></span>}
-            </NavigationItem>
-            {menu.length > 0 && <button type="button" aria-expanded={unfolded} aria-label={`${name} 하위 메뉴 ${unfolded ? '접기' : '펼치기'}`} onClick={() => toggle(ghost.id)}
-              className="absolute top-1/2 right-1 grid size-6 -translate-y-1/2 cursor-pointer place-items-center rounded-full text-ink-3 outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3">
-              <ChevronRight size={14} aria-hidden="true" className={`transition-transform motion-reduce:transition-none ${unfolded ? 'rotate-90' : ''}`}/>
-            </button>}
-          </div>
-          {unfolded && <div className="ml-[17px] grid gap-1 border-l border-line pl-1.5">{menu.map(item => {
+        return <div key={ghost.id} className="presence-row" data-open={open || undefined}>
+          <button type="button" className="presence-row__main" aria-current={open && currentGhostPage === 'chat' ? 'page' : undefined} onClick={() => openGhost(ghost.id)}>
+            <PresenceAvatar ghostId={ghost.id} state={presence.state} size={26}/>
+            <span className="presence-row__copy">
+              <span className="presence-row__name"><span className="truncate">{ghost.name}</span>{ghost.isDefault && <span className="presence-row__main-mark">메인</span>}</span>
+              {presence.line && <span className="presence-row__line" data-tone={presence.state}>{presence.line}</span>}
+            </span>
+          </button>
+          {menu.length > 0 && <button type="button" className="presence-row__fold" aria-expanded={unfolded} aria-label={`${ghost.name} 하위 메뉴 ${unfolded ? '접기' : '펼치기'}`} onClick={() => toggle(ghost.id)}>
+            <ChevronRight size={14} aria-hidden="true" data-open={unfolded || undefined}/>
+          </button>}
+          {unfolded && <div className="presence-row__menu">{menu.map(item => {
             const Icon = menuIcons[item.kind];
-            return <NavigationItem key={item.key} current={open && item.key === currentGhostPage} onClick={() => navigate(item.path)}><Icon/><span>{item.label}</span></NavigationItem>;
+            return <NavigationItem key={item.key} current={open && item.key === currentGhostPage} onClick={() => navigate(item.path)}><Icon/><span className="truncate">{item.label}</span></NavigationItem>;
           })}</div>}
         </div>;
       })}</NavigationGroup>}
-      {spaces.length > 0 && <NavigationGroup label="프로젝트" className="relative">
-        <button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/spaces?new=1')}
-          className="absolute top-1.5 right-1 grid size-6 cursor-pointer place-items-center rounded-full text-ink-3 outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3"><Plus size={14} aria-hidden="true"/></button>
+      <NavigationGroup label="프로젝트" className="relative">
+        <button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/spaces?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>
         {spaces.map(space => <NavigationItem key={space.id} current={section === 'spaces' && space.id === selectedSpace} onClick={() => navigate(`/spaces/${space.id}`)}>
-          <Folder/><span>{space.name}</span>
+          <Folder/><span className="truncate">{space.name}</span>
         </NavigationItem>)}
-      </NavigationGroup>}
+      </NavigationGroup>
     </Navigation>
-    <div className="shrink-0 border-t border-line p-3">
+    <div className="sidebar-foot">
       <NavigationItem className="w-full" current={section === 'settings'} aria-describedby={hostTrouble ? hostStatusId : undefined}
         onClick={() => navigate(hostTrouble ? '/settings?tab=host' : '/settings')}>
         <Settings2/><span className="flex-1">설정</span>
-        {hostTrouble && <Badge variant="danger" id={hostStatusId}>{status.label}</Badge>}
+        {hostTrouble && <span className="sidebar-count" data-tone="danger" id={hostStatusId}>{status.label}</span>}
       </NavigationItem>
     </div>
   </>;

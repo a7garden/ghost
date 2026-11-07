@@ -30,13 +30,11 @@ export default defineConfig({
       // The proxy owns the owner token: the browser never sees it in dev.
       // Vitest spins up its own dev server; tests never touch the host.
       name: 'ghost-host-proxy',
-      configureServer(server) {
-        if (process.env.VITEST || server.config.mode === 'test') return;
+      config(_config, { command, mode }) {
+        if (command !== 'serve' || process.env.VITEST || mode === 'test') return;
         const host = hostFromRoot();
-        server.middlewares.use('/api', (req, res, next) => {
-          req.headers.authorization = `Bearer ${host.token}`;
-          next();
-        });
+        // The host trusts only its own loopback authority, so the proxy presents it.
+        return { server: { proxy: { '/api': { target: `http://127.0.0.1:${host.port}`, changeOrigin: true, headers: { authorization: `Bearer ${host.token}` } } } } };
       },
     },
   ],
@@ -44,12 +42,6 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5178,
     strictPort: true,
-    configureServer(server) {
-      if (process.env.VITEST || server.config.mode === 'test') return;
-      const host = hostFromRoot();
-      server.config.server.proxy ??= {};
-      server.config.server.proxy['/api'] = { target: `http://127.0.0.1:${host.port}`, changeOrigin: false };
-    },
   },
   build: {
     outDir: 'dist',

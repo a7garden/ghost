@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, ChevronRight, KeyRound, LogIn, ShieldOff, Plus, Trash2 } from 'lucide-react';
-import { Button, SettingsGroup, SettingsRow, InlineError, SelectField } from '../ui';
+import { Button, SettingsGroup, SettingsRow, InlineError, SelectField, Badge } from '../ui';
 import type { Provider, ProviderPreset } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -51,33 +51,29 @@ export function ModelSettings() {
   };
 
   return <section className="flex min-w-0 flex-col gap-6" aria-label="모델 설정">
-    <div className="flex flex-wrap items-center justify-between gap-4">
-      <h3 className="m-0 text-ui font-semibold text-ink">제공자</h3>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h2 className="section-title">제공자</h2>
       <Button variant="outline" type="button" disabled={pending !== '' || !settings || catalogLoading || !catalog.length} onClick={() => { setError(''); setEditor({}); }}><Plus size={15}/>{catalogLoading ? '목록 불러오는 중…' : '제공자 추가'}</Button>
     </div>
     {catalogError && <InlineError pending={catalogLoading} onRetry={() => setCatalogAttempt(value => value + 1)} retryLabel="다시 불러오기">{catalogError}</InlineError>}
-    <div className="flex min-w-0 flex-col">
-      {(settings?.providers ?? []).map(provider => <article className="flex min-w-0 flex-col gap-3 border-b border-line py-4 first:pt-0 last:border-b-0" key={provider.id}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="flex min-w-0 flex-wrap items-center gap-2.5">
-            <span className="text-body font-semibold text-ink [overflow-wrap:anywhere]">{provider.name}</span>
-          </span>
-          <span className="flex items-center gap-1 text-caption text-ink-3">
-            {provider.hasCredential ? <><KeyRound size={13} aria-hidden="true"/>{provider.authType === 'oauth' ? 'ChatGPT 인증 저장됨' : 'API 키 저장됨'}</> : <><ShieldOff size={13} aria-hidden="true"/>인증 정보 없음</>}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="min-w-0 text-caption text-ink-3 [overflow-wrap:anywhere]">{provider.models.length ? `${provider.models.slice(0, 2).map(model => model.name || model.id).join(', ')}${provider.models.length > 2 ? ` 외 ${provider.models.length - 2}개` : ''}` : '선택한 모델 없음'}</span>
-          <div className="flex flex-wrap items-center gap-2">
-            {provider.kind === 'openai' && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} ChatGPT로 로그인`} onClick={() => { setError(''); setLogin(provider); }}><LogIn size={14}/>{provider.authType === 'oauth' ? '다시 로그인' : 'ChatGPT 로그인'}</Button>}
-            <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} 설정`} onClick={() => { setError(''); setEditor({ initial: provider }); }}>설정<ChevronRight size={14}/></Button>
-            <Button variant="ghost" size="icon" type="button" aria-label={`${provider.name} 제공자 삭제`} disabled={pending !== ''} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></Button>
-          </div>
-        </div>
-        {provider.baseUrl && <p className="m-0 text-caption text-ink-3 [overflow-wrap:anywhere]">{provider.baseUrl}</p>}
-      </article>)}
-      {settings && !settings.providers.length && <p className="m-0 py-4 text-ui text-ink-3">사용할 제공자를 추가해 주세요.</p>}
-    </div>
+    {(settings?.providers.length ?? 0) > 0
+      ? <SettingsGroup title={<span className="sr-only">제공자 목록</span>}>{(settings?.providers ?? []).map(provider => <SettingsRow key={provider.id}
+        label={<span className="flex min-w-0 flex-wrap items-center gap-2 text-ui font-semibold text-ink [overflow-wrap:anywhere]">{provider.name}
+          {provider.hasCredential
+            ? <Badge variant="outline"><KeyRound aria-hidden="true"/>{provider.authType === 'oauth' ? 'ChatGPT 인증 저장됨' : 'API 키 저장됨'}</Badge>
+            : <Badge variant="warning"><ShieldOff aria-hidden="true"/>인증 정보 없음</Badge>}
+        </span>}
+        description={<>
+          {provider.models.length ? `${provider.models.slice(0, 2).map(model => model.name || model.id).join(', ')}${provider.models.length > 2 ? ` 외 ${provider.models.length - 2}개` : ''}` : '선택한 모델 없음'}
+          {provider.baseUrl && <span className="mt-0.5 block">{provider.baseUrl}</span>}
+        </>}>
+        <span className="flex flex-wrap items-center gap-1">
+          {provider.kind === 'openai' && !provider.baseUrl && (!provider.hasCredential || provider.authType === 'oauth') && <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} ChatGPT로 로그인`} onClick={() => { setError(''); setLogin(provider); }}><LogIn size={14}/>{provider.authType === 'oauth' ? '다시 로그인' : 'ChatGPT 로그인'}</Button>}
+          <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${provider.name} 설정`} onClick={() => { setError(''); setEditor({ initial: provider }); }}>설정<ChevronRight size={14}/></Button>
+          <Button variant="ghost" size="icon" type="button" aria-label={`${provider.name} 제공자 삭제`} disabled={pending !== ''} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></Button>
+        </span>
+      </SettingsRow>)}</SettingsGroup>
+      : settings && <div className="calm"><Plus size={16} aria-hidden="true"/><p>사용할 제공자를 추가해 주세요</p></div>}
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 flex items-start gap-1.5 text-caption text-success" role="status"><Check size={14} className="mt-0.5 flex-none"/>{notice}</p>}
     <SettingsGroup title="모델 선택">

@@ -19,11 +19,11 @@ export type BannerProps = React.ComponentProps<"div"> & {
 
 const VARIANT_CLASS: Record<
   BannerVariant,
-  { iconClass: string; icon: typeof TriangleAlert }
+  { surfaceClass: string; icon: typeof TriangleAlert }
 > = {
-  warning: { iconClass: "text-orange", icon: TriangleAlert },
-  danger: { iconClass: "text-red", icon: OctagonAlert },
-  info: { iconClass: "text-ink-2", icon: Info },
+  warning: { surfaceClass: "bg-amber-tint text-amber-ink", icon: TriangleAlert },
+  danger: { surfaceClass: "bg-red-tint text-red", icon: OctagonAlert },
+  info: { surfaceClass: "bg-hover text-ink-2", icon: Info },
 }
 
 function Banner({
@@ -35,7 +35,7 @@ function Banner({
   children,
   ...props
 }: BannerProps) {
-  const { iconClass, icon: Icon } = VARIANT_CLASS[variant]
+  const { surfaceClass, icon: Icon } = VARIANT_CLASS[variant]
   return (
     <div
       role="status"
@@ -43,12 +43,13 @@ function Banner({
       data-slot="banner"
       data-variant={variant}
       className={cn(
-        "flex min-w-0 items-start gap-3 rounded-card border border-line bg-inset p-3 text-ui text-ink",
+        "flex min-w-0 items-start gap-3 rounded-card p-3 text-ui",
+        surfaceClass,
         className
       )}
       {...props}
     >
-      <Icon aria-hidden className={cn("mt-1.5 size-4 shrink-0", iconClass)} />
+      <Icon aria-hidden className="mt-0.5 size-4 shrink-0" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
         <span className="min-w-0 min-h-7 flex-1 basis-48 content-center whitespace-normal [overflow-wrap:anywhere]">{children}</span>
         {action && <div data-slot="banner-action" className="flex max-w-full shrink-0 items-center gap-2">{action}</div>}

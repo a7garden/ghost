@@ -29,7 +29,7 @@ function PopoverContent({
         sideOffset={sideOffset}
         collisionPadding={8}
         className={cn(
-          "bg-surface text-ui text-ink data-[state=open]:animate-[pop-in_150ms_var(--ease-enter)] data-[state=closed]:animate-[fade-in_100ms_ease-in_reverse] z-50 w-72 max-w-[calc(100vw-1rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto [overflow-wrap:anywhere] origin-(--radix-popover-content-transform-origin) rounded-card border border-line-strong p-4 shadow-overlay outline-none",
+          "bg-raised text-ui text-ink data-[state=open]:animate-[pop-in_150ms_var(--ease-enter)] data-[state=closed]:animate-[fade-in_100ms_ease-in_reverse] z-50 w-72 max-w-[calc(100vw-1rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto [overflow-wrap:anywhere] origin-(--radix-popover-content-transform-origin) rounded-lg p-4 shadow-overlay outline-none",
           className
         )}
         {...props}

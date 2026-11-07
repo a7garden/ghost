@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
-import { Button, InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui'
+import { InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import type { Settings } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -79,11 +79,11 @@ export function ModelPicker({ conversationId, value, onChange, disabled = false,
 
   return <Popover open={open} onOpenChange={next => { if (!pending) { setOpen(next); if (!next) setError(''); } }}>
     <PopoverTrigger asChild>
-      <Button variant="outline" size="sm" type="button" disabled={locked} title={locked && conversation?.busy ? '진행 중인 응답이 끝난 뒤 모델을 바꿀 수 있습니다.' : undefined}
-        className={`h-8 max-w-[220px] gap-1.5 text-caption ${className}`} aria-label={`모델 ${modelDisplayName(settings, saved)} 선택`}>
+      <button type="button" disabled={locked} title={locked && conversation?.busy ? '진행 중인 응답이 끝난 뒤 모델을 바꿀 수 있습니다.' : undefined}
+        className={`composer-chip max-w-[220px] ${className}`} aria-label={`모델 ${modelDisplayName(settings, saved)} 선택`}>
         <span className="truncate">{modelDisplayName(settings, saved)}</span>
-        <ChevronDown size={14} className="flex-none text-ink-3" aria-hidden="true"/>
-      </Button>
+        <ChevronDown size={13} className="flex-none text-ink-3" aria-hidden="true"/>
+      </button>
     </PopoverTrigger>
     <PopoverContent side="top" align="start" className="w-64 max-w-[calc(100vw-2rem)] p-1.5" aria-label="모델 선택">
       <div className="max-h-[60dvh] overflow-auto">

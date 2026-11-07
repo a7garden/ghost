@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { FileText, FolderPlus, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { Badge, Button, EmptyState, FormField, Page, PageHeader, InlineError, Input, SelectField, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui'
+import { Badge, Button, FormField, Page, PageHeader, InlineError, Input, SelectField, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui'
 import type { PageSummary, Space, SpaceGrant } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { routeLabels } from '../uiText';
+import { toneFor } from './ghostState';
+import { DotAvatar } from '../components/DotAvatar';
 import { grantsSummary, isEditableProfile } from './spacePages';
 import { Modal } from '../components/Modal';
 
@@ -60,38 +62,45 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
   return <Page width="reading">
     <PageHeader title={routeLabels.spaces}
       actions={<Button type="button" disabled={!state} onClick={() => setCreating(true)}><FolderPlus size={16} aria-hidden="true"/>새 프로젝트</Button>}/>
-    <div className="grid gap-6">
+    <div className="grid gap-8">
       <div className="flex min-w-0 flex-col">
-        {spaces.map(item => <div className="flex min-w-0 items-center gap-3 border-b border-line py-3.5 last:border-b-0" key={item.id}>
-          <button type="button" aria-current={item.id === selectedSpace || undefined} onClick={() => onSelectSpace?.(item.id)}
-            className="min-w-0 flex-1 rounded-control px-2 py-1.5 text-left outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 aria-[current]:bg-hover">
-            <span className="block text-ui font-medium text-ink [overflow-wrap:anywhere]">{item.name}</span>
-            <span className="block text-caption text-ink-3 [overflow-wrap:anywhere]">{item.path}</span>
-            <span className="mt-1 block text-caption text-ink-2">{grantsSummary(item.grants, ghostName)}</span>
-          </button>
-          <Button variant="ghost" size="icon" type="button" aria-label={`${item.name} 권한 편집`} disabled={pending !== ''} onClick={() => { setError(''); setEditing(true); }}><Pencil size={15}/></Button>
-          <Button variant="ghost" size="icon" type="button" aria-label={`${item.name} 프로젝트 삭제`} disabled={pending !== ''} onClick={() => { setError(''); setRemoving(item); }}><Trash2 size={15}/></Button>
-        </div>)}
-        {state && !spaces.length && <EmptyState title="등록된 프로젝트 없음" description="PDC 문서 보관함(폴더)을 프로젝트로 등록하면 Ghost가 읽거나 제안할 수 있습니다."
-          action={<Button type="button" variant="outline" onClick={() => setCreating(true)}><Plus size={15}/>새 프로젝트</Button>}/>}
+        {spaces.length
+          ? <div className="lanes">{spaces.map(item => <div className="lane" key={item.id}>
+            <div className="lane__row">
+              <button type="button" aria-current={item.id === selectedSpace || undefined} onClick={() => onSelectSpace?.(item.id)}
+                className="lane__main">
+                <FileText size={16} className="flex-none text-ink-3" aria-hidden="true"/>
+                <span className="lane__copy">
+                  <span className="lane__title">{item.name}</span>
+                  <span className="lane__meta flex-wrap"><span>{item.path}</span><span><span aria-hidden="true">· </span>{grantsSummary(item.grants, ghostName)}</span></span>
+                </span>
+              </button>
+              <span className="lane__action">
+                <Button variant="ghost" size="icon" type="button" aria-label={`${item.name} 권한 편집`} disabled={pending !== ''} onClick={() => { setError(''); setEditing(true); }}><Pencil size={15}/></Button>
+                <Button variant="ghost" size="icon" type="button" aria-label={`${item.name} 프로젝트 삭제`} disabled={pending !== ''} onClick={() => { setError(''); setRemoving(item); }}><Trash2 size={15}/></Button>
+              </span>
+            </div>
+          </div>)}</div>
+          : state && <div className="calm"><FolderPlus size={16} aria-hidden="true"/><p>등록된 프로젝트가 없습니다. PDC 문서 보관함(폴더)을 등록하면 Ghost가 읽거나 제안할 수 있습니다.</p></div>}
       </div>
-      {space && <section className="grid gap-3 border-t border-line pt-5" aria-label={`${space.name} 권한`}>
+      {space && <section className="grid gap-3" aria-label={`${space.name} 권한`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="m-0 text-ui font-semibold text-ink">{space.name} 권한</h2>
+          <h2 className="section-title">{space.name} 권한</h2>
           <span className="text-caption text-ink-3 [overflow-wrap:anywhere]">{space.path}</span>
         </div>
-        <ul className="m-0 grid list-none gap-2 p-0">
-          {space.grants.map(grant => <li className="flex items-center gap-3 text-ui text-ink" key={grant.ghostId}>
-            <span className="min-w-0 flex-1 truncate">{ghostName(grant.ghostId)}</span>
+        <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+          {space.grants.map(grant => <li className="flex items-center gap-1.5 rounded-pill bg-hover py-1 pl-1 pr-2.5 text-ui text-ink" key={grant.ghostId}>
+            <DotAvatar profileId={grant.ghostId} tone={toneFor(grant.ghostId)} size={20}/>
+            <span className="max-w-[180px] truncate">{ghostName(grant.ghostId)}</span>
             <Badge variant="outline">{modeLabel[grant.mode]}</Badge>
           </li>)}
           {!space.grants.length && <li className="text-caption text-ink-3">Ghost 권한 없음</li>}
         </ul>
         <div><Button variant="outline" type="button" disabled={pending !== ''} onClick={() => { setError(''); setEditing(true); }}><Pencil size={15}/>권한 편집</Button></div>
       </section>}
-      {space && <section className="grid gap-3 border-t border-line pt-5" aria-label="저장된 문서">
+      {space && <section className="grid gap-3" aria-label="저장된 문서">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="m-0 text-ui font-semibold text-ink">저장된 문서</h2>
+          <h2 className="section-title">저장된 문서</h2>
           <div className="flex flex-wrap items-center gap-2">
             <Input aria-label="문서 검색" placeholder="문서 검색" value={search} maxLength={200} className="w-[220px]"
               onChange={event => setSearch(event.target.value)}/>
@@ -102,7 +111,7 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
         {pagesLoading && pages.length > 0 && <p className="m-0 text-caption text-ink-3" role="status">문서를 불러오는 중…</p>}
         {listError && <InlineError>{listError}</InlineError>}
         {!listError && pages.length > 0 && <DocumentList pages={pages} onOpen={pageId => setOpen({ pageId })}/>}
-        {!listError && !pagesLoading && !pages.length && <p className="m-0 text-ui text-ink-3">{search ? '검색 결과가 없습니다.' : '아직 문서가 없습니다.'}</p>}
+        {!listError && !pagesLoading && !pages.length && <div className="calm"><FileText size={16} aria-hidden="true"/><p>{search ? `"${search.trim()}" 검색 결과가 없습니다` : '아직 문서가 없습니다'}</p></div>}
       </section>}
       {error && <InlineError>{error}</InlineError>}
       {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
@@ -145,7 +154,7 @@ export function DocumentList({ pages, onOpen }: {
       {pages.map(item => <TableRow key={item.pageId}>
         <TableCell>
           <button type="button" aria-haspopup="dialog" onClick={() => onOpen(item.pageId)}
-            className="flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1.5 text-left hover:bg-hover">
+            className="-mx-2 flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1.5 text-left hover:bg-hover">
             <FileText size={16} className="shrink-0 text-ink-3" aria-hidden="true"/>
             <span className="min-w-0 flex-1 text-ui font-medium text-ink [overflow-wrap:anywhere]">{item.title}</span>
           </button>
@@ -194,7 +203,7 @@ function SpaceForm({ title, ghosts, initial, busy, onClose, onSave }: {
       {!initial && <FormField label="보관함 폴더 경로" description="이 Mac의 절대 경로. 문서는 원래 위치에 그대로 있습니다.">
         {control => <Input {...control} type="text" value={path} onChange={event => setPath(event.target.value)} required placeholder="/Users/me/Documents/프로젝트" maxLength={4096} disabled={locked} spellCheck={false} autoCapitalize="off"/>}
       </FormField>}
-      <fieldset className="m-0 flex min-w-0 flex-col gap-3 border-t border-line pt-4">
+      <fieldset className="m-0 flex min-w-0 flex-col gap-3 border-t border-dashed border-line-strong pt-4">
         <legend className="mb-1 text-caption font-semibold text-ink">Ghost 권한</legend>
         {grants.map(grant => <div className="flex items-center gap-3" key={grant.ghostId}>
           <span className="min-w-0 flex-1 truncate text-caption text-ink">{ghosts.find(ghost => ghost.id === grant.ghostId)?.name ?? grant.ghostId}</span>

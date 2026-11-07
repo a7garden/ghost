@@ -25,6 +25,8 @@ export interface SettingsLayoutProps {
 export interface SettingsGroupProps {
   title: ReactNode
   description?: ReactNode
+  /** Right-aligned controls in the group header (e.g. a primary action). */
+  actions?: ReactNode
   children: ReactNode
   className?: string
 }
@@ -142,7 +144,7 @@ export function SettingsLayout({
   )
 }
 
-export function SettingsGroup({ title, description, children, className }: SettingsGroupProps) {
+export function SettingsGroup({ title, description, actions, children, className }: SettingsGroupProps) {
   const headingId = useId()
   const descriptionId = useId()
 
@@ -152,9 +154,12 @@ export function SettingsGroup({ title, description, children, className }: Setti
       aria-labelledby={headingId}
       aria-describedby={description ? descriptionId : undefined}
     >
-      <header className="ghost-settings-group__header">
-        <h2 id={headingId} className="ghost-settings-group__title">{title}</h2>
-        {description && <p id={descriptionId} className="ghost-settings-group__description">{description}</p>}
+      <header className="ghost-settings-group__header" data-actions={actions ? "" : undefined}>
+        <div className="ghost-settings-group__header-copy">
+          <h2 id={headingId} className="ghost-settings-group__title">{title}</h2>
+          {description && <p id={descriptionId} className="ghost-settings-group__description">{description}</p>}
+        </div>
+        {actions && <div className="ghost-settings-group__header-actions">{actions}</div>}
       </header>
       <div className="ghost-settings-group__rows">{children}</div>
     </section>

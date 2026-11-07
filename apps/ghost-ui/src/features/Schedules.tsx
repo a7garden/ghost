@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Pause, Play, Plus, Trash2 } from 'lucide-react';
-import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Textarea } from '../ui'
+import { Clock3, Pause, Play, Plus, Trash2 } from 'lucide-react';
+import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, SettingsGroup, SettingsRow, Textarea } from '../ui'
 import type { Schedule, ScheduleSpec } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -37,6 +37,7 @@ export function specLabel(spec: ScheduleSpec): string {
 }
 
 export const scheduleStateLabel: Record<Schedule['state'], string> = { active: '대기 중', paused: '일시정지', done: '완료' };
+const scheduleTone: Record<Schedule['state'], 'outline' | 'warning' | 'success'> = { active: 'outline', paused: 'warning', done: 'success' };
 
 /** 예약된 반복 작업 목록. 만들기·일시정지·재개·삭제는 schedule.create · schedule.update · schedule.delete로 저장한다. */
 export function Schedules({ ghostId }: { ghostId?: string }) {
@@ -55,31 +56,30 @@ export function Schedules({ ghostId }: { ghostId?: string }) {
     catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); }
     finally { setPending(''); }
   };
-  return <section className="flex min-w-0 flex-col gap-4" aria-label={uiTerms.schedules}>
+  return <section className="flex min-w-0 flex-col gap-6" aria-label={uiTerms.schedules}>
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <h2 className="m-0 text-ui font-semibold text-ink">{uiTerms.schedules}</h2>
+      <h2 className="section-title">{uiTerms.schedules}</h2>
       <Button type="button" disabled={!state} onClick={() => setCreating(true)}><Plus size={15}/>반복 작업 예약</Button>
     </div>
-    <div className="flex min-w-0 flex-col">
-      {schedules.map(schedule => <article className="flex min-w-0 flex-col gap-1.5 border-b border-line py-4 last:border-b-0" key={schedule.id}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    {schedules.length
+      ? <SettingsGroup title={<span className="sr-only">{uiTerms.schedules}</span>}>{schedules.map(schedule => <SettingsRow key={schedule.id}
+        label={<span className="flex min-w-0 flex-col gap-1.5">
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             {!ghostId && <Badge variant="outline">{ghostName(schedule.ghostId)}</Badge>}
-            <Badge variant="outline">{scheduleStateLabel[schedule.state]}</Badge>
-            <span className="text-caption text-ink-3">{specLabel(schedule.spec)}</span>
+            <Badge variant={scheduleTone[schedule.state]}>{scheduleStateLabel[schedule.state]}</Badge>
+            <span className="text-caption font-normal text-ink-3">{specLabel(schedule.spec)}</span>
           </span>
-          <span className="flex items-center gap-1">
-            {schedule.state !== 'done' && (schedule.state === 'paused'
-              ? <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} onClick={() => void run(schedule.id, () => client.send({ type: 'schedule.update', scheduleId: schedule.id, paused: false }), '반복 작업을 재개했습니다.')}><Play size={14}/>재개</Button>
-              : <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} onClick={() => void run(schedule.id, () => client.send({ type: 'schedule.update', scheduleId: schedule.id, paused: true }), '반복 작업을 일시정지했습니다.')}><Pause size={14}/>일시정지</Button>)}
-            <Button variant="ghost" size="icon" type="button" aria-label="반복 작업 삭제" disabled={pending !== ''} onClick={() => { setError(''); setRemove(schedule); }}><Trash2 size={15}/></Button>
-          </span>
-        </div>
-        <p className="m-0 text-ui text-ink [overflow-wrap:anywhere]">{schedule.prompt}</p>
-        <p className="m-0 text-caption text-ink-3">{schedule.nextAt ? `다음 실행 · ${dateTime(schedule.nextAt)}` : '다음 실행 없음'}</p>
-      </article>)}
-      {state && !schedules.length && <p className="m-0 py-2 text-ui text-ink-3">예약된 반복 작업 없음</p>}
-    </div>
+          <span className="text-ui font-medium text-ink [overflow-wrap:anywhere]">{schedule.prompt}</span>
+        </span>}
+        description={schedule.nextAt ? `다음 실행 · ${dateTime(schedule.nextAt)}` : '다음 실행 없음'}>
+        <span className="flex items-center gap-1">
+          {schedule.state !== 'done' && (schedule.state === 'paused'
+            ? <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} onClick={() => void run(schedule.id, () => client.send({ type: 'schedule.update', scheduleId: schedule.id, paused: false }), '반복 작업을 재개했습니다.')}><Play size={14}/>재개</Button>
+            : <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} onClick={() => void run(schedule.id, () => client.send({ type: 'schedule.update', scheduleId: schedule.id, paused: true }), '반복 작업을 일시정지했습니다.')}><Pause size={14}/>일시정지</Button>)}
+          <Button variant="ghost" size="icon" type="button" aria-label="반복 작업 삭제" disabled={pending !== ''} onClick={() => { setError(''); setRemove(schedule); }}><Trash2 size={15}/></Button>
+        </span>
+      </SettingsRow>)}</SettingsGroup>
+      : state && <div className="calm"><Clock3 size={16} aria-hidden="true"/><p>예약된 반복 작업 없음</p></div>}
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
     {creating && <ScheduleCreateDialog fixedGhostId={ghostId} onClose={() => setCreating(false)} onCreate={async input => {

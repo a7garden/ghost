@@ -28,12 +28,12 @@ function InlineError({
       data-slot="inline-error"
       aria-busy={pending || undefined}
       className={cn(
-        "flex min-w-0 items-start gap-3 text-ui text-ink",
+        "flex min-w-0 items-start gap-2 rounded-card bg-red-tint p-2.5 text-caption text-ink",
         className
       )}
       {...props}
     >
-      <TriangleAlert aria-hidden className="mt-1.5 size-4 shrink-0 text-red" />
+      <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-red" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
         <span className="min-w-0 min-h-7 flex-1 basis-48 content-center [overflow-wrap:anywhere]">{children}</span>
         {onRetry && (

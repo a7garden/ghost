@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Decision } from '@ghost/contract';
 import { HostProvider } from '../host/context';
-import { DecisionCard, decisionCommand, documentProposal } from './Inbox';
+import { DecisionCard, decisionCommand, documentProposal } from './Decision';
 
 const decision = (patch: Partial<Decision> = {}): Decision => ({
   id: 'd1', kind: 'approve_effect', ghostId: 'sage', conversationId: 'c1', workId: null, effectId: 'e1',

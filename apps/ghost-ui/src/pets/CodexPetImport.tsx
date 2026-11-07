@@ -31,7 +31,7 @@ export function CodexPetImport({ animate, busy, onClose, onSave }: { animate: bo
       setReading(true); setPet(undefined); setError('');
       void importCodexPet(files).then(setPet).catch(e => setError(e instanceof Error ? e.message : '펫을 읽지 못했습니다.')).finally(() => setReading(false));
     }}/>
-    <footer className="mt-6 flex flex-wrap justify-between gap-3 border-t border-line pt-4">
+    <footer className="mt-6 flex flex-wrap justify-between gap-3 border-t border-dashed border-line-strong pt-4">
       {pet ? <Button variant="outline" type="button" disabled={locked} onClick={() => picker.current?.click()}><RefreshCw size={15}/>다른 폴더</Button> : <span/>}
       <Button type="button" disabled={!pet || locked} onClick={() => {
         if (!pet || locked) return; setSaving(true); setError('');

@@ -3,6 +3,7 @@ import { CircleAlert, Clock3, Server, Smartphone, Users } from 'lucide-react';
 import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
 import { AppFrame } from './components/AppFrame';
+import { ActivityIsland } from './components/agent';
 import { PortraitAppearances } from './components/DotAvatar';
 import { Settings, type SettingsSection } from './pets/Settings';
 import { AvatarProvider } from './pets/AvatarProvider';
@@ -123,11 +124,12 @@ function Shell() {
       <AvatarProvider animate={preferences.animate}>
         <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0}
           location={pageLabel(section, openGhost, currentGhostPage, state?.spaces.find(space => space.id === selectedSpace)?.name ?? null)}
+          island={state && <ActivityIsland state={state} navigate={navigate}/>}
           sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
           {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>{error}</Banner>}
           {runtimeDown && state && <Banner variant="warning" className="mb-4">{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
-            {section === 'home' && <Overview state={state} navigate={navigate} onOpenGhost={switchGhost}/>}
+            {section === 'home' && <Overview state={state} navigate={navigate}/>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>

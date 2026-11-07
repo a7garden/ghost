@@ -15,4 +15,3 @@ export function DotAvatar({ tone = 'mint', size = 48, className = '', profileId 
     {pet.source ? <PetSprite source={pet.source} version={pet.version} state={pet.state} size={size} animate={pet.animate}/> : pet.isDefault ? <GhostCharacter size={size} color={appearance?.body} state={pet.isResponding ? 'running' : 'idle'} animate={pet.animate}/> : <span className="avatar-loading"/>}
   </span>;
 }
-export function GhostMark() { return <GhostCharacter size={26} animate={false}/>; }

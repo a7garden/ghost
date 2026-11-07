@@ -26,13 +26,13 @@ function EmptyState({
       )}
       {...props}
     >
-      <div className="flex w-full max-w-72 min-w-0 flex-col items-center gap-2 [overflow-wrap:anywhere]">
-        {icon && <div aria-hidden="true" className="mb-2 flex size-10 items-center justify-center rounded-card bg-inset text-ink-2 [&_svg]:size-5">{icon}</div>}
-        <div className="text-bodyLg font-medium text-ink">
+      <div className="flex w-full max-w-72 min-w-0 flex-col items-center gap-1.5 [overflow-wrap:anywhere]">
+        {icon && <div aria-hidden="true" className="mb-1 text-ink-3 [&_svg]:size-4">{icon}</div>}
+        <div className="text-ui font-medium text-ink-2">
           {title}
         </div>
         {description && (
-          <div className="text-ui text-ink-2">{description}</div>
+          <div className="text-caption text-ink-3">{description}</div>
         )}
         {action && (
           <div className="mt-2 flex flex-wrap justify-center gap-2">

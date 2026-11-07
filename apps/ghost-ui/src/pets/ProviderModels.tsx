@@ -58,7 +58,7 @@ export function ProviderModels({ catalog, selected, onChange, disabled = false }
     setError('');
   };
 
-  return <fieldset className="m-0 flex min-w-0 flex-col gap-2.5 border-t border-line pt-4" disabled={disabled}>
+  return <fieldset className="m-0 flex min-w-0 flex-col gap-2.5 border-t border-dashed border-line-strong pt-4" disabled={disabled}>
     <legend className="mb-1 shrink-0 text-caption font-semibold text-ink">모델 · {selected.length}개</legend>
     <div className="flex min-w-0 items-center gap-2">
       <Input aria-label="모델 검색" placeholder="모델 검색" value={query} maxLength={200} spellCheck={false}
@@ -72,7 +72,7 @@ export function ProviderModels({ catalog, selected, onChange, disabled = false }
         const rowId = `${idPrefix}-m${row.index}`;
         const meta = [contextLabel(row.model.contextWindow), row.model.reasoning ? '추론' : ''].filter(Boolean).join(' · ');
         return <label key={row.model.id} htmlFor={rowId}
-          className="flex min-w-0 items-start gap-2.5 border-b border-line py-2 text-caption text-ink last:border-b-0">
+          className="-mx-2 flex min-w-0 items-start gap-2.5 rounded-control px-2 py-2 text-caption text-ink transition-colors hover:bg-hover">
           <Checkbox id={rowId} className="mt-0.5 flex-none" checked={selectedIds.has(row.model.id)} disabled={disabled || (!selectedIds.has(row.model.id) && selected.length >= 256)}
             onCheckedChange={checked => onChange(toggleModel(selected, row.model, checked === true))}/>
           <span className="min-w-0 flex-1">

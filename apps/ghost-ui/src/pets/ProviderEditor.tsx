@@ -41,7 +41,7 @@ export function ProviderEditor({ initial, presets, providerIds, busy, onClose, o
       <div className="flex flex-col" aria-label="제공자 목록">
         {visible.map(item => <button key={item.id} type="button" disabled={busy} onClick={() => setPreset(item)}
           className="flex min-h-16 items-center gap-3 rounded-control px-3 py-3 text-left outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 disabled:opacity-50">
-          <span className="flex size-9 flex-none items-center justify-center rounded-control border border-line text-ui font-semibold text-ink" aria-hidden="true">{item.kind === 'openai_compatible' ? '+' : item.name.slice(0, 1)}</span>
+          <span className="flex size-9 flex-none items-center justify-center rounded-control bg-hover text-ui font-semibold text-ink" aria-hidden="true">{item.kind === 'openai_compatible' ? '+' : item.name.slice(0, 1)}</span>
           <span className="min-w-0 flex-1"><span className="block text-ui font-semibold text-ink">{item.name}</span>
             <span className="block text-caption text-ink-3">{item.kind === 'openai' ? 'ChatGPT 구독 · API 키' : item.kind === 'openai_compatible' ? '주소와 모델 직접 설정' : 'API 키'}</span>
           </span><ChevronRight size={15} className="flex-none text-ink-3" aria-hidden="true"/>
@@ -120,7 +120,7 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
       {value.kind === 'openai_compatible' && <FormField label="서버 주소">{control => <Input {...control} type="url" value={value.baseUrl ?? ''} placeholder="https://api.example.com/v1" required disabled={locked} onChange={event => patch({ baseUrl: event.target.value.trim() || null })}/>}</FormField>}
       <ProviderModels catalog={catalog} selected={value.models} disabled={locked} onChange={models => patch({ models })}/>
       {catalog.length > 0 && <p className="m-0 text-caption text-ink-3">기본 모델 목록입니다. 사용 가능 여부는 계정의 권한을 따릅니다.</p>}
-      <details className="border-t border-line pt-3">
+      <details className="border-t border-dashed border-line-strong pt-3">
         <summary className="cursor-pointer text-caption font-medium text-ink-2">고급 설정</summary>
         <div className="mt-4 flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -134,7 +134,7 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
       </details>
       </div>
       {error && <InlineError>{error}</InlineError>}
-      <div className="flex flex-none justify-end gap-2 border-t border-line pt-3">
+      <div className="flex flex-none justify-end gap-2 border-t border-dashed border-line-strong pt-3">
         <Button variant="outline" type="button" disabled={locked} onClick={onClose}>취소</Button>
         <Button type="submit" disabled={locked}>{saving ? '저장 중…' : effectiveMethod === 'oauth' && initial?.authType !== 'oauth' && !removeKey ? 'ChatGPT로 로그인' : '저장'}</Button>
       </div>

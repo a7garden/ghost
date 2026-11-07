@@ -78,7 +78,7 @@ export function PetEditor({ name: initialName, seed, animate, busy, onClose, onS
         </div>
       </div>
       {(error || generated.error) && <InlineError className="mt-4">{error || generated.error}</InlineError>}
-      <footer className="mt-6 flex flex-wrap justify-between gap-3 border-t border-line pt-4">
+      <footer className="mt-6 flex flex-wrap justify-between gap-3 border-t border-dashed border-line-strong pt-4">
         <Button variant="outline" type="button" disabled={!source || !name.trim() || locked} onClick={() => { if (source) { try { downloadPet(name.trim(), description, version, source); } catch (e) { setError(String(e)); } } }}><Download size={15}/>Codex용 내보내기</Button>
         <Button type="submit" disabled={!source || !name.trim() || locked}>{reading ? '파일 확인 중…' : busy ? '저장 중…' : '저장'}</Button>
       </footer>
