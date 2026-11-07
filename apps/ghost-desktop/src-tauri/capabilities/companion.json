@@ -1,0 +1,15 @@
+{
+  "identifier": "companion-window",
+  "description": "The desktop avatar may resize and drag itself, sync its enabled setting, open chat, and focus the main window. No filesystem or general window management access.",
+  "windows": ["companion"],
+  "remote": { "urls": ["http://127.0.0.1:*"] },
+  "permissions": [
+    "allow-companion-drag",
+    "allow-companion-enabled",
+    "allow-companion-set",
+    "allow-companion-resize",
+    "allow-toggle-overlay",
+    "allow-focus-main",
+    "allow-companion-menu"
+  ]
+}

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
-import { mkdir, open, readFile, rename } from "node:fs/promises";
+import { mkdir, open, readFile, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ArtifactRef } from "@ghost/contract";
 import type { ArtifactStore } from "../core/ports.ts";
@@ -25,8 +25,25 @@ export class FsArtifactStore implements ArtifactStore {
     return existsSync(this.path(digest));
   }
 
-  async read(digest: string): Promise<Uint8Array> {
-    return new Uint8Array(await readFile(this.path(digest)));
+  async size(digest: string): Promise<number> {
+    return (await stat(this.path(digest))).size;
+  }
+
+  async read(digest: string, maxBytes?: number): Promise<Uint8Array> {
+    if (maxBytes === undefined) return new Uint8Array(await readFile(this.path(digest)));
+    const handle = await open(this.path(digest), "r");
+    try {
+      const bytes = new Uint8Array(Math.min((await handle.stat()).size, maxBytes));
+      let offset = 0;
+      while (offset < bytes.byteLength) {
+        const { bytesRead } = await handle.read(bytes, offset, bytes.byteLength - offset, offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      return bytes.subarray(0, offset);
+    } finally {
+      await handle.close();
+    }
   }
 
   /** Writes through a temporary file plus fsync plus atomic rename, so a crash never leaves a partial artifact. */

@@ -1,6 +1,10 @@
+import { Buffer } from "node:buffer";
+import { extname } from "node:path";
 import type { ArtifactRef, Live, LiveTool, Message, MessageOrigin, ToolCallView } from "@ghost/contract";
 import type { AssistantMessage, ToolCall, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
+import type { ArtifactStore } from "../core/ports.ts";
+import { CommandError } from "../core/errors.ts";
 
 /** Bounded preview of a tool call's arguments. */
 const MAX_TOOL_ARGS = 4096;
@@ -172,11 +176,94 @@ export function sameLive(left: Live, right: Live): boolean {
   });
 }
 
-/** What the model sees: the owner's text and the artifacts that came with it. */
-export function renderUserContent(text: string, attachments: ArtifactRef[]): string {
+const IMAGE_EXTENSIONS: Record<string, true> = { ".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true };
+const TEXT_EXTENSIONS: Record<string, true> = Object.fromEntries([
+  ".txt", ".md", ".markdown", ".mdx", ".csv", ".tsv", ".json", ".jsonl", ".ndjson",
+  ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".py", ".rb", ".go", ".rs",
+  ".c", ".h", ".cpp", ".hpp", ".cs", ".java", ".kt", ".swift", ".sh", ".bash",
+  ".zsh", ".sql", ".html", ".htm", ".css", ".scss", ".xml", ".yaml", ".yml",
+  ".toml", ".ini", ".conf", ".log", ".vue", ".svelte", ".r", ".lua", ".php",
+].map((extension) => [extension, true]));
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_TOTAL_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_TEXT_BYTES = 100 * 1024;
+const MAX_TOTAL_TEXT_BYTES = 200 * 1024;
+
+/** Only the four provider-supported raster formats may become image content. */
+function imageType(bytes: Uint8Array): string | null {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+    && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46
+    && bytes[3] === 0x38 && (bytes[4] === 0x37 || bytes[4] === 0x39) && bytes[5] === 0x61) return "image/gif";
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
+    && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return "image/webp";
+  return null;
+}
+
+/** Read immutable stored bytes before admission; Pi persists the resulting content for replay. */
+export async function renderUserContent(text: string, attachments: ArtifactRef[], store?: ArtifactStore): Promise<UserMessage["content"]> {
   if (attachments.length === 0) return text;
-  const lines = attachments.map((artifact) => `- ${artifact.name} (${artifact.mediaType}, sha256:${artifact.digest})`);
-  return `${text}${ATTACHMENT_MARKER}${lines.join("\n")}\n</attachments>`;
+  const lines: string[] = [];
+  const images: Extract<UserMessage["content"], unknown[]> = [];
+  let imageBytes = 0;
+  let textBytes = 0;
+  for (const artifact of attachments) {
+    lines.push(`- ${artifact.name} (${artifact.mediaType}, sha256:${artifact.digest})`);
+    if (!store) continue;
+    const mediaType = artifact.mediaType.split(";", 1)[0]!.trim().toLowerCase();
+    const extension = extname(artifact.name).toLowerCase();
+    const image = mediaType.startsWith("image/") || IMAGE_EXTENSIONS[extension] === true;
+    const textLike = mediaType.startsWith("text/") || mediaType === "application/json"
+      || mediaType.endsWith("+json") || TEXT_EXTENSIONS[extension] === true;
+    if (!image && !textLike) {
+      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — 지원하지 않는 파일 형식; 참조만 포함]`);
+      continue;
+    }
+    if (!store.has(artifact.digest)) throw new CommandError("not_found", `artifact ${artifact.digest} does not exist`);
+    const size = await store.size(artifact.digest);
+    if (image) {
+      if (size > MAX_IMAGE_BYTES || size > MAX_TOTAL_IMAGE_BYTES - imageBytes) {
+        lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — 이미지 크기 제한 (파일당 4 MiB, 메시지당 8 MiB)]`);
+        continue;
+      }
+      const bytes = await store.read(artifact.digest, MAX_IMAGE_BYTES);
+      const detectedType = imageType(bytes);
+      if (!detectedType) {
+        lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — 지원하는 이미지 형식이 아님]`);
+        continue;
+      }
+      images.push({ type: "image", mimeType: detectedType, data: Buffer.from(bytes).toString("base64") });
+      imageBytes += bytes.byteLength;
+      continue;
+    }
+    const window = Math.min(MAX_TEXT_BYTES, MAX_TOTAL_TEXT_BYTES - textBytes);
+    if (window === 0) {
+      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — 메시지 텍스트 크기 제한 (200 KiB)]`);
+      continue;
+    }
+    const bytes = await store.read(artifact.digest, window);
+    const truncated = size > window;
+    let body: string;
+    try {
+      // A truncated final UTF-8 character is omitted, not replaced with invalid text.
+      body = new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: truncated });
+    } catch {
+      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — UTF-8 텍스트가 아님]`);
+      continue;
+    }
+    if (body.includes("\0")) {
+      lines.push(`[첨부 생략: ${JSON.stringify(artifact.name)} — UTF-8 텍스트가 아님]`);
+      continue;
+    }
+    textBytes += bytes.byteLength;
+    let fenceLength = 3;
+    for (const match of body.matchAll(/`+/g)) fenceLength = Math.max(fenceLength, match[0].length + 1);
+    const fence = "`".repeat(fenceLength);
+    lines.push(`File: ${JSON.stringify(artifact.name)}\n${fence}\n${body}\n${fence}${truncated ? `\n[첨부 일부 생략: ${JSON.stringify(artifact.name)} — 처음 ${window}바이트만 포함]` : ""}`);
+  }
+  const rendered = `${text}${ATTACHMENT_MARKER}${lines.join("\n")}\n</attachments>`;
+  return images.length ? [{ type: "text", text: rendered }, ...images] : rendered;
 }
 
 /** What the transcript shows: the owner's text without the attachment block. */

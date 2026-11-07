@@ -72,7 +72,8 @@ Feature-level compositions:
 
 - **Hand-off composer** (home): a recipient token and a 대화/맡기기 switch inside the
   composer. 맡기기 unfolds 완료 기준 and 기한 in place and sends `work.create`; nothing
-  becomes a 맡긴 일 unless the owner chose it.
+  becomes a 맡긴 일 unless the owner chose it. Like the conversation composer it has the
+  + menu bottom-left (files) and the model beside send.
 - **Decision deck** (home, 확인할 일): pending decisions stacked oldest-first, the top one
   fully actionable. Questions answer with numbered tiles (digit keys) or free text;
   approvals show the exact request; results arrive as a receipt with files and the
@@ -119,8 +120,14 @@ with backlog), each arriving word fades up out of a soft blur, and a breathing d
 the newest word. Assistant text reads at 15px/1.7; tables are quiet cards with row
 hairlines. Sending a message always follows the latest turn; only the owner's own
 scrolling (wheel, touch, pointer, keys) stops following, never a layout shift.
-The dock holds the auto-growing composer (its running edge circles all four sides),
-model selection, send and cancel. Suggestions populate and focus the draft. Conversation
+The dock holds the auto-growing composer (its running edge circles all four sides). Bottom
+left is **+**: its actions unfold upward one after another (사진·파일 첨부, 일로 맡기기, 나중에
+보내기) while the + turns into ×. Files also arrive by drop or paste; each uploads at once
+(`POST /api/artifacts`) and waits above the text as a thumbnail or file card, then goes with
+`message.send`. 일로 맡기기 puts a 맡기기 token over the text with 완료 기준 and 기한 and sends
+`work.create` into this conversation; 나중에 보내기 offers 1시간 뒤 · 오늘 저녁 6시 · 내일 아침 9시
+or a chosen time and sends `schedule.create`. Model choice, cancel and send sit bottom right.
+Suggestions populate and focus the draft. Conversation
 identity resets local transcript/draft state so switching history never shows another
 conversation's messages or sends its draft accidentally.
 
@@ -144,10 +151,21 @@ body-color outline so they read on any surface. Ghosts have no background tile (
 decision, 2026-11-08): portraits sit directly on the page, and a stored `look.background`
 is neither shown nor editable. `look.body` takes any color from a twelve-hue
 palette or a custom one; a Ghost that never chose gets a stable hue from its id so agents
-read apart. 꾸미기 opens in its own dialog: a floating preview that pops on every change
-and a 무작위 shuffle, then picture choices whose legend names the current pick; choices
-show at once and save behind the preview (the newest wins). Name, main, state and model
-follow under 기본 정보.
+read apart. 꾸미기 is only the look: it opens in its own dialog from the portrait, with a
+floating preview that pops on every change and a 무작위 shuffle, then picture choices whose
+legend names the current pick; choices show at once and save behind the preview (the newest
+wins). Everything else about a Ghost lives in **Ghost 설정** (설정 → Ghost): a portrait roster,
+then the chosen Ghost as one sheet — the name edited in place as the heading, 메인으로 지정,
+a 활성/일시정지/은퇴 capsule, the model as a card, 역할 지시 as a growing note, tools as
+switch-pills grouped by purpose (a group's label toggles it) and the sandbox as a status strip
+with a two-step reset. New Ghosts start as the same sheet. There is no avatar library: stored
+sprite avatars stay selectable in 꾸미기, nothing creates new ones.
+
+## Settings
+
+Ghost · 모델 · 기기 · 반복 작업 · 호스트 · 화면, plus **데스크톱 아바타** inside the Mac app.
+화면 picks the theme from three little windows painted in their own palette. 데스크톱
+아바타 controls the Ghost that floats on the desktop above other apps (see the desktop shell).
 
 ## Interactive responses
 

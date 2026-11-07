@@ -1,5 +1,5 @@
-import type { ModelInfo, ProviderPreset } from "@ghost/contract";
-import type { Provider as PiProvider } from "@earendil-works/pi-ai";
+import type { ModelInfo, ProviderPreset, Provider as ContractProvider } from "@ghost/contract";
+import type { Api, Model, Provider as PiProvider } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { googleProvider } from "@earendil-works/pi-ai/providers/google";
 import { minimaxProvider } from "@earendil-works/pi-ai/providers/minimax";
@@ -45,6 +45,25 @@ const anthropicModels = chatCatalog(anthropic);
 const googleModels = chatCatalog(google);
 const zaiModels = chatCatalog(zai);
 const minimaxModels = chatCatalog(minimax);
+
+const CAPABILITY_SOURCES: Record<ContractProvider["kind"], readonly PiProvider[]> = {
+  openai: [openai],
+  openai_compatible: [openai, zai, anthropic, google, minimax],
+  anthropic: [anthropic],
+  google: [google],
+  zai: [zai],
+  minimax: [minimax],
+};
+
+/** Static SDK capabilities only; unknown custom model ids remain text-only. */
+export function modelInputFor(kind: ContractProvider["kind"], id: string, api: Api): Model<Api>["input"] {
+  const sources = api === "openai-codex-responses" ? [codex] : CAPABILITY_SOURCES[kind];
+  for (const source of sources) {
+    const model = source.getModels().find((model) => model.id === id);
+    if (model) return model.input;
+  }
+  return ["text"];
+}
 
 /**
  * Bundled provider presets, computed once at module scope from the installed

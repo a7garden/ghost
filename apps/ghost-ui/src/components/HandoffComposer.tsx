@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Paperclip } from 'lucide-react';
 import { Composer, InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import type { Ghost } from '@ghost/contract';
 import { DotAvatar } from './DotAvatar';
 import { toneFor } from '../features/ghostState';
 import { ModelPicker } from '../pets/ModelPicker';
 import { useHost } from '../host/context';
+import { ComposerPlus } from './composer/ComposerPlus';
+import { AttachmentTray, useAttachments } from './composer/attachments';
 
 type Mode = 'talk' | 'work';
 
@@ -24,10 +26,13 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attachments = useAttachments();
   const target = ghosts.find(ghost => ghost.id === ghostId) ?? ghosts[0];
 
   const send = async (value: string) => {
     if (!target || sending) return;
+    if (mode === 'talk' && attachments.uploading) { setError('첨부를 올리는 중입니다. 끝나면 보내 주세요.'); return; }
     setSending(true); setError('');
     try {
       if (mode === 'work') {
@@ -39,7 +44,8 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
         });
         navigate(`/work/${encodeURIComponent(created.workId)}`);
       } else {
-        await client.send({ type: 'message.send', conversationId: target.directConversationId, text: value });
+        await client.send({ type: 'message.send', conversationId: target.directConversationId, text: value, ...(attachments.refs.length ? { attachments: attachments.refs } : {}) });
+        attachments.clear();
         navigate(`/ghosts/${encodeURIComponent(target.id)}`);
       }
       setText(''); setCriteria(''); setDeadline('');
@@ -50,7 +56,10 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
   if (!target) return null;
   const assigning = mode === 'work';
   return <div className="handoff" data-mode={mode}>
+    <input ref={fileInput} type="file" multiple hidden onChange={event => { attachments.add(Array.from(event.target.files ?? [])); event.target.value = ''; inputRef.current?.focus(); }}/>
     <Composer inputId="handoff-message" inputRef={inputRef} value={text} onValueChange={setText} onSubmit={value => void send(value)}
+      onFiles={assigning ? undefined : attachments.add}
+      tray={<AttachmentTray items={attachments.items} onRemove={attachments.remove}/>}
       label={`${target.name}에게 ${assigning ? '일 맡기기' : '메시지'}`}
       placeholder={assigning ? '맡길 일을 적어 주세요. 첫 줄이 제목이 됩니다.' : `${target.name}에게 메시지`}
       submitLabel={assigning ? '일 맡기기' : '보내기'} disabled={sending} pending={sending}
@@ -58,6 +67,7 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
         <RecipientToken ghosts={ghosts} value={target} disabled={sending} onChange={id => { setGhostId(id); inputRef.current?.focus(); }}/>
         <div className="handoff__mode" role="radiogroup" aria-label="보내는 방식">
           {(['talk', 'work'] as const).map(value => <button key={value} type="button" role="radio" aria-checked={mode === value}
+            disabled={value === 'work' && attachments.items.length > 0}
             onClick={() => { setMode(value); inputRef.current?.focus(); }}>{value === 'talk' ? '대화' : '맡기기'}</button>)}
         </div>
       </div>}
@@ -71,7 +81,10 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
           <input type="datetime-local" value={deadline} onChange={event => setDeadline(event.target.value)} disabled={sending}/>
         </label>
       </div>}
-      footer={!assigning && <ModelPicker conversationId={target.directConversationId} disabled={sending}/>}/>
+      leading={<ComposerPlus disabled={sending} actions={[
+        { id: 'files', icon: <Paperclip/>, label: '사진·파일 첨부', disabled: assigning, onSelect: () => fileInput.current?.click() },
+      ]}/>}
+      trailing={!assigning && <ModelPicker conversationId={target.directConversationId} disabled={sending}/>}/>
     {error && <InlineError className="mt-2">{error}</InlineError>}
   </div>;
 }

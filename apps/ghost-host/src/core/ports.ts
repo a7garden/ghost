@@ -61,7 +61,8 @@ export interface EngineEvents {
 /** Content-addressed bytes under `artifacts/sha256/`. */
 export interface ArtifactStore {
   put(bytes: Uint8Array, name: string, mediaType: string): Promise<ArtifactRef>;
-  read(digest: string): Promise<Uint8Array>;
+  read(digest: string, maxBytes?: number): Promise<Uint8Array>;
+  size(digest: string): Promise<number>;
   has(digest: string): boolean;
   path(digest: string): string;
 }

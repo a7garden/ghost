@@ -52,10 +52,15 @@ export class MemoryArtifacts implements ArtifactStore {
     this.bytes.set(digest, bytes);
     return { digest, name, mediaType, size: bytes.length };
   }
-  async read(digest: string) {
+  async size(digest: string): Promise<number> {
     const bytes = this.bytes.get(digest);
     if (!bytes) throw new Error(`no artifact ${digest}`);
-    return bytes;
+    return bytes.byteLength;
+  }
+  async read(digest: string, maxBytes?: number) {
+    const bytes = this.bytes.get(digest);
+    if (!bytes) throw new Error(`no artifact ${digest}`);
+    return maxBytes === undefined ? bytes : bytes.subarray(0, maxBytes);
   }
   has(digest: string) {
     return this.bytes.has(digest);

@@ -323,6 +323,30 @@ body {
 .trail__steps pre { max-height: 220px; margin: 0; overflow: auto; padding: 10px 12px; border-radius: var(--radius-control); color: var(--ghost-ink2); background: var(--ghost-inset); font: 11.5px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .chat-thinking > span:not(.presence) { animation: none; color: var(--ghost-ink2); } }
 
+/* 설정 → 화면: themes as little windows painted in their own palette ------------ */
+.appearance { display: grid; gap: 20px; max-width: 560px; }
+.theme-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.theme-picker__choice { display: grid; gap: 10px; justify-items: center; padding: 0; border: 0; background: none; color: var(--ghost-ink2); font: 500 var(--text-ui)/1.3 var(--font-sans); cursor: pointer; }
+.theme-picker__window {
+  --w-page: #f3f3f1; --w-sheet: #ffffff; --w-ink: #141518;
+  position: relative; display: grid; width: 100%; aspect-ratio: 16 / 10; grid-template-columns: 28% 1fr; gap: 6%; padding: 9% 8%;
+  border-radius: var(--radius-card); background: var(--w-page); box-shadow: var(--shadow-card);
+  transition: box-shadow var(--duration-fast) ease, transform var(--duration-fast) var(--ease-spring);
+}
+.theme-picker__window > i { border-radius: 6px; background: color-mix(in srgb, var(--w-ink) 9%, transparent); }
+.theme-picker__window > i:nth-child(2) { grid-row: span 2; background: var(--w-sheet); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.theme-picker__window > i:nth-child(3) { width: 70%; height: 30%; align-self: end; background: color-mix(in srgb, var(--w-ink) 14%, transparent); }
+[data-theme-preview="dark"] .theme-picker__window { --w-page: #0c0c0e; --w-sheet: #18181b; --w-ink: #ececee; }
+/* System: the light sidebar beside a dark sheet — the split falls in the gap between them. */
+[data-theme-preview="system"] .theme-picker__window { background: linear-gradient(90deg, #f3f3f1 0 39%, #0c0c0e 39% 100%); }
+[data-theme-preview="system"] .theme-picker__window > i:nth-child(2) { background: #18181b; }
+.theme-picker__choice:hover .theme-picker__window { transform: translateY(-2px); box-shadow: var(--shadow-raised); }
+.theme-picker__choice[aria-checked="true"] { color: var(--ghost-ink); }
+.theme-picker__choice[aria-checked="true"] .theme-picker__window { box-shadow: 0 0 0 2px var(--ghost-canvas), 0 0 0 4px var(--ghost-signal); }
+.theme-picker__choice:focus-visible { outline: none; }
+.theme-picker__choice:focus-visible .theme-picker__window { box-shadow: 0 0 0 2px var(--ghost-canvas), 0 0 0 4px var(--ghost-ink3); }
+.appearance__toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border-radius: var(--radius-card); background: var(--ghost-surface); box-shadow: var(--shadow-card); color: var(--ghost-ink); font-size: var(--text-ui); font-weight: 500; cursor: pointer; }
+
 /* Work board ---------------------------------------------------------------- */
 .board-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .ghost-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Composer: + menu bottom-left unfolds 사진·파일 첨부, 일로 맡기기 and 나중에 보내기; files
+  upload on add, drop or paste and travel with `message.send`; the model chip moved beside
+  send.
+- 꾸미기 is only the look. Ghost 설정 is a new sheet: portrait roster, in-place name, 메인으로
+  지정, state capsule, model card, role note, tool switch-pills, sandbox strip; new Ghosts
+  start there.
+- Removed the avatar library (creation, Codex import/export) and the in-window pet;
+  설정 → 데스크톱 아바타 controls the desktop Ghost in the Mac app. 화면 picks themes from
+  painted previews.
 - Ghosts have no background: the 배경 row, the avatar 배경색 picker and portrait tiles are
   gone; a stored `look.background` is ignored.
 - Chat reading pass: 15px/1.7 assistant text, tighter heading/list rhythm, tables as quiet

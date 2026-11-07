@@ -20,10 +20,17 @@ export interface ComposerProps {
   running?: boolean
   /** Above the text: addressing and mode. */
   header?: React.ReactNode
+  /** Directly above the text: files on their way with the message. */
+  tray?: React.ReactNode
   /** Between the text and the controls: fields a mode adds. */
   extension?: React.ReactNode
+  /** Bottom-left: the + menu (attach, assign, send later). */
+  leading?: React.ReactNode
   footer?: React.ReactNode
+  /** Bottom-right before send: model choice, cancel. */
   trailing?: React.ReactNode
+  /** Files dropped on or pasted into the composer. */
+  onFiles?: (files: File[]) => void
   inputRef?: React.Ref<HTMLTextAreaElement>
   describedBy?: string
   className?: string
@@ -44,9 +51,12 @@ export function Composer({
   pending = false,
   running = false,
   header,
+  tray,
   extension,
+  leading,
   footer,
   trailing,
+  onFiles,
   inputRef,
   describedBy,
   className,
@@ -96,11 +106,27 @@ export function Composer({
     onSubmit(trimmedValue)
   }
 
+  const [dragging, setDragging] = React.useState(false)
+  const dragDepth = React.useRef(0)
+  const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes("Files")
+  const dropHandlers = onFiles && !disabled ? {
+    onDragEnter: (event: React.DragEvent) => { if (!hasFiles(event)) return; event.preventDefault(); dragDepth.current += 1; setDragging(true) },
+    onDragOver: (event: React.DragEvent) => { if (hasFiles(event)) event.preventDefault() },
+    onDragLeave: () => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false) },
+    onDrop: (event: React.DragEvent) => {
+      if (!hasFiles(event)) return
+      event.preventDefault(); dragDepth.current = 0; setDragging(false)
+      const files = Array.from(event.dataTransfer.files)
+      if (files.length) onFiles(files)
+    },
+  } : {}
+
   return (
-    <div data-slot="ghost-composer" data-running={running || undefined} aria-busy={pending || undefined} className={cn("ghost-composer", className)}>
+    <div data-slot="ghost-composer" data-running={running || undefined} data-dragging={dragging || undefined} aria-busy={pending || undefined} className={cn("ghost-composer", className)} {...dropHandlers}>
       <label className="ghost-composer__label ghost-composer__label--visually-hidden" htmlFor={resolvedInputId}>{label}</label>
       <div className="ghost-composer__surface">
         {header}
+        {tray}
         <textarea
           ref={setInputRef}
           id={resolvedInputId}
@@ -112,6 +138,10 @@ export function Composer({
               submit()
             }
           }}
+          onPaste={onFiles ? (event) => {
+            const files = Array.from(event.clipboardData.files)
+            if (files.length) { event.preventDefault(); onFiles(files) }
+          } : undefined}
           placeholder={placeholder}
           rows={1}
           disabled={disabled || pending}
@@ -120,6 +150,7 @@ export function Composer({
         />
         {extension}
         <div className="ghost-composer__footer">
+          {leading}
           <div className="ghost-composer__footer-slot">{footer}</div>
           <div className="ghost-composer__footer-actions">
             {trailing}

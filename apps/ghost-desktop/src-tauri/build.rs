@@ -4,6 +4,14 @@ fn main() {
             "drag_window",
             "open_external_url",
             "pick_folder",
+            "companion_set",
+            "companion_enabled",
+            "companion_reset_position",
+            "companion_resize",
+            "toggle_overlay",
+            "focus_main",
+            "companion_menu",
+            "companion_drag",
         ]),
     ))
     .expect("failed to run the Tauri build script");

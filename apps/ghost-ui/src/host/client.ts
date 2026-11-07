@@ -1,5 +1,6 @@
 import type {
   ApiError,
+  ArtifactRef,
   Command,
   CommandResponse,
   ConversationPage,
@@ -116,6 +117,18 @@ export class HostClient {
   /** Cancel a pending device-code login (owner only). */
   cancelOAuth(providerId: string): Promise<OAuthStatus> {
     return this.json(`/api/providers/${encodeURIComponent(providerId)}/oauth`, { method: 'DELETE' });
+  }
+
+  /** Upload owner message bytes; the returned reference can be passed to message.send. */
+  uploadArtifact(file: File): Promise<ArtifactRef> {
+    return this.json('/api/artifacts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Ghost-File-Name': encodeURIComponent(file.name),
+      },
+      body: file,
+    });
   }
 
   /** Artifact bytes as an object URL; revoke it when done. */

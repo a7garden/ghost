@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "typebox";
 import {
+  ArtifactRef,
   CommandResponse,
   GHOST_TOOLS,
   LedgerEvent as LedgerEventSchema,
@@ -378,6 +379,59 @@ describe("API server", () => {
     expect(response.status).toBe(403);
     expect(((await response.json()) as { error: { code: string } }).error.code).toBe("forbidden");
   });
+  test("owner uploads raw artifacts and reads them without a Work row", async () => {
+    const bytes = new TextEncoder().encode("첨부 파일 내용");
+    const response = await fetch(`${base}/api/artifacts`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${OWNER_TOKEN}`, "content-type": "text/plain; charset=utf-8", "x-ghost-file-name": encodeURIComponent("자료.txt") },
+      body: bytes,
+    });
+    expect(response.status).toBe(201);
+    const artifact = parse(ArtifactRef, await response.json());
+    expect(artifact).toMatchObject({ name: "자료.txt", mediaType: "text/plain; charset=utf-8", size: bytes.byteLength });
+    expect(ledger.artifactsForDigest(artifact.digest)).toEqual([]);
+    const downloaded = await get(`/api/artifacts/${artifact.digest}`, OWNER_TOKEN);
+    expect(downloaded.status).toBe(200);
+    expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(bytes);
+    expect((await get(`/api/artifacts/${artifact.digest}`, deviceToken)).status).toBe(404);
+    expect((await runCommand({ type: "message.send", conversationId: alphaDirectId, text: "첨부 확인", attachments: [artifact] }, OWNER_TOKEN)).status).toBe(200);
+    expect(engine.submitted.at(-1)?.submission.attachments).toEqual([artifact]);
+    expect((await get(`/api/artifacts/${artifact.digest}`, OWNER_TOKEN)).status).toBe(200);
+  });
+
+  test("artifact uploads reject devices, missing auth, invalid metadata and bodies above 20 MiB", async () => {
+    const upload = (token: string | undefined, name: string, mediaType: string, body: BodyInit = "bytes") => fetch(`${base}/api/artifacts`, {
+      method: "POST",
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": mediaType, "x-ghost-file-name": name },
+      body,
+    });
+    expect((await upload(undefined, "test.txt", "text/plain")).status).toBe(401);
+    const forbidden = await upload(deviceToken, "test.txt", "text/plain");
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({ error: { code: "forbidden" } });
+    for (const [name, mediaType] of [["", "text/plain"], ["x".repeat(257), "text/plain"], ["%broken", "text/plain"], ["bad%00name", "text/plain"], ["test", "not-a-type"], ["test", `text/${"x".repeat(124)}`]]) {
+      const response = await upload(OWNER_TOKEN, name!, mediaType!);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "invalid" } });
+    }
+    const limit = 20 * 1024 * 1024;
+    const exact = await upload(OWNER_TOKEN, "limit.bin", "application/octet-stream", new Uint8Array(limit));
+    expect(exact.status).toBe(201);
+    expect(parse(ArtifactRef, await exact.json()).size).toBe(limit);
+    const oversized = await upload(OWNER_TOKEN, "large.bin", "application/octet-stream", new Uint8Array(limit + 1));
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toMatchObject({ error: { code: "invalid" } });
+    const streamed = await upload(OWNER_TOKEN, "streamed.bin", "application/octet-stream", new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(limit));
+        controller.enqueue(new Uint8Array(1));
+        controller.close();
+      },
+    }));
+    expect(streamed.status).toBe(413);
+    expect(await streamed.json()).toMatchObject({ error: { code: "invalid" } });
+  });
+
 
   test("OAuth attempts are owner-only for every operation", async () => {
     for (const method of ["GET", "POST", "DELETE"]) {

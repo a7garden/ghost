@@ -8,6 +8,7 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import type { Secrets } from "../core/ports.ts";
+import { modelInputFor } from "../integrations/provider-catalog.ts";
 
 /** Which pi-ai API speaks each provider kind. */
 const API_BY_KIND = {
@@ -60,7 +61,7 @@ function modelOf(provider: ContractProvider, info: ModelInfo, api: Api, baseUrl:
     api,
     provider: provider.id,
     baseUrl,
-    input: ["text"],
+    input: modelInputFor(provider.kind, info.id, api),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: info.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
     maxTokens: DEFAULT_MAX_TOKENS,

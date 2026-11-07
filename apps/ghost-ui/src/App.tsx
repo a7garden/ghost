@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, Clock3, Server, Smartphone, Users } from 'lucide-react';
+import { CircleAlert, Clock3, MonitorSmartphone, Server, Smartphone, Users } from 'lucide-react';
 import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
 import { AppFrame } from './components/AppFrame';
@@ -7,7 +7,6 @@ import { ActivityIsland } from './components/agent';
 import { PortraitAppearances } from './components/DotAvatar';
 import { Settings, type SettingsSection } from './pets/Settings';
 import { AvatarProvider } from './pets/AvatarProvider';
-import { FloatingPet } from './pets/FloatingPet';
 import { usePreferences } from './pets/preferences';
 import { HostProvider, useHost } from './host/context';
 import { useHostState } from './host/store';
@@ -19,13 +18,15 @@ import { WorkView } from './features/WorkViews';
 import { WorkDetail } from './features/WorkDetail';
 import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
-import { TeamSettings } from './features/TeamSettings';
+import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
 import { Schedules } from './features/Schedules';
 import { SpacesView } from './features/SpacesView';
 import { routeLabels, uiTerms } from './uiText';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { installWindowDrag } from './host/windowDrag';
+import { initializeDesktopCompanion } from './host/desktop';
+import DesktopAvatarSettings from './features/DesktopAvatarSettings';
 
 // Tauri 웹뷰는 모든 내비게이션에 __TAURI_INTERNALS__를 주입한다. 데스크톱 창에서만 끌 수 있는 타이틀바를 그린다.
 const desktopShell = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window && !/iPhone|iPad/.test(navigator.userAgent);
@@ -47,6 +48,11 @@ function Shell() {
   const { preferences, updatePreferences, storageError } = usePreferences();
   const [route, setRoute] = useState(currentRoute);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [desktopError, setDesktopError] = useState('');
+  // The shell owns whether the desktop Ghost is shown; mirror it into the shared preference once.
+  useEffect(() => {
+    if (desktopShell) void initializeDesktopCompanion().catch(reason => setDesktopError(reason instanceof Error ? reason.message : '데스크톱 아바타를 준비하지 못했습니다.'));
+  }, []);
   // The main region owns scrolling; a new destination starts at its top.
   const resetScroll = () => { document.getElementById('main-content')?.scrollTo(0, 0); };
   useEffect(() => { const change = () => setRoute(currentRoute()); window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
@@ -78,7 +84,7 @@ function Shell() {
     { id: 'spaces', label: routeLabels.spaces, group: '이동', onSelect: go('/spaces') },
     ...ghosts.map(ghost => ({ id: `ghost:${ghost.id}`, label: ghost.name, description: ghost.isDefault ? '메인 Ghost' : undefined, group: 'Ghost', onSelect: () => switchGhost(ghost.id) })),
     ...state.spaces.map(space => ({ id: `space:${space.id}`, label: space.name, group: '프로젝트', onSelect: () => navigate(`/spaces/${space.id}`) })),
-    { id: 'team', label: '팀', group: '설정', onSelect: go('/settings?tab=team') },
+    { id: 'team', label: uiTerms.ghostSettings, group: '설정', onSelect: go('/settings?tab=team') },
     { id: 'devices', label: '기기', group: '설정', onSelect: go('/settings?tab=devices') },
     { id: 'schedules', label: uiTerms.schedules, group: '설정', onSelect: go('/settings?tab=schedules') },
     { id: 'host', label: routeLabels.host, group: '설정', onSelect: go('/settings?tab=host') },
@@ -88,15 +94,17 @@ function Shell() {
   // The Ghost's look is the one source of portrait color and variation; the pets draw from it through DotAvatar.
   const portraits = Object.fromEntries(ghosts.map(ghost => [ghost.id, { body: ghost.look.body, shape: ghost.look.shape, face: ghost.look.face, mark: ghost.look.mark }]));
 
-  const companion = ghosts.find(ghost => ghost.id === preferences.companionProfile) ?? defaultGhost ?? ghosts[0] ?? null;
-
   const settingsSections: SettingsSection[] = [
-    { id: 'team', label: '팀', icon: Users, content: <TeamSettings onChat={switchGhost}
-      onManage={id => navigate(`/settings?tab=team&ghost=${encodeURIComponent(id)}`)} onPortrait={switchGhost}
+    { id: 'team', label: 'Ghost', icon: Users, content: <GhostSettings onChat={switchGhost}
+      onSelect={id => navigate(`/settings?tab=team&ghost=${encodeURIComponent(id)}`)}
       selectedGhostId={params.get('ghost') ?? undefined}/> },
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
+    ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
+      {desktopError && <Banner variant="warning" className="mb-4">{desktopError}</Banner>}
+      <DesktopAvatarSettings/>
+    </> }] : []),
   ];
 
   const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>;
@@ -137,8 +145,6 @@ function Shell() {
               action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>}
           </>}
         </AppFrame>
-        {preferences.companion && section !== 'settings' && companion && <FloatingPet ghost={{ id: companion.id, name: companion.name }}
-          onOpen={() => switchGhost(companion.id)} onHide={() => updatePreferences({ companion: false })}/>}
       </AvatarProvider>
     </PortraitAppearances.Provider>
   </div>;

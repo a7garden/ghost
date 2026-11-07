@@ -41,6 +41,6 @@ Respect reduced motion: rings, sheens and streaming carets stop.
 | 맡긴 일 | Delegation trees by state and assignee; detail with lifecycle, decisions, result, delegation map and effects |
 | Conversation | Continuous transcript, tool trails, anchored composer, scoped model choice |
 | 프로젝트 | Document spaces and pages |
-| 설정 | Team, devices, schedules, host, models, display, avatars |
+| 설정 | Ghost settings, models, devices, schedules, host, display, desktop avatar (Mac app) |
 
 Follow `docs/pdc-adoption.md` for the user document plane.

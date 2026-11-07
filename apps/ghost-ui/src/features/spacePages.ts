@@ -9,11 +9,6 @@ export const isEditableProfile = (profile: string): profile is EditableProfile =
 /** A stale `expectedHash` comes back as the host's `conflict` error, not a generic failure. */
 export const isConflict = (error: unknown): boolean => error instanceof HostError && error.code === 'conflict';
 
-export function grantsSummary(grants: SpaceGrant[], ghostName: (id: string) => string): string {
-  if (!grants.length) return 'Ghost 권한 없음';
-  return grants.map(grant => `${ghostName(grant.ghostId)} ${modeLabel[grant.mode]}`).join(', ');
-}
-
 /** 새 프로젝트 이름 기본값: 폴더 경로의 마지막 세그먼트. */
 export const spaceNameFromPath = (path: string): string => path.split('/').filter(Boolean).pop() ?? '';
 
@@ -23,4 +18,32 @@ export const defaultSpaceGrants = (ghosts: ReadonlyArray<{ id: string; isDefault
   return main ? [{ ghostId: main.id, mode: 'read' }] : [];
 };
 
-const modeLabel: Record<SpaceGrant['mode'], string> = { read: '읽기', propose: '제안' };
+/** 접근 단계는 없음 → 읽기 → 제안; `none`은 등록된 grant가 없는 상태다. */
+export type AccessLevel = SpaceGrant['mode'] | 'none';
+export const ACCESS_LEVELS: readonly AccessLevel[] = ['none', 'read', 'propose'];
+export const accessLabel: Record<AccessLevel, string> = { none: '없음', read: '읽기', propose: '제안' };
+
+export const accessLevelOf = (grants: SpaceGrant[], ghostId: string): AccessLevel =>
+  grants.find(grant => grant.ghostId === ghostId)?.mode ?? 'none';
+
+/** 한 Ghost의 접근 단계를 고쳐 쓴다; 없음은 grant 자체를 지운다. */
+export const withAccess = (grants: SpaceGrant[], ghostId: string, level: AccessLevel): SpaceGrant[] =>
+  level === 'none'
+    ? grants.filter(grant => grant.ghostId !== ghostId)
+    : grants.some(grant => grant.ghostId === ghostId)
+      ? grants.map(grant => grant.ghostId === ghostId ? { ghostId, mode: level } : grant)
+      : [...grants, { ghostId, mode: level }];
+
+/** 경로를 고랑 조각으로; 깊은 경로는 첫 세그먼트와 마지막 둘만 남기고 가운데를 접는다. */
+export interface PathCrumb { leading: string | null; trailing: string[] }
+export const pathCrumb = (path: string): PathCrumb => {
+  const segments = path.split('/').filter(Boolean);
+  return segments.length <= 3
+    ? { leading: null, trailing: segments }
+    : { leading: segments[0]!, trailing: segments.slice(-2) };
+};
+
+/** 문서에는 계약상 시각이 없다; 이 세션에서 저장한 순간만 기록해 마지막 편집으로 보여 준다. */
+const sessionEdits = new Map<string, number>();
+export const noteSpaceEdit = (spaceId: string): void => { sessionEdits.set(spaceId, Date.now()); };
+export const spaceLastEdit = (spaceId: string): number | null => sessionEdits.get(spaceId) ?? null;

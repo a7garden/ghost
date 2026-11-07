@@ -89,24 +89,3 @@ export function useProfileAvatar(ghostId?: string, tone?: string) {
   const busy = Boolean(ghost && state?.conversations.some(conversation => conversation.ghostId === ghost.id && conversation.busy));
   return { ...source, isDefault: !avatar, isResponding: busy || speaking, version: spriteVersionOf(avatar?.design), state: speaking ? 'running' as const : ghostPetState(ghost, state) };
 }
-
-/** Artifact bytes as a `data:` URL, for re-encoding a stored avatar (Codex export). */
-export async function artifactDataUrl(client: { artifactUrl(digest: string): Promise<string> }, digest: string): Promise<string> {
-  const url = await client.artifactUrl(digest);
-  try {
-    const blob = await fetch(url).then(response => {
-      if (!response.ok) throw new Error('이미지를 불러오지 못했습니다.');
-      return response.blob();
-    });
-    return await legacyReader(blob);
-  } finally { URL.revokeObjectURL(url); }
-}
-
-function legacyReader(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('이미지를 읽지 못했습니다.'));
-    reader.readAsDataURL(blob);
-  });
-}

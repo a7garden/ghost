@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, closeSync, existsSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ArtifactRef, Conversation, Ghost, UiBlock, Work } from "@ghost/contract";
@@ -27,6 +27,9 @@ class TempArtifacts implements ArtifactStore {
     mkdirSync(this.root, { recursive: true });
     writeFileSync(join(this.root, digest), bytes);
     return { digest, name, mediaType, size: bytes.length };
+  }
+  async size(digest: string): Promise<number> {
+    return statSync(join(this.root, digest)).size;
   }
   async read(digest: string): Promise<Uint8Array> {
     return readFileSync(join(this.root, digest));

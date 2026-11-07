@@ -185,6 +185,7 @@ class HostEngine implements Engine {
     const state = await this.ensureState(conversationId);
     if (!state.configured) await this.configure(state, { conversation, ghost, work });
     const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [] };
+    const content = await renderUserContent(submission.text, meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
     await this.recordOrigin(state, submission.requestId, meta);
     // The run starts a commit after the admission; the view stays attached until that
     // run settles, so core hears busy and idle with or without a watcher.
@@ -193,7 +194,7 @@ class HostEngine implements Engine {
     const submitted = await state.pi.submit(
       {
         type: "input",
-        content: renderUserContent(submission.text, meta.attachments),
+        content,
         requestId: submission.requestId,
         whenBusy: submission.steer ? "steer" : "followUp",
       },

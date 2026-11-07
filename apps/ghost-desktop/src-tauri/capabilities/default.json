@@ -13,6 +13,9 @@
     "core:window:allow-start-dragging",
     "allow-drag-window",
     "allow-open-external-url",
-    "allow-pick-folder"
+    "allow-pick-folder",
+    "allow-companion-set",
+    "allow-companion-enabled",
+    "allow-companion-reset-position"
   ]
 }

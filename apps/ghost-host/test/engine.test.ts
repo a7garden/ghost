@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
-import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall, type FauxProviderHandle } from "@earendil-works/pi-ai";
+import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall, type FauxProviderHandle, type UserMessage } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { defineExtension, defineTool, type LiveState } from "@earendil-works/pi-durable";
 import type { Live, Message, MessageRole } from "@ghost/contract";
@@ -13,7 +13,7 @@ import { execute } from "../src/core/commands.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import { CommandError } from "../src/core/errors.ts";
 import { createEngine } from "../src/engine/index.ts";
-import { liveFrom, sameLive } from "../src/engine/messages.ts";
+import { cutAttachmentBlock, liveFrom, renderUserContent, sameLive } from "../src/engine/messages.ts";
 import { applyProviders, buildModels } from "../src/engine/models.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import type { Engine } from "../src/core/ports.ts";
@@ -104,7 +104,7 @@ async function fixture(toolFactory: (core: Core) => ToolSet = () => tools): Prom
     ledger.putSetting("defaultModel", { provider: "faux", model: "faux-1" });
   });
   secrets.put("faux", "faux-key");
-  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux 1" }] });
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux 1", input: ["text", "image"] }] });
   const models = createModels();
   models.setProvider(faux.provider);
   const engine = await createEngine({
@@ -155,6 +155,173 @@ test("a submission produces an assistant message in the transcript", async () =>
   expect(page.messages[0]?.text).toBe("hi");
   expect(page.messages[0]?.origin).toBe("owner");
   await engine.close();
+});
+
+test("owner attachment bytes reach the model as images and fenced text, while binary remains a reference", async () => {
+  const { core, engine, ledger, root, conversationId, faux } = await fixture();
+  try {
+    const png = Uint8Array.fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=");
+    const attachments = [
+      await core.artifacts.put(png, "pixel.png", "image/png"),
+      await core.artifacts.put(new TextEncoder().encode("실제 파일 내용\n```not a closing fence"), "notes.txt", "text/plain"),
+      await core.artifacts.put(new Uint8Array([0, 255, 42]), "unknown.bin", "application/octet-stream"),
+    ];
+    let input: UserMessage["content"] | undefined;
+    faux.setResponses([(context) => {
+      input = context.messages.find((message) => message.role === "user")?.content as UserMessage["content"] | undefined;
+      return fauxAssistantMessage(fauxText("첨부 확인"));
+    }]);
+    const answered = nextMessage(engine, conversationId, "assistant");
+    await core.sendMessage(conversationId, "첨부를 봐 주세요", "attachments", attachments);
+    await answered;
+    expect(Array.isArray(input)).toBe(true);
+    if (!Array.isArray(input)) throw new Error("expected multimodal input");
+    expect(input).toContainEqual({ type: "image", mimeType: "image/png", data: Buffer.from(png).toString("base64") });
+    const text = input.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+    expect(text).toContain('File: "notes.txt"\n````\n실제 파일 내용');
+    expect(text).toContain(`- unknown.bin (application/octet-stream, sha256:${attachments[2]!.digest})`);
+    expect(text).not.toContain('File: "unknown.bin"');
+    const page = await engine.page(conversationId, null, 50);
+    const owner = page.messages.find((message) => message.role === "user");
+    expect(owner?.text).toBe("첨부를 봐 주세요");
+    expect(owner?.attachments).toEqual(attachments);
+  } finally {
+    core.stop();
+    await core.idle();
+    await engine.close();
+    ledger.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("attachment previews bound text and images and only inline valid UTF-8", async () => {
+  const store = new MemoryArtifacts();
+  const attachments = [
+    await store.put(new TextEncoder().encode("a".repeat(100 * 1024 - 1) + "한" + "hidden"), "long.md", "application/octet-stream"),
+    await store.put(new TextEncoder().encode("export const value = 42;"), "source.ts", "application/octet-stream"),
+    await store.put(new Uint8Array([255, 254]), "invalid.txt", "text/plain"),
+    await store.put(new Uint8Array(5 * 1024 * 1024 + 1), "large.png", "image/png"),
+  ];
+  const content = await renderUserContent("owner", attachments, store);
+  expect(typeof content).toBe("string");
+  expect(content).toContain('[첨부 일부 생략: "long.md" — 처음 102400바이트만 포함]');
+  expect(content).not.toContain("hidden");
+  expect(content).not.toContain("\ufffd");
+  expect(content).toContain("export const value = 42;");
+  expect(content).not.toContain('File: "invalid.txt"');
+  expect(content).toContain("- large.png (image/png, sha256:");
+  expect(content).toContain('[첨부 생략: "invalid.txt" — UTF-8 텍스트가 아님]');
+  expect(content).toContain('[첨부 생략: "large.png" — 이미지 크기 제한');
+  expect(cutAttachmentBlock(content as string)).toBe("owner");
+});
+
+test("attachment budgets use stored sizes, bound reads, and explain every omission", async () => {
+  class RecordingArtifacts extends MemoryArtifacts {
+    readonly reads: { digest: string; maxBytes: number | undefined }[] = [];
+    override async read(digest: string, maxBytes?: number) {
+      this.reads.push({ digest, maxBytes });
+      return super.read(digest, maxBytes);
+    }
+  }
+  const store = new RecordingArtifacts();
+  const image = new Uint8Array(4 * 1024 * 1024);
+  image.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const first = await store.put(image, "first.jpg", "image/jpeg");
+  const second = { ...first, name: "second.png" };
+  const third = { ...first, name: "third.png" };
+  const oversized = await store.put(new Uint8Array(4 * 1024 * 1024 + 1), "oversized.png", "image/png");
+  const invalid = await store.put(new TextEncoder().encode("not an image"), "invalid.png", "image/png");
+  const text = await store.put(new TextEncoder().encode("t".repeat(100 * 1024)), "first.txt", "text/plain");
+  const binary = await store.put(new Uint8Array([0, 255]), "unknown.bin", "application/octet-stream");
+  const content = await renderUserContent("owner", [
+    { ...oversized, size: 1 }, first, second, third, invalid, text,
+    { ...text, name: "second.txt" }, { ...text, name: "third.txt" }, binary,
+  ], store);
+  if (!Array.isArray(content)) throw new Error("expected image parts");
+  const images = content.filter((part) => part.type === "image");
+  expect(images).toHaveLength(2);
+  expect(images.every((part) => part.mimeType === "image/png")).toBe(true);
+  const rendered = content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+  expect(rendered).toContain('[첨부 생략: "oversized.png" — 이미지 크기 제한');
+  expect(rendered).toContain('[첨부 생략: "third.png" — 이미지 크기 제한');
+  // Once the image budget is spent, even an invalid candidate is skipped before reading.
+  expect(rendered).toContain('[첨부 생략: "invalid.png" — 이미지 크기 제한');
+  expect(rendered).toContain('[첨부 생략: "third.txt" — 메시지 텍스트 크기 제한');
+  expect(rendered).toContain('[첨부 생략: "unknown.bin" — 지원하지 않는 파일 형식');
+  expect(store.reads).toEqual([
+    { digest: first.digest, maxBytes: 4 * 1024 * 1024 },
+    { digest: first.digest, maxBytes: 4 * 1024 * 1024 },
+    { digest: text.digest, maxBytes: 100 * 1024 },
+    { digest: text.digest, maxBytes: 100 * 1024 },
+  ]);
+  const mismatched = await renderUserContent("owner", [invalid], store);
+  expect(mismatched).toContain('[첨부 생략: "invalid.png" — 지원하는 이미지 형식이 아님]');
+});
+
+test("image magic bytes determine the provider media type", async () => {
+  const store = new MemoryArtifacts();
+  const headers = [
+    { bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], type: "image/png" },
+    { bytes: [0xff, 0xd8, 0xff], type: "image/jpeg" },
+    { bytes: [0x47, 0x49, 0x46, 0x38, 0x37, 0x61], type: "image/gif" },
+    { bytes: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61], type: "image/gif" },
+    { bytes: [0x52, 0x49, 0x46, 0x46, 4, 0, 0, 0, 0x57, 0x45, 0x42, 0x50], type: "image/webp" },
+  ];
+  for (const header of headers) {
+    const artifact = await store.put(new Uint8Array(header.bytes), "mislabelled.png", "image/png");
+    const content = await renderUserContent("owner", [artifact], store);
+    expect(content).toContainEqual({ type: "image", mimeType: header.type, data: Buffer.from(header.bytes).toString("base64") });
+  }
+});
+
+test("static model capabilities downgrade images for text-only and unknown models, not vision models", async () => {
+  const requests: { model: string; messages: unknown }[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      requests.push(await request.json() as { model: string; messages: unknown });
+      const frame = (delta: Record<string, unknown>, finishReason: string | null) => `data: ${JSON.stringify({
+        id: "attachment-modalities", object: "chat.completion.chunk", created: 1, model: "test",
+        choices: [{ index: 0, delta, finish_reason: finishReason }],
+      })}\n\n`;
+      return new Response(frame({ role: "assistant", content: "received" }, null) + frame({}, "stop") + "data: [DONE]\n\n", {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  try {
+    const secrets = new MemorySecrets();
+    secrets.put("compatible", "key");
+    secrets.put("zai", "key");
+    const settings = {
+      defaultModel: null,
+      reviewModel: null,
+      providers: [
+        { id: "compatible", kind: "openai_compatible" as const, name: "Compatible", baseUrl: `http://127.0.0.1:${server.port}/v1`, models: [{ id: "gpt-4.1", name: "Vision" }, { id: "unknown", name: "Unknown" }], hasCredential: true },
+        { id: "zai", kind: "zai" as const, name: "Z.AI", baseUrl: `http://127.0.0.1:${server.port}/v1`, models: [{ id: "glm-5.3", name: "Text" }], hasCredential: true },
+      ],
+    };
+    const models = buildModels(settings, secrets);
+    const original: UserMessage = { role: "user", timestamp: 1, content: [
+      { type: "text", text: "Read the image" },
+      { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=" },
+    ] };
+    for (const [provider, id, vision] of [["zai", "glm-5.3", false], ["compatible", "unknown", false], ["compatible", "gpt-4.1", true]] as const) {
+      const model = models.getModel(provider, id);
+      if (!model) throw new Error(`missing ${id}`);
+      expect(model.input.includes("image")).toBe(vision);
+      const result = await models.completeSimple(model, { messages: [original] });
+      expect(result.stopReason).toBe("stop");
+      const request = JSON.stringify(requests.at(-1));
+      expect(request.includes('"image_url"')).toBe(vision);
+      expect(request.includes("(image omitted: model does not support images)")).toBe(!vision);
+      // Provider conversion must not remove the persisted original image.
+      expect(original.content).toContainEqual(expect.objectContaining({ type: "image" }));
+    }
+  } finally {
+    server.stop(true);
+  }
 });
 
 test("reasoning stays on the assistant message, apart from its text", async () => {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-companion-reset-position"
+description = "Enables the companion_reset_position command without any pre-configured scope."
+commands.allow = ["companion_reset_position"]
+
+[[permission]]
+identifier = "deny-companion-reset-position"
+description = "Denies the companion_reset_position command without any pre-configured scope."
+commands.deny = ["companion_reset_position"]

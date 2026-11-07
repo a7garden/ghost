@@ -207,7 +207,8 @@
 .ghost-composer__textarea:disabled { opacity: .55; }
 .ghost-composer__footer { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .ghost-composer__footer-slot, .ghost-composer__footer-actions, .ghost-composer__footer-trailing { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
-.ghost-composer__footer-slot { flex: 1; margin-left: -6px; }
+.ghost-composer__footer-slot { flex: 1; }
+.composer-confirmation { color: var(--ghost-signal-ink); font-size: var(--text-caption); font-weight: 500; animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .ghost-composer__footer-actions { justify-content: flex-end; }
 /* While the Ghost responds a light travels around the composer: a crisp comet on the edge and a soft glow
    behind it, over a faint steady ring so the busy state reads even where the comet is not. */

@@ -85,7 +85,7 @@ export function ModelPicker({ conversationId, value, onChange, disabled = false,
         <ChevronDown size={13} className="flex-none text-ink-3" aria-hidden="true"/>
       </button>
     </PopoverTrigger>
-    <PopoverContent side="top" align="start" className="w-64 max-w-[calc(100vw-2rem)] p-1.5" aria-label="모델 선택">
+    <PopoverContent side="top" align="end" className="w-64 max-w-[calc(100vw-2rem)] p-1.5" aria-label="모델 선택">
       <div className="max-h-[60dvh] overflow-auto">
         {usableProviders(settings).map(provider => <section key={provider.id} className="py-1">
           <p className="m-0 px-2.5 py-1 text-caption font-medium text-ink-3">{provider.name}</p>

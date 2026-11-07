@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-companion-resize"
+description = "Enables the companion_resize command without any pre-configured scope."
+commands.allow = ["companion_resize"]
+
+[[permission]]
+identifier = "deny-companion-resize"
+description = "Denies the companion_resize command without any pre-configured scope."
+commands.deny = ["companion_resize"]

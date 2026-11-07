@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod companion;
 mod supervisor;
 
 use crate::supervisor::{ProcessState, ProcessSupervisor, SupervisorConfig};
@@ -391,6 +392,7 @@ fn create_overlay(app: &tauri::AppHandle, origin: &OriginCell) -> Result<Webview
 struct HostUi {
     window: WebviewWindow,
     overlay: WebviewWindow,
+    companion: WebviewWindow,
     /// The origin the webviews may load.
     origin: OriginCell,
     /// The endpoint the windows currently show.
@@ -410,6 +412,7 @@ impl HostUi {
         if moved || restarted {
             navigate(&self.window, endpoint);
             navigate_overlay(&self.overlay, endpoint);
+            companion::navigate(&self.companion, endpoint);
         }
         self.current = Some(endpoint.clone());
     }
@@ -698,11 +701,31 @@ fn main() {
         return;
     }
     #[cfg(target_os = "macos")]
-    let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool =
-        tauri::generate_handler![drag_window, open_external_url, pick_folder];
+    let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        drag_window,
+        open_external_url,
+        pick_folder,
+        companion::companion_set,
+        companion::companion_enabled,
+        companion::companion_reset_position,
+        companion::companion_resize,
+        companion::toggle_overlay,
+        companion::focus_main,
+        companion::companion_menu,
+        companion::companion_drag
+    ];
     #[cfg(not(target_os = "macos"))]
-    let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool =
-        tauri::generate_handler![drag_window];
+    let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        drag_window,
+        companion::companion_set,
+        companion::companion_enabled,
+        companion::companion_reset_position,
+        companion::companion_resize,
+        companion::toggle_overlay,
+        companion::focus_main,
+        companion::companion_menu,
+        companion::companion_drag
+    ];
     tauri::Builder::default()
         .plugin(ShortcutBuilder::new().build())
         .invoke_handler(invoke_handler)
@@ -743,12 +766,30 @@ fn main() {
             })
             .on_navigation(move |url| navigation_allowed(&window_origin, url))
             .build()?;
+            // Closing the workspace keeps the desktop avatar and shortcut alive.
+            // Actual application termination still follows ExitRequested below.
+            let close_window = window.clone();
+            window.on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    let quitting = close_window
+                        .app_handle()
+                        .try_state::<DesktopHost>()
+                        .is_some_and(|state| state.exiting.load(Ordering::Acquire));
+                    if !quitting {
+                        api.prevent_close();
+                        if let Err(error) = close_window.hide() {
+                            eprintln!("[ghost] Ghost 창을 숨기지 못했습니다: {error}");
+                        }
+                    }
+                }
+            });
 
             // The chat overlay: a warm, parked second webview the ⌘⇧G global
             // shortcut surfaces over the current work. It stays hidden until
             // the host is up and the shell navigates it to the host's
             // overlay page.
             let overlay = create_overlay(app.handle(), &origin)?;
+            let companion = companion::create(app.handle(), &origin)?;
 
             // A taken or rejected ⌘⇧G must not take the whole console down:
             // register here and keep the app usable without the shortcut.
@@ -799,6 +840,7 @@ fn main() {
             let ui = HostUi {
                 window,
                 overlay,
+                companion,
                 origin,
                 current: None,
             };
@@ -819,6 +861,15 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("Ghost desktop runtime failed")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::RunEvent::Reopen { .. }) {
+                if !app.state::<DesktopHost>().exiting.load(Ordering::Acquire) {
+                    if let Err(error) = companion::focus_main(app.clone()) {
+                        eprintln!("[ghost] {error}");
+                    }
+                }
+                return;
+            }
             // macOS application termination can reach Exit directly. The owned
             // host process must be reaped before the runtime leaves.
             if matches!(event, tauri::RunEvent::Exit) {

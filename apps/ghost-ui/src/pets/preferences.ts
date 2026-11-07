@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 // Ghost colors belong to each Ghost's look; there is no display-wide override.
-export interface Preferences { theme: 'system' | 'light' | 'dark'; animate: boolean; companion: boolean; companionProfile: string; }
-const defaults: Preferences = { theme: 'system', animate: true, companion: false, companionProfile: '' };
+export interface Preferences { theme: 'system' | 'light' | 'dark'; animate: boolean; }
+const defaults: Preferences = { theme: 'system', animate: true };
 export function usePreferences() {
   const [preferences, setPreferences] = useState<Preferences>(() => {
-    try { const saved = JSON.parse(localStorage.getItem('ghost-ui:preferences') ?? 'null'); const theme = saved?.theme ?? localStorage.getItem('ghost-ui:theme'); return { theme: ['system', 'light', 'dark'].includes(theme) ? theme : 'system', animate: saved?.animate !== false, companion: saved?.companion === true, companionProfile: typeof saved?.companionProfile === 'string' ? saved.companionProfile : '' }; } catch { return defaults; }
+    try { const saved = JSON.parse(localStorage.getItem('ghost-ui:preferences') ?? 'null'); const theme = saved?.theme ?? localStorage.getItem('ghost-ui:theme'); return { theme: ['system', 'light', 'dark'].includes(theme) ? theme : 'system', animate: saved?.animate !== false }; } catch { return defaults; }
   });
   const [storageError, setStorageError] = useState('');
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches);

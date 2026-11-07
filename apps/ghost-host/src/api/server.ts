@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import { basename, extname, join, resolve, sep } from "node:path";
 import {
+  ArtifactRef,
   CommandRequest,
   ContractError,
   PairingClaim,
@@ -39,6 +40,8 @@ import { NotFound } from "../ledger/ledger.ts";
 const HTTP_STATUS: Record<ErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503, internal: 500 };
 const DIGEST = /^[0-9a-f]{64}$/;
 const AFTER = /^\d+$/;
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MEDIA_TYPE = /^[!#$%&'*+.^_`|~0-9a-z-]+\/[!#$%&'*+.^_`|~0-9a-z-]+(?:\s*;\s*[!#$%&'*+.^_`|~0-9a-z-]+=(?:[!#$%&'*+.^_`|~0-9a-z-]+|"[^"\\\r\n]*"))*$/i;
 
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -242,12 +245,56 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     return json({ conversation, ...page } satisfies ConversationPage);
   }
 
+  async function uploadArtifact(request: Request, access: Access): Promise<Response> {
+    if (!access.isOwner) return error("forbidden", "artifact upload needs the owner", 403);
+    let name: string;
+    try {
+      name = decodeURIComponent(request.headers.get("x-ghost-file-name") ?? "");
+    } catch {
+      return error("invalid", "file name must be percent-encoded UTF-8", 400);
+    }
+    const mediaType = request.headers.get("content-type") ?? "";
+    try {
+      parse(ArtifactRef, { digest: "0".repeat(64), name, mediaType, size: 0 });
+    } catch (caught) {
+      return failure(caught);
+    }
+    if (/[\u0000-\u001f\u007f]/.test(name) || !MEDIA_TYPE.test(mediaType)) {
+      return error("invalid", "invalid file name or media type", 400);
+    }
+    if (Number(request.headers.get("content-length")) > MAX_UPLOAD_BYTES) {
+      return error("invalid", "artifact exceeds the 20 MiB upload limit", 413);
+    }
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const reader = request.body?.getReader();
+    try {
+      if (reader) {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > MAX_UPLOAD_BYTES) {
+            await reader.cancel();
+            return error("invalid", "artifact exceeds the 20 MiB upload limit", 413);
+          }
+          chunks.push(value);
+        }
+      }
+      return json(await core.artifacts.put(Buffer.concat(chunks, size), name, mediaType), 201);
+    } catch (caught) {
+      return failure(caught);
+    } finally {
+      reader?.releaseLock();
+    }
+  }
+
   async function serveArtifact(digest: string, access: Access): Promise<Response> {
     if (!DIGEST.test(digest)) throw notFound(`artifact ${digest}`);
     const rows = core.ledger.artifactsForDigest(digest);
     const visibleWork = rows.some((row) => row.workId !== null && access.canSeeWork(core.ledger.work(row.workId)));
     const avatarImage = core.ledger.avatars().some((avatar) => avatar.imageDigest === digest);
-    if (!visibleWork && !avatarImage) throw notFound(`artifact ${digest}`);
+    if (!access.isOwner && !visibleWork && !avatarImage) throw notFound(`artifact ${digest}`);
     if (!core.artifacts.has(digest)) throw notFound(`artifact ${digest}`);
     const bytes = await core.artifacts.read(digest);
     // Store reads allocate fresh ArrayBuffer-backed bytes, which is what Bun's body union accepts.
@@ -465,6 +512,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
     if (pathname === "/api/commands" && request.method === "POST") return serveCommand(request, access);
+    if (pathname === "/api/artifacts" && request.method === "POST") return uploadArtifact(request, access);
     if (pathname === "/api/events" && request.method === "GET") return serveEvents(request, url, access);
 
     if (pathname === "/api/providers/catalog" && request.method === "GET") {

@@ -32,6 +32,10 @@ describe("FsArtifactStore", () => {
     expect(store.path(digest)).toBe(join(root, "artifacts", "sha256", digest.slice(0, 2), digest));
     expect(readFileSync(join(root, "artifacts", "sha256", digest.slice(0, 2), digest)).toString()).toBe("artifact body");
     expect(Buffer.from(await store.read(digest))).toEqual(Buffer.from(content));
+    expect(await store.size(digest)).toBe(content.byteLength);
+    expect(await store.read(digest, 4)).toEqual(content.subarray(0, 4));
+    expect(await store.read(digest, 0)).toEqual(new Uint8Array());
+    expect(await store.read(digest, 1024)).toEqual(content);
   });
 
   test("re-putting the same bytes is idempotent", async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, CircleAlert, GitBranch, Square, X } from 'lucide-react';
-import { Button, Composer, Conversation, Popover, PopoverContent, PopoverTrigger } from '../ui'
+import { ArrowRight, CircleAlert, GitBranch, X } from 'lucide-react';
+import { Button, Conversation, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
 import { GhostProfile } from '../components/GhostProfile';
@@ -8,7 +8,7 @@ import { projectGhostActivity } from '../components/AgentStatus';
 import { StateGlyph, ThreadCard, workGlyph } from '../components/agent';
 import { LiveReply, Transcript, type TranscriptExtra } from '../components/TranscriptMessage';
 import { quoteForReply } from '../components/MessageMenu';
-import { ModelPicker } from '../pets/ModelPicker';
+import { ChatComposer } from './ChatComposer';
 import { GhostDesignEditor } from './GhostDesign';
 import { ThreadPanel } from './ThreadPanel';
 import { useConversationFeed } from './conversationFeed';
@@ -40,21 +40,11 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   const { feed: page, loading, olderLoading, loadOlder, error, setError } = useConversationFeed(conversationId);
   const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
   const [followKey, setFollowKey] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { if (!sending) inputRef.current?.focus(); }, [sending]);
+  useEffect(() => { inputRef.current?.focus(); }, [conversationId]);
 
   const run = async (fn: () => Promise<unknown>) => { setError(''); try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다.'); } };
-  const send = (value: string) => {
-    if (!conversationId || !value.trim() || sending) return;
-    setSending(true);
-    setFollowKey(key => key + 1);
-    void run(async () => {
-      await client.send({ type: 'message.send', conversationId, text: value });
-      setDraft('');
-    }).finally(() => setSending(false));
-  };
   const stop = () => { if (conversationId) void run(() => client.send({ type: 'message.cancel', conversationId })); };
   // The thread lives in the URL so it survives reloads and can be linked; the conversation stays put.
   const chatPath = `/ghosts/${encodeURIComponent(ghost.id)}${conversationId && conversationId !== ghost.directConversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ''}`;
@@ -97,11 +87,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
           onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
           onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
       </>}
-      composer={<Composer inputId="message-input" inputRef={inputRef} value={draft} onValueChange={setDraft} onSubmit={send}
-        label={`${ghost.name}에게 메시지`} placeholder={running ? '응답 중에도 덧붙일 수 있습니다' : `${ghost.name}에게 메시지`} submitLabel="메시지 보내기"
-        disabled={!conversationId} pending={sending} running={running} describedBy="composer-keyboard-help"
-        footer={conversationId && <ModelPicker conversationId={conversationId} value={currentConversation?.model} disabled={sending}/>}
-        trailing={running ? <button type="button" className="chat-stop" aria-label="응답 취소" title="응답 취소" onClick={stop}><Square aria-hidden="true"/></button> : undefined}/>}
+      composer={<ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft} inputRef={inputRef}
+        onSent={() => setFollowKey(key => key + 1)} onStop={stop} onError={setError}/>}
       footer={<>
         {error && <div className="chat-error" role="alert"><CircleAlert size={15} aria-hidden="true"/><span>{error}</span><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label="오류 메시지 닫기" onClick={() => setError('')}><X size={14}/></Button></div>}
         <p id="composer-keyboard-help" className="sr-only m-0">Enter로 보내기 · Shift + Enter로 줄바꿈{busy ? ' · 추가 지시는 진행 중인 응답에 전달됩니다.' : ''}</p>
