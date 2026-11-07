@@ -27,14 +27,24 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-79bd394` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-9db4166` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
-| Mac 앱 | `~/Applications/Ghost.app`(`f4f05fb` 셸·새 아이콘, 임시 서명), `console.json` = `{host_mode: external, root}` |
+| Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### Ghost 설정·입력창 + 메뉴·첨부·데스크톱 아바타 운영 반영 — 2026-11-08
+
+- 소스 `9db4166`의 Host·UI·Mac 셸을 `releases/20261108-bun-9db4166`에 설치했다. 계약·DB 스키마는 그대로다. 새 Owner API `POST /api/artifacts`(첨부 업로드, 20 MiB, 소유자 전용)와 첨부 내용의 모델 전달(이미지: 모델 카탈로그상 이미지 입력 모델만, 파일 4 MiB·메시지 8 MiB / 텍스트: 파일 100 KiB·메시지 200 KiB, 넘치면 생략 사유 표시)이 추가됐다. 컴파일 Host 바이트와 UI 93개 파일 해시가 빌드 원본과 일치한다. 설치 사본을 백업 DB 사본 위 임시 루트·포트에서 실행해 health·UI·`companion.html`·첨부 업로드 응답을 확인했다.
+- UI: 설정의 아바타 보관함과 창 안 펫을 없애고 `데스크톱 아바타` 탭을 추가했다. 꾸미기는 모습만 다루고 이름·메인·상태·모델·역할·도구·샌드박스는 새 Ghost 설정 시트로 옮겼다. 입력창 왼쪽 아래 + 메뉴(사진·파일 첨부·일로 맡기기·나중에 보내기), 모델 선택은 보내기 옆. 프로젝트 화면을 새 구성 요소로 다시 짰다.
+- Mac 셸: 투명·항상 위·모든 Space의 `companion` 창, 위치·표시 상태 저장, 기본 메뉴, 메인 창 닫기 시 숨김·Dock 재열기. 앱을 정상 종료(`quit`)한 뒤 임시 서명한 새 번들로 교체했고 `codesign --verify --strict` 통과, 아이콘 원본 일치. 이전 앱은 백업의 `Ghost.app`.
+- 검사: Host 테스트 246개(+1 생략)·타입 검사, UI 테스트 63개·타입 검사·빌드, 시각 회귀 28개(홈·대화·Ghost 설정·프로젝트 기준 갱신 후 재통과), Rust fmt·clippy·테스트 12개, 격리 Host에서 첨부 업로드→전송→모델 요청, 일로 맡기기, 나중에 보내기, Ghost 설정 도구·상태 변경, 빌드 번들 데스크톱 아바타(표시·클릭·드래그·재실행 위치·설정 손상 시 기동·메인 창 복구) 확인. 독립 검토(첨부: Claude, 셸: Claude) 지적 P1 3건·P2 3건 반영.
+- 백업: `~/.local/share/ghost/backups/pre-ghost-settings-20261108-9db4166/`, `ghost-backup/2`, `complete: true`, 두 DB `integrity_check` ok, artifacts·secrets·config 복사, 이전 `Ghost.app` 사본 서명 유효. 시각 `2026-11-07T16:09Z`.
+- 유휴 확인 후 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 3071 → 39276). 실행 파일·준비 상태, Ghost 4·대화 9·맡긴 일 32, config·secrets 보존 확인. 새 앱에서 설정 → 데스크톱 아바타를 켜 데스크톱 오른쪽 아래에 `primary`가 상태 말풍선과 함께 뜨는 것을 화면 캡처로 확인하고 다시 껐다(기본값 꺼짐 유지).
+- 되돌릴 때는 `current`를 `releases/20261108-bun-79bd394`로 교체하고 LaunchAgent를 정상 재시작하며, 앱을 종료하고 백업의 `Ghost.app`으로 바꾼다. 저장 형식 변화는 없다(업로드한 첨부 바이트는 artifacts에 남는다).
 
 ### Ghost 배경 제거 운영 반영 — 2026-11-08
 
