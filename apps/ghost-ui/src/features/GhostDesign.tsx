@@ -8,17 +8,11 @@ import { GhostCharacter } from '../pets/GhostCharacter';
 import { defaultBodyColor } from '../pets/appearance';
 import { Modal } from '../components/Modal';
 import { useAvatarSource } from '../pets/AvatarProvider';
-import { GhostColorPicker } from '../pets/GhostColorPicker';
 import { LookEditor } from '../pets/LookEditor';
 import { PetSprite } from '../pets/PetSprite';
 import { spriteVersionOf } from '../pets/sprites';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from '../pets/ModelPicker';
 
-const backgroundColors = [
-  { name: '하늘', color: '#dbeaff' }, { name: '민트', color: '#d7f0e4' }, { name: '라일락', color: '#e9e1fa' },
-  { name: '복숭아', color: '#fbe3d6' }, { name: '모래', color: '#f3e8cf' }, { name: '안개', color: '#eef0f3' },
-  { name: '먹', color: '#202125' }, { name: '흰색', color: '#ffffff' },
-];
 const stateChoices: { value: GhostState; label: string }[] = [{ value: 'active', label: '활성' }, { value: 'paused', label: '일시정지' }, { value: 'retired', label: '은퇴' }];
 
 /**
@@ -57,7 +51,6 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
       reason => { if (request === lookRequest.current) { setLookDraft(null); setError(reason instanceof Error ? reason.message : '모습을 저장하지 못했습니다.'); } },
     );
   };
-  const backgroundColor = look.background || 'auto';
   return <div className="grid gap-6">
     <div className="grid gap-5">
       {!look.avatarId && <LookEditor ghostId={ghost.id} look={look} disabled={!state} onChange={saveLook}/>}
@@ -72,8 +65,6 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
             onSelect={() => look.avatarId !== avatar.id && saveLook({ avatarId: avatar.id })}/>)}
         </div>
       </fieldset>}
-      {look.avatarId && <GhostColorPicker label="배경색" resetLabel="기본" presets={backgroundColors} value={backgroundColor}
-        onChange={color => saveLook({ background: color === 'auto' ? '' : color })}/>}
     </div>
     <SettingsGroup title="기본 정보">
       <form onSubmit={event => {

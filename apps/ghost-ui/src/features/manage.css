@@ -48,19 +48,4 @@
 /* Lanes as selectable list rows (프로젝트) -------------------------------- */
 .lane__main[aria-current]:not([aria-current="false"]) { background: var(--ghost-hover2); }
 .lane__main:disabled { cursor: default; }
-
-/* Ghost color swatch ring ------------------------------------------------ */
-.ghost-color-swatch {
-  width: 28px;
-  height: 28px;
-  flex: none;
-  cursor: pointer;
-  border: 1px solid var(--ghost-line-strong);
-  border-radius: 50%;
-  outline: 2px solid transparent;
-  outline-offset: 3px;
-  transition: outline-color var(--duration-fast) ease;
-}
-.ghost-color-swatch[aria-pressed="true"] { outline-color: var(--ghost-ink); }
-.ghost-color-swatch:focus-visible { outline-color: var(--ghost-ink2); }
 }

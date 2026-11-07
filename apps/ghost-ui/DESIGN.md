@@ -140,7 +140,9 @@ squircle, sheet); every body shares the round body's top and width so accents si
 `look.face` picks the eyes (bars, dots, arcs, tall) and `look.mark` one accent: halo,
 antenna, sprout, ring, spark, crown, ears, horns and the headphone band are drawn in the
 body color; bow, headphone cups and glasses are worn in front in the face color with a
-body-color outline so they read on any tile. `look.body` takes any color from a twelve-hue
+body-color outline so they read on any surface. Ghosts have no background tile (owner
+decision, 2026-11-08): portraits sit directly on the page, and a stored `look.background`
+is neither shown nor editable. `look.body` takes any color from a twelve-hue
 palette or a custom one; a Ghost that never chose gets a stable hue from its id so agents
 read apart. 꾸미기 opens in its own dialog: a floating preview that pops on every change
 and a 무작위 shuffle, then picture choices whose legend names the current pick; choices

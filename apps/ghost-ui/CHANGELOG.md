@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ghosts have no background: the 배경 row, the avatar 배경색 picker and portrait tiles are
+  gone; a stored `look.background` is ignored.
 - Chat reading pass: 15px/1.7 assistant text, tighter heading/list rhythm, tables as quiet
   cards with row hairlines, lighter code blocks, aligned tool trails.
 - Streaming: text advances at an even pace, arriving words fade up out of a blur and a
