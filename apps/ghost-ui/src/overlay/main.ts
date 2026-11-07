@@ -7,6 +7,7 @@ import type { Message, State } from '@ghost/contract';
 import { pickConversation, pickGhost, type Target } from './target';
 import '@garden/ui/styles.css';
 import './overlay.css';
+import { installWindowDrag } from '../host/windowDrag';
 
 // Garden tokens switch on the root `.dark` class; the overlay follows the system theme.
 const systemDark = matchMedia('(prefers-color-scheme: dark)');
@@ -24,11 +25,12 @@ const dotEl = document.getElementById('dot') as HTMLSpanElement;
 const statusEl = document.getElementById('status') as HTMLOutputElement;
 
 // Tauri 2 injects this IPC bridge into every webview; the overlay only calls
-// the window hide command that the capability grants.
+// the window hide and title bar drag commands that the capability grants.
 interface TauriInternals {
   invoke(command: string): Promise<void>;
 }
 const tauri = (window as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
+if (tauri) installWindowDrag(command => tauri.invoke(command));
 
 let client: HostClient | null = null;
 let state: State | null = null;

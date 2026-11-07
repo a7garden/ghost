@@ -25,10 +25,15 @@ import { SpacesView } from './features/SpacesView';
 import { routeLabels, uiTerms } from './uiText';
 import type { GhostMenuItem } from './components/WorkspaceSidebar';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
+import { installWindowDrag } from './host/windowDrag';
 
 // Tauri 웹뷰는 모든 내비게이션에 __TAURI_INTERNALS__를 주입한다. 데스크톱 창에서만 끌 수 있는 타이틀바를 그린다.
 const desktopShell = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window && !/iPhone|iPad/.test(navigator.userAgent);
 const desktopMac = desktopShell && /Mac/.test(navigator.platform);
+if (desktopShell) {
+  const tauri = (window as unknown as { __TAURI_INTERNALS__: { invoke(command: string): Promise<unknown> } }).__TAURI_INTERNALS__;
+  installWindowDrag(command => tauri.invoke(command));
+}
 
 const currentRoute = () => location.hash.replace(/^#/, '').replace(/^\/dots\//, '/ghosts/') || '/';
 

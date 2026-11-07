@@ -559,6 +559,44 @@ fn probe() -> Result<Value, String> {
     }
 }
 
+/// Move the window with the pointer from a title bar press.
+///
+/// Tauri's `start_dragging` hands AppKit whatever event is current when the IPC
+/// message lands. The press already went to the web content process, so once the
+/// pointer moves that is a drag event and AppKit logs "Window move completed
+/// without beginning" instead of moving. A synchronous command runs on the main
+/// thread; it starts the move from a press at the pointer while the button is held.
+#[tauri::command]
+fn drag_window(window: WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSWindow};
+        if NSEvent::pressedMouseButtons() & 1 == 0 {
+            return Ok(());
+        }
+        let pointer = window.ns_window().map_err(|error| error.to_string())?;
+        // SAFETY: Tauri returns the live NSWindow of this webview window, and a
+        // synchronous command runs on the main thread that owns it.
+        let ns_window = unsafe { &*pointer.cast::<NSWindow>() };
+        let press = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+            NSEventType::LeftMouseDown,
+            ns_window.mouseLocationOutsideOfEventStream(),
+            NSEventModifierFlags::empty(),
+            0.0,
+            ns_window.windowNumber(),
+            None,
+            0,
+            1,
+            1.0,
+        )
+        .ok_or("could not create the press event")?;
+        ns_window.performWindowDragWithEvent(&press);
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    window.start_dragging().map_err(|error| error.to_string())
+}
+
 fn main() {
     // Integration probe uses the same host handshake as the window, without
     // opening a window or claiming that UI interactions have been tested.
@@ -574,6 +612,7 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(ShortcutBuilder::new().build())
+        .invoke_handler(tauri::generate_handler![drag_window])
         .setup(|app| {
             let resources = app.path().resource_dir()?.join("resources");
             let origin: OriginCell = Arc::new(Mutex::new(None));
