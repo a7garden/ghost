@@ -27,14 +27,23 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-a7ef16e` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-327d81b` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
-| Mac 앱 | `~/Applications/Ghost.app`, `console.json` = `{host_mode: external, root}` |
+| Mac 앱 | `~/Applications/Ghost.app`(`7fa4f8f` 셸, 임시 서명), `console.json` = `{host_mode: external, root}` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### UI/UX 보완·폴더 선택 셸 운영 반영 — 2026-11-07
+
+- 소스 `7fa4f8f`(iPhone 앱 리디자인, 대화 옆 스레드 패널, 보조 글자 대비 AA, 표시 전역 Ghost 색 제거, 홈 설정 카드, 생각 수준, 폴더 선택, 시각 회귀 테스트)와 후속 `327d81b`(끝난 스레드의 빈 작업 대화를 `기록 없음`으로 표시)의 UI를 `releases/20261107-bun-327d81b`에 설치했다. Host·계약은 `a7ef16e` 이후 바뀌지 않아 같은 컴파일 Host를 복사했다(바이트 일치). UI 85개 파일 해시가 빌드 원본과 일치한다. `7fa4f8f` 사본은 백업 DB 사본을 쓰는 임시 루트·포트에서 먼저 실행해 홈 설정 카드를 확인했다.
+- Mac 셸을 교체했다. 메인 창에만 `allow-pick-folder` 권한을 주고 `pick_folder`가 `NSOpenPanel`을 창 시트(`beginSheetModalForWindow`)로 띄운다. 독립 검토가 지적한 `runModal` 중첩 실행 루프(종료 시 멈춤 위험)를 비차단 시트로 바꿨다. 새 앱은 임시 서명, `codesign --verify --strict` 통과. 이전 앱은 백업 디렉터리의 `Ghost.app`에 있다.
+- 검사: UI 테스트 68개·타입 검사·빌드, Playwright 시각 회귀 28개(연속 3회 통과), Rust fmt·clippy·테스트 7개, iOS `swift test` 37개·시뮬레이터 빌드·UI 테스트 10개(실 Host 4개 생략). 독립 검토(UI: Codex, 셸: Claude)의 P2 다섯 건을 고쳤다.
+- 백업: `~/.local/share/ghost/backups/pre-ux-gaps-20261107-7fa4f8f/`, `ghost-backup/2`, `complete: true`, `2026-11-07T13:51:54Z`, 두 DB `integrity_check` ok, artifacts·secrets·config 복사·비교, 이전 `Ghost.app` 사본 서명 유효.
+- 유휴 상태에서 `current`를 두 번 원자적으로 교체하고 Host를 정상 재기동했다(PID 2704 → 55004 → 55950). 실행 파일·운영 DB·단일 리스너·준비 상태, Ghost 4·대화 9·맡긴 일 32·프로젝트 0, config·secrets 보존을 확인했다. 설치 앱에서 `--desktop-probe` health 후 접근성 의미 클릭으로 Ghost 대화 열기, 스레드 카드 → 스레드 패널 열기·닫기, 새 프로젝트 → 폴더 선택 시트 표시 → Cancel → 입력 다시 활성화를 확인했다. 운영 프로젝트는 만들지 않았다.
+- 되돌릴 때는 `current`를 `releases/20261107-bun-a7ef16e`로 교체하고 LaunchAgent를 정상 재시작한다. 셸까지 되돌리려면 앱을 종료하고 백업의 `Ghost.app`으로 바꾼다. 저장 형식 변화는 없다.
 
 ### 지속 대화·추론 표시·원형 Ghost 운영 반영 — 2026-11-07
 
