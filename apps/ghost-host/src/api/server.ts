@@ -140,6 +140,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   const server: Bun.Server<undefined> = Bun.serve({
     hostname: config.host,
     port: config.port,
+    // Bun closes connections idle for 10 s by default; the SSE keepalive is every 15 s.
+    idleTimeout: 60,
     fetch: (request, bound) => handle(request, bound),
   });
 
