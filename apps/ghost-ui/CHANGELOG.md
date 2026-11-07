@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added model-generated interactive responses through the direct-only `present_ui`
+  capability: bar/line charts with exact-data view, comparisons, choices, forms and
+  isolated static HTML. UI actions send ordinary owner messages, retain tab-scoped
+  input state and reuse request IDs after uncertain delivery. Presentations survive
+  host restarts in the existing Pi tool journal; no new database or permissions.
+  HTML is sanitized, scriptless and navigation-free with no remote resources.
+
 - Made UI controls, theme, source Markdown editing and desktop process supervision
   app-owned. Removed external framework snapshots, workspace dependencies, sync
   commands and adoption instructions. Retained source-editor previews, keyboard

@@ -5,6 +5,7 @@ import { describeWork } from "../core/works.ts";
 import type { MemoryPort, DocumentsPort, SandboxEnvFactory } from "../integrations/ports.ts";
 import { createDocumentsTools } from "./documents.ts";
 import { createDirectTools } from "./direct.ts";
+import { createInteractiveTools, INTERACTIVE_INSTRUCTIONS } from "./interactive.ts";
 import { createMainTools } from "./main.ts";
 import { createMemoryTools } from "./memory.ts";
 import { createReviewTools } from "./review.ts";
@@ -16,7 +17,9 @@ Create a Work (work_create) only when the owner explicitly hands over a task —
 work_list and work_inspect show progress; work_update edits a live Work; work_cancel stops one.
 ask_owner asks the owner a question when a decision is theirs; the answer arrives as a message.
 schedule_create wakes this conversation once at a given time or on an interval; schedule_list and schedule_cancel manage schedules.
-ghost_list shows the active Ghosts; hand a task to a better-fit Ghost with work_create and its ghost_id.`;
+ghost_list shows the active Ghosts; hand a task to a better-fit Ghost with work_create and its ghost_id.
+
+${INTERACTIVE_INSTRUCTIONS}`;
 
 const WORK_INSTRUCTIONS = `This conversation executes exactly one Work. Stay on it.
 read, write, edit and bash operate in the Work's sandbox workspace; publish everything the result needs with publish_artifact before completing.
@@ -37,6 +40,7 @@ export function createToolSet(deps: {
   documents: DocumentsPort | null;
 }): ToolSet {
   const direct = createDirectTools(deps.core);
+  const interactive = createInteractiveTools(deps.core);
   const work = createWorkTools(deps.core, deps.sandbox);
   const review = createReviewTools(deps.core);
   const main = createMainTools(deps.core);
@@ -45,12 +49,12 @@ export function createToolSet(deps: {
 
   return {
     all(): Extension[] {
-      return [direct, work, review, main, ...(memory ? [memory] : []), ...(documents ? [documents] : [])];
+      return [direct, interactive, work, review, main, ...(memory ? [memory] : []), ...(documents ? [documents] : [])];
     },
     extensionsFor(conversation: Conversation, ghost: Ghost, _work: Work | null): Extension[] {
       switch (conversation.kind) {
         case "direct": {
-          const selected = [direct];
+          const selected = [direct, interactive];
           if (deps.memory?.available(ghost.id) && memory) selected.push(memory);
           if ((deps.documents?.spacesFor(ghost.id).length ?? 0) > 0 && documents) selected.push(documents);
           // Main-only management: resolved again at every execution, so a stale main keeps nothing.

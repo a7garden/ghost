@@ -6,6 +6,7 @@ import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, type 
 import { createModels } from "@earendil-works/pi-ai/models";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type { Live, Message, MessageRole } from "@ghost/contract";
+import { GHOST_TOOLS, parseInteractiveUi, readInteractiveUi } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
 import { Access } from "../src/core/access.ts";
 import { execute } from "../src/core/commands.ts";
@@ -215,6 +216,70 @@ test("a tool call shows up as a tool message", async () => {
   await engine.close();
 });
 
+test("present_ui persists through the real tool journal without optional privileges, alongside ordinary text", async () => {
+  const { core, engine, ledger, root, faux } = await fixture(
+    (core) => createToolSet({ core, sandbox, memory: null, documents: null }),
+  );
+  let active: Engine | null = engine;
+  const ghost = core.createGhost({ name: "Presenter", persona: "사용자의 자료를 그대로 보여 주세요.", tools: [] });
+  await core.idle();
+  const ui = parseInteractiveUi({
+    version: "ghost-ui/1",
+    title: "사용자가 제공한 과일 수량",
+    blocks: [
+      { type: "text", id: "source", text: "출처: 이 대화에서 사용자가 제공한 수량입니다." },
+      { type: "chart", id: "fruit", title: "과일 수량", kind: "bar", unit: "개", series: [{ name: "수량", points: [{ label: "사과", value: 2 }, { label: "배", value: 3 }] }] },
+      { type: "choices", id: "next", title: "다음 보기", options: [{ id: "table", label: "표로 보기" }, { id: "keep", label: "차트 유지" }] },
+      { type: "html", id: "large", title: "큰 정적 응답", html: `<p>${"가".repeat(20000)}</p>` },
+    ],
+  });
+  try {
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("present_ui", ui), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxText("다른 자료가 있으면 알려 주세요.")),
+    ]);
+    const called = nextMessage(engine, ghost.directConversationId, "tool");
+    const settled = core.nextActivity(ghost.directConversationId, core.activityCount(ghost.directConversationId) + 1);
+    await core.sendMessage(ghost.directConversationId, "사과 2개와 배 3개를 차트로 보여 주세요.", "ui-request");
+    const result = await called;
+    await settled;
+    expect(new TextEncoder().encode(result.text).byteLength).toBe(new TextEncoder().encode(JSON.stringify(ui)).byteLength);
+    expect(result.tool?.name).toBe("present_ui");
+    expect(result.tool?.isError).toBeFalsy();
+    expect(result.text).toBe(JSON.stringify(ui));
+    expect(readInteractiveUi(result.text)).toEqual(ui);
+    expect(ledger.ghost(ghost.id).tools).toEqual([]);
+    expect(ledger.worksForState()).toHaveLength(0);
+    await engine.close();
+    active = null;
+
+    const models = createModels();
+    const restartedProvider = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux 1" }] });
+    models.setProvider(restartedProvider.provider);
+    active = await createEngine({
+      core,
+      storagePath: join(root, "pi.db"),
+      tools: createToolSet({ core, sandbox, memory: null, documents: null }),
+      sandbox,
+      models,
+      log: () => {},
+    });
+    core.attach(active);
+    const page = await active.page(ghost.directConversationId, null, 50);
+    const persisted = page.messages.find((message) => message.role === "tool" && message.tool?.name === "present_ui");
+    expect(persisted?.id).toBe(result.id);
+    expect(persisted?.text).toBe(JSON.stringify(ui));
+    expect(readInteractiveUi(persisted!.text)).toEqual(ui);
+    expect(page.messages.some((message) => message.role === "assistant" && message.text === "다른 자료가 있으면 알려 주세요.")).toBe(true);
+  } finally {
+    core.stop();
+    await core.idle();
+    await active?.close();
+    ledger.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an origin survives a restart of the engine", async () => {
   const { core, engine, ledger, root, conversationId, faux } = await fixture();
   faux.setResponses([fauxAssistantMessage(fauxText("hello there"))]);
@@ -342,7 +407,7 @@ test("changing the main Ghost transfers real management authority without restar
   }
 });
 
-test("the real model request offers only granted tools after live permission changes", async () => {
+test("the real model request offers only granted selectable tools after live permission changes", async () => {
   const { core, engine, ledger, root, faux } = await fixture(
     (core) => createToolSet({ core, sandbox, memory: null, documents: null }),
   );
@@ -357,7 +422,7 @@ test("the real model request offers only granted tools after live permission cha
         for (const tool of message.toolsRemoved ?? []) available.delete(tool.name);
         for (const tool of message.toolsAdded ?? []) available.add(tool.name);
       }
-      names = [...available].sort();
+      names = [...available].filter((name) => GHOST_TOOLS.some((tool) => tool === name)).sort();
       return fauxAssistantMessage(fauxText("finished"));
     }]);
     const answered = nextMessage(engine, helper.directConversationId, "assistant");
@@ -375,11 +440,11 @@ test("the real model request offers only granted tools after live permission cha
     await core.idle();
   };
   try {
-    expect(await offered()).toEqual(["ask_owner"]);
+    expect(await offered()).toEqual([]);
     await update(["work_list"]);
-    expect(await offered()).toEqual(["ask_owner", "work_list"]);
+    expect(await offered()).toEqual(["work_list"]);
     await update([]);
-    expect(await offered()).toEqual(["ask_owner"]);
+    expect(await offered()).toEqual([]);
   } finally {
     core.stop();
     await core.idle();

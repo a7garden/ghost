@@ -3,6 +3,7 @@ import { chmodSync, closeSync, existsSync, ftruncateSync, mkdirSync, mkdtempSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ArtifactRef, Conversation, Ghost, Work } from "@ghost/contract";
+import { parseInteractiveUi, readInteractiveUi } from "@ghost/contract";
 import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -138,6 +139,74 @@ async function runningWork(setup: Setup) {
 }
 
 describe("tools", () => {
+  test("present_ui is deterministic presentation even with every optional tool disabled", async () => {
+    const s = setup();
+    const ghost = { ...s.ghost, tools: [] };
+    s.ledger.tx(() => s.ledger.putGhost(ghost));
+    const pi = asPi(s, s.direct, "pi-direct");
+    const present = toolOf(s, s.direct, ghost, "present_ui");
+    const ui = parseInteractiveUi({
+      version: "ghost-ui/1",
+      title: "검토 방식",
+      blocks: [{ type: "choices", id: "mode", title: "어떻게 검토할까요?", options: [{ id: "summary", label: "핵심 요약" }] }],
+    });
+    const before = { ghost: s.ledger.ghost(ghost.id), conversations: s.ledger.conversations(), works: s.ledger.worksForState(), schedules: s.ledger.schedules() };
+    const first = await call(present, ui, apiOf(pi, "ui-1"));
+    const replayed = await call(present, ui, apiOf(pi, "ui-1"));
+    expect(first.isError).toBeFalsy();
+    expect(contentOf(first)).toBe(JSON.stringify(ui));
+    expect(readInteractiveUi(contentOf(first))).toEqual(ui);
+    expect(replayed).toEqual(first);
+    expect({ ghost: s.ledger.ghost(ghost.id), conversations: s.ledger.conversations(), works: s.ledger.worksForState(), schedules: s.ledger.schedules() }).toEqual(before);
+  });
+
+  test("present_ui returns recoverable errors for invalid cross-field invariants and hidden actions", async () => {
+    const s = setup();
+    const pi = asPi(s, s.direct, "pi-direct");
+    const present = toolOf(s, s.direct, s.ghost, "present_ui");
+    const invalidBlocks = [
+      [{ type: "text", id: "same", text: "첫째" }, { type: "text", id: "same", text: "둘째" }],
+      [{ type: "chart", id: "chart", title: "불일치", kind: "bar", series: [{ name: "첫째", points: [{ label: "A", value: 1 }] }, { name: "둘째", points: [{ label: "B", value: 2 }] }] }],
+      [{ type: "chart", id: "chart", title: "무한 수치", kind: "line", series: [{ name: "값", points: [{ label: "A", value: Infinity }] }] }],
+      [{ type: "comparison", id: "table", title: "누락 열", columns: ["A", "B"], rows: [{ label: "항목", values: ["하나"] }] }],
+      [{ type: "form", id: "form", title: "범위", submitLabel: "보내기", fields: [{ type: "number", id: "count", label: "개수", min: 1, max: 5, value: 8 }] }],
+      [{ type: "form", id: "form", title: "선택", submitLabel: "보내기", fields: [{ type: "select", id: "pick", label: "항목", options: [{ value: "a", label: "A" }], value: "b" }] }],
+      [{ type: "choices", id: "choices", title: "숨은 실행", options: [{ id: "run", label: "계속", action: { command: "bash" } }] }],
+      Array.from({ length: 12 }, (_, index) => ({ type: "text", id: `text-${index}`, text: "a".repeat(12000) })),
+    ];
+    for (const [index, blocks] of invalidBlocks.entries()) {
+      const refused = await call(present, { version: "ghost-ui/1", title: "잘못된 UI", blocks }, apiOf(pi, `invalid-${index}`));
+      expect(refused.isError).toBe(true);
+      expect(readInteractiveUi(contentOf(refused))).toBeNull();
+    }
+    const recovered = await call(present, { version: "ghost-ui/1", title: "수정 완료", blocks: [{ type: "text", id: "ok", text: "정상 표시" }] }, apiOf(pi, "valid-after-errors"));
+    expect(recovered.isError).toBeFalsy();
+    expect(readInteractiveUi(contentOf(recovered))?.title).toBe("수정 완료");
+    expect(s.ledger.worksForState()).toHaveLength(0);
+  });
+
+  test("a stale present_ui registration resolves the caller and rejects work and review execution", async () => {
+    const s = setup();
+    const present = toolOf(s, s.direct, s.ghost, "present_ui");
+    const ui = { version: "ghost-ui/1", title: "직접 대화 전용", blocks: [{ type: "text", id: "text", text: "표시" }] };
+    const { work, conversation, pi } = await runningWork(s);
+    const fromWork = await call(present, ui, apiOf(pi, "ui-work"));
+    expect(fromWork.isError).toBe(true);
+    const reviewer = s.core.createGhost({ name: "Critic", persona: "Review the result." });
+    s.core.works.update(work.id, { acceptance: { criteria: "Review the result", checks: [], reviewer: { kind: "ghost", ghostId: reviewer.id } } });
+    const completed = await call(toolOf(s, conversation, s.ghost, "complete"), { summary: "검토 요청", artifacts: [] }, apiOf(pi, "complete-for-review"));
+    expect(completed.isError).toBeFalsy();
+    await s.core.idle();
+    const review = s.ledger.conversations({ kind: "review" }).find((candidate) => candidate.workId === work.id);
+    if (!review) throw new Error("no review conversation was opened");
+    const reviewPi = asPi(s, review, "pi-review");
+    const fromReview = await call(present, ui, apiOf(reviewPi, "ui-review"));
+    expect(fromReview.isError).toBe(true);
+    const unbound = await call(present, ui, apiOf("not-in-ledger", "ui-unbound"));
+    expect(unbound.isError).toBe(true);
+    expect(s.ledger.effectsForWork(work.id)).toHaveLength(0);
+  });
+
   test("work_create from a direct conversation creates a root Work reporting to it", async () => {
     const s = setup();
     const pi = asPi(s, s.direct, "pi-direct");

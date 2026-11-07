@@ -175,7 +175,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 
 | Kind | Extensions |
 | --- | --- |
-| `direct` | `ghost.direct`: `work_create`, `work_list`, `work_inspect`, `work_update`, `work_cancel`, `ask_owner`, `schedule_create`, `schedule_list`, `schedule_cancel`, `ghost_list`; `ghost.memory`; `ghost.documents`; `ghost.main` (`ghost_inspect`, `ghost_update`) for the active default Ghost only |
+| `direct` | `ghost.direct`: `work_create`, `work_list`, `work_inspect`, `work_update`, `work_cancel`, `ask_owner`, `schedule_create`, `schedule_list`, `schedule_cancel`, `ghost_list`; `ghost.interactive`: `present_ui`; `ghost.memory`; `ghost.documents`; `ghost.main` (`ghost_inspect`, `ghost_update`) for the active default Ghost only |
 | `work` | `ghost.work`: `read`, `write`, `edit`, `bash` (over the sandbox env), `publish_artifact`, `delegate`, `complete`, `ask_owner`, `work_status`; `ghost.memory` (work scope) |
 | `review` | `ghost.review`: `artifact_read`, `effect_list`, `verdict` |
 
@@ -194,6 +194,14 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 - Only the currently active default Ghost's direct conversations receive `ghost_inspect` and `ghost_update`. Every execution rechecks the current designation. These tools inspect/update another non-default Ghost's name, persona, model, look, state and optional tools. They cannot change the caller, the default designation, document grants, credentials or sandbox controls. Owners retain those controls.
 - Permission changes refresh live conversations; execution also checks the current ledger permissions so a stale configured tool cannot bypass revocation. Work/review conversations never receive Ghost-management authority, including work assigned to the default Ghost.
 - Tool permissions control which actions are exposed, not sandbox syscall permissions: allowing `bash` can still read/write files inside the existing sandbox boundary even when `write` is disabled.
+- `present_ui` is a fixed, replay-safe response-format capability in direct conversations,
+  not an optional action grant. It validates bounded `ghost-ui/1` data and returns JSON
+  through the ordinary Pi tool-result journal. Work/review execution is refused even
+  for a stale registration. It writes no ledger rows, files, effects or extra stores.
+  Web/Mac widgets submit their visible input as ordinary `message.send` commands;
+  existing request-ID receipts prevent duplicate wakes on retry. Static HTML has no
+  script, navigation, network or privileged bridge. Text-only clients retain a concise
+  ordinary assistant conclusion.
 
 ## API
 

@@ -1,8 +1,10 @@
 import { CircleAlert } from 'lucide-react';
 import { ConversationActivity, ConversationMessage } from '../ui'
-import type { Message } from '@ghost/contract';
+import { INTERACTIVE_UI_TOOL, readInteractiveUi, type Message } from '@ghost/contract';
 import { ArtifactPreview } from './ArtifactPreview';
 import { CopyButton, MessageBody } from './MessageBody';
+import { InteractivePresentation } from './interactive/InteractivePresentation';
+import type { UiSubmit } from './interactive/UiInputBlock';
 
 function Attachments({ message }: { message: Message }) {
   if (message.attachments.length === 0) return null;
@@ -12,8 +14,13 @@ function Attachments({ message }: { message: Message }) {
 }
 
 /** One transcript row shared by the direct conversation and the read-only work conversation. */
-export function TranscriptMessage({ message, speaker }: { message: Message; speaker(message: Message): string }) {
+export function TranscriptMessage({ message, speaker, onUiSubmit }: { message: Message; speaker(message: Message): string; onUiSubmit?: UiSubmit }) {
   if (message.role === 'tool') {
+    const ui = message.tool?.name === INTERACTIVE_UI_TOOL && !message.tool.isError ? readInteractiveUi(message.text) : null;
+    if (ui) return <ConversationMessage role="assistant" label={speaker(message)}>
+      <InteractivePresentation key={`${message.conversationId}:${message.id}`} ui={ui} conversationId={message.conversationId} messageId={message.id} onUiSubmit={onUiSubmit}/>
+      <Attachments message={message}/>
+    </ConversationMessage>;
     const title = message.tool?.name ?? '도구 기록';
     return <ConversationMessage role="assistant" label={speaker(message)}>
       <ConversationActivity summary={<span className="flex items-center gap-1.5">

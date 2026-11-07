@@ -137,7 +137,10 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
       {conversationId && page.before && <div className="grid justify-items-center py-2">
         <Button variant="ghost" size="sm" disabled={olderLoading} onClick={() => void load(conversationId, page.before)}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</Button>
       </div>}
-      {page.messages.map(message => <TranscriptMessage key={message.id} message={message} speaker={speaker}/>)}
+      {page.messages.map(message => <TranscriptMessage key={`${message.conversationId}:${message.id}`} message={message} speaker={speaker}
+        onUiSubmit={message.conversationId === conversationId ? async (text, requestId) => {
+          await client.send({ type: 'message.send', conversationId: message.conversationId, text }, requestId);
+        } : undefined}/>)}
       {live?.running && <ConversationMessage role="assistant" label={`${ghost.name} · 응답 작성 중`}>
         <div className="mb-3 flex items-center gap-2 text-caption text-ink-2" role="status"><LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true"/>응답 중</div>
         {live.partial && <MessageBody text={live.partial}/>}

@@ -1,0 +1,41 @@
+.ghost-interactive { display: grid; gap: 24px; width: 100%; min-width: 0; color: var(--ghost-ink); }
+.ghost-interactive h2 { margin: 0; font-size: 18px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.ghost-interactive h3 { margin: 0; font-size: 14px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+.ghost-ui-block { display: grid; gap: 12px; min-width: 0; }
+.ghost-ui-block__bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
+.ghost-ui-block__bar h3 { flex: 1 1 180px; }
+.ghost-ui-unit { font-size: 12px; font-weight: 400; color: var(--ghost-ink2); }
+.ghost-ui-scroll { max-width: 100%; min-width: 0; overflow: auto; border: 1px solid var(--ghost-line); border-radius: 8px; }
+.ghost-ui-scroll svg { display: block; background: var(--ghost-canvas); }
+.ghost-ui-chart__tick { fill: var(--ghost-ink2); font: 11px system-ui, sans-serif; }
+.ghost-ui-table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.6; text-align: left; }
+.ghost-ui-table th, .ghost-ui-table td { min-width: 120px; max-width: 320px; padding: 10px 12px; border-bottom: 1px solid var(--ghost-line); vertical-align: top; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ghost-ui-table thead th { color: var(--ghost-ink2); background: var(--ghost-inset); font-weight: 500; }
+.ghost-ui-table tbody th { font-weight: 500; }
+.ghost-ui-table tr:last-child > * { border-bottom: 0; }
+.ghost-ui-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 0; font-size: 12px; color: var(--ghost-ink2); }
+.ghost-ui-legend li { display: flex; align-items: baseline; gap: 6px; overflow-wrap: anywhere; min-width: 0; }
+.ghost-ui-legend li > span { display: inline-flex; width: 18px; height: 18px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 3px; color: var(--ghost-canvas); font-size: 11px; }
+.ghost-ui-input, .ghost-ui-fields { display: grid; gap: 16px; min-width: 0; }
+.ghost-ui-fields [data-slot="input"] { height: 36px; }
+.ghost-ui-select { width: 100%; min-height: 36px; height: auto; white-space: normal; text-align: left; }
+.ghost-ui-select > span { -webkit-line-clamp: unset; }
+.ghost-ui-fields label { overflow-wrap: anywhere; }
+.ghost-ui-fields .ghost-form-field:has([data-slot="checkbox"]) { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; }
+.ghost-ui-fields .ghost-form-field > [data-slot="checkbox"] { order: -1; margin-top: 2px; }
+.ghost-ui-choices { display: grid; gap: 8px; margin: 0; padding: 0; min-width: 0; border: 0; }
+.ghost-ui-choice { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--ghost-line-strong); border-radius: 8px; cursor: pointer; }
+.ghost-ui-choice:has(:checked) { border-color: var(--ghost-ink3); background: var(--ghost-hover); }
+.ghost-ui-choice:has(:disabled) { cursor: default; }
+.ghost-ui-choice > input { margin: 4px 0 0; flex-shrink: 0; accent-color: var(--ghost-ink); }
+.ghost-ui-choice > span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.ghost-ui-choice__label { font-size: 14px; line-height: 1.5; font-weight: 500; }
+.ghost-ui-choice__description { font-size: 13px; line-height: 1.6; color: var(--ghost-ink2); white-space: pre-wrap; }
+.ghost-ui-input__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ghost-ui-input__actions button { min-height: 32px; height: auto; white-space: normal; overflow-wrap: anywhere; padding-block: 6px; max-width: 100%; }
+.ghost-ui-feedback { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.6; color: var(--ghost-ink2); overflow-wrap: anywhere; }
+.ghost-ui-feedback:empty { display: none; }
+.ghost-ui-feedback[role="alert"] { color: var(--ghost-danger); }
+.ghost-ui-html { width: 100%; min-width: 0; height: 380px; resize: vertical; border: 1px solid var(--ghost-line-strong); border-radius: 8px; background: #fff; }
+.ghost-ui-source { margin: 0; padding: 12px; max-height: 480px; overflow: auto; border: 1px solid var(--ghost-line); border-radius: 8px; background: var(--ghost-inset); font-size: 12px; line-height: 1.6; white-space: pre; }
+.ghost-interactive :is(.ghost-ui-scroll, .ghost-ui-source, input[type="radio"]):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 3px; }

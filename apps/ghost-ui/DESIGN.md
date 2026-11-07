@@ -40,10 +40,34 @@ transcript/draft state so switching history never shows another conversation's
 messages or sends its draft accidentally.
 
 Assistant text uses GFM Markdown, including scrollable code/tables and copy
-actions; owner text and tool output remain literal. Completed tools use inline
+actions; owner text and ordinary tool output remain literal. Completed tools use inline
 disclosures. Raw HTML is inert, only explicit HTTP(S)/mailto destinations open
 externally, and image URLs are opt-in links, never automatic image requests.
 Footnotes navigate within their own message without changing the app hash route;
 relative paths have no transcript document base and remain plain text.
-All presentation is read-only over the existing transcript; document storage,
-model execution and host permissions are unchanged.
+Rendering never rewrites the existing transcript or document storage.
+Interactive responses create new owner messages only through the normal send command.
+
+## Interactive responses
+
+`present_ui` is a direct-conversation response format, available even when optional
+action tools are disabled. Valid `ghost-ui/1` tool results render inline in web/Mac
+chat; malformed, unknown-version and failed results retain the ordinary readable
+tool disclosure. iOS and the chat overlay retain text-only answers.
+
+The model chooses ordinary Markdown or text, bar/line charts, comparisons, choices,
+forms and static HTML. Charts offer chart/data views rather than duplicating data.
+Native controls own user interaction. Choice replies contain only visible labels
+and descriptions; forms submit their displayed fields. Neither is an approval or
+a privileged command, and messages sent during a run remain ordinary follow-ups.
+
+Form values, selection and delivery state are tab-scoped in `sessionStorage`,
+keyed by conversation, immutable tool message and block identity. Refresh/reconnect
+keeps this state in the same tab; it is not a cross-device or browser-restart draft
+store. Uncertain delivery can retry the same request ID without a duplicate wake.
+The normal composer draft is independent of widget submissions.
+
+HTML uses an explicit static-tag/attribute allow-list, an opaque sandboxed iframe
+and a resource-blocking CSP. Scripts, links, metadata refresh, forms, nested frames,
+SVG/MathML and remote assets are not supported. Source view is escaped text.
+There is no postMessage bridge, arbitrary JavaScript or direct Host access.
