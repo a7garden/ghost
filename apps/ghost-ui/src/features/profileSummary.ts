@@ -6,18 +6,5 @@ export function profileSummary(persona: string) {
   if (!first) return '역할 미설정';
   // Tool identifiers belong in the full instructions, not the role introduction.
   if (/\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b/.test(first)) return '역할 지시가 설정되어 있습니다.';
-  return first.replaceAll('오케스트레이터', '작업 조율자').replaceAll('bounded task', '범위가 정해진 작업');
-}
-
-// Profile names the Host creates for its starter Ghosts (src/host/mod.rs). They are identifiers, not names a person picked.
-const starterNames: Record<string, string> = {
-  primary: '주 Ghost',
-  'specialist-research': '리서치',
-  'specialist-engineering': '엔지니어링',
-  'specialist-operations': '운영',
-};
-
-/** Name shown for a Ghost: the owner's display name, else a readable name for Host starter identifiers, else the profile name. */
-export function ghostDisplayName(profile: { name: string; display_name?: string | null }) {
-  return profile.display_name?.trim() || starterNames[profile.name] || profile.name;
+  return first;
 }

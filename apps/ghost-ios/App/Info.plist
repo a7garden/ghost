@@ -20,7 +20,7 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>io.a7garden.ghost.connect</string>
+			<string>io.a7garden.ghost.pair</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>ghost</string>
@@ -29,9 +29,9 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_ghost-pair._tcp</string>
-	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>PC 화면의 QR 코드를 스캔해 서버에 연결할 때 카메라를 사용합니다.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>같은 네트워크의 PC Ghost 서버에 연결할 때 로컬 네트워크에 접근합니다.</string>
 </dict>
 </plist>

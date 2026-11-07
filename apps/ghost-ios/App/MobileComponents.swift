@@ -95,28 +95,31 @@ struct GhostStatusBadge: View {
             .background(GhostStyle.under, in: Capsule())
             .fixedSize(horizontal: false, vertical: true)
     }
-    private var isIssue: Bool { ["failed", "unknown", "effect_unknown", "blocked", "rejected", "waiting_owner"].contains(state) }
+    private var isIssue: Bool { ["failed", "blocked", "pending", "denied"].contains(state) }
     private var title: String {
         switch state {
-        case "accepted": "확인 완료"
-        case "completed", "complete": "실행 종료 · 검수 전"
-        case "running", "submitted": "진행 중"
-        case "queued", "open": "대기 중"
-        case "failed", "rejected", "waiting_owner": "확인 필요"
-        case "cancelled", "stopped": "중지됨"
-        case "stale": "이전 요청"
-        case "unknown", "effect_unknown": "결과 확인 필요"
-        case "blocked": "도움이 필요해요"
+        case "queued": "대기 중"
+        case "running": "진행 중"
+        case "waiting": "대기 중 · 확인 필요"
+        case "verifying": "검수 중"
+        case "blocked": "확인 필요"
+        case "done": "완료"
+        case "failed": "실패"
+        case "cancelled": "취소됨"
+        case "approved": "승인됨"
+        case "answered": "답변됨"
+        case "denied": "거절됨"
+        case "pending": "확인 필요"
+        case "unknown": "결과 확인 필요"
         default: "상태 확인 중"
         }
     }
     private var symbol: String {
         switch state {
-        case "accepted": "checkmark.circle.fill"
-        case "completed", "complete": "doc.text"
-        case "running", "submitted": "circle.dotted"
-        case "failed", "unknown", "effect_unknown", "blocked": "exclamationmark.circle"
-        case "cancelled", "stopped", "stale": "pause.circle"
+        case "done", "approved", "answered": "checkmark.circle.fill"
+        case "running", "verifying": "circle.dotted"
+        case "failed", "blocked", "pending", "unknown": "exclamationmark.circle"
+        case "cancelled", "denied": "pause.circle"
         default: "clock"
         }
     }

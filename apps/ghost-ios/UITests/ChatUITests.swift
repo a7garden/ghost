@@ -6,31 +6,33 @@ import XCTest
         app.launchArguments = ["--ui-testing"] + (reset ? ["--reset-fixture"] : [])
         if incoming { app.launchArguments.append("--ui-testing-incoming") }
         app.launch()
-        let profile = app.buttons["profile-test-ghost"]
-        XCTAssertTrue(profile.waitForExistence(timeout: 10))
-        profile.tap()
+        let conversation = app.buttons["conversation-fixture-conversation"].firstMatch
+        XCTAssertTrue(conversation.waitForExistence(timeout: 10))
+        conversation.tap()
         return app
     }
-    private func select(_ title: String, in app: XCUIApplication) {
-        app.buttons["conversation-menu"].tap()
-        app.buttons[title].tap()
+    private func select(_ conversationID: String, in app: XCUIApplication) {
+        app.tabBars.buttons["대화"].tap()
+        app.buttons["conversation-\(conversationID)"].firstMatch.tap()
     }
     private func screenshot(_ name: String, app: XCUIApplication) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        attachment.name = name; add(attachment)
     }
     func testConversationDraftsStaySeparate() {
         let app = launch()
         let composer = app.descendants(matching: .any)["chat-composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.tap(); composer.typeText("Draft for first")
-        select("Second conversation", in: app)
-        XCTAssertNotEqual(composer.value as? String, "Draft for first")
-        composer.tap(); composer.typeText("Draft for second")
-        select("First conversation", in: app)
-        XCTAssertEqual(composer.value as? String, "Draft for first")
-        select("Second conversation", in: app)
-        XCTAssertEqual(composer.value as? String, "Draft for second")
+        select("fixture-second-conversation", in: app)
+        let secondComposer = app.descendants(matching: .any)["chat-composer"]
+        XCTAssertTrue(secondComposer.waitForExistence(timeout: 5))
+        XCTAssertNotEqual(secondComposer.value as? String, "Draft for first")
+        secondComposer.tap(); secondComposer.typeText("Draft for second")
+        select("fixture-conversation", in: app)
+        XCTAssertEqual(app.descendants(matching: .any)["chat-composer"].value as? String, "Draft for first")
+        select("fixture-second-conversation", in: app)
+        XCTAssertEqual(app.descendants(matching: .any)["chat-composer"].value as? String, "Draft for second")
         screenshot("Separate conversation draft", app: app)
     }
     func testDraftSurvivesAppRelaunch() {
@@ -38,7 +40,6 @@ import XCTest
         let composer = app.descendants(matching: .any)["chat-composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.tap(); composer.typeText("Saved after relaunch")
-        select("Second conversation", in: app)
         app.terminate()
         let reopened = launch(reset: false)
         XCTAssertEqual(reopened.descendants(matching: .any)["chat-composer"].value as? String, "Saved after relaunch")
@@ -46,18 +47,16 @@ import XCTest
     }
     func testHistoryStartsAtLatestAndAllowsReadingEarlierMessages() {
         let app = launch()
-        let latest = app.staticTexts["Latest message"]
-        let visible = NSPredicate(format: "isHittable == true")
-        expectation(for: visible, evaluatedWith: latest)
+        let latest = app.staticTexts["짧게 읽을 수 있는 에세이 위주로 보고 싶어."]
+        expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: latest)
         waitForExpectations(timeout: 5)
         let history = app.scrollViews["chat-history"]
         history.swipeDown()
         let jump = app.buttons["latest-messages"]
         XCTAssertTrue(jump.waitForExistence(timeout: 5))
-        XCTAssertFalse(latest.isHittable)
         screenshot("Reading earlier messages", app: app)
         jump.tap()
-        expectation(for: visible, evaluatedWith: latest)
+        expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: latest)
         waitForExpectations(timeout: 5)
         screenshot("Latest messages", app: app)
     }

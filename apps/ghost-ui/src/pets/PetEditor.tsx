@@ -3,24 +3,40 @@ import { Download, Upload, WandSparkles } from 'lucide-react';
 import { Button, FormField, InlineError, Input, SegmentedControl, SelectField } from '@garden/ui';
 import { Modal } from '../components/Modal';
 import { PetSprite } from './PetSprite';
-import { COLORS, DEFAULT_DESIGN, STATES, createSpriteSheet, importSprite, isDesign } from './sprites';
+import { COLORS, DEFAULT_DESIGN, STATES, codexDesign, createSpriteSheet, importSprite, isDesign, ownDesign } from './sprites';
 import type { PetDesign, PetState, SpriteVersion } from './sprites';
 import { downloadPet } from './archive';
-import type { Avatar } from '../client/types';
-export interface AvatarInput { name: string; description: string; sprite_version: SpriteVersion; data_url: string; design: PetDesign | null; source_manifest?: Record<string, unknown> | null; }
-export function PetEditor({ name: initialName, seed, animate, busy, onClose, onSave }: { name: string; seed?: Avatar; animate: boolean; busy: boolean; onClose: () => void; onSave: (input: AvatarInput) => Promise<void> }) {
+
+/** What `avatar.create` stores: a PNG/WebP data URL plus the UI's sprite design. */
+export interface AvatarInput {
+  name: string;
+  description: string;
+  /** `data:image/png|webp;base64,…` */
+  image: string;
+  /** UI-owned sprite design; `null` for pets without one. */
+  design: Record<string, unknown> | null;
+}
+
+export function PetEditor({ name: initialName, seed, animate, busy, onClose, onSave }: {
+  name: string;
+  /** An avatar to copy and change. */
+  seed?: { name: string; description: string; imageDigest: string; design: unknown };
+  animate: boolean; busy: boolean;
+  onClose(): void;
+  onSave(input: AvatarInput): Promise<void>;
+}) {
   const [design, setDesign] = useState<PetDesign>(isDesign(seed?.design) ? seed.design : DEFAULT_DESIGN);
   const [name, setName] = useState(seed ? `${seed.name} 복사` : initialName), [description, setDescription] = useState(seed?.description ?? '');
   const [mode, setMode] = useState<'create' | 'import'>('create');
-  const [imported, setImported] = useState<{ data_url: string; sprite_version: SpriteVersion }>();
+  const [imported, setImported] = useState<{ image: string; spriteVersion: SpriteVersion }>();
   const [error, setError] = useState(''), [reading, setReading] = useState(false), [state, setState] = useState<PetState>('idle');
   const generated = useMemo(() => { try { return { source: createSpriteSheet(design), error: '' }; } catch { return { source: '', error: '이 브라우저에서 아바타를 그릴 수 없습니다.' }; } }, [design]);
-  const source = mode === 'create' ? generated.source : imported?.data_url;
-  const version = mode === 'create' ? 2 : imported?.sprite_version ?? 2;
+  const source = mode === 'create' ? generated.source : imported?.image;
+  const version = mode === 'create' ? 2 : imported?.spriteVersion ?? 2;
   const patch = (value: Partial<PetDesign>) => setDesign(d => ({ ...d, ...value }));
   const locked = busy || reading;
   return <Modal title={seed ? '아바타를 복사해서 만들기' : '아바타 만들기'} onClose={() => !locked && onClose()} className="w-[min(760px,calc(100vw-2rem))] sm:max-w-[760px]">
-    <form onSubmit={e => { e.preventDefault(); if (!source || locked) return; setError(''); void onSave({ name: name.trim(), description: description.trim(), sprite_version: version, data_url: source, design: mode === 'create' ? design : null }).catch(e => setError(e.message)); }}>
+    <form onSubmit={e => { e.preventDefault(); if (!source || locked) return; setError(''); void onSave({ name: name.trim(), description: description.trim(), image: source, design: mode === 'create' ? ownDesign(design) : codexDesign(imported!.spriteVersion) }).catch(e => setError(e.message)); }}>
       <div className="grid grid-cols-[minmax(0,.9fr)_minmax(0,1fr)] gap-7 max-[760px]:grid-cols-1 max-[760px]:gap-5">
         <div className="flex min-w-0 flex-col items-center justify-center gap-2 rounded-xl bg-inset px-3 py-4 max-[760px]:p-2 max-[760px]:[&_.pet-sprite]:scale-[.65]">
           <div className="flex min-h-[230px] items-center justify-center text-ink-3 max-[760px]:h-[130px] max-[760px]:min-h-[120px] max-[760px]:max-w-full">
@@ -38,7 +54,7 @@ export function PetEditor({ name: initialName, seed, animate, busy, onClose, onS
           <SegmentedControl aria-label="아바타 제작 방식" value={mode} onValueChange={value => { setMode(value as 'create' | 'import'); setError(''); }}
             options={[{ value: 'create', label: <span className="flex items-center gap-1.5"><WandSparkles size={15}/>직접 만들기</span>, disabled: locked },
               { value: 'import', label: <span className="flex items-center gap-1.5"><Upload size={15}/>가져오기</span>, disabled: locked }]}/>
-          <FormField label="아바타 이름">{control => <Input {...control} value={name} onChange={e => setName(e.target.value)} required maxLength={80} disabled={locked}/>}</FormField>
+          <FormField label="아바타 이름">{control => <Input {...control} value={name} onChange={e => setName(e.target.value)} required maxLength={128} disabled={locked}/>}</FormField>
           {mode === 'create' ? <>
             <fieldset className="m-0 min-w-0"><legend className="mb-2.5 text-caption text-ink-2">색</legend>
               <div className="flex flex-wrap gap-2.5">{COLORS.map(color => <button type="button" key={color.value} aria-label={color.name} aria-pressed={design.color === color.value}
@@ -56,15 +72,15 @@ export function PetEditor({ name: initialName, seed, animate, busy, onClose, onS
             <FormField label="펫 스프라이트" description="투명 PNG·WebP, 최대 4 MiB. 1536 × 1872(v1) 또는 1536 × 2288(v2). Codex 펫 폴더의 spritesheet 파일을 선택하세요.">
               {control => <Input {...control} type="file" accept="image/png,image/webp" disabled={locked} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (!file) return; setReading(true); setError(''); setImported(undefined); void importSprite(file).then(setImported).catch(e => setError(e.message)).finally(() => setReading(false)); }}/>}
             </FormField>
-            {imported && <span className="text-caption leading-relaxed text-success">v{imported.sprite_version} · 모든 동작과 투명 배경 확인됨</span>}
+            {imported && <span className="text-caption leading-relaxed text-success">v{imported.spriteVersion} · 모든 동작과 투명 배경 확인됨</span>}
           </>}
-          <FormField label="설명 (선택)">{control => <Input {...control} value={description} onChange={e => setDescription(e.target.value)} maxLength={500} disabled={locked}/>}</FormField>
+          <FormField label="설명 (선택)">{control => <Input {...control} value={description} onChange={e => setDescription(e.target.value)} maxLength={2048} disabled={locked}/>}</FormField>
         </div>
       </div>
       {(error || generated.error) && <InlineError className="mt-4">{error || generated.error}</InlineError>}
       <footer className="mt-6 flex flex-wrap justify-between gap-3 border-t border-line pt-4">
         <Button variant="outline" type="button" disabled={!source || !name.trim() || locked} onClick={() => { if (source) { try { downloadPet(name.trim(), description, version, source); } catch (e) { setError(String(e)); } } }}><Download size={15}/>Codex용 내보내기</Button>
-        <Button type="submit" disabled={!source || !name.trim() || locked}>{reading ? '파일 확인 중…' : busy ? '저장 중…' : '저장하고 적용'}</Button>
+        <Button type="submit" disabled={!source || !name.trim() || locked}>{reading ? '파일 확인 중…' : busy ? '저장 중…' : '저장'}</Button>
       </footer>
     </form>
   </Modal>;

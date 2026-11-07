@@ -1,66 +1,112 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import type { Command, Profile, Snapshot } from '../client/types';
-import { isRunning } from '../client/types';
-import type { PetState } from './sprites';
+import type { Ghost, State } from '@ghost/contract';
+import { useHost } from '../host/context';
+import { useHostState } from '../host/store';
 import { createAvatarSpeech } from './avatarSpeech';
+import type { AvatarSpeech } from './avatarSpeech';
+import { spriteVersionOf } from './sprites';
+import type { PetState } from './sprites';
 
-type Query = (command: Command) => Promise<Record<string, any>>;
-const Context = createContext<{ snapshot: Snapshot | null; animate: boolean; speech: ReturnType<typeof createAvatarSpeech>; load: (id: string) => Promise<string> }>({ snapshot: null, animate: true, speech: createAvatarSpeech(), load: async () => { throw new Error('아바타를 불러올 수 없습니다.'); } });
-export function AvatarProvider({ snapshot, query, animate, children }: { snapshot: Snapshot | null; query: Query; animate: boolean; children: ReactNode }) {
-  const images = useRef(new Map<string, Promise<string>>());
+type ContextValue = {
+  state: State | null;
+  animate: boolean;
+  speech: AvatarSpeech;
+  /** Object URL of an avatar image, cached per digest. The provider revokes it on unmount. */
+  load: (digest: string) => Promise<string>;
+};
+
+const Context = createContext<ContextValue>({ state: null, animate: true, speech: createAvatarSpeech(), load: async () => { throw new Error('아바타를 불러올 수 없습니다.'); } });
+
+/** Loads avatar images from host artifacts; mount inside `<HostProvider>`. */
+export function AvatarProvider({ animate, children }: { animate: boolean; children: ReactNode }) {
+  const { store, client } = useHost();
+  const { state } = useHostState(store);
+  const promises = useRef(new Map<string, Promise<string>>());
+  const urls = useRef(new Map<string, string>());
   const [speech] = useState(createAvatarSpeech);
-  const load = useCallback((id: string) => {
-    const cached = images.current.get(id); if (cached) return cached;
-    const request = query({ type: 'workspace', action: { type: 'read_avatar', id } }).then(result => {
-      if (typeof result.data_url !== 'string' || !/^data:image\/(png|webp);base64,[A-Za-z0-9+/=]+$/.test(result.data_url)) throw new Error('아바타 이미지가 올바르지 않습니다.');
-      return result.data_url as string;
-    }).catch(error => { images.current.delete(id); throw error; });
-    images.current.set(id, request); return request;
-  }, [query]);
-  useEffect(() => { const ids = new Set(snapshot?.avatars.map(a => a.id)); for (const id of images.current.keys()) if (!ids.has(id)) images.current.delete(id); }, [snapshot?.avatars]);
-  return <Context.Provider value={useMemo(() => ({ snapshot, load, animate, speech }), [snapshot, load, animate, speech])}>{children}</Context.Provider>;
+  const load = useCallback((digest: string) => {
+    const cached = promises.current.get(digest);
+    if (cached) return cached;
+    const request = client.artifactUrl(digest).then(url => {
+      urls.current.set(digest, url);
+      return url;
+    }).catch(error => { promises.current.delete(digest); throw error; });
+    promises.current.set(digest, request);
+    return request;
+  }, [client]);
+  const digests = useMemo(() => state?.avatars.map(avatar => avatar.imageDigest).join(' ') ?? '', [state?.avatars]);
+  useEffect(() => {
+    const known = new Set(digests ? digests.split(' ') : []);
+    for (const digest of promises.current.keys()) if (!known.has(digest)) promises.current.delete(digest);
+  }, [digests]);
+  useEffect(() => () => {
+    for (const url of urls.current.values()) URL.revokeObjectURL(url);
+    urls.current.clear(); promises.current.clear();
+  }, []);
+  const value = useMemo(() => ({ state, load, animate, speech }), [state, load, animate, speech]);
+  return <Context.Provider value={value}>{children}</Context.Provider>;
 }
-export function useAvatarSpeaking(profileId: string) {
-  const { speech, snapshot } = useContext(Context);
-  const workspaceId = snapshot?.workspace_id;
-  const source = useMemo(() => Symbol('voice output'), [workspaceId, profileId]);
+
+/** Voice playback badge for one Ghost's avatar; returns a setter, not a value. */
+export function useAvatarSpeaking(ghostId: string) {
+  const { speech } = useContext(Context);
+  const source = useMemo(() => Symbol('voice output'), [ghostId]);
   useEffect(() => () => speech.set(source, null), [speech, source]);
   return useCallback((speaking: boolean) => {
-    speech.set(source, speaking && workspaceId ? { workspaceId, profileId } : null);
-  }, [speech, source, workspaceId, profileId]);
+    speech.set(source, speaking ? ghostId : null);
+  }, [speech, source, ghostId]);
 }
-export function profilePetState(profile?: Profile, snapshot?: Snapshot | null): PetState {
-  if (!profile) return 'idle';
-  const tasks = profile.conversations.flatMap(c => c.tasks);
-  if (profile.error) return 'failed';
-  if (tasks.some(t => isRunning(t.phase))) return 'running';
-  if (tasks.some(t => t.phase === 'waiting_owner') || snapshot?.reviews.some(r => r.profile_id === profile.id && ['pending', 'approved'].includes(r.state))) return 'waiting';
-  const latestMessage = profile.conversations[0]?.messages.at(-1);
-  if (latestMessage?.role === 'interrupted' && tasks.some(t => t.id === latestMessage.task_id && t.phase === 'failed')) return 'failed';
+
+/** Pet sprite row for a Ghost: busy conversation, a pending decision, or idle. Pure; exported for tests. */
+export function ghostPetState(ghost: Ghost | undefined, state: State | null | undefined): PetState {
+  if (!ghost) return 'idle';
+  if (state?.conversations.some(conversation => conversation.ghostId === ghost.id && conversation.busy)) return 'running';
+  if (state?.decisions.some(decision => decision.ghostId === ghost.id && decision.state === 'pending')) return 'waiting';
   return 'idle';
 }
-export function profileIsResponding(profile?: Profile) {
-  return Boolean(profile && !profile.error && profile.conversations.some(c => c.tasks.some(t => t.phase === 'model_running')));
-}
-export function useAvatarSource(id?: string | null, fallbackTone?: string) {
-  const { load, animate, snapshot } = useContext(Context);
+
+export function useAvatarSource(digest?: string | null) {
+  const { load, animate } = useContext(Context);
   const [result, setResult] = useState<{ key: string; source?: string; error?: string }>({ key: '' });
   const [attempt, setAttempt] = useState(0);
-  const key = `${snapshot?.workspace_id}:${id ?? fallbackTone ?? ''}`;
+  const key = digest ?? '';
   useEffect(() => {
     let alive = true;
-    if (id) load(id).then(source => { if (alive) setResult({ key, source }); }).catch(error => { if (alive) setResult({ key, error: String(error.message ?? error) }); });
+    if (digest) load(digest).then(source => { if (alive) setResult({ key, source }); }).catch(error => { if (alive) setResult({ key, error: String(error.message ?? error) }); });
     else setResult({ key });
     return () => { alive = false; };
-  }, [key, id, fallbackTone, load, attempt]);
+  }, [key, digest, load, attempt]);
   return { source: result.key === key ? result.source : undefined, error: result.key === key ? result.error : undefined, animate, retry: () => setAttempt(v => v + 1) };
 }
-export function useProfileAvatar(profileId?: string, tone = 'mint') {
-  const { snapshot, speech } = useContext(Context);
-  const speaking = useSyncExternalStore(speech.subscribe, () => speech.isSpeaking(snapshot?.workspace_id, profileId), () => false);
-  const profile = snapshot?.profiles.find(p => p.id === profileId);
-  const avatar = snapshot?.avatars.find(a => a.id === profile?.avatar_id);
-  const source = useAvatarSource(profile?.avatar_id, tone);
-  return { ...source, isDefault: !profile?.avatar_id, isResponding: profileIsResponding(profile) || speaking, version: avatar?.sprite_version ?? 2, state: speaking ? 'running' as const : profilePetState(profile, snapshot) };
+
+export function useProfileAvatar(ghostId?: string, tone?: string) {
+  const { state, speech } = useContext(Context);
+  const ghost = state?.ghosts.find(item => item.id === ghostId);
+  const avatar = ghost?.look.avatarId ? state?.avatars.find(item => item.id === ghost.look.avatarId) : undefined;
+  const source = useAvatarSource(avatar?.imageDigest);
+  const speaking = useSyncExternalStore(speech.subscribe, () => speech.isSpeaking(ghostId), () => false);
+  const busy = Boolean(ghost && state?.conversations.some(conversation => conversation.ghostId === ghost.id && conversation.busy));
+  return { ...source, isDefault: !avatar, isResponding: busy || speaking, version: spriteVersionOf(avatar?.design), state: speaking ? 'running' as const : ghostPetState(ghost, state) };
+}
+
+/** Artifact bytes as a `data:` URL, for re-encoding a stored avatar (Codex export). */
+export async function artifactDataUrl(client: { artifactUrl(digest: string): Promise<string> }, digest: string): Promise<string> {
+  const url = await client.artifactUrl(digest);
+  try {
+    const blob = await fetch(url).then(response => {
+      if (!response.ok) throw new Error('이미지를 불러오지 못했습니다.');
+      return response.blob();
+    });
+    return await legacyReader(blob);
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function legacyReader(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('이미지를 읽지 못했습니다.'));
+    reader.readAsDataURL(blob);
+  });
 }

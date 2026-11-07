@@ -1,52 +1,32 @@
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
-import type { Page } from '../client/types';
-import { initialWorkspace } from '../fixtures/workspace';
-import { DocumentList, SpacesView } from './SpacesView';
+import { HostError } from '../host/client';
+import { grantsSummary, isConflict, isEditableProfile } from './spacePages';
+import type { SpaceGrant } from '@ghost/contract';
 
-const page = (overrides: Partial<Page>): Page => ({
-  id: 'page-1', locator: 'note.md', title: '주간 기록', profile: 'pdc-markdown/1', ...overrides,
+const name = (id: string) => (id === 'sage' ? '세이지' : id);
+
+it('summarises ghost grants per project', () => {
+  expect(grantsSummary([], name)).toBe('Ghost 권한 없음');
+  expect(grantsSummary([{ ghostId: 'sage', mode: 'read' }], name)).toBe('세이지 읽기');
+  expect(grantsSummary([{ ghostId: 'sage', mode: 'read' }, { ghostId: 'milo', mode: 'propose' }], name)).toBe('세이지 읽기, milo 제안');
 });
 
-function renderSpace(selectedSpace?: string) {
-  const snapshot = initialWorkspace();
-  snapshot.capabilities.documents = true;
-  return renderToStaticMarkup(createElement(SpacesView, {
-    snapshot, selectedSpace, query: async () => [], action: async () => ({}), onReview: () => {},
-    connected: true, busy: false, mode: 'live', onSelectFolder: () => {}, theme: 'light',
-  }));
-}
-
-it('titles the project page with the project name and offers a new document', () => {
-  const html = renderSpace('space-ghost');
-  expect(html).toContain('Ghost 프로젝트');
-  expect(html).toContain('저장된 문서');
-  expect(html).toContain('새 문서');
+it('marks only the current PDC profiles editable', () => {
+  expect(isEditableProfile('pdc-markdown/1')).toBe(true);
+  expect(isEditableProfile('pdc-html/1')).toBe(true);
+  expect(isEditableProfile('pdc-markdown/0')).toBe(false);
+  expect(isEditableProfile('text/plain')).toBe(false);
 });
 
-it('reports a missing project instead of an empty list', () => {
-  const html = renderSpace('space-missing');
-  expect(html).toContain('프로젝트를 찾을 수 없습니다.');
+it('surfaces a stale content hash as a conflict', () => {
+  const stale = new HostError('conflict', '문서가 이미 바뀌었습니다.');
+  const gone = new HostError('not_found', '문서를 찾을 수 없습니다.');
+  expect(isConflict(stale)).toBe(true);
+  expect(isConflict(gone)).toBe(false);
+  expect(isConflict(new Error('network down'))).toBe(false);
 });
 
-it('lists the project documents with their state', () => {
-  const html = renderToStaticMarkup(createElement(DocumentList, {
-    pages: [page({}), page({ id: 'page-2', locator: 'old.md', title: '이전 문서', deleted: true }),
-      page({ id: 'page-3', locator: 'legacy.md', title: '이전 형식 문서', legacy: true })],
-    opening: false,
-    onOpen: () => {},
-  }));
-  expect(html).toContain('문서 목록');
-  expect(html).toContain('주간 기록');
-  expect(html).toContain('삭제됨');
-  expect(html).toContain('읽기 전용');
-});
-
-it('keeps document rows as the control that opens a document', () => {
-  const html = renderToStaticMarkup(createElement(DocumentList, {
-    pages: [page({})], opening: false, onOpen: () => {},
-  }));
-  expect(html).toContain('aria-haspopup="dialog"');
-  expect(html).toContain('주간 기록');
+it('keeps page grants typed against the contract', () => {
+  const grants: SpaceGrant[] = [{ ghostId: 'sage', mode: 'read' }];
+  expect(grants[0].mode).toBe('read');
 });

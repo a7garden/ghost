@@ -4,10 +4,8 @@ import Security
 import UIKit
 import GhostMobileCore
 
-// Keychain-backed pending-attempt store, matching the saved-connection
-// pattern: one generic-password item, device-only availability. The fresh
-// phone key and QR ticket never appear anywhere else — not in files, not in
-// logs.
+/// Keychain-backed pending pairing attempt, matching the saved-connection
+/// pattern: one generic-password item, device-only availability.
 struct PairingKeychainStore: PairingAttemptStoring {
     private static var query: [String: Any] {
         [
@@ -17,7 +15,7 @@ struct PairingKeychainStore: PairingAttemptStoring {
         ]
     }
 
-    func load() throws -> PairingRecord? {
+    func load() throws -> PairingAttempt? {
         var request = Self.query
         request[kSecReturnData as String] = true
         var result: CFTypeRef?
@@ -26,11 +24,11 @@ struct PairingKeychainStore: PairingAttemptStoring {
         guard status == errSecSuccess, let data = result as? Data else {
             throw MobileError.response("진행 중인 연결 요청을 읽지 못했습니다.")
         }
-        return try JSONDecoder().decode(PairingRecord.self, from: data)
+        return try JSONDecoder().decode(PairingAttempt.self, from: data)
     }
 
-    func save(_ record: PairingRecord) throws {
-        let data = try JSONEncoder().encode(record)
+    func save(_ attempt: PairingAttempt) throws {
+        let data = try JSONEncoder().encode(attempt)
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
@@ -54,199 +52,124 @@ struct PairingKeychainStore: PairingAttemptStoring {
     }
 }
 
-// Connect-screen state machine: discovery, QR deep-link confirmation, the
-// 8-character code against a confirmed nearby server, and the pending
-// attempt card. The attempt (fresh key + nonce + origin + status) survives
-// relaunch in the Keychain; an unknown network outcome is never silently
-// replaced — only an explicit resume re-sends the identical request, and
-// only an explicit cancel clears it.
+/// Connect-screen state machine: QR scan or deep link intake, manual origin +
+/// code entry, then one claim. A stored attempt survives relaunch and is
+/// retried with the exact same body.
 @MainActor @Observable final class PairingModel {
     private(set) var attempt: PairingAttempt?
     var error: String?
-    var deviceName: String = PairingModel.sanitizedDeviceName(UIDevice.current.name)
+    var intakeIssue: String?
+    var connectIssue: String?
+    var draftOrigin: String = ""
     var draftCode: String = ""
-    private(set) var linkDraft: PairingInvitation?
-    private(set) var deepLinkIssue: String?
-    private(set) var connectIssue: String?
+    var deviceName: String = PairingModel.sanitizedDeviceName(UIDevice.current.name)
     private(set) var isBusy = false
-    let discovery = PairingDiscovery()
+    private(set) var lastResult: PairingResult?
 
-    // Set by GhostModel: runs the EXISTING connect path (bootstrap probe →
-    // scoped API → Keychain save) with the approved credential. Returns true
-    // only after the connection is live.
-    @ObservationIgnored var onApproved: ((String, String) async -> Bool)?
+    /// Set by GhostModel: adopts the claimed credential into the saved
+    /// connection. Returns true only after the connection is live.
+    @ObservationIgnored var onApproved: ((URL, String, String) async -> Bool)?
     @ObservationIgnored private let session: PairingSession
-    @ObservationIgnored private var adoptingApproval = false
+    @ObservationIgnored private var adopting = false
 
     init(store: PairingAttemptStoring) {
         session = PairingSession(store: store)
     }
 
-    var activeAttempt: Bool {
-        attempt.map { !$0.status.isTerminal } ?? false
-    }
-
     var normalizedDraftCode: String? {
-        try? PairingCode.normalize(draftCode)
+        let code = draftCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (6...32).contains(code.count) else { return nil }
+        return code
     }
 
-    @ObservationIgnored private var selectedCandidateID: String?
-    var selectedCandidate: GhostServerCandidate? {
-        discovery.candidates.first { $0.id == selectedCandidateID }
+    var canSubmitManual: Bool {
+        !isBusy && normalizedDraftCode != nil && !draftOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func select(_ candidate: GhostServerCandidate) {
-        selectedCandidateID = candidate.id
-    }
-
-    // MARK: Lifecycle (connect screen visibility)
-
-    // A saved connection exists: any pending attempt either produced it or is
-    // stale, and must not resurrect behind the Tab UI.
+    /// A saved connection exists: any pending attempt either produced it or is
+    /// stale, and must not resurrect behind the tab UI.
     func discardAdoptedAttempt() {
         Task {
-            try? await session.discardAdopted()
+            await session.discard()
             attempt = nil
         }
     }
 
-    // Runs while ConnectView is visible; SwiftUI cancels the task on
-    // disappear, which stops polling but preserves any unknown attempt.
-    func runVisibleLoop() async {
+    /// Restores a persisted attempt (interrupted claim) when the screen opens.
+    func restore() async {
         attempt = await session.restore()
-        while !Task.isCancelled {
-            await stepOnce()
-            do { try await Task.sleep(for: .seconds(3)) } catch { return }
-        }
     }
 
-    private func stepOnce() async {
-        guard let current = attempt, !isBusy else { return }
-        switch current.status {
-        case .pending:
-            await pollOnce()
-        case .approved:
-            await adoptApproval()
-        case .claiming, .cancelled, .expired, .revoked:
-            break
-        }
-    }
-
-    // MARK: Deep link and QR scan intake (parse before anything else)
+    // MARK: Intake (deep link and QR scan — parse before anything else)
 
     func handleDeepLink(_ url: URL) {
-        deepLinkIssue = nil
+        intakeIssue = nil
+        error = nil
         do {
-            linkDraft = try PairingQR.parse(url.absoluteString)
+            let offer = try PairingQR.parse(url.absoluteString)
+            acceptOffer(offer)
         } catch {
-            deepLinkIssue = error.localizedDescription
+            intakeIssue = error.localizedDescription
         }
     }
 
-    // A QR payload already parsed strictly by the scanner sink.
-    func acceptScanned(_ invitation: PairingInvitation) {
-        deepLinkIssue = nil
-        linkDraft = invitation
+    /// A QR payload already parsed strictly by the scanner sink.
+    func acceptOffer(_ offer: PairingOffer) {
+        intakeIssue = nil
+        error = nil
+        draftOrigin = offer.origin.absoluteString
+        draftCode = offer.code
+        Task { await claim(offer) }
     }
 
-    func dismissLinkDraft() {
-        linkDraft = nil
-        deepLinkIssue = nil
-    }
-
-    // MARK: Begin + claim (explicit user actions only)
-
-    func confirmLinkDraft() async {
-        guard let draft = linkDraft, !isBusy else { return }
-        isBusy = true
-        defer { isBusy = false }
+    func submitManual() async {
+        guard canSubmitManual else { return }
         do {
-            attempt = try await session.begin(invitation: draft, deviceName: deviceName)
-            linkDraft = nil
-            await submitOnce()
+            let offer = PairingOffer(origin: try canonicalOrigin(draftOrigin), code: normalizedDraftCode!)
+            await claim(offer)
         } catch {
-            self.error = error.localizedDescription
+            intakeIssue = error.localizedDescription
         }
     }
 
-    func beginWithCode() async {
-        guard let candidate = selectedCandidate, !isBusy else { return }
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            let code = try PairingCode.normalize(draftCode)
-            attempt = try await session.begin(code: code, origin: candidate.origin, deviceName: deviceName)
-            draftCode = ""
-            await submitOnce()
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    // Explicit resume: re-sends the exact stored payload (claiming), polls
-    // the server's current word (pending), or retries the approved connect
-    // with the same key.
+    /// Retries the stored attempt with the exact same body.
     func resume() async {
-        guard !isBusy, let current = attempt else { return }
-        isBusy = true
-        defer { isBusy = false }
-        switch current.status {
-        case .claiming: await submitOnce()
-        case .pending: await pollOnce()
-        case .approved: await adoptApproval()
-        case .expired: await pollOnce()
-        case .cancelled, .revoked: break
-        }
+        guard let current = attempt, !isBusy else { return }
+        await claim(PairingOffer(origin: current.origin, code: current.code))
     }
 
     func cancel() async {
+        await session.cancel()
+        attempt = nil
+        error = nil
+        connectIssue = nil
+    }
+
+    // MARK: Claim
+
+    private func claim(_ offer: PairingOffer) async {
+        guard !isBusy else { return }
+        isBusy = true
+        defer { isBusy = false }
         do {
-            try await session.cancel()
+            let stored = try await session.begin(offer, deviceName: deviceName)
+            attempt = stored
+            error = nil
+            connectIssue = nil
+            let result = try await session.claim()
+            lastResult = result
             attempt = nil
-            error = nil
-            connectIssue = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    // MARK: Steps (callers hold `isBusy`)
-
-    private func submitOnce() async {
-        do {
-            attempt = try await session.submit()
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func pollOnce() async {
-        do {
-            attempt = try await session.pollOnce()
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func adoptApproval() async {
-        guard !adoptingApproval, let onApproved else { return }
-        adoptingApproval = true
-        defer { adoptingApproval = false }
-        do {
-            let credential = try await session.approvedCredential()
-            connectIssue = nil
-            let connected = await onApproved(credential.origin, credential.key)
+            guard !adopting, let onApproved else { return }
+            adopting = true
+            defer { adopting = false }
+            let connected = await onApproved(offer.origin, result.deviceId, result.token)
             if connected {
-                try? await session.cancel()
-                attempt = nil
-                error = nil
+                connectIssue = nil
             } else {
-                connectIssue = "승인된 연결에 접속하지 못했습니다. 다시 시도해 주세요."
+                connectIssue = "연결된 서버에 접속하지 못했습니다. 다시 시도해 주세요."
             }
         } catch {
-            connectIssue = error.localizedDescription
+            self.error = error.localizedDescription
         }
     }
 

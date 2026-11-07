@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FRAME_COUNTS, frameDuration, isDesign, lookFrame, rowFor, validatePixels } from './sprites';
+import { DEFAULT_DESIGN, FRAME_COUNTS, codexDesign, frameDuration, isDesign, lookFrame, rowFor, spriteVersionOf, validatePixels } from './sprites';
 import { petBundle, zipFiles } from './archive';
 
 function fixture(rows = 11) {
@@ -41,5 +41,11 @@ describe('Codex pet compatibility', () => {
     expect(decoded).toContain('"spriteVersionNumber": 2');
     expect(decoded).toContain('"spritesheetPath": "spritesheet.png"');
     expect(decoded).toContain(`${result.filename.slice(0, -4)}/pet.json`);
+  });
+  it('reads the sprite layout from a persisted design record', () => {
+    expect(spriteVersionOf({ ...DEFAULT_DESIGN, spriteVersion: 2 })).toBe(2);
+    expect(spriteVersionOf(codexDesign(1))).toBe(1);
+    expect(spriteVersionOf(null)).toBe(2);
+    expect(spriteVersionOf({ kind: 'codex', spriteVersion: 3 })).toBe(2);
   });
 });

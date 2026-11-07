@@ -2,961 +2,390 @@ import Foundation
 import Testing
 @testable import GhostMobileCore
 
-private func lifetimeGolden() throws -> JSON {
-    var root = URL(fileURLWithPath: #filePath)
-    root = root.deletingLastPathComponent()
-    root = root.deletingLastPathComponent()
-    root = root.deletingLastPathComponent()
-    root = root.deletingLastPathComponent()
-    root = root.deletingLastPathComponent()
-    return try JSONDecoder().decode(JSON.self, from: Data(contentsOf: root.appending(path: "contracts/lifetime/golden.json")))
-}
-
-private struct StubReply: @unchecked Sendable {
-    let statusCode: Int?
-    let body: Data
-    let failure: URLError?
-    init(statusCode: Int, body: Data) { self.statusCode = statusCode; self.body = body; self.failure = nil }
-    init(failure: URLError) { self.statusCode = nil; self.body = Data(); self.failure = failure }
-}
-
-private final class ReplyQueue: @unchecked Sendable {
-    private let lock = NSLock()
-    private var replies: [StubReply]
-    private var bodies: [Data] = []
-    private var paths: [String] = []
-    private let responder: (@Sendable (URLRequest, Data) -> StubReply)?
-
-    init(_ replies: [StubReply], responder: (@Sendable (URLRequest, Data) -> StubReply)? = nil) {
-        self.replies = replies
-        self.responder = responder
+@Suite struct ContractDecodingTests {
+    private let stateJSON = """
+    {
+      "seq": 42,
+      "principal": {"kind": "device", "deviceId": "device-1", "name": "Test iPhone", "grants": [{"ghostId": "ghost-1", "conversationId": null}]},
+      "runtime": {"ready": true, "detail": "", "version": "1.0.0"},
+      "ghosts": [{"id": "ghost-1", "name": "Ghost", "persona": "비서", "look": {"avatarId": null},
+                  "model": null, "isDefault": true, "state": "active",
+                  "directConversationId": "conv-1", "createdAt": 1700000000000, "updatedAt": 1700000001000}],
+      "conversations": [{"id": "conv-1", "ghostId": "ghost-1", "kind": "direct", "workId": null,
+                         "title": "대화", "privacy": "public", "model": null, "busy": false,
+                         "createdAt": 1700000000000, "lastActivityAt": 1700000002000}],
+      "works": [{"id": "work-1", "parentId": null, "rootId": "work-1", "ghostId": "ghost-1",
+                 "originConversationId": "conv-1", "conversationId": "conv-9",
+                 "title": "책 목록 정리", "brief": "정리해 주세요",
+                 "acceptance": {"criteria": "파일로 남는다", "checks": [], "reviewer": null},
+                 "state": "running", "revision": 1, "revisionsUsed": 0,
+                 "deadlineAt": null, "result": null, "verdict": null, "reason": null,
+                 "createdAt": 1700000000000, "startedAt": 1700000000500, "endedAt": null,
+                 "updatedAt": 1700000002000}],
+      "decisions": [{"id": "decision-1", "kind": "question", "ghostId": "ghost-1",
+                     "conversationId": "conv-1", "workId": null, "effectId": null,
+                     "title": "어느 책?", "detail": "고르세요", "options": ["에세이", "소설"],
+                     "proposal": {"format": "md"}, "state": "pending", "answer": null,
+                     "createdAt": 1700000000000, "resolvedAt": null}],
+      "notifications": [{"id": "notification-1", "kind": "work_done", "ghostId": "ghost-1",
+                         "conversationId": null, "workId": "work-1", "decisionId": null,
+                         "title": "완료", "body": "맡긴 일이 끝났습니다.",
+                         "createdAt": 1700000000000, "readAt": null}],
+      "schedules": [], "spaces": [], "avatars": [],
+      "settings": {"defaultModel": null, "reviewModel": null, "providers": []},
+      "devices": [], "sandboxes": []
     }
-    func take(_ request: URLRequest) -> StubReply {
-        lock.lock()
-        defer { lock.unlock() }
-        var body = request.httpBody ?? Data()
-        if body.isEmpty, let stream = request.httpBodyStream {
-            stream.open()
-            defer { stream.close() }
-            let readable = withUnsafeTemporaryAllocation(of: UInt8.self, capacity: 4096) { buffer -> Bool in
-                while true {
-                    let count = stream.read(buffer.baseAddress!, maxLength: buffer.count)
-                    if count < 0 || body.count + max(count, 0) > 1_048_576 { return false }
-                    if count == 0 { return true }
-                    body.append(buffer.baseAddress!, count: count)
-                }
-            }
-            if !readable { return StubReply(failure: URLError(.cannotDecodeContentData)) }
+    """
+
+    @Test func decodesStateSnapshotForDevicePrincipal() throws {
+        let state = try JSONDecoder().decode(GhostStateSnapshot.self, from: json(stateJSON))
+        #expect(state.seq == 42)
+        guard case .device(let deviceId, let name, let grants) = state.principal else {
+            Issue.record("expected device principal"); return
         }
-        bodies.append(body)
-        paths.append(request.url?.path ?? "")
-        if !replies.isEmpty { return replies.removeFirst() }
-        return responder?(request, body) ?? StubReply(statusCode: 500, body: Data())
+        #expect(deviceId == "device-1")
+        #expect(name == "Test iPhone")
+        #expect(grants == [DeviceGrant(ghostId: "ghost-1", conversationId: nil)])
+        #expect(state.runtime.ready)
+        #expect(state.ghosts[0].isDefault)
+        #expect(state.ghosts[0].state == .active)
+        #expect(state.conversations[0].kind == .direct)
+        #expect(state.conversations[0].busy == false)
+        #expect(state.works[0].state == .running)
+        #expect(state.works[0].acceptance.criteria == "파일로 남는다")
+        #expect(state.decisions[0].kind == .question)
+        #expect(state.decisions[0].isPending)
+        #expect(state.decisions[0].proposal?.dictionary["format"]?.text == "md")
+        #expect(state.notifications[0].kind == .work_done)
+        #expect(!state.notifications[0].isRead)
+        #expect(contractDate(state.works[0].startedAt!).timeIntervalSince1970 == 1_700_000_000.5)
     }
 
-    func captured() -> (bodies: [Data], paths: [String]) {
-        lock.lock()
-        defer { lock.unlock() }
-        return (bodies, paths)
-    }
-}
-
-private func encodedJSON(_ value: JSON) -> Data {
-    (try? JSONEncoder().encode(value)) ?? Data()
-}
-
-private final class StubProtocolRegistry: @unchecked Sendable {
-    private let lock = NSLock()
-    private var queues: [String: ReplyQueue] = [:]
-
-    func install(_ queue: ReplyQueue, host: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        queues[host] = queue
+    @Test func decodesOwnerPrincipal() throws {
+        let ownerState = stateJSON.replacingOccurrences(
+            of: #"{"kind": "device", "deviceId": "device-1", "name": "Test iPhone", "grants": [{"ghostId": "ghost-1", "conversationId": null}]}"#,
+            with: #"{"kind": "owner"}"#)
+        let state = try JSONDecoder().decode(GhostStateSnapshot.self, from: json(ownerState))
+        #expect(state.principal == .owner)
+        #expect(state.principal.grants.isEmpty)
     }
 
-    func remove(host: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        queues.removeValue(forKey: host)
-    }
-
-    func take(_ request: URLRequest) -> StubReply? {
-        guard let host = request.url?.host else { return nil }
-        lock.lock()
-        defer { lock.unlock() }
-        return queues[host]?.take(request)
-    }
-}
-
-private let stubProtocolRegistry = StubProtocolRegistry()
-
-private final class GhostStubURLProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool {
-        request.url?.host?.hasSuffix(".stub.invalid") == true
-    }
-
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let reply = stubProtocolRegistry.take(request) else {
-            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
-            return
+    @Test func decodesConversationPage() throws {
+        let pageJSON = """
+        {
+          "conversation": {"id": "conv-1", "ghostId": "ghost-1", "kind": "direct", "workId": null,
+                           "title": "대화", "privacy": "public", "model": null, "busy": true,
+                           "createdAt": 1, "lastActivityAt": 2},
+          "messages": [
+            {"id": "m-1", "conversationId": "conv-1", "role": "user", "origin": "owner",
+             "text": "안녕?", "toolCalls": [], "tool": null, "attachments": [], "createdAt": 10},
+            {"id": "m-2", "conversationId": "conv-1", "role": "assistant", "origin": null,
+             "text": "실행했습니다.", "toolCalls": [{"callId": "c-1", "name": "bash", "args": "ls"}],
+             "tool": {"callId": "c-1", "name": "bash", "isError": false}, "attachments": [], "createdAt": 20}
+          ],
+          "before": "m-0",
+          "live": {"conversationId": "conv-1", "running": true, "partial": "결과는", "tools": []}
         }
-        if let failure = reply.failure {
-            client?.urlProtocol(self, didFailWithError: failure)
-            return
+        """
+        let page = try JSONDecoder().decode(ConversationPage.self, from: json(pageJSON))
+        #expect(page.conversation.busy)
+        #expect(page.messages.count == 2)
+        #expect(page.messages[1].toolCalls[0].name == "bash")
+        #expect(page.messages[1].tool?.isError == false)
+        #expect(page.before == "m-0")
+        #expect(page.live?.partial == "결과는")
+    }
+
+    @Test func decodesWorkDetail() throws {
+        let detailJSON = """
+        {
+          "work": {"id": "work-1", "parentId": null, "rootId": "work-1", "ghostId": "ghost-1",
+                   "originConversationId": "conv-1", "conversationId": "conv-9",
+                   "title": "책 목록 정리", "brief": "정리해 주세요",
+                   "acceptance": {"criteria": "파일로", "checks": [], "reviewer": null},
+                   "state": "done", "revision": 2, "revisionsUsed": 1, "deadlineAt": null,
+                   "result": {"summary": "완료했습니다.", "artifacts": [
+                       {"digest": "\(String(repeating: "a", count: 64))", "name": "books.md", "mediaType": "text/markdown", "size": 3}]},
+                   "verdict": {"outcome": "pass", "source": "checks", "reasons": "일치", "at": 5},
+                   "reason": null, "createdAt": 1, "startedAt": 2, "endedAt": 3, "updatedAt": 4},
+          "ancestors": [],
+          "children": [{"id": "work-2", "parentId": "work-1", "rootId": "work-1", "ghostId": "ghost-1",
+                        "originConversationId": "conv-9", "conversationId": "conv-10",
+                        "title": "하위", "brief": "b", "acceptance": {"criteria": "", "checks": [], "reviewer": null},
+                        "state": "cancelled", "revision": 1, "revisionsUsed": 0, "deadlineAt": null,
+                        "result": null, "verdict": null, "reason": "부모 취소", "createdAt": 1,
+                        "startedAt": null, "endedAt": 2, "updatedAt": 3}],
+          "effects": [{"id": "effect-1", "workId": "work-1", "conversationId": "conv-9",
+                       "callId": "c-1", "tool": "write", "summary": "books.md 저장",
+                       "inputDigest": "\(String(repeating: "b", count: 64))", "state": "done",
+                       "result": "books.md", "createdAt": 1, "endedAt": 2}],
+          "decisions": [],
+          "artifacts": [{"digest": "\(String(repeating: "a", count: 64))", "name": "books.md", "mediaType": "text/markdown", "size": 3}]
         }
-        guard let url = request.url, let statusCode = reply.statusCode,
-              let response = HTTPURLResponse(url: url, statusCode: statusCode, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json", "Content-Length": String(reply.body.count)]) else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
+        """
+        let detail = try JSONDecoder().decode(WorkDetail.self, from: json(detailJSON))
+        #expect(detail.work.state == .done)
+        #expect(detail.work.result?.summary == "완료했습니다.")
+        #expect(detail.work.verdict?.outcome == "pass")
+        #expect(detail.children[0].state == .cancelled)
+        #expect(detail.effects[0].tool == "write")
+        #expect(detail.artifacts[0].name == "books.md")
+    }
+
+    @Test func commandEncodingMatchesContract() throws {
+        let body = try JSONEncoder().encode(CommandRequest(
+            requestId: "0123abcd-1234-5678-9abc-def012345678",
+            command: .messageSend(conversationId: "conv-1", text: "안녕?")))
+        let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(object["requestId"] as? String == "0123abcd-1234-5678-9abc-def012345678")
+        let command = try #require(object["command"] as? [String: Any])
+        #expect(command["type"] as? String == "message.send")
+        #expect(command["conversationId"] as? String == "conv-1")
+        #expect(command["text"] as? String == "안녕?")
+
+        let update = try JSONEncoder().encode(CommandRequest(
+            requestId: "0123abcd-1234-5678-9abc-def012345679",
+            command: .workUpdate(workId: "work-1", title: .keep, brief: .set("새 내용"), deadlineAt: .clear)))
+        let updateObject = try #require(JSONSerialization.jsonObject(with: update) as? [String: Any])
+        let updateCommand = try #require(updateObject["command"] as? [String: Any])
+        #expect(updateCommand["type"] as? String == "work.update")
+        #expect(updateCommand["workId"] as? String == "work-1")
+        #expect(updateCommand["brief"] as? String == "새 내용")
+        #expect((updateCommand["deadlineAt"] as? NSNull) != nil)
+        #expect(updateCommand["title"] == nil)
+
+        let resolve = try JSONEncoder().encode(CommandRequest(
+            requestId: "0123abcd-1234-5678-9abc-def012345680",
+            command: .decisionResolve(decisionId: "decision-1", outcome: .answer, answer: "에세이")))
+        let resolveObject = try #require(JSONSerialization.jsonObject(with: resolve) as? [String: Any])
+        let resolveCommand = try #require(resolveObject["command"] as? [String: Any])
+        #expect(resolveCommand["type"] as? String == "decision.resolve")
+        #expect(resolveCommand["outcome"] as? String == "answer")
+        #expect(resolveCommand["answer"] as? String == "에세이")
+
+        let roundTrip = try JSONDecoder().decode(CommandRequest.self, from: update)
+        #expect(roundTrip.command == .workUpdate(workId: "work-1", title: .keep, brief: .set("새 내용"), deadlineAt: .clear))
+    }
+}
+
+@Suite struct SSEParsingTests {
+    private func ledgerEventFrame(seq: Int) -> String {
+        "event: ledger\nid: \(seq)\ndata: {\"seq\": \(seq), \"at\": 1700000000000, \"data\": {\"type\": \"conversation\", \"conversation\": {\"id\": \"conv-1\", \"ghostId\": \"ghost-1\", \"kind\": \"direct\", \"workId\": null, \"title\": \"대화\", \"privacy\": \"public\", \"model\": null, \"busy\": false, \"createdAt\": 1, \"lastActivityAt\": 2}}}\n\n"
+    }
+
+    @Test func parsesFramesSplitAcrossChunks() throws {
+        var parser = SSEParser()
+        let frame = "event: ledger\r\nid: 7\r\ndata: {\"seq\": 7, \"at\": 1700000000000, \"data\": {\"type\": \"work.removed\", \"id\": \"work-1\"}}\r\n\r\n"
+        var received: [SSEFrame] = []
+        for index in frame.indices {
+            received += parser.feed(text: String(frame[index...index]))
         }
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: reply.body)
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    override func stopLoading() {}
-}
-
-@Test func lifetimeReadAuthorityCannotFetchOwnerWideSnapshot() async throws {
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    let queue = ReplyQueue([StubReply(statusCode: 200, body: encodedJSON(.object(["private_owner_data": .string("must not be fetched")])) )])
-    stubProtocolRegistry.install(queue, host: host)
-    defer { stubProtocolRegistry.remove(host: host) }
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GhostStubURLProtocol.self]
-    let session = URLSession(configuration: configuration)
-    defer { session.invalidateAndCancel() }
-    let identity = try LifetimeIdentity(authorityEpoch: 1)
-    let namespace = try LifetimeJournalNamespace(workspaceID: UUID().uuidString, deviceID: UUID().uuidString, authorityEpoch: 1)
-    let api = GhostAPI(
-        connection: try Connection(server: "https://\(host)", token: String(repeating: "a", count: 64)),
-        pendingFile: FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString)/pending.json"),
-        lifetimeIdentity: identity,
-        lifetimeNamespace: namespace,
-        lifetimeCapabilities: ["lifetime.read"],
-        session: session
-    )
-    await #expect(throws: MobileError.self) { try await api.ownerSnapshot() }
-    #expect(queue.captured().paths.isEmpty)
-}
-
-@Test func serverAddressRejectsCredentialLeaks() throws {
-    let token = String(repeating: "a", count: 64)
-    for url in ["http://ghost.example", "https://u:p@ghost.example", "https://ghost.example/path", "https://ghost.example?token=x", "https://ghost.example#x"] {
-        #expect(throws: MobileError.self) { try Connection(server: url, token: token) }
-    }
-    let valid = try Connection(server: "https://ghost.example:8443", token: token)
-    #expect(valid.url("mobile/v1/snapshot").absoluteString == "https://ghost.example:8443/mobile/v1/snapshot")
-    #expect(try Connection(server: "https://GHOST.EXAMPLE:443/", token: token).origin == Connection(server: "https://ghost.example", token: token).origin)
-}
-@Test func retrySurvivesProcessStateAndRemainsBoundToCommand() async throws {
-    let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: dir) }
-    let file = dir.appending(path: "pending.json")
-    let command = JSON.object(["type": .string("submit"), "prompt": .string("original")])
-    let first = try await PendingCommands(file: file).prepare(command)
-    let reopened = PendingCommands(file: file)
-    #expect(try await reopened.prepare(command) == first)
-    let different = try await reopened.prepare(.object(["type": .string("submit"), "prompt": .string("changed")]))
-    #expect(different.request_id != first.request_id)
-    try await reopened.finish(first)
-    #expect(try await reopened.prepare(command).request_id != first.request_id)
-}
-@Test func corruptedJournalFailsBeforeDispatch() async throws {
-    let file = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: file) }
-    try Data("broken".utf8).write(to: file)
-    await #expect(throws: (any Error).self) { try await PendingCommands(file: file).prepare(.object(["type": .string("submit")])) }
-}
-
-@Test func lifetimeOutboxRequiresReceiptInspectionAfterAmbiguousDispatch() async throws {
-    let golden = try lifetimeGolden()
-    let body = golden["body"]
-    let identity = try LifetimeIdentity(authorityEpoch: 1)
-    let workspaceID = UUID().uuidString.lowercased()
-    let deviceID = UUID().uuidString.lowercased()
-    let namespace = try LifetimeJournalNamespace(workspaceID: workspaceID, deviceID: deviceID, authorityEpoch: 1)
-    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-    let file = root.appending(path: "pending.json")
-    let journalFile = namespace.file(in: root)
-    defer { try? FileManager.default.removeItem(at: root) }
-
-    let success = JSON.object([
-        "status": .string("success"),
-        "summary": .string("admitted"),
-        "object_refs": .array([]),
-        "artifacts": .array([]),
-        "next_actions": .array([]),
-        "error_code": .null,
-        "retry_class": .string("same_id"),
-        "data": .null,
-    ])
-    let queue = ReplyQueue([StubReply(failure: URLError(.notConnectedToInternet))], responder: { _, requestBody in
-        let wire = (try? JSONDecoder().decode(Envelope.self, from: requestBody)) ?? Envelope(command: .null)
-        let body = wire.command["envelope"]["body"]
-        if body["method"] == .string("command.inspect") {
-            let commandID = body["command_id"].text
-            let receiptResponse = JSON.object([
-                "status": .string("success"),
-                "summary": .string("original request admitted"),
-                "object_refs": .array([]), "artifacts": .array([]), "next_actions": .array([]), "data": .null,
-                "retry_class": .string("same_id"),
-                "error_code": .null,
-            ])
-            let inspection = JSON.object([
-                "status": .string("success"),
-                "summary": .string("receipt inspected"),
-                "object_refs": .array([]),
-                "artifacts": .array([]),
-                "next_actions": .array([]),
-                "error_code": .null,
-                "retry_class": .string("same_id"),
-                "data": .object([
-                    "command_id": .string(commandID),
-                    "found": .bool(true),
-                    "authority_epoch": .number(1),
-                    "payload_digest": golden["payload_digest"],
-                    "response": receiptResponse,
-                ]),
-            ])
-            return StubReply(statusCode: 200, body: encodedJSON(.object(["ok": .bool(true), "result": inspection])))
+        #expect(received.count == 1)
+        #expect(received[0].event == "ledger")
+        #expect(received[0].id == "7")
+        guard case .ledger(let event) = try received[0].streamFrame() else {
+            Issue.record("expected ledger frame"); return
         }
-        return StubReply(statusCode: 200, body: encodedJSON(.object(["ok": .bool(true), "result": success])))
-    })
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    stubProtocolRegistry.install(queue, host: host)
-    defer { stubProtocolRegistry.remove(host: host) }
+        #expect(event.seq == 7)
+        #expect(event.data == .other("work.removed"))
+    }
 
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GhostStubURLProtocol.self]
-    configuration.timeoutIntervalForRequest = 5
-    let session = URLSession(configuration: configuration)
-    defer { session.invalidateAndCancel() }
-    let connection = try Connection(server: "https://\(host)", token: String(repeating: "a", count: 64))
-    let api = GhostAPI(
-        connection: connection,
-        pendingFile: file,
-        lifetimeIdentity: identity,
-        lifetimeNamespace: namespace,
-        lifetimeCapabilities: ["lifetime.read", "lifetime.write"],
-        session: session
-    )
-
-    await #expect(throws: (any Error).self) { try await api.lifetimeAction(body) }
-    let pending = try await api.pendingCommands()
-    #expect(pending.count == 1)
-    let persistedAfterRestart = try await PendingCommands(file: journalFile).prepareLifetime(body, identity: identity)
-    #expect(persistedAfterRestart.request_id == pending[0].request_id)
-
-    let firstCapture = queue.captured()
-    let firstWire = try JSONDecoder().decode(Envelope.self, from: firstCapture.bodies[0])
-    let firstInner = firstWire.command["envelope"]
-    #expect(firstInner["payload_digest"] == golden["payload_digest"])
-    #expect(firstInner["authority_epoch"] == .number(1))
-
-    await #expect(throws: (any Error).self) { try await api.retry(pending[0]) }
-    #expect(queue.captured().bodies.count == 1)
-    let reconciliation = try await api.inspectLifetimeCommand(pending[0])
-    #expect(reconciliation.status == .confirmedSuccess)
-    #expect(reconciliation.commandID == firstInner["command_id"].text)
-    #expect(try await api.pendingCommands().isEmpty)
-
-    _ = try await api.lifetimeAction(body)
-    let requests = queue.captured()
-    let inspectWire = try JSONDecoder().decode(Envelope.self, from: requests.bodies[1])
-    let newIntentWire = try JSONDecoder().decode(Envelope.self, from: requests.bodies[2])
-    #expect(inspectWire.command["envelope"]["body"]["method"] == .string("command.inspect"))
-    #expect(inspectWire.command["envelope"]["body"]["command_id"] == firstInner["command_id"])
-    #expect(inspectWire.command["envelope"]["authority_epoch"] == .number(1))
-    #expect(inspectWire.command["envelope"]["command_id"] != firstInner["command_id"])
-    #expect(newIntentWire.request_id != firstWire.request_id)
-    #expect(newIntentWire.command["envelope"]["command_id"] != firstInner["command_id"])
-    #expect(try await api.pendingCommands().isEmpty)
-}
-
-@Test func bindingScopeKeepsOnlyAdvertisedPairs() {
-    let snapshot = JSON.object([
-        "bindings": .array([
-            .object(["ghost_id": .string("g1"), "conversation_id": .string("c1"), "runtime_kind": .string("pi")]),
-            .object(["ghost_id": .string("g2"), "conversation_id": .string("c2"), "runtime_kind": .string("web")]),
-            .object(["ghost_id": .string("g1"), "conversation_id": .string("c1"), "runtime_kind": .string("pi")]),
-        ]),
-    ])
-    let pairs = lifetimeBindingPairs(snapshot: snapshot, ghostIDs: ["g1", "g2"], conversationIDs: ["c1", "c2"])
-    #expect(pairs.map(\.id) == ["g1:c1", "g2:c2"])
-    #expect(!pairs.contains { $0.ghostID == "g1" && $0.conversationID == "c2" })
-}
-
-@Test func previousWorkspaceJournalPreservesOriginalIDAndEpochAndBlocksMutation() async throws {
-    let golden = try lifetimeGolden()
-    let identity = try LifetimeIdentity(authorityEpoch: 2)
-    let oldIdentity = try LifetimeIdentity(authorityEpoch: 1)
-    let oldWorkspaceID = UUID().uuidString.lowercased()
-    let currentWorkspaceID = oldWorkspaceID
-    let deviceID = UUID().uuidString.lowercased()
-    let oldNamespace = try LifetimeJournalNamespace(workspaceID: oldWorkspaceID, deviceID: deviceID, authorityEpoch: 1)
-    let namespace = try LifetimeJournalNamespace(workspaceID: currentWorkspaceID, deviceID: deviceID, authorityEpoch: 2)
-    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-    let oldFile = oldNamespace.file(in: root)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let original = try await PendingCommands(file: oldFile).prepareLifetime(golden["body"], identity: oldIdentity)
-
-    let receiptResponse = JSON.object([
-        "status": .string("success"),
-        "summary": .string("old request admitted"),
-        "object_refs": .array([]), "artifacts": .array([]), "next_actions": .array([]), "data": .null,
-        "retry_class": .string("same_id"),
-        "error_code": .null,
-    ])
-    let success = JSON.object([
-        "status": .string("success"),
-        "summary": .string("admitted"),
-        "object_refs": .array([]),
-        "artifacts": .array([]),
-        "next_actions": .array([]),
-        "error_code": .null,
-        "retry_class": .string("same_id"),
-        "data": .null,
-    ])
-    let queue = ReplyQueue([], responder: { _, requestBody in
-        let wire = (try? JSONDecoder().decode(Envelope.self, from: requestBody)) ?? Envelope(command: .null)
-        let body = wire.command["envelope"]["body"]
-        if body["method"] == .string("command.inspect") {
-            let inspection = JSON.object([
-                "status": .string("success"),
-                "summary": .string("receipt inspected"),
-                "retry_class": .string("same_id"),
-                "object_refs": .array([]), "artifacts": .array([]), "next_actions": .array([]),
-                "error_code": .null,
-                "data": .object([
-                    "command_id": body["command_id"],
-                    "found": .bool(true),
-                    "authority_epoch": .number(1),
-                    "payload_digest": original.command["envelope"]["payload_digest"],
-                    "response": receiptResponse,
-                ]),
-            ])
-            return StubReply(statusCode: 200, body: encodedJSON(.object(["ok": .bool(true), "result": inspection])))
+    @Test func ledgerUnionMapsKnownAndUnknownTypes() throws {
+        var parser = SSEParser()
+        let conversation = ledgerEventFrame(seq: 7)
+        let frames = parser.feed(text: conversation)
+        #expect(frames.count == 1)
+        guard case .ledger(let event) = try frames[0].streamFrame() else {
+            Issue.record("expected ledger frame"); return
         }
-        return StubReply(statusCode: 200, body: encodedJSON(.object(["ok": .bool(true), "result": success])))
-    })
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    stubProtocolRegistry.install(queue, host: host)
-    defer { stubProtocolRegistry.remove(host: host) }
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GhostStubURLProtocol.self]
-    let session = URLSession(configuration: configuration)
-    defer { session.invalidateAndCancel() }
-    let connection = try Connection(server: "https://\(host)", token: String(repeating: "b", count: 64))
-    let api = GhostAPI(
-        connection: connection,
-        pendingFile: root.appending(path: "pending.json"),
-        lifetimeIdentity: identity,
-        lifetimeNamespace: namespace,
-        lifetimeCapabilities: ["lifetime.read", "lifetime.write"],
-        session: session
-    )
+        #expect(event.seq == 7)
+        #expect(event.data == .conversation(try JSONDecoder().decode(Conversation.self, from: json(#"{"id": "conv-1", "ghostId": "ghost-1", "kind": "direct", "workId": null, "title": "대화", "privacy": "public", "model": null, "busy": false, "createdAt": 1, "lastActivityAt": 2}"#))))
 
-    let recovery = try await api.lifetimeRecoveryItems()
-    #expect(recovery.count == 1)
-    #expect(recovery[0].workspaceID == oldWorkspaceID)
-    #expect(recovery[0].deviceID == deviceID)
-    #expect(recovery[0].commandID == original.command["envelope"]["command_id"].text)
-    #expect(recovery[0].authorityEpoch == 1)
-    #expect(recovery[0].canReconcile)
-    await #expect(throws: (any Error).self) { try await api.lifetimeAction(golden["body"]) }
-    #expect(queue.captured().paths.isEmpty)
-
-    let result = try await api.reconcileLifetime(recovery[0].id)
-    #expect(result.status == .confirmedSuccess)
-    #expect(result.commandID == original.command["envelope"]["command_id"].text)
-    #expect(result.authorityEpoch == 1)
-    #expect(try await PendingCommands(file: oldFile).all().isEmpty)
-    #expect(original.command["envelope"]["authority_epoch"] == .number(1))
-    _ = try await api.lifetimeAction(golden["body"])
-
-    let requests = queue.captured()
-    let inspect = try JSONDecoder().decode(Envelope.self, from: requests.bodies[0])
-    #expect(inspect.command["envelope"]["body"]["method"] == .string("command.inspect"))
-    #expect(inspect.command["envelope"]["body"]["command_id"] == original.command["envelope"]["command_id"])
-    #expect(inspect.command["envelope"]["authority_epoch"] == .number(2))
-    #expect(inspect.command["envelope"]["command_id"] != original.command["envelope"]["command_id"])
-    #expect(original.command["envelope"]["authority_epoch"] == .number(1))
-    #expect(requests.bodies.count == 2)
-}
-
-@Test func dispatchOffKeepsReadsButBlocksWritesBeforeTransport() async throws {
-    let golden = try lifetimeGolden()
-    let identity = try LifetimeIdentity(authorityEpoch: 1)
-    let namespace = try LifetimeJournalNamespace(
-        workspaceID: UUID().uuidString.lowercased(),
-        deviceID: UUID().uuidString.lowercased(),
-        authorityEpoch: 1
-    )
-    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let accepted = JSON.object([
-        "status": .string("success"),
-        "summary": .string("accepted"),
-        "object_refs": .array([]),
-        "artifacts": .array([]),
-        "next_actions": .array([]),
-        "error_code": .null,
-        "retry_class": .string("same_id"),
-        "data": .null,
-    ])
-    let queue = ReplyQueue([
-        StubReply(statusCode: 200, body: Data("{}".utf8)),
-        StubReply(statusCode: 200, body: encodedJSON(.object(["ok": .bool(true), "result": accepted]))),
-    ])
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    stubProtocolRegistry.install(queue, host: host)
-    defer { stubProtocolRegistry.remove(host: host) }
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GhostStubURLProtocol.self]
-    let session = URLSession(configuration: configuration)
-    defer { session.invalidateAndCancel() }
-    let connection = try Connection(server: "https://\(host)", token: String(repeating: "c", count: 64))
-    let api = GhostAPI(
-        connection: connection,
-        pendingFile: root.appending(path: "pending.json"),
-        lifetimeIdentity: identity,
-        lifetimeNamespace: namespace,
-        dispatchEnabled: false,
-        lifetimeCapabilities: ["lifetime.read", "lifetime.write"],
-        session: session
-    )
-
-    _ = try await api.lifetimeSnapshot()
-    let target = (
-        ghostID: UUID().uuidString.lowercased(),
-        conversationID: UUID().uuidString.lowercased(),
-        turnID: UUID().uuidString.lowercased()
-    )
-    _ = try await api.inspectLifetimeConversationTurn(
-        ghostID: target.ghostID,
-        conversationID: target.conversationID,
-        turnID: target.turnID
-    )
-    await #expect(throws: (any Error).self) {
-        try await api.lifetimeAction(.object([
-            "method": .string("conversation.turn.inspect"),
-            "ghost_id": .string(target.ghostID),
-            "conversation_id": .string(target.conversationID),
-            "turn_id": .string(target.turnID),
-            "unexpected": .string("reject-before-dispatch"),
-        ]))
-    }
-    await #expect(throws: (any Error).self) {
-        try await api.cancelLifetimeConversationTurn(
-            ghostID: target.ghostID,
-            conversationID: target.conversationID,
-            turnID: target.turnID
-        )
-    }
-    await #expect(throws: (any Error).self) { try await api.lifetimeAction(golden["body"]) }
-    let requests = queue.captured()
-    #expect(requests.paths == ["/mobile/v1/lifetime/snapshot", "/mobile/v1/lifetime/action"])
-    let inspectWire = try JSONDecoder().decode(Envelope.self, from: requests.bodies[1])
-    #expect(inspectWire.command["envelope"]["body"] == .object([
-        "method": .string("conversation.turn.inspect"),
-        "ghost_id": .string(target.ghostID),
-        "conversation_id": .string(target.conversationID),
-        "turn_id": .string(target.turnID),
-    ]))
-
-    #expect(try await api.pendingCommands().isEmpty)
-
-}
-
-@Test func writeOnlyConnectionDoesNotRequestSnapshotsOrReceipts() async throws {
-    let golden = try lifetimeGolden()
-    let identity = try LifetimeIdentity(authorityEpoch: 1)
-    let namespace = try LifetimeJournalNamespace(
-        workspaceID: UUID().uuidString.lowercased(),
-        deviceID: UUID().uuidString.lowercased(),
-        authorityEpoch: 1
-    )
-    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let journalFile = namespace.file(in: root)
-    let original = try await PendingCommands(file: journalFile).prepareLifetime(golden["body"], identity: identity)
-
-    let queue = ReplyQueue([])
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    stubProtocolRegistry.install(queue, host: host)
-    defer { stubProtocolRegistry.remove(host: host) }
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GhostStubURLProtocol.self]
-    let session = URLSession(configuration: configuration)
-    defer { session.invalidateAndCancel() }
-    let connection = try Connection(server: "https://\(host)", token: String(repeating: "d", count: 64))
-    let api = GhostAPI(
-        connection: connection,
-        pendingFile: root.appending(path: "pending.json"),
-        lifetimeIdentity: identity,
-        lifetimeNamespace: namespace,
-        lifetimeCapabilities: ["lifetime.write"],
-        session: session
-    )
-
-    await #expect(throws: (any Error).self) { try await api.lifetimeSnapshot() }
-    await #expect(throws: (any Error).self) { try await api.inspectLifetimeCommand(original) }
-    await #expect(throws: (any Error).self) { try await api.action(.object(["type": .string("lifetime")])) }
-    await #expect(throws: (any Error).self) { try await api.acknowledge(original) }
-    await #expect(throws: (any Error).self) { try await api.lifetimeAction(golden["body"]) }
-    #expect(queue.captured().paths.isEmpty)
-    #expect(try await PendingCommands(file: journalFile).all() == [original])
-}
-
-@Test func canonicalConversationRunParserRejectsForeignUnreferencedAndMalformedRows() throws {
-    let turnID = UUID().uuidString.lowercased()
-    let valid: [String: JSON] = [
-        "turn_id": .string(turnID),
-        "ghost_id": .string("ghost"),
-        "conversation_id": .string("conversation"),
-        "state": .string("running"),
-        "cancel_requested": .bool(false),
-        "cancel_command_id": .null,
-        "submission_id": .string("opaque-submission"),
-        "entry_id": .null,
-        "reason_code": .null,
-        "latest_status_command_id": .null,
-        "created_at_ms": .number(1),
-        "updated_at_ms": .number(2),
-    ]
-    let parsed = try parseLifetimeConversationRuns(
-        .array([.object(valid)]),
-        ghostID: "ghost",
-        conversationID: "conversation",
-        referencedTurnIDs: [turnID]
-    )
-    #expect(parsed.count == 1)
-    #expect(parsed[0].turnID == turnID)
-    #expect(parsed[0].state == "running")
-    #expect(parsed[0].cancelRequested == false)
-
-    var foreign = valid
-    foreign["conversation_id"] = .string("other-conversation")
-    var unreferenced = valid
-    unreferenced["turn_id"] = .string(UUID().uuidString.lowercased())
-    var unknownState = valid
-    unknownState["state"] = .string("completed")
-    var unknownReason = valid
-    unknownReason["reason_code"] = .string("raw-model-diagnostic")
-    var malformedCancel = valid
-    malformedCancel["cancel_requested"] = .string("false")
-    var extraField = valid
-    extraField["host_prompt"] = .string("private")
-    var negativeTimestamp = valid
-    negativeTimestamp["updated_at_ms"] = .number(-1)
-    var reversedTimestamp = valid
-    reversedTimestamp["created_at_ms"] = .number(3)
-    var excessiveUTF8Identity = valid
-    excessiveUTF8Identity["submission_id"] = .string(String(repeating: "é", count: 257))
-
-    for invalid in [foreign, unreferenced, unknownState, unknownReason, malformedCancel, extraField, negativeTimestamp, reversedTimestamp, excessiveUTF8Identity] {
-        #expect(throws: MobileError.self) {
-            try parseLifetimeConversationRuns(
-                .array([.object(invalid)]),
-                ghostID: "ghost",
-                conversationID: "conversation",
-                referencedTurnIDs: [turnID]
-            )
+        var unknownParser = SSEParser()
+        let unknown = "event: ledger\ndata: {\"seq\": 9, \"at\": 1, \"data\": {\"type\": \"space.removed\", \"id\": \"space-1\"}}\n\n"
+        guard case .ledger(let unknownEvent) = try unknownParser.feed(text: unknown)[0].streamFrame() else {
+            Issue.record("expected ledger frame"); return
         }
+        #expect(unknownEvent.data == .other("space.removed"))
+
+        var removedParser = SSEParser()
+        let removed = "event: ledger\ndata: {\"seq\": 10, \"at\": 1, \"data\": {\"type\": \"conversation.removed\", \"id\": \"conv-1\"}}\n\n"
+        guard case .ledger(let removedEvent) = try removedParser.feed(text: removed)[0].streamFrame() else {
+            Issue.record("expected ledger frame"); return
+        }
+        #expect(removedEvent.data == .conversationRemoved("conv-1"))
     }
-    #expect(throws: MobileError.self) {
-        try parseLifetimeConversationRuns(
-            .array([.object(valid), .object(valid)]),
-            ghostID: "ghost",
-            conversationID: "conversation",
-            referencedTurnIDs: [turnID]
-        )
+
+    @Test func parsesLiveAndResetFrames() throws {
+        var parser = SSEParser()
+        let live = "event: live\ndata: {\"type\": \"live\", \"live\": {\"conversationId\": \"conv-1\", \"running\": true, \"partial\": \"결\", \"tools\": [{\"callId\": \"c-1\", \"name\": \"write\", \"output\": \"ok\"}]}}\n\n"
+        let message = "event: live\ndata: {\"type\": \"message\", \"message\": {\"id\": \"m-2\", \"conversationId\": \"conv-1\", \"role\": \"assistant\", \"origin\": null, \"text\": \"결과입니다\", \"toolCalls\": [], \"tool\": null, \"attachments\": [], \"createdAt\": 5}}\n\n"
+        let reset = "event: reset\ndata: {\"seq\": 3}\n\n"
+        let frames = parser.feed(text: live + message + reset)
+        #expect(frames.count == 3)
+        guard case .live(.live(let live)) = try frames[0].streamFrame() else {
+            Issue.record("expected live frame"); return
+        }
+        #expect(live.running)
+        #expect(live.tools[0].name == "write")
+        guard case .live(.message(let message)) = try frames[1].streamFrame() else {
+            Issue.record("expected message frame"); return
+        }
+        #expect(message.text == "결과입니다")
+        guard case .reset(let seq) = try frames[2].streamFrame() else {
+            Issue.record("expected reset frame"); return
+        }
+        #expect(seq == 3)
     }
-    #expect(throws: MobileError.self) {
-        try parseLifetimeConversationRuns(
-            .null,
-            ghostID: "ghost",
-            conversationID: "conversation",
-            referencedTurnIDs: [turnID]
-        )
+
+    @Test func unknownEventNamesAreRejectedByStreamFrame() {
+        var parser = SSEParser()
+        let frames = parser.feed(text: "event: future\ndata: {}\n\n")
+        #expect(frames.count == 1)
+        #expect(throws: (any Error).self) { try frames[0].streamFrame() }
     }
-}
 
-@Test func delayedControllerReadsCannotUndoConfirmedCancellation() throws {
-    let turnID = "11111111-1111-4111-8111-111111111111"
-    let running = LifetimeConversationRun(
-        turnID: turnID, ghostID: "ghost", conversationID: "conversation",
-        state: "running", cancelRequested: false, cancelCommandID: nil,
-        submissionID: "8", entryID: nil, reasonCode: nil,
-        latestStatusCommandID: "status-running", createdAtMS: 1, updatedAtMS: 2
-    )
-    let requested = LifetimeConversationRun(
-        turnID: turnID, ghostID: "ghost", conversationID: "conversation",
-        state: "running", cancelRequested: true, cancelCommandID: "cancel-original",
-        submissionID: "8", entryID: nil, reasonCode: nil,
-        latestStatusCommandID: "status-running", createdAtMS: 1, updatedAtMS: 3
-    )
-    let confirmed = LifetimeConversationRun(
-        turnID: turnID, ghostID: "ghost", conversationID: "conversation",
-        state: "cancelled", cancelRequested: true, cancelCommandID: "cancel-original",
-        submissionID: "8", entryID: nil, reasonCode: "owner_cancelled",
-        latestStatusCommandID: "status-cancelled", createdAtMS: 1, updatedAtMS: 4
-    )
-    let pending = try mergeLifetimeConversationRun(current: running, incoming: requested)
-    #expect(pending.state == "running")
-    #expect(pending.cancelRequested)
-    let completed = try mergeLifetimeConversationRun(current: pending, incoming: confirmed)
-    let delayed = try mergeLifetimeConversationRun(current: completed, incoming: running)
-    let equalVersion = try mergeLifetimeConversationRun(current: delayed, incoming: confirmed)
-    #expect(equalVersion.state == "cancelled")
-    #expect(equalVersion.cancelRequested)
-    #expect(equalVersion.cancelCommandID == "cancel-original")
-    #expect(equalVersion.submissionID == "8")
-    #expect(equalVersion.reasonCode == "owner_cancelled")
-    #expect(equalVersion.updatedAtMS == 4)
-}
-
-
-@Test func cancellationUsesPersistedOutboxWhileTargetInspectionUsesFreshEphemeralIdentity() async throws {
-    let identity = try LifetimeIdentity(authorityEpoch: 1)
-    let workspaceID = UUID().uuidString.lowercased()
-    let deviceID = UUID().uuidString.lowercased()
-    let namespace = try LifetimeJournalNamespace(workspaceID: workspaceID, deviceID: deviceID, authorityEpoch: 1)
-    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let accepted = JSON.object([
-        "status": .string("success"),
-        "summary": .string("accepted"),
-        "object_refs": .array([]),
-        "artifacts": .array([]),
-        "next_actions": .array([]),
-        "error_code": .null,
-        "retry_class": .string("same_id"),
-        "data": .null,
-    ])
-    let queue = ReplyQueue([
-        StubReply(failure: URLError(.notConnectedToInternet)),
-        StubReply(statusCode: 200, body: encodedJSON(.object(["ok": .bool(true), "result": accepted]))),
-        StubReply(statusCode: 200, body: encodedJSON(.object(["ok": .bool(true), "result": accepted]))),
-    ])
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    stubProtocolRegistry.install(queue, host: host)
-    defer { stubProtocolRegistry.remove(host: host) }
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GhostStubURLProtocol.self]
-    let session = URLSession(configuration: configuration)
-    defer { session.invalidateAndCancel() }
-    let api = GhostAPI(
-        connection: try Connection(server: "https://\(host)", token: String(repeating: "e", count: 64)),
-        pendingFile: root.appending(path: "pending.json"),
-        lifetimeIdentity: identity,
-        lifetimeNamespace: namespace,
-        lifetimeCapabilities: ["lifetime.read", "lifetime.write"],
-        session: session
-    )
-    let target = (
-        ghostID: UUID().uuidString.lowercased(),
-        conversationID: UUID().uuidString.lowercased(),
-        turnID: UUID().uuidString.lowercased()
-    )
-
-    await #expect(throws: (any Error).self) {
-        try await api.cancelLifetimeConversationTurn(
-            ghostID: target.ghostID,
-            conversationID: target.conversationID,
-            turnID: target.turnID
-        )
-    }
-    let pending = try await api.pendingCommands()
-    #expect(pending.count == 1)
-    #expect(pending[0].command["envelope"]["body"] == .object([
-        "method": .string("conversation.cancel_turn"),
-        "ghost_id": .string(target.ghostID),
-        "conversation_id": .string(target.conversationID),
-        "turn_id": .string(target.turnID),
-    ]))
-
-    _ = try await api.inspectLifetimeConversationTurn(
-        ghostID: target.ghostID,
-        conversationID: target.conversationID,
-        turnID: target.turnID
-    )
-    _ = try await api.inspectLifetimeConversationTurn(
-        ghostID: target.ghostID,
-        conversationID: target.conversationID,
-        turnID: target.turnID
-    )
-    let requests = queue.captured()
-    #expect(requests.paths == [
-        "/mobile/v1/lifetime/action",
-        "/mobile/v1/lifetime/action",
-        "/mobile/v1/lifetime/action",
-    ])
-    let cancelWire = try JSONDecoder().decode(Envelope.self, from: requests.bodies[0])
-    let inspectWire = try JSONDecoder().decode(Envelope.self, from: requests.bodies[1])
-    let repeatedInspectWire = try JSONDecoder().decode(Envelope.self, from: requests.bodies[2])
-    #expect(cancelWire.command["envelope"]["body"]["method"] == .string("conversation.cancel_turn"))
-    #expect(inspectWire.command["envelope"]["body"] == .object([
-        "method": .string("conversation.turn.inspect"),
-        "ghost_id": .string(target.ghostID),
-        "conversation_id": .string(target.conversationID),
-        "turn_id": .string(target.turnID),
-    ]))
-    #expect(inspectWire.command["envelope"]["command_id"] != cancelWire.command["envelope"]["command_id"])
-    #expect(repeatedInspectWire.command["envelope"]["command_id"] != inspectWire.command["envelope"]["command_id"])
-    #expect(repeatedInspectWire.request_id != inspectWire.request_id)
-    #expect(try await api.pendingCommands() == pending)
-}
-
-// MARK: Notification inbox and acknowledgement contract (gateway envelope)
-
-private func stubNotificationAPI(host: String, session: URLSession) throws -> GhostAPI {
-    try GhostAPI(
-        connection: Connection(server: "https://\(host)", token: String(repeating: "f", count: 64)),
-        pendingFile: FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString)/pending.json"),
-        session: session
-    )
-}
-
-private func stubSessionFor(host: String, queue: ReplyQueue) -> URLSession {
-    stubProtocolRegistry.install(queue, host: host)
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GhostStubURLProtocol.self]
-    return URLSession(configuration: configuration)
-}
-
-@Test func notificationInboxDecodesActualGatewayEnvelope() async throws {
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    let recipient = UUID().uuidString.lowercased()
-    // The exact envelope the gateway produces: outer ok plus the Host
-    // lifetime result with status and data.notifications (PHONE-004).
-    let gatewayBody = JSON.object([
-        "ok": .bool(true),
-        "result": .object([
-            "status": .string("success"),
-            "summary": .string("notification inbox inspected"),
-            "object_refs": .array([]),
-            "artifacts": .array([]),
-            "error_code": .null,
-            "retry_class": .string("same_id"),
-            "data": .object(["notifications": .array([.object([
-                "id": .string("notification:1"),
-                "conversation_id": .string(UUID().uuidString.lowercased()),
-                "work_id": .string("work-1"),
-                "goal_revision": .number(3),
-                "event_kind": .string("briefing"),
-                "state": .string("pending"),
-            ])])]),
-        ]),
-    ])
-    let queue = ReplyQueue([StubReply(statusCode: 200, body: encodedJSON(gatewayBody))])
-    let session = stubSessionFor(host: host, queue: queue)
-    defer { session.invalidateAndCancel(); stubProtocolRegistry.remove(host: host) }
-    let api = try stubNotificationAPI(host: host, session: session)
-
-    let items = try await api.notificationInbox(recipientID: recipient)
-    #expect(items.count == 1)
-    #expect(items[0].id == "notification:1")
-    #expect(items[0].eventKind == "briefing")
-    #expect(items[0].state == "pending")
-    let captured = queue.captured()
-    #expect(captured.paths == ["/mobile/v1/notifications/inspect"])
-    #expect(try JSONDecoder().decode(JSON.self, from: captured.bodies[0])["recipient_id"] == .string(recipient))
-}
-
-@Test func notificationInboxRejectsForeignEnvelopeLevelsAndHostErrors() async throws {
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    let recipient = UUID().uuidString.lowercased()
-    // The old wrong decode target: notifications at the result level.
-    let legacy = JSON.object(["ok": .bool(true), "result": .object(["notifications": .array([])])])
-    // A non-success Host status must never list notifications.
-    let hostError = JSON.object(["ok": .bool(true), "result": .object([
-        "status": .string("error"), "error_code": .string("invalid_request"),
-        "data": .object(["notifications": .array([])]),
-    ])])
-    let queue = ReplyQueue([
-        StubReply(statusCode: 200, body: encodedJSON(legacy)),
-        StubReply(statusCode: 200, body: encodedJSON(hostError)),
-    ])
-    let session = stubSessionFor(host: host, queue: queue)
-    defer { session.invalidateAndCancel(); stubProtocolRegistry.remove(host: host) }
-    let api = try stubNotificationAPI(host: host, session: session)
-
-    for _ in 0..<2 {
-        do { _ = try await api.notificationInbox(recipientID: recipient); Issue.record("foreign envelope must throw") }
-        catch { #expect(error is MobileError) }
+    @Test func multilineDataJoinsAndCommentsAreIgnored() throws {
+        var parser = SSEParser()
+        let frame = ": keep-alive\n: ping\nevent: reset\ndata: {\"seq\":\ndata: 12}\n\n"
+        let frames = parser.feed(text: frame)
+        #expect(frames.count == 1)
+        #expect(frames[0].event == "reset")
+        guard case .reset(let seq) = try frames[0].streamFrame() else {
+            Issue.record("expected reset frame"); return
+        }
+        #expect(seq == 12)
     }
 }
 
-@Test func notificationAckRequiresHostAcceptedBindingAndKeepsFailuresVisible() async throws {
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    let recipient = UUID().uuidString.lowercased()
-    let notificationID = "notification:7"
-    func ackResult(_ data: JSON, status: String) -> JSON {
-        .object(["ok": .bool(true), "result": .object([
-            "status": .string(status), "summary": .string("notification delivery state recorded"),
-            "object_refs": .array([.string(notificationID)]), "artifacts": .array([]),
-            "error_code": status == "success" ? .null : .string("not_found"),
-            "retry_class": .string("same_id"), "data": data,
-        ])])
+@Suite struct GhostAPITests {
+    private func makeAPI() -> (GhostAPI, StubLane, URL) {
+        let (origin, lane) = makeStubOrigin()
+        let connection = try! Connection(origin: origin, deviceId: "device-1", token: "device-token")
+        let pendingFile = FileManager.default.temporaryDirectory
+            .appending(path: "api-tests/\(UUID().uuidString)/pending.json")
+        let api = GhostAPI(connection: connection, pendingFile: pendingFile, session: StubURLProtocol.makeSession())
+        return (api, lane, pendingFile)
     }
-    let accepted = ackResult(.object([
-        "recipient_id": .string(recipient),
-        "notification_id": .string(notificationID),
-        "state": .string("client_seen"),
-    ]), status: "success")
-    let mismatched = ackResult(.object([
-        "recipient_id": .string(UUID().uuidString.lowercased()),
-        "notification_id": .string(notificationID),
-        "state": .string("client_seen"),
-    ]), status: "success")
-    let hostRejected = ackResult(.null, status: "error")
-    let queue = ReplyQueue([
-        StubReply(statusCode: 200, body: encodedJSON(accepted)),
-        StubReply(statusCode: 200, body: encodedJSON(mismatched)),
-        StubReply(statusCode: 200, body: encodedJSON(hostRejected)),
-        StubReply(statusCode: 502, body: encodedJSON(.object(["ok": .bool(false), "error": .string("host_acknowledgement_rejected")]))),
-        StubReply(statusCode: 502, body: encodedJSON(.object(["ok": .bool(false), "error": .string("host_unavailable_or_outcome_unknown")]))),
-        StubReply(statusCode: 404, body: encodedJSON(.object(["ok": .bool(false), "error": .string("notification_not_found")]))),
-    ])
-    let session = stubSessionFor(host: host, queue: queue)
-    defer { session.invalidateAndCancel(); stubProtocolRegistry.remove(host: host) }
-    let api = try stubNotificationAPI(host: host, session: session)
 
-    // Only the bound Host success confirms the acknowledgement.
-    try await api.acknowledgeNotification(recipientID: recipient, notificationID: notificationID, state: "client_seen")
-
-    do {
-        try await api.acknowledgeNotification(recipientID: recipient, notificationID: notificationID, state: "client_seen")
-        Issue.record("mismatched binding must throw")
-    } catch {
+    private func ok(_ body: String) -> StubResponse {
+        StubResponse(action: .reply(status: 200, body: json(body)))
     }
-    for _ in 0..<4 {
+
+    @Test func decodesStateAndSendsBearerToken() async throws {
+        let (api, registry, _) = makeAPI()
+        let snapshot = GhostStateSnapshot(seq: 1, principal: .owner,
+            runtime: Runtime(ready: true, detail: "", version: "1"),
+            ghosts: [], conversations: [], works: [], decisions: [], notifications: [])
+        registry.enqueue(ok(String(data: stubJSON(snapshot), encoding: .utf8)!))
+        let state = try await api.state()
+        #expect(state.seq == 1)
+        let request = registry.allRequests()[0]
+        #expect(request.path == "/api/state")
+    }
+
+    @Test func eventRequestCarriesSeqAndConversations() async throws {
+        let (api, _, _) = makeAPI()
+        let request = api.eventRequest(after: 41, conversations: ["conv-1", "conv-2"])
+        let url = try #require(request.url)
+        #expect(url.path == "/api/events")
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let queryItems = try #require(components?.queryItems)
+        let after = queryItems.first(where: { $0.name == "after" })?.value
+        #expect(after == "41")
+        let conversations = queryItems.filter { $0.name == "conversation" }.compactMap(\.value)
+        #expect(conversations == ["conv-1", "conv-2"])
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer device-token")
+        #expect(request.value(forHTTPHeaderField: "Accept") == "text/event-stream")
+    }
+
+    @Test func unknownOutcomeKeepsEnvelopeAndRetriesSameRequestId() async throws {
+        let (api, registry, pendingFile) = makeAPI()
+        let journal = PendingCommands(file: pendingFile)
+        registry.enqueue(StubResponse(action: .networkFailure))
+        let command = DeviceCommand.messageSend(conversationId: "conv-1", text: "첫 메시지")
+        do { _ = try await api.send(command); Issue.record("send should fail") }
+        catch { /* unknown outcome */ }
+        let pending = try await journal.all()
+        #expect(pending.count == 1)
+        let firstRequest = registry.allRequests()[0]
+        let firstBody = try #require(JSONSerialization.jsonObject(with: firstRequest.body) as? [String: Any])
+        let requestId = try #require(firstBody["requestId"] as? String)
+        #expect(pending[0].requestId == requestId)
+
+        // A retry with the stored envelope sends the same id and bytes.
+        registry.enqueue(ok(#"{"ok": true, "result": {"conversationId": "conv-1"}}"#))
+        let result = try await api.retry(pending[0])
+        #expect(result.dictionary["conversationId"]?.text == "conv-1")
+        let requests = registry.allRequests()
+        #expect(requests.count == 2)
+        let retryBody = try #require(JSONSerialization.jsonObject(with: requests[1].body) as? [String: Any])
+        #expect(retryBody["requestId"] as? String == requestId)
+        #expect(requests[1].body == firstRequest.body)
+        #expect(try await journal.all().isEmpty)
+    }
+
+    @Test func identicalPendingCommandCollapsesOntoOneEnvelope() async throws {
+        let (api, registry, pendingFile) = makeAPI()
+        let journal = PendingCommands(file: pendingFile)
+        registry.enqueue(StubResponse(action: .networkFailure))
+        registry.enqueue(StubResponse(action: .networkFailure))
+        let command = DeviceCommand.messageSend(conversationId: "conv-1", text: "같은 내용")
+        for _ in 0..<2 { _ = try? await api.send(command) }
+        let requests = registry.allRequests()
+        #expect(requests.count == 2)
+        #expect(requests[0].body == requests[1].body)
+        #expect(try await journal.all().count == 1)
+    }
+
+    @Test func definitiveRejectionRemovesEnvelopeAndThrowsCommandError() async throws {
+        let (api, registry, pendingFile) = makeAPI()
+        let journal = PendingCommands(file: pendingFile)
+        registry.enqueue(ok(#"{"ok": false, "error": {"code": "forbidden", "message": "허용되지 않음"}}"#))
         do {
-            try await api.acknowledgeNotification(recipientID: recipient, notificationID: notificationID, state: "client_seen")
-            Issue.record("unconfirmed ack must throw")
-        } catch {
+            _ = try await api.send(.workCancel(workId: "work-1"))
+            Issue.record("send should fail")
+        } catch let error as CommandError {
+            #expect(error.code == "forbidden")
+        }
+        #expect(try await journal.all().isEmpty)
+    }
+
+    @Test func artifactBytesVerifyAgainstDigest() async throws {
+        let (api, registry, _) = makeAPI()
+        let bytes = Data("# 책 목록\n- 에세이".utf8)
+        let digest = GhostAPI.sha256Hex(bytes)
+        registry.enqueue(StubResponse(action: .reply(status: 200, body: bytes)))
+        let loaded = try await api.artifact(digest: digest)
+        #expect(loaded == bytes)
+        #expect(registry.allRequests()[0].path == "/api/artifacts/\(digest)")
+
+        let wrongDigest = String(repeating: "9", count: 64)
+        registry.enqueue(StubResponse(action: .reply(status: 200, body: bytes)))
+        await #expect(throws: MobileError.self) { try await api.artifact(digest: wrongDigest) }
+    }
+
+    @Test func conversationListPassesPagingQuery() async throws {
+        let (api, registry, _) = makeAPI()
+        let page = ConversationPage(
+            conversation: Conversation(id: "conv-1", ghostId: "ghost-1", kind: .direct, workId: nil,
+                title: "대화", busy: false, createdAt: 1, lastActivityAt: 2),
+            messages: [], before: nil, live: nil)
+        registry.enqueue(ok(String(data: stubJSON(page), encoding: .utf8)!))
+        let loaded = try await api.conversation(id: "conv 1", before: "m-9", limit: 30)
+        #expect(loaded.messages.isEmpty)
+        let request = registry.allRequests()[0]
+        #expect(request.path == "/api/conversations/conv%201")
+        #expect(request.query.contains("before=m-9"))
+        #expect(request.query.contains("limit=30"))
+    }
+
+    @Test func unauthorizedStateSurfacesPairingMessage() async throws {
+        let (api, registry, _) = makeAPI()
+        registry.enqueue(StubResponse(action: .reply(status: 401, body: json(#"{}"#))))
+        do { _ = try await api.state(); Issue.record("state should fail") }
+        catch let error as MobileError {
+            #expect(error.localizedDescription.contains("연결이 해제"))
         }
     }
-    let captured = queue.captured()
-    #expect(captured.paths.count == 6)
-    #expect(captured.paths.allSatisfy { $0 == "/mobile/v1/notifications/ack" })
-}
-
-// MARK: Voice media classification contract
-
-@Test func voiceOfferCarriesStartIdentityAndOnlyAdmissionFailuresAreDefinite() async throws {
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    let startID = UUID().uuidString.lowercased()
-    let answer = JSON.object(["type": .string("answer"), "sdp": .string("v=0 answer"), "pc_id": .string("pc-1")])
-    let queue = ReplyQueue([
-        StubReply(statusCode: 200, body: encodedJSON(answer)),
-        StubReply(statusCode: 400, body: encodedJSON(.object(["error": .string("offer_fields_invalid")]))),
-        StubReply(statusCode: 502, body: encodedJSON(.object(["error": .string("voice_media_unavailable_or_outcome_unknown")]))),
-        StubReply(statusCode: 409, body: encodedJSON(.object(["error": .string("voice_offer_in_progress")]))),
-        StubReply(statusCode: 409, body: encodedJSON(.object(["error": .string("voice_start_unresolved")]))),
-        StubReply(statusCode: 409, body: encodedJSON(.object(["error": .string("voice_start_limit")]))),
-    ])
-    let session = stubSessionFor(host: host, queue: queue)
-    defer { session.invalidateAndCancel(); stubProtocolRegistry.remove(host: host) }
-    let api = try stubNotificationAPI(host: host, session: session)
-
-    let applied = try await api.offer(sdp: "v=0 offer", startID: startID)
-    #expect(applied.pcID == "pc-1")
-    let body = try JSONDecoder().decode(JSON.self, from: queue.captured().bodies[0])
-    #expect(body["start_id"] == .string(startID))
-    #expect(body["type"] == .string("offer"))
-    #expect(body["sdp"] == .string("v=0 offer"))
-
-    do { _ = try await api.offer(sdp: "v=0 offer", startID: startID); Issue.record("rejection must throw") }
-    catch { #expect(VoiceMediaError.isDefinite(error), "definitive admission rejection") }
-    // Post-dispatch outcomes never count as definitive no-session evidence.
-    do { _ = try await api.offer(sdp: "v=0 offer", startID: startID); Issue.record("unknown outcome must throw") }
-    catch { #expect(!VoiceMediaError.isDefinite(error), "502 stays unknown") }
-    do { _ = try await api.offer(sdp: "v=0 offer", startID: startID); Issue.record("mid-creation must throw") }
-    catch { #expect(!VoiceMediaError.isDefinite(error), "offer_in_progress stays unknown") }
-    do { _ = try await api.offer(sdp: "v=0 offer", startID: startID); Issue.record("unresolved previous start must throw") }
-    catch {
-        #expect(!VoiceMediaError.isDefinite(error), "voice_start_unresolved is not no-session evidence")
-    }
-    do { _ = try await api.offer(sdp: "v=0 offer", startID: startID); Issue.record("ledger capacity refusal must throw") }
-    catch {
-        #expect(VoiceMediaError.isDefinite(error), "nothing is unresolved: capacity refusal is definitive for this attempt")
-    }
-}
-
-@Test func voiceHangupOutcomesNeverCountAsClosureUnlessConfirmed() async throws {
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    let queue = ReplyQueue([
-        StubReply(statusCode: 404, body: encodedJSON(.object(["error": .string("voice_session_not_found")]))),
-        StubReply(statusCode: 502, body: encodedJSON(.object(["error": .string("voice_media_unavailable_or_outcome_unknown")]))),
-        StubReply(statusCode: 200, body: encodedJSON(.object(["state": .string("ended"), "already_ended": .bool(true)]))),
-    ])
-    let session = stubSessionFor(host: host, queue: queue)
-    defer { session.invalidateAndCancel(); stubProtocolRegistry.remove(host: host) }
-    let api = try stubNotificationAPI(host: host, session: session)
-
-    for _ in 0..<2 {
-        do {
-            try await api.hangup(pcID: "pc-1")
-            Issue.record("lost end outcome must throw")
-        } catch {
-            #expect(!VoiceMediaError.isDefinite(error), "hangup absence is not closure")
-        }
-    }
-    // The tombstone replay confirms the same owned session.
-    try await api.hangup(pcID: "pc-1")
-}
-
-@Test func voiceStartStateParsesAgreedObservationContract() async throws {
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    let startID = UUID().uuidString.lowercased()
-    let queue = ReplyQueue([
-        StubReply(statusCode: 200, body: encodedJSON(.object(["state": .string("live"), "pc_id": .string("pc-1")]))),
-        StubReply(statusCode: 200, body: encodedJSON(.object(["state": .string("ended"), "pc_id": .string("pc-1")]))),
-        StubReply(statusCode: 404, body: encodedJSON(.object(["error": .string("voice_start_unknown")]))),
-        StubReply(statusCode: 502, body: encodedJSON(.object(["error": .string("voice_start_unknown_outcome")]))),
-        StubReply(statusCode: 200, body: encodedJSON(.object(["state": .string("live")]))),
-        StubReply(statusCode: 403, body: encodedJSON(.object(["ok": .bool(false), "error": .string("voice_start_forbidden")]))),
-    ])
-    let session = stubSessionFor(host: host, queue: queue)
-    defer { session.invalidateAndCancel(); stubProtocolRegistry.remove(host: host) }
-    let api = try stubNotificationAPI(host: host, session: session)
-
-    #expect(try await api.startState(startID: startID) == .live(pcID: "pc-1"))
-    #expect(try await api.startState(startID: startID) == .ended(pcID: "pc-1"))
-    #expect(try await api.startState(startID: startID) == .unknownStart)
-    do { _ = try await api.startState(startID: startID); Issue.record("unresolvable evidence must throw") }
-    catch { #expect(error is MobileError, "stays unknown, never treated as ended") }
-    do { _ = try await api.startState(startID: startID); Issue.record("observation without pc_id must throw") }
-    catch { #expect(error is MobileError) }
-    do { _ = try await api.startState(startID: startID); Issue.record("foreign-principal evidence must throw") }
-    catch {
-        #expect(error is MobileError, "voice_start_forbidden never clears the fence")
-    }
-    let captured = queue.captured()
-    #expect(captured.paths.allSatisfy { $0 == "/mobile/v1/voice/starts/\(startID)" })
-}
-
-@Test func nativePiArtifactIdentityAndInvalidTraversal() async throws {
-    let host = "\(UUID().uuidString.lowercased()).stub.invalid"
-    let workID = UUID().uuidString.lowercased(), executionID = "pi-" + String(repeating: "a", count: 64)
-    let bytes = Data("diagnostic\n".utf8), digest = "d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
-    let artifact: JSON = .object(["work_id": .string(workID), "execution_id": .string(executionID), "goal_id": .string(UUID().uuidString.lowercased()), "goal_revision": .number(1), "digest": .string(digest), "privacy": .string("local_only"), "encoding": .string("base64"), "byte_length": .number(Double(bytes.count)), "data": .string(bytes.base64EncodedString())])
-    let reply: JSON = .object(["ok": .bool(true), "result": .object(["status": .string("success"), "summary": .string("artifact"), "object_refs": .array([]), "artifacts": .array([]), "next_actions": .array([]), "retry_class": .string("same_id"), "error_code": .null, "data": artifact])])
-    let queue = ReplyQueue([StubReply(statusCode: 200, body: encodedJSON(reply))])
-    stubProtocolRegistry.install(queue, host: host); defer { stubProtocolRegistry.remove(host: host) }
-    let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [GhostStubURLProtocol.self]
-    let session = URLSession(configuration: configuration); defer { session.invalidateAndCancel() }
-    let api = GhostAPI(connection: try Connection(server: "https://\(host)", token: String(repeating: "a", count: 64)), pendingFile: FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString)/pending.json"), lifetimeIdentity: try LifetimeIdentity(authorityEpoch: 1), lifetimeNamespace: try LifetimeJournalNamespace(workspaceID: UUID().uuidString, deviceID: UUID().uuidString, authorityEpoch: 1), lifetimeCapabilities: ["lifetime.read"], session: session)
-    let content = try await api.readWorkArtifact(workID: workID, executionID: executionID, digest: digest, locator: "/owned/artifact.json")
-    #expect(content.data == bytes); #expect(content.executionID == executionID)
-    for invalid in ["pi-../secret", "pi-" + String(repeating: "A", count: 64), "pi-" + String(repeating: "a", count: 63)] {
-        await #expect(throws: MobileError.self) { try await api.readWorkArtifact(workID: workID, executionID: invalid, digest: digest, locator: "/owned/artifact.json") }
-    }
-    #expect(queue.captured().paths.count == 1)
 }

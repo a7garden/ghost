@@ -2,7 +2,7 @@
 
 ## Execution architecture
 
-Every Ghost is the same kind of independently identifiable, durable bot. Pi Durable is built into each Ghost, including direct conversation, work and recovery. One Ghost is selected as the default entry point; it does not have a unique durability tier. The protocol kinds `primary` and `specialist` are existing registry/default-role metadata, not separate runtime capabilities. The owner confirmed this model on 2026-11-04. The owner previously shelved the proposed migration of all Ghosts to OMP SDK. Pi Durable owns the canonical conversations. On this Mac the installed Host release runs Pi work with the legacy worker agents disabled. Check the actual installed release before making assumptions about the SDK worker path.
+Every Ghost is the same kind of independently identifiable, durable bot. One Ghost is the default entry point; it has no other special capability. Since 2026-11-07 the host is one Bun/TypeScript process (`apps/ghost-host`) that runs every conversation in-process on Pi Durable; read [the architecture](docs/architecture.md) before changing it and keep its principles: every wake is a deterministic-id submission, effects are journaled before I/O and never replayed, capability comes from the conversation kind, reads are not journaled. The production Mac may still run the pre-Bun Rust host until the owner approves the cutover in [local operations](docs/local-operations.md); check what is installed before operating on it.
 
 The native iPhone app must support direct conversation, delegation, approval, results and reconnect without Telegram, Slack or another messenger. Device grants remain explicit and scoped to the reviewed Ghost/conversation pairs.
 
@@ -10,12 +10,12 @@ The native iPhone app must support direct conversation, delegation, approval, re
 
 See [current goals and scope](docs/current-priorities.md) for the product entry point and remaining acceptance boundaries. Dated migration plans are historical evidence, not an independent backlog.
 
-Use **맡긴 일** for work assigned to Ghost. Keep execution time limits, durable scheduling, work resumption, and completion notifications. The desktop no longer offers a personal planner or Google Calendar/Tasks presets. Preserve prior planner records and Host protocol compatibility.
+Use **맡긴 일** for work assigned to Ghost. Keep execution time limits, durable scheduling, work resumption, and completion notifications. There is no personal planner or calendar.
 
 ## Local operations
 
 - Use the canonical checkout at `~/Workspace/Projects/ghost` and integrate verified changes into `main`. Use temporary worktrees for isolation and consolidate or archive them after verification.
-- Keep one operating Host for the production state root. The installed desktop app uses external Host mode. Keep Gateway and local inference attached to that Host. Use a separate state root and loopback ports for fixture runs.
+- Keep one operating Host for the production state root. The installed desktop app uses external Host mode. Development and tests always use a separate state root (`GHOST_ROOT`) and port; the host refuses to open a pre-Bun state root in place.
 - Before operating on a process, verify its path, listener, and state root. Close test apps and their servers when done. See [local operations](docs/local-operations.md) for checks and recovery.
 
 ## Durable user documents

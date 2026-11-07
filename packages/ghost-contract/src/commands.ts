@@ -1,0 +1,194 @@
+import { Type, type Static } from "typebox";
+import {
+  Acceptance,
+  ArtifactRef,
+  DeviceGrant,
+  Id,
+  Look,
+  ModelInfo,
+  ModelRef,
+  Privacy,
+  ProviderKind,
+  ScheduleSpec,
+  SpaceGrant,
+  Timestamp,
+  GhostState,
+  nullable,
+} from "./entities.ts";
+
+const command = <K extends string, P extends Parameters<typeof Type.Object>[0]>(type: K, properties: P) =>
+  Type.Object({ type: Type.Literal(type), ...properties }, { additionalProperties: false });
+
+const Text = (max: number) => Type.String({ minLength: 1, maxLength: max });
+const DataUrl = Type.String({ pattern: "^data:image/(png|webp);base64,[A-Za-z0-9+/=]+$", maxLength: 8_000_000 });
+
+/** Every mutation a client can request. Reads are plain GET routes. */
+export const Command = Type.Union([
+  // Conversations
+  command("message.send", {
+    conversationId: Id,
+    text: Text(32768),
+    attachments: Type.Optional(Type.Array(ArtifactRef, { maxItems: 16 })),
+  }),
+  command("message.cancel", { conversationId: Id }),
+  command("conversation.create", { ghostId: Id, title: Type.Optional(Text(256)), privacy: Type.Optional(Privacy) }),
+  command("conversation.update", {
+    conversationId: Id,
+    title: Type.Optional(Text(256)),
+    model: Type.Optional(nullable(ModelRef)),
+    privacy: Type.Optional(Privacy),
+  }),
+
+  // Work (맡긴 일)
+  command("work.create", {
+    ghostId: Id,
+    title: Text(256),
+    brief: Text(32768),
+    acceptance: Type.Optional(Acceptance),
+    deadlineAt: Type.Optional(nullable(Timestamp)),
+    /** Direct conversation that receives the report; defaults to the Ghost's main direct conversation. */
+    originConversationId: Type.Optional(Id),
+  }),
+  command("work.update", {
+    workId: Id,
+    title: Type.Optional(Text(256)),
+    brief: Type.Optional(Text(32768)),
+    acceptance: Type.Optional(Acceptance),
+    deadlineAt: Type.Optional(nullable(Timestamp)),
+  }),
+  command("work.cancel", { workId: Id }),
+  /** Re-queue a failed or blocked root Work with its current brief. */
+  command("work.resume", { workId: Id }),
+
+  // Decisions
+  command("decision.resolve", {
+    decisionId: Id,
+    outcome: Type.Union([Type.Literal("approve"), Type.Literal("deny"), Type.Literal("answer")]),
+    answer: Type.Optional(Text(8192)),
+  }),
+
+  // Ghosts
+  command("ghost.create", {
+    name: Text(128),
+    persona: Type.String({ maxLength: 8192 }),
+    model: Type.Optional(nullable(ModelRef)),
+    look: Type.Optional(Look),
+  }),
+  command("ghost.update", {
+    ghostId: Id,
+    name: Type.Optional(Text(128)),
+    persona: Type.Optional(Type.String({ maxLength: 8192 })),
+    model: Type.Optional(nullable(ModelRef)),
+    look: Type.Optional(Look),
+    state: Type.Optional(GhostState),
+  }),
+  command("ghost.set_default", { ghostId: Id }),
+  command("sandbox.control", { ghostId: Id, action: Type.Union([Type.Literal("stop"), Type.Literal("reset")]) }),
+
+  // Schedules
+  command("schedule.create", {
+    ghostId: Id,
+    conversationId: Type.Optional(Id),
+    prompt: Text(8192),
+    spec: ScheduleSpec,
+  }),
+  command("schedule.update", {
+    scheduleId: Id,
+    prompt: Type.Optional(Text(8192)),
+    spec: Type.Optional(ScheduleSpec),
+    paused: Type.Optional(Type.Boolean()),
+  }),
+  command("schedule.delete", { scheduleId: Id }),
+
+  // Documents
+  command("space.create", { name: Text(128), path: Text(4096), grants: Type.Optional(Type.Array(SpaceGrant, { maxItems: 64 })) }),
+  command("space.update", { spaceId: Id, name: Type.Optional(Text(128)), grants: Type.Optional(Type.Array(SpaceGrant, { maxItems: 64 })) }),
+  command("space.delete", { spaceId: Id }),
+  /** Owner writes a page: new when `pageId` is null, otherwise an edit guarded by `expectedHash`. */
+  command("document.save", {
+    spaceId: Id,
+    pageId: nullable(Type.String({ minLength: 1, maxLength: 256 })),
+    expectedHash: nullable(Type.String({ minLength: 1, maxLength: 128 })),
+    title: Text(512),
+    body: Type.String({ maxLength: 1_048_576 }),
+    profile: Type.Optional(Type.Union([Type.Literal("pdc-markdown/1"), Type.Literal("pdc-html/1")])),
+  }),
+
+  // Avatars
+  command("avatar.create", {
+    name: Text(128),
+    description: Type.String({ maxLength: 2048 }),
+    image: DataUrl,
+    design: Type.Optional(nullable(Type.Record(Type.String(), Type.Unknown()))),
+  }),
+  command("avatar.delete", { avatarId: Id }),
+
+  // Settings and providers
+  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), reviewModel: Type.Optional(nullable(ModelRef)) }),
+  command("provider.upsert", {
+    id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
+    kind: ProviderKind,
+    name: Text(128),
+    baseUrl: Type.Optional(nullable(Type.String({ maxLength: 2048 }))),
+    models: Type.Array(ModelInfo, { maxItems: 256 }),
+    local: Type.Boolean(),
+    /** Omit to keep the stored credential; null removes it. */
+    apiKey: Type.Optional(nullable(Type.String({ minLength: 1, maxLength: 4096 }))),
+  }),
+  command("provider.delete", { providerId: Id }),
+
+  // Devices
+  command("device.pairing_start", { name: Text(128), grants: Type.Array(DeviceGrant, { maxItems: 64 }) }),
+  command("device.update", { deviceId: Id, name: Type.Optional(Text(128)), grants: Type.Optional(Type.Array(DeviceGrant, { maxItems: 64 })) }),
+  command("device.revoke", { deviceId: Id }),
+  /** Device principal only. */
+  command("device.push_register", {
+    token: Type.String({ pattern: "^[a-f0-9]{16,256}$" }),
+    environment: Type.Union([Type.Literal("sandbox"), Type.Literal("production")]),
+  }),
+
+  // Notifications
+  command("notification.read", { notificationIds: Type.Array(Id, { minItems: 1, maxItems: 500 }) }),
+]);
+export type Command = Static<typeof Command>;
+export type CommandType = Command["type"];
+export type CommandOf<T extends CommandType> = Extract<Command, { type: T }>;
+
+/** Commands a paired device may send, always further limited to its grants. */
+export const DEVICE_COMMANDS: readonly CommandType[] = [
+  "message.send",
+  "message.cancel",
+  "work.create",
+  "work.update",
+  "work.cancel",
+  "work.resume",
+  "decision.resolve",
+  "device.push_register",
+  "notification.read",
+];
+
+export const CommandRequest = Type.Object({
+  /** Client-chosen UUID; a retry with the same id and bytes returns the original outcome. */
+  requestId: Type.String({ pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }),
+  command: Command,
+});
+export type CommandRequest = Static<typeof CommandRequest>;
+
+export const ErrorCode = Type.Union([
+  Type.Literal("invalid"),
+  Type.Literal("not_found"),
+  Type.Literal("forbidden"),
+  Type.Literal("conflict"),
+  Type.Literal("unavailable"),
+  Type.Literal("internal"),
+]);
+export type ErrorCode = Static<typeof ErrorCode>;
+
+export const ApiError = Type.Object({ code: ErrorCode, message: Type.String() });
+export type ApiError = Static<typeof ApiError>;
+
+export const CommandResponse = Type.Union([
+  Type.Object({ ok: Type.Literal(true), result: Type.Record(Type.String(), Type.Unknown()) }),
+  Type.Object({ ok: Type.Literal(false), error: ApiError }),
+]);
+export type CommandResponse = Static<typeof CommandResponse>;

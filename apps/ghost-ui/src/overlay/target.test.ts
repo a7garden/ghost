@@ -1,72 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import type { Profile, Snapshot } from '../client/types';
-import { legacySubmitKind, pickConversation, pickProfile, routingKind } from './target';
+import type { Ghost, State } from '@ghost/contract';
+import { pickConversation, pickGhost } from './target';
 
-const profile = (id: string, name: string, conversationIds: string[] = []): Profile => ({
-  id,
-  name,
-  persona: '',
-  conversations: conversationIds.map(id => ({
-    id,
-    title: id,
-    model: 'mock',
-    offline: false,
-    messages: [],
-    tasks: [],
-  })),
-  policy: {},
+const ghost = (id: string, isDefault = false, directId = `direct-${id}`): Ghost => ({
+  id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault, state: 'active',
+  directConversationId: directId, createdAt: 1, updatedAt: 1,
 });
 
-const snapshot = (profiles: Profile[]): Snapshot =>
-  ({ profiles, workspace_id: 'w' }) as unknown as Snapshot;
+const state = (): State => ({
+  seq: 1,
+  principal: { kind: 'owner' },
+  runtime: { ready: true, detail: '', version: '0.0.0' },
+  ghosts: [ghost('milo'), ghost('sage', true)],
+  conversations: [
+    { id: 'extra', ghostId: 'sage', kind: 'direct', workId: null, title: '이전 대화', privacy: 'public', model: null, busy: false, createdAt: 1, lastActivityAt: 2 },
+    { id: 'work-conv', ghostId: 'sage', kind: 'work', workId: 'w1', title: '작업 대화', privacy: 'public', model: null, busy: false, createdAt: 1, lastActivityAt: 3 },
+  ],
+  works: [], decisions: [], notifications: [], schedules: [], spaces: [], avatars: [],
+  settings: { defaultModel: null, reviewModel: null, providers: [] }, devices: [], sandboxes: [],
+});
 
-const empty = snapshot([]);
-
-describe('pickProfile', () => {
-  it('prefers the primary Ghost by name', () => {
-    const s = snapshot([profile('a', 'Scout'), profile('b', 'primary')]);
-    expect(pickProfile(s)?.id).toBe('b');
-  });
-
-  it('prefers the stored target id over the primary name', () => {
-    const s = snapshot([profile('a', 'Scout'), profile('b', 'primary')]);
-    expect(pickProfile(s, 'a')?.id).toBe('a');
-  });
-
-  it('falls back to the first profile when no primary exists', () => {
-    const s = snapshot([profile('a', 'Scout'), profile('b', 'Sage')]);
-    expect(pickProfile(s)?.id).toBe('a');
-  });
-
-  it('returns null on an empty workspace', () => {
-    expect(pickProfile(empty)).toBeNull();
+describe('pickGhost', () => {
+  it('prefers the stored target, then the default Ghost, then the first Ghost', () => {
+    const snapshot = state();
+    expect(pickGhost(snapshot)?.id).toBe('sage');
+    expect(pickGhost(snapshot, 'milo')?.id).toBe('milo');
+    expect(pickGhost({ ...snapshot, ghosts: [ghost('milo')] })?.id).toBe('milo');
+    expect(pickGhost({ ...snapshot, ghosts: [] })).toBeNull();
   });
 });
 
 describe('pickConversation', () => {
-  it('keeps the stored conversation while it exists', () => {
-    const p = profile('p', 'primary', ['aa', 'bb']);
-    expect(pickConversation(p, 'aa')).toBe('aa');
-  });
-
-  it('drops a stale stored id and picks the newest UUIDv7', () => {
-    const p = profile('p', 'primary', ['018f-aa', '0190-bb']);
-    expect(pickConversation(p, 'gone')).toBe('0190-bb');
-  });
-
-  it('is empty for a profile without conversations', () => {
-    expect(pickConversation(profile('p', 'primary'))).toBe('');
-  });
-});
-
-describe('kind mapping', () => {
-  it('routes follow_up only into conversations with history', () => {
-    expect(routingKind(0)).toBe('prompt');
-    expect(routingKind(2)).toBe('follow_up');
-  });
-
-  it('steers only running work in the legacy fallback', () => {
-    expect(legacySubmitKind(0)).toBe('prompt');
-    expect(legacySubmitKind(1)).toBe('steer');
+  it('keeps a stored direct conversation only while this Ghost still owns it', () => {
+    const snapshot = state();
+    const sage = pickGhost(snapshot, 'sage')!;
+    expect(pickConversation(snapshot, sage, 'extra')).toBe('extra');
+    expect(pickConversation(snapshot, sage, 'work-conv')).toBe('direct-sage');
+    expect(pickConversation(snapshot, sage, 'gone')).toBe('direct-sage');
+    expect(pickConversation(snapshot, sage)).toBe('direct-sage');
   });
 });

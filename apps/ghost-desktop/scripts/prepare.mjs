@@ -1,34 +1,46 @@
-import { cp, mkdir, readFile, writeFile, chmod, rm, realpath } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile, chmod, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { assertPortableNodeRuntime } from './node-runtime.mjs';
+
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ghost = resolve(app, '../..');
 const destination = join(app, 'src-tauri/resources');
-const runtime = await realpath(resolve(process.env.GHOST_NODE_BINARY || process.execPath));
-assertPortableNodeRuntime(runtime);
-const host = process.env.GHOST_PACKAGE_BINARY || join(ghost, 'target/debug/ghost');
-// This directory contains generated payload only; replace it to avoid stale assets.
-await rm(destination, { recursive: true, force: true });
-for (const dir of ['runtime','host','launcher','ui/scripts','ui/server','ghost-omp','voice']) await mkdir(join(destination, dir), { recursive: true });
-await cp(runtime, join(destination, 'runtime/node'));
-await cp(host, join(destination, 'host/ghost'));
-for (const executable of ['runtime/node','host/ghost']) await chmod(join(destination, executable), 0o755);
-await cp(join(app, 'scripts/desktop-console.mjs'), join(destination, 'launcher/desktop-console.mjs'));
-await cp(join(app, 'scripts/local-voice.mjs'), join(destination, 'launcher/local-voice.mjs'));
-for (const name of ['server.py', 'remote_speech.py', 'speech_contract.py', 'requirements.lock']) {
-  await cp(join(ghost, 'apps/ghost-voice-server', name), join(destination, 'voice', name));
+
+/** Run a build step and fail the packaging when it fails. */
+function run(command, args, cwd) {
+  const result = spawnSync(command, args, { cwd, stdio: 'inherit' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} 실패 (${result.status})`);
 }
-await cp(join(ghost, 'apps/ghost-ui/dist'), join(destination, 'ui/dist'), { recursive: true, force: true });
-for (const name of ['console.mjs','serve.mjs']) await cp(join(ghost, 'apps/ghost-ui/scripts', name), join(destination, 'ui/scripts', name));
-for (const name of ['bridge.mjs', 'packages.mjs', 'package-format.mjs']) await cp(join(ghost, 'apps/ghost-ui/server', name), join(destination, 'ui/server', name));
-for (const name of ['images.mjs','codex-client.mjs','completion-codec.mjs']) await cp(join(ghost, 'apps/ghost-omp', name), join(destination, 'ghost-omp', name));
-await writeFile(join(destination,'ui/package.json'), '{"type":"module"}\n');
+
+// The Ghost host is one Bun process: it serves the API and the web UI. The
+// desktop shell bundles that binary and the built UI, and nothing else.
+await rm(destination, { recursive: true, force: true });
+await mkdir(join(destination, 'host'), { recursive: true });
+await mkdir(join(destination, 'ui'), { recursive: true });
+
+const host = join(destination, 'host/ghost');
+run('bun', ['build', 'apps/ghost-host/src/main.ts', '--compile', '--outfile', host], ghost);
+await chmod(host, 0o755);
+
+run('bun', ['run', 'build'], join(ghost, 'apps/ghost-ui'));
+await cp(join(ghost, 'apps/ghost-ui/dist'), join(destination, 'ui'), { recursive: true });
+
 const sha = async path => createHash('sha256').update(await readFile(path)).digest('hex');
-await writeFile(join(destination,'payload.json'), JSON.stringify({
-  version: 'ghost-desktop-payload/1', ghost_features: 'workspace-ui', ghost_build: 'local-development',
-  node_sha256: await sha(join(destination,'runtime/node')), ghost_sha256: await sha(join(destination,'host/ghost')),
-  ui_index_sha256: await sha(join(destination,'ui/dist/index.html')), voice_server_sha256: await sha(join(destination,'voice/server.py')), voice_runtime_included: false, credentials_included: false,
-}, null, 2)+'\n');
-console.log('Ghost host, UI and Node runtime prepared; credentials and user data are excluded.');
+await writeFile(
+  join(destination, 'payload.json'),
+  `${JSON.stringify(
+    {
+      version: 'ghost-desktop-payload/2',
+      ghost_features: 'host-ui',
+      host_sha256: await sha(host),
+      ui_index_sha256: await sha(join(destination, 'ui/index.html')),
+      credentials_included: false,
+    },
+    null,
+    2,
+  )}\n`,
+);
+console.log('Ghost 호스트와 UI를 준비했습니다. 자격 증명과 사용자 데이터는 포함하지 않습니다.');

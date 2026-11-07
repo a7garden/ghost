@@ -1,16 +1,10 @@
 /**
  * Ghost chat overlay. Lives in the desktop app's second webview: a small
- * always-on-top window the native side parks off-screen and surfaces over the
- * current work. Same console origin, so the bridge CSRF, routing contract and
- * pending-turn journal are identical to the main console. Showing/hiding is
- * native (src-tauri main.rs: ⌘⇧G toggle, focus-loss hide); Esc hide is handled
- * locally below via the plugin:window|hide IPC.
+ * always-available composer into the default Ghost's direct conversation.
  */
-import { CommandQueue, connect, RoutingPending, RoutingTerminal } from '../client/api';
-import { RoutingClient } from '../client/routingClient';
-import { isRunning, phaseLabel, type Client, type Profile, type Snapshot } from '../client/types';
-import type { RoutingTurn } from '../client/routingTypes';
-import { legacySubmitKind, pickConversation, pickProfile, routingKind, type Target } from './target';
+import { HostClient } from '../host/client';
+import type { Message, State } from '@ghost/contract';
+import { pickConversation, pickGhost, type Target } from './target';
 import '@garden/ui/styles.css';
 import './overlay.css';
 
@@ -36,107 +30,63 @@ interface TauriInternals {
 }
 const tauri = (window as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
 
-let client: Client | null = null;
-let routing: RoutingClient | null = null;
-let queue: CommandQueue | null = null;
-let queueWorkspace = '';
-let workspaceId = '';
-let target: Target = {};
-let profile: Profile | null = null;
+let client: HostClient | null = null;
+let state: State | null = null;
+let ghostId = '';
 let conversationId = '';
+let messages: Message[] = [];
+let busy = false;
 let sending = false;
 let renderedSignature = '';
-let lastSnapshot: Snapshot | null = null;
 
-const targetKey = (workspace: string) => `ghost-overlay:${workspace}`;
+const targetKey = 'ghost-overlay:target';
 
-function loadTarget(workspace: string): Target {
+function loadTarget(): Target {
   try {
-    return JSON.parse(localStorage.getItem(targetKey(workspace)) || '{}') as Target;
+    const raw: unknown = JSON.parse(localStorage.getItem(targetKey) || '{}');
+    if (typeof raw !== 'object' || raw === null) return {};
+    const ghostId = 'ghostId' in raw && typeof raw.ghostId === 'string' ? raw.ghostId : undefined;
+    const conversationId = 'conversationId' in raw && typeof raw.conversationId === 'string' ? raw.conversationId : undefined;
+    return { ghostId, conversationId };
   } catch {
     return {};
   }
 }
 
-function saveTarget() {
-  if (workspaceId) localStorage.setItem(targetKey(workspaceId), JSON.stringify(target));
-}
-
-function currentConversation(snapshot: Snapshot | null) {
-  return snapshot?.profiles
-    .find(p => p.id === profile?.id)
-    ?.conversations.find(c => c.id === conversationId);
+function saveTarget(target: Target) {
+  try { localStorage.setItem(targetKey, JSON.stringify(target)); } catch { /* The default target still works. */ }
 }
 
 async function initialize(): Promise<void> {
-  client = await connect();
-  const snapshot = await client.snapshot();
-  lastSnapshot = snapshot;
-  adoptWorkspace(snapshot);
-  await ensureConversation(snapshot);
-  render();
+  client = new HostClient();
+  await refresh();
   setDot('idle');
 }
 
-/** The console rebuilds its journal queue per workspace; the overlay does too. */
-function adoptWorkspace(snapshot: Snapshot) {
-  workspaceId = snapshot.workspace_id;
-  target = loadTarget(workspaceId);
-  if (queueWorkspace !== workspaceId) {
-    queueWorkspace = workspaceId;
-    queue = new CommandQueue(localStorage, `ghost-overlay:pending:${workspaceId}`);
-    routing = client?.routing?.canPrepareInput
-      ? new RoutingClient(client.routing, queue)
-      : null;
-  }
-}
-
-async function ensureConversation(snapshot: Snapshot): Promise<void> {
-  const next = pickProfile(snapshot, target.profile_id);
-  if (!next) {
+/** One read pass: state snapshot, then the target conversation's transcript. */
+async function refresh(): Promise<void> {
+  if (!client) return;
+  const next = await client.state();
+  state = next;
+  const target = loadTarget();
+  const ghost = pickGhost(next, target.ghostId);
+  if (!ghost) {
     status('등록된 Ghost가 없습니다.');
     return;
   }
-  let changed = false;
-  if (next.id !== profile?.id) {
-    profile = next;
-    changed = true;
+  const stored = pickConversation(next, ghost, target.conversationId);
+  if (ghost.id !== ghostId || stored !== conversationId) {
+    ghostId = ghost.id;
+    conversationId = stored;
+    messages = [];
+    saveTarget({ ghostId, conversationId });
   }
-  const found = pickConversation(next, target.conversation_id);
-  if (found !== conversationId) {
-    conversationId = found;
-    changed = true;
-  }
-  if (!conversationId) {
-    // Journaled dispatch like useWorkspace.action: a lost reply retries with
-    // the same request id instead of minting duplicate conversations.
-    const result: unknown = await queue!.send(client!, {
-      type: 'create_conversation',
-      profile_id: profile.id,
-      model: snapshot.default_model,
-      tools: true,
-    });
-    if (
-      !(
-        result &&
-        typeof result === 'object' &&
-        'conversation_id' in result &&
-        typeof result.conversation_id === 'string'
-      )
-    ) {
-      throw new Error('새 대화를 만들지 못했습니다.');
-    }
-    conversationId = result.conversation_id;
-    changed = true;
-  }
-  if (workspaceId !== snapshot.workspace_id) {
-    workspaceId = snapshot.workspace_id;
-    changed = true;
-  }
-  if (changed) {
-    target = { profile_id: profile.id, conversation_id: conversationId };
-    saveTarget();
-  }
+  const page = await client.conversation(conversationId);
+  messages = page.messages;
+  busy = page.conversation.busy;
+  const runtime = next.runtime.ready ? '' : `대화를 실행할 수 없습니다. ${next.runtime.detail}`;
+  if (!sending) status(runtime);
+  render();
 }
 
 function status(text: string) {
@@ -156,93 +106,52 @@ function escapeHtml(text: string) {
 }
 
 function render() {
-  if (!profile || !conversationId) return;
-  const conversation = currentConversation(lastSnapshot);
+  if (!state || !conversationId) return;
   const rows: string[] = [];
-  for (const message of conversation?.messages ?? []) {
-    if (message.role === 'user' && message.text.trim()) {
-      rows.push(`<li class="row user"><div>${escapeHtml(message.text)}</div></li>`);
-    } else if (message.role === 'assistant' && message.text.trim()) {
-      rows.push(`<li class="row ghost"><div>${escapeHtml(message.text)}</div></li>`);
-    }
+  for (const message of messages) {
+    if (message.role === 'user' && message.text.trim()) rows.push(`<li class="row user"><div>${escapeHtml(message.text)}</div></li>`);
+    else if (message.role === 'assistant' && message.text.trim()) rows.push(`<li class="row ghost"><div>${escapeHtml(message.text)}</div></li>`);
   }
-  const tasks = conversation?.tasks ?? [];
-  const running = tasks.filter(t => isRunning(t.phase)).at(-1);
-  if (running) {
-    const partial = running.partial.trim() || `${phaseLabel(running.phase)}…`;
-    rows.push(`<li class="row ghost working"><div>${escapeHtml(partial)}</div></li>`);
-  } else {
-    // A turn that ended without a reply (failed/cancelled classification) must
-    // not look like a silently dropped message.
-    const last = tasks.at(-1);
-    const lastUserIndex = (conversation?.messages ?? []).map(m => m.role).lastIndexOf('user');
-    const answered = (conversation?.messages ?? []).some(
-      (m, index) =>
-        index > lastUserIndex && m.role === 'assistant' && m.text.trim(),
-    );
-    if (last && ['failed', 'cancelled'].includes(last.phase) && !answered) {
-      const note = last.output.trim() || phaseLabel(last.phase);
-      rows.push(`<li class="row ghost working"><div>${escapeHtml(note)}</div></li>`);
-    }
-  }
-  const body = rows.length
-    ? rows.join('')
-    : '<li class="empty">주 Ghost와의 대화가 여기에 표시됩니다.</li>';
-  // Working rows re-render freely; settled rows only when the body changes.
-  const signature = running ? `working:${body}` : body;
+  if (busy) rows.push('<li class="row ghost working"><div>응답 작성 중…</div></li>');
+  const body = rows.length ? rows.join('') : '<li class="empty">주 Ghost와의 대화가 여기에 표시됩니다.</li>';
+  const signature = busy ? `working:${body}` : body;
   if (signature !== renderedSignature) {
     renderedSignature = signature;
     const stick = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
     logEl.innerHTML = body;
     if (stick) logEl.scrollTop = logEl.scrollHeight;
   }
-  setDot(running ? 'busy' : 'idle');
+  setDot(busy ? 'busy' : 'idle');
   sendEl.disabled = sending || !conversationId;
-  titleEl.textContent = profile.name === 'primary' ? 'Ghost' : `Ghost · ${profile.name}`;
+  const ghost = pickGhost(state, ghostId);
+  titleEl.textContent = ghost && !ghost.isDefault ? `Ghost · ${ghost.name}` : 'Ghost';
 }
 
 async function send(text: string) {
-  if (!client || !queue || !profile || !conversationId || sending || !text.trim()) return;
+  if (!client || !conversationId || sending || !text.trim()) return;
   sending = true;
   setDot('busy');
   status('보내는 중…');
-  const conversation = currentConversation(lastSnapshot);
-  const running = (conversation?.tasks ?? []).filter(t => isRunning(t.phase)).length;
   try {
-    if (routing && client.routing?.canPrepareInput) {
-      const turn: RoutingTurn = {
-        entry: { entry_profile_id: profile.id, conversation_id: conversationId },
-        text,
-        kind: routingKind(conversation?.messages.length ?? 0),
-        resolves: [],
-      };
-      await routing.submit(turn);
-    } else {
-      await queue!.send(client, {
-        type: 'submit',
-        profile_id: profile.id,
-        conversation_id: conversationId,
-        prompt: text,
-        kind: legacySubmitKind(running),
-      });
-    }
+    await client.send({ type: 'message.send', conversationId, text });
     status('');
+    inputEl.value = '';
+    autoresize();
   } catch (error) {
-    // Direct-answer turns end without an admission and the reply still lands
-    // through snapshot polling (the console clears these too). Unexpected
-    // failures restore the draft instead of silently dropping the prompt.
-    if (!(error instanceof RoutingPending) && !(error instanceof RoutingTerminal)) {
-      setDot('error');
-      status(error instanceof Error ? error.message : '보내지 못했습니다.');
-      inputEl.value = text;
-      autoresize();
-    } else {
-      status('');
-    }
+    // The draft stays so the prompt is never silently dropped.
+    setDot('error');
+    status(error instanceof Error ? error.message : '보내지 못했습니다.');
+    inputEl.value = text;
+    autoresize();
   } finally {
     sending = false;
     render();
   }
+}
+
+function autoresize() {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = `${Math.min(inputEl.scrollHeight, 132)}px`;
 }
 
 async function poll() {
@@ -250,25 +159,16 @@ async function poll() {
   try {
     if (!client) {
       // The first connect failed; retry the whole sequence instead of
-      // staying dead until the console restarts.
+      // staying dead until the desktop app restarts.
       await initialize();
       return;
     }
-    const snapshot = await client.snapshot();
-    lastSnapshot = snapshot;
-    adoptWorkspace(snapshot);
-    await ensureConversation(snapshot);
-    render();
-    if (!sending) status('');
+    await refresh();
+    if (!sending) status(state?.runtime.ready === false ? `대화를 실행할 수 없습니다. ${state.runtime.detail}` : '');
   } catch (error) {
     setDot('error');
     status(error instanceof Error ? error.message : '연결을 확인해 주세요.');
   }
-}
-
-function autoresize() {
-  inputEl.style.height = 'auto';
-  inputEl.style.height = `${Math.min(inputEl.scrollHeight, 132)}px`;
 }
 
 async function start() {
@@ -278,9 +178,7 @@ async function start() {
     setDot('error');
     status(error instanceof Error ? error.message : 'Ghost 호스트에 연결하지 못했습니다.');
   }
-  // Self-scheduling like the console: a slow round-trip must never overlap
-  // the next poll (two overlapping ensureConversation calls would each
-  // create a conversation).
+  // Self-scheduling: a slow round-trip must never overlap the next poll.
   const tick = () => {
     void poll().finally(() => setTimeout(tick, 1500));
   };

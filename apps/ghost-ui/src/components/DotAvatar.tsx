@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react';
 import { PetSprite } from '../pets/PetSprite';
 import { useProfileAvatar } from '../pets/AvatarProvider';
 import { GhostCharacter } from '../pets/GhostCharacter';
-import type { Tone } from '../client/types';
+import type { Tone } from '../features/ghostState';
 
 export type PortraitAppearance = { body?: string; background?: string };
 export const PortraitAppearances = createContext<Readonly<Record<string, PortraitAppearance>>>({});

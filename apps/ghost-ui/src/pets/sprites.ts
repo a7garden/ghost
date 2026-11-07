@@ -21,6 +21,19 @@ export function isDesign(d: unknown): d is PetDesign {
 }
 export const rowsFor = (version: SpriteVersion) => version === 2 ? 11 : 9;
 export const rowFor = (state: PetState) => STATES.findIndex(s => s.key === state);
+/**
+ * Sprite layout of a persisted avatar design. UI-created pets are always v2;
+ * imported Codex pets store `{ kind: 'codex', spriteVersion }` as their design.
+ */
+export function spriteVersionOf(design: unknown): SpriteVersion {
+  if (isDesign(design)) return 2;
+  const version = (design as { spriteVersion?: unknown } | null | undefined)?.spriteVersion;
+  return version === 1 ? 1 : 2;
+}
+/** Design record the UI sends with `avatar.create` for a pet it drew itself. */
+export const ownDesign = (design: PetDesign): Record<string, unknown> => ({ ...design, spriteVersion: 2 as const });
+/** Design record the UI sends with `avatar.create` for an imported Codex pet. */
+export const codexDesign = (spriteVersion: SpriteVersion): Record<string, unknown> => ({ kind: 'codex', spriteVersion });
 export function lookFrame(x: number, y: number) {
   const index = Math.round((Math.atan2(x, -y) * 180 / Math.PI + 360) % 360 / 22.5) % 16;
   return { row: 9 + Math.floor(index / 8), column: index % 8 };
@@ -47,20 +60,25 @@ export function validatePixels(data: Uint8ClampedArray, width: number, height: n
   }
   return version;
 }
-export async function importSprite(file: File): Promise<{ data_url: string; sprite_version: SpriteVersion }> {
+export async function importSprite(file: File): Promise<{ image: string; spriteVersion: SpriteVersion }> {
   if (!['image/png', 'image/webp'].includes(file.type)) throw new Error('PNG 또는 WebP 파일을 선택해 주세요.');
   if (file.size > MAX_IMAGE_BYTES) throw new Error('이미지는 4 MiB 이하여야 합니다.');
   // Use the same data: source for decoding and storage; production CSP allows
   // local image data without opening blob: or remote image origins.
-  const data_url = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('파일을 읽을 수 없습니다.')); reader.readAsDataURL(file); });
-  const img = new Image(); img.src = data_url;
+  const image = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('파일을 읽을 수 없습니다.'));
+    reader.readAsDataURL(file);
+  });
+  const img = new Image(); img.src = image;
   try { await img.decode(); } catch { throw new Error('손상된 이미지이거나 지원하지 않는 이미지 형식입니다.'); }
   if (img.width !== 1536 || ![1872, 2288].includes(img.height)) throw new Error('펫 스프라이트는 1536 × 1872(v1) 또는 1536 × 2288(v2) 크기여야 합니다.');
   const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true }); if (!ctx) throw new Error('이미지를 읽을 수 없습니다.');
   ctx.drawImage(img, 0, 0);
-  const sprite_version = validatePixels(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
-  return { data_url, sprite_version };
+  const spriteVersion = validatePixels(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
+  return { image, spriteVersion };
 }
 
 // Original Ghost artwork, drawn at runtime so the editor works fully offline.

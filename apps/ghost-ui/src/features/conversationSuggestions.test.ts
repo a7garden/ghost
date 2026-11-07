@@ -20,6 +20,6 @@ it('does not infer a role from tool identifiers or later model instructions', ()
 
 it('supports English role names without classifying unrelated word fragments', () => {
   expect(conversationSuggestions('A software engineer').join(' ')).toContain('오류 메시지');
-  expect(conversationSuggestions('A planner').join(' ')).toContain('맡긴 일의 진행 상황');
+  expect(conversationSuggestions('주간 계획과 플래너를 관리합니다').join(' ')).toContain('맡긴 일의 진행 상황');
   expect(conversationSuggestions('An editorial historian')).toEqual(conversationSuggestions(''));
 });

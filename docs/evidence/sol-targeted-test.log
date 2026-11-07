@@ -1,9 +1,0 @@
-   Compiling ghost v0.1.0 (/Users/garden/Documents/Workspace/Projects/ghost)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.22s
-     Running tests/collaboration.rs (target/debug/deps/collaboration-3822ebea4bab69cd)
-
-running 1 test
-test spoofed_existing_inbox_payload_rejected_untouched ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.38s
-

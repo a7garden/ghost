@@ -17,6 +17,8 @@ use std::{
 pub struct SupervisorConfig {
     pub program: PathBuf,
     pub arguments: Vec<String>,
+    /// Environment entries the child inherits on top of the parent's.
+    pub environment: Vec<(String, String)>,
     pub working_directory: Option<PathBuf>,
     pub shutdown_timeout: Duration,
     pub restart_delay: Duration,
@@ -28,6 +30,7 @@ impl SupervisorConfig {
         Self {
             program: program.into(),
             arguments: vec![],
+            environment: vec![],
             working_directory: None,
             shutdown_timeout: Duration::from_secs(3),
             restart_delay: Duration::from_millis(250),
@@ -78,6 +81,9 @@ fn spawn(config: &SupervisorConfig) -> std::io::Result<Child> {
         .stderr(Stdio::inherit());
     if let Some(directory) = &config.working_directory {
         command.current_dir(directory);
+    }
+    for (key, value) in &config.environment {
+        command.env(key, value);
     }
     // A private process group lets shutdown include helpers started by the child.
     #[cfg(unix)]
@@ -337,6 +343,18 @@ mod tests {
         assert_eq!(failed.restarts, 2);
         assert_eq!(failed.exit_code, Some(7));
         assert!(failed.pid.is_none());
+    }
+
+    #[test]
+    fn environment_entries_reach_the_child() {
+        let mut config = shell("test \"$GHOST_TEST_ENV\" = value");
+        config.restart_limit = 0;
+        config.environment = vec![("GHOST_TEST_ENV".into(), "value".into())];
+        let supervisor = ProcessSupervisor::new(config).unwrap();
+        supervisor.start().unwrap();
+        let failed = until(&supervisor, ProcessState::Failed);
+        // `test` exits 0 when the environment matches, 1 when it does not.
+        assert_eq!(failed.exit_code, Some(0));
     }
 
     #[test]

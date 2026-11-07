@@ -20,7 +20,7 @@ The composer stays above the keyboard and system tab bar. Sending preserves the 
 
 Work summaries distinguish running, produced, accepted, failed and unconfirmed. Completion is not acceptance. Approval details must still show the exact operation, destination, input and target before any decision. Technical facts can be disclosed within the relevant detail rather than injected into every default screen.
 
-Voice controls respect the exact configured Ghost/conversation pair and existing call fences. No fake active call or promised route. Disabled, loading, error, offline, empty, accepted, pending and cancellation states are explicit. Success is shown in place, without celebratory toasts.
+Every action states its real outcome: sending, stopping a response, cancelling or resuming a Work, resolving a decision, and reading a notification each show their own disabled, loading, error, offline, empty, pending and settled states. Nothing promises a route the host does not serve, and success is shown in place, without celebratory toasts.
 
 ## Motion and accessibility
 
@@ -29,17 +29,17 @@ Use native navigation and short opacity/press transitions, no page-load animatio
 ## Pairing and equality
 
 The owner chooses the exact Ghost/conversation pairs for a new phone connection.
-The phone validates the saved grant and advertised pair before offering a conversation.
-Adding another Ghost later does not silently expand a device grant. Existing grants
-retain their original scope. The registered default is labeled 기본 Ghost; other
-Ghosts have the same conversation and recovery behavior. Display actual names when
-provided by the gateway, not raw IDs as default navigation labels.
+The phone validates the saved origin and code before claiming, then stores the
+issued device credential. Adding another Ghost later does not silently expand a
+device grant: the host filters every read and command by the device's grants.
+Existing grants retain their original scope. Display actual Ghost names, not raw
+IDs as default navigation labels.
 
 Switching keeps each draft in its original pair, clears pending attachment selection,
 and restores the chosen conversation after reopening. An uncertain send remains tied
 to its original request and cannot become a fresh send to another Ghost. Provider
 selection errors lock apply until a fresh read; tentative consent resets on reconnect.
 
-The app talks directly to the authenticated HTTPS Gateway. Telegram and Slack are
-not dependencies. APNs/voice hardware acceptance and actual installed-device rollout
-remain separate from simulator UI verification.
+The app talks directly to the paired host API on one origin. There is no separate
+relay process and no external messenger dependency. APNs hardware acceptance and
+actual installed-device rollout remain separate from simulator UI verification.

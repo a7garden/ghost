@@ -1,6 +1,5 @@
 import UIKit
 @preconcurrency import UserNotifications
-import GhostMobileCore
 
 // APNs alert delivery for the durable notification outbox. Registration is
 // idempotent: the token is re-uploaded whenever it changes, and delivery
@@ -38,20 +37,10 @@ import GhostMobileCore
     func handleDeviceToken(_ token: Data) {
         guard let model else { return }
         let tokenText = token.map { String(format: "%02x", $0) }.joined()
-        guard let api = model.api else {
-            model.pendingPushToken = tokenText
-            return
-        }
         model.pushStatus = "알림 토큰을 등록하는 중…"
         Task {
-            do {
-                try await api.registerPushToken(tokenText, environment: PushEnvironment.current)
-                model.pushStatus = nil
-                model.pendingPushToken = nil
-            } catch {
-                model.pendingPushToken = tokenText
-                model.pushStatus = "알림 토큰 등록이 실패했습니다. 연결 후 다시 시도됩니다."
-            }
+            await model.registerPushToken(tokenText, environment: PushEnvironment.current)
+            if model.pushStatus == "알림 토큰을 등록하는 중…" { model.pushStatus = nil }
         }
     }
 
@@ -87,7 +76,7 @@ import GhostMobileCore
 }
 
 enum PushEnvironment {
-    // Debug builds use Apple's sandbox gateway; release builds use production.
+    // Debug builds use Apple's sandbox environment; release builds use production.
     static var current: String {
         #if DEBUG
         "sandbox"

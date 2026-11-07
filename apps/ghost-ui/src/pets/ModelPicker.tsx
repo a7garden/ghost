@@ -1,119 +1,105 @@
-import { useEffect, useId, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
-import { Button, Checkbox, InlineError, Popover, PopoverContent, PopoverTrigger, SelectField } from '@garden/ui';
-import { effortLabel, inferenceRequest, type InferenceConfiguration } from './InferenceSettings';
+import { useState } from 'react';
+import { ChevronDown, Check } from 'lucide-react';
+import { Button, InlineError, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
+import type { Settings } from '@ghost/contract';
+import { useHost } from '../host/context';
+import { useHostState } from '../host/store';
 
-type Pair = { ghost_id: string; conversation_id: string };
-export type ModelSelection = { provider: string; model: string; effort: string };
-/** A model chosen before the conversation exists; applied to the Ghost's conversation when the message lands. */
-export type ModelChoice = { selection: ModelSelection; allowExternal: boolean };
+/** A model the UI offers: a provider id plus one of its model ids. */
+export type ModelChoice = { provider: string; model: string };
+// Radix Select는 빈 값을 항목으로 가질 수 없으므로 '기본 모델 따름' 선택값을 치환한다.
+export const NO_MODEL = '__none__';
 
-const pairKey = (pair: Pair) => `${pair.ghost_id}/${pair.conversation_id}`;
-export const turnLockedMessage = '진행 중인 응답이 끝난 뒤 모델을 바꿀 수 있습니다.';
-
-/** Saves one conversation's model, re-reading the settings version first so a stale picker cannot overwrite a newer save. */
-export async function applyConversationModel(pair: Pair, choice: ModelChoice, publicOnly = false): Promise<void> {
-  const current = await inferenceRequest();
-  const saved = current.settings.conversations[pairKey(pair)] ?? current.settings.default;
-  if (saved.provider === choice.selection.provider && saved.model === choice.selection.model && saved.effort === choice.selection.effort) return;
-  // Registry entries carry more fields; the settings API accepts exactly the two ids.
-  try {
-    await inferenceRequest({ version: current.settings.version, operation: 'select', ghost_id: pair.ghost_id, conversation_id: pair.conversation_id, selection: choice.selection,
-      ...(!publicOnly ? { allow_external: choice.allowExternal } : {}) });
-  } catch (reason) {
-    // The Host refuses a switch while a turn is unresolved; say so in the owner's language.
-    if (reason instanceof Error && /finish or reconcile the current turn/i.test(reason.message)) throw new Error(turnLockedMessage);
-    throw reason;
-  }
+/** Providers the pickers can offer; a provider without models cannot run anything. */
+export function usableProviders(settings: Settings | null | undefined): Settings['providers'] {
+  return settings?.providers.filter(provider => provider.models.length > 0) ?? [];
 }
 
+export function modelDisplayName(settings: Settings | null | undefined, choice: ModelChoice | null | undefined): string {
+  if (!choice) return '기본 모델';
+  const provider = settings?.providers.find(item => item.id === choice.provider);
+  const model = provider?.models.find(item => item.id === choice.model);
+  const name = model && (model.name || model.id);
+  return provider ? `${provider.name} / ${name ?? choice.model}` : choice.model;
+}
+
+/** `<providerId>/<modelId>` values for Select fields, labelled with the stored names. */
+export function modelSelectOptions(settings: Settings | null | undefined): { value: string; label: string }[] {
+  return usableProviders(settings).flatMap(provider => provider.models.map(model => ({
+    value: `${provider.id}/${model.id}`,
+    label: `${provider.name} / ${model.name || model.id}`,
+  })));
+}
+
+/** Parses a select value back to a choice, rejecting keys the current settings no longer offer. */
+export function modelFromKey(settings: Settings | null | undefined, key: string | null | undefined): ModelChoice | null | undefined {
+  if (key === null) return null;
+  if (!key || key === NO_MODEL) return undefined;
+  const [provider, model] = key.split('/');
+  const valid = settings?.providers.some(item => item.id === provider && item.models.some(entry => entry.id === model));
+  return valid ? { provider, model } : undefined;
+}
+
+const keyOf = (choice: ModelChoice) => `${choice.provider}/${choice.model}`;
+
 /**
- * Model chip for a composer. With `pair` it reads and saves that conversation's model;
- * without one it is a controlled choice for a message that has no conversation yet.
+ * Model chip for a composer. With `conversationId` it reads that conversation's model and saves
+ * the choice there; without one it is a controlled choice for a message that has no conversation yet.
  */
-export function ModelPicker({ pair, publicOnly = false, disabled = false, connected = true, turnActive = false, value, onChange }: {
-  pair?: Pair; publicOnly?: boolean; disabled?: boolean; connected?: boolean;
-  /** A reply is still unresolved; the Host keeps the model until it settles. */
-  turnActive?: boolean;
-  value?: ModelChoice; onChange?: (choice: ModelChoice | undefined) => void;
+export function ModelPicker({ conversationId, value, onChange, disabled = false, className = '' }: {
+  conversationId?: string;
+  value?: ModelChoice | null;
+  onChange?: (choice: ModelChoice) => void;
+  disabled?: boolean;
+  className?: string;
 }) {
+  const { store, client } = useHost();
+  const { state } = useHostState(store);
   const [open, setOpen] = useState(false);
-  const [data, setData] = useState<InferenceConfiguration>(), [error, setError] = useState(''), [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState<ModelSelection>(), [allow, setAllow] = useState(false);
-  const consentId = useId();
-  const key = pair ? pairKey(pair) : '';
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const settings = state?.settings;
+  const conversation = conversationId ? state?.conversations.find(item => item.id === conversationId) : undefined;
+  const saved = conversation ? conversation.model : value ?? settings?.defaultModel ?? null;
+  const locked = disabled || pending || Boolean(conversation?.busy);
 
-  useEffect(() => {
-    if (!connected) return;
-    let current = true;
-    setError('');
-    void inferenceRequest().then(next => { if (current) setData(next); })
-      .catch(reason => { if (current) setError(reason instanceof Error ? reason.message : '모델 설정을 불러오지 못했습니다.'); });
-    return () => { current = false; };
-  }, [connected, key, open]);
-
-  const saved = data && (pair ? data.settings.conversations[key] ?? data.settings.default : value?.selection ?? data.settings.default);
-  useEffect(() => { if (open && saved) { setDraft(saved); setAllow(Boolean(value?.allowExternal && !pair)); } }, [open, saved?.provider, saved?.model, saved?.effort]);
-
-  const provider = data?.providers.find(item => item.id === draft?.provider);
-  const registered = provider?.auth !== 'api_key' || data?.settings.credentials[provider.id] === true;
-  const granted = Boolean(pair && draft && data?.settings.external_grants[key]?.includes(draft.provider));
-  const changed = Boolean(draft && saved && (draft.provider !== saved.provider || draft.model !== saved.model || draft.effort !== saved.effort));
-  const needsGrant = Boolean(!publicOnly && changed && draft!.provider !== 'local' && !granted);
-  const usable = Boolean(draft && !(publicOnly && draft.provider === 'local') && provider?.models.includes(draft.model) && provider.efforts.includes(draft.effort));
-  const locked = disabled || !connected || saving || !data || turnActive;
-  const label = saved ? `${saved.model} · ${effortLabel(saved.effort)}` : '모델';
-
-  const apply = async () => {
-    if (!draft || locked) return;
-    const choice = { selection: draft, allowExternal: needsGrant ? allow : granted };
-    if (!pair) { onChange?.(choice); setOpen(false); return; }
-    setSaving(true); setError('');
+  const choose = async (choice: ModelChoice) => {
+    if (locked || !conversationId && (saved?.provider === choice.provider && saved?.model === choice.model)) { setOpen(false); return; }
+    setPending(true); setError('');
     try {
-      await applyConversationModel(pair, choice, publicOnly);
-      setData(await inferenceRequest());
+      if (conversationId) await client.send({ type: 'conversation.update', conversationId, model: choice });
+      onChange?.(choice);
       setOpen(false);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '모델을 저장하지 못했습니다.');
-    } finally { setSaving(false); }
+    } finally { setPending(false); }
   };
 
-  return <Popover open={open} onOpenChange={next => !saving && setOpen(next)}>
+  return <Popover open={open} onOpenChange={next => { if (!pending) { setOpen(next); if (!next) setError(''); } }}>
     <PopoverTrigger asChild>
-      <button type="button" disabled={disabled || !connected} aria-label={`모델: ${label}`}
-        className="inline-flex h-7 min-w-0 max-w-56 cursor-pointer items-center gap-1 rounded-full px-2 text-caption text-ink-2 outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3 disabled:cursor-not-allowed disabled:opacity-50">
-        <span className="min-w-0 truncate">{label}</span><ChevronDown size={12} className="shrink-0" aria-hidden="true"/>
-      </button>
+      <Button variant="outline" size="sm" type="button" disabled={locked} title={locked && conversation?.busy ? '진행 중인 응답이 끝난 뒤 모델을 바꿀 수 있습니다.' : undefined}
+        className={`h-8 max-w-[220px] gap-1.5 text-caption ${className}`} aria-label={`모델 ${modelDisplayName(settings, saved)} 선택`}>
+        <span className="truncate">{modelDisplayName(settings, saved)}</span>
+        <ChevronDown size={14} className="flex-none text-ink-3" aria-hidden="true"/>
+      </Button>
     </PopoverTrigger>
-    <PopoverContent side="top" align="start" aria-label="모델" className="grid w-72 max-w-[calc(100vw-1rem)] gap-3">
-      {!data && !error && <p className="m-0 text-caption text-ink-2" role="status">모델 설정을 불러오는 중…</p>}
-      {data && draft && <>
-        <SelectField label="제공자" disabled={locked} value={draft.provider} onValueChange={id => {
-          const next = data.providers.find(item => item.id === id);
-          if (next?.default_model) { setDraft({ provider: next.id, model: next.default_model, effort: next.default_effort }); setAllow(false); }
-        }} options={[
-          ...(!provider ? [{ value: draft.provider, label: `${draft.provider} · 사용 불가` }] : []),
-          ...data.providers.map(item => ({ value: item.id, label: item.name, disabled: !item.models.length || publicOnly && item.id === 'local' })),
-        ]}/>
-        <SelectField label="모델" disabled={locked || !provider?.models.length} value={draft.model} onValueChange={model => setDraft({ ...draft, model })} options={[
-          ...(!provider?.models.includes(draft.model) ? [{ value: draft.model, label: `${draft.model} · 사용 불가` }] : []),
-          ...(provider?.models.map(model => ({ value: model, label: model })) ?? []),
-        ]}/>
-        <SelectField label="추론 수준" disabled={locked || !provider?.efforts.length} value={draft.effort} onValueChange={effort => setDraft({ ...draft, effort })} options={[
-          ...(!provider?.efforts.includes(draft.effort) ? [{ value: draft.effort, label: `${effortLabel(draft.effort)} · 사용 불가` }] : []),
-          ...(provider?.efforts.map(effort => ({ value: effort, label: effortLabel(effort) })) ?? []),
-        ]}/>
-        {needsGrant && <div className="flex items-start gap-2 text-caption text-ink">
-          <Checkbox id={consentId} checked={allow} disabled={locked} onCheckedChange={next => setAllow(next === true)}/>
-          <label htmlFor={consentId} className="min-w-0 [overflow-wrap:anywhere]">이 대화의 기존 기록과 새 메시지를 {provider?.name ?? draft.provider}에 보내는 것을 허용합니다.</label>
-        </div>}
-        {!registered && <p className="m-0 text-caption text-ink-2">설정에서 {provider?.name ?? draft.provider} API 키를 먼저 등록하세요.</p>}
-        <Button type="button" disabled={locked || !changed || !usable || !registered || needsGrant && !allow} onClick={() => void apply()}>
-          {saving ? '저장 중…' : '적용'}
-        </Button>
-      </>}
-      {turnActive && <p className="m-0 text-caption text-ink-2">{turnLockedMessage}</p>}
-      {error && <InlineError>{error}</InlineError>}
+    <PopoverContent side="top" align="start" className="w-64 max-w-[calc(100vw-2rem)] p-1.5" aria-label="모델 선택">
+      <div className="max-h-[60dvh] overflow-auto">
+        {usableProviders(settings).map(provider => <section key={provider.id} className="py-1">
+          <p className="m-0 px-2.5 py-1 text-caption font-medium text-ink-3">{provider.name}{provider.local && ' · 로컬'}</p>
+          {provider.models.map(model => {
+            const selected = saved?.provider === provider.id && saved?.model === model.id;
+            return <button key={model.id} type="button" onClick={() => void choose({ provider: provider.id, model: model.id })}
+              aria-pressed={selected}
+              className="flex min-h-9 w-full items-center gap-2 rounded-control px-2.5 text-left text-ui text-ink outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3">
+              <span className="min-w-0 flex-1 truncate">{model.name || model.id}</span>
+              {selected && <Check size={14} className="flex-none text-ink-2" aria-hidden="true"/>}
+            </button>;
+          })}
+        </section>)}
+        {!usableProviders(settings).length && <p className="m-0 p-2.5 text-caption text-ink-3">사용할 수 있는 모델이 없습니다. 설정에서 제공자를 등록해 주세요.</p>}
+      </div>
+      {error && <div className="px-1 pt-1.5"><InlineError>{error}</InlineError></div>}
     </PopoverContent>
   </Popover>;
 }

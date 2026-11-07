@@ -7,8 +7,9 @@ struct HistoryPreference: PreferenceKey {
 }
 
 struct MessageHistory: View {
-    let profileName: String
-    let messages: [JSON]
+    let ghostName: String
+    let messages: [Message]
+    var live: Live?
     let scrollRequest: UUID
     @State private var followsLatest = true
     @State private var hasNewMessages = false
@@ -16,7 +17,6 @@ struct MessageHistory: View {
     private let bottomID = "history-bottom"
 
     var body: some View {
-        let rows = messageRows(messages)
         GeometryReader { viewport in
             ScrollViewReader { proxy in
                 ScrollView {
@@ -25,7 +25,10 @@ struct MessageHistory: View {
                             GhostEmptyConversation()
                         }
                         ForEach(rows) { row in
-                            GhostMessageBubble(text: row.value["text"].text, isUser: row.value["role"].text == "user", label: profileName) { EmptyView() }
+                            rowView(row)
+                        }
+                        if let live, live.running, let partial = live.partial, !partial.isEmpty {
+                            streamingBubble(partial)
                         }
                         Color.clear.frame(height: 1).id(bottomID).accessibilityHidden(true)
                     }
@@ -67,6 +70,69 @@ struct MessageHistory: View {
             }
         }
     }
+
+    private var rows: [Message] { messages }
+
+    @ViewBuilder
+    private func rowView(_ message: Message) -> some View {
+        switch message.role {
+        case .user:
+            GhostMessageBubble(text: message.text, isUser: true, label: "나") { EmptyView() }
+        case .assistant:
+            GhostMessageBubble(text: message.text, isUser: false, label: ghostName) {
+                if !message.attachments.isEmpty {
+                    attachmentsRow(message.attachments)
+                }
+            }
+        case .tool:
+            VStack(alignment: .leading, spacing: 4) {
+                Label {
+                    Text(message.tool?.name ?? "도구").font(.caption.weight(.medium))
+                } icon: {
+                    Image(systemName: message.tool?.isError == true ? "exclamationmark.circle" : "gearshape")
+                }
+                .foregroundStyle(message.tool?.isError == true ? GhostStyle.warning : GhostStyle.secondary)
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(GhostStyle.secondary)
+                        .lineLimit(6)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(12)
+            .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 12))
+            .frame(maxWidth: 680, alignment: .leading)
+        case .note:
+            Text(message.text)
+                .font(.caption).foregroundStyle(GhostStyle.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 2)
+        }
+    }
+
+    private func streamingBubble(_ text: String) -> some View {
+        GhostMessageBubble(text: text, isUser: false, label: ghostName) {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("입력 중").font(.caption).foregroundStyle(GhostStyle.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func attachmentsRow(_ attachments: [ArtifactRef]) -> some View {
+        // Attachment names only; opening artifact bytes is a work-detail surface.
+        HStack {
+            ForEach(attachments, id: \.digest) { attachment in
+                Label(attachment.name, systemImage: "paperclip")
+                    .font(.caption)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(GhostStyle.under, in: Capsule())
+            }
+        }
+    }
+
     private func jumpToLatest(_ proxy: ScrollViewProxy) {
         followsLatest = true; hasNewMessages = false
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }

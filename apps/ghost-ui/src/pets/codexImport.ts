@@ -1,4 +1,5 @@
-import { MAX_IMAGE_BYTES } from './sprites';
+import { MAX_IMAGE_BYTES, codexDesign } from './sprites';
+import type { SpriteVersion } from './sprites';
 import type { AvatarInput } from './PetEditor';
 export type CodexManifest = Record<string, unknown> & { displayName: string; description?: string; spriteVersionNumber?: 1 | 2; spritesheetPath: string };
 export function spritePath(value: unknown): string {
@@ -26,12 +27,12 @@ export async function readCodexSprite(file: File) {
   if (!png && !webp) throw new Error('PNG 또는 WebP 스프라이트를 선택해 주세요.');
   const chunks: string[] = [];
   for (let i = 0; i < bytes.length; i += 32768) chunks.push(String.fromCharCode(...bytes.subarray(i, i + 32768)));
-  const data_url = `data:image/${png ? 'png' : 'webp'};base64,${btoa(chunks.join(''))}`;
-  const image = new Image(); image.src = data_url;
-  try { await image.decode(); } catch { throw new Error('스프라이트 이미지를 읽을 수 없습니다.'); }
-  if (image.width !== 1536 || ![1872, 2288].includes(image.height)) throw new Error('펫 스프라이트는 1536 × 1872(v1) 또는 1536 × 2288(v2) 크기여야 합니다.');
+  const image = `data:image/${png ? 'png' : 'webp'};base64,${btoa(chunks.join(''))}`;
+  const element = new Image(); element.src = image;
+  try { await element.decode(); } catch { throw new Error('스프라이트 이미지를 읽을 수 없습니다.'); }
+  if (element.width !== 1536 || ![1872, 2288].includes(element.height)) throw new Error('펫 스프라이트는 1536 × 1872(v1) 또는 1536 × 2288(v2) 크기여야 합니다.');
   // Codex ignores unused atlas cells. Preserve the complete original, including those pixels.
-  return { data_url, sprite_version: image.height === 1872 ? 1 as const : 2 as const };
+  return { image, spriteVersion: element.height === 1872 ? 1 as const : 2 as const };
 }
 export async function importCodexPet(files: readonly File[], decode = readCodexSprite): Promise<AvatarInput> {
   const path = (file: File) => file.webkitRelativePath || file.name;
@@ -43,7 +44,7 @@ export async function importCodexPet(files: readonly File[], decode = readCodexS
   const parent = path(manifest).slice(0, -'pet.json'.length);
   const matches = files.filter(file => path(file) === parent + spritePath(data.spritesheetPath));
   if (matches.length !== 1) throw new Error(`pet.json에 지정된 ${data.spritesheetPath} 파일을 찾을 수 없습니다. 폴더 전체를 선택해 주세요.`);
-  const image = await decode(matches[0]);
-  if (image.sprite_version !== (data.spriteVersionNumber ?? 1)) throw new Error('pet.json의 버전과 스프라이트 크기가 일치하지 않습니다.');
-  return { name: data.displayName, description: data.description ?? '', ...image, design: null, source_manifest: data };
+  const sprite = await decode(matches[0]);
+  if (sprite.spriteVersion !== (data.spriteVersionNumber ?? 1)) throw new Error('pet.json의 버전과 스프라이트 크기가 일치하지 않습니다.');
+  return { name: data.displayName, description: data.description ?? '', image: sprite.image, design: codexDesign(sprite.spriteVersion) };
 }

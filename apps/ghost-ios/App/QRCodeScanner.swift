@@ -102,12 +102,12 @@ final class QRScannerController: NSObject, AVCaptureMetadataOutputObjectsDelegat
 // parses them strictly; an unparseable QR is reported, never acted on.
 @MainActor @Observable final class QRScanSink {
     private(set) var parseIssue: String?
-    var onInvitation: ((PairingInvitation) -> Void)?
+    var onOffer: ((PairingOffer) -> Void)?
 
     func handle(raw: String) {
         do {
             parseIssue = nil
-            onInvitation?(try PairingQR.parse(raw))
+            onOffer?(try PairingQR.parse(raw))
         } catch {
             parseIssue = error.localizedDescription
         }
@@ -255,7 +255,7 @@ struct QRScannerSheet: View {
             VStack(spacing: 16) {
                 Image(systemName: "camera.badge.ellipsis").font(.largeTitle).foregroundStyle(.white)
                 Text("카메라를 사용할 수 없습니다").font(.headline).foregroundStyle(.white)
-                Text("iOS 설정 > Ghost > 카메라를 허용한 뒤 다시 스캔해 주세요. 카메라 없이는 근처 서버 목록에서 8자리 코드로 연결할 수 있습니다.")
+                Text("iOS 설정 > Ghost > 카메라를 허용한 뒤 다시 스캔해 주세요. 카메라 없이는 아래 화면에서 서버 주소와 연결 코드를 직접 입력해 연결할 수 있습니다.")
                     .font(.callout)
                     .foregroundStyle(.white.opacity(0.85))
                     .multilineTextAlignment(.center)

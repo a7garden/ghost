@@ -1,0 +1,74 @@
+import { Type, type Static, type TLiteral, type TSchema } from "typebox";
+import {
+  Avatar,
+  Conversation,
+  Decision,
+  Device,
+  Effect,
+  Ghost,
+  Id,
+  Live,
+  Message,
+  Notification,
+  Sandbox,
+  Schedule,
+  Settings,
+  Space,
+  Timestamp,
+  Work,
+} from "./entities.ts";
+
+/** Literal `type` plus one literal key, so each member narrows to `{ type: "work"; work: Work }`. */
+const upsert = <K extends string, Key extends string, S extends TSchema>(type: K, key: Key, schema: S) =>
+  Type.Object({ type: Type.Literal(type), [key]: schema } as unknown as { type: TLiteral<K> } & Record<Key, S>);
+const removed = <K extends string>(type: K) => Type.Object({ type: Type.Literal(type), id: Id });
+
+/**
+ * Ledger change events. Each carries the whole entity after the change, so a client
+ * keeps state by upserting by id. Persisted with a seq; replayable after reconnect.
+ */
+export const LedgerEventData = Type.Union([
+  upsert("ghost", "ghost", Ghost),
+  upsert("conversation", "conversation", Conversation),
+  removed("conversation.removed"),
+  upsert("work", "work", Work),
+  upsert("decision", "decision", Decision),
+  upsert("effect", "effect", Effect),
+  upsert("notification", "notification", Notification),
+  upsert("schedule", "schedule", Schedule),
+  removed("schedule.removed"),
+  upsert("space", "space", Space),
+  removed("space.removed"),
+  upsert("avatar", "avatar", Avatar),
+  removed("avatar.removed"),
+  upsert("device", "device", Device),
+  removed("device.removed"),
+  upsert("settings", "settings", Settings),
+  upsert("sandbox", "sandbox", Sandbox),
+]);
+export type LedgerEventData = Static<typeof LedgerEventData>;
+
+export const LedgerEvent = Type.Object({
+  seq: Type.Integer({ minimum: 1 }),
+  at: Timestamp,
+  data: LedgerEventData,
+});
+export type LedgerEvent = Static<typeof LedgerEvent>;
+
+/** Conversation activity, not persisted as events (the transcript is in Pi). Sent only to subscribers of that conversation. */
+export const LiveEvent = Type.Union([
+  Type.Object({ type: Type.Literal("message"), message: Message }),
+  Type.Object({ type: Type.Literal("live"), live: Live }),
+]);
+export type LiveEvent = Static<typeof LiveEvent>;
+
+/**
+ * GET /api/events?after=<seq>[&conversation=<id>...]  (text/event-stream)
+ * - `event: ledger`, `id: <seq>`, `data: LedgerEvent`
+ * - `event: live`, `data: LiveEvent` (only for requested conversations)
+ * - `event: reset` when `after` is older than retained events: refetch /api/state.
+ */
+export type StreamFrame =
+  | { event: "ledger"; data: LedgerEvent }
+  | { event: "live"; data: LiveEvent }
+  | { event: "reset"; data: { seq: number } };

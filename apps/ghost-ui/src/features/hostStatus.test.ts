@@ -1,14 +1,13 @@
 import { expect, it } from 'vitest';
 import { hostStatus } from './hostStatus';
 
-it('does not interpret transport configuration as successful attachment', () => {
-  expect(hostStatus('live', '', null, false, 1000).state).toBe('connecting');
-  expect(hostStatus('demo', '', null, true, 1000).state).toBe('connecting');
-  expect(hostStatus('demo', '', 900, false, 1000).state).toBe('demo');
+it('treats a live event stream as connected regardless of read age', () => {
+  expect(hostStatus('live', true)).toMatchObject({ state: 'connected', label: '연결됨' });
+  expect(hostStatus('live', false)).toMatchObject({ state: 'connected', label: '연결됨' });
+  expect(hostStatus('connecting', false)).toMatchObject({ state: 'connecting', label: '연결 확인 중' });
 });
-it('distinguishes a failed initial connection from cached and aged state', () => {
-  expect(hostStatus('live', 'failure', null, false, 1000).state).toBe('offline');
-  expect(hostStatus('live', 'failure', 900, false, 1000).state).toBe('stale');
-  expect(hostStatus('live', '', 900, false, 1000).state).toBe('connected');
-  expect(hostStatus('live', '', 900, false, 62000).state).toBe('stale');
+
+it('distinguishes a dropped stream with cached state from a dead one', () => {
+  expect(hostStatus('offline', false)).toMatchObject({ state: 'offline', label: '연결 필요' });
+  expect(hostStatus('offline', true)).toMatchObject({ state: 'stale', label: '갱신 지연' });
 });

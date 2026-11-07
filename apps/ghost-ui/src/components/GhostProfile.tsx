@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, History, ListTodo, Palette, Settings2, X } f
 import { Badge, Button, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
 import { DotAvatar } from './DotAvatar';
 import { AgentActivityList, type AgentActivityProps } from './AgentStatus';
-import { toneFor } from '../client/types';
+import { toneFor } from '../features/ghostState';
 
 export interface GhostProfileProps {
   ghostID: string;
@@ -29,7 +29,7 @@ export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWor
   const go = (action: () => void) => () => { setOpen(false); action(); };
   const hasActivity = activity.model.observations.length > 0;
   const rows = [
-    onOpenWork && { key: 'work', icon: ListTodo, label: '맡은 일', action: go(onOpenWork) },
+    onOpenWork && { key: 'work', icon: ListTodo, label: '맡긴 일', action: go(onOpenWork) },
     onOpenHistory && historyCount > 0 && { key: 'history', icon: History, label: `이전 대화 ${historyCount}`, action: go(onOpenHistory) },
     onManage && { key: 'manage', icon: Settings2, label: 'Ghost 관리', action: go(onManage) },
   ].filter(Boolean) as { key: string; icon: typeof ListTodo; label: string; action: () => void }[];

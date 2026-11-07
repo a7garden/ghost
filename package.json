@@ -1,0 +1,15 @@
+{
+  "name": "ghost",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/ghost-host"
+  ],
+  "scripts": {
+    "host": "bun run --cwd apps/ghost-host start",
+    "test": "bun run --cwd apps/ghost-host test",
+    "typecheck": "bun run --cwd packages/ghost-contract typecheck && bun run --cwd apps/ghost-host typecheck"
+  },
+  "packageManager": "bun@1.4.2"
+}
