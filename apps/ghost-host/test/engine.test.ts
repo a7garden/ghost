@@ -37,6 +37,7 @@ const sandbox: SandboxEnvFactory = {
   },
   workspacePath: () => "",
   stageInputs: async () => {},
+  release: async () => {},
 };
 
 /** Records what the engine reports about a conversation's runs, and lets a test await them. */

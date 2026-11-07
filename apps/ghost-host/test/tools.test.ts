@@ -49,6 +49,7 @@ class TempSandbox implements SandboxEnvFactory {
     return path;
   }
   async stageInputs() {}
+  async release() {}
 }
 
 /** MemoryPort stub that records retains and answers search/recall deterministically. */

@@ -195,5 +195,18 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     }
   };
 
-  return { envFor, workspacePath, stageInputs, status, control };
+  /** A settled Work's container is deleted; its workspace stays for inspection. */
+  const release = async (work: Work): Promise<void> => {
+    if (container === null) return;
+    const name = containerName(work.id);
+    const rows = containerRows(true);
+    lsCache = null;
+    if (!rows.ok) throw new Error(`sandbox: container ls failed: ${rows.error.message}`);
+    if (!rows.value.some((row) => row.id === name)) return;
+    const deleted = await runCli(container.cli, ["delete", "--force", name], CLI_TIMEOUT_MS);
+    if (!deleted.ok || deleted.value.code !== 0)
+      throw new Error(`sandbox: deleting ${name} failed: ${(!deleted.ok ? deleted.error.message : deleted.value.stderr).trim().slice(0, 512)}`);
+  };
+
+  return { envFor, workspacePath, stageInputs, status, control, release };
 }

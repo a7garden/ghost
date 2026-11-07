@@ -493,6 +493,13 @@ export class Works {
 
   /** A settled Work reports to whoever waits: its parent's conversation, or the owner for a root Work. */
   private async report(work: Work) {
+    if (this.core.sandbox.release) {
+      try {
+        await this.core.sandbox.release(work);
+      } catch (error) {
+        this.core.log(`releasing the sandbox of ${work.id} failed`, error);
+      }
+    }
     if (work.parentId) {
       await this.notifyParent(work);
     } else {

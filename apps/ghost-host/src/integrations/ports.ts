@@ -9,6 +9,8 @@ export interface SandboxEnvFactory {
   workspacePath(work: Work): string;
   /** Copy accepted child artifacts into `inputs/<child-id>/<name>` of the workspace. Refuses tampered bytes. */
   stageInputs(work: Work, inputs: { childId: string; name: string; digest: string }[]): Promise<void>;
+  /** Free a settled Work's compute (its container); the workspace stays. */
+  release(work: Work): Promise<void>;
 }
 
 export interface MemoryHit {
