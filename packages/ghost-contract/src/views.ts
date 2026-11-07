@@ -35,6 +35,16 @@ export const Runtime = Type.Object({
 });
 export type Runtime = Static<typeof Runtime>;
 
+/** Owner-only /api/providers/:id/oauth; tokens never cross this boundary. */
+export const OAuthStatus = Type.Object({
+  state: Type.Union([Type.Literal("pending"), Type.Literal("done"), Type.Literal("failed"), Type.Literal("cancelled")]),
+  userCode: nullable(Type.String()),
+  verificationUri: nullable(Type.String()),
+  expiresAt: Timestamp,
+  message: nullable(Type.String()),
+});
+export type OAuthStatus = Static<typeof OAuthStatus>;
+
 /** GET /api/state. A device sees only what its grants cover; owner-only collections are empty for devices. */
 export const State = Type.Object({
   /** Apply events with a greater seq on top of this snapshot. */

@@ -26,6 +26,7 @@ import {
 import type { Config } from "../config.ts";
 import type { DocumentsPort } from "../integrations/ports.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
+import { OAuthLogins } from "./oauth.ts";
 import { Access } from "../core/access.ts";
 import { execute, hashSecret } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
@@ -136,6 +137,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   const { core, config, ownerToken, documents } = deps;
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
+  const oauth = new OAuthLogins(core);
 
   const server: Bun.Server<undefined> = Bun.serve({
     hostname: config.host,
@@ -464,6 +466,20 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/commands" && request.method === "POST") return serveCommand(request, access);
     if (pathname === "/api/events" && request.method === "GET") return serveEvents(request, url, access);
 
+    const providerOAuth = /^\/api\/providers\/([a-z0-9][a-z0-9_-]{0,63})\/oauth$/.exec(pathname);
+    if (providerOAuth !== null) {
+      try {
+        if (!access.isOwner) throw new CommandError("forbidden", "provider login needs the owner");
+        const id = providerOAuth[1]!;
+        if (request.method === "POST") return json(oauth.start(id));
+        if (request.method === "GET") return json(oauth.status(id));
+        if (request.method === "DELETE") return json(oauth.cancel(id));
+        return error("invalid", "use GET, POST or DELETE", 405);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+
     const work = /^\/api\/works\/([^/]+)$/.exec(pathname);
     if (work !== null && request.method === "GET") {
       try {
@@ -511,6 +527,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   return {
     port: server.port!, // a TCP listener always reports its bound port
     stop: async () => {
+      oauth.close();
       server.stop(true);
     },
   };

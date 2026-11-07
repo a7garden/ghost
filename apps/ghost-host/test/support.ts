@@ -4,8 +4,9 @@ import { join } from "node:path";
 import type { ArtifactRef, LiveEvent, Sandbox } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
 import { sha256 } from "../src/core/ids.ts";
-import type { ArtifactStore, ConversationSetup, Engine, Secrets, Submission, TranscriptPage } from "../src/core/ports.ts";
+import type { ArtifactStore, ConversationSetup, Engine, Submission, TranscriptPage } from "../src/core/ports.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
+import { BaseSecrets } from "../src/stores/secrets.ts";
 
 /** Records what core asks of Pi. Deduplicates submissions by request id like Pi does. */
 export class FakeEngine implements Engine {
@@ -64,18 +65,8 @@ export class MemoryArtifacts implements ArtifactStore {
   }
 }
 
-export class MemorySecrets implements Secrets {
-  readonly values = new Map<string, string>();
-  has(id: string) {
-    return this.values.has(id);
-  }
-  get(id: string) {
-    return this.values.get(id) ?? null;
-  }
-  put(id: string, key: string | null) {
-    if (key === null) this.values.delete(id);
-    else this.values.set(id, key);
-  }
+export class MemorySecrets extends BaseSecrets {
+  protected persist() {}
 }
 
 export const noSandbox = {

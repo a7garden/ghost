@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FsArtifactStore } from "../src/stores/artifacts.ts";
@@ -52,6 +52,15 @@ describe("FsArtifactStore", () => {
   });
 });
 
+/** Canonical OAuth credential fixture with token-shaped fields. */
+const oauthCredential = {
+  type: "oauth",
+  refresh: "refresh-private-token",
+  access: "access-private-token",
+  expires: Date.now() + 3_600_000,
+  accountId: "acct-123",
+} as const;
+
 describe("FileSecrets", () => {
   test("stores provider keys as 0600 files in a 0700 directory", () => {
     const root = tempRoot();
@@ -63,7 +72,7 @@ describe("FileSecrets", () => {
     expect(secrets.has("openai")).toBe(true);
     expect(secrets.get("openai")).toBe("sk-test");
     const file = join(root, "secrets", "openai.json");
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ apiKey: "sk-test" });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ type: "api_key", key: "sk-test" });
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(statSync(join(root, "secrets")).mode & 0o777).toBe(0o700);
   });
@@ -85,5 +94,110 @@ describe("FileSecrets", () => {
     }
     secrets.put("a_b-c9", "ok");
     expect(secrets.get("a_b-c9")).toBe("ok");
+  });
+
+  test("reads legacy {apiKey} files as API key credentials", async () => {
+    const root = tempRoot();
+    mkdirSync(join(root, "secrets"), { recursive: true });
+    writeFileSync(join(root, "secrets", "zai.json"), JSON.stringify({ apiKey: "sk-legacy" }), { mode: 0o600 });
+
+    const secrets = new FileSecrets(root);
+    expect(secrets.credential("zai")).toEqual({ type: "api_key", key: "sk-legacy" });
+    expect(secrets.get("zai")).toBe("sk-legacy");
+    expect(secrets.has("zai")).toBe(true);
+    expect(await secrets.list()).toEqual([{ providerId: "zai", type: "api_key" }]);
+  });
+
+  test("oauth credentials survive reopening and list without secrets", async () => {
+    const root = tempRoot();
+    const secrets = new FileSecrets(root);
+    const persisted = await secrets.modify("openai", async () => ({ ...oauthCredential }));
+    expect(persisted).toEqual(oauthCredential);
+
+    const reopened = new FileSecrets(root);
+    expect(reopened.credential("openai")).toEqual(oauthCredential);
+    expect(reopened.has("openai")).toBe(true);
+    expect(reopened.get("openai")).toBeNull();
+    expect(await reopened.list()).toEqual([{ providerId: "openai", type: "oauth" }]);
+    expect(JSON.stringify(await reopened.list())).not.toContain("private-token");
+
+    // A canonical OAuth credential on disk resolves through the store.
+    expect(await reopened.read("openai")).toEqual(oauthCredential);
+  });
+
+  test("modify returning undefined leaves the entry unchanged", async () => {
+    const root = tempRoot();
+    const secrets = new FileSecrets(root);
+    await secrets.modify("openai", async () => ({ ...oauthCredential }));
+    const post = await secrets.modify("openai", async () => undefined);
+    expect(post).toEqual(oauthCredential);
+    expect(new FileSecrets(root).credential("openai")).toEqual(oauthCredential);
+  });
+
+  test("serializes concurrent modify writers per provider", async () => {
+    const secrets = new FileSecrets(tempRoot());
+    const releaseFirst = Promise.withResolvers<void>();
+    const order: string[] = [];
+    const first = secrets.modify("openai", async (current) => {
+      order.push(`one:${current?.type ?? "empty"}`);
+      await releaseFirst.promise;
+      return { type: "api_key", key: "one" };
+    });
+    const second = secrets.modify("openai", async (current) => {
+      order.push(`two:${current?.type === "api_key" ? current.key : "empty"}`);
+      return { type: "api_key", key: `${current?.type === "api_key" ? current.key : ""}-two` };
+    });
+    releaseFirst.resolve();
+    expect(await first).toEqual({ type: "api_key", key: "one" });
+    expect(await second).toEqual({ type: "api_key", key: "one-two" });
+    expect(order).toEqual(["one:empty", "two:one"]);
+  });
+
+  test("an api key put during an in-flight write cannot be overwritten", async () => {
+    const root = tempRoot();
+    const secrets = new FileSecrets(root);
+    await secrets.modify("openai", async () => ({ ...oauthCredential }));
+
+    const gate = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const refresh = secrets.modify("openai", async (current) => {
+      started.resolve();
+      await gate.promise;
+      // A refresh would produce a new OAuth credential, e.g. with a rotated refresh token.
+      return { ...(current as typeof oauthCredential), access: "access-new", expires: Date.now() + 3_600_000 };
+    });
+    await started.promise;
+    secrets.put("openai", "sk-replacement");
+    gate.resolve();
+
+    expect(await refresh).toEqual({ type: "api_key", key: "sk-replacement" });
+    expect(secrets.get("openai")).toBe("sk-replacement");
+    expect(JSON.parse(readFileSync(join(root, "secrets", "openai.json"), "utf8"))).toEqual({
+      type: "api_key",
+      key: "sk-replacement",
+    });
+    expect(new FileSecrets(root).credential("openai")).toEqual({ type: "api_key", key: "sk-replacement" });
+  });
+
+  test("a delete during an in-flight write cannot be resurrected", async () => {
+    const root = tempRoot();
+    const secrets = new FileSecrets(root);
+    await secrets.modify("openai", async () => ({ ...oauthCredential }));
+
+    const gate = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const refresh = secrets.modify("openai", async (current) => {
+      started.resolve();
+      await gate.promise;
+      return { ...(current as typeof oauthCredential), access: "access-new" };
+    });
+    await started.promise;
+    await secrets.delete("openai");
+    gate.resolve();
+
+    expect(await refresh).toBeUndefined();
+    expect(secrets.has("openai")).toBe(false);
+    expect(existsSync(join(root, "secrets", "openai.json"))).toBe(false);
+    expect(new FileSecrets(root).has("openai")).toBe(false);
   });
 });

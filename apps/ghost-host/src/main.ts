@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { resolve } from "node:path";
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { openApp, serve } from "./app.ts";
 import { backup } from "./backup.ts";
 import { loadConfig } from "./config.ts";
@@ -69,6 +70,9 @@ async function main(argv: string[]) {
       if (command && command !== "help" && command !== "--help") process.exitCode = 2;
   }
 }
+
+// pi-ai's default OAuth loader uses runtime paths, which do not exist inside a standalone binary.
+registerBunOAuthFlows();
 
 main(process.argv.slice(2)).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);

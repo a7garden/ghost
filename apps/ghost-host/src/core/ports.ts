@@ -9,6 +9,7 @@ import type {
   Sandbox,
   Work,
 } from "@ghost/contract";
+import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 
 /** What the engine needs to run one conversation. Built by core from ledger rows. */
 export interface ConversationSetup {
@@ -70,9 +71,22 @@ export interface SandboxControl {
   control(ghostId: string, action: "stop" | "reset"): Promise<void>;
 }
 
-/** Provider API keys, stored outside the ledger. */
-export interface Secrets {
+/**
+ * Provider credentials, stored outside the ledger. Extends pi-ai's app-owned
+ * `CredentialStore`: `read`/`list`/`modify`/`delete` are the canonical async
+ * API that pi-ai `Models` uses (OAuth refresh runs single-flight inside
+ * `modify`), while `credential`/`has`/`get`/`put` are Ghost's synchronous
+ * helpers. `put`/`delete` replace the stored credential and invalidate any
+ * in-flight `modify` publication, so an owner-side replacement can never be
+ * overwritten by a stale refresh.
+ */
+export interface Secrets extends CredentialStore {
+  /** Synchronous read of the stored credential (model construction). */
+  credential(providerId: string): Credential | undefined;
+  /** Whether a valid credential — API key or OAuth — exists. */
   has(providerId: string): boolean;
+  /** API key only; OAuth credentials return null. */
   get(providerId: string): string | null;
+  /** Replace the credential with an API key (null deletes). */
   put(providerId: string, apiKey: string | null): void;
 }

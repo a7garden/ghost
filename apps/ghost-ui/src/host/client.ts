@@ -5,6 +5,7 @@ import type {
   ConversationPage,
   LedgerEvent,
   LiveEvent,
+  OAuthStatus,
   PageSummary,
   PageView,
   State,
@@ -94,6 +95,21 @@ export class HostClient {
     });
     if (!response.ok) throw new HostError(response.error.code, response.error.message);
     return response.result as T;
+  }
+
+  /** Start a device-code login for one OpenAI provider (owner only); joining a pending session returns it unchanged. */
+  startOAuth(providerId: string): Promise<OAuthStatus> {
+    return this.json(`/api/providers/${encodeURIComponent(providerId)}/oauth`, { method: 'POST' });
+  }
+
+  /** Read the current device-code login status of one provider (owner only). */
+  oauthStatus(providerId: string): Promise<OAuthStatus> {
+    return this.json(`/api/providers/${encodeURIComponent(providerId)}/oauth`);
+  }
+
+  /** Cancel a pending device-code login (owner only). */
+  cancelOAuth(providerId: string): Promise<OAuthStatus> {
+    return this.json(`/api/providers/${encodeURIComponent(providerId)}/oauth`, { method: 'DELETE' });
   }
 
   /** Artifact bytes as an object URL; revoke it when done. */

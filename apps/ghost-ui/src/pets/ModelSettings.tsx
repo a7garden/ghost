@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Check, ChevronRight, KeyRound, ShieldOff, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, KeyRound, LogIn, ShieldOff, Plus, Trash2 } from 'lucide-react';
 import { Badge, Button, SettingsGroup, SettingsRow, InlineError, SelectField } from '../ui'
 import type { Provider } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
+import { ChatGptLoginDialog } from './ChatGptLogin';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from './ModelPicker';
 import { ProviderEditor, providerKindLabel, emptyDraft } from './ProviderEditor';
 import type { ProviderDraft, ProviderSave } from './ProviderEditor';
@@ -16,6 +17,7 @@ export function ModelSettings() {
   const settings = state?.settings;
   const [editor, setEditor] = useState<{ draft: ProviderDraft; existing: boolean; hasCredential: boolean }>();
   const [remove, setRemove] = useState<Provider>();
+  const [login, setLogin] = useState<Provider>();
   const [pending, setPending] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const options = modelSelectOptions(settings);
   const run = async (label: string, work: () => Promise<unknown>, done: string) => {
@@ -66,13 +68,14 @@ export function ModelSettings() {
             <Badge variant="outline">{providerKindLabel(provider.kind)}</Badge>
           </span>
           <span className="flex items-center gap-3 text-caption text-ink-3">
-            {provider.hasCredential ? <span className="flex items-center gap-1"><KeyRound size={13} aria-hidden="true"/>인증 키 저장됨</span> : <span className="flex items-center gap-1"><ShieldOff size={13} aria-hidden="true"/>인증 키 없음</span>}
+            {provider.hasCredential ? <span className="flex items-center gap-1"><KeyRound size={13} aria-hidden="true"/>인증 정보 저장됨</span> : <span className="flex items-center gap-1"><ShieldOff size={13} aria-hidden="true"/>인증 정보 없음</span>}
             <span>{provider.models.length}개 모델</span>
           </span>
         </div>
         <p className="m-0 text-caption text-ink-3 [overflow-wrap:anywhere]">{provider.baseUrl ?? '기본 서버 주소'}</p>
         <p className="m-0 text-caption text-ink-3 [overflow-wrap:anywhere]">{provider.models.map(model => model.name || model.id).join(', ')}</p>
         <div className="flex flex-wrap items-center gap-4">
+          {provider.kind === 'openai' && !provider.baseUrl && <Button variant="ghost" type="button" disabled={pending !== ''} aria-label={`${provider.name} ChatGPT로 로그인`} onClick={() => { setError(''); setLogin(provider); }}><LogIn size={14}/>ChatGPT 로그인</Button>}
           <Button variant="ghost" type="button" disabled={pending !== ''} onClick={() => setEditor({ draft: { id: provider.id, kind: provider.kind, name: provider.name, baseUrl: provider.baseUrl, models: provider.models.map(model => ({ ...model })) }, existing: true, hasCredential: provider.hasCredential })}>편집<ChevronRight size={14}/></Button>
           <Button variant="ghost" size="icon" type="button" className="ml-auto" aria-label={`${provider.name} 제공자 삭제`} disabled={pending !== ''} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></Button>
         </div>
@@ -82,8 +85,9 @@ export function ModelSettings() {
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 flex items-start gap-1.5 text-caption text-success" role="status"><Check size={14} className="mt-0.5 flex-none"/>{notice}</p>}
     {editor && <ProviderEditor initial={editor.draft} existing={editor.existing} hasCredential={editor.hasCredential} busy={pending !== ''} onClose={() => setEditor(undefined)} onSave={saveProvider}/>}
+    {login && <ChatGptLoginDialog provider={login} onClose={() => setLogin(undefined)}/>}
     {remove && <Modal title="제공자 삭제" onClose={() => pending === '' && setRemove(undefined)}>
-      <p className="m-0">{remove.name}의 서버 설정을 삭제합니다. 저장된 인증 키도 함께 지워집니다.</p>
+      <p className="m-0">{remove.name}의 서버 설정을 삭제합니다. 저장된 인증 정보도 함께 지워집니다.</p>
       {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}
       <div className="mt-4 flex justify-end gap-2">
         <Button variant="outline" type="button" disabled={pending !== ''} onClick={() => setRemove(undefined)}>취소</Button>

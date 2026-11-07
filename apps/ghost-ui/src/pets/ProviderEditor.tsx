@@ -83,16 +83,17 @@ export function ProviderEditor({ initial, existing, hasCredential, busy, onClose
       </section>
       <section className="flex min-w-0 flex-col gap-2.5 border-t border-line pt-4">
         <h3 className="m-0 text-caption font-semibold text-ink">인증</h3>
+        {value.kind === 'openai' && !value.baseUrl && <p className="m-0 text-caption text-ink-3">ChatGPT 구독으로 로그인하거나 API 키를 직접 입력해 인증할 수 있습니다. 로그인은 제공자 목록에서 시작합니다.</p>}
         {existing && hasCredential && <>
           <div className="flex items-center gap-2.5">
             <Checkbox id="provider-remove-key" checked={removeKey} disabled={locked} onCheckedChange={checked => setRemoveKey(checked === true)}/>
-            <label htmlFor="provider-remove-key" className="text-caption text-ink">저장된 인증 키 삭제</label>
+            <label htmlFor="provider-remove-key" className="text-caption text-ink">저장된 인증 정보 삭제</label>
           </div>
-          {!removeKey && <FormField label="새 인증 키" description="비워 두면 저장된 키를 그대로 사용합니다. 키는 호스트에만 저장되며 다시 표시되지 않습니다.">
-            {control => <Input {...control} type="password" value={apiKey} placeholder="저장된 키 사용" maxLength={4096} disabled={locked} autoComplete="off" onChange={event => setApiKey(event.target.value)}/>}
+          {!removeKey && <FormField label="새 API 키" description="비워 두면 저장된 인증 정보를 그대로 사용합니다. API 키는 호스트에만 저장되며 다시 표시되지 않습니다.">
+            {control => <Input {...control} type="password" value={apiKey} placeholder="저장된 인증 정보 사용" maxLength={4096} disabled={locked} autoComplete="off" onChange={event => setApiKey(event.target.value)}/>}
           </FormField>}
         </>}
-        {!(existing && hasCredential) && <FormField label="인증 키" description="호스트에만 저장되며 다시 표시되지 않습니다.">
+        {!(existing && hasCredential) && <FormField label="API 키" description="호스트에만 저장되며 다시 표시되지 않습니다.">
           {control => <Input {...control} type="password" value={apiKey} maxLength={4096} disabled={locked} autoComplete="off" onChange={event => setApiKey(event.target.value)}/>}
         </FormField>}
       </section>

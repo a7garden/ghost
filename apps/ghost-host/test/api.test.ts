@@ -364,6 +364,21 @@ describe("API server", () => {
     expect(((await response.json()) as { error: { code: string } }).error.code).toBe("forbidden");
   });
 
+  test("OAuth attempts are owner-only for every operation", async () => {
+    for (const method of ["GET", "POST", "DELETE"]) {
+      const path = `${base}/api/providers/codex/oauth`;
+      expect((await fetch(path, { method })).status).toBe(401);
+      expect((await fetch(path, { method, headers: { authorization: `Bearer ${deviceToken}` } })).status).toBe(403);
+    }
+  });
+
+  test("OAuth rejects custom endpoints before starting a login", async () => {
+    await runCommand({ type: "provider.upsert", id: "oauth-custom", kind: "openai", name: "Custom", baseUrl: "https://attacker.invalid", models: [] }, OWNER_TOKEN);
+    const response = await postJson("/api/providers/oauth-custom/oauth", {}, OWNER_TOKEN);
+    expect(response.status).toBe(400);
+    expect(core.secrets.has("oauth-custom")).toBe(false);
+  });
+
   test("transcript pages are access-checked", async () => {
     const owner = await get(`/api/conversations/${alphaDirectId}`, OWNER_TOKEN);
     expect(owner.status).toBe(200);
