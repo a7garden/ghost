@@ -22,12 +22,12 @@
 
 Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다.
 
-## 현재 설치 (2026-11-07)
+## 현재 설치 (2026-11-08)
 
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-f4f05fb` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-0a7ca7c` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`f4f05fb` 셸·새 아이콘, 임시 서명), `console.json` = `{host_mode: external, root}` |
@@ -35,6 +35,16 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 채팅 다듬기·기억 직렬화·위임 표시 운영 반영 — 2026-11-08
+
+- 소스 `0a7ca7c`의 Host·UI를 `releases/20261108-bun-0a7ca7c`에 설치했다. 계약·DB 스키마·셸은 그대로다. 컴파일 Host 바이트와 UI 85개 파일 해시가 빌드 원본과 일치한다. 설치 사본을 백업 DB 사본 위 임시 루트·포트에서(메모리 설정 없이) 실행해 실제 `primary` 대화가 새 렌더링으로 열리고 모델 칩 `glm-5.3`의 아랫부분이 잘리지 않는 것을 확인했다.
+- 원인 조사(운영 DB 사본): 도구 결과 13건 중 실패 4건. `memory_search` 1건은 한 응답의 병렬 호출 두 개 중 두 번째가 Oxibrain 저장소 잠금에 걸린 것이고, `present_ui` 3건은 차트 `points`를 최상위에 둔 2건과 비교표 열에 행 제목을 넣은 1건이다. 기억 작업을 한 줄로 직렬화하고 각 자식 프로세스를 다음 실행 전에 회수(SIGTERM, 2초 뒤 SIGKILL, 4초 상한)하도록 고쳤고, `present_ui` 설명·오류에 형식 규칙을 넣었다. 운영 config 변경은 없다.
+- 협업 점검: 운영에서 위임은 한 번도 일어나지 않았다(Work 32개 모두 루트). 작업 대화에는 `delegate`만 있고 `ghost_list`가 없어 유효한 `ghost_id`를 알 수 없었으므로, `delegate`를 가진 Ghost의 작업 지시에 활성 동료 목록을 넣었다. UI는 위임 이벤트 줄, 스레드 카드의 위임 Ghost, `위임 결과 대기`, Work 페이지 작업 대화의 실시간 표시를 추가했다. 작업 중 Ghost 간 메시지 채널은 아직 없다.
+- 검사: Host 테스트 239개(+1 생략)·타입 검사, UI 테스트 69개·타입 검사·빌드, 시각 회귀 28개(대화 화면 4개 기준 갱신 후 재통과), 격리 Host·모의 제공자에서 스트리밍·우클릭 메뉴·꾸미기 무작위 저장·위임 표시 확인. 독립 검토(기억 직렬화: Claude, 위임 목록·종료 처리: Codex) 결과 P2 한 건(회수 대기 상한)을 반영했다.
+- 백업: `~/.local/share/ghost/backups/pre-chat-polish-20261108-0a7ca7c/`, `ghost-backup/2`, `complete: true`, 두 DB `integrity_check` ok, artifacts·secrets·config 복사·비교. 시각 `2026-11-07T15:05Z` 전후.
+- 유휴(바쁜 대화·진행 중 Work 0) 확인 후 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 67594 → 96122). 실행 파일·운영 DB·단일 리스너·준비 상태(`provider zai-coding is ready`), Ghost 4·대화 9·맡긴 일 32·프로젝트 0, config·secrets 보존을 확인했다. 설치 앱(external)이 새 UI로 다시 읽혔고, 접근성 클릭으로 `primary` 대화 → 프로필 → 꾸미기 대화상자(무작위 포함)를 열어 확인한 뒤 바꾸지 않고 닫았다.
+- 되돌릴 때는 `current`를 `releases/20261107-bun-f4f05fb`로 교체하고 LaunchAgent를 정상 재시작한다. 저장 형식 변화는 없다.
 
 ### Ghost 바리에이션·새 앱 아이콘 운영 반영 — 2026-11-07
 
