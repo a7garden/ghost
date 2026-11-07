@@ -40,6 +40,12 @@ ink and a tint in `src/ui/theme.css`: signal blue for a Ghost actually working, 
 anything waiting on the owner, red for failure, green for an accepted result. Inter and
 JetBrains Mono remain; mono marks tool names, commands and times.
 
+Text tiers meet WCAG AA: ink2/ink3 are 74%/61% ink in light and 70%/53% in dark, so
+secondary and meta text keep 4.5:1 on page, canvas and surface; ink4 is decoration only.
+Until a provider can run Ghosts, home leads with a setup card instead of a warning banner;
+other pages keep the banner with a 모델 설정 action. The default model's reasoning level
+(끔·낮음·중간·높음) is set beside it in 설정 → 모델.
+
 Component styles live in the `components` cascade layer (`src/ui/compositions.css`,
 `src/app.css`, `src/components/agent/agent.css`) so Tailwind utilities passed through
 `className` win. `src/main.tsx` imports global CSS first; that import declares the layer
@@ -84,8 +90,11 @@ Each Ghost keeps one durable conversation, like Dots: there is no "new conversat
 The Ghost floats as a round button at the top center (its presence ring; it opens the
 profile and look editor) and content fades beneath it. Work the conversation spins off
 appears as **thread cards** at the moment it started, kept live (state glyph, carrier,
-lifecycle). The thread button at the top right gathers the Ghost's live and recent
-맡긴 일; direct conversations kept from before stay reachable there as 이전 대화.
+lifecycle). Opening a card or a thread from the thread button (top right) brings the
+**thread panel** beside the conversation (over it below 64rem, `?thread=` in the URL):
+status and lifecycle, its decisions resolved in place, delegated threads, and the
+carrier's work conversation streaming live. Editing and cancelling stay on the full
+맡긴 일 page. Direct conversations kept from before stay reachable as 이전 대화.
 Host wakes (reports, child results, decision answers, schedules, verdicts) render as quiet
 event lines, never as the owner's bubble.
 

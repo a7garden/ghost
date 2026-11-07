@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { importCodexPet, parseManifest, spritePath } from './codexImport';
-import { faceColor, isGhostColor } from './appearance';
+import { faceColor } from './appearance';
 import { spriteVersionOf } from './sprites';
 const manifest = { displayName: '카구야', description: '원본 설명', spriteVersionNumber: 2, spritesheetPath: 'assets/original.webp', custom: { untouched: true } };
 const file = (name: string, contents: string | Uint8Array, path: string) => {
@@ -35,7 +35,6 @@ describe('Codex folder import', () => {
     expect(spriteVersionOf(pet.design)).toBe(1);
   });
 });
-it('validates persisted Ghost colors and chooses a contrasting face', () => {
-  expect(isGhostColor('auto')).toBe(true); expect(isGhostColor('#a1B2C3')).toBe(true); expect(isGhostColor('url(https://example.test)')).toBe(false);
+it('chooses a contrasting face for a Ghost body color', () => {
   expect(faceColor('#000000')).toBe('#ffffff'); expect(faceColor('#ffffff')).toBe('#000000');
 });

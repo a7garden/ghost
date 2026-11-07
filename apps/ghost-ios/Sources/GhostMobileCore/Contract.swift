@@ -15,15 +15,38 @@ public struct ModelRef: Codable, Hashable, Sendable {
     public var thinking: String?
 }
 
+public enum LookFace: String, Codable, Sendable, CaseIterable {
+    case bars, dots, arcs, tall
+}
+
+public enum LookMark: String, Codable, Sendable, CaseIterable {
+    case none, halo, antenna, sprout, ring, spark
+}
+
 public struct Look: Codable, Hashable, Sendable {
     public var avatarId: String?
     public var body: String?
     public var background: String?
+    public var face: LookFace?
+    public var mark: LookMark?
 
-    public init(avatarId: String?, body: String? = nil, background: String? = nil) {
+    public init(avatarId: String?, body: String? = nil, background: String? = nil, face: LookFace? = nil, mark: LookMark? = nil) {
         self.avatarId = avatarId
         self.body = body
         self.background = background
+        self.face = face
+        self.mark = mark
+    }
+
+    private enum CodingKeys: String, CodingKey { case avatarId, body, background, face, mark }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        avatarId = try c.decodeIfPresent(String.self, forKey: .avatarId)
+        body = try c.decodeIfPresent(String.self, forKey: .body)
+        background = try c.decodeIfPresent(String.self, forKey: .background)
+        face = try c.decodeIfPresent(String.self, forKey: .face).flatMap(LookFace.init(rawValue:))
+        mark = try c.decodeIfPresent(String.self, forKey: .mark).flatMap(LookMark.init(rawValue:))
     }
 }
 
@@ -212,6 +235,7 @@ public struct Message: Codable, Identifiable, Hashable, Sendable {
     public var role: MessageRole
     public var origin: String?
     public var text: String
+    public var thinking: String?
     public var toolCalls: [ToolCallView]
     public var tool: MessageToolInfo?
     public var attachments: [ArtifactRef]
@@ -221,13 +245,14 @@ public struct Message: Codable, Identifiable, Hashable, Sendable {
 
     public init(
         id: String, conversationId: String, role: MessageRole, origin: String?, text: String,
-        toolCalls: [ToolCallView] = [], tool: MessageToolInfo? = nil, attachments: [ArtifactRef] = [], createdAt: Int
+        toolCalls: [ToolCallView] = [], tool: MessageToolInfo? = nil, attachments: [ArtifactRef] = [], createdAt: Int, thinking: String? = nil
     ) {
         self.id = id
         self.conversationId = conversationId
         self.role = role
         self.origin = origin
         self.text = text
+        self.thinking = thinking
         self.toolCalls = toolCalls
         self.tool = tool
         self.attachments = attachments
@@ -249,6 +274,7 @@ public struct Live: Codable, Hashable, Sendable {
     public var conversationId: String
     public var running: Bool
     public var partial: String?
+    public var thinking: String?
     public var tools: [LiveTool]
 }
 

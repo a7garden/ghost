@@ -1,10 +1,11 @@
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, ChevronRight } from 'lucide-react';
 import { TERMINAL_WORK_STATES, type State, type Work } from '@ghost/contract';
 import { Page } from '../ui'
 import { WorkLane } from '../components/agent';
 import { HandoffComposer } from '../components/HandoffComposer';
+import { DotAvatar } from '../components/DotAvatar';
 import { DecisionDeck } from './Decision';
-import { liveWorks } from './ghostState';
+import { liveWorks, toneFor } from './ghostState';
 import { useNow } from './time';
 import { uiTerms } from '../uiText';
 
@@ -32,7 +33,18 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
       branch={children.length > 0 ? children.map(lane) : undefined}/>;
   };
   const quiet = !roots.length && !recent.length && !state.decisions.some(decision => decision.state === 'pending');
+  // Until a provider can run Ghosts, home leads with the one step that unblocks everything.
+  const setup = !state.runtime.ready;
+  const lead = ghosts[0];
   return <Page className="home" data-quiet={quiet || undefined}>
+    {setup && <button type="button" className="setup-card" onClick={() => navigate('/settings?tab=models')}>
+      {lead && <DotAvatar profileId={lead.id} tone={toneFor(lead.id)} size={44}/>}
+      <span className="setup-card__copy">
+        <strong>{!state.settings.providers.length ? '모델 제공자 연결' : !state.settings.defaultModel ? '기본 모델 선택' : '모델 연결 확인'}</strong>
+        {state.settings.providers.length > 0 && state.settings.defaultModel && <span>{state.runtime.detail}</span>}
+      </span>
+      <ChevronRight size={18} aria-hidden="true"/>
+    </button>}
     <HandoffComposer ghosts={ghosts} navigate={navigate}/>
     <DecisionDeck state={state} navigate={navigate}/>
     {roots.length > 0 && <section className="home__band" aria-labelledby="home-live">

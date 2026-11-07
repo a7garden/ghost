@@ -1,10 +1,11 @@
 import XCTest
 
 @MainActor final class ChatUITests: XCTestCase {
-    private func launch(reset: Bool = true, incoming: Bool = false) -> XCUIApplication {
+    private func launch(reset: Bool = true, incoming: Bool = false, longConversation: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"] + (reset ? ["--reset-fixture"] : [])
         if incoming { app.launchArguments.append("--ui-testing-incoming") }
+        if longConversation { app.launchArguments.append("--long-conversation") }
         app.launch()
         let conversation = app.buttons["conversation-fixture-conversation"].firstMatch
         XCTAssertTrue(conversation.waitForExistence(timeout: 10))
@@ -40,13 +41,15 @@ import XCTest
         let composer = app.descendants(matching: .any)["chat-composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.tap(); composer.typeText("Saved after relaunch")
+        // Backgrounding exercises the scene's durable-draft flush before termination.
+        XCUIDevice.shared.press(.home)
         app.terminate()
         let reopened = launch(reset: false)
         XCTAssertEqual(reopened.descendants(matching: .any)["chat-composer"].value as? String, "Saved after relaunch")
         screenshot("Restored draft", app: reopened)
     }
     func testHistoryStartsAtLatestAndAllowsReadingEarlierMessages() {
-        let app = launch()
+        let app = launch(longConversation: true)
         let latest = app.staticTexts["짧게 읽을 수 있는 에세이 위주로 보고 싶어."]
         expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: latest)
         waitForExpectations(timeout: 5)

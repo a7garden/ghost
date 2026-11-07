@@ -4,8 +4,8 @@ import { Badge, Button, InlineError, Input, SegmentedControl, SelectField, Setti
 import type { Ghost, GhostState } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
-import { toneFor } from './ghostState';
-import { DotAvatar } from '../components/DotAvatar';
+import { GhostCharacter } from '../pets/GhostCharacter';
+import { defaultBodyColor } from '../pets/appearance';
 import { Modal } from '../components/Modal';
 import { useAvatarSource } from '../pets/AvatarProvider';
 import { GhostColorPicker } from '../pets/GhostColorPicker';
@@ -87,7 +87,7 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
           <div className="grid grid-cols-5 gap-1.5">
             <button type="button" aria-pressed={!ghost.look.avatarId} disabled={locked} onClick={() => ghost.look.avatarId && assign(null)} title="기본 Ghost"
               className="avatar-choice avatar-choice--tile p-2 outline-none disabled:cursor-not-allowed">
-              <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={36}/><span className="sr-only">기본 Ghost</span>
+              <GhostCharacter size={36} animate={false} color={ghost.look.body} fallback={defaultBodyColor(ghost.id)} face={ghost.look.face} mark={ghost.look.mark}/><span className="sr-only">기본 Ghost</span>
               {!ghost.look.avatarId && <Check size={12} className="absolute top-1 right-1" aria-hidden="true"/>}
             </button>
             {avatars.map(avatar => <AvatarTile key={avatar.id} avatar={avatar} selected={ghost.look.avatarId === avatar.id} disabled={locked}

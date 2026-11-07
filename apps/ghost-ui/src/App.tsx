@@ -115,7 +115,7 @@ function Shell() {
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
           sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
           {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>{error}</Banner>}
-          {runtimeDown && state && <Banner variant="warning" className="mb-4">{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
+          {runtimeDown && state && section !== 'home' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate}/>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
@@ -123,7 +123,7 @@ function Shell() {
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
               : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')}/>)}
             {section === 'ghosts' && (openGhost
-              ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} navigate={navigate}/>
+              ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} threadId={params.get('thread')} navigate={navigate}/>
               : ghostNotFound)}
             {section === 'spaces' && <SpacesView key={`${selectedSpace ?? 'empty'}:${params.get('new') ?? ''}`} selectedSpace={selectedSpace}
               onSelectSpace={id => navigate(`/spaces/${id}`)} createRequested={params.get('new') === '1'}

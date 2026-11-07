@@ -1,4 +1,7 @@
 import { Fragment, type ReactNode } from 'react';
+import type { Live } from '@ghost/contract';
+import { DotAvatar } from './DotAvatar';
+import { toneFor } from '../features/ghostState';
 import { ChevronRight } from 'lucide-react';
 import { ConversationMessage } from '../ui'
 import { INTERACTIVE_UI_TOOL, readInteractiveUi, type LiveTool, type Message } from '@ghost/contract';
@@ -130,4 +133,20 @@ export function Transcript({ messages, speaker, onUiSubmit, extras = [] }: { mes
   }
   flushBefore(Infinity);
   return <>{rows}</>;
+}
+
+/** The generation in progress: running tools, then reasoning and the reply as they stream. */
+export function LiveReply({ live, ghostId, ghostName }: { live: Live; ghostId: string; ghostName: string }) {
+  if (!live.running) return null;
+  return <>
+    {live.tools.length > 0 && <ToolTrail results={[]} running={live.tools}/>}
+    <article className="ghost-conversation-message chat-live" data-role="assistant" aria-label={`${ghostName} · 응답 작성 중`} aria-busy="true">
+      <div className="ghost-conversation-message__content">
+        {live.thinking && <Reasoning text={live.thinking} live={!live.partial}/>}
+        {live.partial
+          ? <div className="chat-live__text"><MessageBody text={live.partial}/></div>
+          : !live.thinking && <div className="chat-thinking" role="status"><DotAvatar profileId={ghostId} tone={toneFor(ghostId)} size={20}/><span>응답 중</span></div>}
+      </div>
+    </article>
+  </>;
 }

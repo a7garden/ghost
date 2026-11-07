@@ -4,6 +4,7 @@ import { Badge, Button, FormField, Page, PageHeader, InlineError, Input, SelectF
 import type { PageSummary, Space, SpaceGrant } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
+import { canPickFolder, pickFolder } from '../host/folderPicker';
 import { routeLabels } from '../uiText';
 import { toneFor } from './ghostState';
 import { DotAvatar } from '../components/DotAvatar';
@@ -187,8 +188,9 @@ function SpaceForm({ title, ghosts, initial, busy, defaultGrants = [], onClose, 
   const [grantMode, setGrantMode] = useState<SpaceGrant['mode']>('read');
   const [fieldError, setFieldError] = useState<{ name?: string; path?: string }>({});
   const [error, setError] = useState(''), [saving, setSaving] = useState(false);
+  const [picking, setPicking] = useState(false);
   const firstField = useRef<HTMLInputElement>(null);
-  const locked = busy || saving;
+  const locked = busy || saving || picking;
   useEffect(() => {
     // Radix puts the initial focus on the dialog's close button; put the caret in the first field instead.
     const timer = setTimeout(() => firstField.current?.focus(), 0);
@@ -197,6 +199,16 @@ function SpaceForm({ title, ghosts, initial, busy, defaultGrants = [], onClose, 
   const updatePath = (value: string) => {
     setPath(value);
     if (!named) setName(spaceNameFromPath(value));
+  };
+  const chooseFolder = async () => {
+    if (locked) return;
+    setPicking(true); setError('');
+    try {
+      const selected = await pickFolder();
+      if (selected !== null) updatePath(selected);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally { setPicking(false); }
   };
   const addGrant = () => {
     if (!grantGhost) return;
@@ -221,7 +233,10 @@ function SpaceForm({ title, ghosts, initial, busy, defaultGrants = [], onClose, 
     className={initial ? 'w-[min(600px,calc(100vw-2rem))] sm:max-w-[600px]' : 'w-[min(440px,calc(100vw-2rem))] sm:max-w-[440px]'}>
     <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
       {!initial && <FormField label="폴더 경로" error={fieldError.path}>
-        {control => <Input {...control} ref={firstField} type="text" value={path} onChange={event => updatePath(event.target.value)} required maxLength={4096} placeholder="/Users/me/Documents/notes" disabled={locked} spellCheck={false} autoCapitalize="off" autoComplete="off"/>}
+        {control => <div className="flex items-center gap-2">
+          <Input {...control} ref={firstField} className="min-w-0 flex-1" type="text" value={path} onChange={event => updatePath(event.target.value)} required maxLength={4096} placeholder="/Users/me/Documents/notes" disabled={locked} spellCheck={false} autoCapitalize="off" autoComplete="off"/>
+          {canPickFolder && <Button variant="outline" type="button" className="flex-none" disabled={locked} aria-label="폴더 선택" onClick={() => void chooseFolder()}>선택</Button>}
+        </div>}
       </FormField>}
       <FormField label="이름" error={fieldError.name}>
         {control => <Input {...control} ref={initial ? firstField : undefined} value={name} onChange={event => { setName(event.target.value); setNamed(true); }} required maxLength={128} disabled={locked}/>}

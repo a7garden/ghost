@@ -1,6 +1,5 @@
-// Hallmark · native: Long Document / Index First · theme: Coral / Ghost porcelain
-// Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 · native adaptation verified.
 import SwiftUI
+import GhostMobileCore
 
 struct GhostMark: View {
     var size: CGFloat = 36
@@ -37,9 +36,10 @@ struct GhostSilhouette: Shape {
 }
 
 struct GhostEmptyConversation: View {
+    var ghost: Ghost?
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            GhostMark(size: 52)
+            GhostPortrait(ghost: ghost, size: 64)
             Text("무슨 일을\n함께할까요?")
                 .font(.system(.largeTitle, design: .rounded, weight: .semibold))
                 .tracking(-0.8)
@@ -49,7 +49,6 @@ struct GhostEmptyConversation: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 28).padding(.vertical, 32)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -57,12 +56,13 @@ struct GhostMessageBubble<Accessory: View>: View {
     let text: String
     let isUser: Bool
     var label = "Ghost"
+    var ghost: Ghost? = nil
     @ViewBuilder var accessory: Accessory
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             if isUser { Spacer(minLength: 44) }
-            if !isUser { GhostMark(size: 28).padding(.top, 2) }
+            if !isUser { GhostPortrait(ghost: ghost, size: 32).padding(.top, 2) }
             VStack(alignment: .leading, spacing: 8) {
                 if !isUser {
                     Text(label).font(.caption.weight(.semibold)).foregroundStyle(GhostStyle.secondary)
@@ -88,21 +88,23 @@ struct GhostMessageBubble<Accessory: View>: View {
 struct GhostStatusBadge: View {
     let state: String
     var body: some View {
-        Label(title, systemImage: symbol)
+        HStack(spacing: 6) {
+            StateGlyph(state: state, size: 14)
+            Text(title)
+        }
             .font(.caption.weight(.medium))
-            .foregroundStyle(isIssue ? GhostStyle.warning : GhostStyle.secondary)
+            .foregroundStyle(GhostStateToken.ink(state))
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(GhostStyle.under, in: Capsule())
+            .background(GhostStateToken.tint(state), in: Capsule())
             .fixedSize(horizontal: false, vertical: true)
     }
-    private var isIssue: Bool { ["failed", "blocked", "pending", "denied"].contains(state) }
     private var title: String {
         switch state {
         case "queued": "대기 중"
         case "running": "진행 중"
-        case "waiting": "대기 중 · 확인 필요"
-        case "verifying": "검수 중"
-        case "blocked": "확인 필요"
+        case "waiting": "대기 중"
+        case "verifying": "검증 중"
+        case "blocked": "결과 미확정"
         case "done": "완료"
         case "failed": "실패"
         case "cancelled": "취소됨"
@@ -112,15 +114,6 @@ struct GhostStatusBadge: View {
         case "pending": "확인 필요"
         case "unknown": "결과 확인 필요"
         default: "상태 확인 중"
-        }
-    }
-    private var symbol: String {
-        switch state {
-        case "done", "approved", "answered": "checkmark.circle.fill"
-        case "running", "verifying": "circle.dotted"
-        case "failed", "blocked", "pending", "unknown": "exclamationmark.circle"
-        case "cancelled", "denied": "pause.circle"
-        default: "clock"
         }
     }
 }
@@ -142,5 +135,234 @@ struct GhostNotice: View {
         .foregroundStyle(isError ? GhostStyle.warning : GhostStyle.secondary)
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
         .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+enum GhostStateToken {
+    static func ink(_ state: String) -> Color {
+        switch state {
+        case "running", "verifying": GhostStyle.signalInk
+        case "blocked", "pending", "unknown": GhostStyle.amberInk
+        case "done", "approved", "answered": GhostStyle.successInk
+        case "failed", "denied": GhostStyle.dangerInk
+        default: GhostStyle.secondary
+        }
+    }
+    static func tint(_ state: String) -> Color {
+        switch state {
+        case "running", "verifying": GhostStyle.signalTint
+        case "blocked", "pending", "unknown": GhostStyle.amberTint
+        case "done", "approved", "answered": GhostStyle.successTint
+        case "failed", "denied": GhostStyle.dangerTint
+        default: GhostStyle.under
+        }
+    }
+    static func workState(_ state: WorkState, needsOwner: Bool) -> String {
+        needsOwner && state != .blocked && !state.isTerminal ? "pending" : state.rawValue
+    }
+}
+
+struct TravellingArc: View {
+    var color = GhostStyle.signal
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
+            Circle().trim(from: 0.05, to: 0.75)
+                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(reduceMotion ? -90 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4 * 360))
+        }.accessibilityHidden(true)
+    }
+}
+
+/// A distinct shape for every state; the text badge supplies its accessible name.
+struct StateGlyph: View {
+    let state: String
+    var size: CGFloat = 18
+    var body: some View {
+        Group {
+            if state == "running" { TravellingArc(color: GhostStyle.signalInk) }
+            else {
+                Canvas { context, rect in
+                    let s = rect.width / 20
+                    context.scaleBy(x: s, y: s)
+                    let color = GraphicsContext.Shading.color(GhostStateToken.ink(state))
+                    var p = Path()
+                    let cutout = GraphicsContext.Shading.color(GhostStyle.canvas)
+                    switch state {
+                    case "waiting":
+                        context.stroke(Path(ellipseIn: CGRect(x: 3, y: 3, width: 14, height: 14)), with: color, lineWidth: 1.8)
+                        p.move(to: CGPoint(x: 8, y: 7.5)); p.addLine(to: CGPoint(x: 8, y: 12.5))
+                        p.move(to: CGPoint(x: 12, y: 7.5)); p.addLine(to: CGPoint(x: 12, y: 12.5))
+                        context.stroke(p, with: color, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                    case "verifying":
+                        context.stroke(Path(ellipseIn: CGRect(x: 3, y: 3, width: 14, height: 14)), with: color, lineWidth: 1.8)
+                        p.addArc(center: CGPoint(x: 10, y: 10), radius: 4.7, startAngle: .degrees(-90), endAngle: .degrees(90), clockwise: false)
+                        p.closeSubpath()
+                        context.fill(p, with: color)
+                    case "blocked", "pending", "unknown":
+                        context.fill(Path(ellipseIn: CGRect(x: 1.8, y: 1.8, width: 16.4, height: 16.4)), with: color)
+                        p.move(to: CGPoint(x: 10, y: 6)); p.addLine(to: CGPoint(x: 10, y: 10.6))
+                        context.stroke(p, with: cutout, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        context.fill(Path(ellipseIn: CGRect(x: 8.75, y: 12.5, width: 2.5, height: 2.5)), with: cutout)
+                    case "done", "approved", "answered":
+                        context.fill(Path(ellipseIn: CGRect(x: 1.8, y: 1.8, width: 16.4, height: 16.4)), with: color)
+                        p.move(to: CGPoint(x: 6.6, y: 10.25)); p.addLine(to: CGPoint(x: 8.9, y: 12.5)); p.addLine(to: CGPoint(x: 13.4, y: 7.75))
+                        context.stroke(p, with: cutout, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    case "failed", "denied":
+                        context.fill(Path(ellipseIn: CGRect(x: 1.8, y: 1.8, width: 16.4, height: 16.4)), with: color)
+                        p.move(to: CGPoint(x: 7.25, y: 7.25)); p.addLine(to: CGPoint(x: 12.75, y: 12.75))
+                        p.move(to: CGPoint(x: 12.75, y: 7.25)); p.addLine(to: CGPoint(x: 7.25, y: 12.75))
+                        context.stroke(p, with: cutout, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    case "cancelled":
+                        context.stroke(Path(ellipseIn: CGRect(x: 3, y: 3, width: 14, height: 14)), with: color, lineWidth: 1.8)
+                        p.move(to: CGPoint(x: 5.5, y: 14.5)); p.addLine(to: CGPoint(x: 14.5, y: 5.5))
+                        context.stroke(p, with: color, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                    default:
+                        context.stroke(Path(ellipseIn: CGRect(x: 3, y: 3, width: 14, height: 14)), with: color, style: StrokeStyle(lineWidth: 1.8, dash: [2.75, 2.6]))
+                    }
+                }
+            }
+        }.frame(width: size, height: size).accessibilityHidden(true)
+    }
+}
+
+struct LifecycleTrack: View {
+    let state: WorkState
+    var needsOwner = false
+    var compact = false
+    private let titles = ["접수", "진행", "검증", "완료"]
+    private var current: Int {
+        switch state {
+        case .queued: 0
+        case .running, .waiting, .blocked: 1
+        case .verifying: 2
+        case .done: 3
+        case .failed, .cancelled: 1
+        }
+    }
+    private var color: Color { GhostStateToken.ink(GhostStateToken.workState(state, needsOwner: needsOwner)) }
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(titles.indices, id: \.self) { index in
+                VStack(alignment: .leading, spacing: 6) {
+                    Capsule().fill(index == current ? color : (index < current ? color.opacity(0.30) : GhostStyle.border)).frame(height: compact ? 3 : 4)
+                    if !compact {
+                        Text(titles[index]).font(.caption2.weight(index == current ? .semibold : .regular))
+                            .foregroundStyle(index == current ? color : GhostStyle.secondary)
+                    }
+                }
+            }
+        }.accessibilityElement(children: .ignore).accessibilityLabel("진행 단계: \(titles[current])")
+    }
+}
+
+enum GhostPresence { case idle, working, needsOwner }
+
+/// The web's 100…900 portrait coordinate space, including the approved face.
+struct GhostPortrait: View {
+    var ghost: Ghost?
+    var size: CGFloat = 48
+    var presence: GhostPresence = .idle
+    private var hex: UInt32 {
+        if let body = ghost?.look.body, body.count == 7, body.first == "#",
+           let value = UInt32(body.dropFirst(), radix: 16) { return value }
+        return UInt32(GhostAppearance.defaultBodyColor(id: ghost?.id ?? "").dropFirst(), radix: 16)!
+    }
+    private var faceColor: Color {
+        let color = hex
+        func linearChannel(_ shift: Int) -> Double {
+            let v = Double((color >> shift) & 255) / 255
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        return linearChannel(16) * 0.2126 + linearChannel(8) * 0.7152 + linearChannel(0) * 0.0722 > 0.179 ? .black : .white
+    }
+    var body: some View {
+        Canvas { context, bounds in
+            context.scaleBy(x: bounds.width / 800, y: bounds.height / 800)
+            context.translateBy(x: -100, y: -100)
+            let body = GraphicsContext.Shading.color(GhostStyle.color(hex))
+            let face = GraphicsContext.Shading.color(faceColor)
+            drawMark(context: &context, color: body, front: false)
+            context.fill(Path(ellipseIn: CGRect(x: 212, y: 212, width: 576, height: 576)), with: body)
+            var eyes = Path()
+            switch ghost?.look.face ?? .bars {
+            case .bars:
+                for x: CGFloat in [384, 538] { eyes.addRoundedRect(in: CGRect(x: x, y: 403, width: 78, height: 27), cornerSize: CGSize(width: 13.5, height: 13.5)) }
+            case .dots:
+                for x: CGFloat in [399, 553] { eyes.addEllipse(in: CGRect(x: x, y: 393, width: 48, height: 48)) }
+            case .tall:
+                for x: CGFloat in [404, 558] { eyes.addRoundedRect(in: CGRect(x: x, y: 384, width: 38, height: 66), cornerSize: CGSize(width: 19, height: 19)) }
+            case .arcs:
+                for x: CGFloat in [391, 545] {
+                    eyes.move(to: CGPoint(x: x, y: 428))
+                    eyes.addQuadCurve(to: CGPoint(x: x + 64, y: 428), control: CGPoint(x: x + 32, y: 392))
+                }
+            }
+            if ghost?.look.face == .arcs { context.stroke(eyes, with: face, style: StrokeStyle(lineWidth: 26, lineCap: .round)) }
+            else { context.fill(eyes, with: face) }
+            context.fill(Path(ellipseIn: CGRect(x: 485, y: 469, width: 30, height: 30)), with: face)
+            drawMark(context: &context, color: body, front: true)
+        }
+        .overlay {
+            if presence == .working { TravellingArc().padding(2) }
+            if presence == .needsOwner {
+                Circle().trim(from: 0.035, to: 0.965).stroke(GhostStyle.amber, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90)).padding(2)
+                Capsule().fill(GhostStyle.amber).frame(width: 3, height: 7).offset(y: -size / 2 + 3)
+            }
+        }
+        .frame(width: size, height: size).accessibilityHidden(true)
+    }
+
+    private func drawMark(context: inout GraphicsContext, color: GraphicsContext.Shading, front: Bool) {
+        let mark = ghost?.look.mark ?? .none
+        if mark == .ring {
+            var ring = Path()
+            ring.addArc(center: CGPoint(x: 500, y: 500), radius: 372, startAngle: .degrees(front ? 0 : 180), endAngle: .degrees(front ? 180 : 360), clockwise: false)
+            let flattened = ring.applying(CGAffineTransform(translationX: -500, y: -500))
+                .applying(CGAffineTransform(scaleX: 1, y: 92.0 / 372))
+                .applying(CGAffineTransform(rotationAngle: -.pi / 15))
+                .applying(CGAffineTransform(translationX: 500, y: 500))
+            context.opacity = front ? 1 : 0.45
+            context.stroke(flattened, with: color, style: StrokeStyle(lineWidth: 26, lineCap: .round))
+            context.opacity = 1
+            return
+        }
+        guard !front else { return }
+        var p = Path()
+        switch mark {
+        case .halo:
+            context.stroke(Path(ellipseIn: CGRect(x: 350, y: 124, width: 300, height: 68)), with: color, lineWidth: 24)
+        case .antenna:
+            p.addRoundedRect(in: CGRect(x: 488, y: 128, width: 24, height: 96), cornerSize: CGSize(width: 12, height: 12))
+            p.addEllipse(in: CGRect(x: 466, y: 92, width: 68, height: 68))
+        case .sprout:
+            p.move(to: CGPoint(x: 500, y: 214))
+            p.addCurve(to: CGPoint(x: 418, y: 138), control1: CGPoint(x: 500, y: 170), control2: CGPoint(x: 470, y: 140))
+            p.addCurve(to: CGPoint(x: 500, y: 214), control1: CGPoint(x: 420, y: 186), control2: CGPoint(x: 452, y: 214))
+            p.move(to: CGPoint(x: 500, y: 214))
+            p.addCurve(to: CGPoint(x: 600, y: 120), control1: CGPoint(x: 500, y: 160), control2: CGPoint(x: 536, y: 122))
+            p.addCurve(to: CGPoint(x: 500, y: 214), control1: CGPoint(x: 598, y: 178), control2: CGPoint(x: 556, y: 214))
+        case .spark:
+            p.move(to: CGPoint(x: 790, y: 170))
+            p.addCurve(to: CGPoint(x: 870, y: 250), control1: CGPoint(x: 798, y: 222), control2: CGPoint(x: 818, y: 242))
+            p.addCurve(to: CGPoint(x: 790, y: 330), control1: CGPoint(x: 818, y: 258), control2: CGPoint(x: 798, y: 278))
+            p.addCurve(to: CGPoint(x: 710, y: 250), control1: CGPoint(x: 782, y: 278), control2: CGPoint(x: 762, y: 258))
+            p.addCurve(to: CGPoint(x: 790, y: 170), control1: CGPoint(x: 762, y: 242), control2: CGPoint(x: 782, y: 222))
+        case .none, .ring: break
+        }
+        context.fill(p, with: color)
+    }
+}
+
+/// Explicit label/fill tokens keep primary actions legible in both appearances.
+struct GhostPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(isEnabled ? GhostStyle.onInk : GhostStyle.secondary)
+            .padding(.horizontal, 16).padding(.vertical, 10).frame(minHeight: 44)
+            .background(isEnabled ? GhostStyle.ink : GhostStyle.ink.opacity(0.12), in: Capsule())
+            .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }

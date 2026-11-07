@@ -587,6 +587,65 @@ fn probe() -> Result<Value, String> {
     }
 }
 
+/// Present a sheet without nesting an event loop inside Tauri's main-thread callback.
+/// Only the main window has permission to ask for a project folder.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn pick_folder(window: WebviewWindow) -> Result<Option<String>, String> {
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    let main_window = window.clone();
+    window
+        .run_on_main_thread(move || {
+            if let Err(error) = begin_project_folder_sheet(&main_window, sender.clone()) {
+                let _ = sender.try_send(Err(error));
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    receiver
+        .recv()
+        .await
+        .ok_or_else(|| "폴더 선택 창의 응답을 받지 못했습니다.".to_string())?
+}
+
+#[cfg(target_os = "macos")]
+fn begin_project_folder_sheet(
+    window: &WebviewWindow,
+    sender: tauri::async_runtime::Sender<Result<Option<String>, String>>,
+) -> Result<(), String> {
+    use block2::RcBlock;
+    use objc2_app_kit::{NSModalResponseCancel, NSModalResponseOK, NSOpenPanel, NSWindow};
+    // Foundation still re-exports this marker; use the already-present crate.
+    #[allow(deprecated)]
+    let main_thread = objc2_foundation::MainThreadMarker::new()
+        .ok_or("폴더 선택 창은 메인 스레드에서 열어야 합니다.")?;
+    let pointer = window.ns_window().map_err(|error| error.to_string())?;
+    // SAFETY: Tauri supplies this window's live NSWindow; this function runs on
+    // the main thread and the borrowed window stays alive while presenting it.
+    let parent = unsafe { &*pointer.cast::<NSWindow>() };
+    let panel = NSOpenPanel::openPanel(main_thread);
+    panel.setCanChooseDirectories(true);
+    panel.setCanChooseFiles(false);
+    panel.setAllowsMultipleSelection(false);
+    let selected_panel = panel.clone();
+    let completion = RcBlock::new(move |response| {
+        let result = if response == NSModalResponseOK {
+            selected_panel
+                .URL()
+                .and_then(|url| url.path())
+                .map(|path| Some(path.to_string()))
+                .ok_or_else(|| "선택한 폴더 경로를 읽지 못했습니다.".into())
+        } else if response == NSModalResponseCancel {
+            Ok(None)
+        } else {
+            Err("폴더 선택 창을 열지 못했습니다.".into())
+        };
+        selected_panel.orderOut(None);
+        let _ = sender.try_send(result);
+    });
+    panel.beginSheetModalForWindow_completionHandler(parent, &completion);
+    Ok(())
+}
+
 /// Move the window with the pointer from a title bar press.
 ///
 /// Tauri's `start_dragging` hands AppKit whatever event is current when the IPC
@@ -640,7 +699,7 @@ fn main() {
     }
     #[cfg(target_os = "macos")]
     let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool =
-        tauri::generate_handler![drag_window, open_external_url];
+        tauri::generate_handler![drag_window, open_external_url, pick_folder];
     #[cfg(not(target_os = "macos"))]
     let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool =
         tauri::generate_handler![drag_window];

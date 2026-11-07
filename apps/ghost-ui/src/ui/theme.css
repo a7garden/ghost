@@ -6,8 +6,9 @@
 :root {
   color-scheme: light;
   --ghost-ink: #141518;
-  --ghost-ink2: color-mix(in srgb, var(--ghost-ink) 62%, transparent);
-  --ghost-ink3: color-mix(in srgb, var(--ghost-ink) 40%, transparent);
+  /* Text tiers keep WCAG AA (4.5:1) on page, canvas and surface; ink4 is decoration only. */
+  --ghost-ink2: color-mix(in srgb, var(--ghost-ink) 74%, transparent);
+  --ghost-ink3: color-mix(in srgb, var(--ghost-ink) 61%, transparent);
   --ghost-ink4: color-mix(in srgb, var(--ghost-ink) 22%, transparent);
   --ghost-page: #f3f3f1;
   --ghost-canvas: #fafaf9;
@@ -81,6 +82,8 @@
 .dark {
   color-scheme: dark;
   --ghost-ink: #ececee;
+  --ghost-ink2: color-mix(in srgb, var(--ghost-ink) 70%, transparent);
+  --ghost-ink3: color-mix(in srgb, var(--ghost-ink) 53%, transparent);
   --ghost-page: #0c0c0e;
   --ghost-canvas: #121214;
   --ghost-surface: #18181b;

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Threads open in a panel beside the conversation (`?thread=`): status, lifecycle,
+  decisions resolved in place, delegated threads and the live work conversation.
+- Secondary and meta text now meet WCAG AA in both themes (ink2/ink3 retuned; audited
+  on home, 확인할 일, 맡긴 일, work detail, conversation and model settings).
+- Removed the display-wide Ghost color preference; colors live only in each Ghost's look,
+  and the avatar library previews the Ghost's own look.
+- Home shows a setup card while no provider can run Ghosts; other pages' warning banner
+  links to model settings. The default model's reasoning level is selectable.
+
 - One durable conversation per Ghost: removed 새 대화 and the conversation switcher;
   the home composer talks into that conversation. Work it spins off shows as live
   thread cards where it started and in a thread list; older direct conversations stay

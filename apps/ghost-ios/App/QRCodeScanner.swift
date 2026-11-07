@@ -219,6 +219,7 @@ struct QRScannerSheet: View {
                 }
             }
         }
+        .preferredColorScheme(.dark)
         .task {
             guard controller == nil else { return }
             let sink = sink
@@ -264,7 +265,7 @@ struct QRScannerSheet: View {
                         UIApplication.shared.open(url)
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(GhostPrimaryButtonStyle())
                 Button("닫기") { dismiss() }
             }
             .padding(24)

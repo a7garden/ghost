@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, CircleAlert, GitBranch, Square, X } from 'lucide-react';
 import { Button, Composer, Conversation, Popover, PopoverContent, PopoverTrigger } from '../ui'
-import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Live, type Message, type State, type Work } from '@ghost/contract';
+import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
 import { StateGlyph, ThreadCard, workGlyph } from '../components/agent';
-import { Reasoning, Transcript, ToolTrail, type TranscriptExtra } from '../components/TranscriptMessage';
-import { MessageBody } from '../components/MessageBody';
+import { LiveReply, Transcript, type TranscriptExtra } from '../components/TranscriptMessage';
 import { ModelPicker } from '../pets/ModelPicker';
 import { GhostDesignEditor } from './GhostDesign';
+import { ThreadPanel } from './ThreadPanel';
+import { useConversationFeed } from './conversationFeed';
 import { conversationStarters } from './conversationSuggestions';
 import { profileSummary } from './profileSummary';
 import { ghostPresence, toneFor } from './ghostState';
@@ -17,72 +18,31 @@ import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { useHost } from '../host/context';
 
-type Page = { messages: Message[]; before: string | null; live: Live | null };
-
 /**
  * The owner's conversation with one Ghost. Each Ghost keeps one durable conversation;
  * the work it takes on branches off as threads (맡긴 일), shown where they started and
  * gathered behind the thread button. Older direct conversations stay readable there.
  */
-export function GhostChat({ ghost, state, conversationId, navigate }: {
+export function GhostChat({ ghost, state, conversationId, threadId, navigate }: {
   ghost: Ghost;
   state: State;
   /** The conversation on screen; null when this Ghost has none yet. */
   conversationId: string | null;
+  /** A thread opened beside the conversation (`?thread=`). */
+  threadId: string | null;
   navigate(path: string): void;
 }) {
-  const { store, client } = useHost();
+  const { client } = useHost();
   const now = useNow();
   const conversations = state.conversations
     .filter(conversation => conversation.ghostId === ghost.id && conversation.kind === 'direct')
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-  const [page, setPage] = useState<Page>({ messages: [], before: null, live: null });
-  const [loading, setLoading] = useState(false);
-  const [olderLoading, setOlderLoading] = useState(false);
-  const [error, setError] = useState('');
+  const { feed: page, loading, olderLoading, loadOlder, error, setError } = useConversationFeed(conversationId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [followKey, setFollowKey] = useState(0);
-  const openConversation = useRef(conversationId);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  openConversation.current = conversationId;
   useEffect(() => { if (!sending) inputRef.current?.focus(); }, [sending]);
-
-  const load = useCallback(async (id: string, before?: string | null) => {
-    if (before === undefined) { setLoading(true); setPage({ messages: [], before: null, live: null }); }
-    else setOlderLoading(true);
-    try {
-      const next = await client.conversation(id, before ?? undefined);
-      if (openConversation.current !== id) return;
-      setPage(current => before
-        ? { messages: [...next.messages, ...current.messages], before: next.before, live: next.live ?? current.live }
-        : { messages: next.messages, before: next.before, live: next.live });
-    } catch (e) {
-      if (openConversation.current === id) setError(e instanceof Error ? e.message : '대화 기록을 읽지 못했습니다.');
-    } finally {
-      if (before !== undefined) setOlderLoading(false); else setLoading(false);
-    }
-  }, [client]);
-
-  useEffect(() => { if (conversationId) void load(conversationId); else setPage({ messages: [], before: null, live: null }); }, [conversationId, load]);
-
-  // Live frames: finished messages append to the transcript; partial text, reasoning and tool output stream under them.
-  // An owner message does not end the generation, so only the Ghost's own messages retire the live view.
-  useEffect(() => {
-    if (!conversationId) return;
-    return store.watchConversation(conversationId, event => {
-      if (openConversation.current !== conversationId) return;
-      if (event.type === 'message') {
-        const message = event.message;
-        setPage(current => {
-          const index = current.messages.findIndex(item => item.id === message.id);
-          const messages = index < 0 ? [...current.messages, message]
-            : current.messages.map((item, at) => at === index ? message : item);
-          return { ...current, messages, live: message.role === 'user' ? current.live : null };
-        });
-      } else setPage(current => ({ ...current, live: event.live }));
-    });
-  }, [store, conversationId]);
 
   const run = async (fn: () => Promise<unknown>) => { setError(''); try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다.'); } };
   const send = (value: string) => {
@@ -95,6 +55,10 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
     }).finally(() => setSending(false));
   };
   const stop = () => { if (conversationId) void run(() => client.send({ type: 'message.cancel', conversationId })); };
+  // The thread lives in the URL so it survives reloads and can be linked; the conversation stays put.
+  const chatPath = `/ghosts/${encodeURIComponent(ghost.id)}${conversationId && conversationId !== ghost.directConversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ''}`;
+  const openThread = (id: string) => navigate(`${chatPath}${chatPath.includes('?') ? '&' : '?'}thread=${encodeURIComponent(id)}`);
+  const closeThread = () => navigate(chatPath);
 
   const live = page.live;
   const hasContent = page.messages.length > 0 || Boolean(live?.running);
@@ -109,9 +73,9 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
   const extras: TranscriptExtra[] = conversationId ? state.works
     .filter(work => work.originConversationId === conversationId && !work.parentId)
     .map(work => ({ key: `thread:${work.id}`, at: work.createdAt, node: <ThreadCard work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'}
-      needsOwner={waiting.has(work.id)} now={now} onOpen={() => openWork(work.id)}/> })) : [];
+      needsOwner={waiting.has(work.id)} now={now} onOpen={() => openThread(work.id)}/> })) : [];
 
-  return <div className="flex h-full min-h-0 w-full min-w-0">
+  return <div className="chat-layout" data-thread={threadId ? '' : undefined}>
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
       scrollKey={`${page.messages.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
       overlay={<>
@@ -124,7 +88,7 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
             isMain={ghost.isDefault}/>
         </div>
         <Threads ghost={ghost} state={state} conversations={conversations} currentId={conversationId} waiting={waiting} now={now}
-          onOpenWork={openWork} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
+          onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
           onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
       </>}
       composer={<Composer inputId="message-input" inputRef={inputRef} value={draft} onValueChange={setDraft} onSubmit={send}
@@ -144,22 +108,15 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
       </div>}
       {loading && <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>}
       {conversationId && page.before && <div className="grid justify-items-center">
-        <button type="button" className="link-quiet" disabled={olderLoading} onClick={() => void load(conversationId, page.before)}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
+        <button type="button" className="link-quiet" disabled={olderLoading} onClick={loadOlder}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
       </div>}
       <Transcript messages={page.messages} speaker={speaker} extras={extras}
         onUiSubmit={message => message.conversationId === conversationId ? async (text, requestId) => {
           await client.send({ type: 'message.send', conversationId: message.conversationId, text }, requestId);
         } : undefined}/>
-      {live?.running && live.tools.length > 0 && <ToolTrail results={[]} running={live.tools}/>}
-      {live?.running && <article className="ghost-conversation-message chat-live" data-role="assistant" aria-label={`${ghost.name} · 응답 작성 중`} aria-busy="true">
-        <div className="ghost-conversation-message__content">
-          {live.thinking && <Reasoning text={live.thinking} live={!live.partial}/>}
-          {live.partial
-            ? <div className="chat-live__text"><MessageBody text={live.partial}/></div>
-            : !live.thinking && <div className="chat-thinking" role="status"><DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={20}/><span>응답 중</span></div>}
-        </div>
-      </article>}
+      {live && <LiveReply live={live} ghostId={ghost.id} ghostName={ghost.name}/>}
     </Conversation>
+    {threadId && <ThreadPanel key={threadId} workId={threadId} state={state} onClose={closeThread} onOpenThread={openThread} onOpenPage={openWork}/>}
   </div>;
 }
 

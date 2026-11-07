@@ -7,7 +7,9 @@ struct HistoryPreference: PreferenceKey {
 }
 
 struct MessageHistory: View {
-    let ghostName: String
+    let model: GhostModel
+    let ghost: Ghost?
+    let works: [Work]
     let messages: [Message]
     var live: Live?
     let scrollRequest: UUID
@@ -17,18 +19,38 @@ struct MessageHistory: View {
     private let bottomID = "history-bottom"
 
     var body: some View {
+        let transcript = rows
         GeometryReader { viewport in
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 20) {
-                        if rows.isEmpty {
-                            GhostEmptyConversation()
+                        if transcript.isEmpty {
+                            GhostEmptyConversation(ghost: ghost)
                         }
-                        ForEach(rows) { row in
+                        ForEach(transcript) { row in
                             rowView(row)
                         }
-                        if let live, live.running, let partial = live.partial, !partial.isEmpty {
-                            streamingBubble(partial)
+                        if let live, live.running {
+                            VStack(alignment: .leading, spacing: 12) {
+                                if let thinking = live.thinking, !thinking.isEmpty {
+                                    ReasoningDisclosure(text: thinking, isThinking: live.partial?.isEmpty != false)
+                                        .padding(.leading, 42)
+                                }
+                                if let partial = live.partial, !partial.isEmpty { streamingBubble(partial) }
+                                if !live.tools.isEmpty {
+                                    DisclosureGroup {
+                                        ForEach(live.tools, id: \.callId) { tool in
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                Text(tool.name).font(.caption.monospaced().weight(.medium))
+                                                Text(tool.output).font(.caption.monospaced()).textSelection(.enabled)
+                                            }.padding(.vertical, 6)
+                                        }
+                                    } label: {
+                                        Label(live.tools.map(\.name).joined(separator: " · "), systemImage: "gearshape")
+                                            .font(.caption).foregroundStyle(GhostStyle.secondary)
+                                    }
+                                }
+                            }
                         }
                         Color.clear.frame(height: 1).id(bottomID).accessibilityHidden(true)
                     }
@@ -46,7 +68,7 @@ struct MessageHistory: View {
                 .coordinateSpace(name: "history")
                 .accessibilityIdentifier("chat-history")
                 .scrollDismissesKeyboard(.interactively)
-                .modifier(ObserveHistoryGeometry { nearBottom in
+                .modifier(ObserveHistoryGeometry(followsLatest: followsLatest) { nearBottom in
                     followsLatest = nearBottom
                     if nearBottom { hasNewMessages = false }
                 })
@@ -61,58 +83,101 @@ struct MessageHistory: View {
                     }
                 }
                 .task { proxy.scrollTo(bottomID, anchor: .bottom) }
-                .onChange(of: rows.last) {
+                .onChange(of: transcript.last) {
                     if followsLatest { proxy.scrollTo(bottomID, anchor: .bottom) }
                     else { hasNewMessages = true }
                 }
                 .onChange(of: scrollRequest) { jumpToLatest(proxy) }
+                .onChange(of: live) { if followsLatest { proxy.scrollTo(bottomID, anchor: .bottom) } }
                 .onChange(of: viewport.size.height) { if followsLatest { proxy.scrollTo(bottomID, anchor: .bottom) } }
             }
         }
+        .background(GhostStyle.canvas)
     }
 
-    private var rows: [Message] { messages }
+    private enum Row: Identifiable, Equatable {
+        case message(Message), tools([Message]), work(Work)
+        var id: String {
+            switch self {
+            case .message(let m): "message-\(m.id)"
+            case .tools(let tools): "tools-\(tools[0].id)"
+            case .work(let work): "work-\(work.id)"
+            }
+        }
+    }
+    private var rows: [Row] {
+        var entries: [(at: Int, row: Row)] = []
+        entries.reserveCapacity(messages.count + works.count)
+        for message in messages { entries.append((message.createdAt, .message(message))) }
+        for work in works { entries.append((work.createdAt, .work(work))) }
+        entries.sort { $0.at == $1.at ? $0.row.id < $1.row.id : $0.at < $1.at }
+        var result: [Row] = []
+        result.reserveCapacity(entries.count)
+        var trail: [Message] = []
+        for entry in entries {
+            if case .message(let message) = entry.row, message.role == .tool {
+                trail.append(message)
+            } else {
+                if !trail.isEmpty { result.append(.tools(trail)); trail = [] }
+                result.append(entry.row)
+            }
+        }
+        if !trail.isEmpty { result.append(.tools(trail)) }
+        return result
+    }
 
-    @ViewBuilder
-    private func rowView(_ message: Message) -> some View {
-        switch message.role {
-        case .user:
-            GhostMessageBubble(text: message.text, isUser: true, label: "나") { EmptyView() }
-        case .assistant:
-            GhostMessageBubble(text: message.text, isUser: false, label: ghostName) {
-                if !message.attachments.isEmpty {
-                    attachmentsRow(message.attachments)
+    @ViewBuilder private func rowView(_ row: Row) -> some View {
+        switch row {
+        case .work(let work):
+            NavigationLink { WorkDetailScreen(model: model, workId: work.id) } label: {
+                WorkThreadCard(model: model, work: work)
+            }.buttonStyle(.plain).accessibilityIdentifier("thread-\(work.id)")
+        case .tools(let tools):
+            DisclosureGroup {
+                ForEach(tools) { tool in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(tool.tool?.name ?? "도구").font(.caption.monospaced().weight(.medium))
+                        Text(tool.text).font(.caption.monospaced()).textSelection(.enabled)
+                    }.foregroundStyle(tool.tool?.isError == true ? GhostStyle.dangerInk : GhostStyle.secondary)
+                        .padding(.vertical, 6)
                 }
-            }
-        case .tool:
-            VStack(alignment: .leading, spacing: 4) {
-                Label {
-                    Text(message.tool?.name ?? "도구").font(.caption.weight(.medium))
-                } icon: {
-                    Image(systemName: message.tool?.isError == true ? "exclamationmark.circle" : "gearshape")
+            } label: {
+                Label(tools.map { $0.tool?.name ?? "도구" }.joined(separator: " · "), systemImage: "gearshape")
+                    .font(.caption).foregroundStyle(GhostStyle.secondary)
+            }.padding(12).background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 12))
+        case .message(let message):
+            if let origin = message.origin, origin != "owner" {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "arrow.turn.down.right").padding(.top, 2)
+                    Text(message.text).textSelection(.enabled)
                 }
-                .foregroundStyle(message.tool?.isError == true ? GhostStyle.warning : GhostStyle.secondary)
-                if !message.text.isEmpty {
-                    Text(message.text)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(GhostStyle.secondary)
-                        .lineLimit(6)
-                        .textSelection(.enabled)
-                }
-            }
-            .padding(12)
-            .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 12))
-            .frame(maxWidth: 680, alignment: .leading)
-        case .note:
-            Text(message.text)
                 .font(.caption).foregroundStyle(GhostStyle.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 2)
+                .padding(.vertical, 4).padding(.leading, 12)
+                .accessibilityIdentifier("event-\(message.id)")
+            } else {
+                switch message.role {
+                case .user:
+                    GhostMessageBubble(text: message.text, isUser: true, label: "나") { EmptyView() }
+                case .assistant:
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let thinking = message.thinking, !thinking.isEmpty {
+                            ReasoningDisclosure(text: thinking, isThinking: false).padding(.leading, 42)
+                        }
+                        GhostMessageBubble(text: message.text, isUser: false, label: ghost?.name ?? "Ghost", ghost: ghost) {
+                            if !message.attachments.isEmpty { attachmentsRow(message.attachments) }
+                        }
+                    }
+                case .tool: EmptyView() // Consecutive tools are grouped above.
+                case .note:
+                    Text(message.text).font(.caption).foregroundStyle(GhostStyle.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 2)
+                }
+            }
         }
     }
 
     private func streamingBubble(_ text: String) -> some View {
-        GhostMessageBubble(text: text, isUser: false, label: ghostName) {
+        GhostMessageBubble(text: text, isUser: false, label: ghost?.name ?? "Ghost", ghost: ghost) {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.mini)
                 Text("입력 중").font(.caption).foregroundStyle(GhostStyle.secondary)
@@ -123,12 +188,18 @@ struct MessageHistory: View {
     @ViewBuilder
     private func attachmentsRow(_ attachments: [ArtifactRef]) -> some View {
         // Attachment names only; opening artifact bytes is a work-detail surface.
-        HStack {
-            ForEach(attachments, id: \.digest) { attachment in
-                Label(attachment.name, systemImage: "paperclip")
-                    .font(.caption)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(GhostStyle.under, in: Capsule())
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                ForEach(attachments, id: \.digest) { attachment in
+                    Label(attachment.name, systemImage: "paperclip")
+                        .font(.caption).padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(GhostStyle.under, in: Capsule())
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(attachments, id: \.digest) { attachment in
+                    Label(attachment.name, systemImage: "paperclip").font(.caption)
+                }
             }
         }
     }
@@ -139,13 +210,45 @@ struct MessageHistory: View {
     }
 }
 
+struct ReasoningDisclosure: View {
+    let text: String
+    let isThinking: Bool
+    @State private var expanded = false
+    private var lines: [Substring] { text.split(whereSeparator: \.isNewline) }
+    private var newestStep: String { String(lines.last ?? "").trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "**", with: "") }
+    var body: some View {
+        DisclosureGroup(isExpanded: Binding(
+            get: { isThinking || expanded },
+            set: { expanded = $0 })) {
+                Text(isThinking ? lines.dropLast().suffix(3).joined(separator: "\n").replacingOccurrences(of: "**", with: "") : text)
+                    .font(.footnote).lineSpacing(4).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        if isThinking { StateGlyph(state: "running", size: 13) }
+                        Text(isThinking ? "생각 중" : "생각 과정").font(.caption.weight(.medium))
+                    }
+                    if isThinking, !newestStep.isEmpty {
+                        Text(newestStep).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .foregroundStyle(GhostStyle.secondary)
+            .onChange(of: isThinking) { expanded = false }
+            .accessibilityIdentifier(isThinking ? "live-reasoning" : "message-reasoning")
+    }
+}
+
 struct ObserveHistoryGeometry: ViewModifier {
+    let followsLatest: Bool
     let update: (Bool) -> Void
     @State private var userScrolling = false
     func body(content: Content) -> some View {
         if #available(iOS 18, *) {
             content.defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(.top, for: .alignment)
+            .defaultScrollAnchor(followsLatest ? .bottom : nil, for: .sizeChanges)
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentSize.height - geometry.visibleRect.maxY < 80
             } action: { _, nearBottom in

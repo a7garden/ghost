@@ -61,7 +61,7 @@ frame을 차단한다.
 ## 검증
 
 ```sh
-cd apps/ghost-ios && swift test
+(cd apps/ghost-ios && swift test)
 xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost \
   -destination 'platform=iOS Simulator,name=iPhone 18 Pro' build
 ```
@@ -69,6 +69,15 @@ xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost \
 UI 테스트는 `--ui-testing` Debug 전용 fixture를 사용한다. fixture는 예약된
 `.invalid` 호스트를 URLProtocol로 처리하고 실제 네트워크와 변경 요청을 거부한다.
 `--review-width=320|375|414|768`은 네이티브 레이아웃 검토 전용이다.
+`--design-review`는 같은 fixture에 실시간·완료된 생각 과정, 호스트 이벤트,
+Work 스레드, 질문·승인·결과 결정을 추가한다.
+`MobileRedesignUITests.testShippedDesignLightAndDark`는 두 테마의 대화·결정·Work
+화면을 XCTest 첨부 파일로 보존한다. 다음 명령으로 내보낸다.
+`xcrun xcresulttool export attachments --path <result.xcresult> --output-path /tmp/ghost-shots/ios`.
+
+이전 메시지 스크롤 검증에는 `--long-conversation`, 새 메시지 수신 검증에는
+`--ui-testing-incoming`을 쓴다. 실제 호스트에 연결하는 검증은 명시적으로
+페어링한 테스트 호스트와 `GHOST_E2E=1`이 필요하다. 기본 실행에서는 건너뛴다.
 
 앱 아이콘 재생성: 이 저장소 루트에서
 `swift apps/ghost-ios/generate-icon.swift apps/ghost-ios/App/Assets.xcassets/AppIcon.appiconset/Ghost-1024.png`.

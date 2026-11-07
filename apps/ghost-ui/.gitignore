@@ -3,3 +3,5 @@ dist/
 *.tsbuildinfo
 .env*
 !.env.example
+test-results/
+e2e/.run/

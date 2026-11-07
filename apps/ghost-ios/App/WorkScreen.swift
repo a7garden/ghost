@@ -25,6 +25,7 @@ struct WorkListScreen: View {
                     Section("진행 중") {
                         ForEach(active) { work in
                             NavigationLink(value: work.id) { WorkRow(model: model, work: work) }
+                                .accessibilityIdentifier("work-\(work.id)")
                         }
                     }
                 }
@@ -32,6 +33,7 @@ struct WorkListScreen: View {
                     Section("완료") {
                         ForEach(settled) { work in
                             NavigationLink(value: work.id) { WorkRow(model: model, work: work) }
+                                .accessibilityIdentifier("work-\(work.id)")
                         }
                     }
                 }
@@ -63,7 +65,7 @@ private struct WorkRow: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(work.title).font(.subheadline.weight(.medium)).lineLimit(2)
             HStack(spacing: 8) {
-                GhostStatusBadge(state: work.state.rawValue)
+                GhostStatusBadge(state: GhostStateToken.workState(work.state, needsOwner: model.snapshot.decisions.contains { $0.workId == work.id && $0.isPending }))
                 Text(model.ghostName(work.ghostId)).font(.caption).foregroundStyle(GhostStyle.secondary)
                 if let deadline = work.deadlineAt, !work.state.isTerminal {
                     Text("기한 \(model.deadlineText(deadline))").font(.caption).foregroundStyle(GhostStyle.secondary)
@@ -71,7 +73,33 @@ private struct WorkRow: View {
             }
         }
         .padding(.vertical, 4)
-        .accessibilityIdentifier("work-\(work.id)")
+    }
+}
+
+struct WorkThreadCard: View {
+    let model: GhostModel
+    let work: Work
+    private var needsOwner: Bool { model.snapshot.decisions.contains { $0.workId == work.id && $0.isPending } }
+    private var displayState: String { GhostStateToken.workState(work.state, needsOwner: needsOwner) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                StateGlyph(state: displayState, size: 20).padding(.top, 2)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(work.title).font(.callout.weight(.semibold)).foregroundStyle(GhostStyle.ink)
+                    HStack(spacing: 6) {
+                        GhostPortrait(ghost: model.ghost(work.ghostId), size: 24)
+                        Text(model.ghostName(work.ghostId)).font(.caption).foregroundStyle(GhostStyle.secondary)
+                        Spacer(minLength: 4)
+                        GhostStatusBadge(state: displayState)
+                    }
+                }
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(GhostStyle.secondary).padding(.top, 4)
+            }
+            LifecycleTrack(state: work.state, needsOwner: needsOwner, compact: true)
+        }.padding(16).frame(maxWidth: 680, alignment: .leading)
+            .background(GhostStyle.surface, in: RoundedRectangle(cornerRadius: 18))
+            .shadow(color: GhostStyle.shadow, radius: 8, y: 2)
     }
 }
 
@@ -138,10 +166,11 @@ struct WorkDetailScreen: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(detail.work.title).font(.title3.weight(.semibold))
                 HStack(spacing: 8) {
-                    GhostStatusBadge(state: detail.work.state.rawValue)
+                    GhostStatusBadge(state: GhostStateToken.workState(detail.work.state, needsOwner: detail.decisions.contains { $0.isPending }))
                     Text(model.ghostName(detail.work.ghostId)).font(.caption).foregroundStyle(GhostStyle.secondary)
                     Text("수정 \(detail.work.revision)회차").font(.caption).foregroundStyle(GhostStyle.secondary)
                 }
+                LifecycleTrack(state: detail.work.state, needsOwner: detail.decisions.contains { $0.isPending }).padding(.vertical, 8)
                 if let deadline = detail.work.deadlineAt {
                     LabeledContent("기한", value: model.deadlineText(deadline))
                 }
@@ -174,7 +203,7 @@ struct WorkDetailScreen: View {
             }
             if work.state == .failed || work.state == .blocked, work.parentId == nil {
                 Button("재개") { confirmingResume = true }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(GhostPrimaryButtonStyle())
                     .disabled(model.busy || !model.isOnline)
                     .accessibilityIdentifier("work-resume")
             }
@@ -239,18 +268,18 @@ struct WorkDetailScreen: View {
     private func decisionsSection(_ detail: WorkDetail) -> some View {
         Section("관련 결정") {
             ForEach(detail.decisions) { decision in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(decision.title).font(.subheadline)
-                    HStack(spacing: 8) {
-                        GhostStatusBadge(state: decision.state == .pending ? "pending" : decision.state.rawValue)
-                        Text(model.ghostName(decision.ghostId)).font(.caption).foregroundStyle(GhostStyle.secondary)
-                    }
-                    if let answer = decision.answer, !answer.isEmpty {
-                        Text(answer).font(.footnote).foregroundStyle(GhostStyle.secondary).lineLimit(2)
-                    }
-                }.padding(.vertical, 2)
+                if decision.isPending {
+                    DecisionCard(model: model, decision: decision)
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(decision.title).font(.subheadline)
+                        GhostStatusBadge(state: decision.state.rawValue)
+                        if let answer = decision.answer, !answer.isEmpty {
+                            Text(answer).font(.footnote).foregroundStyle(GhostStyle.secondary)
+                        }
+                    }.padding(.vertical, 2)
+                }
             }
-            Text("결정은 소식 탭의 확인 필요에서 처리합니다.").font(.caption).foregroundStyle(GhostStyle.secondary)
         }
     }
 

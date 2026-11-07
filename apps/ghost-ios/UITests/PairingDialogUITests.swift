@@ -28,7 +28,9 @@ import XCTest
 /// Opens the paired conversation so the transcript can be captured against
 /// a real host.
 @MainActor final class PairedConversationUITests: XCTestCase {
-    func testOpensPairedConversation() {
+    func testOpensPairedConversation() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["GHOST_E2E"] == "1",
+                          "Requires an explicitly paired test host; set GHOST_E2E=1.")
         let app = XCUIApplication()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for candidate in [springboard.buttons["허용 안 함"], app.buttons["허용 안 함"]] {

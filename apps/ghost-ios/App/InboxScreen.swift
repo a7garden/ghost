@@ -104,7 +104,7 @@ struct InboxScreen: View {
 }
 
 /// One pending decision with the action set its kind allows.
-private struct DecisionCard: View {
+struct DecisionCard: View {
     let model: GhostModel
     let decision: Decision
     @State private var customAnswer = ""
@@ -112,31 +112,35 @@ private struct DecisionCard: View {
     @State private var issue: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(decision.title, systemImage: "hand.raised.fill")
-                .font(.callout.weight(.semibold))
-            HStack(spacing: 8) {
-                Text(model.ghostName(decision.ghostId)).font(.caption).foregroundStyle(GhostStyle.secondary)
-                Text(kindLabel).font(.caption).foregroundStyle(GhostStyle.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 10) {
+                StateGlyph(state: "pending", size: 22)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(decision.title).font(.headline).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Text(model.ghostName(decision.ghostId))
+                        Text(kindLabel)
+                    }.font(.caption).foregroundStyle(GhostStyle.secondary)
+                }
             }
             if !decision.detail.isEmpty {
-                Text(decision.detail).font(.footnote).textSelection(.enabled)
+                Text(decision.detail).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
-            if let proposal = decision.proposal, !proposal.pretty.isEmpty {
-                Text(proposal.pretty)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(GhostStyle.secondary)
-                    .lineLimit(10)
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 10))
+            if decision.kind == .accept_result {
+                resultReceipt
+            } else if let proposal = decision.proposal, !proposal.pretty.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("요청").font(.caption.weight(.semibold)).foregroundStyle(GhostStyle.secondary)
+                    Text(proposal.pretty).font(.caption.monospaced()).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(14).background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 14))
             }
             actions
             if let issue {
                 Text(issue).font(.caption).foregroundStyle(GhostStyle.warning)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 12)
         .confirmationDialog(confirmTitle, isPresented: Binding(
             get: { confirming != nil },
             set: { if !$0 { confirming = nil } }), titleVisibility: .visible) {
@@ -151,13 +155,39 @@ private struct DecisionCard: View {
         }
     }
 
+    private var resultReceipt: some View {
+        let work = model.snapshot.works.first { $0.id == decision.workId }
+        let submitted = decision.proposal?.dictionary["result"]
+        let summary = submitted?.dictionary["summary"]?.text ?? work?.result?.summary ?? ""
+        let criteria = decision.proposal?.dictionary["criteria"]?.text ?? work?.acceptance.criteria ?? ""
+        let files = submitted?.dictionary["artifacts"]?.items.map { $0["name"].text } ?? work?.result?.artifacts.map(\.name) ?? []
+        return VStack(alignment: .leading, spacing: 14) {
+            if !summary.isEmpty { Text(summary).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+            ForEach(Array(files.enumerated()), id: \.offset) { _, name in
+                Label(name, systemImage: "doc.text").font(.footnote).fixedSize(horizontal: false, vertical: true)
+            }
+            if !criteria.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("완료 기준").font(.caption.weight(.semibold)).foregroundStyle(GhostStyle.secondary)
+                    Text(criteria).font(.footnote).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let proposal = decision.proposal, !proposal.pretty.isEmpty {
+                DisclosureGroup("결과 상세") {
+                    Text(proposal.pretty).font(.caption.monospaced()).textSelection(.enabled)
+                }.font(.caption).foregroundStyle(GhostStyle.secondary)
+            }
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 14))
+    }
+
     private var kindLabel: String {
         switch decision.kind {
-        case .approve_effect: "효과 승인"
-        case .question: "질문"
-        case .accept_result: "결과 수락"
+        case .approve_effect: "실행 승인"
+        case .question: "답변 대기"
+        case .accept_result: "결과 확인"
         case .document_review: "문서 검토"
-        case .reconcile_effect: "효과 확인"
+        case .reconcile_effect: "결과 미확정"
         }
     }
 
@@ -165,35 +195,30 @@ private struct DecisionCard: View {
     private var actions: some View {
         VStack(alignment: .leading, spacing: 8) {
             switch decision.kind {
-            case .approve_effect, .document_review, .reconcile_effect:
+            case .approve_effect, .document_review, .reconcile_effect, .accept_result:
                 HStack(spacing: 12) {
                     Button(approveLabel) { confirming = .approve }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(GhostPrimaryButtonStyle())
                         .disabled(model.busy || !model.isOnline)
                         .accessibilityIdentifier("decision-approve-\(decision.id)")
-                    Button("거절", role: .destructive) { confirming = .deny }
-                        .buttonStyle(.bordered)
-                        .disabled(model.busy || !model.isOnline)
-                        .accessibilityIdentifier("decision-deny-\(decision.id)")
-                }
-            case .accept_result:
-                HStack(spacing: 12) {
-                    Button("수락") { confirming = .approve }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.busy || !model.isOnline)
-                        .accessibilityIdentifier("decision-approve-\(decision.id)")
-                    Button("거절", role: .destructive) { confirming = .deny }
+                    Button(denyLabel, role: .destructive) { confirming = .deny }
                         .buttonStyle(.bordered)
                         .disabled(model.busy || !model.isOnline)
                         .accessibilityIdentifier("decision-deny-\(decision.id)")
                 }
             case .question:
                 if !decision.options.isEmpty {
-                    ForEach(decision.options, id: \.self) { option in
-                        Button(option) { resolve(.answer, answer: option) }
-                            .buttonStyle(.bordered)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .disabled(model.busy || !model.isOnline)
+                    ForEach(Array(decision.options.enumerated()), id: \.offset) { index, option in
+                        Button { resolve(.answer, answer: option) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text("\(index + 1)").font(.caption.monospaced().weight(.semibold))
+                                    .frame(width: 24, height: 24).background(GhostStyle.surface, in: RoundedRectangle(cornerRadius: 7))
+                                Text(option).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                            }.foregroundStyle(GhostStyle.ink).padding(12).frame(minHeight: 48)
+                                .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 14))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.busy || !model.isOnline)
                     }
                 }
                 HStack(spacing: 12) {
@@ -203,38 +228,51 @@ private struct DecisionCard: View {
                         guard !answer.isEmpty else { return }
                         resolve(.answer, answer: answer)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(GhostPrimaryButtonStyle())
                     .disabled(model.busy || !model.isOnline || customAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
     }
 
+    // Same words as the web deck, and what the host does with each outcome.
     private var approveLabel: String {
         switch decision.kind {
-        case .reconcile_effect: "다시 시도"
+        case .accept_result: "결과 확인"
+        case .document_review: "저장 승인"
+        case .reconcile_effect: "의도대로 처리됨"
         default: "승인"
+        }
+    }
+
+    private var denyLabel: String {
+        switch decision.kind {
+        case .accept_result: "수정 요청"
+        case .reconcile_effect: "처리되지 않음"
+        default: "거부"
         }
     }
 
     private var confirmTitle: String {
         switch confirming {
-        case .approve: "\(approveLabel)할까요?"
-        case .deny: "거절할까요?"
+        case .approve: approveLabel
+        case .deny: denyLabel
         default: ""
         }
     }
 
     private var confirmLabel: String {
-        confirming == .approve ? approveLabel : "거절"
+        confirming == .approve ? approveLabel : denyLabel
     }
 
     private var confirmMessage: String {
-        switch decision.kind {
-        case .approve_effect: "이 효과를 승인하면 Ghost가 실행을 계속합니다."
-        case .document_review: "이 문서 제안을 승인하면 저장이 진행됩니다."
-        case .reconcile_effect: "확인되지 않은 효과를 다시 시도합니다."
-        case .accept_result: "이 결과를 수락하면 맡긴 일이 완료됩니다."
+        switch (decision.kind, confirming) {
+        case (.approve_effect, .approve?): "Ghost가 요청한 실행을 진행합니다."
+        case (.document_review, .approve?): "제안된 문서를 저장합니다."
+        case (.reconcile_effect, .approve?): "이 실행이 실제로 일어났다고 기록하고 맡긴 일을 이어갑니다."
+        case (.reconcile_effect, .deny?): "이 실행이 일어나지 않았다고 기록하고 맡긴 일을 이어갑니다."
+        case (.accept_result, .approve?): "결과를 받아들이고 맡긴 일을 끝냅니다."
+        case (.accept_result, .deny?): "Ghost에게 결과를 고쳐 달라고 전달합니다."
         default: ""
         }
     }

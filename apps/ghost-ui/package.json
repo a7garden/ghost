@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5178 --strictPort",
     "build": "tsc -b && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:visual": "playwright test",
+    "test:visual:update": "playwright test --update-snapshots"
   },
   "dependencies": {
     "@atomic-editor/editor": "0.6.2",
@@ -46,15 +48,16 @@
     "typebox": "1.3.27"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "@tailwindcss/vite": "4.1.18",
+    "@tauri-apps/cli": "2.12.0",
     "@types/qrcode": "1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
     "typescript": "5.9.3",
     "vite": "8.3.2",
-    "vitest": "5.0.3",
-    "@tauri-apps/cli": "2.12.0",
-    "@tailwindcss/vite": "4.1.18"
+    "vitest": "5.0.3"
   },
   "packageManager": "bun@1.4.2"
 }

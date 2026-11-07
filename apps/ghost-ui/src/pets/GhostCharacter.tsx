@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { LookFace, LookMark } from '@ghost/contract';
 import type { PetState } from './sprites';
-import { faceColor } from './appearance';
+import { faceColor, isHexColor } from './appearance';
 
 /**
  * The built-in Ghost: the approved face (two bar eyes, a small round mouth) on a round body.
@@ -48,9 +48,9 @@ export function GhostCharacter({ size = 48, state = 'idle', animate = true, colo
   size?: number;
   state?: PetState;
   animate?: boolean;
-  /** The Ghost's chosen body color; `auto` or empty follows the display preference. */
+  /** The Ghost's chosen body color; empty or `auto` means it never chose one. */
   color?: string;
-  /** Body color when neither the Ghost nor the display preference chose one. */
+  /** Body color when the Ghost never chose one (a stable hue from its id). */
   fallback?: string;
   face?: LookFace;
   mark?: LookMark;
@@ -72,14 +72,10 @@ export function GhostCharacter({ size = 48, state = 'idle', animate = true, colo
     return () => { cancelAnimationFrame(frame); media.removeEventListener('change', update); document.removeEventListener('visibilitychange', update); };
   }, [state, animate]);
   const chosen = color && color !== 'auto' ? color : undefined;
-  const style = {
-    width: size, height: size,
-    ...(chosen ? { '--ghost-body-color': chosen, '--ghost-face-color': faceColor(chosen) }
-      : fallback ? { '--ghost-body-fallback': fallback, '--ghost-face-fallback': faceColor(fallback) } : {}),
-  } as CSSProperties;
-  // A display-wide preference (--ghost-body-color on :root) still wins over the per-Ghost fallback.
-  const bodyFill = chosen ? 'var(--ghost-body-color)' : 'var(--ghost-body-color, var(--ghost-body-fallback, var(--ghost-ink)))';
-  const faceFill = chosen ? 'var(--ghost-face-color)' : 'var(--ghost-face-color, var(--ghost-face-fallback, var(--ghost-canvas)))';
+  const style = { width: size, height: size } as CSSProperties;
+  const tone = chosen ?? fallback;
+  const bodyFill = tone ?? 'var(--ghost-ink)';
+  const faceFill = tone && isHexColor(tone) ? faceColor(tone) : 'var(--ghost-canvas)';
   return <svg className={`ghost-character ${className}`} style={style} viewBox="100 100 800 800" fill="none" aria-hidden="true" data-ghost-state={state}>
     <g ref={body} style={{ '--g-body': bodyFill, '--g-face': faceFill } as CSSProperties}>
       <Mark mark={mark} front={false}/>

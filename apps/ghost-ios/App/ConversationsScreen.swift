@@ -33,10 +33,9 @@ struct ConversationsScreen: View {
                         ForEach(entry.conversations) { conversation in
                             NavigationLink(value: conversation.id) {
                                 HStack(spacing: 14) {
-                                    Image(systemName: "bubble.left.fill")
-                                        .font(.title3)
-                                        .frame(width: 42, height: 42)
-                                        .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 13))
+                                    GhostPortrait(ghost: entry.ghost, size: 44, presence:
+                                        model.snapshot.decisions.contains { $0.ghostId == entry.ghost.id && $0.isPending } ? .needsOwner :
+                                            (conversation.busy || model.liveByConversation[conversation.id]?.running == true ? .working : .idle))
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(conversation.title.isEmpty ? "대화" : conversation.title)
                                             .font(.subheadline.weight(.medium))
@@ -90,12 +89,15 @@ struct ChatScreen: View {
     @State private var loadError: String?
     @State private var sending = false
     @State private var scrollRequest = UUID()
+    @State private var pageLive: Live?
 
     private var conversation: Conversation? { model.snapshot.conversations.first { $0.id == conversationId } }
     private var ghost: Ghost? { conversation.map { model.ghost($0.ghostId) } ?? nil }
     private var title: String { conversation?.title.isEmpty == false ? conversation!.title : (ghost?.name ?? "대화") }
-    private var live: Live? { model.liveByConversation[conversationId] }
+    private var live: Live? { model.liveByConversation[conversationId] ?? pageLive }
     private var isBusy: Bool { conversation?.busy == true || live?.running == true }
+    private var threads: [Work] { model.snapshot.works.filter { $0.originConversationId == conversationId } }
+    private var needsOwner: Bool { model.snapshot.decisions.contains { $0.ghostId == ghost?.id && $0.isPending } }
 
     private var draftAddress: DraftAddress { model.draftAddress(conversationId: conversationId) }
     private var draftText: Binding<String> {
@@ -106,10 +108,16 @@ struct ChatScreen: View {
     }
 
     var body: some View {
-        MessageHistory(ghostName: ghost?.name ?? "Ghost", messages: messages, live: live, scrollRequest: scrollRequest)
+        MessageHistory(model: model, ghost: ghost, works: threads, messages: messages, live: live, scrollRequest: scrollRequest)
         .id(conversationId)
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    GhostPortrait(ghost: ghost, size: 38, presence: needsOwner ? .needsOwner : (isBusy ? .working : .idle))
+                    Text(ghost?.name ?? title).font(.headline)
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 if isBusy {
                     Button {
@@ -139,6 +147,16 @@ struct ChatScreen: View {
             }.padding(.horizontal, 16).padding(.bottom, 8).background(GhostStyle.surface)
         }
         .task(id: conversationId) { await loadLatest() }
+        #if DEBUG
+        .task(id: "fixture-incoming-\(conversationId)") {
+            if MobileUIFixture.incoming, conversationId == MobileUIFixture.conversationID {
+                do {
+                    try await Task.sleep(for: .seconds(12))
+                    model.appendUITestMessage()
+                } catch { }
+            }
+        }
+        #endif
         .overlay {
             if messages.isEmpty, let loadError {
                 ContentUnavailableView("대화를 불러오지 못했습니다", systemImage: "wifi.exclamationmark", description: Text(loadError))
@@ -147,10 +165,9 @@ struct ChatScreen: View {
         .onChange(of: model.appendedMessages[conversationId]?.count ?? 0) {
             let fresh = model.drainAppendedMessages(conversationId: conversationId, loadedIDs: Set(messages.map(\.id)))
             guard !fresh.isEmpty else { return }
-            if olderBefore == nil {
-                messages += fresh
-                model.noteLoadedMessages(conversationId: conversationId, ids: fresh.map(\.id))
-            }
+            messages += fresh
+            if fresh.contains(where: { $0.role == .assistant }) { pageLive = nil }
+            model.noteLoadedMessages(conversationId: conversationId, ids: fresh.map(\.id))
         }
         .task(id: draft?.revision) {
             do { try await Task.sleep(for: .milliseconds(300)); model.saveDrafts() } catch { }
@@ -164,6 +181,7 @@ struct ChatScreen: View {
             messages = page.messages
             olderBefore = page.before
             loadError = nil
+            pageLive = page.live
             model.noteLoadedMessages(conversationId: conversationId, ids: page.messages.map(\.id))
         } catch {
             loadError = error.localizedDescription

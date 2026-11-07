@@ -10,15 +10,23 @@ The existing web design's repeated Workbench structure does not govern this nati
 
 ## Theme and tokens
 
-Modern minimal, Coral adaptation: warm near-white canvas, porcelain surfaces, charcoal text, restrained accent reserved for controls and meaningful states. Dark mode uses opaque warm charcoal surfaces and light ink. SwiftUI's `GhostStyle` is the runtime token authority; `tokens.css` is the portable reference. Use SF system type with Dynamic Type, a rounded display variant only for the empty conversation, and monospaced type only in disclosed technical details.
+Neutral layered surfaces follow the shipped web/Mac language: canvas `#fafaf9`, white cards and soft shadows; dark canvas `#121214` and cards `#18181b`. Color describes state, not decoration: signal blue working, amber needs owner, red failed, green accepted. Each state also has a distinct glyph (ring, travelling arc, pause bars, half disc, exclamation, check, cross, slash). SwiftUI's `GhostStyle` is the runtime token authority; `tokens.css` mirrors its light/dark values. Use SF system type with Dynamic Type and monospaced type only in disclosed technical details.
+
+Primary buttons use explicit ink/on-ink tokens, including their disabled state, rather than the system's inferred label color. Approval requests and receipt criteria wrap completely; they never truncate the operation or acceptance conditions.
 
 Spacing: 4/8/12/16/20/24/32. Primary controls have at least44pt hit targets. Messages use open assistant text and a distinct trailing user bubble. No nested card grids, gradients, decorative orbs, invented counters or technical UUIDs in the default conversation.
+
+The in-app Ghost portrait uses the approved round body, two bar eyes and small round mouth. `look.face` selects bars/dots/arcs/tall and `look.mark` selects none/halo/antenna/sprout/ring/spark. Unknown options decode as unset. The twelve body colors and stable default hue match the web palette; the id hash wraps UInt32 over UTF-16 code units. A travelling blue arc marks working; an amber ring with a notch marks owner attention. The app icon remains unchanged.
 
 ## Interaction
 
 The composer stays above the keyboard and system tab bar. Sending preserves the existing durable draft/receipt contract; a lost acknowledgment remains unresolved and is never silently retried. Earlier-message reading must not jump when refresh brings new content. A visible header picker switches between named authorized Ghosts. Privacy and existing-artifact attachments live in conversation options. Their original authority and disclosure guards remain enforced.
 
 Work summaries distinguish running, produced, accepted, failed and unconfirmed. Completion is not acceptance. Approval details must still show the exact operation, destination, input and target before any decision. Technical facts can be disclosed within the relevant detail rather than injected into every default screen.
+
+There is one durable conversation per Ghost; existing older conversations remain reachable and no new-conversation action is added. Host-origin wakes are quiet event lines. Streamed reasoning stays open as 생각 중 with its newest step, then folds to 생각 과정 when reply text arrives. Consecutive tool results share a disclosure. Works appear chronologically as live thread cards opening the existing work screen. Work headers show the 접수 · 진행 · 검증 · 완료 lifecycle.
+
+Decision cards follow their kind: numbered question options, the full exact request for approvals, and a result receipt containing the summary, files and completion criteria. Command and confirmation semantics remain unchanged.
 
 Every action states its real outcome: sending, stopping a response, cancelling or resuming a Work, resolving a decision, and reading a notification each show their own disabled, loading, error, offline, empty, pending and settled states. Nothing promises a route the host does not serve, and success is shown in place, without celebratory toasts.
 

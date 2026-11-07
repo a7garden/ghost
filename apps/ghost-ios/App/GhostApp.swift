@@ -43,22 +43,42 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 // Ghost mobile semantic tokens (DESIGN.md); native type and touch sizes
 // follow Dynamic Type and iOS accessibility rather than desktop pixel sizes.
 enum GhostStyle {
-    static let surface = adaptive(light: (0.993, 0.989, 0.979), dark: (0.10, 0.10, 0.096))
-    static let under = adaptive(light: (0.952, 0.945, 0.930), dark: (0.155, 0.155, 0.148))
-    static let canvas = surface
-    static let ink = adaptive(light: (0.17, 0.18, 0.17), dark: (0.94, 0.94, 0.91))
-    static let onInk = adaptive(light: (0.99, 0.98, 0.96), dark: (0.13, 0.14, 0.13))
-    static let accent = adaptive(light: (0.67, 0.27, 0.19), dark: (0.92, 0.64, 0.52))
-    static let warning = adaptive(light: (0.72, 0.15, 0.12), dark: (1.0, 0.52, 0.46))
-    static let destructive = Color(red: 0.72, green: 0.15, blue: 0.12)
+    static let surface = adaptive(light: 0xffffff, dark: 0x18181b)
+    static let under = adaptive(light: 0xf0f0ee, dark: 0x0e0e10)
+    static let canvas = adaptive(light: 0xfafaf9, dark: 0x121214)
+    static let page = adaptive(light: 0xf3f3f1, dark: 0x0c0c0e)
+    static let ink = adaptive(light: 0x141518, dark: 0xececee)
+    static let onInk = adaptive(light: 0xffffff, dark: 0x0c0c0e)
+    static let signal = adaptive(light: 0x3d5cf5, dark: 0x7088ff)
+    static let signalInk = adaptive(light: 0x2c47d1, dark: 0x98a9ff)
+    static let amber = adaptive(light: 0xf0a020, dark: 0xf5b13d)
+    static let amberInk = adaptive(light: 0xa35a00, dark: 0xf7bd5c)
+    static let success = adaptive(light: 0x1f9d55, dark: 0x3fcf7f)
+    static let successInk = adaptive(light: 0x157a41, dark: 0x5ad893)
+    static let danger = adaptive(light: 0xe0372f, dark: 0xff6a62)
+    static let dangerInk = adaptive(light: 0xc02a23, dark: 0xff8a83)
+    static let signalTint = adaptive(light: 0x3d5cf5, dark: 0x7088ff, lightAlpha: 0.09, darkAlpha: 0.15)
+    static let amberTint = amber.opacity(0.14)
+    static let successTint = adaptive(light: 0x1f9d55, dark: 0x3fcf7f, lightAlpha: 0.11, darkAlpha: 0.13)
+    static let dangerTint = adaptive(light: 0xe0372f, dark: 0xff6a62, lightAlpha: 0.10, darkAlpha: 0.14)
+    static let accent = signalInk
+    static let warning = dangerInk
+    static let destructive = dangerInk
     static let onDestructive = Color.white
-    static let text = Color.primary
-    static let secondary = adaptive(light: (0.40, 0.41, 0.39), dark: (0.68, 0.69, 0.65))
-    static let border = adaptive(light: (0.86, 0.85, 0.82), dark: (0.29, 0.29, 0.27))
-    private static func adaptive(light: (Double, Double, Double), dark: (Double, Double, Double)) -> Color {
+    static let text = ink
+    static let secondary = adaptive(light: 0x646468, dark: 0x929296)
+    static let border = ink.opacity(0.12)
+    static let shadow = Color.black.opacity(0.07)
+
+    static func color(_ hex: UInt32) -> Color {
+        Color(red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255)
+    }
+
+    private static func adaptive(light: UInt32, dark: UInt32, lightAlpha: Double = 1, darkAlpha: Double = 1) -> Color {
         Color(uiColor: UIColor { traits in
-            let c = traits.userInterfaceStyle == .dark ? dark : light
-            return UIColor(red: c.0, green: c.1, blue: c.2, alpha: 1)
+            let isDark = traits.userInterfaceStyle == .dark
+            let c = isDark ? dark : light
+            return UIColor(red: Double((c >> 16) & 255) / 255, green: Double((c >> 8) & 255) / 255, blue: Double(c & 255) / 255, alpha: isDark ? darkAlpha : lightAlpha)
         })
     }
 }

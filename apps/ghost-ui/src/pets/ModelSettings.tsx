@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, ChevronRight, KeyRound, LogIn, ShieldOff, Plus, Trash2 } from 'lucide-react';
-import { Button, SettingsGroup, SettingsRow, InlineError, SelectField, Badge } from '../ui';
-import type { Provider, ProviderPreset } from '@ghost/contract';
+import { Button, SettingsGroup, SettingsRow, InlineError, SelectField, Badge, SegmentedControl } from '../ui';
+import type { Provider, ProviderPreset, Thinking } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
@@ -40,6 +40,11 @@ export function ModelSettings() {
   const roleCommand = (field: 'defaultModel' | 'reviewModel', key: string) => {
     const model = modelFromKey(settings, key) ?? null;
     void run(field, () => client.send(field === 'defaultModel' ? { type: 'settings.update', defaultModel: model } : { type: 'settings.update', reviewModel: model }), '모델을 저장했습니다.');
+  };
+  // Reasoning depth rides on the default model; models that cannot reason ignore it.
+  const thinkingCommand = (thinking: Thinking) => {
+    if (!settings?.defaultModel) return;
+    void run('thinking', () => client.send({ type: 'settings.update', defaultModel: { ...settings.defaultModel!, thinking } }), '생각 수준을 저장했습니다.');
   };
   const saveProvider = async ({ draft, apiKey, login: startLogin }: ProviderSave) => {
     await client.send({ type: 'provider.upsert', id: draft.id, kind: draft.kind, name: draft.name, baseUrl: draft.baseUrl, models: draft.models,
@@ -81,6 +86,10 @@ export function ModelSettings() {
         <SelectField label="기본 모델" className="w-[240px] max-w-full" value={settings?.defaultModel ? `${settings.defaultModel.provider}/${settings.defaultModel.model}` : NO_MODEL}
           disabled={pending !== '' || !settings} onValueChange={key => roleCommand('defaultModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
       </SettingsRow>
+      {settings?.defaultModel && <SettingsRow label="생각 수준" description="답하기 전에 추론하는 정도">
+        <SegmentedControl aria-label="생각 수준" value={settings.defaultModel.thinking ?? 'off'} onValueChange={thinkingCommand}
+          options={(['off', 'low', 'medium', 'high'] as const).map(value => ({ value, label: { off: '끔', low: '낮음', medium: '중간', high: '높음' }[value], disabled: pending !== '' }))}/>
+      </SettingsRow>}
       <SettingsRow label="검토 모델" description="맡긴 일의 결과를 판정할 때 씁니다.">
         <SelectField label="검토 모델" className="w-[240px] max-w-full" value={settings?.reviewModel ? `${settings.reviewModel.provider}/${settings.reviewModel.model}` : NO_MODEL}
           disabled={pending !== '' || !settings} onValueChange={key => roleCommand('reviewModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
