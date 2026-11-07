@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Check, CircleAlert, MessageCircle, Plus, Square, X } from 'lucide-react';
-import { Badge, Button, GComposer, GConversation, GConversationMessage, cn } from '@garden/ui';
+import { ArrowUpRight, Check, CircleAlert, History, LoaderCircle, MessageCircle, Plus, Square, X } from 'lucide-react';
+import { Button, GComposer, GConversation, GConversationActivity, GConversationMessage, cn } from '@garden/ui';
 import type { Ghost, Live, Message, State } from '@ghost/contract';
-import { DetailDialog } from '../components/DetailDialog';
 import { DotAvatar } from '../components/DotAvatar';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
 import { Modal } from '../components/Modal';
 import { TranscriptMessage } from '../components/TranscriptMessage';
+import { MessageBody } from '../components/MessageBody';
 import { ModelPicker } from '../pets/ModelPicker';
 import { GhostDesignEditor } from './GhostDesign';
 import { conversationStarters } from './conversationSuggestions';
@@ -38,7 +38,9 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
   const [sending, setSending] = useState(false);
   const [history, setHistory] = useState(false);
   const openConversation = useRef(conversationId);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   openConversation.current = conversationId;
+  useEffect(() => { if (!sending) inputRef.current?.focus(); }, [sending]);
 
   const load = useCallback(async (id: string, before?: string | null) => {
     if (before === undefined) { setLoading(true); setPage({ messages: [], before: null, live: null }); }
@@ -94,11 +96,13 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
   const hasContent = page.messages.length > 0 || Boolean(live?.running);
   const speaker = (message: Message) => message.role === 'user' ? '나' : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : ghost.name;
   const busy = Boolean(state.conversations.find(conversation => conversation.id === conversationId)?.busy);
+  const currentConversation = conversations.find(conversation => conversation.id === conversationId);
+  const running = busy || Boolean(live?.running);
 
   return <div className="flex h-full min-h-0 w-full min-w-0">
-    <GConversation className={cn(!hasContent && 'conversation-is-empty')} label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지로 이동"
+    <GConversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지로 이동"
       scrollKey={page.messages.length + (live?.partial ? 1 : 0)}
-      header={<div className="flex min-w-0 items-center justify-center gap-2 py-1">
+      header={<div className="flex min-w-0 items-center gap-3 py-1">
         <GhostProfile ghostID={ghost.id} name={ghost.name} summary={profileSummary(ghost.persona)}
           activity={{ model: projectGhostActivity(ghost, state), onInspectWork: workId => navigate(`/work/${encodeURIComponent(workId)}`), onCancelTurn: id => stop() }}
           onOpenWork={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}
@@ -106,24 +110,28 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
           onManage={() => navigate(`/settings?tab=team&ghost=${encodeURIComponent(ghost.id)}`)}
           design={<GhostDesignEditor ghostId={ghost.id}/>}
           isMain={ghost.isDefault}/>
+        <div className="min-w-0 flex-1">
+          <h1 className="m-0 truncate text-ui font-semibold text-ink">{currentConversation?.title && currentConversation.title !== ghost.name ? currentConversation.title : '대화'}</h1>
+          <p className="m-0 truncate text-caption text-ink-2">{running ? '응답 중' : ghost.name}</p>
+        </div>
+        <Button type="button" variant="ghost" size="icon" aria-label="이전 대화" title="이전 대화" onClick={() => setHistory(true)}><History size={17}/></Button>
+        <Button type="button" variant="ghost" size="sm" onClick={startConversation}><Plus size={16}/>새 대화</Button>
       </div>}
-      composer={<GComposer variant="conversation" inputId="message-input" rows={1} value={draft} onValueChange={setDraft} onSubmit={value => send(value)}
-        label={`${ghost.name}에게 메시지`} placeholder="메시지 쓰기" submitLabel="메시지 보내기"
+      composer={<GComposer variant="conversation" inputId="message-input" inputRef={inputRef} rows={1} value={draft} onValueChange={setDraft} onSubmit={send}
+        label={`${ghost.name}에게 메시지`} placeholder={running ? '추가 지시를 입력하세요' : `${ghost.name}에게 메시지 보내기`} submitLabel="메시지 보내기"
         disabled={!conversationId} pending={sending}
-        footer={conversationId && <ModelPicker conversationId={conversationId} value={conversations.find(item => item.id === conversationId)?.model ?? undefined} disabled={sending}/>}
-        trailing={busy ? <Button type="button" variant="ghost" size="icon" aria-label="응답 취소" title="응답 취소" onClick={stop}><Square size={15}/></Button> : undefined}/>}
+        footer={conversationId && <ModelPicker conversationId={conversationId} value={currentConversation?.model} disabled={sending}/>}
+        trailing={running ? <Button type="button" variant="secondary" size="icon" aria-label="응답 취소" title="응답 취소" onClick={stop}><Square size={14}/></Button> : undefined}/>}
       footer={<div className="grid gap-2">
         {error && <div className="flex items-start gap-2 rounded-card border border-line bg-surface px-3 py-2.5 text-caption text-ink" role="alert"><CircleAlert size={16} className="mt-0.5 shrink-0 text-red"/><span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{error}</span><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label="오류 메시지 닫기" onClick={() => setError('')}><X size={14}/></Button></div>}
         <p id="composer-keyboard-help" className="sr-only m-0">Enter로 보내기 · Shift + Enter로 줄바꿈{busy ? ' · 추가 지시는 진행 중인 응답에 전달됩니다.' : ''}</p>
       </div>}>
-      {!hasContent && !loading && <div className="conversation-start grid justify-items-center gap-3 px-2 py-10 text-center">
+      {!hasContent && !loading && <div className="flex min-h-[min(42dvh,360px)] flex-col items-center justify-center gap-4 py-8 text-center">
         <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={44}/>
-        <h2 className="text-headingSm font-semibold text-ink">{ghost.name}</h2>
-        <p className="m-0 max-w-[46ch] text-ui leading-relaxed text-ink-2" title={profileSummary(ghost.persona)}>{profileSummary(ghost.persona)}</p>
-        {ghost.persona.trim() && <div className="mx-auto mt-3 grid w-full max-w-[380px] gap-2" role="group" aria-label="대화 시작 제안">{conversationStarters(ghost.persona).map(({ label, prompt }) => <button type="button" key={label} title={prompt}
-          className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-control border border-line px-3.5 py-3 text-left text-caption leading-relaxed outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3"
-          onClick={() => setDraft(prompt)}>{label}<ArrowUpRight size={12} className="shrink-0 text-ink-3"/></button>)}</div>}
-        {!conversationId && <Button variant="secondary" onClick={startConversation}>새 대화 시작</Button>}
+        <h2 className="m-0 text-headingLg font-semibold text-ink">무엇을 맡길까요?</h2>
+        {ghost.persona.trim() && <div className="mt-2 grid w-full gap-2 sm:grid-cols-2" role="group" aria-label="대화 시작 제안">{conversationStarters(ghost.persona).map(({ label, prompt }) => <button type="button" key={label} title={prompt}
+          className="flex min-h-16 cursor-pointer items-start justify-between gap-3 rounded-control border border-line p-4 text-left text-ui leading-relaxed text-ink-2 outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3"
+          onClick={() => { setDraft(prompt); inputRef.current?.focus(); }}>{label}<ArrowUpRight size={14} className="mt-0.5 shrink-0" aria-hidden="true"/></button>)}</div>}
       </div>}
       {loading && <div className="grid justify-items-center py-10 text-caption text-ink-2" aria-busy="true">대화 기록을 읽는 중…</div>}
       {conversationId && page.before && <div className="grid justify-items-center py-2">
@@ -131,12 +139,13 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
       </div>}
       {page.messages.map(message => <TranscriptMessage key={message.id} message={message} speaker={speaker}/>)}
       {live?.running && <GConversationMessage role="assistant" label={`${ghost.name} · 응답 작성 중`}>
-        {live.partial
-          ? <div className="text-body leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{live.partial}</div>
-          : <div className="thinking-dots self-center" aria-hidden="true"><i/><i/><i/></div>}
-        {live.tools.map(tool => <div key={tool.callId} className="mt-1 flex items-center gap-1.5 text-caption text-ink-2" role="status">
-          <Badge variant="outline">{tool.name}</Badge><span className="min-w-0 truncate [overflow-wrap:anywhere]">{tool.output}</span>
-        </div>)}
+        <div className="mb-3 flex items-center gap-2 text-caption text-ink-2" role="status"><LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true"/>응답 중</div>
+        {live.partial && <MessageBody text={live.partial}/>}
+        {live.tools.length > 0 && <GConversationActivity summary={`도구 활동 ${live.tools.length}개`}>
+          {live.tools.map(tool => <div key={tool.callId} className="grid gap-1 py-2 text-caption text-ink-2">
+            <span className="font-medium">{tool.name}</span><pre className="m-0 max-h-48 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]">{tool.output}</pre>
+          </div>)}
+        </GConversationActivity>}
       </GConversationMessage>}
     </GConversation>
     {history && <Modal title={`${ghost.name} · ${uiTerms.conversationHistory}`} onClose={() => setHistory(false)}>

@@ -133,7 +133,7 @@ function Shell() {
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
               : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')}/>)}
             {section === 'ghosts' && (openGhost
-              ? <GhostChat key={openGhost.id} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} navigate={navigate}/>
+              ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} navigate={navigate}/>
               : ghostNotFound)}
             {section === 'spaces' && <SpacesView key={`${selectedSpace ?? 'empty'}:${params.get('new') ?? ''}`} selectedSpace={selectedSpace}
               onSelectSpace={id => navigate(`/spaces/${id}`)} createRequested={params.get('new') === '1'}

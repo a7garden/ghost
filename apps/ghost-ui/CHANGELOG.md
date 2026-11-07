@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Redesigned chat around the reading column: trailing owner bubbles, rendered
+  assistant Markdown, scrollable code/tables, message/code copy, inline tool
+  disclosures and explicit streaming/cancel state. Added direct history/new-chat
+  actions, focused draft suggestions and conversation-local view state.
+  Warning banners now keep their natural height.
+  Untrusted HTML/URLs stay inert; images never load automatically. Footnotes stay
+  inside their message instead of opening a broken hash route.
+
 - Added per-Ghost tool allow-lists and agent settings for role instructions and tools.
   The current main Ghost may inspect/configure other non-main Ghosts only from direct
   conversations; self-configuration and changing the main designation remain owner-only.

@@ -31,3 +31,21 @@ opens from the title bar menu. Theme follows the `.dark` class on `<html>`.
 Earlier designs (Docket console, dashboard of 2026-11-04) are history:
 [redesign report](../../docs/dashboard-redesign-2026-11-04.md),
 [review surface design](../../docs/ghost-conversation-review-surfaces.md).
+
+## Conversation — 2026-11-07
+
+Direct chat keeps Garden's 760px reading column, trailing owner bubbles and
+open assistant prose. The local header exposes history and new conversation;
+the dock holds the auto-growing composer, model selection, send and cancel.
+Suggestions populate and focus the draft. Conversation identity resets local
+transcript/draft state so switching history never shows another conversation's
+messages or sends its draft accidentally.
+
+Assistant text uses GFM Markdown, including scrollable code/tables and copy
+actions; owner text and tool output remain literal. Completed tools use inline
+disclosures. Raw HTML is inert, only explicit HTTP(S)/mailto destinations open
+externally, and image URLs are opt-in links, never automatic image requests.
+Footnotes navigate within their own message without changing the app hash route;
+relative paths have no transcript document base and remain plain text.
+All presentation is read-only over the existing transcript; document storage,
+model execution and host permissions are unchanged.

@@ -17,17 +17,6 @@ body {
   background: var(--g-page);
 }
 
-/* Desktop transcript: the Owner's message is a full-width block in reading order, not a trailing phone bubble. */
-.ghost-root .g-conversation-message[data-role="user"] {
-  align-items: stretch;
-}
-
-.ghost-root .g-conversation-message[data-role="user"] .g-conversation-message__content {
-  width: 100%;
-  max-width: 100%;
-  border-radius: var(--radius-lg, 10px);
-}
-
 /* Sidebar sections follow each other at row spacing; the group label alone marks the section. */
 .ghost-root .ghost-sidebar {
   gap: var(--g-space-1, 4px);

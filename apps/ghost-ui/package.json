@@ -11,17 +11,19 @@
     "garden:doctor": "node vendor/garden/cli/garden.mjs doctor"
   },
   "dependencies": {
+    "@garden/editor": "workspace:*",
+    "@garden/markdown": "workspace:*",
+    "@garden/native": "workspace:*",
     "@garden/ui": "workspace:*",
     "@ghost/contract": "file:../../packages/ghost-contract",
+    "@tauri-apps/api": "2.12.0",
     "lucide-react": "1.50.0",
-    "typebox": "1.3.27",
     "qrcode": "1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "@garden/editor": "workspace:*",
-    "@garden/markdown": "workspace:*",
-    "@tauri-apps/api": "2.12.0",
-    "@garden/native": "workspace:*"
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "typebox": "1.3.27"
   },
   "devDependencies": {
     "@types/qrcode": "1.5.6",

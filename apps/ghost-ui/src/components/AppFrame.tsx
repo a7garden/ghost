@@ -29,7 +29,7 @@ export function AppFrame({ desktop, macOSInset, location, sidebar, fill, command
       : <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">{menu}<div className="min-w-0 flex-1">{place}</div>{search}</header>}
     <div className="flex min-h-0 flex-1">
       <aside className="hidden w-[232px] shrink-0 flex-col border-r border-line bg-page min-[56rem]:flex" aria-label="작업실 탐색">{sidebar}</aside>
-      <main id="main-content" tabIndex={-1} className={fill ? 'flex min-h-0 min-w-0 flex-1 flex-col outline-none [&>*]:min-h-0 [&>*]:flex-1' : 'min-h-0 min-w-0 flex-1 overflow-y-auto px-[clamp(16px,3vw,40px)] py-8 outline-none'}>
+      <main id="main-content" tabIndex={-1} className={fill ? 'flex min-h-0 min-w-0 flex-1 flex-col outline-none [&>*]:min-h-0 [&>*]:shrink-0 [&>*:last-child]:flex-1' : 'min-h-0 min-w-0 flex-1 overflow-y-auto px-[clamp(16px,3vw,40px)] py-8 outline-none'}>
         {children}
       </main>
     </div>
