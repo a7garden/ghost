@@ -85,8 +85,8 @@ function Shell() {
     { id: 'settings', label: uiTerms.settings, group: '설정', onSelect: go('/settings') },
   ] : [];
 
-  // The Ghost's look is the one source of portrait colors; the pets draw from it through DotAvatar.
-  const portraits = Object.fromEntries(ghosts.map(ghost => [ghost.id, { body: ghost.look.body, background: ghost.look.background }]));
+  // The Ghost's look is the one source of portrait color and variation; the pets draw from it through DotAvatar.
+  const portraits = Object.fromEntries(ghosts.map(ghost => [ghost.id, { body: ghost.look.body, background: ghost.look.background, face: ghost.look.face, mark: ghost.look.mark }]));
 
   const companion = ghosts.find(ghost => ghost.id === preferences.companionProfile) ?? defaultGhost ?? ghosts[0] ?? null;
 

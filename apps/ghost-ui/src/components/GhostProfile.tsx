@@ -39,7 +39,7 @@ export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWor
     <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) setView('profile'); }}>
       <PopoverTrigger asChild>
         <button type="button" aria-label={`${name} 프로필 ${open ? '닫기' : '열기'}`} title={name} className="profile-trigger">
-          <PresenceAvatar ghostId={ghostID} state={presence} size={30}/>
+          <PresenceAvatar ghostId={ghostID} state={presence} size={36}/>
         </button>
       </PopoverTrigger>
       <PopoverContent side="bottom" align="center" aria-label={editing ? `${name} 꾸미기` : `${name} 프로필`}

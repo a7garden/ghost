@@ -14,4 +14,13 @@ export function grantsSummary(grants: SpaceGrant[], ghostName: (id: string) => s
   return grants.map(grant => `${ghostName(grant.ghostId)} ${modeLabel[grant.mode]}`).join(', ');
 }
 
+/** 새 프로젝트 이름 기본값: 폴더 경로의 마지막 세그먼트. */
+export const spaceNameFromPath = (path: string): string => path.split('/').filter(Boolean).pop() ?? '';
+
+/** 새 프로젝트는 기본 Ghost가 읽는 상태로 시작하고, 추가 권한은 프로젝트 화면에서 고친다. */
+export const defaultSpaceGrants = (ghosts: ReadonlyArray<{ id: string; isDefault: boolean }>): SpaceGrant[] => {
+  const main = ghosts.find(ghost => ghost.isDefault);
+  return main ? [{ ghostId: main.id, mode: 'read' }] : [];
+};
+
 const modeLabel: Record<SpaceGrant['mode'], string> = { read: '읽기', propose: '제안' };

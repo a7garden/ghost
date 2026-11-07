@@ -9,21 +9,15 @@ import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { useAvatarSource } from '../pets/AvatarProvider';
 import { GhostColorPicker } from '../pets/GhostColorPicker';
+import { LookEditor } from '../pets/LookEditor';
 import { PetSprite } from '../pets/PetSprite';
 import { spriteVersionOf } from '../pets/sprites';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from '../pets/ModelPicker';
 
-const boldColors = [
-  { name: '빨강', color: '#e92b37' }, { name: '주황', color: '#ff7a18' }, { name: '노랑', color: '#ffd600' },
-  { name: '초록', color: '#008a45' }, { name: '파랑', color: '#0058ef' }, { name: '보라', color: '#7135db' },
-];
-const neutralColors = [{ name: '검정', color: '#191919' }, { name: '흰색', color: '#ffffff' }];
-const bodyColors = [...neutralColors, ...boldColors];
 const backgroundColors = [
-  ...boldColors,
-  { name: '하늘', color: '#d7e9ff' }, { name: '민트', color: '#d5eee2' }, { name: '라일락', color: '#e8def9' },
-  { name: '복숭아', color: '#fae0d5' }, { name: '모래', color: '#f1e5cb' }, { name: '슬레이트', color: '#e0e6eb' },
-  ...neutralColors,
+  { name: '하늘', color: '#dbeaff' }, { name: '민트', color: '#d7f0e4' }, { name: '라일락', color: '#e9e1fa' },
+  { name: '복숭아', color: '#fbe3d6' }, { name: '모래', color: '#f3e8cf' }, { name: '안개', color: '#eef0f3' },
+  { name: '먹', color: '#202125' }, { name: '흰색', color: '#ffffff' },
 ];
 const stateChoices: { value: GhostState; label: string }[] = [{ value: 'active', label: '활성' }, { value: 'paused', label: '일시정지' }, { value: 'retired', label: '은퇴' }];
 
@@ -52,8 +46,8 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
   };
   const patchLook = (look: Partial<Ghost['look']>) => client.send({ type: 'ghost.update', ghostId, look: { ...ghost.look, ...look } });
   const assign = (avatarId: string | null) => void run(() => patchLook({ avatarId }), '아바타를 바꿨습니다.');
-  const bodyColor = ghost.look.body || 'auto';
   const backgroundColor = ghost.look.background || 'auto';
+  const saveLook = (patch: Partial<Ghost['look']>) => void run(() => patchLook(patch), '모습을 저장했습니다.');
   return <div className="grid gap-4">
     <SettingsGroup title={<span className="sr-only">기본 정보</span>}>
       <form onSubmit={event => {
@@ -86,23 +80,22 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
           options={[{ value: NO_MODEL, label: '기본 모델 따름' }, ...modelSelectOptions(state?.settings)]}/>
       </SettingsRow>
     </SettingsGroup>
-    <SettingsGroup title="아바타">
-      <div className="grid gap-4 p-4">
-        <fieldset className="m-0 grid gap-2 border-0 p-0"><legend className="sr-only">아바타</legend>
+    <SettingsGroup title="모습">
+      <div className="grid gap-5 p-4">
+        {!ghost.look.avatarId && <LookEditor ghostId={ghost.id} look={ghost.look} disabled={locked} onChange={saveLook}/>}
+        {avatars.length > 0 && <fieldset className="m-0 grid gap-2 border-0 p-0"><legend className="mb-2 text-caption text-ink-3">아바타</legend>
           <div className="grid grid-cols-5 gap-1.5">
             <button type="button" aria-pressed={!ghost.look.avatarId} disabled={locked} onClick={() => ghost.look.avatarId && assign(null)} title="기본 Ghost"
               className="avatar-choice avatar-choice--tile p-2 outline-none disabled:cursor-not-allowed">
-              <DotAvatar tone={toneFor(ghost.id)} size={36}/><span className="sr-only">기본 Ghost</span>
+              <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={36}/><span className="sr-only">기본 Ghost</span>
               {!ghost.look.avatarId && <Check size={12} className="absolute top-1 right-1" aria-hidden="true"/>}
             </button>
             {avatars.map(avatar => <AvatarTile key={avatar.id} avatar={avatar} selected={ghost.look.avatarId === avatar.id} disabled={locked}
               onSelect={() => ghost.look.avatarId !== avatar.id && assign(avatar.id)}/>)}
           </div>
-        </fieldset>
-        {!ghost.look.avatarId && <GhostColorPicker label="본체 색" resetLabel="자동" presets={bodyColors} value={bodyColor}
-          onChange={color => void run(() => patchLook({ body: color === 'auto' ? '' : color }), '본체 색을 저장했습니다.')}/>}
-        <GhostColorPicker label="배경색" resetLabel="기본" presets={backgroundColors} value={backgroundColor}
-          onChange={color => void run(() => patchLook({ background: color === 'auto' ? '' : color }), '배경색을 저장했습니다.')}/>
+        </fieldset>}
+        {ghost.look.avatarId && <GhostColorPicker label="배경색" resetLabel="기본" presets={backgroundColors} value={backgroundColor}
+          onChange={color => saveLook({ background: color === 'auto' ? '' : color })}/>}
       </div>
     </SettingsGroup>
     {sandbox && <SettingsGroup title="샌드박스">

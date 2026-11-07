@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- One durable conversation per Ghost: removed 새 대화 and the conversation switcher;
+  the home composer talks into that conversation. Work it spins off shows as live
+  thread cards where it started and in a thread list; older direct conversations stay
+  readable there. The Ghost's profile is a floating round button at the top center.
+  Host wakes render as event lines instead of owner bubbles.
+- Streamed model reasoning shows live above the reply and folds into 생각 과정
+  (`Message.thinking`, `Live.thinking` in the contract).
+- Sending follows the latest turn again; layout shifts no longer stop following.
+  The composer's running edge now circles the top side too.
+- The built-in Ghost is round with the same face, with eye styles, one accent mark and a
+  twelve-hue palette (`look.face`, `look.mark`); unset colors get a stable per-Ghost hue.
+- Creating a project asks only for the folder (name follows it), lands on the project
+  and shows host errors inline; grants are edited on the project page.
+
 - Removed the per-Ghost sidebar submenus (맡긴 일 · 이전 대화). Ghost rows are a flat
   presence roster with a live Work count; conversation history lives in the header
   switcher (기본 대화 pinned, distinct names for untitled conversations, relative times,

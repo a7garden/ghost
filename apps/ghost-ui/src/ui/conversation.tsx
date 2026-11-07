@@ -10,10 +10,14 @@ export interface ConversationProps {
   transcriptLabel: string
   children: React.ReactNode
   header?: React.ReactNode
+  /** Floats over the top of the transcript (identity, threads); the transcript scrolls beneath it. */
+  overlay?: React.ReactNode
   composer: React.ReactNode
   footer?: React.ReactNode
   className?: string
   scrollKey?: string | number
+  /** Changing it means the owner just acted (sent a message): follow the latest again wherever the view was. */
+  followKey?: string | number
   jumpToLatestLabel: string
 }
 
@@ -40,10 +44,12 @@ export function Conversation({
   transcriptLabel,
   children,
   header,
+  overlay,
   composer,
   footer,
   className,
   scrollKey,
+  followKey,
   jumpToLatestLabel,
 }: ConversationProps) {
   const viewportRef = React.useRef<HTMLDivElement>(null)
@@ -70,6 +76,11 @@ export function Conversation({
     hasMountedRef.current = true
   }, [jumpToLatest, scrollKey])
 
+  React.useLayoutEffect(() => {
+    if (followKey === undefined) return
+    jumpToLatest()
+  }, [jumpToLatest, followKey])
+
   React.useEffect(() => {
     const content = contentRef.current
     if (!content) return
@@ -93,15 +104,32 @@ export function Conversation({
     return () => observer.disconnect()
   }, [jumpToLatest])
 
+  // Layout shifts (a disclosure folding, reasoning collapsing into its summary, scroll anchoring) also fire
+  // scroll events. Only scrolling the owner did recently may stop following the latest turn.
+  const lastUserScrollRef = React.useRef(0)
+  const pointerHeldRef = React.useRef(false)
+  const markUserScroll = React.useCallback(() => { lastUserScrollRef.current = Date.now() }, [])
+  // A held pointer (scrollbar thumb drag) keeps counting as the owner's scrolling until release.
+  const holdPointer = React.useCallback(() => {
+    pointerHeldRef.current = true
+    markUserScroll()
+    const release = () => { pointerHeldRef.current = false; markUserScroll(); window.removeEventListener("pointerup", release); window.removeEventListener("pointercancel", release) }
+    window.addEventListener("pointerup", release)
+    window.addEventListener("pointercancel", release)
+  }, [markUserScroll])
   const handleTranscriptScroll = React.useCallback(() => {
     const viewport = viewportRef.current
     if (!viewport) return
     const distanceFromBottom =
       viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
     const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD
+    if (!isNearBottom && nearBottomRef.current && !pointerHeldRef.current && Date.now() - lastUserScrollRef.current > 800) {
+      jumpToLatest()
+      return
+    }
     nearBottomRef.current = isNearBottom
     setShowJumpToLatest(!isNearBottom)
-  }, [])
+  }, [jumpToLatest])
 
   return (
     <section
@@ -115,7 +143,8 @@ export function Conversation({
         </header>
       )}
 
-      <div className="ghost-conversation__transcript-frame">
+      <div className="ghost-conversation__transcript-frame" data-overlay={overlay != null || undefined}>
+        {overlay != null && <div className="ghost-conversation__overlay">{overlay}</div>}
         <div
           ref={viewportRef}
           className="ghost-conversation__transcript"
@@ -123,6 +152,10 @@ export function Conversation({
           aria-label={transcriptLabel}
           tabIndex={0}
           onScroll={handleTranscriptScroll}
+          onWheel={markUserScroll}
+          onTouchMove={markUserScroll}
+          onPointerDown={holdPointer}
+          onKeyDown={markUserScroll}
           onClickCapture={(event) => {
             if (event.target instanceof Element && event.target.closest("summary")) {
               preserveDisclosurePositionRef.current = true

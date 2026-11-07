@@ -4,7 +4,7 @@ import { Composer, InlineError, Popover, PopoverContent, PopoverTrigger } from '
 import type { Ghost } from '@ghost/contract';
 import { DotAvatar } from './DotAvatar';
 import { toneFor } from '../features/ghostState';
-import { ModelPicker, type ModelChoice } from '../pets/ModelPicker';
+import { ModelPicker } from '../pets/ModelPicker';
 import { useHost } from '../host/context';
 
 type Mode = 'talk' | 'work';
@@ -21,7 +21,6 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
   const [deadline, setDeadline] = useState('');
   const [mode, setMode] = useState<Mode>('talk');
   const [ghostId, setGhostId] = useState<string>();
-  const [model, setModel] = useState<ModelChoice>();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -39,17 +38,11 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}),
         });
         navigate(`/work/${encodeURIComponent(created.workId)}`);
-      } else if (model) {
-        // The first message carries the chosen model: open the conversation, save the model, then send.
-        const created = await client.send<{ conversationId: string }>({ type: 'conversation.create', ghostId: target.id });
-        await client.send({ type: 'conversation.update', conversationId: created.conversationId, model: { provider: model.provider, model: model.model } });
-        await client.send({ type: 'message.send', conversationId: created.conversationId, text: value });
-        navigate(`/ghosts/${encodeURIComponent(target.id)}?conversation=${encodeURIComponent(created.conversationId)}`);
       } else {
         await client.send({ type: 'message.send', conversationId: target.directConversationId, text: value });
         navigate(`/ghosts/${encodeURIComponent(target.id)}`);
       }
-      setText(''); setCriteria(''); setDeadline(''); setModel(undefined);
+      setText(''); setCriteria(''); setDeadline('');
     } catch (e) { setError(e instanceof Error ? e.message : '보내지 못했습니다.'); }
     finally { setSending(false); }
   };
@@ -62,7 +55,7 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
       placeholder={assigning ? '맡길 일을 적어 주세요. 첫 줄이 제목이 됩니다.' : `${target.name}에게 메시지`}
       submitLabel={assigning ? '일 맡기기' : '보내기'} disabled={sending} pending={sending}
       header={<div className="handoff__head">
-        <RecipientToken ghosts={ghosts} value={target} disabled={sending} onChange={id => { setGhostId(id); setModel(undefined); inputRef.current?.focus(); }}/>
+        <RecipientToken ghosts={ghosts} value={target} disabled={sending} onChange={id => { setGhostId(id); inputRef.current?.focus(); }}/>
         <div className="handoff__mode" role="radiogroup" aria-label="보내는 방식">
           {(['talk', 'work'] as const).map(value => <button key={value} type="button" role="radio" aria-checked={mode === value}
             onClick={() => { setMode(value); inputRef.current?.focus(); }}>{value === 'talk' ? '대화' : '맡기기'}</button>)}
@@ -78,7 +71,7 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
           <input type="datetime-local" value={deadline} onChange={event => setDeadline(event.target.value)} disabled={sending}/>
         </label>
       </div>}
-      footer={!assigning && <ModelPicker value={model} onChange={setModel} disabled={sending}/>}/>
+      footer={!assigning && <ModelPicker conversationId={target.directConversationId} disabled={sending}/>}/>
     {error && <InlineError className="mt-2">{error}</InlineError>}
   </div>;
 }

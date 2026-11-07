@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { FileText, FolderPlus, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Badge, Button, FormField, Page, PageHeader, InlineError, Input, SelectField, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui'
 import type { PageSummary, Space, SpaceGrant } from '@ghost/contract';
@@ -7,7 +7,7 @@ import { useHostState } from '../host/store';
 import { routeLabels } from '../uiText';
 import { toneFor } from './ghostState';
 import { DotAvatar } from '../components/DotAvatar';
-import { grantsSummary, isEditableProfile } from './spacePages';
+import { defaultSpaceGrants, grantsSummary, isEditableProfile, spaceNameFromPath } from './spacePages';
 import { Modal } from '../components/Modal';
 
 const PageEditorDrawer = lazy(() => import('./PageEditorDrawer'));
@@ -33,7 +33,7 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [removing, setRemoving] = useState<Space>();
-  const [pending, setPending] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [pending, setPending] = useState(''), [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [pages, setPages] = useState<PageSummary[]>([]);
   const [pagesLoading, setPagesLoading] = useState(false);
@@ -53,9 +53,9 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
     }, 250);
     return () => { alive = false; clearTimeout(timer); };
   }, [space?.id, search, reload, client]);
-  const run = async (work: () => Promise<unknown>, done: string) => {
-    setPending('save'); setError(''); setNotice('');
-    try { await work(); setNotice(done); return true; }
+  const run = async (work: () => Promise<unknown>) => {
+    setPending('save'); setError('');
+    try { await work(); return true; }
     catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); return false; }
     finally { setPending(''); }
   };
@@ -81,7 +81,7 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
               </span>
             </div>
           </div>)}</div>
-          : state && <div className="calm"><FolderPlus size={16} aria-hidden="true"/><p>등록된 프로젝트가 없습니다. PDC 문서 보관함(폴더)을 등록하면 Ghost가 읽거나 제안할 수 있습니다.</p></div>}
+          : state && <div className="calm"><FolderPlus size={16} aria-hidden="true"/><p>등록된 프로젝트가 없습니다</p></div>}
       </div>
       {space && <section className="grid gap-3" aria-label={`${space.name} 권한`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -114,22 +114,24 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
         {!listError && !pagesLoading && !pages.length && <div className="calm"><FileText size={16} aria-hidden="true"/><p>{search ? `"${search.trim()}" 검색 결과가 없습니다` : '아직 문서가 없습니다'}</p></div>}
       </section>}
       {error && <InlineError>{error}</InlineError>}
-      {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
     </div>
-    {creating && <SpaceForm title="새 프로젝트" ghosts={ghosts} busy={pending !== ''} onClose={() => { setCreating(false); onCreateClosed?.(); }} onSave={async input => {
-      const saved = await run(async () => { await client.send({ type: 'space.create', name: input.name, path: input.path, grants: input.grants }); }, '프로젝트를 등록했습니다.');
-      if (saved) { setCreating(false); onCreateClosed?.(); }
-    }}/>}
+    {creating && <SpaceForm title="새 프로젝트" ghosts={ghosts} busy={pending !== ''} defaultGrants={defaultSpaceGrants(ghosts)}
+      onClose={() => { setCreating(false); onCreateClosed?.(); }}
+      onSave={async input => {
+        const saved = await client.send<{ spaceId: string }>({ type: 'space.create', name: input.name, path: input.path, grants: input.grants });
+        setCreating(false);
+        if (onSelectSpace) onSelectSpace(saved.spaceId); else onCreateClosed?.();
+      }}/>}
     {editing && space && <SpaceForm title={`${space.name} 권한 편집`} ghosts={ghosts} busy={pending !== ''} initial={space} onClose={() => setEditing(false)} onSave={async input => {
-      const saved = await run(() => client.send({ type: 'space.update', spaceId: space.id, name: input.name, grants: input.grants }), '권한을 저장했습니다.');
-      if (saved) setEditing(false);
+      await client.send({ type: 'space.update', spaceId: space.id, name: input.name, grants: input.grants });
+      setEditing(false);
     }}/>}
     {removing && <Modal title="프로젝트 삭제" onClose={() => pending === '' && setRemoving(undefined)}>
       <p className="m-0">{removing.name} 프로젝트 등록을 삭제할까요? 보관함의 문서는 지워지지 않습니다.</p>
       {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}
       <div className="mt-4 flex justify-end gap-2">
         <Button variant="outline" type="button" disabled={pending !== ''} onClick={() => setRemoving(undefined)}>취소</Button>
-        <Button variant="destructive" type="button" disabled={pending !== ''} onClick={() => void run(async () => { await client.send({ type: 'space.delete', spaceId: removing.id }); setRemoving(undefined); if (onSelectSpace && removing.id === selectedSpace) onSelectSpace(''); }, '프로젝트를 삭제했습니다.')}>삭제</Button>
+        <Button variant="destructive" type="button" disabled={pending !== ''} onClick={() => void run(async () => { await client.send({ type: 'space.delete', spaceId: removing.id }); setRemoving(undefined); if (onSelectSpace && removing.id === selectedSpace) onSelectSpace(''); })}>삭제</Button>
       </div>
     </Modal>}
     {open && space && <Suspense fallback={<Modal title={open.pageId ? '문서' : '새 문서'} onClose={() => setOpen(undefined)} drawer focusClose><p className="m-0 text-ui text-ink-2" role="status">편집기를 불러오는 중…</p></Modal>}>
@@ -165,22 +167,37 @@ export function DocumentList({ pages, onOpen }: {
   </Table>;
 }
 
-function SpaceForm({ title, ghosts, initial, busy, onClose, onSave }: {
+function SpaceForm({ title, ghosts, initial, busy, defaultGrants = [], onClose, onSave }: {
   title: string;
-  ghosts: { id: string; name: string }[];
+  ghosts: { id: string; name: string; isDefault: boolean }[];
   initial?: Space;
   busy: boolean;
+  /** Grants a new project starts with; grants are edited on the project page afterwards. */
+  defaultGrants?: SpaceGrant[];
   onClose(): void;
   /** `path` is meaningful only for creation; edits keep the registered path. */
   onSave(input: { name: string; path: string; grants: SpaceGrant[] }): Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? '');
+  /** While the owner has not typed a name, it follows the folder's last segment. */
+  const [named, setNamed] = useState(Boolean(initial));
   const [path, setPath] = useState(initial?.path ?? '');
-  const [grants, setGrants] = useState<SpaceGrant[]>(initial?.grants.map(grant => ({ ...grant })) ?? []);
+  const [grants, setGrants] = useState<SpaceGrant[]>(initial?.grants.map(grant => ({ ...grant })) ?? defaultGrants);
   const [grantGhost, setGrantGhost] = useState('');
   const [grantMode, setGrantMode] = useState<SpaceGrant['mode']>('read');
+  const [fieldError, setFieldError] = useState<{ name?: string; path?: string }>({});
   const [error, setError] = useState(''), [saving, setSaving] = useState(false);
+  const firstField = useRef<HTMLInputElement>(null);
   const locked = busy || saving;
+  useEffect(() => {
+    // Radix puts the initial focus on the dialog's close button; put the caret in the first field instead.
+    const timer = setTimeout(() => firstField.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, []);
+  const updatePath = (value: string) => {
+    setPath(value);
+    if (!named) setName(spaceNameFromPath(value));
+  };
   const addGrant = () => {
     if (!grantGhost) return;
     if (grants.some(grant => grant.ghostId === grantGhost)) { setError('이미 권한이 있는 Ghost입니다.'); return; }
@@ -189,21 +206,27 @@ function SpaceForm({ title, ghosts, initial, busy, onClose, onSave }: {
   };
   const save = async () => {
     if (locked) return;
-    if (!name.trim()) { setError('프로젝트 이름을 입력해 주세요.'); return; }
-    if (!initial && !path.trim().startsWith('/')) { setError('보관함 폴더의 절대 경로를 입력해 주세요.'); return; }
+    const next: { name?: string; path?: string } = {};
+    if (!name.trim()) next.name = '프로젝트 이름을 입력해 주세요.';
+    if (!initial && !path.trim().startsWith('/')) next.path = '보관함 폴더의 절대 경로를 입력해 주세요.';
+    setFieldError(next);
+    if (next.name || next.path) return;
     setSaving(true); setError('');
     try { await onSave({ name: name.trim(), path: initial?.path ?? path.trim(), grants }); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '저장하지 못했습니다.'); }
     finally { setSaving(false); }
   };
   const remaining = ghosts.filter(ghost => !grants.some(grant => grant.ghostId === ghost.id));
-  return <Modal title={title} onClose={() => !locked && onClose()} className="w-[min(600px,calc(100vw-2rem))] sm:max-w-[600px]">
+  return <Modal title={title} onClose={() => !locked && onClose()}
+    className={initial ? 'w-[min(600px,calc(100vw-2rem))] sm:max-w-[600px]' : 'w-[min(440px,calc(100vw-2rem))] sm:max-w-[440px]'}>
     <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
-      <FormField label="이름">{control => <Input {...control} value={name} onChange={event => setName(event.target.value)} required maxLength={128} disabled={locked}/>}</FormField>
-      {!initial && <FormField label="보관함 폴더 경로" description="이 Mac의 절대 경로. 문서는 원래 위치에 그대로 있습니다.">
-        {control => <Input {...control} type="text" value={path} onChange={event => setPath(event.target.value)} required placeholder="/Users/me/Documents/프로젝트" maxLength={4096} disabled={locked} spellCheck={false} autoCapitalize="off"/>}
+      {!initial && <FormField label="폴더 경로" error={fieldError.path}>
+        {control => <Input {...control} ref={firstField} type="text" value={path} onChange={event => updatePath(event.target.value)} required maxLength={4096} placeholder="/Users/me/Documents/notes" disabled={locked} spellCheck={false} autoCapitalize="off" autoComplete="off"/>}
       </FormField>}
-      <fieldset className="m-0 flex min-w-0 flex-col gap-3 border-t border-dashed border-line-strong pt-4">
+      <FormField label="이름" error={fieldError.name}>
+        {control => <Input {...control} ref={initial ? firstField : undefined} value={name} onChange={event => { setName(event.target.value); setNamed(true); }} required maxLength={128} disabled={locked}/>}
+      </FormField>
+      {initial && <fieldset className="m-0 flex min-w-0 flex-col gap-3 border-t border-dashed border-line-strong pt-4">
         <legend className="mb-1 text-caption font-semibold text-ink">Ghost 권한</legend>
         {grants.map(grant => <div className="flex items-center gap-3" key={grant.ghostId}>
           <span className="min-w-0 flex-1 truncate text-caption text-ink">{ghosts.find(ghost => ghost.id === grant.ghostId)?.name ?? grant.ghostId}</span>
@@ -219,11 +242,13 @@ function SpaceForm({ title, ghosts, initial, busy, onClose, onSave }: {
           <SelectField label="권한 종류" className="w-[110px] flex-none" value={grantMode} disabled={locked} onValueChange={mode => setGrantMode(mode as SpaceGrant['mode'])} options={modeChoices}/>
           <Button variant="outline" type="button" className="flex-none" disabled={locked || !grantGhost} onClick={addGrant}><Plus size={14}/>추가</Button>
         </div>
-      </fieldset>
+      </fieldset>}
       {error && <InlineError>{error}</InlineError>}
       <div className="flex justify-end gap-2">
         <Button variant="outline" type="button" disabled={locked} onClick={onClose}>취소</Button>
-        <Button type="submit" disabled={locked || Boolean(!initial && !path.trim())}>{saving ? '저장 중…' : '저장'}</Button>
+        <Button type="submit" disabled={locked || Boolean(!initial && !path.trim())}>
+          {saving ? (initial ? '저장 중…' : '등록 중…') : initial ? '저장' : '등록'}
+        </Button>
       </div>
     </form>
   </Modal>;

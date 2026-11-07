@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
-import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, type FauxProviderHandle } from "@earendil-works/pi-ai";
+import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, type LiveState } from "@earendil-works/pi-durable";
 import type { Live, Message, MessageRole } from "@ghost/contract";
 import { GHOST_TOOLS, parseInteractiveUi, readInteractiveUi } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
@@ -13,6 +13,7 @@ import { execute } from "../src/core/commands.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import { CommandError } from "../src/core/errors.ts";
 import { createEngine } from "../src/engine/index.ts";
+import { liveFrom, sameLive } from "../src/engine/messages.ts";
 import { applyProviders, buildModels } from "../src/engine/models.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import type { Engine } from "../src/core/ports.ts";
@@ -154,6 +155,30 @@ test("a submission produces an assistant message in the transcript", async () =>
   expect(page.messages[0]?.text).toBe("hi");
   expect(page.messages[0]?.origin).toBe("owner");
   await engine.close();
+});
+
+test("reasoning stays on the assistant message, apart from its text", async () => {
+  const { engine, conversationId, faux } = await fixture();
+  faux.setResponses([fauxAssistantMessage([fauxThinking("weighing two options"), fauxText("option two")])]);
+  const answered = nextMessage(engine, conversationId, "assistant");
+  await engine.submit(conversationId, { text: "pick one", origin: "owner", requestId: "r1" });
+  const answer = await answered;
+  expect(answer.thinking).toBe("weighing two options");
+  expect(answer.text).toBe("option two");
+  const page = await engine.page(conversationId, null, 50);
+  expect(page.messages.find((message) => message.role === "assistant")?.thinking).toBe("weighing two options");
+  expect(page.messages.find((message) => message.role === "user")?.thinking).toBeUndefined();
+  await engine.close();
+});
+
+test("the live state streams reasoning separately and ignores redacted blocks", () => {
+  const generation = (content: unknown[]) => ({ run: {}, generation: { message: { role: "assistant", content } }, tools: [] }) as unknown as LiveState;
+  const thinking = liveFrom(generation([{ type: "thinking", thinking: "first step" }]), "c1");
+  expect(thinking).toMatchObject({ running: true, partial: null, thinking: "first step" });
+  const answering = liveFrom(generation([{ type: "thinking", thinking: "first step" }, { type: "text", text: "done" }]), "c1");
+  expect(answering).toMatchObject({ partial: "done", thinking: "first step" });
+  expect(sameLive(thinking, answering)).toBe(false);
+  expect(liveFrom(generation([{ type: "thinking", thinking: "secret", redacted: true }]), "c1").thinking).toBeUndefined();
 });
 
 test("the same request id is admitted once", async () => {

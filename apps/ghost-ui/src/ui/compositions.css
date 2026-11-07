@@ -92,12 +92,6 @@
 .presence-row__line[data-tone="working"] { color: var(--ghost-ink2); }
 .shell-menu .ghost-sidebar { padding: 12px 10px; }
 .shell-menu .sidebar-foot { padding: 8px 10px 10px; }
-.chat-head__work { display: inline-flex; height: 30px; min-width: 30px; align-items: center; justify-content: center; gap: 5px; padding: 0 7px; border: 0; border-radius: var(--radius-control); color: var(--ghost-ink2); background: none; font: 600 var(--text-caption)/1 var(--font-sans); cursor: pointer; }
-.chat-head__work:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
-.chat-head__work svg { width: 17px; height: 17px; }
-.chat-head__work > span { color: var(--ghost-signal-ink); }
-.switcher-search { width: 100%; height: 34px; margin-bottom: 4px; padding: 0 10px; border: 0; border-radius: var(--radius-control); outline: 0; color: var(--ghost-ink); background: var(--ghost-hover); font: var(--text-ui)/1 var(--font-sans); }
-.switcher-search::placeholder { color: var(--ghost-ink3); }
 
 /* Command search ------------------------------------------------------- */
 .ghost-command-palette__backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; justify-content: center; align-items: flex-start; padding: min(16vh, 128px) 16px 24px; background: color-mix(in srgb, var(--ghost-page) 40%, transparent); backdrop-filter: blur(2px); }
@@ -212,7 +206,7 @@
 .ghost-composer__footer-slot { flex: 1; margin-left: -6px; }
 .ghost-composer__footer-actions { justify-content: flex-end; }
 .ghost-composer[data-running] .ghost-composer__surface::before {
-  content: ''; position: absolute; inset: -1px; z-index: -1; border-radius: inherit; padding: 1px;
+  content: ''; position: absolute; inset: -1.5px; z-index: -1; border-radius: inherit; padding: 1.5px;
   background: conic-gradient(from var(--composer-angle, 0deg), transparent 0 60%, var(--ghost-signal) 80%, transparent 100%);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
@@ -237,7 +231,8 @@
 .ghost-conversation__messages > [data-kind="trail"] + [data-kind="trail"],
 .ghost-conversation__messages > [data-kind="trail"] + [data-role="assistant"],
 .ghost-conversation__messages > [data-role="assistant"] + [data-kind="trail"] { margin-block-start: 12px; }
-.ghost-conversation__dock { position: relative; z-index: 1; flex: 0 0 auto; padding: 0 var(--ghost-space-6) 16px; background: var(--ghost-canvas); }
+/* The top padding keeps the composer's 1.5px running edge inside the dock, below the fade above it. */
+.ghost-conversation__dock { position: relative; z-index: 1; flex: 0 0 auto; padding: 6px var(--ghost-space-6) 16px; background: var(--ghost-canvas); }
 .ghost-conversation__dock::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px; background: linear-gradient(transparent, var(--ghost-canvas)); pointer-events: none; }
 .ghost-conversation__footer { margin-top: var(--ghost-space-2); color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.4; text-align: center; }
 .ghost-conversation__jump { position: absolute; z-index: 2; bottom: 12px; left: 50%; max-width: calc(100% - 24px); transform: translateX(-50%); border-radius: var(--radius-pill) !important; box-shadow: var(--shadow-raised); }

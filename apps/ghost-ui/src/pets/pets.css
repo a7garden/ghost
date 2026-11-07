@@ -7,3 +7,26 @@
 .dot-avatar.pet-avatar { overflow: visible; border-radius: 25%; }
 .avatar-edit-button { display: inline-flex; border-radius: var(--radius-xl); }
 .avatar-edit-button:hover { background: var(--ghost-hover); }
+
+@layer components {
+  /* Built-in Ghost look editor: preview, then picture-choices for color, eyes, accent and tile. */
+  .look-editor { container-type: inline-size; min-width: 0; }
+  .look-editor__layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @container (min-width: 440px) { .look-editor__layout { grid-template-columns: 168px minmax(0, 1fr); gap: 20px; align-items: start; } }
+  .look-editor__stage { display: grid; height: 168px; place-items: center; border-radius: var(--radius-xl); background: var(--ghost-inset); }
+  .look-editor__rows { display: grid; gap: 14px; min-width: 0; }
+  .look-editor__row { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+  .look-editor__row > legend { margin-bottom: 8px; padding: 0; color: var(--ghost-ink3); font-size: var(--text-micro); font-weight: 600; }
+  .look-editor__swatches, .look-editor__options { display: flex; flex-wrap: wrap; gap: 6px; }
+  .look-swatch { position: relative; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ghost-ink) 10%, transparent); cursor: pointer; transition: transform var(--duration-fast) var(--ease-spring); }
+  .look-swatch:hover:not(:disabled) { transform: scale(1.1); }
+  .look-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ghost-canvas), 0 0 0 3.5px var(--ghost-ink); }
+  .look-swatch[data-empty] { background: repeating-linear-gradient(135deg, var(--ghost-hover2) 0 3px, transparent 3px 6px); }
+  .look-swatch--custom { display: grid; place-items: center; overflow: hidden; background: conic-gradient(#ef4b3f, #f2b600, #1fa463, #2f9bff, #8a5cf6, #ef4b3f); }
+  .look-swatch--custom input { width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  .look-swatch:disabled { cursor: not-allowed; opacity: .5; }
+  .look-option { display: grid; width: 52px; height: 52px; place-items: center; padding: 0; border: 0; border-radius: var(--radius-card); background: var(--ghost-hover); cursor: pointer; transition: background-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease; }
+  .look-option:hover:not(:disabled) { background: var(--ghost-hover2); }
+  .look-option[aria-pressed="true"] { background: var(--ghost-surface); box-shadow: 0 0 0 1.5px var(--ghost-ink); }
+  .look-option:disabled { cursor: not-allowed; opacity: .5; }
+}

@@ -33,6 +33,18 @@ function textOf(content: unknown): string {
   return parts.join("\n");
 }
 
+/** The reasoning blocks of an assistant body; redacted blocks carry no readable text. */
+function thinkingOf(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const block = part as { type?: unknown; thinking?: unknown; redacted?: unknown };
+    if (block.type === "thinking" && typeof block.thinking === "string" && block.redacted !== true && block.thinking.trim()) parts.push(block.thinking);
+  }
+  return parts.join("\n\n");
+}
+
 /** Bounded JSON preview of a tool call's arguments. */
 function argumentsOf(call: ToolCall): string {
   try {
@@ -86,10 +98,12 @@ export function toMessage(entry: EntryRecord, conversationId: string, userMeta: 
             .filter((part): part is ToolCall => part.type === "toolCall")
             .map((call) => ({ callId: call.id, name: call.name, args: argumentsOf(call) }))
         : [];
+      const thinking = message ? thinkingOf(message.content) : "";
       return {
         ...base,
         role: "assistant",
         text: message ? textOf(message.content) : "",
+        ...(thinking ? { thinking } : {}),
         toolCalls,
         createdAt: message?.timestamp ?? 0,
       };
@@ -136,18 +150,21 @@ export function liveFrom(state: LiveState | undefined, conversationId: string): 
     name: slot.name,
     output: (slot.output ?? "").slice(0, MAX_TOOL_OUTPUT),
   }));
-  const partial = state?.generation?.message ? textOf(state.generation.message.content) : "";
+  const content = state?.generation?.message?.content;
+  const partial = content ? textOf(content) : "";
+  const thinking = content ? thinkingOf(content) : "";
   return {
     conversationId,
     running: state?.run !== undefined,
     partial: partial.length > 0 ? partial : null,
+    ...(thinking ? { thinking } : {}),
     tools,
   };
 }
 
 /** Whether two live states would look the same to a client. */
 export function sameLive(left: Live, right: Live): boolean {
-  if (left.running !== right.running || left.partial !== right.partial) return false;
+  if (left.running !== right.running || left.partial !== right.partial || left.thinking !== right.thinking) return false;
   if (left.tools.length !== right.tools.length) return false;
   return left.tools.every((tool, index) => {
     const other = right.tools[index];

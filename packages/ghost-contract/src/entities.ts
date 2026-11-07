@@ -17,10 +17,20 @@ export const ModelRef = Type.Object({
 });
 export type ModelRef = Static<typeof ModelRef>;
 
+/** Eye styles of the built-in Ghost portrait. */
+export const LookFace = Type.Union([Type.Literal("bars"), Type.Literal("dots"), Type.Literal("arcs"), Type.Literal("tall")]);
+export type LookFace = Static<typeof LookFace>;
+
+/** A single minimal accent on the built-in Ghost portrait. */
+export const LookMark = Type.Union([Type.Literal("none"), Type.Literal("halo"), Type.Literal("antenna"), Type.Literal("sprout"), Type.Literal("ring"), Type.Literal("spark")]);
+export type LookMark = Static<typeof LookMark>;
+
 export const Look = Type.Object({
   avatarId: nullable(Id),
   body: Type.Optional(Type.String({ maxLength: 32 })),
   background: Type.Optional(Type.String({ maxLength: 32 })),
+  face: Type.Optional(LookFace),
+  mark: Type.Optional(LookMark),
 });
 export type Look = Static<typeof Look>;
 
@@ -446,6 +456,8 @@ export const Message = Type.Object({
   role: MessageRole,
   origin: nullable(MessageOrigin),
   text: Type.String(),
+  /** The model's reasoning before an assistant reply, when the provider streams it. Absent when empty. */
+  thinking: Type.Optional(Type.String()),
   toolCalls: Type.Array(ToolCallView),
   /** Present on tool results. */
   tool: nullable(Type.Object({ callId: Type.String(), name: Type.String(), isError: Type.Boolean() })),
@@ -466,6 +478,8 @@ export const Live = Type.Object({
   running: Type.Boolean(),
   /** Streaming assistant text of the current generation. */
   partial: nullable(Type.String()),
+  /** Streaming reasoning of the current generation, when the provider streams it. Absent when empty. */
+  thinking: Type.Optional(Type.String()),
   tools: Type.Array(LiveTool),
 });
 export type Live = Static<typeof Live>;

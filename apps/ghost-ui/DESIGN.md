@@ -5,7 +5,7 @@
 - The host contract (`@ghost/contract`) is the only API reference; the UI owns no second vocabulary for entities, commands or events.
 - Page headings name the destination. Do not append promotional subtitles, rhetorical slogans, English eyebrow labels, or companionship copy. Show actual state and actionable labels. Help belongs beside a field or in an empty/error state when needed.
 - Example data is explicitly labeled and kept separate from the host. No fake live terminal, model execution, or simulated streams.
-- Keep the current Ghost icon, per the latest owner instruction.
+- The app icon keeps the original Ghost mark. The in-app built-in Ghost portrait is a round body with the same face (two bar eyes, small round mouth); see Ghost portraits below.
 
 ## App-owned UI
 
@@ -80,12 +80,20 @@ Feature-level compositions:
 
 ## Conversation — 2026-11-07
 
-Direct chat keeps a 720px reading column, trailing owner bubbles and open assistant
-prose. The header shows the Ghost's presence portrait (opening its profile), its name and
-the conversation title. The title opens every conversation of the Ghost: 기본 대화 pinned on
-top, then by activity with relative times; untitled ones are named by their start time;
-a search field appears past eight. 새 대화 starts one in place. 맡긴 일 (with the live
-count) and 새 대화 sit at the right. The dock holds the auto-growing composer,
+Each Ghost keeps one durable conversation, like Dots: there is no "new conversation" action.
+The Ghost floats as a round button at the top center (its presence ring; it opens the
+profile and look editor) and content fades beneath it. Work the conversation spins off
+appears as **thread cards** at the moment it started, kept live (state glyph, carrier,
+lifecycle). The thread button at the top right gathers the Ghost's live and recent
+맡긴 일; direct conversations kept from before stay reachable there as 이전 대화.
+Host wakes (reports, child results, decision answers, schedules, verdicts) render as quiet
+event lines, never as the owner's bubble.
+
+Reasoning the provider streams shows as a disclosure above the reply: while thinking it
+stays open, names the newest step and shows the latest lines; once text arrives it folds
+to 생각 과정. Sending a message always follows the latest turn; only the owner's own
+scrolling (wheel, touch, pointer, keys) stops following, never a layout shift.
+The dock holds the auto-growing composer (its running edge circles all four sides),
 model selection, send and cancel. Suggestions populate and focus the draft. Conversation
 identity resets local transcript/draft state so switching history never shows another
 conversation's messages or sends its draft accidentally.
@@ -98,6 +106,14 @@ Footnotes navigate within their own message without changing the app hash route;
 relative paths have no transcript document base and remain plain text.
 Rendering never rewrites the existing transcript or document storage.
 Interactive responses create new owner messages only through the normal send command.
+
+## Ghost portraits
+
+The built-in portrait is a circle with the approved face. `look.face` picks the eyes
+(bars, dots, arcs, tall) and `look.mark` one accent drawn in the body color (halo,
+antenna, sprout, ring, spark). `look.body` takes any color from a twelve-hue palette or a
+custom one; a Ghost that never chose gets a stable hue from its id so agents read apart.
+The look editor shows every choice as a picture of the result.
 
 ## Interactive responses
 
