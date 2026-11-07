@@ -27,14 +27,23 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-327d81b` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-f4f05fb` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
-| Mac 앱 | `~/Applications/Ghost.app`(`7fa4f8f` 셸, 임시 서명), `console.json` = `{host_mode: external, root}` |
+| Mac 앱 | `~/Applications/Ghost.app`(`f4f05fb` 셸·새 아이콘, 임시 서명), `console.json` = `{host_mode: external, root}` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### Ghost 바리에이션·새 앱 아이콘 운영 반영 — 2026-11-07
+
+- 소스 `f4f05fb`의 Host·UI를 `releases/20261107-bun-f4f05fb`에 설치했다. 계약에 선택 필드 `Look.shape`(round·egg·squircle·sheet)와 `LookMark` 여섯 값(crown·bow·ears·horns·headphones·glasses)이 추가됐다. DB 스키마는 그대로다. 컴파일 Host 바이트와 UI 85개 파일 해시가 빌드 원본과 일치한다. 설치 사본을 백업 DB 사본 위 임시 루트·포트에서 실행해, 꾸미기에서 모양 `유령`·장식 `헤드폰`을 고르면 `look`에 저장되는 것을 확인했다.
+- Mac 앱을 새 아이콘(원형 Ghost와 파란 작업 호)으로 다시 빌드해 교체했다. 임시 서명, `codesign --verify --strict` 통과, 번들 `icon.icns`가 저장소 원본과 일치하고 Finder 아이콘도 새 모양이다. 이전 앱은 백업의 `Ghost.app`에 있다.
+- 검사: Host 테스트 235개(모습 저장·거부 1개 추가)·타입 검사, UI 테스트 68개·타입 검사·빌드, 시각 회귀 28개(기준 갱신 후 재통과), iOS `swift test` 37개·시뮬레이터 빌드·밝게/어둡게 캡처. 독립 Codex 검토 결과 지적 사항 없음.
+- 백업: `~/.local/share/ghost/backups/pre-variations-20261107-f4f05fb/`, `ghost-backup/2`, `complete: true`, 두 DB `integrity_check` ok, artifacts·secrets·config 복사·비교, 이전 앱 사본 서명 유효.
+- 유휴 상태에서 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 55950 → 67594). 실행 파일·운영 DB·단일 리스너·준비 상태, Ghost 4·대화 9·맡긴 일 32·프로젝트 0, config·secrets 보존을 확인했다. 설치 앱에서 `--desktop-probe` health 후 의미 클릭으로 Ghost 대화 → 프로필 → 꾸미기를 열어 모양 4종과 새 장식이 보이는 것을 확인하고 닫았다. 운영 Ghost의 모습은 바꾸지 않았다.
+- 되돌릴 때는 `current`를 `releases/20261107-bun-327d81b`로 교체하고 LaunchAgent를 정상 재시작한다. 새 값을 저장한 Ghost가 있으면 이전 Host가 그 `look`을 거부할 수 있으므로, 되돌리기 전에 해당 Ghost의 모양·장식을 기존 값으로 바꾼다.
 
 ### UI/UX 보완·폴더 선택 셸 운영 반영 — 2026-11-07
 
