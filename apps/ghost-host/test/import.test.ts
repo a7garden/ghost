@@ -96,6 +96,7 @@ function buildLegacyRoot(): string {
   bindings.run(CONV_A2, GHOST_A);
   bindings.run(CONV_B, GHOST_B);
   db.query("INSERT INTO lifetime_conversation_disclosure(ghost_id, conversation_id, privacy) VALUES (?, ?, 'public')").run(GHOST_A, CONV_A2);
+  db.query("INSERT INTO lifetime_conversation_disclosure(ghost_id, conversation_id, privacy) VALUES (?, ?, 'local_only')").run(GHOST_B, CONV_B);
   const turn = db.query(
     "INSERT INTO lifetime_turns(id, ghost_id, conversation_id, sequence, sender_kind, sender_ref, text, privacy, kind, source_turn_id, attachments, created_at_ms) VALUES (?, ?, ?, ?, ?, 'owner', ?, 'private', ?, NULL, '[]', ?)",
   );
@@ -209,6 +210,9 @@ describe("runImport", () => {
     expect(ledger.conversation(CONV_A)).toMatchObject({ ghostId: GHOST_A, kind: "direct", privacy: "private" });
     expect(ledger.conversation(CONV_A2)).toMatchObject({ ghostId: GHOST_A, kind: "direct", privacy: "public" });
     expect(ledger.conversations({ ghostId: GHOST_A })).toHaveLength(2);
+    // A legacy local-only canonical conversation stays local; model choices stay on conversations.
+    expect(ledger.conversation(CONV_B).privacy).toBe("local");
+    expect(ledger.ghosts().every((ghost) => ghost.model === null)).toBe(true);
 
     // History: owner → user, ghost → assistant, ordered by sequence; empty and host turns dropped.
     expect(report.messages).toBe(4);

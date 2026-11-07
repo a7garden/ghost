@@ -566,7 +566,8 @@ function planGhost(
     name,
     persona: profile?.persona ?? "",
     look: { avatarId: legacy.ghostAvatars.get(row.ghostId) ?? null },
-    model: selectionFor(row.ghostId, row.conversationId),
+    // Model choices were per conversation in the legacy host; the Ghost follows the default.
+    model: null,
     isDefault: row.ghostId === defaultId,
     // Draining Ghosts accepted no new work; paused preserves that posture.
     state: row.mode === "draining" ? "paused" : "active",
@@ -581,8 +582,9 @@ function planGhost(
       kind: "direct",
       workId: null,
       title: name,
-      privacy: "private",
-      model: null,
+      // The legacy disclosure is a privacy boundary the owner set; it is never loosened.
+      privacy: LEGACY_PRIVACY[legacy.disclosures.get(row.conversationId) ?? "private"] ?? "private",
+      model: selectionFor(row.ghostId, row.conversationId),
       busy: false,
       createdAt,
       lastActivityAt: lastActivity,
@@ -685,7 +687,7 @@ export async function runImport(opts: {
         workId: null,
         title: plan.ghost.name,
         privacy,
-        model: null,
+        model: selectionFor(binding.ghostId, binding.conversationId),
         busy: false,
         createdAt: now,
         lastActivityAt: lastActivity,
