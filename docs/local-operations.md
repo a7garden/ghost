@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-0a7ca7c` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-79bd394` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`f4f05fb` 셸·새 아이콘, 임시 서명), `console.json` = `{host_mode: external, root}` |
@@ -35,6 +35,14 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### Ghost 배경 제거 운영 반영 — 2026-11-08
+
+- 소유자 결정: Ghost에는 배경이 없다. 소스 `79bd394`의 UI를 `releases/20261108-bun-79bd394`에 설치했다(꾸미기의 배경 줄·아바타 배경색 선택·초상 배경 제거, 저장된 `look.background`는 무시). Host는 `0a7ca7c`과 소스·바이트가 같아 그대로 복사했고 UI 85개 파일 해시가 빌드 원본과 일치한다. 운영 Ghost 4개의 `look.background`는 이미 모두 비어 있어 데이터 변경은 없다.
+- 검사: UI 테스트 69개·타입 검사·빌드, 시각 회귀 28개 통과. 설치 사본을 백업 DB 사본 위 임시 루트·포트에서 실행해 health·UI 응답을 확인했다.
+- 백업: `~/.local/share/ghost/backups/pre-no-background-20261108-79bd394/`, `ghost-backup/2`, `complete: true`, 두 DB `integrity_check` ok, artifacts·secrets·config 복사. 시각 `2026-11-07T15:22Z`.
+- 유휴 확인 후 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 96122 → 3071). 실행 파일·준비 상태, Ghost 4·대화 9·맡긴 일 32, config·secrets 보존을 확인했다. 설치 앱에서 꾸미기를 열어 배경 줄이 없는 것을 확인하고 닫았다.
+- 되돌릴 때는 `current`를 `releases/20261108-bun-0a7ca7c`로 교체하고 LaunchAgent를 정상 재시작한다.
 
 ### 채팅 다듬기·기억 직렬화·위임 표시 운영 반영 — 2026-11-08
 
