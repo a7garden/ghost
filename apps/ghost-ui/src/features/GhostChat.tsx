@@ -7,6 +7,7 @@ import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
 import { StateGlyph, ThreadCard, workGlyph } from '../components/agent';
 import { LiveReply, Transcript, type TranscriptExtra } from '../components/TranscriptMessage';
+import { quoteForReply } from '../components/MessageMenu';
 import { ModelPicker } from '../pets/ModelPicker';
 import { GhostDesignEditor } from './GhostDesign';
 import { ThreadPanel } from './ThreadPanel';
@@ -69,11 +70,16 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
   const names = new Map(state.ghosts.map(item => [item.id, item.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
   const openWork = (id: string) => navigate(`/work/${encodeURIComponent(id)}`);
-  // Threads begun here appear where they started, kept live.
+  // Threads begun here appear where they started, kept live, with the Ghosts they delegated to beneath.
   const extras: TranscriptExtra[] = conversationId ? state.works
     .filter(work => work.originConversationId === conversationId && !work.parentId)
-    .map(work => ({ key: `thread:${work.id}`, at: work.createdAt, node: <ThreadCard work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'}
-      needsOwner={waiting.has(work.id)} now={now} onOpen={() => openThread(work.id)}/> })) : [];
+    .map(work => {
+      const delegates = state.works.filter(child => child.rootId === work.id && child.id !== work.id)
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .map(child => ({ work: child, ghostName: names.get(child.ghostId) ?? 'Ghost', needsOwner: waiting.has(child.id) }));
+      return { key: `thread:${work.id}`, at: work.createdAt, node: <ThreadCard work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'}
+        needsOwner={waiting.has(work.id)} now={now} delegates={delegates} onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
+    }) : [];
 
   return <div className="chat-layout" data-thread={threadId ? '' : undefined}>
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
@@ -111,6 +117,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
         <button type="button" className="link-quiet" disabled={olderLoading} onClick={loadOlder}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
       </div>}
       <Transcript messages={page.messages} speaker={speaker} extras={extras}
+        onQuote={text => { setDraft(current => `${current.trim() ? `${current.trimEnd()}\n\n` : ''}${quoteForReply(text)}`); inputRef.current?.focus(); }}
+        onReuse={text => { setDraft(text); inputRef.current?.focus(); }}
         onUiSubmit={message => message.conversationId === conversationId ? async (text, requestId) => {
           await client.send({ type: 'message.send', conversationId: message.conversationId, text }, requestId);
         } : undefined}/>

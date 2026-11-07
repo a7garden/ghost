@@ -6,11 +6,12 @@ import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph, type GlyphState } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
-import { Transcript } from '../components/TranscriptMessage';
+import { LiveReply, Transcript } from '../components/TranscriptMessage';
 import { ArtifactPreview } from '../components/ArtifactPreview';
 import { MessageBody } from '../components/MessageBody';
 import { DecisionCard } from './Decision';
 import { toneFor } from './ghostState';
+import { useConversationFeed } from './conversationFeed';
 import { absoluteTime, relativeTime, useNow } from './time';
 import { useHost } from '../host/context';
 import { uiTerms } from '../uiText';
@@ -170,29 +171,30 @@ function BranchNode({ work, ghostName, depth, needsOwner, onOpen }: { work: Work
   </li>;
 }
 
-/** The assignee's conversation, read-only: the owner steers through 수정 and decisions. */
+/** The assignee's conversation, read-only and live while it runs: the owner steers through 수정 and decisions. */
 function WorkConversation({ work, ghostName }: { work: Work; ghostName: string }) {
-  const { client } = useHost();
-  const [messages, setMessages] = useState<Message[] | null>(null);
   const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (!open || !work.conversationId) return;
-    let alive = true;
-    void client.conversation(work.conversationId).then(page => { if (alive) setMessages(page.messages); }).catch(() => { if (alive) setMessages([]); });
-    return () => { alive = false; };
-  }, [open, work.conversationId, client]);
   if (!work.conversationId) return null;
-  const speaker = (message: Message) => message.role === 'user' ? 'Ghost에게 전달' : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : ghostName;
   return <section className="work-section" aria-labelledby="work-conversation">
     <button type="button" className="work-disclosure" aria-expanded={open} onClick={() => setOpen(value => !value)}>
       <ChevronRight size={14} aria-hidden="true"/><h2 id="work-conversation" className="section-title">작업 대화</h2>
     </button>
-    {open && <div className="work-transcript">
-      {messages === null ? <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>
-        : messages.length ? <div className="ghost-conversation__messages"><Transcript messages={messages} speaker={speaker}/></div>
-          : <p className="work-aside__empty">대화 기록 없음</p>}
-    </div>}
+    {open && <WorkTranscript conversationId={work.conversationId} ghostId={work.ghostId} ghostName={ghostName}/>}
   </section>;
+}
+
+function WorkTranscript({ conversationId, ghostId, ghostName }: { conversationId: string; ghostId: string; ghostName: string }) {
+  const { feed, loading } = useConversationFeed(conversationId);
+  const speaker = (message: Message) => message.role === 'user' ? 'Ghost에게 전달' : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : ghostName;
+  const running = Boolean(feed.live?.running);
+  return <div className="work-transcript">
+    {loading && !feed.messages.length ? <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>
+      : feed.messages.length || running ? <div className="ghost-conversation__messages">
+        <Transcript messages={feed.messages} speaker={speaker}/>
+        {feed.live && <LiveReply live={feed.live} ghostId={ghostId} ghostName={ghostName}/>}
+      </div>
+        : <p className="work-aside__empty">대화 기록 없음</p>}
+  </div>;
 }
 
 function EditWorkModal({ work, onClose, onSaved }: { work: Work; onClose(): void; onSaved(): void }) {

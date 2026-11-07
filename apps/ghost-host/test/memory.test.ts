@@ -11,10 +11,21 @@ import { createMemory } from "../src/integrations/memory.ts";
  * engine does.
  */
 const FAKE_ENGINE = `#!/usr/bin/env bun
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const logDir = join(import.meta.dir, "log");
+const lockDir = join(import.meta.dir, "engine-lock");
+try {
+  mkdirSync(lockDir);
+} catch {
+  process.stderr.write("store is locked — another oxibrain process owns it\\n");
+  process.exit(1);
+}
+process.on("exit", () => rmSync(lockDir, { recursive: true, force: true }));
+// Integration test: a real child retains its OS-level store lock during shutdown;
+// the parent's fake clock cannot drive this separate process's termination.
+process.on("SIGTERM", () => setTimeout(() => process.exit(0), 30));
 writeFileSync(join(logDir, "argv.json"), JSON.stringify(process.argv.slice(2)));
 
 function respond(message) {
@@ -49,6 +60,10 @@ function handle(line) {
   if (request.method === "tools/call") {
     const name = request.params.name;
     if (name === "search") {
+      if (request.params.arguments.query === "fixture-failure") {
+        respond({ jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: "fixture search failed" }] } });
+        return;
+      }
       const envelope = {
         data: {
           memory: [
@@ -181,6 +196,39 @@ describe("memory", () => {
     const call = requests.find((request) => request.method === "tools/call");
     expect(call?.params?.["name"]).toBe("search");
     expect(call?.params?.["arguments"]).toEqual({ query: "tomatoes", space: "space-a", mode: "auto", limit: 5 });
+  });
+
+  test("parallel memory calls across Ghosts wait for the previous engine to exit", async () => {
+    const fixture = engineFixture();
+    const memory = createMemory({ ...fixture.config, memory: { ...fixture.config.memory!, spaces: { "*": "space-all" } } })!;
+
+    const [first, second, recalled, retained] = await Promise.all([
+      memory.search("ghost-1", "인텔리턴트", 8),
+      memory.search("ghost-2", "intelligent UI 지능형 UI", 8),
+      memory.recall("ghost-1", "what did we decide", 512),
+      memory.retain("ghost-2", "the owner said hello", { conversationId: "conversation-1", workId: null }),
+    ]);
+
+    expect(first).toHaveLength(2);
+    expect(second).toHaveLength(2);
+    expect(recalled.text).toBe("The owner decided to water the tomatoes.");
+    expect(retained.id).toBe("a".repeat(64));
+    expect(fixture.requests().filter((request) => request.method === "tools/call").map((request) => request.params?.["name"])).toEqual(["search", "search", "recall", "ingest"]);
+  });
+
+  test("a failed operation keeps its error and releases the queue for the next call", async () => {
+    const fixture = engineFixture();
+    const memory = createMemory(fixture.config)!;
+
+    const results = await Promise.allSettled([
+      memory.search("ghost-1", "fixture-failure", 8),
+      memory.search("ghost-1", "tomatoes", 8),
+    ]);
+
+    expect(results[0]?.status).toBe("rejected");
+    if (results[0]?.status === "rejected") expect(results[0].reason.message).toBe("fixture search failed");
+    expect(results[1]?.status).toBe("fulfilled");
+    if (results[1]?.status === "fulfilled") expect(results[1].value).toHaveLength(2);
   });
 
   test("recall asks for a token budget and returns the layers and their sources", async () => {

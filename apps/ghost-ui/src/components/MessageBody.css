@@ -9,38 +9,48 @@
   overflow-wrap: anywhere;
 }
 
+/* In a transcript the message sets the reading size (15px chat, smaller in the thread panel). */
+:is(.ghost-conversation-message__content, .chat-live__text) > .message-body {
+  font-size: inherit;
+  line-height: inherit;
+}
 
 .message-body :is(p, ul, ol, blockquote, hr, .message-body__code, .message-body__tablewrap) {
-  margin-block: 0.8em 0;
+  margin-block: 0.75em 0;
 }
 
 .message-body li > p {
-  margin-block: 0.35em 0;
+  margin-block: 0.3em 0;
 }
 
 /* Headings stay near body scale; they organise a reply, not a document page. */
 .message-body :is(h1, h2, h3, h4, h5, h6) {
-  margin-block: 1.1em 0.4em;
+  margin-block: 1.35em 0.45em;
   color: var(--ghost-ink, #1a1c1f);
   font-weight: var(--font-weight-semibold, 600);
-  line-height: var(--text-headingSm--line-height, 1.4);
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.message-body :is(h1, h2, h3, h4, h5, h6) + :is(p, ul, ol) {
+  margin-block-start: 0;
 }
 
 .message-body h1 {
-  font-size: var(--text-headingSm, 18px);
+  font-size: 1.25em;
 }
 
 .message-body h2 {
-  font-size: var(--text-bodyLg, 16px);
+  font-size: 1.125em;
 }
 
 .message-body :is(h3, h4, h5, h6) {
-  font-size: var(--text-body, 14px);
+  font-size: 1em;
 }
 
 .message-body ul,
 .message-body ol {
-  padding-inline-start: 1.5em;
+  padding-inline-start: 1.4em;
 }
 
 .message-body ul {
@@ -51,8 +61,28 @@
   list-style: decimal;
 }
 
+.message-body li {
+  padding-inline-start: 0.2em;
+}
+
+.message-body li::marker {
+  color: var(--ghost-ink3);
+}
+
+.message-body ol > li::marker {
+  font-variant-numeric: tabular-nums;
+}
+
 .message-body li + li {
   margin-block-start: 0.3em;
+}
+
+.message-body :is(li > ul, li > ol) {
+  margin-block-start: 0.3em;
+}
+
+.message-body strong {
+  font-weight: 600;
 }
 
 /* GFM task lists keep their box but lose the redundant bullet. */
@@ -67,8 +97,8 @@
 
 .message-body blockquote {
   margin-inline: 0;
-  padding-inline-start: var(--ghost-space-3, 12px);
-  border-inline-start: 2px solid var(--ghost-line-strong);
+  padding: 0.1em 0 0.1em 0.9em;
+  border-inline-start: 3px solid var(--ghost-line-strong);
   color: var(--ghost-ink2);
 }
 
@@ -99,9 +129,9 @@
 /* Fenced code: language bar plus copy action, lines scroll inside the block. */
 .message-body__code {
   min-width: 0;
-  border: 1px solid var(--ghost-line);
   border-radius: var(--radius-card, 10px);
   background: var(--ghost-inset);
+  box-shadow: inset 0 0 0 1px var(--ghost-line);
   overflow: hidden;
 }
 
@@ -110,10 +140,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--ghost-space-2, 8px);
-  min-height: var(--ghost-control-height, 28px);
-  padding-inline: var(--ghost-space-2, 8px) var(--ghost-space-1, 4px);
-  border-bottom: 1px solid var(--ghost-line);
-  background: var(--ghost-surface);
+  min-height: 32px;
+  padding-inline: var(--ghost-space-4, 16px) var(--ghost-space-1, 4px);
 }
 
 .message-body__code-lang {
@@ -133,10 +161,10 @@
 .message-body__code pre {
   min-width: 0;
   margin: 0;
-  padding: var(--ghost-space-3, 12px) var(--ghost-space-4, 16px);
+  padding: 0 var(--ghost-space-4, 16px) var(--ghost-space-3, 12px);
   overflow-x: auto;
   color: var(--ghost-ink);
-  font: var(--text-mono, 12px) / var(--text-mono--line-height, 1.6) var(--font-mono, ui-monospace, monospace);
+  font: 12.5px / 1.65 var(--font-mono, ui-monospace, monospace);
 }
 
 .message-body__code pre:focus-visible {
@@ -154,40 +182,75 @@
   overflow-wrap: normal;
 }
 
-/* GFM tables: hairline grid that scrolls locally instead of stretching the transcript. */
+/* GFM tables: a quiet card with row hairlines that scrolls locally instead of stretching the transcript. */
 .message-body__tablewrap {
+  width: fit-content;
   min-width: 0;
   max-width: 100%;
   overflow-x: auto;
+  border-radius: var(--radius-control, 10px);
+  border: 1px solid var(--ghost-line-strong);
 }
 
 .message-body__tablewrap:focus-visible {
   outline: 2px solid var(--ghost-ink3);
   outline-offset: 2px;
-  border-radius: var(--radius-chip, 6px);
 }
 
 .message-body table {
   margin-block: 0;
-  border-collapse: collapse;
-  font-size: var(--text-ui, 13px);
-  line-height: var(--text-ui--line-height, 1.45);
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.9em;
+  line-height: 1.5;
 }
 
 .message-body th,
 .message-body td {
   min-width: 5em;
-  padding: var(--ghost-space-2, 8px) var(--ghost-space-3, 12px);
-  border: 1px solid var(--ghost-line-strong);
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--ghost-line);
   text-align: start;
   vertical-align: top;
   overflow-wrap: normal;
 }
 
+.message-body tr:last-child > td {
+  border-bottom: 0;
+}
+
 .message-body th {
-  background: var(--ghost-inset);
-  color: var(--ghost-ink);
-  font-weight: var(--font-weight-semibold, 600);
+  border-bottom-color: var(--ghost-line-strong);
+  background: var(--ghost-hover);
+  color: var(--ghost-ink2);
+  font-weight: 600;
+}
+
+
+/* Streaming: words fade up out of a soft blur as they arrive; a breathing dot marks where text grows. */
+.message-body .stream-word {
+  animation: stream-word-in 420ms cubic-bezier(.2, .7, .2, 1) both;
+}
+
+@keyframes stream-word-in {
+  from { opacity: 0; filter: blur(3px); }
+  to { opacity: 1; filter: none; }
+}
+
+.message-body .stream-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  margin-inline-start: 0.3em;
+  border-radius: 50%;
+  background: var(--ghost-signal);
+  vertical-align: 0.05em;
+  animation: stream-caret 1.1s ease-in-out infinite;
+}
+
+@keyframes stream-caret {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.72); }
 }
 
 /* Remote images are never fetched: alt text becomes an explicit link. */

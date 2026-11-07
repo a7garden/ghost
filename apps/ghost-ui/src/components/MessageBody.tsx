@@ -3,6 +3,7 @@ import { Check, CircleAlert, Copy, Image as ImageIcon } from 'lucide-react';
 import { Button, cn } from '../ui'
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { Element, ElementContent, Root } from 'hast';
 import './MessageBody.css';
 import { ExternalAnchor } from './ExternalAnchor';
 
@@ -138,9 +139,89 @@ const components: Components = {
 const remarkPlugins = [remarkGfm];
 const remarkRehypeOptions = { footnoteLabel: '각주', footnoteBackLabel: '본문으로 돌아가기' };
 
+/** Code keeps its exact characters as one node. */
+const KEEP_WHOLE: Record<string, true> = { pre: true, code: true, svg: true };
+
+const isStreamWord = (node: ElementContent) => node.type === 'element' && node.tagName === 'span'
+  && Array.isArray(node.properties.className) && node.properties.className.includes('stream-word');
+
+/**
+ * While a reply streams, every word becomes its own span and a caret follows the last text.
+ * The renderer keys children by position, so words already on screen keep their elements and
+ * only words that just arrived mount — their entrance animation is the streaming effect.
+ */
+function rehypeStreaming() {
+  const split = (parent: Root | Element) => {
+    const next: ElementContent[] = [];
+    for (const child of parent.children) {
+      if (child.type === 'text') {
+        for (const piece of child.value.split(/(\s+)/)) {
+          if (!piece) continue;
+          next.push(/^\s+$/.test(piece) ? { type: 'text', value: piece }
+            : { type: 'element', tagName: 'span', properties: { className: ['stream-word'] }, children: [{ type: 'text', value: piece }] });
+        }
+      } else if (child.type === 'element') {
+        if (!KEEP_WHOLE[child.tagName]) split(child);
+        next.push(child);
+      } else if (child.type !== 'doctype') {
+        next.push(child);
+      }
+    }
+    parent.children = next;
+  };
+  /** The innermost last element that holds text: the caret sits right after the newest word. */
+  const tail = (node: Root | Element): Root | Element => {
+    for (let index = node.children.length - 1; index >= 0; index--) {
+      const child = node.children[index];
+      if (child.type === 'text' && child.value.trim() === '' || child.type === 'comment' || child.type === 'doctype') continue;
+      return child.type === 'element' && !isStreamWord(child) && !KEEP_WHOLE[child.tagName] ? tail(child) : node;
+    }
+    return node;
+  };
+  return (tree: Root) => {
+    split(tree);
+    tail(tree).children.push({ type: 'element', tagName: 'span', properties: { className: ['stream-caret'], ariaHidden: 'true' }, children: [] });
+  };
+}
+const streamingRehypePlugins = [rehypeStreaming];
+
 /** Assistant transcript body: GFM markdown kept inside the message column, no raw HTML, no automatic remote resources. */
-export function MessageBody({ text }: { text: string }) {
-  return <div className="message-body">
-    <Markdown remarkPlugins={remarkPlugins} remarkRehypeOptions={remarkRehypeOptions} urlTransform={safeUrl} components={components}>{text}</Markdown>
+export function MessageBody({ text, streaming = false }: { text: string; streaming?: boolean }) {
+  return <div className="message-body" data-streaming={streaming || undefined}>
+    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={streaming ? streamingRehypePlugins : undefined} remarkRehypeOptions={remarkRehypeOptions} urlTransform={safeUrl} components={components}>{text}</Markdown>
   </div>;
+}
+
+/**
+ * Streamed text revealed at an even pace: providers deliver in bursts, the screen advances a few
+ * characters per frame and speeds up with the backlog so it never trails far behind the stream.
+ */
+export function useSmoothText(target: string): string {
+  const [shown, setShown] = useState(target);
+  const shownRef = useRef(target);
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  useEffect(() => {
+    // A replaced (not extended) text, or reduced motion, shows at once.
+    if (!target.startsWith(shownRef.current) || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      shownRef.current = target;
+      setShown(target);
+      return;
+    }
+    let frame = 0;
+    const step = () => {
+      const goal = targetRef.current;
+      const backlog = goal.length - shownRef.current.length;
+      if (backlog <= 0) return;
+      let end = shownRef.current.length + Math.max(2, Math.ceil(backlog / 10));
+      // Never end between the halves of a surrogate pair.
+      if (end < goal.length && /[\uD800-\uDBFF]/.test(goal[end - 1] ?? '')) end += 1;
+      shownRef.current = goal.slice(0, end);
+      setShown(shownRef.current);
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target]);
+  return shown;
 }

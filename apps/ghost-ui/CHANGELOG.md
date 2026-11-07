@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Chat reading pass: 15px/1.7 assistant text, tighter heading/list rhythm, tables as quiet
+  cards with row hairlines, lighter code blocks, aligned tool trails.
+- Streaming: text advances at an even pace, arriving words fade up out of a blur and a
+  breathing dot follows the newest word; a finished reply no longer fades in twice.
+- The composer's running edge is a comet with a soft glow over a faint steady ring.
+- Model chip text no longer clips descenders (`glm-5.3`).
+- Right-click menus on messages (copy, copy selection/link, quote into reply, reuse own
+  message), thread cards and sidebar Ghosts.
+- Motion: pages rise in, list rows cascade, cards lift and press, disclosures unfold.
+- 꾸미기 opens in a dialog with a floating preview, 무작위 shuffle and instant choices.
+- Collaboration is visible: 위임 event lines, delegated Ghosts on thread cards, 위임 결과
+  대기 state, and a live work conversation on the Work page.
+
 - Ghost variations: four body shapes (`look.shape`: round, egg, squircle, sheet) and six
   more accessories (crown, bow, cat ears, horns, headphones, glasses); the look editor gains
   a 모양 row. New app icon: the round Ghost with the blue working arc (Mac and iPhone).

@@ -80,9 +80,23 @@ Feature-level compositions:
   Work detail resolves its own decisions in place.
 - **Tool trail** (conversations): consecutive tool results fold into one line of chips;
   opening it shows each call's output on a thread. Live tools tick in at the end; the
-  composer edge carries a travelling signal while the Ghost responds.
+  composer edge carries a travelling signal while the Ghost responds: a comet on the edge,
+  a soft glow behind it and a faint steady ring.
+- **Collaboration**: a `delegate` result reads as a 위임 event line (Ghost · title), and a
+  child's report as 위임 결과. Thread cards list every Ghost working under the thread with
+  its live state; a Work waiting on children reads 위임 결과 대기. The Work page's work
+  conversation streams live like the thread panel.
 - **Work detail**: lifecycle track, the delegation map (parents above, children below)
   and the effect timeline beside the brief, criteria and result receipt.
+- **Context menus**: right-click a message to copy it, its selected text or a link, quote
+  it into the reply (assistant) or bring it back into the composer (owner); a thread card
+  opens its thread or Work page; a sidebar Ghost opens its conversation, 맡긴 일 or
+  settings. Text fields keep the system menu.
+
+Motion stays short and purposeful: pages rise in, list rows cascade once, the owner's
+message and a starting reply rise in (a finished reply replaces its live article without a
+second entrance), disclosures unfold, cards lift on hover and press in on click. Reduced
+motion stops all of it.
 
 ## Conversation — 2026-11-07
 
@@ -100,7 +114,10 @@ event lines, never as the owner's bubble.
 
 Reasoning the provider streams shows as a disclosure above the reply: while thinking it
 stays open, names the newest step and shows the latest lines; once text arrives it folds
-to 생각 과정. Sending a message always follows the latest turn; only the owner's own
+to 생각 과정. Streamed text advances at an even pace (a few characters per frame, faster
+with backlog), each arriving word fades up out of a soft blur, and a breathing dot follows
+the newest word. Assistant text reads at 15px/1.7; tables are quiet cards with row
+hairlines. Sending a message always follows the latest turn; only the owner's own
 scrolling (wheel, touch, pointer, keys) stops following, never a layout shift.
 The dock holds the auto-growing composer (its running edge circles all four sides),
 model selection, send and cancel. Suggestions populate and focus the draft. Conversation
@@ -125,7 +142,10 @@ antenna, sprout, ring, spark, crown, ears, horns and the headphone band are draw
 body color; bow, headphone cups and glasses are worn in front in the face color with a
 body-color outline so they read on any tile. `look.body` takes any color from a twelve-hue
 palette or a custom one; a Ghost that never chose gets a stable hue from its id so agents
-read apart. The look editor shows every choice as a picture of the result.
+read apart. 꾸미기 opens in its own dialog: a floating preview that pops on every change
+and a 무작위 shuffle, then picture choices whose legend names the current pick; choices
+show at once and save behind the preview (the newest wins). Name, main, state and model
+follow under 기본 정보.
 
 ## Interactive responses
 

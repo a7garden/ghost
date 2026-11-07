@@ -75,10 +75,22 @@ export function createToolSet(deps: {
         case "direct":
           return ghost.isDefault && ghost.state === "active" ? `${DIRECT_INSTRUCTIONS}\n\n${MAIN_INSTRUCTIONS}` : DIRECT_INSTRUCTIONS;
         case "work":
-          return [WORK_INSTRUCTIONS, work ? describeWork(work) : ""].filter(Boolean).join("\n\n");
+          return [WORK_INSTRUCTIONS, delegationRoster(deps.core, ghost), work ? describeWork(work) : ""].filter(Boolean).join("\n\n");
         case "review":
           return [REVIEW_INSTRUCTIONS, work ? describeWork(work) : ""].filter(Boolean).join("\n\n");
       }
     },
   };
+}
+
+/**
+ * The peers a Work can delegate to. Work conversations have no ghost_list, so without this roster the
+ * model has no valid ghost_id for delegate. Read when the conversation is configured (Work start).
+ */
+function delegationRoster(core: Core, ghost: Ghost): string {
+  if (!ghost.tools.includes("delegate")) return "";
+  const peers = core.ledger.ghosts().filter((peer) => peer.state === "active" && peer.id !== ghost.id);
+  if (peers.length === 0) return "";
+  const rows = peers.map((peer) => `- ${peer.name} (ghost_id ${peer.id})${peer.persona.trim() ? ` — ${peer.persona.trim().split("\n")[0]}` : ""}`);
+  return `Ghosts you can delegate to:\n${rows.join("\n")}`;
 }

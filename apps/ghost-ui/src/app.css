@@ -21,7 +21,7 @@ body {
 .link-quiet:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
 .composer-chip {
   display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border: 0; border-radius: var(--radius-pill);
-  color: var(--ghost-ink2); background: none; font: 500 var(--text-caption)/1 var(--font-sans); cursor: pointer;
+  color: var(--ghost-ink2); background: none; font: 500 var(--text-caption)/1.35 var(--font-sans); cursor: pointer;
 }
 .composer-chip:hover:not(:disabled) { color: var(--ghost-ink); background: var(--ghost-hover); }
 .composer-chip:disabled { opacity: .5; cursor: not-allowed; }
@@ -159,7 +159,12 @@ body {
 
 /* Work lanes -------------------------------------------------------------- */
 .lanes { display: grid; gap: 2px; padding: 4px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
-.lane { min-width: 0; }
+/* Rows arrive in a short cascade when a list first renders. */
+.lane, .feed > li { min-width: 0; animation: rise-in var(--duration-base) var(--ease-enter) both; }
+:is(.lanes, .feed) > :nth-child(2) { animation-delay: 30ms; }
+:is(.lanes, .feed) > :nth-child(3) { animation-delay: 60ms; }
+:is(.lanes, .feed) > :nth-child(4) { animation-delay: 90ms; }
+:is(.lanes, .feed) > :nth-child(n+5) { animation-delay: 120ms; }
 .lane__row { display: flex; min-width: 0; align-items: center; gap: 4px; }
 .lane__main { display: flex; min-width: 0; flex: 1; align-items: center; gap: 12px; min-height: 52px; padding: 8px 12px; border: 0; border-radius: var(--radius-card); color: var(--ghost-ink); background: none; text-align: left; font: inherit; cursor: pointer; transition: background-color var(--duration-fast) ease; }
 .lane__main:hover { background: var(--ghost-hover); }
@@ -210,6 +215,11 @@ body {
 .profile-trigger:hover { transform: scale(1.06); }
 .profile-trigger:active { transform: scale(.95); }
 .profile-trigger .dot-avatar { border-radius: 50%; }
+.profile-portrait { padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; outline: none; transition: transform var(--duration-fast) var(--ease-spring); }
+.profile-portrait:hover { transform: scale(1.06) rotate(-3deg); }
+.profile-portrait:active { transform: scale(.95); }
+.profile-portrait:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
+.profile-portrait .dot-avatar { border-radius: 50%; }
 .chat-threads { position: absolute; top: 6px; right: 18px; display: inline-flex; height: 32px; min-width: 32px; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: color-mix(in srgb, var(--ghost-canvas) 80%, transparent); box-shadow: var(--shadow-btn); backdrop-filter: blur(10px); font: 600 var(--text-caption)/1 var(--font-sans); cursor: pointer; }
 .chat-threads:hover { color: var(--ghost-ink); box-shadow: var(--shadow-raised); }
 .chat-threads svg { width: 15px; height: 15px; }
@@ -231,14 +241,22 @@ body {
 /* Live reasoning reads from its newest line: the tail stays in view as it grows. */
 .reasoning[data-live] .reasoning__body { display: flex; max-height: 132px; flex-direction: column-reverse; -webkit-mask: linear-gradient(transparent, #000 36px); mask: linear-gradient(transparent, #000 36px); }
 
-.thread-card { position: relative; padding-left: 22px; }
+.thread-card { position: relative; padding-left: 22px; animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .thread-card::before { content: ''; position: absolute; top: -10px; left: 8px; width: 10px; height: 34px; border-left: 1.5px solid var(--ghost-line-strong); border-bottom: 1.5px solid var(--ghost-line-strong); border-bottom-left-radius: 10px; }
-.thread-card > button { display: flex; width: 100%; max-width: 520px; min-width: 0; align-items: center; gap: 12px; padding: 10px 14px; border: 0; border-radius: var(--radius-card); color: var(--ghost-ink); background: var(--ghost-surface); box-shadow: var(--shadow-card); text-align: left; font: inherit; cursor: pointer; transition: box-shadow var(--duration-fast) ease; }
-.thread-card > button:hover { box-shadow: var(--shadow-raised); }
+.thread-card > button { display: flex; width: 100%; max-width: 520px; min-width: 0; align-items: center; gap: 12px; padding: 10px 14px; border: 0; border-radius: var(--radius-card); color: var(--ghost-ink); background: var(--ghost-surface); box-shadow: var(--shadow-card); text-align: left; font: inherit; cursor: pointer; transition: box-shadow var(--duration-fast) ease, transform var(--duration-fast) var(--ease-spring); }
+.thread-card > button:hover { box-shadow: var(--shadow-raised); transform: translateY(-1px); }
+.thread-card > button:active { transform: scale(.99); }
 .thread-card__copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
 .thread-card__title { overflow: hidden; font-size: var(--text-ui); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .thread-card__meta { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .thread-card__meta .dot-avatar { border-radius: 50%; }
+.thread-card__delegates { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.thread-card__delegate { display: inline-flex; min-width: 0; max-width: 160px; align-items: center; gap: 4px; padding: 2px 7px 2px 4px; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: var(--ghost-hover); font-size: var(--text-micro); animation: pop-in var(--duration-base) var(--ease-spring) both; }
+.thread-card__delegate .dot-avatar { border-radius: 50%; }
+
+/* Context menus open from the pointer with a short scale-in. */
+.ghost-context-menu[data-state="open"] { animation: pop-in 130ms var(--ease-enter); }
+.ghost-context-menu[data-state="closed"] { animation: fade-in 90ms ease-in reverse; }
 .chat-stop { display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink); background: var(--ghost-hover2); cursor: pointer; }
 .chat-stop:hover { background: color-mix(in srgb, var(--ghost-ink) 12%, transparent); }
 .chat-stop svg { width: 12px; height: 12px; fill: currentColor; }
@@ -254,9 +272,8 @@ body {
 .chat-loading > span:not(.sr-only) { width: 6px; height: 6px; border-radius: 50%; background: var(--ghost-ink3); animation: island-breathe 1.2s ease-in-out infinite; }
 .chat-loading > span:nth-child(2) { animation-delay: .15s; }
 .chat-loading > span:nth-child(3) { animation-delay: .3s; }
-.chat-thinking { display: inline-flex; align-items: center; gap: 10px; color: var(--ghost-ink3); font-size: var(--text-ui); font-weight: 500; }
-.chat-thinking > span { background: linear-gradient(90deg, var(--ghost-ink3) 0%, var(--ghost-ink) 50%, var(--ghost-ink3) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer-text 1.8s linear infinite; }
-.chat-live__text .message-body > :last-child::after { content: ''; display: inline-block; width: .5em; height: 1em; margin-left: 2px; vertical-align: -2px; border-radius: 2px; background: var(--ghost-signal); animation: island-breathe 1s ease-in-out infinite; }
+.chat-thinking { display: inline-flex; align-items: center; gap: 10px; color: var(--ghost-ink3); font-size: var(--text-ui); font-weight: 500; animation: fade-in var(--duration-slow) ease both; }
+.chat-thinking > span:not(.presence) { background: linear-gradient(90deg, var(--ghost-ink3) 0%, var(--ghost-ink) 50%, var(--ghost-ink3) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer-text 1.8s linear infinite; }
 .transcript-note { align-self: center; margin: 0; padding: 4px 12px; border-radius: var(--radius-pill); color: var(--ghost-ink3); background: var(--ghost-hover); font-size: var(--text-caption); white-space: pre-wrap; overflow-wrap: anywhere; text-align: center; }
 .transcript-event { display: flex; min-width: 0; align-items: baseline; gap: 10px; padding: 8px 14px; border-radius: var(--radius-card); color: var(--ghost-ink2); background: var(--ghost-hover); font-size: var(--text-caption); line-height: 1.55; }
 .transcript-event__kind { flex: none; color: var(--ghost-ink3); font-weight: 600; }
@@ -264,7 +281,7 @@ body {
 
 /* A thread opens beside the conversation on wide sheets and over it on narrow ones. */
 .chat-layout { position: relative; display: flex; height: 100%; min-height: 0; width: 100%; min-width: 0; }
-.chat-layout > .ghost-conversation { flex: 1; min-width: 0; }
+.chat-layout > .ghost-conversation { flex: 1; min-width: 0; animation: fade-in var(--duration-base) ease both; }
 .thread-panel { display: flex; width: min(440px, 42%); min-width: 340px; flex: none; min-height: 0; flex-direction: column; border-left: 1px solid var(--ghost-line); background: var(--ghost-canvas); animation: thread-in var(--duration-base) var(--ease-enter) both; }
 @keyframes thread-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 @media (max-width: 64rem) { .thread-panel { position: absolute; z-index: 5; inset: 0; width: auto; min-width: 0; border-left: 0; } }
@@ -274,16 +291,19 @@ body {
 .thread-panel__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .thread-panel__section { display: grid; gap: 8px; min-width: 0; }
 .thread-panel__transcript { gap: 0; font-size: var(--text-ui); }
+.thread-panel__transcript .ghost-conversation-message { font-size: 14px; line-height: 1.65; }
 .thread-panel__transcript > * + * { margin-top: 18px; }
 .thread-panel .decision { padding: 16px; }
 
 /* Tool trail */
 .trail { min-width: 0; color: var(--ghost-ink2); font-size: var(--text-caption); }
-.trail__summary { display: inline-flex; max-width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 4px 10px 4px 6px; border-radius: var(--radius-pill); list-style: none; cursor: pointer; transition: background-color var(--duration-fast) ease; }
+.trail__summary { display: inline-flex; max-width: calc(100% + 6px); min-width: 0; align-items: center; gap: 8px; margin-left: -6px; padding: 4px 10px 4px 6px; border-radius: var(--radius-pill); list-style: none; cursor: pointer; transition: background-color var(--duration-fast) ease; }
 .trail__summary::-webkit-details-marker { display: none; }
 .trail__summary:hover { background: var(--ghost-hover); }
 .trail__chevron { width: 14px; height: 14px; flex: none; color: var(--ghost-ink3); transition: transform var(--duration-base) var(--ease-enter); }
 .trail[open] .trail__chevron { transform: rotate(90deg); }
+/* Opened disclosures unfold their content instead of snapping in. */
+.trail[open] > .trail__steps, .reasoning[open]:not([data-live]) > .reasoning__body { animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .trail__count { flex: none; color: var(--ghost-ink2); font-weight: 500; }
 .trail__failed { color: var(--ghost-danger-ink); }
 .trail__chips { display: inline-flex; min-width: 0; gap: 4px; overflow: hidden; }
@@ -301,7 +321,7 @@ body {
 .trail__step-name em { color: var(--ghost-ink3); font: 500 var(--text-micro)/1 var(--font-sans); font-style: normal; }
 .trail__steps li[data-error] em { color: var(--ghost-danger-ink); }
 .trail__steps pre { max-height: 220px; margin: 0; overflow: auto; padding: 10px 12px; border-radius: var(--radius-control); color: var(--ghost-ink2); background: var(--ghost-inset); font: 11.5px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .chat-thinking > span { animation: none; color: var(--ghost-ink2); } }
+@media (prefers-reduced-motion: reduce) { .chat-thinking > span:not(.presence) { animation: none; color: var(--ghost-ink2); } }
 
 /* Work board ---------------------------------------------------------------- */
 .board-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }

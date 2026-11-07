@@ -21,6 +21,7 @@ export { CommandPalette } from './command-palette';
 export { SelectField } from './select';
 export { Dialog, DialogContent, DialogHeader, DialogTitle } from './dialog';
 export { Popover, PopoverContent, PopoverTrigger } from './popover';
+export { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './context-menu';
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './table';
 export { cn } from './utils';
 export type { CommandItem } from './command-palette';

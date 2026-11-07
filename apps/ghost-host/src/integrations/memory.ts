@@ -8,9 +8,9 @@ import type { MemoryHit, MemoryPort } from "./ports.ts";
  * The engine is a caller-owned child process that speaks newline-delimited
  * JSON-RPC 2.0 over its stdio: `auth` (the token travels in the request, never
  * on the command line), `handshake` (transport capability negotiation), then
- * `tools/call` for every read and write. The child is spawned per operation and
- * killed afterwards, so a revoked token or a changed engine scope is never
- * inherited from a previous session.
+ * `tools/call` for every read and write. Operations share a queue because
+ * Oxibrain locks the store for the lifetime of its child process. Each child
+ * exits before the next starts, and every operation authenticates afresh.
  */
 const PROTOCOL_VERSION = 1;
 const MIN_STORE_FORMAT_VERSION = 1;
@@ -152,7 +152,7 @@ class BrainSession {
     return envelope.data;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     try {
@@ -166,6 +166,10 @@ class BrainSession {
       // Already exited.
     }
     void this.reader.cancel().catch(() => {});
+    // The queue waits on this exit; a child that ignores SIGTERM must not stall every later memory call,
+    // and one that cannot be reaped at all lets the queue move on (the next call then reports the lock).
+    const forced = setTimeout(() => { try { this.proc.kill("SIGKILL"); } catch { /* already exited */ } }, 2_000);
+    try { await Promise.race([this.proc.exited, Bun.sleep(4_000)]); } finally { clearTimeout(forced); }
   }
 
   private async send(method: string, params: Json): Promise<number> {
@@ -254,7 +258,7 @@ async function withSession<T>(
     await session.handshake(deadline);
     return await run(session, deadline);
   } finally {
-    session.close();
+    await session.close();
   }
 }
 
@@ -321,6 +325,8 @@ function sourceLocator(ghostId: string, origin: { conversationId: string; workId
 }
 
 class OxibrainMemory implements MemoryPort {
+  private pending: Promise<void> = Promise.resolve();
+
   constructor(private readonly settings: MemorySettings) {}
 
   /** A Ghost can use memory only when a space is mapped to it. */
@@ -332,7 +338,7 @@ class OxibrainMemory implements MemoryPort {
     const space = this.requireSpace(ghostId);
     if (typeof query !== "string" || query.trim() === "") throw new Error("a memory search needs a query");
     const bounded = Math.max(MIN_SEARCH_LIMIT, Math.min(MAX_SEARCH_LIMIT, Math.trunc(limit) || MIN_SEARCH_LIMIT));
-    const data = await withSession(this.settings, (session, deadline) =>
+    const data = await this.withSession((session, deadline) =>
       session.callToolData("search", { query, space, mode: "auto", limit: bounded }, deadline),
     );
     return hitsOf(data);
@@ -342,7 +348,7 @@ class OxibrainMemory implements MemoryPort {
     const space = this.requireSpace(ghostId);
     if (typeof query !== "string" || query.trim() === "") throw new Error("a memory recall needs a query");
     const budget = Math.max(MIN_TOKEN_BUDGET, Math.min(MAX_TOKEN_BUDGET, Math.trunc(tokenBudget) || MIN_TOKEN_BUDGET));
-    const envelope = await withSession(this.settings, (session, deadline) =>
+    const envelope = await this.withSession((session, deadline) =>
       session.callToolJson("recall", { query, space, token_budget: budget }, deadline),
     );
     return recallOf(envelope);
@@ -361,10 +367,18 @@ class OxibrainMemory implements MemoryPort {
       throw new Error("retained memory needs its origin conversation");
     }
     const sourcePath = sourceLocator(ghostId, origin, text);
-    const result = await withSession(this.settings, (session, deadline) =>
+    const result = await this.withSession((session, deadline) =>
       session.callTool("ingest", { content: text, space, source_path: sourcePath, extract: false, trust: "untrusted" }, deadline),
     );
     return { id: episodeIdOf(result) };
+  }
+
+  /** All Ghosts share one store; even read tools need its exclusive engine lock. */
+  private withSession<T>(run: (session: BrainSession, deadline: number) => Promise<T>): Promise<T> {
+    const operation = this.pending.then(() => withSession(this.settings, run));
+    // A failed operation still rejects its caller, but must not poison the queue.
+    this.pending = operation.then(() => {}, () => {});
+    return operation;
   }
 
   private spaceFor(ghostId: string): string | null {

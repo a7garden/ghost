@@ -44,3 +44,13 @@ it('keeps footnote targets and references available without exposing relative ap
   expect(html).not.toContain('target="_blank"');
   expect(html).not.toContain('href="docs/a.md"');
 });
+
+it('streams words as their own nodes, keeps code exact and puts the caret after the newest word', () => {
+  const html = renderToStaticMarkup(createElement(MessageBody, { text: '목록:\n\n- 첫 항목\n- 둘째 **굵게** 끝\n\n```\nconst a = 1;\n```\n\n마지막 문장', streaming: true }));
+  expect(html).toContain('<span class="stream-word">첫</span> <span class="stream-word">항목</span>');
+  expect(html).toContain('<code>const a = 1;\n</code>');
+  expect(html.match(/stream-caret/g)).toHaveLength(1);
+  expect(html).toMatch(/<span class="stream-word">문장<\/span><span class="stream-caret" aria-hidden="true"><\/span><\/p><\/div>$/);
+  const settled = render('마지막 문장');
+  expect(settled).not.toContain('stream-');
+});

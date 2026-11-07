@@ -4,7 +4,7 @@ import { TERMINAL_WORK_STATES, type WorkState } from '@ghost/contract';
 export type GlyphState = WorkState | 'attention';
 
 export const glyphLabel: Record<GlyphState, string> = {
-  queued: '대기 중', running: '진행 중', waiting: '대기 중', verifying: '검증 중',
+  queued: '대기 중', running: '진행 중', waiting: '위임 결과 대기', verifying: '검증 중',
   blocked: '결과 미확정', done: '완료', failed: '실패', cancelled: '취소됨', attention: '확인 필요',
 };
 

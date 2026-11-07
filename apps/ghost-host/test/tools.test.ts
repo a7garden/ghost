@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { chmodSync, closeSync, existsSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ArtifactRef, Conversation, Ghost, Work } from "@ghost/contract";
+import type { ArtifactRef, Conversation, Ghost, UiBlock, Work } from "@ghost/contract";
 import { parseInteractiveUi, readInteractiveUi } from "@ghost/contract";
 import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
@@ -14,6 +14,7 @@ import { parseShellResult } from "../src/core/verify.ts";
 import type { SandboxEnvFactory, MemoryPort } from "../src/integrations/ports.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
 import { createToolSet } from "../src/tools/index.ts";
+import { INTERACTIVE_INSTRUCTIONS } from "../src/tools/interactive.ts";
 import { MAX_ARTIFACT_BYTES } from "../src/tools/work.ts";
 import type { ToolSet } from "../src/tools/types.ts";
 import { harness, tempDir, type FakeEngine } from "./support.ts";
@@ -183,6 +184,42 @@ describe("tools", () => {
     expect(recovered.isError).toBeFalsy();
     expect(readInteractiveUi(contentOf(recovered))?.title).toBe("수정 완료");
     expect(s.ledger.worksForState()).toHaveLength(0);
+  });
+
+  test("present_ui documents nested chart points and rejects the observed duplicate top-level points", async () => {
+    const s = setup();
+    const pi = asPi(s, s.direct, "pi-direct");
+    const present = toolOf(s, s.direct, s.ghost, "present_ui");
+    expect(present.description).toContain("series[].points");
+    expect(INTERACTIVE_INSTRUCTIONS).toContain("블록 최상위에는 넣지 마세요");
+    const points = [{ label: "사과", value: 2 }, { label: "배", value: 3 }];
+    const chart = { type: "chart", id: "fruit-count", title: "과일 개수", kind: "bar", series: [{ name: "개수", points }] } satisfies UiBlock;
+    const ui = { version: "ghost-ui/1", title: "운영 UI 확인", blocks: [{ ...chart, points }] };
+
+    const refused = await call(present, ui, apiOf(pi, "duplicate-points"));
+    expect(refused.isError).toBe(true);
+    expect(contentOf(refused)).toContain("series[].points");
+    const corrected = await call(present, { ...ui, blocks: [chart] }, apiOf(pi, "nested-points"));
+    expect(corrected.isError).toBeFalsy();
+    expect(readInteractiveUi(contentOf(corrected))?.blocks[0]).toEqual(chart);
+  });
+
+  test("present_ui explains that comparison row labels are not value-column headings", async () => {
+    const s = setup();
+    const pi = asPi(s, s.direct, "pi-direct");
+    const present = toolOf(s, s.direct, s.ghost, "present_ui");
+    expect(present.description).toContain("rows[].values.length는 columns.length");
+    expect(INTERACTIVE_INSTRUCTIONS).toContain("행 제목 label의 열은 제외");
+    const comparison = { type: "comparison", id: "types", title: "블록 유형", columns: ["블록", "용도", "상호작용"], rows: [{ label: "차트", values: ["추이·비교 시각화", "표시 전용"] }] } satisfies UiBlock;
+    const ui = { version: "ghost-ui/1", title: "UI 데모", blocks: [comparison] };
+
+    const refused = await call(present, ui, apiOf(pi, "extra-label-column"));
+    expect(refused.isError).toBe(true);
+    expect(contentOf(refused)).toContain("행 제목 label의 열은 제외");
+    expect(contentOf(refused)).toContain("rows[].values.length는 columns.length");
+    const corrected = await call(present, { ...ui, blocks: [{ ...comparison, columns: ["용도", "상호작용"] }] }, apiOf(pi, "value-columns-only"));
+    expect(corrected.isError).toBeFalsy();
+    expect(readInteractiveUi(contentOf(corrected))?.blocks[0]).toEqual({ ...comparison, columns: ["용도", "상호작용"] });
   });
 
   test("a stale present_ui registration resolves the caller and rejects work and review execution", async () => {
@@ -414,6 +451,23 @@ describe("tools", () => {
     const children = s.ledger.children(work.id);
     expect(children).toHaveLength(1);
     expect(contentOf(first)).toContain(children[0]!.id);
+    await s.core.idle();
+  });
+
+  test("a Work that can delegate is told which Ghosts it can delegate to", async () => {
+    const s = setup();
+    const helper = s.core.createGhost({ name: "Helper", persona: "You research.\nDetails" });
+    const retired = s.core.createGhost({ name: "Gone", persona: "Old" });
+    s.ledger.tx(() => s.ledger.putGhost({ ...retired, state: "retired", updatedAt: Date.now() }));
+    const { work, conversation } = await runningWork(s);
+
+    const instructions = s.tools.instructionsFor(conversation, s.ghost, work);
+    expect(instructions).toContain(`Helper (ghost_id ${helper.id}) — You research.`);
+    expect(instructions).not.toContain(retired.id);
+    expect(instructions).not.toContain(`ghost_id ${s.ghost.id}`);
+
+    const withoutDelegate = { ...s.ghost, tools: s.ghost.tools.filter((tool) => tool !== "delegate") };
+    expect(s.tools.instructionsFor(conversation, withoutDelegate, work)).not.toContain(helper.id);
     await s.core.idle();
   });
 

@@ -1,6 +1,6 @@
-import { Folder, Home, Inbox, LayoutList, Plus, Settings2 } from 'lucide-react';
+import { Folder, Home, Inbox, LayoutList, MessageCircle, Plus, Settings2 } from 'lucide-react';
 import { useId } from 'react';
-import { Navigation, NavigationGroup, NavigationItem } from '../ui'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Navigation, NavigationGroup, NavigationItem } from '../ui'
 import type { State } from '@ghost/contract';
 import { ghostLiveWork, ghostPresence, liveWorks } from '../features/ghostState';
 import { PresenceAvatar } from './agent';
@@ -48,14 +48,23 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
       {ghosts.length > 0 && <NavigationGroup label="Ghost">{ghosts.map(ghost => {
         const presence = state ? ghostPresence(ghost, state) : { state: 'idle' as const, line: null };
         const working = state ? ghostLiveWork(state, ghost.id).length : 0;
-        return <button key={ghost.id} type="button" className="presence-row__main" aria-current={ghost.id === openGhostId ? 'page' : undefined} onClick={() => openGhost(ghost.id)}>
-          <PresenceAvatar ghostId={ghost.id} state={presence.state} size={26}/>
-          <span className="presence-row__copy">
-            <span className="presence-row__name"><span className="truncate">{ghost.name}</span>{ghost.isDefault && <span className="presence-row__main-mark">메인</span>}</span>
-            {presence.line && <span className="presence-row__line" data-tone={presence.state}>{presence.line}</span>}
-          </span>
-          {working > 0 && <span className="sidebar-count"><span className="sr-only">맡긴 일 진행 중 </span>{working}</span>}
-        </button>;
+        return <ContextMenu key={ghost.id}>
+          <ContextMenuTrigger asChild>
+            <button type="button" className="presence-row__main" aria-current={ghost.id === openGhostId ? 'page' : undefined} onClick={() => openGhost(ghost.id)}>
+              <PresenceAvatar ghostId={ghost.id} state={presence.state} size={26}/>
+              <span className="presence-row__copy">
+                <span className="presence-row__name"><span className="truncate">{ghost.name}</span>{ghost.isDefault && <span className="presence-row__main-mark">메인</span>}</span>
+                {presence.line && <span className="presence-row__line" data-tone={presence.state}>{presence.line}</span>}
+              </span>
+              {working > 0 && <span className="sidebar-count"><span className="sr-only">맡긴 일 진행 중 </span>{working}</span>}
+            </button>
+          </ContextMenuTrigger>
+          <ContextMenuContent aria-label={`${ghost.name} 메뉴`}>
+            <ContextMenuItem icon={<MessageCircle/>} onSelect={() => openGhost(ghost.id)}>대화 열기</ContextMenuItem>
+            <ContextMenuItem icon={<LayoutList/>} onSelect={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}>{uiTerms.work}</ContextMenuItem>
+            <ContextMenuItem icon={<Settings2/>} onSelect={() => navigate(`/settings?tab=team&ghost=${encodeURIComponent(ghost.id)}`)}>{uiTerms.ghostSettings}</ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>;
       })}</NavigationGroup>}
       <NavigationGroup label="프로젝트" className="relative">
         <button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/spaces?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>

@@ -21,7 +21,8 @@ export interface ConversationProps {
   jumpToLatestLabel: string
 }
 
-export interface ConversationMessageProps {
+/** Extra article props (ref, handlers) let a context menu trigger wrap the message with `asChild`. */
+export interface ConversationMessageProps extends Omit<React.ComponentProps<"article">, "role" | "children"> {
   role: "user" | "assistant"
   label: string
   children: React.ReactNode
@@ -199,9 +200,11 @@ export function ConversationMessage({
   children,
   actions,
   className,
+  ...rest
 }: ConversationMessageProps) {
   return (
     <article
+      {...rest}
       data-slot="ghost-conversation-message"
       data-role={role}
       aria-label={label}

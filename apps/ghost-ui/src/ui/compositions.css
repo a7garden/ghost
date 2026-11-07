@@ -64,6 +64,8 @@
 .ghost-navigation-item > span { min-width: 0; }
 .ghost-navigation-item:disabled, .ghost-navigation-item[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 .ghost-navigation-item:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+.ghost-navigation-item:active:not(:disabled), .presence-row__main:active { transform: scale(.98); }
+.ghost-navigation-item, .presence-row__main { transition-property: background-color, color, box-shadow, transform; transition-duration: var(--duration-fast); }
 .ghost-navigation-item[aria-selected="true"], .ghost-navigation-item[aria-current]:not([aria-current="false"]) {
   color: var(--ghost-ink); background: var(--ghost-surface); box-shadow: var(--shadow-card);
 }
@@ -117,7 +119,9 @@
 @keyframes ghost-command-enter { from { opacity: 0; transform: translateY(-6px) scale(.985); } to { opacity: 1; transform: none; } }
 
 /* Pages ---------------------------------------------------------------- */
-.ghost-page { width: 100%; min-width: 0; max-width: var(--ghost-layout-content-max); margin-inline: auto; }
+/* A destination settles in: pages rise a few pixels as they open. */
+.ghost-page { width: 100%; min-width: 0; max-width: var(--ghost-layout-content-max); margin-inline: auto; animation: page-in var(--duration-slow) var(--ease-enter) both; }
+@keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .ghost-page[data-width="reading"] { max-width: var(--ghost-layout-document-max); }
 .ghost-page[data-width="full"] { max-width: none; }
 .ghost-page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: var(--ghost-layout-row-gap); margin-bottom: 32px; }
@@ -205,13 +209,23 @@
 .ghost-composer__footer-slot, .ghost-composer__footer-actions, .ghost-composer__footer-trailing { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ghost-composer__footer-slot { flex: 1; margin-left: -6px; }
 .ghost-composer__footer-actions { justify-content: flex-end; }
+/* While the Ghost responds a light travels around the composer: a crisp comet on the edge and a soft glow
+   behind it, over a faint steady ring so the busy state reads even where the comet is not. */
+.ghost-composer[data-running] .ghost-composer__surface { box-shadow: 0 0 0 1px color-mix(in srgb, var(--ghost-signal) 22%, transparent), var(--shadow-raised); }
+.ghost-composer[data-running] .ghost-composer__surface::before,
+.ghost-composer[data-running] .ghost-composer__surface::after {
+  content: ''; position: absolute; inset: -1.5px; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(from var(--composer-angle, 0deg),
+    transparent 0 52%, color-mix(in srgb, var(--ghost-signal) 35%, transparent) 70%, var(--ghost-signal) 86%,
+    color-mix(in srgb, var(--ghost-signal) 55%, white) 90%, transparent 96%);
+  animation: composer-orbit 2.8s cubic-bezier(.45, .05, .55, .95) infinite;
+}
 .ghost-composer[data-running] .ghost-composer__surface::before {
-  content: ''; position: absolute; inset: -1.5px; z-index: -1; border-radius: inherit; padding: 1.5px;
-  background: conic-gradient(from var(--composer-angle, 0deg), transparent 0 60%, var(--ghost-signal) 80%, transparent 100%);
+  padding: 1.5px;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  animation: composer-orbit 2.4s linear infinite;
 }
+.ghost-composer[data-running] .ghost-composer__surface::after { inset: -2px; z-index: -2; filter: blur(8px); opacity: .35; }
 @keyframes composer-orbit { to { --composer-angle: 360deg; } }
 @supports (corner-shape: superellipse(1.1)) { .ghost-composer__surface { corner-shape: superellipse(1.1); } }
 
@@ -225,19 +239,22 @@
 .ghost-conversation__transcript:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 .ghost-conversation__transcript-content { padding-block: 24px 48px; }
 .ghost-conversation__messages { display: flex; min-width: 0; flex-direction: column; }
-.ghost-conversation__messages > * + * { margin-block-start: 28px; }
+.ghost-conversation__messages > * + * { margin-block-start: 24px; }
 .ghost-conversation__messages > [data-role="user"] + [data-role="assistant"],
-.ghost-conversation__messages > [data-role="assistant"] + [data-role="user"] { margin-block-start: 36px; }
+.ghost-conversation__messages > [data-role="assistant"] + [data-role="user"] { margin-block-start: 32px; }
 .ghost-conversation__messages > [data-kind="trail"] + [data-kind="trail"],
 .ghost-conversation__messages > [data-kind="trail"] + [data-role="assistant"],
-.ghost-conversation__messages > [data-role="assistant"] + [data-kind="trail"] { margin-block-start: 12px; }
+.ghost-conversation__messages > [data-role="assistant"] + [data-kind="trail"] { margin-block-start: 10px; }
 /* The top padding keeps the composer's 1.5px running edge inside the dock, below the fade above it. */
 .ghost-conversation__dock { position: relative; z-index: 1; flex: 0 0 auto; padding: 6px var(--ghost-space-6) 16px; background: var(--ghost-canvas); }
 .ghost-conversation__dock::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px; background: linear-gradient(transparent, var(--ghost-canvas)); pointer-events: none; }
 .ghost-conversation__footer { margin-top: var(--ghost-space-2); color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.4; text-align: center; }
-.ghost-conversation__jump { position: absolute; z-index: 2; bottom: 12px; left: 50%; max-width: calc(100% - 24px); transform: translateX(-50%); border-radius: var(--radius-pill) !important; box-shadow: var(--shadow-raised); }
+.ghost-conversation__jump { position: absolute; z-index: 2; bottom: 12px; left: 50%; max-width: calc(100% - 24px); translate: -50% 0; border-radius: var(--radius-pill) !important; box-shadow: var(--shadow-raised); animation: rise-in var(--duration-base) var(--ease-enter) both; }
 
-.ghost-conversation-message { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; color: var(--ghost-ink); font: var(--text-body)/1.72 var(--font-sans); animation: rise-in var(--duration-base) var(--ease-enter) both; }
+/* Only what arrives now animates in: the owner's message and a reply that starts streaming. A finished reply
+   replaces its live article in place, so it must not fade in a second time. */
+.ghost-conversation-message { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; color: var(--ghost-ink); font: 15px/1.7 var(--font-sans); }
+.ghost-conversation-message[data-role="user"], .ghost-conversation-message.chat-live { animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .ghost-conversation-message__content { width: 100%; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .ghost-conversation-message__content p { margin: 0; }
 .ghost-conversation-message__content p + p { margin-block-start: .8em; }
@@ -247,8 +264,8 @@
 .ghost-conversation-message__content li + li { margin-block-start: .3em; }
 .ghost-conversation-message[data-role="user"] { align-items: flex-end; }
 .ghost-conversation-message[data-role="user"] .ghost-conversation-message__content {
-  width: fit-content; max-width: min(85%, 560px); padding: 10px 16px; border-radius: 20px 20px 6px 20px;
-  background: var(--ghost-hover2); white-space: pre-wrap;
+  width: fit-content; max-width: min(85%, 560px); padding: 9px 15px; border-radius: 18px 18px 6px 18px;
+  background: var(--ghost-hover2); line-height: 1.6; white-space: pre-wrap;
 }
 .ghost-conversation-message__actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: var(--ghost-space-2); margin-top: 6px; opacity: 0; transition: opacity var(--duration-fast) ease; }
 .ghost-conversation-message:is(:hover, :focus-within) .ghost-conversation-message__actions { opacity: 1; }
@@ -272,6 +289,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ghost-conversation-activity__chevron { transition: none; }
   .ghost-composer[data-running] .ghost-composer__surface::before { animation: none; background: var(--ghost-signal); }
+  .ghost-composer[data-running] .ghost-composer__surface::after { display: none; }
 }
 @media (forced-colors: active) {
   .ghost-conversation__transcript:focus-visible, .ghost-conversation-activity__summary:focus-visible { outline-color: Highlight; }

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { Badge, Button, InlineError, Input, SegmentedControl, SelectField, SettingsGroup, SettingsRow, Switch } from '../ui'
-import type { Ghost, GhostState } from '@ghost/contract';
+import type { GhostState, Look } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { GhostCharacter } from '../pets/GhostCharacter';
@@ -35,21 +35,47 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  // Look choices show at once and save behind the preview; the newest choice wins.
+  const [lookDraft, setLookDraft] = useState<Look | null>(null);
+  const lookRequest = useRef(0);
   const locked = busy || !state;
   if (!ghost) return <p className="m-0 text-caption text-ink-3">Ghost를 찾을 수 없습니다.</p>;
   const name = nameDraft ?? ghost.name;
+  const look = lookDraft ?? ghost.look;
   const run = async (work: () => Promise<unknown>, done: string) => {
     setBusy(true); setError(''); setNotice('');
     try { await work(); setNotice(done); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '저장하지 못했습니다. 다시 시도해 주세요.'); }
     finally { setBusy(false); }
   };
-  const patchLook = (look: Partial<Ghost['look']>) => client.send({ type: 'ghost.update', ghostId, look: { ...ghost.look, ...look } });
-  const assign = (avatarId: string | null) => void run(() => patchLook({ avatarId }), '아바타를 바꿨습니다.');
-  const backgroundColor = ghost.look.background || 'auto';
-  const saveLook = (patch: Partial<Ghost['look']>) => void run(() => patchLook(patch), '모습을 저장했습니다.');
-  return <div className="grid gap-4">
-    <SettingsGroup title={<span className="sr-only">기본 정보</span>}>
+  const saveLook = (patch: Partial<Look>) => {
+    const next = { ...look, ...patch };
+    const request = ++lookRequest.current;
+    setLookDraft(next); setError(''); setNotice('');
+    client.send({ type: 'ghost.update', ghostId, look: next }).then(
+      () => { if (request === lookRequest.current) setLookDraft(null); },
+      reason => { if (request === lookRequest.current) { setLookDraft(null); setError(reason instanceof Error ? reason.message : '모습을 저장하지 못했습니다.'); } },
+    );
+  };
+  const backgroundColor = look.background || 'auto';
+  return <div className="grid gap-6">
+    <div className="grid gap-5">
+      {!look.avatarId && <LookEditor ghostId={ghost.id} look={look} disabled={!state} onChange={saveLook}/>}
+      {avatars.length > 0 && <fieldset className="m-0 grid gap-2 border-0 p-0"><legend className="mb-2 text-caption text-ink-3">아바타</legend>
+        <div className="grid grid-cols-5 gap-1.5">
+          <button type="button" aria-pressed={!look.avatarId} disabled={!state} onClick={() => look.avatarId && saveLook({ avatarId: null })} title="기본 Ghost"
+            className="avatar-choice avatar-choice--tile p-2 outline-none disabled:cursor-not-allowed">
+            <GhostCharacter size={36} animate={false} color={look.body} fallback={defaultBodyColor(ghost.id)} shape={look.shape} face={look.face} mark={look.mark}/><span className="sr-only">기본 Ghost</span>
+            {!look.avatarId && <Check size={12} className="absolute top-1 right-1" aria-hidden="true"/>}
+          </button>
+          {avatars.map(avatar => <AvatarTile key={avatar.id} avatar={avatar} selected={look.avatarId === avatar.id} disabled={!state}
+            onSelect={() => look.avatarId !== avatar.id && saveLook({ avatarId: avatar.id })}/>)}
+        </div>
+      </fieldset>}
+      {look.avatarId && <GhostColorPicker label="배경색" resetLabel="기본" presets={backgroundColors} value={backgroundColor}
+        onChange={color => saveLook({ background: color === 'auto' ? '' : color })}/>}
+    </div>
+    <SettingsGroup title="기본 정보">
       <form onSubmit={event => {
         event.preventDefault();
         const next = name.trim();
@@ -79,24 +105,6 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
           onValueChange={key => void run(() => client.send({ type: 'ghost.update', ghostId, model: modelFromKey(state?.settings, key) ?? null }), '모델을 저장했습니다.')}
           options={[{ value: NO_MODEL, label: '기본 모델 따름' }, ...modelSelectOptions(state?.settings)]}/>
       </SettingsRow>
-    </SettingsGroup>
-    <SettingsGroup title="모습">
-      <div className="grid gap-5 p-4">
-        {!ghost.look.avatarId && <LookEditor ghostId={ghost.id} look={ghost.look} disabled={locked} onChange={saveLook}/>}
-        {avatars.length > 0 && <fieldset className="m-0 grid gap-2 border-0 p-0"><legend className="mb-2 text-caption text-ink-3">아바타</legend>
-          <div className="grid grid-cols-5 gap-1.5">
-            <button type="button" aria-pressed={!ghost.look.avatarId} disabled={locked} onClick={() => ghost.look.avatarId && assign(null)} title="기본 Ghost"
-              className="avatar-choice avatar-choice--tile p-2 outline-none disabled:cursor-not-allowed">
-              <GhostCharacter size={36} animate={false} color={ghost.look.body} fallback={defaultBodyColor(ghost.id)} shape={ghost.look.shape} face={ghost.look.face} mark={ghost.look.mark}/><span className="sr-only">기본 Ghost</span>
-              {!ghost.look.avatarId && <Check size={12} className="absolute top-1 right-1" aria-hidden="true"/>}
-            </button>
-            {avatars.map(avatar => <AvatarTile key={avatar.id} avatar={avatar} selected={ghost.look.avatarId === avatar.id} disabled={locked}
-              onSelect={() => ghost.look.avatarId !== avatar.id && assign(avatar.id)}/>)}
-          </div>
-        </fieldset>}
-        {ghost.look.avatarId && <GhostColorPicker label="배경색" resetLabel="기본" presets={backgroundColors} value={backgroundColor}
-          onChange={color => saveLook({ background: color === 'auto' ? '' : color })}/>}
-      </div>
     </SettingsGroup>
     {sandbox && <SettingsGroup title="샌드박스">
       <SettingsRow label={<span className="flex items-center gap-2">샌드박스 <SandboxBadge state={sandbox.state}/></span>} description={sandbox.detail}>
