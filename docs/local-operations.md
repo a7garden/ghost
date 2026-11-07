@@ -8,6 +8,32 @@
 | Mac 앱 | `~/Applications/Ghost.app`. `~/.config/ghost/console.json`의 `host_mode: external`이면 상태 루트의 `host.json`을 읽어 실행 중인 Host에 붙는다. `managed`이면 앱에 들어 있는 Host를 직접 띄운다. |
 | iPhone | 페어링한 기기가 Host의 공개 origin(`publicOrigin`, TLS 리버스 프록시)으로 직접 접속한다. 별도 Gateway는 없다. |
 
+## 현재 설치 (2026-11-07 전환)
+
+| 항목 | 값 |
+| --- | --- |
+| LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-<commit>` (UI는 같은 디렉터리의 `ui/`) |
+| 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
+| 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
+| Mac 앱 | `~/Applications/Ghost.app`, `console.json` = `{host_mode: external, root}` |
+| 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent |
+| 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
+
+가져온 대화의 개인정보 경계는 이전 Host 그대로다. 기본 Ghost(`primary`)와 `specialist-research`의 주 대화는 `local`이라 로컬 모델로만 실행되며, 현재 로컬 추론 서버에 가중치가 없어 응답하지 못한다. Z.AI로 대화하던 공개 대화(`83a3e562-…`)는 `public`으로 남아 있다.
+
+### 되돌리기
+
+전환 전 상태와 설정은 `~/.local/share/ghost/backups/pre-bun-20261107/`에 있다(`state/`, `state.sha256`, `config-ghost/`, 이전 실행 링크, plist, `ghost-run.sh.previous`, `tailscale-serve.txt`, `import-report.json`). 이전 상태 루트는 `~/Library/Application Support/Ghost.pre-bun-20261107`에 그대로 있다.
+
+1. `launchctl bootout gui/$UID/com.a7.ghost`, Mac 앱 종료.
+2. 새 루트를 다른 이름으로 옮기고 `Ghost.pre-bun-20261107`을 `Ghost`로 되돌린다.
+3. `~/.local/bin/ghost`를 `previous-ghost-link.txt`의 경로로, infra `scripts/ghost-run.sh`를 `ghost-run.sh.previous`로 되돌린다.
+4. `tailscale serve --bg --https=8443 http://127.0.0.1:8788`, `launchctl enable`/`bootstrap` `com.a7.ghost-gateway`.
+5. `~/Applications/Ghost.previous-20261107.app`을 `Ghost.app`으로, `config-ghost/console.json`을 `~/.config/ghost/`로 되돌린 뒤 `com.a7.ghost`를 다시 띄운다.
+
+전환 뒤에 생긴 대화·맡긴 일은 이전 Host로 옮겨지지 않는다.
+
 상태 루트:
 
 ```
