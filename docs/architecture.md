@@ -141,7 +141,7 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 | Table | Key | Notes |
 | --- | --- | --- |
 | `ghosts` | `id` | name, persona, look, model, is_default (one), state, direct_conversation_id |
-| `conversations` | `id` | ghost_id, kind, work_id, title, privacy, model, busy; `pi_conversation_id` maps to Pi |
+| `conversations` | `id` | ghost_id, kind, work_id, title, model, busy; `pi_conversation_id` maps to Pi |
 | `works` | `id` | parent_id, root_id, ghost_id, origin_conversation_id, conversation_id, brief, acceptance, state, revision, revisions_used, idle_nudges, deadline_at, result, verdict, reason, timestamps |
 | `decisions` | `id` | kind, ghost_id, conversation_id, work_id, effect_id, title, detail, options, proposal, state, answer |
 | `effects` | `id`; unique `(conversation_id, call_id)` | work_id, tool, summary, input_digest, state, result |
@@ -152,7 +152,7 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 | `pairings` | `code_hash` | name, grants, expires_at, device_id |
 | `spaces` | `id` | name, path, grants (Ghost + read/propose) |
 | `avatars` | `id` | name, description, image_digest, design |
-| `providers` | `id` | kind, name, base_url, models, local (keys live in `secrets/`) |
+| `providers` | `id` | kind, name, base_url, models (keys live in `secrets/`) |
 | `settings` | `key` | default model, review model |
 | `requests` | `id` | principal, command digest, small outcome |
 | `events` | `seq` | change event JSON; retained 7 days |
@@ -182,7 +182,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 - The sandbox `ExecutionEnv` for a work conversation is built from the Work's row: Apple container with only the Work's directory mounted at `/workspace`, no network. Local-directory env exists for tests and development.
 - A work conversation that goes idle with live children or a pending decision becomes `waiting`; when a child settles, its outcome (and its files under `inputs/<child-id>/`) is submitted to the parent. Idle without either gets one reminder, then the Work fails.
 - Effect journaling wraps every tool that changes the outside world (`write`, `edit`, `bash`, `publish_artifact`, `memory_retain`).
-- Privacy: a conversation's privacy (`public | private | local`) limits which providers may run it and which grants its tools may use. `local` requires a local provider route.
+- Providers: any configured provider with a credential runs any conversation with every tool the Ghost holds. There are no privacy tiers or local-only routes (owner decision, 2026-11-07).
 
 ## API
 

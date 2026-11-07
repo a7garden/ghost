@@ -218,9 +218,9 @@ export class Ledger {
   putConversation(conversation: Conversation) {
     this.db
       .query(
-        `INSERT INTO conversations (id, ghost_id, kind, work_id, title, privacy, model, busy, created_at, last_activity_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET title = excluded.title, privacy = excluded.privacy, model = excluded.model,
+        `INSERT INTO conversations (id, ghost_id, kind, work_id, title, model, busy, created_at, last_activity_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET title = excluded.title, model = excluded.model,
            busy = excluded.busy, last_activity_at = excluded.last_activity_at`,
       )
       .run(
@@ -229,7 +229,6 @@ export class Ledger {
         conversation.kind,
         conversation.workId,
         conversation.title,
-        conversation.privacy,
         json(conversation.model),
         conversation.busy ? 1 : 0,
         conversation.createdAt,
@@ -723,7 +722,6 @@ export class Ledger {
       name: String(row.name),
       baseUrl: row.base_url === null ? null : String(row.base_url),
       models: parseJson<Provider["models"]>(row.models),
-      local: bool(row.local),
       hasCredential: false,
     }));
   }
@@ -731,11 +729,11 @@ export class Ledger {
   putProvider(provider: Omit<Provider, "hasCredential">) {
     this.db
       .query(
-        `INSERT INTO providers (id, kind, name, base_url, models, local) VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO providers (id, kind, name, base_url, models) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, name = excluded.name, base_url = excluded.base_url,
-           models = excluded.models, local = excluded.local`,
+           models = excluded.models`,
       )
-      .run(provider.id, provider.kind, provider.name, provider.baseUrl, json(provider.models), provider.local ? 1 : 0);
+      .run(provider.id, provider.kind, provider.name, provider.baseUrl, json(provider.models));
   }
 
   deleteProvider(id: string) {
@@ -776,7 +774,6 @@ function toConversation(row: Row): Conversation {
     kind: String(row.kind) as Conversation["kind"],
     workId: row.work_id === null ? null : String(row.work_id),
     title: String(row.title),
-    privacy: String(row.privacy) as Conversation["privacy"],
     model: parseNullable(row.model),
     busy: bool(row.busy),
     createdAt: Number(row.created_at),

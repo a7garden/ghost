@@ -19,7 +19,6 @@ import {
   parse,
   type ArtifactRef,
   type ModelRef,
-  type Privacy,
 } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { sha256 } from "../core/ids.ts";
@@ -136,7 +135,6 @@ interface Legacy {
   registry: { ghostId: string; kind: string; conversationId: string; mode: string }[];
   bindings: { conversationId: string; ghostId: string }[];
   turns: LegacyTurn[];
-  disclosures: Map<string, string>;
   goals: Map<string, LegacyGoal>;
   works: LegacyWork[];
   links: Map<string, LegacyLink>;
@@ -170,14 +168,13 @@ const THINKING: Record<string, "off" | "low" | "medium" | "high"> = {
 };
 
 /** Legacy inference catalog (src/host/inference.rs), minus the retired transport detail. */
-const PROVIDER_CATALOG: Record<string, { kind: Provider["kind"]; name: string; models: string[]; local: boolean }> = {
-  codex: { kind: "openai", name: "Codex", models: ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"], local: false },
-  "zai-coding": { kind: "zai", name: "Z.AI Coding Plan", models: ["glm-5.3"], local: false },
-  minimax: { kind: "minimax", name: "MiniMax", models: ["MiniMax-M3.1-Flash-Preview"], local: false },
-  local: { kind: "openai_compatible", name: "Local model", models: [], local: true },
+const PROVIDER_CATALOG: Record<string, { kind: Provider["kind"]; name: string; models: string[] }> = {
+  codex: { kind: "openai", name: "Codex", models: ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"] },
+  "zai-coding": { kind: "zai", name: "Z.AI Coding Plan", models: ["glm-5.3"] },
+  minimax: { kind: "minimax", name: "MiniMax", models: ["MiniMax-M3.1-Flash-Preview"] },
+  local: { kind: "openai_compatible", name: "Local model", models: [] },
 };
 
-const LEGACY_PRIVACY: Record<string, Privacy> = { public: "public", private: "private", local_only: "local" };
 
 const MEDIA_BY_EXTENSION: Record<string, string> = {
   ".md": "text/markdown",
@@ -304,11 +301,6 @@ function readLegacy(from: string, db: Database, scratch: string): Legacy {
     attachments: typeof row.attachments === "string" ? row.attachments : "[]",
     at: toMs(row.created_at_ms),
   }));
-
-  const disclosures = new Map<string, string>();
-  for (const row of select(db, "SELECT conversation_id, privacy FROM lifetime_conversation_disclosure")) {
-    disclosures.set(String(row.conversation_id), String(row.privacy));
-  }
 
   const goals = new Map<string, LegacyGoal>();
   for (const row of select(db, "SELECT id, revision, accountable_ghost, reply_conversation, payload FROM lifetime_goals")) {
@@ -478,7 +470,6 @@ function readLegacy(from: string, db: Database, scratch: string): Legacy {
     registry,
     bindings,
     turns,
-    disclosures,
     goals,
     works,
     links,
@@ -582,8 +573,6 @@ function planGhost(
       kind: "direct",
       workId: null,
       title: name,
-      // The legacy disclosure is a privacy boundary the owner set; it is never loosened.
-      privacy: LEGACY_PRIVACY[legacy.disclosures.get(row.conversationId) ?? "private"] ?? "private",
       model: selectionFor(row.ghostId, row.conversationId),
       busy: false,
       createdAt,
@@ -677,7 +666,6 @@ export async function runImport(opts: {
       continue;
     }
     if (conversationIds.has(binding.conversationId)) continue;
-    const privacy = LEGACY_PRIVACY[legacy.disclosures.get(binding.conversationId) ?? "private"] ?? "private";
     const lastActivity = turnsByKey.get(`${binding.ghostId}/${binding.conversationId}`)?.at(-1)?.at ?? now;
     plan.conversations.push({
       conversation: {
@@ -686,7 +674,6 @@ export async function runImport(opts: {
         kind: "direct",
         workId: null,
         title: plan.ghost.name,
-        privacy,
         model: selectionFor(binding.ghostId, binding.conversationId),
         busy: false,
         createdAt: now,
@@ -866,7 +853,6 @@ export async function runImport(opts: {
       name: entry.name,
       baseUrl: null,
       models: models.map((model) => ({ id: model, name: model })),
-      local: entry.local,
       hasCredential: legacy.credentialKeys.some((key) => key.provider === id),
     });
   }
@@ -938,7 +924,7 @@ export async function runImport(opts: {
     note(`inference: image provider preference ${legacy.inference.image_provider} is not carried`);
   }
   if (Object.keys(legacy.inference.conversations).length > 0) {
-    note("inference: per-conversation external provider grants are not carried; privacy gates are rebuilt by the host");
+    note("inference: per-conversation provider grants and privacy tiers are not carried; every configured provider runs every conversation");
   }
 
   // History notes over the conversations actually imported.

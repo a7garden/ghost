@@ -315,22 +315,6 @@ describe("restart", () => {
   });
 });
 
-describe("privacy", () => {
-  test("tightening the origin conversation tightens Work already under way", async () => {
-    const { core, ledger, ghost, helper } = setup();
-    const parent = core.works.createRoot({ ghostId: ghost.id, title: "P", brief: "B", originConversationId: ghost.directConversationId });
-    await core.idle();
-    const child = core.works.delegate(parent.id, { ghostId: helper.id, title: "C", brief: "B" });
-    await core.idle();
-    const childConversation = ledger.work(child.id).conversationId!;
-    expect(core.effectivePrivacy(childConversation)).toBe("private");
-    const origin = ledger.conversation(ghost.directConversationId);
-    ledger.tx(() => ledger.putConversation({ ...origin, privacy: "local" }));
-    expect(core.effectivePrivacy(childConversation)).toBe("local");
-    expect(core.effectivePrivacy(ledger.work(parent.id).conversationId!)).toBe("local");
-  });
-});
-
 describe("commands and access", () => {
   test("a repeated request id runs once; different bytes conflict", async () => {
     const { core, ledger, ghost } = setup();

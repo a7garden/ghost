@@ -7,7 +7,6 @@ import {
   Look,
   ModelInfo,
   ModelRef,
-  Privacy,
   ProviderKind,
   ScheduleSpec,
   SpaceGrant,
@@ -31,12 +30,11 @@ export const Command = Type.Union([
     attachments: Type.Optional(Type.Array(ArtifactRef, { maxItems: 16 })),
   }),
   command("message.cancel", { conversationId: Id }),
-  command("conversation.create", { ghostId: Id, title: Type.Optional(Text(256)), privacy: Type.Optional(Privacy) }),
+  command("conversation.create", { ghostId: Id, title: Type.Optional(Text(256)) }),
   command("conversation.update", {
     conversationId: Id,
     title: Type.Optional(Text(256)),
     model: Type.Optional(nullable(ModelRef)),
-    privacy: Type.Optional(Privacy),
   }),
 
   // Work (맡긴 일)
@@ -131,7 +129,6 @@ export const Command = Type.Union([
     name: Text(128),
     baseUrl: Type.Optional(nullable(Type.String({ maxLength: 2048 }))),
     models: Type.Array(ModelInfo, { maxItems: 256 }),
-    local: Type.Boolean(),
     /** Omit to keep the stored credential; null removes it. */
     apiKey: Type.Optional(nullable(Type.String({ minLength: 1, maxLength: 4096 }))),
   }),

@@ -13,8 +13,8 @@ const state = (): State => ({
   runtime: { ready: true, detail: '', version: '0.0.0' },
   ghosts: [ghost('milo'), ghost('sage', true)],
   conversations: [
-    { id: 'extra', ghostId: 'sage', kind: 'direct', workId: null, title: '이전 대화', privacy: 'public', model: null, busy: false, createdAt: 1, lastActivityAt: 2 },
-    { id: 'work-conv', ghostId: 'sage', kind: 'work', workId: 'w1', title: '작업 대화', privacy: 'public', model: null, busy: false, createdAt: 1, lastActivityAt: 3 },
+    { id: 'extra', ghostId: 'sage', kind: 'direct', workId: null, title: '이전 대화', model: null, busy: false, createdAt: 1, lastActivityAt: 2 },
+    { id: 'work-conv', ghostId: 'sage', kind: 'work', workId: 'w1', title: '작업 대화', model: null, busy: false, createdAt: 1, lastActivityAt: 3 },
   ],
   works: [], decisions: [], notifications: [], schedules: [], spaces: [], avatars: [],
   settings: { defaultModel: null, reviewModel: null, providers: [] }, devices: [], sandboxes: [],

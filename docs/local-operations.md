@@ -20,7 +20,7 @@
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
-가져온 대화의 개인정보 경계는 이전 Host 그대로다. 기본 Ghost(`primary`)와 `specialist-research`의 주 대화는 `local`이라 로컬 모델로만 실행되며, 현재 로컬 추론 서버에 가중치가 없어 응답하지 못한다. Z.AI로 대화하던 공개 대화(`83a3e562-…`)는 `public`으로 남아 있다.
+모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
 
 ### 되돌리기
 
@@ -41,7 +41,7 @@ ledger.db   pi.db   host.json (0600)   config.json (선택)
 artifacts/sha256/…   skills/…   secrets/<provider>.json (0600)   sandboxes/<ghost>/<work>/workspace
 ```
 
-`config.json`은 `publicOrigin`, `uiDir`, `sandbox`(`local` 또는 `apple-container`), `memory`(Oxibrain), `apns`를 담는다. 환경 변수는 `GHOST_ROOT`, `GHOST_PORT`, `GHOST_HOST`, `GHOST_PUBLIC_ORIGIN`, `GHOST_UI_DIR`만 읽는다.
+`config.json`은 `publicOrigin`, `uiDir`, `sandbox`(`local` 또는 `apple-container`), `memory`(Oxibrain; `spaces`는 Ghost id → space, `*`는 나머지 모든 Ghost), `apns`를 담는다. 환경 변수는 `GHOST_ROOT`, `GHOST_PORT`, `GHOST_HOST`, `GHOST_PUBLIC_ORIGIN`, `GHOST_UI_DIR`만 읽는다.
 
 ## 확인
 

@@ -95,7 +95,6 @@ async function fixture(): Promise<Fixture> {
       name: "Faux",
       baseUrl: null,
       models: [{ id: "faux-1", name: "Faux 1" }],
-      local: false,
     });
     ledger.putSetting("defaultModel", { provider: "faux", model: "faux-1" });
   });
@@ -241,24 +240,6 @@ test("an origin survives a restart of the engine", async () => {
   ledger.close();
 });
 
-test("a local conversation refuses a provider that is not local", async () => {
-  const { core, engine, faux } = await fixture();
-  faux.setResponses([fauxAssistantMessage(fauxText("hello there"))]);
-  const local = core.createDirectConversation(core.ledger.ghosts()[0]!.id, "local chat", "local");
-  await core.idle();
-  let refusal: unknown;
-  try {
-    await engine.submit(local.id, { text: "hi", origin: "owner", requestId: "r1" });
-  } catch (error) {
-    refusal = error;
-  }
-  expect(refusal).toBeInstanceOf(CommandError);
-  expect((refusal as CommandError).code).toBe("unavailable");
-  const page = await engine.page(local.id, null, 50);
-  expect(page.messages).toHaveLength(0);
-  await engine.close();
-});
-
 test("the transcript pages backwards", async () => {
   const { engine, conversationId, faux } = await fixture();
   faux.setResponses([fauxAssistantMessage(fauxText("hello there"))]);
@@ -305,7 +286,6 @@ test("the model catalog follows the configured providers", async () => {
         name: "Faux",
         baseUrl: "http://127.0.0.1:9/v1",
         models: [{ id: "faux-1", name: "Faux 1" }],
-        local: false,
         hasCredential: false,
       },
     ],

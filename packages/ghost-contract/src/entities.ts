@@ -7,9 +7,6 @@ export const Id = Type.String({ minLength: 1, maxLength: 128 });
 export const Timestamp = Type.Integer({ minimum: 0 });
 export const Sha256 = Type.String({ pattern: "^[a-f0-9]{64}$" });
 
-export const Privacy = Type.Union([Type.Literal("public"), Type.Literal("private"), Type.Literal("local")]);
-export type Privacy = Static<typeof Privacy>;
-
 export const Thinking = Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")]);
 export type Thinking = Static<typeof Thinking>;
 
@@ -54,7 +51,6 @@ export const Conversation = Type.Object({
   kind: ConversationKind,
   workId: nullable(Id),
   title: Type.String({ maxLength: 256 }),
-  privacy: Privacy,
   /** Null follows the Ghost's model. */
   model: nullable(ModelRef),
   busy: Type.Boolean(),
@@ -316,8 +312,6 @@ export const Provider = Type.Object({
   name: Type.String({ minLength: 1, maxLength: 128 }),
   baseUrl: nullable(Type.String({ maxLength: 2048 })),
   models: Type.Array(ModelInfo, { maxItems: 256 }),
-  /** A local provider may run `local` conversations. */
-  local: Type.Boolean(),
   hasCredential: Type.Boolean(),
 });
 export type Provider = Static<typeof Provider>;

@@ -204,4 +204,8 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX events_at ON events(at);
   `,
+  /* 2: no privacy tiers or local providers; every configured provider runs everything */ `
+  ALTER TABLE conversations DROP COLUMN privacy;
+  ALTER TABLE providers DROP COLUMN local;
+  `,
 ];

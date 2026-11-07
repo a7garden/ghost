@@ -67,7 +67,7 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
       return {};
 
     case "conversation.create":
-      return { conversationId: core.createDirectConversation(command.ghostId, command.title, command.privacy).id };
+      return { conversationId: core.createDirectConversation(command.ghostId, command.title).id };
 
     case "conversation.update": {
       const conversation = ledger.conversation(command.conversationId);
@@ -75,7 +75,6 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
         ...conversation,
         title: command.title ?? conversation.title,
         model: command.model === undefined ? conversation.model : command.model,
-        privacy: command.privacy ?? conversation.privacy,
       };
       ledger.tx(() => ledger.putConversation(next));
       void core.lane(`conversation:${next.id}`, () => core.openConversation(next.id));
@@ -231,7 +230,7 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
     case "provider.upsert":
       if (command.apiKey !== undefined) core.secrets.put(command.id, command.apiKey);
       ledger.tx(() => {
-        ledger.putProvider({ id: command.id, kind: command.kind, name: command.name, baseUrl: command.baseUrl ?? null, models: command.models, local: command.local });
+        ledger.putProvider({ id: command.id, kind: command.kind, name: command.name, baseUrl: command.baseUrl ?? null, models: command.models });
         ledger.emit({ type: "settings", settings: settingsView(core) });
       });
       return {};

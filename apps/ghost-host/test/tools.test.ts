@@ -273,49 +273,6 @@ describe("tools", () => {
     expect(settled.verdict?.outcome).toBe("pass");
   });
 
-  test("a local conversation may search and recall memory but cannot retain into it", async () => {
-    const s = setup();
-    const memory = new FakeMemory();
-    const tools = { ...s, tools: createToolSet({ core: s.core, sandbox: s.sandbox, memory, documents: null }) };
-    s.ledger.tx(() => s.ledger.putConversation({ ...s.direct, privacy: "local" }));
-    const pi = asPi(s, s.direct, "pi-local");
-
-    const refused = await call(toolOf(tools, s.direct, s.ghost, "memory_retain"), { text: "the owner's private notes" }, apiOf(pi, "retain-1"));
-    expect(refused.isError).toBe(true);
-    expect(contentOf(refused)).toContain("local");
-    expect(memory.retained).toHaveLength(0);
-
-    const searched = await call(toolOf(tools, s.direct, s.ghost, "memory_search"), { query: "notes" }, apiOf(pi, "search-1"));
-    expect(searched.isError).toBeFalsy();
-    expect(contentOf(searched)).toContain("hit for notes");
-
-    const recalled = await call(toolOf(tools, s.direct, s.ghost, "memory_recall"), { query: "notes" }, apiOf(pi, "recall-1"));
-    expect(recalled.isError).toBeFalsy();
-    expect(contentOf(recalled)).toContain("recalled text");
-  });
-
-  test("tightening the origin conversation to local stops memory_retain in a running work", async () => {
-    const s = setup();
-    const memory = new FakeMemory();
-    const tools = { ...s, tools: createToolSet({ core: s.core, sandbox: s.sandbox, memory, documents: null }) };
-    const { work, conversation, pi } = await runningWork(s);
-
-    const allowed = await call(toolOf(tools, conversation, s.ghost, "memory_retain"), { text: "progress note" }, apiOf(pi, "retain-1"));
-    expect(allowed.isError).toBeFalsy();
-    expect(memory.retained).toHaveLength(1);
-    const retained = s.ledger.effectsForWork(work.id).filter((effect) => effect.tool === "memory_retain");
-    expect(retained).toHaveLength(1);
-    expect(retained[0]!.state).toBe("done");
-
-    // The Work copied `private` from the origin at creation; effective privacy must follow the origin now.
-    s.ledger.tx(() => s.ledger.putConversation({ ...s.direct, privacy: "local" }));
-    const refused = await call(toolOf(tools, conversation, s.ghost, "memory_retain"), { text: "more notes" }, apiOf(pi, "retain-2"));
-    expect(refused.isError).toBe(true);
-    expect(contentOf(refused)).toContain("local");
-    expect(memory.retained).toHaveLength(1);
-    expect(s.ledger.effectsForWork(work.id).filter((effect) => effect.tool === "memory_retain")).toHaveLength(1);
-  });
-
   test("publish_artifact refuses a file above the byte cap without storing anything", async () => {
     const s = setup();
     const { work, conversation, pi } = await runningWork(s);

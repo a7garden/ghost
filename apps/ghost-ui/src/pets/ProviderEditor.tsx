@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, X } from 'lucide-react';
-import { Button, Checkbox, FormField, InlineError, Input, SelectField, Switch } from '@garden/ui';
+import { Button, Checkbox, FormField, InlineError, Input, SelectField } from '@garden/ui';
 import type { ModelInfo, ProviderKind } from '@ghost/contract';
 import { Modal } from '../components/Modal';
 
@@ -14,14 +14,14 @@ const KINDS: { value: ProviderKind; label: string }[] = [
 ];
 
 /** The fields `provider.upsert` takes; the UI keeps them as one draft. */
-export interface ProviderDraft { id: string; kind: ProviderKind; name: string; baseUrl: string | null; models: ModelInfo[]; local: boolean }
+export interface ProviderDraft { id: string; kind: ProviderKind; name: string; baseUrl: string | null; models: ModelInfo[] }
 /** `apiKey` tri-state: undefined keeps the stored credential, null removes it, a value replaces it. */
 export interface ProviderSave { draft: ProviderDraft; apiKey?: string | null }
 
 export const providerKindLabel = (kind: ProviderKind) => KINDS.find(item => item.value === kind)?.label ?? kind;
 
 export function emptyDraft(): ProviderDraft {
-  return { id: '', kind: 'openai_compatible', name: '', baseUrl: null, models: [], local: false };
+  return { id: '', kind: 'openai_compatible', name: '', baseUrl: null, models: [] };
 }
 
 export function ProviderEditor({ initial, existing, hasCredential, busy, onClose, onSave }: {
@@ -66,11 +66,6 @@ export function ProviderEditor({ initial, existing, hasCredential, busy, onClose
       <FormField label="서버 주소" description="비워 두면 종류의 기본 주소를 사용합니다. OpenAI 호환 서버에는 주소가 필요합니다.">
         {control => <Input {...control} type="url" value={value.baseUrl ?? ''} placeholder="http://127.0.0.1:11434/v1" disabled={locked} onChange={event => patch({ baseUrl: event.target.value.trim() || null })}/>}
       </FormField>
-      <div className="flex items-center gap-2.5">
-        <Switch id="provider-local" checked={value.local} disabled={locked} onCheckedChange={local => patch({ local })}/>
-        <label htmlFor="provider-local" className="text-caption text-ink">로컬 제공자</label>
-        <span className="text-caption text-ink-3">이 제공자가 로컬 대화를 실행할 수 있습니다.</span>
-      </div>
       <section className="flex min-w-0 flex-col gap-3.5 border-t border-line pt-4">
         <h3 className="m-0 text-caption font-semibold text-ink">모델 · {value.models.length}개</h3>
         <div className="flex max-h-[32dvh] min-h-16 flex-col gap-3 overflow-auto p-1">

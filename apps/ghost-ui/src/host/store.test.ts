@@ -38,8 +38,8 @@ describe('applyEvent', () => {
   });
 
   it('removes conversations and keeps the rest', () => {
-    let state = applyEvent(baseState(), event({ type: 'conversation', conversation: { id: 'c1', ghostId: 'sage', kind: 'direct', workId: null, title: '대화', privacy: 'public', model: null, busy: false, createdAt: 1, lastActivityAt: 1 } }));
-    state = applyEvent(state, event({ type: 'conversation', conversation: { id: 'c2', ghostId: 'sage', kind: 'direct', workId: null, title: '이전 대화', privacy: 'public', model: null, busy: false, createdAt: 1, lastActivityAt: 1 } }));
+    let state = applyEvent(baseState(), event({ type: 'conversation', conversation: { id: 'c1', ghostId: 'sage', kind: 'direct', workId: null, title: '대화', model: null, busy: false, createdAt: 1, lastActivityAt: 1 } }));
+    state = applyEvent(state, event({ type: 'conversation', conversation: { id: 'c2', ghostId: 'sage', kind: 'direct', workId: null, title: '이전 대화', model: null, busy: false, createdAt: 1, lastActivityAt: 1 } }));
     expect(state.conversations).toHaveLength(2);
     state = applyEvent(state, event({ type: 'conversation.removed', id: 'c1' }));
     expect(state.conversations.map(row => row.id)).toEqual(['c2']);

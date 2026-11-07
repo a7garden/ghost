@@ -36,7 +36,6 @@ export function ModelSettings() {
       name: draft.name.trim(),
       baseUrl: draft.baseUrl,
       models: draft.models,
-      local: draft.local,
       ...(apiKey === undefined ? {} : { apiKey }),
     });
     setEditor(undefined);
@@ -65,7 +64,6 @@ export function ModelSettings() {
           <span className="flex min-w-0 flex-wrap items-center gap-2.5">
             <span className="text-body font-semibold text-ink [overflow-wrap:anywhere]">{provider.name}</span>
             <Badge variant="outline">{providerKindLabel(provider.kind)}</Badge>
-            {provider.local && <Badge variant="outline">로컬</Badge>}
           </span>
           <span className="flex items-center gap-3 text-caption text-ink-3">
             {provider.hasCredential ? <span className="flex items-center gap-1"><KeyRound size={13} aria-hidden="true"/>인증 키 저장됨</span> : <span className="flex items-center gap-1"><ShieldOff size={13} aria-hidden="true"/>인증 키 없음</span>}
@@ -75,7 +73,7 @@ export function ModelSettings() {
         <p className="m-0 text-caption text-ink-3 [overflow-wrap:anywhere]">{provider.baseUrl ?? '기본 서버 주소'}</p>
         <p className="m-0 text-caption text-ink-3 [overflow-wrap:anywhere]">{provider.models.map(model => model.name || model.id).join(', ')}</p>
         <div className="flex flex-wrap items-center gap-4">
-          <Button variant="ghost" type="button" disabled={pending !== ''} onClick={() => setEditor({ draft: { id: provider.id, kind: provider.kind, name: provider.name, baseUrl: provider.baseUrl, models: provider.models.map(model => ({ ...model })), local: provider.local }, existing: true, hasCredential: provider.hasCredential })}>편집<ChevronRight size={14}/></Button>
+          <Button variant="ghost" type="button" disabled={pending !== ''} onClick={() => setEditor({ draft: { id: provider.id, kind: provider.kind, name: provider.name, baseUrl: provider.baseUrl, models: provider.models.map(model => ({ ...model })) }, existing: true, hasCredential: provider.hasCredential })}>편집<ChevronRight size={14}/></Button>
           <Button variant="ghost" size="icon" type="button" className="ml-auto" aria-label={`${provider.name} 제공자 삭제`} disabled={pending !== ''} onClick={() => { setError(''); setRemove(provider); }}><Trash2 size={15}/></Button>
         </div>
       </article>)}

@@ -86,7 +86,7 @@ export function ModelPicker({ conversationId, value, onChange, disabled = false,
     <PopoverContent side="top" align="start" className="w-64 max-w-[calc(100vw-2rem)] p-1.5" aria-label="모델 선택">
       <div className="max-h-[60dvh] overflow-auto">
         {usableProviders(settings).map(provider => <section key={provider.id} className="py-1">
-          <p className="m-0 px-2.5 py-1 text-caption font-medium text-ink-3">{provider.name}{provider.local && ' · 로컬'}</p>
+          <p className="m-0 px-2.5 py-1 text-caption font-medium text-ink-3">{provider.name}</p>
           {provider.models.map(model => {
             const selected = saved?.provider === provider.id && saved?.model === model.id;
             return <button key={model.id} type="button" onClick={() => void choose({ provider: provider.id, model: model.id })}

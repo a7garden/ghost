@@ -223,6 +223,18 @@ describe("memory", () => {
     expect(fixture.requests()).toEqual([]);
   });
 
+  test("the `*` space serves every Ghost without its own entry", async () => {
+    const fixture = engineFixture();
+    const memory = createMemory({ ...fixture.config, memory: { ...fixture.config.memory!, spaces: { "ghost-1": "space-a", "*": "space-all" } } })!;
+
+    expect(memory.available("ghost-2")).toBe(true);
+    await memory.search("ghost-2", "tomatoes", 3);
+    await memory.search("ghost-1", "tomatoes", 3);
+
+    const spaces = fixture.requests().filter((request) => request.method === "tools/call").map((request) => (request.params?.["arguments"] as Record<string, unknown>)["space"]);
+    expect(spaces).toEqual(["space-all", "space-a"]);
+  });
+
   test("a rejected token fails the operation instead of falling back", async () => {
     const fixture = engineFixture("wrong-token");
     const memory = createMemory(fixture.config)!;

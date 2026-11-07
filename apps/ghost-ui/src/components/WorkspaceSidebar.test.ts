@@ -15,8 +15,8 @@ const state = (): State => ({
   runtime: { ready: true, detail: '', version: '0.0.0' },
   ghosts: [ghost('milo'), ghost('sage', true)],
   conversations: [
-    { id: 'conv-sage', ghostId: 'sage', kind: 'direct', workId: null, title: '메인 대화', privacy: 'public', model: null, busy: false, createdAt: 1, lastActivityAt: 5 },
-    { id: 'conv-old', ghostId: 'sage', kind: 'direct', workId: null, title: '이전 대화', privacy: 'public', model: null, busy: false, createdAt: 1, lastActivityAt: 2 },
+    { id: 'conv-sage', ghostId: 'sage', kind: 'direct', workId: null, title: '메인 대화', model: null, busy: false, createdAt: 1, lastActivityAt: 5 },
+    { id: 'conv-old', ghostId: 'sage', kind: 'direct', workId: null, title: '이전 대화', model: null, busy: false, createdAt: 1, lastActivityAt: 2 },
   ],
   works: [],
   decisions: [],

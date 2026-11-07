@@ -1,4 +1,4 @@
-import type { ArtifactRef, Conversation, Ghost, Notification, Privacy } from "@ghost/contract";
+import type { ArtifactRef, Conversation, Ghost, Notification } from "@ghost/contract";
 import type { Ledger } from "../ledger/ledger.ts";
 import { Decisions } from "./decisions.ts";
 import { Effects } from "./effects.ts";
@@ -135,30 +135,22 @@ export class Core implements EngineEvents {
     };
     this.ledger.tx(() => {
       this.ledger.putGhost(ghost);
-      this.ledger.putConversation(this.newConversation(id, "direct", null, ghost.name, "private", conversationId, now));
+      this.ledger.putConversation(this.newConversation(id, "direct", null, ghost.name, conversationId, now));
     });
     void this.lane(`conversation:${conversationId}`, () => this.openConversation(conversationId));
     return ghost;
   }
 
-  createDirectConversation(ghostId: string, title: string | undefined, privacy: Privacy | undefined): Conversation {
+  createDirectConversation(ghostId: string, title: string | undefined): Conversation {
     const ghost = this.ledger.ghost(ghostId);
-    const conversation = this.newConversation(ghost.id, "direct", null, title ?? ghost.name, privacy ?? "private", newId(), Date.now());
+    const conversation = this.newConversation(ghost.id, "direct", null, title ?? ghost.name, newId(), Date.now());
     this.ledger.tx(() => this.ledger.putConversation(conversation));
     void this.lane(`conversation:${conversation.id}`, () => this.openConversation(conversation.id));
     return conversation;
   }
 
-  newConversation(
-    ghostId: string,
-    kind: Conversation["kind"],
-    workId: string | null,
-    title: string,
-    privacy: Privacy,
-    id = newId(),
-    now = Date.now(),
-  ): Conversation {
-    return { id, ghostId, kind, workId, title, privacy, model: null, busy: false, createdAt: now, lastActivityAt: now };
+  newConversation(ghostId: string, kind: Conversation["kind"], workId: string | null, title: string, id = newId(), now = Date.now()): Conversation {
+    return { id, ghostId, kind, workId, title, model: null, busy: false, createdAt: now, lastActivityAt: now };
   }
 
   /** (Re)apply a conversation's agent from current ledger rows. */
@@ -180,28 +172,13 @@ export class Core implements EngineEvents {
     }
   }
 
-  /** Submit an owner message; rejects when the engine refuses it (no model, privacy route). */
+  /** Submit an owner message; rejects when the engine refuses it (no model, no credential). */
   sendMessage(conversationId: string, text: string, requestId: string, attachments: ArtifactRef[] = []): Promise<void> {
     const conversation = this.ledger.conversation(conversationId);
     if (conversation.kind !== "direct") throw invalid("owner messages go to direct conversations; edit a Work to steer it");
     return this.run(`conversation:${conversationId}`, () =>
       this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments }),
     );
-  }
-
-  /**
-   * The privacy a conversation runs under now: the most restrictive of its own and that of
-   * the direct conversation its Work tree reports to, so tightening the origin later also
-   * tightens Work already under way.
-   */
-  effectivePrivacy(conversationId: string): Privacy {
-    const conversation = this.ledger.conversation(conversationId);
-    if (!conversation.workId) return conversation.privacy;
-    const work = this.ledger.work(conversation.workId);
-    const root = work.rootId === work.id ? work : this.ledger.work(work.rootId);
-    const origin = this.ledger.findConversation(root.originConversationId);
-    const rank: Record<Privacy, number> = { public: 0, private: 1, local: 2 };
-    return origin && rank[origin.privacy] > rank[conversation.privacy] ? origin.privacy : conversation.privacy;
   }
 
   // Notifications

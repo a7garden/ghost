@@ -366,8 +366,7 @@ export class Works {
   private async start(work: Work) {
     let conversationId = work.conversationId;
     if (!conversationId) {
-      const origin = this.ledger.conversation(work.originConversationId);
-      const conversation = this.core.newConversation(work.ghostId, "work", work.id, work.title, origin.privacy);
+      const conversation = this.core.newConversation(work.ghostId, "work", work.id, work.title);
       conversationId = conversation.id;
       const now = Date.now();
       this.ledger.tx(() => {
@@ -474,8 +473,7 @@ export class Works {
     const existing = this.ledger.conversations({ kind: "review" }).find((conversation) => conversation.workId === work.id);
     let conversationId = existing?.id;
     if (!conversationId) {
-      const origin = this.ledger.conversation(work.originConversationId);
-      const conversation = this.core.newConversation(reviewerGhostId, "review", work.id, `Review: ${work.title}`, origin.privacy);
+      const conversation = this.core.newConversation(reviewerGhostId, "review", work.id, `Review: ${work.title}`);
       conversationId = conversation.id;
       this.ledger.tx(() => this.ledger.putConversation(conversation));
     }
@@ -524,7 +522,7 @@ export class Works {
           requestId: `work:${work.id}:report:${work.state}:${work.revision}`,
         });
       } catch (error) {
-        // A refusal (no model, privacy route) is final for this report; the notification stands.
+        // A refusal (no model, no credential) is final for this report; the notification stands.
         if (!(error instanceof CommandError)) throw error;
         this.core.log(`report of ${work.id} not delivered`, error.message);
       }

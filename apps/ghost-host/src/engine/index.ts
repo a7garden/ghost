@@ -168,10 +168,7 @@ class HostEngine implements Engine {
     if (provider.models.length > 0 && !provider.models.some((info) => info.id === model.model)) {
       throw new CommandError("unavailable", `provider ${provider.id} has no model ${model.model}`);
     }
-    if (this.core.effectivePrivacy(conversation.id) === "local" && !provider.local) {
-      throw new CommandError("unavailable", "a local conversation can only run on a local provider");
-    }
-    if (!provider.local && !this.core.secrets.has(provider.id)) {
+    if (!this.core.secrets.has(provider.id)) {
       throw new CommandError("unavailable", `provider ${provider.id} has no credential`);
     }
     const state = await this.ensureState(conversationId);
@@ -272,7 +269,6 @@ class HostEngine implements Engine {
     if (!model) return { ready: false, detail: "no default model is configured" };
     const provider = settings.providers.find((item) => item.id === model.provider);
     if (!provider) return { ready: false, detail: `provider ${model.provider} is not configured` };
-    if (provider.local) return { ready: true, detail: `local provider ${provider.id}` };
     if (this.core.secrets.has(provider.id)) return { ready: true, detail: `provider ${provider.id} is ready` };
     return { ready: false, detail: `provider ${provider.id} has no credential` };
   }

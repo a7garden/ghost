@@ -6,9 +6,9 @@ const settings: Settings = {
   defaultModel: { provider: 'zai', model: 'glm-5.3' },
   reviewModel: null,
   providers: [
-    { id: 'zai', kind: 'zai', name: 'Z.AI', baseUrl: null, models: [{ id: 'glm-5.3', name: 'GLM-5.3' }], local: false, hasCredential: true },
-    { id: 'local', kind: 'openai_compatible', name: '로컬', baseUrl: 'http://127.0.0.1:11434/v1', models: [], local: true, hasCredential: false },
-    { id: 'openai', kind: 'openai', name: 'OpenAI', baseUrl: null, models: [{ id: 'gpt-o', name: '' }], local: false, hasCredential: true },
+    { id: 'zai', kind: 'zai', name: 'Z.AI', baseUrl: null, models: [{ id: 'glm-5.3', name: 'GLM-5.3' }], hasCredential: true },
+    { id: 'local', kind: 'openai_compatible', name: '로컬', baseUrl: 'http://127.0.0.1:11434/v1', models: [], hasCredential: false },
+    { id: 'openai', kind: 'openai', name: 'OpenAI', baseUrl: null, models: [{ id: 'gpt-o', name: '' }], hasCredential: true },
   ],
 };
 

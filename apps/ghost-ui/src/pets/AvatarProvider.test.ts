@@ -26,7 +26,7 @@ const state = (partial: Partial<Pick<State, 'conversations' | 'decisions'>> = {}
 });
 
 it('animates a Ghost only while one of its conversations is busy', () => {
-  const busy = state({ conversations: [{ id: 'c1', ghostId: 'sage', kind: 'direct', workId: null, title: '', privacy: 'public', model: null, busy: true, createdAt: 1, lastActivityAt: 1 }] });
+  const busy = state({ conversations: [{ id: 'c1', ghostId: 'sage', kind: 'direct', workId: null, title: '', model: null, busy: true, createdAt: 1, lastActivityAt: 1 }] });
   expect(ghostPetState(state().ghosts[0], busy)).toBe('running');
   expect(ghostPetState(state().ghosts[0], state())).toBe('idle');
 });
@@ -39,7 +39,7 @@ it('shows the waiting pose on a pending decision for the Ghost', () => {
 });
 
 it('ignores other Ghosts and unknown ghosts', () => {
-  const busy = state({ conversations: [{ id: 'c1', ghostId: 'milo', kind: 'work', workId: null, title: '', privacy: 'public', model: null, busy: true, createdAt: 1, lastActivityAt: 1 }] });
+  const busy = state({ conversations: [{ id: 'c1', ghostId: 'milo', kind: 'work', workId: null, title: '', model: null, busy: true, createdAt: 1, lastActivityAt: 1 }] });
   expect(ghostPetState(state().ghosts[0], busy)).toBe('idle');
   expect(ghostPetState(undefined, busy)).toBe('idle');
 });

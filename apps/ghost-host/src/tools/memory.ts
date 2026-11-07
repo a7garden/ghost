@@ -61,8 +61,6 @@ export function createMemoryTools(core: Core, memory: MemoryPort): Extension {
     async execute(args, api) {
       try {
         const scope = scopeOf(core, api);
-        if (core.effectivePrivacy(scope.conversation.id) === "local")
-          throw forbidden("memory_retain is refused in a local conversation: local data must stay out of the shared memory that cloud conversations recall from");
         if (!memory.available(scope.ghost.id)) throw forbidden("memory is not available for this Ghost");
         if (new TextEncoder().encode(args.text).length > MAX_RETAIN_BYTES) throw invalid(`memory_retain stores at most ${MAX_RETAIN_BYTES} bytes`);
         const origin = { conversationId: scope.conversation.id, workId: scope.conversation.workId };

@@ -117,7 +117,7 @@ export class Schedules {
           requestId: `schedule:${schedule.id}:${at}`,
         });
       } catch (error) {
-        // A refusal (no model, privacy route) is an outcome, not a crash: skip this occurrence.
+        // A refusal (no model, no credential) is an outcome, not a crash: skip this occurrence.
         if (!(error instanceof CommandError)) throw error;
         this.core.log(`schedule ${schedule.id} skipped`, error.message);
       }

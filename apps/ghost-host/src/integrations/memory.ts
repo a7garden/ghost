@@ -39,7 +39,7 @@ interface MemorySettings {
   executable: string;
   dir: string;
   token: string;
-  /** Ghost id → Oxibrain space id. */
+  /** Ghost id → Oxibrain space id; `*` is the space of every Ghost without its own entry. */
   spaces: Record<string, string>;
 }
 
@@ -368,7 +368,7 @@ class OxibrainMemory implements MemoryPort {
   }
 
   private spaceFor(ghostId: string): string | null {
-    const space = this.settings.spaces[ghostId];
+    const space = this.settings.spaces[ghostId] ?? this.settings.spaces["*"];
     if (typeof space !== "string" || !SPACE_PATTERN.test(space)) return null;
     return space;
   }

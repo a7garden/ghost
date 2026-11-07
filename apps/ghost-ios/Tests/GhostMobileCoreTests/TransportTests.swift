@@ -12,7 +12,7 @@ import Testing
                   "model": null, "isDefault": true, "state": "active",
                   "directConversationId": "conv-1", "createdAt": 1700000000000, "updatedAt": 1700000001000}],
       "conversations": [{"id": "conv-1", "ghostId": "ghost-1", "kind": "direct", "workId": null,
-                         "title": "대화", "privacy": "public", "model": null, "busy": false,
+                         "title": "대화", "model": null, "busy": false,
                          "createdAt": 1700000000000, "lastActivityAt": 1700000002000}],
       "works": [{"id": "work-1", "parentId": null, "rootId": "work-1", "ghostId": "ghost-1",
                  "originConversationId": "conv-1", "conversationId": "conv-9",
@@ -74,7 +74,7 @@ import Testing
         let pageJSON = """
         {
           "conversation": {"id": "conv-1", "ghostId": "ghost-1", "kind": "direct", "workId": null,
-                           "title": "대화", "privacy": "public", "model": null, "busy": true,
+                           "title": "대화", "model": null, "busy": true,
                            "createdAt": 1, "lastActivityAt": 2},
           "messages": [
             {"id": "m-1", "conversationId": "conv-1", "role": "user", "origin": "owner",
@@ -170,7 +170,7 @@ import Testing
 
 @Suite struct SSEParsingTests {
     private func ledgerEventFrame(seq: Int) -> String {
-        "event: ledger\nid: \(seq)\ndata: {\"seq\": \(seq), \"at\": 1700000000000, \"data\": {\"type\": \"conversation\", \"conversation\": {\"id\": \"conv-1\", \"ghostId\": \"ghost-1\", \"kind\": \"direct\", \"workId\": null, \"title\": \"대화\", \"privacy\": \"public\", \"model\": null, \"busy\": false, \"createdAt\": 1, \"lastActivityAt\": 2}}}\n\n"
+        "event: ledger\nid: \(seq)\ndata: {\"seq\": \(seq), \"at\": 1700000000000, \"data\": {\"type\": \"conversation\", \"conversation\": {\"id\": \"conv-1\", \"ghostId\": \"ghost-1\", \"kind\": \"direct\", \"workId\": null, \"title\": \"대화\", \"model\": null, \"busy\": false, \"createdAt\": 1, \"lastActivityAt\": 2}}}\n\n"
     }
 
     @Test func parsesFramesSplitAcrossChunks() throws {
@@ -199,7 +199,7 @@ import Testing
             Issue.record("expected ledger frame"); return
         }
         #expect(event.seq == 7)
-        #expect(event.data == .conversation(try JSONDecoder().decode(Conversation.self, from: json(#"{"id": "conv-1", "ghostId": "ghost-1", "kind": "direct", "workId": null, "title": "대화", "privacy": "public", "model": null, "busy": false, "createdAt": 1, "lastActivityAt": 2}"#))))
+        #expect(event.data == .conversation(try JSONDecoder().decode(Conversation.self, from: json(#"{"id": "conv-1", "ghostId": "ghost-1", "kind": "direct", "workId": null, "title": "대화", "model": null, "busy": false, "createdAt": 1, "lastActivityAt": 2}"#))))
 
         var unknownParser = SSEParser()
         let unknown = "event: ledger\ndata: {\"seq\": 9, \"at\": 1, \"data\": {\"type\": \"space.removed\", \"id\": \"space-1\"}}\n\n"
