@@ -7,7 +7,7 @@ import { LiveReply, Transcript } from '../components/TranscriptMessage';
 import { useHost } from '../host/context';
 import { DecisionCard } from './Decision';
 import { useConversationFeed } from './conversationFeed';
-import { toneFor } from './ghostState';
+import { liveWork, toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
 
 /**
@@ -86,7 +86,7 @@ export function ThreadPanel({ workId, state, onClose, onOpenThread, onOpenPage }
       </section>}
       <section className="thread-panel__section">
         <h3 className="section-title">작업 대화</h3>
-        {!work.conversationId ? <p className="work-aside__empty">아직 시작 전</p>
+        {!work.conversationId ? <p className="work-aside__empty">{liveWork(work) ? '아직 시작 전' : '기록 없음'}</p>
           : loading ? <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>
             : <div className="ghost-conversation__messages thread-panel__transcript">
               <Transcript messages={feed.messages} speaker={message => message.role === 'user' ? `${carrier}에게 전달` : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : carrier}/>
