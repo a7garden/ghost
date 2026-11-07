@@ -8,12 +8,26 @@
 | Mac 앱 | `~/Applications/Ghost.app`. `~/.config/ghost/console.json`의 `host_mode: external`이면 상태 루트의 `host.json`을 읽어 실행 중인 Host에 붙는다. `managed`이면 앱에 들어 있는 Host를 직접 띄운다. |
 | iPhone | 페어링한 기기가 Host의 공개 origin(`publicOrigin`, TLS 리버스 프록시)으로 직접 접속한다. 별도 Gateway는 없다. |
 
+## 개발 변경의 자동 운영 반영
+
+소유자 상시 승인(2026-11-07): 검증한 Ghost 구현 변경은 별도 확인을 묻지 않고 같은 작업에서 운영 앱까지 반영한다. 빌드만 하거나 “운영 미반영” 상태로 개발 작업을 끝내지 않는다. 런타임에 영향 없는 문서 수정만 배포 대상에서 제외한다.
+
+1. 해당 변경의 테스트·타입 검사·실행 검증과 필요한 독립 검토를 마치고 소스 커밋을 보존한다. 검증되지 않은 편집을 감시해 즉시 설치하는 watcher는 만들지 않는다.
+2. LaunchAgent, 실제 실행 파일, 포트 62062의 리스너, 열린 DB 경로와 상태 루트가 일치하는지 확인한다. 처리 중 대화·작업을 임의로 끊지 않고 유휴 시점에 전환한다. 유휴가 되지 않으면 검증한 릴리스를 준비한 채 차단 사유를 보고한다.
+3. 유휴 확인 후 `ghost backup <새 백업 디렉터리>`의 DB 무결성 확인·manifest와 백업 시각을 기록하고, `artifacts/`, `skills/`, `secrets/`, `config.json`도 권한을 유지해 보관한다. 이전 릴리스는 삭제하지 않는다.
+4. `~/.local/share/ghost/releases/<날짜>-bun-<소스 커밋>/`에 검증한 `ghost`와 `ui/`를 설치하고 원본·사본의 해시를 비교한다. 별도 임시 상태 루트·포트에서 설치 사본도 실행해 본다.
+5. 유휴 상태를 다시 확인한 뒤 같은 디렉터리의 임시 심볼릭 링크를 `os.replace` 같은 원자적 rename으로 `current`에 교체한다. 실제 `readlink` 대상이 새 릴리스인지 확인한 후 LaunchAgent의 기존 Host를 `SIGTERM`으로 정상 종료해 재기동한다. 운영 루트에 두 번째 Host를 직접 띄우지 않는다.
+6. Owner API/health로 단일 리스너·실행 경로, 준비 상태와 기존 데이터 보존을 확인하고 **설치된 Ghost 앱**에서 바뀐 화면을 실제로 연다. 운영 루트에는 `ghost doctor`를 실행하지 않는다. Host/UI만 바뀌었으면 external 모드를 유지해 새 Host/UI를 사용하고, native shell 변경이 있을 때만 기존 서명·배포 검증을 거쳐 앱 번들을 교체한다.
+7. 검증 실패 시 저장 형식의 하위 호환성을 확인한 뒤 이전 릴리스 링크로 되돌려 정상 재기동한다. 새 릴리스가 인증 형식을 바꾸면 운영 검증 중 인증 정보를 저장하지 않는다. 저장 이후에는 이전 릴리스가 해당 인증을 읽지 못할 수 있으므로 별도 승인 없이 secrets를 복원하지 않고 보고한다. 데이터 복원·파괴적 마이그레이션도 별도 승인이 필요하다. 설치 경로·소스·백업·검증 결과를 이 문서에 기록한다.
+
+Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다.
+
 ## 현재 설치 (2026-11-07)
 
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-74cd0fb` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-f1e1a64` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`, `console.json` = `{host_mode: external, root}` |
@@ -21,6 +35,14 @@
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### OAuth·제공자 설정 운영 반영 — 2026-11-07
+
+- 검증한 소스 `f1e1a64`(OAuth `d5e84cd` 포함)의 Host/UI를 새 릴리스로 설치했다. 컴파일 Host SHA-256 일치와 UI 전체 바이트 일치를 확인하고 설치 사본도 임시 루트·포트에서 실행했다. 기존 Mac 셸은 external 모드로 유지했다.
+- 백업: `~/.local/share/ghost/backups/pre-provider-settings-20261107-f1e1a64/`, `ghost-backup/2`, `complete: true`, DB 무결성 확인. 백업 시각은 `2026-11-07T10:30:43.768Z`. artifacts·secrets·config·console 설정도 권한을 유지해 복사·비교했다. 이 루트에는 별도 skills 디렉터리가 없었다. 이전 릴리스 `20261107-bun-74cd0fb`는 보관했다.
+- 유휴 상태에서 링크를 원자적으로 교체하고 LaunchAgent를 정상 재기동했다. 새 실행 파일, 운영 DB 경로와 포트 62062의 단일 리스너를 확인했다. runtime 준비 상태, Ghost 4개·대화 8개·맡긴 일 32개와 제공자·모델 설정, 인증 파일 바이트가 보존됐다.
+- 설치된 앱의 `--desktop-probe`가 새 Host PID의 external 연결과 health를 확인했다. 기존 native 프로세스의 Ghost webview는 한 번 관찰했으나 이후 백그라운드 창 목록에 없어 네이티브 설정 클릭은 추가 검증하지 못했다. 강제로 앞으로 가져오지 않았다. 운영 Host의 실제 웹 UI에서 새 제공자 선택 화면을 열어 6개 선택지와 새 번들을 확인했다. 운영 인증 저장·로그인은 실행하지 않았다.
+- DB 스키마는 변경하지 않았다. 다만 이 릴리스가 새로 저장하는 인증은 이전 릴리스와 형식이 다르다. 이번 검증은 인증 파일을 변경하지 않았으므로 이전 링크로 되돌릴 수 있다. 이후 인증을 저장한 제공자는 이전 실행 파일에서 읽지 못할 수 있으므로 secrets를 자동 복원하지 않는다.
 
 ### 대화형 UI 설치 — 2026-11-07
 
@@ -57,12 +79,13 @@ artifacts/sha256/…   skills/…   secrets/<provider>.json (0600)   sandboxes/<
 
 ```sh
 curl -fsS http://127.0.0.1:62062/api/health
-ghost doctor
 ```
+
+실행 중 Host의 준비 상태는 인증된 `GET /api/state`로 확인한다. `ghost doctor`는 DB와 엔진을 열기 때문에 운영 루트에 쓰지 않는다. 필요하면 별도 임시 상태 루트에만 실행한다.
 
 ## 제공자 설정
 
-소스 빌드의 웹·Mac UI에서 **설정 → 모델 → 제공자 추가**를 열고 OpenAI, Anthropic, Google Gemini, Z.AI Coding Plan, MiniMax 또는 OpenAI 호환 서버를 선택한다. 위의 설치 릴리스를 자동으로 교체하지는 않는다.
+웹·Mac UI에서 **설정 → 모델 → 제공자 추가**를 열고 OpenAI, Anthropic, Google Gemini, Z.AI Coding Plan, MiniMax 또는 OpenAI 호환 서버를 선택한다. 구현 변경은 위의 자동 운영 반영 절차로 설치한다.
 
 - 기본 이름·ID·주소와 추천 모델을 채워 준다. API 키를 입력하고 사용할 모델을 검색해 선택한다. **API 키 발급**은 각 제공자의 공식 키 관리 페이지를 연다.
 - 모델 목록은 설치된 pi-ai SDK의 정적 목록이지 계정에서 조회한 허용 목록이 아니다. 다른 모델은 **모델 ID 직접 추가**에서 등록한다. OpenAI 호환 서버는 주소와 모델을 직접 지정한다.
