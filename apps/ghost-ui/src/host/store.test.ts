@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Ghost, LedgerEventData, State } from '@ghost/contract';
-import { applyEvent } from './store';
+import { applyEvent, HostStore } from './store';
+import { HostClient, type StreamHandlers } from './client';
 
 const baseState = (): State => ({
   seq: 7,
@@ -85,4 +86,46 @@ describe('applyEvent', () => {
     const after = applyEvent(before, event({ type: 'effect', effect: { id: 'e1', workId: 'w1', conversationId: 'c9', callId: 'call', tool: 'bash', summary: 'ls', inputDigest: 'a'.repeat(64), state: 'done', result: null, createdAt: 1, endedAt: 2 } }));
     expect(after).toBe(before);
   });
+});
+
+it('updates runtime readiness after provider settings change without a page reload', async () => {
+  const initial: State = { ...baseState(), runtime: { ready: false, detail: 'no default model', version: '0.0.0' } };
+  const ready: State = {
+    ...initial, seq: 8,
+    settings: { defaultModel: { provider: 'zai', model: 'glm-5.3' }, reviewModel: null, providers: [
+      { id: 'zai', kind: 'zai', name: 'Z.AI', baseUrl: null, hasCredential: true, authType: 'api_key', models: [{ id: 'glm-5.3', name: 'GLM' }] },
+    ] },
+    runtime: { ready: true, detail: 'provider zai is ready', version: '0.0.0' },
+  };
+  class RuntimeClient extends HostClient {
+    changed = false;
+    snapshotKept = false;
+    override async state() {
+      if (this.changed) this.snapshotKept = store.get().state !== null;
+      return this.changed ? ready : initial;
+    }
+    override async stream(_after: number, _conversations: string[], handlers: StreamHandlers, signal: AbortSignal) {
+      const ended = Promise.withResolvers<void>();
+      signal.addEventListener('abort', () => ended.resolve(), { once: true });
+      if (!this.changed) {
+        this.changed = true;
+        handlers.ledger({ seq: 8, at: 1, data: { type: 'settings', settings: ready.settings } });
+      }
+      if (!signal.aborted) await ended.promise;
+    }
+  }
+  const client = new RuntimeClient();
+  const store = new HostStore(client);
+  const observed = Promise.withResolvers<State>();
+  const unsubscribe = store.subscribe(() => {
+    const state = store.get().state;
+    if (state?.runtime.ready) observed.resolve(state);
+  });
+  store.start();
+  try {
+    const state = await observed.promise;
+    expect(state.runtime).toEqual(ready.runtime);
+    expect(state.settings.defaultModel).toEqual({ provider: 'zai', model: 'glm-5.3' });
+    expect(client.snapshotKept).toBe(true);
+  } finally { unsubscribe(); store.stop(); }
 });

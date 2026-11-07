@@ -73,6 +73,7 @@ export class HostStore {
   private readonly effectListeners = new Set<(event: LedgerEvent) => void>();
   private abort: AbortController | null = null;
   private stopped = false;
+  private runtimeRevision = 0;
 
   constructor(readonly client: HostClient) {}
 
@@ -120,6 +121,7 @@ export class HostStore {
 
   stop() {
     this.stopped = true;
+    this.runtimeRevision++;
     this.abort?.abort();
   }
 
@@ -142,6 +144,18 @@ export class HostStore {
             if (!state || event.seq <= state.seq) return;
             this.set({ state: { ...applyEvent(state, event.data), seq: event.seq } });
             for (const listener of this.effectListeners) listener(event);
+            // Refresh only the host-owned readiness projection; keep views and their unsaved inputs mounted.
+            if (event.data.type === 'settings') {
+              const revision = ++this.runtimeRevision;
+              void this.client.state().then(fresh => {
+                const current = this.snapshot.state;
+                if (this.stopped || revision !== this.runtimeRevision || !current) return;
+                this.set({ state: { ...current, runtime: fresh.runtime }, error: this.snapshot.connection === 'live' ? null : this.snapshot.error });
+              }).catch(reason => {
+                if (this.stopped || revision !== this.runtimeRevision) return;
+                this.set({ error: reason instanceof Error ? reason.message : '실행 상태를 갱신하지 못했습니다.' });
+              });
+            }
           },
           live: (event) => {
             const id = event.type === 'message' ? event.message.conversationId : event.live.conversationId;

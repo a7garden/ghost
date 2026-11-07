@@ -364,12 +364,18 @@ export const ProviderKind = Type.Union([
 ]);
 export type ProviderKind = Static<typeof ProviderKind>;
 
+/** How the stored provider credential authenticates. */
+export const AuthType = Type.Union([Type.Literal("api_key"), Type.Literal("oauth")]);
+export type AuthType = Static<typeof AuthType>;
+
 export const Provider = Type.Object({
   id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
   kind: ProviderKind,
   name: Type.String({ minLength: 1, maxLength: 128 }),
   baseUrl: nullable(Type.String({ maxLength: 2048 })),
   models: Type.Array(ModelInfo, { maxItems: 256 }),
+  /** Credential kind while a valid credential exists; emitted by the host's settingsView, never stored in the ledger. */
+  authType: Type.Optional(AuthType),
   hasCredential: Type.Boolean(),
 });
 export type Provider = Static<typeof Provider>;
@@ -380,6 +386,28 @@ export const Settings = Type.Object({
   providers: Type.Array(Provider, { maxItems: 64 }),
 });
 export type Settings = Static<typeof Settings>;
+
+/**
+ * A named provider the host offers for setup. `models` and `oauthModels` are
+ * the bundled SDK's static chat catalogs — never account-verified — and the
+ * recommendation ids only ever point into those catalogs. The custom
+ * OpenAI-compatible preset carries empty catalogs and null urls.
+ */
+export const ProviderPreset = Type.Object({
+  id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
+  kind: ProviderKind,
+  name: Type.String({ minLength: 1, maxLength: 128 }),
+  /** Default upstream address; null for the custom OpenAI-compatible provider. */
+  baseUrl: nullable(Type.String({ maxLength: 2048 })),
+  /** Official page where a key is managed; null when none applies. */
+  credentialUrl: nullable(Type.String({ maxLength: 2048 })),
+  models: Type.Array(ModelInfo, { maxItems: 256 }),
+  /** ChatGPT-login catalog for the OpenAI preset; empty elsewhere. */
+  oauthModels: Type.Array(ModelInfo, { maxItems: 256 }),
+  recommendedModelId: nullable(Type.String({ maxLength: 256 })),
+  recommendedOAuthModelId: nullable(Type.String({ maxLength: 256 })),
+});
+export type ProviderPreset = Static<typeof ProviderPreset>;
 
 export const Sandbox = Type.Object({
   ghostId: Id,

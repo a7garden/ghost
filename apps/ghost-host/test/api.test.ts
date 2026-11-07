@@ -10,6 +10,8 @@ import {
   GHOST_TOOLS,
   LedgerEvent as LedgerEventSchema,
   Notification as NotificationSchema,
+  ProviderCatalog,
+  Settings,
   type LedgerEvent,
   State,
   parse,
@@ -377,6 +379,54 @@ describe("API server", () => {
     const response = await postJson("/api/providers/oauth-custom/oauth", {}, OWNER_TOKEN);
     expect(response.status).toBe(400);
     expect(core.secrets.has("oauth-custom")).toBe(false);
+  });
+
+  test("the provider catalog requires owner access and recommends only listed models", async () => {
+    expect((await get("/api/providers/catalog")).status).toBe(401);
+    expect((await get("/api/providers/catalog", deviceToken)).status).toBe(403);
+    const response = await get("/api/providers/catalog", OWNER_TOKEN);
+    expect(response.status).toBe(200);
+    const catalog = parse(ProviderCatalog, await response.json());
+    for (const preset of catalog) {
+      if (preset.recommendedModelId !== null) expect(preset.models.some((model) => model.id === preset.recommendedModelId)).toBe(true);
+      if (preset.recommendedOAuthModelId !== null) expect(preset.oauthModels.some((model) => model.id === preset.recommendedOAuthModelId)).toBe(true);
+    }
+  });
+
+  test("provider settings carry the credential's auth type for the owner only", async () => {
+    const settingsOf = async (token: string) => parse(State, await (await get("/api/state", token)).json()).settings;
+    await runCommand({ type: "provider.upsert", id: "auth-typed", kind: "openai", name: "Typed", models: [] }, OWNER_TOKEN);
+
+    // Without a credential the auth type is absent.
+    let provider = (await settingsOf(OWNER_TOKEN)).providers.find((row) => row.id === "auth-typed");
+    expect(provider?.hasCredential).toBe(false);
+    expect(provider !== undefined && "authType" in provider).toBe(false);
+
+    // An API key credential reports api_key.
+    core.secrets.put("auth-typed", "sk-test");
+    provider = (await settingsOf(OWNER_TOKEN)).providers.find((row) => row.id === "auth-typed");
+    expect(provider?.hasCredential).toBe(true);
+    expect(provider?.authType).toBe("api_key");
+
+    // An OAuth credential reports oauth.
+    await core.secrets.modify("auth-typed", async () => ({ type: "oauth", refresh: "r", access: "a", expires: Date.now() + 60_000 }));
+    provider = (await settingsOf(OWNER_TOKEN)).providers.find((row) => row.id === "auth-typed");
+    expect(provider?.authType).toBe("oauth");
+
+    // The settings event emitted with the credential change carries the same metadata.
+    const events: LedgerEvent[] = [];
+    const unwatch = core.ledger.subscribe((event) => events.push(event));
+    await runCommand({ type: "provider.upsert", id: "auth-typed", kind: "openai", name: "Typed", models: [], apiKey: "sk-test-2" }, OWNER_TOKEN);
+    unwatch();
+    const settingsEventData = Type.Object({ type: Type.Literal("settings"), settings: Settings });
+    const settingsEvent = events.filter((event) => event.data.type === "settings").map((event) => parse(settingsEventData, event.data)).at(-1);
+    expect(settingsEvent?.settings.providers.find((row) => row.id === "auth-typed")?.authType).toBe("api_key");
+
+    // Device snapshots never contain provider rows, so auth type metadata cannot cross to them.
+    expect((await settingsOf(deviceToken)).providers).toEqual([]);
+
+    await runCommand({ type: "provider.delete", providerId: "auth-typed" }, OWNER_TOKEN);
+    expect(core.secrets.has("auth-typed")).toBe(false);
   });
 
   test("transcript pages are access-checked", async () => {

@@ -1,106 +1,141 @@
-import { useState } from 'react';
-import { Plus, X } from 'lucide-react';
-import { Button, Checkbox, FormField, InlineError, Input, SelectField } from '../ui'
-import type { ModelInfo, ProviderKind } from '@ghost/contract';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ChevronRight, ExternalLink, Search } from 'lucide-react';
+import { Button, Checkbox, FormField, InlineError, Input, SegmentedControl, SelectField } from '../ui';
+import type { ModelInfo, Provider, ProviderKind, ProviderPreset } from '@ghost/contract';
 import { Modal } from '../components/Modal';
+import { ProviderModels } from './ProviderModels';
 
 const KINDS: { value: ProviderKind; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'zai', label: 'Z.AI' },
   { value: 'minimax', label: 'MiniMax' },
-  { value: 'google', label: 'Google' },
+  { value: 'google', label: 'Google Gemini' },
   { value: 'openai_compatible', label: 'OpenAI 호환 서버' },
 ];
 
-/** The fields `provider.upsert` takes; the UI keeps them as one draft. */
 export interface ProviderDraft { id: string; kind: ProviderKind; name: string; baseUrl: string | null; models: ModelInfo[] }
-/** `apiKey` tri-state: undefined keeps the stored credential, null removes it, a value replaces it. */
-export interface ProviderSave { draft: ProviderDraft; apiKey?: string | null }
-
+/** Undefined keeps the stored credential, null removes it; login starts ChatGPT after saving. */
+export interface ProviderSave { draft: ProviderDraft; apiKey?: string | null; login?: boolean }
 export const providerKindLabel = (kind: ProviderKind) => KINDS.find(item => item.value === kind)?.label ?? kind;
 
-export function emptyDraft(): ProviderDraft {
-  return { id: '', kind: 'openai_compatible', name: '', baseUrl: null, models: [] };
-}
-
-export function ProviderEditor({ initial, existing, hasCredential, busy, onClose, onSave }: {
-  initial: ProviderDraft; existing: boolean; hasCredential: boolean; busy: boolean;
+export function ProviderEditor({ initial, presets, providerIds, busy, onClose, onSave }: {
+  initial?: Provider;
+  presets: ProviderPreset[];
+  providerIds: string[];
+  busy: boolean;
   onClose(): void;
   onSave(save: ProviderSave): Promise<void>;
 }) {
-  const [value, setValue] = useState(initial);
+  const [preset, setPreset] = useState<ProviderPreset>();
+  const [query, setQuery] = useState('');
+  const visible = presets.filter(item => `${item.name} ${providerKindLabel(item.kind)}`.toLowerCase().includes(query.trim().toLowerCase()));
+  if (initial || preset) return <ProviderForm initial={initial} preset={preset ?? presets.find(item => item.kind === initial?.kind)} presets={presets}
+    providerIds={providerIds} busy={busy} onClose={onClose} onBack={initial ? undefined : () => setPreset(undefined)} onSave={onSave}/>;
+  return <Modal title="제공자 추가" onClose={onClose} className="w-[min(480px,calc(100vw-2rem))] sm:max-w-[480px]">
+    <div className="flex flex-col gap-3">
+      <div className="relative"><Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3"/>
+        <Input aria-label="제공자 검색" placeholder="제공자 검색" value={query} onChange={event => setQuery(event.target.value)} className="pl-9"/>
+      </div>
+      <div className="flex flex-col" aria-label="제공자 목록">
+        {visible.map(item => <button key={item.id} type="button" disabled={busy} onClick={() => setPreset(item)}
+          className="flex min-h-16 items-center gap-3 rounded-control px-3 py-3 text-left outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 disabled:opacity-50">
+          <span className="flex size-9 flex-none items-center justify-center rounded-control border border-line text-ui font-semibold text-ink" aria-hidden="true">{item.kind === 'openai_compatible' ? '+' : item.name.slice(0, 1)}</span>
+          <span className="min-w-0 flex-1"><span className="block text-ui font-semibold text-ink">{item.name}</span>
+            <span className="block text-caption text-ink-3">{item.kind === 'openai' ? 'ChatGPT 구독 · API 키' : item.kind === 'openai_compatible' ? '주소와 모델 직접 설정' : 'API 키'}</span>
+          </span><ChevronRight size={15} className="flex-none text-ink-3" aria-hidden="true"/>
+        </button>)}
+      </div>
+      {!visible.length && <p className="m-0 px-3 py-4 text-ui text-ink-3">일치하는 제공자가 없습니다.</p>}
+    </div>
+  </Modal>;
+}
+
+function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, onBack, onSave }: {
+  initial?: Provider; preset?: ProviderPreset; presets: ProviderPreset[]; providerIds: string[]; busy: boolean;
+  onClose(): void; onBack?: () => void; onSave(save: ProviderSave): Promise<void>;
+}) {
+  const [method, setMethod] = useState<'api_key' | 'oauth'>(initial ? initial.authType === 'oauth' ? 'oauth' : 'api_key' : preset?.kind === 'openai' ? 'oauth' : 'api_key');
+  const [value, setValue] = useState<ProviderDraft>(() => {
+    if (initial) return { id: initial.id, kind: initial.kind, name: initial.name, baseUrl: initial.baseUrl, models: initial.models.map(model => ({ ...model })) };
+    const chosen = preset!;
+    let id = chosen.id;
+    for (let suffix = 2; providerIds.includes(id); suffix++) id = `${chosen.id}-${suffix}`;
+    const models = method === 'oauth' ? chosen.oauthModels : chosen.models;
+    const recommended = method === 'oauth' ? chosen.recommendedOAuthModelId : chosen.recommendedModelId;
+    return { id, kind: chosen.kind, name: chosen.name, baseUrl: null, models: models.filter(model => model.id === recommended).map(model => ({ ...model })) };
+  });
   const [apiKey, setApiKey] = useState('');
   const [removeKey, setRemoveKey] = useState(false);
-  const [newModel, setNewModel] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const locked = busy || saving;
-  const patch = (p: Partial<ProviderDraft>) => setValue(v => ({ ...v, ...p }));
-  const addModel = () => {
-    const id = newModel.trim();
-    if (!id) return;
-    if (value.models.some(model => model.id === id)) { setError('이미 등록된 모델 ID입니다.'); return; }
-    if (id.length > 256) { setError('모델 ID는 256자 이하여야 합니다.'); return; }
-    patch({ models: [...value.models, { id, name: id }] });
-    setNewModel(''); setError('');
+  const currentPreset = presets.find(item => item.kind === value.kind);
+  const oauthAllowed = value.kind === 'openai' && value.baseUrl === null;
+  const effectiveMethod = oauthAllowed ? method : 'api_key';
+  const catalog = value.baseUrl === null ? effectiveMethod === 'oauth' ? currentPreset?.oauthModels ?? [] : currentPreset?.models ?? [] : [];
+  const patch = (next: Partial<ProviderDraft>) => setValue(current => ({ ...current, ...next }));
+  const chooseMethod = (next: 'api_key' | 'oauth') => {
+    setMethod(next); setError(''); setRemoveKey(false);
+    if (!initial && currentPreset) {
+      const source = next === 'oauth' ? currentPreset.oauthModels : currentPreset.models;
+      const recommended = next === 'oauth' ? currentPreset.recommendedOAuthModelId : currentPreset.recommendedModelId;
+      patch({ models: source.filter(model => model.id === recommended).map(model => ({ ...model })) });
+    }
   };
-  const save = () => {
+  const save = async () => {
     if (locked) return;
-    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value.id)) { setError('제공자 ID는 소문자·숫자·하이픈·밑줄로 시작하거나 이어야 합니다.'); return; }
-    if (!value.name.trim()) { setError('제공자 이름을 입력해 주세요.'); return; }
-    if (!value.models.length) { setError('모델을 한 개 이상 등록해 주세요.'); return; }
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value.id)) { setError('제공자 ID는 소문자·숫자·하이픈·밑줄을 사용해 주세요.'); return; }
+    if (!initial && providerIds.includes(value.id)) { setError('이미 등록된 제공자 ID입니다. 고급 설정에서 바꿔 주세요.'); return; }
+    if (!value.name.trim()) { setError('이름을 입력해 주세요.'); return; }
+    if (!value.models.length) { setError('사용할 모델을 한 개 이상 선택해 주세요.'); return; }
+    if (value.kind === 'openai_compatible' && !value.baseUrl) { setError('서버 주소를 입력해 주세요.'); return; }
+    const key = apiKey.trim();
+    if (effectiveMethod === 'api_key' && !removeKey && !key && (!initial || initial.authType === 'oauth' || initial.kind !== value.kind)) { setError('API 키를 입력해 주세요.'); return; }
     setSaving(true); setError('');
-    const key = removeKey ? null : apiKey.trim() || undefined;
-    void onSave({ draft: value, apiKey: key }).then(onClose).catch(reason => setError(reason instanceof Error ? reason.message : '저장하지 못했습니다.')).finally(() => setSaving(false));
+    try {
+      await onSave({ draft: { ...value, name: value.name.trim() },
+        ...(removeKey ? { apiKey: null } : effectiveMethod === 'api_key' && key ? { apiKey: key } : {}),
+        ...(effectiveMethod === 'oauth' && !removeKey && initial?.authType !== 'oauth' ? { login: true } : {}),
+      });
+    } catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : '저장하지 못했습니다.'); }
+    finally { if (mounted.current) setSaving(false); }
   };
-  return <Modal title={existing ? `${initial.name} 편집` : '제공자 등록'} onClose={() => !locked && onClose()} className="w-[min(620px,calc(100vw-2rem))] sm:max-w-[620px]">
-    <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); save(); }}>
-      <div className="grid gap-4 max-[480px]:grid-cols-1 sm:grid-cols-2">
-        <FormField label="이름">{control => <Input {...control} value={value.name} maxLength={128} required disabled={locked} onChange={event => patch({ name: event.target.value })}/>}</FormField>
-        <FormField label="제공자 ID" description={existing ? '등록된 ID는 바꿀 수 없습니다.' : '소문자·숫자·하이픈·밑줄'}>
-          {control => <Input {...control} value={value.id} maxLength={64} pattern="[a-z0-9][a-z0-9_-]{0,63}" required disabled={locked || existing} onChange={event => patch({ id: event.target.value.toLowerCase() })}/>}
-        </FormField>
-      </div>
-      <FormField label="종류">{control => <SelectField {...control} label="종류" value={value.kind} disabled={locked} onValueChange={kind => patch({ kind: kind as ProviderKind })} options={KINDS}/>}</FormField>
-      <FormField label="서버 주소" description="비워 두면 종류의 기본 주소를 사용합니다. OpenAI 호환 서버에는 주소가 필요합니다.">
-        {control => <Input {...control} type="url" value={value.baseUrl ?? ''} placeholder="http://127.0.0.1:11434/v1" disabled={locked} onChange={event => patch({ baseUrl: event.target.value.trim() || null })}/>}
-      </FormField>
-      <section className="flex min-w-0 flex-col gap-3.5 border-t border-line pt-4">
-        <h3 className="m-0 text-caption font-semibold text-ink">모델 · {value.models.length}개</h3>
-        <div className="flex max-h-[32dvh] min-h-16 flex-col gap-3 overflow-auto p-1">
-          {value.models.map(model => <div className="flex min-w-0 items-center gap-2.5 border-b border-line pb-2.5" key={model.id}>
-            <strong title={model.id} className="min-w-0 flex-1 truncate text-caption font-normal">{model.name || model.id}</strong>
-            <Button variant="ghost" size="icon" type="button" aria-label={`${model.name || model.id} 모델 삭제`} disabled={locked} onClick={() => patch({ models: value.models.filter(entry => entry.id !== model.id) })}><X size={14}/></Button>
-          </div>)}
-          {!value.models.length && <p className="m-0 text-caption text-ink-3">모델 ID를 입력해 등록해 주세요.</p>}
-        </div>
-        <div className="flex items-center gap-2">
-          <Input aria-label="추가할 모델 ID" placeholder="모델 ID" value={newModel} maxLength={256} disabled={locked} className="min-w-0 flex-1"
-            onChange={event => setNewModel(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addModel(); } }}/>
-          <Button className="flex-none" variant="outline" type="button" disabled={locked || !newModel.trim()} onClick={addModel}><Plus size={14}/>추가</Button>
-        </div>
-      </section>
-      <section className="flex min-w-0 flex-col gap-2.5 border-t border-line pt-4">
-        <h3 className="m-0 text-caption font-semibold text-ink">인증</h3>
-        {value.kind === 'openai' && !value.baseUrl && <p className="m-0 text-caption text-ink-3">ChatGPT 구독으로 로그인하거나 API 키를 직접 입력해 인증할 수 있습니다. 로그인은 제공자 목록에서 시작합니다.</p>}
-        {existing && hasCredential && <>
-          <div className="flex items-center gap-2.5">
-            <Checkbox id="provider-remove-key" checked={removeKey} disabled={locked} onCheckedChange={checked => setRemoveKey(checked === true)}/>
-            <label htmlFor="provider-remove-key" className="text-caption text-ink">저장된 인증 정보 삭제</label>
-          </div>
-          {!removeKey && <FormField label="새 API 키" description="비워 두면 저장된 인증 정보를 그대로 사용합니다. API 키는 호스트에만 저장되며 다시 표시되지 않습니다.">
-            {control => <Input {...control} type="password" value={apiKey} placeholder="저장된 인증 정보 사용" maxLength={4096} disabled={locked} autoComplete="off" onChange={event => setApiKey(event.target.value)}/>}
-          </FormField>}
-        </>}
-        {!(existing && hasCredential) && <FormField label="API 키" description="호스트에만 저장되며 다시 표시되지 않습니다.">
-          {control => <Input {...control} type="password" value={apiKey} maxLength={4096} disabled={locked} autoComplete="off" onChange={event => setApiKey(event.target.value)}/>}
+  return <Modal title={initial ? `${initial.name} 설정` : preset!.name} onClose={() => !locked && onClose()} className="w-[min(560px,calc(100vw-2rem))] sm:max-w-[560px]">
+    <form className="flex max-h-[calc(100dvh-8rem)] min-w-0 flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
+      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+      {onBack && <Button variant="ghost" size="sm" type="button" className="self-start" disabled={locked} onClick={onBack}><ArrowLeft size={14}/>다른 제공자</Button>}
+      {oauthAllowed && <SegmentedControl aria-label="인증 방법" value={method} onValueChange={chooseMethod}
+        options={[{ value: 'oauth', label: 'ChatGPT 구독', disabled: locked }, { value: 'api_key', label: 'API 키', disabled: locked }]}/>}
+      {effectiveMethod === 'oauth'
+        ? <p className="m-0 text-ui text-ink-2">{initial?.authType === 'oauth' ? '저장된 ChatGPT 인증을 사용합니다.' : '저장 후 인증 페이지에서 ChatGPT 계정으로 로그인합니다.'}</p>
+        : <FormField label={initial?.hasCredential ? '새 API 키' : 'API 키'} description={initial?.hasCredential && initial.authType !== 'oauth' ? '비워 두면 저장된 인증 정보를 유지합니다.' : '키는 호스트에만 저장되며 다시 표시되지 않습니다.'}>
+          {control => <div className="flex flex-col gap-2"><Input {...control} type="password" value={apiKey} maxLength={4096} autoComplete="off" disabled={locked || removeKey} onChange={event => setApiKey(event.target.value)}/>
+            {currentPreset?.credentialUrl && <a href={currentPreset.credentialUrl} target="_blank" rel="noopener noreferrer" className="flex w-fit items-center gap-1 text-caption text-ink-2 underline underline-offset-4">API 키 발급<ExternalLink size={12} aria-hidden="true"/></a>}
+          </div>}
         </FormField>}
-      </section>
+      {value.kind === 'openai_compatible' && <FormField label="서버 주소">{control => <Input {...control} type="url" value={value.baseUrl ?? ''} placeholder="https://api.example.com/v1" required disabled={locked} onChange={event => patch({ baseUrl: event.target.value.trim() || null })}/>}</FormField>}
+      <ProviderModels catalog={catalog} selected={value.models} disabled={locked} onChange={models => patch({ models })}/>
+      {catalog.length > 0 && <p className="m-0 text-caption text-ink-3">기본 모델 목록입니다. 사용 가능 여부는 계정의 권한을 따릅니다.</p>}
+      <details className="border-t border-line pt-3">
+        <summary className="cursor-pointer text-caption font-medium text-ink-2">고급 설정</summary>
+        <div className="mt-4 flex flex-col gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="이름">{control => <Input {...control} value={value.name} maxLength={128} disabled={locked} onChange={event => patch({ name: event.target.value })}/>}</FormField>
+            <FormField label="제공자 ID">{control => <Input {...control} value={value.id} maxLength={64} disabled={locked || !!initial} onChange={event => patch({ id: event.target.value.toLowerCase() })}/>}</FormField>
+          </div>
+          <FormField label="API 형식">{control => <SelectField {...control} label="API 형식" value={value.kind} disabled={locked} options={KINDS} onValueChange={kind => patch({ kind: kind as ProviderKind })}/>}</FormField>
+          {value.kind !== 'openai_compatible' && <FormField label="서버 주소" description="비워 두면 제공자의 기본 주소를 사용합니다.">{control => <Input {...control} type="url" value={value.baseUrl ?? ''} placeholder={currentPreset?.baseUrl ?? ''} disabled={locked} onChange={event => patch({ baseUrl: event.target.value.trim() || null })}/>}</FormField>}
+          {initial?.hasCredential && <label className="flex items-center gap-2.5 text-caption text-ink"><Checkbox checked={removeKey} disabled={locked} onCheckedChange={checked => setRemoveKey(checked === true)}/>저장된 인증 정보 삭제</label>}
+        </div>
+      </details>
+      </div>
       {error && <InlineError>{error}</InlineError>}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-none justify-end gap-2 border-t border-line pt-3">
         <Button variant="outline" type="button" disabled={locked} onClick={onClose}>취소</Button>
-        <Button type="submit" disabled={locked}>{saving ? '저장 중…' : '저장'}</Button>
+        <Button type="submit" disabled={locked}>{saving ? '저장 중…' : effectiveMethod === 'oauth' && initial?.authType !== 'oauth' && !removeKey ? 'ChatGPT로 로그인' : '저장'}</Button>
       </div>
     </form>
   </Modal>;

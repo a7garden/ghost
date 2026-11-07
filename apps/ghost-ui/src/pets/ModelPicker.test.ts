@@ -36,3 +36,10 @@ it('builds and validates select values', () => {
   expect(modelFromKey(settings, 'local/missing')).toBeUndefined();
   expect(modelFromKey(settings, 'zai/removed-after-provider-edit')).toBeUndefined();
 });
+
+it('round-trips custom model IDs containing slashes without truncating them', () => {
+  const custom: Settings = { ...settings, providers: [{ id: 'gateway', kind: 'openai_compatible', name: 'Gateway', baseUrl: 'https://example.com/v1', models: [{ id: 'vendor/family/model', name: 'Custom' }], hasCredential: true }] };
+  const key = modelSelectOptions(custom)[0]!.value;
+  expect(modelFromKey(custom, key)).toEqual({ provider: 'gateway', model: 'vendor/family/model' });
+  expect(modelFromKey(custom, 'gateway/vendor/family')).toBeUndefined();
+});

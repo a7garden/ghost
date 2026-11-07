@@ -7,6 +7,7 @@ import type {
   LiveEvent,
   OAuthStatus,
   PageSummary,
+  ProviderPreset,
   PageView,
   State,
   WorkDetail,
@@ -95,6 +96,11 @@ export class HostClient {
     });
     if (!response.ok) throw new HostError(response.error.code, response.error.message);
     return response.result as T;
+  }
+
+  /** Bundled provider/model defaults; no account credentials or network discovery. */
+  providerCatalog(): Promise<ProviderPreset[]> {
+    return this.json('/api/providers/catalog');
   }
 
   /** Start a device-code login for one OpenAI provider (owner only); joining a pending session returns it unchanged. */

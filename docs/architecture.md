@@ -186,6 +186,8 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 - OpenAI providers retain API-key authentication. A stored ChatGPT OAuth credential switches the same provider/model IDs to pi-ai's Codex Responses API at the fixed `https://chatgpt.com/backend-api` endpoint. Tokens never go to a configured custom URL.
 - Owner-only device-code login is ephemeral (15 minutes, restart requires a new attempt); credentials persist in `secrets/` as canonical API-key or OAuth JSON. Legacy `{apiKey}` files remain readable. pi-ai refreshes OAuth under the store's per-provider in-process lock and persists rotated tokens; owner replacement/deletion invalidates an in-flight publication. One Host per state root remains required.
 - The CLI registers pi-ai's bundled OAuth flows before startup so the standalone Bun executable can resolve login and refresh implementations without external JavaScript files.
+- Provider setup uses an owner-only bundled preset catalog: native provider factories supply default URLs and chat-model metadata; OpenAI API-key and ChatGPT catalogs remain separate. No credential lookup or provider network request occurs while listing presets. Recommendations must name an entry in the same catalog; custom OpenAI-compatible endpoints retain manual model entry.
+- Owner settings include optional `authType` (`api_key` or `oauth`) alongside `hasCredential`, derived from the secret store, never persisted in provider rows or sent to devices. The UI preserves stored model metadata and credentials on ordinary edits, keeps advanced connection fields collapsed, and refreshes the host-owned readiness projection after settings events without remounting forms.
 
 ### Agent settings and management
 
@@ -222,6 +224,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 | `GET /api/events?after=seq` | SSE: ledger events + live conversation deltas |
 | `POST /api/commands` | `{ requestId, command }`, command is a contract union (`message.send`, `work.create`, `work.update`, `work.cancel`, `decision.resolve`, `ghost.create`, `ghost.update`, `schedule.*`, `device.*`, `settings.*`, …) |
 | `POST /api/pairing/claim` | device pairing with a one-time code |
+| `GET /api/providers/catalog` | owner-only bundled provider presets and model metadata; not account-verified |
 | `POST /api/providers/:id/oauth` | owner-only ChatGPT device-code login; a pending attempt is reused |
 | `GET /api/providers/:id/oauth` | owner-only login status, verification URL and device code; never tokens |
 | `DELETE /api/providers/:id/oauth` | cancel a pending login, not an existing credential |

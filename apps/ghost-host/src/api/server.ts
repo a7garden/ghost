@@ -24,6 +24,7 @@ import {
   parse,
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
+import { PROVIDER_PRESETS } from "../integrations/provider-catalog.ts";
 import type { DocumentsPort } from "../integrations/ports.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
@@ -465,6 +466,15 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     }
     if (pathname === "/api/commands" && request.method === "POST") return serveCommand(request, access);
     if (pathname === "/api/events" && request.method === "GET") return serveEvents(request, url, access);
+
+    if (pathname === "/api/providers/catalog" && request.method === "GET") {
+      try {
+        if (!access.isOwner) throw new CommandError("forbidden", "provider catalog needs the owner");
+        return json(PROVIDER_PRESETS);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
 
     const providerOAuth = /^\/api\/providers\/([a-z0-9][a-z0-9_-]{0,63})\/oauth$/.exec(pathname);
     if (providerOAuth !== null) {

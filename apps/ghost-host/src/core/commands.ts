@@ -321,5 +321,16 @@ export function updateGhost(core: Core, ghostId: string, patch: GhostPatch): Gho
 
 export function settingsView(core: Core) {
   const settings = core.ledger.settings();
-  return { ...settings, providers: settings.providers.map((provider) => ({ ...provider, hasCredential: core.secrets.has(provider.id) })) };
+  return {
+    ...settings,
+    providers: settings.providers.map((provider) => {
+      const credential = core.secrets.credential(provider.id);
+      return {
+        ...provider,
+        hasCredential: credential !== undefined,
+        // api_key or oauth while a valid credential exists; the field disappears with it.
+        ...(credential === undefined ? {} : { authType: credential.type }),
+      };
+    }),
+  };
 }

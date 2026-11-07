@@ -35,7 +35,9 @@ export function modelSelectOptions(settings: Settings | null | undefined): { val
 export function modelFromKey(settings: Settings | null | undefined, key: string | null | undefined): ModelChoice | null | undefined {
   if (key === null) return null;
   if (!key || key === NO_MODEL) return undefined;
-  const [provider, model] = key.split('/');
+  const separator = key.indexOf('/');
+  if (separator < 1) return undefined;
+  const provider = key.slice(0, separator), model = key.slice(separator + 1);
   const valid = settings?.providers.some(item => item.id === provider && item.models.some(entry => entry.id === model));
   return valid ? { provider, model } : undefined;
 }
