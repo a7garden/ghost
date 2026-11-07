@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Removed the per-Ghost sidebar submenus (맡긴 일 · 이전 대화). Ghost rows are a flat
+  presence roster with a live Work count; conversation history lives in the header
+  switcher (기본 대화 pinned, distinct names for untitled conversations, relative times,
+  search past eight) and the header 맡긴 일 button shows the live count.
+
 - Redesigned the whole app around supervising agents. New visual language (neutral
   layered surfaces; color only for agent state, each with its own glyph shape) and
   purpose-built components: presence rings with a live "now" line per Ghost, an activity

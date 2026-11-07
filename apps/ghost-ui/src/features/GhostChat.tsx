@@ -12,7 +12,7 @@ import { ModelPicker } from '../pets/ModelPicker';
 import { GhostDesignEditor } from './GhostDesign';
 import { conversationStarters } from './conversationSuggestions';
 import { profileSummary } from './profileSummary';
-import { ghostPresence, toneFor } from './ghostState';
+import { ghostLiveWork, ghostPresence, toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { useHost } from '../host/context';
@@ -99,7 +99,8 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
   const currentConversation = conversations.find(conversation => conversation.id === conversationId);
   const busy = Boolean(currentConversation?.busy);
   const running = busy || Boolean(live?.running);
-  const title = currentConversation?.title && currentConversation.title !== ghost.name ? currentConversation.title : '대화';
+  const title = currentConversation ? conversationName(currentConversation, ghost) : '대화';
+  const liveCount = ghostLiveWork(state, ghost.id).length;
 
   return <div className="flex h-full min-h-0 w-full min-w-0">
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
@@ -113,10 +114,12 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
           isMain={ghost.isDefault}/>
         <div className="chat-head__copy">
           <h1 className="chat-head__name">{ghost.name}</h1>
-          <ConversationSwitcher title={title} conversations={conversations} currentId={conversationId} onOpen={openHistory} onNew={startConversation}/>
+          <ConversationSwitcher ghost={ghost} title={title} conversations={conversations} currentId={conversationId} onOpen={openHistory} onNew={startConversation}/>
         </div>
         <div className="chat-head__actions">
-          <button type="button" className="shell-icon-button" aria-label={`${ghost.name}에게 맡긴 일`} title={uiTerms.work} onClick={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}><LayoutList aria-hidden="true"/></button>
+          <button type="button" className="chat-head__work" aria-label={`${ghost.name}에게 맡긴 일${liveCount ? ` 진행 중 ${liveCount}` : ''}`} title={uiTerms.work} onClick={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}>
+            <LayoutList aria-hidden="true"/>{liveCount > 0 && <span className="tabular" aria-hidden="true">{liveCount}</span>}
+          </button>
           <button type="button" className="shell-icon-button" aria-label="새 대화" title="새 대화" onClick={startConversation}><SquarePen aria-hidden="true"/></button>
         </div>
       </div>}
@@ -153,8 +156,20 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
   </div>;
 }
 
-/** The conversation title opens the Ghost's earlier conversations in place, with a fresh one at hand. */
-function ConversationSwitcher({ title, conversations, currentId, onOpen, onNew }: {
+/**
+ * A conversation's name in the switcher and header: the main one is 기본 대화, a titled one
+ * keeps its title, an untitled one (or one titled after the Ghost) is named by when it started.
+ */
+function conversationName(conversation: ConversationRow, ghost: Ghost): string {
+  if (conversation.id === ghost.directConversationId) return '기본 대화';
+  const title = conversation.title.trim();
+  if (title && title !== ghost.name) return title;
+  return new Date(conversation.createdAt).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+/** The conversation title opens every conversation of the Ghost in place, with a fresh one at hand. */
+function ConversationSwitcher({ ghost, title, conversations, currentId, onOpen, onNew }: {
+  ghost: Ghost;
   title: string;
   conversations: ConversationRow[];
   currentId: string | null;
@@ -162,21 +177,28 @@ function ConversationSwitcher({ title, conversations, currentId, onOpen, onNew }
   onNew(): void;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const now = useNow(60_000);
-  return <Popover open={open} onOpenChange={setOpen}>
+  const needle = query.trim().toLocaleLowerCase();
+  // The main conversation stays on top; the rest follow by latest activity.
+  const ordered = [...conversations].sort((a, b) => Number(b.id === ghost.directConversationId) - Number(a.id === ghost.directConversationId));
+  const shown = needle ? ordered.filter(conversation => conversationName(conversation, ghost).toLocaleLowerCase().includes(needle)) : ordered;
+  return <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) setQuery(''); }}>
     <PopoverTrigger asChild>
       <button type="button" className="chat-head__switch" aria-label={`${uiTerms.conversationHistory}: ${title}`}>
         <span className="truncate">{title}</span><ChevronDown size={13} aria-hidden="true"/>
       </button>
     </PopoverTrigger>
-    <PopoverContent side="bottom" align="start" aria-label={uiTerms.conversationHistory} className="grid w-72 gap-0.5 p-1.5">
+    <PopoverContent side="bottom" align="start" aria-label={uiTerms.conversationHistory} className="grid w-80 gap-0.5 p-1.5">
+      {conversations.length > 8 && <input className="switcher-search" value={query} onChange={event => setQuery(event.target.value)} placeholder="대화 찾기" aria-label="대화 찾기" autoFocus/>}
       <div className="max-h-[50dvh] overflow-y-auto">
-        {conversations.map(conversation => <button key={conversation.id} type="button" aria-pressed={conversation.id === currentId} className="menu-row w-full"
+        {shown.map(conversation => <button key={conversation.id} type="button" aria-pressed={conversation.id === currentId} className="menu-row w-full"
           onClick={() => { setOpen(false); onOpen(conversation.id); }}>
-          <span className="min-w-0 flex-1 truncate">{conversation.title || '대화'}</span>
+          <span className="min-w-0 flex-1 truncate">{conversationName(conversation, ghost)}</span>
           {conversation.busy ? <span className="chat-head__busy" aria-label="응답 중"/> : <time className="shrink-0 text-micro text-ink-3 tabular">{relativeTime(conversation.lastActivityAt, now)}</time>}
-          {conversation.id === currentId && <Check size={14} className="shrink-0" aria-hidden="true"/>}
+          <Check size={14} className={conversation.id === currentId ? 'shrink-0' : 'invisible shrink-0'} aria-hidden="true"/>
         </button>)}
+        {!shown.length && <p className="m-0 px-2 py-3 text-caption text-ink-3">일치하는 대화 없음</p>}
       </div>
       <button type="button" className="menu-row mt-1 border-t border-line pt-1" onClick={() => { setOpen(false); onNew(); }}><SquarePen size={15} aria-hidden="true"/>새 대화</button>
     </PopoverContent>

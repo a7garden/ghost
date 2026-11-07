@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 import type { Ghost, State } from '@ghost/contract';
-import { WorkspaceSidebar, type GhostMenuItem } from './WorkspaceSidebar';
+import { WorkspaceSidebar } from './WorkspaceSidebar';
 
 const ghost = (id: string, isDefault = false): Ghost => ({
   id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault, state: 'active',
@@ -29,39 +29,33 @@ const state = (): State => ({
   sandboxes: [],
 });
 
-const menu: GhostMenuItem[] = [{ key: 'work', label: '맡긴 일', path: '/work', kind: 'work' }];
-
 function render(overrides: Partial<Parameters<typeof WorkspaceSidebar>[0]> = {}) {
   return renderToStaticMarkup(createElement(WorkspaceSidebar, {
-    state: state(), section: 'home', openGhostId: null, ghostMenu: () => menu, currentGhostPage: null,
+    state: state(), section: 'home', openGhostId: null,
     attentionCount: 2, status: { state: 'connected', label: '연결됨' }, navigate() {}, openGhost() {}, ...overrides,
   }));
 }
 
-it('keeps every Ghost folded on workspace pages and lists the main Ghost first with its badge', () => {
+it('lists the main Ghost first with its badge and only workspace destinations as pages', () => {
   const html = render();
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   expect(html).toContain('<span class="sr-only">확인 필요 </span>2');
-  // Only the workspace-wide 맡긴 일 entry; no Ghost submenu is unfolded.
   expect(html.match(/맡긴 일/g)).toHaveLength(1);
-  expect(html.match(/aria-expanded="false"/g)).toHaveLength(2);
   const ghosts = html.slice(html.indexOf('Ghost</p>'));
   expect(ghosts.indexOf('sage')).toBeLessThan(ghosts.indexOf('milo'));
   expect(ghosts.slice(ghosts.indexOf('sage'), ghosts.indexOf('</button>', ghosts.indexOf('sage')))).toContain('메인');
   expect(html.match(/메인/g)).toHaveLength(1);
 });
 
-it('shows pages only under the open Ghost and marks the page on screen', () => {
-  const html = render({ section: 'work', openGhostId: 'sage', currentGhostPage: 'work' });
-  // The workspace-wide entry plus the open Ghost's own page.
-  expect(html.match(/맡긴 일/g)).toHaveLength(2);
+it('marks the work board itself, not a Ghost, while it is on screen', () => {
+  const html = render({ section: 'work' });
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   const current = html.slice(html.indexOf('aria-current="page"'));
   expect(current.slice(0, current.indexOf('</button>'))).toContain('맡긴 일');
 });
 
-it('marks the open Ghost itself while its conversation is on screen', () => {
-  const html = render({ section: 'ghosts', openGhostId: 'sage', currentGhostPage: 'chat' });
+it('marks the open Ghost while any of its conversations is on screen', () => {
+  const html = render({ section: 'ghosts', openGhostId: 'sage' });
   const current = html.slice(html.indexOf('aria-current="page"'));
   expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   expect(current.slice(0, current.indexOf('</button>'))).toContain('sage');

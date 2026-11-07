@@ -19,8 +19,9 @@ destination on an inset sheet (rounded, card shadow) beside it.
 
 - Sidebar: 홈 · 확인할 일 (pending decisions, amber count) · 맡긴 일 (live count), then
   Ghosts as presence rows — portrait in its state ring, name, and a one-line "now" (the
-  question waiting on the owner, the Work in progress, or 응답 중). The open Ghost unfolds
-  into 맡긴 일 · 이전 대화. 프로젝트 with 새 프로젝트. 설정 at the bottom; host trouble shows
+  question waiting on the owner, the Work in progress, or 응답 중) and its live Work count.
+  A row only opens the Ghost's conversation; there are no per-Ghost submenus, so the
+  roster stays a glanceable list. 프로젝트 with 새 프로젝트. 설정 at the bottom; host trouble shows
   there only when the host is not connected.
 - Title bar: location on the left, the activity island in the center, command search
   (`⌘K`) on the right. Below 56rem the sidebar opens from the title bar menu.
@@ -81,8 +82,10 @@ Feature-level compositions:
 
 Direct chat keeps a 720px reading column, trailing owner bubbles and open assistant
 prose. The header shows the Ghost's presence portrait (opening its profile), its name and
-the conversation title, which switches between earlier conversations or starts a new one
-in place; 맡긴 일 and 새 대화 sit at the right. The dock holds the auto-growing composer,
+the conversation title. The title opens every conversation of the Ghost: 기본 대화 pinned on
+top, then by activity with relative times; untitled ones are named by their start time;
+a search field appears past eight. 새 대화 starts one in place. 맡긴 일 (with the live
+count) and 새 대화 sit at the right. The dock holds the auto-growing composer,
 model selection, send and cancel. Suggestions populate and focus the draft. Conversation
 identity resets local transcript/draft state so switching history never shows another
 conversation's messages or sends its draft accidentally.

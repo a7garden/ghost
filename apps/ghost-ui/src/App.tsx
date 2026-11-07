@@ -24,7 +24,6 @@ import { MobilePairing } from './features/MobilePairing';
 import { Schedules } from './features/Schedules';
 import { SpacesView } from './features/SpacesView';
 import { routeLabels, uiTerms } from './uiText';
-import type { GhostMenuItem } from './components/WorkspaceSidebar';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { installWindowDrag } from './host/windowDrag';
 
@@ -66,17 +65,6 @@ function Shell() {
   const ghostSegment = section === 'ghosts' ? path.split('/')[2] : null;
   const openGhost = ghostSegment ? ghosts.find(ghost => encodeURIComponent(ghost.id) === ghostSegment) ?? null : null;
   const routeConversationId = params.get('conversation');
-  const currentGhostPage = !openGhost ? null
-    : routeConversationId && routeConversationId !== openGhost.directConversationId ? `conversation:${routeConversationId}` : 'chat';
-  const ghostMenu = (ghost: Ghost): GhostMenuItem[] => [
-    { key: 'work', label: uiTerms.work, path: `/work?ghost=${encodeURIComponent(ghost.id)}`, kind: 'work' as const },
-    // The Ghost's own row is the main conversation; the submenu lists only older ones.
-    ...(state?.conversations ?? [])
-      .filter(conversation => conversation.ghostId === ghost.id && conversation.kind === 'direct' && conversation.id !== ghost.directConversationId)
-      .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
-      .slice(0, 5)
-      .map(conversation => ({ key: `conversation:${conversation.id}`, label: conversation.title || '대화', path: `/ghosts/${encodeURIComponent(ghost.id)}?conversation=${encodeURIComponent(conversation.id)}`, kind: 'history' as const })),
-  ];
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
   const selectedSpace = section === 'spaces' ? path.split('/')[2] : undefined;
@@ -115,15 +103,15 @@ function Shell() {
   const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, settings: true };
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
-  const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null} ghostMenu={ghostMenu}
-    currentGhostPage={currentGhostPage} selectedSpace={params.has('new') ? undefined : selectedSpace} attentionCount={attentionCount}
+  const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
+    selectedSpace={params.has('new') ? undefined : selectedSpace} attentionCount={attentionCount}
     status={status} navigate={navigate} openGhost={switchGhost}/>;
 
   return <div className="ghost-root">
     <PortraitAppearances.Provider value={portraits}>
       <AvatarProvider animate={preferences.animate}>
         <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0}
-          location={pageLabel(section, openGhost, currentGhostPage, state?.spaces.find(space => space.id === selectedSpace)?.name ?? null)}
+          location={openGhost?.name ?? pageLabel(section, state?.spaces.find(space => space.id === selectedSpace)?.name ?? null)}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
           sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
           {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>{error}</Banner>}
@@ -156,11 +144,7 @@ function Shell() {
   </div>;
 }
 
-function pageLabel(section: string, openGhost: { name: string } | null, currentGhostPage: string | null, spaceName: string | null): string {
-  if (openGhost && currentGhostPage) {
-    const suffix = currentGhostPage === 'chat' ? null : currentGhostPage === 'work' ? uiTerms.work : '대화';
-    return suffix ? `${openGhost.name} · ${suffix}` : openGhost.name;
-  }
+function pageLabel(section: string, spaceName: string | null): string {
   if (spaceName) return spaceName;
   return (routeLabels[section as keyof typeof routeLabels] as string | undefined) ?? '찾을 수 없는 화면';
 }
