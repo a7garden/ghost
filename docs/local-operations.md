@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-f7ea509` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-64dd7b4` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`, `console.json` = `{host_mode: external, root}` |
@@ -35,6 +35,13 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 사이드바 Ghost 하위 메뉴 정리 운영 반영 — 2026-11-07
+
+- 소스 `64dd7b4`의 UI를 `releases/20261107-bun-64dd7b4`에 설치했다. Host는 `f7ea509` 이후 변경이 없어 같은 컴파일 파일을 복사했고 SHA-256이 같다. UI 85개 파일 해시가 빌드 원본과 일치하고, 설치 사본을 임시 루트에서 실행해 새 번들(`main-DyYNiOyc.js`)과 health를 확인했다.
+- UI 테스트 66개·타입 검사·빌드를 통과했다. 별도 Host 루트에서 제목이 같은 대화 3개로 사이드바(하위 메뉴 없음)와 헤더 대화 전환(기본 대화 고정, 시작 시각 이름)을 데스크톱·모바일 메뉴에서 확인했다.
+- 백업: `~/.local/share/ghost/backups/pre-sidebar-roster-20261107-64dd7b4/`, `ghost-backup/2`, `complete: true`, `2026-11-07T12:22:34Z`, 두 DB `integrity_check` ok, artifacts·secrets·config·console 설정 복사·비교.
+- 유휴 상태에서 `current`를 원자적으로 교체하고 Host(PID 67086)를 정상 재기동했다. 새 PID 85405의 실행 파일·운영 DB·단일 리스너·준비 상태와 Ghost 4개·대화 9개·맡긴 일 32개, config·secrets 보존을 확인했다. Mac 앱을 외부 모드로 다시 실행해 `--desktop-probe` health와 창 캡처로 새 사이드바를 확인했다. 되돌릴 때는 `current`를 `releases/20261107-bun-f7ea509`로 교체하고 LaunchAgent를 정상 재시작한다.
 
 ### 앱 전체 리디자인 운영 반영 — 2026-11-07
 
