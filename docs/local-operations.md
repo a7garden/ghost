@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-64dd7b4` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261107-bun-a7ef16e` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`, `console.json` = `{host_mode: external, root}` |
@@ -35,6 +35,14 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 지속 대화·추론 표시·원형 Ghost 운영 반영 — 2026-11-07
+
+- 소스 `a7ef16e`의 Host와 UI를 `releases/20261107-bun-a7ef16e`에 설치했다. 계약에 선택 필드 `Message.thinking`·`Live.thinking`·`Look.face`·`Look.mark`가 추가됐고 Host가 추론 블록(가려진 블록 제외)을 전달한다. DB 스키마는 바뀌지 않는다. 컴파일 Host와 UI 85개 파일의 해시가 빌드 원본과 일치한다.
+- Host 테스트 233개(추론 투영 2개 추가), UI 테스트 68개, 두 타입 검사가 통과했다. 모의 추론 스트리밍 제공자를 붙인 별도 Host에서 생각 중 표시·접힘, 스레드 카드·목록, 플로팅 프로필, 보낸 뒤 최신 따라가기, 입력창 테두리 윗변, 원형 Ghost·꾸미기, 프로젝트 만들기를 확인했다. 독립 Codex 검토의 P2 두 건(스크롤바 끌기 중 강제 이동, 도구 묶음 사이 스레드 위치)을 고쳤다. 백업 DB 사본을 새 릴리스로 임시 포트에서 열어 Ghost 4·대화 9·맡긴 일 32와 기존 메시지 7개의 추론 표시를 확인했다.
+- 백업: `~/.local/share/ghost/backups/pre-durable-chat-20261107-a7ef16e/`, `ghost-backup/2`, `complete: true`, `2026-11-07T12:48:45Z`, 두 DB `integrity_check` ok, artifacts·secrets·config·console 설정 복사·비교.
+- 유휴 상태에서 `current`를 원자적으로 교체하고 Host(PID 85405)를 정상 재기동했다. 새 PID 2704의 실행 파일·운영 DB·단일 리스너·준비 상태, Ghost 4·대화 9·맡긴 일 32, config·secrets 보존을 확인했다. Mac 앱을 외부 모드로 다시 실행해 `--desktop-probe` health와 창 캡처로 원형 Ghost가 적용된 화면을 확인했다. 앱 아이콘(네이티브 셸)은 바꾸지 않았다.
+- 되돌릴 때는 `current`를 `releases/20261107-bun-64dd7b4`로 교체하고 LaunchAgent를 정상 재시작한다. 이전 Host는 새 선택 필드를 무시하므로 저장 데이터와 호환된다.
 
 ### 사이드바 Ghost 하위 메뉴 정리 운영 반영 — 2026-11-07
 
