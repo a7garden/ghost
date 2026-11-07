@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { Database } from "bun:sqlite";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { openApp, serve } from "./app.ts";
+import { backup } from "./backup.ts";
 import { loadConfig } from "./config.ts";
 import { runImport } from "./import/index.ts";
 
@@ -11,7 +10,7 @@ const USAGE = `ghost — one process for every Ghost
   ghost serve                      run the host (state root: $GHOST_ROOT or ~/Library/Application Support/Ghost)
   ghost import --from <old-root> [--artifacts <worker-root>]...
                                    copy a pre-Bun state root into an empty state root
-  ghost backup <dir>               consistent copy of ledger.db and pi.db, safe while serving
+  ghost backup <dir>               consistent ledger.db + pi.db copies and backup.json, safe while serving
   ghost doctor                     check the state root and configuration
 
   --root <dir>                     override the state root`;
@@ -48,17 +47,7 @@ async function main(argv: string[]) {
     case "backup": {
       const target = args.find((arg) => !arg.startsWith("--") && arg !== option(args, "--root"));
       if (!target) throw new Error("ghost backup needs a target directory");
-      const dir = resolve(target);
-      if (existsSync(dir) && readdirSync(dir).length > 0) throw new Error(`${dir} is not empty`);
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-      for (const name of ["ledger.db", "pi.db"]) {
-        const source = join(config.root, name);
-        if (!existsSync(source)) continue;
-        const db = new Database(source, { readonly: true });
-        db.exec(`VACUUM INTO '${join(dir, name).replaceAll("'", "''")}'`);
-        db.close();
-      }
-      console.log(`backed up ledger.db and pi.db to ${dir}; copy artifacts/ and secrets/ with them`);
+      console.log(JSON.stringify(backup(config.root, resolve(target)), null, 2));
       return;
     }
 
