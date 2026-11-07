@@ -4,6 +4,7 @@ import { Badge, Button, Popover, PopoverContent, PopoverTrigger } from '@garden/
 import { DotAvatar } from './DotAvatar';
 import { AgentActivityList, type AgentActivityProps } from './AgentStatus';
 import { toneFor } from '../features/ghostState';
+import { uiTerms } from '../uiText';
 
 export interface GhostProfileProps {
   ghostID: string;
@@ -16,7 +17,7 @@ export interface GhostProfileProps {
   historyCount?: number;
   onOpenHistory?: () => void;
   onManage?: () => void;
-  /** Inline editor for the Ghost's look and role; opens in place of the profile. */
+  /** Inline editor for the Ghost's look (꾸미기); opens in place of the profile. */
   design?: ReactNode;
   /** The owner's main Ghost. */
   isMain?: boolean;
@@ -31,7 +32,7 @@ export function GhostProfile({ ghostID, name, summary, note, activity, onOpenWor
   const rows = [
     onOpenWork && { key: 'work', icon: ListTodo, label: '맡긴 일', action: go(onOpenWork) },
     onOpenHistory && historyCount > 0 && { key: 'history', icon: History, label: `이전 대화 ${historyCount}`, action: go(onOpenHistory) },
-    onManage && { key: 'manage', icon: Settings2, label: 'Ghost 관리', action: go(onManage) },
+    onManage && { key: 'manage', icon: Settings2, label: uiTerms.ghostSettings, action: go(onManage) },
   ].filter(Boolean) as { key: string; icon: typeof ListTodo; label: string; action: () => void }[];
   const editing = view === 'design' && design != null;
 

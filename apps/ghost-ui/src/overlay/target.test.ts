@@ -4,7 +4,7 @@ import { pickConversation, pickGhost } from './target';
 
 const ghost = (id: string, isDefault = false, directId = `direct-${id}`): Ghost => ({
   id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault, state: 'active',
-  directConversationId: directId, createdAt: 1, updatedAt: 1,
+  tools: [], directConversationId: directId, createdAt: 1, updatedAt: 1,
 });
 
 const state = (): State => ({

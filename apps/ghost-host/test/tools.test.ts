@@ -347,4 +347,106 @@ describe("tools", () => {
     expect(contentOf(first)).toContain(children[0]!.id);
     await s.core.idle();
   });
+
+  test("revoking a tool prevents a stale configured call from acting", async () => {
+    const s = setup();
+    const { work, conversation, pi } = await runningWork(s);
+    // Captured while bash was still granted, as a conversation configured before the revocation holds it.
+    const bash = toolOf(s, conversation, s.ghost, "bash");
+    const env = await s.sandbox.envFor(work);
+    const path = join(s.sandbox.root, work.id, "counter.txt");
+
+    s.ledger.tx(() => s.ledger.putGhost({ ...s.ghost, tools: s.ghost.tools.filter((tool) => tool !== "bash"), updatedAt: Date.now() }));
+
+    const stale = await call(bash, { command: "printf x >> counter.txt" }, apiOf(pi, "bash-stale", env));
+    expect(stale.isError).toBe(true);
+    expect(existsSync(path)).toBe(false);
+    expect(s.ledger.effectsForWork(work.id).filter((effect) => effect.tool === "bash")).toHaveLength(0);
+  });
+
+  test("a tool offered to another conversation kind is refused at execution", async () => {
+    const s = setup();
+    const { pi } = await runningWork(s);
+    const workCreate = toolOf(s, s.direct, s.ghost, "work_create");
+    const crossKind = await call(workCreate, { title: "Cross", brief: "From a work conversation" }, apiOf(pi, "cross-1"));
+    expect(crossKind.isError).toBe(true);
+    expect(s.ledger.worksForState().filter((work) => work.title === "Cross")).toHaveLength(0);
+  });
+
+  test("ghost_inspect and ghost_update belong to the current main Ghost alone", async () => {
+    const s = setup();
+    const helper = s.core.createGhost({ name: "Helper", persona: "You help.\nPreserve sources and never publish without approval." });
+    const helperDirect = s.ledger.conversation(helper.directConversationId);
+    expect(namesOf(s, helperDirect, helper)).not.toContain("ghost_inspect");
+    expect(namesOf(s, helperDirect, helper)).not.toContain("ghost_update");
+
+    const pi = asPi(s, s.direct, "pi-direct");
+    const inspect = toolOf(s, s.direct, s.ghost, "ghost_inspect");
+    const update = toolOf(s, s.direct, s.ghost, "ghost_update");
+
+    const shown = await call(inspect, { ghost_id: helper.id }, apiOf(pi, "inspect-1"));
+    expect(shown.isError).toBeFalsy();
+    const inspected = JSON.parse(contentOf(shown));
+    expect(inspected.persona).toBe("You help.\nPreserve sources and never publish without approval.");
+
+    const self = await call(inspect, { ghost_id: s.ghost.id }, apiOf(pi, "inspect-2"));
+    expect(self.isError).toBe(true);
+
+    const updated = await call(update, { ghost_id: helper.id, tools: ["work_list", "read"] }, apiOf(pi, "update-1"));
+    expect(updated.isError).toBeFalsy();
+    expect(s.ledger.ghost(helper.id).tools).toEqual(["work_list", "read"]);
+
+    const unknown = await call(update, { ghost_id: helper.id, tools: ["time_travel"] }, apiOf(pi, "update-2"));
+    expect(unknown.isError).toBe(true);
+    const duplicated = await call(update, { ghost_id: helper.id, tools: ["read", "read"] }, apiOf(pi, "update-3"));
+    expect(duplicated.isError).toBe(true);
+    expect(s.ledger.ghost(helper.id).tools).toEqual(["work_list", "read"]);
+  });
+
+  test("losing the main designation revokes ghost_update at execution, and the new main takes over", async () => {
+    const s = setup();
+    const helper = s.core.createGhost({ name: "Helper", persona: "You help." });
+    const helperDirect = s.ledger.conversation(helper.directConversationId);
+    const pi = asPi(s, s.direct, "pi-direct");
+
+    // An ordinary direct Ghost is not offered the management tools at all.
+    expect(namesOf(s, helperDirect, helper)).not.toContain("ghost_update");
+
+    // Captured while Garden is main, as an in-flight conversation holds its configured tools.
+    const gardenUpdate = toolOf(s, s.direct, s.ghost, "ghost_update");
+
+    // A work conversation refuses management even while its Ghost is main.
+    const { conversation } = await runningWork(s);
+    const workPi = asPi(s, conversation, "pi-work");
+    const fromWork = await call(gardenUpdate, { ghost_id: helper.id, tools: [] }, apiOf(workPi, "update-1"));
+    expect(fromWork.isError).toBe(true);
+    expect(s.ledger.ghost(helper.id).tools).not.toEqual([]);
+
+    // Designation is rechecked on every execution: the stale main is refused, the new main proceeds.
+    s.ledger.tx(() => s.ledger.putGhost({ ...helper, isDefault: true, updatedAt: Date.now() }));
+    const staleMain = await call(gardenUpdate, { ghost_id: helper.id, name: "Renamed" }, apiOf(pi, "update-2"));
+    expect(staleMain.isError).toBe(true);
+    expect(s.ledger.ghost(helper.id).name).toBe("Helper");
+
+    const helperNow = s.ledger.ghost(helper.id);
+    const helperUpdate = toolOf(s, helperDirect, helperNow, "ghost_update");
+    const helperPi = asPi(s, helperDirect, "pi-helper");
+    const takeover = await call(helperUpdate, { ghost_id: s.ghost.id, state: "paused" }, apiOf(helperPi, "update-3"));
+    expect(takeover.isError).toBeFalsy();
+    expect(s.ledger.ghost(s.ghost.id).state).toBe("paused");
+    await s.core.idle();
+  });
+
+  test("a paused main Ghost loses management tools until reactivated", async () => {
+    const s = setup();
+    const helper = s.core.createGhost({ name: "Helper", persona: "You help." });
+    s.ledger.tx(() => s.ledger.putGhost({ ...s.ghost, state: "paused", updatedAt: Date.now() }));
+    expect(namesOf(s, s.direct, s.ledger.ghost(s.ghost.id))).not.toContain("ghost_update");
+    // Captured from the pre-pause configuration, as an in-flight conversation would hold it.
+    const inspect = toolOf(s, s.direct, s.ghost, "ghost_inspect");
+    const pi = asPi(s, s.direct, "pi-direct");
+    const stale = await call(inspect, { ghost_id: helper.id }, apiOf(pi, "inspect-paused"));
+    expect(stale.isError).toBe(true);
+    await s.core.idle();
+  });
 });

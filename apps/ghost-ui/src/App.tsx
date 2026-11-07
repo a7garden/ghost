@@ -102,7 +102,9 @@ function Shell() {
   const companion = ghosts.find(ghost => ghost.id === preferences.companionProfile) ?? defaultGhost ?? ghosts[0] ?? null;
 
   const settingsSections: SettingsSection[] = [
-    { id: 'team', label: '팀', icon: Users, content: <TeamSettings onChat={switchGhost} onManage={switchGhost} onPortrait={switchGhost}/> },
+    { id: 'team', label: '팀', icon: Users, content: <TeamSettings onChat={switchGhost}
+      onManage={id => navigate(`/settings?tab=team&ghost=${encodeURIComponent(id)}`)} onPortrait={switchGhost}
+      selectedGhostId={params.get('ghost') ?? undefined}/> },
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { join } from "node:path";
-import type { Principal } from "@ghost/contract";
+import { GHOST_TOOLS, type Principal } from "@ghost/contract";
 import { Access } from "../src/core/access.ts";
 import { execute } from "../src/core/commands.ts";
 import { Core } from "../src/core/core.ts";
@@ -344,5 +345,49 @@ describe("commands and access", () => {
     await expect(execute(core, device, { requestId: uuid(), command: { type: "ghost.create", name: "X", persona: "" } }, { publicOrigin: "http://x", documents: null })).rejects.toThrow("owner");
     await execute(core, device, { requestId: uuid(), command: { type: "work.cancel", workId: visible.id } }, { publicOrigin: "http://x", documents: null });
     expect(ledger.work(visible.id).state).toBe("cancelled");
+  });
+
+  test("ghost.update changes tool permissions and rejects invalid allow-lists without changing them", async () => {
+    const { core, ledger, helper } = setup();
+    const access = new Access(ledger, owner);
+    await core.idle();
+
+    await execute(core, access, { requestId: uuid(), command: { type: "ghost.update", ghostId: helper.id, tools: ["read", "bash"] } }, { publicOrigin: "http://x", documents: null });
+    expect(ledger.ghost(helper.id).tools).toEqual(["read", "bash"]);
+
+    await execute(core, access, { requestId: uuid(), command: { type: "ghost.update", ghostId: helper.id, tools: [] } }, { publicOrigin: "http://x", documents: null });
+    expect(ledger.ghost(helper.id).tools).toEqual([]);
+    // Unknown names and duplicates are refused by the shared rule even for non-HTTP callers.
+    await expect(
+      execute(core, access, { requestId: uuid(), command: { type: "ghost.update", ghostId: helper.id, tools: ["time_travel"] as never } }, { publicOrigin: "http://x", documents: null }),
+    ).rejects.toMatchObject({ code: "invalid" });
+    await expect(
+      execute(core, access, { requestId: uuid(), command: { type: "ghost.update", ghostId: helper.id, tools: ["read", "read"] as never } }, { publicOrigin: "http://x", documents: null }),
+    ).rejects.toMatchObject({ code: "invalid" });
+    expect(ledger.ghost(helper.id).tools).toEqual([]);
+  });
+
+  test("migrating a ledger from before tool allow-lists grants every established Ghost the full set", async () => {
+    const path = join(tempDir(), "ghost-settings.db");
+    const first = harness(path);
+    const ghost = first.core.createGhost({ name: "G", persona: "" });
+    first.core.createGhost({ name: "H", persona: "" });
+    await first.core.idle();
+    first.ledger.close();
+
+    // Rewind to the schema that predates tool allow-lists.
+    const db = new Database(path);
+    db.exec("ALTER TABLE ghosts DROP COLUMN tools");
+    db.exec("PRAGMA user_version = 2");
+    db.close();
+
+    const second = harness(path);
+    expect(second.ledger.ghost(ghost.id).tools).toEqual([...GHOST_TOOLS]);
+    expect(second.ledger.ghosts().every((item) => item.tools.length === GHOST_TOOLS.length)).toBe(true);
+    // The migrated allow-list is an ordinary editable allow-list.
+    const helper = second.ledger.ghosts().find((item) => item.name === "H")!;
+    second.ledger.tx(() => second.ledger.putGhost({ ...helper, tools: ["read"], updatedAt: Date.now() }));
+    expect(second.ledger.ghost(helper.id).tools).toEqual(["read"]);
+    second.ledger.close();
   });
 });

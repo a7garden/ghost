@@ -6,7 +6,7 @@ import { WorkspaceSidebar, type GhostMenuItem } from './WorkspaceSidebar';
 
 const ghost = (id: string, isDefault = false): Ghost => ({
   id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault, state: 'active',
-  directConversationId: `conv-${id}`, createdAt: 1, updatedAt: 1,
+  tools: [], directConversationId: `conv-${id}`, createdAt: 1, updatedAt: 1,
 });
 
 const state = (): State => ({

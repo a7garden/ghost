@@ -6,7 +6,7 @@ import type { Core } from "../core/core.ts";
 import { invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
 import { workDetail } from "../core/state.ts";
-import { askOwnerTool, describeWorkLine, errorResult, firstLine, requireOrigin, scopeOf, type Scope } from "./shared.ts";
+import { askOwnerTool, describeWorkLine, errorResult, firstLine, requireAllowed, requireOrigin, type Scope } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -43,7 +43,7 @@ export function createDirectTools(core: Core): Extension {
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "work_create");
         const work = core.works.createRoot({
           ghostId: args.ghost_id ?? scope.ghost.id,
           title: args.title,
@@ -68,7 +68,7 @@ export function createDirectTools(core: Core): Extension {
     replay: "safe",
     async execute(_args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "work_list");
         const works = visibleWorks(core, scope);
         return text(works.length === 0 ? "No Work here yet." : works.map((work) => describeWorkLine(core, work)).join("\n"));
       } catch (error) {
@@ -84,7 +84,7 @@ export function createDirectTools(core: Core): Extension {
     replay: "safe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "work_inspect");
         const work = core.ledger.work(args.work_id);
         const root = work.rootId === work.id ? work : core.ledger.work(work.rootId);
         const assignedHere = work.ghostId === scope.ghost.id;
@@ -112,7 +112,7 @@ export function createDirectTools(core: Core): Extension {
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "work_update");
         const work = requireOrigin(core, scope, args.work_id);
         const acceptance = args.criteria === undefined ? undefined : { ...work.acceptance, criteria: args.criteria };
         const next = core.works.update(work.id, {
@@ -135,7 +135,7 @@ export function createDirectTools(core: Core): Extension {
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "work_cancel");
         const work = requireOrigin(core, scope, args.work_id);
         const next = core.works.cancel(work.id, `cancelled from the conversation of ${scope.ghost.name}`);
         return text(`Work "${next.title}" is ${next.state}.`);
@@ -156,7 +156,7 @@ export function createDirectTools(core: Core): Extension {
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "schedule_create");
         const spec = scheduleSpec(args.at, args.every_minutes);
         const schedule = core.schedules.create({ ghostId: scope.ghost.id, conversationId: scope.conversation.id, prompt: args.prompt, spec, id: idFor(scope.conversation.id, api.callId) });
         return text(`Schedule ${schedule.id} created; next run ${schedule.nextAt === null ? "never" : new Date(schedule.nextAt).toISOString()}.`);
@@ -173,7 +173,7 @@ export function createDirectTools(core: Core): Extension {
     replay: "safe",
     async execute(_args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "schedule_list");
         const schedules = core.ledger.schedules().filter((schedule) => schedule.ghostId === scope.ghost.id);
         return text(
           schedules.length === 0
@@ -201,7 +201,7 @@ export function createDirectTools(core: Core): Extension {
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "schedule_cancel");
         const schedule = core.ledger.schedule(args.schedule_id);
         if (schedule.ghostId !== scope.ghost.id) throw invalid("that schedule belongs to another Ghost");
         core.schedules.delete(schedule.id);
@@ -219,7 +219,7 @@ export function createDirectTools(core: Core): Extension {
     replay: "safe",
     async execute(_args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "ghost_list");
         const ghosts = core.ledger.ghosts().filter((ghost) => ghost.state === "active");
         return text(ghosts.map((ghost: Ghost) => `- ${ghost.name} (${ghost.id}) — ${firstLine(ghost.persona)}`).join("\n"));
       } catch (error) {

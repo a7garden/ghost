@@ -6,22 +6,26 @@ import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { toneFor } from './ghostState';
 import { DotAvatar } from '../components/DotAvatar';
+import { GhostAgentSettingsEditor } from './GhostAgentSettings';
 import { profileSummary } from './profileSummary';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from '../pets/ModelPicker';
 import { Modal } from '../components/Modal';
 
 const stateBadge: Record<Ghost['state'], string | null> = { active: null, paused: '일시정지', retired: '은퇴' };
 
-/** Ghost 목록과 새 Ghost 만들기. 대화·관리·꾸미기 이동은 App이 콜백으로 연결한다. */
-export function TeamSettings({ onChat, onManage, onPortrait, onImport }: {
+/** Ghost 목록과 새 Ghost 만들기. 대화·꾸미기 이동은 App이 콜백으로 연결하고, 선택한 Ghost의 설정(역할·도구)은 이 탭에서 고친다. */
+export function TeamSettings({ onChat, onManage, onPortrait, onImport, selectedGhostId }: {
   onChat(id: string): void;
   onManage?(id: string): void;
   onPortrait?(id: string): void;
   onImport?(): void;
+  /** Settings 주소의 ?ghost= 값. 없으면 첫 Ghost를 보여 준다. */
+  selectedGhostId?: string;
 }) {
   const { store, client } = useHost();
   const { state } = useHostState(store);
   const ghosts = [...(state?.ghosts ?? [])].sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.createdAt - b.createdAt);
+  const selected = ghosts.find(ghost => ghost.id === selectedGhostId) ?? ghosts[0] ?? null;
   const [creating, setCreating] = useState(false);
   return <section className="flex min-w-0 flex-col gap-3" aria-labelledby="team-heading">
     <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="team-heading" className="m-0 text-ui font-semibold text-ink">팀</h2>
@@ -41,11 +45,15 @@ export function TeamSettings({ onChat, onManage, onPortrait, onImport }: {
       </span>}>
         <span className="flex items-center gap-1">
           <Button variant="ghost" size="icon" type="button" aria-label={`${ghost.name} 대화`} title="대화" onClick={() => onChat(ghost.id)}><MessageCircle size={16}/></Button>
-          {onManage && <Button variant="ghost" size="icon" type="button" aria-label={`${ghost.name} 관리`} title="관리" onClick={() => onManage(ghost.id)}><Settings2 size={16}/></Button>}
+          {onManage && <Button variant="ghost" size="icon" type="button" aria-label={`${ghost.name} 설정`} title="Ghost 설정" onClick={() => onManage(ghost.id)}><Settings2 size={16}/></Button>}
           {onPortrait && <Button variant="ghost" size="icon" type="button" aria-label={`${ghost.name} 꾸미기`} title="꾸미기" onClick={() => onPortrait(ghost.id)}><Palette size={16}/></Button>}
         </span>
       </GSettingsRow>;
     })}</GSettingsGroup>
+    {selected && <section className="grid gap-3" aria-labelledby="ghost-settings-heading">
+      <h3 id="ghost-settings-heading" className="m-0 text-ui font-semibold text-ink">{selected.name} 설정</h3>
+      <GhostAgentSettingsEditor key={selected.id} ghostId={selected.id}/>
+    </section>}
     {creating && <GhostCreateDialog onClose={() => setCreating(false)} onCreate={async input => {
       const created = await client.send<Partial<Ghost>>({ type: 'ghost.create', ...input });
       setCreating(false);

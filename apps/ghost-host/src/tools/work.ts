@@ -13,7 +13,7 @@ import { idFor } from "../core/ids.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import { describeOutcome, describeWork } from "../core/works.ts";
 import { parseShellResult, type ShellResult } from "../core/verify.ts";
-import { askOwnerTool, errorResult, requireWork, scopeOf } from "./shared.ts";
+import { askOwnerTool, errorResult, requireAllowed, requireWork, scopeOf } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -169,14 +169,28 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
   const write = createWriteTool();
   const edit = createEditTool();
 
-  const read = { ...createReadTool(), replay: "safe" as const };
+  const baseRead = createReadTool();
+
+  // `read` comes from the harness; its only host rule is the allow-list guard, applied before any file is touched.
+  const read = defineTool({
+    ...baseRead,
+    replay: "safe",
+    async execute(args, api, context) {
+      try {
+        requireAllowed(core, api, "read");
+      } catch (error) {
+        return errorResult(error);
+      }
+      return baseRead.execute(args, api, context);
+    },
+  });
 
   const writeTool = defineTool({
     ...write,
     replay: "unsafe",
     async execute(args, api, context) {
       try {
-        const scope = requireWork(scopeOf(core, api));
+        const scope = requireWork(requireAllowed(core, api, "write"));
         let fresh: ToolExecutionResult | null = null;
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "write", input: args, summary: `write ${args.path}` },
@@ -199,7 +213,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
     replay: "unsafe",
     async execute(args, api, context) {
       try {
-        const scope = requireWork(scopeOf(core, api));
+        const scope = requireWork(requireAllowed(core, api, "edit"));
         let fresh: ToolExecutionResult | null = null;
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "edit", input: args, summary: `edit ${args.path}` },
@@ -227,7 +241,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
     replay: "unsafe",
     async execute(args, api, context) {
       try {
-        const scope = requireWork(scopeOf(core, api));
+        const scope = requireWork(requireAllowed(core, api, "bash"));
         if (!api.env) throw new Error("no sandbox environment for this conversation");
         const env = api.env;
         const recorded = await core.effects
@@ -277,7 +291,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const scope = requireWork(scopeOf(core, api));
+        const scope = requireWork(requireAllowed(core, api, "publish_artifact"));
         const name = args.name ?? basename(args.path);
         const digest = await core.effects.run(
           {
@@ -323,7 +337,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const scope = requireWork(scopeOf(core, api));
+        const scope = requireWork(requireAllowed(core, api, "delegate"));
         const child = core.works.delegate(scope.work.id, {
           ghostId: args.ghost_id,
           title: args.title,

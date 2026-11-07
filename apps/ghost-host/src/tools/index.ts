@@ -5,6 +5,7 @@ import { describeWork } from "../core/works.ts";
 import type { MemoryPort, DocumentsPort, SandboxEnvFactory } from "../integrations/ports.ts";
 import { createDocumentsTools } from "./documents.ts";
 import { createDirectTools } from "./direct.ts";
+import { createMainTools } from "./main.ts";
 import { createMemoryTools } from "./memory.ts";
 import { createReviewTools } from "./review.ts";
 import type { ToolSet } from "./types.ts";
@@ -26,6 +27,8 @@ work_status shows this Work's state and children; ask_owner when only the owner 
 const REVIEW_INSTRUCTIONS = `This conversation reviews one Work. Judge only from its artifacts (artifact_read) and recorded effects (effect_list) — never from the assignee's claims.
 Call verdict exactly once: pass, revise, or fail with concrete reasons. revise sends your reasons back to the assignee for another attempt.`;
 
+const MAIN_INSTRUCTIONS = `As the current main Ghost you can ghost_inspect another Ghost's configuration and ghost_update its name, persona, model, look, state or tool allow-list. The main designation and your own settings belong to the owner.`;
+
 /** The model-facing capability of each conversation kind (src/tools/types.ts). */
 export function createToolSet(deps: {
   core: Core;
@@ -36,12 +39,13 @@ export function createToolSet(deps: {
   const direct = createDirectTools(deps.core);
   const work = createWorkTools(deps.core, deps.sandbox);
   const review = createReviewTools(deps.core);
+  const main = createMainTools(deps.core);
   const memory = deps.memory === null ? null : createMemoryTools(deps.core, deps.memory);
   const documents = deps.documents === null ? null : createDocumentsTools(deps.core, deps.documents);
 
   return {
     all(): Extension[] {
-      return [direct, work, review, ...(memory ? [memory] : []), ...(documents ? [documents] : [])];
+      return [direct, work, review, main, ...(memory ? [memory] : []), ...(documents ? [documents] : [])];
     },
     extensionsFor(conversation: Conversation, ghost: Ghost, _work: Work | null): Extension[] {
       switch (conversation.kind) {
@@ -49,6 +53,8 @@ export function createToolSet(deps: {
           const selected = [direct];
           if (deps.memory?.available(ghost.id) && memory) selected.push(memory);
           if ((deps.documents?.spacesFor(ghost.id).length ?? 0) > 0 && documents) selected.push(documents);
+          // Main-only management: resolved again at every execution, so a stale main keeps nothing.
+          if (ghost.isDefault && ghost.state === "active") selected.push(main);
           return selected;
         }
         case "work": {
@@ -63,7 +69,7 @@ export function createToolSet(deps: {
     instructionsFor(conversation: Conversation, ghost: Ghost, work: Work | null): string {
       switch (conversation.kind) {
         case "direct":
-          return DIRECT_INSTRUCTIONS;
+          return ghost.isDefault && ghost.state === "active" ? `${DIRECT_INSTRUCTIONS}\n\n${MAIN_INSTRUCTIONS}` : DIRECT_INSTRUCTIONS;
         case "work":
           return [WORK_INSTRUCTIONS, work ? describeWork(work) : ""].filter(Boolean).join("\n\n");
         case "review":

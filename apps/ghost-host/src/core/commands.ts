@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { Command, CommandRequest, Ghost, Space } from "@ghost/contract";
+import { GhostToolList, validate, type Command, type CommandRequest, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
 import type { Access } from "./access.ts";
 import type { Core } from "./core.ts";
 import type { DocumentsPort } from "../integrations/ports.ts";
@@ -111,37 +111,31 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
       return {};
 
     case "ghost.create": {
-      const ghost = core.createGhost({ name: command.name, persona: command.persona, model: command.model ?? null, look: command.look });
+      const ghost = core.createGhost({ name: command.name, persona: command.persona, model: command.model ?? null, look: command.look, tools: command.tools });
       return { ghostId: ghost.id };
     }
 
-    case "ghost.update": {
-      const ghost = ledger.ghost(command.ghostId);
-      if (command.state && command.state !== "active" && ghost.isDefault) throw conflict("choose another default Ghost first");
-      const next: Ghost = {
-        ...ghost,
-        name: command.name ?? ghost.name,
-        persona: command.persona ?? ghost.persona,
-        model: command.model === undefined ? ghost.model : command.model,
-        look: command.look ?? ghost.look,
-        state: command.state ?? ghost.state,
-        updatedAt: Date.now(),
-      };
-      ledger.tx(() => {
-        ledger.putGhost(next);
-        // The main conversation is titled after its Ghost until the owner renames it.
-        const main = ledger.conversation(ghost.directConversationId);
-        if (next.name !== ghost.name && main.title === ghost.name) ledger.putConversation({ ...main, title: next.name });
+    case "ghost.update":
+      updateGhost(core, command.ghostId, {
+        name: command.name,
+        persona: command.persona,
+        model: command.model === undefined ? undefined : command.model,
+        look: command.look,
+        state: command.state,
+        tools: command.tools,
       });
-      core.refreshGhost(ghost.id);
       return {};
-    }
 
     case "ghost.set_default": {
       const ghost = ledger.ghost(command.ghostId);
       if (ghost.state !== "active") throw conflict(`${ghost.name} is ${ghost.state}`);
+      // The demoted default is captured before the promotion: putGhost itself clears every other default.
+      const demoted = ledger.ghosts().filter((other) => other.id !== ghost.id && other.isDefault);
       ledger.tx(() => ledger.putGhost({ ...ghost, isDefault: true, updatedAt: Date.now() }));
-      for (const other of ledger.ghosts()) if (other.id !== ghost.id && other.isDefault) ledger.tx(() => ledger.putGhost({ ...other, isDefault: false }));
+      for (const other of demoted) ledger.tx(() => ledger.putGhost({ ...other, isDefault: false }));
+      // Both sides re-open at once: the new main gains the management tools, the former main loses them.
+      core.refreshGhost(ghost.id);
+      for (const other of demoted) core.refreshGhost(other.id);
       return {};
     }
 
@@ -285,6 +279,44 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
 
 function refreshGrantees(core: Core, grants: { ghostId: string }[]) {
   for (const ghostId of new Set(grants.map((grant) => grant.ghostId))) core.refreshGhost(ghostId);
+}
+
+/** One editable aspect of a Ghost; `undefined` leaves it unchanged. Never isDefault, grants or credentials. */
+export interface GhostPatch {
+  name?: string;
+  persona?: string;
+  model?: ModelRef | null;
+  look?: Look;
+  state?: GhostState;
+  tools?: GhostTool[];
+}
+
+/**
+ * The single Ghost-editing rule set, shared by the owner's `ghost.update` command and the main
+ * Ghost's `ghost_update` tool. Re-opens the Ghost's live conversations so tool changes apply at once.
+ */
+export function updateGhost(core: Core, ghostId: string, patch: GhostPatch): Ghost {
+  const ghost = core.ledger.ghost(ghostId);
+  if (patch.state && patch.state !== "active" && ghost.isDefault) throw conflict("choose another default Ghost first");
+  if (patch.tools !== undefined && !validate(GhostToolList, patch.tools)) throw invalid("tools must be a duplicate-free list of known tool names");
+  const next: Ghost = {
+    ...ghost,
+    name: patch.name ?? ghost.name,
+    persona: patch.persona ?? ghost.persona,
+    model: patch.model === undefined ? ghost.model : patch.model,
+    look: patch.look ?? ghost.look,
+    state: patch.state ?? ghost.state,
+    tools: patch.tools ?? ghost.tools,
+    updatedAt: Date.now(),
+  };
+  core.ledger.tx(() => {
+    core.ledger.putGhost(next);
+    // The main conversation is titled after its Ghost until the owner renames it.
+    const main = core.ledger.conversation(ghost.directConversationId);
+    if (next.name !== ghost.name && main.title === ghost.name) core.ledger.putConversation({ ...main, title: next.name });
+  });
+  core.refreshGhost(ghost.id);
+  return next;
 }
 
 export function settingsView(core: Core) {

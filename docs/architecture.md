@@ -35,7 +35,7 @@ flowchart LR
 1. **One process, one language.** Host, conversation engine and device API run in one Bun process. Types are shared with the UI through `packages/ghost-contract`.
 2. **Two stores, each with one writer.** `ledger.db` holds what Ghost knows about Ghosts, work, decisions and effects. `pi.db` holds conversations and their durable tasks, owned by Pi Durable. Nothing else is persisted except content-addressed artifacts, provider secrets and config.
 3. **Everything that wakes a Ghost is a submission.** Owner messages, child results, owner decisions, schedule fires and review feedback are Pi submissions to a conversation with a deterministic `requestId`. Pi's request-ID idempotency removes duplicate wakes after a crash. There is no outbox, mailbox or delivery-receipt table.
-4. **Capability by construction.** A conversation's kind decides its tools. A direct conversation cannot touch a sandbox; a work conversation cannot create root work. Tools read their scope from the ledger row bound to the conversation, never from model arguments.
+4. **Capability by construction.** A conversation's kind bounds its tools; each Ghost's explicit tool allow-list narrows that set, and integration/document grants still apply. A direct conversation cannot touch a sandbox; a work conversation cannot create root work. Tools resolve and authorize their current scope from the ledger on every execution, never from model arguments or a cached configuration.
 5. **Effects are journaled, never replayed.** A tool with an external effect records `pending` before I/O and `done` after. On restart, `pending` becomes `unknown`, the work blocks and the owner reconciles. Pi's own tool tasks are `replay: "unsafe"` for these tools, so an interrupted call returns an interrupted result instead of running twice.
 6. **Reads are free.** Read endpoints are never journaled. Only mutating commands carry a request ID, and the receipt stores the outcome reference, not the response body.
 7. **Plain tables, one change feed.** Every ledger mutation appends an `events` row in the same transaction. Clients get a snapshot, then the event stream. No event sourcing, no generic key-value table.
@@ -68,7 +68,7 @@ docs/
 
 | Concept | Meaning |
 | --- | --- |
-| Ghost | A durable bot: name, persona, look, model, memory space and document grants. One Ghost is the default entry point; it has no other special capability. |
+| Ghost | A durable bot: name, persona, look, model, tool allow-list, memory space and document grants. The default Ghost is the entry point and may configure other non-default Ghosts only from direct conversations. |
 | Conversation | A Pi conversation bound to one Ghost. Kinds: `direct` (owner ↔ Ghost), `work` (a Ghost executing one Work), `review` (an independent reviewer judging one Work). |
 | Work | 맡긴 일. A node in a tree. A root Work is created only from an owner request in a direct conversation (or by the owner in the UI). A child Work is a delegation to another Ghost. Each Work has an assignee, a brief, an acceptance spec, a deadline, a work conversation, a state, a result and a verdict. |
 | Decision | Something only the owner can settle: approve an effect (browser mutation), answer a question, accept a result, approve a document proposal, reconcile an unknown effect. |
@@ -140,7 +140,7 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 
 | Table | Key | Notes |
 | --- | --- | --- |
-| `ghosts` | `id` | name, persona, look, model, is_default (one), state, direct_conversation_id |
+| `ghosts` | `id` | name, persona, look, model, tools (explicit allow-list), is_default (one), state, direct_conversation_id |
 | `conversations` | `id` | ghost_id, kind, work_id, title, model, busy; `pi_conversation_id` maps to Pi |
 | `works` | `id` | parent_id, root_id, ghost_id, origin_conversation_id, conversation_id, brief, acceptance, state, revision, revisions_used, idle_nudges, deadline_at, result, verdict, reason, timestamps |
 | `decisions` | `id` | kind, ghost_id, conversation_id, work_id, effect_id, title, detail, options, proposal, state, answer |
@@ -175,7 +175,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 
 | Kind | Extensions |
 | --- | --- |
-| `direct` | `ghost.direct`: `work_create`, `work_list`, `work_inspect`, `work_update`, `work_cancel`, `ask_owner`, `schedule_create`, `schedule_cancel`, `ghost_list`; `ghost.memory`; `ghost.documents` |
+| `direct` | `ghost.direct`: `work_create`, `work_list`, `work_inspect`, `work_update`, `work_cancel`, `ask_owner`, `schedule_create`, `schedule_list`, `schedule_cancel`, `ghost_list`; `ghost.memory`; `ghost.documents`; `ghost.main` (`ghost_inspect`, `ghost_update`) for the active default Ghost only |
 | `work` | `ghost.work`: `read`, `write`, `edit`, `bash` (over the sandbox env), `publish_artifact`, `delegate`, `complete`, `ask_owner`, `work_status`; `ghost.memory` (work scope) |
 | `review` | `ghost.review`: `artifact_read`, `effect_list`, `verdict` |
 
@@ -183,6 +183,17 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 - A work conversation that goes idle with live children or a pending decision becomes `waiting`; when a child settles, its outcome (and its files under `inputs/<child-id>/`) is submitted to the parent. Idle without either gets one reminder, then the Work fails.
 - Effect journaling wraps every tool that changes the outside world (`write`, `edit`, `bash`, `publish_artifact`, `memory_retain`).
 - Providers: any configured provider with a credential runs any conversation with every tool the Ghost holds. There are no privacy tiers or local-only routes (owner decision, 2026-11-07).
+
+### Agent settings and management
+
+- Each Ghost stores an explicit `tools` allow-list. Existing and newly created Ghosts start with the established optional tools; `[]` disables all optional tools. Unknown names and duplicates are rejected.
+- The engine configures Pi's explicit tool selection as well as its named extensions. Pi re-resolves extensions from the registry by name; filtering a copied extension's `tools` array does not restrict a model request.
+- Owners edit role instructions and tool permissions in **설정 → 팀 → Ghost 설정**, also reachable from the Ghost's conversation profile. Selecting a tool never grants a document Space or enables an unavailable integration.
+- Unsaved owner tool toggles are applied to the latest observed allow-list, preserving concurrent changes to untouched tools.
+- `ask_owner`, `complete`, `work_status`, `artifact_read`, `effect_list` and `verdict` remain fixed lifecycle/safety tools in their existing conversation kinds.
+- Only the currently active default Ghost's direct conversations receive `ghost_inspect` and `ghost_update`. Every execution rechecks the current designation. These tools inspect/update another non-default Ghost's name, persona, model, look, state and optional tools. They cannot change the caller, the default designation, document grants, credentials or sandbox controls. Owners retain those controls.
+- Permission changes refresh live conversations; execution also checks the current ledger permissions so a stale configured tool cannot bypass revocation. Work/review conversations never receive Ghost-management authority, including work assigned to the default Ghost.
+- Tool permissions control which actions are exposed, not sandbox syscall permissions: allowing `bash` can still read/write files inside the existing sandbox boundary even when `write` is disabled.
 
 ## API
 

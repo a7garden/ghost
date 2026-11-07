@@ -1,4 +1,4 @@
-import type { ArtifactRef, Conversation, Ghost, Notification } from "@ghost/contract";
+import { GHOST_TOOLS, type ArtifactRef, type Conversation, type Ghost, type Notification } from "@ghost/contract";
 import type { Ledger } from "../ledger/ledger.ts";
 import { Decisions } from "./decisions.ts";
 import { Effects } from "./effects.ts";
@@ -116,8 +116,8 @@ export class Core implements EngineEvents {
 
   // Ghosts and conversations
 
-  /** Create a Ghost with its main direct conversation. */
-  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "model" | "look" | "isDefault">>): Ghost {
+  /** Create a Ghost with its main direct conversation. New Ghosts default to the full selectable tool set. */
+  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "model" | "look" | "isDefault" | "tools">>): Ghost {
     const now = Date.now();
     const id = newId();
     const conversationId = newId();
@@ -129,6 +129,7 @@ export class Core implements EngineEvents {
       model: input.model ?? null,
       isDefault: input.isDefault ?? this.ledger.defaultGhost() === null,
       state: "active",
+      tools: input.tools ?? [...GHOST_TOOLS],
       directConversationId: conversationId,
       createdAt: now,
       updatedAt: now,

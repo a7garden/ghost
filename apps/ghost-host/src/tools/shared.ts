@@ -1,4 +1,4 @@
-import type { Conversation, Ghost, Work } from "@ghost/contract";
+import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
 import { Type } from "typebox";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
@@ -12,6 +12,44 @@ export interface Scope {
   conversation: Conversation;
   ghost: Ghost;
   work: Work | null;
+}
+
+/** The conversation kinds each selectable tool runs in; `Record<GhostTool, …>` stays exhaustive over the contract list. */
+const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
+  work_create: ["direct"],
+  work_list: ["direct"],
+  work_inspect: ["direct"],
+  work_update: ["direct"],
+  work_cancel: ["direct"],
+  schedule_create: ["direct"],
+  schedule_list: ["direct"],
+  schedule_cancel: ["direct"],
+  ghost_list: ["direct"],
+  read: ["work"],
+  write: ["work"],
+  edit: ["work"],
+  bash: ["work"],
+  publish_artifact: ["work"],
+  delegate: ["work"],
+  memory_search: ["direct", "work"],
+  memory_recall: ["direct", "work"],
+  memory_retain: ["direct", "work"],
+  document_spaces: ["direct"],
+  document_list: ["direct"],
+  document_read: ["direct"],
+  document_propose: ["direct"],
+};
+
+/**
+ * Execution-time authorization for a selectable tool: resolve the caller from the ledger now, then
+ * require conversation kind ∩ the Ghost's persisted allow-list. A call configured before a revocation
+ * still passes through here before any effect, so revocation stops even in-flight stale calls.
+ */
+export function requireAllowed(core: Core, api: ToolExecutionApi, name: GhostTool): Scope {
+  const scope = scopeOf(core, api);
+  if (!TOOL_KINDS[name].includes(scope.conversation.kind)) throw forbidden(`${name} does not run in a ${scope.conversation.kind} conversation`);
+  if (!scope.ghost.tools.includes(name)) throw forbidden(`${name} is not enabled for ${scope.ghost.name}`);
+  return scope;
 }
 
 /** Resolve the calling conversation from the Pi conversation id the harness puts on every call. */

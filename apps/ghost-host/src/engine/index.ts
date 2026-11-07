@@ -16,9 +16,10 @@ import {
   type EntryRecord,
   type LiveState,
   type SubmissionRecord,
+  type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import type { Conversation as HostConversation, Ghost, Live, LiveEvent, Message, ModelRef, Settings, Work } from "@ghost/contract";
+import { GHOST_TOOLS, type Conversation as HostConversation, type Ghost, type Live, type LiveEvent, type Message, type ModelRef, type Settings, type Work } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { CommandError } from "../core/errors.ts";
 import type { ConversationSetup, Engine, Submission, TranscriptPage } from "../core/ports.ts";
@@ -29,6 +30,7 @@ import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
 
 const ctx = BACKGROUND_CONTEXT;
+const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
 
 /** One host conversation and everything the engine tracks about it. */
 interface ConversationState {
@@ -131,11 +133,20 @@ class HostEngine implements Engine {
     const { conversation, ghost, work } = setup;
     const model = this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
     const kindInstructions = this.tools.instructionsFor(conversation, ghost, work);
+    const extensions = this.tools.extensionsFor(conversation, ghost, work);
+    // Pi resolves extension names from its registry; filtering copied extensions would not filter the model's tools.
+    const grantedTools: ToolRegistration[] = [];
+    for (const extension of extensions) {
+      for (const tool of extension.tools ?? []) {
+        if (!SELECTABLE_TOOLS.has(tool.name) || ghost.tools.some((name) => name === tool.name)) grantedTools.push(tool);
+      }
+    }
     await state.pi.configure(
       {
         model: model ? { provider: model.provider, modelId: model.model } : null,
         thinkingLevel: model?.thinking ?? "off",
-        extensions: this.tools.extensionsFor(conversation, ghost, work),
+        extensions,
+        tools: grantedTools,
         instructions: kindInstructions ? `${ghost.persona}\n\n${kindInstructions}`.trim() : ghost.persona,
       },
       ctx,

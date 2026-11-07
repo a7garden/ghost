@@ -27,6 +27,62 @@ export type Look = Static<typeof Look>;
 export const GhostState = Type.Union([Type.Literal("active"), Type.Literal("paused"), Type.Literal("retired")]);
 export type GhostState = Static<typeof GhostState>;
 
+/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, complete, work_status, artifact_read, effect_list, verdict) and the main-only ghost_inspect/ghost_update are not selectable. */
+export const GhostTool = Type.Union([
+  Type.Literal("work_create"),
+  Type.Literal("work_list"),
+  Type.Literal("work_inspect"),
+  Type.Literal("work_update"),
+  Type.Literal("work_cancel"),
+  Type.Literal("schedule_create"),
+  Type.Literal("schedule_list"),
+  Type.Literal("schedule_cancel"),
+  Type.Literal("ghost_list"),
+  Type.Literal("read"),
+  Type.Literal("write"),
+  Type.Literal("edit"),
+  Type.Literal("bash"),
+  Type.Literal("publish_artifact"),
+  Type.Literal("delegate"),
+  Type.Literal("memory_search"),
+  Type.Literal("memory_recall"),
+  Type.Literal("memory_retain"),
+  Type.Literal("document_spaces"),
+  Type.Literal("document_list"),
+  Type.Literal("document_read"),
+  Type.Literal("document_propose"),
+]);
+export type GhostTool = Static<typeof GhostTool>;
+
+/** Every selectable tool, in contract order. */
+export const GHOST_TOOLS: readonly GhostTool[] = [
+  "work_create",
+  "work_list",
+  "work_inspect",
+  "work_update",
+  "work_cancel",
+  "schedule_create",
+  "schedule_list",
+  "schedule_cancel",
+  "ghost_list",
+  "read",
+  "write",
+  "edit",
+  "bash",
+  "publish_artifact",
+  "delegate",
+  "memory_search",
+  "memory_recall",
+  "memory_retain",
+  "document_spaces",
+  "document_list",
+  "document_read",
+  "document_propose",
+];
+
+/** An explicit allow-list: unknown names and duplicates are schema errors. */
+export const GhostToolList = Type.Array(GhostTool, { uniqueItems: true, maxItems: GHOST_TOOLS.length });
+
 export const Ghost = Type.Object({
   id: Id,
   name: Type.String({ minLength: 1, maxLength: 128 }),
@@ -36,6 +92,8 @@ export const Ghost = Type.Object({
   model: nullable(ModelRef),
   isDefault: Type.Boolean(),
   state: GhostState,
+  /** The persisted allow-list of optional tools; [] disables all of them. */
+  tools: GhostToolList,
   directConversationId: Id,
   createdAt: Timestamp,
   updatedAt: Timestamp,

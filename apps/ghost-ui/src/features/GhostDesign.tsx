@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check } from 'lucide-react';
-import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Switch, Textarea } from '@garden/ui';
+import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Switch } from '@garden/ui';
 import type { Ghost, GhostState } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -29,7 +29,8 @@ const stateChoices: { value: GhostState; label: string }[] = [{ value: 'active',
 const sandboxLabel: Record<string, string> = { none: '샌드박스 없음', stopped: '정지됨', running: '실행 중', error: '오류' };
 
 /**
- * 한 Ghost의 이름·역할 지시·모델·모습·상태를 한 데서 고치는 편집기.
+ * 한 Ghost의 이름·모델·모습·상태·샌드박스를 고치는 꾸미기 편집기.
+ * 역할 지시·도구 권한은 GhostAgentSettingsEditor가 맡는다.
  * 각 변경은 곧바로 ghost.update · ghost.set_default · sandbox.control로 저장된다.
  */
 export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
@@ -39,13 +40,11 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
   const avatars = state?.avatars ?? [];
   const sandbox = state?.sandboxes.find(item => item.ghostId === ghostId);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
-  const [personaDraft, setPersonaDraft] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const locked = busy || !state;
   if (!ghost) return <p className="m-0 text-caption text-ink-3">Ghost를 찾을 수 없습니다.</p>;
   const name = nameDraft ?? ghost.name;
-  const persona = personaDraft ?? ghost.persona;
   const run = async (work: () => Promise<unknown>, done: string) => {
     setBusy(true); setError(''); setNotice('');
     try { await work(); setNotice(done); }
@@ -98,15 +97,6 @@ export function GhostDesignEditor({ ghostId }: { ghostId: string }) {
       onChange={color => void run(() => patchLook({ body: color === 'auto' ? '' : color }), '본체 색을 저장했습니다.')}/>}
     <GhostColorPicker label="배경색" resetLabel="기본" presets={backgroundColors} value={backgroundColor}
       onChange={color => void run(() => patchLook({ background: color === 'auto' ? '' : color }), '배경색을 저장했습니다.')}/>
-    <form className="grid gap-2" onSubmit={event => {
-      event.preventDefault();
-      if (persona.trim() && persona !== ghost.persona) void run(() => client.send({ type: 'ghost.update', ghostId, persona }), `$역할 지시를 저장했습니다.`);
-    }}>
-      <label className="grid gap-2 text-caption text-ink-2">역할 지시
-        <Textarea value={persona} onChange={event => setPersonaDraft(event.target.value)} rows={4} maxLength={8192} required disabled={locked}/>
-      </label>
-      {persona !== ghost.persona && <Button type="submit" size="sm" className="justify-self-end" disabled={locked || !persona.trim()}>저장</Button>}
-    </form>
     {sandbox && <section className="grid gap-2 border-t border-line pt-3" aria-label="샌드박스">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-caption text-ink-2">샌드박스 <Badge variant="outline">{sandboxLabel[sandbox.state] ?? sandbox.state}</Badge></span>

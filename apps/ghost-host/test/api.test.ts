@@ -6,10 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "typebox";
 import {
+  CommandResponse,
+  GHOST_TOOLS,
   LedgerEvent as LedgerEventSchema,
   Notification as NotificationSchema,
   type LedgerEvent,
-  type State,
+  State,
   parse,
   validate,
 } from "@ghost/contract";
@@ -288,6 +290,34 @@ describe("API server", () => {
     const conflict = await postJson("/api/commands", { requestId, command: { ...command, name: "Other" } }, OWNER_TOKEN);
     expect(conflict.status).toBe(409);
     expect(((await conflict.json()) as { error: { code: string } }).error.code).toBe("conflict");
+  });
+
+  test("ghost tools reject unknown names and duplicates through the schema", async () => {
+    const expectInvalid = async (command: Record<string, unknown>) => {
+      const response = parse(CommandResponse, await (await runCommand(command, OWNER_TOKEN)).json());
+      if (response.ok || response.error.code !== "invalid") throw new Error(`expected an invalid error for ${String(command.type)}`);
+    };
+    await expectInvalid({ type: "ghost.create", name: "Bad", persona: "", tools: ["time_travel"] });
+    await expectInvalid({ type: "ghost.create", name: "Dup", persona: "", tools: ["read", "read"] });
+    await expectInvalid({ type: "ghost.update", ghostId: alphaId, tools: ["bash", "bash"] });
+    const state = parse(State, await (await get("/api/state", OWNER_TOKEN)).json());
+    expect(state.ghosts.filter((ghost) => ghost.name === "Bad" || ghost.name === "Dup")).toHaveLength(0);
+  });
+
+  test("ghost.create defaults to the full tool list; ghost.update narrows it", async () => {
+    const created = parse(CommandResponse, await (await runCommand({ type: "ghost.create", name: "Tooled", persona: "flexible" }, OWNER_TOKEN)).json());
+    if (!created.ok || typeof created.result.ghostId !== "string") throw new Error("ghost.create failed");
+    const tooledId = created.result.ghostId;
+    const readTools = async () => {
+      const state = parse(State, await (await get("/api/state", OWNER_TOKEN)).json());
+      const ghost = state.ghosts.find((candidate) => candidate.id === tooledId);
+      if (!ghost) throw new Error("the created Ghost is missing from state");
+      return ghost.tools;
+    };
+    expect(await readTools()).toEqual([...GHOST_TOOLS]);
+    const narrowed = parse(CommandResponse, await (await runCommand({ type: "ghost.update", ghostId: tooledId, tools: ["work_list"] }, OWNER_TOKEN)).json());
+    expect(narrowed.ok).toBe(true);
+    expect(await readTools()).toEqual(["work_list"]);
   });
 
   test("pairing: owner starts, device claims once", async () => {

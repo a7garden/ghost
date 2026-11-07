@@ -21,7 +21,7 @@ const baseState = (): State => ({
 
 const ghost = (id: string, patch: Partial<Ghost> = {}): Ghost => ({
   id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault: false, state: 'active',
-  directConversationId: `conv-${id}`, createdAt: 1, updatedAt: 1, ...patch,
+  tools: [], directConversationId: `conv-${id}`, createdAt: 1, updatedAt: 1, ...patch,
 });
 
 const event = (data: LedgerEventData) => data;

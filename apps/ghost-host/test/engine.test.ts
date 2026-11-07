@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
@@ -7,6 +7,9 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type { Live, Message, MessageRole } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
+import { Access } from "../src/core/access.ts";
+import { execute } from "../src/core/commands.ts";
+import { createToolSet } from "../src/tools/index.ts";
 import { CommandError } from "../src/core/errors.ts";
 import { createEngine } from "../src/engine/index.ts";
 import { applyProviders, buildModels } from "../src/engine/models.ts";
@@ -83,7 +86,7 @@ interface Fixture {
   faux: FauxProviderHandle;
 }
 
-async function fixture(): Promise<Fixture> {
+async function fixture(toolFactory: (core: Core) => ToolSet = () => tools): Promise<Fixture> {
   const root = mkdtempSync(join(tmpdir(), "ghost-engine-"));
   const ledger = new Ledger(join(root, "ledger.db"));
   const secrets = new MemorySecrets();
@@ -105,7 +108,7 @@ async function fixture(): Promise<Fixture> {
   const engine = await createEngine({
     core,
     storagePath: join(root, "pi.db"),
-    tools,
+    tools: toolFactory(core),
     sandbox,
     models,
     log: () => {},
@@ -295,4 +298,93 @@ test("the model catalog follows the configured providers", async () => {
   expect(await models.getAuth("faux")).toEqual({ auth: { apiKey: "faux-key" }, source: "Ghost secrets" });
   applyProviders(models, { ...settings, providers: [] }, secrets);
   expect(models.getProviders()).toHaveLength(0);
+});
+
+test("changing the main Ghost transfers real management authority without restarting conversations", async () => {
+  const { core, engine, ledger, root, ghostId, conversationId, faux } = await fixture(
+    (core) => createToolSet({ core, sandbox, memory: null, documents: null }),
+  );
+  const helper = core.createGhost({ name: "Helper", persona: "Original helper.", tools: [] });
+  await core.idle();
+  const manage = async (actor: string, target: string, persona: string) => {
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("ghost_update", { ghost_id: target, persona }), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxText("finished")),
+    ]);
+    const toolResult = nextMessage(engine, actor, "tool");
+    const settled = core.nextActivity(actor, core.activityCount(actor) + 1);
+    await core.sendMessage(actor, "Update the requested Ghost.", crypto.randomUUID());
+    await toolResult;
+    await settled;
+  };
+  try {
+    await manage(conversationId, helper.id, "Managed before the switch.");
+    expect(ledger.ghost(helper.id).persona).toBe("Managed before the switch.");
+
+    await execute(core, new Access(ledger, { kind: "owner" }), {
+      requestId: crypto.randomUUID(),
+      command: { type: "ghost.set_default", ghostId: helper.id },
+    }, { publicOrigin: "http://localhost", documents: null });
+    await core.idle();
+
+    await manage(conversationId, helper.id, "Unauthorized former main.");
+    expect(ledger.ghost(helper.id).persona).toBe("Managed before the switch.");
+    await manage(helper.directConversationId, ghostId, "Managed by the new main.");
+    expect(ledger.ghost(ghostId).persona).toBe("Managed by the new main.");
+    await manage(helper.directConversationId, helper.id, "Unauthorized self edit.");
+    expect(ledger.ghost(helper.id).persona).toBe("Managed before the switch.");
+  } finally {
+    core.stop();
+    await core.idle();
+    await engine.close();
+    ledger.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the real model request offers only granted tools after live permission changes", async () => {
+  const { core, engine, ledger, root, faux } = await fixture(
+    (core) => createToolSet({ core, sandbox, memory: null, documents: null }),
+  );
+  const helper = core.createGhost({ name: "Restricted", persona: "Only use granted tools.", tools: [] });
+  await core.idle();
+  const offered = async (): Promise<string[]> => {
+    let names: string[] = [];
+    faux.setResponses([(context) => {
+      const available = new Set<string>();
+      for (const message of context.messages) {
+        if (message.role !== "system") continue;
+        for (const tool of message.toolsRemoved ?? []) available.delete(tool.name);
+        for (const tool of message.toolsAdded ?? []) available.add(tool.name);
+      }
+      names = [...available].sort();
+      return fauxAssistantMessage(fauxText("finished"));
+    }]);
+    const answered = nextMessage(engine, helper.directConversationId, "assistant");
+    const settled = core.nextActivity(helper.directConversationId, core.activityCount(helper.directConversationId) + 1);
+    await core.sendMessage(helper.directConversationId, "What can you do?", crypto.randomUUID());
+    await answered;
+    await settled;
+    return names;
+  };
+  const update = async (tools: [] | ["work_list"]) => {
+    await execute(core, new Access(ledger, { kind: "owner" }), {
+      requestId: crypto.randomUUID(),
+      command: { type: "ghost.update", ghostId: helper.id, tools },
+    }, { publicOrigin: "http://localhost", documents: null });
+    await core.idle();
+  };
+  try {
+    expect(await offered()).toEqual(["ask_owner"]);
+    await update(["work_list"]);
+    expect(await offered()).toEqual(["ask_owner", "work_list"]);
+    await update([]);
+    expect(await offered()).toEqual(["ask_owner"]);
+  } finally {
+    core.stop();
+    await core.idle();
+    await engine.close();
+    ledger.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

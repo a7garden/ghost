@@ -4,7 +4,7 @@ import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
 import type { DocumentsPort, PageMeta } from "../integrations/ports.ts";
-import { errorResult, firstLine, scopeOf, type Scope } from "./shared.ts";
+import { errorResult, firstLine, requireAllowed, type Scope } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -12,9 +12,8 @@ const text = (message: string): ToolExecutionResult => ({ content: [{ type: "tex
 const READ_WINDOW = 16_384;
 
 export function createDocumentsTools(core: Core, documents: DocumentsPort): Extension {
-  /** The Space grant of this conversation's Ghost, or a refusal. Only direct conversations carry document tools. */
+  /** The Space grant of this conversation's Ghost, or a refusal. Kind is already guarded per tool. */
   function grant(scope: Scope, spaceId: string): { spaceId: string; mode: "read" | "propose" } {
-    if (scope.conversation.kind !== "direct") throw forbidden("documents are available only in direct conversations");
     const found = documents.spacesFor(scope.ghost.id).find((candidate) => candidate.space.id === spaceId);
     if (!found) throw forbidden("this Ghost has no grant for that Space");
     return { spaceId: found.space.id, mode: found.mode };
@@ -27,8 +26,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
     replay: "safe",
     async execute(_args, api) {
       try {
-        const scope = scopeOf(core, api);
-        if (scope.conversation.kind !== "direct") throw forbidden("documents are available only in direct conversations");
+        const scope = requireAllowed(core, api, "document_spaces");
         const spaces = documents.spacesFor(scope.ghost.id);
         return text(spaces.length === 0 ? "No document Spaces are granted." : spaces.map((entry) => `- ${entry.space.name} (${entry.space.id}) — ${entry.mode}`).join("\n"));
       } catch (error) {
@@ -47,7 +45,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
     replay: "safe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "document_list");
         const granted = grant(scope, args.space_id);
         const pages = await documents.listPages(granted.spaceId, args.query ?? null);
         return text(pages.length === 0 ? "No pages matched." : pages.map((page: PageMeta) => `- ${page.title} (${page.pageId}) ${page.locator} — ${page.profile}`).join("\n"));
@@ -68,7 +66,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
     replay: "safe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "document_read");
         const granted = grant(scope, args.space_id);
         if (args.page_id === undefined && args.locator === undefined) throw invalid("give page_id or locator");
         const page = await documents.readPage(granted.spaceId, { pageId: args.page_id, locator: args.locator });
@@ -94,7 +92,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "document_propose");
         const granted = grant(scope, args.space_id);
         if (granted.mode !== "propose") throw forbidden("this Ghost may read that Space but not propose in it");
         const proposal = {

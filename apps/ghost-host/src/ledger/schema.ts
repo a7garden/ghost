@@ -1,3 +1,5 @@
+import { GHOST_TOOLS } from "@ghost/contract";
+
 /**
  * Ledger migrations, applied in order inside one transaction each.
  * `PRAGMA user_version` records how many have run. Append only.
@@ -207,5 +209,8 @@ export const MIGRATIONS: readonly string[] = [
   /* 2: no privacy tiers or local providers; every configured provider runs everything */ `
   ALTER TABLE conversations DROP COLUMN privacy;
   ALTER TABLE providers DROP COLUMN local;
+  `,
+  /* 3: explicit per-Ghost tool allow-lists; established Ghosts keep the full set they effectively had */ `
+  ALTER TABLE ghosts ADD COLUMN tools TEXT NOT NULL DEFAULT '${JSON.stringify(GHOST_TOOLS)}';
   `,
 ];

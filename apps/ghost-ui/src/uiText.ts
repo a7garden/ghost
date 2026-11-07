@@ -6,6 +6,7 @@ export const uiTerms = {
   schedules: '반복 작업',
   conversationHistory: '대화 기록',
   roleInstructions: '역할 지시',
+  ghostSettings: 'Ghost 설정',
   settings: '설정',
 } as const;
 

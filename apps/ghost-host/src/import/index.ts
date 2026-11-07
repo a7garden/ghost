@@ -12,6 +12,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import {
   Avatar,
   Conversation,
+  GHOST_TOOLS,
   Ghost,
   Provider,
   Schedule,
@@ -562,6 +563,8 @@ function planGhost(
     isDefault: row.ghostId === defaultId,
     // Draining Ghosts accepted no new work; paused preserves that posture.
     state: row.mode === "draining" ? "paused" : "active",
+    // Established Ghosts keep every tool they effectively had before allow-lists existed.
+    tools: [...GHOST_TOOLS],
     directConversationId: row.conversationId,
     createdAt,
     updatedAt: now,

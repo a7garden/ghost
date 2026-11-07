@@ -5,7 +5,7 @@ import { spriteVersionOf } from './sprites';
 
 const ghost = (id: string) => ({
   id, name: 'Sage', persona: '', look: { avatarId: null }, model: null, isDefault: true, state: 'active' as const,
-  directConversationId: `${id}-direct`, createdAt: 1, updatedAt: 1,
+  tools: [], directConversationId: `${id}-direct`, createdAt: 1, updatedAt: 1,
 });
 
 const state = (partial: Partial<Pick<State, 'conversations' | 'decisions'>> = {}): State => ({

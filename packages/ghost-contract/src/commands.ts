@@ -3,6 +3,7 @@ import {
   Acceptance,
   ArtifactRef,
   DeviceGrant,
+  GhostToolList,
   Id,
   Look,
   ModelInfo,
@@ -71,6 +72,8 @@ export const Command = Type.Union([
     persona: Type.String({ maxLength: 8192 }),
     model: Type.Optional(nullable(ModelRef)),
     look: Type.Optional(Look),
+    /** Omit for the full selectable set; [] disables every optional tool. */
+    tools: Type.Optional(GhostToolList),
   }),
   command("ghost.update", {
     ghostId: Id,
@@ -79,6 +82,7 @@ export const Command = Type.Union([
     model: Type.Optional(nullable(ModelRef)),
     look: Type.Optional(Look),
     state: Type.Optional(GhostState),
+    tools: Type.Optional(GhostToolList),
   }),
   command("ghost.set_default", { ghostId: Id }),
   command("sandbox.control", { ghostId: Id, action: Type.Union([Type.Literal("stop"), Type.Literal("reset")]) }),

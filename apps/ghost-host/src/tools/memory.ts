@@ -3,7 +3,7 @@ import { defineExtension, defineTool, type Extension, type ToolExecutionResult }
 import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import type { MemoryPort } from "../integrations/ports.ts";
-import { errorResult, firstLine, scopeOf } from "./shared.ts";
+import { errorResult, firstLine, requireAllowed } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -23,7 +23,7 @@ export function createMemoryTools(core: Core, memory: MemoryPort): Extension {
     replay: "safe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "memory_search");
         if (!memory.available(scope.ghost.id)) throw forbidden("memory is not available for this Ghost");
         const hits = await memory.search(scope.ghost.id, args.query, args.limit ?? 8);
         return text(hits.length === 0 ? "No memory matched." : hits.map((hit) => `- ${hit.text} [${hit.source}${hit.score === null ? "" : `, score ${hit.score}`}]`).join("\n"));
@@ -43,7 +43,7 @@ export function createMemoryTools(core: Core, memory: MemoryPort): Extension {
     replay: "safe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "memory_recall");
         if (!memory.available(scope.ghost.id)) throw forbidden("memory is not available for this Ghost");
         const recalled = await memory.recall(scope.ghost.id, args.query, args.token_budget ?? 1024);
         return text(recalled.text ? `${recalled.text}\n\nSources: ${recalled.sources.join(", ")}` : "Nothing recalled.");
@@ -60,7 +60,7 @@ export function createMemoryTools(core: Core, memory: MemoryPort): Extension {
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const scope = scopeOf(core, api);
+        const scope = requireAllowed(core, api, "memory_retain");
         if (!memory.available(scope.ghost.id)) throw forbidden("memory is not available for this Ghost");
         if (new TextEncoder().encode(args.text).length > MAX_RETAIN_BYTES) throw invalid(`memory_retain stores at most ${MAX_RETAIN_BYTES} bytes`);
         const origin = { conversationId: scope.conversation.id, workId: scope.conversation.workId };

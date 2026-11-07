@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added per-Ghost tool allow-lists and agent settings for role instructions and tools.
+  The current main Ghost may inspect/configure other non-main Ghosts only from direct
+  conversations; self-configuration and changing the main designation remain owner-only.
+  Optional tools are filtered from model requests and checked against current permissions
+  on execution, including stale calls. Unsaved owner toggles preserve concurrent changes
+  to untouched tool permissions.
+
 - Moved to the new host contract: one Bun host process (`apps/ghost-host`), one HTTP API
   (`@ghost/contract`). `src/host/` owns the whole data layer now — `HostClient`
   (`/api/state`, transcript pages, commands, artifact bytes, SSE), `HostStore` (snapshot +
