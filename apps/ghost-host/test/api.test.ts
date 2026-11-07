@@ -322,6 +322,19 @@ describe("API server", () => {
     expect(await readTools()).toEqual(["work_list"]);
   });
 
+  test("a Ghost's look keeps its body shape and accessory; unknown values are refused", async () => {
+    const look = { avatarId: null, body: "#59a08b", shape: "sheet", face: "dots", mark: "headphones" } as const;
+    const updated = parse(CommandResponse, await (await runCommand({ type: "ghost.update", ghostId: alphaId, look }, OWNER_TOKEN)).json());
+    expect(updated.ok).toBe(true);
+    const readLook = async () => parse(State, await (await get("/api/state", OWNER_TOKEN)).json()).ghosts.find((ghost) => ghost.id === alphaId)?.look;
+    expect(await readLook()).toEqual(look);
+    for (const bad of [{ ...look, shape: "star" }, { ...look, mark: "cape" }]) {
+      const refused = parse(CommandResponse, await (await runCommand({ type: "ghost.update", ghostId: alphaId, look: bad }, OWNER_TOKEN)).json());
+      expect(refused.ok ? "ok" : refused.error.code).toBe("invalid");
+    }
+    expect(await readLook()).toEqual(look);
+  });
+
   test("pairing: owner starts, device claims once", async () => {
     const started = (await (
       await runCommand({ type: "device.pairing_start", name: "Test Phone", grants: [{ ghostId: alphaId, conversationId: alphaDirectId }] }, OWNER_TOKEN)

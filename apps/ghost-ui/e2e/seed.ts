@@ -115,13 +115,13 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
     type: 'ghost.create',
     name: '연구원',
     persona: '조사와 자료 정리를 맡는 Ghost입니다.',
-    look: { avatarId: null, body: '#c47f3c', face: 'dots', mark: 'antenna' },
+    look: { avatarId: null, body: '#c47f3c', shape: 'squircle', face: 'dots', mark: 'headphones' },
   })).ghostId);
   const scribeGhostId = String((await command(host, {
     type: 'ghost.create',
     name: '기록가',
     persona: '회의 기록과 문서를 맡는 Ghost입니다.',
-    look: { avatarId: null, body: '#59a08b', face: 'arcs', mark: 'sprout' },
+    look: { avatarId: null, body: '#59a08b', shape: 'sheet', face: 'arcs', mark: 'glasses' },
   })).ghostId);
 
   // Direct conversation with the default Ghost: two owner turns, two streamed replies.

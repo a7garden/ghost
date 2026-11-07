@@ -40,4 +40,4 @@ npm test        # src-tauri 프로세스 감독(supervisor) 테스트
 
 외부 모드 실행 검증: 임시 루트로 호스트를 띄운다(`GHOST_ROOT=$(mktemp -d) GHOST_PORT=0 GHOST_UI_DIR=<빌드된 ui> bun apps/ghost-host/src/main.ts serve`), 임시 console.json을 쓰고(`GHOST_CONSOLE_CONFIG`) 디버그 빌드를 실행해 창이 호스트 UI를 띄우는지 확인한다.
 
-번들은 로컬 개발용 `Ghost.app`이며 Apple Developer ID 서명/공증 배포를 주진하지 않는다. 사용자가 승인한 닫힌 몸체·짧은 두 눈·작은 원형 입의 Ghost PNG/SVG 원본을 `src-tauri/brand-source`에 보존하고 Tauri 아이콘 변환으로 번들·Dock에 적용한다.
+번들은 로컬 개발용 `Ghost.app`이며 Apple Developer ID 서명/공증 배포를 추진하지 않는다. 앱 아이콘은 원형 Ghost(승인된 얼굴)와 파란 작업 호다. 원본 `src-tauri/brand-source/Ghost-round-macos.svg`를 1024px 투명 PNG로 렌더링하고 `npx tauri icon <png> -o src-tauri/icons`로 번들·Dock 아이콘을 만든다. 이전 아이콘 원본과 이력은 같은 폴더의 `provenance.json`에 있다.

@@ -15,36 +15,43 @@ public struct ModelRef: Codable, Hashable, Sendable {
     public var thinking: String?
 }
 
+public enum LookShape: String, Codable, Sendable, CaseIterable {
+    case round, egg, squircle, sheet
+}
+
 public enum LookFace: String, Codable, Sendable, CaseIterable {
     case bars, dots, arcs, tall
 }
 
 public enum LookMark: String, Codable, Sendable, CaseIterable {
-    case none, halo, antenna, sprout, ring, spark
+    case none, halo, antenna, sprout, ring, spark, crown, bow, ears, horns, headphones, glasses
 }
 
 public struct Look: Codable, Hashable, Sendable {
     public var avatarId: String?
     public var body: String?
     public var background: String?
+    public var shape: LookShape?
     public var face: LookFace?
     public var mark: LookMark?
 
-    public init(avatarId: String?, body: String? = nil, background: String? = nil, face: LookFace? = nil, mark: LookMark? = nil) {
+    public init(avatarId: String?, body: String? = nil, background: String? = nil, shape: LookShape? = nil, face: LookFace? = nil, mark: LookMark? = nil) {
         self.avatarId = avatarId
         self.body = body
         self.background = background
+        self.shape = shape
         self.face = face
         self.mark = mark
     }
 
-    private enum CodingKeys: String, CodingKey { case avatarId, body, background, face, mark }
+    private enum CodingKeys: String, CodingKey { case avatarId, body, background, shape, face, mark }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         avatarId = try c.decodeIfPresent(String.self, forKey: .avatarId)
         body = try c.decodeIfPresent(String.self, forKey: .body)
         background = try c.decodeIfPresent(String.self, forKey: .background)
+        shape = try c.decodeIfPresent(String.self, forKey: .shape).flatMap(LookShape.init(rawValue:))
         face = try c.decodeIfPresent(String.self, forKey: .face).flatMap(LookFace.init(rawValue:))
         mark = try c.decodeIfPresent(String.self, forKey: .mark).flatMap(LookMark.init(rawValue:))
     }

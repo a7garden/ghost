@@ -282,8 +282,8 @@ struct GhostPortrait: View {
             context.translateBy(x: -100, y: -100)
             let body = GraphicsContext.Shading.color(GhostStyle.color(hex))
             let face = GraphicsContext.Shading.color(faceColor)
-            drawMark(context: &context, color: body, front: false)
-            context.fill(Path(ellipseIn: CGRect(x: 212, y: 212, width: 576, height: 576)), with: body)
+            drawMark(context: &context, color: body, face: face, front: false)
+            context.fill(bodyPath, with: body)
             var eyes = Path()
             switch ghost?.look.face ?? .bars {
             case .bars:
@@ -301,7 +301,7 @@ struct GhostPortrait: View {
             if ghost?.look.face == .arcs { context.stroke(eyes, with: face, style: StrokeStyle(lineWidth: 26, lineCap: .round)) }
             else { context.fill(eyes, with: face) }
             context.fill(Path(ellipseIn: CGRect(x: 485, y: 469, width: 30, height: 30)), with: face)
-            drawMark(context: &context, color: body, front: true)
+            drawMark(context: &context, color: body, face: face, front: true)
         }
         .overlay {
             if presence == .working { TravellingArc().padding(2) }
@@ -313,7 +313,28 @@ struct GhostPortrait: View {
         .frame(width: size, height: size).accessibilityHidden(true)
     }
 
-    private func drawMark(context: inout GraphicsContext, color: GraphicsContext.Shading, front: Bool) {
+    private var bodyPath: Path {
+        var p = Path()
+        switch ghost?.look.shape ?? .round {
+        case .round:
+            p.addEllipse(in: CGRect(x: 212, y: 212, width: 576, height: 576))
+        case .egg:
+            p.addEllipse(in: CGRect(x: 238, y: 212, width: 524, height: 616))
+        case .squircle:
+            p.addRoundedRect(in: CGRect(x: 212, y: 212, width: 576, height: 576), cornerSize: CGSize(width: 188, height: 188))
+        case .sheet:
+            p.addArc(center: CGPoint(x: 500, y: 500), radius: 288, startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
+            p.addLine(to: CGPoint(x: 788, y: 770))
+            p.addQuadCurve(to: CGPoint(x: 644, y: 770), control: CGPoint(x: 716, y: 830))
+            p.addQuadCurve(to: CGPoint(x: 500, y: 770), control: CGPoint(x: 572, y: 830))
+            p.addQuadCurve(to: CGPoint(x: 356, y: 770), control: CGPoint(x: 428, y: 830))
+            p.addQuadCurve(to: CGPoint(x: 212, y: 770), control: CGPoint(x: 284, y: 830))
+            p.closeSubpath()
+        }
+        return p
+    }
+
+    private func drawMark(context: inout GraphicsContext, color: GraphicsContext.Shading, face: GraphicsContext.Shading, front: Bool) {
         let mark = ghost?.look.mark ?? .none
         if mark == .ring {
             var ring = Path()
@@ -327,7 +348,44 @@ struct GhostPortrait: View {
             context.opacity = 1
             return
         }
-        guard !front else { return }
+        if front {
+            switch mark {
+            case .bow:
+                var bow = context
+                bow.translateBy(x: 652, y: 262)
+                bow.rotate(by: .degrees(-20))
+                bow.translateBy(x: -652, y: -262)
+                let stroke = StrokeStyle(lineWidth: 16, lineJoin: .round)
+                for side in -1...1 where side != 0 {
+                    let direction = CGFloat(side)
+                    var wing = Path()
+                    wing.move(to: CGPoint(x: 652, y: 262))
+                    wing.addLine(to: CGPoint(x: 652 + direction * 86, y: 208))
+                    wing.addQuadCurve(to: CGPoint(x: 652 + direction * 86, y: 316), control: CGPoint(x: 652 + direction * 106, y: 262))
+                    wing.closeSubpath()
+                    bow.fill(wing, with: face)
+                    bow.stroke(wing, with: color, style: stroke)
+                }
+                let knot = Path(ellipseIn: CGRect(x: 622, y: 232, width: 60, height: 60))
+                bow.fill(knot, with: face)
+                bow.stroke(knot, with: color, style: stroke)
+            case .headphones:
+                var cups = Path()
+                cups.addRoundedRect(in: CGRect(x: 140, y: 406, width: 72, height: 140), cornerSize: CGSize(width: 36, height: 36))
+                cups.addRoundedRect(in: CGRect(x: 788, y: 406, width: 72, height: 140), cornerSize: CGSize(width: 36, height: 36))
+                context.fill(cups, with: face)
+                context.stroke(cups, with: color, lineWidth: 18)
+            case .glasses:
+                var glasses = Path()
+                glasses.addEllipse(in: CGRect(x: 369, y: 363, width: 108, height: 108))
+                glasses.addEllipse(in: CGRect(x: 523, y: 363, width: 108, height: 108))
+                glasses.move(to: CGPoint(x: 477, y: 410))
+                glasses.addQuadCurve(to: CGPoint(x: 523, y: 410), control: CGPoint(x: 500, y: 396))
+                context.stroke(glasses, with: face, style: StrokeStyle(lineWidth: 16, lineCap: .round))
+            default: break
+            }
+            return
+        }
         var p = Path()
         switch mark {
         case .halo:
@@ -348,7 +406,40 @@ struct GhostPortrait: View {
             p.addCurve(to: CGPoint(x: 790, y: 330), control1: CGPoint(x: 818, y: 258), control2: CGPoint(x: 798, y: 278))
             p.addCurve(to: CGPoint(x: 710, y: 250), control1: CGPoint(x: 782, y: 278), control2: CGPoint(x: 762, y: 258))
             p.addCurve(to: CGPoint(x: 790, y: 170), control1: CGPoint(x: 762, y: 242), control2: CGPoint(x: 782, y: 222))
-        case .none, .ring: break
+        case .crown:
+            p.move(to: CGPoint(x: 372, y: 262))
+            p.addLine(to: CGPoint(x: 352, y: 134))
+            p.addLine(to: CGPoint(x: 432, y: 196))
+            p.addLine(to: CGPoint(x: 500, y: 110))
+            p.addLine(to: CGPoint(x: 568, y: 196))
+            p.addLine(to: CGPoint(x: 648, y: 134))
+            p.addLine(to: CGPoint(x: 628, y: 262))
+            p.closeSubpath()
+            context.stroke(p, with: color, style: StrokeStyle(lineWidth: 18, lineJoin: .round))
+        case .ears:
+            p.move(to: CGPoint(x: 300, y: 330))
+            p.addLine(to: CGPoint(x: 322, y: 166))
+            p.addLine(to: CGPoint(x: 440, y: 250))
+            p.closeSubpath()
+            p.move(to: CGPoint(x: 700, y: 330))
+            p.addLine(to: CGPoint(x: 678, y: 166))
+            p.addLine(to: CGPoint(x: 560, y: 250))
+            p.closeSubpath()
+            context.stroke(p, with: color, style: StrokeStyle(lineWidth: 24, lineJoin: .round))
+        case .horns:
+            p.move(to: CGPoint(x: 352, y: 300))
+            p.addCurve(to: CGPoint(x: 332, y: 136), control1: CGPoint(x: 318, y: 252), control2: CGPoint(x: 300, y: 190))
+            p.addCurve(to: CGPoint(x: 432, y: 262), control1: CGPoint(x: 352, y: 190), control2: CGPoint(x: 392, y: 228))
+            p.closeSubpath()
+            p.move(to: CGPoint(x: 648, y: 300))
+            p.addCurve(to: CGPoint(x: 668, y: 136), control1: CGPoint(x: 682, y: 252), control2: CGPoint(x: 700, y: 190))
+            p.addCurve(to: CGPoint(x: 568, y: 262), control1: CGPoint(x: 648, y: 190), control2: CGPoint(x: 608, y: 228))
+            p.closeSubpath()
+        case .headphones:
+            p.addArc(center: CGPoint(x: 500, y: 476), radius: 324, startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
+            context.stroke(p, with: color, style: StrokeStyle(lineWidth: 28, lineCap: .round))
+            return
+        case .none, .ring, .bow, .glasses: break
         }
         context.fill(p, with: color)
     }

@@ -1,12 +1,12 @@
 import { createContext, useContext } from 'react';
-import type { LookFace, LookMark } from '@ghost/contract';
+import type { LookFace, LookMark, LookShape } from '@ghost/contract';
 import { PetSprite } from '../pets/PetSprite';
 import { useProfileAvatar } from '../pets/AvatarProvider';
 import { GhostCharacter } from '../pets/GhostCharacter';
 import { defaultBodyColor } from '../pets/appearance';
 import type { Tone } from '../features/ghostState';
 
-export type PortraitAppearance = { body?: string; background?: string; face?: LookFace; mark?: LookMark };
+export type PortraitAppearance = { body?: string; background?: string; shape?: LookShape; face?: LookFace; mark?: LookMark };
 export const PortraitAppearances = createContext<Readonly<Record<string, PortraitAppearance>>>({});
 
 export function DotAvatar({ tone = 'mint', size = 48, className = '', profileId }: { tone?: Tone; size?: number; className?: string; profileId?: string }) {
@@ -15,8 +15,7 @@ export function DotAvatar({ tone = 'mint', size = 48, className = '', profileId 
   const pet = useProfileAvatar(profileId, tone);
   return <span className={`dot-avatar pet-avatar ${className}`} style={{ width: size, height: size, backgroundColor: appearance?.background }} aria-hidden="true">
     {pet.source ? <PetSprite source={pet.source} version={pet.version} state={pet.state} size={size} animate={pet.animate}/>
-      : pet.isDefault ? <GhostCharacter size={size} color={appearance?.body} fallback={profileId ? defaultBodyColor(profileId) : undefined}
-        face={appearance?.face} mark={appearance?.mark} state={pet.isResponding ? 'running' : 'idle'} animate={pet.animate}/>
+      : pet.isDefault ? <GhostCharacter size={size} color={appearance?.body} fallback={profileId ? defaultBodyColor(profileId) : undefined} shape={appearance?.shape} face={appearance?.face} mark={appearance?.mark} state={pet.isResponding ? 'running' : 'idle'} animate={pet.animate}/>
         : <span className="avatar-loading"/>}
   </span>;
 }

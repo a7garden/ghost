@@ -79,5 +79,5 @@ Work 스레드, 질문·승인·결과 결정을 추가한다.
 `--ui-testing-incoming`을 쓴다. 실제 호스트에 연결하는 검증은 명시적으로
 페어링한 테스트 호스트와 `GHOST_E2E=1`이 필요하다. 기본 실행에서는 건너뛴다.
 
-앱 아이콘 재생성: 이 저장소 루트에서
-`swift apps/ghost-ios/generate-icon.swift apps/ghost-ios/App/Assets.xcassets/AppIcon.appiconset/Ghost-1024.png`.
+앱 아이콘 원본은 `apps/ghost-desktop/src-tauri/brand-source/Ghost-round-ios.svg`다.
+1024px 불투명 PNG로 렌더링해 `App/Assets.xcassets/AppIcon.appiconset/Ghost-1024.png`에 넣는다.

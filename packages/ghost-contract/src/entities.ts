@@ -21,14 +21,22 @@ export type ModelRef = Static<typeof ModelRef>;
 export const LookFace = Type.Union([Type.Literal("bars"), Type.Literal("dots"), Type.Literal("arcs"), Type.Literal("tall")]);
 export type LookFace = Static<typeof LookFace>;
 
+/** Body silhouette of the built-in Ghost portrait; all share the round body's top and width. */
+export const LookShape = Type.Union([Type.Literal("round"), Type.Literal("egg"), Type.Literal("squircle"), Type.Literal("sheet")]);
+export type LookShape = Static<typeof LookShape>;
+
 /** A single minimal accent on the built-in Ghost portrait. */
-export const LookMark = Type.Union([Type.Literal("none"), Type.Literal("halo"), Type.Literal("antenna"), Type.Literal("sprout"), Type.Literal("ring"), Type.Literal("spark")]);
+export const LookMark = Type.Union([
+  Type.Literal("none"), Type.Literal("halo"), Type.Literal("antenna"), Type.Literal("sprout"), Type.Literal("ring"), Type.Literal("spark"),
+  Type.Literal("crown"), Type.Literal("bow"), Type.Literal("ears"), Type.Literal("horns"), Type.Literal("headphones"), Type.Literal("glasses"),
+]);
 export type LookMark = Static<typeof LookMark>;
 
 export const Look = Type.Object({
   avatarId: nullable(Id),
   body: Type.Optional(Type.String({ maxLength: 32 })),
   background: Type.Optional(Type.String({ maxLength: 32 })),
+  shape: Type.Optional(LookShape),
   face: Type.Optional(LookFace),
   mark: Type.Optional(LookMark),
 });

@@ -5,25 +5,38 @@ import Testing
 @Suite struct AppearanceContractTests {
     @Test func optionalAppearanceDecoding() throws {
         let decoder = JSONDecoder()
-        let present = try decoder.decode(Look.self, from: Data(##"{"face":"arcs","mark":"sprout","body":"#3d5cf5"}"##.utf8))
+        let present = try decoder.decode(Look.self, from: Data(##"{"shape":"egg","face":"arcs","mark":"crown","body":"#3d5cf5"}"##.utf8))
+        #expect(present.shape == .egg)
         #expect(present.face == .arcs)
-        #expect(present.mark == .sprout)
+        #expect(present.mark == .crown)
         #expect(present.body == "#3d5cf5")
         let absent = try decoder.decode(Look.self, from: Data("{}".utf8))
+        #expect(absent.shape == nil)
         #expect(absent.face == nil)
         #expect(absent.mark == nil)
-        let unknown = try decoder.decode(Look.self, from: Data(#"{"face":"future-face","mark":"future-mark"}"#.utf8))
+        let unknown = try decoder.decode(Look.self, from: Data(#"{"shape":"future-shape","face":"future-face","mark":"future-mark"}"#.utf8))
+        #expect(unknown.shape == nil)
         #expect(unknown.face == nil)
         #expect(unknown.mark == nil)
-        let mixed = try decoder.decode(Look.self, from: Data(#"{"face":"dots","mark":"future-mark"}"#.utf8))
+        let mixed = try decoder.decode(Look.self, from: Data(#"{"shape":"sheet","face":"dots","mark":"future-mark"}"#.utf8))
+        #expect(mixed.shape == .sheet)
         #expect(mixed.face == .dots)
         #expect(mixed.mark == nil)
         #expect(try decoder.decode(Look.self, from: JSONEncoder().encode(present)) == present)
+        #expect(Look(avatarId: nil).shape == nil)
+        #expect(Look(avatarId: nil, shape: .squircle).shape == .squircle)
+        for shape in LookShape.allCases {
+            let look = try decoder.decode(Look.self, from: Data("{\"shape\":\"\(shape.rawValue)\"}".utf8))
+            #expect(look.shape == shape)
+            #expect(try decoder.decode(Look.self, from: JSONEncoder().encode(look)) == look)
+        }
         for face in LookFace.allCases {
             #expect(try decoder.decode(Look.self, from: Data("{\"face\":\"\(face.rawValue)\"}".utf8)).face == face)
         }
         for mark in LookMark.allCases {
-            #expect(try decoder.decode(Look.self, from: Data("{\"mark\":\"\(mark.rawValue)\"}".utf8)).mark == mark)
+            let look = try decoder.decode(Look.self, from: Data("{\"mark\":\"\(mark.rawValue)\"}".utf8))
+            #expect(look.mark == mark)
+            #expect(try decoder.decode(Look.self, from: JSONEncoder().encode(look)) == look)
         }
     }
 
@@ -41,8 +54,8 @@ import Testing
         let present = try decoder.decode(Live.self, from: Data(#"{"conversationId":"c","running":true,"thinking":"생각 중","tools":[]}"#.utf8))
         #expect(present.thinking == "생각 중")
         #expect(try decoder.decode(Live.self, from: JSONEncoder().encode(present)) == present)
-        let nulls = try decoder.decode(Look.self, from: Data(#"{"face":null,"mark":null}"#.utf8))
-        #expect(nulls.face == nil && nulls.mark == nil)
+        let nulls = try decoder.decode(Look.self, from: Data(#"{"shape":null,"face":null,"mark":null}"#.utf8))
+        #expect(nulls.shape == nil && nulls.face == nil && nulls.mark == nil)
     }
 
     @Test func defaultHueUsesWrappingUTF16Hash() {

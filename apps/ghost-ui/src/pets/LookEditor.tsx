@@ -1,13 +1,18 @@
-import type { Look, LookFace, LookMark } from '@ghost/contract';
+import type { Look, LookFace, LookMark, LookShape } from '@ghost/contract';
 import { GhostCharacter } from './GhostCharacter';
 import { GHOST_PALETTE, defaultBodyColor } from './appearance';
 
+const shapes: { value: LookShape; label: string }[] = [
+  { value: 'round', label: '동그라미' }, { value: 'egg', label: '달걀' }, { value: 'squircle', label: '둥근 네모' }, { value: 'sheet', label: '유령' },
+];
 const faces: { value: LookFace; label: string }[] = [
   { value: 'bars', label: '기본 눈' }, { value: 'dots', label: '동그란 눈' }, { value: 'arcs', label: '웃는 눈' }, { value: 'tall', label: '긴 눈' },
 ];
 const marks: { value: LookMark; label: string }[] = [
   { value: 'none', label: '장식 없음' }, { value: 'halo', label: '후광' }, { value: 'antenna', label: '안테나' },
   { value: 'sprout', label: '새싹' }, { value: 'ring', label: '고리' }, { value: 'spark', label: '반짝임' },
+  { value: 'crown', label: '왕관' }, { value: 'bow', label: '리본' }, { value: 'ears', label: '고양이 귀' },
+  { value: 'horns', label: '뿔' }, { value: 'headphones', label: '헤드폰' }, { value: 'glasses', label: '안경' },
 ];
 const backgrounds = [
   { name: '없음', color: '' }, { name: '안개', color: '#eef0f3' }, { name: '하늘', color: '#dbeaff' }, { name: '민트', color: '#d7f0e4' },
@@ -15,17 +20,18 @@ const backgrounds = [
 ];
 
 /**
- * The built-in Ghost's look in one place: a live preview, then color, eyes, accent and tile.
+ * The built-in Ghost's look in one place: a live preview, then color, body, eyes, accent and tile.
  * Every choice is a picture of the result, so the editor reads without labels.
  */
 export function LookEditor({ ghostId, look, disabled, onChange }: { ghostId: string; look: Look; disabled: boolean; onChange(patch: Partial<Look>): void }) {
   const body = look.body || '';
+  const shape = look.shape ?? 'round';
   const face = look.face ?? 'bars';
   const mark = look.mark ?? 'none';
   const fallback = defaultBodyColor(ghostId);
   return <div className="look-editor"><div className="look-editor__layout">
     <div className="look-editor__stage" style={{ backgroundColor: look.background || undefined }}>
-      <GhostCharacter size={128} color={body} fallback={fallback} face={face} mark={mark} animate={false}/>
+      <GhostCharacter size={128} color={body} fallback={fallback} shape={shape} face={face} mark={mark} animate={false}/>
     </div>
     <div className="look-editor__rows">
       <fieldset className="look-editor__row"><legend>색</legend>
@@ -39,16 +45,22 @@ export function LookEditor({ ghostId, look, disabled, onChange }: { ghostId: str
           </label>
         </div>
       </fieldset>
+      <fieldset className="look-editor__row"><legend>모양</legend>
+        <div className="look-editor__options">{shapes.map(item => <button key={item.value} type="button" className="look-option" aria-pressed={shape === item.value} disabled={disabled}
+          title={item.label} aria-label={item.label} onClick={() => onChange({ shape: item.value })}>
+          <GhostCharacter size={40} color={body} fallback={fallback} shape={item.value} face={face} animate={false}/>
+        </button>)}</div>
+      </fieldset>
       <fieldset className="look-editor__row"><legend>눈</legend>
         <div className="look-editor__options">{faces.map(item => <button key={item.value} type="button" className="look-option" aria-pressed={face === item.value} disabled={disabled}
           title={item.label} aria-label={item.label} onClick={() => onChange({ face: item.value })}>
-          <GhostCharacter size={40} color={body} fallback={fallback} face={item.value} animate={false}/>
+          <GhostCharacter size={40} color={body} fallback={fallback} shape={shape} face={item.value} animate={false}/>
         </button>)}</div>
       </fieldset>
       <fieldset className="look-editor__row"><legend>장식</legend>
         <div className="look-editor__options">{marks.map(item => <button key={item.value} type="button" className="look-option" aria-pressed={mark === item.value} disabled={disabled}
           title={item.label} aria-label={item.label} onClick={() => onChange({ mark: item.value })}>
-          <GhostCharacter size={40} color={body} fallback={fallback} face={face} mark={item.value} animate={false}/>
+          <GhostCharacter size={40} color={body} fallback={fallback} shape={shape} face={face} mark={item.value} animate={false}/>
         </button>)}</div>
       </fieldset>
       <fieldset className="look-editor__row"><legend>배경</legend>

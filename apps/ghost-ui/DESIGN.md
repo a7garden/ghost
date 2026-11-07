@@ -5,7 +5,7 @@
 - The host contract (`@ghost/contract`) is the only API reference; the UI owns no second vocabulary for entities, commands or events.
 - Page headings name the destination. Do not append promotional subtitles, rhetorical slogans, English eyebrow labels, or companionship copy. Show actual state and actionable labels. Help belongs beside a field or in an empty/error state when needed.
 - Example data is explicitly labeled and kept separate from the host. No fake live terminal, model execution, or simulated streams.
-- The app icon keeps the original Ghost mark. The in-app built-in Ghost portrait is a round body with the same face (two bar eyes, small round mouth); see Ghost portraits below.
+- The app icon is the round Ghost (approved face) with the blue working arc on a light tile; sources live in `apps/ghost-desktop/src-tauri/brand-source/`. The in-app built-in Ghost portrait uses the same face; see Ghost portraits below.
 
 ## App-owned UI
 
@@ -118,11 +118,14 @@ Interactive responses create new owner messages only through the normal send com
 
 ## Ghost portraits
 
-The built-in portrait is a circle with the approved face. `look.face` picks the eyes
-(bars, dots, arcs, tall) and `look.mark` one accent drawn in the body color (halo,
-antenna, sprout, ring, spark). `look.body` takes any color from a twelve-hue palette or a
-custom one; a Ghost that never chose gets a stable hue from its id so agents read apart.
-The look editor shows every choice as a picture of the result.
+The built-in portrait carries the approved face. `look.shape` picks the body (round, egg,
+squircle, sheet); every body shares the round body's top and width so accents sit alike.
+`look.face` picks the eyes (bars, dots, arcs, tall) and `look.mark` one accent: halo,
+antenna, sprout, ring, spark, crown, ears, horns and the headphone band are drawn in the
+body color; bow, headphone cups and glasses are worn in front in the face color with a
+body-color outline so they read on any tile. `look.body` takes any color from a twelve-hue
+palette or a custom one; a Ghost that never chose gets a stable hue from its id so agents
+read apart. The look editor shows every choice as a picture of the result.
 
 ## Interactive responses
 

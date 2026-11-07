@@ -73,7 +73,7 @@ enum MobileUIFixture {
     static var state: GhostStateSnapshot {
         let ghost = Ghost(
             id: ghostID, name: "Ghost", persona: "iPhone 대화",
-            look: Look(avatarId: nil, body: nil, background: nil, face: .bars, mark: .sprout), model: nil, isDefault: true,
+            look: Look(avatarId: nil, body: nil, background: nil, shape: .sheet, face: .bars, mark: .headphones), model: nil, isDefault: true,
             state: .active, directConversationId: conversationID, createdAt: 1, updatedAt: 1)
         let conversations = [
             Conversation(id: conversationID, ghostId: ghostID, kind: .direct, workId: nil, title: "First conversation", busy: false, createdAt: 1, lastActivityAt: 2),

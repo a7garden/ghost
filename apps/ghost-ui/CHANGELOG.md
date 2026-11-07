@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Ghost variations: four body shapes (`look.shape`: round, egg, squircle, sheet) and six
+  more accessories (crown, bow, cat ears, horns, headphones, glasses); the look editor gains
+  a 모양 row. New app icon: the round Ghost with the blue working arc (Mac and iPhone).
 - Threads open in a panel beside the conversation (`?thread=`): status, lifecycle,
   decisions resolved in place, delegated threads and the live work conversation.
 - Secondary and meta text now meet WCAG AA in both themes (ink2/ink3 retuned; audited

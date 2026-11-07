@@ -1,8 +1,17 @@
 {
-  "approved_on": "2026-10-03",
-  "svg_library_id": "libfile_8322281c4a3881919738250fa134683b",
-  "png_library_id": "libfile_c010f5f86ccc81919c60f31f13a27846",
-  "geometry": "closed body, two short horizontal eyes, small circular mouth; no cursor or tail",
-  "source_assets_unchanged": true,
-  "packaging": "Tauri icon resampling; PNG source supplied by user"
+  "current": {
+    "requested_on": "2026-11-07",
+    "macos_svg": "Ghost-round-macos.svg",
+    "ios_svg": "Ghost-round-ios.svg",
+    "geometry": "round Ghost body with the approved face (two bar eyes, small round mouth) and a blue working arc; macOS squircle on the 1024 grid (824 inset, shadow), iOS full-bleed opaque square",
+    "packaging": "SVG rendered to 1024 PNG with headless Chrome; macOS set from `npx tauri icon`, iOS copied to AppIcon.appiconset/Ghost-1024.png"
+  },
+  "previous": {
+    "approved_on": "2026-10-03",
+    "svg_library_id": "libfile_8322281c4a3881919738250fa134683b",
+    "png_library_id": "libfile_c010f5f86ccc81919c60f31f13a27846",
+    "files": ["Ghost-small-mouth.svg", "Ghost-small-mouth.png"],
+    "geometry": "closed body, two short horizontal eyes, small circular mouth; no cursor or tail",
+    "packaging": "Tauri icon resampling; PNG source supplied by user"
+  }
 }

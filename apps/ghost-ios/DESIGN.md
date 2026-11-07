@@ -16,7 +16,7 @@ Primary buttons use explicit ink/on-ink tokens, including their disabled state, 
 
 Spacing: 4/8/12/16/20/24/32. Primary controls have at least44pt hit targets. Messages use open assistant text and a distinct trailing user bubble. No nested card grids, gradients, decorative orbs, invented counters or technical UUIDs in the default conversation.
 
-The in-app Ghost portrait uses the approved round body, two bar eyes and small round mouth. `look.face` selects bars/dots/arcs/tall and `look.mark` selects none/halo/antenna/sprout/ring/spark. Unknown options decode as unset. The twelve body colors and stable default hue match the web palette; the id hash wraps UInt32 over UTF-16 code units. A travelling blue arc marks working; an amber ring with a notch marks owner attention. The app icon remains unchanged.
+The in-app Ghost portrait keeps the approved two bar eyes and small round mouth on a selectable body: `look.shape` selects round/egg/squircle/sheet (unset renders round). `look.face` selects bars/dots/arcs/tall and `look.mark` selects none/halo/antenna/sprout/ring/spark/crown/bow/ears/horns/headphones/glasses. Shape and accessory geometry uses the web renderer's 1000-unit space and 100…900 viewport. Behind-body marks use the body color; front bows, headphone cups and glasses use the face color with the same strokes and layering as the web. Unknown options decode as unset. The twelve body colors and stable default hue match the web palette; the id hash wraps UInt32 over UTF-16 code units. A travelling blue arc marks working; an amber ring with a notch marks owner attention. The app icon is the round Ghost with the blue working arc, sourced from `apps/ghost-desktop/src-tauri/brand-source/Ghost-round-ios.svg`.
 
 ## Interaction
 
