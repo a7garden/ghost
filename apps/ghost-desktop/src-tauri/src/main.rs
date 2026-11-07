@@ -302,6 +302,32 @@ fn navigation_allowed(origin: &OriginCell, url: &tauri::Url) -> bool {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn browser_url_allowed(url: &tauri::Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+}
+
+/// The renderer never navigates outside the Host; HTTP(S) leaves through this command.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let url = tauri::Url::parse(&url).map_err(|_| "유효한 웹 주소가 아닙니다.")?;
+    if !browser_url_allowed(&url) {
+        return Err("HTTP와 HTTPS 주소만 열 수 있습니다.".into());
+    }
+    use objc2_app_kit::NSWorkspace;
+    use objc2_foundation::{NSString, NSURL};
+
+    let opened = NSURL::URLWithString(&NSString::from_str(url.as_str()))
+        .is_some_and(|url| NSWorkspace::sharedWorkspace().openURL(&url));
+    if opened {
+        Ok(())
+    } else {
+        // Authorization URLs can contain secrets; never include the URL in errors.
+        Err("기본 브라우저에서 페이지를 열지 못했습니다.".into())
+    }
+}
+
 /// Load the host UI in the main window.
 fn navigate(window: &WebviewWindow, endpoint: &Endpoint) {
     let Ok(origin) = tauri::Url::parse(&format!("{}/", endpoint.origin)) else {
@@ -612,9 +638,15 @@ fn main() {
         }
         return;
     }
+    #[cfg(target_os = "macos")]
+    let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool =
+        tauri::generate_handler![drag_window, open_external_url];
+    #[cfg(not(target_os = "macos"))]
+    let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool =
+        tauri::generate_handler![drag_window];
     tauri::Builder::default()
         .plugin(ShortcutBuilder::new().build())
-        .invoke_handler(tauri::generate_handler![drag_window])
+        .invoke_handler(invoke_handler)
         .setup(|app| {
             let resources = app.path().resource_dir()?.join("resources");
             let origin: OriginCell = Arc::new(Mutex::new(None));
@@ -760,4 +792,44 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod external_link_tests {
+    use super::{browser_url_allowed, navigation_allowed, OriginCell};
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn browser_links_only_accept_web_schemes() {
+        for value in [
+            "https://auth.openai.com/codex/device",
+            "https://platform.claude.com/settings/keys",
+            "http://127.0.0.1:62062/",
+        ] {
+            assert!(browser_url_allowed(&value.parse().unwrap()));
+        }
+        for value in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,hello",
+            "mailto:owner@example.com",
+            "tauri://localhost/",
+            "about:blank",
+        ] {
+            assert!(!browser_url_allowed(&value.parse().unwrap()));
+        }
+    }
+
+    #[test]
+    fn external_browser_links_do_not_relax_webview_navigation() {
+        let origin: OriginCell = Arc::new(Mutex::new(Some("http://127.0.0.1:62062".into())));
+        assert!(navigation_allowed(
+            &origin,
+            &"http://127.0.0.1:62062/".parse().unwrap()
+        ));
+        assert!(!navigation_allowed(
+            &origin,
+            &"https://auth.openai.com/codex/device".parse().unwrap()
+        ));
+    }
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, ExternalLink, LoaderCircle } from 'lucide-react';
 import { Button, InlineError } from '../ui';
 import { Modal } from '../components/Modal';
+import { ExternalAnchor } from '../components/ExternalAnchor';
 import { useHost } from '../host/context';
 import type { OAuthStatus, Provider } from '@ghost/contract';
 
@@ -122,7 +123,7 @@ export function ChatGptLoginDialog({ provider, onClose }: { provider: Provider; 
           </Button>
         </div>}
         {uri && <div className="flex flex-wrap items-center gap-3">
-          <Button asChild><a href={uri} target="_blank" rel="noopener noreferrer">인증 페이지 열기<ExternalLink size={14}/></a></Button>
+          <Button asChild><ExternalAnchor href={uri} target="_blank" rel="noopener noreferrer">인증 페이지 열기<ExternalLink size={14}/></ExternalAnchor></Button>
           <span className="text-caption text-ink-3">{remainingMinutes > 0 ? `코드는 약 ${remainingMinutes}분 후 만료됩니다.` : undefined}</span>
         </div>}
         <p className="m-0 text-caption text-ink-3" role="status">인증 페이지에서 코드를 입력하면 여기에 결과가 표시됩니다.</p>

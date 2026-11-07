@@ -1,6 +1,6 @@
 {
   "identifier": "window",
-  "description": "Window dragging for the Ghost console. No filesystem, shell, or process commands are exposed to the renderer.",
+  "description": "Window dragging and HTTP(S) browser opening for the Ghost console. No filesystem, shell, or process commands are exposed to the renderer.",
   "windows": [
     "main"
   ],
@@ -11,6 +11,7 @@
   },
   "permissions": [
     "core:window:allow-start-dragging",
-    "allow-drag-window"
+    "allow-drag-window",
+    "allow-open-external-url"
   ]
 }

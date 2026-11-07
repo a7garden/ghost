@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronRight, ExternalLink, Search } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input, SegmentedControl, SelectField } from '../ui';
 import type { ModelInfo, Provider, ProviderKind, ProviderPreset } from '@ghost/contract';
 import { Modal } from '../components/Modal';
+import { ExternalAnchor } from '../components/ExternalAnchor';
 import { ProviderModels } from './ProviderModels';
 
 const KINDS: { value: ProviderKind; label: string }[] = [
@@ -113,7 +114,7 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
         ? <p className="m-0 text-ui text-ink-2">{initial?.authType === 'oauth' ? '저장된 ChatGPT 인증을 사용합니다.' : '저장 후 인증 페이지에서 ChatGPT 계정으로 로그인합니다.'}</p>
         : <FormField label={initial?.hasCredential ? '새 API 키' : 'API 키'} description={initial?.hasCredential && initial.authType !== 'oauth' ? '비워 두면 저장된 인증 정보를 유지합니다.' : '키는 호스트에만 저장되며 다시 표시되지 않습니다.'}>
           {control => <div className="flex flex-col gap-2"><Input {...control} type="password" value={apiKey} maxLength={4096} autoComplete="off" disabled={locked || removeKey} onChange={event => setApiKey(event.target.value)}/>
-            {currentPreset?.credentialUrl && <a href={currentPreset.credentialUrl} target="_blank" rel="noopener noreferrer" className="flex w-fit items-center gap-1 text-caption text-ink-2 underline underline-offset-4">API 키 발급<ExternalLink size={12} aria-hidden="true"/></a>}
+            {currentPreset?.credentialUrl && <ExternalAnchor href={currentPreset.credentialUrl} target="_blank" rel="noopener noreferrer" className="flex w-fit items-center gap-1 text-caption text-ink-2 underline underline-offset-4">API 키 발급<ExternalLink size={12} aria-hidden="true"/></ExternalAnchor>}
           </div>}
         </FormField>}
       {value.kind === 'openai_compatible' && <FormField label="서버 주소">{control => <Input {...control} type="url" value={value.baseUrl ?? ''} placeholder="https://api.example.com/v1" required disabled={locked} onChange={event => patch({ baseUrl: event.target.value.trim() || null })}/>}</FormField>}

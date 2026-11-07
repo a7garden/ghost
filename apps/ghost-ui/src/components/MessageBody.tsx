@@ -4,6 +4,7 @@ import { Button, cn } from '../ui'
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './MessageBody.css';
+import { ExternalAnchor } from './ExternalAnchor';
 
 /** Transcript links have no document base; only external URLs and local footnotes are navigable. */
 const allowedSchemes: Record<string, true> = { http: true, https: true, mailto: true };
@@ -109,7 +110,7 @@ function SafeLink({ children, href, node: _node, ...props }: ComponentPropsWitho
       }
     }}><InLink.Provider value={true}>{children}</InLink.Provider></a>;
   }
-  return <a {...props} href={href} target="_blank" rel="noopener noreferrer nofollow"><InLink.Provider value={true}>{children}</InLink.Provider></a>;
+  return <ExternalAnchor {...props} href={href} target="_blank" rel="noopener noreferrer nofollow"><InLink.Provider value={true}>{children}</InLink.Provider></ExternalAnchor>;
 }
 
 /** Remote images never load: the alt text becomes an explicit link instead. */
@@ -119,7 +120,7 @@ function ImageLink({ alt, src }: { alt?: string; src?: string }) {
   if (!target) return null;
   const content = <><ImageIcon size={13} className="size-[13px]" aria-hidden="true"/><span className="message-body__image-label">{target}</span></>;
   return src && !inLink && !src.startsWith('#')
-    ? <a className="message-body__image" href={src} target="_blank" rel="noopener noreferrer nofollow" aria-label={`이미지 열기: ${target}`}>{content}</a>
+    ? <ExternalAnchor className="message-body__image" href={src} target="_blank" rel="noopener noreferrer nofollow" aria-label={`이미지 열기: ${target}`}>{content}</ExternalAnchor>
     : <span className="message-body__image">{content}</span>;
 }
 
