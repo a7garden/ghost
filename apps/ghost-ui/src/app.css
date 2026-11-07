@@ -1,5 +1,3 @@
-@source "../vendor/garden/packages/ui/src";
-
 html,
 body,
 #root,
@@ -13,15 +11,15 @@ body,
 
 body {
   overflow: hidden;
-  color: var(--g-ink);
-  background: var(--g-page);
+  color: var(--ghost-ink);
+  background: var(--ghost-page);
 }
 
 /* Sidebar sections follow each other at row spacing; the group label alone marks the section. */
 .ghost-root .ghost-sidebar {
-  gap: var(--g-space-1, 4px);
+  gap: var(--ghost-space-1, 4px);
 }
 
-.ghost-root .ghost-sidebar .g-navigation-group__label {
-  padding-top: var(--g-space-2, 8px);
+.ghost-root .ghost-sidebar .ghost-navigation-group__label {
+  padding-top: var(--ghost-space-2, 8px);
 }

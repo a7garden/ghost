@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { MessageCircle, PackagePlus, Palette, Plus, Settings2 } from 'lucide-react';
-import { Badge, Button, FormField, GSettingsGroup, GSettingsRow, InlineError, Input, SelectField, Textarea } from '@garden/ui';
+import { Badge, Button, FormField, SettingsGroup, SettingsRow, InlineError, Input, SelectField, Textarea } from '../ui'
 import type { Ghost, ModelRef } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -34,9 +34,9 @@ export function TeamSettings({ onChat, onManage, onPortrait, onImport, selectedG
         <Button type="button" disabled={!state} onClick={() => setCreating(true)}><Plus size={15}/>새 Ghost</Button>
       </div>
     </div>
-    <GSettingsGroup title={<span className="sr-only">Ghost 목록</span>}>{ghosts.map(ghost => {
+    <SettingsGroup title={<span className="sr-only">Ghost 목록</span>}>{ghosts.map(ghost => {
       const badge = stateBadge[ghost.state];
-      return <GSettingsRow key={ghost.id} label={<span className="flex min-w-0 items-center gap-3">
+      return <SettingsRow key={ghost.id} label={<span className="flex min-w-0 items-center gap-3">
         <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={36}/>
         <span className="flex min-w-0 flex-col gap-1">
           <span className="flex flex-wrap items-center gap-1.5 text-ui font-medium text-ink [overflow-wrap:anywhere]">{ghost.name}{ghost.isDefault && <Badge variant="outline">메인</Badge>}{badge && <Badge variant="outline">{badge}</Badge>}</span>
@@ -48,8 +48,8 @@ export function TeamSettings({ onChat, onManage, onPortrait, onImport, selectedG
           {onManage && <Button variant="ghost" size="icon" type="button" aria-label={`${ghost.name} 설정`} title="Ghost 설정" onClick={() => onManage(ghost.id)}><Settings2 size={16}/></Button>}
           {onPortrait && <Button variant="ghost" size="icon" type="button" aria-label={`${ghost.name} 꾸미기`} title="꾸미기" onClick={() => onPortrait(ghost.id)}><Palette size={16}/></Button>}
         </span>
-      </GSettingsRow>;
-    })}</GSettingsGroup>
+      </SettingsRow>;
+    })}</SettingsGroup>
     {selected && <section className="grid gap-3" aria-labelledby="ghost-settings-heading">
       <h3 id="ghost-settings-heading" className="m-0 text-ui font-semibold text-ink">{selected.name} 설정</h3>
       <GhostAgentSettingsEditor key={selected.id} ghostId={selected.id}/>

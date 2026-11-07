@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ArrowRight, Folder } from 'lucide-react';
-import { Badge, Button, GComposer, GPage, InlineError, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
+import { Badge, Button, Composer, Page, InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import type { Ghost, State } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
 import { pendingDecisions, liveWorks, toneFor } from './ghostState';
@@ -83,9 +83,9 @@ export function Overview({ state, navigate, onOpenGhost }: OverviewProps) {
     finally { setSending(false); }
   };
   const heading = 'flex items-center gap-2 text-ui font-semibold text-ink';
-  return <GPage width="content" className="grid content-start gap-8 pt-8">
+  return <Page width="content" className="grid content-start gap-8 pt-8">
     <div className="grid gap-2">
-      <GComposer variant="conversation" inputId="dashboard-message" rows={1} value={text} onValueChange={setText} onSubmit={value => void send(value)}
+      <Composer variant="conversation" inputId="dashboard-message" rows={1} value={text} onValueChange={setText} onSubmit={value => void send(value)}
         label={target ? `${target.name}에게 ${asWork ? '일 맡기기' : '메시지'}` : '메시지'} placeholder={asWork ? '무엇을 어떻게 완료할지 적어 주세요.' : '무엇을 맡길까요?'} submitLabel={asWork ? '일 맡기기' : '보내기'}
         disabled={!target} pending={sending}
         footer={target && <div className="flex min-w-0 items-center gap-1">
@@ -143,5 +143,5 @@ export function Overview({ state, navigate, onOpenGhost }: OverviewProps) {
       <div className="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-2">{state.spaces.slice(0, 4).map(space =>
         <Button key={space.id} variant="outline" size="lg" className="justify-start" onClick={() => navigate(`/spaces/${space.id}`)}><Folder/><span className="truncate">{space.name}</span></Button>)}</div>
     </section>}
-  </GPage>;
+  </Page>;
 }

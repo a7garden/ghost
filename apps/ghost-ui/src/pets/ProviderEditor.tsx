@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, X } from 'lucide-react';
-import { Button, Checkbox, FormField, InlineError, Input, SelectField } from '@garden/ui';
+import { Button, Checkbox, FormField, InlineError, Input, SelectField } from '../ui'
 import type { ModelInfo, ProviderKind } from '@ghost/contract';
 import { Modal } from '../components/Modal';
 

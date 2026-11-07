@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Download, Upload, WandSparkles } from 'lucide-react';
-import { Button, FormField, InlineError, Input, SegmentedControl, SelectField } from '@garden/ui';
+import { Button, FormField, InlineError, Input, SegmentedControl, SelectField } from '../ui'
 import { Modal } from '../components/Modal';
 import { PetSprite } from './PetSprite';
 import { COLORS, DEFAULT_DESIGN, STATES, codexDesign, createSpriteSheet, importSprite, isDesign, ownDesign } from './sprites';

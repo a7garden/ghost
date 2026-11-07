@@ -1,0 +1,162 @@
+/* Ghost's application palette, density and typography. */
+:root {
+  color-scheme: light;
+  --ghost-ink: #1a1c1f;
+  --ghost-ink2: color-mix(in srgb, var(--ghost-ink) 65%, transparent);
+  --ghost-ink3: color-mix(in srgb, var(--ghost-ink) 45%, transparent);
+  --ghost-page: #f9f9f9;
+  --ghost-canvas: #fff;
+  --ghost-surface: #fff;
+  --ghost-inset: #f9f9f9;
+  --ghost-hover: color-mix(in srgb, var(--ghost-ink) 5%, transparent);
+  --ghost-hover2: color-mix(in srgb, var(--ghost-ink) 8%, transparent);
+  --ghost-line: color-mix(in srgb, var(--ghost-ink) 8%, transparent);
+  --ghost-line-strong: color-mix(in srgb, var(--ghost-ink) 12%, transparent);
+  --ghost-field: #f9f9f9;
+  --ghost-stripe: color-mix(in srgb, var(--ghost-ink) 7%, transparent);
+  --ghost-stripe-bg: #f3f3f3;
+  --ghost-accent: #0285ff;
+  --ghost-accent-ink: #0169cc;
+  --ghost-accent-tint: #e5f3ff;
+  --ghost-success: #00a240;
+  --ghost-success-tint: #d9f4e4;
+  --ghost-warning: #e25507;
+  --ghost-warning-tint: #ffe7d9;
+  --ghost-danger: #e02e2a;
+  --ghost-danger-tint: #ffd9d9;
+  --ghost-primary: #181818;
+  --ghost-primary-ink: #fff;
+  --ghost-space-1: 4px;
+  --ghost-space-2: 8px;
+  --ghost-space-3: 12px;
+  --ghost-space-4: 16px;
+  --ghost-space-5: 20px;
+  --ghost-space-6: 24px;
+  --ghost-space-8: 32px;
+  --ghost-space-10: 40px;
+  --ghost-layout-content-max: 960px;
+  --ghost-layout-document-max: 760px;
+  --ghost-layout-settings-max: 760px;
+  --ghost-layout-settings-nav: 240px;
+  --ghost-layout-page-gutter-compact: 16px;
+  --ghost-layout-section-gap: 32px;
+  --ghost-layout-group-gap: 24px;
+  --ghost-layout-row-gap: 16px;
+  --ghost-layout-field-gap: 8px;
+  --ghost-layout-settings-row-min-height: 64px;
+  --ghost-layout-settings-top-padding: 72px;
+  --ghost-control-height: 28px;
+  --ghost-toolbar-height: 46px;
+  --ghost-shadow-btn: 0 0 0 1px var(--ghost-line-strong), 0 1px 2px rgba(16,24,40,.05);
+  --ghost-shadow-card: 0 0 0 1px var(--ghost-line), 0 1px 2px rgba(16,24,40,.04), 0 2px 6px rgba(16,24,40,.03);
+  --ghost-shadow-raised: 0 0 0 1px var(--ghost-line), 0 2px 10px rgba(0,0,0,.04);
+  --ghost-shadow-overlay: 0 0 0 1px var(--ghost-line), 0 8px 28px rgba(0,0,0,.06);
+  --ghost-shadow-inset-field: inset 0 1px 2px rgba(0,0,0,.12);
+  --shadow-btn: var(--ghost-shadow-btn);
+  --shadow-card: var(--ghost-shadow-card);
+  --shadow-raised: var(--ghost-shadow-raised);
+  --shadow-overlay: var(--ghost-shadow-overlay);
+  --shadow-inset-field: var(--ghost-shadow-inset-field);
+}
+.dark {
+  color-scheme: dark;
+  --ghost-ink: #dfdfdf;
+  --ghost-page: #212121;
+  --ghost-canvas: #181818;
+  --ghost-surface: #212121;
+  --ghost-inset: #131313;
+  --ghost-field: #212121;
+  --ghost-stripe-bg: #161616;
+  --ghost-accent: #339cff;
+  --ghost-accent-ink: #66b5ff;
+  --ghost-accent-tint: color-mix(in srgb, #339cff 16%, transparent);
+  --ghost-success: #40c977;
+  --ghost-success-tint: color-mix(in srgb, #04b84c 15%, transparent);
+  --ghost-warning: #ff8549;
+  --ghost-warning-tint: color-mix(in srgb, #fb6a22 16%, transparent);
+  --ghost-danger: #ff6764;
+  --ghost-danger-tint: color-mix(in srgb, #fa423e 16%, transparent);
+  --ghost-primary: #ededed;
+  --ghost-primary-ink: #0d0d0d;
+}
+@custom-variant dark (&:where(.dark, .dark *));
+@theme inline {
+  --color-page: var(--ghost-page);
+  --color-canvas: var(--ghost-canvas);
+  --color-surface: var(--ghost-surface);
+  --color-inset: var(--ghost-inset);
+  --color-hover: var(--ghost-hover);
+  --color-hover-2: var(--ghost-hover2);
+  --color-ink: var(--ghost-ink);
+  --color-ink-2: var(--ghost-ink2);
+  --color-ink-3: var(--ghost-ink3);
+  --color-line: var(--ghost-line);
+  --color-line-strong: var(--ghost-line-strong);
+  --color-field: var(--ghost-field);
+  --color-accent: var(--ghost-accent);
+  --color-accent-ink: var(--ghost-accent-ink);
+  --color-accent-tint: var(--ghost-accent-tint);
+  --color-primary: var(--ghost-primary);
+  --color-primary-foreground: var(--ghost-primary-ink);
+  --color-secondary: var(--ghost-inset);
+  --color-secondary-foreground: var(--ghost-ink);
+  --color-destructive: var(--ghost-danger);
+  --color-destructive-foreground: var(--ghost-primary-ink);
+  --color-muted: var(--ghost-inset);
+  --color-muted-foreground: var(--ghost-ink2);
+  --color-ring: var(--ghost-accent);
+  --color-success: var(--ghost-success);
+  --color-warning: var(--ghost-warning);
+  --color-danger: var(--ghost-danger);
+  --color-green: var(--ghost-success);
+  --color-green-tint: var(--ghost-success-tint);
+  --color-orange: var(--ghost-warning);
+  --color-orange-tint: var(--ghost-warning-tint);
+  --color-red: var(--ghost-danger);
+  --color-red-tint: var(--ghost-danger-tint);
+  --shadow-btn: var(--ghost-shadow-btn);
+  --shadow-card: var(--ghost-shadow-card);
+  --shadow-raised: var(--ghost-shadow-raised);
+  --shadow-overlay: var(--ghost-shadow-overlay);
+  --shadow-inset-field: var(--ghost-shadow-inset-field);
+}
+@theme static {
+  --font-sans: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --text-micro: 11px;
+  --text-micro--line-height: 1.33;
+  --text-caption: 12px;
+  --text-caption--line-height: 1.43;
+  --text-ui: 13px;
+  --text-ui--line-height: 1.45;
+  --text-body: 14px;
+  --text-body--line-height: 1.5;
+  --text-bodyLg: 16px;
+  --text-bodyLg--line-height: 1.56;
+  --text-headingSm: 18px;
+  --text-headingSm--line-height: 1.4;
+  --text-heading: 20px;
+  --text-heading--line-height: 1.35;
+  --text-headingLg: 24px;
+  --text-headingLg--line-height: 1.3;
+  --text-mono: 12px;
+  --text-mono--line-height: 1.6;
+  --radius-chip: 6px;
+  --radius-control: 8px;
+  --radius-card: 10px;
+  --radius-lg: 12.5px;
+  --radius-xl: 15px;
+  --radius-composer: 28px;
+  --radius-pill: 9999px;
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --ease-enter: cubic-bezier(.19,1,.22,1);
+  --ease-exit: cubic-bezier(.8,0,.4,1);
+}
+body { background: var(--ghost-page); color: var(--ghost-ink); font-family: var(--font-sans); }
+@keyframes shimmer-text { from { background-position: 150%; } to { background-position: -50%; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop-in { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

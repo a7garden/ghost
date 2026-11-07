@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { Button } from '@garden/ui';
+import { Button } from '../ui'
 import type { Ghost } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
 

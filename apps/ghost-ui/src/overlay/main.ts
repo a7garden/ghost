@@ -5,11 +5,11 @@
 import { HostClient } from '../host/client';
 import type { Message, State } from '@ghost/contract';
 import { pickConversation, pickGhost, type Target } from './target';
-import '@garden/ui/styles.css';
+import '../ui/styles.css';
 import './overlay.css';
 import { installWindowDrag } from '../host/windowDrag';
 
-// Garden tokens switch on the root `.dark` class; the overlay follows the system theme.
+// The overlay follows the system theme independently of the main window.
 const systemDark = matchMedia('(prefers-color-scheme: dark)');
 const applyTheme = () => document.documentElement.classList.toggle('dark', systemDark.matches);
 applyTheme();

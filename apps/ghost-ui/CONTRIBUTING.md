@@ -1,3 +1,3 @@
 # Contributing
 
-Read playbook/agents.md and the contracts selected by garden.json. Run `bun install`, `bun run sync`, `bun run build`, and `bun test` before proposing a change. Execute the changed app path and record evidence. Use English Conventional Commits. Never edit generated outputs directly.
+Read the Ghost repository guidance and architecture. Run `bun install`, `bun run test` and `bun run build`, then exercise the changed path with an isolated Host. Preserve document source and unknown metadata; never use the production state root for development.

@@ -1,0 +1,9 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "tailwindcss" source(none);
+@import "./theme.css";
+@import "./controls.css";
+@import "./compositions.css";
+@import "./table.css";
+
+@source "../";

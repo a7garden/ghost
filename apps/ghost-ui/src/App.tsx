@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert, Clock3, Server, Smartphone, Users } from 'lucide-react';
-import { Banner, Button, EmptyState, Skeleton, type GCommandItem } from '@garden/ui';
+import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
 import { AppFrame } from './components/AppFrame';
 import { PortraitAppearances } from './components/DotAvatar';
@@ -82,7 +82,7 @@ function Shell() {
   const ownsGeometry = section === 'settings' || section === 'ghosts';
 
   const go = (target: string) => () => navigate(target);
-  const commandItems: GCommandItem[] = state ? [
+  const commandItems: CommandItem[] = state ? [
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },

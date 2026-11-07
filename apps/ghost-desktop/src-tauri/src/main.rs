@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use garden_native_host::{ProcessState, ProcessSupervisor, SupervisorConfig};
+mod supervisor;
+
+use crate::supervisor::{ProcessState, ProcessSupervisor, SupervisorConfig};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{

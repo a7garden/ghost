@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Pause, Play, Plus, Trash2 } from 'lucide-react';
-import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Textarea } from '@garden/ui';
+import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Textarea } from '../ui'
 import type { Schedule, ScheduleSpec } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';

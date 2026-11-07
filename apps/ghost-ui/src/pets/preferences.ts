@@ -10,7 +10,6 @@ export function usePreferences() {
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches);
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
-    // Garden resolves its token aliases on the root element, so the dark class belongs on <html>.
     const apply = () => { setSystemDark(media.matches); const theme = preferences.theme === 'system' ? (media.matches ? 'dark' : 'light') : preferences.theme; document.documentElement.dataset.theme = theme; document.documentElement.classList.toggle('dark', theme === 'dark'); };
     apply(); media.addEventListener('change', apply);
     const style = document.documentElement.style;

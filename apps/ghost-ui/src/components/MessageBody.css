@@ -1,7 +1,6 @@
 /* Assistant transcript markdown, scoped to MessageBody so user messages and
    tool records stay literal text. Chat is a transcript surface: readable
-   paragraphs, compact headings, and overflow contained per message. All values
-   come from Garden tokens. */
+   paragraphs, compact headings, and overflow contained per message. */
 
 .message-body {
   min-width: 0;
@@ -22,7 +21,7 @@
 /* Headings stay near body scale; they organise a reply, not a document page. */
 .message-body :is(h1, h2, h3, h4, h5, h6) {
   margin-block: 1.1em 0.4em;
-  color: var(--g-ink, #1a1c1f);
+  color: var(--ghost-ink, #1a1c1f);
   font-weight: var(--font-weight-semibold, 600);
   line-height: var(--text-headingSm--line-height, 1.4);
 }
@@ -63,23 +62,23 @@
 }
 
 .message-body input[type='checkbox'] {
-  margin-inline-end: var(--g-space-2, 8px);
+  margin-inline-end: var(--ghost-space-2, 8px);
 }
 
 .message-body blockquote {
   margin-inline: 0;
-  padding-inline-start: var(--g-space-3, 12px);
-  border-inline-start: 2px solid var(--g-line-strong);
-  color: var(--g-ink2);
+  padding-inline-start: var(--ghost-space-3, 12px);
+  border-inline-start: 2px solid var(--ghost-line-strong);
+  color: var(--ghost-ink2);
 }
 
 .message-body hr {
   border: 0;
-  border-top: 1px solid var(--g-line);
+  border-top: 1px solid var(--ghost-line);
 }
 
 .message-body a {
-  color: var(--g-accent-ink);
+  color: var(--ghost-accent-ink);
   text-underline-offset: 2px;
 }
 
@@ -93,16 +92,16 @@
   font-size: 0.9em;
   padding: 0.1em 0.35em;
   border-radius: var(--radius-chip, 6px);
-  background: var(--g-stripe-bg, var(--g-inset));
+  background: var(--ghost-stripe-bg, var(--ghost-inset));
   overflow-wrap: anywhere;
 }
 
 /* Fenced code: language bar plus copy action, lines scroll inside the block. */
 .message-body__code {
   min-width: 0;
-  border: 1px solid var(--g-line);
+  border: 1px solid var(--ghost-line);
   border-radius: var(--radius-card, 10px);
-  background: var(--g-inset);
+  background: var(--ghost-inset);
   overflow: hidden;
 }
 
@@ -110,17 +109,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--g-space-2, 8px);
-  min-height: var(--g-control-height, 28px);
-  padding-inline: var(--g-space-2, 8px) var(--g-space-1, 4px);
-  border-bottom: 1px solid var(--g-line);
-  background: var(--g-surface);
+  gap: var(--ghost-space-2, 8px);
+  min-height: var(--ghost-control-height, 28px);
+  padding-inline: var(--ghost-space-2, 8px) var(--ghost-space-1, 4px);
+  border-bottom: 1px solid var(--ghost-line);
+  background: var(--ghost-surface);
 }
 
 .message-body__code-lang {
   min-width: 0;
   overflow: hidden;
-  color: var(--g-ink3);
+  color: var(--ghost-ink3);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--text-caption, 12px);
   text-overflow: ellipsis;
@@ -134,14 +133,14 @@
 .message-body__code pre {
   min-width: 0;
   margin: 0;
-  padding: var(--g-space-3, 12px) var(--g-space-4, 16px);
+  padding: var(--ghost-space-3, 12px) var(--ghost-space-4, 16px);
   overflow-x: auto;
-  color: var(--g-ink);
+  color: var(--ghost-ink);
   font: var(--text-mono, 12px) / var(--text-mono--line-height, 1.6) var(--font-mono, ui-monospace, monospace);
 }
 
 .message-body__code pre:focus-visible {
-  outline: 2px solid var(--g-ink3);
+  outline: 2px solid var(--ghost-ink3);
   outline-offset: -2px;
 }
 
@@ -163,7 +162,7 @@
 }
 
 .message-body__tablewrap:focus-visible {
-  outline: 2px solid var(--g-ink3);
+  outline: 2px solid var(--ghost-ink3);
   outline-offset: 2px;
   border-radius: var(--radius-chip, 6px);
 }
@@ -178,16 +177,16 @@
 .message-body th,
 .message-body td {
   min-width: 5em;
-  padding: var(--g-space-2, 8px) var(--g-space-3, 12px);
-  border: 1px solid var(--g-line-strong);
+  padding: var(--ghost-space-2, 8px) var(--ghost-space-3, 12px);
+  border: 1px solid var(--ghost-line-strong);
   text-align: start;
   vertical-align: top;
   overflow-wrap: normal;
 }
 
 .message-body th {
-  background: var(--g-inset);
-  color: var(--g-ink);
+  background: var(--ghost-inset);
+  color: var(--ghost-ink);
   font-weight: var(--font-weight-semibold, 600);
 }
 
@@ -196,7 +195,7 @@
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  color: var(--g-accent-ink);
+  color: var(--ghost-accent-ink);
 }
 
 .message-body__image svg {

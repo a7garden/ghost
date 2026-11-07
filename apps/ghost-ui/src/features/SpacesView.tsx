@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { FileText, FolderPlus, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { Badge, Button, EmptyState, FormField, GPage, GPageHeader, InlineError, Input, SelectField, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@garden/ui';
+import { Badge, Button, EmptyState, FormField, Page, PageHeader, InlineError, Input, SelectField, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui'
 import type { PageSummary, Space, SpaceGrant } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -57,8 +57,8 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
     catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); return false; }
     finally { setPending(''); }
   };
-  return <GPage width="reading">
-    <GPageHeader title={routeLabels.spaces}
+  return <Page width="reading">
+    <PageHeader title={routeLabels.spaces}
       actions={<Button type="button" disabled={!state} onClick={() => setCreating(true)}><FolderPlus size={16} aria-hidden="true"/>새 프로젝트</Button>}/>
     <div className="grid gap-6">
       <div className="flex min-w-0 flex-col">
@@ -126,7 +126,7 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
     {open && space && <Suspense fallback={<Modal title={open.pageId ? '문서' : '새 문서'} onClose={() => setOpen(undefined)} drawer focusClose><p className="m-0 text-ui text-ink-2" role="status">편집기를 불러오는 중…</p></Modal>}>
       <PageEditorDrawer spaceId={space.id} pageId={open.pageId} onClose={() => setOpen(undefined)} onSaved={() => setReload(value => value + 1)}/>
     </Suspense>}
-  </GPage>;
+  </Page>;
 }
 
 /** The project's saved documents, one row per document. */

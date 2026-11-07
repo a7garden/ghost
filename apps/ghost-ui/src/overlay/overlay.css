@@ -1,5 +1,5 @@
 /* Ghost chat overlay: a compact composer + transcript the desktop app parks
-   off-screen and surfaces over the current work. Colors come from Garden tokens;
+   off-screen and surfaces over the current work. It shares the application palette;
    main.ts follows the system theme with the `.dark` class. */
 
 html,
@@ -15,10 +15,10 @@ body {
   display: flex;
   flex-direction: column;
   height: 100dvh;
-  border: 1px solid var(--g-line-strong);
+  border: 1px solid var(--ghost-line-strong);
   border-radius: var(--radius-xl, 15px);
-  background: var(--g-surface);
-  color: var(--g-ink);
+  background: var(--ghost-surface);
+  color: var(--ghost-ink);
   box-shadow: var(--shadow-overlay);
   overflow: hidden;
 }
@@ -26,9 +26,9 @@ body {
 header {
   display: flex;
   align-items: center;
-  gap: var(--g-space-2, 8px);
+  gap: var(--ghost-space-2, 8px);
   padding: 10px 14px 8px;
-  border-bottom: 1px solid var(--g-line);
+  border-bottom: 1px solid var(--ghost-line);
   user-select: none;
 }
 
@@ -36,13 +36,13 @@ header {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--g-ink3);
+  background: var(--ghost-ink3);
   flex: none;
 }
 
-#dot.idle { background: var(--g-success); }
-#dot.busy { background: var(--g-warning); animation: pulse 1.2s ease-in-out infinite; }
-#dot.error { background: var(--g-danger); }
+#dot.idle { background: var(--ghost-success); }
+#dot.busy { background: var(--ghost-warning); animation: pulse 1.2s ease-in-out infinite; }
+#dot.error { background: var(--ghost-danger); }
 
 @keyframes pulse { 50% { opacity: 0.35; } }
 
@@ -62,7 +62,7 @@ h1 {
 #status {
   margin-left: auto;
   font-size: var(--text-caption, 12px);
-  color: var(--g-ink2);
+  color: var(--ghost-ink2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -90,12 +90,12 @@ h1 {
 }
 
 .row.user { display: flex; justify-content: flex-end; }
-.row.user > div { background: var(--g-hover2); }
+.row.user > div { background: var(--ghost-hover2); }
 .row.ghost > div { padding-inline: 0; }
-.row.working > div { color: var(--g-ink2); }
+.row.working > div { color: var(--ghost-ink2); }
 
 #log .empty {
-  color: var(--g-ink2);
+  color: var(--ghost-ink2);
   font-size: var(--text-caption, 12px);
   text-align: center;
   padding: 14px 0;
@@ -104,18 +104,18 @@ h1 {
 #composer {
   display: flex;
   align-items: flex-end;
-  gap: var(--g-space-2, 8px);
+  gap: var(--ghost-space-2, 8px);
   padding: 8px 10px 10px;
-  border-top: 1px solid var(--g-line);
+  border-top: 1px solid var(--ghost-line);
 }
 
 #input {
   flex: 1;
   resize: none;
-  border: 1px solid var(--g-line-strong);
+  border: 1px solid var(--ghost-line-strong);
   border-radius: var(--radius-control, 8px);
-  background: var(--g-field);
-  color: var(--g-ink);
+  background: var(--ghost-field);
+  color: var(--ghost-ink);
   font: inherit;
   font-size: var(--text-ui, 13px);
   line-height: 1.4;
@@ -132,11 +132,11 @@ h1 {
   height: 32px;
   border: 0;
   border-radius: 50%;
-  background: var(--g-primary);
-  color: var(--g-primary-ink);
+  background: var(--ghost-primary);
+  color: var(--ghost-primary-ink);
   font-size: 14px;
   cursor: pointer;
 }
 
 #send:disabled { opacity: 0.45; cursor: default; }
-#send:focus-visible { outline: 2px solid var(--g-ink); outline-offset: 2px; }
+#send:focus-visible { outline: 2px solid var(--ghost-ink); outline-offset: 2px; }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, CheckCheck, CircleAlert, FileText, Inbox as InboxIcon } from 'lucide-react';
-import { Badge, Button, EmptyState, GPage, GPageHeader, InlineError, Textarea } from '@garden/ui';
+import { Badge, Button, EmptyState, Page, PageHeader, InlineError, Textarea } from '../ui'
 import type { Decision, DecisionKind, State } from '@ghost/contract';
 import { WorkRow } from './WorkViews';
 import { useHost } from '../host/context';
@@ -125,8 +125,8 @@ export function InboxView({ state, navigate, focusDecisionId }: {
     seenFocus.current = focused.id;
     requestAnimationFrame(() => document.getElementById(`decision-${focused.id}`)?.scrollIntoView({ block: 'center' }));
   }, [focused]);
-  return <GPage>
-    <GPageHeader title={uiTerms.inbox}/>
+  return <Page>
+    <PageHeader title={uiTerms.inbox}/>
     {error && <InlineError>{error}</InlineError>}
     <section className="grid gap-3" aria-labelledby="inbox-pending">
       <h2 id="inbox-pending" className="m-0 flex items-center gap-2 text-ui font-semibold text-ink">확인 필요
@@ -162,5 +162,5 @@ export function InboxView({ state, navigate, focusDecisionId }: {
     </section>}
     {focused && !pending.includes(focused) && <InlineError>이미 처리된 결정입니다. <button type="button" className="cursor-pointer underline underline-offset-2" onClick={() => navigate('/inbox')}>목록으로</button></InlineError>}
     <p className="m-0 mt-6 text-caption text-ink-3"><ArrowRight className="mr-1 inline size-3" aria-hidden="true"/>결정은 Ghost의 대화에 바로 전달됩니다.</p>
-  </GPage>;
+  </Page>;
 }

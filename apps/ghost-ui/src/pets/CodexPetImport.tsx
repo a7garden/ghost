@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { FolderOpen, RefreshCw } from 'lucide-react';
-import { Badge, Button, InlineError } from '@garden/ui';
+import { Badge, Button, InlineError } from '../ui'
 import { Modal } from '../components/Modal';
 import { PetSprite } from './PetSprite';
 import { spriteVersionOf } from './sprites';

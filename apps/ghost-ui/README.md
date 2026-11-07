@@ -33,6 +33,8 @@ bun run test    # vitest run
 - `src/components/`, `src/features/` — 앱 셸과 사이드바, 홈 대시보드, Ghost 대화,
   맡긴 일 목록·상세, 확인할 일(결정·알림), 호스트 설정.
 - `src/pets/` — 아바타·모델·표시 설정과 작업실 펫.
+- `src/ui/` — 앱이 소유하는 접근성 컨트롤·레이아웃·테마. React/Radix/Tailwind를 직접 사용한다.
+- `src/editor/` — 원문을 정본으로 유지하는 CodeMirror/Atomic 문서 편집기.
 - `src/overlay/` — 데스크톱 앱의 오버레이. 기본 Ghost의 기본 대화로 `message.send`한다.
 - `@ghost/contract`는 tsconfig `paths`와 vite `resolve.alias`로
   `packages/ghost-contract/src`을 직접 가리킨다. 계약 타입은 UI의 유일한 API 참조다.

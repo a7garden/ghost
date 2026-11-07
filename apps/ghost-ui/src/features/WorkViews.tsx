@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ArrowUpRight, Check, CircleAlert, Plus } from 'lucide-react';
-import { Badge, Button, EmptyState, FormField, GPage, GPageHeader, InlineError, Input, SegmentedControl, SelectField, Textarea, cn } from '@garden/ui';
+import { Badge, Button, EmptyState, FormField, Page, PageHeader, InlineError, Input, SegmentedControl, SelectField, Textarea, cn } from '../ui'
 import type { State, Work, WorkState } from '@ghost/contract';
 import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
@@ -83,8 +83,8 @@ export function WorkView({ state, navigate, filterGhostId }: {
     .sort((a, b) => b.updatedAt - a.updatedAt);
   const cancel = (work: Work) => { setError(''); void client.send({ type: 'work.cancel', workId: work.id }).catch(e => setError(e instanceof Error ? e.message : '맡긴 일을 취소하지 못했습니다.')); };
   const filterName = filterGhostId ? ghostName(filterGhostId) : null;
-  return <GPage>
-    <GPageHeader title={uiTerms.work} actions={<Button onClick={() => setCreating(true)} disabled={!state.ghosts.length}><Plus className="size-4"/>일 맡기기</Button>}/>
+  return <Page>
+    <PageHeader title={uiTerms.work} actions={<Button onClick={() => setCreating(true)} disabled={!state.ghosts.length}><Plus className="size-4"/>일 맡기기</Button>}/>
     {filterName && <p className="m-0 text-caption text-ink-2" role="status">{filterName}에게 맡긴 일만 보고 있습니다. <button type="button" className="cursor-pointer underline underline-offset-2 hover:text-ink" onClick={() => navigate('/work')}>전체 보기</button></p>}
     {error && <InlineError>{error}</InlineError>}
     <section className="grid gap-1" aria-labelledby="work-list">
@@ -109,7 +109,7 @@ export function WorkView({ state, navigate, filterGhostId }: {
     </section>
     {creating && <NewWorkModal state={state} defaultGhostId={filterGhostId ?? state.ghosts.find(ghost => ghost.isDefault)?.id ?? state.ghosts[0]?.id ?? ''}
       onClose={() => setCreating(false)} onCreated={id => { setCreating(false); navigate(`/work/${encodeURIComponent(id)}`); }}/>}
-  </GPage>;
+  </Page>;
 }
 
 /** 일 맡기기: one Ghost, what to do, and when it must be done. */

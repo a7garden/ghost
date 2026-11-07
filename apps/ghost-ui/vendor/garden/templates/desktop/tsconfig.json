@@ -1,1 +1,0 @@
-{"extends":"./vendor/garden/packages/config/tsconfig.json","compilerOptions":{"lib":["ES2022","DOM","DOM.Iterable"],"types":["vite/client"]},"include":["src","vite.config.ts"]}

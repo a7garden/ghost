@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Check, CircleAlert, History, LoaderCircle, MessageCircle, Plus, Square, X } from 'lucide-react';
-import { Button, GComposer, GConversation, GConversationActivity, GConversationMessage, cn } from '@garden/ui';
+import { Button, Composer, Conversation, ConversationActivity, ConversationMessage, cn } from '../ui'
 import type { Ghost, Live, Message, State } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
 import { GhostProfile } from '../components/GhostProfile';
@@ -100,7 +100,7 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
   const running = busy || Boolean(live?.running);
 
   return <div className="flex h-full min-h-0 w-full min-w-0">
-    <GConversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지로 이동"
+    <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지로 이동"
       scrollKey={page.messages.length + (live?.partial ? 1 : 0)}
       header={<div className="flex min-w-0 items-center gap-3 py-1">
         <GhostProfile ghostID={ghost.id} name={ghost.name} summary={profileSummary(ghost.persona)}
@@ -117,7 +117,7 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
         <Button type="button" variant="ghost" size="icon" aria-label="이전 대화" title="이전 대화" onClick={() => setHistory(true)}><History size={17}/></Button>
         <Button type="button" variant="ghost" size="sm" onClick={startConversation}><Plus size={16}/>새 대화</Button>
       </div>}
-      composer={<GComposer variant="conversation" inputId="message-input" inputRef={inputRef} rows={1} value={draft} onValueChange={setDraft} onSubmit={send}
+      composer={<Composer variant="conversation" inputId="message-input" inputRef={inputRef} rows={1} value={draft} onValueChange={setDraft} onSubmit={send}
         label={`${ghost.name}에게 메시지`} placeholder={running ? '추가 지시를 입력하세요' : `${ghost.name}에게 메시지 보내기`} submitLabel="메시지 보내기"
         disabled={!conversationId} pending={sending}
         footer={conversationId && <ModelPicker conversationId={conversationId} value={currentConversation?.model} disabled={sending}/>}
@@ -138,16 +138,16 @@ export function GhostChat({ ghost, state, conversationId, navigate }: {
         <Button variant="ghost" size="sm" disabled={olderLoading} onClick={() => void load(conversationId, page.before)}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</Button>
       </div>}
       {page.messages.map(message => <TranscriptMessage key={message.id} message={message} speaker={speaker}/>)}
-      {live?.running && <GConversationMessage role="assistant" label={`${ghost.name} · 응답 작성 중`}>
+      {live?.running && <ConversationMessage role="assistant" label={`${ghost.name} · 응답 작성 중`}>
         <div className="mb-3 flex items-center gap-2 text-caption text-ink-2" role="status"><LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true"/>응답 중</div>
         {live.partial && <MessageBody text={live.partial}/>}
-        {live.tools.length > 0 && <GConversationActivity summary={`도구 활동 ${live.tools.length}개`}>
+        {live.tools.length > 0 && <ConversationActivity summary={`도구 활동 ${live.tools.length}개`}>
           {live.tools.map(tool => <div key={tool.callId} className="grid gap-1 py-2 text-caption text-ink-2">
             <span className="font-medium">{tool.name}</span><pre className="m-0 max-h-48 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]">{tool.output}</pre>
           </div>)}
-        </GConversationActivity>}
-      </GConversationMessage>}
-    </GConversation>
+        </ConversationActivity>}
+      </ConversationMessage>}
+    </Conversation>
     {history && <Modal title={`${ghost.name} · ${uiTerms.conversationHistory}`} onClose={() => setHistory(false)}>
       <div className="grid max-h-[400px] gap-1 overflow-y-auto">
         {conversations.map(conversation => <button key={conversation.id} type="button"

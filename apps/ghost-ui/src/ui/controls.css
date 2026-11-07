@@ -1,0 +1,62 @@
+/* Field and popup behavior shared by Ghost's forms. */
+body [data-slot="select-trigger"] {
+  box-sizing: border-box; min-width: 0; max-width: 100%; height: 32px; min-height: 32px;
+  padding: 0 12px; gap: 8px; border: 1px solid var(--ghost-line-strong);
+  border-radius: var(--radius-control); background: var(--ghost-field); color: var(--ghost-ink);
+  font: var(--text-ui)/1.4 var(--font-sans); box-shadow: var(--shadow-inset-field);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+body [data-slot="select-trigger"]:hover:not(:disabled) { border-color: var(--ghost-ink3); }
+body [data-slot="select-trigger"][data-size="sm"] { height: 28px; min-height: 28px; font-size: var(--text-caption); }
+body [data-slot="select-trigger"] > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body [data-slot="select-trigger"]:focus-visible { box-shadow: var(--shadow-inset-field); }
+body [data-slot="select-content"] {
+  padding: 4px; border-color: var(--ghost-line-strong); border-radius: var(--radius-card);
+  min-width: max(8rem, var(--radix-select-trigger-width, 0px));
+  max-width: min(calc(100vw - 16px), var(--radix-select-content-available-width, 100vw));
+  box-shadow: var(--shadow-overlay);
+}
+body [data-slot="select-viewport"] { padding: 0; }
+body [data-slot="select-item"] { height: auto; min-height: 32px; padding-block: 6px; line-height: 20px; font-size: var(--text-ui); border-radius: var(--radius-chip); }
+body [data-slot="select-item"][data-state="checked"] { background: var(--ghost-hover); }
+body [data-slot="select-item"][data-highlighted] { background: var(--ghost-hover2); outline: none !important; }
+body [data-slot="checkbox"] {
+  appearance: none; display: inline-grid; place-content: center; box-sizing: border-box;
+  flex: 0 0 auto; width: 18px; height: 18px; padding: 0; vertical-align: middle;
+  border: 1px solid var(--ghost-ink3); border-radius: var(--radius-chip);
+  background: var(--ghost-field); color: var(--ghost-primary-ink); box-shadow: none; cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+body [data-slot="checkbox"]:is([data-state="checked"], [data-state="indeterminate"]) {
+  background: var(--ghost-primary); border-color: var(--ghost-primary); color: var(--ghost-primary-ink);
+}
+.ghost-checkbox-mixed { display: none; }
+[data-state="indeterminate"] > [data-slot="checkbox-indicator"] > .ghost-checkbox-mixed { display: block; }
+[data-state="indeterminate"] > [data-slot="checkbox-indicator"] > .ghost-checkbox-check { display: none; }
+body [data-slot="switch"] { box-sizing: border-box; width: 36px; height: 22px; padding: 2px; border: 0; box-shadow: inset 0 0 0 1px var(--ghost-line-strong); transition: background-color 150ms ease; }
+body [data-slot="switch-thumb"] { flex-shrink: 0; width: 18px; height: 18px; background: var(--ghost-canvas); transform: translateX(0); transition: transform 150ms ease; }
+body [data-slot="switch-thumb"][data-state="checked"] { background: var(--ghost-primary-ink); transform: translateX(14px); }
+body :is([data-slot="checkbox"], [data-slot="select-trigger"], [data-slot="switch"]):disabled { opacity: .45; cursor: not-allowed; }
+body :is([data-slot="select-trigger"], [data-slot="checkbox"])[aria-invalid="true"] { border-color: var(--ghost-danger); }
+.ghost-form-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--ghost-ink); font-size: var(--text-ui); }
+.ghost-form-field > label { font-weight: 500; }
+.ghost-form-field p { margin: 0; font-size: var(--text-caption); overflow-wrap: anywhere; }
+.ghost-form-field-help { color: var(--ghost-ink2); }
+.ghost-form-field-error { color: var(--ghost-danger); }
+
+/* Text entry keeps a stable surface. Actions retain visible keyboard focus. */
+body :is(input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), textarea, [contenteditable="true"]):focus {
+  outline: none !important; caret-color: var(--ghost-ink);
+}
+body :is(button, select, [role="combobox"]:not(input):not([contenteditable="true"]), a, input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"], input[type="range"], [role="button"]:not([role="combobox"]), [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="radio"], [role="switch"], [tabindex]:not([tabindex="-1"]):not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="combobox"])):focus-visible:not([data-slot="select-item"]) {
+  --tw-ring-shadow: 0 0 #0000 !important; --tw-ring-offset-shadow: 0 0 #0000 !important;
+  outline: 2px solid var(--ghost-ink2) !important; outline-offset: 2px;
+}
+body [data-slot="select-item"][role="option"]:focus-visible { outline: none !important; background: var(--ghost-hover2); }
+@supports (corner-shape: superellipse(1.1)) {
+  body :is([data-slot="button"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], [data-slot="select-content"], [data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="banner"], [data-slot="checkbox"]) { corner-shape: superellipse(1.1); }
+}
+@media (forced-colors: active) {
+  body [data-slot="checkbox"] { forced-color-adjust: none; background: Canvas; color: CanvasText; border-color: ButtonText; }
+  body [data-slot="checkbox"]:is([data-state="checked"], [data-state="indeterminate"]) { background: Highlight; color: HighlightText; border-color: Highlight; }
+}

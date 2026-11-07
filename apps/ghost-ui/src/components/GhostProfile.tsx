@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, History, ListTodo, Palette, Settings2, X } from 'lucide-react';
-import { Badge, Button, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
+import { Badge, Button, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import { DotAvatar } from './DotAvatar';
 import { AgentActivityList, type AgentActivityProps } from './AgentStatus';
 import { toneFor } from '../features/ghostState';

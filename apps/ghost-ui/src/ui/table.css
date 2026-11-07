@@ -1,0 +1,55 @@
+.ghost-table-container {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-color: var(--ghost-line-strong) transparent;
+}
+
+.ghost-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  color: var(--ghost-ink);
+  font-size: var(--text-ui, 13px);
+  line-height: 1.45;
+  text-align: left;
+}
+
+.ghost-table--fixed { width: 100%; table-layout: fixed; }
+.ghost-table--fixed .ghost-table__head { white-space: normal; }
+
+.ghost-table__head,
+.ghost-table__cell {
+  min-width: 0;
+  padding: var(--ghost-space-2) var(--ghost-space-3);
+  border-bottom: 1px solid var(--ghost-line);
+  text-align: left;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.ghost-table__head {
+  color: var(--ghost-ink2);
+  font-size: var(--text-caption, 12px);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ghost-table__footer .ghost-table__cell {
+  border-top: 1px solid var(--ghost-line-strong);
+  border-bottom: 0;
+  font-weight: 500;
+}
+
+.ghost-table__caption {
+  padding: var(--ghost-space-2) var(--ghost-space-3);
+  color: var(--ghost-ink2);
+  font-size: var(--text-caption, 12px);
+  text-align: left;
+}
+
+.ghost-table__body .ghost-table__row:hover > .ghost-table__cell {
+  background: var(--ghost-hover);
+}

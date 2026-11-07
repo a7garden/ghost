@@ -7,14 +7,12 @@
 - Example data is explicitly labeled and kept separate from the host. No fake live terminal, model execution, or simulated streams.
 - Keep the current Ghost icon, per the latest owner instruction.
 
-## Garden components — 2026-11-06
+## App-owned UI
 
-The UI uses Garden (`garden.json`, `vendor/garden`) for its components only:
-Garden's shadcn/ui-style, Radix-backed `@garden/ui` controls, styled with Tailwind 4
-utilities bound to Garden's generated tokens. The layout stays Ghost's own (recorded
-exception `shell.layout`, `docs/decisions/0003-ghost-owns-its-layout.md`). There is no
-app-level control library or global stylesheet beyond `src/app.css` (root sizing) and
-`src/pets/pets.css` (avatar sprites).
+The React application owns its controls, compositions and theme in `src/ui`.
+Accessible primitives use Radix directly. Tailwind utilities consume the app's
+own light/dark theme; source Markdown editing lives in `src/editor`.
+The desktop shell and process supervision belong to `apps/ghost-desktop`.
 
 `src/components/AppFrame.tsx` draws one sidebar beside one main region:
 
@@ -34,7 +32,7 @@ Earlier designs (Docket console, dashboard of 2026-11-04) are history:
 
 ## Conversation — 2026-11-07
 
-Direct chat keeps Garden's 760px reading column, trailing owner bubbles and
+Direct chat keeps a 760px reading column, trailing owner bubbles and
 open assistant prose. The local header exposes history and new conversation;
 the dock holds the auto-growing composer, model selection, send and cancel.
 Suggestions populate and focus the draft. Conversation identity resets local

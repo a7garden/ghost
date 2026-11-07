@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check, ChevronRight, KeyRound, ShieldOff, Plus, Trash2 } from 'lucide-react';
-import { Badge, Button, GSettingsGroup, GSettingsRow, InlineError, SelectField } from '@garden/ui';
+import { Badge, Button, SettingsGroup, SettingsRow, InlineError, SelectField } from '../ui'
 import type { Provider } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -42,18 +42,18 @@ export function ModelSettings() {
     setNotice(`${draft.name.trim()} 제공자를 저장했습니다.`);
   };
   return <section className="flex min-w-0 flex-col gap-6" aria-label="모델 설정">
-    <GSettingsGroup title="모델 선택" description="설정하지 않으면 대화가 등록된 제공자의 기본 모델을 따릅니다.">
-      <GSettingsRow label="기본 모델" description="새 대화와 Ghost가 따르는 모델">
+    <SettingsGroup title="모델 선택" description="설정하지 않으면 대화가 등록된 제공자의 기본 모델을 따릅니다.">
+      <SettingsRow label="기본 모델" description="새 대화와 Ghost가 따르는 모델">
         <SelectField label="기본 모델" className="w-[240px] max-w-full" value={settings?.defaultModel ? `${settings.defaultModel.provider}/${settings.defaultModel.model}` : NO_MODEL}
           disabled={pending !== '' || !settings} onValueChange={key => roleCommand('defaultModel', key)}
           options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
-      </GSettingsRow>
-      <GSettingsRow label="검토 모델" description="맡긴 일의 결과를 판정할 때 씁니다.">
+      </SettingsRow>
+      <SettingsRow label="검토 모델" description="맡긴 일의 결과를 판정할 때 씁니다.">
         <SelectField label="검토 모델" className="w-[240px] max-w-full" value={settings?.reviewModel ? `${settings.reviewModel.provider}/${settings.reviewModel.model}` : NO_MODEL}
           disabled={pending !== '' || !settings} onValueChange={key => roleCommand('reviewModel', key)}
           options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
-      </GSettingsRow>
-    </GSettingsGroup>
+      </SettingsRow>
+    </SettingsGroup>
     <div className="flex flex-wrap items-center justify-between gap-4">
       <h3 className="m-0 text-ui font-semibold text-ink">제공자</h3>
       <Button variant="outline" type="button" disabled={pending !== '' || !settings} onClick={() => setEditor({ draft: emptyDraft(), existing: false, hasCredential: false })}><Plus size={15}/>제공자 추가</Button>

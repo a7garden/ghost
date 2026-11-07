@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Button } from '@garden/ui';
+import { Button } from '../ui'
 import { Modal } from './Modal';
 
 /** Secondary details kept out of the primary flow until asked for. */

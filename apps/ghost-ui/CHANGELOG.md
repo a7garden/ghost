@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Made UI controls, theme, source Markdown editing and desktop process supervision
+  app-owned. Removed external framework snapshots, workspace dependencies, sync
+  commands and adoption instructions. Retained source-editor previews, keyboard
+  behavior, document-byte preservation, safe HTML isolation and host lifecycle.
+
 - Redesigned chat around the reading column: trailing owner bubbles, rendered
   assistant Markdown, scrollable code/tables, message/code copy, inline tool
   disclosures and explicit streaming/cancel state. Added direct history/new-chat
@@ -41,9 +46,4 @@
   and adds the owner Authorization header server-side. Production output is `dist/`, served
   by the host.
 - The overlay sends `message.send` into the default Ghost's direct conversation.
-- Adopted the Garden framework for its components (`garden.json`, `vendor/garden` 0.1.0).
-  Controls come from `@garden/ui` (shadcn/ui-style, Radix-backed); color and spacing use
-  Tailwind 4 with Garden tokens. Removed `@garden/arc`, the Docket/liquid-glass
-  stylesheets and the page-local control CSS. The layout stays Ghost's own sidebar and
-  main region (recorded `shell.layout` exception).
 - The package manager is bun.

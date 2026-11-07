@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
-import { Button, InlineError, Popover, PopoverContent, PopoverTrigger } from '@garden/ui';
+import { Button, InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import type { Settings } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';

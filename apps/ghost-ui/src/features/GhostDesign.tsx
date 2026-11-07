@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check } from 'lucide-react';
-import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Switch } from '@garden/ui';
+import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Switch } from '../ui'
 import type { Ghost, GhostState } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';

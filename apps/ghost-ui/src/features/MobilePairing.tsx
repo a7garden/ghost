@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toDataURL } from 'qrcode';
 import { Pencil, QrCode, Smartphone, Trash2 } from 'lucide-react';
-import { Badge, Button, Checkbox, FormField, InlineError, Input } from '@garden/ui';
+import { Badge, Button, Checkbox, FormField, InlineError, Input } from '../ui'
 import type { Device, DeviceGrant } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';

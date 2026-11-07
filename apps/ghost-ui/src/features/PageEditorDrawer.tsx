@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Textarea } from '@garden/ui';
-import { GMarkdownEditor } from '@garden/editor';
-import '@garden/editor/styles.css';
+import { Badge, Button, FormField, InlineError, Input, SegmentedControl, SelectField, Textarea } from '../ui';
+import { MarkdownEditor } from '../editor/MarkdownEditor';
+import '../editor/styles.css';
 import type { PageView } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { isConflict, isEditableProfile } from './spacePages';
@@ -107,7 +107,7 @@ export function PageEditorDrawer({ spaceId, pageId, onClose, onSaved }: {
               </FormField>}
           </section>
           : <div className="grid gap-1 rounded-control border border-line bg-surface p-1">
-            <GMarkdownEditor value={draft.body} onChange={body => setDraft(current => ({ ...current, body }))}
+            <MarkdownEditor value={draft.body} onChange={body => setDraft(current => ({ ...current, body }))}
               label="본문" readOnly={!editable || saving} documentId={view?.pageId ?? 'new'} className="min-h-[50dvh]"
               unsupportedLabel="이 브라우저에서 문서 편집기를 사용할 수 없습니다."/>
           </div>}

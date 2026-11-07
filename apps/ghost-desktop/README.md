@@ -1,6 +1,6 @@
 # Ghost desktop
 
-Ghost의 Mac 앱은 Tauri 2 셸이다. UI와 API는 Ghost 호스트(하나의 Bun 프로세스)가 직접 제공하고, 셸은 그 호스트를 찾아 붙거나 직접 기동한다. 셸이 UI를 서빙하거나 브리지를 운영하지 않는다. 창 상단 46px 타이틀바는 ghost-ui의 GTitleBar가 Tauri 셸에서만 렌더링한다(macOS traffic-light inset 80px, 전 구간 drag).
+Ghost의 Mac 앱은 Tauri 2 셸이다. UI와 API는 Ghost 호스트(하나의 Bun 프로세스)가 직접 제공하고, 셸은 그 호스트를 찾아 붙거나 직접 기동한다. 셸이 UI를 서빙하거나 브리지를 운영하지 않는다. 창 상단 46px 타이틀바는 ghost-ui의 앱 소유 `TitleBar`가 Tauri 셸에서만 렌더링한다(macOS traffic-light inset 80px, 전 구간 drag).
 
 ## 호스트 연결
 
@@ -33,7 +33,7 @@ Node 런타임, 콘솔 런처, 로컬 음성 리소스는 더는 번들에 넣�
 
 ```sh
 npm run check   # cargo fmt --check + cargo clippy --offline --all-targets -- -D warnings
-npm test        # vendor/garden-native-host crate 테스트
+npm test        # src-tauri 프로세스 감독(supervisor) 테스트
 ```
 
 격리 smoke는 앱의 `Contents/MacOS/ghost-desktop --desktop-probe`를 임시 설정(`GHOST_CONSOLE_CONFIG`가 가리키는 `{"host_mode":"managed","root":"<임시>"}` 파일)으로 실행한다. 프로브는 실제 패키지의 실행·host.json 발견·health·종료를 검증하지만 화면 E2E 통과를 뜻하지 않는다.

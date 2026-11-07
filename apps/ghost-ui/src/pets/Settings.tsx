@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Check, Copy, Download, Monitor, Moon, Palette, PawPrint, Plus, Sun, Trash2, RefreshCw, FolderInput, Cpu, type LucideIcon } from 'lucide-react';
-import { Button, FormField, GSettings, GSettingsGroup, GSettingsRow, InlineError, SegmentedControl, SelectField, Switch } from '@garden/ui';
+import { Button, FormField, SettingsLayout, SettingsGroup, SettingsRow, InlineError, SegmentedControl, SelectField, Switch } from '../ui'
 import type { Avatar, Ghost } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -41,40 +41,40 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
   const ghost = ghosts.find(item => item.id === requestedGhost) ?? ghosts[0];
   const changeTab = (next: string) => navigate(`/settings?tab=${next}${ghost ? `&ghost=${encodeURIComponent(ghost.id)}` : ''}`);
   const shellSection = sections.find(section => section.id === tab);
-  return <GSettings title="설정" strings={{ navigationLabel: '설정 항목', contentLabel: '설정 내용' }}
+  return <SettingsLayout title="설정" strings={{ navigationLabel: '설정 항목', contentLabel: '설정 내용' }}
     sections={items.map(item => ({ id: item.id, label: item.label, icon: <item.icon aria-hidden="true"/> }))}
     activeSection={tab} onSectionChange={changeTab}>
     {shellSection?.content}
     {storageError && <InlineError className="mt-4">{storageError}</InlineError>}
     {tab === 'models' && <ModelSettings/>}
     {tab === 'appearance' && <>
-      <GSettingsGroup title={<span className="sr-only">화면</span>}>
-        <GSettingsRow label="테마">
+      <SettingsGroup title={<span className="sr-only">화면</span>}>
+        <SettingsRow label="테마">
           <SegmentedControl aria-label="테마" value={preferences.theme} onValueChange={theme => updatePreferences({ theme: theme as Preferences['theme'] })}
             options={[{ value: 'system', label: <span className="flex items-center gap-1.5"><Monitor size={14}/>시스템</span> },
               { value: 'light', label: <span className="flex items-center gap-1.5"><Sun size={14}/>밝게</span> },
               { value: 'dark', label: <span className="flex items-center gap-1.5"><Moon size={14}/>어둡게</span> }]}/>
-        </GSettingsRow>
-        <GSettingsRow label="아바타 애니메이션" description="작업 중에 움직입니다. 시스템의 동작 줄이기 설정을 따릅니다." htmlFor="animate-switch">
+        </SettingsRow>
+        <SettingsRow label="아바타 애니메이션" description="작업 중에 움직입니다. 시스템의 동작 줄이기 설정을 따릅니다." htmlFor="animate-switch">
           <Switch id="animate-switch" checked={preferences.animate} onCheckedChange={animate => updatePreferences({ animate })}/>
-        </GSettingsRow>
-      </GSettingsGroup>
+        </SettingsRow>
+      </SettingsGroup>
       <p className="m-0 text-caption text-ink-3">표시 설정은 이 브라우저에 저장됩니다.</p>
     </>}
     {tab === 'pets' && <>
       <PetLibrary key={ghost?.id ?? 'empty'} ghost={ghost} navigate={navigate} animate={preferences.animate} color={preferences.ghostColor} onColor={ghostColor => updatePreferences({ ghostColor })}/>
-      <GSettingsGroup title="작업실 펫">
-        <GSettingsRow label="작업실에 펫 표시" description="펫을 누르면 선택한 Ghost와의 대화가 열립니다." htmlFor="companion-switch">
+      <SettingsGroup title="작업실 펫">
+        <SettingsRow label="작업실에 펫 표시" description="펫을 누르면 선택한 Ghost와의 대화가 열립니다." htmlFor="companion-switch">
           <Switch id="companion-switch" checked={preferences.companion} onCheckedChange={companion => updatePreferences({ companion })}/>
-        </GSettingsRow>
-        {preferences.companion && <GSettingsRow label="표시할 Ghost" htmlFor="companion-ghost">
+        </SettingsRow>
+        {preferences.companion && <SettingsRow label="표시할 Ghost" htmlFor="companion-ghost">
           <SelectField id="companion-ghost" label="표시할 Ghost" value={ghosts.some(item => item.id === preferences.companionProfile) ? preferences.companionProfile : ghosts[0]?.id ?? ''}
             onValueChange={companionProfile => updatePreferences({ companionProfile })}
             options={ghosts.map(item => ({ value: item.id, label: item.name }))}/>
-        </GSettingsRow>}
-      </GSettingsGroup>
+        </SettingsRow>}
+      </SettingsGroup>
     </>}
-  </GSettings>;
+  </SettingsLayout>;
 }
 
 function PetLibrary({ ghost, navigate, animate, color, onColor }: {

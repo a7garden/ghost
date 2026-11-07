@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { InlineError, Input } from '@garden/ui';
+import { InlineError, Input } from '../ui'
 import { isHexColor } from './appearance';
 
 export type ColorPreset = { name: string; color: string };

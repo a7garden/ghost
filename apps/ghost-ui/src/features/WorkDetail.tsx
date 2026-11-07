@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowUpRight, CircleAlert, FileText, ListTree, Play, Pencil, Square, Wrench } from 'lucide-react';
-import { Badge, Button, EmptyState, GPage, GPageHeader, InlineError } from '@garden/ui';
+import { Badge, Button, EmptyState, Page, PageHeader, InlineError } from '../ui'
 import type { Message, State, Work, WorkDetail as WorkDetailData, Effect, Verdict } from '@ghost/contract';
 import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
@@ -57,20 +57,20 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
 
   const run = (fn: () => Promise<unknown>) => { setError(''); void fn().then(() => reload()).catch(e => setError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다.')); };
 
-  if (notFound) return <GPage>
-    <GPageHeader title={uiTerms.work}/>
+  if (notFound) return <Page>
+    <PageHeader title={uiTerms.work}/>
     <EmptyState icon={<CircleAlert/>} title="맡긴 일을 찾을 수 없습니다"
       description="종료된 지 오래된 일은 목록에서 사라집니다." action={<Button variant="outline" onClick={() => navigate('/work')}>{uiTerms.work} 목록으로</Button>}/>
-  </GPage>;
-  if (!detail) return <GPage><GPageHeader title={uiTerms.work}/><p className="m-0 text-caption text-ink-2" aria-busy="true">읽는 중…</p></GPage>;
+  </Page>;
+  if (!detail) return <Page><PageHeader title={uiTerms.work}/><p className="m-0 text-caption text-ink-2" aria-busy="true">읽는 중…</p></Page>;
 
   const { work, children, effects, artifacts, ancestors, decisions } = detail;
   const pendingDecisions = decisions.filter(decision => decision.state === 'pending');
   const live = !TERMINAL_WORK_STATES.includes(work.state);
   const pendingWorkIds = new Set(pendingDecisions.map(decision => decision.workId).filter((id): id is string => id !== null));
-  return <GPage width="content" className="grid content-start gap-8 pt-8">
+  return <Page width="content" className="grid content-start gap-8 pt-8">
     <div className="grid gap-3">
-      <GPageHeader title={work.title}
+      <PageHeader title={work.title}
       actions={<>
         {live && <Button variant="outline" onClick={() => setEditing(true)}><Pencil className="size-4"/>수정</Button>}
         {live && <Button variant="outline" onClick={() => run(() => client.send({ type: 'work.cancel', workId: work.id }))}><Square className="size-4"/>취소</Button>}
@@ -144,7 +144,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
 
     <WorkConversation work={work} ghostName={ghostName(work.ghostId)}/>
     {editing && <EditWorkModal work={work} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }}/>}
-  </GPage>;
+  </Page>;
 }
 
 function WorkRowInline({ work, pendingDecisionIds, ghostName, onOpen }: { work: Work; pendingDecisionIds: ReadonlySet<string>; ghostName: string; onOpen(): void }) {

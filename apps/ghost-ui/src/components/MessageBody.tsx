@@ -1,6 +1,6 @@
 import { createContext, isValidElement, useContext, useEffect, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import { Check, CircleAlert, Copy, Image as ImageIcon } from 'lucide-react';
-import { Button, cn } from '@garden/ui';
+import { Button, cn } from '../ui'
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './MessageBody.css';
@@ -97,7 +97,7 @@ function SafeLink({ children, href, node: _node, ...props }: ComponentPropsWitho
       try { id = decodeURIComponent(href.slice(1)); } catch { return; }
       const target = [...(body?.querySelectorAll<HTMLElement>('[id]') ?? [])].find(element => element.id === id);
       if (target) {
-        const viewport = target.closest<HTMLElement>('.g-conversation__transcript, #main-content');
+        const viewport = target.closest<HTMLElement>('.ghost-conversation__transcript, #main-content');
         if (viewport) {
           const content = target.getBoundingClientRect();
           const frame = viewport.getBoundingClientRect();

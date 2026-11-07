@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from '@garden/ui';
+import { Button } from '../ui'
 import type { ArtifactRef } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { Modal } from './Modal';

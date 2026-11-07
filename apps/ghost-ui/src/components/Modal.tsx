@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@garden/ui';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '../ui'
 
-/** Blocking task or side detail on Garden's Dialog; `drawer` docks it to the trailing edge. */
+/** Blocking task or side detail; `drawer` docks it to the trailing edge. */
 export function Modal({ title, children, onClose, drawer = false, className = '', focusClose = false }: { title: string; children: ReactNode; onClose: () => void; drawer?: boolean; className?: string; focusClose?: boolean }) {
   return <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
     <DialogContent closeLabel="닫기" aria-describedby={undefined}

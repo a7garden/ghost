@@ -7,7 +7,7 @@
     "prepare": "node scripts/prepare.mjs",
     "build": "npm run prepare && tauri build --debug --bundles app -- --offline",
     "check": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --offline --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
-    "test": "cargo test --offline --manifest-path vendor/garden-native-host/Cargo.toml",
+    "test": "cargo test --offline --manifest-path src-tauri/Cargo.toml",
     "ios:preview": "node scripts/ios-package-preview.mjs"
   },
   "devDependencies": {

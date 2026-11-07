@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Checkbox, GSettingsGroup, GSettingsRow, InlineError, Textarea } from '@garden/ui';
+import { Button, Checkbox, SettingsGroup, SettingsRow, InlineError, Textarea } from '../ui'
 import { GHOST_TOOLS, type GhostTool } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -87,9 +87,9 @@ export function GhostAgentSettingsEditor({ ghostId }: { ghostId: string }) {
   const extra = GHOST_TOOLS.filter(tool => !grouped.has(tool));
   const toolRow = (tool: GhostTool) => {
     const id = `ghost-tool-${ghostId}-${tool}`;
-    return <GSettingsRow key={tool} label={toolLabels[tool]} htmlFor={id}>
+    return <SettingsRow key={tool} label={toolLabels[tool]} htmlFor={id}>
       <Checkbox id={id} checked={draft.includes(tool)} disabled={locked} onCheckedChange={on => toggle(tool, on === true)}/>
-    </GSettingsRow>;
+    </SettingsRow>;
   };
   return <div className="grid gap-4">
     <form className="grid gap-2" onSubmit={event => {
@@ -112,17 +112,17 @@ export function GhostAgentSettingsEditor({ ghostId }: { ghostId: string }) {
           setToolsDraft({});
         }, '도구 권한을 저장했습니다.')}>저장</Button>}
       </div>
-      {toolGroups.map(group => <GSettingsGroup key={group.title} title={group.title} description={group.description}>
+      {toolGroups.map(group => <SettingsGroup key={group.title} title={group.title} description={group.description}>
         {group.tools.map(toolRow)}
-      </GSettingsGroup>)}
-      {extra.length > 0 && <GSettingsGroup title="기타 도구">{extra.map(toolRow)}</GSettingsGroup>}
-      <GSettingsGroup title="항상 제공되는 도구" description="Ghost가 일을 안전하게 진행하도록 대화 종류에 따라 항상 쓰는 도구입니다. 선택 목록에 없고 끌 수 없습니다.">
+      </SettingsGroup>)}
+      {extra.length > 0 && <SettingsGroup title="기타 도구">{extra.map(toolRow)}</SettingsGroup>}
+      <SettingsGroup title="항상 제공되는 도구" description="Ghost가 일을 안전하게 진행하도록 대화 종류에 따라 항상 쓰는 도구입니다. 선택 목록에 없고 끌 수 없습니다.">
         <ul className="m-0 grid list-none gap-1.5 p-0">
           {lifecycleTools.map(({ tool, label, note }) => <li key={tool} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-caption">
             <span className="text-ink">{label}</span><span className="text-ink-3">{note}</span>
           </li>)}
         </ul>
-      </GSettingsGroup>
+      </SettingsGroup>
       <p className="m-0 text-caption text-ink-3">메인 Ghost만 직접 대화에서 다른 Ghost의 설정을 바꿀 수 있습니다. 자기 설정과 메인 지정은 소유자만 바꿉니다.</p>
       {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
       {error && <InlineError>{error}</InlineError>}
