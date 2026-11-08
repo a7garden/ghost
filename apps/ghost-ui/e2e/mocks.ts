@@ -9,6 +9,8 @@ export const visualHandoffDecisionId = 'visual-handoff';
 function vaultItems(): VaultItem[] {
   const { fixedNow, defaultGhostId, researchGhostId, scribeGhostId } = readRunState();
   const stamped = fixedNow - 3600_000;
+  // A fixed calendar point: the row renders the absolute deletion time as text, so it must not drift per run.
+  const oneTimeExpiry = Date.UTC(2026, 10, 9, 10, 30);
   return [
     { id: 'v-login', kind: 'login', title: '서비스 로그인', origin: 'https://app.example.com', username: 'owner@example.com',
       cardLast4: null, cardExpiry: null, contact: null, hints: '업무용 계정', ghostIds: [researchGhostId],
@@ -21,7 +23,7 @@ function vaultItems(): VaultItem[] {
       hints: '견적 문의', ghostIds: [], hasPassword: false, hasTotp: false, expiresAt: null, createdAt: stamped, updatedAt: stamped },
     { id: 'v-secret', kind: 'secret', title: '배포 API 키', origin: 'https://api.example.com', username: null,
       cardLast4: null, cardExpiry: null, contact: null, hints: '일회용', ghostIds: [scribeGhostId],
-      hasPassword: false, hasTotp: false, expiresAt: fixedNow + 20 * 3600_000, createdAt: stamped, updatedAt: stamped },
+      hasPassword: false, hasTotp: false, expiresAt: oneTimeExpiry, createdAt: stamped, updatedAt: stamped },
   ];
 }
 

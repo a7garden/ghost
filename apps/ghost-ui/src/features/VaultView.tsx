@@ -158,8 +158,8 @@ export function VaultView() {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">금고</h2>
       <span className="flex items-center gap-2">
-        <Button variant="outline" type="button" onClick={() => setImporting(true)}><FileUp size={15}/>CSV 가져오기</Button>
-        <Button type="button" onClick={() => setEditing('new')}><Plus size={15}/>새 항목</Button>
+        <Button variant="outline" type="button" disabled={!state} onClick={() => setImporting(true)}><FileUp size={15}/>CSV 가져오기</Button>
+        <Button type="button" disabled={!state} onClick={() => setEditing('new')}><Plus size={15}/>새 항목</Button>
       </span>
     </div>
     {loadError && <InlineError>{loadError}</InlineError>}
