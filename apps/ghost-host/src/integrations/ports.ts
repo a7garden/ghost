@@ -1,4 +1,4 @@
-import type { Decision, Space, Work } from "@ghost/contract";
+import type { Decision, Space, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 
 /** Builds the Pi execution environment of a work conversation. Implemented in src/sandbox. */
@@ -166,4 +166,55 @@ export interface SkillsPort {
   list(name: string): string[];
   /** One skill file as UTF-8 text, bounded. */
   readFile(name: string, relPath: string): string;
+}
+
+/** A secret field of a vault item. Values flow host → page only; no tool result carries one. */
+export type VaultField = "username" | "password" | "totp" | "card_number" | "card_expiry" | "card_cvc" | "card_name" | "value";
+
+/** Fields whose fill needs an owner-approved effect each time (money moves through them). */
+export const APPROVAL_FIELDS: readonly VaultField[] = ["card_number", "card_expiry", "card_cvc", "card_name"];
+
+/**
+ * The Ghost vault: encrypted items, per-Ghost grants, write-only secrets. Implemented in src/stores/vault.ts.
+ * `reveal` is host-internal (the browser fill path); its value must never enter a tool result, log, event or effect row.
+ */
+export interface VaultPort {
+  /** Metadata of the items a Ghost may use, optionally narrowed to an origin (exact canonical match) or kind. */
+  listFor(ghostId: string, filter?: { origin?: string; kind?: VaultItem["kind"] }): VaultItem[];
+  /** One item's metadata if the Ghost may use it; throws forbidden/not_found otherwise. */
+  itemFor(ghostId: string, itemId: string): VaultItem;
+  /** The secret value of one field, for filling into a page. Throws when not granted, expired or absent. */
+  reveal(ghostId: string, itemId: string, field: VaultField, at?: number): string;
+  /** A new login with a generated password, granted to `ghostId`. The password is never returned. */
+  generateLogin(ghostId: string, input: { origin: string; username: string; title?: string; hints?: string }): VaultItem;
+}
+
+/** The conversation whose browser session a command runs in; logins persist per Ghost. */
+export interface BrowserSessionRef {
+  ghostId: string;
+  conversationId: string;
+}
+
+/** One normalized agent-browser `--json` response. Page-derived strings in `data` are untrusted. */
+export interface BrowserCommandResult {
+  ok: boolean;
+  data: unknown;
+  error: string | null;
+}
+
+/**
+ * Host-side Chrome through the installed agent-browser CLI, behind the host's egress proxy (no loopback,
+ * private, link-local or tailnet destinations, including page-issued requests). Implemented in src/integrations/browser.ts.
+ */
+export interface BrowserPort {
+  /** One command in the conversation's session. Secret material may only travel through `stdin`. */
+  run(session: BrowserSessionRef, argv: string[], options?: { stdin?: string; timeoutMs?: number }): Promise<BrowserCommandResult>;
+  /** Reopen the session in a visible window (same Ghost login state) at `url` so the owner can act. */
+  handoff(session: BrowserSessionRef, url: string | null): Promise<void>;
+  /** End the visible window after the owner is done; the next command starts headless with the saved state. */
+  endHandoff(session: BrowserSessionRef): Promise<void>;
+  /** Close the conversation's session; the Ghost's login state is saved. */
+  close(session: BrowserSessionRef): Promise<void>;
+  /** Stop every session and the egress proxy (host shutdown). */
+  shutdown(): Promise<void>;
 }

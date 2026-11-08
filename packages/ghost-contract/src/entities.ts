@@ -45,7 +45,7 @@ export type Look = Static<typeof Look>;
 export const GhostState = Type.Union([Type.Literal("active"), Type.Literal("paused"), Type.Literal("retired")]);
 export type GhostState = Static<typeof GhostState>;
 
-/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, complete, work_status, artifact_read, effect_list, verdict) and the main-only ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
+/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict) and the main-only ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
@@ -81,6 +81,29 @@ export const GhostTool = Type.Union([
   Type.Literal("host_read"),
   Type.Literal("host_nodes"),
   Type.Literal("host_command_propose"),
+  Type.Literal("browser_open"),
+  Type.Literal("browser_snapshot"),
+  Type.Literal("browser_screenshot"),
+  Type.Literal("browser_read"),
+  Type.Literal("browser_click"),
+  Type.Literal("browser_fill"),
+  Type.Literal("browser_type"),
+  Type.Literal("browser_press"),
+  Type.Literal("browser_select"),
+  Type.Literal("browser_check"),
+  Type.Literal("browser_scroll"),
+  Type.Literal("browser_navigate"),
+  Type.Literal("browser_tabs"),
+  Type.Literal("browser_wait"),
+  Type.Literal("browser_upload"),
+  Type.Literal("browser_download"),
+  Type.Literal("browser_propose"),
+  Type.Literal("browser_handoff"),
+  Type.Literal("browser_fill_secret"),
+  Type.Literal("browser_close"),
+  Type.Literal("vault_list"),
+  Type.Literal("vault_request"),
+  Type.Literal("vault_generate_login"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 
@@ -120,10 +143,39 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "host_read",
   "host_nodes",
   "host_command_propose",
+  "browser_open",
+  "browser_snapshot",
+  "browser_screenshot",
+  "browser_read",
+  "browser_click",
+  "browser_fill",
+  "browser_type",
+  "browser_press",
+  "browser_select",
+  "browser_check",
+  "browser_scroll",
+  "browser_navigate",
+  "browser_tabs",
+  "browser_wait",
+  "browser_upload",
+  "browser_download",
+  "browser_propose",
+  "browser_handoff",
+  "browser_fill_secret",
+  "browser_close",
+  "vault_list",
+  "vault_request",
+  "vault_generate_login",
 ];
 
 /** Tools that observe or change the owner's Mac. Granted only explicitly, never by default. */
 export const HOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("host_"));
+
+/** The host-side browser: one session per conversation, logins kept per Ghost. */
+export const BROWSER_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("browser_"));
+
+/** Vault metadata and requests; secret values never reach a model. */
+export const VAULT_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("vault_"));
 
 /** The allow-list a new Ghost gets when none is given: every selectable tool except host tools. */
 export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool));
@@ -234,6 +286,10 @@ export const Verdict = Type.Object({
   outcome: VerdictOutcome,
   source: Type.Union([Type.Literal("checks"), Type.Literal("review"), Type.Literal("owner")]),
   reasons: Type.String({ maxLength: 8192 }),
+  /** What the reviewer observed: failing check, file and line, expected vs actual. */
+  evidence: Type.Optional(Type.String({ maxLength: 8192 })),
+  /** The bound on a revision: what may change and what must stay untouched. */
+  scope: Type.Optional(Type.String({ maxLength: 2048 })),
   at: Timestamp,
 });
 export type Verdict = Static<typeof Verdict>;
@@ -303,6 +359,60 @@ export const Decision = Type.Object({
   resolvedAt: nullable(Timestamp),
 });
 export type Decision = Static<typeof Decision>;
+
+export const VaultItemKind = Type.Union([Type.Literal("login"), Type.Literal("card"), Type.Literal("contact"), Type.Literal("secret")]);
+export type VaultItemKind = Static<typeof VaultItemKind>;
+
+export const VaultContact = Type.Object({
+  name: Type.Optional(Type.String({ maxLength: 256 })),
+  phone: Type.Optional(Type.String({ maxLength: 64 })),
+  email: Type.Optional(Type.String({ maxLength: 256 })),
+  address: Type.Optional(Type.String({ maxLength: 1024 })),
+});
+export type VaultContact = Static<typeof VaultContact>;
+
+/**
+ * What the owner and Ghosts may see of a vault item. Passwords, one-time-code seeds, card numbers,
+ * security codes and secret values are write-only: no API or tool returns them.
+ */
+export const VaultItem = Type.Object({
+  id: Id,
+  kind: VaultItemKind,
+  title: Type.String({ minLength: 1, maxLength: 256 }),
+  /** Canonical https origin a login or secret belongs to. */
+  origin: nullable(Type.String({ maxLength: 512 })),
+  username: nullable(Type.String({ maxLength: 512 })),
+  cardLast4: nullable(Type.String({ maxLength: 4 })),
+  cardExpiry: nullable(Type.String({ maxLength: 16 })),
+  contact: nullable(VaultContact),
+  /** When to use this item, written by the owner; Ghosts read it to choose between items. */
+  hints: Type.String({ maxLength: 1024 }),
+  /** Ghosts allowed to use the item. */
+  ghostIds: Type.Array(Id, { maxItems: 256 }),
+  hasPassword: Type.Boolean(),
+  hasTotp: Type.Boolean(),
+  /** A one-time item from a secure form the owner chose not to keep; removed after this time. */
+  expiresAt: nullable(Timestamp),
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+});
+export type VaultItem = Static<typeof VaultItem>;
+
+/** `proposal.secureForm` of a `question` decision: the owner answers through the vault, never in chat. */
+export const SecureFormRequest = Type.Object({
+  kind: VaultItemKind,
+  origin: nullable(Type.String({ maxLength: 512 })),
+  title: nullable(Type.String({ maxLength: 256 })),
+  reason: Type.String({ maxLength: 2048 }),
+});
+export type SecureFormRequest = Static<typeof SecureFormRequest>;
+
+/** `proposal.browserHandoff` of a `question` decision: a visible browser window waits for the owner. */
+export const BrowserHandoff = Type.Object({
+  url: nullable(Type.String({ maxLength: 2048 })),
+  reason: Type.String({ maxLength: 2048 }),
+});
+export type BrowserHandoff = Static<typeof BrowserHandoff>;
 
 export const EffectState = Type.Union([Type.Literal("pending"), Type.Literal("done"), Type.Literal("unknown"), Type.Literal("denied")]);
 export type EffectState = Static<typeof EffectState>;
