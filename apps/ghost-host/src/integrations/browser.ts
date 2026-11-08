@@ -70,10 +70,7 @@ export class AgentBrowser implements BrowserPort {
     this.namespace = `g${rootHash.slice(0, 12)}`;
     // macOS sockaddr_un permits only 103 path bytes; sockets are ephemeral, not login state.
     this.socketDir = `/tmp/ghost-browser-${rootHash.slice(0, 16)}`;
-    try { mkdirSync(this.socketDir, { mode: 0o700 }); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-    const socketDir = lstatSync(this.socketDir);
-    if (!socketDir.isDirectory() || socketDir.isSymbolicLink() || socketDir.uid !== process.getuid?.() || (socketDir.mode & 0o077) !== 0) throw new Error("Unsafe browser socket directory");
+    this.ensureSocketDir();
     const keyPath = join(base, "key");
     const temporaryKey = `${keyPath}.${randomUUID()}`;
     writeFileSync(temporaryKey, randomBytes(32).toString("hex"), { flag: "wx", mode: 0o600 });
@@ -83,6 +80,13 @@ export class AgentBrowser implements BrowserPort {
     this.key = readFileSync(keyPath, "utf8");
     if (!/^[a-f0-9]{64}$/.test(this.key)) throw new Error("Invalid browser encryption key");
     chmodSync(keyPath, 0o600);
+  }
+  /** Create the 0700 socket directory if missing; refuse a symlink, a foreign owner or group/other access. */
+  private ensureSocketDir() {
+    try { mkdirSync(this.socketDir, { mode: 0o700 }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+    const socketDir = lstatSync(this.socketDir);
+    if (!socketDir.isDirectory() || socketDir.isSymbolicLink() || socketDir.uid !== process.getuid?.() || (socketDir.mode & 0o077) !== 0) throw new Error("Unsafe browser socket directory");
   }
   private enqueue<T>(perform: () => Promise<T>): Promise<T> {
     const next = this.queue.then(perform);
@@ -212,6 +216,8 @@ export class AgentBrowser implements BrowserPort {
       "--args", `--proxy-server=${proxy.url},--proxy-bypass-list=<-loopback>,--force-webrtc-ip-handling-policy=disable_non_proxied_udp`,
       "--content-boundaries", "--max-output", "48000", "--idle-timeout", `${this.config.idleTimeoutMinutes ?? 10}m`,
       "--download-path", download, "--screenshot-dir", download, ...(session.headed ? ["--headed"] : []), "--json", ...command];
+    // /tmp is swept by macOS; the socket directory may vanish while the host keeps running.
+    this.ensureSocketDir();
     const env = { HOME: this.home, PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", TMPDIR: process.env.TMPDIR ?? "/tmp",
       AGENT_BROWSER_ENCRYPTION_KEY: this.key, AGENT_BROWSER_NO_VERSION_CHECK: "1", AGENT_BROWSER_SOCKET_DIR: this.socketDir };
     let child: Bun.Subprocess<"pipe", "pipe", "pipe">;
@@ -455,6 +461,8 @@ export class AgentBrowser implements BrowserPort {
       }
       if (this.proxy) { await (await this.proxy).close(); this.proxy = null; }
       if (failure) throw failure;
+      // Every session of this root is closed; its ephemeral socket directory goes with them.
+      rmSync(this.socketDir, { recursive: true, force: true });
     })).catch((error) => {
       this.shutdownPromise = null;
       throw error;
