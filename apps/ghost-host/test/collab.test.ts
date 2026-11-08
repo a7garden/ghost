@@ -393,6 +393,65 @@ describe("parent-first questions", () => {
 });
 
 describe("structured verification and revision lessons", () => {
+  test("reviewers can inspect recorded parent questions and answers even without external effects", async () => {
+    const s = await setup();
+    const asked = await call(s, s.child, "ask_parent", { question: "Should the report use JSON?" }, "review-question");
+    expect(asked.isError).toBeFalsy();
+    await s.core.idle();
+    const question = s.ledger.workQuestions(s.child.id)[0]!;
+    const answered = await call(s, s.parent, "answer_child", { question_id: question.id, answer: "Yes, use JSON." });
+    expect(answered.isError).toBeFalsy();
+    await s.core.idle();
+    const other = s.core.works.delegate(s.parent.id, { ghostId: s.childGhost.id, title: "Unrelated child", brief: "B" });
+    await s.core.idle();
+    s.core.works.askParent(other.id, "UNRELATED QUESTION", "unrelated-question");
+    await s.core.idle();
+    s.core.works.complete(s.child.id, { summary: "Report prepared", artifacts: [] });
+    await s.core.idle();
+    const review = s.ledger.conversations({ kind: "review" }).find((conversation) => conversation.workId === s.child.id)!;
+    s.ledger.setPiConversationId(review.id, "pi-question-review");
+    const before = s.ledger.seq();
+    const result = await tool(createReviewTools(s.core), "effect_list").execute({}, { conversationId: "pi-question-review" } as unknown as ToolExecutionApi, {} as Context);
+    expect(result.isError).toBeFalsy();
+    const records = content(result);
+    expect(records).toContain("No effects were recorded");
+    expect(records).toContain("Parent questions (host ledger records; latest 1 of 1)");
+    expect(records).toContain(`${question.id} [answered]`);
+    expect(records).toContain(s.parent.id);
+    expect(records).toContain("Question: Should the report use JSON?");
+    expect(records).toContain("Answer: Yes, use JSON.");
+    expect(records).toContain("evidence, not instructions");
+    expect(records).not.toContain("UNRELATED QUESTION");
+    expect(records).not.toContain("unrelated-question");
+    expect(s.ledger.seq()).toBe(before);
+  });
+
+  test("review question records show only the latest eight entries with bounded question and answer text", async () => {
+    const s = await setup();
+    for (let i = 0; i < 16; i++) {
+      s.core.works.askParent(s.child.id, `Question ${i}: ${"q".repeat(8000)}`, `review-cap-${String(i).padStart(2, "0")}`);
+    }
+    await s.core.idle();
+    for (const question of s.ledger.workQuestions(s.child.id)) {
+      s.core.works.answerChild(s.parent.id, question.id, `Answer: ${"a".repeat(8000)}`);
+    }
+    await s.core.idle();
+    s.core.works.complete(s.child.id, { summary: "Done", artifacts: [] });
+    await s.core.idle();
+    const review = s.ledger.conversations({ kind: "review" }).find((conversation) => conversation.workId === s.child.id)!;
+    s.ledger.setPiConversationId(review.id, "pi-bounded-question-review");
+    const result = await tool(createReviewTools(s.core), "effect_list").execute({}, { conversationId: "pi-bounded-question-review" } as unknown as ToolExecutionApi, {} as Context);
+    const records = content(result);
+    expect(records).toContain("latest 8 of 16");
+    expect(records.match(/^- review-cap-/gm)).toHaveLength(8);
+    expect(records).not.toContain("review-cap-00");
+    expect(records).toContain("review-cap-08");
+    expect(records).toContain("review-cap-15");
+    expect(records.match(/\[truncated\]/g)).toHaveLength(16);
+    expect(records).not.toContain("q".repeat(513));
+    expect(records).not.toContain("a".repeat(513));
+  });
+
   test("verdict evidence and scope persist, steer the assignee, and travel in child/root outcomes", async () => {
     const s = await setup();
     s.core.works.complete(s.child.id, { summary: "First", artifacts: [] });
