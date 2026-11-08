@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-4cba876` (`main`, UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-7b5e80a` (`main`, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,13 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 제목 표시줄 아래 패널 위 여백 운영 반영 — 2026-11-08
+
+- 소스 `7b5e80a`(main; 메인 시트의 위 여백 8px — 그 전에는 `margin: 0 8px 8px 0`로 패널 윗변이 제목 표시줄에 바로 붙어 가려진 것처럼 보였다)를 `releases/20261108-bun-7b5e80a`에 설치했다. Host는 당시 운영 `3a21717` 것과 같은 바이트를 복사했다. UI 93개 파일 해시 일치, 백업 DB 사본 위 임시 루트·포트에서 health·새 번들(`main-CD6BUIiB.js`) 확인.
+- 검사: UI 테스트 87개·타입 검사·빌드, 시각 회귀(전체 통과; 병행 작업의 Playwright 실행과 임시 루트 충돌로 몇 차례 재실행 후 최종 35개 통과). 설치 앱 창을 영역 캡처로 확인: 패널 윗변이 제목 표시줄 아래 20px쯤에 온전히 보이고 오른쪽 둥근 모서리가 그대로 그려진다.
+- 백업 `~/.local/share/ghost/backups/pre-title-gap-20261108-bun-7b5e80a/`: `ghost-backup/2`, `complete: true`, 두 DB `integrity_check` ok. 유휴 확인 후 원자적으로 전환하고 정상 재기동했다(PID 97048 → 1416). 단일 리스너·준비 상태, Ghost 24·대화 40·맡긴 일 39, config 보존 확인.
+- 병행 작업 안내: `releases/20261108-bun-bbded27`(521e661) 스테이징이 이 릴리스 아래 커밋 기반이다. 다음 배포는 main 선두(`7b5e80a` 이상)에서 다시 빌드해야 이 여백이 유지된다. 되돌릴 때는 `current`를 `releases/20261108-bun-3a21717`로 교체한다. 저장 형식 변화는 없다.
 
 ### 고정 roster·Ghost 풀 사이드바 운영 반영 — 2026-11-08
 
