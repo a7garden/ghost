@@ -136,18 +136,23 @@ class HostEngine implements Engine {
     this.unsubscribeLedger = this.core.ledger.subscribe((event) => {
       if (event.data.type === "settings") this.rebuildModels();
     });
-    this.unsubscribeCommits = this.harness.subscribeCommits((publication) => {
-      for (const change of publication.changes) {
-        if (change.type === "submission") {
+    try {
+      this.unsubscribeCommits = this.harness.subscribeCommits((publication) => {
+        for (const change of publication.changes) {
+          if (change.type === "submission") {
+            const state = this.byPiId.get(change.value.conversationId);
+            if (state) this.enqueue(state, () => this.noteSubmission(change.value));
+            continue;
+          }
+          if (change.type !== "entry") continue;
           const state = this.byPiId.get(change.value.conversationId);
-          if (state) this.enqueue(state, () => this.noteSubmission(change.value));
-          continue;
+          if (state) this.enqueue(state, () => this.publishEntry(state, change.value));
         }
-        if (change.type !== "entry") continue;
-        const state = this.byPiId.get(change.value.conversationId);
-        if (state) this.enqueue(state, () => this.publishEntry(state, change.value));
-      }
-    });
+      });
+    } catch (error) {
+      this.unsubscribeLedger();
+      throw error;
+    }
   }
 
   // Opening
@@ -703,6 +708,9 @@ class HostEngine implements Engine {
   }
 }
 
+/** Startup could not prove that Pi's live resources were closed; retain root ownership. */
+export class EngineStartupCleanupError extends AggregateError {}
+
 /**
  * Open the engine over one Pi storage. The harness owns every conversation; core
  * drives it through the `Engine` port.
@@ -717,20 +725,45 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
   const registry = createRegistry();
   for (const extension of tools.all()) registry.install(extension);
   const storage = await openNodeSqliteStorage(deps.storagePath);
-  const harness = await Harness.open(
-    storage,
-    {
-      models,
-      registry,
-      settings: deps.harnessSettings,
-      env: async ({ conversationId }) => {
-        const host = core.ledger.conversationByPiId(String(conversationId));
-        if (!host || host.kind !== "work" || !host.workId) return undefined;
-        const work = core.ledger.workByConversation(host.id);
-        return work ? sandbox.envFor(work) : undefined;
+  let harness: Harness | null = null;
+  let opening = true;
+  const startupReports: unknown[] = [];
+  try {
+    harness = await Harness.open(
+      storage,
+      {
+        models,
+        registry,
+        settings: deps.harnessSettings,
+        // Harness.open reports an internal close failure here if its own startup
+        // fails. Do not mistake its original rejection for successful cleanup.
+        onReport: (error) => {
+          if (opening) startupReports.push(error);
+          else log("engine: harness report", error);
+        },
+        env: async ({ conversationId }) => {
+          const host = core.ledger.conversationByPiId(String(conversationId));
+          if (!host || host.kind !== "work" || !host.workId) return undefined;
+          const work = core.ledger.workByConversation(host.id);
+          return work ? sandbox.envFor(work) : undefined;
+        },
       },
-    },
-    ctx,
-  );
-  return new HostEngine(deps, harness, ownedModels, registry);
+      ctx,
+    );
+    opening = false;
+    return new HostEngine(deps, harness, ownedModels, registry);
+  } catch (error) {
+    opening = false;
+    const cleanupErrors = harness ? [] : startupReports;
+    try {
+      if (harness) await harness.close(ctx);
+      else await storage.close(ctx);
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    if (cleanupErrors.length) {
+      throw new EngineStartupCleanupError([error, ...cleanupErrors], "Pi startup cleanup failed; root remains owned until process exit");
+    }
+    throw error;
+  }
 }

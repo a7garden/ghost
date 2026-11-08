@@ -225,4 +225,7 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE ghosts ADD COLUMN skills TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE ghosts ADD COLUMN deleted_at INTEGER;
   `,
+  /* 5: reserve API identities before asynchronous effects; old receipts are complete */ `
+  ALTER TABLE requests ADD COLUMN state TEXT NOT NULL DEFAULT 'done' CHECK (state IN ('pending', 'done'));
+  `,
 ];

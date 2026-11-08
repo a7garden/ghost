@@ -89,12 +89,24 @@ export class Decisions {
   }
 
   async resolve(decisionId: string, resolution: Resolution) {
+    const resolved = this.resolveState(decisionId, resolution);
+    await this.followUp(resolved);
+  }
+
+  /** Commit the owner's answer before external follow-ups; API receipts join this transaction. */
+  resolveState(decisionId: string, resolution: Resolution): Decision {
     const decision = this.ledger.decision(decisionId);
     if (decision.state !== "pending") throw conflict(`decision is already ${decision.state}`);
     const state = stateFor(decision, resolution);
     const resolved: Decision = { ...decision, state, answer: resolution.answer ?? null, resolvedAt: Date.now() };
     this.ledger.tx(() => this.ledger.putDecision(resolved));
-    await this.followUp(resolved);
+    return resolved;
+  }
+
+  /** Retry only domain-journaled follow-ups, never the already committed resolution. */
+  async finishResolution(decisionId: string) {
+    const decision = this.ledger.decisionsAwaitingFollowUp().find((item) => item.id === decisionId);
+    if (decision) await this.followUp(decision);
   }
 
   /** Startup: finish follow-ups a crash interrupted after the owner's answer was committed. */

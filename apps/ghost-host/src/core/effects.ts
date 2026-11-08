@@ -14,6 +14,15 @@ export interface BeginEffect {
   summary: string;
 }
 
+/** Host-only API journals; these names are not model tools or tool exclusion scopes. */
+const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete"] as const;
+export type CommandEffectTool = typeof COMMAND_EFFECT_TOOLS[number];
+
+export interface BeginCommandEffect extends Omit<BeginEffect, "tool" | "callId"> {
+  tool: CommandEffectTool;
+  requestId: string;
+}
+
 /** What `begin` returns: run the effect, or replay a known outcome. */
 export type EffectStart = { kind: "run"; effect: Effect } | { kind: "replay"; effect: Effect };
 
@@ -32,16 +41,31 @@ export class Effects {
   }
 
   begin(input: BeginEffect): EffectStart {
+    if ((COMMAND_EFFECT_TOOLS as readonly string[]).includes(input.tool)) throw new CommandError("invalid", "API effects require command admission");
+    return this.start(input, "tool");
+  }
+
+  /** Explicit owner actions have independent exclusion, but identical replay guards. */
+  beginCommand(input: BeginCommandEffect): EffectStart {
+    if (!(COMMAND_EFFECT_TOOLS as readonly string[]).includes(input.tool)) throw new CommandError("invalid", "unknown API effect tool");
+    const { requestId, ...effect } = input;
+    return this.start({ ...effect, callId: `api:${requestId}` }, "command");
+  }
+
+  private start(input: BeginEffect, scope: "tool" | "command"): EffectStart {
     return this.ledger.tx(() => {
       const digest = digestOf(input.input);
       const existing = this.ledger.effectByCall(input.conversationId, input.callId);
       if (existing) {
         if (existing.inputDigest !== digest) throw conflict(`call ${input.callId} was recorded with different input`);
+        if (existing.tool !== input.tool) throw conflict(`call ${input.callId} was recorded for a different tool`);
         if (existing.state === "done" || existing.state === "denied") return { kind: "replay", effect: existing };
         throw conflict(`the outcome of call ${input.callId} is ${existing.state}; it will not run again`);
       }
-      const blocking = this.unresolvedInConversation(input.conversationId);
-      if (blocking.length > 0) throw conflict(`effect ${blocking[0]!.tool} (${blocking[0]!.callId}) is unresolved; nothing else runs until the owner reconciles it`);
+      if (scope === "tool") {
+        const blocking = this.unresolvedInConversation(input.conversationId);
+        if (blocking.length > 0) throw conflict(`effect ${blocking[0]!.tool} (${blocking[0]!.callId}) is unresolved; nothing else runs until the owner reconciles it`);
+      }
       const conversation = this.ledger.conversation(input.conversationId);
       const effect: Effect = {
         id: newId(),
@@ -93,7 +117,28 @@ export class Effects {
    * without running again; a throw that may have left an effect marks it unknown.
    */
   async run(input: BeginEffect, perform: () => Promise<string>): Promise<string> {
-    const start = this.begin(input);
+    return this.perform(this.begin(input), perform);
+  }
+
+  /** Journal an owner command without making it compete with Ghost tool mutations. */
+  async runCommand(input: BeginCommandEffect, perform: () => Promise<string>): Promise<string> {
+    return this.perform(this.beginCommand(input), perform);
+  }
+
+  /** An uncertain cancellation cannot replay and abort a newer run. */
+  async cancelMessage(conversationId: string, requestId: string): Promise<void> {
+    const start = this.beginCommand({
+      conversationId, requestId, tool: "message.cancel",
+      input: { type: "message.cancel", conversationId }, summary: "API message.cancel",
+    });
+    const result = await this.perform(start, async () => {
+      await this.core.engine.abort(conversationId);
+      return "cancelled";
+    });
+    if (result !== "cancelled") throw conflict("the cancellation outcome requires owner reconciliation; it is not a successful cancellation receipt");
+  }
+
+  private async perform(start: EffectStart, perform: () => Promise<string>): Promise<string> {
     if (start.kind === "replay") {
       if (start.effect.state === "denied") throw new CommandError("forbidden", start.effect.result ?? "denied");
       return start.effect.result ?? "";
@@ -121,7 +166,9 @@ export class Effects {
   }
 
   private unresolvedInConversation(conversationId: string): Effect[] {
-    return [...this.ledger.effectsInState("unknown"), ...this.ledger.effectsInState("pending")].filter((effect) => effect.conversationId === conversationId);
+    return [...this.ledger.effectsInState("unknown"), ...this.ledger.effectsInState("pending")].filter(
+      (effect) => effect.conversationId === conversationId && !(COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool),
+    );
   }
 
   /** At startup no effect can still be running: every `pending` becomes `unknown`. */

@@ -52,12 +52,19 @@ export class Ledger {
   private readonly listeners = new Set<Listener>();
   private pending: LedgerEventData[] | null = null;
   private depth = 0;
+  private committedTasks: (() => void)[] | null = null;
+  private rolledBackTasks: (() => void)[] | null = null;
 
   constructor(path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path, { create: true, strict: true });
-    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
-    this.migrate();
+    try {
+      this.db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+      this.migrate();
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
   }
 
   close() {
@@ -75,24 +82,47 @@ export class Ledger {
     }
   }
 
-  /** Run `fn` atomically. Nested calls join the outer transaction. */
+  /** Run synchronous `fn` atomically. Nested calls join the outer transaction. */
   tx<T>(fn: () => T): T {
-    if (this.depth > 0) return fn();
+    if (this.depth > 0) return this.synchronous(fn());
     this.pending = [];
+    this.committedTasks = [];
+    this.rolledBackTasks = [];
     this.depth++;
     let events: LedgerEvent[] = [];
+    let committed = false;
     try {
       const result = this.db.transaction(() => {
-        const value = fn();
+        const value = this.synchronous(fn());
         events = this.flush();
         return value;
       })();
+      committed = true;
       return result;
     } finally {
+      const tasks = committed ? this.committedTasks : this.rolledBackTasks;
       this.depth--;
       this.pending = null;
-      for (const event of events) for (const listener of this.listeners) listener(event);
+      this.committedTasks = null;
+      this.rolledBackTasks = null;
+      for (const task of tasks ?? []) task();
+      if (committed) for (const event of events) for (const listener of this.listeners) listener(event);
     }
+  }
+
+  private synchronous<T>(value: T): T {
+    if (value !== null && typeof value === "object" && "then" in value) throw new Error("Ledger.tx cannot return a Promise");
+    return value;
+  }
+
+  /** Defer engine work until the outer commit; a rollback must also settle its caller. */
+  afterCommit(task: () => void, rollback?: () => void) {
+    if (this.depth === 0) {
+      task();
+      return;
+    }
+    this.committedTasks!.push(task);
+    if (rollback) this.rolledBackTasks!.push(rollback);
   }
 
   private flush(): LedgerEvent[] {
@@ -137,7 +167,7 @@ export class Ledger {
   /** Request receipts and read notifications are kept for 30 days. */
   pruneHistory(now = Date.now()) {
     const cutoff = now - RECEIPT_RETENTION_MS;
-    this.db.query("DELETE FROM requests WHERE created_at < ?").run(cutoff);
+    this.db.query("DELETE FROM requests WHERE created_at < ? AND state = 'done'").run(cutoff);
     this.db.query("DELETE FROM notifications WHERE created_at < ? AND read_at IS NOT NULL").run(cutoff);
   }
 
@@ -756,13 +786,21 @@ export class Ledger {
 
   // Request receipts
 
-  request(id: string): { principal: string; digest: string; outcome: Record<string, unknown> } | null {
-    const row = this.db.query("SELECT principal, digest, outcome FROM requests WHERE id = ?").get(id) as Row | null;
-    return row ? { principal: String(row.principal), digest: String(row.digest), outcome: parseJson(row.outcome) } : null;
+  request(id: string): { principal: string; digest: string; state: "pending" | "done"; outcome: Record<string, unknown> } | null {
+    const row = this.db.query("SELECT principal, digest, state, outcome FROM requests WHERE id = ?").get(id) as Row | null;
+    return row ? { principal: String(row.principal), digest: String(row.digest), state: String(row.state) as "pending" | "done", outcome: parseJson(row.outcome) } : null;
+  }
+
+  /** Reserve an async command's identity before I/O, including failed or interrupted attempts. */
+  claimRequest(id: string, principal: string, digest: string, outcome: Record<string, unknown> = {}) {
+    this.db.query("INSERT INTO requests (id, principal, digest, outcome, created_at, state) VALUES (?, ?, ?, ?, ?, 'pending')").run(id, principal, digest, JSON.stringify(outcome), Date.now());
   }
 
   putRequest(id: string, principal: string, digest: string, outcome: Record<string, unknown>) {
-    this.db.query("INSERT INTO requests (id, principal, digest, outcome, created_at) VALUES (?, ?, ?, ?, ?)").run(id, principal, digest, JSON.stringify(outcome), Date.now());
+    this.db.query(`INSERT INTO requests (id, principal, digest, outcome, created_at, state) VALUES (?, ?, ?, ?, ?, 'done')
+      ON CONFLICT (id) DO UPDATE SET outcome = excluded.outcome, state = 'done'
+      WHERE requests.principal = excluded.principal AND requests.digest = excluded.digest`)
+      .run(id, principal, digest, JSON.stringify(outcome), Date.now());
   }
 }
 

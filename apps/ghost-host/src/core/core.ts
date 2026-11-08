@@ -81,17 +81,21 @@ export class Core implements EngineEvents {
    * the caller. The lane itself survives a failure.
    */
   run<T>(key: string, task: () => Promise<T>): Promise<T> {
-    const previous = this.lanes.get(key) ?? Promise.resolve();
-    const result = previous.then(task);
-    const settled = result.then(
-      () => {},
-      () => {},
-    );
-    this.lanes.set(key, settled);
-    void settled.finally(() => {
-      if (this.lanes.get(key) === settled) this.lanes.delete(key);
-    });
-    return result;
+    const { promise, resolve, reject } = Promise.withResolvers<T>();
+    this.ledger.afterCommit(() => {
+      const previous = this.lanes.get(key) ?? Promise.resolve();
+      const result = previous.then(task);
+      const settled = result.then(
+        () => {},
+        () => {},
+      );
+      this.lanes.set(key, settled);
+      void result.then(resolve, reject);
+      void settled.finally(() => {
+        if (this.lanes.get(key) === settled) this.lanes.delete(key);
+      });
+    }, () => reject(new Error("ledger transaction rolled back before engine work")));
+    return promise;
   }
 
   /** Fire-and-forget `run`: failures are logged and the next reconcile pass retries from ledger state. */

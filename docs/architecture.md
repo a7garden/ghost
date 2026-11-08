@@ -33,11 +33,11 @@ flowchart LR
 ## Principles
 
 1. **One process, one language.** Host, conversation engine and device API run in one Bun process. Types are shared with the UI through `packages/ghost-contract`.
-2. **Two stores, each with one writer.** `ledger.db` holds what Ghost knows about Ghosts, work, decisions and effects. `pi.db` holds conversations and their durable tasks, owned by Pi Durable. Nothing else is persisted except content-addressed artifacts, provider secrets and config.
+2. **Two domain stores, one Host per root.** `ledger.db` holds Ghosts, work, decisions and effects; Pi Durable owns conversations and tasks in `pi.db`. Before either store opens, the Host holds a SQLite exclusive transaction on `lock.db` for its lifetime. Root aliases share the same lock; process death releases it without a stale-PID override. The lock contains no domain state. Artifacts, provider secrets, config and disposable model catalogs remain separate files.
 3. **Everything that wakes a Ghost is a submission.** Owner messages, child results, owner decisions, schedule fires and review feedback are Pi submissions to a conversation with a deterministic `requestId`. Pi's request-ID idempotency removes duplicate wakes after a crash. There is no outbox, mailbox or delivery-receipt table.
 4. **Capability by construction.** A conversation's kind bounds its tools; each Ghost's explicit tool allow-list narrows that set, and integration/document grants still apply. A direct conversation cannot touch a sandbox; a work conversation cannot create root work. Tools resolve and authorize their current scope from the ledger on every execution, never from model arguments or a cached configuration.
-5. **Effects are journaled, never replayed.** A tool with an external effect records `pending` before I/O and `done` after. On restart, `pending` becomes `unknown`, the work blocks and the owner reconciles. Pi's own tool tasks are `replay: "unsafe"` for these tools, so an interrupted call returns an interrupted result instead of running twice.
-6. **Reads are free.** Read endpoints are never journaled. Only mutating commands carry a request ID, and the receipt stores the outcome reference, not the response body.
+5. **Effects are journaled, never replayed.** A tool with an external effect records `pending` before I/O and `done` after. On restart, `pending` becomes `unknown`, the work blocks and the owner reconciles. Pi's own tool tasks are `replay: "unsafe"` for these tools, so an interrupted call returns an interrupted result instead of running twice. Owner API journals retain the same replay guards but do not participate in Ghost-tool mutation exclusion; a waiting tool approval cannot prevent credential revocation, document saves or sandbox control.
+6. **Reads are free; commands have durable identities.** Read endpoints are never journaled. Synchronous command mutations, events and the success receipt commit together; engine follow-ups start only after that commit. Async commands reserve their principal and command digest before I/O, then use Pi admission IDs, recoverable decision follow-ups or the effect journal. An unknown external result is not a success receipt and is never repeated automatically. Pending request identities are not pruned; completed receipts are retained for 30 days. Receipts contain small outcomes, never command bodies or credentials.
 7. **Plain tables, one change feed.** Every ledger mutation appends an `events` row in the same transaction. Clients get a snapshot, then the event stream. No event sourcing, no generic key-value table.
 
 ## Repository layout
@@ -154,13 +154,14 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 | `avatars` | `id` | name, description, image_digest, design |
 | `providers` | `id` | kind, name, base_url, models (keys live in `secrets/`) |
 | `settings` | `key` | default model, review model |
-| `requests` | `id` | principal, command digest, small outcome |
+| `requests` | `id` | principal, command digest, state (`pending` / `done`), small outcome; migration 5 |
 | `events` | `seq` | change event JSON; retained 7 days |
 
 ### Files under the state root
 
 ```
 ledger.db  pi.db
+lock.db                      kernel-held ownership lock, not a domain store or backup input
 artifacts/sha256/ab/<digest>
 secrets/<provider>.json      0600
 sandboxes/<ghost_id>/<work_id>/workspace

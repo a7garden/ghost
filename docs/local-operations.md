@@ -27,14 +27,48 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-7b5e80a` (`main`, UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-338dd06` (`main`, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
-| Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
+| Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent, `dev.garden.macfra.agent`(2026-11-08 Ghost `Mac 관리`로 이전, disabled) |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 실행 안전성 보강 검증 — 2026-11-08
+
+- 상태 루트의 SQLite 소유권 잠금, 동기 API 변경·성공 기록의 원자적 커밋, 비동기 요청 신원·효과 기록, 두 DB를 함께 동결하는 백업을 검증했다. 원장 마이그레이션 5는 `requests.state`만 추가한다. 스키마 4 실행 파일로 직접 되돌릴 수 없으며 데이터·자격 복원은 별도 승인이 필요하다.
+- 검사: Host·계약 타입 검사, Host 테스트 395개 통과·1개 생략(`GHOST_TEST_CONTAINER=1`, 1,927 assertions), 독립 실행 파일 빌드. 실제 CLI에서 동일 루트의 두 번째 Host 거절, 실행 중 백업·별도 루트 복원 후 Ghost 식별자 보존을 확인했다.
+- 새 컴파일 Host와 격리된 실제 `glm-5.3`·Apple container 업무로 실행 중 `SIGKILL`→효과 대사→완료(append 1회), 취소→재시작 후 취소 유지·컨테이너 해제, 실패→동일 맡긴 일 재개→완료를 확인했다(전체 48.66초). 임시 상태·자격·컨테이너를 제거했다. 이 검사는 설치판의 장기 실업무나 실물 iPhone 수용을 대신하지 않는다.
+- 독립 검토: 명령·원장은 Codex 작성→Claude 검토, 잠금·백업·종료 경로는 GLM 초안·Codex 복구→Claude Opus 검토. 명령 검토의 승인 대기 때문에 소유자 자격 삭제·문서 저장·샌드박스 제어가 막히던 P2를 별도 API 효과 범위로 고치고 재현·회귀 검사를 통과했다. 잠금·백업 검토의 P0/P1/P2 지적은 없다.
+
+### 펫에 붙는 대화창 운영 반영 — 2026-11-08
+
+- 소스 `338dd06`(main; 운영 `fb34f1f`의 설정·모델 카탈로그·파일 읽기 시트 등을 유지)을 `releases/20261108-bun-338dd06`에 설치했다. 펫 클릭 지연·두 번 클릭 구분을 없애고, 400×440 대화면을 펫의 실제 SVG 그림·상태 말풍선 위에 붙인다. 투명 창의 여백은 앵커에서 빼고, 몸통 중심으로 꼬리를 맞춘다. 구석에서는 같은 모니터 작업 영역 안쪽으로 이동하며, 위 공간이 모자라면 높이를 줄인 뒤 최소 높이도 안 되면 아래로 펼친다. 표시 영역은 companion 전용 IPC로 전달하고 메모리에만 보관한다.
+- 검사: Host 353개 통과·2개 생략 및 타입 검사, UI 84개·타입 검사·빌드, Rust 24개·fmt·clippy `-D warnings`, Tauri 번들 빌드. 격리 Host·브라우저에서 Enter 전송, Shift+Enter 줄바꿈, 실패 시 초안 보존, Ghost 전환 시 이전 대화·초안 제거, 사라진 대상의 기본 대화 복구를 확인했다. 독립 검토의 대상 정규화·macOS 이전 화면 배율 참조 두 지적을 수정했고, 추가 그림 앵커·권한 경계 검토에는 지적이 없었다.
+- 격리 네이티브 앱의 실제 펫 버튼 경로로 왼쪽·오른쪽 아래 구석의 창 위치와 꼬리 정렬을 화면에서 확인했다. 검사 중 소유자의 Safari 전환으로 정상 포커스 상실 닫기가 빨리 발생해, 화면 검수에는 닫기 직전 디버거 중단점도 사용했다. 닫기 규칙은 바꾸지 않았다. 혼합 배율·음수 모니터 좌표·부족한 위 공간·크기 변경 시 앵커 무효화는 네이티브 테스트로 검증했다.
+- Host 원본/설치 사본 및 UI 93개 파일 해시가 일치한다. 설치 사본 Host·UI를 자격 없는 별도 상태 루트·모의 제공자에서 실행해 실제 메시지 왕복을 확인했고, 서명한 셸의 external 프로브도 같은 Host 연결을 확인했다. 새 앱은 기존 로컬 방식인 ad-hoc 서명이며 `codesign --verify --strict`와 아이콘 원본 일치를 확인했다.
+- 백업 `~/.local/share/ghost/backups/pre-pet-20261108-338dd06-1794138526515/`: `db/backup.json`은 `ghost-backup/2`, `complete: true`, 두 DB 무결성 확인. 상태 부속 파일·console 설정과 이전 앱(`Ghost.app`, 교체 직전 원본 `Ghost.original.app`)을 보관했다. 유휴·이전 링크 재확인 뒤 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 4892 → 16460). 단일 리스너·새 실행 경로·운영 DB·준비 상태, Ghost 24·대화 40·맡긴 일 39의 모든 식별자와 config·secrets 바이트 보존을 확인했다.
+- 설치된 `~/Applications/Ghost.app`을 external 모드로 실행하고 실제 `⌘⇧G` 입력으로 운영 대화를 열어, 머리 바로 위의 짧은 간격·오른쪽 구석의 안쪽 정렬·새 대화 UI를 화면 캡처로 확인했다. 운영 메시지나 모델 설정은 저장하지 않았다. 기존 대화 본문은 이 작은 창에서 계속 텍스트로 표시한다.
+- 되돌릴 때는 앱을 정상 종료하고 `current`를 `releases/20261108-bun-fb34f1f`로 바꿔 LaunchAgent를 정상 재시작한 뒤, 백업의 `Ghost.app`을 설치 경로로 복원한다. 저장 형식·자격 형식 변경은 없으므로 DB나 secrets 복원은 필요 없다.
+
+### 설정 레이아웃·모델 폴백 경로 운영 반영 — 2026-11-08
+
+- 소스 `fb34f1f`(main; 설정 `4161737`, 검색 복구 `79b46d0`, 모델 우선 배치 `caa5fec`와 병행 모델 카탈로그·대화 결정·제목 표시줄 여백 통합)을 `releases/20261108-bun-fb34f1f`에 설치했다. 설정 메뉴 폭·공통 섹션 표면을 통일하고 검색 가능한 작은 roster, 연결된 기본/대체 모델 경로, 모델 검색·중복 선택 방지·순서/삭제 조작을 제공한다. 긴 역할 지시는 모델 뒤에, 상태·메인 지정·삭제는 운영 섹션에 두며 스킬·도구 선택은 유지했다. 셸·저장 형식 변경은 없다.
+- 검사: Host 타입 검사·테스트 353개(+2 생략)·컴파일, UI 타입 검사·빌드·테스트 84개, Playwright 35개 통과. 격리 Host에서 모델 추가·교체·순서·상속의 재접속 후 보존, 실패 시 기존 값 유지·자동 재전송 없음, 키보드 탐색과 도구·스킬 저장을 확인했다. 밝게/어둡게·1280/390px 화면을 점검했다. 독립 Codex 검토의 검색 임계값(8→7명) 복구 지적은 수정 전 실패·수정 후 통과 브라우저 회귀로 보존했다.
+- 백업 `~/.local/share/ghost/backups/pre-settings-20261108-bun-fb34f1f/`: `ghost-backup/2`, `complete: true`, 생성 시각 `1794137541083`, DB 해시·두 DB `integrity_check` ok, artifacts·skills·secrets·config 권한 유지 복사. Host 원본/사본과 UI 93개 파일 해시 일치. 자격·Mac watch 설정을 복사하지 않은 임시 루트에서 백업 DB로 설치 바이너리·새 UI·기존 식별자 보존을 확인했다.
+- 유휴 재확인 후 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 1416 → 4892). 단일 리스너·실행 경로·운영 DB·준비 상태, Ghost 24·대화 40·맡긴 일 39의 식별자와 config·secrets 바이트 보존을 확인했다. 설치 앱(external)을 정상 재실행해 실제 모델 경로와 선택기의 `GPT-6` 검색·이미 사용 중인 모델 표시를 확인하고 저장하지 않고 닫았다. 운영 모델 설정은 그대로다. 임시 Host·브라우저는 종료했다.
+- 되돌릴 때는 `current`를 `releases/20261108-bun-7b5e80a`로 교체하고 LaunchAgent를 정상 재시작한다. 데이터·인증 복원은 필요 없다.
+
+### 동적 모델 카탈로그 운영 반영 — 2026-11-08
+
+- 구현 `23d83e1`을 병행 중인 파일 읽기 시트·사이드바와 통합한 `3a21717`을 `releases/20261108-bun-3a21717`에 설치했다. Host와 UI 93개 파일의 설치 사본 해시가 빌드 원본과 일치했다. 분리 루트의 설치 실행 파일에서 health·카탈로그·실제 제공 UI 바이트를 확인했다. 원장 마이그레이션은 없다.
+- 표준 제공자는 models.dev의 접점별 활성 모델을 자동 노출한다. Codex는 계정의 모델 API를 별도로 조회한다. 마지막 성공 메타데이터를 캐시하고 6시간 뒤 갱신하며, 저장된 모델 지정·대체 모델·인증은 바꾸지 않는다. 새 MiniMax의 필수 adaptive thinking도 `reasoning_options` 선언으로 처리한다.
+- 검사: Host 353개 통과·2개 생략, 계약·Host 타입 검사·실행 파일 빌드, 통합 UI 87개·타입 검사·빌드, 시각 회귀 32개 통과. 서로 다른 제공자의 코드 검토에서 접점 판별·캐시 쓰기 복구·구독 전용 모델 필터·오류 스트림 정리 4건을 수정했다. 분리된 실제 모델 실행에서 GLM Flash·MiniMax M3.1 Flash(`끔` 선택)·M3(`높음` 선택)가 모두 HTTP 200과 계산 결과 `56`을 반환했다.
+- 백업 `~/.local/share/ghost/backups/pre-model-catalog-20261108-release/`: `ghost-backup/2`, `complete: true`, 두 DB 무결성 확인, artifacts·secrets·config 사본. 유휴 확인 후 `4cba876`에서 원자적으로 전환하고 Host를 정상 재기동했다(PID 90046 → 97048). 단일 리스너·준비 상태, Ghost 24·대화 40·맡긴 일 39, 저장된 제공자 목록·기본 모델·config 및 인증 파일의 바이트 보존을 확인했다.
+- 설치 앱을 external 모드로 새로 읽어 GLM 3종과 MiniMax 3종(기존 Preview 포함)을 확인했다. 네이티브 AX 입력은 거부되어 직접 입력 검증은 같은 운영 UI의 격리 브라우저로 수행했다: 수동 ID 추가→삭제→취소, 기본 모델 선택기에 새 모델 표시, 콘솔 오류 없음. 검증용 ID는 저장하지 않았고 브라우저와 임시 Host를 종료했다.
+- 후속 병행 릴리스 `7b5e80a`·`fb34f1f`에도 이 구현이 포함됨을 Git 조상 관계와 운영 API에서 확인했다. 이 기능만 되돌릴 때 기준은 `4cba876`이지만 이후 UI 변경도 빠지므로, 현재 릴리스의 되돌리기 절차를 먼저 따른다. 생성된 `models.json`·`codex-models.json`은 권위 있는 사용자 데이터가 아닌 메타데이터 캐시다.
 
 ### 제목 표시줄 아래 패널 위 여백 운영 반영 — 2026-11-08
 
@@ -265,9 +299,17 @@ Mac 앱의 **인증 페이지 열기**·**API 키 발급**과 대화의 웹 링�
 
 인증 정보는 Host의 `secrets/<provider>.json`에만 저장한다(0600). 만료 전 자동 갱신하며 새로고침 토큰도 원자적으로 교체한다. 로그인 취소는 기존 인증 정보를 유지한다. 로그아웃은 제공자 설정의 **고급 설정 → 저장된 인증 정보 삭제**를 선택한 뒤 저장한다. API 키로 전환하려면 인증 방법을 **API 키**로 바꾸고 새 키를 입력해 저장한다. Host를 재시작하면 미완료 로그인만 다시 시작해야 한다.
 
+## 원장 스키마 5와 요청 재시도
+
+동기 API 명령은 원장 변경·이벤트·성공 기록을 한 트랜잭션으로 저장한다. 비동기 명령은 I/O 전에 요청 ID·주체·명령 해시를 `pending`으로 보존하고, 기존 Pi 제출 ID나 효과 기록으로 재시도를 처리한다. 명령 본문과 자격은 요청 기록에 저장하지 않는다. 외부 결과가 불명확하면 소유자 확인을 요구하며, 확인했다는 사실만으로 API 성공 응답을 만들어 내지 않는다.
+
+마이그레이션 5는 `requests.state`를 추가한다. 기존 성공 기록은 `done`이 되고, 미완료 요청은 30일 정리 대상에서 제외된다. 스키마 4 Host는 업그레이드된 원장을 거절한다. 배포 전 백업과 이전 릴리스를 보존하되, 업그레이드 뒤 이전 실행 파일로 링크만 되돌리지 않는다. 데이터·자격 복원은 별도 소유자 승인이 필요하다.
+
 ## 백업
 
-`ghost backup <빈 디렉터리>`는 실행 중에도 `ledger.db`와 `pi.db`의 일관된 사본을 만든다(SQLite `VACUUM INTO`). `artifacts/`, `skills/`, `secrets/`는 파일 복사로 함께 보관한다. 백업은 Host를 멈추거나 전역 잠금을 잡지 않는다.
+`ghost backup <빈 디렉터리>`는 두 DB 모두에 SQLite writer 잠금을 확보한 뒤 `VACUUM INTO`로 복사한다. 두 사본이 끝나면 잠금을 풀고 무결성·해시를 검증한 뒤 `ghost-backup/2` manifest를 마지막에 쓴다. Host를 재시작하지 않지만 복사 중 쓰기와 이를 기다리는 API는 지연될 수 있다. 복사가 Host의 5초 busy timeout을 넘으면 쓰기가 `SQLITE_BUSY`로 실패할 수도 있으므로 배포 백업은 유휴 상태에서 수행한다. 잠금을 확보하지 못하거나 복사가 실패하면 완료 manifest를 만들지 않는다.
+
+`artifacts/`, `skills/`, `secrets/`, `config.json`은 권한을 유지해 별도로 보관한다. `lock.db`는 실행 중 소유권 잠금일 뿐 복구할 업무 데이터가 아니므로 백업 입력에서 제외한다. 새 Host는 이 잠금을 잡은 뒤 원장을 열며, 같은 루트를 쓰는 다른 Host·`doctor`·`import`는 거절한다. 운영 루트 점검은 Owner API로 한다.
 
 ## 개발 Host
 

@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { FallbackList, GhostToolList, SkillList, validate, type Command, type CommandRequest, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
 import type { Access } from "./access.ts";
 import type { Core } from "./core.ts";
+import type { CommandEffectTool } from "./effects.ts";
 import type { DocumentsPort } from "../integrations/ports.ts";
 import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId, sha256 } from "./ids.ts";
@@ -26,46 +27,161 @@ export function newPairingCode(): string {
   return [...bytes].map((byte) => PAIRING_ALPHABET[byte % 32]).join("");
 }
 
-/** Requests running right now, so a concurrent retry joins the first run instead of starting another. */
-const inFlight = new Map<string, { principal: string; digest: string; outcome: Promise<Record<string, unknown>> }>();
+type Outcome = Record<string, unknown>;
+type Flight = { principal: string; digest: string; outcome: Promise<Outcome> };
+const inFlight = new WeakMap<Core, Map<string, Flight>>();
 
-/**
- * Execute one client command. A repeated request id with the same bytes returns the
- * recorded (or in-flight) outcome without running again; with different bytes it conflicts.
- * The receipt is written after the command's own ledger writes, so a host crash in that
- * instant leaves the effect without a receipt and a retry runs the command again.
- */
-export async function execute(core: Core, access: Access, request: CommandRequest, context: CommandContext): Promise<Record<string, unknown>> {
+/** Ledger mutations and receipts share a commit; external operations use their domain journals. */
+export async function execute(core: Core, access: Access, request: CommandRequest, context: CommandContext): Promise<Outcome> {
   const principal = access.principal.kind === "owner" ? "owner" : `device:${access.principal.deviceId}`;
   const digest = digestOf(request.command);
-  const previous = core.ledger.request(request.requestId) ?? inFlight.get(request.requestId);
-  if (previous) {
-    if (previous.principal !== principal || previous.digest !== digest) throw conflict("request id reused with a different command");
-    return previous.outcome;
+  let flights = inFlight.get(core);
+  if (!flights) inFlight.set(core, flights = new Map());
+  const previous = core.ledger.request(request.requestId);
+  const active = flights.get(request.requestId);
+  for (const identity of [previous, active]) {
+    if (identity && (identity.principal !== principal || identity.digest !== digest)) throw conflict("request id reused with a different command");
   }
+  if (active) return active.outcome;
+  if (previous?.state === "done") return previous.outcome;
   access.authorize(request.command);
-  const outcome = run(core, access, request, context);
-  inFlight.set(request.requestId, { principal, digest, outcome });
-  try {
-    const result = await outcome;
-    core.ledger.putRequest(request.requestId, principal, digest, result);
+  // Start on the next microtask, after publishing the same-process join point.
+  const outcome = Promise.resolve().then(async () => {
+    const asyncCommand = ["message.send", "message.cancel", "decision.resolve", "sandbox.control", "document.save", "avatar.create", "provider.delete"].includes(request.command.type)
+      || (request.command.type === "provider.upsert" && request.command.apiKey !== undefined);
+    if (!asyncCommand) {
+      return core.ledger.tx(() => {
+        const result = runSync(core, access, request, context);
+        core.ledger.putRequest(request.requestId, principal, digest, result);
+        return result;
+      });
+    }
+    if (!previous) core.ledger.tx(() => {
+      let claim: Outcome = {};
+      if (["document.save", "provider.upsert", "provider.delete"].includes(request.command.type)) {
+        const ghost = core.ledger.defaultGhost();
+        if (!ghost) throw conflict("a default Ghost is required to journal this command");
+        claim = { conversationId: ghost.directConversationId };
+      }
+      core.ledger.claimRequest(request.requestId, principal, digest, claim);
+      if (request.command.type === "decision.resolve") core.decisions.resolveState(request.command.decisionId, { outcome: request.command.outcome, answer: request.command.answer });
+    });
+    const result = await runAsync(core, request, context, principal, digest);
+    if (core.ledger.request(request.requestId)?.state === "done") return result;
+    core.ledger.tx(() => {
+      if (request.command.type === "sandbox.control") core.ledger.emit({ type: "sandbox", sandbox: core.sandbox.status(request.command.ghostId) });
+      core.ledger.putRequest(request.requestId, principal, digest, result);
+    });
     return result;
+  });
+  flights.set(request.requestId, { principal, digest, outcome });
+  try {
+    return await outcome;
   } finally {
-    inFlight.delete(request.requestId);
+    flights.delete(request.requestId);
   }
 }
 
-async function run(core: Core, access: Access, { requestId, command }: CommandRequest, context: CommandContext): Promise<Record<string, unknown>> {
+
+async function runAsync(core: Core, request: CommandRequest, context: CommandContext, principal: string, digest: string): Promise<Outcome> {
   const { ledger } = core;
+  const { command, requestId } = request;
   switch (command.type) {
     case "message.send":
+      // Pi admission identity is distinct from the API mutation/receipt transaction.
       await core.sendMessage(command.conversationId, command.text, requestId, command.attachments ?? []);
       return {};
-
     case "message.cancel":
-      ledger.conversation(command.conversationId);
-      await core.engine.abort(command.conversationId);
+      await core.effects.cancelMessage(command.conversationId, requestId);
       return {};
+    case "decision.resolve":
+      await core.run(`decision:${command.decisionId}`, () => core.decisions.finishResolution(command.decisionId));
+      return {};
+    case "sandbox.control": {
+      const ghost = ledger.ghost(command.ghostId);
+      return journalCommand(core, requestId, command, ghost.directConversationId, async () => {
+        await core.sandbox.control(command.ghostId, command.action);
+        return {};
+      });
+    }
+    case "document.save": {
+      if (!context.documents) throw new CommandError("unavailable", "document spaces are not available");
+      ledger.space(command.spaceId);
+      const documents = context.documents;
+      const proposal = {
+        spaceId: command.spaceId, title: command.title, body: command.body,
+        profile: command.profile ?? "pdc-markdown/1", pageId: command.pageId, expectedHash: command.expectedHash,
+      };
+      const conversationId = ledger.request(requestId)!.outcome.conversationId as string;
+      // Preflight failures are retryable. Once save starts, an uncertain write must be reconciled.
+      const existing = ledger.effectByCall(conversationId, `api:${requestId}`);
+      if (!existing) await documents.check(proposal);
+      return journalCommand(core, requestId, command, conversationId, async () => {
+        const page = await documents.save(proposal);
+        return { pageId: page.pageId, hash: page.hash };
+      });
+    }
+    case "avatar.create": {
+      // Blob storage is content-addressed; an interruption can leave only an unreferenced blob.
+      const [header, base64] = command.image.split(",", 2) as [string, string];
+      const mediaType = header.slice("data:".length, header.indexOf(";"));
+      const ref = await core.artifacts.put(Buffer.from(base64, "base64"), `${command.name}.${mediaType.split("/")[1]}`, mediaType);
+      const avatar = { id: newId(), name: command.name, description: command.description, imageDigest: ref.digest, design: command.design ?? null, createdAt: Date.now() };
+      return ledger.tx(() => {
+        ledger.addArtifact(null, ref);
+        ledger.putAvatar(avatar);
+        const result = { avatarId: avatar.id };
+        ledger.putRequest(requestId, principal, digest, result);
+        return result;
+      });
+    }
+    case "provider.upsert":
+    case "provider.delete": {
+      const conversationId = ledger.request(requestId)!.outcome.conversationId as string;
+      const start = core.effects.beginCommand({ conversationId, requestId, tool: command.type, input: command, summary: command.type });
+      if (start.kind === "replay") return recordedCommandOutcome(start.effect.state, start.effect.result);
+      try {
+        // Credentials live outside SQLite. Never repeat an interrupted replacement, which
+        // could overwrite a newer OAuth login or API key. No secret enters the ledger.
+        if (command.type === "provider.delete") core.secrets.put(command.providerId, null);
+        else if (command.apiKey !== undefined) core.secrets.put(command.id, command.apiKey);
+        return ledger.tx(() => {
+          if (command.type === "provider.delete") ledger.deleteProvider(command.providerId);
+          else ledger.putProvider({ id: command.id, kind: command.kind, name: command.name, baseUrl: command.baseUrl ?? null, models: command.models });
+          ledger.emit({ type: "settings", settings: settingsView(core) });
+          core.effects.finish(start.effect.id, "api-result:{}");
+          ledger.putRequest(requestId, principal, digest, {});
+          return {};
+        });
+      } catch (error) {
+        core.effects.unknown(start.effect.id, error instanceof Error ? error.message : String(error));
+        throw error;
+      }
+    }
+    default:
+      throw new Error(`synchronous command ${command.type} entered the async dispatcher`);
+  }
+}
+
+/** Reuse the domain effect journal: pending/unknown writes never run a second time. */
+async function journalCommand(core: Core, requestId: string, command: Extract<Command, { type: CommandEffectTool }>, conversationId: string, perform: () => Promise<Outcome>): Promise<Outcome> {
+  const result = await core.effects.runCommand({
+    conversationId, requestId, tool: command.type,
+    input: command, summary: `API ${command.type}`,
+  }, async () => `api-result:${JSON.stringify(await perform())}`);
+  return recordedCommandOutcome("done", result);
+}
+
+function recordedCommandOutcome(state: string, result: string | null): Outcome {
+  if (state !== "done" || !result?.startsWith("api-result:")) {
+    throw conflict("the command outcome requires owner reconciliation; a reconciled effect is not an API success receipt");
+  }
+  return JSON.parse(result.slice("api-result:".length)) as Outcome;
+}
+
+function runSync(core: Core, access: Access, { command }: CommandRequest, context: CommandContext): Outcome {
+  const { ledger } = core;
+  switch (command.type) {
 
     case "conversation.create":
       return { conversationId: core.createDirectConversation(command.ghostId, command.title).id };
@@ -107,9 +223,14 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
       core.works.resume(command.workId);
       return {};
 
+    case "message.send":
+    case "message.cancel":
     case "decision.resolve":
-      await core.decisions.resolve(command.decisionId, { outcome: command.outcome, answer: command.answer });
-      return {};
+    case "sandbox.control":
+    case "document.save":
+    case "avatar.create":
+    case "provider.delete":
+      throw new Error(`async command ${command.type} entered a ledger transaction`);
 
     case "ghost.create": {
       const ghost = core.createGhost({
@@ -154,11 +275,6 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
       return {};
     }
 
-    case "sandbox.control":
-      ledger.ghost(command.ghostId);
-      await core.sandbox.control(command.ghostId, command.action);
-      ledger.tx(() => ledger.emit({ type: "sandbox", sandbox: core.sandbox.status(command.ghostId) }));
-      return {};
 
     case "schedule.create":
       return { scheduleId: core.schedules.create(command).id };
@@ -196,31 +312,6 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
       return {};
     }
 
-    case "document.save": {
-      if (!context.documents) throw new CommandError("unavailable", "document spaces are not available");
-      ledger.space(command.spaceId);
-      const page = await context.documents.save({
-        spaceId: command.spaceId,
-        title: command.title,
-        body: command.body,
-        profile: command.profile ?? "pdc-markdown/1",
-        pageId: command.pageId,
-        expectedHash: command.expectedHash,
-      });
-      return { pageId: page.pageId, hash: page.hash };
-    }
-
-    case "avatar.create": {
-      const [header, base64] = command.image.split(",", 2) as [string, string];
-      const mediaType = header.slice("data:".length, header.indexOf(";"));
-      const ref = await core.artifacts.put(Buffer.from(base64, "base64"), `${command.name}.${mediaType.split("/")[1]}`, mediaType);
-      const avatar = { id: newId(), name: command.name, description: command.description, imageDigest: ref.digest, design: command.design ?? null, createdAt: Date.now() };
-      ledger.tx(() => {
-        ledger.addArtifact(null, ref);
-        ledger.putAvatar(avatar);
-      });
-      return { avatarId: avatar.id };
-    }
 
     case "avatar.delete":
       if (ledger.ghosts().some((ghost) => ghost.look.avatarId === command.avatarId)) throw conflict("a Ghost still uses this avatar");
@@ -236,20 +327,10 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
       for (const ghost of ledger.ghosts()) if (ghost.model === null) core.refreshGhost(ghost.id);
       return {};
 
-    case "provider.upsert":
-      if (command.apiKey !== undefined) core.secrets.put(command.id, command.apiKey);
-      ledger.tx(() => {
-        ledger.putProvider({ id: command.id, kind: command.kind, name: command.name, baseUrl: command.baseUrl ?? null, models: command.models });
-        ledger.emit({ type: "settings", settings: settingsView(core) });
-      });
-      return {};
 
-    case "provider.delete":
-      core.secrets.put(command.providerId, null);
-      ledger.tx(() => {
-        ledger.deleteProvider(command.providerId);
-        ledger.emit({ type: "settings", settings: settingsView(core) });
-      });
+    case "provider.upsert":
+      ledger.putProvider({ id: command.id, kind: command.kind, name: command.name, baseUrl: command.baseUrl ?? null, models: command.models });
+      ledger.emit({ type: "settings", settings: settingsView(core) });
       return {};
 
     case "device.pairing_start": {
@@ -374,7 +455,7 @@ export function deleteGhost(core: Core, ghostId: string): void {
     ledger.putGhost({ ...ghost, deletedAt: now, updatedAt: now });
   });
   // A retired Ghost can still be answering a direct message; deletion ends that run.
-  for (const conversation of ledger.conversations({ ghostId: ghost.id })) if (conversation.busy) void core.engine.abort(conversation.id);
+  for (const conversation of ledger.conversations({ ghostId: ghost.id })) if (conversation.busy) ledger.afterCommit(() => { void core.engine.abort(conversation.id); });
 }
 
 export function settingsView(core: Core) {

@@ -6,15 +6,40 @@ import { Access } from "../src/core/access.ts";
 import { execute } from "../src/core/commands.ts";
 import { Core } from "../src/core/core.ts";
 import { KnownOutcome } from "../src/core/effects.ts";
+import { digestOf } from "../src/core/ids.ts";
 import { snapshot } from "../src/core/state.ts";
 import { MAX_REVISIONS } from "../src/core/works.ts";
 import { FakeEngine, MemorySecrets, harness, noSandbox, tempDir } from "./support.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
-import { MIGRATION_3_TOOLS } from "../src/ledger/schema.ts";
+import { MIGRATIONS, MIGRATION_3_TOOLS } from "../src/ledger/schema.ts";
 import type { Submission } from "../src/core/ports.ts";
 
 const owner = { kind: "owner" } as const satisfies Principal;
 const uuid = () => crypto.randomUUID();
+
+/** Seed the actual old schema, rather than dropping selected columns from today's database. */
+function historicalGhosts(path: string, version: 2 | 3, names: string[]): string[] {
+  const db = new Database(path);
+  try {
+    return db.transaction(() => {
+      for (const migration of MIGRATIONS.slice(0, version)) db.exec(migration);
+      db.exec(`PRAGMA user_version = ${version}`);
+      const ghost = db.query(`INSERT INTO ghosts (id, name, persona, look, is_default, state, direct_conversation_id, created_at, updated_at)
+        VALUES (?, ?, '', '{"avatarId":null}', ?, 'active', ?, 1, 1)`);
+      const conversation = db.query(`INSERT INTO conversations (id, ghost_id, kind, title, created_at, last_activity_at)
+        VALUES (?, ?, 'direct', ?, 1, 1)`);
+      return names.map((name, index) => {
+        const id = uuid();
+        const conversationId = uuid();
+        ghost.run(id, name, index === 0 ? 1 : 0, conversationId);
+        conversation.run(conversationId, id, name);
+        return id;
+      });
+    })();
+  } finally {
+    db.close();
+  }
+}
 
 function setup() {
   const h = harness();
@@ -370,43 +395,71 @@ describe("commands and access", () => {
 
   test("migrating a ledger from before tool allow-lists grants every established Ghost the full set", async () => {
     const path = join(tempDir(), "ghost-settings.db");
-    const first = harness(path);
-    const ghost = first.core.createGhost({ name: "G", persona: "" });
-    first.core.createGhost({ name: "H", persona: "" });
-    await first.core.idle();
-    first.ledger.close();
-
-    // Rewind to the schema that predates tool allow-lists (and everything after it).
-    const db = new Database(path);
-    for (const column of ["tools", "fallbacks", "skills", "deleted_at"]) db.exec(`ALTER TABLE ghosts DROP COLUMN ${column}`);
-    db.exec("PRAGMA user_version = 2");
-    db.close();
+    const ghostId = historicalGhosts(path, 2, ["G", "H"])[0]!;
 
     const second = harness(path);
     // Established Ghosts get the tool list as it stood at migration 3; later tools stay opt-in.
-    expect(second.ledger.ghost(ghost.id).tools).toEqual([...MIGRATION_3_TOOLS]);
+    expect(second.ledger.ghost(ghostId).tools).toEqual([...MIGRATION_3_TOOLS]);
     expect(second.ledger.ghosts().every((item) => item.tools.length === MIGRATION_3_TOOLS.length)).toBe(true);
     // The migrated allow-list is an ordinary editable allow-list.
     const helper = second.ledger.ghosts().find((item) => item.name === "H")!;
     second.ledger.tx(() => second.ledger.putGhost({ ...helper, tools: ["read"], updatedAt: Date.now() }));
     expect(second.ledger.ghost(helper.id).tools).toEqual(["read"]);
+    second.core.stop();
     second.ledger.close();
   });
 
   test("migrating a ledger from before fallbacks and skills gives established Ghosts none and keeps them listed", async () => {
     const path = join(tempDir(), "ghost-fallbacks.db");
-    const first = harness(path);
-    const ghost = first.core.createGhost({ name: "G", persona: "", fallbacks: [{ provider: "p", model: "m" }], skills: ["anti-slop"] });
-    await first.core.idle();
-    first.ledger.close();
-
-    const db = new Database(path);
-    for (const column of ["fallbacks", "skills", "deleted_at"]) db.exec(`ALTER TABLE ghosts DROP COLUMN ${column}`);
-    db.exec("PRAGMA user_version = 3");
-    db.close();
+    const ghostId = historicalGhosts(path, 3, ["G"])[0]!;
 
     const second = harness(path);
-    expect(second.ledger.ghost(ghost.id)).toMatchObject({ fallbacks: [], skills: [], deletedAt: null });
+    expect(second.ledger.ghost(ghostId)).toMatchObject({ fallbacks: [], skills: [], deletedAt: null });
+    second.core.stop();
     second.ledger.close();
+  });
+
+  test("a schema-4 success receipt prevents an old retry from overwriting newer settings", async () => {
+    const path = join(tempDir(), "old-receipts.db");
+    const requestId = uuid();
+    const command = { type: "settings.update", defaultModel: { provider: "old", model: "old-model" } } as const;
+    const newerModel = { provider: "new", model: "new-model" };
+    const db = new Database(path);
+    try {
+      db.transaction(() => {
+        for (const migration of MIGRATIONS.slice(0, 4)) db.exec(migration);
+        db.exec("PRAGMA user_version = 4");
+        db.query("INSERT INTO settings (key, value) VALUES ('defaultModel', ?)").run(JSON.stringify(newerModel));
+        db.query("INSERT INTO requests (id, principal, digest, outcome, created_at) VALUES (?, 'owner', ?, '{}', ?)")
+          .run(requestId, digestOf(command), Date.now());
+      })();
+    } finally {
+      db.close();
+    }
+    const { core, ledger } = harness(path);
+    try {
+      await execute(core, new Access(ledger, owner), { requestId, command }, { publicOrigin: "http://localhost", documents: null });
+      expect(ledger.settings().defaultModel).toEqual(newerModel);
+    } finally {
+      core.stop();
+      ledger.close();
+    }
+  });
+
+  test("unfinished request identity still rejects changed bytes after receipt retention expires", async () => {
+    const { core, ledger } = harness();
+    const requestId = uuid();
+    const command = { type: "settings.update", defaultModel: null } as const;
+    ledger.tx(() => ledger.claimRequest(requestId, "owner", digestOf(command)));
+    ledger.pruneHistory(Date.now() + 31 * 24 * 60 * 60 * 1000);
+    try {
+      await expect(execute(core, new Access(ledger, owner), {
+        requestId, command: { type: "settings.update", defaultModel: { provider: "changed", model: "changed" } },
+      }, { publicOrigin: "http://localhost", documents: null })).rejects.toThrow("different command");
+      expect(ledger.settings().defaultModel).toBeNull();
+    } finally {
+      core.stop();
+      ledger.close();
+    }
   });
 });
