@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-338dd06` (`main`, UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-570c27d` (`main`, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -36,12 +36,17 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
 
-### 실행 안전성 보강 검증 — 2026-11-08
+### 실행 안전성 보강 운영 반영 — 2026-11-08
 
 - 상태 루트의 SQLite 소유권 잠금, 동기 API 변경·성공 기록의 원자적 커밋, 비동기 요청 신원·효과 기록, 두 DB를 함께 동결하는 백업을 검증했다. 원장 마이그레이션 5는 `requests.state`만 추가한다. 스키마 4 실행 파일로 직접 되돌릴 수 없으며 데이터·자격 복원은 별도 승인이 필요하다.
 - 검사: Host·계약 타입 검사, Host 테스트 395개 통과·1개 생략(`GHOST_TEST_CONTAINER=1`, 1,927 assertions), 독립 실행 파일 빌드. 실제 CLI에서 동일 루트의 두 번째 Host 거절, 실행 중 백업·별도 루트 복원 후 Ghost 식별자 보존을 확인했다.
 - 새 컴파일 Host와 격리된 실제 `glm-5.3`·Apple container 업무로 실행 중 `SIGKILL`→효과 대사→완료(append 1회), 취소→재시작 후 취소 유지·컨테이너 해제, 실패→동일 맡긴 일 재개→완료를 확인했다(전체 48.66초). 임시 상태·자격·컨테이너를 제거했다. 이 검사는 설치판의 장기 실업무나 실물 iPhone 수용을 대신하지 않는다.
 - 독립 검토: 명령·원장은 Codex 작성→Claude 검토, 잠금·백업·종료 경로는 GLM 초안·Codex 복구→Claude Opus 검토. 명령 검토의 승인 대기 때문에 소유자 자격 삭제·문서 저장·샌드박스 제어가 막히던 P2를 별도 API 효과 범위로 고치고 재현·회귀 검사를 통과했다. 잠금·백업 검토의 P0/P1/P2 지적은 없다.
+- 구현 `7ce91f4`를 병행 UI·네이티브 변경과 합친 `570c27d`를 `releases/20261108-bun-570c27d`에 설치했다. Host 원본·설치 사본 해시가 일치하고, UI 93개 파일은 이전 운영 `338dd06`과 바이트가 같다. 네이티브 셸은 교체하지 않았다. 설치 사본도 별도 상태 루트에서 실행해 health·UI·번들 바이트를 확인했다.
+- 전환 전 백업 `~/.local/share/ghost/backups/pre-durability-20261108-bun-570c27d-1794139196552/`: `db/backup.json`은 `ghost-backup/2`, `complete: true`, 두 DB 무결성·해시 확인, 원장 스키마 4. artifacts·secrets·config·모델 캐시·console 설정을 보관했다. 상태 루트에 `skills/`는 없고, 설정된 외부 스킬 루트는 변경하지 않았다.
+- 유휴·이전 실행 경로·리스너·DB 루트·링크·config·자격을 재확인한 뒤 원자적으로 전환하고 정상 재기동했다(PID 16460 → 23039). 새 경로의 단일 리스너·운영 DB·health 200·제공자 준비 상태와 스키마 5를 확인했다. Ghost 24·대화 40·맡긴 일 39의 모든 식별자, 소유자 토큰, config·console 설정 및 자격 파일 3개의 바이트를 보존했다.
+- 설치된 `~/Applications/Ghost.app`을 정상 종료하고 external 모드로 다시 실행했다(PID 27071). 실제 설치 경로와 메인 대화의 AX 화면 준비를 확인했다. 운영 제공 UI의 `main-Bgsl9EkZ.js`도 보존한 설치 바이트와 일치한다. 검증용 운영 메시지나 모델 설정은 저장하지 않았다.
+- 이전 `338dd06` 릴리스와 스키마 4 백업은 보존했다. 이제 이전 실행 파일로 링크만 되돌리면 스키마 검증에서 거절된다. 이전 상태로 복원하려면 별도 소유자 승인이 필요하다.
 
 ### 펫에 붙는 대화창 운영 반영 — 2026-11-08
 
