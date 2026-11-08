@@ -137,11 +137,12 @@ export class HostClient {
     });
   }
 
-  /** Artifact bytes as an object URL; revoke it when done. */
-  async artifactUrl(digest: string): Promise<string> {
+  /** Artifact bytes as an object URL; callers may type an image/PDF for its native decoder. Revoke when done. */
+  async artifactUrl(digest: string, mediaType?: string): Promise<string> {
     const response = await fetch(`/api/artifacts/${digest}`, { headers: this.headers() });
     if (!response.ok) throw new HostError('not_found', '파일을 불러올 수 없습니다.');
-    return URL.createObjectURL(await response.blob());
+    const blob = await response.blob();
+    return URL.createObjectURL(mediaType ? blob.slice(0, blob.size, mediaType) : blob);
   }
 
   async artifactText(digest: string): Promise<string> {

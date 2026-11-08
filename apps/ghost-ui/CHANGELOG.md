@@ -5,6 +5,15 @@
 - Models: standard providers expose refreshed models.dev catalogs automatically; ChatGPT
   subscriptions discover account models from Codex. Cached metadata keeps offline selection
   working, and manual model entries stay editable without saving the automatic catalog.
+- Files open on a broad reading sheet instead of inside a small generic dialog. Markdown
+  has 읽기/원문 views, document typography and local footnote navigation; source files have
+  line numbers and optional wrapping. Copy and save preserve the original content.
+  Images (including SVG), PDFs, empty files and unsupported binary files keep distinct
+  presentations; the sheet adapts to narrow screens and restores focus on dismissal.
+- Sidebar roster: a 고정 group (the default Ghost plus pinned ones) and a Ghost pool below it.
+  The pool folds from its own header — sticky while scrolling, so folding no longer means
+  hunting for a button at the bottom — and a folded pool still shows the Ghosts that need you
+  or hold the open conversation. Pin from a Ghost's context menu.
 - Thread cards: a settled thread folds to one quiet line (its outcome line already returns
   beneath it); a card waiting on a question shows the question with answer chips in place.
 - Composer: `/` opens the composer's actions by keyboard (Korean words match), `@` hands the

@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-bdec231` (`main`, UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-4cba876` (`main`, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,22 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 고정 roster·Ghost 풀 사이드바 운영 반영 — 2026-11-08
+
+- 소스 `4cba876`(main; 사이드바 roster를 `고정`(메인 + 고정한 Ghost)과 `Ghost` 풀로 분리, 풀은 스크롤에 붙는 그룹 헤더에서 접고, 접힌 풀은 확인 필요·열린 대화 Ghost만 노출, 8줄 이상 펼치면 필터)을 `releases/20261108-bun-4cba876`에 설치했다. Host는 운영 `36fe9a4` 것과 같은 바이트를 복사했다(이후 Host·계약 변경 없음). UI 93개 파일 해시 일치, 백업 DB 사본 위 임시 루트·포트에서 health·새 번들(`main-D4UOwVyj.js`) 확인.
+- 검사: UI 테스트 87개(roster 분리·헤더 접기·접힌 풀의 예외 노출·핀 순서 갱신)·타입 검사·빌드, 시각 회귀 32개(사이드바가 있는 화면 기준 갱신 후 통과). 격리 Host·브라우저에서 고정 그룹·접힌 풀 헤더 `(1)` 표시를 확인했다.
+- 백업 `~/.local/share/ghost/backups/pre-pinned-roster-20261108-bun-4cba876/`: `ghost-backup/2`, `complete: true`, 두 DB `integrity_check` ok, artifacts·secrets·skills·config 복사. 유휴 확인 후 원자적으로 전환하고 정상 재기동했다(PID 87287 → 90046). 단일 리스너·준비 상태, Ghost 24·대화 40·맡긴 일 39, config 보존 확인. 설치 앱에서 `고정`(메인)·`Ghost 목록 펼치기 (21)`·진행 중 Ghost 노출을 확인했다.
+- 되돌릴 때는 `current`를 `releases/20261108-bun-36fe9a4`로 교체하고 LaunchAgent를 정상 재시작한다. 저장 형식 변화는 없다(고정·펼침 상태는 브라우저 localStorage).
+
+### 파일 읽기 시트 운영 반영 — 2026-11-08
+
+- 소스 `36fe9a4`(main)의 파일 뷰어를 `releases/20261108-bun-36fe9a4`에 설치했다. 병행 중인 사이드바·오버레이 변경을 제외한 분리 작업 트리에서 빌드했고, 운영 Host는 `bdec231`과 같은 바이트를 복사했다. UI 93개 파일 해시 일치, 백업 DB 사본 위 별도 루트·포트에서 설치 사본의 health·기존 식별자·새 번들(`main-_QbmLPm5.js`) 응답을 확인했다.
+- UI 테스트 90개·타입 검사·빌드, 뷰어 브라우저 회귀 4개 통과: Markdown 안전 표시·각주 이동·원문/복사/다운로드 바이트 보존, SVG 실제 디코딩·빈 파일·바이너리 저장, 긴 줄 접기·대용량 줄 번호 제한, 불러오는 중 닫기/다시 열기와 URL 회수. 기존 시각 회귀 28개도 구현 중 통과했다. 통합 실행은 다른 작업의 고정 임시 루트 사용과 충돌해 Host가 끊겼으므로, 최종 뷰어 회귀는 별도 `TMPDIR`에서 검증했다.
+- 독립 Codex 검토에서 지적한 SVG의 XML 오분류와 줄 번호 메모리 증폭을 수정했다. Chrome·설치된 Mac 셸에서 합성 Markdown·PDF 실제 표시를 확인했고, Mac의 저장 파일이 원본 바이트와 같음을 확인했다. 밝게/어둡게·1440/390px 읽기 화면과 좁은 원문 화면도 확인했다. 문서·DB·인증 저장 형식 변화는 없다.
+- 백업 `~/.local/share/ghost/backups/pre-file-sheet-20261108-bun-36fe9a4/`: `db/`는 `ghost-backup/2`, `complete: true`, 생성 시각 `1794136237212`, 두 DB `integrity_check` ok. artifacts·skills·secrets·config를 권한 유지 복사했다.
+- 유휴(바쁜 대화·진행 중 Work 0), 이전 링크와 config 해시를 다시 확인한 뒤 원자적으로 전환하고 Host를 정상 재기동했다(PID 63667 → 87287). 새 경로의 단일 리스너·운영 DB·준비 상태, Ghost 24·대화 40·맡긴 일 39의 모든 식별자와 config 보존을 확인했다. 설치 앱(external)을 새로 띄워 기존 `3D 아트 위임 확인`의 `result.py`가 넓은 시트·줄 번호·복사/저장·줄 접기로 열리는 것을 창 캡처로 확인했다. 셸 번들은 교체하지 않았다.
+- 되돌릴 때는 `current`를 `releases/20261108-bun-bdec231`로 교체하고 LaunchAgent를 정상 재시작한다. 데이터 복원은 필요 없다.
 
 ### 스레드 카드·작성기 개선 운영 반영 — 2026-11-08
 

@@ -21,7 +21,11 @@ destination on an inset sheet (rounded, card shadow) beside it.
   Ghosts as presence rows — portrait in its state ring, name, and a one-line "now" (the
   question waiting on the owner, the Work in progress, or 응답 중) and its live Work count.
   A row only opens the Ghost's conversation; there are no per-Ghost submenus, so the
-  roster stays a glanceable list. 프로젝트 with 새 프로젝트. 설정 at the bottom; host trouble shows
+  roster stays a glanceable list — in two groups: **고정** (the default Ghost plus the owner's
+  pins, set from a row's context menu) and the **Ghost pool**, folded from its own header,
+  which sticks while scrolling; a folded pool still admits the Ghosts that need the owner or
+  hold the conversation on screen, and an expanded pool past eight rows grows a filter.
+  프로젝트 with 새 프로젝트. 설정 at the bottom; host trouble shows
   there only when the host is not connected. The three destinations and 설정 stay put; only
   the roster and projects scroll, under sticky group labels, fading out while more follows, with
   a ScrollRail marking Ghosts that are working or need the owner. Opening a Ghost from
@@ -114,6 +118,16 @@ Feature-level compositions:
   it into the reply (assistant) or bring it back into the composer (owner); a thread card
   opens its thread or Work page; a sidebar Ghost opens its conversation, 맡긴 일 or
   settings. Text fields keep the system menu.
+- **File sheet** (`ArtifactPreview`): one wide, quiet reading surface over the conversation,
+  without a second inset card or background blur. File identity and copy/save/close stay
+  above the scroll area; type/size stay below it. Markdown offers underline-style 읽기/원문
+  views, a 668px body measure and 15px/1.85 text; source uses a separate non-copyable gutter
+  and optional wrapping. The gutter disappears when wrapping or over 10,000 lines, never
+  truncating source. Remote Markdown images remain opt-in links and raw HTML stays literal.
+  SVG uses an image decoder; PDF uses the browser's native PDF view, never an HTML preview.
+  Other binary files offer save instead of an empty frame. Requests and blob URLs belong to
+  each opening; dismissing a pending request cannot update a later opening. Escape/outside
+  dismissal returns keyboard focus to the initiating file.
 
 Motion stays short and purposeful: pages rise in, list rows cascade once, the owner's
 message and a starting reply rise in (a finished reply replaces its live article without a
