@@ -181,8 +181,8 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
     </header>
     {error && <div className="ghost-sheet__feedback" role="status"><InlineError>{error}</InlineError></div>}
 
-    <Panel title={uiTerms.roleInstructions}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
     <Panel title="모델"><ModelRoute ghost={ghost} save={save}/></Panel>
+    <Panel title={uiTerms.roleInstructions}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
     <SkillsPanel catalog={catalog} skills={ghost.skills} onChange={skills => void update({ skills })}/>
     <Panel title="도구"><CapabilityBoard tools={ghost.tools} onChange={tools => void update({ tools })}/></Panel>
     <Panel title="운영">

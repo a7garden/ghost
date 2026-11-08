@@ -203,7 +203,8 @@ floating preview that pops on every change and a 무작위 shuffle, then picture
 legend names the current pick; choices show at once and save behind the preview (the newest
 wins). Everything else about a Ghost lives in **Ghost 설정** (설정 → Ghost): a compact
 portrait-and-name roster (searchable from eight Ghosts), then the selected Ghost's name
-edited in place, 역할 지시, model route, skills and grouped tool switch-pills. A group's
+edited in place, model route, 역할 지시, skills and grouped tool switch-pills. The route stays
+above potentially long role instructions so model settings remain immediately reachable. A group's
 label toggles its tools. State, default designation and retired-Ghost deletion live in a
 separate 운영 group; the main Ghost shows its locked active state instead of disabled
 choices. The sandbox keeps its two-step reset. New Ghosts start on the same sheet.

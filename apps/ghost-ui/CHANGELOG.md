@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Settings: slimmer navigation and shared section surfaces. Ghost selection is a compact,
-  searchable roster; role, model and capabilities precede separate operating controls.
+  searchable roster; model, role and capabilities precede separate operating controls.
 - Model fallbacks form a connected route with provider names, search, reorder/remove
   actions and duplicate-choice prevention. Failed edits preserve the saved order.
 - Models: standard providers expose refreshed models.dev catalogs automatically; ChatGPT
