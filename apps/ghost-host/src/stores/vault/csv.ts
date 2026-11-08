@@ -30,10 +30,11 @@ export function parseCsv(csv: string): { rows: ImportedLogin[]; rejected: number
   const rows: ImportedLogin[] = [];
   let rejected = 0;
   for (const values of records) {
-    if (values.length !== headers.length || values.some((s) => Buffer.byteLength(s) > 65536)) throw invalid("invalid vault CSV record");
+    if (values.length !== headers.length) throw invalid("invalid vault CSV record");
     const get = (name: string) => values[normalized.indexOf(name)] ?? "";
     const raw = get("url"), title = get("title") || get("name"), username = get("username"), password = get("password");
-    if (Buffer.byteLength(title) > 256 || Buffer.byteLength(username) > 512 || Buffer.byteLength(raw) > 8192) throw invalid("vault CSV field limit exceeded");
+    if (Buffer.byteLength(title) > 256 || Buffer.byteLength(username) > 512 || Buffer.byteLength(raw) > 8192) { rejected++; continue; }
+    if (values.some((s) => Buffer.byteLength(s) > 65536)) throw invalid("invalid vault CSV record");
     try {
       if (!password || /[\s\p{Cc}\\]/u.test(raw) || !raw.startsWith("https://")) throw invalid("unsupported vault CSV row");
       const url = new URL(raw), authority = raw.slice(8).split(/[/?#]/, 1)[0]!;

@@ -9,6 +9,7 @@ import { startServer } from "../src/api/server.ts";
 import { Access } from "../src/core/access.ts";
 import { serveVault } from "../src/api/vault.ts";
 import { digestOf, idFor } from "../src/core/ids.ts";
+import { hashSecret } from "../src/core/commands.ts";
 import { createVault } from "../src/stores/vault.ts";
 import { createVaultTools } from "../src/tools/vault.ts";
 import { harness, tempDir } from "./support.ts";
@@ -114,6 +115,7 @@ test("vault tools resolve current permissions, list hints and generate determini
   const h = fixture();
   const generated = await h.tool("vault_generate_login", { origin: "https://EXAMPLE.com:443/", username: "user", title: "Generated" }, "generate");
   await h.tool("vault_generate_login", { origin: "https://example.com", username: "user", title: "Generated" }, "generate");
+  await h.tool("vault_generate_login", { origin: "https://example.com", username: "user", title: "Different call" }, "generate-again");
   expect(h.vault.list().length).toBe(1); assertNoValues(JSON.stringify(generated));
   const item = h.vault.list()[0]!; h.vault.update(item.id, { hints: "Use this account" });
   const list = await h.tool("vault_list", { origin: "https://example.com", kind: "login" }); expect(JSON.stringify(list)).toContain("Use this account");
@@ -129,4 +131,23 @@ test("a crash after secure vault commit can resume without duplicating the saved
   const first = h.vault.answerSecureForm(decisionId, decision.ghostId, form, { kind: "secret", title: "Token", value: VALUE }, true);
   const response = await h.request(`/api/vault/requests/${decisionId}`, "POST", { save: true, kind: "secret", title: "Token", value: VALUE }); expect(response.status).toBe(201);
   const item = parse(VaultItem, await response.json()); expect(item.id).toBe(first.id); expect(h.vault.list().length).toBe(1); expect(h.ledger.decision(decisionId).state).toBe("answered");
+});
+
+test("devices cannot distinguish a secure form from another decision outside their grants", async () => {
+  const h = fixture();
+  await h.tool("vault_request", { kind: "secret", reason: "Need token" }, "private-form");
+  const secureId = idFor(h.conversation.id, "private-form");
+  const ordinary = h.core.decisions.ask(h.conversation.id, "Ordinary question", "Not granted", []);
+  const device = { id: "ungranted-device", name: "Phone", grants: [], pushEnabled: false, createdAt: Date.now(), lastSeenAt: null };
+  h.ledger.tx(() => h.ledger.insertDevice(device, hashSecret("ungranted-token")));
+  const replies: string[] = [];
+  for (const decisionId of [secureId, ordinary.id]) {
+    const requestId = idFor("unauthorized-answer", decisionId);
+    const response = await h.request("/api/commands", "POST", { requestId, command: { type: "decision.resolve", decisionId, outcome: "answer", answer: PASSWORD } }, "ungranted-token");
+    expect(response.status).toBe(403);
+    replies.push(await response.text());
+    expect(h.ledger.request(requestId)).toBeNull();
+    expect(h.ledger.decision(decisionId).state).toBe("pending");
+  }
+  expect(replies[0]).toBe(replies[1]); expect(replies[0]).not.toContain("secure form");
 });

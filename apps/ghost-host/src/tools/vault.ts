@@ -7,7 +7,7 @@ import { Vault, normalizeOrigin } from "../stores/vault.ts";
 import { invalid } from "../core/errors.ts";
 import { errorResult, requireAllowed } from "./shared.ts";
 
-export const VAULT_INSTRUCTIONS = "Use vault_list to choose granted credentials by exact HTTPS origin and owner hints. Use vault_request for a secure owner form; never ask for or accept passwords, codes, card values or secrets in chat. vault_generate_login saves a generated password without revealing it. Fill credentials only with browser_fill_secret; never try to reveal them.";
+export const VAULT_INSTRUCTIONS = "Use vault_list to choose granted credentials by exact HTTPS origin and owner hints. Use vault_request for a secure owner form; never ask for or accept passwords, codes, card values or secrets in chat. vault_generate_login reuses a granted login for the exact origin and username, otherwise saves a generated password without revealing it (200 Ghost-created items per Ghost). Fill credentials only with browser_fill_secret; never try to reveal them.";
 
 export function createVaultTools(core: Core, vault: Vault): Extension {
   return defineExtension({
@@ -38,7 +38,7 @@ export function createVaultTools(core: Core, vault: Vault): Extension {
         },
       }),
       defineTool({
-        name: "vault_generate_login", description: "Save a login with a cryptographically generated password, granted to this Ghost. Returns metadata only, never the password.",
+        name: "vault_generate_login", description: "Reuse an existing granted login for the exact HTTPS origin and username, otherwise save a cryptographically generated password. At most 200 Ghost-created items per Ghost; owner items do not count. Returns metadata only, never the password.",
         parameters: Type.Object({ origin: Type.String({ maxLength: 2048 }), username: Type.String({ maxLength: 512 }), title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }), replay: "unsafe",
         async execute(args, api) {
           try {
