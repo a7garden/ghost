@@ -1,7 +1,8 @@
 import { mkdirSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { Sandbox, Work } from "@ghost/contract";
-import { FileError, ok, type Result } from "@earendil-works/pi-durable/env";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { ExecutionError, FileError, err, ok, type Result } from "@earendil-works/pi-durable/env";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { Config } from "../config.ts";
 import { sha256 } from "../core/ids.ts";
@@ -9,6 +10,14 @@ import type { ArtifactStore, SandboxControl } from "../core/ports.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import { CLI_TIMEOUT_MS, ContainerDriver, listContainers, runCli, type ContainerRow } from "./container.ts";
 import { confineDirChain, readFileNoFollow, WorkspaceEnv, writeFileNoFollow } from "./workspace-env.ts";
+import { HostExecutionEnv, HostMutationQueue, validateExecutionTarget } from "./host-env.ts";
+
+export { validateExecutionTarget } from "./host-env.ts";
+
+/** App-owned sandbox lifetime; conversation consumers only need SandboxEnvFactory. */
+export interface SandboxService extends SandboxEnvFactory, SandboxControl {
+  close(): Promise<void>;
+}
 
 /**
  * Digest-pinned Ubuntu image for Apple containers. The guest root is read-only, the network is
@@ -43,8 +52,14 @@ function safeComponent(value: string, what: string): string {
  * `kind: "local"` runs commands on the host — it is for tests and development and it is *not*
  * isolation. `kind: "apple-container"` runs commands inside an Apple container with only the
  * workspace mounted; its file operations stay on the host workspace, confined the same way.
+ *
+ * An explicit `work.execution` overrides that legacy default: `host` uses unrestricted PC file
+ * and shell access at the selected cwd, sharing a mutation queue across Works. Its workspace is
+ * only staging, never a replacement cwd. `container` files stay confined at `/workspace`; shell
+ * execution requires the Apple driver and cannot fall back to local execution. Owner grants
+ * are checked by the caller, not inferred here.
  */
-export function createSandbox(config: Config, artifacts: ArtifactStore): SandboxEnvFactory & SandboxControl {
+export function createSandbox(config: Config, artifacts: ArtifactStore): SandboxService {
   const container =
     config.sandbox.kind === "apple-container"
       ? { cli: config.sandbox.cli, image: config.sandbox.image }
@@ -53,6 +68,22 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     throw new Error("sandbox: kind apple-container needs a container CLI path and a pinned image");
 
   let lsCache: { at: number; rows: Result<ContainerRow[], Error> } | null = null;
+  let closed = false;
+  const hostMutations = new HostMutationQueue();
+  const hostEnvs = new Map<HostExecutionEnv, Work>();
+  const closingHostEnvs = new Map<HostExecutionEnv, Promise<void>>();
+  const closeHostEnvs = async (matches: (work: Work) => boolean): Promise<void> => {
+    await Promise.all([...hostEnvs].filter(([, work]) => matches(work)).map(([env]) => {
+      let closing = closingHostEnvs.get(env);
+      if (!closing) {
+        closing = env.cleanup(BACKGROUND_CONTEXT).then(() => {
+          hostEnvs.delete(env);
+        }).finally(() => closingHostEnvs.delete(env));
+        closingHostEnvs.set(env, closing);
+      }
+      return closing;
+    }));
+  };
 
   const containerRows = (fresh = false): Result<ContainerRow[], Error> => {
     if (container === null) return ok([]);
@@ -75,8 +106,32 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     return path;
   };
 
-  const envFor = async (work: Work): Promise<ExecutionEnv> => {
+  const envFor = async (work: Work, authorize?: () => string): Promise<ExecutionEnv> => {
+    if (closed) throw new Error("sandbox: execution environments are closed");
+    if (work.execution !== undefined) validateExecutionTarget(work.execution);
     const workspace = workspacePath(work);
+    if (work.execution?.kind === "container" && container === null)
+      return new WorkspaceEnv({
+        hostRoot: workspace,
+        logicalRoot: "/workspace",
+        id: `ghost-container:${containerName(work.id)}`,
+        exec: async () => err(new ExecutionError(
+          "shell_unavailable",
+          "Container shell execution requires an apple-container sandbox configuration; refusing to run on the PC",
+        )),
+      });
+    if (work.execution?.kind === "host") {
+      const env = new HostExecutionEnv({
+        cwd: work.execution.cwd,
+        workspace,
+        id: "ghost-host",
+        mutations: hostMutations,
+        deadlineAt: work.deadlineAt,
+        authorize,
+      });
+      hostEnvs.set(env, work);
+      return env;
+    }
     if (container === null)
       return new WorkspaceEnv({ hostRoot: workspace, id: `ghost-ws:${work.ghostId}/${work.id}` });
     const name = containerName(work.id);
@@ -171,6 +226,7 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
   };
 
   const control = async (ghostId: string, action: "stop" | "reset"): Promise<void> => {
+    await closeHostEnvs((work) => work.ghostId === ghostId);
     if (container === null) return;
     const names = new Set(ghostContainerNames(ghostId));
     const rows = containerRows(true);
@@ -195,8 +251,10 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     }
   };
 
-  /** A settled Work's container is deleted; its workspace stays for inspection. */
+  /** Stop settled Work processes or delete its container; staging and the owner's PC cwd stay. */
   const release = async (work: Work): Promise<void> => {
+    await closeHostEnvs((live) => live.id === work.id);
+    if (work.execution?.kind === "host") return;
     if (container === null) return;
     const name = containerName(work.id);
     const rows = containerRows(true);
@@ -208,5 +266,11 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
       throw new Error(`sandbox: deleting ${name} failed: ${(!deleted.ok ? deleted.error.message : deleted.value.stderr).trim().slice(0, 512)}`);
   };
 
-  return { envFor, workspacePath, stageInputs, status, control, release };
+  /** Stop Host processes before draining core lanes that may be waiting for their I/O. */
+  const close = async (): Promise<void> => {
+    closed = true;
+    await closeHostEnvs(() => true);
+  };
+
+  return { envFor, workspacePath, stageInputs, status, control, release, close };
 }

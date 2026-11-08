@@ -3,13 +3,13 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 
 /** Builds the Pi execution environment of a work conversation. Implemented in src/sandbox. */
 export interface SandboxEnvFactory {
-  /** Environment whose filesystem root is the Work's workspace (`/workspace` inside a container). */
-  envFor(work: Work): Promise<ExecutionEnv>;
-  /** Host path of the Work's workspace directory; created on demand. */
+  /** Uses the explicit Work target: real PC cwd for Host; otherwise the private workspace. */
+  envFor(work: Work, authorize?: () => string): Promise<ExecutionEnv>;
+  /** Private staging directory, never the Host target cwd; browser transfers stay confined here. */
   workspacePath(work: Work): string;
   /** Copy accepted child artifacts into `inputs/<child-id>/<name>` of the workspace. Refuses tampered bytes. */
   stageInputs(work: Work, inputs: { childId: string; name: string; digest: string }[]): Promise<void>;
-  /** Free a settled Work's compute (its container); the workspace stays. */
+  /** Abort a settled Work's Host processes or free its container; staging and owner files stay. */
   release(work: Work): Promise<void>;
 }
 

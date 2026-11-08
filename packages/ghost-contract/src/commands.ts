@@ -1,7 +1,9 @@
 import { Type, type Static } from "typebox";
+import { ActivityConfig, ConnectionConfig } from "./autonomy.ts";
 import {
   Acceptance,
   ArtifactRef,
+  ExecutionTarget,
   FallbackList,
   GhostToolList,
   SkillList,
@@ -46,6 +48,7 @@ export const Command = Type.Union([
     brief: Text(32768),
     acceptance: Type.Optional(Acceptance),
     deadlineAt: Type.Optional(nullable(Timestamp)),
+    execution: Type.Optional(ExecutionTarget),
     /** Direct conversation that receives the report; defaults to the Ghost's main direct conversation. */
     originConversationId: Type.Optional(Id),
   }),
@@ -77,6 +80,7 @@ export const Command = Type.Union([
     tools: Type.Optional(GhostToolList),
     fallbacks: Type.Optional(FallbackList),
     skills: Type.Optional(SkillList),
+    hostExecution: Type.Optional(Type.Boolean()),
   }),
   command("ghost.update", {
     ghostId: Id,
@@ -88,6 +92,7 @@ export const Command = Type.Union([
     tools: Type.Optional(GhostToolList),
     fallbacks: Type.Optional(FallbackList),
     skills: Type.Optional(SkillList),
+    hostExecution: Type.Optional(Type.Boolean()),
   }),
   /** Remove a retired Ghost from every list. Past Works keep it as their assignee. */
   command("ghost.delete", { ghostId: Id }),
@@ -108,6 +113,21 @@ export const Command = Type.Union([
     paused: Type.Optional(Type.Boolean()),
   }),
   command("schedule.delete", { scheduleId: Id }),
+
+  // Owner-approved standing delegations and account-scoped connections.
+  command("connection.upsert", {
+    connectionId: Type.Optional(Id), name: Text(128), config: ConnectionConfig,
+    /** Omit to preserve; null removes the stored credential. Never returned to clients. */
+    credential: Type.Optional(nullable(Text(8192))),
+  }),
+  command("connection.delete", { connectionId: Id }),
+  command("connection.test", { connectionId: Id }),
+  command("activity.create", { config: ActivityConfig }),
+  command("activity.update", { activityId: Id, expectedRevision: Type.Integer({ minimum: 1 }), config: ActivityConfig }),
+  command("activity.pause", { activityId: Id, paused: Type.Boolean(), cancelRunning: Type.Optional(Type.Boolean()) }),
+  command("activity.delete", { activityId: Id }),
+  command("activity.run", { activityId: Id, dryRun: Type.Optional(Type.Boolean()) }),
+  command("activity.stop_all", { ghostId: Type.Optional(Id) }),
 
   // Documents
   command("space.create", { name: Text(128), path: Text(4096), grants: Type.Optional(Type.Array(SpaceGrant, { maxItems: 64 })) }),

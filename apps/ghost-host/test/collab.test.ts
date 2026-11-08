@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Check as checkValue } from "typebox/value";
 import type { Context } from "@earendil-works/chord";
 import type { Extension, ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
-import type { Check, Work } from "@ghost/contract";
+import type { Check, GhostTool, Work } from "@ghost/contract";
 import { idFor } from "../src/core/ids.ts";
 import { conflict } from "../src/core/errors.ts";
 import type { Core } from "../src/core/core.ts";
@@ -52,11 +52,11 @@ async function call(s: Harness, work: Work, name: string, args: unknown, callId 
   const api = { conversationId: `pi-${conversation.id}`, callId, output: () => {} } as unknown as ToolExecutionApi;
   return tool(createWorkTools(s.core, sandbox), name).execute(args as never, api, {} as Context);
 }
-async function setup(path = ":memory:") {
+async function setup(path = ":memory:", tools?: GhostTool[]) {
   const s = harness(path);
   opened.push(s);
-  const parentGhost = s.core.createGhost({ name: "Delegator", persona: "Lead" });
-  const childGhost = s.core.createGhost({ name: "Child", persona: "Implement" });
+  const parentGhost = s.core.createGhost({ name: "Delegator", persona: "Lead", tools });
+  const childGhost = s.core.createGhost({ name: "Child", persona: "Implement", tools });
   const root = s.core.works.createRoot({ ghostId: parentGhost.id, title: "Parent", brief: "B", originConversationId: parentGhost.directConversationId });
   await s.core.idle();
   const child = s.core.works.delegate(root.id, { ghostId: childGhost.id, title: "Part", brief: "B" });
@@ -78,12 +78,8 @@ class InterruptedSubmission extends FakeEngine {
 
 describe("parent-first questions", () => {
   test("child asks, waits without nudges, parent wakes and answers, child resumes", async () => {
-    const s = await setup();
-    // Lifecycle tools remain usable even when selectable tools are revoked.
-    s.ledger.tx(() => {
-      s.ledger.putGhost({ ...s.parentGhost, tools: [] });
-      s.ledger.putGhost({ ...s.childGhost, tools: [] });
-    });
+    // Intrinsic lifecycle tools work without optional tool grants at Work admission.
+    const s = await setup(":memory:", []);
     s.core.works.onIdle(s.parent.id);
     await s.core.idle();
     expect(s.ledger.work(s.parent.id).state).toBe("waiting");
@@ -567,10 +563,10 @@ describe("structured verification and revision lessons", () => {
   });
 });
 
-describe("collaboration migration 6", () => {
+describe("collaboration migration 6 and autonomy migration 7", () => {
   test("fresh databases create questions and empty history", async () => {
     const s = await setup();
-    expect(s.ledger.db.query("PRAGMA user_version").get()).toEqual({ user_version: 6 });
+    expect(s.ledger.db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
     expect(s.ledger.reviseHistory(s.parent.id)).toEqual([]);
     expect(s.ledger.db.query("SELECT * FROM work_questions").all()).toEqual([]);
   });
@@ -590,11 +586,82 @@ describe("collaboration migration 6", () => {
     db.close();
     const ledger = new Ledger(path);
     try {
-      expect(ledger.db.query("PRAGMA user_version").get()).toEqual({ user_version: 6 });
+      expect(ledger.db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
       expect(ledger.work("w").title).toBe("Existing");
       expect(ledger.reviseHistory("w")).toEqual([]);
       expect(ledger.db.query("SELECT revise_history FROM works WHERE id = 'w'").get()).toEqual({ revise_history: "[]" });
       expect(() => ledger.db.query("INSERT INTO work_questions (id,work_id,parent_work_id,question,state,created_at) VALUES ('q','w','w','Q','invalid',1)").run()).toThrow();
     } finally { ledger.close(); }
+  });
+
+  test("version 6 preserves live questions, revision lessons and delivery identities across autonomy upgrade and writes", () => {
+    const root = mkdtempSync(join(tmpdir(), "ghost-collab-upgrade-"));
+    roots.push(root);
+    const path = join(root, "ledger.db");
+    const history = [{ source: "review" as const, reasons: "Keep the live behavior", evidence: "Recorded child evidence", scope: "Only the approved files", at: 20 }];
+    const db = new Database(path);
+    let oldWorks: unknown[];
+    let oldQuestions: unknown[];
+    try {
+      db.transaction(() => {
+        for (const migration of MIGRATIONS.slice(0, 6)) db.exec(migration);
+        db.exec("PRAGMA user_version = 6");
+        db.query(`INSERT INTO ghosts (id,name,persona,look,is_default,state,direct_conversation_id,created_at,updated_at,tools)
+          VALUES ('g','Live Ghost','','{"avatarId":null}',1,'active','direct',1,2,'["read","delegate"]')`).run();
+        db.query(`INSERT INTO conversations (id,ghost_id,kind,work_id,title,created_at,last_activity_at,pi_conversation_id)
+          VALUES (?, 'g', ?, ?, ?, 1, 2, ?)`).run("direct", "direct", null, "Owner", "pi-direct");
+        const insert = db.query(`INSERT INTO works
+          (id,parent_id,root_id,ghost_id,origin_conversation_id,title,brief,acceptance,state,revision,revisions_used,
+            idle_nudges,question_nudges,revise_history,reported_at,created_at,updated_at)
+          VALUES (?,?,'parent','g','direct',?,'Live brief','{"criteria":"Keep production","checks":[],"reviewer":null}',?,3,1,1,7,?,NULL,1,2)`);
+        insert.run("parent", null, "Parent", "running", "[]");
+        insert.run("child", "parent", "Child", "waiting", JSON.stringify(history));
+        const question = db.query(`INSERT INTO work_questions
+          (id,work_id,parent_work_id,question,answer,state,created_at,answered_at,submitted_at,answer_submitted_at,
+            nudge_count,cancellation_reason,cancellation_submitted_at)
+          VALUES (?,'child','parent','Which scope?',?,?,10,?,?,?,1,?,?)`);
+        question.run("pending", null, "pending", null, 11, null, null, null);
+        question.run("answered", "Approved scope only", "answered", 12, 11, null, null, null);
+        question.run("cancelled", null, "cancelled", null, 11, null, "Parent unavailable", null);
+      })();
+      oldWorks = db.query("SELECT * FROM works ORDER BY id").all();
+      oldQuestions = db.query("SELECT * FROM work_questions ORDER BY id").all();
+    } finally { db.close(); }
+
+    const ledger = new Ledger(path);
+    try {
+      expect(ledger.db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
+      for (const row of ledger.db.query("SELECT * FROM works ORDER BY id").all()) {
+        const { execution, activity_id, activity_run_id, tool_scope, ...preserved } = row as Record<string, unknown>;
+        expect([execution, activity_id, activity_run_id, tool_scope]).toEqual([null, null, null, null]);
+        expect(oldWorks).toContainEqual(preserved);
+      }
+      expect(ledger.db.query("SELECT * FROM work_questions ORDER BY id").all()).toEqual(oldQuestions);
+      expect(ledger.ghost("g")).toMatchObject({ hostExecution: false, tools: ["read", "delegate"], directConversationId: "direct" });
+      expect(ledger.piConversationId("direct")).toBe("pi-direct");
+      expect(ledger.reviseHistory("child")).toEqual(history);
+      expect(ledger.workQuestionsAwaitingSubmission().map((question) => question.id)).toEqual(["answered", "cancelled"]);
+      expect(ledger.activities()).toEqual([]);
+      expect(ledger.connections()).toEqual([]);
+      expect(ledger.activityRuns()).toEqual([]);
+      ledger.tx(() => {
+        ledger.putWork({ ...ledger.work("child"), title: "Edited after upgrade", execution: { kind: "container" }, toolScope: ["read"] });
+        expect(ledger.nextQuestionNudge("parent")).toBe(8);
+        const answered = ledger.findWorkQuestion("answered")!;
+        ledger.putWorkQuestion({ ...answered, answerSubmittedAt: 30 });
+      });
+      expect(ledger.reviseHistory("child")).toEqual(history);
+      expect(ledger.workQuestionsAwaitingSubmission().map((question) => question.id)).toEqual(["cancelled"]);
+    } finally { ledger.close(); }
+
+    const reopened = new Ledger(path);
+    try {
+      expect(reopened.work("child")).toMatchObject({ parentId: "parent", rootId: "parent", title: "Edited after upgrade", execution: { kind: "container" }, toolScope: ["read"] });
+      expect(reopened.reviseHistory("child")).toEqual(history);
+      expect(reopened.findWorkQuestion("answered")).toMatchObject({ answer: "Approved scope only", answerSubmittedAt: 30, nudgeCount: 1 });
+      expect(reopened.findWorkQuestion("pending")).toMatchObject({ state: "pending", submittedAt: 11 });
+      expect(reopened.findWorkQuestion("cancelled")).toMatchObject({ state: "cancelled", cancellationReason: "Parent unavailable", cancellationSubmittedAt: null });
+      expect(reopened.db.query("SELECT question_nudges FROM works WHERE id = 'parent'").get()).toEqual({ question_nudges: 8 });
+    } finally { reopened.close(); }
   });
 });

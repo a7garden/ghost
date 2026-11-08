@@ -16,15 +16,24 @@ flowchart LR
     engine[engine · Pi Durable]
     pi[(pi.db)]
     tools[tools]
-    sandbox[sandbox · Apple container]
+    sandbox[ExecutionEnv · per Work]
   end
   mem[Oxibrain]
   docs[PDC vaults]
   models[Model providers]
+  clock[Host clock]
+  accounts[GitHub / Gitea · IMAP / SMTP]
+  vm[Apple container · lazy]
+  pc[Mac filesystem / shell · explicit grant]
   clients --> api --> core --> ledger
   core <--> engine --> pi
   engine --> tools --> core
   tools --> sandbox
+  sandbox --> vm
+  sandbox --> pc
+  clock --> core
+  accounts --> core
+  tools --> accounts
   tools --> mem
   tools --> docs
   engine --> models
@@ -34,8 +43,8 @@ flowchart LR
 
 1. **One process, one language.** Host, conversation engine and device API run in one Bun process. Types are shared with the UI through `packages/ghost-contract`.
 2. **Two domain stores, one Host per root.** `ledger.db` holds Ghosts, work, decisions and effects; Pi Durable owns conversations and tasks in `pi.db`. Before either store opens, the Host holds a SQLite exclusive transaction on `lock.db` for its lifetime. Root aliases share the same lock; process death releases it without a stale-PID override. The lock contains no domain state. Artifacts, provider secrets, config and disposable model catalogs remain separate files.
-3. **Everything that wakes a Ghost is a submission.** Owner messages, child results, owner decisions, schedule fires and review feedback are Pi submissions to a conversation with a deterministic `requestId`. Pi's request-ID idempotency removes duplicate wakes after a crash. There is no outbox, mailbox or delivery-receipt table.
-4. **Capability by construction.** A conversation's kind bounds its tools; each Ghost's explicit tool allow-list narrows that set, and integration/document grants still apply. A direct conversation cannot touch a sandbox; a work conversation cannot create root work. Tools resolve and authorize their current scope from the ledger on every execution, never from model arguments or a cached configuration.
+3. **Every model wake has a durable identity.** Owner messages, child results, owner decisions, schedule fires, admitted activity runs and review feedback are Pi submissions to a conversation with a deterministic `requestId`. Pi's request-ID idempotency removes duplicate wakes after a crash. There is no outbox, mailbox or delivery-receipt table. Activity-root results remain passive Work history and notifications, not new direct model turns.
+4. **Capability by construction.** Conversation kind, the Ghost's current tool allow-list, the Work/activity scope and integration/document grants intersect. Work file/shell execution also checks its explicit target and the current owner PC grant. A direct conversation cannot acquire a Work environment; a work conversation cannot create root work. Tools authorize from the current ledger on every execution, never from model arguments or a cached configuration.
 5. **Effects are journaled, never replayed.** A tool with an external effect records `pending` before I/O and `done` after. On restart, `pending` becomes `unknown`, the work blocks and the owner reconciles. Pi's own tool tasks are `replay: "unsafe"` for these tools, so an interrupted call returns an interrupted result instead of running twice. Owner API journals retain the same replay guards but do not participate in Ghost-tool mutation exclusion; a waiting tool approval cannot prevent credential revocation, document saves or sandbox control.
 6. **Reads are free; commands have durable identities.** Read endpoints are never journaled. Synchronous command mutations, events and the success receipt commit together; engine follow-ups start only after that commit. Async commands reserve their principal and command digest before I/O, then use Pi admission IDs, recoverable decision follow-ups or the effect journal. An unknown external result is not a success receipt and is never repeated automatically. Pending request identities are not pruned; completed receipts are retained for 30 days. Receipts contain small outcomes, never command bodies or credentials.
 7. **Plain tables, one change feed.** Every ledger mutation appends an `events` row in the same transaction. Clients get a snapshot, then the event stream. No event sourcing, no generic key-value table.
@@ -52,8 +61,8 @@ apps/ghost-host/           the ghost process
   src/core/                commands → rules → ledger writes → engine effects
   src/engine/              Pi harness, agent instructions, conversation kinds
   src/tools/               model tools grouped by capability
-  src/sandbox/             ExecutionEnv: Apple container, local directory (tests/dev)
-  src/integrations/        oxibrain, pdc, push (APNs), providers
+  src/sandbox/             ExecutionEnv: Apple container, explicit PC, confined workspace
+  src/integrations/        oxibrain, pdc, browser, source connections, push, providers
   src/api/                 Bun.serve routes, auth, pairing, SSE
   src/import/              one-shot importer from a legacy state root
   test/                    bun test
@@ -70,16 +79,19 @@ docs/
 | --- | --- |
 | Ghost | A durable bot: name, persona, look, model and up to three fallback models, tool allow-list, skills, memory space and document grants. The default Ghost is the entry point and may configure other non-default Ghosts only from direct conversations. A retired Ghost can be deleted by the owner: it leaves every list and picker, and its row stays as a tombstone (`deletedAt`) so past Works keep their assignee. |
 | Conversation | A Pi conversation bound to one Ghost. Kinds: `direct` (owner ↔ Ghost), `work` (a Ghost executing one Work), `review` (an independent reviewer judging one Work). |
-| Work | 맡긴 일. A node in a tree. A root Work is created only from an owner request in a direct conversation (or by the owner in the UI). A child Work is a delegation to another Ghost. Each Work has an assignee, a brief, an acceptance spec, a deadline, a work conversation, a state, a result and a verdict. |
+| Work | 맡긴 일. A node in a tree. A root is created from an owner request or an owner-approved Activity rule; a child is a delegation to another Ghost. It has a brief, acceptance, deadline, conversation, result and verdict, plus immutable execution target and optional narrowed Activity scope. |
 | Decision | Something only the owner can settle: approve an effect (a host command, a browser action or a card fill), answer a question (including a vault secure form or a browser handoff), accept a result, approve a document proposal, reconcile an unknown effect. |
 | Effect | One external side effect of a tool call (shell, file write, publish, browser mutation, memory write, document proposal). |
 | Artifact | Published bytes, addressed by SHA-256, attached to a Work result. Avatar images are artifacts too. |
 | Schedule | A timed submission into a conversation (wake, follow-up, reminder the owner asked for). |
+| Activity | An owner-approved standing rule for one Ghost: schedule, PR changes or mail; task instructions, tools, execution, limits, reply policy and notification mode. |
+| ActivityRun | Durable source/admission identity, linked Work, status, deduplication and follow-up state. Oversized mail is an explicit skipped run, never a successful analysis. |
+| Connection | Owner-configured GitHub/Gitea or IMAP/SMTP endpoint and credential epoch; secrets stay outside the ledger. |
 | Notification | Something the owner should see: decision needed, Work finished or failed. Pushed to devices. |
 | Device | A paired iPhone; it sees every Ghost and may send only device commands. |
 | Space | A PDC document vault registered with the host; Ghosts get read or propose grants. |
 | Avatar | A named sprite design whose image is an artifact; a Ghost's look is an avatar plus colors. |
-| Sandbox | A Ghost's Apple container computer. The owner can stop or reset it. |
+| Sandbox | A Work's confined workspace and optional lazy Apple VM. Ghost-level controls manage that Ghost's environments; PC cwd is never deleted by sandbox cleanup. |
 
 ### Work state machine
 
@@ -108,7 +120,7 @@ stateDiagram-v2
 
 - Cancelling a Work cancels its live descendants first and aborts their conversations.
 - `revise` re-submits the verdict feedback into the same work conversation: reasons, the reviewer's evidence and the scope the revision must stay inside.
-- When a child settles, the parent's work conversation receives a submission with the child's result. When a root Work settles, the origin direct conversation receives a report submission. Either report carries the revision history when revisions happened, so the receiver can keep the lesson.
+- A settled child submits its result and revision history to the bound parent. An ordinary owner-requested root reports to its origin direct conversation. An Activity root records its result and notification without starting another model turn; otherwise a scoped container Activity could regain a direct conversation's broader PC authority.
 - A child asks its delegating Ghost first: `ask_parent` stores a `work_questions` row and submits the question to the parent's work conversation; the child waits until the parent calls `answer_child`. Only the parent escalates to the owner with `ask_owner`.
 - The owner can edit a live Work (brief, acceptance, deadline). An edit bumps `revision` and is submitted to the work conversation as steering.
 
@@ -121,6 +133,22 @@ stateDiagram-v2
 3. **Owner.** A root Work without checks or a reviewer opens an `accept_result` decision.
 
 A completion claim alone never accepts a Work.
+
+`complete.artifacts` explicitly lists the exact published filenames (`[]` for no files). Scratch files and filenames mentioned only in prose are not attached automatically. Reviewers start with `evidence_read {}` for the bound Work's recorded reads; optional `child_work_id` may name only its descendants. Recorded observations are paged and bounded, not fetched again from external sources.
+
+### Standing activities, not an always-thinking agent
+
+- The Host's cheap scheduler checks clocks and source metadata. It starts a fresh bounded Work only for a due schedule, a new source version or an admitted next check. Idle Ghosts consume no model turns. There is no separate LLM heartbeat protocol, generic trigger queue or second execution engine.
+- Admission atomically records a deterministic ActivityRun and Work. Retries find the same run; a source cursor advances only after every returned item is admitted or durably accounted for. Daily/concurrent limits defer remaining items without losing them. Waiting roots occupy concurrent slots; each run's whole delegation tree is bounded to 16 Work nodes.
+- Clock/deadline processing and source I/O use separate lanes. One slow poll cannot hold scheduled wakes or Work deadlines. `tickSources` owns its shared source lane; callers must not wrap it in that same lane.
+- `activity_next_check` permits one owner-policy-bounded future check, expressed as relative seconds or an absolute timestamp. The Host computes relative time; a follow-up carries the reason/baseline into a fresh Work. Rules and pending checks persist across restart.
+- Pausing prevents new runs; stopping also cancels live descendants and processes. Rule/account authority changes invalidate obsolete run trees. Three consecutive genuine failures pause the rule and notify once. Successful no-change reports may be quiet only when the run tree performed no mutation; failures and meaningful changes remain visible.
+- PR polling reads bounded metadata; `activity_read` fetches the bound diff/comments. Pagination refuses incomplete coverage beyond its safety cap instead of silently skipping records. IMAP uses read-only mailbox access and `BODY.PEEK`; mail above 2 MiB is recorded as skipped with an owner notice, without downloading its body or charging a model run.
+- `activity_action` can only comment on the bound PR or reply to the source message's mailbox. Its deny/approval/allow policy covers those connector replies, not arbitrary browser or PC actions. Approval presents the recipient/target and full bounded body; uncertain POST/SMTP outcomes are not replayed. Browser/vault retain their independent grants and approval rules.
+- Account credentials are mode-0600 files under `secrets/connections/`; ledger/events contain metadata and credential epochs, never values. Endpoint/credential replacement first disconnects old authority and cancels obsolete runs. Name-only account changes preserve authority and cursors. Source text is untrusted user/tool data, never static system instructions.
+
+The design follows the useful boundary in [Manus automations](https://manus.im/docs/automations.md): explicit sources, conditions, schedules, test runs, history and pause. [Manus cloud computers vs Studio](https://manus.im/docs/introduction/quickstart.md) also separates remote execution from deliberate local-PC access. Neither requires one permanently running VM or an always-prompting model per Ghost.
+
 
 ### Restart
 
@@ -149,6 +177,9 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 | `effects` | `id`; unique `(conversation_id, call_id)` | work_id, tool, summary, input_digest, state, result |
 | `artifacts` | `(digest, work_id, name)` | media_type, size |
 | `schedules` | `id` | ghost_id, conversation_id, prompt, spec, next_at, state |
+| `connections` | `id` | validated account metadata/credential epoch JSON; migration 7 |
+| `activities` | `id` | validated standing-rule, cursor, defer/failure and follow-up JSON; migration 7 |
+| `activity_runs` | `id`; unique `(activity_id, source_key)` | Work link and durable run/deduplication state; migration 7 |
 | `notifications` | `id` | kind, ghost/conversation/work/decision refs, title, body, read_at, pushed_at |
 | `devices` | `id` | name, token_hash, push token, revoked_at; unused grants column retained for previous-release readability |
 | `pairings` | `code_hash` | name, expires_at, device_id; unused grants column retained for previous-release readability |
@@ -168,7 +199,7 @@ artifacts/sha256/ab/<digest>
 secrets/<provider>.json      0600
 vault/key  vault/vault.db    Ghost vault: 0600 key, AES-256-GCM secret fields, outside the ledger and its events
 browser/                     agent-browser HOME (per-Ghost login state, encrypted with browser/key), config, downloads
-sandboxes/<ghost_id>/<work_id>/workspace
+sandboxes/<ghost_id>/<work_id>/workspace   private staging / container mount; never the unrestricted PC cwd
 host.json                    port + owner token for local clients, 0600
 config.json                  optional: publicOrigin, uiDir, sandbox, memory, apns, reach, skills, mac, browser
 ```
@@ -180,11 +211,13 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 
 | Kind | Extensions |
 | --- | --- |
-| `direct` | `ghost.direct`: `work_create`, `work_list`, `work_inspect`, `work_update`, `work_cancel`, `ask_owner`, `schedule_create`, `schedule_list`, `schedule_cancel`, `ghost_list`; `ghost.interactive`: `present_ui`; `ghost.memory`; `ghost.documents`; `ghost.web`; `ghost.browser`; `ghost.vault`; `ghost.skills`; `ghost.host`; `ghost.main` (`ghost_inspect`, `ghost_update`) for the active default Ghost only |
-| `work` | `ghost.work`: `read`, `write`, `edit`, `bash` (over the sandbox env), `publish_artifact`, `delegate`, `complete`, `ask_owner`, `ask_parent` (child Works), `answer_child`, `work_status`; `ghost.memory` (work scope); `ghost.web`; `ghost.browser`; `ghost.vault`; `ghost.skills`; `ghost.host` |
-| `review` | `ghost.review`: `artifact_read`, `effect_list`, `verdict` |
+| `direct` | `ghost.direct`: root Work/schedule management and owner questions; `ghost.activities`: `activity_propose`; interactive UI, memory, documents, web, browser, vault, skills and guarded Mac probes as granted; `ghost.main` only for the active default Ghost |
+| `work` | `ghost.work`: file/shell/publish, scoped delegation, explicit completion, owner/parent questions, child answers and status; optional memory, web, browser, vault, skills and guarded Mac probes; `ghost.activities` only for bound Activity runs |
+| `review` | `ghost.review`: `evidence_read`, `artifact_read`, `effect_list`, `verdict` |
 
-- The sandbox `ExecutionEnv` for a work conversation is built from the Work's row: Apple container with only the Work's directory mounted at `/workspace`, no network. Local-directory env exists for tests and development.
+- Execution is selected per Work, not a permanent container per Ghost. Apple VM creation is lazy; the guest sees only its Work directory at `/workspace` and its shell has no network. Host-mediated web/browser/source tools retain their own grants. Explicit container execution never falls back to the PC; without the Apple driver, confined file/API work remains possible but shell returns unavailable. Legacy implicit local execution is for tests/dev.
+- PC execution requires the owner's separate `Ghost.hostExecution` grant and `Work.execution: { kind: "host", cwd }`. It is unrestricted filesystem/shell access as the Host's OS user, not a cwd jail, a network sandbox or an approval firewall; it can read local credentials if OS permissions permit. Environment scrubbing does not change that boundary. Keep untrusted workloads in containers. OS/TCC permissions still apply; this feature does not mount desktop GUI control.
+- Host mutations share one queue and recheck live authority before and after waiting and before spawning. Revocation/cancellation aborts active process trees, not just future tools. Per-Work staging remains separate for artifacts/delegation/browser transfers. Shutdown closes Host environment admission and aborts tracked processes before draining core lanes.
 - A work conversation that goes idle with live children, a pending decision or its own pending question to the parent becomes `waiting`; when a child settles, its outcome (and its files under `inputs/<child-id>/`) is submitted to the parent. Idle without any of them gets one reminder, then the Work fails.
 - A work conversation whose Ghost holds `delegate` gets the active peer Ghosts in its instructions when it is configured, since `ghost_list` runs only in direct conversations: name, id, first persona line and a capability tag (resolved model, `image` when that model accepts images, `web`, `host`). Creating, changing or deleting a Ghost re-opens the live work conversations of Ghosts that hold `delegate`, so the roster stays current. A Work cannot delegate to its own Ghost. `delegate` may name a reviewer Ghost (`reviewer_ghost_id`), which then judges the child with its own model, and may give the child deterministic `checks`; without a reviewer the delegating Ghost reviews. A child reports its result when it settles; mid-Work, the only channel is the child's `ask_parent` question and the parent's `answer_child`.
 - Model fallback: each Ghost has up to three `fallbacks`. Pi retries a failed generation itself; when the run still ends in an error assistant message caused by a retryable error, rate limit, quota, overload, network failure or a missing credential, and the conversation's model came from the Ghost or the default (not a conversation override or an explicit review model), the engine reconfigures that conversation with the next fallback whose provider has a credential and re-arms Pi's generation task over the committed context in the same transaction. No input is re-submitted, no request id is reused and completed tool tasks are never replayed. A conversation-scoped `ghost.fallback` document records the handled error entry so a restart does not continue it twice. Invalid requests and context overflow never fall back. The next turn starts at the primary model again. Each switch is logged as `fallback: <conversation> <from> -> <to> (<reason>)`; Pi's transcript records the serving provider/model per assistant message.
@@ -212,8 +245,8 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 - The engine configures Pi's explicit tool selection as well as its named extensions. Pi re-resolves extensions from the registry by name; filtering a copied extension's `tools` array does not restrict a model request.
 - Owners edit role instructions and tool permissions in **설정 → 팀 → Ghost 설정**, also reachable from the Ghost's conversation profile. Selecting a tool never grants a document Space or enables an unavailable integration.
 - Unsaved owner tool toggles are applied to the latest observed allow-list, preserving concurrent changes to untouched tools.
-- `ask_owner`, `ask_parent`, `answer_child`, `complete`, `work_status`, `artifact_read`, `effect_list` and `verdict` remain fixed lifecycle/safety tools in their existing conversation kinds.
-- Only the currently active default Ghost's direct conversations receive `ghost_inspect` and `ghost_update`. Every execution rechecks the current designation. These tools inspect/update another non-default Ghost's name, persona, model, fallbacks, skills, look, state and optional tools. They cannot change the caller, the default designation, host tools, document grants, credentials or sandbox controls, and cannot touch a deleted Ghost. Owners retain those controls.
+- `ask_owner`, `ask_parent`, `answer_child`, `complete`, `work_status`, `evidence_read`, `artifact_read`, `effect_list` and `verdict` remain fixed lifecycle/safety tools in their existing conversation kinds.
+- Only the active default Ghost's direct conversations receive `ghost_inspect`/`ghost_update`, rechecked on execution. They may configure another non-default Ghost's ordinary settings, but not the caller/default designation, PC execution grants, host tools, document grants, credentials or sandbox controls. Those remain owner controls.
 - `ghost.delete` (owner only) accepts a retired, non-default Ghost with no live Work and no pending decision. It removes its schedules and every Space grant naming it, then sets `deletedAt`. Deleted Ghosts are never opened, listed, delegated to or edited again.
 - Permission changes refresh live conversations; execution also checks the current ledger permissions so a stale configured tool cannot bypass revocation. Work/review conversations never receive Ghost-management authority, including work assigned to the default Ghost.
 - Tool permissions control which actions are exposed, not sandbox syscall permissions: allowing `bash` can still read/write files inside the existing sandbox boundary even when `write` is disabled.
@@ -231,7 +264,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 `Bun.serve` on one port. Principals:
 
 - **Owner**: bearer token from `host.json`. Used by the Mac app and the web UI.
-- **Device**: bearer token issued at pairing. It sees every Ghost, conversation, Work, decision and notification, including Ghosts created after pairing, but may send only `DEVICE_COMMANDS`. Schedules, Spaces, provider settings/credentials and other devices remain owner-only. Revocation closes its stream and invalidates its token.
+- **Device**: bearer token issued at pairing. It sees every Ghost, conversation, Work, decision and notification, including Ghosts created after pairing, but may send only `DEVICE_COMMANDS`. Schedules, Activities/runs, Connections, Spaces, provider settings/credentials and other devices remain owner-only. Revocation closes its stream and invalidates its token.
 
 | Route | Purpose |
 | --- | --- |

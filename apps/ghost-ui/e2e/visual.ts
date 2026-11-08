@@ -5,16 +5,21 @@ import { readRunState, type VisualRunState } from './run-state';
  * Screen-opening helpers shared by the visual spec. Every screen freezes the
  * browser clock (`page.clock.setFixedTime`) at the seeding end so `Date.now()`
  * is constant, and covers the nondeterministic regions: `<time>` elements
- * (relative-time text) and host wake lines, whose text depends on run timing.
+ * (relative-time text), host wake lines and the project's actual temporary folder
+ * breadcrumb (`title` holds the full path; rendered text abbreviates it).
  * A returned Work renders as its outcome line, whose id stays behind a hover.
  * The verdict stamp's absolute timestamp is a plain span with proportional
  * digits, so it is hidden outright instead of masked.
  */
 
-const MASK_SELECTORS = ['time', '.transcript-event'];
+const MASK_SELECTORS = ['time', '.transcript-event', '.place__crumb[title]'];
 
 /** Test-side style that removes text no mask can cover deterministically. */
-const STABILITY_CSS = '.verdict span { visibility: hidden !important; }';
+const STABILITY_CSS = `
+  .verdict span { visibility: hidden !important; }
+  /* Mask geometry must not depend on TMPDIR's random path length. Test-only. */
+  .place__crumb[title] { width: 240px !important; max-width: 100%; overflow: hidden; }
+`;
 
 export type Theme = 'light' | 'dark';
 

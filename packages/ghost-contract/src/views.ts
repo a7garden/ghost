@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import {
   ArtifactRef,
   Avatar,
@@ -64,6 +65,9 @@ export const State = Type.Object({
   settings: Settings,
   devices: Type.Array(Device),
   sandboxes: Type.Array(Sandbox),
+  activities: Type.Optional(Type.Array(Activity)),
+  activityRuns: Type.Optional(Type.Array(ActivityRun)),
+  connections: Type.Optional(Type.Array(Connection)),
 });
 export type State = Static<typeof State>;
 

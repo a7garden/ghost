@@ -45,6 +45,13 @@ export type Look = Static<typeof Look>;
 export const GhostState = Type.Union([Type.Literal("active"), Type.Literal("paused"), Type.Literal("retired")]);
 export type GhostState = Static<typeof GhostState>;
 
+/** Host execution is unrestricted PC access, not filesystem confinement. */
+export const ExecutionTarget = Type.Union([
+  Type.Object({ kind: Type.Literal("container") }),
+  Type.Object({ kind: Type.Literal("host"), cwd: Type.String({ minLength: 1, maxLength: 4096 }) }),
+]);
+export type ExecutionTarget = Static<typeof ExecutionTarget>;
+
 /** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict) and the main-only ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
@@ -56,6 +63,7 @@ export const GhostTool = Type.Union([
   Type.Literal("schedule_list"),
   Type.Literal("schedule_cancel"),
   Type.Literal("ghost_list"),
+  Type.Literal("activity_propose"),
   Type.Literal("read"),
   Type.Literal("write"),
   Type.Literal("edit"),
@@ -118,6 +126,7 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "schedule_list",
   "schedule_cancel",
   "ghost_list",
+  "activity_propose",
   "read",
   "write",
   "edit",
@@ -204,6 +213,8 @@ export const Ghost = Type.Object({
   fallbacks: FallbackList,
   /** Skill names whose SKILL.md is part of this Ghost's instructions. */
   skills: SkillList,
+  /** Owner-only grant for direct PC file/shell execution. Never implied by sandbox tools. */
+  hostExecution: Type.Optional(Type.Boolean()),
   /** Set once the owner deleted a retired Ghost; such Ghosts stay only so past Works keep their assignee. */
   deletedAt: nullable(Timestamp),
   directConversationId: Id,
@@ -276,6 +287,8 @@ export const TERMINAL_WORK_STATES: readonly WorkState[] = ["done", "failed", "ca
 export const WorkResult = Type.Object({
   summary: Type.String({ maxLength: 16384 }),
   artifacts: Type.Array(ArtifactRef, { maxItems: 64 }),
+  /** Automatic activities may suppress unchanged successful results, never failures. */
+  noChange: Type.Optional(Type.Boolean()),
 });
 export type WorkResult = Static<typeof WorkResult>;
 
@@ -304,6 +317,12 @@ export const Work = Type.Object({
   originConversationId: Id,
   /** The assignee's work conversation; null until the Work first runs. */
   conversationId: nullable(Id),
+  /** Omitted legacy Works use the configured sandbox, never implicit host execution. */
+  execution: Type.Optional(ExecutionTarget),
+  activityId: Type.Optional(Id),
+  activityRunId: Type.Optional(Id),
+  /** Additional owner-approved activity allow-list; inherited by delegated children. */
+  toolScope: Type.Optional(GhostToolList),
   title: Type.String({ minLength: 1, maxLength: 256 }),
   brief: Type.String({ minLength: 1, maxLength: 32768 }),
   acceptance: Acceptance,
@@ -348,7 +367,7 @@ export const Decision = Type.Object({
   workId: nullable(Id),
   effectId: nullable(Id),
   title: Type.String({ minLength: 1, maxLength: 256 }),
-  detail: Type.String({ maxLength: 16384 }),
+  detail: Type.String({ maxLength: 32768 }),
   /** Suggested answers for a question. */
   options: Type.Array(Type.String({ maxLength: 256 }), { maxItems: 8 }),
   /** Kind-specific payload shown to the owner: the exact browser action, the document body, the result. */

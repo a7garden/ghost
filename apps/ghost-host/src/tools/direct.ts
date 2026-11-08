@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import type { Ghost, Work, WorkDetail } from "@ghost/contract";
+import { ExecutionTarget } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { invalid } from "../core/errors.ts";
@@ -38,6 +39,7 @@ export function createDirectTools(core: Core): Extension {
       criteria: Type.Optional(Type.String({ maxLength: 8192, description: "When the Work is done" })),
       ghost_id: Type.Optional(Type.String({ description: "Assignee Ghost; defaults to this Ghost" })),
       deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Deadline in minutes from now" })),
+      execution: Type.Optional(ExecutionTarget),
     }),
     replay: "unsafe",
     async execute(args, api) {
@@ -50,6 +52,7 @@ export function createDirectTools(core: Core): Extension {
           acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: null },
           deadlineAt: args.deadline_minutes === undefined ? null : Date.now() + args.deadline_minutes * 60_000,
           originConversationId: scope.conversation.id,
+          execution: args.execution,
           id: idFor(scope.conversation.id, api.callId),
         });
         const assignee = core.ledger.ghost(work.ghostId).name;

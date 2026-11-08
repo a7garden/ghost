@@ -1,4 +1,4 @@
-import type { Effect } from "@ghost/contract";
+import { TERMINAL_WORK_STATES, type Effect } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { CommandError, conflict } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
@@ -15,7 +15,7 @@ export interface BeginEffect {
 }
 
 /** Host-only API journals; these names are not model tools or tool exclusion scopes. */
-const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete"] as const;
+const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete", "connection.upsert", "connection.delete"] as const;
 export type CommandEffectTool = typeof COMMAND_EFFECT_TOOLS[number];
 
 export interface BeginCommandEffect extends Omit<BeginEffect, "tool" | "callId"> {
@@ -283,7 +283,12 @@ export class Effects {
     await this.notifyResolved(effect, result);
   }
 
-  private notifyResolved(effect: Effect, result: string) {
+  private async notifyResolved(effect: Effect, result: string) {
+    if (effect.workId) {
+      const work = this.ledger.work(effect.workId);
+      if (TERMINAL_WORK_STATES.includes(work.state) || work.state === "blocked") return;
+      this.core.works.resumeFromWaiting(work.id);
+    }
     return this.core.engine.submit(effect.conversationId, {
       text: `${effect.tool} (${effect.callId}): ${result}`,
       origin: "decision",

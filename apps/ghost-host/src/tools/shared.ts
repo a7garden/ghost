@@ -25,6 +25,7 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   schedule_list: ["direct"],
   schedule_cancel: ["direct"],
   ghost_list: ["direct"],
+  activity_propose: ["direct"],
   read: ["work"],
   write: ["work"],
   edit: ["work"],
@@ -85,6 +86,12 @@ export function requireAllowed(core: Core, api: ToolExecutionApi, name: GhostToo
   const scope = scopeOf(core, api);
   if (!TOOL_KINDS[name].includes(scope.conversation.kind)) throw forbidden(`${name} does not run in a ${scope.conversation.kind} conversation`);
   if (!scope.ghost.tools.includes(name)) throw forbidden(`${name} is not enabled for ${scope.ghost.name}`);
+  if (scope.work?.toolScope && !scope.work.toolScope.includes(name)) throw forbidden(`${name} is outside this Work's approved tool scope`);
+  if (scope.work?.execution?.kind === "host" && ["read", "write", "edit", "bash", "publish_artifact"].includes(name) && !scope.ghost.hostExecution) throw forbidden("direct PC execution was revoked by the owner");
+  if (scope.work && scope.ghost.state !== "active") throw forbidden("the executing Ghost is no longer active");
+  if (scope.work && !["running", "waiting"].includes(scope.work.state)) throw forbidden(`Work is ${scope.work.state}`);
+  if (scope.work && scope.work.deadlineAt !== null && scope.work.deadlineAt <= Date.now()) throw forbidden("Work deadline has passed");
+  if (scope.work?.activityId) core.activities.authorize(scope.work.id, name);
   return scope;
 }
 
@@ -150,6 +157,7 @@ export function askOwnerTool(core: Core) {
     async execute(args, api) {
       try {
         const scope = scopeOf(core, api);
+        if (scope.work?.activityId) core.activities.authorize(scope.work.id, "ask_owner");
         const decision = core.decisions.ask(scope.conversation.id, firstLine(args.question), args.question, args.options ?? [], idFor(scope.conversation.id, api.callId));
         return {
           content: [{ type: "text", text: `The owner was asked (${decision.id}). Their answer arrives as a message.` }],

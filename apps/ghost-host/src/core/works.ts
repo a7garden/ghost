@@ -1,9 +1,10 @@
-import { Acceptance, TERMINAL_WORK_STATES, validate, type Verdict, type Work, type WorkResult } from "@ghost/contract";
+import { Acceptance, TERMINAL_WORK_STATES, validate, type ExecutionTarget, type GhostTool, type Verdict, type Work, type WorkResult } from "@ghost/contract";
 import type { WorkQuestion } from "../ledger/ledger.ts";
 import type { Core } from "./core.ts";
 import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
 import { verifyChecks } from "./verify.ts";
+import { validateExecutionTarget } from "../sandbox/index.ts";
 
 /** Automatic `revise` verdicts allowed before a Work fails. */
 export const MAX_REVISIONS = 2;
@@ -27,6 +28,10 @@ export interface CreateWork {
   acceptance?: Acceptance;
   deadlineAt?: number | null;
   originConversationId: string;
+  execution?: ExecutionTarget;
+  activityId?: string;
+  activityRunId?: string;
+  toolScope?: GhostTool[];
   /** Deterministic id from a tool call (see `idFor`), so a replayed call finds its Work. */
   id?: string;
 }
@@ -50,6 +55,7 @@ export class Works {
     if (ghost.state !== "active") throw conflict(`${ghost.name} is ${ghost.state}`);
     const origin = this.ledger.conversation(input.originConversationId);
     if (origin.kind !== "direct") throw invalid("a root Work reports to a direct conversation");
+    this.checkExecution(input.ghostId, input.execution);
     const id = input.id ?? newId();
     const work = this.newWork({ ...input, id, parentId: null, rootId: id });
     this.ledger.tx(() => this.ledger.putWork(work));
@@ -74,6 +80,11 @@ export class Works {
     const live = this.ledger.children(parent.id).filter((child) => !isTerminal(child));
     if (live.length >= MAX_LIVE_CHILDREN) throw conflict(`at most ${MAX_LIVE_CHILDREN} live delegations per Work`);
     const deadlineAt = minDeadline(parent.deadlineAt, input.deadlineAt ?? null);
+    if (parent.activityId) this.core.activities.authorize(parent.id, "delegate");
+    if (input.execution?.kind === "host" && parent.execution?.kind !== "host") throw invalid("delegation cannot elevate container work to PC execution");
+    const execution = input.execution ?? (parent.execution?.kind === "host" && !target.hostExecution ? { kind: "container" as const } : parent.execution);
+    this.checkExecution(target.id, execution);
+    const toolScope = (input.toolScope ?? parent.toolScope)?.filter((tool) => (!parent.toolScope || parent.toolScope.includes(tool)) && target.tools.includes(tool));
     const work = this.newWork({
       ...input,
       deadlineAt,
@@ -81,6 +92,10 @@ export class Works {
       parentId: parent.id,
       rootId: parent.rootId,
       originConversationId: parent.conversationId,
+      execution,
+      activityId: parent.activityId,
+      activityRunId: parent.activityRunId,
+      toolScope,
     });
     this.ledger.tx(() => this.ledger.putWork(work));
     this.kick(work.id);
@@ -96,6 +111,10 @@ export class Works {
       ghostId: input.ghostId,
       originConversationId: input.originConversationId,
       conversationId: null,
+      ...(input.execution ? { execution: input.execution } : {}),
+      ...(input.activityId ? { activityId: input.activityId } : {}),
+      ...(input.activityRunId ? { activityRunId: input.activityRunId } : {}),
+      ...(input.toolScope ? { toolScope: input.toolScope } : {}),
       title: input.title,
       brief: input.brief,
       acceptance: input.acceptance ?? EMPTY_ACCEPTANCE,
@@ -111,6 +130,13 @@ export class Works {
       endedAt: null,
       updatedAt: now,
     };
+  }
+
+  private checkExecution(ghostId: string, execution: ExecutionTarget | undefined) {
+    if (!execution) return;
+    if (execution.kind === "host" && !this.ledger.ghost(ghostId).hostExecution) throw invalid("the owner has not granted this Ghost direct PC execution");
+    try { validateExecutionTarget(execution); }
+    catch (error) { throw invalid(error instanceof Error ? error.message : "invalid execution target"); }
   }
 
   private depth(work: Work): number {
@@ -524,11 +550,15 @@ export class Works {
         // with a silent conversation; the start request id makes this a no-op otherwise.
         if (!work.conversationId) return;
         await this.core.openConversation(work.conversationId);
-        await this.core.engine.submit(work.conversationId, { text: describeWork(work), origin: "work", requestId: `work:${work.id}:start` });
+        await this.core.engine.submit(work.conversationId, { text: this.input(work), origin: "work", requestId: `work:${work.id}:start` });
         return;
       case "blocked":
         return;
     }
+  }
+
+  private input(work: Work): string {
+    return [describeWork(work), work.activityId ? this.core.activities.context(work) : ""].filter(Boolean).join("\n\n");
   }
 
   private async start(work: Work) {
@@ -547,7 +577,7 @@ export class Works {
     }
     await this.core.openConversation(conversationId);
     await this.core.engine.submit(conversationId, {
-      text: describeWork(work),
+      text: this.input(work),
       origin: "work",
       requestId: `work:${work.id}:start`,
     });
@@ -589,7 +619,8 @@ export class Works {
       await this.core.sandbox.stageInputs(parent, artifacts.map((artifact) => ({ childId: child.id, name: artifact.name, digest: artifact.digest })));
     }
     this.resumeFromWaiting(parent.id);
-    const staged = artifacts.length > 0 && this.core.sandbox.stageInputs ? `\n\nIts files are in inputs/${child.id}/ in your workspace.` : "";
+    const inputRoot = parent.execution?.kind === "host" ? `${this.core.sandbox.workspacePath?.(parent) ?? ""}/inputs/${child.id}/` : `inputs/${child.id}/`;
+    const staged = artifacts.length > 0 && this.core.sandbox.stageInputs ? `\n\nIts files are in ${inputRoot} in your Work's staging workspace.` : "";
     await this.core.engine.submit(parent.conversationId, {
       text: this.describeReport(child) + staged,
       origin: "child_result",
@@ -659,7 +690,7 @@ export class Works {
     }
     await this.core.openConversation(conversationId);
     await this.core.engine.submit(conversationId, {
-      text: describeReview(work),
+      text: [describeReview(work), work.activityId ? this.core.activities.context(work) : ""].filter(Boolean).join("\n\n"),
       origin: "work",
       requestId: `review:${work.id}:r${work.revision}:v${work.revisionsUsed}`,
     });
@@ -692,6 +723,11 @@ export class Works {
     if (work.parentId) {
       await this.notifyParent(work);
     } else {
+      const activityOutcome = work.activityId ? this.core.activities.settled(work) : { notify: true };
+      if (!activityOutcome.notify) {
+        this.ledger.tx(() => this.ledger.markReported(work.id, Date.now()));
+        return;
+      }
       if (work.state !== "cancelled") {
         this.ledger.tx(() =>
           this.core.notify({
@@ -706,16 +742,19 @@ export class Works {
           }),
         );
       }
-      try {
-        await this.core.engine.submit(work.originConversationId, {
-          text: this.describeReport(work),
-          origin: "report",
-          requestId: `work:${work.id}:report:${work.state}:${work.revision}`,
-        });
-      } catch (error) {
-        // A refusal (no model, no credential) is final for this report; the notification stands.
-        if (!(error instanceof CommandError)) throw error;
-        this.core.log(`report of ${work.id} not delivered`, error.message);
+      // Automated outcomes remain inspectable data, not new direct turns with the Ghost's full authority.
+      if (!work.activityId) {
+        try {
+          await this.core.engine.submit(work.originConversationId, {
+            text: this.describeReport(work),
+            origin: "report",
+            requestId: `work:${work.id}:report:${work.state}:${work.revision}`,
+          });
+        } catch (error) {
+          // A refusal (no model, no credential) is final for this report; the notification stands.
+          if (!(error instanceof CommandError)) throw error;
+          this.core.log(`report of ${work.id} not delivered`, error.message);
+        }
       }
     }
     this.ledger.tx(() => this.ledger.markReported(work.id, Date.now()));
@@ -733,7 +772,7 @@ export class Works {
       const conversationId = conversation.id;
       void this.core.lane(`work:${work.id}`, () =>
         this.core.engine.submit(conversationId, {
-          text: `The host restarted. Continue this Work from where you stopped; call \`work_status\` if you need to see what changed.\n\n${describeWork(work)}`,
+          text: `The host restarted. Continue this Work from where you stopped; call \`work_status\` if you need to see what changed.\n\n${this.input(work)}`,
           origin: "work",
           requestId: `work:${work.id}:recover:${work.updatedAt}`,
         }),

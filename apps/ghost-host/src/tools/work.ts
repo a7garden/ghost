@@ -196,7 +196,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "write", input: args, summary: `write ${args.path}` },
           async () => {
-            await unchangedMeansNoEffect(sandbox.workspacePath(scope.work), args.path, async () => {
+            await unchangedMeansNoEffect(scope.work.execution?.kind === "host" ? realpathSync(scope.work.execution.cwd) : sandbox.workspacePath(scope.work), args.path, async () => {
               fresh = await write.execute(args, api, context);
             });
             return `Wrote ${Buffer.byteLength(args.content)} bytes to ${args.path}.`;
@@ -219,7 +219,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "edit", input: args, summary: `edit ${args.path}` },
           async () => {
-            await unchangedMeansNoEffect(sandbox.workspacePath(scope.work), args.path, async () => {
+            await unchangedMeansNoEffect(scope.work.execution?.kind === "host" ? realpathSync(scope.work.execution.cwd) : sandbox.workspacePath(scope.work), args.path, async () => {
               fresh = await edit.execute(args, api, context);
             });
             return `Edited ${args.path} (${args.edits.length} block(s)).`;
@@ -234,7 +234,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
 
   const bash = defineTool({
     name: "bash",
-    description: "Run one bash command in the work sandbox. Returns the exit code and the tail of stdout and stderr.",
+    description: "Run one bash command in this Work's selected environment: isolated container or explicitly authorized owner PC. Returns exit code and bounded output.",
     parameters: Type.Object({
       command: Type.String({ minLength: 1, maxLength: 2048 }),
       timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "Timeout in seconds" })),
@@ -283,9 +283,9 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
 
   const publishArtifact = defineTool({
     name: "publish_artifact",
-    description: "Publish a workspace file as an artifact of this Work. `complete` can only name published artifacts.",
+    description: "Publish a file relative to this Work's execution directory as an artifact. On PC work this is the selected cwd; on container work it is /workspace.",
     parameters: Type.Object({
-      path: Type.String({ minLength: 1, maxLength: 4096, description: "Workspace-relative path of the file" }),
+      path: Type.String({ minLength: 1, maxLength: 4096, description: "File path relative to this Work's selected execution cwd: /workspace in a container, or the authorized Host cwd" }),
       name: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: "Artifact name; defaults to the file name" })),
       media_type: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "Defaults to application/octet-stream" })),
     }),
@@ -303,7 +303,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
             summary: `publish ${args.path} as ${name}`,
           },
           async (): Promise<string> => {
-            const base = realpathSync(sandbox.workspacePath(scope.work));
+            const base = realpathSync(scope.work.execution?.kind === "host" ? scope.work.execution.cwd : sandbox.workspacePath(scope.work));
             const path = confinedPath(base, args.path);
             let bytes: Uint8Array;
             try {
@@ -371,6 +371,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
     async execute(args, api) {
       try {
         const scope = requireWork(scopeOf(core, api));
+        if (scope.work.activityId) core.activities.authorize(scope.work.id, "ask_parent");
         const question = core.works.askParent(scope.work.id, args.question, idFor(scope.conversation.id, api.callId));
         return text(`Your delegating Ghost was asked (${question.id}). Its answer arrives as a message.`);
       } catch (error) {
@@ -390,6 +391,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
     async execute(args, api) {
       try {
         const scope = requireWork(scopeOf(core, api));
+        if (scope.work.activityId) core.activities.authorize(scope.work.id, "answer_child");
         const question = core.works.answerChild(scope.work.id, args.question_id, args.answer);
         return text(`Answer recorded for child Work ${question.workId} (question ${question.id}).`);
       } catch (error) {
@@ -403,19 +405,24 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
     description: "Claim this Work done with a truthful summary and the artifacts you published. Verification decides acceptance.",
     parameters: Type.Object({
       summary: Type.String({ minLength: 1, maxLength: 16384, description: "What was done and what the result is" }),
-      artifacts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 64, description: "Names of artifacts published with publish_artifact" })),
+      artifacts: Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 64, description: "Required exact published artifact names to attach as output files. A summary does not attach files. Use [] only when there are no output files." }),
+      no_change: Type.Optional(Type.Boolean({ description: "Automatic activities only: no meaningful new findings or changes. Failures are never silenced." })),
     }),
     replay: "unsafe",
     async execute(args, api) {
       try {
         const scope = requireWork(scopeOf(core, api));
+        if (scope.work.activityId) core.activities.authorize(scope.work.id, "complete");
+        if (!Array.isArray(args.artifacts) || args.artifacts.length > 64 || args.artifacts.some((name) => typeof name !== "string" || name.length === 0 || name.length > 256)) {
+          throw invalid("complete.artifacts must be an explicit array of up to 64 exact published artifact names (non-empty strings of at most 256 characters). Retry complete with the output filenames; use [] only when there are no output files. Naming files in summary does not attach them.");
+        }
         const published = core.ledger.artifactsForWork(scope.work.id);
-        const artifacts = (args.artifacts ?? []).map((name) => {
+        const artifacts = args.artifacts.map((name) => {
           const ref = published.find((candidate) => candidate.name === name);
           if (!ref) throw invalid(`artifact ${name} was not published by this Work; call publish_artifact first`);
           return ref;
         });
-        const work = core.works.complete(scope.work.id, { summary: args.summary, artifacts });
+        const work = core.works.complete(scope.work.id, { summary: args.summary, artifacts, ...(scope.work.activityId && args.no_change ? { noChange: true } : {}) });
         return {
           content: [{ type: "text", text: `Work "${work.title}" claimed complete; it is ${work.state} until verification settles it.` }],
           control: { terminate: true },
@@ -434,6 +441,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
     async execute(_args, api) {
       try {
         const scope = requireWork(scopeOf(core, api));
+        if (scope.work.activityId) core.activities.authorize(scope.work.id, "work_status");
         const work = core.ledger.work(scope.work.id);
         const children = core.ledger.children(work.id);
         const artifacts = core.ledger.artifactsForWork(work.id);

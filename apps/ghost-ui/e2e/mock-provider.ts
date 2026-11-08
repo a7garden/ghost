@@ -51,7 +51,7 @@ function replyFor(messages: ChatMessage[]): MockReply {
   const lastText = textOf(last?.content);
   if (last?.role === 'tool') return { kind: 'text', withThinking: false, text: AFTER_QUESTION };
   if (lastText.startsWith('Work "')) return { kind: 'text', withThinking: false, text: afterReport(/\(([0-9a-f-]{36})\)/.exec(lastText)?.[1] ?? '') };
-  if (lastText.includes('MEDIC-COMPLETE')) return { kind: 'tool', name: 'complete', args: { summary: COMPLETE_SUMMARY } };
+  if (lastText.includes('MEDIC-COMPLETE')) return { kind: 'tool', name: 'complete', args: { summary: COMPLETE_SUMMARY, artifacts: [] } };
   if (lastText.includes('MEDIC-QUESTION')) return { kind: 'tool', name: 'ask_owner', args: { question: QUESTION, options: QUESTION_OPTIONS } };
   return { kind: 'text', withThinking: true, text: REPLY };
 }
