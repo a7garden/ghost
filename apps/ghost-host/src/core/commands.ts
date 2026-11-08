@@ -34,6 +34,7 @@ const inFlight = new WeakMap<Core, Map<string, Flight>>();
 /** Ledger mutations and receipts share a commit; external operations use their domain journals. */
 export async function execute(core: Core, access: Access, request: CommandRequest, context: CommandContext): Promise<Outcome> {
   const principal = access.principal.kind === "owner" ? "owner" : `device:${access.principal.deviceId}`;
+  access.authorize(request.command);
   // Refuse credential answers before even deriving a command digest or reserving a receipt.
   if (request.command.type === "decision.resolve" && core.ledger.findDecision(request.command.decisionId)?.proposal?.secureForm
     && (request.command.outcome !== "deny" || request.command.answer !== undefined)) {
@@ -49,7 +50,6 @@ export async function execute(core: Core, access: Access, request: CommandReques
   }
   if (active) return active.outcome;
   if (previous?.state === "done") return previous.outcome;
-  access.authorize(request.command);
   // Start on the next microtask, after publishing the same-process join point.
   const outcome = Promise.resolve().then(async () => {
     const asyncCommand = ["message.send", "message.cancel", "decision.resolve", "sandbox.control", "document.save", "avatar.create", "provider.delete"].includes(request.command.type)

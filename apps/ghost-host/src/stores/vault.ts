@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { VaultItem as ItemSchema, validate, type VaultItem, type SecureFormRequest } from "@ghost/contract";
@@ -19,13 +19,15 @@ type Stored = { metadata: string; version: number };
 type SecretRow = { field: VaultField; version: number; sealed: Uint8Array };
 const INPUT_KEYS: Record<string, true> = { id: true, kind: true, title: true, origin: true, username: true, password: true, totp: true, card: true, contact: true, value: true, hints: true, ghostIds: true };
 const KIND_FIELDS: Record<VaultItem["kind"], readonly VaultField[]> = { login: ["username", "password", "totp"], card: ["card_number", "card_expiry", "card_cvc", "card_name"], contact: [], secret: ["value"] };
+export const GHOST_VAULT_ITEM_LIMIT = 200;
 
 /** Values never leave this store except through the host-only VaultPort.reveal fill boundary.
  * Metadata is plain; every secret revision is independently AEAD-bound to item, field and revision.
  */
 export class Vault implements VaultPort {
   private readonly db: Database;
-  private readonly key: Buffer;
+  private readonly aeadKey: Buffer;
+  private readonly importTagKey: Buffer;
   private readonly now: () => number;
   constructor(root: string, options: { now?: () => number } = {}) {
     this.now = options.now ?? Date.now;
@@ -50,20 +52,25 @@ export class Vault implements VaultPort {
         try { fsyncSync(directory); } finally { closeSync(directory); }
       }
       chmodSync(keyPath, 0o600);
-      this.key = readFileSync(keyPath);
-      if (this.key.length !== 32) throw new Error();
+      const key = readFileSync(keyPath);
+      try {
+        if (key.length !== 32) throw new Error();
+        this.aeadKey = Buffer.from(hkdfSync("sha256", key, Buffer.alloc(0), "ghost-vault/1 aead", 32));
+        this.importTagKey = Buffer.from(hkdfSync("sha256", key, Buffer.alloc(0), "ghost-vault/1 import-tag", 32));
+      } finally { key.fill(0); }
       const fd = openSync(dbPath, "a", 0o600); closeSync(fd); chmodSync(dbPath, 0o600);
       this.db = new Database(dbPath, { strict: true });
       const version = this.db.query("PRAGMA user_version").get() as { user_version: number };
       if (version.user_version !== 0 && version.user_version !== 1) { this.db.close(); throw new Error(); }
       this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY; PRAGMA trusted_schema=OFF; PRAGMA secure_delete=ON;
-        CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY, metadata TEXT NOT NULL, version INTEGER NOT NULL, expires_at INTEGER);
+        CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY, metadata TEXT NOT NULL, version INTEGER NOT NULL, expires_at INTEGER, creator_ghost_id TEXT);
+        CREATE INDEX IF NOT EXISTS items_creator ON items(creator_ghost_id);
         CREATE TABLE IF NOT EXISTS secrets(item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE, field TEXT NOT NULL, version INTEGER NOT NULL, sealed BLOB NOT NULL, PRIMARY KEY(item_id,field,version));
         CREATE TABLE IF NOT EXISTS versions(item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE, version INTEGER NOT NULL, metadata TEXT NOT NULL, PRIMARY KEY(item_id,version));
         PRAGMA user_version=1;`);
     } catch { throw new CommandError("unavailable", "vault storage could not be opened"); }
   }
-  close() { this.db.close(); this.key.fill(0); }
+  close() { this.db.close(); this.aeadKey.fill(0); this.importTagKey.fill(0); }
   private storage<T>(operation: () => T): T {
     try { return operation(); } catch (error) { if (error instanceof CommandError) throw error; throw new CommandError("unavailable", "vault storage operation failed"); }
   }
@@ -90,7 +97,7 @@ export class Vault implements VaultPort {
   }
   private decrypt(itemId: string, row: SecretRow): string {
     const sealed = Buffer.from(row.sealed);
-    const decipher = createDecipheriv("aes-256-gcm", this.key, sealed.subarray(0, 12));
+    const decipher = createDecipheriv("aes-256-gcm", this.aeadKey, sealed.subarray(0, 12));
     decipher.setAAD(Buffer.from(JSON.stringify(["ghost-vault/1", itemId, row.field, row.version])));
     decipher.setAuthTag(sealed.subarray(12, 28));
     const plain = Buffer.concat([decipher.update(sealed.subarray(28)), decipher.final()]);
@@ -150,7 +157,7 @@ export class Vault implements VaultPort {
     this.db.query("INSERT INTO items(id,metadata,version,expires_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET metadata=excluded.metadata,version=excluded.version,expires_at=excluded.expires_at").run(item.id, JSON.stringify(item), version, item.expiresAt);
     this.db.query("INSERT INTO versions(item_id,version,metadata) VALUES(?,?,?)").run(item.id, version, JSON.stringify(item));
     for (const [field, value] of Object.entries(secrets)) {
-      const nonce = randomBytes(12), cipher = createCipheriv("aes-256-gcm", this.key, nonce);
+      const nonce = randomBytes(12), cipher = createCipheriv("aes-256-gcm", this.aeadKey, nonce);
       cipher.setAAD(Buffer.from(JSON.stringify(["ghost-vault/1", item.id, field, version])));
       const plain = Buffer.from(value);
       try {
@@ -160,14 +167,20 @@ export class Vault implements VaultPort {
       } finally { plain.fill(0); }
     }
   }
-  create(input: VaultInput, options: { expiresAt?: number } = {}): VaultItem {
+  create(input: VaultInput, options: { expiresAt?: number; creatorGhostId?: string } = {}): VaultItem {
     const { item, secrets } = this.prepare(input, undefined, options.expiresAt);
     return this.storage(() => this.db.transaction(() => {
       this.prune();
       if (this.db.query("SELECT id FROM items WHERE id=?").get(item.id)) throw conflict("vault item id already exists");
       const count = this.db.query("SELECT count(*) AS n FROM items").get() as { n: number };
       if (count.n >= 10000) throw conflict("vault item limit exceeded");
-      this.write(item, secrets, 1); return item;
+      if (options.creatorGhostId) {
+        const count = this.db.query("SELECT count(*) AS n FROM items WHERE creator_ghost_id=?").get(options.creatorGhostId) as { n: number };
+        if (count.n >= GHOST_VAULT_ITEM_LIMIT) throw conflict(`Ghost-created vault item limit reached (${GHOST_VAULT_ITEM_LIMIT}); reuse an existing login or ask the owner to manage the vault`);
+      }
+      this.write(item, secrets, 1);
+      if (options.creatorGhostId) this.db.query("UPDATE items SET creator_ghost_id=? WHERE id=?").run(options.creatorGhostId, item.id);
+      return item;
     })());
   }
   update(id: string, input: Partial<VaultInput>): VaultItem {
@@ -187,11 +200,12 @@ export class Vault implements VaultPort {
   }
   remove(id: string) { return this.storage(() => { this.row(id); this.db.query("DELETE FROM items WHERE id=?").run(id); }); }
   generateLogin(ghostId: string, input: { origin: string; username: string; title?: string; hints?: string }, id?: string): VaultItem {
-    if (id) {
-      const existing = this.list().find((item) => item.id === id);
-      if (existing) return this.itemFor(ghostId, id);
-    }
-    return this.create({ ...input, id, kind: "login", title: input.title ?? normalizeOrigin(input.origin), password: generatePassword(), ghostIds: [ghostId] });
+    const items = this.list();
+    if (id && items.some((item) => item.id === id)) return this.itemFor(ghostId, id);
+    const origin = normalizeOrigin(input.origin);
+    const existing = items.find((item) => item.kind === "login" && item.origin === origin && item.username === input.username && item.ghostIds.includes(ghostId));
+    if (existing) return existing;
+    return this.create({ ...input, id, origin, kind: "login", title: input.title ?? origin, password: generatePassword(), ghostIds: [ghostId] }, { creatorGhostId: ghostId });
   }
   /** A decision's fixed item identity permits recovery after a vault commit but before ledger resolution. */
   answerSecureForm(decisionId: string, ghostId: string, request: SecureFormRequest, input: VaultInput, save: boolean): VaultItem {
@@ -208,7 +222,7 @@ export class Vault implements VaultPort {
     const parsed = parseCsv(csv);
     return this.storage(() => this.db.transaction(() => {
       const known = new Set<string>();
-      const tag = (origin: string, username: string, password: string) => createHmac("sha256", this.key).update("ghost-vault/import/1\0").update(JSON.stringify([origin, username, password])).digest("hex");
+      const tag = (origin: string, username: string, password: string) => createHmac("sha256", this.importTagKey).update("ghost-vault/import/1\0").update(JSON.stringify([origin, username, password])).digest("hex");
       for (const item of this.list()) if (item.kind === "login" && item.hasPassword) known.add(tag(item.origin!, item.username ?? "", this.field(item.id, "password")));
       let imported = 0, skipped = 0;
       for (const row of parsed.rows) {

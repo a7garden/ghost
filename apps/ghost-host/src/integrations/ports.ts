@@ -185,7 +185,7 @@ export interface VaultPort {
   itemFor(ghostId: string, itemId: string): VaultItem;
   /** The secret value of one field, for filling into a page. Throws when not granted, expired or absent. */
   reveal(ghostId: string, itemId: string, field: VaultField, at?: number): string;
-  /** A new login with a generated password, granted to `ghostId`. The password is never returned. */
+  /** Reuse a granted exact-origin/username login, otherwise generate one within the per-Ghost creation quota. Never returns the password. */
   generateLogin(ghostId: string, input: { origin: string; username: string; title?: string; hints?: string }): VaultItem;
 }
 

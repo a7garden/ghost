@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { createDecipheriv } from "node:crypto";
+import { createDecipheriv, hkdfSync } from "node:crypto";
 import { existsSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createVault, generatePassword, normalizeOrigin, PASSWORD_ALPHABET, totp, type Vault, type VaultInput } from "../src/stores/vault.ts";
+import { createVault, generatePassword, GHOST_VAULT_ITEM_LIMIT, normalizeOrigin, PASSWORD_ALPHABET, totp, type Vault, type VaultInput } from "../src/stores/vault.ts";
 import { tempDir } from "./support.ts";
 
 const roots: string[] = [], vaults: Vault[] = [];
@@ -63,7 +63,17 @@ describe("encrypted vault", () => {
     expect(db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM secrets WHERE item_id=? AND field='password'").get(item.id)!.n).toBe(2);
     // Decrypt the first revision independently to prove history retains the previous secret with bound AAD.
     const old = db.query<{ sealed: Uint8Array }, [string]>("SELECT sealed FROM secrets WHERE item_id=? AND field='password' AND version=1").get(item.id)!;
-    const sealedOld = Buffer.from(old.sealed), key = readFileSync(join(root, "vault/key"));
+    const sealedOld = Buffer.from(old.sealed), master = readFileSync(join(root, "vault/key"));
+    const key = Buffer.from(hkdfSync("sha256", master, Buffer.alloc(0), "ghost-vault/1 aead", 32));
+    const importKey = Buffer.from(hkdfSync("sha256", master, Buffer.alloc(0), "ghost-vault/1 import-tag", 32));
+    expect(key.equals(master)).toBe(false); expect(importKey.equals(key)).toBe(false);
+    for (const wrongKey of [master, importKey]) {
+      const wrong = createDecipheriv("aes-256-gcm", wrongKey, sealedOld.subarray(0, 12));
+      wrong.setAAD(Buffer.from(JSON.stringify(["ghost-vault/1", item.id, "password", 1])));
+      wrong.setAuthTag(sealedOld.subarray(12, 28));
+      expect(() => { wrong.update(sealedOld.subarray(28)); wrong.final(); }).toThrow();
+    }
+    master.fill(0); importKey.fill(0);
     const decipher = createDecipheriv("aes-256-gcm", key, sealedOld.subarray(0, 12));
     decipher.setAAD(Buffer.from(JSON.stringify(["ghost-vault/1", item.id, "password", 1])));
     decipher.setAuthTag(sealedOld.subarray(12, 28));
@@ -157,6 +167,18 @@ describe("Apple and Chrome CSV import", () => {
     expect(vault.importCsv("Title,URL,Username,Password,OTPAuth\nOTP,https://otp.example/login,user,password,JBSWY3DPEHPK3PXP\nCredentials,https://u:p@example.com,user,password,\nEncoded,https://%65xample.com,user,password,\n")).toEqual({ imported: 1, skipped: 0, rejected: 2 });
     expect(vault.list()[0]?.hasTotp).toBe(true);
   });
+  test("oversized title and username rows are rejected without losing valid logins", () => {
+    const { vault } = fixture();
+    const csv = `Title,URL,Username,Password\nValid,https://valid.example,user,password\n${"x".repeat(257)},https://large-title.example,user,password\nLarge username,https://large-user.example,${"x".repeat(513)},password\n${"x".repeat(65537)},https://huge-title.example,user,password\n`;
+    expect(vault.importCsv(csv)).toEqual({ imported: 1, skipped: 0, rejected: 3 });
+    expect(vault.list().map((item) => item.origin)).toEqual(["https://valid.example"]);
+  });
+  test("the 10,000-row limit still aborts the whole import", () => {
+    const { vault } = fixture();
+    const csv = "Title,URL,Username,Password\n" + "Valid,https://example.com,user,password\n".repeat(10001);
+    expect(() => vault.importCsv(csv)).toThrow("row limit");
+    expect(vault.list()).toEqual([]);
+  });
   test("malformed or oversized input is atomic and errors never echo row values", () => {
     const { vault } = fixture();
     for (const csv of ['URL,Username,Password\nhttps://good.example,u,SYNTHETIC-private\nhttps://bad.example,u,"unfinished', "URL,Username,Password,Password\nhttps://example.com,u,private,private", "URL,Username,Password\nhttps://good.example,u,private\nshort,u", "URL,Username,Password\nhttps://good.example,u,private\nhttps://bad.example,u," + "x".repeat(65537), "x".repeat(1024 * 1024 + 1)]) {
@@ -164,4 +186,24 @@ describe("Apple and Chrome CSV import", () => {
       expect(message.length).toBeGreaterThan(0); expect(message).not.toContain("SYNTHETIC-private"); expect(vault.list()).toEqual([]);
     }
   });
+});
+
+test("generated login reuse is exact, grant-bound and subject to a persistent per-creator quota", () => {
+  const { root, vault } = fixture();
+  const owner = vault.create(login({ title: "Owner login", ghostIds: ["ghost-a"] }));
+  expect(vault.generateLogin("ghost-a", { origin: "https://EXAMPLE.com:443/", username: "user" }).id).toBe(owner.id);
+  const fresh = vault.generateLogin("ghost-b", { origin: "https://example.com", username: "user" });
+  expect(fresh.id).not.toBe(owner.id);
+  for (let i = 1; i < GHOST_VAULT_ITEM_LIMIT; i++) vault.generateLogin("ghost-b", { origin: "https://example.com", username: `user-${i}` });
+  const reopened = createVault(root); vaults.push(reopened);
+  expect(() => reopened.generateLogin("ghost-b", { origin: "https://other.example", username: "over-limit" })).toThrow("Ghost-created vault item limit reached (200)");
+  expect(reopened.generateLogin("ghost-b", { origin: "https://example.com", username: "user" }).id).toBe(fresh.id);
+  expect(reopened.generateLogin("ghost-a", { origin: "https://other.example", username: "independent" }).ghostIds).toEqual(["ghost-a"]);
+  // Owner writes and grants do not consume a Ghost's creation quota.
+  const granted = reopened.create(login({ origin: "https://owner.example", ghostIds: ["ghost-b"] }));
+  expect(reopened.generateLogin("ghost-b", { origin: "https://owner.example", username: "user" }).id).toBe(granted.id);
+  reopened.update(fresh.id, { ghostIds: [] });
+  expect(() => reopened.generateLogin("ghost-b", { origin: "https://example.com", username: "user" })).toThrow("limit reached");
+  reopened.remove(fresh.id);
+  expect(reopened.generateLogin("ghost-b", { origin: "https://replacement.example", username: "replacement" }).ghostIds).toEqual(["ghost-b"]);
 });
