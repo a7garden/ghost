@@ -64,6 +64,9 @@ export function ModelPicker({ conversationId, value, onChange, disabled = false,
   const conversation = conversationId ? state?.conversations.find(item => item.id === conversationId) : undefined;
   const saved = conversation ? conversation.model : value ?? settings?.defaultModel ?? null;
   const locked = disabled || pending || Boolean(conversation?.busy);
+  // The chip names the model; its provider is in the tooltip and the list.
+  const fullName = modelDisplayName(settings, saved);
+  const shortName = saved ? settings?.providers.find(item => item.id === saved.provider)?.models.find(item => item.id === saved.model)?.name || saved.model : fullName;
 
   const choose = async (choice: ModelChoice) => {
     if (locked || !conversationId && (saved?.provider === choice.provider && saved?.model === choice.model)) { setOpen(false); return; }
@@ -79,9 +82,9 @@ export function ModelPicker({ conversationId, value, onChange, disabled = false,
 
   return <Popover open={open} onOpenChange={next => { if (!pending) { setOpen(next); if (!next) setError(''); } }}>
     <PopoverTrigger asChild>
-      <button type="button" disabled={locked} title={locked && conversation?.busy ? '진행 중인 응답이 끝난 뒤 모델을 바꿀 수 있습니다.' : undefined}
-        className={`composer-chip max-w-[220px] ${className}`} aria-label={`모델 ${modelDisplayName(settings, saved)} 선택`}>
-        <span className="truncate">{modelDisplayName(settings, saved)}</span>
+      <button type="button" disabled={locked} title={locked && conversation?.busy ? '진행 중인 응답이 끝난 뒤 모델을 바꿀 수 있습니다.' : fullName}
+        className={`composer-chip max-w-[220px] ${className}`} aria-label={`모델 ${fullName} 선택`}>
+        <span className="truncate">{shortName}</span>
         <ChevronDown size={13} className="flex-none text-ink-3" aria-hidden="true"/>
       </button>
     </PopoverTrigger>

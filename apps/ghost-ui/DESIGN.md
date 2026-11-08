@@ -126,7 +126,10 @@ Each Ghost keeps one durable conversation, like Dots: there is no "new conversat
 The Ghost floats as a round button at the top center (its presence ring; it opens the
 profile and look editor) and content fades beneath it. Work the conversation spins off
 appears as **thread cards** at the moment it started, kept live (state glyph, carrier,
-lifecycle). Opening a card or a thread from the thread button (top right) brings the
+lifecycle); a card waiting on a question shows it with its options as chips answerable in
+place. A settled thread folds to one quiet line — its OutcomeLine returns beneath it, so the
+branch stays readable without saying the result twice. Opening a card or a thread from the
+thread button (top right) brings the
 **thread panel** beside the conversation (over it below 64rem, `?thread=` in the URL):
 status and lifecycle, its decisions resolved in place, delegated threads, and the
 carrier's work conversation streaming live. Editing and cancelling stay on the full
@@ -153,8 +156,10 @@ left is **+**: its actions unfold upward one after another (사진·파일 첨�
 보내기) while the + turns into ×. Files also arrive by drop or paste; each uploads at once
 (`POST /api/artifacts`) and waits above the text as a thumbnail or file card, then goes with
 `message.send`. 일로 맡기기 puts a 맡기기 token over the text with 완료 기준 and 기한 and sends
-`work.create` into this conversation; 나중에 보내기 offers 1시간 뒤 · 오늘 저녁 6시 · 내일 아침 9시
-or a chosen time and sends `schedule.create`. Model choice, cancel and send sit bottom right.
+or a chosen time and sends `schedule.create`. Typing `/` as the whole draft offers the same
+actions by keyboard (Korean words match too); `@` lists the Ghosts and hands the message to
+the chosen one as a 맡긴 일 addressed to it, reported back into this conversation. The model
+chip names the model; its provider is the tooltip. Model choice, cancel and send sit bottom right.
 Suggestions populate and focus the draft. Conversation
 identity resets local transcript/draft state so switching history never shows another
 conversation's messages or sends its draft accidentally.

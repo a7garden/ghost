@@ -258,10 +258,26 @@ body {
 .thread-card > button { display: flex; width: 100%; max-width: 520px; min-width: 0; align-items: center; gap: 12px; padding: 10px 14px; border: 0; border-radius: var(--radius-card); color: var(--ghost-ink); background: var(--ghost-surface); box-shadow: var(--shadow-card); text-align: left; font: inherit; cursor: pointer; transition: box-shadow var(--duration-fast) ease, transform var(--duration-fast) var(--ease-spring); }
 .thread-card > button:hover { box-shadow: var(--shadow-raised); transform: translateY(-1px); }
 .thread-card > button:active { transform: scale(.99); }
+/* A settled thread folds to a quiet line: the branch mark remains, the card itself steps back. */
+.thread-card[data-settled] > button { padding-block: 6px; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: none; box-shadow: none; font-weight: 450; }
+.thread-card[data-settled] > button:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+.thread-card[data-settled]::before { border-color: var(--ghost-line); }
 .thread-card__copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
 .thread-card__title { overflow: hidden; font-size: var(--text-ui); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.thread-card[data-settled] .thread-card__title { font-weight: 450; }
 .thread-card__meta { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .thread-card__meta .dot-avatar { border-radius: 50%; }
+.thread-card__question { overflow: hidden; margin-top: 2px; color: var(--ghost-amber-ink); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
+.thread-card__answers { display: flex; max-width: 520px; flex-wrap: wrap; gap: 6px; margin: 6px 0 0 22px; }
+.thread-card__answer {
+  display: inline-flex; align-items: center; height: 28px; padding: 0 13px; border: 0; border-radius: var(--radius-pill);
+  color: var(--ghost-ink2); background: var(--ghost-surface); box-shadow: var(--shadow-btn); font: 500 var(--text-caption)/1 var(--font-sans); cursor: pointer;
+  transition: box-shadow var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) var(--ease-spring);
+}
+.thread-card__answer:hover { color: var(--ghost-ink); box-shadow: var(--shadow-raised); }
+.thread-card__answer:active { transform: scale(.97); }
+.thread-card__answer:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
+.thread-card__title { overflow: hidden; font-size: var(--text-ui); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .thread-card__delegates { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .thread-card__delegate { display: inline-flex; min-width: 0; max-width: 160px; align-items: center; gap: 4px; padding: 2px 7px 2px 4px; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: var(--ghost-hover); font-size: var(--text-micro); animation: pop-in var(--duration-base) var(--ease-spring) both; }
 .thread-card__delegate .dot-avatar { border-radius: 50%; }

@@ -82,6 +82,23 @@
 .composer-mode[data-mode="later"] .composer-mode__token { color: var(--ghost-signal-ink); background: var(--ghost-signal-tint); }
 .composer-mode__close { display: grid; width: 18px; height: 18px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: inherit; background: none; opacity: .75; cursor: pointer; }
 .composer-mode__close:hover { opacity: 1; background: color-mix(in srgb, currentColor 18%, transparent); }
+.composer-mode__to { display: inline-flex; align-items: center; gap: 5px; margin-left: 2px; padding-left: 7px; border-left: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
+.composer-mode__to .dot-avatar { border-radius: 50%; }
+
+/* Suggestions for `/` and `@`: a raised list just above the composer, the active row lit. */
+.composer-suggest {
+  position: absolute; z-index: 6; left: 8px; bottom: calc(100% + 8px); display: grid; width: min(340px, calc(100% - 16px)); max-height: 280px; gap: 1px; overflow-y: auto; padding: 5px;
+  border-radius: var(--radius-lg); background: var(--ghost-raised); box-shadow: var(--shadow-overlay); animation: suggest-in 160ms var(--ease-enter) both;
+}
+.composer-suggest__item { display: flex; min-width: 0; align-items: center; gap: 10px; min-height: 38px; padding: 5px 10px 5px 6px; border-radius: var(--radius-control); color: var(--ghost-ink2); font: 500 var(--text-ui)/1.3 var(--font-sans); cursor: pointer; }
+.composer-suggest__item[aria-selected="true"] { color: var(--ghost-ink); background: var(--ghost-hover2); }
+.composer-suggest__icon { display: grid; width: 26px; height: 26px; flex: none; place-items: center; border-radius: 50%; color: var(--ghost-ink2); background: var(--ghost-hover); }
+.composer-suggest__icon .dot-avatar { border-radius: 50%; }
+.composer-suggest__icon:has(.dot-avatar) { background: none; }
+.composer-suggest__icon svg { width: 14px; height: 14px; }
+.composer-suggest__label { flex: none; }
+.composer-suggest__hint { min-width: 0; overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes suggest-in { from { opacity: 0; transform: translateY(6px) scale(.98); } }
 .composer-fields { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--ghost-line-strong); animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .composer-field { display: flex; min-width: 0; flex: 1 1 220px; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: var(--radius-control); background: var(--ghost-hover); }
 .composer-field:focus-within { background: var(--ghost-hover2); }

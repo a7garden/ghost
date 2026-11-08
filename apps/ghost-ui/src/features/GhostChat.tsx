@@ -4,7 +4,7 @@ import { Button, Conversation, Popover, PopoverContent, PopoverTrigger } from '.
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
-import { OpenWorkProvider, StateGlyph, ThreadCard, workGlyph } from '../components/agent';
+import { OpenWorkProvider, StateGlyph, ThreadAnswer, ThreadCard, workGlyph } from '../components/agent';
 import { LiveReply, Transcript, type TranscriptExtra } from '../components/TranscriptMessage';
 import { quoteForReply } from '../components/MessageMenu';
 import { ChatComposer } from './ChatComposer';
@@ -62,6 +62,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
   const running = busy || Boolean(live?.running);
   const names = new Map(state.ghosts.map(item => [item.id, item.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
+  const pending = (workId: string) => state.decisions.find(decision => decision.state === 'pending' && decision.workId === workId);
+  const answer = (decisionId: string, text: string) => void run(() => client.send({ type: 'decision.resolve', decisionId, outcome: 'answer', answer: text }));
   const openWork = (id: string) => navigate(`/work/${encodeURIComponent(id)}`);
   // Threads begun here appear where they started, kept live, with the Ghosts they delegated to beneath.
   const extras: TranscriptExtra[] = conversationId ? state.works
@@ -70,8 +72,14 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
       const delegates = state.works.filter(child => child.rootId === work.id && child.id !== work.id)
         .sort((a, b) => a.createdAt - b.createdAt)
         .map(child => ({ work: child, ghostName: names.get(child.ghostId) ?? 'Ghost', needsOwner: waiting.has(child.id) }));
+      const question = pending(work.id);
       return { key: `thread:${work.id}`, at: work.createdAt, node: <ThreadCard work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'}
-        needsOwner={waiting.has(work.id)} now={now} delegates={delegates} onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
+        needsOwner={waiting.has(work.id)} now={now} delegates={delegates}
+        question={question?.kind === 'question' ? question.title : undefined}
+        actions={question?.kind === 'question' && question.options.length > 0
+          ? question.options.map(option => <ThreadAnswer key={option} label={option} onAnswer={() => answer(question.id, option)}/>)
+          : undefined}
+        onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
     }) : [];
 
   return <OpenWorkProvider value={openThread}><div className="chat-layout" data-thread={threadId ? '' : undefined}>

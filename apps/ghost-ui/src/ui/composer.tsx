@@ -31,6 +31,12 @@ export interface ComposerProps {
   trailing?: React.ReactNode
   /** Files dropped on or pasted into the composer. */
   onFiles?: (files: File[]) => void
+  /** Runs before the composer's own keys; `preventDefault()` keeps Enter from sending (e.g. to pick a suggestion). */
+  onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  /** Combobox wiring for the text field while suggestions float above it. */
+  inputAria?: Pick<React.AriaAttributes, "aria-expanded" | "aria-controls" | "aria-activedescendant" | "aria-autocomplete"> & { role?: "combobox" }
+  /** Floats just above the composer: suggestions for what is being typed. */
+  above?: React.ReactNode
   inputRef?: React.Ref<HTMLTextAreaElement>
   describedBy?: string
   className?: string
@@ -57,6 +63,9 @@ export function Composer({
   footer,
   trailing,
   onFiles,
+  onKeyDown,
+  inputAria,
+  above,
   inputRef,
   describedBy,
   className,
@@ -123,6 +132,7 @@ export function Composer({
 
   return (
     <div data-slot="ghost-composer" data-running={running || undefined} data-dragging={dragging || undefined} aria-busy={pending || undefined} className={cn("ghost-composer", className)} {...dropHandlers}>
+      {above}
       <label className="ghost-composer__label ghost-composer__label--visually-hidden" htmlFor={resolvedInputId}>{label}</label>
       <div className="ghost-composer__surface">
         {header}
@@ -133,6 +143,8 @@ export function Composer({
           value={value}
           onChange={(event) => onValueChange(event.target.value)}
           onKeyDown={(event) => {
+            onKeyDown?.(event)
+            if (event.defaultPrevented) return
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
               event.preventDefault()
               submit()
@@ -146,6 +158,7 @@ export function Composer({
           rows={1}
           disabled={disabled || pending}
           aria-describedby={describedBy}
+          {...inputAria}
           className="ghost-composer__textarea"
         />
         {extension}

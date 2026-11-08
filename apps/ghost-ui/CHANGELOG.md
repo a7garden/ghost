@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Thread cards: a settled thread folds to one quiet line (its outcome line already returns
+  beneath it); a card waiting on a question shows the question with answer chips in place.
+- Composer: `/` opens the composer's actions by keyboard (Korean words match), `@` hands the
+  message to a chosen Ghost as a 맡긴 일 addressed to it; the model chip names the model and
+  keeps its provider in the tooltip.
 - Title bar: back/forward (`⌘[` `⌘]`) and a breadcrumb trail — section, the thing inside it,
   the open thread and the threads it came from; each step goes up to it.
 - Sidebar: destinations and 설정 stay put; the roster scrolls under sticky labels, fades out
