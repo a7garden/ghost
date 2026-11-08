@@ -63,8 +63,15 @@ export class Effects {
         throw conflict(`the outcome of call ${input.callId} is ${existing.state}; it will not run again`);
       }
       if (scope === "tool") {
-        const blocking = this.unresolvedInConversation(input.conversationId);
-        if (blocking.length > 0) throw conflict(`effect ${blocking[0]!.tool} (${blocking[0]!.callId}) is unresolved; nothing else runs until the owner reconciles it`);
+        const blocking = this.unresolvedInConversation(input.conversationId)[0];
+        if (blocking) {
+          const name = `effect ${blocking.tool} (${blocking.callId}) is unresolved`;
+          if (blocking.state === "unknown") throw conflict(`${name}; nothing else runs until the owner reconciles it`);
+          const awaitingOwner = this.ledger.pendingDecisions({ effectId: blocking.id }).some((decision) => decision.kind === "approve_effect");
+          throw conflict(awaitingOwner
+            ? `${name}: it waits for the owner's approval; nothing else that changes the outside world runs here until the owner decides`
+            : `${name}: it is still running; try again after it finishes`);
+        }
       }
       const conversation = this.ledger.conversation(input.conversationId);
       const effect: Effect = {
