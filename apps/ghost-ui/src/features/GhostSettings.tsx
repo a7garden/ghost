@@ -30,8 +30,8 @@ const toolLabels: Record<GhostTool, string> = {
   vault_list: '금고 목록', vault_request: '금고 저장 요청', vault_generate_login: '금고 로그인 만들기',
 };
 
-/** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. */
-const toolGroups: readonly { title: string; tools: readonly GhostTool[]; privileged?: boolean }[] = [
+/** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. Exported for the coverage test. */
+export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; privileged?: boolean }[] = [
   { title: '맡긴 일', tools: ['work_create', 'work_list', 'work_inspect', 'work_update', 'work_cancel'] },
   { title: '협업', tools: ['delegate', 'ghost_list', 'publish_artifact'] },
   { title: '파일과 명령', tools: ['read', 'write', 'edit', 'bash'] },
