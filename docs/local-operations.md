@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-7b5e80a` (`main`, UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-fb34f1f` (`main`, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,15 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 동적 모델 카탈로그 운영 반영 — 2026-11-08
+
+- 구현 `23d83e1`을 병행 중인 파일 읽기 시트·사이드바와 통합한 `3a21717`을 `releases/20261108-bun-3a21717`에 설치했다. Host와 UI 93개 파일의 설치 사본 해시가 빌드 원본과 일치했다. 분리 루트의 설치 실행 파일에서 health·카탈로그·실제 제공 UI 바이트를 확인했다. 원장 마이그레이션은 없다.
+- 표준 제공자는 models.dev의 접점별 활성 모델을 자동 노출한다. Codex는 계정의 모델 API를 별도로 조회한다. 마지막 성공 메타데이터를 캐시하고 6시간 뒤 갱신하며, 저장된 모델 지정·대체 모델·인증은 바꾸지 않는다. 새 MiniMax의 필수 adaptive thinking도 `reasoning_options` 선언으로 처리한다.
+- 검사: Host 353개 통과·2개 생략, 계약·Host 타입 검사·실행 파일 빌드, 통합 UI 87개·타입 검사·빌드, 시각 회귀 32개 통과. 서로 다른 제공자의 코드 검토에서 접점 판별·캐시 쓰기 복구·구독 전용 모델 필터·오류 스트림 정리 4건을 수정했다. 분리된 실제 모델 실행에서 GLM Flash·MiniMax M3.1 Flash(`끔` 선택)·M3(`높음` 선택)가 모두 HTTP 200과 계산 결과 `56`을 반환했다.
+- 백업 `~/.local/share/ghost/backups/pre-model-catalog-20261108-release/`: `ghost-backup/2`, `complete: true`, 두 DB 무결성 확인, artifacts·secrets·config 사본. 유휴 확인 후 `4cba876`에서 원자적으로 전환하고 Host를 정상 재기동했다(PID 90046 → 97048). 단일 리스너·준비 상태, Ghost 24·대화 40·맡긴 일 39, 저장된 제공자 목록·기본 모델·config 및 인증 파일의 바이트 보존을 확인했다.
+- 설치 앱을 external 모드로 새로 읽어 GLM 3종과 MiniMax 3종(기존 Preview 포함)을 확인했다. 네이티브 AX 입력은 거부되어 직접 입력 검증은 같은 운영 UI의 격리 브라우저로 수행했다: 수동 ID 추가→삭제→취소, 기본 모델 선택기에 새 모델 표시, 콘솔 오류 없음. 검증용 ID는 저장하지 않았고 브라우저와 임시 Host를 종료했다.
+- 후속 병행 릴리스 `7b5e80a`·`fb34f1f`에도 이 구현이 포함됨을 Git 조상 관계와 운영 API에서 확인했다. 이 기능만 되돌릴 때 기준은 `4cba876`이지만 이후 UI 변경도 빠지므로, 현재 릴리스의 되돌리기 절차를 먼저 따른다. 생성된 `models.json`·`codex-models.json`은 권위 있는 사용자 데이터가 아닌 메타데이터 캐시다.
 
 ### 제목 표시줄 아래 패널 위 여백 운영 반영 — 2026-11-08
 
