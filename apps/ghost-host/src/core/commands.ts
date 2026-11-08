@@ -34,6 +34,11 @@ const inFlight = new WeakMap<Core, Map<string, Flight>>();
 /** Ledger mutations and receipts share a commit; external operations use their domain journals. */
 export async function execute(core: Core, access: Access, request: CommandRequest, context: CommandContext): Promise<Outcome> {
   const principal = access.principal.kind === "owner" ? "owner" : `device:${access.principal.deviceId}`;
+  // Refuse credential answers before even deriving a command digest or reserving a receipt.
+  if (request.command.type === "decision.resolve" && core.ledger.findDecision(request.command.decisionId)?.proposal?.secureForm
+    && (request.command.outcome !== "deny" || request.command.answer !== undefined)) {
+    throw conflict("use the secure form to answer this request; ordinary answers are not accepted");
+  }
   const digest = digestOf(request.command);
   let flights = inFlight.get(core);
   if (!flights) inFlight.set(core, flights = new Map());
