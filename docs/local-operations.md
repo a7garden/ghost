@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-5bbeacb` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-fa25e91` (`ghost-team` 브랜치 배포, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,13 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 제목 표시줄 탐색·사이드바 스크롤 릴리스 대기, 잘못된 전환 복구 — 2026-11-08
+
+- `main`의 `1e87198`(제목 표시줄 뒤로/앞으로·breadcrumb, 사이드바 roster 스크롤·레일, 스레드 패널 열고 닫기 애니메이션, 빈 대화의 초상 제거)을 `releases/20261108-bun-1e87198`에 설치·검증했다(UI 93개 파일 해시 일치, 임시 루트 시험 실행, 백업 `backups/pre-title-nav-20261108-bun-1e87198/`, `ghost-backup/2` complete, 두 DB `integrity_check` ok).
+- 전환 1분 전(19:16 KST) `wt/ghost-team` 작업이 `releases/20261108-bun-fa25e91`을 배포하고 운영 `config.json`에 `reach`·`skills`·`mac`을 추가한 것을 확인하지 않고 `current`를 `1e87198`로 바꿨다. `main`의 Host는 `reach`를 모르는 키로 거부해 재기동하지 못했다(`config.json: unknown key reach`, 약 2분 중단).
+- `current`를 원자적으로 `releases/20261108-bun-fa25e91`로 되돌리자 LaunchAgent가 Host를 다시 띄웠다(PID 51934). health·준비 상태(`provider zai-coding is ready`), Ghost 24·대화 40·맡긴 일 39를 확인했다. 데이터·설정 파일은 바꾸지 않았다.
+- `1e87198`은 `ghost-team`과 합쳐질 때까지 대기 중이다. 두 브랜치가 `WorkspaceSidebar.tsx`·`compositions.css`·`App.tsx`를 함께 바꿨으므로 통합 빌드를 검증한 뒤에 배포한다. 전환 직전에는 `current`의 대상과 `config.json` 변경 시각을 다시 확인한다.
 
 ### 사람이 읽는 보고·참조 표식·대화 지도 스크롤 운영 반영 — 2026-11-08
 
