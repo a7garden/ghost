@@ -85,8 +85,10 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     if (!row || endedHandoffs.has(row.id)) return;
     const decision = core.ledger.decision(row.id);
     if (decision.state === "pending") throw forbidden("The owner is using the browser handoff; wait for their answer");
-    await browser.endHandoff(sessionOf(scope));
+    const resumed = await browser.endHandoff(sessionOf(scope));
     endedHandoffs.add(row.id);
+    observations.delete(scope.conversation.id);
+    return resumed.fallback ? "The handoff page URL could not be recovered; the browser resumed at about:blank." : null;
   }
   async function command(scope: Scope, argv: string[]) {
     const result = await browser.run(sessionOf(scope), argv);
@@ -179,6 +181,8 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
       name, parameters, description: `${name.replaceAll("_", " ")}. ${BROWSER_INSTRUCTIONS}`,
       replay: mutation ? "unsafe" : "safe",
       async execute(args, api) {
+        let notice: string | null | undefined;
+        let result: ToolExecutionResult;
         try {
           const scope = requireAllowed(core, api, name);
           // agent-browser parses global flags even after the command; never let a model value become one.
@@ -187,12 +191,12 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
             const values = Array.isArray(value) ? value : [value];
             if (values.some((entry) => typeof entry === "string" && entry.startsWith("-"))) throw invalid("Browser argument values beginning with '-' are refused to prevent CLI flag injection");
           }
-          await ready(scope);
-          return await perform(args, scope, api);
+          notice = await ready(scope);
+          result = await perform(args, scope, api);
         } catch (error) {
-          if (error instanceof KnownOutcome) return { ...text(error.message), isError: true };
-          return errorResult(error);
+          result = error instanceof KnownOutcome ? { ...text(error.message), isError: true } : errorResult(error);
         }
+        return notice ? { ...result, content: [{ type: "text", text: notice }, ...(result.content ?? [])] } : result;
       },
     });
   }
@@ -292,7 +296,7 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
       const url = (await assertFetchableUrl(await currentUrl(s), "page url")).href;
       const result = await core.effects.run({ conversationId: s.conversation.id, callId: api.callId, tool: "browser_handoff", input: { url, reason: a.reason }, summary: "Browser owner handoff" }, async () => {
         await browser.handoff(sessionOf(s), url);
-        core.ledger.tx(() => core.decisions.open({ id, kind: "question", ghostId: s.ghost.id, conversationId: s.conversation.id, workId: s.work?.id ?? null, effectId: null, title: "Continue in the browser", detail: a.reason, options: ["Done"], proposal: { browserHandoff: { url, reason: a.reason } } }));
+        core.ledger.tx(() => core.decisions.open({ id, kind: "question", ghostId: s.ghost.id, conversationId: s.conversation.id, workId: s.work?.id ?? null, effectId: null, title: "브라우저에서 직접 처리해 주세요", detail: a.reason, options: [], proposal: { browserHandoff: { url, reason: a.reason } } }));
         return `Browser handoff (${id}); tell the owner to answer when finished`;
       });
       return text(result);

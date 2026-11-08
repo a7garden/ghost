@@ -7,6 +7,7 @@ import { CommandError } from "../core/errors.ts";
 import { NoEffect, KnownOutcome } from "../core/effects.ts";
 import type { BrowserCommandResult, BrowserPort, BrowserRunOptions, BrowserSessionRef } from "./ports.ts";
 import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
+import { assertFetchableUrl } from "./netguard.ts";
 import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -25,6 +26,8 @@ const nameFor = (id: string) => `ghost-${createHash("sha256").update(id).digest(
 interface Session {
   ref: BrowserSessionRef;
   headed: boolean;
+  handoffUrl: string | null;
+  handoffFallback: boolean;
   secrets: { variants: string[]; cardPattern?: RegExp }[];
   screenshotsBlocked: boolean;
   passwordScreenshots: Map<string, string>;
@@ -280,7 +283,7 @@ export class AgentBrowser implements BrowserPort {
     if (!this.initialized) {
       // A crashed host may leave daemons pointing at its now-dead proxy. This private namespace
       // belongs to this root only; close those daemons before restoring any new session.
-      const orphan: Session = { ref, headed: false, secrets: [], screenshotsBlocked: false, passwordScreenshots: new Map(), active: false };
+      const orphan: Session = { ref, headed: false, handoffUrl: null, handoffFallback: false, secrets: [], screenshotsBlocked: false, passwordScreenshots: new Map(), active: false };
       if (!(await this.invoke(orphan, ["close", "--all"])).ok) throw new CommandError("unavailable", "Could not close interrupted browser sessions");
       this.initialized = true;
       for (const name of ["downloads", "staging"]) rmSync(join(this.root, "browser", name), { recursive: true, force: true });
@@ -296,7 +299,7 @@ export class AgentBrowser implements BrowserPort {
       this.clearFiles(victim);
       this.sessions.delete(id);
     }
-    const session: Session = existing ?? { ref, headed: false, secrets: [], screenshotsBlocked: false, passwordScreenshots: new Map(), active: false };
+    const session: Session = existing ?? { ref, headed: false, handoffUrl: null, handoffFallback: false, secrets: [], screenshotsBlocked: false, passwordScreenshots: new Map(), active: false };
     session.active = true;
     this.sessions.delete(ref.conversationId);
     this.sessions.set(ref.conversationId, session);
@@ -397,10 +400,40 @@ export class AgentBrowser implements BrowserPort {
       session.passwordScreenshots.clear();
       this.clearFiles(session);
       session.headed = true;
-      if (!(await this.invoke(session, ["open", url ?? "about:blank"])).ok) throw new CommandError("unavailable", "Could not open browser handoff");
+      session.handoffUrl = url ?? "about:blank";
+      session.handoffFallback = false;
+      if (!(await this.invoke(session, ["open", session.handoffUrl])).ok) throw new CommandError("unavailable", "Could not open browser handoff");
     });
   }
-  endHandoff(ref: BrowserSessionRef) { return this.close(ref); }
+  endHandoff(ref: BrowserSessionRef) {
+    return this.enqueueSession(ref, async (session) => {
+      if (session.headed) {
+        try {
+          const current = await this.invoke(session, ["get", "url"]);
+          const url = typeof current.data === "string" ? current.data : current.data && typeof current.data === "object" && "url" in current.data ? current.data.url : null;
+          if (!current.ok || typeof url !== "string") throw new Error("No headed page URL");
+          if (url !== "about:blank") await assertFetchableUrl(url, "handoff page URL");
+          session.handoffUrl = url;
+          session.handoffFallback = false;
+        } catch {
+          session.handoffUrl = "about:blank";
+          session.handoffFallback = true;
+        }
+        if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser handoff state");
+        session.headed = false;
+        session.secrets = [];
+        session.screenshotsBlocked = false;
+        session.passwordScreenshots.clear();
+        this.clearFiles(session);
+      } else if (session.handoffUrl === null) {
+        session.handoffUrl = "about:blank";
+        session.handoffFallback = true;
+      }
+      // Retain the captured URL on this session: a failed reopen can be explicitly retried.
+      if (!(await this.invoke(session, ["open", session.handoffUrl!])).ok) throw new CommandError("unavailable", "Could not resume the browser headlessly");
+      return { fallback: session.handoffFallback };
+    });
+  }
   close(ref: BrowserSessionRef) {
     return this.enqueueSession(ref, async (session) => {
       if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not close browser session");
