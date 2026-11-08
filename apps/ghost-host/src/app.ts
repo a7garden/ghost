@@ -94,8 +94,11 @@ export async function openApp(config: Config): Promise<App> {
       // No tool can run any more: end browser sessions (login state saved) and seal the vault.
       await attempt(async () => { await openedBrowser?.shutdown(); openedBrowser = null; });
       await attempt(() => { openedVault?.close(); openedVault = null; });
-      await attempt(() => { openedLedger?.close(); openedLedger = null; });
-      if (!openedLedger) await attempt(() => lock.close());
+      // Chrome sessions still running keep ownership: close() can retry their shutdown.
+      if (!openedBrowser) {
+        await attempt(() => { openedLedger?.close(); openedLedger = null; });
+        if (!openedLedger) await attempt(() => lock.close());
+      }
     }
     if (errors.length) throw new AggregateError(errors, "failed to close Ghost state root");
   };
