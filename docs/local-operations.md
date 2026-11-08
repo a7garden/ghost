@@ -27,14 +27,24 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-fb34f1f` (`main`, UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-338dd06` (`main`, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
-| Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
+| Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent, `dev.garden.macfra.agent`(2026-11-08 Ghost `Mac 관리`로 이전, disabled) |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 펫에 붙는 대화창 운영 반영 — 2026-11-08
+
+- 소스 `338dd06`(main; 운영 `fb34f1f`의 설정·모델 카탈로그·파일 읽기 시트 등을 유지)을 `releases/20261108-bun-338dd06`에 설치했다. 펫 클릭 지연·두 번 클릭 구분을 없애고, 400×440 대화면을 펫의 실제 SVG 그림·상태 말풍선 위에 붙인다. 투명 창의 여백은 앵커에서 빼고, 몸통 중심으로 꼬리를 맞춘다. 구석에서는 같은 모니터 작업 영역 안쪽으로 이동하며, 위 공간이 모자라면 높이를 줄인 뒤 최소 높이도 안 되면 아래로 펼친다. 표시 영역은 companion 전용 IPC로 전달하고 메모리에만 보관한다.
+- 검사: Host 353개 통과·2개 생략 및 타입 검사, UI 84개·타입 검사·빌드, Rust 24개·fmt·clippy `-D warnings`, Tauri 번들 빌드. 격리 Host·브라우저에서 Enter 전송, Shift+Enter 줄바꿈, 실패 시 초안 보존, Ghost 전환 시 이전 대화·초안 제거, 사라진 대상의 기본 대화 복구를 확인했다. 독립 검토의 대상 정규화·macOS 이전 화면 배율 참조 두 지적을 수정했고, 추가 그림 앵커·권한 경계 검토에는 지적이 없었다.
+- 격리 네이티브 앱의 실제 펫 버튼 경로로 왼쪽·오른쪽 아래 구석의 창 위치와 꼬리 정렬을 화면에서 확인했다. 검사 중 소유자의 Safari 전환으로 정상 포커스 상실 닫기가 빨리 발생해, 화면 검수에는 닫기 직전 디버거 중단점도 사용했다. 닫기 규칙은 바꾸지 않았다. 혼합 배율·음수 모니터 좌표·부족한 위 공간·크기 변경 시 앵커 무효화는 네이티브 테스트로 검증했다.
+- Host 원본/설치 사본 및 UI 93개 파일 해시가 일치한다. 설치 사본 Host·UI를 자격 없는 별도 상태 루트·모의 제공자에서 실행해 실제 메시지 왕복을 확인했고, 서명한 셸의 external 프로브도 같은 Host 연결을 확인했다. 새 앱은 기존 로컬 방식인 ad-hoc 서명이며 `codesign --verify --strict`와 아이콘 원본 일치를 확인했다.
+- 백업 `~/.local/share/ghost/backups/pre-pet-20261108-338dd06-1794138526515/`: `db/backup.json`은 `ghost-backup/2`, `complete: true`, 두 DB 무결성 확인. 상태 부속 파일·console 설정과 이전 앱(`Ghost.app`, 교체 직전 원본 `Ghost.original.app`)을 보관했다. 유휴·이전 링크 재확인 뒤 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 4892 → 16460). 단일 리스너·새 실행 경로·운영 DB·준비 상태, Ghost 24·대화 40·맡긴 일 39의 모든 식별자와 config·secrets 바이트 보존을 확인했다.
+- 설치된 `~/Applications/Ghost.app`을 external 모드로 실행하고 실제 `⌘⇧G` 입력으로 운영 대화를 열어, 머리 바로 위의 짧은 간격·오른쪽 구석의 안쪽 정렬·새 대화 UI를 화면 캡처로 확인했다. 운영 메시지나 모델 설정은 저장하지 않았다. 기존 대화 본문은 이 작은 창에서 계속 텍스트로 표시한다.
+- 되돌릴 때는 앱을 정상 종료하고 `current`를 `releases/20261108-bun-fb34f1f`로 바꿔 LaunchAgent를 정상 재시작한 뒤, 백업의 `Ghost.app`을 설치 경로로 복원한다. 저장 형식·자격 형식 변경은 없으므로 DB나 secrets 복원은 필요 없다.
 
 ### 설정 레이아웃·모델 폴백 경로 운영 반영 — 2026-11-08
 
