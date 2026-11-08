@@ -303,7 +303,7 @@ function ModelChoice({ value, onChange, add = false }: { value: ModelRef | null;
     <PopoverTrigger asChild>
       <button type="button" className="model-choice" data-add={add || undefined} data-default={(!value && !add) || undefined}>
         {add
-          ? <><Plus aria-hidden="true"/><span className="model-choice__model">대체 모델 추가</span></>
+          ? <><Plus aria-hidden="true"/><span>대체 모델 추가</span></>
           : <>
             <span className="model-choice__model">{current?.model ?? fallback?.model ?? '모델 없음'}</span>
             <span className="model-choice__provider">{current ? current.provider : `기본 모델${fallback ? ` · ${fallback.provider}` : ''}`}</span>
