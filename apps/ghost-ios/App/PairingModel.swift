@@ -86,6 +86,24 @@ struct PairingKeychainStore: PairingAttemptStoring {
         !isBusy && normalizedDraftCode != nil && !draftOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    func dismissIssues() {
+        error = nil
+        connectIssue = nil
+        intakeIssue = nil
+    }
+
+    /// Checks the typed server address before the sheet closes, so a typo stays beside its field.
+    func validateManual() -> Bool {
+        do {
+            _ = try canonicalOrigin(draftOrigin)
+            intakeIssue = nil
+            return normalizedDraftCode != nil
+        } catch {
+            intakeIssue = error.localizedDescription
+            return false
+        }
+    }
+
     /// A saved connection exists: any pending attempt either produced it or is
     /// stale, and must not resurrect behind the tab UI.
     func discardAdoptedAttempt() {
@@ -132,9 +150,10 @@ struct PairingKeychainStore: PairingAttemptStoring {
         }
     }
 
-    /// Retries the stored attempt with the exact same body.
+    /// Retries the stored attempt with the exact same body, including the name it was sent with.
     func resume() async {
         guard let current = attempt, !isBusy else { return }
+        deviceName = current.deviceName
         await claim(PairingOffer(origin: current.origin, code: current.code))
     }
 

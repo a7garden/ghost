@@ -345,7 +345,7 @@ describe("restart", () => {
 describe("commands and access", () => {
   test("a repeated request id runs once; different bytes conflict", async () => {
     const { core, ledger, ghost } = setup();
-    const access = new Access(ledger, owner);
+    const access = new Access(owner);
     const requestId = uuid();
     const request = { requestId, command: { type: "work.create" as const, ghostId: ghost.id, title: "T", brief: "B" } };
     const first = await execute(core, access, request, { publicOrigin: "http://x", documents: null });
@@ -355,27 +355,58 @@ describe("commands and access", () => {
     await expect(execute(core, access, { requestId, command: { ...request.command, title: "Other" } }, { publicOrigin: "http://x", documents: null })).rejects.toThrow("different command");
   });
 
-  test("a device sees and acts only within its grants", async () => {
+  test("a device sees every Ghost's conversations and Work and can act across them", async () => {
     const { core, ledger, ghost, helper } = setup();
-    const visible = core.works.createRoot({ ghostId: ghost.id, title: "Mine", brief: "B", originConversationId: ghost.directConversationId });
-    const hidden = core.works.createRoot({ ghostId: helper.id, title: "Theirs", brief: "B", originConversationId: helper.directConversationId });
+    const device = new Access({ kind: "device", deviceId: "d1", name: "Phone" });
+    const later = core.createGhost({ name: "After pairing", persona: "" });
+    const context = { publicOrigin: "http://x", documents: null };
+    const workIds: string[] = [];
+    for (const target of [ghost, helper, later]) {
+      const created = await execute(core, device, {
+        requestId: uuid(), command: { type: "work.create", ghostId: target.id, title: target.name, brief: "B" },
+      }, context);
+      workIds.push(created.workId as string);
+      await execute(core, device, {
+        requestId: uuid(), command: { type: "message.send", conversationId: target.directConversationId, text: "Hello" },
+      }, context);
+      await execute(core, device, {
+        requestId: uuid(), command: { type: "message.cancel", conversationId: target.directConversationId },
+      }, context);
+      const question = core.decisions.ask(target.directConversationId, "Which?", "Choose", ["A", "B"]);
+      await execute(core, device, {
+        requestId: uuid(), command: { type: "decision.resolve", decisionId: question.id, outcome: "answer", answer: "A" },
+      }, context);
+    }
     await core.idle();
-    const device = new Access(ledger, { kind: "device", deviceId: "d1", name: "Phone", grants: [{ ghostId: ghost.id, conversationId: null }] });
 
     const state = snapshot(core, device);
-    expect(state.ghosts.map((item) => item.id)).toEqual([ghost.id]);
-    expect(state.works.map((item) => item.id)).toEqual([visible.id]);
+    const ownerState = snapshot(core, new Access(owner));
+    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications"] as const) {
+      expect(state[key]).toEqual(ownerState[key]);
+    }
+    expect(state.ghosts.map((item) => item.id)).toContain(later.id);
+    expect(state.works.map((item) => item.id).sort()).toEqual(workIds.sort());
     expect(state.settings.providers).toEqual([]);
+    expect(state.schedules).toEqual([]);
+    expect(state.spaces).toEqual([]);
+    expect(state.sandboxes).toEqual([]);
 
-    await expect(execute(core, device, { requestId: uuid(), command: { type: "work.cancel", workId: hidden.id } }, { publicOrigin: "http://x", documents: null })).rejects.toThrow("grants");
-    await expect(execute(core, device, { requestId: uuid(), command: { type: "ghost.create", name: "X", persona: "" } }, { publicOrigin: "http://x", documents: null })).rejects.toThrow("owner");
-    await execute(core, device, { requestId: uuid(), command: { type: "work.cancel", workId: visible.id } }, { publicOrigin: "http://x", documents: null });
-    expect(ledger.work(visible.id).state).toBe("cancelled");
+    await expect(execute(core, device, {
+      requestId: uuid(), command: { type: "ghost.create", name: "X", persona: "" },
+    }, context)).rejects.toThrow("ghost.create needs the owner");
+    for (const workId of workIds) {
+      core.works.fail(workId, "Retry this Work");
+      await execute(core, device, { requestId: uuid(), command: { type: "work.resume", workId } }, context);
+      await core.idle();
+      await execute(core, device, { requestId: uuid(), command: { type: "work.update", workId, title: "Updated" } }, context);
+      await execute(core, device, { requestId: uuid(), command: { type: "work.cancel", workId } }, context);
+      expect(ledger.work(workId)).toMatchObject({ title: "Updated", state: "cancelled" });
+    }
   });
 
   test("ghost.update changes tool permissions and rejects invalid allow-lists without changing them", async () => {
     const { core, ledger, helper } = setup();
-    const access = new Access(ledger, owner);
+    const access = new Access(owner);
     await core.idle();
 
     await execute(core, access, { requestId: uuid(), command: { type: "ghost.update", ghostId: helper.id, tools: ["read", "bash"] } }, { publicOrigin: "http://x", documents: null });
@@ -438,7 +469,7 @@ describe("commands and access", () => {
     }
     const { core, ledger } = harness(path);
     try {
-      await execute(core, new Access(ledger, owner), { requestId, command }, { publicOrigin: "http://localhost", documents: null });
+      await execute(core, new Access(owner), { requestId, command }, { publicOrigin: "http://localhost", documents: null });
       expect(ledger.settings().defaultModel).toEqual(newerModel);
     } finally {
       core.stop();
@@ -453,7 +484,7 @@ describe("commands and access", () => {
     ledger.tx(() => ledger.claimRequest(requestId, "owner", digestOf(command)));
     ledger.pruneHistory(Date.now() + 31 * 24 * 60 * 60 * 1000);
     try {
-      await expect(execute(core, new Access(ledger, owner), {
+      await expect(execute(core, new Access(owner), {
         requestId, command: { type: "settings.update", defaultModel: { provider: "changed", model: "changed" } },
       }, { publicOrigin: "http://localhost", documents: null })).rejects.toThrow("different command");
       expect(ledger.settings().defaultModel).toBeNull();

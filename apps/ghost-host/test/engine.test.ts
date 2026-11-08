@@ -593,7 +593,7 @@ test("a catalog refresh makes a newly released model executable without rewritin
     });
     const executable = buildModels(ledger.settings(), secrets, catalog).getModel("zai", "glm-future");
     expect(executable).toMatchObject({ input: ["text", "image"], reasoning: true, contextWindow: 262_144, maxTokens: 16_384 });
-    await execute(core, new Access(ledger, { kind: "owner" }), {
+    await execute(core, new Access({ kind: "owner" }), {
       requestId: crypto.randomUUID(), command: { type: "settings.update", defaultModel: { provider: "zai", model: "glm-future", thinking: "high" } },
     }, { publicOrigin: "http://localhost", documents: null });
     await core.idle();
@@ -661,7 +661,7 @@ test("changing the main Ghost transfers real management authority without restar
     await manage(conversationId, helper.id, "Managed before the switch.");
     expect(ledger.ghost(helper.id).persona).toBe("Managed before the switch.");
 
-    await execute(core, new Access(ledger, { kind: "owner" }), {
+    await execute(core, new Access({ kind: "owner" }), {
       requestId: crypto.randomUUID(),
       command: { type: "ghost.set_default", ghostId: helper.id },
     }, { publicOrigin: "http://localhost", documents: null });
@@ -708,7 +708,7 @@ test("the real model request offers only granted selectable tools after live per
     return names;
   };
   const update = async (tools: [] | ["work_list"]) => {
-    await execute(core, new Access(ledger, { kind: "owner" }), {
+    await execute(core, new Access({ kind: "owner" }), {
       requestId: crypto.randomUUID(),
       command: { type: "ghost.update", ghostId: helper.id, tools },
     }, { publicOrigin: "http://localhost", documents: null });

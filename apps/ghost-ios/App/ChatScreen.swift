@@ -223,7 +223,7 @@ private struct ThreadDirectory: View {
     private var live: [Work] { roots.filter { !$0.state.isTerminal }.sorted { $0.updatedAt > $1.updatedAt } }
     private var settled: [Work] { roots.filter { $0.state.isTerminal }.sorted { $0.updatedAt > $1.updatedAt } }
     private var conversations: [Conversation] {
-        model.grantedConversations.filter { $0.ghostId == ghost?.id && $0.id != currentConversationId }
+        model.directConversations.filter { $0.ghostId == ghost?.id && $0.id != currentConversationId }
             .sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
 

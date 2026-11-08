@@ -133,9 +133,8 @@ function sendAlert(
 }
 
 /**
- * Every 5 s, sends each unpushed notification to the devices whose grants cover its Ghost
- * (owner-wide notifications go to all devices), then marks it pushed. A 410 clears that
- * device's token; transport failures are logged, never repeated automatically.
+ * Every 5 s, sends each unpushed notification to all push targets, then marks it pushed.
+ * A 410 clears that device's token; transport failures are logged, never repeated automatically.
  */
 export function startPush(core: Core, config: Config): { stop(): void } | null {
   const apns = config.apns;
@@ -154,10 +153,8 @@ export function startPush(core: Core, config: Config): { stop(): void } | null {
     const targets = core.ledger.pushTargets();
     if (targets.length === 0) return;
     for (const notification of notifications) {
-      const receivers =
-        notification.ghostId === null ? targets : targets.filter((target) => target.grants.some((grant) => grant.ghostId === notification.ghostId));
       const jwt = tokenFor();
-      for (const receiver of receivers) {
+      for (const receiver of targets) {
         try {
           const outcome = await sendAlert(APNS_HOSTS[receiver.environment], jwt, apns.topic, receiver.token, JSON.stringify(payload(notification)));
           if (outcome.status === 410) {

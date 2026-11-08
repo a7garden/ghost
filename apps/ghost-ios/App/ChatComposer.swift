@@ -20,10 +20,7 @@ struct ChatComposer: View {
     @State private var hasDeadline = false
     @State private var deadline = Date().addingTimeInterval(3600)
 
-    private var grantedGhosts: [Ghost] {
-        model.snapshot.visibleGhosts.filter { model.grantedGhostIDs.contains($0.id) }
-    }
-    private var candidates: [Ghost] { grantedGhosts.filter { $0.state == .active } }
+    private var candidates: [Ghost] { model.snapshot.visibleGhosts.filter { $0.state == .active } }
     private var recipient: Ghost? {
         if let assigneeId { return candidates.first { $0.id == assigneeId } }
         return ghost
@@ -216,7 +213,7 @@ struct ChatComposer: View {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
         if workMode {
-            guard let recipient, recipient.state == .active, model.grantedGhostIDs.contains(recipient.id) else { return }
+            guard let recipient, recipient.state == .active else { return }
             let command = DeviceCommand.workCreate(ghostId: recipient.id, title: GhostCopy.workTitle(body), brief: body,
                 criteria: criteria.trimmingCharacters(in: .whitespacesAndNewlines),
                 deadlineAt: hasDeadline ? Int(deadline.timeIntervalSince1970 * 1000) : nil,

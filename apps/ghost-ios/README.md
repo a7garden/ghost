@@ -28,7 +28,7 @@ package이며 `swift test`로 계약 JSON 디코딩, SSE 프레임 파싱, 페�
 
 ## 탭
 
-- **대화** — 허용된 Ghost 목록. `고정`(메인 Ghost와 이 iPhone에서 고정한 Ghost)과 접히는
+- **대화** — Ghost 목록. `고정`(메인 Ghost와 이 iPhone에서 고정한 Ghost)과 접히는
   `Ghost` 목록으로 나뉘고, 확인이 필요하거나 일하는 Ghost는 접혀도 보인다. 행을 누르면 그
   Ghost의 대화가 열린다. 대화에는 스레드(맡긴 일)·결과 줄·도구 기록·호스트 이벤트가 시간순으로
   놓이고, 확인할 결정은 입력창 위에 쌓인다. 입력창의 `+`·`/`·`@`로 이 Ghost나 다른 Ghost에게
@@ -41,10 +41,12 @@ package이며 `swift test`로 계약 JSON 디코딩, SSE 프레임 파싱, 페�
 
 ## 페어링
 
-호대전화에는 서버 주소나 긴 연결 키를 입력하지 않는다. PC Ghost 화면에서
+휴대전화에는 긴 연결 키를 입력하지 않는다. PC Ghost의 설정 › 기기 › 기기 연결이
 `device.pairing_start`로 만든 연결 코드를 QR(`ghost://pair?origin=…&code=…`)로
-스캔하거나, origin과 코드를 직접 입력한다. 호스트의 `POST /api/pairing/claim`가
-`{deviceId, token}`을 돌려주고, 이 값은 Keychain에 저장된다.
+스캔하거나, 코드로 연결 시트에 origin과 코드를 입력한다. 호스트의 `POST /api/pairing/claim`가
+휴대전화가 보낸 기기 이름으로 기기를 등록하고 `{deviceId, token}`을 돌려주며, 이 값은
+Keychain에 저장된다. 연결된 기기는 모든 Ghost에 닿고 기기용 명령만 보낼 수 있다.
+PC에서 기기를 철회하면 접근이 끊긴다.
 
 - origin은 스킴·호스트·포트만 허용한다(경로·쿼리·fragment·자격증명 없음).
   HTTPS는 항상 허용하고, 평문 HTTP는 loopback(127.0.0.1·localhost)만 허용한다.

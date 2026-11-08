@@ -7,9 +7,7 @@ struct WorkListScreen: View {
     @State private var finished = false
     @State private var showingCreate = false
 
-    private var availableGhosts: [Ghost] {
-        model.snapshot.visibleGhosts.filter { model.grantedGhostIDs.contains($0.id) }
-    }
+    private var availableGhosts: [Ghost] { model.snapshot.visibleGhosts }
     private var filterGhosts: [Ghost] {
         availableGhosts.filter { ghost in model.snapshot.works.contains { $0.ghostId == ghost.id } }
     }
@@ -541,9 +539,7 @@ private struct NewWorkSheet: View {
     @State private var deadline = Date().addingTimeInterval(86_400)
     @State private var saving = false
     @State private var issue: String?
-    private var ghosts: [Ghost] {
-        model.snapshot.visibleGhosts.filter { model.grantedGhostIDs.contains($0.id) }
-    }
+    private var ghosts: [Ghost] { model.snapshot.visibleGhosts }
     var body: some View {
         NavigationStack {
             ScrollView {

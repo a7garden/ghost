@@ -271,13 +271,10 @@ enum AppTab: Hashable { case conversations, works, inbox, connection }
         eventTask = nil
     }
 
-    /// Direct conversations this device may read; the stream subscribes to
-    /// them so chat pages and the ghost list stay live.
+    /// Direct conversations, newest first; the stream subscribes to them so chat
+    /// pages and the roster stay live.
     private func monitoredConversations() -> [String] {
-        snapshot.conversations
-            .filter { isAllowed($0) }
-            .sorted { $0.lastActivityAt > $1.lastActivityAt }
-            .map(\.id)
+        directConversations.map(\.id)
     }
 
     private func consume(bytes: URLSession.AsyncBytes, api: GhostAPI) async {
@@ -389,27 +386,13 @@ enum AppTab: Hashable { case conversations, works, inbox, connection }
         }
     }
 
-    // MARK: Grants
+    // MARK: Reach
 
-    var grantedGhostIDs: Set<String> {
-        switch snapshot.principal {
-        case .owner: return Set(snapshot.ghosts.map(\.id))
-        case .device(_, _, let grants): return Set(grants.map(\.ghostId))
-        }
-    }
-
-    func isAllowed(_ conversation: Conversation) -> Bool {
-        guard conversation.kind == .direct, grantedGhostIDs.contains(conversation.ghostId) else { return false }
-        switch snapshot.principal {
-        case .owner: return true
-        case .device(_, _, let grants):
-            return grants.contains { $0.ghostId == conversation.ghostId && ($0.conversationId == nil || $0.conversationId == conversation.id) }
-        }
-    }
-
-    var grantedConversations: [Conversation] {
+    /// Every direct conversation, newest first. A paired device reaches every Ghost;
+    /// the host limits it to device commands, not to chosen Ghosts.
+    var directConversations: [Conversation] {
         snapshot.conversations
-            .filter { isAllowed($0) }
+            .filter { $0.kind == .direct }
             .sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
 
@@ -611,6 +594,13 @@ enum AppTab: Hashable { case conversations, works, inbox, connection }
     #if DEBUG
     private func configureUITestsIfNeeded() -> Bool {
         guard MobileUIFixture.enabled else { return false }
+        // The connect screen: no connection, and the pairing fixture's issue when asked for.
+        if MobileUIFixture.pairing {
+            if ProcessInfo.processInfo.arguments.contains("--pairing-issue") {
+                pairing.error = "연결 코드가 만료되었거나 이미 사용되었습니다. PC에서 새 코드를 만들어 주세요."
+            }
+            return true
+        }
         do {
             let directory = URL.applicationSupportDirectory.appending(path: "GhostUITests")
             if ProcessInfo.processInfo.arguments.contains("--reset-fixture"), FileManager.default.fileExists(atPath: directory.path) {

@@ -76,7 +76,7 @@ docs/
 | Artifact | Published bytes, addressed by SHA-256, attached to a Work result. Avatar images are artifacts too. |
 | Schedule | A timed submission into a conversation (wake, follow-up, reminder the owner asked for). |
 | Notification | Something the owner should see: decision needed, Work finished or failed. Pushed to devices. |
-| Device | A paired iPhone with explicit Ghost/conversation grants. |
+| Device | A paired iPhone; it sees every Ghost and may send only device commands. |
 | Space | A PDC document vault registered with the host; Ghosts get read or propose grants. |
 | Avatar | A named sprite design whose image is an artifact; a Ghost's look is an avatar plus colors. |
 | Sandbox | A Ghost's Apple container computer. The owner can stop or reset it. |
@@ -148,8 +148,8 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 | `artifacts` | `(digest, work_id, name)` | media_type, size |
 | `schedules` | `id` | ghost_id, conversation_id, prompt, spec, next_at, state |
 | `notifications` | `id` | kind, ghost/conversation/work/decision refs, title, body, read_at, pushed_at |
-| `devices` | `id` | name, token_hash, grants, push token, revoked_at |
-| `pairings` | `code_hash` | name, grants, expires_at, device_id |
+| `devices` | `id` | name, token_hash, push token, revoked_at; unused grants column retained for previous-release readability |
+| `pairings` | `code_hash` | name, expires_at, device_id; unused grants column retained for previous-release readability |
 | `spaces` | `id` | name, path, grants (Ghost + read/propose) |
 | `avatars` | `id` | name, description, image_digest, design |
 | `providers` | `id` | kind, name, base_url, models (keys live in `secrets/`) |
@@ -208,7 +208,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 - Unsaved owner tool toggles are applied to the latest observed allow-list, preserving concurrent changes to untouched tools.
 - `ask_owner`, `complete`, `work_status`, `artifact_read`, `effect_list` and `verdict` remain fixed lifecycle/safety tools in their existing conversation kinds.
 - Only the currently active default Ghost's direct conversations receive `ghost_inspect` and `ghost_update`. Every execution rechecks the current designation. These tools inspect/update another non-default Ghost's name, persona, model, fallbacks, skills, look, state and optional tools. They cannot change the caller, the default designation, host tools, document grants, credentials or sandbox controls, and cannot touch a deleted Ghost. Owners retain those controls.
-- `ghost.delete` (owner only) accepts a retired, non-default Ghost with no live Work and no pending decision. It removes its schedules and every device or Space grant naming it, then sets `deletedAt`. Deleted Ghosts are never opened, listed, delegated to or edited again.
+- `ghost.delete` (owner only) accepts a retired, non-default Ghost with no live Work and no pending decision. It removes its schedules and every Space grant naming it, then sets `deletedAt`. Deleted Ghosts are never opened, listed, delegated to or edited again.
 - Permission changes refresh live conversations; execution also checks the current ledger permissions so a stale configured tool cannot bypass revocation. Work/review conversations never receive Ghost-management authority, including work assigned to the default Ghost.
 - Tool permissions control which actions are exposed, not sandbox syscall permissions: allowing `bash` can still read/write files inside the existing sandbox boundary even when `write` is disabled.
 - `present_ui` is a fixed, replay-safe response-format capability in direct conversations,
@@ -225,14 +225,14 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 `Bun.serve` on one port. Principals:
 
 - **Owner**: bearer token from `host.json`. Used by the Mac app and the web UI.
-- **Device**: bearer token issued at pairing. Every read and command is filtered by the device's grants.
+- **Device**: bearer token issued at pairing. It sees every Ghost, conversation, Work, decision and notification, including Ghosts created after pairing, but may send only `DEVICE_COMMANDS`. Schedules, Spaces, provider settings/credentials and other devices remain owner-only. Revocation closes its stream and invalidates its token.
 
 | Route | Purpose |
 | --- | --- |
 | `GET /api/state` | snapshot: ghosts, works (live + recent), decisions, notifications, conversations, settings |
 | `GET /api/conversations/:id?before=&limit=` | transcript page (from Pi entries) |
 | `GET /api/works/:id` | Work detail: tree, effects, artifacts, verdict |
-| `GET /api/artifacts/:digest` | artifact bytes; the owner can read any stored digest, devices retain Work-grant/avatar visibility |
+| `GET /api/artifacts/:digest` | artifact bytes; the owner can read any stored digest, a device any Work artifact or avatar image |
 | `POST /api/artifacts` | owner-only raw bytes, up to 20 MiB; `Content-Type` is the media type, `X-Ghost-File-Name` is a percent-encoded UTF-8 filename (1–256 characters); returns `201` with an `ArtifactRef` JSON object (`digest`, `name`, `mediaType`, `size`). Invalid metadata returns `400`; oversized uploads return `413`, both with the standard `invalid` error envelope. Uploads need no Work row; unregistered digest reads use `application/octet-stream`. |
 | `GET /api/events?after=seq` | SSE: ledger events + live conversation deltas |
 | `POST /api/commands` | `{ requestId, command }`, command is a contract union (`message.send`, `work.create`, `work.update`, `work.cancel`, `decision.resolve`, `ghost.create`, `ghost.update`, `schedule.*`, `device.*`, `settings.*`, …) |

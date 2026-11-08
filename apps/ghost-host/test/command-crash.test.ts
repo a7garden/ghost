@@ -26,7 +26,7 @@ async function killAtReceipt(path: string, request: CommandRequest, point: "befo
     const die = () => process.kill(process.pid, "SIGKILL");
     if (${JSON.stringify(point)} === "before") ledger.putRequest = die;
     else ledger.subscribe(event => { if (event.data.type === "work") die(); });
-    await execute(core, new Access(ledger, { kind: "owner" }), request, ${JSON.stringify(context)});
+    await execute(core, new Access({ kind: "owner" }), request, ${JSON.stringify(context)});
     throw new Error("fault point was not reached");
   `], { stdout: "pipe", stderr: "pipe" });
   const stderr = new Response(child.stderr).text();
@@ -66,7 +66,7 @@ describe("API command crash atomicity", () => {
             if (work) expect(restarted.ledger.work(work.id)).toMatchObject({ title: "Before", revision: 1 });
             else expect(restarted.ledger.worksForState()).toHaveLength(0);
           }
-          const access = new Access(restarted.ledger, owner);
+          const access = new Access(owner);
           const first = await execute(restarted.core, access, request, context);
           expect(await execute(restarted.core, access, request, context)).toEqual(first);
           expect(restarted.ledger.worksForState()).toHaveLength(1);
@@ -93,7 +93,7 @@ describe("API command crash atomicity", () => {
     rejectReceipt(ledger, request.requestId);
     let events = 0;
     const unsubscribe = ledger.subscribe(() => { events++; });
-    await expect(execute(core, new Access(ledger, owner), request, context)).rejects.toThrow("receipt fault");
+    await expect(execute(core, new Access(owner), request, context)).rejects.toThrow("receipt fault");
     await core.idle();
     unsubscribe();
     expect(ledger.worksForState()).toHaveLength(0);
@@ -103,7 +103,7 @@ describe("API command crash atomicity", () => {
     expect(engine.opened).toHaveLength(opened);
     expect(engine.submissions.size).toBe(0);
     ledger.db.exec("DROP TRIGGER reject_receipt");
-    await execute(core, new Access(ledger, owner), request, context);
+    await execute(core, new Access(owner), request, context);
     await core.idle();
     expect(ledger.worksForState()).toHaveLength(1);
     const work = ledger.worksForState()[0]!;
@@ -112,7 +112,7 @@ describe("API command crash atomicity", () => {
     const beforeUpdateSubmissions = engine.submissions.size;
     const beforeUpdateOpened = engine.opened.length;
     rejectReceipt(ledger, update.requestId);
-    await expect(execute(core, new Access(ledger, owner), update, context)).rejects.toThrow("receipt fault");
+    await expect(execute(core, new Access(owner), update, context)).rejects.toThrow("receipt fault");
     await core.idle();
     expect(ledger.work(work.id)).toEqual(work);
     expect(ledger.request(update.requestId)).toBeNull();
@@ -126,12 +126,12 @@ describe("API command crash atomicity", () => {
   test("concurrent retries join, while changed bytes or principal conflict", async () => {
     const { core, ledger } = harness();
     const ghost = core.createGhost({ name: "Owner", persona: "" });
-    const access = new Access(ledger, owner);
+    const access = new Access(owner);
     const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "work.create", ghostId: ghost.id, title: "T", brief: "B" } };
     const first = execute(core, access, request, context);
     const second = execute(core, access, request, context);
     await expect(execute(core, access, { ...request, command: { ...request.command, title: "Other" } as CommandRequest["command"] }, context)).rejects.toThrow("different command");
-    const device = new Access(ledger, { kind: "device", deviceId: "other", name: "Phone", grants: [{ ghostId: ghost.id, conversationId: null }] });
+    const device = new Access({ kind: "device", deviceId: "other", name: "Phone" });
     await expect(execute(core, device, request, context)).rejects.toThrow("different command");
     expect(await second).toEqual(await first);
     expect(ledger.worksForState()).toHaveLength(1);
@@ -152,7 +152,7 @@ describe("API command crash atomicity", () => {
     const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "document.save", spaceId: "space", title: "Once", body: "Durable\n", pageId: null, expectedHash: null } };
     // Permit the pending identity, fail only the final success receipt.
     first.ledger.db.exec(`CREATE TRIGGER reject_receipt BEFORE INSERT ON requests WHEN NEW.id = '${request.requestId}' AND NEW.state = 'done' BEGIN SELECT RAISE(ABORT, 'receipt fault'); END;`);
-    await expect(execute(first.core, new Access(first.ledger, owner), request, { ...context, documents: createDocuments(first.core) })).rejects.toThrow("receipt fault");
+    await expect(execute(first.core, new Access(owner), request, { ...context, documents: createDocuments(first.core) })).rejects.toThrow("receipt fault");
     const saved = first.ledger.effectByCall(ghost.directConversationId, `api:${request.requestId}`)!;
     expect(saved.state).toBe("done");
     expect(readdirSync(vault).filter((name) => name.endsWith(".md"))).toHaveLength(1);
@@ -160,7 +160,7 @@ describe("API command crash atomicity", () => {
     first.core.stop();
     first.ledger.close();
     const restarted = harness(path);
-    const result = await execute(restarted.core, new Access(restarted.ledger, owner), request, { ...context, documents: createDocuments(restarted.core) });
+    const result = await execute(restarted.core, new Access(owner), request, { ...context, documents: createDocuments(restarted.core) });
     expect(saved.result).toBe(`api-result:${JSON.stringify(result)}`);
     expect(readdirSync(vault).filter((name) => name.endsWith(".md"))).toHaveLength(1);
     expect((await createDocuments(restarted.core).readPage("space", { pageId: result.pageId as string })).body).toBe("Durable\n");
@@ -193,7 +193,7 @@ describe("API command crash atomicity", () => {
         process.kill(process.pid, "SIGKILL");
         return page;
       };
-      await execute(core, new Access(ledger, { kind: "owner" }), ${JSON.stringify(request)}, { publicOrigin: "http://localhost", documents });
+      await execute(core, new Access({ kind: "owner" }), ${JSON.stringify(request)}, { publicOrigin: "http://localhost", documents });
       throw new Error("fault point was not reached");
     `], { stdout: "pipe", stderr: "pipe" });
     const stderr = new Response(child.stderr).text();
@@ -203,7 +203,7 @@ describe("API command crash atomicity", () => {
     const { core, ledger } = harness(path);
     expect(ledger.effectByCall(ghost.directConversationId, `api:${request.requestId}`)?.state).toBe("pending");
     core.effects.recoverInterrupted();
-    await expect(execute(core, new Access(ledger, owner), request, { ...context, documents: createDocuments(core) })).rejects.toThrow("unknown");
+    await expect(execute(core, new Access(owner), request, { ...context, documents: createDocuments(core) })).rejects.toThrow("unknown");
     expect(ledger.pendingDecisions().some((decision) => decision.kind === "reconcile_effect")).toBe(true);
     expect(readdirSync(vault).filter((name) => name.endsWith(".md"))).toHaveLength(1);
     await core.idle();
@@ -238,7 +238,7 @@ describe("API command crash atomicity", () => {
         process.kill(process.pid, "SIGKILL");
         return "written";
       });
-      await execute(core, new Access(ledger, { kind: "owner" }), ${JSON.stringify(request)}, ${JSON.stringify(context)});
+      await execute(core, new Access({ kind: "owner" }), ${JSON.stringify(request)}, ${JSON.stringify(context)});
       throw new Error("fault point was not reached");
     `], { stdout: "pipe", stderr: "pipe" });
     const stderr = new Response(child.stderr).text();
@@ -249,7 +249,7 @@ describe("API command crash atomicity", () => {
     core.effects.onApproved("test_write", async () => { appendFileSync(target, "duplicate\n"); return "written"; });
     core.effects.recoverInterrupted();
     await core.decisions.recover();
-    await execute(core, new Access(ledger, owner), request, context);
+    await execute(core, new Access(owner), request, context);
     expect(readFileSync(target, "utf8")).toBe("once\n");
     expect(ledger.effect(effect.id).state).toBe("unknown");
     expect(ledger.pendingDecisions({ effectId: effect.id }).some((item) => item.kind === "reconcile_effect")).toBe(true);
@@ -273,13 +273,13 @@ describe("API command crash atomicity", () => {
         ? { type, id: "test-provider", kind: "openai", name: "After", models: [], apiKey: "next" }
         : { type, providerId: "test-provider" } };
       ledger.db.exec(`CREATE TRIGGER reject_receipt BEFORE INSERT ON requests WHEN NEW.id = '${request.requestId}' AND NEW.state = 'done' BEGIN SELECT RAISE(ABORT, 'receipt fault'); END;`);
-      await expect(execute(core, new Access(ledger, owner), request, context)).rejects.toThrow("receipt fault");
+      await expect(execute(core, new Access(owner), request, context)).rejects.toThrow("receipt fault");
       expect(ledger.settings().providers.find((provider) => provider.id === "test-provider")?.name).toBe("Before");
       expect(new FileSecrets(root).get("test-provider")).toBe(type === "provider.upsert" ? "next" : null);
       expect(ledger.effectByCall(ghost.directConversationId, `api:${request.requestId}`)?.state).toBe("unknown");
       ledger.db.exec("DROP TRIGGER reject_receipt");
       secrets.put("test-provider", "newer-owner-key");
-      await expect(execute(core, new Access(ledger, owner), request, context)).rejects.toThrow("unknown");
+      await expect(execute(core, new Access(owner), request, context)).rejects.toThrow("unknown");
       expect(new FileSecrets(root).get("test-provider")).toBe("newer-owner-key");
       await core.idle();
       core.stop();
@@ -293,13 +293,13 @@ describe("API command crash atomicity", () => {
     const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "message.send", conversationId: ghost.directConversationId, text: "Hello" } };
     const submit = engine.submit.bind(engine);
     engine.submit = async () => { throw new CommandError("unavailable", "provider unavailable"); };
-    await expect(execute(core, new Access(ledger, owner), request, context)).rejects.toThrow("provider unavailable");
+    await expect(execute(core, new Access(owner), request, context)).rejects.toThrow("provider unavailable");
     expect(ledger.request(request.requestId)?.state).toBe("pending");
-    const device = new Access(ledger, { kind: "device", deviceId: "other", name: "Phone", grants: [{ ghostId: ghost.id, conversationId: null }] });
+    const device = new Access({ kind: "device", deviceId: "other", name: "Phone" });
     await expect(execute(core, device, request, context)).rejects.toThrow("different command");
     engine.submit = submit;
-    await execute(core, new Access(ledger, owner), request, context);
-    await execute(core, new Access(ledger, owner), request, context);
+    await execute(core, new Access(owner), request, context);
+    await execute(core, new Access(owner), request, context);
     expect(engine.to(ghost.directConversationId).map((submission) => submission.requestId)).toEqual([`owner:${request.requestId}`]);
     expect(ledger.request(request.requestId)?.state).toBe("done");
     await core.idle();
@@ -312,12 +312,12 @@ describe("API command crash atomicity", () => {
     const ghost = core.createGhost({ name: "Owner", persona: "" });
     const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "message.cancel", conversationId: ghost.directConversationId } };
     ledger.db.exec(`CREATE TRIGGER reject_receipt BEFORE INSERT ON requests WHEN NEW.id = '${request.requestId}' AND NEW.state = 'done' BEGIN SELECT RAISE(ABORT, 'receipt fault'); END;`);
-    await expect(execute(core, new Access(ledger, owner), request, context)).rejects.toThrow("receipt fault");
+    await expect(execute(core, new Access(owner), request, context)).rejects.toThrow("receipt fault");
     expect(engine.aborted).toHaveLength(1);
     ledger.db.exec("DROP TRIGGER reject_receipt");
-    await execute(core, new Access(ledger, owner), { ...request, requestId: crypto.randomUUID() }, context);
+    await execute(core, new Access(owner), { ...request, requestId: crypto.randomUUID() }, context);
     expect(engine.aborted).toHaveLength(2);
-    await execute(core, new Access(ledger, owner), request, context);
+    await execute(core, new Access(owner), request, context);
     expect(engine.aborted).toHaveLength(2);
     await core.idle();
     core.stop();
@@ -334,12 +334,12 @@ describe("API command crash atomicity", () => {
       const competing = { conversationId, callId: "competing-write", tool: "memory_retain", input: { text: "Other memory" }, summary: "Other memory" };
       expect(() => core.effects.begin(competing)).toThrow("unresolved");
       const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "message.cancel", conversationId } };
-      await execute(core, new Access(ledger, owner), request, context);
+      await execute(core, new Access(owner), request, context);
       expect(engine.aborted).toEqual([conversationId]);
       expect(ledger.effect(writer.id).state).toBe(state);
       expect(() => core.effects.begin(competing)).toThrow("unresolved");
       if (state === "unknown") expect(ledger.pendingDecisions({ effectId: writer.id }).some((decision) => decision.kind === "reconcile_effect")).toBe(true);
-      await execute(core, new Access(ledger, owner), request, context);
+      await execute(core, new Access(owner), request, context);
       expect(engine.aborted).toEqual([conversationId]);
       await core.idle();
       core.stop();
@@ -358,12 +358,12 @@ describe("API command crash atomicity", () => {
       throw new Error("transport lost after abort");
     };
     const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "message.cancel", conversationId } };
-    await expect(execute(core, new Access(ledger, owner), request, context)).rejects.toThrow("transport lost after abort");
+    await expect(execute(core, new Access(owner), request, context)).rejects.toThrow("transport lost after abort");
     const cancellation = ledger.effectByCall(conversationId, `api:${request.requestId}`)!;
     expect(cancellation.state).toBe("unknown");
     expect(ledger.pendingDecisions({ effectId: cancellation.id }).some((decision) => decision.kind === "reconcile_effect")).toBe(true);
     engine.abort = abort;
-    await expect(execute(core, new Access(ledger, owner), request, context)).rejects.toThrow("unknown");
+    await expect(execute(core, new Access(owner), request, context)).rejects.toThrow("unknown");
     expect(engine.aborted).toEqual([conversationId]);
     expect(ledger.request(request.requestId)?.state).toBe("pending");
     await core.idle();
@@ -402,7 +402,7 @@ describe("API command crash atomicity", () => {
       if (state === "unknown") core.effects.unknown(approval.id, "uncertain previous host command");
       const originalEffect = ledger.effect(approval.id);
       const originalDecisions = ledger.pendingDecisions({ effectId: approval.id });
-      const access = new Access(ledger, owner);
+      const access = new Access(owner);
       await execute(core, access, { requestId: crypto.randomUUID(), command: { type: "provider.delete", providerId: "revoked-provider" } }, context);
       expect(new FileSecrets(root).get("revoked-provider")).toBeNull();
       expect(ledger.settings().providers.some((provider) => provider.id === "revoked-provider")).toBe(false);
@@ -461,10 +461,10 @@ describe("API command crash atomicity", () => {
     const ghost = core.createGhost({ name: "Owner", persona: "" });
     const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "sandbox.control", ghostId: ghost.id, action: "reset" } };
     ledger.db.exec(`CREATE TRIGGER reject_receipt BEFORE INSERT ON requests WHEN NEW.id = '${request.requestId}' AND NEW.state = 'done' BEGIN SELECT RAISE(ABORT, 'receipt fault'); END;`);
-    await expect(execute(core, new Access(ledger, owner), request, context)).rejects.toThrow("receipt fault");
+    await expect(execute(core, new Access(owner), request, context)).rejects.toThrow("receipt fault");
     expect(readFileSync(target, "utf8")).toBe("reset\n");
     ledger.db.exec("DROP TRIGGER reject_receipt");
-    await execute(core, new Access(ledger, owner), request, context);
+    await execute(core, new Access(owner), request, context);
     expect(readFileSync(target, "utf8")).toBe("reset\n");
     expect(ledger.request(request.requestId)?.state).toBe("done");
     await core.idle();
@@ -481,11 +481,11 @@ describe("API command crash atomicity", () => {
     const documents = createDocuments(core);
     const check = documents.check.bind(documents);
     documents.check = async () => { throw new Error("temporarily unavailable vault"); };
-    await expect(execute(core, new Access(ledger, owner), request, { ...context, documents })).rejects.toThrow("temporarily unavailable vault");
+    await expect(execute(core, new Access(owner), request, { ...context, documents })).rejects.toThrow("temporarily unavailable vault");
     expect(ledger.effectsInState("pending")).toHaveLength(0);
     expect(ledger.effectsInState("unknown")).toHaveLength(0);
     documents.check = check;
-    await execute(core, new Access(ledger, owner), request, { ...context, documents });
+    await execute(core, new Access(owner), request, { ...context, documents });
     expect(readdirSync(vault).filter((name) => name.endsWith(".md"))).toHaveLength(1);
     await core.idle();
     core.stop();
@@ -498,13 +498,13 @@ describe("API command crash atomicity", () => {
     core.createGhost({ name: "Owner", persona: "" });
     const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "avatar.create", name: "Mask", description: "A mask", image: `data:image/png;base64,${Buffer.from("image bytes").toString("base64")}` } };
     ledger.db.exec(`CREATE TRIGGER reject_receipt BEFORE INSERT ON requests WHEN NEW.id = '${request.requestId}' AND NEW.state = 'done' BEGIN SELECT RAISE(ABORT, 'receipt fault'); END;`);
-    await expect(execute(core, new Access(ledger, owner), request, context)).rejects.toThrow("receipt fault");
+    await expect(execute(core, new Access(owner), request, context)).rejects.toThrow("receipt fault");
     expect(ledger.avatars()).toHaveLength(0);
     expect(ledger.db.query("SELECT COUNT(*) AS n FROM artifacts").get()).toEqual({ n: 0 });
     expect(ledger.request(request.requestId)?.state).toBe("pending");
     ledger.db.exec("DROP TRIGGER reject_receipt");
-    const result = await execute(core, new Access(ledger, owner), request, context);
-    expect(await execute(core, new Access(ledger, owner), request, context)).toEqual(result);
+    const result = await execute(core, new Access(owner), request, context);
+    expect(await execute(core, new Access(owner), request, context)).toEqual(result);
     expect(ledger.avatars()).toHaveLength(1);
     expect(ledger.db.query("SELECT COUNT(*) AS n FROM artifacts").get()).toEqual({ n: 1 });
     await core.idle();

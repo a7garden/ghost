@@ -5,7 +5,6 @@ import {
   Conversation,
   Decision,
   Device,
-  DeviceGrant,
   Effect,
   Ghost,
   Id,
@@ -25,7 +24,7 @@ import {
 
 export const Principal = Type.Union([
   Type.Object({ kind: Type.Literal("owner") }),
-  Type.Object({ kind: Type.Literal("device"), deviceId: Id, name: Type.String(), grants: Type.Array(DeviceGrant) }),
+  Type.Object({ kind: Type.Literal("device"), deviceId: Id, name: Type.String() }),
 ]);
 export type Principal = Static<typeof Principal>;
 
@@ -47,7 +46,7 @@ export const OAuthStatus = Type.Object({
 });
 export type OAuthStatus = Static<typeof OAuthStatus>;
 
-/** GET /api/state. A device sees only what its grants cover; owner-only collections are empty for devices. */
+/** GET /api/state. Devices see every Ghost; owner-only collections are empty for devices. */
 export const State = Type.Object({
   /** Apply events with a greater seq on top of this snapshot. */
   seq: Type.Integer({ minimum: 0 }),
@@ -102,7 +101,8 @@ export type PairingOffer = Static<typeof PairingOffer>;
 /** POST /api/pairing/claim (unauthenticated, rate limited) */
 export const PairingClaim = Type.Object({
   code: Type.String({ minLength: 6, maxLength: 32 }),
-  deviceName: Type.String({ minLength: 1, maxLength: 128 }),
+  /** Trimmed at claim; an empty name becomes "iPhone". */
+  deviceName: Type.String({ maxLength: 128 }),
 });
 export type PairingClaim = Static<typeof PairingClaim>;
 

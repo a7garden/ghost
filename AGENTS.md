@@ -4,7 +4,7 @@
 
 Every Ghost is the same kind of independently identifiable, durable bot, with its own tool allow-list. The default Ghost is the entry point and, only in direct conversations, may inspect and configure other non-default Ghosts. It cannot configure itself or change the default designation; those remain owner-only. Since 2026-11-07 the host is one Bun/TypeScript process (`apps/ghost-host`) that runs every conversation in-process on Pi Durable; read [the architecture](docs/architecture.md) before changing it and keep its principles: every wake is a deterministic-id submission, effects are journaled before I/O and never replayed, capability is the intersection of conversation kind, Ghost tool permissions and integration grants, reads are not journaled. The production Mac runs it since 2026-11-07; [local operations](docs/local-operations.md) records the installed release and the rollback path.
 
-The native iPhone app must support direct conversation, delegation, approval, results and reconnect without Telegram, Slack or another messenger. Device grants remain explicit and scoped to the reviewed Ghost/conversation pairs.
+The native iPhone app must support direct conversation, delegation, approval, results and reconnect without Telegram, Slack or another messenger. A paired device reaches every Ghost (owner decision 2026-11-08), but may send only device commands; revocation is the control.
 
 ## Product scope
 

@@ -8,7 +8,7 @@ import type { ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@e
 import type { Context } from "@earendil-works/chord";
 import type { Conversation, Ghost, Work } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
-import { deleteGhost, hashSecret, updateGhost } from "../src/core/commands.ts";
+import { deleteGhost, updateGhost } from "../src/core/commands.ts";
 import type { Engine } from "../src/core/ports.ts";
 import type { ArtifactStore } from "../src/core/ports.ts";
 import { createEngine } from "../src/engine/index.ts";
@@ -484,7 +484,7 @@ describe("ghost.delete", () => {
     expect(s.ledger.ghost(s.helper.id).deletedAt).not.toBeNull();
   });
 
-  test("deleting scrubs schedules and device and space grants, and a repeat delete is a no-op", () => {
+  test("deleting scrubs schedules and Space grants, and a repeat delete is a no-op", () => {
     const s = setup();
     const other = s.core.createGhost({ name: "Keeper", persona: "Stays." });
     s.ledger.tx(() => {
@@ -508,20 +508,6 @@ describe("ghost.delete", () => {
         state: "active",
         createdAt: Date.now(),
       });
-      s.ledger.insertDevice(
-        {
-          id: "dev-1",
-          name: "Phone",
-          grants: [
-            { ghostId: s.helper.id, conversationId: null },
-            { ghostId: other.id, conversationId: null },
-          ],
-          pushEnabled: false,
-          createdAt: Date.now(),
-          lastSeenAt: null,
-        },
-        hashSecret("token"),
-      );
       s.ledger.putSpace({
         id: "space-1",
         name: "Vault",
@@ -538,7 +524,6 @@ describe("ghost.delete", () => {
     deleteGhost(s.core, s.helper.id);
 
     expect(s.ledger.schedules().map((schedule) => schedule.id)).toEqual(["sch-kept"]);
-    expect(s.ledger.device("dev-1").grants).toEqual([{ ghostId: other.id, conversationId: null }]);
     expect(s.ledger.space("space-1").grants).toEqual([{ ghostId: other.id, mode: "propose" }]);
     expect(s.ledger.ghost(s.helper.id)).toMatchObject({ deletedAt: expect.any(Number), state: "retired" });
   });
@@ -570,14 +555,6 @@ describe("ghost.delete", () => {
     retireAndDelete(s, s.helper.id);
     expect(() => updateGhost(s.core, s.helper.id, { name: "Zombie" })).toThrow("was deleted");
     expect(s.ledger.ghost(s.helper.id).name).toBe("Helper");
-  });
-
-  test("deleting drops the Ghost from unclaimed pairing offers, so a later claim cannot grant it", () => {
-    const s = setup();
-    s.ledger.tx(() => s.ledger.insertPairing("code-1", "Phone", [{ ghostId: s.helper.id, conversationId: null }, { ghostId: s.ghost.id, conversationId: null }], Date.now() + 60_000));
-    retireAndDelete(s, s.helper.id);
-    const claimed = s.ledger.tx(() => s.ledger.claimPairing("code-1", "dev-new", Date.now()));
-    expect(claimed?.grants).toEqual([{ ghostId: s.ghost.id, conversationId: null }]);
   });
 
   test("a deleted Ghost takes no owner message and runs no tool from its retained conversations", async () => {
