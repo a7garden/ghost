@@ -1,26 +1,37 @@
 import { randomBytes, createHash, randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, linkSync, unlinkSync, readFileSync, writeFileSync, statSync, lstatSync } from "node:fs";
+import { chmodSync, mkdirSync, linkSync, unlinkSync, readFileSync, writeFileSync, statSync, lstatSync, readdirSync, rmSync, realpathSync, openSync, closeSync, fstatSync, readSync, constants as FS } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Config } from "../config.ts";
 import { CommandError } from "../core/errors.ts";
+import { NoEffect, KnownOutcome } from "../core/effects.ts";
 import type { BrowserCommandResult, BrowserPort, BrowserRunOptions, BrowserSessionRef } from "./ports.ts";
 import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
+import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const CAP = 512 * 1024;
 const MAX_SESSIONS = 4;
+const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+const MAX_DOWNLOAD_FILES = 32;
+const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
+const NETWORK_INIT = `(() => {
+  for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCIceCandidate"]) {
+    Object.defineProperty(globalThis, name, { value: undefined, writable: false, configurable: false });
+  }
+})();`;
 const expand = (path: string) => path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 const nameFor = (id: string) => `ghost-${createHash("sha256").update(id).digest("hex").slice(0, 24)}`;
 interface Session {
   ref: BrowserSessionRef;
   headed: boolean;
-  secrets: { value: string; cardPattern?: RegExp }[];
-  screenshotOrigin: string | null;
+  secrets: { variants: string[]; cardPattern?: RegExp }[];
+  screenshotsBlocked: boolean;
+  passwordScreenshots: Map<string, string>;
   active: boolean;
 }
 
-export function createBrowser(config: Config, deps: { root: string; log: (...a: unknown[]) => void }): BrowserPort | null {
+export function createBrowser(config: Config, deps: { root: string }): BrowserPort | null {
   if (!config.browser) return null;
   return new AgentBrowser(config.browser, deps.root);
 }
@@ -29,6 +40,7 @@ export function createBrowser(config: Config, deps: { root: string; log: (...a: 
 export class AgentBrowser implements BrowserPort {
   private readonly home: string;
   private readonly configPath: string;
+  private readonly initPath: string;
   private readonly namespace: string;
   private readonly socketDir: string;
   private readonly key: string;
@@ -45,8 +57,12 @@ export class AgentBrowser implements BrowserPort {
     const base = join(resolve(root), "browser");
     this.home = join(base, "home");
     mkdirSync(this.home, { recursive: true, mode: 0o700 });
+    // Private staged paths are canonical because the sandbox no-follow readers reject parent aliases.
+    this.root = realpathSync(root);
     this.configPath = join(base, "config.json");
     writeFileSync(this.configPath, "{}", { mode: 0o600 });
+    this.initPath = join(base, "network-init.js");
+    writeFileSync(this.initPath, NETWORK_INIT, { mode: 0o600 });
     const rootHash = createHash("sha256").update(resolve(root)).digest("hex");
     this.namespace = `g${rootHash.slice(0, 12)}`;
     // macOS sockaddr_un permits only 103 path bytes; sockets are ephemeral, not login state.
@@ -89,16 +105,107 @@ export class AgentBrowser implements BrowserPort {
     });
     return next;
   }
+  private sessionDirs(session: Session) {
+    const name = nameFor(session.ref.conversationId);
+    return [join(this.root, "browser", "downloads", name), join(this.root, "browser", "staging", name)];
+  }
+  private clearFiles(session: Session) {
+    for (const path of this.sessionDirs(session)) rmSync(path, { recursive: true, force: true });
+  }
+  private checkBudget(session: Session) {
+    let count = 0;
+    let bytes = 0;
+    const dirs = this.sessionDirs(session);
+    while (dirs.length) {
+      const directory = dirs.pop()!;
+      if (!statSync(directory, { throwIfNoEntry: false })) continue;
+      for (const name of readdirSync(directory)) {
+        const path = join(directory, name);
+        const stat = lstatSync(path);
+        if (stat.isSymbolicLink()) throw new Error("Unexpected staging symlink");
+        if (stat.isDirectory()) dirs.push(path);
+        else {
+          count++; bytes += stat.size;
+          if (count > MAX_DOWNLOAD_FILES || bytes > MAX_DOWNLOAD_BYTES) throw new Error("Download budget exceeded");
+        }
+      }
+    }
+  }
+  private async stopDownloads(session: Session) {
+    try {
+      const closed = await this.invoke(session, ["close"], { timeoutMs: 5_000 });
+      if (!closed.ok) throw new Error("Browser did not close");
+    } catch {
+      // A daemon that cannot be stopped must lose its network path, not continue downloading.
+      const proxy = this.proxy; this.proxy = null; this.initialized = false;
+      if (proxy) await (await proxy).close();
+    }
+    this.sessions.delete(session.ref.conversationId);
+    this.clearFiles(session);
+  }
+  private activeTab(data: unknown) {
+    if (!data || typeof data !== "object" || !("tabs" in data) || !Array.isArray(data.tabs)) return null;
+    for (const tab of data.tabs) {
+      if (tab && typeof tab === "object" && "active" in tab && tab.active && "targetId" in tab && typeof tab.targetId === "string" && "url" in tab && typeof tab.url === "string") return { id: tab.targetId, url: tab.url };
+    }
+    return null;
+  }
+  private workspace(workspace: string, input: string, createParent: boolean) {
+    if (lstatSync(workspace).isSymbolicLink()) throw new CommandError("forbidden", "Workspace symlinks are refused");
+    const base = realpathSync(workspace);
+    const path = resolve(base, input);
+    const rel = relative(base, path);
+    if (!rel || rel === ".." || rel.startsWith("../") || isAbsolute(rel)) throw new CommandError("forbidden", "Path must stay inside the Work workspace");
+    confineDirChain(base, rel.split("/").slice(0, -1), createParent);
+    return path;
+  }
+  private stageUpload(path: string, staged: string) {
+    const fd = openSync(path, FS.O_RDONLY | FS.O_NOFOLLOW | FS.O_NONBLOCK);
+    try {
+      const stat = fstatSync(fd);
+      const current = lstatSync(path);
+      if (realpathSync(dirname(path)) !== dirname(path) || !stat.isFile() || current.dev !== stat.dev || current.ino !== stat.ino || stat.size > MAX_UPLOAD_BYTES) throw new CommandError("forbidden", "Upload must be a confined regular file no larger than 32 MiB");
+      const buffer = Buffer.alloc(stat.size + 1);
+      let size = 0;
+      while (size < buffer.length) {
+        const read = readSync(fd, buffer, size, buffer.length - size, null);
+        if (!read) break;
+        size += read;
+      }
+      if (size > stat.size) throw new CommandError("forbidden", "Upload changed while being staged");
+      writeFileSync(staged, buffer.subarray(0, size), { flag: "wx", mode: 0o600 });
+    } finally { closeSync(fd); }
+  }
+  private commitDownload(path: string, staged: string) {
+    if (realpathSync(dirname(path)) !== dirname(path)) throw new CommandError("forbidden", "Download directory was replaced");
+    const fd = openSync(path, FS.O_WRONLY | FS.O_CREAT | FS.O_EXCL | FS.O_NOFOLLOW, 0o600);
+    try {
+      const stat = fstatSync(fd);
+      const current = lstatSync(path);
+      if (realpathSync(dirname(path)) !== dirname(path) || stat.dev !== current.dev || stat.ino !== current.ino) throw new CommandError("forbidden", "Download directory was replaced");
+      writeFileSync(fd, readFileNoFollow(staged));
+    } catch (error) {
+      // Remove only the inode this call just created, never a replacement planted by the container.
+      try {
+        const opened = fstatSync(fd); const current = lstatSync(path);
+        if (opened.dev === current.dev && opened.ino === current.ino) unlinkSync(path);
+      } catch {}
+      throw error;
+    } finally { closeSync(fd); }
+  }
   private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number }): Promise<BrowserCommandResult> {
     const proxy = await (this.proxy ??= createEgressProxy());
     const name = nameFor(session.ref.conversationId);
     const download = join(this.root, "browser", "downloads", name);
     mkdirSync(download, { recursive: true, mode: 0o700 });
+    if (argv[0] !== "close") try { this.checkBudget(session); }
+    catch { await this.stopDownloads(session); throw new CommandError("unavailable", "Browser download limit exceeded; session closed"); }
     const screenshot = argv[0] === "screenshot" ? join(download, `${randomUUID()}.png`) : null;
     const command = screenshot ? ["screenshot", screenshot, ...argv.slice(1)] : argv;
     const args = [expand(this.config.executable), "--session", name, "--namespace", this.namespace,
       "--restore", `ghost-${session.ref.ghostId}`, "--config", this.configPath,
       "--executable-path", expand(this.config.chrome ?? CHROME),
+      "--init-script", this.initPath,
       "--args", `--proxy-server=${proxy.url},--proxy-bypass-list=<-loopback>,--force-webrtc-ip-handling-policy=disable_non_proxied_udp`,
       "--content-boundaries", "--max-output", "48000", "--idle-timeout", `${this.config.idleTimeoutMinutes ?? 10}m`,
       "--download-path", download, "--screenshot-dir", download, ...(session.headed ? ["--headed"] : []), "--json", ...command];
@@ -112,6 +219,16 @@ export class AgentBrowser implements BrowserPort {
     let killTimer: NodeJS.Timeout | undefined;
     const stop = () => { child.kill("SIGTERM"); killTimer ??= setTimeout(() => child.kill("SIGKILL"), 500); };
     const deadline = setTimeout(() => { timedOut = true; stop(); }, Math.min(options?.timeoutMs ?? 45_000, 90_000));
+    let overflow = false;
+    const budgetState: { closing: Promise<void> | null } = { closing: null };
+    const budget = argv[0] === "close" ? null : setInterval(() => {
+      try { this.checkBudget(session); }
+      catch {
+        overflow = true; stop();
+        budgetState.closing ??= this.stopDownloads(session);
+        void budgetState.closing.catch(() => {});
+      }
+    }, 100);
     const capture = async (stream: ReadableStream<Uint8Array>) => {
       const reader = stream.getReader();
       const chunks: Uint8Array[] = [];
@@ -131,31 +248,42 @@ export class AgentBrowser implements BrowserPort {
       if (options?.stdin !== undefined) child.stdin.write(options.stdin);
       child.stdin.end();
       const [out, , exit] = await Promise.all([stdout, stderr, child.exited]);
+      if (budgetState.closing) await budgetState.closing;
+      if (overflow) {
+        this.clearFiles(session);
+        throw new CommandError("unavailable", "Browser download limit exceeded; session closed");
+      }
+      if (argv[0] !== "close") try { this.checkBudget(session); }
+      catch { await this.stopDownloads(session); throw new CommandError("unavailable", "Browser download limit exceeded; session closed"); }
       if (timedOut || exceeded || exit !== 0) throw new CommandError("unavailable", timedOut ? "Browser command deadline exceeded; outcome may be unknown" : "Browser command failed; outcome may be unknown");
       let parsed: { success?: boolean; data?: unknown };
       try { parsed = JSON.parse(out); } catch { throw new CommandError("unavailable", "Browser returned an invalid response"); }
       // Secret eval responses are an allowlisted status only. Never forward raw output or an error.
       if (options?.stdin !== undefined) {
         const value = parsed.data && typeof parsed.data === "object" && "result" in parsed.data ? parsed.data.result : null;
-        const status = value === "filled" ? "filled" : "refused";
-        return { ok: parsed.success === true && status === "filled", data: { status }, error: status === "filled" ? null : "Secret fill refused" };
+        if (value === "uncertain") return { ok: false, data: { status: "uncertain" }, error: "Secret fill outcome is uncertain" };
+        const reason = typeof value === "string" && ["refused:origin_mismatch", "refused:not_password_field", "refused:frame", "refused:not_editable", "refused:not_granted"].includes(value) ? value.slice(8) : "not_editable";
+        return { ok: parsed.success === true && value === "filled", data: value === "filled" ? { status: "filled" } : { status: "refused", reason }, error: value === "filled" ? null : `Secret fill refused (${reason})` };
       }
       if (screenshot && parsed.success === true) {
-        if (statSync(screenshot).size > 8 * 1024 * 1024) return { ok: true, data: { path: screenshot }, error: null };
-        return { ok: true, data: { image: readFileSync(screenshot).toString("base64"), path: screenshot }, error: null };
+        if (statSync(screenshot).size > 8 * 1024 * 1024) throw new CommandError("unavailable", "Screenshot exceeds the 8 MiB image limit");
+        return { ok: true, data: { image: readFileSync(screenshot).toString("base64") }, error: null };
       }
       return { ok: parsed.success === true, data: parsed.data ?? null, error: parsed.success === true ? null : "Browser action failed" };
     } finally {
       clearTimeout(deadline); clearTimeout(killTimer);
+      clearInterval(budget ?? undefined);
+      if (screenshot) rmSync(screenshot, { force: true });
     }
   }
   private async admit(ref: BrowserSessionRef): Promise<Session> {
     if (!this.initialized) {
       // A crashed host may leave daemons pointing at its now-dead proxy. This private namespace
       // belongs to this root only; close those daemons before restoring any new session.
-      const orphan: Session = { ref, headed: false, secrets: [], screenshotOrigin: null, active: false };
+      const orphan: Session = { ref, headed: false, secrets: [], screenshotsBlocked: false, passwordScreenshots: new Map(), active: false };
       if (!(await this.invoke(orphan, ["close", "--all"])).ok) throw new CommandError("unavailable", "Could not close interrupted browser sessions");
       this.initialized = true;
+      for (const name of ["downloads", "staging"]) rmSync(join(this.root, "browser", name), { recursive: true, force: true });
     }
     const existing = this.sessions.get(ref.conversationId);
     if (existing && existing.ref.ghostId !== ref.ghostId) throw new CommandError("forbidden", "Browser session owner changed");
@@ -165,9 +293,10 @@ export class AgentBrowser implements BrowserPort {
       const [id, victim] = idle;
       const closed = await this.invoke(victim, ["close"]);
       if (!closed.ok) throw new CommandError("unavailable", "Browser session eviction failed");
+      this.clearFiles(victim);
       this.sessions.delete(id);
     }
-    const session: Session = existing ?? { ref, headed: false, secrets: [], screenshotOrigin: null, active: false };
+    const session: Session = existing ?? { ref, headed: false, secrets: [], screenshotsBlocked: false, passwordScreenshots: new Map(), active: false };
     session.active = true;
     this.sessions.delete(ref.conversationId);
     this.sessions.set(ref.conversationId, session);
@@ -176,26 +305,72 @@ export class AgentBrowser implements BrowserPort {
   run(ref: BrowserSessionRef, argv: string[], options?: BrowserRunOptions) {
     return this.enqueueSession(ref, async (session) => {
       if (options?.sensitive) {
-        const { value, field, origin } = options.sensitive;
-        if (value && !session.secrets.some((entry) => entry.value === value && (field !== "card_number" || entry.cardPattern !== undefined))) {
+        const { value, field } = options.sensitive;
+        if (value && !session.secrets.some((entry) => entry.variants.includes(value) && (field !== "card_number" || entry.cardPattern !== undefined))) {
+          const json = JSON.stringify(value).slice(1, -1);
+          const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+          let encoded = value;
+          try { encoded = encodeURIComponent(value); } catch {}
+          const variants = [...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), json])].sort((a, b) => b.length - a.length);
           const digits = field === "card_number" ? value.replace(/\D/g, "") : "";
-          session.secrets.push({ value, ...(digits ? { cardPattern: new RegExp(digits.split("").join("[\\s-]*"), "g") } : {}) });
+          session.secrets.push({ variants, ...(digits ? { cardPattern: new RegExp(digits.split("").join("[\\s-]*"), "g") } : {}) });
         }
-        if (field.startsWith("card_") || field === "value") session.screenshotOrigin = origin;
+        if (field.startsWith("card_") || field === "value") session.screenshotsBlocked = true;
+        if (field === "password") {
+          const tab = this.activeTab((await this.invoke(session, ["tab", "list"])).data);
+          if (!tab) throw new CommandError("forbidden", "Secret fill refused (not_password_field)");
+          session.passwordScreenshots.set(tab.id, tab.url);
+        }
       }
-      if (argv[0] === "screenshot" && session.screenshotOrigin) {
-        const page = await this.invoke(session, ["get", "url"]);
-        const url = page.data && typeof page.data === "object" && "url" in page.data ? page.data.url : null;
-        let origin: string | null = null;
-        try { if (typeof url === "string") origin = new URL(url).origin; } catch {}
-        if (!page.ok || origin === null || origin === session.screenshotOrigin) throw new CommandError("forbidden", "Screenshots are disabled on this origin after a card or secret-value fill; navigate to a different origin or close the session");
-        session.screenshotOrigin = null;
+      if (argv[0] === "screenshot") {
+        if (session.screenshotsBlocked) throw new CommandError("forbidden", "Screenshots are disabled after a card or secret-value fill; close the browser session to reset");
+        if (session.passwordScreenshots.size) {
+          const tab = this.activeTab((await this.invoke(session, ["tab", "list"])).data);
+          if (!tab || session.passwordScreenshots.get(tab.id) === tab.url) throw new CommandError("forbidden", "Screenshots are disabled after a password fill until that tab's URL changes");
+          if (tab) session.passwordScreenshots.delete(tab.id);
+        }
       }
-      const result = await this.invoke(session, argv, options);
+      let staged: string | null = null;
+      let destination: string | null = null;
+      let command = argv;
+      if (options?.transfer) {
+        const transfer = options.transfer;
+        const staging = this.sessionDirs(session)[1]!;
+        mkdirSync(staging, { recursive: true, mode: 0o700 });
+        staged = join(staging, randomUUID());
+        try {
+          if (transfer.kind === "upload") {
+            const source = this.workspace(transfer.workspace, transfer.path, false);
+            this.stageUpload(source, staged);
+          } else {
+            if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(transfer.name)) throw new CommandError("invalid", "Download name must be a plain filename");
+            destination = this.workspace(transfer.workspace, `downloads/${transfer.name}`, true);
+            if (lstatSync(destination, { throwIfNoEntry: false })) throw new NoEffect("Download destination already exists");
+          }
+          command = [transfer.kind, argv[1]!, staged];
+        } catch {
+          rmSync(staged, { force: true });
+          throw new NoEffect("Workspace transfer refused: missing file, existing destination or symlink");
+        }
+      }
+      let result: BrowserCommandResult;
+      try {
+        result = await this.invoke(session, command, options);
+        if (result.ok && staged && destination) {
+          try {
+            // Re-walk after Chrome's I/O: a container may have swapped directories while it ran.
+            const transfer = options?.transfer;
+            if (!transfer || transfer.kind !== "download") throw new Error("Missing destination");
+            destination = this.workspace(transfer.workspace, `downloads/${transfer.name}`, true);
+            this.commitDownload(destination, staged);
+          } catch { throw new KnownOutcome("Download could not be saved: existing destination or workspace symlink"); }
+        }
+      } finally { if (staged) rmSync(staged, { force: true }); }
+      if (argv[0] === "close" && result.ok) this.clearFiles(session);
       if (!session.secrets.length || options?.stdin !== undefined || argv[0] === "screenshot") return result;
       const redactText = (text: string) => {
         for (const secret of session.secrets) {
-          text = text.replaceAll(secret.value, "[redacted]");
+          for (const variant of secret.variants) text = text.replaceAll(variant, "[redacted]");
           if (secret.cardPattern) text = text.replace(secret.cardPattern, "[redacted]");
         }
         return text;
@@ -218,7 +393,9 @@ export class AgentBrowser implements BrowserPort {
     return this.enqueueSession(ref, async (session) => {
       if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser state");
       session.secrets = [];
-      session.screenshotOrigin = null;
+      session.screenshotsBlocked = false;
+      session.passwordScreenshots.clear();
+      this.clearFiles(session);
       session.headed = true;
       if (!(await this.invoke(session, ["open", url ?? "about:blank"])).ok) throw new CommandError("unavailable", "Could not open browser handoff");
     });
@@ -227,6 +404,7 @@ export class AgentBrowser implements BrowserPort {
   close(ref: BrowserSessionRef) {
     return this.enqueueSession(ref, async (session) => {
       if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not close browser session");
+      this.clearFiles(session);
       this.sessions.delete(ref.conversationId);
     });
   }
@@ -238,12 +416,16 @@ export class AgentBrowser implements BrowserPort {
       for (const [id, session] of this.sessions) {
         try {
           if (!(await this.invoke(session, ["close"])).ok) throw new Error("Browser session did not close");
+          this.clearFiles(session);
           this.sessions.delete(id);
         } catch (error) { failure = error; }
       }
       if (this.proxy) { await (await this.proxy).close(); this.proxy = null; }
       if (failure) throw failure;
-    }));
+    })).catch((error) => {
+      this.shutdownPromise = null;
+      throw error;
+    });
     return this.shutdownPromise;
   }
 }

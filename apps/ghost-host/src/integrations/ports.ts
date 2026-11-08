@@ -207,6 +207,8 @@ export interface BrowserRunOptions {
   timeoutMs?: number;
   /** Host-only ephemeral redaction registry. Never written to disk or passed in argv. */
   sensitive?: { value: string; field: VaultField; origin: string };
+  /** Workspace paths never reach Chrome; the adapter stages/copies with no-follow semantics. */
+  transfer?: { kind: "upload"; workspace: string; path: string } | { kind: "download"; workspace: string; name: string };
 }
 
 /**
