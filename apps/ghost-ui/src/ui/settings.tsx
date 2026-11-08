@@ -1,6 +1,7 @@
 // App-owned UI. Retained-source notices: ./LICENSE.
 import type { ReactNode, KeyboardEvent } from "react"
 import { useEffect, useId, useRef, useState } from "react"
+import "./settings.css"
 
 export interface SettingsLayoutSection {
   id: string
@@ -65,6 +66,11 @@ export function SettingsLayout({
     observer.observe(settings)
     return () => observer.disconnect()
   }, [])
+
+  // Keyboard and deep-link selection can land outside the visible rail; bring it back.
+  useEffect(() => {
+    tabRefs.current.get(activeSection)?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [activeSection])
 
   const tabId = (sectionId: string) => `${instanceId}-tab-${sectionId}`
   const selectedSection = sections.find((section) => section.id === activeSection)

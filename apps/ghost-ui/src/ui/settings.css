@@ -1,0 +1,24 @@
+/* Shared settings shell refinements. Imported by ui/settings.tsx, so it lands after
+   compositions.css within the components cascade layer; equal-specificity rules here
+   therefore win by source order (same convention as features/manage.css). Every rule
+   stays inside the settings subtree so other surfaces keep their composition. */
+
+@layer components {
+
+/* Scoped tokens: a slim secondary rail, an editor-width reading column and a calmer
+   top rhythm. The root tokens in theme.css stay untouched for other surfaces. */
+.ghost-settings {
+  --ghost-layout-settings-nav: 164px;
+  --ghost-layout-settings-max: var(--ghost-layout-content-max);
+  --ghost-layout-settings-top-padding: 48px;
+}
+
+/* Section selection reads as a quiet tint, not a second raised card, so group bodies
+   stay the only surfaces on screen. */
+.ghost-settings__section[aria-selected="true"] {
+  color: var(--ghost-ink);
+  background: var(--ghost-hover2);
+  box-shadow: none;
+}
+.ghost-settings__section[aria-selected="true"] svg { color: var(--ghost-ink); }
+}

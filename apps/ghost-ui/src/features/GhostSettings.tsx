@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Square, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
 import { GHOST_TOOLS, HOST_TOOLS, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
-import { InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { DotAvatar } from '../components/DotAvatar';
@@ -59,18 +59,28 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId }: {
   const { state } = useHostState(store);
   const ghosts = settingsRoster(state?.ghosts ?? []);
   const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState('');
+  const shown = ghosts.filter(ghost => ghost.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const selected = creating ? null : ghosts.find(ghost => ghost.id === selectedGhostId) ?? ghosts[0] ?? null;
   return <section className="ghost-settings-page" aria-label={uiTerms.ghostSettings}>
-    <div className="roster" role="tablist" aria-label="Ghost">
-      {ghosts.map(ghost => <button key={ghost.id} type="button" role="tab" aria-selected={ghost.id === selected?.id} className="roster__ghost"
-        data-state={ghost.state} onClick={() => { setCreating(false); onSelect(ghost.id); }}>
-        <span className="roster__portrait"><DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={44}/>{ghost.isDefault && <Crown className="roster__crown" aria-label="메인"/>}</span>
-        <span className="roster__name">{ghost.name}</span>
-      </button>)}
-      <button type="button" role="tab" aria-selected={creating} className="roster__ghost roster__new" disabled={!state} onClick={() => setCreating(true)}>
-        <span className="roster__portrait"><Plus aria-hidden="true"/></span>
-        <span className="roster__name">새 Ghost</span>
-      </button>
+    <div className="roster-picker">
+      {ghosts.length >= 8 && <label className="roster-search">
+        <Search aria-hidden="true"/>
+        <input aria-label="설정할 Ghost 찾기" placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}/>
+        {query && <button type="button" aria-label="Ghost 검색 지우기" onClick={() => setQuery('')}><X aria-hidden="true"/></button>}
+      </label>}
+      <div className="roster" aria-label="설정할 Ghost">
+        {shown.map(ghost => <button key={ghost.id} type="button" aria-pressed={!creating && ghost.id === selected?.id} className="roster__ghost"
+          title={ghost.name} data-state={ghost.state} onClick={() => { setCreating(false); onSelect(ghost.id); }}>
+          <span className="roster__portrait"><DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={30}/></span>
+          <span className="roster__name">{ghost.name}</span>
+          {ghost.isDefault && <Crown className="roster__crown" aria-label="메인"/>}
+        </button>)}
+        {!shown.length && <span className="roster__empty">일치하는 Ghost가 없습니다.</span>}
+        <button type="button" aria-pressed={creating} className="roster__ghost roster__new" disabled={!state} onClick={() => setCreating(true)}>
+          <Plus aria-hidden="true"/><span>새 Ghost</span>
+        </button>
+      </div>
     </div>
     {creating ? <GhostCreator onCancel={() => setCreating(false)} onCreated={id => { setCreating(false); onSelect(id); }}/>
       : selected && <GhostSheet key={selected.id} ghost={selected} onChat={() => onChat(selected.id)}/>}
@@ -155,58 +165,91 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
     client.skills().then(found => { if (alive) setCatalog(found); }).catch(() => { if (alive) setCatalog(null); });
     return () => { alive = false; };
   }, [client]);
-  return <div className="ghost-sheet">
+  return <div className="ghost-sheet" aria-busy={saving}>
     <header className="ghost-sheet__identity">
       <button type="button" className="ghost-sheet__portrait" aria-label={`${ghost.name} 꾸미기`} title="꾸미기" onClick={() => setDesigning(true)}>
-        <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={84}/>
+        <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={60}/>
       </button>
       <div className="ghost-sheet__who">
         <NameField key={ghost.name} name={ghost.name} onSave={name => update({ name })}/>
         <div className="ghost-sheet__marks">
-          {ghost.isDefault
-            ? <span className="main-mark" data-on><Crown aria-hidden="true"/>메인 Ghost</span>
-            : <button type="button" className="main-mark" disabled={ghost.state !== 'active'} onClick={() => void save({ type: 'ghost.set_default', ghostId: ghost.id })}>
-              <Crown aria-hidden="true"/>메인으로 지정</button>}
-          <StateSwitch value={ghost.state} disabled={ghost.isDefault} onChange={next => void update({ state: next })}/>
-          {canDeleteGhost(ghost) && <button type="button" className="main-mark" data-danger onClick={() => setDeleting(true)}>
-            <Trash2 aria-hidden="true"/>삭제</button>}
+          {ghost.isDefault && <span className="main-mark" data-on><Crown aria-hidden="true"/>메인 Ghost</span>}
+          <span className="ghost-sheet__state" data-state={ghost.state}><Power aria-hidden="true"/>{states.find(item => item.value === ghost.state)?.label}</span>
         </div>
       </div>
       <button type="button" className="ghost-sheet__chat" onClick={onChat}><MessageCircle aria-hidden="true"/>대화</button>
     </header>
+    {error && <div className="ghost-sheet__feedback" role="status"><InlineError>{error}</InlineError></div>}
 
-    <Panel title="모델">
-      <ModelChoice value={ghost.model} onChange={model => void update({ model })}/>
-      <FallbackBoard ghostId={ghost.id} fallbacks={ghost.fallbacks} save={save}/>
-    </Panel>
-    <SkillsPanel catalog={catalog} skills={ghost.skills} onChange={skills => void update({ skills })}/>
     <Panel title={uiTerms.roleInstructions}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
+    <Panel title="모델"><ModelRoute ghost={ghost} save={save}/></Panel>
+    <SkillsPanel catalog={catalog} skills={ghost.skills} onChange={skills => void update({ skills })}/>
     <Panel title="도구"><CapabilityBoard tools={ghost.tools} onChange={tools => void update({ tools })}/></Panel>
+    <Panel title="운영">
+      <SettingsRow label="상태" description={ghost.isDefault ? '메인 Ghost는 활성 상태를 유지합니다.' : undefined}>
+        {ghost.isDefault ? <span className="ghost-sheet__locked"><Lock aria-hidden="true"/>활성</span>
+          : <StateSwitch value={ghost.state} disabled={saving} onChange={next => void update({ state: next })}/>}
+      </SettingsRow>
+      {!ghost.isDefault && <SettingsRow label="메인 Ghost" description="새 대화와 일을 처음 받는 Ghost">
+        <button type="button" className="sandbox-strip__action" disabled={saving || ghost.state !== 'active'} onClick={() => void save({ type: 'ghost.set_default', ghostId: ghost.id })}>
+          <Crown aria-hidden="true"/>메인으로 지정
+        </button>
+      </SettingsRow>}
+      {canDeleteGhost(ghost) && <SettingsRow label="Ghost 삭제" description="목록에서 제거합니다. 지난 맡긴 일의 기록은 남습니다.">
+        <button type="button" className="sandbox-strip__action" data-danger onClick={() => setDeleting(true)}><Trash2 aria-hidden="true"/>삭제</button>
+      </SettingsRow>}
+    </Panel>
     {sandbox && sandbox.state !== 'none' && <Panel title="샌드박스"><SandboxStrip ghostId={ghost.id} state={sandbox.state} detail={sandbox.detail}/></Panel>}
 
-    <div className="ghost-sheet__status" aria-live="polite">{saving ? '저장 중…' : ''}</div>
-    {error && <InlineError>{error}</InlineError>}
     {designing && <Modal title={`${ghost.name} 꾸미기`} onClose={() => setDesigning(false)} className="sm:max-w-[760px]"><GhostDesignEditor ghostId={ghost.id}/></Modal>}
     {deleting && <DeleteDialog ghost={ghost} onClose={() => setDeleting(false)}/>}
   </div>;
 }
 
-/** Fallback models tried in order after the Ghost's own; each row reuses the model picker. */
-function FallbackBoard({ ghostId, fallbacks, save }: {
-  ghostId: string;
-  fallbacks: readonly ModelRef[];
-  save(command: Command): Promise<boolean>;
-}) {
-  const act = (action: FallbackAction) => void save(fallbacksCommand(ghostId, fallbacks, action));
-  return <div className="fallbacks">
-    {fallbacks.map((fallback, index) => <div key={`${fallback.provider}/${fallback.model}:${index}`} className="fallback">
-      <span className="fallback__order" aria-hidden="true">{index + 1}</span>
-      <ModelChoice value={fallback} onChange={model => act(model ? { kind: 'replace', index, model } : { kind: 'remove', index })}/>
-      <button type="button" className="fallback__move" aria-label={`${index + 1}번 위로`} disabled={index === 0} onClick={() => act({ kind: 'move', index, delta: -1 })}><ArrowUp aria-hidden="true"/></button>
-      <button type="button" className="fallback__move" aria-label={`${index + 1}번 아래로`} disabled={index === fallbacks.length - 1} onClick={() => act({ kind: 'move', index, delta: 1 })}><ArrowDown aria-hidden="true"/></button>
-      <button type="button" className="fallback__move" aria-label={`${index + 1}번 대체 모델 지우기`} onClick={() => act({ kind: 'remove', index })}><X aria-hidden="true"/></button>
-    </div>)}
-    {fallbacks.length < MAX_FALLBACKS && <ModelChoice add value={null} onChange={model => model && act({ kind: 'add', model })}/>}
+/** One route: the effective primary, then up to three ordered alternatives. */
+function ModelRoute({ ghost, save }: { ghost: Ghost; save(command: Command): Promise<boolean> }) {
+  const { store } = useHost();
+  const { state } = useHostState(store);
+  const [pending, setPending] = useState(false);
+  const inFlight = useRef(false);
+  const primary = ghost.model ?? state?.settings.defaultModel;
+  const commit = async (command: Command) => {
+    if (inFlight.current) return;
+    inFlight.current = true; setPending(true);
+    try { await save(command); }
+    finally { inFlight.current = false; setPending(false); }
+  };
+  const act = (action: FallbackAction) => void commit(fallbacksCommand(ghost.id, ghost.fallbacks, action));
+  const used = [primary, ...ghost.fallbacks].filter((ref): ref is ModelRef => !!ref);
+  return <div className="model-route" aria-busy={pending}>
+    <ol className="model-route__steps" aria-label="모델 사용 순서">
+      <li className="model-route__step" data-primary>
+        <span className="model-route__node" aria-hidden="true"><span/></span>
+        <div className="model-route__choice">
+          <span className="model-route__label">먼저 사용</span>
+          <ModelChoice label="기본 모델 선택" value={ghost.model} excluded={ghost.fallbacks} disabled={pending} onChange={model => void commit({ type: 'ghost.update', ghostId: ghost.id, model })}/>
+        </div>
+      </li>
+      {ghost.fallbacks.map((fallback, index) => <li key={`${fallback.provider}/${fallback.model}:${index}`} className="model-route__step">
+        <span className="model-route__node" aria-hidden="true">{index + 1}</span>
+        <div className="model-route__choice">
+          <span className="model-route__label">대체 {index + 1}</span>
+          <ModelChoice label={`${index + 1}번 대체 모델 선택`} value={fallback} inherit={false} disabled={pending}
+            excluded={used.filter(ref => ref.provider !== fallback.provider || ref.model !== fallback.model)}
+            onChange={model => model && act({ kind: 'replace', index, model })}/>
+        </div>
+        <div className="model-route__actions" role="group" aria-label={`대체 ${index + 1} 순서와 삭제`}>
+          <button type="button" aria-label={`${index + 1}번 위로`} title="앞으로" disabled={pending || index === 0} onClick={() => act({ kind: 'move', index, delta: -1 })}><ArrowUp aria-hidden="true"/></button>
+          <button type="button" aria-label={`${index + 1}번 아래로`} title="뒤로" disabled={pending || index === ghost.fallbacks.length - 1} onClick={() => act({ kind: 'move', index, delta: 1 })}><ArrowDown aria-hidden="true"/></button>
+          <button type="button" aria-label={`${index + 1}번 대체 모델 지우기`} title="삭제" disabled={pending} onClick={() => act({ kind: 'remove', index })}><X aria-hidden="true"/></button>
+        </div>
+      </li>)}
+      {ghost.fallbacks.length < MAX_FALLBACKS && <li className="model-route__step" data-add>
+        <span className="model-route__node" aria-hidden="true"><Plus/></span>
+        <ModelChoice add value={null} excluded={used} disabled={pending} onChange={model => model && act({ kind: 'add', model })}/>
+      </li>}
+    </ol>
+    <p className="model-route__hint">연결 오류·사용 한도에 걸리면 다음 모델로 이어갑니다.</p>
   </div>;
 }
 
@@ -260,10 +303,7 @@ function DeleteDialog({ ghost, onClose }: { ghost: Ghost; onClose(): void }) {
 }
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="ghost-panel" aria-label={title}>
-    <h3 className="ghost-panel__title">{title}</h3>
-    {children}
-  </section>;
+  return <SettingsGroup title={title} className="ghost-panel">{children}</SettingsGroup>;
 }
 
 /** The name reads as the heading and edits in place; Enter or leaving the field saves, Escape restores. */
@@ -284,10 +324,19 @@ function StateSwitch({ value, disabled, onChange }: { value: GhostState; disable
   </div>;
 }
 
-function ModelChoice({ value, onChange, add = false }: { value: ModelRef | null; onChange(model: ModelRef | null): void; add?: boolean }) {
+function ModelChoice({ value, onChange, add = false, inherit = true, excluded = [], disabled = false, label }: {
+  value: ModelRef | null;
+  onChange(model: ModelRef | null): void;
+  add?: boolean;
+  inherit?: boolean;
+  excluded?: readonly ModelRef[];
+  disabled?: boolean;
+  label?: string;
+}) {
   const { store } = useHost();
   const { state } = useHostState(store);
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const settings = state?.settings;
   const providers = usableProviders(settings);
   const nameOf = (ref: ModelRef | null | undefined) => {
@@ -298,33 +347,43 @@ function ModelChoice({ value, onChange, add = false }: { value: ModelRef | null;
   };
   const current = nameOf(value);
   const fallback = nameOf(settings?.defaultModel);
+  const search = query.trim().toLocaleLowerCase();
+  const matches = providers.map(provider => ({
+    ...provider, models: provider.models.filter(model => `${provider.name} ${model.name} ${model.id}`.toLocaleLowerCase().includes(search)),
+  })).filter(provider => provider.models.length);
   const pick = (model: ModelRef | null) => { setOpen(false); onChange(model); };
-  return <Popover open={open} onOpenChange={setOpen}>
+  return <Popover open={open && !disabled} onOpenChange={next => { setOpen(next); if (next) setQuery(''); }}>
     <PopoverTrigger asChild>
-      <button type="button" className="model-choice" data-add={add || undefined} data-default={(!value && !add) || undefined}>
-        {add
-          ? <><Plus aria-hidden="true"/><span>대체 모델 추가</span></>
-          : <>
-            <span className="model-choice__model">{current?.model ?? fallback?.model ?? '모델 없음'}</span>
-            <span className="model-choice__provider">{current ? current.provider : `기본 모델${fallback ? ` · ${fallback.provider}` : ''}`}</span>
-          </>}
+      <button type="button" className="model-choice" disabled={disabled} data-add={add || undefined} data-default={(!value && !add) || undefined}>
+        {label && <span className="sr-only">{label}: </span>}
+        {add ? <span>대체 모델 추가</span> : <span className="model-choice__copy">
+          <span className="model-choice__model">{current?.model ?? fallback?.model ?? '모델 없음'}</span>
+          <span className="model-choice__provider">{current ? current.provider : `기본 모델 따름${fallback ? ` · ${fallback.provider}` : ''}`}</span>
+        </span>}
         <ChevronDown aria-hidden="true"/>
       </button>
     </PopoverTrigger>
-    <PopoverContent align="start" className="w-72 p-1.5" aria-label="모델 선택">
-      <div className="max-h-[50dvh] overflow-auto">
-        {!add && <button type="button" className="menu-row w-full" aria-pressed={!value} onClick={() => pick(null)}>
+    <PopoverContent align="start" className="model-menu w-[min(380px,calc(100vw-32px))] p-1.5" aria-label={label ?? '대체 모델 추가'}>
+      <label className="model-menu__search"><Search aria-hidden="true"/>
+        <input aria-label="모델 검색" placeholder="모델 검색" value={query} onChange={event => setQuery(event.target.value)}/>
+      </label>
+      <div className="model-menu__list">
+        {!add && inherit && !search && <button type="button" className="menu-row w-full" aria-pressed={!value} onClick={() => pick(null)}>
           <span className="flex-1">기본 모델 따름</span>{!value && <Check size={14} aria-hidden="true"/>}
         </button>}
-        {providers.map(provider => <div key={provider.id}>
+        {matches.map(provider => <div key={provider.id}>
           <p className="menu-heading">{provider.name}</p>
           {provider.models.map(model => {
             const chosen = value?.provider === provider.id && value.model === model.id;
-            return <button key={model.id} type="button" className="menu-row w-full" aria-pressed={chosen} onClick={() => pick({ provider: provider.id, model: model.id })}>
-              <span className="min-w-0 flex-1 truncate">{model.name || model.id}</span>{chosen && <Check size={14} aria-hidden="true"/>}
+            const used = excluded.some(ref => ref.provider === provider.id && ref.model === model.id);
+            return <button key={model.id} type="button" className="menu-row w-full" disabled={used} aria-pressed={chosen} onClick={() => pick({ provider: provider.id, model: model.id })}>
+              <span className="model-menu__name">{model.name || model.id}</span>
+              {used ? <span className="model-menu__used">이미 사용 중</span> : chosen && <Check size={14} aria-hidden="true"/>}
             </button>;
           })}
         </div>)}
+        {!matches.length && <p className="model-menu__empty">{providers.length ? '일치하는 모델이 없습니다.' : '연결된 모델이 없습니다.'}</p>}
+        {!providers.length && <a className="menu-row" href="#/settings?tab=models">모델 설정</a>}
       </div>
     </PopoverContent>
   </Popover>;
@@ -413,7 +472,7 @@ function GhostCreator({ onCancel, onCreated }: { onCancel(): void; onCreated(id:
   };
   return <form className="ghost-sheet ghost-sheet--new" onSubmit={event => { event.preventDefault(); void create(); }}>
     <header className="ghost-sheet__identity">
-      <span className="ghost-sheet__portrait" aria-hidden="true"><DotAvatar profileId={`new:${name}`} size={84}/></span>
+      <span className="ghost-sheet__portrait" aria-hidden="true"><DotAvatar profileId={`new:${name}`} size={60}/></span>
       <div className="ghost-sheet__who">
         <input className="ghost-sheet__name" aria-label="이름" placeholder="이름" value={name} maxLength={128} autoFocus required disabled={saving} onChange={event => setName(event.target.value)}/>
       </div>
