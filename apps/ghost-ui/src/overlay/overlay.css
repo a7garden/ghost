@@ -1,142 +1,77 @@
-/* Ghost chat overlay: a compact composer + transcript the desktop app parks
-   off-screen and surfaces over the current work. It shares the application palette;
-   main.ts follows the system theme with the `.dark` class. */
-
-html,
-body {
+/* A conversation attached to its Ghost; native placement supplies the tail anchor. */
+.overlay-page,
+.overlay-page body {
   margin: 0;
+  width: 100%;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
   background: transparent;
-  font-family: var(--font-sans, Inter, system-ui, sans-serif);
 }
-
-#overlay {
-  display: flex;
-  flex-direction: column;
-  height: 100dvh;
-  border: 1px solid var(--ghost-line-strong);
-  border-radius: var(--radius-xl, 15px);
-  background: var(--ghost-surface);
-  color: var(--ghost-ink);
-  box-shadow: var(--shadow-overlay);
-  overflow: hidden;
+.overlay-page body { padding: 8px 8px 14px; }
+.overlay-page[data-side="below"] body { padding: 14px 8px 8px; }
+@layer components {
+  #overlay {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    border-radius: 22px;
+    background: var(--ghost-surface);
+    color: var(--ghost-ink);
+    box-shadow: 0 0 0 1px var(--ghost-line-strong), 0 4px 12px -4px rgb(0 0 0 / .2);
+  }
+  #overlay::after {
+    content: '';
+    position: absolute;
+    left: clamp(24px, calc(var(--anchor-x, 200px) - 8px), calc(100% - 24px));
+    bottom: -5px;
+    width: 12px;
+    height: 12px;
+    background: var(--ghost-surface);
+    border-right: 1px solid var(--ghost-line-strong);
+    border-bottom: 1px solid var(--ghost-line-strong);
+    border-radius: 0 0 4px 0;
+    transform: translateX(-50%) rotate(45deg);
+  }
+  [data-side="below"] #overlay::after { bottom: auto; top: -5px; transform: translateX(-50%) rotate(225deg); }
+  [data-side="none"] #overlay::after { display: none; }
+  #overlay header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    min-height: 52px;
+    padding: 10px 12px 8px 18px;
+    user-select: none;
+  }
+  #dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--ghost-ink4); }
+  #dot.busy { background: var(--ghost-signal); animation: pet-signal 1.4s ease-in-out infinite; }
+  #dot.error { background: var(--ghost-danger); }
+  #title { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+  #activity { flex: 1; min-width: 0; color: var(--ghost-ink2); font-size: 11px; white-space: nowrap; }
+  .quiet-action { display: grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ghost-ink2); cursor: pointer; }
+  .quiet-action:hover { background: var(--ghost-hover2); color: var(--ghost-ink); }
+  #overlay svg { display: block; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  #log { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 16px; list-style: none; margin: 0; padding: 8px 20px 20px; overflow-y: auto; overscroll-behavior: contain; }
+  .row { flex: none; font-size: 14px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .row.user { display: flex; justify-content: flex-end; }
+  .row.user > div { max-width: 88%; padding: 8px 12px; border-radius: 16px 16px 5px 16px; background: var(--ghost-hover2); }
+  .row.ghost > div { padding: 0; }
+  .row.working { color: var(--ghost-ink2); font-size: 12px; }
+  .row.event { color: var(--ghost-ink2); font-size: 11px; border-left: 2px solid var(--ghost-line-strong); padding-left: 10px; }
+  #log .empty { display: grid; place-content: center; flex: 1; color: var(--ghost-ink3); font-size: 15px; text-align: center; }
+  #status { display: block; flex: none; max-height: 78px; overflow-y: auto; padding: 0 18px 10px; color: var(--ghost-danger-ink); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+  #status:empty { display: none; }
+  #composer { display: flex; align-items: flex-end; flex: none; gap: 8px; margin: 0 10px 10px; padding: 10px 10px 10px 14px; border-radius: 17px; background: var(--ghost-inset); box-shadow: inset 0 0 0 1px transparent; transition: box-shadow .15s; }
+  #composer:focus-within { box-shadow: inset 0 0 0 1px var(--ghost-line-strong); }
+  #input { display: block; flex: 1; width: 0; min-width: 0; resize: none; border: 0; border-radius: 0; outline: none; background: transparent; color: var(--ghost-ink); font: inherit; font-size: 14px; line-height: 1.55; min-height: 30px; max-height: min(100px, 25dvh); padding: 4px 0; }
+  #input::placeholder { color: var(--ghost-ink3); }
+  #send { display: grid; place-items: center; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: var(--ghost-primary); color: var(--ghost-primary-ink); cursor: pointer; transition: opacity .15s, transform .15s; }
+  #send:not(:disabled):active { transform: scale(.92); }
+  #send:disabled { opacity: .25; cursor: default; }
+  #overlay button:focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: 2px; }
+  @keyframes pet-signal { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { #dot.busy { animation: none; } #composer, #send { transition: none; } }
 }
-
-header {
-  display: flex;
-  align-items: center;
-  gap: var(--ghost-space-2, 8px);
-  padding: 10px 14px 8px;
-  border-bottom: 1px solid var(--ghost-line);
-  user-select: none;
-}
-
-#dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--ghost-ink3);
-  flex: none;
-}
-
-#dot.idle { background: var(--ghost-success); }
-#dot.busy { background: var(--ghost-warning); animation: pulse 1.2s ease-in-out infinite; }
-#dot.error { background: var(--ghost-danger); }
-
-@keyframes pulse { 50% { opacity: 0.35; } }
-
-@media (prefers-reduced-motion: reduce) {
-  #dot.busy { animation: none; }
-}
-
-h1 {
-  margin: 0;
-  font-size: var(--text-ui, 13px);
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#status {
-  margin-left: auto;
-  font-size: var(--text-caption, 12px);
-  color: var(--ghost-ink2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#log {
-  flex: 1;
-  margin: 0;
-  padding: 10px 12px;
-  list-style: none;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.row > div {
-  max-width: 88%;
-  padding: 7px 10px;
-  border-radius: var(--radius-card, 10px);
-  font-size: var(--text-ui, 13px);
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.row.user { display: flex; justify-content: flex-end; }
-.row.user > div { background: var(--ghost-hover2); }
-.row.ghost > div { padding-inline: 0; }
-.row.working > div { color: var(--ghost-ink2); }
-
-#log .empty {
-  color: var(--ghost-ink2);
-  font-size: var(--text-caption, 12px);
-  text-align: center;
-  padding: 14px 0;
-}
-
-#composer {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--ghost-space-2, 8px);
-  padding: 8px 10px 10px;
-  border-top: 1px solid var(--ghost-line);
-}
-
-#input {
-  flex: 1;
-  resize: none;
-  border: 1px solid var(--ghost-line-strong);
-  border-radius: var(--radius-control, 8px);
-  background: var(--ghost-field);
-  color: var(--ghost-ink);
-  font: inherit;
-  font-size: var(--text-ui, 13px);
-  line-height: 1.4;
-  padding: 8px 10px;
-  max-height: 132px;
-  outline: none;
-}
-
-#send {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--ghost-primary);
-  color: var(--ghost-primary-ink);
-  font-size: 14px;
-  cursor: pointer;
-}
-
-#send:disabled { opacity: 0.45; cursor: default; }
-#send:focus-visible { outline: 2px solid var(--ghost-ink); outline-offset: 2px; }

@@ -69,7 +69,6 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 �
 - 백업 `~/.local/share/ghost/backups/pre-model-catalog-20261108-release/`: `ghost-backup/2`, `complete: true`, 두 DB 무결성 확인, artifacts·secrets·config 사본. 유휴 확인 후 `4cba876`에서 원자적으로 전환하고 Host를 정상 재기동했다(PID 90046 → 97048). 단일 리스너·준비 상태, Ghost 24·대화 40·맡긴 일 39, 저장된 제공자 목록·기본 모델·config 및 인증 파일의 바이트 보존을 확인했다.
 - 설치 앱을 external 모드로 새로 읽어 GLM 3종과 MiniMax 3종(기존 Preview 포함)을 확인했다. 네이티브 AX 입력은 거부되어 직접 입력 검증은 같은 운영 UI의 격리 브라우저로 수행했다: 수동 ID 추가→삭제→취소, 기본 모델 선택기에 새 모델 표시, 콘솔 오류 없음. 검증용 ID는 저장하지 않았고 브라우저와 임시 Host를 종료했다.
 - 후속 병행 릴리스 `7b5e80a`·`fb34f1f`에도 이 구현이 포함됨을 Git 조상 관계와 운영 API에서 확인했다. 이 기능만 되돌릴 때 기준은 `4cba876`이지만 이후 UI 변경도 빠지므로, 현재 릴리스의 되돌리기 절차를 먼저 따른다. 생성된 `models.json`·`codex-models.json`은 권위 있는 사용자 데이터가 아닌 메타데이터 캐시다.
-
 ### 제목 표시줄 아래 패널 위 여백 운영 반영 — 2026-11-08
 
 - 소스 `7b5e80a`(main; 메인 시트의 위 여백 8px — 그 전에는 `margin: 0 8px 8px 0`로 패널 윗변이 제목 표시줄에 바로 붙어 가려진 것처럼 보였다)를 `releases/20261108-bun-7b5e80a`에 설치했다. Host는 당시 운영 `3a21717` 것과 같은 바이트를 복사했다. UI 93개 파일 해시 일치, 백업 DB 사본 위 임시 루트·포트에서 health·새 번들(`main-CD6BUIiB.js`) 확인.
