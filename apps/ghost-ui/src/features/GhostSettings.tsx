@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { GHOST_TOOLS, HOST_TOOLS, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
 import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -22,14 +22,22 @@ const toolLabels: Record<GhostTool, string> = {
   web_search: '웹 검색', web_read: '웹 읽기', reach: '외부 읽기', skill_read: '스킬 읽기',
   host_status: 'Mac 상태', host_services: 'Mac 서비스', host_disk_scan: 'Mac 디스크 검색', host_disk_usage: 'Mac 디스크 사용량',
   host_list: 'Mac 파일 목록', host_read: 'Mac 파일 읽기', host_nodes: 'Tailscale 노드', host_command_propose: 'Mac 명령 제안',
+  browser_open: '브라우저 열기', browser_snapshot: '브라우저 구조 읽기', browser_screenshot: '브라우저 캡처', browser_read: '브라우저 읽기',
+  browser_click: '브라우저 클릭', browser_fill: '브라우저 채우기', browser_type: '브라우저 입력', browser_press: '브라우저 키 누르기',
+  browser_select: '브라우저 선택', browser_check: '브라우저 체크', browser_scroll: '브라우저 스크롤', browser_navigate: '브라우저 이동',
+  browser_tabs: '브라우저 탭', browser_wait: '브라우저 대기', browser_upload: '브라우저 올리기', browser_download: '브라우저 내려받기',
+  browser_propose: '브라우저 클릭 제안', browser_handoff: '브라우저 넘겨주기', browser_fill_secret: '브라우저 금고 채우기', browser_close: '브라우저 닫기',
+  vault_list: '금고 목록', vault_request: '금고 저장 요청', vault_generate_login: '금고 로그인 만들기',
 };
 
-/** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. */
-const toolGroups: readonly { title: string; tools: readonly GhostTool[]; privileged?: boolean }[] = [
+/** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. Exported for the coverage test. */
+export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; privileged?: boolean }[] = [
   { title: '맡긴 일', tools: ['work_create', 'work_list', 'work_inspect', 'work_update', 'work_cancel'] },
   { title: '협업', tools: ['delegate', 'ghost_list', 'publish_artifact'] },
   { title: '파일과 명령', tools: ['read', 'write', 'edit', 'bash'] },
   { title: '웹', tools: ['web_search', 'web_read', 'reach'] },
+  { title: '브라우저', tools: [...BROWSER_TOOLS] },
+  { title: '금고', tools: [...VAULT_TOOLS] },
   { title: '스킬', tools: ['skill_read'] },
   { title: '기억', tools: ['memory_search', 'memory_recall', 'memory_retain'] },
   { title: '문서', tools: ['document_spaces', 'document_list', 'document_read', 'document_propose'] },

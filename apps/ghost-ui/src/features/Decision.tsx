@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
-import { Button, InlineError } from '../ui'
-import type { Decision, State, WorkResult } from '@ghost/contract';
+import { ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, FileText, Monitor, KeyRound } from 'lucide-react';
+import { Button, Checkbox, FormField, InlineError, Input } from '../ui'
+import type { Decision, SecureFormRequest, State, VaultItemKind, WorkResult } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
 import { ArtifactPreview } from '../components/ArtifactPreview';
 import { MessageBody } from '../components/MessageBody';
 import { useHost } from '../host/context';
-import { decisionHeading, decisionLabel } from './decisionText';
+import { browserHandoffLabel, browserHandoffProposal, decisionHeading, decisionLabel, emptySecureForm, handoffDoneAnswer,
+  secureFormBody, secureFormLabel, secureFormProposal, type SecureFormValues } from './decisionText';
 import { toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
@@ -35,6 +36,8 @@ export function decisionCommand(decision: Decision, outcome: 'approve' | 'deny' 
   { type: 'decision.resolve'; decisionId: string; outcome: 'approve' | 'deny' | 'answer'; answer?: string } | { error: string } {
   if (decision.state !== 'pending') return { error: '이미 처리된 결정입니다.' };
   if (outcome === 'answer') {
+    // A secure-form question answers through the vault route only; typed text never carries its values.
+    if (secureFormProposal(decision)) return { error: '이 결정은 금고 화면에서만 답합니다.' };
     const text = (answer ?? '').trim();
     if (!text) return { error: '답변을 적어 주세요.' };
     return { type: 'decision.resolve', decisionId: decision.id, outcome: 'answer', answer: text };
@@ -80,7 +83,10 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   const proposal = documentProposal(decision);
   const acceptance = acceptanceProposal(decision);
   const isQuestion = decision.kind === 'question';
+  const secureForm = secureFormProposal(decision);
+  const handoff = browserHandoffProposal(decision);
   const labels = actionLabels[decision.kind];
+  const kindLabel = secureForm ? secureFormLabel : handoff ? browserHandoffLabel : decisionLabel[decision.kind];
   const heading = decision.kind === 'accept_result' && workTitle ? workTitle : decision.title;
   // The result summary is shown as the receipt; the detail repeats it after the reviewer's note.
   const detail = (decision.kind === 'accept_result' && acceptance.result
@@ -104,7 +110,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     <header className="decision__meta">
       <DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={20}/>
       <span className="decision__who">{ghostName}</span>
-      <span className="decision__kind">{decisionLabel[decision.kind]}</span>
+      <span className="decision__kind">{kindLabel}</span>
       <time className="decision__time tabular">{relativeTime(decision.createdAt, now)}</time>
       {decision.workId && onOpenWork && <button type="button" className="decision__work" onClick={() => onOpenWork(decision.workId!)}>
         <span className="truncate">{workTitle && workTitle !== heading ? workTitle : uiTerms.work}</span><ArrowUpRight size={13} aria-hidden="true"/>
@@ -127,7 +133,16 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
 
     {(decision.kind === 'approve_effect' || decision.kind === 'reconcile_effect') && decision.proposal && <RequestPreview value={decision.proposal}/>}
 
-    {isQuestion && decision.options.length > 0 && <div className="decision__options" role="group" aria-label="추천 답변">
+    {secureForm && <SecureForm decision={decision} request={secureForm} cardBusy={busy} autoFocus={autoFocus}
+      onResolved={onResolved} onDecline={() => resolve('deny')}/>}
+
+    {!secureForm && handoff && <div className="decision__handoff">
+      <p className="decision__handoff-note"><Monitor size={14} aria-hidden="true"/>이 Mac에서 Chrome 창을 열어 두었습니다. 창에서 직접 마무리해 주세요.</p>
+      {handoff.url && <p className="decision__handoff-url">{handoff.url}</p>}
+      {handoff.reason.trim() && <p className="decision__request-reason">{handoff.reason}</p>}
+    </div>}
+
+    {isQuestion && !secureForm && decision.options.length > 0 && <div className="decision__options" role="group" aria-label="추천 답변">
       {decision.options.map((option, index) => <button key={option} type="button" className="decision__option" disabled={busy} onClick={() => resolve('answer', option)}>
         <kbd aria-hidden="true">{index + 1}</kbd><span>{option}</span>
       </button>)}
@@ -135,20 +150,102 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
 
     {error && <InlineError>{error}</InlineError>}
 
-    {isQuestion
-      ? <form className="decision__answer" onSubmit={event => { event.preventDefault(); resolve('answer', answer); }}>
-        <textarea aria-label="답변" value={answer} onChange={event => setAnswer(event.target.value)} rows={1} maxLength={8192} disabled={busy}
-          placeholder={decision.options.length ? '직접 답하기' : '답변을 적어 주세요'}
-          onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); resolve('answer', answer); } }}/>
-        <Button type="submit" size="icon" aria-label="답변 보내기" title="답변 보내기" disabled={busy || !answer.trim()}
-          className="rounded-pill disabled:opacity-100 disabled:bg-hover-2 disabled:text-ink-3"><ArrowUp/></Button>
-      </form>
+    {secureForm ? null : isQuestion
+      ? <>
+        {handoff && <div className="decision__actions">
+          <Button variant="outline" className="h-[34px] rounded-pill px-4" disabled={busy} onClick={() => resolve('deny')}>{labels.deny}</Button>
+          <Button className="h-[34px] rounded-pill px-4" disabled={busy} onClick={() => resolve('answer', handoffDoneAnswer)}>{handoffDoneAnswer}</Button>
+        </div>}
+        <form className="decision__answer" onSubmit={event => { event.preventDefault(); resolve('answer', answer); }}>
+          <textarea aria-label="답변" value={answer} onChange={event => setAnswer(event.target.value)} rows={1} maxLength={8192} disabled={busy}
+            placeholder={decision.options.length ? '직접 답하기' : '답변을 적어 주세요'}
+            onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); resolve('answer', answer); } }}/>
+          <Button type="submit" size="icon" aria-label="답변 보내기" title="답변 보내기" disabled={busy || !answer.trim()}
+            className="rounded-pill disabled:opacity-100 disabled:bg-hover-2 disabled:text-ink-3"><ArrowUp/></Button>
+        </form>
+      </>
       : <footer className="decision__actions">
         <span className="decision__hint" aria-hidden="true"><kbd>⌘</kbd><kbd>↵</kbd></span>
         <Button variant="outline" className="h-[34px] rounded-pill px-4" disabled={busy} onClick={() => resolve('deny')}>{labels.deny}</Button>
         <Button className="h-[34px] rounded-pill px-4" disabled={busy} onClick={() => resolve('approve')}>{labels.approve}</Button>
       </footer>}
   </article>;
+}
+
+/** The fields one secure-form kind collects. */
+const secureInputs: Record<VaultItemKind, readonly { key: keyof SecureFormValues; label: string; required?: boolean;
+  password?: boolean; placeholder?: string; description?: string; autoComplete?: string }[]> = {
+  login: [
+    { key: 'username', label: '사용자 이름', required: true, autoComplete: 'off' },
+    { key: 'password', label: '비밀번호', required: true, password: true, autoComplete: 'new-password' },
+    { key: 'totp', label: '일회용 코드 시드', description: '비워 두어도 됩니다. 저장하면 Ghost가 코드를 직접 만듭니다.', autoComplete: 'off' },
+  ],
+  card: [
+    { key: 'cardNumber', label: '카드 번호', required: true, autoComplete: 'cc-number' },
+    { key: 'cardExpiry', label: '유효기간', required: true, placeholder: 'MM/YY', autoComplete: 'cc-exp' },
+    { key: 'cardCvc', label: 'CVC', required: true, password: true, autoComplete: 'cc-csc' },
+    { key: 'cardName', label: '카드 소유자 이름', autoComplete: 'cc-name' },
+  ],
+  contact: [
+    { key: 'contactName', label: '이름' },
+    { key: 'contactPhone', label: '전화' },
+    { key: 'contactEmail', label: '이메일' },
+    { key: 'contactAddress', label: '주소' },
+  ],
+  secret: [{ key: 'value', label: '값', required: true, password: true, autoComplete: 'off' }],
+};
+
+/**
+ * The vault answer of a secure-form question: kind-shaped fields, the 저장 choice,
+ * and a submit that posts to the vault route only — the answer API never sees a value.
+ */
+function SecureForm({ decision, request, cardBusy, autoFocus, onResolved, onDecline }: {
+  decision: Decision;
+  request: SecureFormRequest;
+  cardBusy: boolean;
+  autoFocus: boolean;
+  onResolved(): void;
+  onDecline(): void;
+}) {
+  const { client } = useHost();
+  const [values, setValues] = useState<SecureFormValues>(emptySecureForm);
+  const [save, setSave] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => { if (autoFocus) formRef.current?.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true }); }, [autoFocus, decision.id]);
+  const disabled = busy || cardBusy;
+  const submit = () => {
+    if (disabled) return;
+    const built = secureFormBody(request, values, save);
+    if ('error' in built) { setError(built.error); return; }
+    setBusy(true); setError('');
+    void client.vaultRequestAnswer(decision.id, built.body)
+      .then(onResolved)
+      .catch(reason => { setError(reason instanceof Error ? reason.message : '금고에 전달하지 못했습니다. 다시 시도해 주세요.'); setBusy(false); });
+  };
+  return <form ref={formRef} className="decision__secure" onSubmit={event => { event.preventDefault(); submit(); }}>
+    {request.origin && <p className="decision__secure-origin"><KeyRound size={13} aria-hidden="true"/>{request.origin}</p>}
+    {request.reason.trim() && <p className="decision__request-reason">{request.reason}</p>}
+    <div className="decision__secure-fields">
+      {secureInputs[request.kind].map(field => <FormField key={field.key} label={field.label} description={field.description} required={field.required}>
+        {control => <Input {...control} type={field.password ? 'password' : 'text'} autoComplete={field.autoComplete}
+          inputMode={request.kind === 'card' && (field.key === 'cardNumber' || field.key === 'cardExpiry' || field.key === 'cardCvc') ? 'numeric' : undefined}
+          placeholder={field.placeholder} value={values[field.key]} disabled={disabled}
+          onChange={event => setValues(current => ({ ...current, [field.key]: event.target.value }))}/>}
+      </FormField>)}
+    </div>
+    <label className="decision__secure-save">
+      <Checkbox checked={save} disabled={disabled} onCheckedChange={checked => setSave(checked === true)}/>
+      <span>금고에 저장</span>
+      <small>끄면 24시간 뒤 사라지는 일회용 항목으로 저장합니다.</small>
+    </label>
+    {error && <InlineError>{error}</InlineError>}
+    <div className="decision__actions">
+      <Button variant="outline" type="button" className="h-[34px] rounded-pill px-4" disabled={disabled} onClick={onDecline}>거부</Button>
+      <Button type="submit" className="h-[34px] rounded-pill px-4" disabled={disabled}>금고에 전달</Button>
+    </div>
+  </form>;
 }
 
 /** The exact action a Ghost wants to run: short payloads inline, long ones one click away. */

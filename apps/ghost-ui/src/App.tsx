@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, Clock3, MonitorSmartphone, Server, Smartphone, Users } from 'lucide-react';
+import { CircleAlert, Clock3, KeyRound, MonitorSmartphone, Server, Smartphone, Users } from 'lucide-react';
 import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
 import { AppFrame } from './components/AppFrame';
@@ -23,6 +23,7 @@ import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
 import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
+import { VaultView } from './features/VaultView';
 import { Schedules } from './features/Schedules';
 import { SpacesView } from './features/SpacesView';
 import { routeLabels, uiTerms } from './uiText';
@@ -99,6 +100,7 @@ function Shell() {
     ...visibleGhosts(ghosts).map(ghost => ({ id: `ghost:${ghost.id}`, label: ghost.name, description: ghost.isDefault ? '메인 Ghost' : undefined, group: 'Ghost', onSelect: () => switchGhost(ghost.id) })),
     ...state.spaces.map(space => ({ id: `space:${space.id}`, label: space.name, group: '프로젝트', onSelect: () => navigate(`/spaces/${space.id}`) })),
     { id: 'team', label: uiTerms.ghostSettings, group: '설정', onSelect: go('/settings?tab=team') },
+    { id: 'vault', label: '금고', group: '설정', onSelect: go('/settings?tab=vault') },
     { id: 'devices', label: '기기', group: '설정', onSelect: go('/settings?tab=devices') },
     { id: 'schedules', label: uiTerms.schedules, group: '설정', onSelect: go('/settings?tab=schedules') },
     { id: 'host', label: routeLabels.host, group: '설정', onSelect: go('/settings?tab=host') },
@@ -112,6 +114,7 @@ function Shell() {
     { id: 'team', label: 'Ghost', icon: Users, content: <GhostSettings onChat={switchGhost}
       onSelect={id => navigate(`/settings?tab=team&ghost=${encodeURIComponent(id)}`)}
       selectedGhostId={params.get('ghost') ?? undefined}/> },
+    { id: 'vault', label: '금고', icon: KeyRound, content: <VaultView/> },
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },

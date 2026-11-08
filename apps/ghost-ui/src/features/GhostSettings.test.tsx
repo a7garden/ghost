@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Ghost } from '@ghost/contract';
-import { canDeleteGhost, editFallbacks, settingsRoster, toggleSkill } from './GhostSettings';
+import { GHOST_TOOLS, type Ghost } from '@ghost/contract';
+import { canDeleteGhost, editFallbacks, settingsRoster, toggleSkill, toolGroups } from './GhostSettings';
 
 const ghost = (patch: Partial<Ghost> = {}): Ghost => ({
   id: 'g1', name: '연구원', persona: '', look: { avatarId: null }, model: null, isDefault: false, state: 'retired',
@@ -33,6 +33,13 @@ describe('skill selection', () => {
     expect(toggleSkill(saved, 'web', true)).toEqual(['pdf', 'web']);
     expect(toggleSkill(saved, 'pdf', false)).toEqual(['web']);
     expect(saved).toEqual(['pdf', 'web']);
+  });
+});
+
+describe('tool groups', () => {
+  it('covers every contract tool, so none falls to 기타', () => {
+    const grouped = toolGroups.flatMap(group => [...group.tools]);
+    expect([...grouped].sort()).toEqual([...GHOST_TOOLS].sort());
   });
 });
 
