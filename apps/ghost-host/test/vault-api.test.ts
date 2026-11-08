@@ -19,7 +19,7 @@ afterEach(async () => { for (const close of cleanup.splice(0)) await close(); })
 function fixture() {
   const root = tempDir(), ledgerPath = join(root, "ledger.db");
   const h = harness(ledgerPath), vault = createVault(root);
-  const config: Config = { root, host: "127.0.0.1", port: 0, publicOrigin: "http://127.0.0.1", uiDir: null, sandbox: { kind: "local" }, memory: null, voice: null, apns: null, skills: null, reach: null };
+  const config: Config = { root, host: "127.0.0.1", port: 0, publicOrigin: "http://127.0.0.1", uiDir: null, sandbox: { kind: "local" }, memory: null, voice: null, apns: null, skills: null, reach: null, browser: null };
   const server = startServer({ core: h.core, config, ownerToken: "owner-test", documents: null, skills: null, vault });
   const base = `http://127.0.0.1:${server.port}`;
   cleanup.push(async () => { await server.stop(); vault.close(); h.ledger.close(); rmSync(root, { recursive: true, force: true }); });

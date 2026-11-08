@@ -50,7 +50,7 @@ Owner token only; values are accepted, never returned.
 | `POST /api/vault/items` | `{ id?, kind, title, origin?, username?, password?, totp?, card?: {number, expiry, cvc, name}, contact?, value?, hints?, ghostIds? }` → `VaultItem` |
 | `PATCH /api/vault/items/:id` | same fields, omitted = unchanged; `password`/`totp`/`card`/`value` replace and keep the previous version encrypted |
 | `DELETE /api/vault/items/:id` | removes the item and its history |
-| `POST /api/vault/import` | `{ csv }` (Apple Passwords or Chrome export) → `{ imported, skipped, rejected }` |
+| `POST /api/vault/import` | `{ csv }` (Apple Passwords or Chrome export) → `{ imported, skipped, rejected }`. Imports https logins with their username, password and a valid Apple `OTPAuth` seed; identical origin+username+password rows are skipped, a different password for the same login is kept as its own item. Notes and unknown columns are not imported (Ghost has no recovery-source archive like Shade's) |
 | `POST /api/vault/requests/:decisionId` | secure-form answer: item fields + `save: boolean`; resolves the decision with metadata only. `save:false` makes a one-time item that expires after 24 h |
 
 ## Storage and operations

@@ -20,7 +20,7 @@ interface Session {
   active: boolean;
 }
 
-export function createBrowser(config: Config, deps: { root: string; log: (...a: unknown[]) => void }): BrowserPort | null {
+export function createBrowser(config: Config, deps: { root: string }): BrowserPort | null {
   if (!config.browser) return null;
   return new AgentBrowser(config.browser, deps.root);
 }

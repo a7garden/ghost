@@ -1,10 +1,12 @@
 import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
-import { HOST_TOOLS } from "@ghost/contract";
+import { BROWSER_TOOLS, HOST_TOOLS } from "@ghost/contract";
 import type { Extension } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { describeWork } from "../core/works.ts";
 import { modelInputOf } from "../engine/models.ts";
-import type { MemoryPort, DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort } from "../integrations/ports.ts";
+import type { MemoryPort, DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort } from "../integrations/ports.ts";
+import type { Vault } from "../stores/vault.ts";
+import { BROWSER_INSTRUCTIONS, createBrowserTools } from "./browser.ts";
 import { createDocumentsTools } from "./documents.ts";
 import { createDirectTools } from "./direct.ts";
 import { createInteractiveTools, INTERACTIVE_INSTRUCTIONS } from "./interactive.ts";
@@ -12,6 +14,7 @@ import { createMainTools } from "./main.ts";
 import { createMemoryTools } from "./memory.ts";
 import { createReviewTools } from "./review.ts";
 import { createSkillsTools } from "./skills.ts";
+import { createVaultTools, VAULT_INSTRUCTIONS } from "./vault.ts";
 import { createWebTools } from "./web.ts";
 import type { ToolSet } from "./types.ts";
 import { createWorkTools } from "./work.ts";
@@ -42,11 +45,13 @@ ${INTERACTIVE_INSTRUCTIONS}`;
 const WORK_INSTRUCTIONS = `This conversation executes exactly one Work. Stay on it.
 read, write, edit and bash operate in the Work's sandbox workspace; publish everything the result needs with publish_artifact before completing.
 complete claims the result with a truthful summary naming only published artifacts; verification — checks, a reviewer or the owner — decides acceptance, not you. The owner reads that summary too: open it with one plain sentence saying what was made, then the evidence a reviewer needs.
-delegate hands a self-contained part to another Ghost with done-criteria you write. When the result matters, pass reviewer_ghost_id naming a reviewer whose model vendor differs from the assignee's. After delegating, end your turn: do not poll or sleep. Its outcome arrives here as a message when it settles, with its files under inputs/<child id>/; complete refuses while a child is still live.
+delegate hands a self-contained part to another Ghost with done-criteria you write; add deterministic checks when the result can be verified mechanically — failing checks send the child back before any review. When the result matters, pass reviewer_ghost_id naming a reviewer whose model vendor differs from the assignee's. After delegating, end your turn: do not poll or sleep. Its outcome arrives here as a message when it settles, with its files under inputs/<child id>/; complete refuses while a child is still live.
+A child's question arrives here as a message; answer it promptly with answer_child. If only the owner can answer, ask_owner first, then pass the answer on.
+In a delegated Work, ask the Ghost that delegated it with ask_parent; it knows the context. Use ask_owner only for what only the owner can decide or provide (money, identity, personal preference).
 work_status shows this Work's state and children; ask_owner when only the owner can decide something, phrased for a person: plain words and the choice itself, without ids, paths or tool names.`;
 
 const REVIEW_INSTRUCTIONS = `This conversation reviews one Work. Judge only from its artifacts (artifact_read) and recorded effects (effect_list) — never from the assignee's claims.
-Call verdict exactly once: pass, revise, or fail with concrete reasons. revise sends your reasons back to the assignee for another attempt.`;
+Call verdict exactly once: pass, revise, or fail with concrete reasons. For revise, give the evidence you observed (failing check, file and line, expected vs actual) and the scope the fix must stay inside, so the assignee changes only that.`;
 
 const MAIN_INSTRUCTIONS = `As the current main Ghost you can ghost_inspect another Ghost's configuration and ghost_update its name, persona, model, look, state or tool allow-list. The main designation and your own settings belong to the owner.`;
 
@@ -60,6 +65,10 @@ export function createToolSet(deps: {
   skills: SkillsPort | null;
   /** Read-only web research (ghost.web); null leaves the tools out. */
   reach?: ReachPort | null;
+  /** Host-side Chrome (ghost.browser); null leaves the tools out. */
+  browser?: BrowserPort | null;
+  /** The Ghost vault (ghost.vault); null leaves the tools out and secret fills unavailable. */
+  vault?: Vault | null;
 }): ToolSet {
   const direct = createDirectTools(deps.core);
   const interactive = createInteractiveTools(deps.core);
@@ -71,10 +80,19 @@ export function createToolSet(deps: {
   const host = deps.host ? createHostTools(deps.core, deps.host) : null;
   const skills = deps.skills === null ? null : createSkillsTools(deps.core, deps.skills);
   const web = deps.reach ? createWebTools(deps.core, deps.reach) : null;
+  const browser = deps.browser ? createBrowserTools(deps.core, deps.browser, { vault: deps.vault ?? null, sandbox: deps.sandbox }) : null;
+  const vault = deps.vault ? createVaultTools(deps.core, deps.vault) : null;
+  const optional = [memory, documents, host, skills, web, browser, vault].filter((extension): extension is Extension => extension !== null);
+  /** Guidance for an installed capability, only for a Ghost that holds one of its tools. */
+  const capabilityInstructions = (ghost: Ghost) =>
+    [
+      browser && ghost.tools.some((tool) => BROWSER_TOOLS.includes(tool)) ? BROWSER_INSTRUCTIONS : "",
+      vault && ghost.tools.some((tool) => tool.startsWith("vault_") || tool === "browser_fill_secret") ? VAULT_INSTRUCTIONS : "",
+    ];
 
   return {
     all(): Extension[] {
-      return [direct, interactive, work, review, main, ...(memory ? [memory] : []), ...(documents ? [documents] : []), ...(host ? [host] : []), ...(skills ? [skills] : []), ...(web ? [web] : [])];
+      return [direct, interactive, work, review, main, ...optional];
     },
     extensionsFor(conversation: Conversation, ghost: Ghost, _work: Work | null): Extension[] {
       switch (conversation.kind) {
@@ -85,6 +103,8 @@ export function createToolSet(deps: {
           if (host) selected.push(host);
           if (skills) selected.push(skills);
           if (web) selected.push(web);
+          if (browser) selected.push(browser);
+          if (vault) selected.push(vault);
           // Main-only management: resolved again at every execution, so a stale main keeps nothing.
           if (ghost.isDefault && ghost.state === "active") selected.push(main);
           return selected;
@@ -95,6 +115,8 @@ export function createToolSet(deps: {
           if (host) selected.push(host);
           if (skills) selected.push(skills);
           if (web) selected.push(web);
+          if (browser) selected.push(browser);
+          if (vault) selected.push(vault);
           return selected;
         }
         case "review":
@@ -104,11 +126,17 @@ export function createToolSet(deps: {
     instructionsFor(conversation: Conversation, ghost: Ghost, work: Work | null): string {
       switch (conversation.kind) {
         case "direct":
-          return [DIRECT_INSTRUCTIONS, ghost.isDefault && ghost.state === "active" ? MAIN_INSTRUCTIONS : "", skillsInstructions(deps.skills, ghost)]
+          return [DIRECT_INSTRUCTIONS, ghost.isDefault && ghost.state === "active" ? MAIN_INSTRUCTIONS : "", ...capabilityInstructions(ghost), skillsInstructions(deps.skills, ghost)]
             .filter(Boolean)
             .join("\n\n");
         case "work":
-          return [WORK_INSTRUCTIONS, delegationRoster(deps.core, ghost, { web: web !== null, host: host !== null }), work ? describeWork(work) : "", skillsInstructions(deps.skills, ghost)]
+          return [
+            WORK_INSTRUCTIONS,
+            ...capabilityInstructions(ghost),
+            delegationRoster(deps.core, ghost, { web: web !== null, host: host !== null, browser: browser !== null }),
+            work ? describeWork(work) : "",
+            skillsInstructions(deps.skills, ghost),
+          ]
             .filter(Boolean)
             .join("\n\n");
         case "review":
@@ -161,12 +189,12 @@ const WEB_TOOLS: readonly GhostTool[] = ["web_search", "web_read", "reach"];
 
 /**
  * The peers a Work can delegate to, each with what it can do: its resolved model (`provider/model`,
- * its own or the default) and whether that model takes images, plus `web` and `host` tags. Work
+ * its own or the default) and whether that model takes images, plus `web`, `browser` and `host` tags. Work
  * conversations have no ghost_list, so without this roster the model has no valid ghost_id for
  * delegate. Read when the conversation is configured — at Work start, and again whenever any Ghost
  * changes (core.refreshRosters).
  */
-function delegationRoster(core: Core, ghost: Ghost, installed: { web: boolean; host: boolean }): string {
+function delegationRoster(core: Core, ghost: Ghost, installed: { web: boolean; host: boolean; browser: boolean }): string {
   if (!ghost.tools.includes("delegate")) return "";
   const settings = core.ledger.settings();
   const peers = core.ledger.ghosts().filter((peer) => peer.state === "active" && peer.deletedAt === null && peer.id !== ghost.id);
@@ -180,6 +208,7 @@ function delegationRoster(core: Core, ghost: Ghost, installed: { web: boolean; h
       model ? `${model.provider}/${model.model}` : "",
       acceptsImages ? "image" : "",
       installed.web && WEB_TOOLS.some((tool) => peer.tools.includes(tool)) ? "web" : "",
+      installed.browser && peer.tools.includes("browser_open") ? "browser" : "",
       installed.host && HOST_TOOLS.some((tool) => peer.tools.includes(tool)) ? "host" : "",
     ].filter(Boolean);
     const persona = peer.persona.trim();

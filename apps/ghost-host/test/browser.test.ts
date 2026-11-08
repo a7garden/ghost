@@ -74,9 +74,9 @@ function fixture() {
 describe("isolated browser port", () => {
   test("config, private HOME, encrypted key, namespace, restore and proxy flags are host-owned", async () => {
     const root = tempDir();
-    expect(createBrowser(loadConfig({}, root), { root, log: () => {} })).toBeNull();
+    expect(createBrowser(loadConfig({}, root), { root })).toBeNull();
     writeFileSync(join(root, "config.json"), JSON.stringify({ browser: { executable: fakeExecutable(root), chrome: "/test/chrome", idleTimeoutMinutes: 7 } }));
-    const browser = createBrowser(loadConfig({}, root), { root, log: () => {} })!;
+    const browser = createBrowser(loadConfig({}, root), { root })!;
     try {
       await browser.run(session, ["open", "https://example.com/"]);
       const record = records(root)[0]!;
