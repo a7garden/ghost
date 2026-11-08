@@ -69,7 +69,18 @@ export function rehypeRefs() {
       } else if (child.type === 'element') {
         if (child.tagName === 'code') {
           const only = child.children.length === 1 && child.children[0]!.type === 'text' ? wholeRef(child.children[0].value) : null;
-          if (only) { next.push(refNode(only)); changed = true; continue; }
+          if (only) {
+            // "(`id`)": the brackets sit in the neighbouring text; a mark takes them along as in prose.
+            const before = next.at(-1);
+            const after = parent.children[parent.children.indexOf(child) + 1];
+            if (before?.type === 'text' && before.value.endsWith('(') && after?.type === 'text' && after.value.startsWith(')')) {
+              before.value = before.value.slice(0, -1);
+              after.value = after.value.slice(1);
+            }
+            next.push(refNode(only));
+            changed = true;
+            continue;
+          }
           next.push(child);
           continue;
         }

@@ -27,6 +27,13 @@ it('treats hex runs as digests only when they mix digits and letters', () => {
   expect(splitRefs('commit 9cde8c9')).toEqual(['commit 9cde8c9']);
 });
 
+it('lets a code-span id take its surrounding parentheses along', () => {
+  const html = renderToStaticMarkup(createElement(MessageBody, { text: `하위 Work: "상자 스크립트" (\`${ID}\`) — done` }));
+  expect(html).toContain('스크립트&quot; <span class="ref-mark"');
+  expect(html).toContain('</svg></span> — done');
+  expect(html).not.toMatch(/\(\s*<span|<\/span>\s*\)/);
+});
+
 it('renders references in prose and bare code spans as marks, and leaves code blocks and links exact', () => {
   const html = renderToStaticMarkup(createElement(MessageBody, {
     text: `결과는 \`${ID}\`에 있고 (60083fa5e45e) 확인했습니다.\n\n\`\`\`\nid=${ID}\n\`\`\`\n\n[link ${ID}](https://example.com/${ID})`,
