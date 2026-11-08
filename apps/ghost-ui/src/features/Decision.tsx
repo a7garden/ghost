@@ -85,7 +85,9 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   // The result summary is shown as the receipt; the detail repeats it after the reviewer's note.
   const detail = (decision.kind === 'accept_result' && acceptance.result
     ? decision.detail.replace(acceptance.result.summary, '') : decision.detail).trim();
-  const showDetail = detail && detail !== heading.trim();
+  // A host command proposal carries reason, command, folder and risk in its preview; the text detail repeats them for text-only clients.
+  const commandPreview = typeof decision.proposal?.command === 'string';
+  const showDetail = detail && detail !== heading.trim() && !commandPreview;
 
   // Digits pick a suggested answer; ⌘/Ctrl+Enter approves. Typing in a field is never intercepted.
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
