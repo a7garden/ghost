@@ -8,6 +8,7 @@ import type { Context } from "@earendil-works/chord";
 import type { Extension, ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 import type { Check, Work } from "@ghost/contract";
 import { idFor } from "../src/core/ids.ts";
+import { conflict } from "../src/core/errors.ts";
 import type { Core } from "../src/core/core.ts";
 import type { ArtifactStore, Submission } from "../src/core/ports.ts";
 import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
@@ -201,6 +202,193 @@ describe("parent-first questions", () => {
     expect(engine.to(s.child.conversationId!).filter((entry) => entry.requestId === "work-question:q:answer")).toHaveLength(1);
     expect(engine.attempts.filter((id) => id === "work-question:q:question")).toHaveLength(2);
     expect(engine.attempts.filter((id) => id === "work-question:q:answer")).toHaveLength(2);
+  });
+
+  test("idle parents get one counted reminder, then release unanswered children instead of hanging", async () => {
+    const s = await setup();
+    s.core.works.askParent(s.child.id, "Need a format", "idle-q");
+    s.core.works.onIdle(s.child.id);
+    await s.core.idle();
+    s.core.works.onIdle(s.parent.id);
+    await s.core.idle();
+    expect(s.ledger.work(s.parent.id).state).toBe("running");
+    expect(s.ledger.findWorkQuestion("idle-q")?.nudgeCount).toBe(1);
+    const reminder = s.engine.to(s.parent.conversationId!).find((entry) => entry.requestId === `work:${s.parent.id}:qnudge:1`);
+    expect(reminder?.text).toContain("answer_child");
+    expect(reminder?.text).toContain("ask_owner");
+    expect(reminder?.text).toContain("relay");
+    s.core.works.onIdle(s.parent.id);
+    await s.core.idle();
+    expect(s.ledger.findWorkQuestion("idle-q")?.state).toBe("cancelled");
+    expect(s.ledger.work(s.child.id).state).toBe("running");
+    const notice = s.engine.to(s.child.conversationId!).find((entry) => entry.requestId === "work-question:idle-q:cancelled");
+    expect(notice?.text).toContain("best judgment");
+    expect(notice?.text).toContain("ask_owner");
+    // Later question batches must not collide with the first reminder's request id.
+    s.core.works.askParent(s.child.id, "Another question", "idle-q2");
+    s.core.works.onIdle(s.child.id);
+    await s.core.idle();
+    s.core.works.onIdle(s.parent.id);
+    await s.core.idle();
+    expect(s.engine.to(s.parent.conversationId!).find((entry) => entry.requestId === `work:${s.parent.id}:qnudge:2`)).toBeDefined();
+  });
+
+  test("an owner escalation keeps the child question pending rather than exhausting reminders", async () => {
+    const s = await setup();
+    s.core.works.askParent(s.child.id, "Owner-only choice", "escalated");
+    s.core.works.onIdle(s.child.id);
+    await s.core.idle();
+    s.core.decisions.ask(s.parent.conversationId!, "Choose", "Owner-only choice", [], "owner-choice");
+    s.core.works.onIdle(s.parent.id);
+    await s.core.idle();
+    expect(s.ledger.work(s.parent.id).state).toBe("waiting");
+    expect(s.ledger.findWorkQuestion("escalated")?.state).toBe("pending");
+    expect(s.ledger.findWorkQuestion("escalated")?.nudgeCount).toBe(0);
+    expect(s.engine.to(s.parent.conversationId!).some((entry) => entry.requestId.includes(":qnudge:"))).toBe(false);
+  });
+
+  test("refused parent submissions and missing parent conversations cancel and notify the child", async () => {
+    for (const failure of ["refusal", "missing-conversation"]) {
+      const s = await setup();
+      if (failure === "refusal") {
+        const submit = s.engine.submit.bind(s.engine);
+        s.engine.submit = async (conversationId, submission) => {
+          if (submission.requestId === "work-question:unreachable:question") throw conflict("no model credential");
+          await submit(conversationId, submission);
+        };
+      } else {
+        s.ledger.tx(() => s.ledger.putWork({ ...s.parent, conversationId: null }));
+      }
+      s.core.works.askParent(s.child.id, "Q", "unreachable");
+      s.core.works.onIdle(s.child.id);
+      await s.core.idle();
+      expect(s.ledger.findWorkQuestion("unreachable")?.state).toBe("cancelled");
+      expect(s.ledger.findWorkQuestion("unreachable")?.cancellationSubmittedAt).not.toBeNull();
+      expect(s.ledger.work(s.child.id).state).toBe("running");
+      const notice = s.engine.to(s.child.conversationId!).find((entry) => entry.requestId === "work-question:unreachable:cancelled");
+      expect(notice?.text).toContain("parent could not be reached");
+      expect(notice?.text).toContain("ask_owner");
+      expect(s.ledger.workQuestionsAwaitingSubmission()).toHaveLength(0);
+    }
+  });
+
+  test("a refused parent reminder releases its children", async () => {
+    const s = await setup();
+    s.core.works.askParent(s.child.id, "Q", "reminder-refused");
+    s.core.works.onIdle(s.child.id);
+    await s.core.idle();
+    const submit = s.engine.submit.bind(s.engine);
+    s.engine.submit = async (conversationId, submission) => {
+      if (submission.requestId.includes(":qnudge:")) throw conflict("model unavailable");
+      await submit(conversationId, submission);
+    };
+    s.core.works.onIdle(s.parent.id);
+    await s.core.idle();
+    expect(s.ledger.findWorkQuestion("reminder-refused")?.state).toBe("cancelled");
+    expect(s.ledger.work(s.child.id).state).toBe("running");
+    expect(s.engine.to(s.child.conversationId!).find((entry) => entry.requestId === "work-question:reminder-refused:cancelled")?.text).toContain("ask_owner");
+  });
+
+  test("refused answers remain recoverable, then deliver once when the child is reachable", async () => {
+    const s = await setup();
+    s.core.works.askParent(s.child.id, "Q", "answer-retry");
+    s.core.works.onIdle(s.child.id);
+    await s.core.idle();
+    const submit = s.engine.submit.bind(s.engine);
+    s.engine.submit = async (conversationId, submission) => {
+      if (submission.requestId === "work-question:answer-retry:answer") throw conflict("no child credential");
+      await submit(conversationId, submission);
+    };
+    s.core.works.answerChild(s.parent.id, "answer-retry", "A");
+    await s.core.idle();
+    expect(s.ledger.findWorkQuestion("answer-retry")?.state).toBe("answered");
+    expect(s.ledger.findWorkQuestion("answer-retry")?.answerSubmittedAt).toBeNull();
+    expect(s.ledger.workQuestionsAwaitingSubmission().map((row) => row.id)).toEqual(["answer-retry"]);
+    s.engine.submit = submit;
+    s.core.works.recover();
+    await s.core.idle();
+    s.core.works.recover();
+    await s.core.idle();
+    expect(s.ledger.findWorkQuestion("answer-retry")?.answerSubmittedAt).not.toBeNull();
+    expect(s.engine.to(s.child.conversationId!).filter((entry) => entry.requestId === "work-question:answer-retry:answer")).toHaveLength(1);
+    expect(s.ledger.work(s.child.id).state).toBe("running");
+  });
+
+  test("cancelling or recovering a settled child closes answered-but-undelivered rows", async () => {
+    for (const settle of ["cancel", "recover-terminal"]) {
+      const s = await setup();
+      s.core.works.askParent(s.child.id, "Q", "terminal-answer");
+      await s.core.idle();
+      const submit = s.engine.submit.bind(s.engine);
+      s.engine.submit = async (conversationId, submission) => {
+        if (submission.requestId === "work-question:terminal-answer:answer") throw conflict("no child credential");
+        await submit(conversationId, submission);
+      };
+      s.core.works.answerChild(s.parent.id, "terminal-answer", "A");
+      await s.core.idle();
+      expect(s.ledger.workQuestionsAwaitingSubmission()).toHaveLength(1);
+      if (settle === "cancel") s.core.works.cancel(s.child.id);
+      else s.ledger.tx(() => s.ledger.putWork({ ...s.ledger.work(s.child.id), state: "failed", endedAt: Date.now() }));
+      s.core.works.recover();
+      await s.core.idle();
+      expect(s.ledger.findWorkQuestion("terminal-answer")?.state).toBe("cancelled");
+      expect(s.ledger.workQuestionsAwaitingSubmission()).toHaveLength(0);
+    }
+  });
+
+  test("cancelled-question notices survive interruption and recover with the same request id", async () => {
+    const s = await setup();
+    const engine = new InterruptedSubmission();
+    s.core.attach(engine);
+    s.core.works.askParent(s.child.id, "Q", "cancel-notice");
+    s.core.works.onIdle(s.child.id);
+    await s.core.idle();
+    engine.crashOn = "work-question:cancel-notice:cancelled";
+    s.core.works.onIdle(s.parent.id);
+    await s.core.idle();
+    s.core.works.onIdle(s.parent.id);
+    await s.core.idle();
+    expect(s.ledger.findWorkQuestion("cancel-notice")?.cancellationSubmittedAt).toBeNull();
+    expect(s.ledger.workQuestionsAwaitingSubmission().map((row) => row.id)).toEqual(["cancel-notice"]);
+    engine.crashOn = null;
+    s.core.works.recover();
+    await s.core.idle();
+    expect(s.ledger.findWorkQuestion("cancel-notice")?.cancellationSubmittedAt).not.toBeNull();
+    expect(engine.to(s.child.conversationId!).filter((entry) => entry.requestId === "work-question:cancel-notice:cancelled")).toHaveLength(1);
+    expect(engine.attempts.filter((id) => id === "work-question:cancel-notice:cancelled")).toHaveLength(2);
+  });
+
+  test("questions have a lifetime budget and status shows only eight bounded entries", async () => {
+    const s = await setup();
+    for (let i = 0; i < 16; i++) {
+      s.core.works.askParent(s.child.id, `Question ${i}: ${"x".repeat(8000)}`, `cap-${String(i).padStart(2, "0")}`);
+    }
+    await s.core.idle();
+    const refused = await call(s, s.child, "ask_parent", { question: "Seventeenth" }, "over-limit");
+    expect(refused.isError).toBe(true);
+    expect(content(refused)).toContain("at most 16 questions per Work");
+    expect(s.core.works.askParent(s.child.id, "Replay", "cap-00").id).toBe("cap-00");
+    s.core.works.answerChild(s.parent.id, "cap-15", "ANSWER ".repeat(1000));
+    await s.core.idle();
+    const ownStatus = content(await call(s, s.child, "work_status", {}));
+    expect(ownStatus).toContain("latest 8 of 16");
+    expect(ownStatus.match(/^- cap-/gm)).toHaveLength(8);
+    expect(ownStatus).not.toContain("- cap-00");
+    expect(ownStatus).toContain("- cap-15");
+    expect(ownStatus).toContain("[truncated]");
+    expect(ownStatus).not.toContain("x".repeat(513));
+    expect(ownStatus).not.toContain("ANSWER ".repeat(100));
+    const parentStatus = content(await call(s, s.parent, "work_status", {}));
+    expect(parentStatus).toContain("latest 8 of 15");
+    expect(parentStatus.match(/^- cap-/gm)).toHaveLength(8);
+    expect(parentStatus).not.toContain("- cap-00");
+    expect(parentStatus).not.toContain("x".repeat(513));
+    // Settled rows still consume the lifetime budget.
+    for (const question of s.ledger.workQuestions(s.child.id).filter((row) => row.state === "pending")) {
+      s.core.works.answerChild(s.parent.id, question.id, "A");
+    }
+    await s.core.idle();
+    expect(() => s.core.works.askParent(s.child.id, "Still over budget", "after-answers")).toThrow("at most 16");
   });
 });
 

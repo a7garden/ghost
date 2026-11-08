@@ -13,6 +13,8 @@ const MAX_IDLE_NUDGES = 1;
 export const MAX_DEPTH = 4;
 /** Live children per parent. */
 export const MAX_LIVE_CHILDREN = 8;
+/** Lifetime question budget per child Work, including answered/cancelled rows. */
+export const MAX_WORK_QUESTIONS = 16;
 
 const EMPTY_ACCEPTANCE: Acceptance = { criteria: "", checks: [], reviewer: null };
 
@@ -154,11 +156,13 @@ export class Works {
       return existing;
     }
     if (work.state !== "running") throw conflict(`Work is ${work.state}`);
+    if (this.ledger.workQuestions(work.id).length >= MAX_WORK_QUESTIONS) throw conflict(`at most ${MAX_WORK_QUESTIONS} questions per Work`);
     const parent = this.ledger.work(work.parentId);
     if (isTerminal(parent)) throw conflict(`parent Work is ${parent.state}`);
     const row: WorkQuestion = {
       id, workId, parentWorkId: parent.id, question, answer: null, state: "pending",
       createdAt: Date.now(), answeredAt: null, submittedAt: null, answerSubmittedAt: null,
+      nudgeCount: 0, cancellationReason: null, cancellationSubmittedAt: null,
     };
     this.ledger.tx(() => this.ledger.putWorkQuestion(row));
     this.deliverQuestion(row.id);
@@ -185,35 +189,81 @@ export class Works {
     return this.ledger.workQuestions(workId).some((question) => question.state === "pending");
   }
 
+  private abandonQuestion(id: string, reason: string) {
+    const question = this.ledger.findWorkQuestion(id);
+    if (!question || question.state !== "pending") return;
+    this.ledger.tx(() => this.ledger.putWorkQuestion({ ...question, state: "cancelled", cancellationReason: reason }));
+    this.deliverQuestion(id);
+  }
+
+  /** A cancelled question's fallback notice is itself a recoverable deterministic wake. */
+  private async notifyQuestionCancellation(question: WorkQuestion) {
+    if (question.cancellationReason === null || question.cancellationSubmittedAt !== null) return;
+    const child = this.ledger.work(question.workId);
+    if (isTerminal(child)) {
+      this.ledger.tx(() => this.ledger.cancelWorkQuestions(child.id));
+      return;
+    }
+    if (!child.conversationId) {
+      this.fail(child.id, "the parent question could not be resolved because the child has no work conversation");
+      return;
+    }
+    this.resumeFromWaiting(child.id);
+    try {
+      await this.core.openConversation(child.conversationId);
+      await this.core.engine.submit(child.conversationId, {
+        text: `Question ${question.id} was cancelled: ${question.cancellationReason}\n\nProceed with your best judgment if safe, or use \`ask_owner\` if only the owner can decide. Do not keep waiting for your parent.`,
+        origin: "work",
+        requestId: `work-question:${question.id}:cancelled`,
+      });
+      this.ledger.tx(() => this.ledger.putWorkQuestion({ ...this.ledger.findWorkQuestion(question.id)!, cancellationSubmittedAt: Date.now() }));
+    } catch (error) {
+      if (!(error instanceof CommandError)) throw error;
+      this.core.log(`fallback notice for question ${question.id} not delivered`, error.message);
+    }
+  }
+
   /** Journal first, submit second, mark last. Pi deduplicates either crash window. */
   private deliverQuestion(id: string) {
     void this.core.lane(`work-question:${id}`, async () => {
       const question = this.ledger.findWorkQuestion(id);
-      if (!question || question.state === "cancelled") return;
+      if (!question) return;
+      if (question.state === "cancelled") return this.notifyQuestionCancellation(question);
       const child = this.ledger.work(question.workId);
       const parent = this.ledger.work(question.parentWorkId);
       if (isTerminal(child) || isTerminal(parent)) {
-        if (question.state === "pending") this.ledger.tx(() => this.ledger.putWorkQuestion({ ...question, state: "cancelled" }));
+        this.ledger.tx(() => this.ledger.putWorkQuestion({
+          ...question, state: "cancelled",
+          cancellationReason: isTerminal(child) ? null : "Your parent Work settled before the question was resolved.",
+        }));
+        if (!isTerminal(child)) this.deliverQuestion(id);
         return;
       }
       const answering = question.state === "answered";
       if (answering ? question.answerSubmittedAt !== null : question.submittedAt !== null) return;
       const recipient = answering ? child : parent;
-      if (!recipient.conversationId) throw conflict("question recipient has no work conversation");
-      await this.core.openConversation(recipient.conversationId);
-      await this.core.engine.submit(recipient.conversationId, {
-        text: answering
-          ? `Your delegating Ghost answered question ${question.id}.\n\n## Question\n${question.question}\n\n## Answer\n${question.answer}\n\nContinue this Work.`
-          : `Child Work "${child.title}" (${child.id}) asks question ${question.id}.\n\n${question.question}\n\nAnswer promptly with \`answer_child\` using question_id "${question.id}". If only the owner can decide, use \`ask_owner\` and answer the child when resolved.`,
-        origin: "work",
-        requestId: `work-question:${question.id}:${answering ? "answer" : "question"}`,
-      });
-      this.ledger.tx(() => {
-        const current = this.ledger.findWorkQuestion(id)!;
-        // Cancellation/answering can happen while submit is in flight.
-        this.ledger.putWorkQuestion({ ...current, ...(answering ? { answerSubmittedAt: Date.now() } : { submittedAt: Date.now() }) });
-        if (!isTerminal(this.ledger.work(recipient.id))) this.resumeFromWaiting(recipient.id);
-      });
+      try {
+        if (!recipient.conversationId) throw conflict("question recipient has no work conversation");
+        await this.core.openConversation(recipient.conversationId);
+        await this.core.engine.submit(recipient.conversationId, {
+          text: answering
+            ? `Your delegating Ghost answered question ${question.id}.\n\n## Question\n${question.question}\n\n## Answer\n${question.answer}\n\nContinue this Work.`
+            : `Child Work "${child.title}" (${child.id}) asks question ${question.id}.\n\n${question.question}\n\nAnswer promptly with \`answer_child\` using question_id "${question.id}". If only the owner can decide, use \`ask_owner\` and answer the child when resolved.`,
+          origin: "work",
+          requestId: `work-question:${question.id}:${answering ? "answer" : "question"}`,
+        });
+        this.ledger.tx(() => {
+          const current = this.ledger.findWorkQuestion(id)!;
+          // Cancellation/answering can happen while submit is in flight.
+          this.ledger.putWorkQuestion({ ...current, ...(answering ? { answerSubmittedAt: Date.now() } : { submittedAt: Date.now() }) });
+          if (!isTerminal(this.ledger.work(recipient.id))) this.resumeFromWaiting(recipient.id);
+        });
+      } catch (error) {
+        if (!(error instanceof CommandError)) throw error;
+        if (!answering) this.abandonQuestion(id, "Your parent could not be reached.");
+        else if (isTerminal(this.ledger.work(child.id))) this.ledger.tx(() => this.ledger.cancelWorkQuestions(child.id));
+        this.core.log(`${answering ? "answer" : "question"} ${id} not delivered`, error.message);
+      }
     });
   }
 
@@ -385,6 +435,34 @@ export class Works {
     if (work.state !== "running") return;
     const liveChildren = this.ledger.children(work.id).some((child) => !isTerminal(child));
     const pending = this.ledger.pendingDecisions({ workId: work.id }).length > 0;
+    const childQuestions = this.ledger.workQuestions(work.id, true).filter((question) => question.state === "pending");
+    // An owner/upstream question is a legitimate escalation; keep waiting for its answer.
+    if (childQuestions.length > 0 && !pending && !this.pendingQuestion(work.id)) {
+      const exhausted = childQuestions.filter((question) => question.nudgeCount >= MAX_IDLE_NUDGES);
+      for (const question of exhausted) this.abandonQuestion(question.id, "Your parent did not answer after a reminder.");
+      const unanswered = childQuestions.filter((question) => question.nudgeCount < MAX_IDLE_NUDGES);
+      if (unanswered.length > 0) {
+        const count = this.ledger.tx(() => {
+          for (const question of unanswered) this.ledger.putWorkQuestion({ ...question, nudgeCount: question.nudgeCount + 1 });
+          return this.ledger.nextQuestionNudge(work.id);
+        });
+        void this.core.lane(`work:${work.id}`, async () => {
+          try {
+            if (!work.conversationId) throw conflict("parent has no work conversation");
+            await this.core.engine.submit(work.conversationId, {
+              text: `Your children are waiting for answers to questions ${unanswered.map((question) => question.id).join(", ")}. Answer with \`answer_child\`, or use \`ask_owner\` and relay the answer. Do not leave children waiting.`,
+              origin: "work",
+              requestId: `work:${work.id}:qnudge:${count}`,
+            });
+          } catch (error) {
+            if (!(error instanceof CommandError)) throw error;
+            for (const question of unanswered) this.abandonQuestion(question.id, "Your parent could not be reached.");
+            this.core.log(`child-question reminder for ${work.id} not delivered`, error.message);
+          }
+        });
+        return;
+      }
+    }
     if (liveChildren || pending || this.pendingQuestion(work.id)) {
       this.ledger.tx(() => this.ledger.putWork({ ...work, state: "waiting", updatedAt: Date.now() }));
       this.kick(work.id);
