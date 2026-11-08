@@ -32,7 +32,9 @@ async function tunnel(proxy: string, destination: string, payload?: string) {
 
 test("shared guard rejects private compressed IPv6 and all intended IPv4 ranges", async () => {
   for (const ip of ["::", "::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "fc00::1", "fe80::123", "172.16.0.1", "172.31.255.255", "100.64.0.1", "10.0.0.1", "192.168.1.1", "169.254.1.1", "0.0.0.0"]) expect(blockedAddress(ip)).toBe(true);
+  for (const ip of ["198.18.0.0", "198.19.255.255", "192.0.0.0", "192.0.0.255", "224.0.0.1", "239.255.255.255", "240.0.0.1", "255.255.255.255", "64:ff9b::808:808", "2002:7f00:1::", "2002:a00:1::", "fec0::1", "ff02::1", "::8.8.8.8", "invalid", "", "8.8.8.8%bad", "[8.8.8.8", "1::2::3"]) expect(blockedAddress(ip)).toBe(true);
   for (const ip of ["2001:4860:4860::8888", "2001::1", "8.8.8.8", "172.32.0.1", "::ffff:8.8.8.8"]) expect(blockedAddress(ip)).toBe(false);
+  for (const ip of ["198.17.255.255", "198.20.0.1", "192.0.1.1", "223.255.255.255", "2002:808:808::"]) expect(blockedAddress(ip)).toBe(false);
   for (const url of ["http://[::1]", "http://[::ffff:7f00:1]", "http://172.20.0.1", "http://localhost.", "http://foo.ts.net", "file:///tmp/x"]) await expect(assertFetchableUrl(url, "url")).rejects.toThrow();
 });
 
