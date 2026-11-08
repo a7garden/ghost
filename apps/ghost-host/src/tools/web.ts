@@ -35,10 +35,37 @@ const MANAGEMENT: Record<string, true> = {
   channels: true,
 };
 /** Backend/account failures a Ghost cannot fix by retrying. */
-const OWNER_CODES: Record<string, true> = { NEED_LOGIN: true, PLATFORM_BLOCKED: true, RATE_LIMITED: true };
+const OWNER_CODES: Record<string, true> = { NEED_LOGIN: true, NEED_SETUP: true, PLATFORM_BLOCKED: true, RATE_LIMITED: true };
 
 /** An argument that carries a scheme, e.g. `https://…` or `file://…`. */
 const URL_LIKE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+
+const TIMEOUT_FLAG = /^--timeout(?:=(\d+))?$/;
+const TIMEOUT_VALUE = /^\d+$/;
+
+/**
+ * Clamps the CLI's own `--timeout` to the host deadline: a child asking for longer than the host
+ * allows would be killed here first, orphaning the CLI's own supervised children.
+ */
+function clampTimeoutArgs(args: string[], deadlineSeconds: number): string[] {
+  const clamped: string[] = [];
+  for (const arg of args) {
+    const inline = TIMEOUT_FLAG.exec(arg);
+    if (inline?.[1] !== undefined) {
+      clamped.push(`--timeout=${Math.max(1, Math.min(deadlineSeconds, Number(inline[1])))}`);
+      continue;
+    }
+    clamped.push(arg);
+  }
+  for (let index = 0; index < clamped.length; index++) {
+    const flag = clamped[index];
+    const value = clamped[index + 1];
+    if (flag === "--timeout" && value !== undefined && TIMEOUT_VALUE.test(value)) {
+      clamped[index + 1] = String(Math.max(1, Math.min(deadlineSeconds, Number(value))));
+    }
+  }
+  return clamped;
+}
 
 /** Cuts to `max` characters, marking the cut on its own line. */
 function clip(text: string, max: number): string {
@@ -110,9 +137,9 @@ function blockedAddress(address: string): boolean {
 /**
  * SSRF guard for every URL a model hands to web research: http/https only, never this machine
  * (localhost, *.local, *.internal, *.ts.net), never a private-range literal, and never a name
- * whose DNS answer is one.
+ * whose DNS answer is one. Returns the normalized URL to hand to the CLI.
  */
-async function assertFetchableUrl(raw: string, what: string): Promise<void> {
+async function assertFetchableUrl(raw: string, what: string): Promise<URL> {
   let parsed: URL;
   try {
     parsed = new URL(raw);
@@ -127,17 +154,18 @@ async function assertFetchableUrl(raw: string, what: string): Promise<void> {
   }
   if (isIP(host) !== 0) {
     if (blockedAddress(host)) throw forbidden(`${what} points at the private or loopback address ${host}, which is refused`);
-    return;
+    return parsed;
   }
   let addresses;
   try {
     addresses = await lookup(host, { all: true });
   } catch {
     // Unresolvable: the CLI reports that itself, and DNS cannot smuggle a private address.
-    return;
+    return parsed;
   }
   const blocked = addresses.find((address) => blockedAddress(address.address));
   if (blocked) throw forbidden(`${what} resolves to the private or loopback address ${blocked.address}, which is refused`);
+  return parsed;
 }
 
 /** The failure the CLI reported becomes a tool error; owner-action codes say so explicitly. */
@@ -145,6 +173,8 @@ function failure(result: ReachResult): CommandError {
   const error = result.error ?? { code: "internal", message: "agent-reach reported a failure", hint: null };
   const detail = `${error.code}: ${error.message}${error.hint ? ` (${error.hint})` : ""}`;
   if (OWNER_CODES[error.code]) return new CommandError("unavailable", `${detail} — only the owner can fix this; do not retry.`);
+  // BAD_INPUT is the Ghost's mistake: it may fix the arguments and retry.
+  if (error.code === "BAD_INPUT") return new CommandError("invalid", detail);
   return new CommandError("unavailable", detail);
 }
 
@@ -211,8 +241,8 @@ export function createWebTools(core: Core, reach: ReachPort): Extension {
     async execute(args, api) {
       try {
         requireAllowed(core, api, "web_read");
-        await assertFetchableUrl(args.url, "url");
-        return render(await reach.read(args.url));
+        const url = await assertFetchableUrl(args.url, "url");
+        return render(await reach.read(url.href));
       } catch (error) {
         return errorResult(error);
       }
@@ -240,7 +270,7 @@ export function createWebTools(core: Core, reach: ReachPort): Extension {
         for (const value of extra) {
           if (URL_LIKE.test(value)) await assertFetchableUrl(value, "arg");
         }
-        return render(await reach.run(channel, action, extra));
+        return render(await reach.run(channel, action, clampTimeoutArgs(extra, reach.timeoutSeconds)));
       } catch (error) {
         return errorResult(error);
       }

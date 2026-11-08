@@ -239,7 +239,11 @@ describe("delegation roster", () => {
 
     const parent = await runningParent(s);
     const conversation = s.ledger.conversation(s.ledger.work(parent.id).conversationId!);
-    const instructions = s.tools.instructionsFor(conversation, s.ghost, s.ledger.work(parent.id));
+    // Tags name only capabilities this host has installed: without Reach or Mac ports there is no web or host tag.
+    const bare = s.tools.instructionsFor(conversation, s.ghost, s.ledger.work(parent.id));
+    expect(bare).toContain(`Operator (ghost_id ${operator.id}) — Runs the Mac. [faux/gpt-4.1 image]`);
+    const equipped = createToolSet({ core: s.core, sandbox: stubSandbox, memory: null, documents: null, skills: null, reach: {} as never, host: {} as never });
+    const instructions = equipped.instructionsFor(conversation, s.ghost, s.ledger.work(parent.id));
 
     expect(instructions).toContain(`Helper (ghost_id ${s.helper.id}) — Does parts. [faux/gpt-4.1 image web]`);
     expect(instructions).toContain(`Operator (ghost_id ${operator.id}) — Runs the Mac. [faux/gpt-4.1 image web host]`);
@@ -566,5 +570,23 @@ describe("ghost.delete", () => {
     retireAndDelete(s, s.helper.id);
     expect(() => updateGhost(s.core, s.helper.id, { name: "Zombie" })).toThrow("was deleted");
     expect(s.ledger.ghost(s.helper.id).name).toBe("Helper");
+  });
+
+  test("deleting drops the Ghost from unclaimed pairing offers, so a later claim cannot grant it", () => {
+    const s = setup();
+    s.ledger.tx(() => s.ledger.insertPairing("code-1", "Phone", [{ ghostId: s.helper.id, conversationId: null }, { ghostId: s.ghost.id, conversationId: null }], Date.now() + 60_000));
+    retireAndDelete(s, s.helper.id);
+    const claimed = s.ledger.tx(() => s.ledger.claimPairing("code-1", "dev-new", Date.now()));
+    expect(claimed?.grants).toEqual([{ ghostId: s.ghost.id, conversationId: null }]);
+  });
+
+  test("a deleted Ghost takes no owner message and runs no tool from its retained conversations", async () => {
+    const s = setup();
+    const pi = asPi(s, s.ledger.conversation(s.helper.directConversationId), "pi-helper");
+    retireAndDelete(s, s.helper.id);
+    expect(() => s.core.sendMessage(s.helper.directConversationId, "still there?", crypto.randomUUID())).toThrow("was deleted");
+    const listed = await call(toolOf(s, s.ledger.conversation(s.helper.directConversationId), s.ledger.ghost(s.helper.id), "ghost_list"), {}, apiOf(pi, "list-deleted"));
+    expect(listed.isError).toBe(true);
+    expect(contentOf(listed)).toContain("was deleted");
   });
 });

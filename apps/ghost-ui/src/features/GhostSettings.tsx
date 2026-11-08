@@ -21,7 +21,7 @@ const toolLabels: Record<GhostTool, string> = {
   document_spaces: '문서 공간', document_list: '문서 목록', document_read: '문서 읽기', document_propose: '문서 수정 제안',
   web_search: '웹 검색', web_read: '웹 읽기', reach: '외부 읽기', skill_read: '스킬 읽기',
   host_status: 'Mac 상태', host_services: 'Mac 서비스', host_disk_scan: 'Mac 디스크 검색', host_disk_usage: 'Mac 디스크 사용량',
-  host_list: 'Mac 파일 목록', host_read: 'Mac 파일 읽기', host_nodes: 'Mac 항목 보기', host_command_propose: 'Mac 명령 제안',
+  host_list: 'Mac 파일 목록', host_read: 'Mac 파일 읽기', host_nodes: 'Tailscale 노드', host_command_propose: 'Mac 명령 제안',
 };
 
 /** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. */

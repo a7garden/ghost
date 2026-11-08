@@ -18,7 +18,7 @@ import { harness, tempDir } from "./support.ts";
  * `<log>/argv.jsonl` and answers with canned JSON keyed on the invocation.
  */
 const FAKE_REACH = `#!/usr/bin/env bun
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, rmSync } from "node:fs";
 const LOG = "__LOG__";
 const argv = process.argv.slice(2);
 appendFileSync(LOG + "/argv.jsonl", JSON.stringify(argv) + "\\n");
@@ -34,13 +34,20 @@ const catalog = { ok: true, channels: [
   { name: "github", actions: [{ name: "search" }, { name: "read" }] },
   { name: "x", actions: [{ name: "search" }] },
 ] };
+let catalogOut = catalog;
+if (argv[0] === "channels" && existsSync(LOG + "/fail-channels")) {
+  rmSync(LOG + "/fail-channels");
+  catalogOut = { ok: true, channels: [] };
+}
 const loginError = { ok: false, channel: "web", action: "search", items: [], error: { code: "NEED_LOGIN", message: "not signed in to exa", hint: "owner runs agent-reach login" } };
+const setupError = { ok: false, items: [], error: { code: "NEED_SETUP", message: "no search backend configured", hint: "owner runs agent-reach setup" } };
+const badInputError = { ok: false, items: [], error: { code: "BAD_INPUT", message: "query not usable", hint: "shorten the query" } };
 const downError = { ok: false, items: [], error: { code: "BACKEND_DOWN", message: "search backend unreachable" } };
 const flood = { ok: true, items: Array.from({ length: 20 }, (_, i) => ({ title: "Item " + i, url: "https://example.com/" + i, text: String.fromCharCode(97 + (i % 26)).repeat(4000) })) };
 const search = { ok: true, channel: "web", action: "search", items: [{ title: "Result for " + q, url: "https://example.com/a", author: "Ann", published_at: "2026-10-01T00:00:00.000Z", text: "y".repeat(5000) }] };
 const page = { ok: true, channel: "web", action: "read", items: [{ title: "Example", url: argv[1], text: "z".repeat(6000) }] };
 const generic = { ok: true, channel: argv[0], action: argv[1], items: [{ title: argv[0] + " hit", url: "https://example.com/x", text: "short" }] };
-const out = argv[0] === "channels" ? catalog : q === "NEED_LOGIN" ? loginError : q === "DOWN" ? downError : q === "FLOOD" ? flood : q !== "" ? search : argv[0] === "read" ? page : generic;
+const out = argv[0] === "channels" ? catalogOut : q === "NEED_LOGIN" ? loginError : q === "NEED_SETUP" ? setupError : q === "BAD_INPUT" ? badInputError : q === "DOWN" ? downError : q === "FLOOD" ? flood : q !== "" ? search : argv[0] === "read" ? page : generic;
 process.stdout.write(JSON.stringify(out));
 `;
 
@@ -133,6 +140,17 @@ describe("agent-reach port", () => {
     expect(createReach({ ...base, reach: null } as Config)).toBeNull();
     const reach = createReach({ ...base, reach: { executable: "~/bin/agent-reach" } } as Config);
     expect(reach).not.toBeNull();
+  });
+
+  test("a failed catalog fetch is retried, not cached until restart", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghost-reach-catalog-"));
+    const reach = new AgentReach({ executable: fakeExecutable(dir, FAKE_REACH), timeoutMs: 10_000 });
+    writeFileSync(join(dir, "fail-channels"), "1");
+    await expect(reach.catalog()).rejects.toThrow(/no channels/);
+    const catalog = await reach.catalog();
+    expect(catalog.map((channel) => channel.name)).toEqual(["web", "github", "x"]);
+    const lines = await argvLines(dir);
+    expect(lines.filter((argv) => argv[0] === "channels")).toHaveLength(2);
   });
 
   test("search/read/run pass argv verbatim and catalog is fetched once", async () => {
@@ -232,6 +250,13 @@ describe("web tools", () => {
     expect(hit.isError).toBeFalsy();
     expect(contentOf(hit)).toContain("github hit — https://example.com/x");
     expect((await argvLines(s.log)).at(-1)).toEqual(["github", "search", "monorepo tools", "--limit", "2"]);
+    // The CLI's own timeout is clamped to the host deadline (10 s in this setup), never above it.
+    const clamped = await call(s, s.direct, s.ghost, "reach", { channel: "github", action: "search", args: ["monorepo tools", "--timeout", "999999"] });
+    expect(clamped.isError).toBeFalsy();
+    expect((await argvLines(s.log)).at(-1)).toEqual(["github", "search", "monorepo tools", "--timeout", "10"]);
+    const inlineClamped = await call(s, s.direct, s.ghost, "reach", { channel: "github", action: "search", args: ["q", "--timeout=999999"] });
+    expect(inlineClamped.isError).toBeFalsy();
+    expect((await argvLines(s.log)).at(-1)).toEqual(["github", "search", "q", "--timeout=10"]);
     const before = (await argvLines(s.log)).length;
     await call(s, s.direct, s.ghost, "reach", { channel: "x", action: "search", args: ["durable"] });
     // One channels call total: the catalog answer is cached for the process.
@@ -292,6 +317,14 @@ describe("web tools", () => {
     expect(login.isError).toBe(true);
     expect(contentOf(login)).toContain("NEED_LOGIN: not signed in to exa (owner runs agent-reach login)");
     expect(contentOf(login)).toContain("only the owner can fix this; do not retry");
+    const setupFailed = await call(s, s.direct, s.ghost, "web_search", { query: "NEED_SETUP" });
+    expect(setupFailed.isError).toBe(true);
+    expect(contentOf(setupFailed)).toContain("NEED_SETUP: no search backend configured");
+    expect(contentOf(setupFailed)).toContain("only the owner can fix this; do not retry");
+    const badInput = await call(s, s.direct, s.ghost, "web_search", { query: "BAD_INPUT" });
+    expect(badInput.isError).toBe(true);
+    expect(contentOf(badInput)).toContain("BAD_INPUT: query not usable (shorten the query)");
+    expect(contentOf(badInput)).not.toContain("owner");
     const down = await call(s, s.direct, s.ghost, "web_search", { query: "DOWN" });
     expect(down.isError).toBe(true);
     expect(contentOf(down)).toContain("BACKEND_DOWN: search backend unreachable");

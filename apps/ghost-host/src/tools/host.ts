@@ -69,7 +69,10 @@ export function createHostTools(core: Core, host: HostPort): Extension {
     (name) =>
       defineTool({
         name,
-        description: `Read an absolute path inside configured project/cache roots. Secrets and private text are refused; reads are at most 12 KB and lists at most 100 entries. ${UNTRUSTED}`,
+        description:
+          name === "host_read"
+            ? `Read at most 12 KB of UTF-8 text from an absolute path inside configured project roots only, never caches. Secrets, private text paths and project symlinks are refused. ${UNTRUSTED}`
+            : `Inspect an absolute directory inside configured project/cache roots. Secret paths are refused and lists show at most 100 entries. ${UNTRUSTED}`,
         parameters: Type.Object({
           path: Type.String({ minLength: 1, maxLength: 4096 }),
         }),

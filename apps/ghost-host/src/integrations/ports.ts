@@ -98,6 +98,8 @@ export interface ReachChannel {
 
 /** Read-only web research through the installed `agent-reach` CLI. Implemented in src/integrations/reach.ts. */
 export interface ReachPort {
+  /** The host-side deadline in seconds; the tools clamp the CLI's own `--timeout` to it. */
+  readonly timeoutSeconds: number;
   /** `agent-reach web search <query> --limit <limit>`. */
   search(query: string, limit: number): Promise<ReachResult>;
   /** `agent-reach read <url>`. The caller must have vetted the URL against the SSRF guard. */
@@ -119,7 +121,7 @@ export interface HostCommand {
 
 export interface HostStatus {
   collectedAt: number;
-  disks: { path: string; totalBytes: number; freeBytes: number; pressure: "healthy" | "pressure" | "critical" }[];
+  disks: { path: string; volumeId?: string; totalBytes: number; freeBytes: number; pressure: "healthy" | "pressure" | "critical" }[];
   ramBytes: number;
   memoryFreePct: number | null;
   cores: number;

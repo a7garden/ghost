@@ -17,10 +17,12 @@ export const FallbackDoc = defineDoc({
 export function fallbackReason(message: AssistantMessage): string | null {
   if (message.stopReason !== "error" || isContextOverflow(message)) return null;
   const error = message.errorMessage ?? "";
-  // Invalid input never improves by spending a different provider's quota.
-  if (/\b400\b|invalid[_ -]?request|bad request/i.test(error)) return null;
+  // Billing failures can use HTTP 400 / invalid_request_error despite valid input.
+  if (/insufficient[_ -](?:quota|credits?|balance|funds)|credit balance|billing|exceeded (?:your )?(?:current )?quota|(?:quota|budget|credits?) (?:exceeded|exhausted|depleted)|usage[_ .-]?limit|available balance|out of (?:budget|credits?)|not enough credits?/i.test(error)) return error;
+  // A token count of 400 in a rate-limit report is not an HTTP status.
+  if (/^\s*(?:(?:http(?:\/\d(?:\.\d)?)?|error|status(?: code)?)\s*:?\s*)?400\b|invalid[_ -]?request|bad request/i.test(error)) return null;
   if (isRetryableAssistantError(message)) return error || "retryable provider error";
-  return /\b(429|529|503)\b|quota|billing|budget|credit|usage.?limit|available balance|overload|provider.{0,20}unavailable|no (?:api key|credential)|missing.{0,20}(?:api key|credential)|credential.{0,20}(?:missing|not found)|ECONNRESET|ECONNREFUSED|ENETUNREACH/i.test(error)
+  return /\b(429|529|503)\b|overload|provider.{0,20}unavailable|no (?:api key|credential)|missing.{0,20}(?:api key|credential)|credential.{0,20}(?:missing|not found)|ECONNRESET|ECONNREFUSED|ENETUNREACH/i.test(error)
     ? error
     : null;
 }

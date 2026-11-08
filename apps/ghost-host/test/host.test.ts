@@ -17,6 +17,7 @@ import {
   sensitiveText,
   type HostRun,
   type HostRunner,
+  type HostOutput,
 } from "../src/integrations/host.ts";
 import type {
   HostCommand,
@@ -29,6 +30,8 @@ import { HostWatch } from "../src/core/hostwatch.ts";
 import { createHostTools } from "../src/tools/host.ts";
 import { loadConfig } from "../src/config.ts";
 import { harness, tempDir } from "./support.ts";
+import { openApp, type App } from "../src/app.ts";
+import { CommandError } from "../src/core/errors.ts";
 
 const GB = 1_073_741_824;
 const HOUR = 3_600_000;
@@ -42,6 +45,8 @@ function fixture(runner?: HostRunner) {
 }
 const ok = (output = "") => ({
   exitCode: 0,
+  stdout: output,
+  stderr: "",
   output,
   timedOut: false,
   truncated: false,
@@ -63,12 +68,15 @@ class Probes implements HostPort {
   lastExit = 0;
   online = true;
   executions = 0;
+  statusCalls = 0;
   async status(): Promise<HostStatus> {
+    this.statusCalls++;
     return {
       collectedAt: 0,
       disks: [
         {
           path: "/",
+          volumeId: "main",
           totalBytes: this.total,
           freeBytes: this.free,
           pressure:
@@ -163,9 +171,12 @@ describe("guarded Mac host", () => {
       const listing = await f.host.list(f.root);
       expect(listing.entries.some((e) => e.name === ".env.local")).toBe(false);
       writeFileSync(join(f.home, ".cache", "text.txt"), "cache");
-      expect(
-        await f.host.read(join(f.home, ".cache", "text.txt")),
-      ).toMatchObject({ text: "cache" });
+      await expect(
+        f.host.read(join(f.home, ".cache", "text.txt")),
+      ).rejects.toThrow("outside");
+      expect(await f.host.list(join(f.home, ".cache"))).toMatchObject({
+        entries: [{ name: "text.txt", kind: "file" }],
+      });
       writeFileSync(join(f.root, "huge.txt"), "x".repeat(12_001));
       await expect(f.host.read(join(f.root, "huge.txt"))).rejects.toThrow(
         "12 KB",
@@ -173,6 +184,105 @@ describe("guarded Mac host", () => {
       writeFileSync(join(f.root, "binary.txt"), Buffer.from([0xff]));
       await expect(f.host.read(join(f.root, "binary.txt"))).rejects.toThrow();
     } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("project reads allow symlinked root ancestors but refuse symlinks below that root", async () => {
+    const f = fixture();
+    try {
+      writeFileSync(join(f.root, "hello.txt"), "hello");
+      mkdirSync(join(f.root, "sub"));
+      writeFileSync(join(f.root, "sub", "text.txt"), "sub");
+      symlinkSync(f.home, join(f.home, "linked"));
+      symlinkSync(join(f.root, "sub"), join(f.root, "alias-dir"));
+      const linkedRoot = join(f.home, "linked", "projects");
+      const host = new MacHost({ home: f.home, roots: [linkedRoot] });
+      expect(await host.read(join(linkedRoot, "hello.txt"))).toMatchObject({
+        text: "hello",
+      });
+      expect(await host.read(join(f.root, "hello.txt"))).toMatchObject({
+        text: "hello",
+      });
+      await expect(
+        host.read(join(linkedRoot, "alias-dir", "text.txt")),
+      ).rejects.toThrow("symlink");
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("du totals come only from stdout, even when diagnostics arrive first", async () => {
+    const f = fixture(async () => ({
+      exitCode: 1,
+      stdout: "scan notice\n12\tpath\n",
+      stderr: "99 permission errors\n",
+      output: "99 permission errors\nscan notice\n12\tpath\n",
+      timedOut: false,
+      truncated: false,
+    }));
+    try {
+      expect(await f.host.diskUsage(f.root)).toMatchObject({
+        bytes: 12 * 1024,
+        partial: true,
+      });
+      const scan = await f.host.diskScan();
+      expect(scan.entries.length).toBeGreaterThan(0);
+      expect(
+        scan.entries.every(
+          (entry) => entry.bytes === 12 * 1024 && entry.partial,
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test.skipIf(process.getuid?.() === 0 || Boolean(process.env.CI))(
+    "real du preserves its partial total for unreadable subdirectories",
+    async () => {
+      let observed: HostOutput | undefined;
+      const f = fixture(async (input) => {
+        observed = await runHostCommand(input);
+        return observed;
+      });
+      const locked = join(f.root, "blocked");
+      try {
+        mkdirSync(locked);
+        writeFileSync(join(locked, "hidden.txt"), "not readable");
+        writeFileSync(join(f.root, "visible.txt"), "visible");
+        chmodSync(locked, 0);
+        const usage = await f.host.diskUsage(f.root);
+        expect(observed?.stderr).toMatch(/permission denied/i);
+        expect(observed?.stdout).toMatch(/^\s*\d+\s/m);
+        expect(usage.bytes).toBeGreaterThan(0);
+        expect(usage.partial).toBe(true);
+        const scan = await f.host.diskScan();
+        expect(
+          scan.entries.find((entry) => entry.path === f.root),
+        ).toMatchObject({ partial: true });
+      } finally {
+        chmodSync(locked, 0o700);
+        rmSync(f.home, { recursive: true, force: true });
+      }
+    },
+  );
+  test("openApp never starts host monitoring for doctor or import", async () => {
+    const f = fixture();
+    const start = spyOn(HostWatch.prototype, "start").mockImplementation(() => {
+      throw new Error("only serve may start monitoring");
+    });
+    let app: App | undefined;
+    try {
+      writeFileSync(
+        join(f.home, "config.json"),
+        JSON.stringify({
+          mac: { roots: [f.root], watch: { ghostId: "not-running" } },
+        }),
+      );
+      app = await openApp(loadConfig({}, f.home));
+      expect(start).not.toHaveBeenCalled();
+      expect(app.ledger.setting("hostWatch", null)).toBeNull();
+    } finally {
+      await app?.close();
+      start.mockRestore();
       rmSync(f.home, { recursive: true, force: true });
     }
   });
@@ -477,7 +587,7 @@ describe("host command approval", () => {
 });
 
 describe("HostWatch durable admission", () => {
-  test("baseline, two-sample pressure, six-hour cooldown and daily review have deterministic IDs; persist before submission", async () => {
+  test("baseline, restarted streaks, cooldown and daily review persist before one deterministic submission", async () => {
     const h = harness();
     const probes = new Probes();
     const ghost = h.core.createGhost({ name: "Watch", persona: "" });
@@ -497,32 +607,37 @@ describe("HostWatch durable admission", () => {
     await watch.tick(start);
     expect(
       h.engine.to(ghost.directConversationId).map((s) => s.requestId),
-    ).toEqual([`hostwatch:review:${start}`]);
+    ).toEqual([`hostwatch:${start}`]);
     probes.free = 40 * GB;
     await watch.tick(start + 5 * 60_000);
     expect(h.engine.submissions.size).toBe(1);
     await watch.tick(start + 10 * 60_000);
     expect(h.engine.submissions.size).toBe(2);
     const pressure = h.engine.to(ghost.directConversationId)[1]!;
-    expect(pressure.requestId).toMatch(/^hostwatch:disk:[a-f0-9]+:pressure:/);
+    expect(pressure.requestId).toBe(`hostwatch:${start + 10 * 60_000}`);
+    expect(pressure.text).toContain(":pressure");
     expect(pressure.text).toContain("NO_UPDATE");
-    await watch.tick(start + HOUR);
-    expect(
-      h.engine
-        .to(ghost.directConversationId)
-        .filter((s) => s.requestId.includes(":pressure:")).length,
-    ).toBe(1);
     const restarted = new HostWatch(h.core, probes, { ghostId: ghost.id });
     await restarted.tick(start + 7 * HOUR);
-    expect(
-      h.engine
-        .to(ghost.directConversationId)
-        .filter((s) => s.requestId.includes(":pressure:")).length,
-    ).toBe(2);
+    expect(h.engine.submissions.size).toBe(2); // A continuing incident is not new after six hours.
+    probes.free = 100 * GB;
+    await restarted.tick(start + 7 * HOUR + 5 * 60_000);
+    probes.free = 40 * GB;
+    await restarted.tick(start + 7 * HOUR + 10 * 60_000);
+    await restarted.tick(start + 7 * HOUR + 15 * 60_000);
+    expect(h.engine.submissions.size).toBe(3); // Resolved and reappeared after cooldown.
+    probes.free = 100 * GB;
+    await restarted.tick(start + 7 * HOUR + 20 * 60_000);
+    probes.free = 40 * GB;
+    await restarted.tick(start + 7 * HOUR + 25 * 60_000);
+    await restarted.tick(start + 7 * HOUR + 30 * 60_000);
+    expect(h.engine.submissions.size).toBe(3); // Reappeared inside cooldown.
+    await restarted.tick(start + 14 * HOUR);
+    expect(h.engine.submissions.size).toBe(3); // No delayed re-admission for that same streak.
     await restarted.tick(start + 24 * HOUR);
-    expect(
-      h.engine.submissions.has(`hostwatch:review:${start + 24 * HOUR}`),
-    ).toBe(true);
+    expect(h.engine.submissions.has(`hostwatch:${start + 24 * HOUR}`)).toBe(
+      true,
+    );
     for (let i = 1; i < 15; i++)
       await restarted.tick(start + 24 * HOUR + i * 60_000);
     expect(
@@ -531,7 +646,7 @@ describe("HostWatch durable admission", () => {
     ).toBe(12);
     h.ledger.close();
   });
-  test("critical is immediate, growth uses older sample, service failure and node offline are edges", async () => {
+  test("critical is immediate; service and node issues need confirmation and coalesce", async () => {
     const h = harness();
     const probes = new Probes();
     const ghost = h.core.createGhost({ name: "Watch", persona: "" });
@@ -542,23 +657,89 @@ describe("HostWatch durable admission", () => {
     probes.lastExit = 7;
     probes.online = false;
     await watch.tick(start + 60_000);
-    const ids = h.engine.to(ghost.directConversationId).map((s) => s.requestId);
-    expect(ids.some((id) => id.includes(":critical:"))).toBe(true);
-    expect(ids.some((id) => id.includes("hostwatch:service:"))).toBe(true);
-    expect(ids.some((id) => id.includes("hostwatch:node:"))).toBe(true);
-    probes.free = 80 * GB;
-    await watch.tick(start + HOUR / 2);
-    expect(
-      h.engine
-        .to(ghost.directConversationId)
-        .some((s) => s.requestId.includes(":growth:")),
-    ).toBe(true);
-    const count = h.engine.submissions.size;
-    await watch.tick(start + HOUR / 2 + 60_000);
-    expect(h.engine.submissions.size).toBe(count);
+    expect(h.engine.submissions.size).toBe(2);
+    expect(h.engine.to(ghost.directConversationId)[1]!.text).toContain(
+      ":critical",
+    );
+    expect(h.engine.to(ghost.directConversationId)[1]!.text).not.toContain(
+      "service:",
+    );
+    expect(h.engine.to(ghost.directConversationId)[1]!.text).not.toContain(
+      "node:",
+    );
+    await watch.tick(start + 2 * 60_000);
+    expect(h.engine.submissions.size).toBe(3);
+    const confirmed = h.engine.to(ghost.directConversationId)[2]!;
+    expect(confirmed.requestId).toBe(`hostwatch:${start + 2 * 60_000}`);
+    expect(confirmed.text).toContain("service:");
+    expect(confirmed.text).toContain("node:");
+    await watch.tick(start + 7 * HOUR);
+    expect(h.engine.submissions.size).toBe(3);
+    probes.free = 100 * GB;
+    probes.lastExit = 0;
+    probes.online = true;
+    await watch.tick(start + 7 * HOUR + 10 * 60_000);
+    probes.lastExit = 7;
+    probes.online = false;
+    await watch.tick(start + 7 * HOUR + 15 * 60_000);
+    expect(h.engine.submissions.size).toBe(3);
+    await watch.tick(start + 7 * HOUR + 20 * 60_000);
+    expect(h.engine.submissions.size).toBe(4);
     h.ledger.close();
   });
-  test("failed admissions persist and retry exact identities; retired/deleted Ghosts never submit", async () => {
+  test("growth requires two consecutive samples at least thirty minutes after a reference", async () => {
+    const h = harness();
+    const probes = new Probes();
+    const ghost = h.core.createGhost({ name: "Watch", persona: "" });
+    const watch = new HostWatch(h.core, probes, { ghostId: ghost.id });
+    const start = 100 * HOUR;
+    await watch.tick(start);
+    probes.free = 94 * GB;
+    await watch.tick(start + HOUR / 2);
+    expect(h.engine.submissions.size).toBe(1);
+    probes.free = 93 * GB;
+    await watch.tick(start + 35 * 60_000);
+    expect(h.engine.submissions.size).toBe(2);
+    expect(h.engine.to(ghost.directConversationId)[1]!.text).toContain(
+      ":growth",
+    );
+    h.ledger.close();
+  });
+  test("volume identity deduplicates root paths but not independent disks with equal capacity", async () => {
+    const h = harness();
+    const probes = new Probes();
+    const status = probes.status.bind(probes);
+    probes.status = async () => {
+      const sample = await status();
+      return {
+        ...sample,
+        disks: [
+          sample.disks[0]!,
+          { ...sample.disks[0]!, path: "/projects" },
+          { ...sample.disks[0]!, path: "/external", volumeId: "external" },
+        ],
+      };
+    };
+    const ghost = h.core.createGhost({ name: "Watch", persona: "" });
+    const watch = new HostWatch(h.core, probes, { ghostId: ghost.id });
+    const start = 100 * HOUR;
+    await watch.tick(start);
+    probes.free = 40 * GB;
+    await watch.tick(start + 5 * 60_000);
+    await watch.tick(start + 10 * 60_000);
+    const state = h.ledger.setting<{
+      samples: { disks: unknown[] }[];
+      cooldowns: Record<string, number>;
+    }>("hostWatch", { samples: [], cooldowns: {} });
+    expect(state.samples.at(-1)!.disks).toHaveLength(2);
+    expect(Object.keys(state.cooldowns)).toHaveLength(2);
+    expect(h.engine.submissions.size).toBe(2); // Both confirmed volumes share one submission.
+    expect(
+      h.engine.to(ghost.directConversationId)[1]!.text.match(/:pressure/g),
+    ).toHaveLength(2);
+    h.ledger.close();
+  });
+  test("transient failures retain admission identities without freezing samples; retired/deleted Ghosts stay quiet", async () => {
     const h = harness();
     const probes = new Probes();
     const ghost = h.core.createGhost({ name: "Watch", persona: "" });
@@ -568,17 +749,22 @@ describe("HostWatch durable admission", () => {
     h.engine.submit = async () => {
       throw new Error("offline");
     };
-    await expect(watch.tick(start)).rejects.toThrow("offline");
-    const pending = h.ledger.setting<{ pending: { requestId: string }[] }>(
-      "hostWatch",
-      { pending: [] },
-    );
-    expect(pending.pending[0]?.requestId).toBe(`hostwatch:review:${start}`);
+    await watch.tick(start);
+    await watch.tick(start + 5 * 60_000);
+    const pending = h.ledger.setting<{
+      pending: { requestId: string }[];
+      samples: unknown[];
+    }>("hostWatch", { pending: [], samples: [] });
+    expect(pending.pending.map((p) => p.requestId)).toEqual([
+      `hostwatch:${start}`,
+    ]);
+    expect(pending.samples).toHaveLength(2);
+    expect(probes.statusCalls).toBe(2);
     h.engine.submit = submit;
     await new HostWatch(h.core, probes, { ghostId: ghost.id }).tick(
-      start + 60_000,
+      start + 10 * 60_000,
     );
-    expect(h.engine.submissions.has(`hostwatch:review:${start}`)).toBe(true);
+    expect(h.engine.submissions.has(`hostwatch:${start}`)).toBe(true);
     h.ledger.tx(() =>
       h.ledger.putGhost({ ...h.ledger.ghost(ghost.id), state: "retired" }),
     );
@@ -594,6 +780,39 @@ describe("HostWatch durable admission", () => {
     );
     await watch.tick(start + 24 * HOUR);
     expect(h.engine.submissions.size).toBe(1);
+    expect(probes.statusCalls).toBe(5);
+    h.ledger.close();
+  });
+  test("unavailable model admissions are dropped while later samples and new issues continue", async () => {
+    const h = harness();
+    const probes = new Probes();
+    const ghost = h.core.createGhost({ name: "Watch", persona: "" });
+    const watch = new HostWatch(h.core, probes, { ghostId: ghost.id });
+    const submit = h.engine.submit.bind(h.engine);
+    let attempts = 0;
+    h.engine.submit = async () => {
+      attempts++;
+      throw new CommandError("unavailable", "no credential");
+    };
+    const start = 100 * HOUR;
+    await watch.tick(start);
+    probes.free = 40 * GB;
+    await watch.tick(start + 5 * 60_000);
+    await watch.tick(start + 10 * 60_000);
+    const state = h.ledger.setting<{ pending: unknown[]; samples: unknown[] }>(
+      "hostWatch",
+      { pending: [], samples: [] },
+    );
+    expect(attempts).toBe(2);
+    expect(state.pending).toHaveLength(0);
+    expect(state.samples).toHaveLength(3);
+    h.engine.submit = submit;
+    probes.free = 1 * GB;
+    await watch.tick(start + 15 * 60_000);
+    expect(h.engine.submissions.size).toBe(1);
+    expect(h.engine.submissions.has(`hostwatch:${start + 15 * 60_000}`)).toBe(
+      true,
+    );
     h.ledger.close();
   });
 });

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, realpathSync, statSync, type Dirent, type Stats } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import type { Config } from "../config.ts";
@@ -85,23 +85,23 @@ class OwnerSkills implements SkillsPort {
 
   constructor(private readonly roots: string[]) {}
 
-  /** The first root holding `<root>/<name>/SKILL.md`, or null. Directory names are the skill names. */
+  /** A directory counts as a skill when it holds a bounded, UTF-8 SKILL.md; the one rule everywhere. */
+  private skillAt(dir: string): { dir: string; description: string } | null {
+    try {
+      if (!statSync(dir).isDirectory()) return null;
+      const manifest = join(dir, SKILL_MANIFEST);
+      if (!statSync(manifest).isFile()) return null;
+      return { dir, description: frontmatterOf(readText(manifest)).description };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The first root holding a usable `<root>/<name>`, judged exactly like the catalog scan. */
   private skillDir(name: string): string | null {
     for (const root of this.roots) {
-      const dir = join(root, name);
-      let stat: Stats;
-      try {
-        stat = statSync(dir);
-      } catch {
-        continue;
-      }
-      if (!stat.isDirectory()) continue;
-      try {
-        statSync(join(dir, SKILL_MANIFEST));
-      } catch {
-        continue;
-      }
-      return dir;
+      const found = this.skillAt(join(root, name));
+      if (found !== null) return found.dir;
     }
     return null;
   }
@@ -120,21 +120,12 @@ class OwnerSkills implements SkillsPort {
       for (const entry of listing) {
         // Dotfiles are never skills; symlinked skill directories (dotfile managers) are followed.
         if (entry.name.startsWith(".") || entries.has(entry.name) || !SKILL_NAME.test(entry.name)) continue;
-        const dir = join(root, entry.name);
-        try {
-          if (!entry.isDirectory() && !statSync(dir).isDirectory()) continue;
-          if (!statSync(join(dir, SKILL_MANIFEST)).isFile()) continue;
-        } catch {
-          continue;
-        }
-        try {
-          entries.set(entry.name, frontmatterOf(readText(join(dir, SKILL_MANIFEST))).description);
-        } catch {
-          continue;
-        }
+        const found = this.skillAt(join(root, entry.name));
+        if (found === null) continue;
+        entries.set(entry.name, found.description);
       }
     }
-    const list = [...entries].map(([name, description]) => ({ name, description }));
+    const list = [...entries].map(([name, description]) => ({ name, description })).sort((a, b) => a.name.localeCompare(b.name));
     this.cache = { at: now, entries: list };
     return list;
   }
@@ -171,8 +162,8 @@ class OwnerSkills implements SkillsPort {
   readFile(name: string, relPath: string): string {
     const dir = this.skillDir(name);
     if (dir === null) throw notFound(`skill ${name} is not in the catalog`);
-    if (relPath.length === 0 || isAbsolute(relPath) || relPath.split(/[\\/]/).some((segment) => segment === ".." || segment === ".")) {
-      throw forbidden(`skill files are read by path relative to the skill directory: ${relPath}`);
+    if (relPath.length === 0 || isAbsolute(relPath) || relPath.split(/[\\/]/).some((segment) => segment.startsWith("."))) {
+      throw forbidden(`skill files are read by path relative to the skill directory, without dotfiles: ${relPath}`);
     }
     const realDir = realpathSync(dir);
     const path = join(realDir, ...relPath.split(/[\\/]/));

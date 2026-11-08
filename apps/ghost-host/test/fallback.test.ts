@@ -42,7 +42,7 @@ class RunCore extends Core {
   }
 }
 
-async function fixture(fallbacks: ModelRef[] = [backup], missing: string[] = []) {
+async function fixture(fallbacks: ModelRef[] = [backup], missing: string[] = [], retryDelayMs = 1) {
   const root = mkdtempSync(join(tmpdir(), "ghost-fallback-"));
   const ledger = new Ledger(join(root, "ledger.db"));
   const secrets = new MemorySecrets();
@@ -71,7 +71,7 @@ async function fixture(fallbacks: ModelRef[] = [backup], missing: string[] = [])
       release: async () => {},
     },
     tools: { all: () => [extension], extensionsFor: () => [extension], instructionsFor: () => "Answer briefly." },
-    harnessSettings: { retry: { maxRetries: 1, baseDelayMs: 1 }, compaction: { enabled: false } },
+    harnessSettings: { retry: { maxRetries: 1, baseDelayMs: retryDelayMs }, compaction: { enabled: false } },
     log: (message) => logs.push(message),
   });
   core.attach(engine);
@@ -224,5 +224,93 @@ test("fallback classification includes provider failures, but rejects bad reques
   }
   for (const reason of ["400 invalid request", "maximum context length exceeded", "invalid_request_error: too many tokens"]) {
     expect(fallbackReason(error(reason) as AssistantMessage)).toBeNull();
+  }
+});
+
+test("aborting retry backoff suppresses fallback until a new submission", async () => {
+  const f = await fixture([backup], [], 30_000);
+  const id = f.ghost.directConversationId;
+  const { promise: retryError, resolve } = Promise.withResolvers<void>();
+  const stop = f.engine.watch(id, (event) => {
+    if (event.type === "message" && event.message.role === "assistant") resolve();
+  });
+  try {
+    f.providers[0]!.setResponses([error("429 rate limit")]);
+    f.providers[1]!.setResponses([fauxAssistantMessage("backup answer")]);
+    const settled = f.core.settled(id);
+    await f.engine.submit(id, { text: "stop this run", requestId: "aborted", origin: "owner" });
+    await retryError;
+    await f.engine.abort(id);
+    await settled;
+    expect(f.providers[1]!.getPendingResponseCount()).toBe(1);
+    expect(f.logs.filter((line) => line.startsWith("fallback:"))).toHaveLength(0);
+    expect((await f.engine.page(id, null, 50)).messages.some((message) => message.text === "backup answer")).toBe(false);
+
+    // A new input may fall back again, even after the cancelled run's durable marker.
+    f.providers[0]!.setResponses([error("insufficient_quota")]);
+    await f.send("new run");
+    expect((await f.engine.page(id, null, 50)).messages.at(-1)?.text).toBe("backup answer");
+    expect(f.logs.filter((line) => line.startsWith("fallback:"))).toHaveLength(1);
+  } finally {
+    stop();
+    await f.close();
+  }
+});
+
+for (const reason of [
+  '400 {"type":"invalid_request_error","message":"Your credit balance is too low"}',
+  "429 Rate limit reached: Limit 400, Used 400",
+]) {
+  test(`provider exhaustion falls back despite incidental 400: ${reason}`, async () => {
+    const f = await fixture();
+    try {
+      f.providers[0]!.setResponses([error(reason), error(reason)]);
+      f.providers[1]!.setResponses([fauxAssistantMessage("backup answer")]);
+      await f.send();
+      expect((await f.engine.page(f.ghost.directConversationId, null, 50)).messages.at(-1)?.text).toBe("backup answer");
+      expect(f.logs.filter((line) => line.startsWith("fallback:"))).toHaveLength(1);
+    } finally { await f.close(); }
+  });
+}
+
+test("request validation mentioning budgets, credits or quotas does not imply exhaustion", () => {
+  for (const reason of [
+    "budget_tokens must be less than max_tokens",
+    "400 invalid_request_error: budget_tokens must be less than max_tokens",
+    "invalid_request_error: credit parameter is unsupported",
+    "quota field must be a positive integer",
+  ]) {
+    expect(fallbackReason(error(reason) as AssistantMessage)).toBeNull();
+  }
+});
+
+test("a fallback exception still reports the conversation idle", async () => {
+  const f = await fixture();
+  const id = f.ghost.directConversationId;
+  const running: boolean[] = [];
+  const stop = f.engine.watch(id, (event) => {
+    if (event.type === "live") running.push(event.live.running);
+  });
+  const originalHas = f.secrets.has.bind(f.secrets);
+  f.secrets.has = (provider) => {
+    if (provider === "backup") throw new Error("credential store unavailable");
+    return originalHas(provider);
+  };
+  try {
+    f.providers[0]!.setResponses([error("insufficient_quota")]);
+    await f.send();
+    expect(f.logs).toContain("engine: model fallback failed");
+    expect(f.core.count(id)).toBe(1);
+    expect(running.at(-1)).toBe(false);
+
+    f.secrets.has = originalHas;
+    f.providers[0]!.setResponses([fauxAssistantMessage("primary recovered")]);
+    await f.send("next turn");
+    expect(f.core.count(id)).toBe(2);
+    expect((await f.engine.page(id, null, 50)).messages.at(-1)?.text).toBe("primary recovered");
+  } finally {
+    f.secrets.has = originalHas;
+    stop();
+    await f.close();
   }
 });

@@ -95,7 +95,7 @@ export function createToolSet(deps: {
             .filter(Boolean)
             .join("\n\n");
         case "work":
-          return [WORK_INSTRUCTIONS, delegationRoster(deps.core, ghost), work ? describeWork(work) : "", skillsInstructions(deps.skills, ghost)]
+          return [WORK_INSTRUCTIONS, delegationRoster(deps.core, ghost, { web: web !== null, host: host !== null }), work ? describeWork(work) : "", skillsInstructions(deps.skills, ghost)]
             .filter(Boolean)
             .join("\n\n");
         case "review":
@@ -153,7 +153,7 @@ const WEB_TOOLS: readonly GhostTool[] = ["web_search", "web_read", "reach"];
  * delegate. Read when the conversation is configured — at Work start, and again whenever any Ghost
  * changes (core.refreshRosters).
  */
-function delegationRoster(core: Core, ghost: Ghost): string {
+function delegationRoster(core: Core, ghost: Ghost, installed: { web: boolean; host: boolean }): string {
   if (!ghost.tools.includes("delegate")) return "";
   const settings = core.ledger.settings();
   const peers = core.ledger.ghosts().filter((peer) => peer.state === "active" && peer.deletedAt === null && peer.id !== ghost.id);
@@ -166,8 +166,8 @@ function delegationRoster(core: Core, ghost: Ghost): string {
     const tags = [
       model ? `${model.provider}/${model.model}` : "",
       acceptsImages ? "image" : "",
-      WEB_TOOLS.some((tool) => peer.tools.includes(tool)) ? "web" : "",
-      HOST_TOOLS.some((tool) => peer.tools.includes(tool)) ? "host" : "",
+      installed.web && WEB_TOOLS.some((tool) => peer.tools.includes(tool)) ? "web" : "",
+      installed.host && HOST_TOOLS.some((tool) => peer.tools.includes(tool)) ? "host" : "",
     ].filter(Boolean);
     const persona = peer.persona.trim();
     return [`- ${peer.name} (ghost_id ${peer.id})`, persona && `— ${persona.split("\n")[0]}`, tags.length > 0 && `[${tags.join(" ")}]`]

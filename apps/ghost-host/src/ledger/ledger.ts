@@ -655,6 +655,16 @@ export class Ledger {
     this.db.query("DELETE FROM pairings WHERE expires_at <= ?").run(now);
   }
 
+  /** Drop one Ghost from every unclaimed pairing offer, so a later claim cannot grant it. */
+  scrubPairingGrants(ghostId: string) {
+    const rows = this.db.query("SELECT code_hash, grants FROM pairings WHERE device_id IS NULL").all() as Row[];
+    for (const row of rows) {
+      const grants = parseJson<DeviceGrant[]>(row.grants);
+      const kept = grants.filter((grant) => grant.ghostId !== ghostId);
+      if (kept.length !== grants.length) this.db.query("UPDATE pairings SET grants = ? WHERE code_hash = ?").run(json(kept), String(row.code_hash));
+    }
+  }
+
   // Spaces
 
   spaces(): Space[] {

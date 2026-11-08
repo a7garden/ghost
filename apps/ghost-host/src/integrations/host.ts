@@ -23,6 +23,8 @@ const PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin";
 export interface HostOutput {
   exitCode: number | null;
   output: string;
+  stdout: string;
+  stderr: string;
   timedOut: boolean;
   truncated: boolean;
 }
@@ -55,8 +57,8 @@ export const runHostCommand: HostRunner = async (input) => {
   }
   let timedOut = false;
   let truncated = false;
-  let size = 0;
-  const chunks: Uint8Array[] = [];
+  const stdoutChunks: Uint8Array[] = [];
+  const stderrChunks: Uint8Array[] = [];
   const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
   const kill = () => {
     try {
@@ -67,14 +69,19 @@ export const runHostCommand: HostRunner = async (input) => {
       } catch {}
     }
   };
-  const capture = async (stream: ReadableStream<Uint8Array>) => {
+  const capture = async (
+    stream: ReadableStream<Uint8Array>,
+    chunks: Uint8Array[],
+    limit: number,
+  ) => {
+    let size = 0;
     const reader = stream.getReader();
     readers.push(reader);
     try {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
-        const room = Math.max(0, input.maxBytes - size);
+        const room = Math.max(0, limit - size);
         if (value.byteLength > room) truncated = true;
         if (room) {
           const part = value.slice(0, room);
@@ -86,7 +93,11 @@ export const runHostCommand: HostRunner = async (input) => {
       reader.releaseLock();
     }
   };
-  const output = Promise.all([capture(child.stdout), capture(child.stderr)]);
+  // Reserve capacity for both streams: diagnostic floods must not hide du's stdout total.
+  const output = Promise.all([
+    capture(child.stdout, stdoutChunks, Math.ceil(input.maxBytes / 2)),
+    capture(child.stderr, stderrChunks, Math.floor(input.maxBytes / 2)),
+  ]);
   const timer = setTimeout(() => {
     timedOut = true;
     kill();
@@ -99,10 +110,18 @@ export const runHostCommand: HostRunner = async (input) => {
       truncated = true;
       for (const reader of readers) void reader.cancel().catch(() => {});
     }, 2000);
-    try { await output; } finally { clearTimeout(drainTimer); }
+    try {
+      await output;
+    } finally {
+      clearTimeout(drainTimer);
+    }
+    const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+    const stderr = Buffer.concat(stderrChunks).toString("utf8");
     return {
       exitCode,
-      output: Buffer.concat(chunks).toString("utf8"),
+      stdout,
+      stderr,
+      output: stdout + stderr,
       timedOut,
       truncated,
     };
@@ -317,6 +336,7 @@ export class MacHost implements HostPort {
         const freeBytes = s.bavail * s.bsize;
         disks.push({
           path,
+          volumeId: String(statSync(path).dev),
           totalBytes,
           freeBytes,
           pressure: storagePressure(freeBytes, totalBytes),
@@ -505,7 +525,7 @@ export class MacHost implements HostPort {
       35_000,
       4000,
     );
-    const kb = /^\s*(\d+)\s/.exec(result.output)?.[1];
+    const kb = /^\s*(\d+)\s/m.exec(result.stdout)?.[1];
     if (!kb) throw new Error("disk usage unavailable");
     return {
       path: canonical,
@@ -519,24 +539,35 @@ export class MacHost implements HostPort {
     const visible = listing.filter((e) => !secretPath(e.name));
     return {
       path: canonical,
-      entries: visible
-        .slice(0, 100)
-        .map((e) => ({
-          name: e.name,
-          kind: e.isSymbolicLink()
-            ? "symlink"
-            : e.isDirectory()
-              ? "directory"
-              : "file",
-        })),
+      entries: visible.slice(0, 100).map((e) => ({
+        name: e.name,
+        kind: e.isSymbolicLink()
+          ? "symlink"
+          : e.isDirectory()
+            ? "directory"
+            : "file",
+      })),
       truncated: listing.length >= 1001 || visible.length > 100,
     };
   }
   async read(path: string) {
-    const canonical = this.resolve(path, true);
-    // Refuse symlinks in every component, then pin the final inode using O_NOFOLLOW.
-    let current: string = sep;
-    for (const component of path.split(sep).filter(Boolean)) {
+    const canonical = this.resolve(path, true, true);
+    // A configured root may itself have a symlinked spelling (e.g. /var on macOS).
+    // Inspect only descendants of that trusted root, retaining the requested relative path
+    // so a symlink within the project cannot disappear during canonicalisation.
+    const root = this.roots
+      .flatMap((raw) => {
+        try {
+          return [{ raw, canonical: realpathSync(raw) }];
+        } catch {
+          return [];
+        }
+      })
+      .sort((a, b) => b.raw.length - a.raw.length)
+      .find((root) => inside(path, root.raw) || inside(path, root.canonical))!;
+    const base = inside(path, root.raw) ? root.raw : root.canonical;
+    let current = root.canonical;
+    for (const component of relative(base, path).split(sep).filter(Boolean)) {
       current = join(current, component);
       if (lstatSync(current).isSymbolicLink())
         throw new Error("symlink reads refused");
@@ -565,7 +596,11 @@ export class MacHost implements HostPort {
         buffer.subarray(0, size),
       );
       if (text.includes("\0")) throw new Error("binary file refused");
-      return { path: canonical, text: sensitiveText(text) ? "[REDACTED: sensitive text]" : text, untrusted: true };
+      return {
+        path: canonical,
+        text: sensitiveText(text) ? "[REDACTED: sensitive text]" : text,
+        untrusted: true,
+      };
     } finally {
       await file.close();
     }
@@ -638,7 +673,7 @@ export class MacHost implements HostPort {
               Math.min(45_000, until - this.now()),
               4000,
             );
-            const kb = /^\s*(\d+)\s/.exec(result.output)?.[1];
+            const kb = /^\s*(\d+)\s/m.exec(result.stdout)?.[1];
             if (!kb) throw new Error();
             results.push({
               path: p,
@@ -687,9 +722,7 @@ export class MacHost implements HostPort {
       input.args.length > 64 ||
       input.args.some(
         (a) =>
-          typeof a !== "string" ||
-          a.length > 4096 ||
-          /[\0\r\n;|&<>`$]/.test(a),
+          typeof a !== "string" || a.length > 4096 || /[\0\r\n;|&<>`$]/.test(a),
       ) ||
       input.args.join("").length > 12_000
     )
@@ -774,6 +807,11 @@ export class MacHost implements HostPort {
       24_000,
       checked.cwd,
     );
-    return { ...result, output: redactHostText(result.output) };
+    return {
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      truncated: result.truncated,
+      output: redactHostText(result.output),
+    };
   }
 }

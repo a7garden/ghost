@@ -352,11 +352,16 @@ export function deleteGhost(core: Core, ghostId: string): void {
   if (ghost.deletedAt !== null) return;
   if (ghost.isDefault) throw conflict("the default Ghost cannot be deleted");
   if (ghost.state !== "retired") throw conflict(`retire ${ghost.name} before deleting it`);
-  if (ledger.worksInState(...LIVE_WORK_STATES).some((work) => work.ghostId === ghost.id)) throw conflict(`${ghost.name} still has live Work`);
+  const live = ledger.worksInState(...LIVE_WORK_STATES);
+  if (live.some((work) => work.ghostId === ghost.id)) throw conflict(`${ghost.name} still has live Work`);
+  if (live.some((work) => work.acceptance.reviewer?.kind === "ghost" && work.acceptance.reviewer.ghostId === ghost.id)) {
+    throw conflict(`${ghost.name} still reviews live Work`);
+  }
   if (ledger.pendingDecisions().some((decision) => decision.ghostId === ghost.id)) throw conflict(`${ghost.name} still has pending decisions`);
   const now = Date.now();
   ledger.tx(() => {
     for (const schedule of ledger.schedules()) if (schedule.ghostId === ghost.id) ledger.deleteSchedule(schedule.id);
+    ledger.scrubPairingGrants(ghost.id);
     for (const device of ledger.devices()) {
       const grants = device.grants.filter((grant) => grant.ghostId !== ghost.id);
       if (grants.length !== device.grants.length) ledger.updateDevice({ ...device, grants });
@@ -367,6 +372,8 @@ export function deleteGhost(core: Core, ghostId: string): void {
     }
     ledger.putGhost({ ...ghost, deletedAt: now, updatedAt: now });
   });
+  // A retired Ghost can still be answering a direct message; deletion ends that run.
+  for (const conversation of ledger.conversations({ ghostId: ghost.id })) if (conversation.busy) void core.engine.abort(conversation.id);
 }
 
 export function settingsView(core: Core) {

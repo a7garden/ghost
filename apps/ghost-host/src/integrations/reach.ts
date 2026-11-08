@@ -142,12 +142,14 @@ function channelsOf(data: Json): ReachChannel[] {
  */
 export class AgentReach implements ReachPort {
   private readonly timeoutMs: number;
+  readonly timeoutSeconds: number;
   private catalogPromise: Promise<ReachChannel[]> | null = null;
   private active = 0;
   private readonly waiters: (() => void)[] = [];
 
   constructor(private readonly settings: ReachSettings) {
     this.timeoutMs = settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.timeoutSeconds = Math.max(1, Math.round(this.timeoutMs / 1000));
   }
 
   async search(query: string, limit: number): Promise<ReachResult> {
@@ -162,14 +164,18 @@ export class AgentReach implements ReachPort {
     return this.result([channel, action, ...args]);
   }
 
-  /** The catalog is static for the life of the process; fetch it once. */
+  /** The catalog is static for the life of the process; fetch it once. A failed fetch is retried on the next call. */
   catalog(): Promise<ReachChannel[]> {
-    this.catalogPromise ??= this.invoke(["channels"]).then((data) => {
+    const attempt = (this.catalogPromise ??= this.invoke(["channels"]).then((data) => {
       const channels = channelsOf(data);
       if (channels.length === 0) throw new Error("agent-reach reported no channels");
       return channels;
+    }));
+    // Drop the cache only when this attempt is still the cached one; a later call may have replaced it.
+    attempt.catch(() => {
+      if (this.catalogPromise === attempt) this.catalogPromise = null;
     });
-    return this.catalogPromise;
+    return attempt;
   }
 
   private async result(argv: string[]): Promise<ReachResult> {
@@ -194,7 +200,9 @@ export class AgentReach implements ReachPort {
         stdout: "pipe",
         stderr: "pipe",
         // Only what the CLI needs to find its tools and home; host secrets stay out.
-        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? "/" },
+        // REACH_API_SUPERVISED keeps the CLI's own children (yt-dlp, ffmpeg) under its supervision,
+        // so a host-side kill does not orphan them.
+        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? "/", REACH_API_SUPERVISED: "1" },
       });
     } catch (error) {
       throw new Error(`cannot start agent-reach (${this.settings.executable}): ${error instanceof Error ? error.message : String(error)}`);
@@ -263,7 +271,7 @@ export class AgentReach implements ReachPort {
     }
   }
 
-  /** At most {@link MAX_CONCURRENT} children; the rest wait here. */
+  /** At most {@link MAX_CONCURRENT} children; the rest wait here for a handed-off slot. */
   private async acquire(): Promise<void> {
     if (this.active < MAX_CONCURRENT && this.waiters.length === 0) {
       this.active++;
@@ -272,12 +280,13 @@ export class AgentReach implements ReachPort {
     const { promise, resolve } = Promise.withResolvers<void>();
     this.waiters.push(resolve);
     await promise;
-    this.active++;
   }
 
+  /** The slot passes straight to the next waiter, so the limit can never be transiently exceeded. */
   private release(): void {
-    this.active--;
-    this.waiters.shift()?.();
+    const next = this.waiters.shift();
+    if (next) next();
+    else this.active--;
   }
 }
 

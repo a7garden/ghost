@@ -2,7 +2,7 @@ import { DEFAULT_GHOST_TOOLS, type ArtifactRef, type Conversation, type Ghost, t
 import type { Ledger } from "../ledger/ledger.ts";
 import { Decisions } from "./decisions.ts";
 import { Effects } from "./effects.ts";
-import { invalid } from "./errors.ts";
+import { conflict, invalid } from "./errors.ts";
 import { newId } from "./ids.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import type { ArtifactStore, Engine, EngineEvents, SandboxControl, Secrets } from "./ports.ts";
@@ -184,15 +184,19 @@ export class Core implements EngineEvents {
   }
 
   /**
-   * Re-open the live work conversations of Ghosts that hold `delegate`, so the delegation roster in
-   * their instructions reflects the Ghost that just changed. Only delegate-holders with live Work
-   * are re-opened; the changed Ghost's own conversations are `refreshGhost`'s business.
+   * Re-open the idle live work conversations of Ghosts that hold `delegate`, so the delegation roster in
+   * their instructions reflects the Ghost that just changed. A running conversation is left alone: re-opening
+   * mid-run would reset a fallback model and the prompt cache, and its next turn reconfigures anyway.
    */
   private refreshRosters() {
-    for (const conversation of this.ledger.conversations({ kind: "work" })) {
-      if (!this.ledger.ghost(conversation.ghostId).tools.includes("delegate")) continue;
-      const work = conversation.workId ? this.ledger.findWork(conversation.workId) : null;
-      if (!work || isTerminal(work)) continue;
+    const holds = new Map<string, boolean>();
+    for (const work of this.ledger.worksInState("queued", "running", "waiting", "verifying")) {
+      if (!work.conversationId) continue;
+      let delegates = holds.get(work.ghostId);
+      if (delegates === undefined) holds.set(work.ghostId, (delegates = this.ledger.ghost(work.ghostId).tools.includes("delegate")));
+      if (!delegates) continue;
+      const conversation = this.ledger.findConversation(work.conversationId);
+      if (!conversation || conversation.busy) continue;
       void this.lane(`conversation:${conversation.id}`, () => this.openConversation(conversation.id));
     }
   }
@@ -201,6 +205,8 @@ export class Core implements EngineEvents {
   sendMessage(conversationId: string, text: string, requestId: string, attachments: ArtifactRef[] = []): Promise<void> {
     const conversation = this.ledger.conversation(conversationId);
     if (conversation.kind !== "direct") throw invalid("owner messages go to direct conversations; edit a Work to steer it");
+    const ghost = this.ledger.ghost(conversation.ghostId);
+    if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
     return this.run(`conversation:${conversationId}`, () =>
       this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments }),
     );

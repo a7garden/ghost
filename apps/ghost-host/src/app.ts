@@ -15,7 +15,7 @@ import { createSandbox } from "./sandbox/index.ts";
 import { FsArtifactStore } from "./stores/artifacts.ts";
 import { FileSecrets } from "./stores/secrets.ts";
 import { createToolSet } from "./tools/index.ts";
-import type { DocumentsPort, SkillsPort } from "./integrations/ports.ts";
+import type { DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
 import { MacHost } from "./integrations/host.ts";
 import { HostWatch } from "./core/hostwatch.ts";
 
@@ -25,6 +25,7 @@ export interface App {
   ledger: Ledger;
   documents: DocumentsPort;
   skills: SkillsPort | null;
+  host: HostPort | null;
   close(): Promise<void>;
 }
 
@@ -55,16 +56,14 @@ export async function openApp(config: Config): Promise<App> {
   const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config) });
   const engine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, log });
   core.attach(engine);
-  const hostWatch = host && config.mac?.watch ? new HostWatch(core, host, config.mac.watch) : null;
-  hostWatch?.start();
   return {
     core,
     engine,
     ledger,
     documents,
     skills,
+    host,
     async close() {
-      await hostWatch?.stop();
       core.stop();
       await core.idle();
       await engine.close();
@@ -94,6 +93,8 @@ export async function serve(config: Config) {
   const hostFile = join(config.root, "host.json");
   writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });
   chmodSync(hostFile, 0o600);
+  const hostWatch = app.host && config.mac?.watch ? new HostWatch(app.core, app.host, config.mac.watch) : null;
+  hostWatch?.start();
   log(`serving ${config.root} on http://${config.host}:${server.port}`);
 
   let closing = false;
@@ -101,6 +102,7 @@ export async function serve(config: Config) {
     if (closing) return;
     closing = true;
     push?.stop();
+    await hostWatch?.stop();
     await server.stop();
     await app.close();
     process.exit(0);

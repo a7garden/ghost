@@ -51,6 +51,8 @@ interface ConversationState {
   busy: boolean;
   /** True from a submission until its run is seen running, so the view is not dropped in between. */
   expectRun: boolean;
+  /** Owner cancellation suppresses fallback until a new input is admitted. */
+  aborted: boolean;
   live: Live;
   listeners: Set<(event: LiveEvent) => void>;
   view?: AttachedReplicatedState<ConversationView>;
@@ -196,9 +198,13 @@ class HostEngine implements Engine {
     return model ?? ghost.model ?? settings.defaultModel;
   }
 
+  /** Fallback applies when the model came from a Ghost (or the default), never from an explicit choice. */
   private allowsFallback(settings: Settings, conversation: HostConversation, work: Work | null): boolean {
-    return conversation.model === null && (conversation.kind !== "review" ||
-      (work?.acceptance.reviewer?.kind !== "model" && settings.reviewModel === null));
+    if (conversation.model !== null) return false;
+    if (conversation.kind !== "review") return true;
+    const reviewer = work?.acceptance.reviewer ?? null;
+    // A named reviewer Ghost judges with its own model; an unnamed review uses the review model when one is set.
+    return reviewer?.kind === "ghost" || (reviewer === null && settings.reviewModel === null);
   }
 
   private available(model: ModelRef, settings: Settings): boolean {
@@ -226,6 +232,7 @@ class HostEngine implements Engine {
     // A duplicate admission must not reset an in-flight fallback or start another run.
     const existing = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, submission.requestId), ctx);
     if (existing) return;
+    state.aborted = false;
     let serving = model;
     if (!this.core.secrets.has(provider.id)) {
       const next = this.allowsFallback(settings, conversation, work)
@@ -261,8 +268,19 @@ class HostEngine implements Engine {
   async abort(conversationId: string): Promise<void> {
     const state = this.states.get(conversationId);
     if (!state) return;
+    state.aborted = true;
     state.expectRun = false;
-    await state.pi.abort(ctx);
+    // Pi may leave the last retryable error as the tail when aborted in backoff.
+    // Persist its suppression before stopping, so recovery cannot continue it.
+    try {
+      await state.pi.commit(async (tx) => {
+        const tail = (await tx.scanEntries({ conversationId: state.piId }, 1)).items[0];
+        const fallback = await tx.doc(FallbackDoc, state.piId);
+        fallback.lastError = Math.max(fallback.lastError, tail?.id ?? 0);
+      }, ctx);
+    } finally {
+      await state.pi.abort(ctx);
+    }
   }
 
   // Reading
@@ -439,6 +457,7 @@ class HostEngine implements Engine {
       configured: false,
       busy: conversation?.busy ?? false,
       expectRun: false,
+      aborted: false,
       live: { conversationId: hostId, running: false, partial: null, tools: [] },
       listeners: new Set(),
       dispatch: Promise.resolve(),
@@ -501,7 +520,11 @@ class HostEngine implements Engine {
     if (live.running) this.setBusy(state, true);
     if (!live.running) {
       this.enqueue(state, async () => {
-        if (await this.continueFallback(state)) return;
+        try {
+          if (await this.continueFallback(state)) return;
+        } catch (error) {
+          this.log("engine: model fallback failed", error);
+        }
         const current = liveFrom(await this.liveState(state), state.hostId);
         if (current.running) return;
         this.setBusy(state, false);
@@ -526,7 +549,7 @@ class HostEngine implements Engine {
   /** Continue committed context, not input: no second user entry or request-id admission. */
   private async continueFallback(state: ConversationState): Promise<boolean> {
     // Merely opening an idle historical conversation must not retry its old error.
-    if (!state.busy) return false;
+    if (!state.busy || state.aborted) return false;
     const conversation = this.core.ledger.findConversation(state.hostId);
     if (!conversation) return false;
     const settings = this.core.ledger.settings();
@@ -537,7 +560,7 @@ class HostEngine implements Engine {
     if (!primary || ghost.fallbacks.length === 0) return false;
     const switched = await state.pi.commit(async (tx) => {
       const live = await tx.doc(LiveDoc, state.piId);
-      if (live.run) return null; // Pi's own retry or another input is still running.
+      if (state.aborted || live.run) return null; // Pi's own retry or another input is still running.
       const entries = await tx.scanEntries({ conversationId: state.piId }, 10);
       const tail = entries.items.find((entry) => entry.kind === "pi.assistant" || entry.kind === "pi.user");
       if (!tail || tail.kind !== "pi.assistant") return null;

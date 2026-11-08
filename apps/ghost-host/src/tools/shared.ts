@@ -69,6 +69,7 @@ export function scopeOf(core: Core, api: ToolExecutionApi): Scope {
   const conversation = core.ledger.conversationByPiId(String(api.conversationId));
   if (!conversation) throw notFound(`conversation ${api.conversationId} is not in the ledger`);
   const ghost = core.ledger.ghost(conversation.ghostId);
+  if (ghost.deletedAt !== null) throw forbidden(`${ghost.name} was deleted`);
   const work = conversation.workId ? core.ledger.work(conversation.workId) : null;
   return { conversation, ghost, work };
 }

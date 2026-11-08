@@ -91,6 +91,22 @@ describe("skills port", () => {
     expect(skills.catalog()).toHaveLength(1);
   });
 
+  test("a root whose SKILL.md is unusable loses everywhere, not only in the catalog", () => {
+    const rootA = tempDir();
+    const rootB = tempDir();
+    // rootA holds the name first but its SKILL.md is not UTF-8 text, so the whole skill is unusable there.
+    mkdirSync(join(rootA, "dupe"));
+    writeFileSync(join(rootA, "dupe", "SKILL.md"), new Uint8Array([0, 159, 146, 150]));
+    writeSkill(rootB, "dupe", "description: Second root wins", "# Dupe\nusable body", { "note.txt": "usable note" });
+
+    const skills = createSkills(configOf({ roots: [rootA, rootB] }))!;
+    const entry = skills.catalog().find((candidate) => candidate.name === "dupe");
+    expect(entry?.description).toBe("Second root wins");
+    expect(skills.body("dupe")).toBe("# Dupe\nusable body");
+    expect(skills.readFile("dupe", "note.txt")).toBe("usable note");
+    expect(skills.list("dupe")).toEqual(["SKILL.md", "note.txt"]);
+  });
+
   test("bodies drop the front matter and a missing skill reads as null", () => {
     const root = tempDir();
     writeSkill(root, "alpha", "description: d", "# Alpha\nstep one");
@@ -130,7 +146,8 @@ describe("skills port", () => {
     const outside = tempDir();
     const outsideFile = join(outside, "secret.txt");
     writeFileSync(outsideFile, "outside");
-    writeSkill(root, "alpha", "description: d", "body", { "docs/note.md": "the note" });
+    writeSkill(root, "alpha", "description: d", "body", { "docs/note.md": "the note", "docs/.secret": "dotfile" });
+    writeFileSync(join(root, "alpha", ".env"), "SECRET");
     symlinkSync(outsideFile, join(root, "alpha", "link.md"));
     symlinkSync("/etc/passwd", join(root, "alpha", "passwd.md"));
     writeFileSync(join(root, "alpha", "binary.bin"), new Uint8Array([0, 159, 146, 150]));
@@ -151,6 +168,8 @@ describe("skills port", () => {
     expect(codeOf(() => skills.readFile("alpha", "../../etc/passwd"))).toBe("forbidden");
     expect(codeOf(() => skills.readFile("alpha", "/etc/passwd"))).toBe("forbidden");
     expect(codeOf(() => skills.readFile("alpha", "docs/../../../etc/passwd"))).toBe("forbidden");
+    expect(codeOf(() => skills.readFile("alpha", ".env"))).toBe("forbidden");
+    expect(codeOf(() => skills.readFile("alpha", "docs/.secret"))).toBe("forbidden");
     expect(codeOf(() => skills.readFile("alpha", "link.md"))).toBe("forbidden");
     expect(codeOf(() => skills.readFile("alpha", "passwd.md"))).toBe("forbidden");
     expect(codeOf(() => skills.readFile("alpha", "binary.bin"))).toBe("invalid");
