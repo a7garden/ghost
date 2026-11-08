@@ -11,6 +11,17 @@ open apps/ghost-ios/Ghost.xcodeproj
 본인의 개발 팀을 선택해야 한다. iOS 17 이상을 대상으로 한다. 배포·서명 인증서를
 자동 설치하거나 App Store에 업로드하지 않는다.
 
+개인 개발 팀은 Push Notifications 권한을 발급하지 않는다. 그 팀으로 연결된 iPhone에
+설치할 때는 빈 entitlements 파일을 지정해 `aps-environment` 없이 서명한다. 번들 ID와
+팀이 같으면 Keychain의 연결 정보는 유지된다.
+
+```sh
+xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost -configuration Debug \
+  -destination 'platform=iOS,id=<UDID>' DEVELOPMENT_TEAM=<TEAM> \
+  CODE_SIGN_ENTITLEMENTS=<빈 plist> -allowProvisioningUpdates build
+xcrun devicectl device install app --device <UDID> <DerivedData>/Build/Products/Debug-iphoneos/Ghost.app
+```
+
 프로젝트 재생성은 이 폴더에서 `xcodegen generate`로 한다. 통신 모듈은 별도 Swift
 package이며 `swift test`로 계약 JSON 디코딩, SSE 프레임 파싱, 페어링 URL 파싱,
 요청 ID 재사용, 결과 자료 digest 검증을 검증한다.
