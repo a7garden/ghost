@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-f9bfa2c` (`main`, UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-bdec231` (`main`, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,14 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 스레드 카드·작성기 개선 운영 반영 — 2026-11-08
+
+- 소스 `bdec231`(main; `f9bfa2c` 위에 끝난 스레드 카드 접기·질문 카드 바로 답하기, 작성기 `/` 명령·`@` Ghost 위임·모델 칩 축약)을 `releases/20261108-bun-bdec231`에 설치했다. Host를 main에서 다시 컴파일했다(바이트가 `f9bfa2c` 빌드와 다름, `bdec231`의 Host 소스는 `f9bfa2c`와 같지만 빌드 시점 차이). UI 93개 파일 해시가 빌드 원본과 일치한다. 설치 사본을 백업 DB 사본 위 임시 루트·포트에서 두 번 실행했다: 기본 config와 운영 `config.json` 사본(`reach`·`skills`·`mac` 포함) 모두 health·새 번들 응답.
+- 검사: Host 테스트 328개(+2 생략)·타입 검사, UI 테스트 90개·타입 검사·빌드, 시각 회귀 28개(대화 화면 4장 갱신 후 통과). 격리 Host·브라우저에서 `/` 목록·한글 필터(`/파` → 첨부), `@` 목록에서 Ghost 선택 → 맡기기 토큰에 수신자 표시, 진행 중 카드의 질문과 답변 칩(누르면 결정 해결·카드 정리), 끝난 카드 한 줄 접힘(52px)과 결과 줄 분리를 확인했다.
+- 백업: `~/.local/share/ghost/backups/pre-thread-fold-20261108-bun-bdec231/`, `ghost-backup/2`, `complete: true`, 두 DB `integrity_check` ok, artifacts·secrets·skills·config 복사. 전환 직전 `current`가 여전히 `f9bfa2c`이고 `config.json` 변경 시각이 19:08 그대로임을 확인했다.
+- 유휴(바쁜 대화·진행 중 Work 0) 확인 후 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 54254 → 63667). 단일 리스너·실행 경로·준비 상태(`provider zai-coding is ready`), Ghost 24·대화 40·맡긴 일 39, config 바이트 보존을 확인했다. 설치 앱(external)을 다시 띄워 메인 대화에서 뒤로/앞으로 단추와 끝난 스레드들이 한 줄로 접힌 것을 확인했다(대화 기록이 길어 접근성 트리에서 하단 작성기는 잘렸다 — 별도 브라우저 확인으로 대체).
+- 되돌릴 때는 `current`를 `releases/20261108-bun-f9bfa2c`로 교체하고 LaunchAgent를 정상 재시작한다. 저장 형식 변화는 없다.
 
 ### Ghost 팀 인프라 운영 반영 — 2026-11-08
 
