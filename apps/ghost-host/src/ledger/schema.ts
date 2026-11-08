@@ -230,6 +230,7 @@ export const MIGRATIONS: readonly string[] = [
   `,
   /* 6: parent-first questions and bounded internal revision lessons */ `
   ALTER TABLE works ADD COLUMN revise_history TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE works ADD COLUMN question_nudges INTEGER NOT NULL DEFAULT 0;
   CREATE TABLE work_questions (
     id TEXT PRIMARY KEY,
     work_id TEXT NOT NULL REFERENCES works(id),
@@ -240,7 +241,10 @@ export const MIGRATIONS: readonly string[] = [
     created_at INTEGER NOT NULL,
     answered_at INTEGER,
     submitted_at INTEGER,
-    answer_submitted_at INTEGER
+    answer_submitted_at INTEGER,
+    nudge_count INTEGER NOT NULL DEFAULT 0,
+    cancellation_reason TEXT,
+    cancellation_submitted_at INTEGER
   );
   CREATE INDEX work_questions_by_work ON work_questions(work_id, state);
   CREATE INDEX work_questions_by_parent ON work_questions(parent_work_id, state);

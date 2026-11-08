@@ -365,7 +365,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
 
   const askParent = defineTool({
     name: "ask_parent",
-    description: "Ask the Ghost that delegated this child Work. Wait for its answer; root Works use ask_owner.",
+    description: "Ask the Ghost that delegated this child Work (at most 16 questions per Work). Wait for its answer; root Works use ask_owner.",
     parameters: Type.Object({ question: Type.String({ minLength: 1, maxLength: 8192 }) }),
     replay: "unsafe",
     async execute(args, api) {
@@ -437,6 +437,8 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
         const work = core.ledger.work(scope.work.id);
         const children = core.ledger.children(work.id);
         const artifacts = core.ledger.artifactsForWork(work.id);
+        const questions = core.ledger.workQuestions(work.id);
+        const childQuestions = core.ledger.workQuestions(work.id, true).filter((question) => question.state === "pending");
         const parts = [
           describeWork(work),
           `State: ${work.state}${work.verdict ? ` — ${work.verdict.outcome} verdict` : ""}${work.reason ? ` — ${work.reason}` : ""}`,
@@ -444,11 +446,11 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
             ? `Children:\n${children.map((child) => `  ${describeOutcome(child).replaceAll("\n", "\n  ")}`).join("\n")}`
             : "",
           artifacts.length ? `Artifacts:\n${artifacts.map((artifact) => `  - ${artifact.name} ${artifact.digest.slice(0, 12)} (${artifact.size} bytes)`).join("\n")}` : "",
-          core.ledger.workQuestions(work.id).length
-            ? `Questions to parent:\n${core.ledger.workQuestions(work.id).map((question) => `- ${question.id} [${question.state}]: ${question.question}${question.answer ? `\n  Answer: ${question.answer}` : ""}`).join("\n")}`
+          questions.length
+            ? `Questions to parent (latest ${Math.min(8, questions.length)} of ${questions.length}):\n${questions.slice(-8).map((question) => `- ${question.id} [${question.state}]: ${question.question.slice(0, 512)}${question.question.length > 512 ? " [truncated]" : ""}${question.answer ? `\n  Answer: ${question.answer.slice(0, 512)}${question.answer.length > 512 ? " [truncated]" : ""}` : ""}`).join("\n")}`
             : "",
-          core.ledger.workQuestions(work.id, true).some((question) => question.state === "pending")
-            ? `Children awaiting answers:\n${core.ledger.workQuestions(work.id, true).filter((question) => question.state === "pending").map((question) => `- ${question.id} (child ${question.workId}): ${question.question}`).join("\n")}`
+          childQuestions.length
+            ? `Children awaiting answers (latest ${Math.min(8, childQuestions.length)} of ${childQuestions.length}):\n${childQuestions.slice(-8).map((question) => `- ${question.id} (child ${question.workId}): ${question.question.slice(0, 512)}${question.question.length > 512 ? " [truncated]" : ""}`).join("\n")}`
             : "",
         ];
         return text(parts.filter(Boolean).join("\n\n"));

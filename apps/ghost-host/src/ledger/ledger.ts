@@ -48,6 +48,9 @@ export interface WorkQuestion {
   answeredAt: number | null;
   submittedAt: number | null;
   answerSubmittedAt: number | null;
+  nudgeCount: number;
+  cancellationReason: string | null;
+  cancellationSubmittedAt: number | null;
 }
 
 export type ReviseLesson = Pick<Verdict, "source" | "reasons" | "evidence" | "scope" | "at">;
@@ -412,6 +415,9 @@ export class Ledger {
       answeredAt: row.answered_at === null ? null : Number(row.answered_at),
       submittedAt: row.submitted_at === null ? null : Number(row.submitted_at),
       answerSubmittedAt: row.answer_submitted_at === null ? null : Number(row.answer_submitted_at),
+      nudgeCount: Number(row.nudge_count),
+      cancellationReason: row.cancellation_reason === null ? null : String(row.cancellation_reason),
+      cancellationSubmittedAt: row.cancellation_submitted_at === null ? null : Number(row.cancellation_submitted_at),
     } : null;
   }
 
@@ -423,24 +429,39 @@ export class Ledger {
   workQuestionsAwaitingSubmission(): WorkQuestion[] {
     return (this.db.query(`SELECT id FROM work_questions
       WHERE (state = 'pending' AND submitted_at IS NULL) OR (state = 'answered' AND answer_submitted_at IS NULL)
+        OR (state = 'cancelled' AND cancellation_reason IS NOT NULL AND cancellation_submitted_at IS NULL)
       ORDER BY created_at, id`).all() as Row[]).map((row) => this.findWorkQuestion(String(row.id))!);
   }
 
   putWorkQuestion(question: WorkQuestion) {
     this.db.query(`INSERT INTO work_questions
-      (id, work_id, parent_work_id, question, answer, state, created_at, answered_at, submitted_at, answer_submitted_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, work_id, parent_work_id, question, answer, state, created_at, answered_at, submitted_at, answer_submitted_at,
+        nudge_count, cancellation_reason, cancellation_submitted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (id) DO UPDATE SET answer = excluded.answer, state = excluded.state, answered_at = excluded.answered_at,
-        submitted_at = excluded.submitted_at, answer_submitted_at = excluded.answer_submitted_at`)
+        submitted_at = excluded.submitted_at, answer_submitted_at = excluded.answer_submitted_at,
+        nudge_count = excluded.nudge_count, cancellation_reason = excluded.cancellation_reason,
+        cancellation_submitted_at = excluded.cancellation_submitted_at`)
       .run(question.id, question.workId, question.parentWorkId, question.question, question.answer, question.state,
-        question.createdAt, question.answeredAt, question.submittedAt, question.answerSubmittedAt);
+        question.createdAt, question.answeredAt, question.submittedAt, question.answerSubmittedAt,
+        question.nudgeCount, question.cancellationReason, question.cancellationSubmittedAt);
     this.emit({ type: "work", work: this.work(question.workId) });
   }
 
   cancelWorkQuestions(workId: string) {
     for (const question of this.workQuestions(workId)) {
-      if (question.state === "pending") this.putWorkQuestion({ ...question, state: "cancelled" });
+      if (question.state === "pending" || (question.state === "answered" && question.answerSubmittedAt === null)
+        || (question.state === "cancelled" && question.cancellationReason !== null && question.cancellationSubmittedAt === null)) {
+        this.putWorkQuestion({ ...question, state: "cancelled", cancellationReason: null });
+      }
     }
+  }
+
+  /** Monotonic per-parent sequence; ids must not be reused for later question batches. */
+  nextQuestionNudge(workId: string): number {
+    const row = this.db.query("UPDATE works SET question_nudges = question_nudges + 1 WHERE id = ? RETURNING question_nudges").get(workId) as Row;
+    this.emit({ type: "work", work: this.work(workId) });
+    return Number(row.question_nudges);
   }
 
   // Decisions
