@@ -46,6 +46,15 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 - 유휴 확인 후 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 3071 → 39276). 실행 파일·준비 상태, Ghost 4·대화 9·맡긴 일 32, config·secrets 보존 확인. 새 앱에서 설정 → 데스크톱 아바타를 켜 데스크톱 오른쪽 아래에 `primary`가 상태 말풍선과 함께 뜨는 것을 화면 캡처로 확인하고 다시 껐다(기본값 꺼짐 유지).
 - 되돌릴 때는 `current`를 `releases/20261108-bun-79bd394`로 교체하고 LaunchAgent를 정상 재시작하며, 앱을 종료하고 백업의 `Ghost.app`으로 바꾼다. 저장 형식 변화는 없다(업로드한 첨부 바이트는 artifacts에 남는다).
 
+### Ghost 팀 구성 — 2026-11-08
+
+- 소유자 요청으로 omp 오케스트레이션(main 강한 모델, 작업자 GLM, 작성자와 다른 vendor의 검토)과 사용 패턴(글·기획 요청 다수, 저장소·인프라·웹 작업은 omp)을 기준으로 Owner API에서 재구성했다. 릴리스 변경은 없다.
+- 활성: `메인`(기존 `primary`, 기본, `codex/gpt-6.1-sol` high, 기존 도구 전부), `작가`(글 초안·편집·검수), `기획`(게임·제품 시스템과 콘텐츠 데이터 설계). 작가·기획은 `zai-coding/glm-5.3` high, `delegate`·`schedule_*`·`ghost_list`·`memory_retain` 없음. 위임 결과는 위임한 메인(Codex)이 검토하므로 vendor가 갈린다.
+- 일시정지: `specialist-research`·`specialist-engineering`·`specialist-operations`. Work 샌드박스는 네트워크가 없고 이미지에 `python3`·`node`·`git`·`jq`가 없으며(perl·awk·sed·coreutils만) 저장소·호스트에 닿지 않아 웹 조사·코드·운영 역할을 실제로 수행할 수 없다. 샌드박스 도구나 브라우저 도구가 생기면 다시 켠다.
+- 메인 직접 대화(`01a146f5-42fa-…`)에는 소유자가 고른 대화 모델 `zai-coding/glm-5.3`이 남아 있어 그 대화는 GLM으로 답한다. 메인의 Work·검토는 Ghost 모델(Codex)을 쓴다.
+- 확인: 메인 Work가 작가에게 위임 → 작가 결과를 메인이 검토 통과 → 루트 Work가 `artifact_contains` 검사로 `done`. `pi.db`의 응답 메타데이터로 루트 Work·검토는 `codex/gpt-6.1-sol`, 하위 Work는 `zai-coding/glm-5.3`, 오류 0건을 확인했다.
+- 되돌릴 때는 `~/.local/share/ghost/backups/pre-roster-20261108/ghosts-before.json`의 이름·페르소나·모델·상태로 `ghost.update`를 보내고 작가·기획을 `retired`로 바꾼다.
+
 ### Ghost 배경 제거 운영 반영 — 2026-11-08
 
 - 소유자 결정: Ghost에는 배경이 없다. 소스 `79bd394`의 UI를 `releases/20261108-bun-79bd394`에 설치했다(꾸미기의 배경 줄·아바타 배경색 선택·초상 배경 제거, 저장된 `look.background`는 무시). Host는 `0a7ca7c`과 소스·바이트가 같아 그대로 복사했고 UI 85개 파일 해시가 빌드 원본과 일치한다. 운영 Ghost 4개의 `look.background`는 이미 모두 비어 있어 데이터 변경은 없다.
