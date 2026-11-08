@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261109-bun-cd1527b` (`main`, UI는 같은 디렉터리의 `ui/`, 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261109-bun-2bf4792` (`autonomy-integrated-20261109`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,21 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 자동 활동·PC 직접 실행 운영 반영 — 2026-11-09
+
+- 소스 `2bf4792`는 자동 활동 구현과 운영 `cd1527b`의 브라우저·금고·협업 및 전체 Ghost 기기 접근 정책을 합친 검증본이다. [구조와 권한 경계](architecture.md#standing-activities-not-an-always-thinking-agent), [설정 방법](#자동-활동과-pc-실행)을 따른다. Ghost별 상시 VM이나 LLM 하트비트 대신 Host 감지 → 한도가 있는 맡긴 일을 사용한다.
+- 검사: 계약·Host 타입 검사, Host 578 통과·5 생략(4,118 assertions), 실제 Chrome 검사 4 통과, UI 128 통과·타입/빌드, 브라우저 시각·기능 61 통과. 실제 Pi와 PC 파일·셸로 실패 → 같은 맡긴 일/대화 재개 → 새 OS 바이트 읽기·쓰기·실행·산출물 수용을 검증했다. 의심했던 환경 캐시 문제는 재현되지 않았고 런타임 우회 수정은 하지 않았다.
+- 독립 검토: Codex 작성 통합 Core·실행 환경·UI는 Claude, Claude 작성 계약·API·문서는 Codex가 검토했다. 실제 응답 메타데이터로 vendor 차이를 확인했다. 통합 검토의 확정 지적은 없다. 그 전 실제 실행에서 찾은 승인 뒤 대기 고착과 자동 활동 결과의 직접 대화 권한 확장 등은 구현·회귀·실제 실행으로 수정했다.
+- 격리된 실제 모델: PC 권한 전 거절·허용 뒤 정확한 cwd의 파일/셸·산출물 수용, Apple container의 Host 파일 비가시성과 원본 보존, 로컬 Gitea 및 엄격한 TLS IMAP/SMTP 원본 읽기 → 유휴 승인 대기(전송 0회) → 승인 후 정확히 1회 댓글/회신 → 완료를 확인했다. 중복 감지·변경된 head/UID·중지·수동 답글 대상 고정도 확인했다. 실제 메일 계정이나 외부 수신자에게 보내지 않았다.
+- 공식 Manus 문서 조사 뒤 240초 상대 다음 점검을 저장하고, 유휴 확인 후 Host를 정상 종료·재시작했다. 동일한 실행·시각·비교 기준이 남았고 자기 점검이 정확히 한 번 완료됐다(전체 2회); 변경 없음 결과는 알림 없이 종료했다. 실제 브라우저의 제목/본문 관측이 검토자의 `evidence_read`에 전달되는 것도 확인했다. 시험 원장·Pi·모델 캐시에서 제공자 자격 값의 일치가 0건이었다.
+- 설치: `releases/20261109-bun-2bf4792`, Host SHA-256 `1bfe723f…`, UI 93개 파일 원본/사본 일치, `agent-browser` SHA-256 `19680f06…` 보존(`release.json`에 전체 해시). 백업 `backups/pre-autonomy-20261109-1794158897180/`: `db/backup.json`은 `ghost-backup/2`, complete, 원장 스키마 6·두 DB 및 금고 DB/키의 무결성·해시 확인. 부속 상태 34개 파일과 console 설정의 바이트·권한도 확인했다.
+- 설치 사본을 자격·Mac watch·기억 연동을 끈 운영 백업 사본에서 실행했다. 스키마 6→7, Ghost 24·대화 40·맡긴 일 39와 질문·수정 이력 보존, 금고 API 200·제공 UI 바이트 일치를 확인했다. 모델 자격을 의도적으로 복사하지 않아 이 복원 검사의 모델 준비 상태는 false였고, 실제 모델 실행은 별도 새 루트에서 검증했다.
+- 유휴에서 `current`를 원자적 rename으로 교체·대상 확인 후 기존 Host에 `SIGTERM`을 보냈다(PID 57107→26240). 새 `host.json` 파일 이벤트로 재기동을 관측했다. 단일 62062 리스너·새 실행 경로·운영 DB 루트·스키마 7·모델 준비 상태·health/공개 origin/금고 API 200, 기존 Ghost·대화·맡긴 일·결정·기기 식별자와 모델·도구·자격·소유자 토큰·console 설정 보존을 확인했다. PC 권한·연결 계정·활동 규칙은 자동 부여/생성하지 않았다.
+- 설치된 Mac 앱은 external 모드에서 정상 종료·비활성 재실행했다(PID 54752→28423). 셸 번들은 교체하지 않았다. 새 창은 `accessible:false`, `is_focused:false`여서 네이티브 클릭은 확인하지 않았고 앞으로 강제 이동하지 않았다. 운영 Host가 제공하는 실제 UI에서 자동 활동 생성 양식(PC 미허용 상태), 연결 계정 탭을 열고 저장 없이 닫았다.
+- Git: 전용 브랜치는 일반 푸시했다. canonical `main`의 기존 미커밋 기기 알림 작업과 겹쳐 `git merge --ff-only`가 거절됐으므로 그 변경은 stage/commit/stash/reset하지 않았다. `main`은 미통합이며 검증 소스는 `autonomy-integrated-20261109`에 보존한다.
+- 되돌리기: 이전 `cd1527b`와 스키마 6 백업을 보존했다. 스키마 6 Host는 7을 거절하므로 링크만 되돌리지 않는다. 데이터·자격 복원은 별도 소유자 승인이 필요하다.
+
 
 ### 브라우저·금고·협업 개선 운영 반영 — 2026-11-09
 
