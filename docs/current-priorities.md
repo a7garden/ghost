@@ -33,9 +33,9 @@
 
 | 분류 | 내용 |
 | --- | --- |
-| 유지 | 맡긴 일 트리, 완료 조건·검증, 수정·취소·재개, 실행 시간 제한, 예약된 wake, 완료 알림, Ghost 간 위임, Mac/iPhone 접점, 기억, 문서 Space, 읽기 전용 웹 조사(agent-reach), Ghost별 스킬·대체 모델, Mac 상주 점검과 승인형 Mac 명령(Macfra에서 이전) |
+| 유지 | 맡긴 일 트리, 완료 조건·검증, 수정·취소·재개, 실행 시간 제한, 예약된 wake, 완료 알림, Ghost 간 위임(자식은 먼저 부모에게 묻기), Mac/iPhone 접점, 기억, 문서 Space, 읽기 전용 웹 조사(agent-reach), 로그인·폼 조작까지 하는 Host 브라우저(agent-browser·Chrome, 결제·전송은 승인), Ghost 금고(Shade 모델 포팅, 값은 모델에 보이지 않음), Ghost별 스킬·대체 모델, Mac 상주 점검과 승인형 Mac 명령(Macfra에서 이전) |
 | 제외 | 개인 캘린더·할 일 앱, planner·CalDAV·Google 동기화, 별도 OMP/LLM 작업자, 모델 주도 봇 후보/평가 파이프라인, 외부 연동 제안 화면 |
-| 후속 | 쓰기가 필요한 브라우저 도구(로그인·폼 조작), 음성 경로, 실물 iPhone·APNs 수용, mini 상시 운영 |
+| 후속 | 음성 경로, 전화 대행, 데스크톱 앱 조작(agent-desktop: Host용 고정 실행 파일과 소유자 손쉬운 사용 승인이 선행 조건), iPhone 금고 입력 양식, 실물 iPhone·APNs 수용, mini 상시 운영 |
 
 ## 먼저 마무리할 흐름
 
