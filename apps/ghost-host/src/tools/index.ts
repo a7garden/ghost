@@ -55,6 +55,15 @@ Call verdict exactly once: pass, revise, or fail with concrete reasons. For revi
 
 const MAIN_INSTRUCTIONS = `As the current main Ghost you can ghost_inspect another Ghost's configuration and ghost_update its name, persona, model, look, state or tool allow-list. The main designation and your own settings belong to the owner.`;
 
+/**
+ * The effect journal admits one pending mutation per conversation, so a round that calls two effectful
+ * tools at once would refuse the second. Any tool Pi may not replay (`replay` unset or `unsafe`) makes
+ * its round sequential; rounds of read-only tools stay parallel.
+ */
+function sequentialEffects(extension: Extension): Extension {
+  return { ...extension, tools: extension.tools?.map((tool) => (tool.replay === "safe" ? tool : { ...tool, executionMode: "sequential" as const })) };
+}
+
 /** The model-facing capability of each conversation kind (src/tools/types.ts). */
 export function createToolSet(deps: {
   core: Core;
@@ -70,18 +79,18 @@ export function createToolSet(deps: {
   /** The Ghost vault (ghost.vault); null leaves the tools out and secret fills unavailable. */
   vault?: Vault | null;
 }): ToolSet {
-  const direct = createDirectTools(deps.core);
-  const interactive = createInteractiveTools(deps.core);
-  const work = createWorkTools(deps.core, deps.sandbox);
-  const review = createReviewTools(deps.core);
-  const main = createMainTools(deps.core);
-  const memory = deps.memory === null ? null : createMemoryTools(deps.core, deps.memory);
-  const documents = deps.documents === null ? null : createDocumentsTools(deps.core, deps.documents);
-  const host = deps.host ? createHostTools(deps.core, deps.host) : null;
-  const skills = deps.skills === null ? null : createSkillsTools(deps.core, deps.skills);
-  const web = deps.reach ? createWebTools(deps.core, deps.reach) : null;
-  const browser = deps.browser ? createBrowserTools(deps.core, deps.browser, { vault: deps.vault ?? null, sandbox: deps.sandbox }) : null;
-  const vault = deps.vault ? createVaultTools(deps.core, deps.vault) : null;
+  const direct = sequentialEffects(createDirectTools(deps.core));
+  const interactive = sequentialEffects(createInteractiveTools(deps.core));
+  const work = sequentialEffects(createWorkTools(deps.core, deps.sandbox));
+  const review = sequentialEffects(createReviewTools(deps.core));
+  const main = sequentialEffects(createMainTools(deps.core));
+  const memory = deps.memory === null ? null : sequentialEffects(createMemoryTools(deps.core, deps.memory));
+  const documents = deps.documents === null ? null : sequentialEffects(createDocumentsTools(deps.core, deps.documents));
+  const host = deps.host ? sequentialEffects(createHostTools(deps.core, deps.host)) : null;
+  const skills = deps.skills === null ? null : sequentialEffects(createSkillsTools(deps.core, deps.skills));
+  const web = deps.reach ? sequentialEffects(createWebTools(deps.core, deps.reach)) : null;
+  const browser = deps.browser ? sequentialEffects(createBrowserTools(deps.core, deps.browser, { vault: deps.vault ?? null, sandbox: deps.sandbox })) : null;
+  const vault = deps.vault ? sequentialEffects(createVaultTools(deps.core, deps.vault)) : null;
   const optional = [memory, documents, host, skills, web, browser, vault].filter((extension): extension is Extension => extension !== null);
   /** Guidance for an installed capability, only for a Ghost that holds one of its tools. */
   const capabilityInstructions = (ghost: Ghost) =>
