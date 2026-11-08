@@ -149,12 +149,14 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   </Page>;
 }
 
-function VerdictStamp({ verdict }: { verdict: Verdict }) {
+export function VerdictStamp({ verdict }: { verdict: Verdict }) {
   return <div className="verdict" data-outcome={verdict.outcome}>
     <StateGlyph state={verdict.outcome === 'pass' ? 'done' : verdict.outcome === 'fail' ? 'failed' : 'attention'} size={15}/>
     <strong>{verdictText[verdict.outcome]}</strong>
     <span>{verdictSource[verdict.source]} · {absoluteTime(verdict.at)}</span>
     {verdict.reasons.trim() && <details><summary>사유</summary><p>{verdict.reasons}</p></details>}
+    {verdict.evidence?.trim() && <details><summary>근거</summary><p>{verdict.evidence}</p></details>}
+    {verdict.scope?.trim() && <details><summary>수정 범위</summary><p>{verdict.scope}</p></details>}
   </div>;
 }
 

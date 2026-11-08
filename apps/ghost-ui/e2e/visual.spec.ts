@@ -1,9 +1,11 @@
 import { test } from '@playwright/test';
 import { screenshot, openScreen, type Screen } from './visual';
+import { mockStateDecisions, mockVaultApi, visualSecureDecisionId, visualHandoffDecisionId } from './mocks';
 
 /**
- * Seven screens × 1440x900 / 390x844 × light / dark. Baselines live under
- * `e2e/__screenshots__/`; `bun run test:visual:update` regenerates them.
+ * Seven screens × 1440x900 / 390x844 × light / dark, plus the three new vault and
+ * decision surfaces (with their host API mocked at the network layer). Baselines
+ * live under `e2e/__screenshots__/`; `bun run test:visual:update` regenerates them.
  */
 
 const screens: Screen[] = [
@@ -14,6 +16,9 @@ const screens: Screen[] = [
   { name: 'conversation', route: state => `/ghosts/${encodeURIComponent(state.defaultGhostId)}`, waits: () => ['맡긴 일에서 볼 수 있어요'] },
   { name: 'team', route: () => '/settings?tab=team', waits: () => ['연구원', '기록가', '새 Ghost'] },
   { name: 'projects', route: state => `/spaces/${encodeURIComponent(state.spaceId)}`, waits: () => ['비행 기록 노트', '회의 정리'] },
+  { name: 'vault', route: () => '/settings?tab=vault', waits: () => ['서비스 로그인', '업무 카드', '거래처 연락처', '배포 API 키'], prepare: page => mockVaultApi(page) },
+  { name: 'decision-secure', route: () => `/inbox?decision=${visualSecureDecisionId}`, waits: () => ['금고에 전달', 'app.example.com'], prepare: page => mockStateDecisions(page) },
+  { name: 'decision-handoff', route: () => `/inbox?decision=${visualHandoffDecisionId}`, waits: () => ['다 했어요', 'subscribe.example.com'], prepare: page => mockStateDecisions(page) },
 ];
 
 const viewports = [

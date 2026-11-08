@@ -12,6 +12,9 @@ import type {
   PageView,
   SkillCatalog,
   State,
+  VaultContact,
+  VaultItem,
+  VaultItemKind,
   WorkDetail,
 } from '@ghost/contract';
 
@@ -35,6 +38,24 @@ export type StreamHandlers = {
   /** `after` is too old; refetch state. */
   reset(): void;
 };
+
+/** One owner write of a vault item. Secret fields are write-only; the host accepts them, no API returns them. */
+export type VaultItemWrite = {
+  kind: VaultItemKind;
+  title: string;
+  origin?: string;
+  username?: string;
+  password?: string;
+  totp?: string;
+  card?: { number: string; expiry: string; cvc: string; name?: string };
+  contact?: VaultContact;
+  value?: string;
+  hints?: string;
+  ghostIds?: string[];
+};
+
+/** The result of importing an Apple Passwords or Chrome CSV export. */
+export type VaultImportResult = { imported: number; skipped: number; rejected: number };
 
 /**
  * The only way the UI talks to the host. Same origin; the owner token comes from the
@@ -123,6 +144,39 @@ export class HostClient {
   /** Cancel a pending device-code login (owner only). */
   cancelOAuth(providerId: string): Promise<OAuthStatus> {
     return this.json(`/api/providers/${encodeURIComponent(providerId)}/oauth`, { method: 'DELETE' });
+  }
+
+  /** The owner's vault metadata; one-time items that expired are already gone. Values are never returned. */
+  vaultItems(): Promise<{ items: VaultItem[] }> {
+    return this.json('/api/vault/items');
+  }
+
+  /** Create one vault item and return its metadata. */
+  vaultCreate(item: VaultItemWrite): Promise<VaultItem> {
+    return this.json('/api/vault/items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
+  }
+
+  /** Edit one vault item; omitted fields keep the stored value. Stored versions stay encrypted. */
+  vaultUpdate(id: string, item: VaultItemWrite): Promise<VaultItem> {
+    return this.json(`/api/vault/items/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
+  }
+
+  /** Delete one vault item and its history. */
+  async vaultDelete(id: string): Promise<void> {
+    await this.json(`/api/vault/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  /** Import an Apple Passwords or Chrome CSV export. */
+  vaultImportCsv(csv: string): Promise<VaultImportResult> {
+    return this.json('/api/vault/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ csv }) });
+  }
+
+  /**
+   * Answer a secure-form question through the vault: item fields plus `save`. The
+   * decision resolves with metadata only, so the ordinary answer path never sees a value.
+   */
+  async vaultRequestAnswer(decisionId: string, answer: Record<string, unknown>): Promise<void> {
+    await this.json(`/api/vault/requests/${encodeURIComponent(decisionId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(answer) });
   }
 
   /** Upload owner message bytes; the returned reference can be passed to message.send. */

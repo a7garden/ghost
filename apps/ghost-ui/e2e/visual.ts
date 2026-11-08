@@ -23,6 +23,8 @@ export interface Screen {
   route: (state: VisualRunState) => string;
   /** Text that must be visible before the shot; proves the data has rendered. */
   waits: (state: VisualRunState) => string[];
+  /** Network shaping before the app loads: mocked vault API, injected decisions. */
+  prepare?: (page: Page) => Promise<void>;
 }
 
 export async function openScreen(page: Page, screen: Screen, theme: Theme): Promise<VisualRunState> {
@@ -31,6 +33,7 @@ export async function openScreen(page: Page, screen: Screen, theme: Theme): Prom
     localStorage.setItem('ghost-ui:preferences', JSON.stringify(preferences));
   }, { theme, animate: false, companion: false, companionProfile: '' });
   await page.clock.setFixedTime(new Date(state.fixedNow));
+  await screen.prepare?.(page);
   await page.goto(`${state.baseUrl}/#${screen.route(state)}`);
   for (const text of screen.waits(state)) {
     await expect(page.getByText(text).filter({ visible: true }).first()).toBeVisible();

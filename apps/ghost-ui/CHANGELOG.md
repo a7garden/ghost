@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- 금고 (설정 → 금고): the owner's vault item list — kind, origin, username, card
+  ••••last4/expiry, per-Ghost grants and one-time expiry — with add/edit/delete.
+  Secret fields stay write-only: an empty field keeps the stored value, stored secrets
+  read as 저장됨 and never as a value; a password generator fills 20 random characters;
+  Apple Passwords/Chrome CSV import reports 가져옴·건너뜀·거부됨 counts.
+- A question carrying `proposal.secureForm` renders the secure form for its kind
+  (login·card·contact·secret fields, the requested origin and reason, 금고에 저장 checked
+  by default) and answers through `POST /api/vault/requests/:decisionId` only — the chat
+  answer path refuses these decisions. A `browserHandoff` question explains the waiting
+  Chrome window on this Mac, shows its url and reason, and offers 다 했어요 next to 거부.
+- Work verdicts show 근거 (what the reviewer observed) and 수정 범위 (what a revision may
+  change) whenever the verdict records them.
+- Ghost 설정 도구 권한: the new browser tools group as 브라우저 and the vault tools as 금고,
+  each with Korean labels; every contract tool is labeled, so none falls to 기타.
 - Conversations answer their own decisions: a Ghost's pending questions, approvals and result
   reviews — including those from its older conversations and from threads begun there — sit
   above the composer, so opening a Ghost that needs you no longer means going to 확인할 일.
