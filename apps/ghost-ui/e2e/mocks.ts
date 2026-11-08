@@ -27,19 +27,49 @@ function vaultItems(): VaultItem[] {
   ];
 }
 
-/** The pending question decisions the visual suite injects: one secure form, one browser handoff. */
+/** The pending question decisions the visual suite injects, in the shape the real host writes. */
 export function visualDecisions(): Decision[] {
   const { fixedNow, researchGhostId, scribeGhostId } = readRunState();
   return [
     { id: visualSecureDecisionId, kind: 'question', ghostId: researchGhostId, conversationId: 'conv-visual', workId: null, effectId: null,
-      title: '서비스 로그인', detail: '로그인에 필요한 사용자 이름과 비밀번호를 금고에 요청합니다.', options: [],
+      title: '서비스 로그인', detail: '예약을 넣으려면 서비스에 로그인해야 합니다.', options: [],
       proposal: { secureForm: { kind: 'login', origin: 'https://app.example.com', title: '서비스 로그인', reason: '예약을 넣으려면 서비스에 로그인해야 합니다.' } },
       state: 'pending', answer: null, createdAt: fixedNow - 60_000, resolvedAt: null },
     { id: visualHandoffDecisionId, kind: 'question', ghostId: scribeGhostId, conversationId: 'conv-visual', workId: null, effectId: null,
-      title: '구독 신청 화면', detail: '결제 화면은 소유자가 직접 확인하는 것이 안전합니다.', options: [],
+      title: 'Continue in the browser', detail: '카드 정보를 넣는 화면이라 직접 확인이 필요합니다.', options: ['Done'],
       proposal: { browserHandoff: { url: 'https://subscribe.example.com/join', reason: '카드 정보를 넣는 화면이라 직접 확인이 필요합니다.' } },
       state: 'pending', answer: null, createdAt: fixedNow - 30_000, resolvedAt: null },
   ];
+}
+
+const vaultKinds = ['login', 'card', 'contact', 'secret'] as const;
+
+/**
+ * The write-shape checks the real host applies before anything is stored. Returns the
+ * rejection message or null; mock routes fulfill 400 with it so contract bugs fail tests.
+ */
+export function validateVaultWrite(input: unknown): string | null {
+  if (!input || typeof input !== 'object') return 'invalid vault item fields';
+  const write = input as Record<string, unknown>;
+  if (!vaultKinds.includes(write.kind as typeof vaultKinds[number])) return 'invalid vault item kind';
+  if (typeof write.title !== 'string' || !write.title.trim()) return 'invalid vault item metadata';
+  if (write.save !== undefined && typeof write.save !== 'boolean') return 'secure form requires a save choice';
+  if (typeof write.origin === 'string' && write.origin && !write.origin.startsWith('https://')) return 'invalid vault origin';
+  if (write.card !== undefined) {
+    const card = write.card as Record<string, unknown> | null;
+    if (!card || typeof card !== 'object' || [card.number, card.expiry, card.cvc, card.name].some(part => typeof part !== 'string' || !part.length)) {
+      return 'invalid vault card fields';
+    }
+  }
+  return null;
+}
+
+/** Fulfills a vault write route the way the host would when the body breaks its contract. */
+export async function fulfillValidatedVaultWrite(route: Route, ok: (input: Record<string, unknown>) => unknown): Promise<void> {
+  const input = route.request().postDataJSON() as Record<string, unknown>;
+  const invalid = validateVaultWrite(input);
+  if (invalid) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ ok: false, error: { code: 'invalid', message: invalid } }) });
+  return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(ok(input)) });
 }
 
 async function fulfillJson(route: Route, status: number, body: unknown): Promise<void> {

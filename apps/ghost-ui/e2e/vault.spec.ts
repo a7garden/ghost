@@ -1,11 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readRunState } from './run-state';
-import { mockStateDecisions, mockVaultApi, visualSecureDecisionId, visualHandoffDecisionId } from './mocks';
+import { mockStateDecisions, mockVaultApi, validateVaultWrite, visualSecureDecisionId, visualHandoffDecisionId } from './mocks';
 
 /**
  * Functional checks for the vault and secure-form surfaces. The host API they need
- * is mocked at the network layer, so these run against the seeded isolated host no
- * matter which side of the integration lands first.
+ * is mocked at the network layer with the real host's write validation, so contract
+ * bugs fail these tests instead of hiding behind permissive mocks.
  */
 
 interface CommandBody { command?: { type?: string; outcome?: string; decisionId?: string; answer?: string } }
@@ -17,16 +17,28 @@ async function recordCommands(page: Page, commands: (CommandBody['command'])[]):
   });
 }
 
+/** The secure-form answer route as the host reads it: kind required, boolean save, no foreign fields. */
+async function mockVaultRequest(page: Page, answers: Record<string, unknown>[]): Promise<void> {
+  await page.route('**/api/vault/requests/*', async route => {
+    const answer = route.request().postDataJSON() as Record<string, unknown>;
+    const broken = answer.kind !== 'login' || typeof answer.save !== 'boolean'
+      || ['card', 'contact', 'value', 'title', 'hints', 'ghostIds'].some(key => key in answer);
+    if (broken) {
+      return route.fulfill({ status: 400, contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: { code: 'invalid', message: 'secure form answer breaks the host contract' } }) });
+    }
+    answers.push(answer);
+    return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({}) });
+  });
+}
+
 test('a secure form answers through the vault route and never through the answer API', async ({ page }) => {
   const { baseUrl } = readRunState();
-  const vaultAnswers: unknown[] = [];
+  const vaultAnswers: Record<string, unknown>[] = [];
   const commands: CommandBody['command'][] = [];
   await mockStateDecisions(page);
   await recordCommands(page, commands);
-  await page.route('**/api/vault/requests/*', async route => {
-    vaultAnswers.push(route.request().postDataJSON());
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-  });
+  await mockVaultRequest(page, vaultAnswers);
   await page.goto(`${baseUrl}/#/inbox?decision=${visualSecureDecisionId}`);
   await expect(page.getByRole('button', { name: '금고에 전달' })).toBeVisible();
   // The chat answer path is not on the card.
@@ -35,20 +47,17 @@ test('a secure form answers through the vault route and never through the answer
   await page.getByLabel('사용자 이름').fill('owner@example.com');
   await page.getByLabel('비밀번호').fill('비밀1234!@#');
   await page.getByRole('button', { name: '금고에 전달' }).click();
-  await expect.poll(() => vaultAnswers).toEqual([{ username: 'owner@example.com', password: '비밀1234!@#', save: true }]);
+  await expect.poll(() => vaultAnswers).toEqual([{ kind: 'login', username: 'owner@example.com', password: '비밀1234!@#', save: true }]);
   expect(commands).toEqual([]);
 });
 
 test('unchecking 저장 sends save:false and declining takes the ordinary deny path', async ({ page }) => {
   const { baseUrl } = readRunState();
-  const vaultAnswers: unknown[] = [];
+  const vaultAnswers: Record<string, unknown>[] = [];
   const commands: CommandBody['command'][] = [];
   await mockStateDecisions(page);
   await recordCommands(page, commands);
-  await page.route('**/api/vault/requests/*', async route => {
-    vaultAnswers.push(route.request().postDataJSON());
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-  });
+  await mockVaultRequest(page, vaultAnswers);
   await page.goto(`${baseUrl}/#/inbox?decision=${visualSecureDecisionId}`);
   // Decline first: it uses the ordinary deny command, never the vault route.
   await page.getByRole('button', { name: '거부' }).click();
@@ -59,7 +68,7 @@ test('unchecking 저장 sends save:false and declining takes the ordinary deny p
   await page.getByLabel('비밀번호').fill('비밀1234!@#');
   await page.getByRole('checkbox', { name: '금고에 저장' }).uncheck();
   await page.getByRole('button', { name: '금고에 전달' }).click();
-  await expect.poll(() => vaultAnswers).toEqual([{ username: 'owner@example.com', password: '비밀1234!@#', save: false }]);
+  await expect.poll(() => vaultAnswers).toEqual([{ kind: 'login', username: 'owner@example.com', password: '비밀1234!@#', save: false }]);
   expect(commands).toHaveLength(1);
 });
 
@@ -80,7 +89,10 @@ test('editing an item keeps stored secrets out of the body and shows them as 저
   const patches: Record<string, unknown>[] = [];
   await page.route('**/api/vault/items/v-login', async route => {
     if (route.request().method() !== 'PATCH') return route.continue();
-    patches.push(route.request().postDataJSON() as Record<string, unknown>);
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    patches.push(body);
+    const invalid = validateVaultWrite(body);
+    if (invalid) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ ok: false, error: { code: 'invalid', message: invalid } }) });
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
   await page.goto(`${baseUrl}/#/settings?tab=vault`);
@@ -115,8 +127,11 @@ test('creating a login demands its primary fields and stores the generated passw
   await mockVaultApi(page);
   await page.route('**/api/vault/items', async route => {
     if (route.request().method() !== 'POST') return route.fallback();
-    posts.push(route.request().postDataJSON() as Record<string, unknown>);
-    return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    posts.push(body);
+    const invalid = validateVaultWrite(body);
+    if (invalid) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ ok: false, error: { code: 'invalid', message: invalid } }) });
+    return route.fulfill({ status: 201, contentType: 'application/json', body: '{}' });
   });
   await page.goto(`${baseUrl}/#/settings?tab=vault`);
   await page.getByRole('button', { name: '새 항목' }).click();

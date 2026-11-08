@@ -31,8 +31,9 @@ describe('vaultWriteBody', () => {
   it('demands a name and the primary fields on create', () => {
     expect(vaultWriteBody(emptyVaultForm, 'create')).toEqual({ error: '이름을 입력해 주세요.' });
     const base = { ...emptyVaultForm, title: '예시' };
-    expect(vaultWriteBody({ ...base, kind: 'login', username: 'a' }, 'create')).toEqual({ error: '사용자 이름과 비밀번호를 입력해 주세요.' });
-    expect(vaultWriteBody({ ...base, kind: 'card', cardNumber: '4242', cardExpiry: '12/28' }, 'create')).toEqual({ error: '카드 번호와 유효기간, CVC를 입력해 주세요.' });
+    expect(vaultWriteBody({ ...base, kind: 'login' }, 'create')).toEqual({ error: '로그인에는 https://로 시작하는 주소가 필요합니다.' });
+    expect(vaultWriteBody({ ...base, kind: 'login', origin: 'https://a.com', username: 'a' }, 'create')).toEqual({ error: '사용자 이름과 비밀번호를 입력해 주세요.' });
+    expect(vaultWriteBody({ ...base, kind: 'card', cardNumber: '4242', cardExpiry: '12/28' }, 'create')).toEqual({ error: '카드 번호와 유효기간, CVC, 이름을 모두 입력해 주세요.' });
     expect(vaultWriteBody({ ...base, kind: 'contact' }, 'create')).toEqual({ error: '한 항목 이상 입력해 주세요.' });
     expect(vaultWriteBody({ ...base, kind: 'secret' }, 'create')).toEqual({ error: '값을 입력해 주세요.' });
   });
@@ -57,21 +58,42 @@ describe('vaultWriteBody', () => {
     expect('body' in body && body.body.totp).toBeUndefined();
   });
 
-  it('sends the card only as a whole replacement', () => {
+  it('sends the card only as a whole replacement with the holder name', () => {
     const base = { ...emptyVaultForm, title: '업무 카드', kind: 'card' as const };
     expect(vaultWriteBody({ ...base, cardNumber: '4242', cardExpiry: '12/28' }, 'edit'))
-      .toEqual({ error: '카드 번호와 유효기간, CVC를 입력해 주세요.' });
+      .toEqual({ error: '카드 번호와 유효기간, CVC, 이름을 모두 입력해 주세요.' });
     const body = vaultWriteBody({ ...base, cardNumber: ' 4242 ', cardExpiry: '12/28', cardCvc: ' 123 ', cardName: ' 홍 ' }, 'edit');
     expect('body' in body && body.body.card).toEqual({ number: '4242', expiry: '12/28', cvc: '123', name: '홍' });
+    // Card-only expiry edits keep the stored card: nothing typed into number or CVC, no card sent.
+    const untouched = vaultWriteBody({ ...base, cardExpiry: '01/29' }, 'edit');
+    expect('body' in untouched && untouched.body.card).toBeUndefined();
   });
 
-  it('keeps only the contact fields that are filled', () => {
+  it('sends only the selected kind’s fields, even when others were typed first', () => {
+    const switched = vaultWriteBody({ ...emptyVaultForm, title: '예시', kind: 'card', username: 'left@over', password: 'left',
+      cardNumber: '4242', cardExpiry: '12/28', cardCvc: '123', cardName: '홍' }, 'create');
+    expect('body' in switched && switched.body).toEqual({
+      kind: 'card', title: '예시', hints: '', ghostIds: [],
+      card: { number: '4242', expiry: '12/28', cvc: '123', name: '홍' },
+    });
+    expect('body' in switched && switched.body.username).toBeUndefined();
+    expect('body' in switched && switched.body.password).toBeUndefined();
+  });
+
+  it('keeps only the contact fields that are filled, and an empty contact clears them', () => {
     const body = vaultWriteBody({ ...emptyVaultForm, title: '연락처', kind: 'contact', contactName: '홍길동', contactEmail: 'h@e.com' }, 'create');
-    expect('body' in body && body.body.contact).toEqual({ name: '홍길동', email: 'h@e.com' });
     expect('body' in body && body.body).toEqual({
       kind: 'contact', title: '연락처', hints: '', ghostIds: [],
       contact: { name: '홍길동', email: 'h@e.com' },
     });
+    const cleared = vaultWriteBody({ ...emptyVaultForm, title: '연락처', kind: 'contact' }, 'edit');
+    expect('body' in cleared && cleared.body.contact).toEqual({});
+  });
+
+  it('keeps a cleared secret origin off the wire and stores the value verbatim', () => {
+    const body = vaultWriteBody({ ...emptyVaultForm, title: '키', kind: 'secret', origin: '  ', value: ' raw value ' }, 'edit');
+    expect('body' in body && body.body).toEqual({ kind: 'secret', title: '키', hints: '', ghostIds: [], value: ' raw value ' });
+    expect('body' in body && body.body.origin).toBeUndefined();
   });
 });
 
@@ -125,8 +147,10 @@ describe('vaultRowDetail and vaultGrantsLabel', () => {
   it('names the granted Ghosts and the one-time expiry', () => {
     expect(vaultGrantsLabel(item({ ghostIds: ['g1'] }), id => `Ghost ${id}`)).toBe('Ghost g1 사용 가능');
     expect(vaultGrantsLabel(item({ ghostIds: [] }), id => id)).toBe('Ghost 권한 없음');
+    // The 일회용 badge already marks the kind; the description carries only the time.
     const expiryLabel = vaultGrantsLabel(item({ ghostIds: [], expiresAt: Date.UTC(2026, 10, 9, 6, 30) }), id => id);
-    expect(expiryLabel.startsWith('Ghost 권한 없음 · 일회용 · ')).toBe(true);
+    expect(expiryLabel.startsWith('Ghost 권한 없음 · ')).toBe(true);
     expect(expiryLabel.endsWith('에 삭제')).toBe(true);
+    expect(expiryLabel).not.toContain('일회용');
   });
 });

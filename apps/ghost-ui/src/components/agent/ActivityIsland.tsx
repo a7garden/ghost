@@ -4,7 +4,7 @@ import type { State } from '@ghost/contract';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui';
 import { ghostPresence, liveWorks, pendingDecisions, toneFor } from '../../features/ghostState';
 import { relativeTime, useNow } from '../../features/time';
-import { decisionHeading, decisionLabel } from '../../features/decisionText';
+import { decisionChip, decisionHeading } from '../../features/decisionText';
 import { uiTerms } from '../../uiText';
 import { DotAvatar } from '../DotAvatar';
 import { StateGlyph, type GlyphState } from './StateGlyph';
@@ -31,7 +31,7 @@ export function ActivityIsland({ state, navigate }: { state: State; navigate(pat
   const go = (path: string) => () => { setOpen(false); navigate(path); };
   const attention: Entry[] = [
     ...decisions.map(decision => ({ id: decision.id, glyph: 'attention' as const, title: decisionHeading(decision, state),
-      meta: `${names.get(decision.ghostId) ?? 'Ghost'} · ${decisionLabel[decision.kind]}`, at: decision.createdAt,
+      meta: `${names.get(decision.ghostId) ?? 'Ghost'} · ${decisionChip(decision)}`, at: decision.createdAt,
       go: go(`/inbox?decision=${encodeURIComponent(decision.id)}`) })),
     ...works.filter(work => work.state === 'blocked').map(work => ({ id: work.id, glyph: 'blocked' as const, title: work.title,
       meta: names.get(work.ghostId) ?? 'Ghost', at: work.updatedAt, go: go(`/work/${encodeURIComponent(work.id)}`) })),

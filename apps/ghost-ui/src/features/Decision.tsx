@@ -6,8 +6,8 @@ import { DotAvatar } from '../components/DotAvatar';
 import { ArtifactPreview } from '../components/ArtifactPreview';
 import { MessageBody } from '../components/MessageBody';
 import { useHost } from '../host/context';
-import { browserHandoffLabel, browserHandoffProposal, decisionHeading, decisionLabel, emptySecureForm, handoffDoneAnswer,
-  secureFormBody, secureFormLabel, secureFormProposal, type SecureFormValues } from './decisionText';
+import { browserHandoffProposal, decisionChip, decisionHeading, emptySecureForm, handoffDoneAnswer,
+  secureFormBody, secureFormProposal, type SecureFormValues } from './decisionText';
 import { toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
@@ -86,7 +86,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   const secureForm = secureFormProposal(decision);
   const handoff = browserHandoffProposal(decision);
   const labels = actionLabels[decision.kind];
-  const kindLabel = secureForm ? secureFormLabel : handoff ? browserHandoffLabel : decisionLabel[decision.kind];
+  const kindLabel = decisionChip(decision);
   const heading = decision.kind === 'accept_result' && workTitle ? workTitle : decision.title;
   // The result summary is shown as the receipt; the detail repeats it after the reviewer's note.
   const detail = (decision.kind === 'accept_result' && acceptance.result
@@ -98,7 +98,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   // Digits pick a suggested answer; ⌘/Ctrl+Enter approves. Typing in a field is never intercepted.
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (busy || (event.target as Element).closest('textarea, input')) return;
-    if (isQuestion && /^[1-9]$/.test(event.key)) {
+    if (isQuestion && !secureForm && !handoff && /^[1-9]$/.test(event.key)) {
       const option = decision.options[Number(event.key) - 1];
       if (option) { event.preventDefault(); resolve('answer', option); }
     } else if (!isQuestion && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -137,12 +137,12 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
       onResolved={onResolved} onDecline={() => resolve('deny')}/>}
 
     {!secureForm && handoff && <div className="decision__handoff">
-      <p className="decision__handoff-note"><Monitor size={14} aria-hidden="true"/>이 Mac에서 Chrome 창을 열어 두었습니다. 창에서 직접 마무리해 주세요.</p>
+      <p className="decision__handoff-note"><Monitor size={14} aria-hidden="true"/>Mac에서 Chrome 창을 열어 두었습니다. 창에서 직접 마무리해 주세요.</p>
       {handoff.url && <p className="decision__handoff-url">{handoff.url}</p>}
-      {handoff.reason.trim() && <p className="decision__request-reason">{handoff.reason}</p>}
+      {handoff.reason.trim() && handoff.reason.trim() !== decision.detail.trim() && <p className="decision__request-reason">{handoff.reason}</p>}
     </div>}
 
-    {isQuestion && !secureForm && decision.options.length > 0 && <div className="decision__options" role="group" aria-label="추천 답변">
+    {isQuestion && !secureForm && !handoff && decision.options.length > 0 && <div className="decision__options" role="group" aria-label="추천 답변">
       {decision.options.map((option, index) => <button key={option} type="button" className="decision__option" disabled={busy} onClick={() => resolve('answer', option)}>
         <kbd aria-hidden="true">{index + 1}</kbd><span>{option}</span>
       </button>)}
@@ -177,14 +177,14 @@ const secureInputs: Record<VaultItemKind, readonly { key: keyof SecureFormValues
   password?: boolean; placeholder?: string; description?: string; autoComplete?: string }[]> = {
   login: [
     { key: 'username', label: '사용자 이름', required: true, autoComplete: 'off' },
-    { key: 'password', label: '비밀번호', required: true, password: true, autoComplete: 'new-password' },
-    { key: 'totp', label: '일회용 코드 시드', description: '비워 두어도 됩니다. 저장하면 Ghost가 코드를 직접 만듭니다.', autoComplete: 'off' },
+    { key: 'password', label: '비밀번호', required: true, password: true, autoComplete: 'off' },
+    { key: 'totp', label: '일회용 코드 시드', password: true, description: '비워 두어도 됩니다. 저장하면 Ghost가 코드를 직접 만듭니다.', autoComplete: 'off' },
   ],
   card: [
     { key: 'cardNumber', label: '카드 번호', required: true, autoComplete: 'cc-number' },
     { key: 'cardExpiry', label: '유효기간', required: true, placeholder: 'MM/YY', autoComplete: 'cc-exp' },
     { key: 'cardCvc', label: 'CVC', required: true, password: true, autoComplete: 'cc-csc' },
-    { key: 'cardName', label: '카드 소유자 이름', autoComplete: 'cc-name' },
+    { key: 'cardName', label: '카드 소유자 이름', required: true, autoComplete: 'cc-name' },
   ],
   contact: [
     { key: 'contactName', label: '이름' },
@@ -224,9 +224,17 @@ function SecureForm({ decision, request, cardBusy, autoFocus, onResolved, onDecl
       .then(onResolved)
       .catch(reason => { setError(reason instanceof Error ? reason.message : '금고에 전달하지 못했습니다. 다시 시도해 주세요.'); setBusy(false); });
   };
+  // The host repeats the proposal reason in the decision detail; show it once.
+  const reason = request.reason.trim() && request.reason.trim() !== decision.detail.trim() && <p className="decision__request-reason">{request.reason}</p>;
   return <form ref={formRef} className="decision__secure" onSubmit={event => { event.preventDefault(); submit(); }}>
     {request.origin && <p className="decision__secure-origin"><KeyRound size={13} aria-hidden="true"/>{request.origin}</p>}
-    {request.reason.trim() && <p className="decision__request-reason">{request.reason}</p>}
+    {reason}
+    {!request.origin && request.kind === 'login' && <div className="decision__secure-fields">
+      <FormField label="주소" description="이 로그인을 저장할 https:// 주소입니다." required>
+        {control => <Input {...control} type="text" placeholder="https://example.com" value={values.origin} disabled={disabled}
+          onChange={event => setValues(current => ({ ...current, origin: event.target.value }))}/>}
+      </FormField>
+    </div>}
     <div className="decision__secure-fields">
       {secureInputs[request.kind].map(field => <FormField key={field.key} label={field.label} description={field.description} required={field.required}>
         {control => <Input {...control} type={field.password ? 'password' : 'text'} autoComplete={field.autoComplete}
@@ -323,7 +331,7 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
         <button type="button" aria-current={position === at || undefined} onClick={() => setIndex(position)}>
           <DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={18}/>
           <span className="deck__index-copy"><span>{decisionHeading(decision, state)}</span>
-            <small>{names.get(decision.ghostId) ?? 'Ghost'} · {decisionLabel[decision.kind]}</small></span>
+            <small>{names.get(decision.ghostId) ?? 'Ghost'} · {decisionChip(decision)}</small></span>
         </button>
       </li>)}</ol>}
       <div className="deck__stack">

@@ -47,7 +47,7 @@ export type VaultItemWrite = {
   username?: string;
   password?: string;
   totp?: string;
-  card?: { number: string; expiry: string; cvc: string; name?: string };
+  card?: { number: string; expiry: string; cvc: string; name: string };
   contact?: VaultContact;
   value?: string;
   hints?: string;

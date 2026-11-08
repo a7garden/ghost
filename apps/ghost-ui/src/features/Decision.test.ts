@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { Decision, State, Work } from '@ghost/contract';
 import { HostProvider } from '../host/context';
 import { DecisionCard, chatDecisions, decisionCommand, documentProposal } from './Decision';
-import { browserHandoffProposal, emptySecureForm, secureFormBody, secureFormProposal } from './decisionText';
+import { browserHandoffProposal, decisionChip, emptySecureForm, secureFormBody, secureFormProposal } from './decisionText';
 
 const decision = (patch: Partial<Decision> = {}): Decision => ({
   id: 'd1', kind: 'approve_effect', ghostId: 'sage', conversationId: 'c1', workId: null, effectId: 'e1',
@@ -144,14 +144,32 @@ describe('secureFormProposal and browserHandoffProposal', () => {
   });
 });
 
+describe('decisionChip', () => {
+  it('reads the proposal shape for questions and the kind label otherwise', () => {
+    expect(decisionChip(decision({ kind: 'question', proposal: { secureForm: loginRequest } }))).toBe('금고 요청');
+    expect(decisionChip(decision({ kind: 'question', proposal: { browserHandoff: { url: null, reason: '확인' } } }))).toBe('브라우저 대기');
+    expect(decisionChip(decision({ kind: 'question' }))).toBe('답변 대기');
+    expect(decisionChip(decision())).toBe('실행 승인');
+  });
+});
+
 describe('secureFormBody', () => {
-  it('builds a login answer with a verbatim password and an optional code seed', () => {
+  it('builds a login answer with kind, a verbatim password and an optional code seed', () => {
     const values = { ...emptySecureForm, username: ' owner@example.com ', password: ' secret pass ', totp: ' JBSW Y3DP ' };
     expect(secureFormBody(loginRequest, values, true)).toEqual({
-      body: { username: 'owner@example.com', password: ' secret pass ', totp: 'JBSW Y3DP', save: true },
+      body: { kind: 'login', username: 'owner@example.com', password: ' secret pass ', totp: 'JBSW Y3DP', save: true },
     });
     expect(secureFormBody(loginRequest, { ...emptySecureForm, username: 'a', password: 'p' }, false))
-      .toEqual({ body: { username: 'a', password: 'p', save: false } });
+      .toEqual({ body: { kind: 'login', username: 'a', password: 'p', save: false } });
+  });
+
+  it('carries a typed origin only when the request has none', () => {
+    const noOrigin = { kind: 'login' as const, origin: null, title: '예시 로그인', reason: '로그인이 필요합니다.' };
+    const values = { ...emptySecureForm, origin: ' https://new.example.com ', username: 'a', password: 'p' };
+    expect(secureFormBody(noOrigin, values, true))
+      .toEqual({ body: { kind: 'login', username: 'a', password: 'p', origin: 'https://new.example.com', save: true } });
+    expect(secureFormBody(noOrigin, { ...values, origin: ' ' }, true)).toEqual({ error: 'https://로 시작하는 주소를 입력해 주세요.' });
+    expect('body' in secureFormBody(loginRequest, values, true) && secureFormBody(loginRequest, values, true).body.origin).toBeUndefined();
   });
 
   it('refuses an incomplete login before anything reaches the wire', () => {
@@ -159,19 +177,19 @@ describe('secureFormBody', () => {
     expect(secureFormBody(loginRequest, { ...emptySecureForm, username: 'a' }, true)).toEqual({ error: '비밀번호를 입력해 주세요.' });
   });
 
-  it('builds card, contact and secret answers', () => {
+  it('builds card, contact and secret answers with kind and a required holder name', () => {
     const card = { kind: 'card' as const, origin: null, title: '업무 카드', reason: '결제가 필요합니다.' };
     expect(secureFormBody(card, { ...emptySecureForm, cardNumber: '4242 4242', cardExpiry: '12/28', cardCvc: '123', cardName: ' 홍 ' }, true))
-      .toEqual({ body: { card: { number: '4242 4242', expiry: '12/28', cvc: '123', name: '홍' }, save: true } });
-    expect(secureFormBody(card, { ...emptySecureForm, cardNumber: '4242', cardExpiry: '12/28' }, true))
-      .toEqual({ error: '카드 번호와 유효기간, CVC를 입력해 주세요.' });
+      .toEqual({ body: { kind: 'card', card: { number: '4242 4242', expiry: '12/28', cvc: '123', name: '홍' }, save: true } });
+    expect(secureFormBody(card, { ...emptySecureForm, cardNumber: '4242', cardExpiry: '12/28', cardCvc: '123' }, true))
+      .toEqual({ error: '카드 번호와 유효기간, CVC, 이름을 입력해 주세요.' });
     const contact = { kind: 'contact' as const, origin: null, title: null, reason: '연락처가 필요합니다.' };
     expect(secureFormBody(contact, { ...emptySecureForm, contactName: '홍길동', contactEmail: ' h@e.com ' }, true))
-      .toEqual({ body: { contact: { name: '홍길동', email: 'h@e.com' }, save: true } });
+      .toEqual({ body: { kind: 'contact', contact: { name: '홍길동', email: 'h@e.com' }, save: true } });
     expect(secureFormBody(contact, emptySecureForm, true)).toEqual({ error: '한 항목 이상 입력해 주세요.' });
     const secret = { kind: 'secret' as const, origin: null, title: null, reason: '키가 필요합니다.' };
     expect(secureFormBody(secret, { ...emptySecureForm, value: ' raw value ' }, false))
-      .toEqual({ body: { value: ' raw value ', save: false } });
+      .toEqual({ body: { kind: 'secret', value: ' raw value ', save: false } });
     expect(secureFormBody(secret, emptySecureForm, true)).toEqual({ error: '값을 입력해 주세요.' });
   });
 });
