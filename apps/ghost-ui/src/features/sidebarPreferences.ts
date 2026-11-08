@@ -13,7 +13,7 @@ export function loadSidebarPreferences(): SidebarPreferences {
       : JSON.parse(localStorage.getItem(KEY) ?? 'null') as { pinned?: unknown; expanded?: unknown } | null;
     const pinned = Array.isArray(saved?.pinned)
       ? [...new Set(saved.pinned.filter((id): id is string => typeof id === 'string'))] : [];
-    return { pinned, expanded: saved?.expanded === true };
+  return { pinned, expanded: saved?.expanded !== false };
   } catch { return defaults; }
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
-import { Folder, Home, Inbox, LayoutList, MessageCircle, Pin, Plus, Settings2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Folder, Home, Inbox, LayoutList, MessageCircle, Pin, Plus, Settings2 } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Navigation, NavigationGroup, NavigationItem, ScrollRail } from '../ui'
 import type { Ghost, State } from '@ghost/contract';
 import { ghostLiveWork, ghostPresence, liveWorks, visibleGhosts, type Presence } from '../features/ghostState';
@@ -8,17 +8,15 @@ import { PresenceAvatar } from './agent';
 import { routeLabels, uiTerms } from '../uiText';
 import type { HostStatus } from '../features/hostStatus';
 
-/** Beyond this many Ghosts the roster collapses to a top list and a +N disclosure; at or below it renders exactly as before. */
-const COLLAPSE_LIMIT = 7;
-/** An expanded overflow list grows its own filter only once the hidden rows alone pass this. */
+/** An expanded pool grows its own filter once the rows alone pass this. */
 const SEARCH_LIMIT = 8;
 
 /**
- * Workspace destinations, then every Ghost as a presence row: its state ring, name and
- * what it is doing now. A row opens the Ghost's conversation; its history and Work are
- * reached from the conversation header, so the list stays a glanceable roster. Once the
- * team grows past seven, only the Ghosts that need the owner stay up: the default, those
- * with a presence line, pinned ones and the open conversation — the rest sit behind +N.
+ * Workspace destinations, then the Ghosts: the owner's 고정 roster and the pool. A pinned row
+ * (the default Ghost is always pinned) stays up in its own group; everyone else sits in the
+ * pool group, folded by its own header — the header sticks while scrolling, so folding never
+ * means hunting for a button at the bottom of a long list. A folded pool still shows the Ghosts
+ * that need the owner or hold the conversation on screen.
  *
  * The destinations stay put; only the roster and projects scroll, under sticky group labels,
  * fading out at the bottom while more follows. The rail beside it marks Ghosts that are
@@ -47,33 +45,24 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
     if (!openGhostId) return;
     scrollRef.current?.querySelector<HTMLElement>('.presence-row__main[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
   }, [openGhostId]);
-  // Deleted and retired Ghosts leave the roster. Small teams keep the classic order:
-  // the default leads, the rest follow in roster order.
-  const ghosts = (state?.ghosts ?? []).filter(ghost => ghost.state !== 'retired' && ghost.deletedAt === null);
-  const flat = [...ghosts].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  // Deleted and retired Ghosts leave the roster.
   const roster = visibleGhosts(state?.ghosts ?? []);
-  const overflow = roster.length > COLLAPSE_LIMIT;
   const { pinned, expanded, togglePinned, setExpanded } = useSidebarPreferences(roster.map(ghost => ghost.id));
   const [query, setQuery] = useState('');
-
   const presence = new Map<Ghost['id'], Presence>(roster.map(ghost => [ghost.id, state ? ghostPresence(ghost, state) : { state: 'idle', line: null, rank: 5 }]));
   const byId = new Map(roster.map(ghost => [ghost.id, ghost]));
   const pinnedIds = new Set(pinned);
-  // The collapsed top list: default first, then presence (attention before progress),
-  // then the owner's pins, then the conversation on screen — each Ghost once, at its
-  // highest spot.
-  const top: Ghost[] = [];
-  const admit = (ghost?: Ghost) => { if (ghost && !top.includes(ghost)) top.push(ghost); };
-  if (overflow) {
-    admit(roster.find(ghost => ghost.isDefault));
-    for (const ghost of roster.filter(ghost => presence.get(ghost.id)!.line !== null)
-      .sort((a, b) => presence.get(a.id)!.rank - presence.get(b.id)!.rank)) admit(ghost);
-    for (const id of pinned) admit(byId.get(id));
-    admit(openGhostId ? byId.get(openGhostId) : undefined);
-  }
-  const rest = overflow ? roster.filter(ghost => !top.includes(ghost)) : [];
+  // The default Ghost is the entry point and always sits in 고정; pins follow in pin order.
+  const fixed: Ghost[] = [];
+  const admitFixed = (ghost?: Ghost) => { if (ghost && !fixed.includes(ghost)) fixed.push(ghost); };
+  admitFixed(roster.find(ghost => ghost.isDefault));
+  for (const id of pinned) admitFixed(byId.get(id));
+  const pool = roster.filter(ghost => !fixed.includes(ghost));
+  // A folded pool keeps the rows the owner is looking at or must answer.
+  const needsEyes = (ghost: Ghost) => ghost.id === openGhostId || presence.get(ghost.id)!.line !== null;
+  const shownPool = expanded ? pool : pool.filter(needsEyes);
   const needle = query.trim().toLowerCase();
-  const shownRest = rest.filter(ghost => !needle || ghost.name.toLowerCase().includes(needle)
+  const filteredPool = shownPool.filter(ghost => !needle || ghost.name.toLowerCase().includes(needle)
     || ghost.persona.split('\n')[0]!.toLowerCase().includes(needle));
 
   const row = (ghost: Ghost, dimmed = false) => {
@@ -120,19 +109,18 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
       </div>
       <div className="sidebar-scroll-frame">
         <div ref={scrollRef} className="sidebar-scroll">
-          {ghosts.length > 0 && <NavigationGroup label="Ghost">
-            {overflow ? <>
-              {top.map(ghost => row(ghost))}
-              {expanded && rest.length > SEARCH_LIMIT && <input type="search" className="sidebar-search" aria-label="Ghost 찾기"
-                placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
-                onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
-              {expanded && shownRest.map(ghost => row(ghost, true))}
-              {rest.length > 0 && <button type="button" className="sidebar-more" aria-expanded={expanded}
-                aria-label={expanded ? 'Ghost 목록 접기' : `Ghost ${rest.length}명 더 보기`}
-                onClick={() => { setQuery(''); setExpanded(!expanded); }}>
-                <span aria-hidden="true">{expanded ? `−${rest.length}` : `+${rest.length}`}</span>
-              </button>}
-            </> : flat.map(ghost => row(ghost))}
+          {roster.length > 0 && <NavigationGroup label="고정">{fixed.map(ghost => row(ghost))}</NavigationGroup>}
+          {roster.length > 0 && <NavigationGroup label="Ghost"
+            action={<button type="button" className="sidebar-pool-toggle" aria-expanded={expanded}
+              aria-label={expanded ? 'Ghost 목록 접기' : `Ghost 목록 펼치기${pool.length ? ` (${pool.length})` : ''}`}
+              onClick={() => { setQuery(''); setExpanded(!expanded); }}>
+              {expanded ? <ChevronUp size={13} aria-hidden="true"/> : <ChevronDown size={13} aria-hidden="true"/>}
+              {!expanded && pool.length > 0 && <span className="tabular">{pool.length}</span>}
+            </button>}>
+            {expanded && pool.length > SEARCH_LIMIT && <input type="search" className="sidebar-search" aria-label="Ghost 찾기"
+              placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
+              onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
+            {filteredPool.map(ghost => row(ghost, true))}
           </NavigationGroup>}
           <NavigationGroup label="프로젝트"
             action={<button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/spaces?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>}>
