@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Conversations answer their own decisions: a Ghost's pending questions, approvals and result
+  reviews — including those from its older conversations and from threads begun there — sit
+  above the composer, so opening a Ghost that needs you no longer means going to 확인할 일.
 - Settings: slimmer navigation and shared section surfaces. Ghost selection is a compact,
   searchable roster; role, model and capabilities precede separate operating controls.
 - Model fallbacks form a connected route with provider names, search, reorder/remove
@@ -19,7 +22,7 @@
   hunting for a button at the bottom — and a folded pool still shows the Ghosts that need you
   or hold the open conversation. Pin from a Ghost's context menu.
 - Thread cards: a settled thread folds to one quiet line (its outcome line already returns
-  beneath it); a card waiting on a question shows the question with answer chips in place.
+  beneath it); a thread waiting on the owner is answered from the conversation's dock.
 - Composer: `/` opens the composer's actions by keyboard (Korean words match), `@` hands the
   message to a chosen Ghost as a 맡긴 일 addressed to it; the model chip names the model and
   keeps its provider in the tooltip.

@@ -1,9 +1,9 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { Decision } from '@ghost/contract';
+import type { Decision, State, Work } from '@ghost/contract';
 import { HostProvider } from '../host/context';
-import { DecisionCard, decisionCommand, documentProposal } from './Decision';
+import { DecisionCard, chatDecisions, decisionCommand, documentProposal } from './Decision';
 
 const decision = (patch: Partial<Decision> = {}): Decision => ({
   id: 'd1', kind: 'approve_effect', ghostId: 'sage', conversationId: 'c1', workId: null, effectId: 'e1',
@@ -41,6 +41,31 @@ describe('documentProposal', () => {
     expect(documentProposal(decision())).toBeNull();
     expect(documentProposal(decision({ kind: 'document_review', proposal: { title: '회의록', body: '내용' } })))
       .toMatchObject({ title: '회의록', body: '내용' });
+  });
+});
+
+describe('chatDecisions', () => {
+  const work = (id: string, ghostId: string, patch: Partial<Work> = {}) =>
+    ({ id, ghostId, parentId: null, rootId: id, originConversationId: 'other', ...patch }) as Work;
+  const state = (decisions: Decision[], works: Work[]) => ({ decisions, works }) as unknown as State;
+
+  it("gathers the Ghost's own decisions and those of threads begun in the conversation, oldest first", () => {
+    const works = [
+      work('root', 'kai', { originConversationId: 'c1' }),
+      work('child', 'mo', { parentId: 'root', rootId: 'root', originConversationId: 'kai-work' }),
+      work('elsewhere', 'mo'),
+    ];
+    const decisions = [
+      decision({ id: 'own-direct', createdAt: 5 }),
+      decision({ id: 'own-other-work', ghostId: 'sage', conversationId: 'w9', workId: 'w9', createdAt: 1 }),
+      decision({ id: 'thread-root', ghostId: 'kai', workId: 'root', createdAt: 3 }),
+      decision({ id: 'thread-child', ghostId: 'mo', workId: 'child', createdAt: 4 }),
+      decision({ id: 'unrelated', ghostId: 'mo', workId: 'elsewhere', createdAt: 2 }),
+      decision({ id: 'settled', state: 'approved', createdAt: 0 }),
+    ];
+    expect(chatDecisions(state(decisions, works), 'sage', 'c1').map(item => item.id))
+      .toEqual(['own-other-work', 'thread-root', 'thread-child', 'own-direct']);
+    expect(chatDecisions(state(decisions, works), 'sage', null).map(item => item.id)).toEqual(['own-other-work', 'own-direct']);
   });
 });
 

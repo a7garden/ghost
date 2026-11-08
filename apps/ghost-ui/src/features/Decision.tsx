@@ -171,12 +171,35 @@ function RequestPreview({ value }: { value: Record<string, unknown> }) {
 }
 
 /**
+ * What a Ghost's conversation needs from the owner: every pending decision of that Ghost
+ * (what its sidebar row announces) plus those of threads begun in this conversation, at any
+ * depth, whoever carries them. Oldest first.
+ */
+export function chatDecisions(state: State, ghostId: string, conversationId: string | null): Decision[] {
+  const roots = new Set(conversationId ? state.works.filter(work => work.originConversationId === conversationId && !work.parentId).map(work => work.id) : []);
+  const threads = new Set(state.works.filter(work => roots.has(work.rootId) || roots.has(work.id)).map(work => work.id));
+  return state.decisions
+    .filter(decision => decision.state === 'pending' && (decision.ghostId === ghostId || (decision.workId !== null && threads.has(decision.workId))))
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/**
  * Pending decisions as a stack: the oldest on top and fully actionable, the rest
  * peeking behind it. Resolving one lifts the next; arrows browse without resolving.
- * The overview variant lists every pending item beside the stack.
+ * The overview variant lists every pending item beside the stack; the docked variant sits
+ * above a conversation's composer with only that conversation's decisions.
  */
-export function DecisionDeck({ state, navigate, focusId, overview = false }: { state: State; navigate(path: string): void; focusId?: string | null; overview?: boolean }) {
-  const pending = state.decisions.filter(decision => decision.state === 'pending').sort((a, b) => a.createdAt - b.createdAt);
+export function DecisionDeck({ state, navigate, focusId, overview = false, docked = false, decisions, onOpenWork }: {
+  state: State;
+  navigate(path: string): void;
+  focusId?: string | null;
+  overview?: boolean;
+  docked?: boolean;
+  /** The pending decisions to stack, oldest first; every pending decision when omitted. */
+  decisions?: Decision[];
+  onOpenWork?(workId: string): void;
+}) {
+  const pending = decisions ?? state.decisions.filter(decision => decision.state === 'pending').sort((a, b) => a.createdAt - b.createdAt);
   const [index, setIndex] = useState(() => Math.max(0, pending.findIndex(decision => decision.id === focusId)));
   const [focusNext, setFocusNext] = useState(false);
   const focusPosition = pending.findIndex(decision => decision.id === focusId);
@@ -188,15 +211,16 @@ export function DecisionDeck({ state, navigate, focusId, overview = false }: { s
   const workTitle = current.workId ? state.works.find(work => work.id === current.workId)?.title : undefined;
   const behind = Math.min(pending.length - 1, 2);
   const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
-  return <section className="deck" aria-label="확인 필요" data-depth={behind} data-overview={overview || undefined}>
-    <header className="deck__head">
+  return <section className="deck" aria-label="확인 필요" data-depth={behind} data-overview={overview || undefined} data-docked={docked || undefined}>
+    {/* Docked, a single card speaks for itself; the head appears only to browse several. */}
+    {(!docked || pending.length > 1) && <header className="deck__head">
       <h2 className="section-title">확인 필요<span className="count">{pending.length}</span></h2>
       {pending.length > 1 && <div className="deck__nav">
         <span className="tabular" aria-live="polite">{at + 1} / {pending.length}</span>
         <button type="button" aria-label="이전 항목" disabled={at === 0} onClick={() => setIndex(at - 1)}><ChevronLeft size={15}/></button>
         <button type="button" aria-label="다음 항목" disabled={at === pending.length - 1} onClick={() => setIndex(at + 1)}><ChevronRight size={15}/></button>
       </div>}
-    </header>
+    </header>}
     <div className="deck__body">
       {overview && pending.length > 1 && <ol className="deck__index" aria-label="확인 필요 목록">{pending.map((decision, position) => <li key={decision.id}>
         <button type="button" aria-current={position === at || undefined} onClick={() => setIndex(position)}>
@@ -209,7 +233,7 @@ export function DecisionDeck({ state, navigate, focusId, overview = false }: { s
         {Array.from({ length: behind }, (_, layer) => <div key={layer} className="deck__ghost-card" data-layer={layer + 1} aria-hidden="true"/>)}
         <div className="deck__top" key={current.id}>
           <DecisionCard decision={current} ghostName={ghostName} workTitle={workTitle} autoFocus={focusNext || current.id === focusId}
-            onOpenWork={id => navigate(`/work/${encodeURIComponent(id)}`)} onResolved={() => setFocusNext(true)}/>
+            onOpenWork={onOpenWork ?? (id => navigate(`/work/${encodeURIComponent(id)}`))} onResolved={() => setFocusNext(true)}/>
         </div>
       </div>
     </div>

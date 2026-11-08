@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import type { Work } from '@ghost/contract';
 import { ExternalLink, PanelRight } from 'lucide-react';
 import { DotAvatar } from '../DotAvatar';
@@ -19,16 +18,12 @@ const SHOWN_DELEGATES = 4;
  * and kept live — state, carrier, lifecycle, and the Ghosts it delegated parts to — so the
  * one durable chat shows its branches and the collaboration under them.
  */
-export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], question, actions, onOpen, onOpenPage }: {
+export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], onOpen, onOpenPage }: {
   work: Work;
   ghostName: string;
   needsOwner: boolean;
   now: number;
   delegates?: ThreadDelegate[];
-  /** The pending question this Work waits on, when there is one. */
-  question?: string;
-  /** Answer chips under a card waiting on the owner (the question's options). */
-  actions?: ReactNode;
   onOpen(): void;
   onOpenPage?(): void;
 }) {
@@ -53,7 +48,6 @@ export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], q
                   <time className="tabular">{relativeTime(work.updatedAt, now)}</time>
                 </>}
             </span>
-            {question && <span className="thread-card__question">{question}</span>}
             {shown.length > 0 && !settled && <span className="thread-card__delegates" aria-hidden="true">
               {shown.map(({ work: child, ghostName: name, needsOwner: waiting }) => <span key={child.id} className="thread-card__delegate" title={`${name}: ${child.title}`}>
                 <StateGlyph state={workGlyph(child.state, waiting)} size={12}/>
@@ -65,7 +59,6 @@ export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], q
           </span>
           {!settled && <LifecycleTrack state={work.state} needsOwner={needsOwner} compact/>}
         </button>
-        {actions && <div className="thread-card__answers">{actions}</div>}
       </div>
     </ContextMenuTrigger>
     <ContextMenuContent aria-label="스레드 메뉴">
@@ -73,9 +66,4 @@ export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], q
       {onOpenPage && <ContextMenuItem icon={<ExternalLink/>} onSelect={onOpenPage}>맡긴 일 페이지에서 보기</ContextMenuItem>}
     </ContextMenuContent>
   </ContextMenu>;
-}
-
-/** What a thread waiting on the owner asks, and how it can be answered without opening it. */
-export function ThreadAnswer({ label, onAnswer }: { label: string; onAnswer(): void }) {
-  return <button type="button" className="thread-card__answer" onClick={onAnswer}>{label}</button>;
 }

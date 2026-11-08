@@ -113,6 +113,9 @@ body {
 .deck__index-copy { display: grid; min-width: 0; gap: 1px; }
 .deck__index-copy > span { overflow: hidden; font-size: var(--text-ui); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .deck__index-copy > small { overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-micro); text-overflow: ellipsis; white-space: nowrap; }
+/* Docked above a conversation's composer: the transcript keeps most of the height; a long card scrolls inside. */
+.deck[data-docked] { gap: 6px; margin-bottom: 10px; }
+.deck[data-docked] .decision { max-height: min(46vh, 440px); overflow-y: auto; overscroll-behavior: contain; }
 
 .decision {
   position: relative; display: grid; gap: 14px; min-width: 0; padding: 20px 22px 18px;
@@ -267,16 +270,6 @@ body {
 .thread-card[data-settled] .thread-card__title { font-weight: 450; }
 .thread-card__meta { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .thread-card__meta .dot-avatar { border-radius: 50%; }
-.thread-card__question { overflow: hidden; margin-top: 2px; color: var(--ghost-amber-ink); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
-.thread-card__answers { display: flex; max-width: 520px; flex-wrap: wrap; gap: 6px; margin: 6px 0 0 22px; }
-.thread-card__answer {
-  display: inline-flex; align-items: center; height: 28px; padding: 0 13px; border: 0; border-radius: var(--radius-pill);
-  color: var(--ghost-ink2); background: var(--ghost-surface); box-shadow: var(--shadow-btn); font: 500 var(--text-caption)/1 var(--font-sans); cursor: pointer;
-  transition: box-shadow var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) var(--ease-spring);
-}
-.thread-card__answer:hover { color: var(--ghost-ink); box-shadow: var(--shadow-raised); }
-.thread-card__answer:active { transform: scale(.97); }
-.thread-card__answer:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
 .thread-card__title { overflow: hidden; font-size: var(--text-ui); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .thread-card__delegates { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .thread-card__delegate { display: inline-flex; min-width: 0; max-width: 160px; align-items: center; gap: 4px; padding: 2px 7px 2px 4px; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: var(--ghost-hover); font-size: var(--text-micro); animation: pop-in var(--duration-base) var(--ease-spring) both; }
