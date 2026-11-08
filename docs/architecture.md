@@ -71,7 +71,7 @@ docs/
 | Ghost | A durable bot: name, persona, look, model and up to three fallback models, tool allow-list, skills, memory space and document grants. The default Ghost is the entry point and may configure other non-default Ghosts only from direct conversations. A retired Ghost can be deleted by the owner: it leaves every list and picker, and its row stays as a tombstone (`deletedAt`) so past Works keep their assignee. |
 | Conversation | A Pi conversation bound to one Ghost. Kinds: `direct` (owner ↔ Ghost), `work` (a Ghost executing one Work), `review` (an independent reviewer judging one Work). |
 | Work | 맡긴 일. A node in a tree. A root Work is created only from an owner request in a direct conversation (or by the owner in the UI). A child Work is a delegation to another Ghost. Each Work has an assignee, a brief, an acceptance spec, a deadline, a work conversation, a state, a result and a verdict. |
-| Decision | Something only the owner can settle: approve an effect (a host command proposal), answer a question, accept a result, approve a document proposal, reconcile an unknown effect. |
+| Decision | Something only the owner can settle: approve an effect (a host command, a browser action or a card fill), answer a question (including a vault secure form or a browser handoff), accept a result, approve a document proposal, reconcile an unknown effect. |
 | Effect | One external side effect of a tool call (shell, file write, publish, browser mutation, memory write, document proposal). |
 | Artifact | Published bytes, addressed by SHA-256, attached to a Work result. Avatar images are artifacts too. |
 | Schedule | A timed submission into a conversation (wake, follow-up, reminder the owner asked for). |
@@ -87,8 +87,8 @@ docs/
 stateDiagram-v2
   [*] --> queued
   queued --> running: engine starts work conversation
-  running --> waiting: delegated children or owner decision pending
-  waiting --> running: last child settled / decision resolved
+  running --> waiting: delegated children, owner decision or own question to the parent pending
+  waiting --> running: last child settled / decision resolved / parent answered
   running --> verifying: complete(result)
   verifying --> done: verdict pass
   verifying --> running: verdict revise (≤ 2 revisions)
@@ -107,16 +107,17 @@ stateDiagram-v2
 ```
 
 - Cancelling a Work cancels its live descendants first and aborts their conversations.
-- `revise` re-submits the verdict feedback into the same work conversation.
-- When a child settles, the parent's work conversation receives a submission with the child's result. When a root Work settles, the origin direct conversation receives a report submission.
+- `revise` re-submits the verdict feedback into the same work conversation: reasons, the reviewer's evidence and the scope the revision must stay inside.
+- When a child settles, the parent's work conversation receives a submission with the child's result. When a root Work settles, the origin direct conversation receives a report submission. Either report carries the revision history when revisions happened, so the receiver can keep the lesson.
+- A child asks its delegating Ghost first: `ask_parent` stores a `work_questions` row and submits the question to the parent's work conversation; the child waits until the parent calls `answer_child`. Only the parent escalates to the owner with `ask_owner`.
 - The owner can edit a live Work (brief, acceptance, deadline). An edit bumps `revision` and is submitted to the work conversation as steering.
 
 ### Verification
 
 `complete` moves a Work to `verifying`. The verdict comes from the first applicable source:
 
-1. **Checks.** If the acceptance spec has deterministic `checks` (`artifact_sha256`, `artifact_contains`, `command_exit_zero`, `command_stdout`), the host evaluates them against reopened artifact bytes and recorded effect results. Checks come only from owner-authored specs, never from a model.
-2. **Review.** Otherwise a `review` conversation judges the result with read-only artifact and effect tools and returns `pass | revise | fail` with reasons. The reviewer is the one the spec names (a Ghost or a model); for a delegated child without one, it is the Ghost that delegated it.
+1. **Checks.** If the acceptance spec has deterministic `checks` (`artifact_sha256`, `artifact_contains`, `command_exit_zero`, `command_stdout`), the host evaluates them against reopened artifact bytes and recorded effect results. A root Work's checks come only from the owner and decide the verdict. A child's checks come from the Ghost that delegated it and gate review: failing checks revise the child without a review conversation, passing checks continue to review.
+2. **Review.** Otherwise (or after a child's checks pass) a `review` conversation judges the result with read-only artifact and effect tools and returns `pass | revise | fail` with reasons, optional evidence and an optional revision scope. The reviewer is the one the spec names (a Ghost or a model); for a delegated child without one, it is the Ghost that delegated it.
 3. **Owner.** A root Work without checks or a reviewer opens an `accept_result` decision.
 
 A completion claim alone never accepts a Work.
@@ -130,7 +131,7 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 - Settled Work without a recorded report reports again (deterministic request id, deterministic notification id).
 - A running Work whose conversation is idle gets one wake, keyed by the Work's last change, so repeated restarts do not stack wakes.
 - Schedules submit before they advance.
-- Tools that create rows (`work_create`, `delegate`, `schedule_create`, `ask_owner`, `document_propose`) derive the row id from the tool call, so a call Pi replays finds its row.
+- Tools that create rows (`work_create`, `delegate`, `schedule_create`, `ask_owner`, `ask_parent`, `document_propose`, `vault_request`, `browser_propose`, `browser_handoff`) derive the row id from the tool call, so a call Pi replays finds its row. Parent questions and answers that were recorded but not yet submitted are submitted again with their deterministic request ids.
 
 ## Stores
 
@@ -142,7 +143,8 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 | --- | --- | --- |
 | `ghosts` | `id` | name, persona, look, model, tools (explicit allow-list), is_default (one), state, direct_conversation_id |
 | `conversations` | `id` | ghost_id, kind, work_id, title, model, busy; `pi_conversation_id` maps to Pi |
-| `works` | `id` | parent_id, root_id, ghost_id, origin_conversation_id, conversation_id, brief, acceptance, state, revision, revisions_used, idle_nudges, deadline_at, result, verdict, reason, timestamps |
+| `works` | `id` | parent_id, root_id, ghost_id, origin_conversation_id, conversation_id, brief, acceptance, state, revision, revisions_used, idle_nudges, deadline_at, result, verdict, reason, revise_history (internal; migration 6), timestamps |
+| `work_questions` | `id` | work_id, parent_work_id, question, answer, state (`pending` / `answered` / `cancelled`), submission markers; migration 6 |
 | `decisions` | `id` | kind, ghost_id, conversation_id, work_id, effect_id, title, detail, options, proposal, state, answer |
 | `effects` | `id`; unique `(conversation_id, call_id)` | work_id, tool, summary, input_digest, state, result |
 | `artifacts` | `(digest, work_id, name)` | media_type, size |
@@ -164,9 +166,11 @@ ledger.db  pi.db
 lock.db                      kernel-held ownership lock, not a domain store or backup input
 artifacts/sha256/ab/<digest>
 secrets/<provider>.json      0600
+vault/key  vault/vault.db    Ghost vault: 0600 key, AES-256-GCM secret fields, outside the ledger and its events
+browser/                     agent-browser HOME (per-Ghost login state, encrypted with browser/key), config, downloads
 sandboxes/<ghost_id>/<work_id>/workspace
 host.json                    port + owner token for local clients, 0600
-config.json                  optional: publicOrigin, uiDir, sandbox, memory, apns, reach, skills, mac
+config.json                  optional: publicOrigin, uiDir, sandbox, memory, apns, reach, skills, mac, browser
 ```
 
 ## Engine
@@ -176,19 +180,21 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 
 | Kind | Extensions |
 | --- | --- |
-| `direct` | `ghost.direct`: `work_create`, `work_list`, `work_inspect`, `work_update`, `work_cancel`, `ask_owner`, `schedule_create`, `schedule_list`, `schedule_cancel`, `ghost_list`; `ghost.interactive`: `present_ui`; `ghost.memory`; `ghost.documents`; `ghost.web`; `ghost.skills`; `ghost.host`; `ghost.main` (`ghost_inspect`, `ghost_update`) for the active default Ghost only |
-| `work` | `ghost.work`: `read`, `write`, `edit`, `bash` (over the sandbox env), `publish_artifact`, `delegate`, `complete`, `ask_owner`, `work_status`; `ghost.memory` (work scope); `ghost.web`; `ghost.skills`; `ghost.host` |
+| `direct` | `ghost.direct`: `work_create`, `work_list`, `work_inspect`, `work_update`, `work_cancel`, `ask_owner`, `schedule_create`, `schedule_list`, `schedule_cancel`, `ghost_list`; `ghost.interactive`: `present_ui`; `ghost.memory`; `ghost.documents`; `ghost.web`; `ghost.browser`; `ghost.vault`; `ghost.skills`; `ghost.host`; `ghost.main` (`ghost_inspect`, `ghost_update`) for the active default Ghost only |
+| `work` | `ghost.work`: `read`, `write`, `edit`, `bash` (over the sandbox env), `publish_artifact`, `delegate`, `complete`, `ask_owner`, `ask_parent` (child Works), `answer_child`, `work_status`; `ghost.memory` (work scope); `ghost.web`; `ghost.browser`; `ghost.vault`; `ghost.skills`; `ghost.host` |
 | `review` | `ghost.review`: `artifact_read`, `effect_list`, `verdict` |
 
 - The sandbox `ExecutionEnv` for a work conversation is built from the Work's row: Apple container with only the Work's directory mounted at `/workspace`, no network. Local-directory env exists for tests and development.
-- A work conversation that goes idle with live children or a pending decision becomes `waiting`; when a child settles, its outcome (and its files under `inputs/<child-id>/`) is submitted to the parent. Idle without either gets one reminder, then the Work fails.
-- A work conversation whose Ghost holds `delegate` gets the active peer Ghosts in its instructions when it is configured, since `ghost_list` runs only in direct conversations: name, id, first persona line and a capability tag (resolved model, `image` when that model accepts images, `web`, `host`). Creating, changing or deleting a Ghost re-opens the live work conversations of Ghosts that hold `delegate`, so the roster stays current. A Work cannot delegate to its own Ghost. `delegate` may name a reviewer Ghost (`reviewer_ghost_id`), which then judges the child with its own model; without one the delegating Ghost reviews. Delegation is one-shot: a child reports back only when it settles; there is no peer messaging channel mid-Work.
+- A work conversation that goes idle with live children, a pending decision or its own pending question to the parent becomes `waiting`; when a child settles, its outcome (and its files under `inputs/<child-id>/`) is submitted to the parent. Idle without any of them gets one reminder, then the Work fails.
+- A work conversation whose Ghost holds `delegate` gets the active peer Ghosts in its instructions when it is configured, since `ghost_list` runs only in direct conversations: name, id, first persona line and a capability tag (resolved model, `image` when that model accepts images, `web`, `host`). Creating, changing or deleting a Ghost re-opens the live work conversations of Ghosts that hold `delegate`, so the roster stays current. A Work cannot delegate to its own Ghost. `delegate` may name a reviewer Ghost (`reviewer_ghost_id`), which then judges the child with its own model, and may give the child deterministic `checks`; without a reviewer the delegating Ghost reviews. A child reports its result when it settles; mid-Work, the only channel is the child's `ask_parent` question and the parent's `answer_child`.
 - Model fallback: each Ghost has up to three `fallbacks`. Pi retries a failed generation itself; when the run still ends in an error assistant message caused by a retryable error, rate limit, quota, overload, network failure or a missing credential, and the conversation's model came from the Ghost or the default (not a conversation override or an explicit review model), the engine reconfigures that conversation with the next fallback whose provider has a credential and re-arms Pi's generation task over the committed context in the same transaction. No input is re-submitted, no request id is reused and completed tool tasks are never replayed. A conversation-scoped `ghost.fallback` document records the handled error entry so a restart does not continue it twice. Invalid requests and context overflow never fall back. The next turn starts at the primary model again. Each switch is logged as `fallback: <conversation> <from> -> <to> (<reason>)`; Pi's transcript records the serving provider/model per assistant message.
 - Web research (`ghost.web`, config `reach.executable`): `web_search`, `web_read` and `reach` run the owner's read-only `agent-reach` CLI on the host by argv (no shell), with a minimal environment, a deadline, an output cap and at most four children at once. `reach` accepts only catalogued channel actions, never management commands (setup, add, login, update, …). URLs must be http(s) and must not name or resolve to loopback, private, link-local, CGNAT or `*.ts.net`/`*.local` hosts. Results are marked as untrusted evidence. Reads are never journaled.
 - Skills (`ghost.skills`, config `skills.roots`): a Ghost's `skills` list names skill directories (with `SKILL.md`) under the configured roots. Their bodies are appended to direct and work instructions in the Ghost's order, bounded per skill and in total, after a line saying they were written for other harnesses; a missing skill is marked unavailable. `skill_read` lists or reads files inside a listed skill only (text, bounded, no path or symlink escape). `GET /api/skills` gives the owner the catalog for the settings picker.
 - Mac operations (`ghost.host`, config `mac: { roots, watch }`; the existing `host` key stays the API bind address): read-only probes `host_status`, `host_services`, `host_disk_scan`, `host_disk_usage`, `host_list`, `host_read`, `host_nodes` run on the Mac itself with Macfra's guards. Disk probes may also measure the cache dirs; `host_list`/`host_read` stay inside the configured roots, refuse symlinks below the root, secret and private paths, and redact sensitive text. `host_command_propose` never executes: it validates an absolute, allowlisted program without shells or interpreters and a cwd inside the roots, journals a pending effect and opens an `approve_effect` decision; the host runs it only after approval, without a shell, in its own process group with a 90 s limit, and refuses proposals older than 24 h. Host tools are never in a new Ghost's default allow-list and only the owner grants or revokes them. When `mac.watch` names a Ghost, `ghost serve` (never one-shot CLI commands) runs a watcher after the core has started: it samples status, services and nodes every few minutes without model calls. An issue is admitted after two consecutive samples (critical disk at once), again only after it cleared and came back and six hours passed; one sample's admitted issues, deduplicated by volume, become a single submission into that Ghost's direct conversation, plus one full review a day. State is persisted before each submission; a refused submission (no model or credential) is dropped without stopping sampling. This replaces Macfra's resident agent.
 - Oxibrain holds an exclusive store lock for the life of its `admin serve --stdio` child, and every Ghost shares one store. All memory operations go through one queue; each child is reaped (SIGTERM, SIGKILL after 2 s) before the next starts, so parallel `memory_search` calls in one turn run one after another instead of failing on the lock.
-- Effect journaling wraps every tool that changes the outside world (`write`, `edit`, `bash`, `publish_artifact`, `memory_retain`).
+- Effect journaling wraps every tool that changes the outside world (`write`, `edit`, `bash`, `publish_artifact`, `memory_retain`, browser actions and secret fills).
+- Browser (`ghost.browser`, config `browser: { executable, chrome?, idleTimeoutMinutes? }`): the installed agent-browser CLI drives Google Chrome on the host by argv, one session per conversation, login state saved per Ghost (`--restore ghost-<id>`, encrypted) under `<root>/browser` with its own `HOME` and an explicit config, so the owner's agent-browser state and plugins are never read. Chrome's traffic goes through a host-owned egress proxy that resolves each destination and refuses loopback, private, link-local, CGNAT, ULA and tailnet/local names, then connects to the checked address; page-issued requests and WebRTC cannot bypass it. Reads (`browser_open`, `browser_snapshot`, `browser_screenshot`, `browser_read`, scroll, wait, tab list) are not journaled; clicks, fills, typing, key presses, selections, uploads and downloads are effects. `browser_propose` (purchases, payments, sending, deleting, legal submissions) and every card-field fill wait for an `approve_effect`; the host acts only after approval and only if the page is still the proposed one. `browser_handoff` reopens the session as a visible Chrome window for the owner and asks a `question`; the next browser call after the answer closes the window and continues headless with the saved login. Uploads and downloads stay inside the Work workspace.
+- Vault (`ghost.vault`; no config): items (`login`, `card`, `contact`, `secret`) live in `<root>/vault/vault.db` with every secret field encrypted under `<root>/vault/key`; origins follow Shade's https-only canonical form, generated passwords and CSV import follow Shade's rules, replaced secrets keep encrypted history, and each item lists the Ghosts allowed to use it. No API or tool returns a secret value: Ghosts see metadata (`vault_list`), ask the owner with `vault_request` (a `question` whose `proposal.secureForm` the app answers through `POST /api/vault/requests/:decisionId`; the ordinary answer path refuses it), create logins with `vault_generate_login`, and fill fields with `browser_fill_secret`, which passes the value to the page over stdin after checking the page origin. Backups copy the vault store with its key.
 - Providers: any configured provider with a credential runs any conversation with every tool the Ghost holds. There are no privacy tiers or local-only routes (owner decision, 2026-11-07).
 - Owner message attachments are rendered from immutable artifact bytes before Pi admission; Pi stores the exact input for replay. Magic-byte-verified PNG/JPEG/GIF/WebP become image content parts (4 MiB per image, 8 MiB total per message). UTF-8 text (`text/*`, JSON, or text/source filename extensions) is inlined with its filename in a fenced block (first 100 KiB per file, 200 KiB total per message). Stored sizes are checked before image reads; text reads fetch only the bounded prefix. Omitted or truncated content gets an explicit model-visible reason beside its digest reference. Model input capabilities use the same effective catalog as execution: refreshed metadata, then the SDK's offline seed; unknown manual ids default to text-only. Pi retains image parts in history while pi-ai downgrades them to an omission note for text-only model requests. Transcripts hide the model-only attachment block and retain separate attachment references.
 - OpenAI providers retain API-key authentication. A stored ChatGPT OAuth credential switches the same provider/model IDs to pi-ai's Codex Responses API at the fixed `https://chatgpt.com/backend-api` endpoint. Tokens never go to a configured custom URL.
@@ -206,7 +212,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 - The engine configures Pi's explicit tool selection as well as its named extensions. Pi re-resolves extensions from the registry by name; filtering a copied extension's `tools` array does not restrict a model request.
 - Owners edit role instructions and tool permissions in **설정 → 팀 → Ghost 설정**, also reachable from the Ghost's conversation profile. Selecting a tool never grants a document Space or enables an unavailable integration.
 - Unsaved owner tool toggles are applied to the latest observed allow-list, preserving concurrent changes to untouched tools.
-- `ask_owner`, `complete`, `work_status`, `artifact_read`, `effect_list` and `verdict` remain fixed lifecycle/safety tools in their existing conversation kinds.
+- `ask_owner`, `ask_parent`, `answer_child`, `complete`, `work_status`, `artifact_read`, `effect_list` and `verdict` remain fixed lifecycle/safety tools in their existing conversation kinds.
 - Only the currently active default Ghost's direct conversations receive `ghost_inspect` and `ghost_update`. Every execution rechecks the current designation. These tools inspect/update another non-default Ghost's name, persona, model, fallbacks, skills, look, state and optional tools. They cannot change the caller, the default designation, host tools, document grants, credentials or sandbox controls, and cannot touch a deleted Ghost. Owners retain those controls.
 - `ghost.delete` (owner only) accepts a retired, non-default Ghost with no live Work and no pending decision. It removes its schedules and every device or Space grant naming it, then sets `deletedAt`. Deleted Ghosts are never opened, listed, delegated to or edited again.
 - Permission changes refresh live conversations; execution also checks the current ledger permissions so a stale configured tool cannot bypass revocation. Work/review conversations never receive Ghost-management authority, including work assigned to the default Ghost.
@@ -241,6 +247,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 | `POST /api/providers/:id/oauth` | owner-only ChatGPT device-code login; a pending attempt is reused |
 | `GET /api/providers/:id/oauth` | owner-only login status, verification URL and device code; never tokens |
 | `DELETE /api/providers/:id/oauth` | cancel a pending login, not an existing credential |
+| `GET/POST /api/vault/items`, `PATCH/DELETE /api/vault/items/:id`, `POST /api/vault/import`, `POST /api/vault/requests/:decisionId` | owner-only vault management and secure-form answers; values are accepted, never returned ([details](agent-capabilities.md#owner-api-vault)) |
 | `GET /` | web UI |
 
 ## Import
@@ -266,6 +273,5 @@ It writes a loss report of everything it did not carry over. PDC vaults are refe
 | Planner, CalDAV, Google planner, Slack channel, incidents feed, integrations proposal surface | outside current product scope |
 | Model-driven bot candidate/evaluation pipeline | Ghosts are created and edited by the owner |
 | `workspace_objects` key-value store, command response ledger | plain tables; reads are not journaled |
-| Owned-browser tools and browser approvals | not enabled in the production Pi computer config (`accepted_capabilities` had no browser); re-add as a `ghost.browser` extension using `effects.propose` |
 | Voice routes (transcribe, synthesize, WebRTC media relay) | follow-up scope; `apps/ghost-voice-server` stays and gets a host route when voice is accepted |
 | Memory publication ledger, source review screens, Work-memory profiles | memory is Oxibrain search/recall/retain per Ghost; source correction happens in Oxibrain |
