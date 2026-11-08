@@ -37,6 +37,8 @@ export interface Config {
   skills: null | { roots: string[] };
   /** Read-only web research through the installed `agent-reach` CLI; null turns it off. */
   reach: null | { executable: string };
+  /** Host-owned Chrome sessions behind the public-internet egress proxy. */
+  browser: null | { executable: string; chrome?: string; idleTimeoutMinutes?: number };
 }
 
 export const DEFAULT_ROOT = join(homedir(), "Library", "Application Support", "Ghost");
@@ -50,7 +52,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const root = resolve(rootOverride ?? env.GHOST_ROOT ?? DEFAULT_ROOT);
   const path = join(root, "config.json");
   const file = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Partial<Config>) : {};
-  const allowed = new Set(["host", "port", "publicOrigin", "uiDir", "sandbox", "memory", "voice", "apns", "skills", "mac", "reach"]);
+  const allowed = new Set(["host", "port", "publicOrigin", "uiDir", "sandbox", "memory", "voice", "apns", "skills", "mac", "reach", "browser"]);
   for (const key of Object.keys(file)) if (!allowed.has(key)) throw new Error(`config.json: unknown key ${key}`);
   const port = Number(env.GHOST_PORT ?? file.port ?? DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("GHOST_PORT must be a TCP port (0 picks a free one)");
@@ -62,6 +64,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (typeof file.mac !== "object" || (file.mac.roots !== undefined && (!Array.isArray(file.mac.roots) || file.mac.roots.some((p) => typeof p !== "string" || !p.trim())))) throw new Error("config.json: mac.roots must be paths");
     const watch = file.mac.watch;
     if (watch != null && (typeof watch !== "object" || typeof watch.ghostId !== "string" || !watch.ghostId.trim() || (watch.intervalMinutes !== undefined && (!Number.isFinite(watch.intervalMinutes) || watch.intervalMinutes <= 0 || watch.intervalMinutes > 1440)))) throw new Error("config.json: invalid mac.watch");
+  }
+  if (file.browser != null) {
+    const b = file.browser;
+    if (typeof b !== "object" || typeof b.executable !== "string" || !b.executable.trim() ||
+      (b.chrome !== undefined && (typeof b.chrome !== "string" || !b.chrome.trim())) ||
+      (b.idleTimeoutMinutes !== undefined && (!Number.isFinite(b.idleTimeoutMinutes) || b.idleTimeoutMinutes <= 0 || b.idleTimeoutMinutes > 1440))) {
+      throw new Error("config.json: invalid browser configuration");
+    }
   }
   return {
     root,
@@ -76,5 +86,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     apns: file.apns ?? null,
     skills: file.skills ?? null,
     reach: file.reach ?? null,
+    browser: file.browser ?? null,
   };
 }

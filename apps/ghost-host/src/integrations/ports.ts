@@ -202,13 +202,20 @@ export interface BrowserCommandResult {
   error: string | null;
 }
 
+export interface BrowserRunOptions {
+  stdin?: string;
+  timeoutMs?: number;
+  /** Host-only ephemeral redaction registry. Never written to disk or passed in argv. */
+  sensitive?: { value: string; field: VaultField; origin: string };
+}
+
 /**
  * Host-side Chrome through the installed agent-browser CLI, behind the host's egress proxy (no loopback,
  * private, link-local or tailnet destinations, including page-issued requests). Implemented in src/integrations/browser.ts.
  */
 export interface BrowserPort {
   /** One command in the conversation's session. Secret material may only travel through `stdin`. */
-  run(session: BrowserSessionRef, argv: string[], options?: { stdin?: string; timeoutMs?: number }): Promise<BrowserCommandResult>;
+  run(session: BrowserSessionRef, argv: string[], options?: BrowserRunOptions): Promise<BrowserCommandResult>;
   /** Reopen the session in a visible window (same Ghost login state) at `url` so the owner can act. */
   handoff(session: BrowserSessionRef, url: string | null): Promise<void>;
   /** End the visible window after the owner is done; the next command starts headless with the saved state. */
