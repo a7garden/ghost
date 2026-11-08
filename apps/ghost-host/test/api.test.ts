@@ -26,6 +26,7 @@ import type { ConversationSetup, Engine, Submission, TranscriptPage } from "../s
 import { Ledger } from "../src/ledger/ledger.ts";
 import { FsArtifactStore } from "../src/stores/artifacts.ts";
 import { FileSecrets } from "../src/stores/secrets.ts";
+import { ProviderCatalog as HostProviderCatalog } from "../src/integrations/provider-catalog.ts";
 
 const OWNER_TOKEN = "owner-test-token";
 const VERSION = "2.0.0";
@@ -79,6 +80,17 @@ const core = new Core({
     control: async () => {},
   },
   secrets: new FileSecrets(root),
+  catalog: new HostProviderCatalog({
+    fetch: (async () => Response.json({
+      "zai-coding-plan": { models: {
+        "glm-api-discovery": {
+          id: "glm-api-discovery", name: "Discovered GLM", tool_call: true, reasoning: true,
+          modalities: { input: ["text", "image"], output: ["text"] },
+          limit: { context: 256_000, output: 32_000 },
+        },
+      } },
+    })),
+  }),
   log: () => {},
 });
 core.attach(engine);
@@ -461,6 +473,31 @@ describe("API server", () => {
       if (preset.recommendedModelId !== null) expect(preset.models.some((model) => model.id === preset.recommendedModelId)).toBe(true);
       if (preset.recommendedOAuthModelId !== null) expect(preset.oauthModels.some((model) => model.id === preset.recommendedOAuthModelId)).toBe(true);
     }
+  });
+
+  test("owner settings and provider catalog expose discovered models without saving an allowlist", async () => {
+    await core.catalog.refresh();
+    const presets = parse(ProviderCatalog, await (await get("/api/providers/catalog", OWNER_TOKEN)).json());
+    expect(presets.find(preset => preset.kind === "zai")?.models.find(model => model.id === "glm-api-discovery")).toMatchObject({
+      input: ["text", "image"], contextWindow: 256_000, maxTokens: 32_000,
+    });
+    await runCommand({
+      type: "provider.upsert", id: "dynamic-zai", kind: "zai", name: "Dynamic Z.AI",
+      models: [{ id: "manual-saved", name: "Manual" }], apiKey: "not-returned",
+    }, OWNER_TOKEN);
+    const snapshot = parse(State, await (await get("/api/state", OWNER_TOKEN)).json());
+    const provider = snapshot.settings.providers.find(provider => provider.id === "dynamic-zai");
+    expect(provider?.models.some(model => model.id === "glm-api-discovery")).toBe(true);
+    expect(provider?.configuredModels).toEqual([{ id: "manual-saved", name: "Manual" }]);
+    expect(provider?.models.some(model => model.id === "manual-saved")).toBe(true);
+    expect(provider?.manualModelIds).toEqual(["manual-saved"]);
+    expect(provider?.automaticModels).toBe(true);
+    expect(ledger.settings().providers.find(provider => provider.id === "dynamic-zai")?.models).toEqual([{ id: "manual-saved", name: "Manual" }]);
+    await runCommand({ type: "settings.update", reviewModel: { provider: "dynamic-zai", model: "glm-api-discovery" } }, OWNER_TOKEN);
+    expect(parse(State, await (await get("/api/state", OWNER_TOKEN)).json()).settings.reviewModel).toEqual({ provider: "dynamic-zai", model: "glm-api-discovery" });
+    expect(JSON.stringify(snapshot.settings)).not.toContain("not-returned");
+    await runCommand({ type: "settings.update", reviewModel: null }, OWNER_TOKEN);
+    await runCommand({ type: "provider.delete", providerId: "dynamic-zai" }, OWNER_TOKEN);
   });
 
   test("provider settings carry the credential's auth type for the owner only", async () => {

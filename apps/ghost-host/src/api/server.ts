@@ -26,7 +26,6 @@ import {
   parse,
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
-import { PROVIDER_PRESETS } from "../integrations/provider-catalog.ts";
 import type { DocumentsPort, SkillsPort } from "../integrations/ports.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
@@ -519,7 +518,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/providers/catalog" && request.method === "GET") {
       try {
         if (!access.isOwner) throw new CommandError("forbidden", "provider catalog needs the owner");
-        return json(PROVIDER_PRESETS);
+        return json(core.catalog.presets);
       } catch (caught) {
         return failure(caught);
       }

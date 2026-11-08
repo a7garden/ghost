@@ -18,6 +18,8 @@ import { createToolSet } from "./tools/index.ts";
 import type { DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
 import { MacHost } from "./integrations/host.ts";
 import { HostWatch } from "./core/hostwatch.ts";
+import { ProviderCatalog } from "./integrations/provider-catalog.ts";
+import { settingsView } from "./core/commands.ts";
 
 export interface App {
   core: Core;
@@ -49,7 +51,11 @@ export async function openApp(config: Config): Promise<App> {
   const ledger = new Ledger(join(config.root, "ledger.db"));
   const artifacts = new FsArtifactStore(config.root);
   const sandbox = createSandbox(config, artifacts);
-  const core = new Core({ ledger, artifacts, sandbox, secrets: new FileSecrets(config.root), log });
+  const core = new Core({
+    ledger, artifacts, sandbox, secrets: new FileSecrets(config.root), log,
+    catalog: new ProviderCatalog({ cachePath: join(config.root, "models.json") }),
+    codexCachePath: join(config.root, "codex-models.json"),
+  });
   const documents = createDocuments(core);
   const skills = createSkills(config);
   const host = config.mac ? new MacHost({ roots: config.mac.roots }) : null;
@@ -64,6 +70,7 @@ export async function openApp(config: Config): Promise<App> {
     skills,
     host,
     async close() {
+      await Promise.all([core.catalog.close(), core.codexCatalog.close()]);
       core.stop();
       await core.idle();
       await engine.close();
@@ -87,6 +94,9 @@ export async function serve(config: Config) {
   const app = await openApp(config);
   if (app.ledger.ghosts().length === 0) app.core.createGhost({ name: "Ghost", persona: "", isDefault: true });
   await app.core.start();
+  const catalogChanged = () => app.ledger.tx(() => app.ledger.emit({ type: "settings", settings: settingsView(app.core) }));
+  app.core.catalog.start(catalogChanged);
+  app.core.codexCatalog.start(catalogChanged);
   const token = ownerToken(config.root);
   const server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills });
   const push = startPush(app.core, config);

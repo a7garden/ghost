@@ -6,6 +6,7 @@ import type { Core } from "./core.ts";
 import type { DocumentsPort } from "../integrations/ports.ts";
 import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId, sha256 } from "./ids.ts";
+import { supportsAutomaticModels } from "../integrations/provider-catalog.ts";
 
 export interface CommandContext {
   /** Origin a paired device should use, e.g. https://ghost.example.ts.net */
@@ -377,13 +378,19 @@ export function deleteGhost(core: Core, ghostId: string): void {
 }
 
 export function settingsView(core: Core) {
+  core.codexCatalog.sync();
   const settings = core.ledger.settings();
   return {
     ...settings,
     providers: settings.providers.map((provider) => {
       const credential = core.secrets.credential(provider.id);
+      const catalogIds = new Set(core.catalog.modelsFor({ ...provider, models: [] }, credential?.type).map(model => model.id));
       return {
         ...provider,
+        configuredModels: provider.models,
+        manualModelIds: provider.models.filter(model => !catalogIds.has(model.id)).map(model => model.id),
+        automaticModels: supportsAutomaticModels(provider),
+        models: core.catalog.modelsFor(provider, credential?.type),
         hasCredential: credential !== undefined,
         // api_key or oauth while a valid credential exists; the field disappears with it.
         ...(credential === undefined ? {} : { authType: credential.type }),

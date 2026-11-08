@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Models: standard providers expose refreshed models.dev catalogs automatically; ChatGPT
+  subscriptions discover account models from Codex. Cached metadata keeps offline selection
+  working, and manual model entries stay editable without saving the automatic catalog.
 - Thread cards: a settled thread folds to one quiet line (its outcome line already returns
   beneath it); a card waiting on a question shows the question with answer chips in place.
 - Composer: `/` opens the composer's actions by keyboard (Korean words match), `@` hands the

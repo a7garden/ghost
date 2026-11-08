@@ -58,13 +58,11 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
 }) {
   const [method, setMethod] = useState<'api_key' | 'oauth'>(initial ? initial.authType === 'oauth' ? 'oauth' : 'api_key' : preset?.kind === 'openai' ? 'oauth' : 'api_key');
   const [value, setValue] = useState<ProviderDraft>(() => {
-    if (initial) return { id: initial.id, kind: initial.kind, name: initial.name, baseUrl: initial.baseUrl, models: initial.models.map(model => ({ ...model })) };
+    if (initial) return { id: initial.id, kind: initial.kind, name: initial.name, baseUrl: initial.baseUrl, models: (initial.configuredModels ?? initial.models).map(model => ({ ...model })) };
     const chosen = preset!;
     let id = chosen.id;
     for (let suffix = 2; providerIds.includes(id); suffix++) id = `${chosen.id}-${suffix}`;
-    const models = method === 'oauth' ? chosen.oauthModels : chosen.models;
-    const recommended = method === 'oauth' ? chosen.recommendedOAuthModelId : chosen.recommendedModelId;
-    return { id, kind: chosen.kind, name: chosen.name, baseUrl: null, models: models.filter(model => model.id === recommended).map(model => ({ ...model })) };
+    return { id, kind: chosen.kind, name: chosen.name, baseUrl: null, models: [] };
   });
   const [apiKey, setApiKey] = useState('');
   const [removeKey, setRemoveKey] = useState(false);
@@ -76,22 +74,25 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
   const currentPreset = presets.find(item => item.kind === value.kind);
   const oauthAllowed = value.kind === 'openai' && value.baseUrl === null;
   const effectiveMethod = oauthAllowed ? method : 'api_key';
-  const catalog = value.baseUrl === null ? effectiveMethod === 'oauth' ? currentPreset?.oauthModels ?? [] : currentPreset?.models ?? [] : [];
+  const unchangedEndpoint = initial?.kind === value.kind && initial.baseUrl === value.baseUrl;
+  const automatic = unchangedEndpoint && initial.automaticModels !== undefined
+    ? initial.automaticModels
+    : value.kind !== 'openai_compatible' && (value.baseUrl === null || value.baseUrl === currentPreset?.baseUrl);
+  const manualModelIds = new Set(initial?.manualModelIds ?? []);
+  const catalog = automatic
+    ? unchangedEndpoint && initial.authType === effectiveMethod ? initial.models.filter(model => !manualModelIds.has(model.id)) : effectiveMethod === 'oauth' ? currentPreset?.oauthModels ?? [] : currentPreset?.models ?? []
+    : [];
   const patch = (next: Partial<ProviderDraft>) => setValue(current => ({ ...current, ...next }));
   const chooseMethod = (next: 'api_key' | 'oauth') => {
     setMethod(next); setError(''); setRemoveKey(false);
-    if (!initial && currentPreset) {
-      const source = next === 'oauth' ? currentPreset.oauthModels : currentPreset.models;
-      const recommended = next === 'oauth' ? currentPreset.recommendedOAuthModelId : currentPreset.recommendedModelId;
-      patch({ models: source.filter(model => model.id === recommended).map(model => ({ ...model })) });
-    }
+    if (!initial) patch({ models: [] });
   };
   const save = async () => {
     if (locked) return;
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value.id)) { setError('제공자 ID는 소문자·숫자·하이픈·밑줄을 사용해 주세요.'); return; }
     if (!initial && providerIds.includes(value.id)) { setError('이미 등록된 제공자 ID입니다. 고급 설정에서 바꿔 주세요.'); return; }
     if (!value.name.trim()) { setError('이름을 입력해 주세요.'); return; }
-    if (!value.models.length) { setError('사용할 모델을 한 개 이상 선택해 주세요.'); return; }
+    if (!automatic && !value.models.length) { setError('모델 ID를 한 개 이상 추가해 주세요.'); return; }
     if (value.kind === 'openai_compatible' && !value.baseUrl) { setError('서버 주소를 입력해 주세요.'); return; }
     const key = apiKey.trim();
     if (effectiveMethod === 'api_key' && !removeKey && !key && (!initial || initial.authType === 'oauth' || initial.kind !== value.kind)) { setError('API 키를 입력해 주세요.'); return; }
@@ -118,8 +119,8 @@ function ProviderForm({ initial, preset, presets, providerIds, busy, onClose, on
           </div>}
         </FormField>}
       {value.kind === 'openai_compatible' && <FormField label="서버 주소">{control => <Input {...control} type="url" value={value.baseUrl ?? ''} placeholder="https://api.example.com/v1" required disabled={locked} onChange={event => patch({ baseUrl: event.target.value.trim() || null })}/>}</FormField>}
-      <ProviderModels catalog={catalog} selected={value.models} disabled={locked} onChange={models => patch({ models })}/>
-      {catalog.length > 0 && <p className="m-0 text-caption text-ink-3">기본 모델 목록입니다. 사용 가능 여부는 계정의 권한을 따릅니다.</p>}
+      <ProviderModels catalog={catalog} selected={value.models} automatic={automatic} disabled={locked} onChange={models => patch({ models })}/>
+      {automatic && <p className="m-0 text-caption text-ink-3">모델 목록은 자동으로 갱신됩니다. 사용 가능 여부는 계정의 권한을 따릅니다.</p>}
       <details className="border-t border-dashed border-line-strong pt-3">
         <summary className="cursor-pointer text-caption font-medium text-ink-2">고급 설정</summary>
         <div className="mt-4 flex flex-col gap-4">
