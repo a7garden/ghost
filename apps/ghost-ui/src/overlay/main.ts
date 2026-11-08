@@ -1,13 +1,14 @@
 /**
- * Ghost chat overlay. Lives in the desktop app's second webview: a small
- * always-available composer into the default Ghost's direct conversation.
+ * Ghost's pet-linked conversation. A warm desktop webview into the selected
+ * Ghost's existing direct conversation.
  */
 import { HostClient } from '../host/client';
-import type { Message, State } from '@ghost/contract';
+import type { Live, Message, State } from '@ghost/contract';
 import { pickConversation, pickGhost, type Target } from './target';
 import '../ui/styles.css';
 import './overlay.css';
 import { installWindowDrag } from '../host/windowDrag';
+import { describeWake } from '../components/wake';
 
 // The overlay follows the system theme independently of the main window.
 const systemDark = matchMedia('(prefers-color-scheme: dark)');
@@ -15,32 +16,32 @@ const applyTheme = () => document.documentElement.classList.toggle('dark', syste
 applyTheme();
 systemDark.addEventListener('change', applyTheme);
 
-// Known static overlay markup; getElementById is untyped.
 const inputEl = document.getElementById('input') as HTMLTextAreaElement;
 const sendEl = document.getElementById('send') as HTMLButtonElement;
 const logEl = document.getElementById('log') as HTMLOListElement;
 const composerEl = document.getElementById('composer') as HTMLFormElement;
 const titleEl = document.getElementById('title') as HTMLHeadingElement;
 const dotEl = document.getElementById('dot') as HTMLSpanElement;
+const activityEl = document.getElementById('activity') as HTMLSpanElement;
 const statusEl = document.getElementById('status') as HTMLOutputElement;
 
-// Tauri 2 injects this IPC bridge into every webview; the overlay only calls
-// the window hide and title bar drag commands that the capability grants.
-interface TauriInternals {
-  invoke(command: string): Promise<void>;
-}
-const tauri = (window as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
+const tauri = window.__TAURI_INTERNALS__;
 if (tauri) installWindowDrag(command => tauri.invoke(command));
 
-let client: HostClient | null = null;
+const client = new HostClient();
 let state: State | null = null;
 let ghostId = '';
 let conversationId = '';
 let messages: Message[] = [];
+let live: Live | null = null;
 let busy = false;
 let sending = false;
+let refreshing = false;
+let refreshAgain = false;
 let renderedSignature = '';
-
+let connectionError = '';
+let sendError = '';
+let followLatest = true;
 const targetKey = 'ghost-overlay:target';
 
 function loadTarget(): Target {
@@ -50,161 +51,172 @@ function loadTarget(): Target {
     const ghostId = 'ghostId' in raw && typeof raw.ghostId === 'string' ? raw.ghostId : undefined;
     const conversationId = 'conversationId' in raw && typeof raw.conversationId === 'string' ? raw.conversationId : undefined;
     return { ghostId, conversationId };
-  } catch {
-    return {};
-  }
+  } catch { return {}; }
 }
 
-function saveTarget(target: Target) {
-  try { localStorage.setItem(targetKey, JSON.stringify(target)); } catch { /* The default target still works. */ }
-}
-
-async function initialize(): Promise<void> {
-  client = new HostClient();
-  await refresh();
-  setDot('idle');
-}
-
-/** One read pass: state snapshot, then the target conversation's transcript. */
-async function refresh(): Promise<void> {
-  if (!client) return;
-  const next = await client.state();
-  state = next;
-  const target = loadTarget();
-  const ghost = pickGhost(next, target.ghostId);
-  if (!ghost) {
-    status('등록된 Ghost가 없습니다.');
-    return;
-  }
-  const stored = pickConversation(next, ghost, target.conversationId);
-  if (ghost.id !== ghostId || stored !== conversationId) {
-    ghostId = ghost.id;
-    conversationId = stored;
-    messages = [];
-    saveTarget({ ghostId, conversationId });
-  }
-  const page = await client.conversation(conversationId);
-  messages = page.messages;
-  busy = page.conversation.busy;
-  const runtime = next.runtime.ready ? '' : `대화를 실행할 수 없습니다. ${next.runtime.detail}`;
-  if (!sending) status(runtime);
-  render();
-}
-
-function status(text: string) {
-  statusEl.textContent = text;
-}
-
-function setDot(kind: 'idle' | 'busy' | 'error') {
-  dotEl.className = kind;
-}
-
-// Element-content interpolation only: textContent round-trip does not escape
-// quotes, so never reuse this for an attribute value.
 function escapeHtml(text: string) {
   const node = document.createElement('div');
   node.textContent = text;
   return node.innerHTML;
 }
 
+function updateControls() {
+  const target = loadTarget();
+  const current = (!target.ghostId || target.ghostId === ghostId) &&
+    (!target.conversationId || target.conversationId === conversationId);
+  inputEl.disabled = sending || !conversationId || !current;
+  sendEl.disabled = inputEl.disabled || !inputEl.value.trim() || !state?.runtime.ready || Boolean(connectionError);
+  const error = sendError || connectionError || (state?.runtime.ready === false ? `대화를 실행할 수 없습니다. ${state.runtime.detail}` : '');
+  statusEl.textContent = error;
+  dotEl.className = error ? 'error' : busy || sending ? 'busy' : 'idle';
+  activityEl.textContent = sending ? '보내는 중' : busy ? '응답 중' : '';
+}
+
 function render() {
   if (!state || !conversationId) return;
   const rows: string[] = [];
   for (const message of messages) {
-    if (message.role === 'user' && message.text.trim()) rows.push(`<li class="row user"><div>${escapeHtml(message.text)}</div></li>`);
-    else if (message.role === 'assistant' && message.text.trim()) rows.push(`<li class="row ghost"><div>${escapeHtml(message.text)}</div></li>`);
+    if (message.role === 'user' && message.text.trim()) {
+      if (message.origin && message.origin !== 'owner') {
+        const wake = describeWake(message.origin, message.text);
+        rows.push(`<li class="row event">${escapeHtml(wake.label)} · ${escapeHtml(wake.line)}</li>`);
+      } else rows.push(`<li class="row user"><div>${escapeHtml(message.text)}</div></li>`);
+    } else if (message.role === 'assistant' && message.text.trim()) {
+      rows.push(`<li class="row ghost"><div>${escapeHtml(message.text)}</div></li>`);
+    }
   }
-  if (busy) rows.push('<li class="row ghost working"><div>응답 작성 중…</div></li>');
-  const body = rows.length ? rows.join('') : '<li class="empty">주 Ghost와의 대화가 여기에 표시됩니다.</li>';
-  const signature = busy ? `working:${body}` : body;
-  if (signature !== renderedSignature) {
-    renderedSignature = signature;
-    const stick = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+  if (busy) rows.push(live?.partial
+    ? `<li class="row ghost"><div>${escapeHtml(live.partial)}</div></li>`
+    : '<li class="row ghost working">생각하고 있어요<span aria-hidden="true">…</span></li>');
+  const body = rows.length ? rows.join('') : '<li class="empty">무엇을 도와드릴까요?</li>';
+  if (body !== renderedSignature) {
+    renderedSignature = body;
     logEl.innerHTML = body;
-    if (stick) logEl.scrollTop = logEl.scrollHeight;
+    if (followLatest) logEl.scrollTop = logEl.scrollHeight;
   }
-  setDot(busy ? 'busy' : 'idle');
-  sendEl.disabled = sending || !conversationId;
   const ghost = pickGhost(state, ghostId);
-  titleEl.textContent = ghost && !ghost.isDefault ? `Ghost · ${ghost.name}` : 'Ghost';
+  titleEl.textContent = ghost?.name ?? 'Ghost';
+  inputEl.placeholder = `${ghost?.name ?? 'Ghost'}에게 메시지`;
+  updateControls();
 }
 
-async function send(text: string) {
-  if (!client || !conversationId || sending || !text.trim()) return;
-  sending = true;
-  setDot('busy');
-  status('보내는 중…');
+/** Serialize snapshot reads; a target change supersedes the old response before paint. */
+async function refresh(): Promise<void> {
+  if (refreshing) { refreshAgain = true; return; }
+  refreshing = true;
+  const target = loadTarget();
   try {
-    await client.send({ type: 'message.send', conversationId, text });
-    status('');
-    inputEl.value = '';
-    autoresize();
+    const next = await client.state();
+    const ghost = pickGhost(next, target.ghostId);
+    if (!ghost) throw new Error('등록된 Ghost가 없습니다.');
+    const stored = pickConversation(next, ghost, target.conversationId);
+    const page = await client.conversation(stored);
+    const latest = loadTarget();
+    if (latest.ghostId !== target.ghostId || latest.conversationId !== target.conversationId) {
+      refreshAgain = true;
+      return;
+    }
+    if (target.ghostId !== ghost.id || target.conversationId !== stored) {
+      localStorage.setItem(targetKey, JSON.stringify({ ghostId: ghost.id, conversationId: stored }));
+    }
+    if (ghost.id !== ghostId || stored !== conversationId) {
+      inputEl.value = '';
+      sendError = '';
+      followLatest = true;
+      renderedSignature = '';
+      autoresize();
+    }
+    ghostId = ghost.id;
+    conversationId = stored;
+    state = next;
+    messages = page.messages;
+    live = page.live;
+    busy = page.conversation.busy;
+    connectionError = '';
+    render();
   } catch (error) {
-    // The draft stays so the prompt is never silently dropped.
-    setDot('error');
-    status(error instanceof Error ? error.message : '보내지 못했습니다.');
-    inputEl.value = text;
-    autoresize();
+    connectionError = error instanceof Error ? error.message : '호스트에 연결하지 못했습니다.';
+  } finally {
+    refreshing = false;
+    updateControls();
+    if (refreshAgain) { refreshAgain = false; void refresh(); }
+  }
+}
+
+async function send() {
+  updateControls();
+  const text = inputEl.value;
+  if (sendEl.disabled || !text.trim()) return;
+  const destination = conversationId;
+  sending = true;
+  sendError = '';
+  updateControls();
+  try {
+    await client.send({ type: 'message.send', conversationId: destination, text });
+    if (destination === conversationId) {
+      inputEl.value = '';
+      followLatest = true;
+      autoresize();
+    }
+    await refresh();
+  } catch (error) {
+    if (destination === conversationId) sendError = error instanceof Error ? error.message : '보내지 못했습니다.';
   } finally {
     sending = false;
-    render();
+    updateControls();
+    if (!inputEl.disabled) inputEl.focus();
   }
 }
 
 function autoresize() {
   inputEl.style.height = 'auto';
-  inputEl.style.height = `${Math.min(inputEl.scrollHeight, 132)}px`;
+  inputEl.style.height = `${Math.min(inputEl.scrollHeight, 100, innerHeight * .25)}px`;
 }
 
-async function poll() {
-  if (document.hidden) return;
-  try {
-    if (!client) {
-      // The first connect failed; retry the whole sequence instead of
-      // staying dead until the desktop app restarts.
-      await initialize();
-      return;
-    }
-    await refresh();
-    if (!sending) status(state?.runtime.ready === false ? `대화를 실행할 수 없습니다. ${state.runtime.detail}` : '');
-  } catch (error) {
-    setDot('error');
-    status(error instanceof Error ? error.message : '연결을 확인해 주세요.');
+function onTargetChange() {
+  const target = loadTarget();
+  if ((target.ghostId && target.ghostId !== ghostId) || (target.conversationId && target.conversationId !== conversationId)) {
+    conversationId = '';
+    inputEl.value = '';
+    renderedSignature = '';
+    logEl.replaceChildren();
+    titleEl.textContent = state?.ghosts.find(ghost => ghost.id === target.ghostId)?.name ?? 'Ghost';
+    autoresize();
   }
+  updateControls();
+  void refresh().then(() => { if (!inputEl.disabled) inputEl.focus(); });
 }
 
-async function start() {
-  try {
-    await initialize();
-  } catch (error) {
-    setDot('error');
-    status(error instanceof Error ? error.message : 'Ghost 호스트에 연결하지 못했습니다.');
-  }
-  // Self-scheduling: a slow round-trip must never overlap the next poll.
-  const tick = () => {
-    void poll().finally(() => setTimeout(tick, 1500));
-  };
-  setTimeout(tick, 1500);
-}
-
-composerEl.addEventListener('submit', event => {
-  event.preventDefault();
-  const text = inputEl.value;
-  inputEl.value = '';
-  autoresize();
-  void send(text);
-});
-
-inputEl.addEventListener('input', autoresize);
+composerEl.addEventListener('submit', event => { event.preventDefault(); void send(); });
+inputEl.addEventListener('input', () => { sendError = ''; autoresize(); updateControls(); });
 inputEl.addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     composerEl.requestSubmit();
   }
 });
-window.addEventListener('keydown', event => {
-  if (event.key === 'Escape') void tauri?.invoke('plugin:window|hide');
+logEl.addEventListener('scroll', () => {
+  followLatest = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+}, { passive: true });
+const hide = () => {
+  void tauri?.invoke('plugin:window|hide').catch(error => {
+    connectionError = String(error); updateControls();
+  });
+};
+document.getElementById('close')!.addEventListener('click', hide);
+document.getElementById('open-main')!.addEventListener('click', () => {
+  void tauri?.invoke('focus_main').catch(error => {
+    connectionError = String(error); updateControls();
+  });
 });
-window.addEventListener('focus', () => inputEl.focus());
+window.addEventListener('keydown', event => { if (event.key === 'Escape') hide(); });
+window.addEventListener('focus', onTargetChange);
+window.addEventListener('storage', event => { if (event.key === targetKey) onTargetChange(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) onTargetChange(); });
+window.addEventListener('resize', autoresize);
 
-void start();
+void refresh();
+const tick = () => {
+  void (document.hidden ? Promise.resolve() : refresh()).finally(() => setTimeout(tick, 1000));
+};
+setTimeout(tick, 1000);

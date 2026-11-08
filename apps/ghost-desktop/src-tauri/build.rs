@@ -8,6 +8,7 @@ fn main() {
             "companion_enabled",
             "companion_reset_position",
             "companion_resize",
+            "companion_anchor",
             "toggle_overlay",
             "focus_main",
             "companion_menu",

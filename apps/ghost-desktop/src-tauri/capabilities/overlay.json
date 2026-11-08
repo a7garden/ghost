@@ -1,6 +1,6 @@
 {
   "identifier": "overlay-window",
-  "description": "Window dragging, native hide, and HTTP(S) browser opening for the Ghost overlay. No filesystem, shell, or process commands are exposed to the renderer.",
+  "description": "Window dragging, native hide, main-window focus, and HTTP(S) browser opening for the Ghost overlay. No filesystem, shell, or process commands are exposed to the renderer.",
   "windows": [
     "overlay"
   ],
@@ -13,6 +13,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-hide",
     "allow-drag-window",
-    "allow-open-external-url"
+    "allow-open-external-url",
+    "allow-focus-main"
   ]
 }

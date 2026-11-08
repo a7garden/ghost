@@ -8,6 +8,7 @@
     "allow-companion-enabled",
     "allow-companion-set",
     "allow-companion-resize",
+    "allow-companion-anchor",
     "allow-toggle-overlay",
     "allow-focus-main",
     "allow-companion-menu"

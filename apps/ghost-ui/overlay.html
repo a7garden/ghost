@@ -1,28 +1,32 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" class="overlay-page">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>Ghost</title>
-    <link rel="stylesheet" href="/src/overlay/overlay.css" />
   </head>
   <body>
     <main id="overlay">
       <header data-tauri-drag-region>
         <span id="dot" aria-hidden="true"></span>
         <h1 data-tauri-drag-region id="title">Ghost</h1>
-        <output id="status" role="status"></output>
+        <span id="activity" role="status"></span>
+        <button id="open-main" class="quiet-action" type="button" aria-label="Ghost 창 열기" title="Ghost 창 열기">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 4h5v5M16 4l-7 7M7 4H4v12h12v-3"/></svg>
+        </button>
+        <button id="close" class="quiet-action" type="button" aria-label="대화 닫기" title="닫기 · Esc">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8M14 6l-8 8"/></svg>
+        </button>
       </header>
-      <ol id="log" aria-live="polite"></ol>
+      <ol id="log" aria-label="대화" aria-live="polite"></ol>
+      <output id="status" role="status"></output>
       <form id="composer">
-        <textarea
-          id="input"
-          rows="1"
-          placeholder="주 Ghost에게 명령 — Enter 전송 · Esc 닫기"
-          autocomplete="off"
-        ></textarea>
-        <button id="send" type="submit" aria-label="보내기" disabled>➤</button>
+        <textarea id="input" rows="1" aria-label="메시지" placeholder="메시지 보내기"
+          autocomplete="off" disabled></textarea>
+        <button id="send" type="submit" aria-label="보내기" title="보내기 · Enter" disabled>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15V5m-5 5 5-5 5 5"/></svg>
+        </button>
       </form>
     </main>
     <script type="module" src="/src/overlay/main.ts"></script>

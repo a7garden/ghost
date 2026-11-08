@@ -69,10 +69,19 @@ struct Endpoint {
     pid: u32,
 }
 
-/// Overlay geometry: a small composer over the current work, bottom-center of
-/// the monitor the main window sits on.
-const OVERLAY_SIZE: (f64, f64) = (560.0, 420.0);
+/// Overlay geometry: a 400x440 logical sheet (its CSS inset padding and
+/// bottom tail included) attached to the desktop pet, or — with no visible
+/// pet — bottom-center of the monitor the main window sits on.
+const OVERLAY_SIZE: (f64, f64) = (400.0, 440.0);
+/// Gap under the detached bottom-center sheet.
 const OVERLAY_BOTTOM_GAP: f64 = 24.0;
+/// Gap between the sheet's edge and the pet's rect, logical px.
+const OVERLAY_PET_GAP: f64 = 4.0;
+/// Shortest pet-attached sheet worth showing, logical px: between this and
+/// the full height the sheet shortens to the headroom, under this it flips
+/// to the pet's other side instead of squishing.
+const OVERLAY_MIN_HEIGHT: f64 = 240.0;
+
 /// Parked off-screen while hidden so the webview stays warm and the shortcut
 /// surfaces it in a single frame.
 const OVERLAY_PARK: (f64, f64) = (-32000.0, -32000.0);
@@ -91,37 +100,224 @@ fn overlay_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
     app.get_webview_window("overlay")
 }
 
-fn position_overlay(overlay: &tauri::WebviewWindow) {
-    let main = overlay.app_handle().get_webview_window("main");
-    let monitor = main
-        .as_ref()
-        .and_then(|window| window.current_monitor().ok().flatten())
+/// A rectangle in physical pixels: top-left corner and extent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PxRect {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+/// Which side of the pet the sheet's tail points from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OverlaySide {
+    /// Sheet above the pet, tail on its bottom edge.
+    Above,
+    /// Sheet below the pet, tail on its top edge.
+    Below,
+    /// No pet to attach to: centered sheet without a tail.
+    Detached,
+}
+
+impl OverlaySide {
+    /// The value the overlay page reads from its `data-side` attribute.
+    fn css_value(self) -> &'static str {
+        match self {
+            Self::Above => "above",
+            Self::Below => "below",
+            Self::Detached => "none",
+        }
+    }
+}
+
+/// One deterministic placement: physical position and size, plus the tail
+/// anchor in logical CSS pixels (pet center minus overlay left edge).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct OverlayPlacement {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    side: OverlaySide,
+    anchor_x: f64,
+}
+
+/// Logical to physical pixels on one monitor's scale.
+fn logical_px(value: f64, scale: f64) -> i32 {
+    (value * scale).round() as i32
+}
+
+/// Attach the overlay to one pet inside one work area, both in physical
+/// pixels. Preference: full height above the pet; shortened above once at
+/// least `min_height` logical px fit; below only when above is physically
+/// impossible; `None` when even a minimum sheet would leave the work area,
+/// because a half-visible sheet is worse than surfacing nothing. The sheet
+/// always ends up fully inside the work area.
+fn place_overlay_near_pet(
+    pet: PxRect,
+    pet_center_x: i64,
+    work_area: PxRect,
+    scale: f64,
+    gap_logical: f64,
+    desired: (f64, f64),
+    min_height_logical: f64,
+) -> Option<OverlayPlacement> {
+    if !scale.is_finite() || scale <= 0.0 || work_area.width <= 0 || work_area.height <= 0 {
+        return None;
+    }
+    let width = logical_px(desired.0, scale).min(work_area.width);
+    let full_height = logical_px(desired.1, scale).min(work_area.height);
+    let min_height = logical_px(min_height_logical, scale).max(1);
+    let gap = logical_px(gap_logical, scale);
+    let area_bottom = i64::from(work_area.y) + i64::from(work_area.height);
+    let pet_bottom = i64::from(pet.y) + i64::from(pet.height);
+    let headroom = i64::from(pet.y) - i64::from(gap) - i64::from(work_area.y);
+    let (side, height, y) = if headroom >= i64::from(full_height) {
+        let y = i64::from(pet.y) - i64::from(gap) - i64::from(full_height);
+        (OverlaySide::Above, i64::from(full_height), y)
+    } else if headroom >= i64::from(min_height) {
+        // Shorten the sheet to the headroom: top pinned to the work area,
+        // bottom still `gap` above the pet.
+        (OverlaySide::Above, headroom, i64::from(work_area.y))
+    } else {
+        let below_room = area_bottom - i64::from(gap) - pet_bottom;
+        if below_room < i64::from(min_height) {
+            return None;
+        }
+        let height = below_room.min(i64::from(full_height));
+        (OverlaySide::Below, height, pet_bottom + i64::from(gap))
+    };
+    // Center on the pet, then keep the sheet inside the same work area.
+    let x = companion::clamp_axis(
+        pet_center_x - i64::from(width) / 2,
+        work_area.x,
+        work_area.width.max(0) as u32,
+        width.max(0) as u32,
+    );
+    Some(OverlayPlacement {
+        x,
+        y: companion::clamp_axis(y, work_area.y, work_area.height as u32, height as u32),
+        width,
+        height: height as i32,
+        side,
+        anchor_x: (pet_center_x - i64::from(x)) as f64 / scale,
+    })
+}
+
+/// Where the overlay belongs right now. A visible companion pins the sheet
+/// to the pet's painted bounds, work area, and scale — the parked overlay's or the
+/// main window's monitor would misplace it on mixed-DPI setups. Without a
+/// readable pet the shortcut keeps its old bottom-center surface over the
+/// monitor the main window sits on. `None` means no trustworthy monitor:
+/// stay parked rather than surface off-screen.
+fn overlay_placement(
+    app: &tauri::AppHandle,
+    overlay: &WebviewWindow,
+) -> Option<(OverlayPlacement, f64)> {
+    let pet = app
+        .get_webview_window("companion")
+        .filter(|pet| pet.is_visible().unwrap_or(false));
+    if let Some(pet) = pet {
+        if let (Ok(origin), Ok(size), Some(monitor)) = (
+            pet.outer_position(),
+            pet.inner_size(),
+            pet.current_monitor().ok().flatten(),
+        ) {
+            let area = monitor.work_area();
+            let (bounds, center_x) = app.state::<companion::CompanionState>().visible_geometry(
+                PxRect {
+                    x: origin.x,
+                    y: origin.y,
+                    width: size.width as i32,
+                    height: size.height as i32,
+                },
+                monitor.scale_factor(),
+            );
+            return place_overlay_near_pet(
+                bounds,
+                center_x,
+                PxRect {
+                    x: area.position.x,
+                    y: area.position.y,
+                    width: area.size.width as i32,
+                    height: area.size.height as i32,
+                },
+                monitor.scale_factor(),
+                OVERLAY_PET_GAP,
+                OVERLAY_SIZE,
+                OVERLAY_MIN_HEIGHT,
+            )
+            .map(|placement| (placement, monitor.scale_factor()));
+        }
+    }
+    let monitor = app
+        .get_webview_window("main")
+        .and_then(|main| main.current_monitor().ok().flatten())
         .or_else(|| overlay.current_monitor().ok().flatten())
         // Display-transition edge: without any current monitor the overlay
         // would otherwise surface at its off-screen park position, invisible
         // yet consuming the toggle.
-        .or_else(|| overlay.primary_monitor().ok().flatten());
-    let Some(monitor) = monitor else {
-        // Practically unreachable with the primary fallback; leave placement
-        // untouched rather than guessing.
-        return;
-    };
-    let (width, height) = OVERLAY_SIZE;
-    let scale = monitor.scale_factor();
-    let origin = monitor.position();
-    let size = monitor.size();
+        .or_else(|| overlay.primary_monitor().ok().flatten())?;
     // Physical pixels throughout: converting through the parked window's
     // monitor scale would misplace the overlay on mixed-DPI setups.
-    let width_px = (width * scale).round() as i32;
-    let height_px = (height * scale).round() as i32;
-    let gap_px = (OVERLAY_BOTTOM_GAP * scale).round() as i32;
-    let x = origin.x + (size.width as i32 - width_px) / 2;
-    let y = origin.y + size.height as i32 - height_px - gap_px;
-    let _ = overlay.set_position(tauri::PhysicalPosition::new(x, y));
+    let scale = monitor.scale_factor();
+    let width = logical_px(OVERLAY_SIZE.0, scale);
+    let height = logical_px(OVERLAY_SIZE.1, scale);
+    let gap = logical_px(OVERLAY_BOTTOM_GAP, scale);
+    let origin = monitor.position();
+    let size = monitor.size();
+    Some((
+        OverlayPlacement {
+            x: origin.x + (size.width as i32 - width) / 2,
+            y: origin.y + size.height as i32 - height - gap,
+            width,
+            height,
+            side: OverlaySide::Detached,
+            anchor_x: OVERLAY_SIZE.0 / 2.0,
+        },
+        scale,
+    ))
 }
 
-/// Surface the parked overlay over the current work; a visible overlay toggles
-/// away instead. Mirrors the oximemo capture overlay's warm-window toggle.
+/// Apply geometry using its target display's scale, never the parked window's.
+fn apply_placement(
+    overlay: &WebviewWindow,
+    placement: &OverlayPlacement,
+    scale: f64,
+) -> Result<(), tauri::Error> {
+    #[cfg(target_os = "macos")]
+    {
+        // Tao queues both native mutations asynchronously. Logical arguments
+        // bypass its conversion through the overlay's stale previous scale.
+        overlay.set_size(tauri::LogicalSize::new(
+            f64::from(placement.width) / scale,
+            f64::from(placement.height) / scale,
+        ))?;
+        overlay.set_position(tauri::LogicalPosition::new(
+            f64::from(placement.x) / scale,
+            f64::from(placement.y) / scale,
+        ))?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = scale;
+        overlay.set_size(tauri::PhysicalSize::new(
+            placement.width as u32,
+            placement.height as u32,
+        ))?;
+        overlay.set_position(tauri::PhysicalPosition::new(placement.x, placement.y))?;
+    }
+    overlay.eval(format!(
+        "document.documentElement.style.setProperty('--anchor-x', '{:.1}px');document.documentElement.setAttribute('data-side', '{}');",
+        placement.anchor_x,
+        placement.side.css_value(),
+    ))
+}
+
+/// Surface the overlay above the visible pet when there is one, else over
+/// the current work; a visible overlay toggles away instead. Mirrors the
+/// oximemo capture overlay's warm-window toggle.
 fn toggle_overlay(app: &tauri::AppHandle) {
     let Some(overlay) = overlay_window(app) else {
         return;
@@ -133,11 +329,19 @@ fn toggle_overlay(app: &tauri::AppHandle) {
         Ok(true) => {
             let _ = overlay.hide();
         }
-        Ok(false) => {
-            position_overlay(&overlay);
-            let _ = overlay.show();
-            let _ = overlay.set_focus();
-        }
+        Ok(false) => match overlay_placement(app, &overlay) {
+            Some((placement, scale)) => {
+                if let Err(error) = apply_placement(&overlay, &placement, scale)
+                    .and_then(|()| overlay.show())
+                    .and_then(|()| overlay.set_focus())
+                {
+                    eprintln!("[ghost] 오버레이를 열지 못했습니다: {error}");
+                }
+            }
+            // Nothing sane to compute: showing the parked overlay would put
+            // it off-screen, invisible yet consuming the toggle.
+            None => eprintln!("[ghost] 오버레이를 표시할 위치를 계산하지 못했습니다."),
+        },
         Err(_) => {}
     }
 }
@@ -360,13 +564,33 @@ fn create_overlay(app: &tauri::AppHandle, origin: &OriginCell) -> Result<Webview
     .inner_size(OVERLAY_SIZE.0, OVERLAY_SIZE.1)
     .position(OVERLAY_PARK.0, OVERLAY_PARK.1)
     .decorations(false)
+    // The rounded sheet and tail are drawn in CSS over a transparent,
+    // unshadowed, fixed-size window; placement reasserts the exact physical
+    // size on every show.
+    .transparent(true)
+    .shadow(false)
+    .resizable(false)
     .always_on_top(true)
+    .visible_on_all_workspaces(true)
     .skip_taskbar(true)
     .focused(false)
     .visible(false)
     .on_navigation(move |url| navigation_allowed(&overlay_origin, url))
     .build()
     .map_err(|error| format!("오버레이를 만들지 못했습니다: {error}"))?;
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+        let pointer = overlay.ns_window().map_err(|error| error.to_string())?;
+        // SAFETY: setup runs on the main thread; Tauri owns this live NSWindow.
+        let native = unsafe { &*pointer.cast::<NSWindow>() };
+        native.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::Stationary,
+        );
+        native.setHidesOnDeactivate(false);
+    }
     let _ = overlay.hide();
     // Click-outside and app-switch dismissal: hide only after the overlay
     // actually held focus, so show→focus can't self-dismiss.
@@ -709,6 +933,7 @@ fn main() {
         companion::companion_enabled,
         companion::companion_reset_position,
         companion::companion_resize,
+        companion::companion_anchor,
         companion::toggle_overlay,
         companion::focus_main,
         companion::companion_menu,
@@ -721,6 +946,7 @@ fn main() {
         companion::companion_enabled,
         companion::companion_reset_position,
         companion::companion_resize,
+        companion::companion_anchor,
         companion::toggle_overlay,
         companion::focus_main,
         companion::companion_menu,
@@ -902,6 +1128,293 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod overlay_placement_tests {
+    use super::{
+        place_overlay_near_pet, OverlayPlacement, OverlaySide, PxRect, OVERLAY_MIN_HEIGHT,
+        OVERLAY_PET_GAP, OVERLAY_SIZE,
+    };
+
+    /// The production gap, size, and minimum; only the scale varies per test.
+    fn place(pet: PxRect, area: PxRect, scale: f64) -> Option<OverlayPlacement> {
+        place_overlay_near_pet(
+            pet,
+            i64::from(pet.x) + i64::from(pet.width) / 2,
+            area,
+            scale,
+            OVERLAY_PET_GAP,
+            OVERLAY_SIZE,
+            OVERLAY_MIN_HEIGHT,
+        )
+    }
+
+    #[test]
+    fn attaches_above_at_full_height_centered_on_the_pet() {
+        let pet = PxRect {
+            x: 890,
+            y: 700,
+            width: 140,
+            height: 170,
+        };
+        let area = PxRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1056,
+        };
+        assert_eq!(
+            place(pet, area, 1.0),
+            Some(OverlayPlacement {
+                x: 760,
+                y: 256,
+                width: 400,
+                height: 440,
+                side: OverlaySide::Above,
+                anchor_x: 200.0,
+            })
+        );
+    }
+
+    #[test]
+    fn shortens_above_when_the_headroom_is_partial() {
+        let pet = PxRect {
+            x: 100,
+            y: 300,
+            width: 140,
+            height: 170,
+        };
+        let area = PxRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1056,
+        };
+        // 296 logical px of headroom: between the 240 minimum and the 440
+        // full height, so the sheet pins to the work-area top and keeps its
+        // bottom 4 px above the pet.
+        assert_eq!(
+            place(pet, area, 1.0),
+            Some(OverlayPlacement {
+                x: 0,
+                y: 0,
+                width: 400,
+                height: 296,
+                side: OverlaySide::Above,
+                anchor_x: 170.0,
+            })
+        );
+    }
+
+    #[test]
+    fn flips_below_when_the_headroom_is_insufficient() {
+        let area = PxRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1056,
+        };
+        // 196 logical px of headroom is under the minimum: hang below instead.
+        let near_top = PxRect {
+            x: 100,
+            y: 200,
+            width: 140,
+            height: 170,
+        };
+        assert_eq!(
+            place(near_top, area, 1.0),
+            Some(OverlayPlacement {
+                x: 0,
+                y: 374,
+                width: 400,
+                height: 440,
+                side: OverlaySide::Below,
+                anchor_x: 170.0,
+            })
+        );
+        // Below never exceeds the full height either: the pet leaves 252 px
+        // under it, so the sheet shortens to that.
+        let tall = PxRect {
+            x: 100,
+            y: 240,
+            width: 140,
+            height: 560,
+        };
+        assert_eq!(
+            place(tall, area, 1.0),
+            Some(OverlayPlacement {
+                x: 0,
+                y: 804,
+                width: 400,
+                height: 252,
+                side: OverlaySide::Below,
+                anchor_x: 170.0,
+            })
+        );
+    }
+
+    #[test]
+    fn fails_safely_when_neither_side_leaves_room() {
+        let area = PxRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1056,
+        };
+        let covering = PxRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1056,
+        };
+        assert_eq!(place(covering, area, 1.0), None);
+    }
+
+    #[test]
+    fn clamps_to_the_work_area_edges() {
+        let area = PxRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1056,
+        };
+        let near_right = PxRect {
+            x: 1780,
+            y: 700,
+            width: 140,
+            height: 170,
+        };
+        assert_eq!(
+            place(near_right, area, 1.0),
+            Some(OverlayPlacement {
+                x: 1520,
+                y: 256,
+                width: 400,
+                height: 440,
+                side: OverlaySide::Above,
+                anchor_x: 330.0,
+            })
+        );
+        let near_left = PxRect {
+            x: 2,
+            y: 700,
+            width: 140,
+            height: 170,
+        };
+        assert_eq!(
+            place(near_left, area, 1.0),
+            Some(OverlayPlacement {
+                x: 0,
+                y: 256,
+                width: 400,
+                height: 440,
+                side: OverlaySide::Above,
+                anchor_x: 72.0,
+            })
+        );
+    }
+
+    #[test]
+    fn negative_monitor_coordinates_stay_inside_their_work_area() {
+        let area = PxRect {
+            x: -1920,
+            y: 24,
+            width: 1920,
+            height: 1056,
+        };
+        let pet = PxRect {
+            x: -1850,
+            y: 700,
+            width: 140,
+            height: 170,
+        };
+        assert_eq!(
+            place(pet, area, 1.0),
+            Some(OverlayPlacement {
+                x: -1920,
+                y: 256,
+                width: 400,
+                height: 440,
+                side: OverlaySide::Above,
+                anchor_x: 140.0,
+            })
+        );
+    }
+
+    #[test]
+    fn mixed_dpi_converts_the_logical_sheet_through_the_target_monitor_scale() {
+        let area = PxRect {
+            x: 0,
+            y: 0,
+            width: 3840,
+            height: 2112,
+        };
+        let pet = PxRect {
+            x: 1780,
+            y: 1400,
+            width: 280,
+            height: 340,
+        };
+        // 2x: 400x440 logical becomes 800x880 physical, the 4 px gap becomes 8.
+        assert_eq!(
+            place(pet, area, 2.0),
+            Some(OverlayPlacement {
+                x: 1520,
+                y: 512,
+                width: 800,
+                height: 880,
+                side: OverlaySide::Above,
+                anchor_x: 200.0,
+            })
+        );
+        let retina_area = PxRect {
+            x: 0,
+            y: 0,
+            width: 2880,
+            height: 1584,
+        };
+        let retina_pet = PxRect {
+            x: 0,
+            y: 600,
+            width: 210,
+            height: 255,
+        };
+        // 1.5x: 594 physical px of headroom shorten the sheet; the anchor
+        // stays logical (105 physical px / 1.5 = 70).
+        assert_eq!(
+            place(retina_pet, retina_area, 1.5),
+            Some(OverlayPlacement {
+                x: 0,
+                y: 0,
+                width: 600,
+                height: 594,
+                side: OverlaySide::Above,
+                anchor_x: 70.0,
+            })
+        );
+    }
+
+    #[test]
+    fn narrow_work_area_and_partly_offscreen_pet_keep_the_sheet_reachable() {
+        let area = PxRect {
+            x: 0,
+            y: 30,
+            width: 320,
+            height: 600,
+        };
+        let pet = PxRect {
+            x: 260,
+            y: 680,
+            width: 140,
+            height: 170,
+        };
+        let result = place(pet, area, 1.0).unwrap();
+        assert_eq!(
+            (result.x, result.y, result.width, result.height),
+            (0, 190, 320, 440)
+        );
+    }
 }
 
 #[cfg(all(test, target_os = "macos"))]

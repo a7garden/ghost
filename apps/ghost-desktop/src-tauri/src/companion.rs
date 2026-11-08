@@ -17,12 +17,110 @@ struct Config {
     position: Option<Position>,
 }
 
+/// CSS-pixel paint bounds, never persisted with the companion's preferences.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VisibleAnchor {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    center_x: f64,
+    window_width: f64,
+    window_height: f64,
+}
+
+impl VisibleAnchor {
+    fn validate(&self, size: (f64, f64)) -> Result<(), String> {
+        if [
+            self.x,
+            self.y,
+            self.width,
+            self.height,
+            self.center_x,
+            self.window_width,
+            self.window_height,
+            size.0,
+            size.1,
+        ]
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+            || self.width <= 0.0
+            || self.height <= 0.0
+            || size.0 <= 0.0
+            || size.1 <= 0.0
+            // A logical client dimension can round by one physical pixel.
+            || (self.window_width - size.0).abs() > 1.0
+            || (self.window_height - size.1).abs() > 1.0
+            || self.x + self.width > self.window_width
+            || self.y + self.height > self.window_height
+            || self.x + self.width > size.0 + 1.0
+            || self.y + self.height > size.1 + 1.0
+            || self.center_x < self.x
+            || self.center_x > self.x + self.width
+        {
+            return Err("올바르지 않거나 크기가 지난 아바타 표시 영역입니다.".into());
+        }
+        Ok(())
+    }
+
+    fn physical_geometry(
+        &self,
+        window: super::PxRect,
+        scale: f64,
+    ) -> Result<(super::PxRect, i64), String> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err("아바타 화면 배율을 읽지 못했습니다.".into());
+        }
+        self.validate((
+            f64::from(window.width) / scale,
+            f64::from(window.height) / scale,
+        ))?;
+        let left = super::logical_px(self.x, scale);
+        let top = super::logical_px(self.y, scale);
+        Ok((
+            super::PxRect {
+                x: window.x.saturating_add(left),
+                y: window.y.saturating_add(top),
+                width: super::logical_px(self.x + self.width, scale) - left,
+                height: super::logical_px(self.y + self.height, scale) - top,
+            },
+            i64::from(window.x) + i64::from(super::logical_px(self.center_x, scale)),
+        ))
+    }
+}
+
 pub struct CompanionState {
     path: PathBuf,
     config: Mutex<Config>,
+    visible_anchor: Mutex<Option<VisibleAnchor>>,
 }
 
 impl CompanionState {
+    pub(super) fn visible_geometry(
+        &self,
+        window: super::PxRect,
+        scale: f64,
+    ) -> (super::PxRect, i64) {
+        let fallback = (window, i64::from(window.x) + i64::from(window.width) / 2);
+        let Ok(mut saved) = self.visible_anchor.lock() else {
+            eprintln!("[ghost] 아바타 표시 영역을 읽지 못했습니다.");
+            return fallback;
+        };
+        match saved
+            .as_ref()
+            .map(|anchor| anchor.physical_geometry(window, scale))
+        {
+            Some(Ok(geometry)) => geometry,
+            Some(Err(error)) => {
+                eprintln!("[ghost] {error}");
+                *saved = None;
+                fallback
+            }
+            None => fallback,
+        }
+    }
+
     fn save(&self, config: &Config) -> Result<(), String> {
         let parent = self.path.parent().ok_or("아바타 설정 경로가 없습니다.")?;
         std::fs::create_dir_all(parent).map_err(|_| "아바타 설정 폴더를 만들지 못했습니다.")?;
@@ -56,17 +154,20 @@ fn load_config(path: &std::path::Path) -> Config {
     })
 }
 
+/// One axis of a work-area clamp. i64 avoids overflowing when a disconnected
+/// display left an extreme saved coordinate. `pub(super)` so the overlay's
+/// pet-anchored geometry in the crate root reuses the same rule.
+pub(super) fn clamp_axis(value: i64, start: i32, available: u32, extent: u32) -> i32 {
+    let end = i64::from(start) + i64::from(available.saturating_sub(extent));
+    value
+        .clamp(i64::from(start), end)
+        .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
 fn clamp(position: Position, origin: Position, area: (u32, u32), size: (u32, u32)) -> Position {
-    // i64 avoids overflowing when a disconnected display left an extreme saved coordinate.
-    let axis = |value: i32, start: i32, available: u32, extent: u32| {
-        let end = i64::from(start) + i64::from(available.saturating_sub(extent));
-        i64::from(value)
-            .clamp(i64::from(start), end)
-            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
-    };
     Position {
-        x: axis(position.x, origin.x, area.0, size.0),
-        y: axis(position.y, origin.y, area.1, size.1),
+        x: clamp_axis(i64::from(position.x), origin.x, area.0, size.0),
+        y: clamp_axis(i64::from(position.y), origin.y, area.1, size.1),
     }
 }
 
@@ -149,6 +250,7 @@ pub fn create(app: &tauri::AppHandle, origin: &super::OriginCell) -> Result<Webv
     app.manage(CompanionState {
         path,
         config: Mutex::new(config),
+        visible_anchor: Mutex::new(None),
     });
     let allowed = origin.clone();
     let window = tauri::WebviewWindowBuilder::new(
@@ -186,8 +288,8 @@ pub fn create(app: &tauri::AppHandle, origin: &super::OriginCell) -> Result<Webv
         native.setHidesOnDeactivate(false);
     }
     let tracked = window.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::Moved(point) = event {
+    window.on_window_event(move |event| match event {
+        WindowEvent::Moved(point) => {
             let state = tracked.app_handle().state::<CompanionState>();
             if let Ok(mut config) = state.config.lock() {
                 config.position = Some(Position {
@@ -196,6 +298,13 @@ pub fn create(app: &tauri::AppHandle, origin: &super::OriginCell) -> Result<Webv
                 });
             };
         }
+        WindowEvent::Resized(_) => {
+            let state = tracked.app_handle().state::<CompanionState>();
+            if let Ok(mut anchor) = state.visible_anchor.lock() {
+                *anchor = None;
+            };
+        }
+        _ => {}
     });
     let menu_window = window.clone();
     window.on_menu_event(move |_, event| {
@@ -287,6 +396,29 @@ pub fn companion_resize(window: WebviewWindow, size: String) -> Result<(), Strin
         .set_size(tauri::LogicalSize::new(dimensions.0, dimensions.1))
         .map_err(|error| error.to_string())?;
     position(&window, false)
+}
+
+#[tauri::command]
+pub fn companion_anchor(window: WebviewWindow, bounds: VisibleAnchor) -> Result<(), String> {
+    if window.label() != "companion" {
+        return Err("허용되지 않은 창입니다.".into());
+    }
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .ok_or("아바타 화면을 찾지 못했습니다.")?;
+    let scale = monitor.scale_factor();
+    bounds.validate((
+        f64::from(size.width) / scale,
+        f64::from(size.height) / scale,
+    ))?;
+    *window
+        .state::<CompanionState>()
+        .visible_anchor
+        .lock()
+        .map_err(|_| "아바타 표시 영역을 저장하지 못했습니다.")? = Some(bounds);
+    Ok(())
 }
 
 /// Borderless, non-key windows cannot reliably use AppKit's event-driven
@@ -404,8 +536,147 @@ pub fn companion_menu(window: WebviewWindow) -> Result<(), String> {
 }
 #[cfg(test)]
 mod tests {
-    use super::{clamp, load_config, CompanionState, Config, Position};
+    use super::{clamp, load_config, CompanionState, Config, Position, VisibleAnchor};
     use std::sync::Mutex;
+
+    fn anchor() -> VisibleAnchor {
+        VisibleAnchor {
+            x: 30.0,
+            y: 55.0,
+            width: 80.0,
+            height: 100.0,
+            center_x: 70.0,
+            window_width: 140.0,
+            window_height: 170.0,
+        }
+    }
+
+    #[test]
+    fn transparent_window_offset_places_tail_at_painted_head_at_both_corners() {
+        let area = super::super::PxRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1056,
+        };
+        for (window_x, expected_x, expected_anchor) in [(1780, 1520, 330.0), (0, 0, 70.0)] {
+            let (paint, center) = anchor()
+                .physical_geometry(
+                    super::super::PxRect {
+                        x: window_x,
+                        y: 700,
+                        width: 140,
+                        height: 170,
+                    },
+                    1.0,
+                )
+                .unwrap();
+            assert_eq!(paint.y, 755);
+            let placed = super::super::place_overlay_near_pet(
+                paint,
+                center,
+                area,
+                1.0,
+                super::super::OVERLAY_PET_GAP,
+                super::super::OVERLAY_SIZE,
+                super::super::OVERLAY_MIN_HEIGHT,
+            )
+            .unwrap();
+            assert_eq!(placed.y + placed.height, 751);
+            assert_eq!(placed.x, expected_x);
+            assert_eq!(placed.anchor_x, expected_anchor);
+        }
+    }
+
+    #[test]
+    fn paint_uses_companion_scale_and_body_center_not_decoration_center() {
+        let decorated = VisibleAnchor {
+            x: 20.0,
+            width: 110.0,
+            ..anchor()
+        };
+        let (paint, center) = decorated
+            .physical_geometry(
+                super::super::PxRect {
+                    x: -3840,
+                    y: 400,
+                    width: 280,
+                    height: 340,
+                },
+                2.0,
+            )
+            .unwrap();
+        assert_eq!(
+            paint,
+            super::super::PxRect {
+                x: -3800,
+                y: 510,
+                width: 220,
+                height: 200
+            }
+        );
+        assert_eq!(center, -3700);
+        assert_ne!(center, i64::from(paint.x) + i64::from(paint.width) / 2);
+    }
+
+    #[test]
+    fn invalid_paint_bounds_and_stale_viewports_are_rejected() {
+        assert!(anchor().validate((140.0, 170.0)).is_ok());
+        for invalid in [
+            VisibleAnchor {
+                x: -1.0,
+                ..anchor()
+            },
+            VisibleAnchor {
+                y: f64::NAN,
+                ..anchor()
+            },
+            VisibleAnchor {
+                width: f64::INFINITY,
+                ..anchor()
+            },
+            VisibleAnchor {
+                height: 0.0,
+                ..anchor()
+            },
+            VisibleAnchor {
+                height: 116.0,
+                ..anchor()
+            },
+            VisibleAnchor {
+                center_x: 111.0,
+                ..anchor()
+            },
+            VisibleAnchor {
+                window_width: 168.0,
+                ..anchor()
+            },
+        ] {
+            assert!(invalid.validate((140.0, 170.0)).is_err());
+        }
+        assert!(anchor().validate((112.0, 142.0)).is_err());
+        assert!(anchor().validate((f64::NAN, 170.0)).is_err());
+        assert!(serde_json::from_str::<VisibleAnchor>(
+            r#"{"x":0,"y":0,"width":1,"height":1,"centerX":0,"windowWidth":140,"windowHeight":170,"state":{}}"#
+        ).is_err());
+    }
+
+    #[test]
+    fn resize_discards_old_paint_and_falls_back_to_current_window_bounds() {
+        let state = CompanionState {
+            path: std::path::PathBuf::new(),
+            config: Mutex::new(Config::default()),
+            visible_anchor: Mutex::new(Some(anchor())),
+        };
+        let resized = super::super::PxRect {
+            x: 20,
+            y: 30,
+            width: 112,
+            height: 142,
+        };
+        assert_eq!(state.visible_geometry(resized, 1.0), (resized, 76));
+        assert!(state.visible_anchor.lock().unwrap().is_none());
+    }
 
     #[test]
     fn config_defaults_are_hidden_and_unpositioned() {
@@ -445,6 +716,7 @@ mod tests {
         let state = CompanionState {
             path: path.clone(),
             config: Mutex::new(config.clone()),
+            visible_anchor: Mutex::new(None),
         };
         state.save(&config).unwrap();
         assert_eq!(load_config(&path), config);
