@@ -1,142 +1,183 @@
 import SwiftUI
 import WebKit
+import CoreTransferable
+import UniformTypeIdentifiers
 import GhostMobileCore
 
-// One opened artifact document. Bytes arrive digest-verified from the
-// transport; rendering is read-only: Markdown becomes plain attributed text
-// without links or image fetches, HTML is shown in a JavaScript-disabled web
-// view that cancels every navigation and subresource load, images decode from
-// the verified bytes. Nothing writes back to the document.
 struct ArtifactScreen: View {
     let model: GhostModel
-    let digest: String
+    let artifact: ArtifactRef
     @Environment(\.dismiss) private var dismiss
+    @State private var reading = true
+    @State private var wrapLines = true
 
-    private var loaded: LoadedArtifact? { model.loadedArtifacts[digest] }
+    private var loaded: LoadedArtifact? { model.loadedArtifacts[artifact.digest] }
+    private var text: String? {
+        guard let data = loaded?.data, !artifact.mediaType.hasPrefix("image/") else { return nil }
+        let type = UTType(mimeType: artifact.mediaType)
+        guard isMarkdown || isHTML || artifact.mediaType.hasPrefix("text/") || type?.conforms(to: .text) == true else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+    private var isMarkdown: Bool {
+        artifact.mediaType == "text/markdown" || artifact.name.lowercased().hasSuffix(".md")
+            || artifact.name.lowercased().hasSuffix(".markdown")
+    }
+    private var isHTML: Bool {
+        artifact.mediaType == "text/html" || artifact.name.lowercased().hasSuffix(".html")
+            || artifact.name.lowercased().hasSuffix(".htm")
+    }
+    private var lineCount: Int? { text.map { $0.isEmpty ? 0 : $0.reduce(1) { $1 == "\n" ? $0 + 1 : $0 } } }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if let loaded, let data = loaded.data {
-                    ArtifactDocumentView(digest: digest, data: data)
-                } else if let loaded, let error = loaded.error {
-                    ContentUnavailableView("결과 자료를 열지 못했습니다", systemImage: "doc.questionmark", description: Text(error))
-                } else {
-                    ProgressView("불러오는 중")
+            VStack(spacing: 0) {
+                if let text, !isHTML {
+                    HStack(spacing: 16) {
+                        if isMarkdown {
+                            Picker("표시 방식", selection: $reading) {
+                                Text("읽기").tag(true)
+                                Text("원문").tag(false)
+                            }.pickerStyle(.segmented)
+                        } else { Spacer(minLength: 0) }
+                        if !isMarkdown || !reading {
+                            Toggle("줄 접기", isOn: $wrapLines).toggleStyle(.button)
+                                .accessibilityLabel("긴 줄 접기")
+                        }
+                    }
+                    .font(.footnote).padding(.horizontal, 16).padding(.vertical, 8)
+                    .opacity(text.isEmpty ? 0 : 1)
+                }
+                documentBody.frame(maxWidth: .infinity, maxHeight: .infinity)
+                if loaded?.data != nil {
+                    HStack(spacing: 8) {
+                        Text(artifact.mediaType)
+                        Text("·")
+                        Text(artifact.sizeLabel)
+                        if let lineCount { Text("·"); Text("\(lineCount)줄") }
+                        Spacer(minLength: 0)
+                    }
+                    .font(.caption).foregroundStyle(GhostStyle.secondary)
+                    .padding(16).overlay(alignment: .top) { Rectangle().fill(GhostStyle.border).frame(height: 1) }
                 }
             }
             .background(GhostStyle.surface)
-            .navigationTitle("결과 자료").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(artifact.name).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("닫기") { dismiss() } }
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 8) {
+                        Image(systemName: artifact.symbol).foregroundStyle(GhostStyle.secondary)
+                        Text(artifact.name).font(.headline).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if let text {
+                        Button { UIPasteboard.general.string = text } label: { Image(systemName: "doc.on.doc") }
+                            .frame(minWidth: 44, minHeight: 44).accessibilityLabel("파일 내용 복사")
+                    }
+                    if let data = loaded?.data {
+                        ShareLink(item: VerifiedArtifactFile(data: data, name: artifact.name),
+                            preview: SharePreview(artifact.name)) { Image(systemName: "square.and.arrow.up") }
+                            .frame(minWidth: 44, minHeight: 44).accessibilityLabel("저장")
+                    }
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                        .frame(minWidth: 44, minHeight: 44).accessibilityLabel("파일 닫기")
+                }
             }
-            .task { await model.loadArtifact(digest: digest) }
+            .task(id: artifact.digest) { await model.loadArtifact(digest: artifact.digest) }
+        }
+    }
+
+    @ViewBuilder private var documentBody: some View {
+        if let loaded, let data = loaded.data {
+            if data.isEmpty {
+                ContentUnavailableView("빈 파일", systemImage: artifact.symbol)
+            } else if isHTML, let text {
+                SafeHTMLView(html: text)
+            } else if artifact.mediaType.hasPrefix("image/"), let image = UIImage(data: data) {
+                ScrollView {
+                    Image(uiImage: image).resizable().scaledToFit().padding(16)
+                        .accessibilityLabel(artifact.name)
+                }
+            } else if let text {
+                if isMarkdown && reading {
+                    ScrollView {
+                        // Untrusted documents render inertly: no URL, mark or remote image acquires an action.
+                        GhostProse(text: text, state: model.snapshot, inert: true)
+                            .foregroundStyle(GhostStyle.text)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                    }
+                } else {
+                    ArtifactSource(text: text, wrapLines: wrapLines)
+                }
+            } else {
+                ContentUnavailableView {
+                    Label(artifact.name, systemImage: artifact.symbol)
+                } description: {
+                    Text("이 파일은 저장해서 열어 주세요.")
+                }
+            }
+        } else if loaded?.error != nil {
+            ContentUnavailableView("파일을 읽지 못했습니다.", systemImage: "doc.questionmark")
+                .accessibilityAddTraits(.updatesFrequently)
+        } else {
+            ProgressView("파일을 읽는 중…")
         }
     }
 }
 
-struct ArtifactDocumentView: View {
-    let digest: String
-    let data: Data
+private struct ArtifactSource: View {
+    let text: String
+    let wrapLines: Bool
+    private var lines: [Substring]? {
+        let count = text.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        return count <= 10_000 ? text.split(separator: "\n", omittingEmptySubsequences: false) : nil
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(documentKindLabel).font(.headline)
-                    Text("SHA-256 \(digest.prefix(12))… · \(data.count) bytes")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(GhostStyle.secondary)
-                }
-                documentBody
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    @ViewBuilder
-    private var documentBody: some View {
-        switch DocumentKind(bytes: data) {
-        case .markdown(let text):
-            markdownText(text)
-        case .html(let text):
-            SafeHTMLView(html: text)
-                .frame(minHeight: 320)
-                .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 12))
-        case .image:
-            if let image = UIImage(data: data) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 12))
-            } else {
-                Text("이미지 데이터를 해독하지 못했습니다. 원본 bytes는 검증된 상태로 보존되어 있습니다.")
-                    .foregroundStyle(.red)
-            }
-        case .text(let text):
-            Text(text).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-        }
-    }
-
-    private func markdownText(_ text: String) -> some View {
         Group {
-            if let attributed = inertMarkdown(text) {
-                Text(attributed).textSelection(.enabled)
+            if wrapLines {
+                ScrollView { source.frame(maxWidth: .infinity, alignment: .leading) }
             } else {
-                Text(text).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                ScrollView([.horizontal, .vertical]) { source.fixedSize(horizontal: true, vertical: false) }
             }
         }
     }
 
-    private func inertMarkdown(_ text: String) -> AttributedString? {
-        guard var attributed = try? AttributedString(
-            markdown: text,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace))
-        else { return nil }
-        attributed.link = nil
-        return attributed
-    }
-
-    private var documentKindLabel: String {
-        switch DocumentKind(bytes: data) {
-        case .markdown: return "문서 · Markdown"
-        case .html: return "문서 · HTML (스크립트·외부 자원 차단)"
-        case .image: return "이미지"
-        case .text: return "텍스트"
+    @ViewBuilder private var source: some View {
+        if let lines {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(lines.indices, id: \.self) { index in
+                    HStack(alignment: .top, spacing: 16) {
+                        Text("\(index + 1)").foregroundStyle(GhostStyle.secondary)
+                            .frame(width: CGFloat(String(lines.count).count) * 12, alignment: .trailing)
+                            .accessibilityHidden(true)
+                        Text(lines[index].isEmpty ? " " : String(lines[index]))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .font(.system(.footnote, design: .monospaced)).padding(16)
+        } else {
+            Text(text).font(.system(.footnote, design: .monospaced))
+                .textSelection(.enabled).padding(16)
         }
     }
 }
 
-private enum DocumentKind {
-    case markdown(String)
-    case html(String)
-    case image
-    case text(String)
+private struct VerifiedArtifactFile: Transferable, Sendable {
+    let data: Data
+    let name: String
 
-    init(bytes: Data) {
-        if Self.imagePrefix(bytes) {
-            self = .image
-        } else if let text = String(data: bytes, encoding: .utf8) {
-            var trimmed = text
-            while let first = trimmed.unicodeScalars.first, first == "\u{feff}" || first == "\u{200b}" || first.properties.isWhitespace {
-                trimmed.removeFirst()
-            }
-            let lowered = trimmed.lowercased()
-            if lowered.hasPrefix("<!doctype html") || lowered.hasPrefix("<html") {
-                self = .html(text)
-            } else {
-                self = .markdown(text)
-            }
-        } else {
-            self = .text("(이진 내용 · 텍스트로 표시할 수 없습니다)")
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .data) { file in
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let basename = (file.name as NSString).lastPathComponent
+            let url = directory.appendingPathComponent(basename.isEmpty || basename == "." || basename == ".." ? "파일" : basename)
+            try file.data.write(to: url, options: .atomic)
+            return SentTransferredFile(url)
         }
-    }
-
-    private static func imagePrefix(_ bytes: Data) -> Bool {
-        bytes.starts(with: [0x89, 0x50, 0x4E, 0x47]) ||
-            bytes.starts(with: [0xFF, 0xD8, 0xFF]) ||
-            bytes.starts(with: [0x47, 0x49, 0x46, 0x38])
     }
 }
 

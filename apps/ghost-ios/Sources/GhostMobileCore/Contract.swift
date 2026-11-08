@@ -70,13 +70,15 @@ public struct Ghost: Codable, Identifiable, Hashable, Sendable {
     public var isDefault: Bool
     public var state: GhostState
     public var directConversationId: String
+    /// Set once the owner deleted a retired Ghost; such Ghosts stay only so past Works keep their assignee.
+    public var deletedAt: Int?
     public var createdAt: Int
     public var updatedAt: Int
 
-    public init(id: String, name: String, persona: String, look: Look, model: ModelRef?, isDefault: Bool, state: GhostState, directConversationId: String, createdAt: Int, updatedAt: Int) {
+    public init(id: String, name: String, persona: String, look: Look, model: ModelRef?, isDefault: Bool, state: GhostState, directConversationId: String, deletedAt: Int? = nil, createdAt: Int, updatedAt: Int) {
         self.id = id; self.name = name; self.persona = persona; self.look = look; self.model = model
         self.isDefault = isDefault; self.state = state; self.directConversationId = directConversationId
-        self.createdAt = createdAt; self.updatedAt = updatedAt
+        self.deletedAt = deletedAt; self.createdAt = createdAt; self.updatedAt = updatedAt
     }
 }
 
@@ -105,11 +107,19 @@ public struct ArtifactRef: Codable, Hashable, Sendable {
     public var name: String
     public var mediaType: String
     public var size: Int
+
+    public init(digest: String, name: String, mediaType: String, size: Int) {
+        self.digest = digest; self.name = name; self.mediaType = mediaType; self.size = size
+    }
 }
 
 public struct WorkResult: Codable, Hashable, Sendable {
     public var summary: String
     public var artifacts: [ArtifactRef]
+
+    public init(summary: String, artifacts: [ArtifactRef]) {
+        self.summary = summary; self.artifacts = artifacts
+    }
 }
 
 public struct Work: Codable, Identifiable, Hashable, Sendable {
@@ -230,6 +240,10 @@ public struct MessageToolInfo: Codable, Hashable, Sendable {
     public var callId: String
     public var name: String
     public var isError: Bool
+
+    public init(callId: String, name: String, isError: Bool) {
+        self.callId = callId; self.name = name; self.isError = isError
+    }
 }
 
 public enum MessageRole: String, Codable, Sendable {
@@ -420,7 +434,9 @@ public enum Editable<Value: Equatable & Sendable>: Sendable, Equatable {
 public enum DeviceCommand: Sendable, Equatable {
     case messageSend(conversationId: String, text: String)
     case messageCancel(conversationId: String)
-    case workCreate(ghostId: String, title: String, brief: String, deadlineAt: Int?)
+    /// A 맡긴 일. `originConversationId` names the direct conversation that receives the report
+    /// (the Ghost's own when nil); `criteria` becomes the acceptance criteria when non-empty.
+    case workCreate(ghostId: String, title: String, brief: String, criteria: String? = nil, deadlineAt: Int?, originConversationId: String? = nil)
     case workUpdate(workId: String, title: Editable<String>, brief: Editable<String>, deadlineAt: Editable<Int>)
     case workCancel(workId: String)
     case workResume(workId: String)
@@ -462,12 +478,16 @@ extension DeviceCommand: Encodable {
         case .messageCancel(let conversationId):
             try container.encode("message.cancel", forKey: AnyKey("type"))
             try encodeField("conversationId", conversationId)
-        case .workCreate(let ghostId, let title, let brief, let deadlineAt):
+        case .workCreate(let ghostId, let title, let brief, let criteria, let deadlineAt, let originConversationId):
             try container.encode("work.create", forKey: AnyKey("type"))
             try encodeField("ghostId", ghostId)
             try encodeField("title", title)
             try encodeField("brief", brief)
+            if let criteria, !criteria.isEmpty {
+                try encodeField("acceptance", AcceptanceBody(criteria: criteria))
+            }
             try encodeIfPresent("deadlineAt", deadlineAt)
+            try encodeIfPresent("originConversationId", originConversationId)
         case .workUpdate(let workId, let title, let brief, let deadlineAt):
             try container.encode("work.update", forKey: AnyKey("type"))
             try encodeField("workId", workId)
@@ -510,6 +530,26 @@ struct AnyKey: CodingKey {
     init?(intValue: Int) { return nil }
 }
 
+/// Contract `Acceptance` as a device writes it: criteria only, no checks, no reviewer.
+struct AcceptanceBody: Codable, Equatable {
+    var criteria: String
+
+    init(criteria: String) { self.criteria = criteria }
+
+    private enum CodingKeys: String, CodingKey { case criteria, checks, reviewer }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(criteria, forKey: .criteria)
+        try container.encode([String](), forKey: .checks)
+        try container.encodeNil(forKey: .reviewer)
+    }
+
+    init(from decoder: Decoder) throws {
+        criteria = try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .criteria)
+    }
+}
+
 extension DeviceCommand: Decodable {
     public init(from decoder: Decoder) throws {
         let type = try decoder.container(keyedBy: CommandTypeKey.self).decode(String.self, forKey: .type)
@@ -531,7 +571,9 @@ extension DeviceCommand: Decodable {
         case "message.cancel":
             self = .messageCancel(conversationId: try string("conversationId"))
         case "work.create":
-            self = .workCreate(ghostId: try string("ghostId"), title: try string("title"), brief: try string("brief"), deadlineAt: nullableInt("deadlineAt"))
+            let acceptance: AcceptanceBody? = present("acceptance")
+            self = .workCreate(ghostId: try string("ghostId"), title: try string("title"), brief: try string("brief"),
+                               criteria: acceptance?.criteria, deadlineAt: nullableInt("deadlineAt"), originConversationId: present("originConversationId"))
         case "work.update":
             self = .workUpdate(workId: try string("workId"), title: editable("title", clear: ""), brief: editable("brief", clear: ""), deadlineAt: editable("deadlineAt", clear: 0))
         case "work.cancel":

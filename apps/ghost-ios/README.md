@@ -11,16 +11,32 @@ open apps/ghost-ios/Ghost.xcodeproj
 본인의 개발 팀을 선택해야 한다. iOS 17 이상을 대상으로 한다. 배포·서명 인증서를
 자동 설치하거나 App Store에 업로드하지 않는다.
 
+개인 개발 팀은 Push Notifications 권한을 발급하지 않는다. 그 팀으로 연결된 iPhone에
+설치할 때는 빈 entitlements 파일을 지정해 `aps-environment` 없이 서명한다. 번들 ID와
+팀이 같으면 Keychain의 연결 정보는 유지된다.
+
+```sh
+xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost -configuration Debug \
+  -destination 'platform=iOS,id=<UDID>' DEVELOPMENT_TEAM=<TEAM> \
+  CODE_SIGN_ENTITLEMENTS=<빈 plist> -allowProvisioningUpdates build
+xcrun devicectl device install app --device <UDID> <DerivedData>/Build/Products/Debug-iphoneos/Ghost.app
+```
+
 프로젝트 재생성은 이 폴더에서 `xcodegen generate`로 한다. 통신 모듈은 별도 Swift
 package이며 `swift test`로 계약 JSON 디코딩, SSE 프레임 파싱, 페어링 URL 파싱,
 요청 ID 재사용, 결과 자료 digest 검증을 검증한다.
 
 ## 탭
 
-- **대화** — 허용된 Ghost의 직접 대화. 전송, 응답 중지, 라이브 입력 중 표시.
-- **맡긴 일** — 진행 중이거나 최근에 끝난 Work. 상태·결과·검수, 취소·재개·편집.
-- **소식** — 확인이 필요한 결정(종류별 승인·거절·답변)과 알림. 알림은 읽음 처리 후
-  정확히 그 대상(대화·맡긴 일)으로 이동한다.
+- **대화** — 허용된 Ghost 목록. `고정`(메인 Ghost와 이 iPhone에서 고정한 Ghost)과 접히는
+  `Ghost` 목록으로 나뉘고, 확인이 필요하거나 일하는 Ghost는 접혀도 보인다. 행을 누르면 그
+  Ghost의 대화가 열린다. 대화에는 스레드(맡긴 일)·결과 줄·도구 기록·호스트 이벤트가 시간순으로
+  놓이고, 확인할 결정은 입력창 위에 쌓인다. 입력창의 `+`·`/`·`@`로 이 Ghost나 다른 Ghost에게
+  일을 맡긴다. 첨부 업로드·모델 변경·나중에 보내기는 소유자 전용이라 휴대전화에 없다.
+- **맡긴 일** — 진행 중이거나 끝난 Work와 그 아래 위임한 일. Ghost별로 거르고, 새 일을
+  맡기고, 상태·결과·검수와 취소·재개·편집을 다룬다.
+- **소식** — 확인이 필요한 결정(종류별 승인·거절·답변)과 알림. 탭에 대기 중인 결정 수가
+  표시된다. 알림은 읽음 처리 후 정확히 그 대상(대화·맡긴 일)으로 이동한다.
 - **연결** — origin, 기기 ID, 연결 상태, 푸시 알림 상태, 연결 해제.
 
 ## 페어링
@@ -69,8 +85,9 @@ xcodebuild -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost \
 UI 테스트는 `--ui-testing` Debug 전용 fixture를 사용한다. fixture는 예약된
 `.invalid` 호스트를 URLProtocol로 처리하고 실제 네트워크와 변경 요청을 거부한다.
 `--review-width=320|375|414|768`은 네이티브 레이아웃 검토 전용이다.
-`--design-review`는 같은 fixture에 실시간·완료된 생각 과정, 호스트 이벤트,
-Work 스레드, 질문·승인·결과 결정을 추가한다.
+`--design-review`는 Ghost 세 명(메인·확인 대기·대기 중), 위임이 달린 스레드, 결과 줄,
+위임·호스트 이벤트, 도구 기록, 실시간 생각 과정, 질문·명령 승인·결과 확인 결정과 digest가
+맞는 Markdown 결과 파일을 같은 fixture에 추가한다.
 `MobileRedesignUITests.testShippedDesignLightAndDark`는 두 테마의 대화·결정·Work
 화면을 XCTest 첨부 파일로 보존한다. 다음 명령으로 내보낸다.
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path /tmp/ghost-shots/ios`.

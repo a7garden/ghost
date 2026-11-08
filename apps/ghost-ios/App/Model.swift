@@ -69,6 +69,8 @@ struct NotificationRoute: Equatable {
     static func == (lhs: NotificationRoute, rhs: NotificationRoute) -> Bool { lhs.identifier == rhs.identifier }
 }
 
+enum AppTab: Hashable { case conversations, works, inbox, connection }
+
 @MainActor @Observable final class GhostModel {
     private(set) var connection: Connection?
     let pairing: PairingModel
@@ -98,6 +100,10 @@ struct NotificationRoute: Equatable {
 
     var chatRoute: ChatRoute?
     var notificationRoute: NotificationRoute?
+    /// The visible tab; surfaces switch it to hand the owner to another destination.
+    var tab: AppTab = .conversations
+    /// A Ghost the works board should show alone when the roster hands over; nil shows all.
+    var workFilterGhostId: String?
 
     @ObservationIgnored private(set) var api: GhostAPI?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
@@ -550,6 +556,8 @@ struct NotificationRoute: Equatable {
     func route(_ notification: GhostNotification) {
         markNotificationsRead([notification.id])
         notificationRoute = NotificationRoute(notificationId: notification.id)
+        if notification.workId != nil { tab = .works }
+        else if notification.conversationId != nil { tab = .conversations }
     }
 
     /// A push tap routes to exactly the tapped notification; an unknown or

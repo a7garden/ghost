@@ -84,22 +84,27 @@ enum GhostStyle {
 }
 
 struct RootView: View {
-    let model: GhostModel
+    @Bindable var model: GhostModel
     @Environment(\.scenePhase) private var phase
     var body: some View {
         Group {
             if model.connection == nil {
                 ConnectView(model: model)
             } else {
-                TabView {
+                TabView(selection: $model.tab) {
                     ConversationsScreen(model: model)
                         .tabItem { Label("대화", systemImage: "bubble.left.and.bubble.right") }
+                        .tag(AppTab.conversations)
                     WorkListScreen(model: model)
                         .tabItem { Label("맡긴 일", systemImage: "checklist") }
+                        .tag(AppTab.works)
                     InboxScreen(model: model)
                         .tabItem { Label("소식", systemImage: "bell") }
+                        .badge(model.snapshot.pendingDecisions.count)
+                        .tag(AppTab.inbox)
                     SettingsScreen(model: model)
                         .tabItem { Label("연결", systemImage: "network") }
+                        .tag(AppTab.connection)
                 }
             }
         }

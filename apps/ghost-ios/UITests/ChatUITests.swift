@@ -12,9 +12,12 @@ import XCTest
         conversation.tap()
         return app
     }
+    /// Older direct conversations of a Ghost live in its thread sheet.
     private func select(_ conversationID: String, in app: XCUIApplication) {
-        app.tabBars.buttons["대화"].tap()
-        app.buttons["conversation-\(conversationID)"].firstMatch.tap()
+        app.buttons["chat-threads"].tap()
+        let row = app.buttons["conversation-\(conversationID)"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
     }
     private func screenshot(_ name: String, app: XCUIApplication) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
