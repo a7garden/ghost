@@ -26,10 +26,12 @@ async function storedGhost(page: Page, id: string): Promise<Ghost> {
 
 test.describe('Ghost model route', () => {
   let ghostId: string;
+  let extraGhostIds: string[] = [];
   const provider = 'settings_test';
   const ref = (model: string) => ({ provider, model });
 
   test.beforeEach(async ({ page }) => {
+    extraGhostIds = [];
     await page.goto(`${readRunState().baseUrl}/#/settings?tab=team`);
     await expect(page.getByRole('button', { name: '새 Ghost', exact: true })).toBeVisible();
     await send(page, { type: 'provider.upsert', id: provider, kind: 'openai_compatible', name: 'Settings test',
@@ -43,9 +45,11 @@ test.describe('Ghost model route', () => {
   });
 
   test.afterEach(async ({ page }) => {
-    if (!ghostId) return;
-    await send(page, { type: 'ghost.update', ghostId, state: 'retired' });
-    await send(page, { type: 'ghost.delete', ghostId });
+    for (const id of [ghostId, ...extraGhostIds]) {
+      if (!id || (await storedGhost(page, id)).deletedAt !== null) continue;
+      await send(page, { type: 'ghost.update', ghostId: id, state: 'retired' });
+      await send(page, { type: 'ghost.delete', ghostId: id });
+    }
   });
 
   test('excludes used alternatives and persists add, reorder, replacement and inheritance', async ({ page }) => {
@@ -91,5 +95,20 @@ test.describe('Ghost model route', () => {
     await page.getByRole('button', { name: '1번 아래로', exact: true }).click();
     await expect.poll(async () => (await storedGhost(page, ghostId)).fallbacks.map(ref => ref.model)).toEqual(['Gamma', 'Beta']);
     await expect(page.getByText('검증용 저장 실패')).toHaveCount(0);
+  });
+
+  test('keeps the filter clearable when deleting a Ghost crosses the search threshold', async ({ page }) => {
+    for (let index = 0; index < 4; index++) {
+      const created = await send(page, { type: 'ghost.create', name: `검색 경계 검증 ${index}`, persona: '합성 검색 검증 자료입니다.' });
+      extraGhostIds.push(String(created.ghostId));
+    }
+    await page.getByRole('textbox', { name: '설정할 Ghost 찾기', exact: true }).fill('모델 경로 검증용');
+    await page.getByRole('radio', { name: '은퇴', exact: true }).click();
+    await page.getByRole('button', { name: '삭제', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: '삭제', exact: true }).click();
+    await expect.poll(async () => (await storedGhost(page, ghostId)).deletedAt).not.toBeNull();
+    await page.getByRole('button', { name: 'Ghost 검색 지우기', exact: true }).click({ timeout: 3000 });
+    await expect(page.locator('.roster').getByRole('button', { name: '검색 경계 검증 0', exact: true })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: '설정할 Ghost 찾기', exact: true })).toHaveCount(0);
   });
 });

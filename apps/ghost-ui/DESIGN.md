@@ -201,18 +201,31 @@ palette or a custom one; a Ghost that never chose gets a stable hue from its id 
 read apart. 꾸미기 is only the look: it opens in its own dialog from the portrait, with a
 floating preview that pops on every change and a 무작위 shuffle, then picture choices whose
 legend names the current pick; choices show at once and save behind the preview (the newest
-wins). Everything else about a Ghost lives in **Ghost 설정** (설정 → Ghost): a portrait roster,
-then the chosen Ghost as one sheet — the name edited in place as the heading, 메인으로 지정,
-a 활성/일시정지/은퇴 capsule, the model as a card, 역할 지시 as a growing note, tools as
-switch-pills grouped by purpose (a group's label toggles it) and the sandbox as a status strip
-with a two-step reset. New Ghosts start as the same sheet. There is no avatar library: stored
-sprite avatars stay selectable in 꾸미기, nothing creates new ones.
+wins). Everything else about a Ghost lives in **Ghost 설정** (설정 → Ghost): a compact
+portrait-and-name roster (searchable from eight Ghosts), then the selected Ghost's name
+edited in place, 역할 지시, model route, skills and grouped tool switch-pills. A group's
+label toggles its tools. State, default designation and retired-Ghost deletion live in a
+separate 운영 group; the main Ghost shows its locked active state instead of disabled
+choices. The sandbox keeps its two-step reset. New Ghosts start on the same sheet.
+There is no avatar library: stored sprite avatars stay selectable in 꾸미기, nothing creates new ones.
 
 ## Settings
 
 Ghost · 모델 · 기기 · 반복 작업 · 호스트 · 화면, plus **데스크톱 아바타** inside the Mac app.
 화면 picks the theme from three little windows painted in their own palette. 데스크톱
 아바타 controls the Ghost that floats on the desktop above other apps (see the desktop shell).
+
+Settings share a 164px secondary rail, an editor-width content column and the same
+`SettingsGroup` header/body surface (`src/ui/settings.css`). The rail becomes horizontal
+at 700px and keeps the selected item in view. Ghost sections reuse those groups rather
+than wrapping individual controls in competing cards.
+
+The **model route** is one connected sequence: effective primary, then at most three
+numbered alternatives. Each step keeps its model and provider together; alternatives
+carry their reorder/remove controls. Search stays inside the chooser; already-used
+models cannot be selected again. Primary-model inheritance is distinct from removing
+an alternative. A route edit waits for its save before the next edit; failures keep the
+stored route and show a sticky error, with no automatic replay.
 
 ## Interactive responses
 

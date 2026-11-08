@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Settings: slimmer navigation and shared section surfaces. Ghost selection is a compact,
+  searchable roster; role, model and capabilities precede separate operating controls.
+- Model fallbacks form a connected route with provider names, search, reorder/remove
+  actions and duplicate-choice prevention. Failed edits preserve the saved order.
 - Files open on a broad reading sheet instead of inside a small generic dialog. Markdown
   has 읽기/원문 views, document typography and local footnote navigation; source files have
   line numbers and optional wrapping. Copy and save preserve the original content.
@@ -36,9 +40,8 @@
 - Composer: + menu bottom-left unfolds 사진·파일 첨부, 일로 맡기기 and 나중에 보내기; files
   upload on add, drop or paste and travel with `message.send`; the model chip moved beside
   send.
-- 꾸미기 is only the look. Ghost 설정 is a new sheet: portrait roster, in-place name, 메인으로
-  지정, state capsule, model card, role note, tool switch-pills, sandbox strip; new Ghosts
-  start there.
+- 꾸미기 is only the look. Ghost 설정 keeps the editable name, role note, ordered model
+  route, skill/tool pills and sandbox strip; state and default designation live in 운영.
 - Removed the avatar library (creation, Codex import/export) and the in-window pet;
   설정 → 데스크톱 아바타 controls the desktop Ghost in the Mac app. 화면 picks themes from
   painted previews.

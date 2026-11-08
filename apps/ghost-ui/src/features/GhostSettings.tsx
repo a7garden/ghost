@@ -64,7 +64,7 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId }: {
   const selected = creating ? null : ghosts.find(ghost => ghost.id === selectedGhostId) ?? ghosts[0] ?? null;
   return <section className="ghost-settings-page" aria-label={uiTerms.ghostSettings}>
     <div className="roster-picker">
-      {ghosts.length >= 8 && <label className="roster-search">
+      {(ghosts.length >= 8 || query) && <label className="roster-search">
         <Search aria-hidden="true"/>
         <input aria-label="설정할 Ghost 찾기" placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}/>
         {query && <button type="button" aria-label="Ghost 검색 지우기" onClick={() => setQuery('')}><X aria-hidden="true"/></button>}
