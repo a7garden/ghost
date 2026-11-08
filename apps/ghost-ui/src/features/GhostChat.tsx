@@ -5,7 +5,7 @@ import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost,
 import { DotAvatar } from '../components/DotAvatar';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
-import { StateGlyph, ThreadCard, workGlyph } from '../components/agent';
+import { OpenWorkProvider, StateGlyph, ThreadCard, workGlyph } from '../components/agent';
 import { LiveReply, Transcript, type TranscriptExtra } from '../components/TranscriptMessage';
 import { quoteForReply } from '../components/MessageMenu';
 import { ChatComposer } from './ChatComposer';
@@ -71,7 +71,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
         needsOwner={waiting.has(work.id)} now={now} delegates={delegates} onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
     }) : [];
 
-  return <div className="chat-layout" data-thread={threadId ? '' : undefined}>
+  return <OpenWorkProvider value={openThread}><div className="chat-layout" data-thread={threadId ? '' : undefined}>
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
       scrollKey={`${page.messages.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
       overlay={<>
@@ -112,7 +112,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
       {live && <LiveReply live={live} ghostId={ghost.id} ghostName={ghost.name}/>}
     </Conversation>
     {threadId && <ThreadPanel key={threadId} workId={threadId} state={state} onClose={closeThread} onOpenThread={openThread} onOpenPage={openWork}/>}
-  </div>;
+  </div></OpenWorkProvider>;
 }
 
 /**

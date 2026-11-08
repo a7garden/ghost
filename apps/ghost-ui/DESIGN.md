@@ -67,6 +67,20 @@ Built for supervising agents instead of reusing generic cards and badges
   delegated children hanging on a branch line.
 - **ActivityIsland** — the workspace pulse in the title bar: faces of active Ghosts and
   amber/blue counts; silent when nothing moves; opens into every live item.
+- **OutcomeLine** — a Work coming back where its thread card branched off: a return hook
+  in the state color, a state-tinted pill (glyph, title, 완료/실패) that opens the thread, the
+  files as chips and a failure's reason. Report and 위임 결과 wakes render as this line.
+- **Peek** — technical facts (assignee, verdict source, duration, id, size, hash) kept off the
+  surface and shown on pointer rest or keyboard focus; copyable values copy on click. Touch
+  has no hover, so the element's own action leads to the full page instead.
+- **RefMark** — an id or digest a Ghost wrote into prose (`src/components/refs.ts` finds
+  them outside code blocks and links) shows what it points at: a Work's state glyph that opens
+  it, a Ghost's face, a file icon, else a quiet #. The value itself is behind a Peek.
+- **TranscriptRail** (`src/ui/transcript-rail.tsx`) — the conversation's scrollbar as a map:
+  a hairline thumb and ticks for the owner's turns (`data-rail="owner"`), thread cards and
+  outcomes in their state color. Hover names a tick, click jumps, drag scrubs. It shows with
+  the pointer or the owner's own scrolling, never for auto-follow; touch keeps native
+  scrolling. Other scroll areas use trackless pills that appear with the pointer.
 
 Feature-level compositions:
 
@@ -111,7 +125,11 @@ status and lifecycle, its decisions resolved in place, delegated threads, and th
 carrier's work conversation streaming live. Editing and cancelling stay on the full
 맡긴 일 page. Direct conversations kept from before stay reachable as 이전 대화.
 Host wakes (reports, child results, decision answers, schedules, verdicts) render as quiet
-event lines, never as the owner's bubble.
+event lines, never as the owner's bubble. The host writes them for the receiving Ghost; the
+transcript reads them for the owner (`src/components/wake.ts`): one Korean line, the Ghost's
+exact text folded beneath, and a settled Work as its OutcomeLine. Ghosts themselves are told
+to talk to the owner without ids, digests or tool mechanics (host `tools/index.ts`
+`OWNER_VOICE`); RefMark is the guard when they still do.
 
 Reasoning the provider streams shows as a disclosure above the reply: while thinking it
 stays open, names the newest step and shows the latest lines; once text arrives it folds

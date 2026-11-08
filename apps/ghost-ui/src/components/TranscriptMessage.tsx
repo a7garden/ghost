@@ -1,12 +1,13 @@
 import { Fragment, type ReactNode } from 'react';
 import type { Live } from '@ghost/contract';
-import { PresenceAvatar } from './agent';
+import { OutcomeLine, PresenceAvatar, RefText } from './agent';
 import { ChevronRight } from 'lucide-react';
 import { ConversationMessage } from '../ui'
 import { INTERACTIVE_UI_TOOL, readInteractiveUi, type LiveTool, type Message } from '@ghost/contract';
 import { ArtifactPreview } from './ArtifactPreview';
 import { CopyButton, MessageBody, useSmoothText } from './MessageBody';
 import { MessageMenu } from './MessageMenu';
+import { describeWake, parseOutcome } from './wake';
 import { InteractivePresentation } from './interactive/InteractivePresentation';
 import type { UiSubmit } from './interactive/UiInputBlock';
 
@@ -79,10 +80,24 @@ export function Reasoning({ text, live = false }: { text: string; live?: boolean
   </details>;
 }
 
-/** How a host-originated wake is labelled in the transcript. */
-const originLabel: Record<Exclude<NonNullable<Message['origin']>, 'owner'>, string> = {
-  work: '맡긴 일', child_result: '위임 결과', decision: '결정 전달', schedule: '반복 작업', verdict: '판정', report: '보고',
-};
+/**
+ * A wake the host sent on the owner's behalf. A settled Work returns as its outcome line; every
+ * other wake reads as one line in the owner's language with the Ghost's exact text folded below.
+ */
+function WakeEvent({ message, label }: { message: Message & { origin: Exclude<Message['origin'], 'owner' | null> }; label: string }) {
+  const outcome = message.origin === 'report' || message.origin === 'child_result' ? parseOutcome(message.text) : null;
+  if (outcome) return <OutcomeLine outcome={outcome}/>;
+  const view = describeWake(message.origin, message.text);
+  const head = <>
+    <span className="transcript-event__kind">{view.label}</span>
+    <span className="transcript-event__text"><RefText text={view.line}/></span>
+  </>;
+  if (!view.detail) return <div className="transcript-event" data-kind="note" data-origin={message.origin} role="note" aria-label={label}>{head}</div>;
+  return <details className="transcript-event" data-kind="note" data-origin={message.origin} aria-label={label}>
+    <summary>{head}<ChevronRight className="transcript-event__chevron" aria-hidden="true"/></summary>
+    <div className="transcript-event__detail">{view.detail}</div>
+  </details>;
+}
 
 /** Composer actions a transcript offers from its message menus; absent in read-only transcripts. */
 export interface TranscriptActions { onQuote?(text: string): void; onReuse?(text: string): void }
@@ -104,14 +119,11 @@ export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReu
   }
   // Wakes the host sent on the owner's behalf (reports, results, answers, schedules) are events, not the owner speaking.
   if (message.role === 'user' && message.origin && message.origin !== 'owner') {
-    return <div className="transcript-event" data-kind="note" data-origin={message.origin} role="note" aria-label={speaker(message)}>
-      <span className="transcript-event__kind">{originLabel[message.origin]}</span>
-      <span className="transcript-event__text">{message.text}</span>
-    </div>;
+    return <WakeEvent message={{ ...message, origin: message.origin }} label={speaker(message)}/>;
   }
   if (message.role === 'user') {
     return <MessageMenu text={message.text} onReuse={onReuse}>
-      <ConversationMessage role="user" label={speaker(message)}>
+      <ConversationMessage role="user" label={speaker(message)} data-rail="owner" data-rail-label={message.text.replace(/\s+/g, ' ').trim().slice(0, 80)}>
         <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</div>
         <Attachments message={message}/>
       </ConversationMessage>

@@ -252,6 +252,46 @@
 .ghost-conversation__footer { margin-top: var(--ghost-space-2); color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.4; text-align: center; }
 .ghost-conversation__jump { position: absolute; z-index: 2; bottom: 12px; left: 50%; max-width: calc(100% - 24px); translate: -50% 0; border-radius: var(--radius-pill) !important; box-shadow: var(--shadow-raised); animation: rise-in var(--duration-base) var(--ease-enter) both; }
 
+/* Transcript rail: the conversation's scrollbar as a map. Fine pointers only; touch keeps native scrolling. */
+.ghost-rail { position: absolute; z-index: 2; top: 30px; right: 2px; bottom: 18px; width: 22px; opacity: 0; touch-action: none; user-select: none; cursor: default; transition: opacity var(--duration-base) ease; }
+.ghost-rail[hidden] { display: none; }
+.ghost-conversation__transcript-frame[data-overlay] > .ghost-rail { top: 64px; }
+.ghost-conversation__transcript-frame:hover > .ghost-rail { opacity: .7; }
+.ghost-rail:hover, .ghost-rail[data-active], .ghost-rail[data-dragging] { opacity: 1 !important; }
+.ghost-rail__thumb {
+  position: absolute; top: 0; right: 6px; width: 3px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--ghost-ink) 18%, transparent);
+  will-change: transform; transition: width var(--duration-fast) var(--ease-enter), right var(--duration-fast) var(--ease-enter), background var(--duration-fast) ease;
+}
+.ghost-rail:hover .ghost-rail__thumb, .ghost-rail[data-dragging] .ghost-rail__thumb { right: 5px; width: 5px; background: color-mix(in srgb, var(--ghost-ink) 30%, transparent); }
+.ghost-rail[data-dragging] .ghost-rail__thumb { background: color-mix(in srgb, var(--ghost-ink) 44%, transparent); }
+.ghost-rail__mark { position: absolute; right: 0; width: 22px; height: 10px; margin-top: -5px; cursor: pointer; }
+.ghost-rail__mark::after {
+  content: ''; position: absolute; top: 4px; right: 13px; width: 5px; height: 2px; border-radius: 2px; background: var(--ghost-ink4);
+  transition: width var(--duration-fast) var(--ease-spring), background var(--duration-fast) ease;
+}
+.ghost-rail__mark[data-tone]::after { width: 7px; height: 3px; top: 3.5px; }
+.ghost-rail__mark[data-tone="success"]::after { background: var(--ghost-success); }
+.ghost-rail__mark[data-tone="amber"]::after { background: var(--ghost-amber); }
+.ghost-rail__mark[data-tone="danger"]::after { background: var(--ghost-danger); }
+.ghost-rail__mark[data-tone="signal"]::after { background: var(--ghost-signal); }
+.ghost-rail__mark[data-tone="muted"]::after { background: var(--ghost-ink3); }
+.ghost-rail__mark:hover::after { width: 11px; }
+.ghost-rail__mark:not([data-tone]):hover::after { background: var(--ghost-ink2); }
+.ghost-rail__label {
+  position: absolute; right: 30px; max-width: min(280px, 60cqi); translate: 0 -50%; overflow: hidden; padding: 4px 10px; border-radius: var(--radius-pill);
+  color: var(--ghost-ink2); background: var(--ghost-raised); box-shadow: var(--shadow-raised); font: 500 var(--text-caption)/1.35 var(--font-sans);
+  text-overflow: ellipsis; white-space: nowrap; pointer-events: none; animation: rail-label 140ms var(--ease-enter) both;
+}
+.ghost-rail__label[data-tone="success"] { color: var(--ghost-success-ink); }
+.ghost-rail__label[data-tone="amber"] { color: var(--ghost-amber-ink); }
+.ghost-rail__label[data-tone="danger"] { color: var(--ghost-danger-ink); }
+@keyframes rail-label { from { opacity: 0; transform: translateX(4px); } }
+@media (hover: hover) and (pointer: fine) {
+  .ghost-conversation__transcript { scrollbar-width: none; }
+  .ghost-conversation__transcript::-webkit-scrollbar { display: none; }
+}
+@media not ((hover: hover) and (pointer: fine)) { .ghost-rail { display: none; } }
+
 /* Only what arrives now animates in: the owner's message and a reply that starts streaming. A finished reply
    replaces its live article in place, so it must not fade in a second time. */
 .ghost-conversation-message { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; color: var(--ghost-ink); font: 15px/1.7 var(--font-sans); }

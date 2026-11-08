@@ -29,7 +29,8 @@ const COMPLETE_SUMMARY = '요청한 문서를 작성해 결과로 남겼어요. 
 const QUESTION = '어떤 항목부터 조사할까요?';
 const QUESTION_OPTIONS = ['속도 지표', '오류 패턴', '사용자 요청'];
 const AFTER_QUESTION = '물어봐 주셔서 감사해요. 답변을 기다리는 동안 관련 자료를 정리해 둘게요.';
-const AFTER_REPORT = '보고 확인했어요. 결과는 맡긴 일에서 볼 수 있어요.';
+/** A model that quotes the Work id back, as real ones do: the transcript must show it as a mark, not characters. */
+const afterReport = (workId: string) => `보고 확인했어요. 결과(${workId})는 맡긴 일에서 볼 수 있어요.`;
 const THINKING = '요청을 한 문단으로 정리해 답하자. 확인 가능한 것만 말하고, 새로운 사실은 만들지 않는다.';
 const REPLY = '이번 주에는 세 가지 요청이 들어왔어요. 보고서 초안과 메모 요약부터 진행하고, 나머지는 다음 주로 미뤘어요.';
 
@@ -49,7 +50,7 @@ function replyFor(messages: ChatMessage[]): MockReply {
   const last = messages[messages.length - 1];
   const lastText = textOf(last?.content);
   if (last?.role === 'tool') return { kind: 'text', withThinking: false, text: AFTER_QUESTION };
-  if (lastText.startsWith('Work "')) return { kind: 'text', withThinking: false, text: AFTER_REPORT };
+  if (lastText.startsWith('Work "')) return { kind: 'text', withThinking: false, text: afterReport(/\(([0-9a-f-]{36})\)/.exec(lastText)?.[1] ?? '') };
   if (lastText.includes('MEDIC-COMPLETE')) return { kind: 'tool', name: 'complete', args: { summary: COMPLETE_SUMMARY } };
   if (lastText.includes('MEDIC-QUESTION')) return { kind: 'tool', name: 'ask_owner', args: { question: QUESTION, options: QUESTION_OPTIONS } };
   return { kind: 'text', withThinking: true, text: REPLY };

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Reports read like a person: a returned Work is an outcome line hooked to its thread card
+  (state, title, files as chips, a failure's reason); who judged it, how long it took and its
+  id wait behind a hover (Peek). Other host wakes are one line in Korean with the Ghost's
+  exact text folded beneath.
+- Ids and digests a Ghost writes into prose become marks: a Work's state glyph (opens its
+  thread), a Ghost's face, a file icon, or a quiet # — the exact value is a hover away and
+  copies on click. Code blocks and links stay exact.
+- The conversation's scrollbar is a map: a hairline thumb plus ticks for the owner's turns,
+  threads and returned Work in their state color; hover a tick for its name, click to jump,
+  drag to scrub. Elsewhere scrollbars are trackless pills that show with the pointer.
 - Composer: + menu bottom-left unfolds 사진·파일 첨부, 일로 맡기기 and 나중에 보내기; files
   upload on add, drop or paste and travel with `message.send`; the model chip moved beside
   send.
