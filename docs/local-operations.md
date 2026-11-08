@@ -22,19 +22,31 @@
 
 Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다.
 
-## 현재 설치 (2026-11-08)
+## 현재 설치 (2026-11-09)
 
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-1fde344` (`main`, UI는 같은 디렉터리의 `ui/`) |
-| 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261109-bun-cd1527b` (`main`, UI는 같은 디렉터리의 `ui/`, 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
+| 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent, `dev.garden.macfra.agent`(2026-11-08 Ghost `Mac 관리`로 이전, disabled) |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 브라우저·금고·협업 개선 운영 반영 — 2026-11-09
+
+- 설계: [agent-capabilities](agent-capabilities.md). Host 브라우저(agent-browser + Chrome, Host 출구 프록시, 결제·전송은 승인), Ghost 금고(Shade 모델 포팅, 보안 입력 양식, 값은 모델·원장에 남지 않음), 자식→부모 질문(`ask_parent`/`answer_child`), 판정 근거·수정 범위, 자식 검사, 교훈 전달, 효과 도구가 있는 라운드의 순차 실행. 원장 마이그레이션 6(`work_questions`, `works.revise_history`·`question_nudges`).
+- 검사: Host 468개 중 462 통과·6 생략(실제 Chrome 4개는 `GHOST_BROWSER_SMOKE=1`로 따로 통과: 공개 페이지·프록시 거절·Ghost별 로그인 복원, WebRTC UDP 0패킷, 스크린샷 잠금, 인계 후 마지막 페이지 복원), 타입 검사, UI 114개·빌드, 시각/기능 53개. 독립 검토: 협업·금고·브라우저(Codex 작성)는 Claude, UI(GLM 작성)는 Claude Opus, 통합 코드(Claude 작성)는 Codex가 검토했다. P1 4건(WebRTC UDP 우회, 업로드·다운로드 경로 경쟁, 보안 양식 `kind` 누락, 저장 실패 대화상자 고착)과 P2·P3를 고치고 회귀 검사를 더했다.
+- 실제 모델(운영 사본 위 격리 루트): 브라우저로 example.com→IANA 이동, 보안 양식 요청→금고 경로 답변(일반 답변은 409)→the-internet 로그인 성공(`[redacted]` 표시), 카드 채우기 승인 대기→승인 후 입력, 인계 창 열림→답변 후 이어가기, 자식의 `ask_parent`→부모 `answer_child`→검사·검토 통과. 원장·Pi·금고 DB에서 시험 비밀번호·카드 번호가 발견되지 않았다(사이트 본문에 원래 적힌 데모 비밀번호만 Pi 기록에 있음).
+- 설치: `releases/20261109-bun-eff8fba`로 먼저 전환한 뒤, `/tmp` 정리로 소켓 디렉터리가 사라져도 다시 만드는 수정을 더한 `releases/20261109-bun-cd1527b`로 다시 전환했다. Host 원본·사본 해시 일치, `agent-browser`는 upstream 공개 SHA-256(`19680f06…`)과 같다. 설치 사본을 운영 백업 사본 위 임시 루트·포트에서 실행해 스키마 6, health, 금고 API, UI, 실제 모델의 네이버 열기를 확인했다.
+- 백업: `backups/pre-capabilities-20261109-eff8fba-1794151213000/`(스키마 5, artifacts·secrets·config·모델 캐시·console) 와 `backups/pre-cd1527b-20261109-1794151565000/`(스키마 6, 금고 DB·키 포함). 두 번 모두 유휴(바쁜 대화·진행 중 맡긴 일 0)를 확인하고 전환했다.
+- 사고: 첫 전환에서 링크 교체 명령(`mv -h`)이 실패한 채 재기동 신호가 나가, 이전 실행 파일이 새 config의 `browser` 키를 거부하고 원장을 열기 전에 종료했다. 곧바로 `os.replace`로 링크를 바꿨고 launchd가 새 Host를 띄웠다. 데이터 변경은 없었다. 이후 전환은 `os.replace`만 쓴다.
+- 운영 확인: 단일 리스너, 새 실행 경로, 스키마 6, 준비 상태, Ghost 24·대화 40·맡긴 일 39 식별자 보존, 금고 API 200, 제공 UI 번들 일치, 설정 › 금고 탭을 운영 웹 UI에서 열었다. 활성 Ghost 22명에게 브라우저·금고 도구를 부여했다(소유자 지시: 넓은 권한). 운영 대화에 검증 메시지는 보내지 않았다.
+- Mac 앱은 external 모드로 정상 종료 후 다시 열었다. 화면이 꺼져 있어(CoreGraphics 활성 디스플레이 없음) 네이티브 창의 화면 확인은 하지 못했고, 같은 Host가 제공하는 웹 UI로 대신 확인했다.
+- 되돌리기: 스키마 6은 이전 실행 파일이 거부한다. 이전 릴리스로 돌아가려면 `config.json`에서 `browser` 키를 빼고 `pre-capabilities-…` 백업(스키마 5)을 복원해야 하며, 이는 소유자 승인이 필요하다. 같은 스키마 안의 되돌리기는 `current`를 `releases/20261109-bun-eff8fba`로 바꾸면 된다.
 
 ### 기기 범위 제거·한 단계 페어링 운영 반영 — 2026-11-08
 
