@@ -48,12 +48,15 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 
 ### Ghost 팀 구성 — 2026-11-08
 
-- 소유자 요청으로 omp 오케스트레이션(main 강한 모델, 작업자 GLM, 작성자와 다른 vendor의 검토)과 사용 패턴(글·기획 요청 다수, 저장소·인프라·웹 작업은 omp)을 기준으로 Owner API에서 재구성했다. 릴리스 변경은 없다.
-- 활성: `메인`(기존 `primary`, 기본, `codex/gpt-6.1-sol` high, 기존 도구 전부), `작가`(글 초안·편집·검수), `기획`(게임·제품 시스템과 콘텐츠 데이터 설계). 작가·기획은 `zai-coding/glm-5.3` high, `delegate`·`schedule_*`·`ghost_list`·`memory_retain` 없음. 위임 결과는 위임한 메인(Codex)이 검토하므로 vendor가 갈린다.
-- 일시정지: `specialist-research`·`specialist-engineering`·`specialist-operations`. Work 샌드박스는 네트워크가 없고 이미지에 `python3`·`node`·`git`·`jq`가 없으며(perl·awk·sed·coreutils만) 저장소·호스트에 닿지 않아 웹 조사·코드·운영 역할을 실제로 수행할 수 없다. 샌드박스 도구나 브라우저 도구가 생기면 다시 켠다.
+- 소유자 요청으로 omp 오케스트레이션 역할과 실제 사용 패턴을 기준으로 Owner API에서 재구성했다. 릴리스 변경은 없다.
+- 사용 패턴: 사용자 프롬프트가 있는 Codex 루트 세션 529개(보관 `archived_sessions/*.jsonl.zst` 409개 포함)와 omp 세션 110개, 모두 639개를 세션 단위로 분류했다(`zai/glm-5.3-flash` 분류기, 근사치). 코드 구현 169, UI/UX 디자인 109, 게임 기획 79, 에이전트·하네스 설정 79, 3D·Blender·Tripo 64, 인프라 58, 리뷰·QA 28, 리서치 23, 글 12, 픽셀 3.
+- 활성: `메인`(기본, `codex/gpt-6.1-sol` high, 기존 도구 전부, 위임·검토·omp로 넘길 일 분류), `디자이너`(UI/UX 설계·스크린샷 검수·안티슬롭 문구 검수), `3D 아트`(에셋 설계·미실행 bpy 스크립트·Tripo 구분·렌더 검수), `기획`(게임 목표·성장·시스템·콘텐츠·월드). 디자이너·3D 아트는 시각 판단에 이미지 입력이 필요해 `codex/gpt-6.1-sol`, 기획은 `zai-coding/glm-5.3` high. 세 Ghost 모두 `delegate`·`schedule_*`·`ghost_list`·`memory_retain`이 없다.
+- 은퇴: `작가`(글 12세션, 안티슬롭 검수는 디자이너가 맡음), `specialist-research`·`specialist-engineering`·`specialist-operations`. Ghost 삭제 명령은 없어 `retired`로 둔다.
+- 만들지 않은 역할: 코드 구현·인프라·하네스 설정·픽셀 아트·웹 리서치. Work 샌드박스는 네트워크가 없고 이미지에 `python3`·`node`·`git`·`jq`·Blender가 없으며(perl·awk·sed·coreutils만) 저장소·호스트·앱에 닿지 않는다. 이런 일은 omp 세션에 남긴다.
+- 검토 경계: GLM(텍스트 전용)·MiniMax는 이미지 입력이 없고 Anthropic 제공자가 없어, Codex가 만든 시각 결과의 검토도 Codex(메인)가 한다. 이 검토를 다른 vendor의 독립 검토로 치지 않는다. 기획(GLM)의 결과는 메인(Codex)이 검토하므로 vendor가 갈린다.
 - 메인 직접 대화(`01a146f5-42fa-…`)에는 소유자가 고른 대화 모델 `zai-coding/glm-5.3`이 남아 있어 그 대화는 GLM으로 답한다. 메인의 Work·검토는 Ghost 모델(Codex)을 쓴다.
-- 확인: 메인 Work가 작가에게 위임 → 작가 결과를 메인이 검토 통과 → 루트 Work가 `artifact_contains` 검사로 `done`. `pi.db`의 응답 메타데이터로 루트 Work·검토는 `codex/gpt-6.1-sol`, 하위 Work는 `zai-coding/glm-5.3`, 오류 0건을 확인했다.
-- 되돌릴 때는 `~/.local/share/ghost/backups/pre-roster-20261108/ghosts-before.json`의 이름·페르소나·모델·상태로 `ghost.update`를 보내고 작가·기획을 `retired`로 바꾼다.
+- 확인: 디자이너 직접 대화에 UI 스크린샷을 첨부해 화면 속 문구를 그대로 인용한 지적을 받았다(이미지 파트 1, `codex/gpt-6.1-sol`). 메인 Work가 3D 아트에게 bpy 스크립트를 위임 → 메인 검토 통과(미실행임을 확인) → 루트 Work가 `artifact_contains` 검사로 `done`. 앞선 작가 위임 확인에서는 하위 Work가 `zai-coding/glm-5.3`이었다. 모든 확인에서 오류 0건.
+- 되돌릴 때는 `~/.local/share/ghost/backups/pre-roster-20261108/`의 `ghosts-before-v2.json`(이번 변경 직전) 또는 `ghosts-before.json`(첫 재구성 직전)의 이름·페르소나·모델·상태로 `ghost.update`를 보내고, 그 시점에 없던 Ghost는 `retired`로 바꾼다.
 
 ### Ghost 배경 제거 운영 반영 — 2026-11-08
 
