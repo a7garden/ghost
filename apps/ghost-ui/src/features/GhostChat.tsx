@@ -4,10 +4,11 @@ import { Button, Conversation, Popover, PopoverContent, PopoverTrigger } from '.
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
-import { OpenWorkProvider, StateGlyph, ThreadAnswer, ThreadCard, workGlyph } from '../components/agent';
+import { OpenWorkProvider, StateGlyph, ThreadCard, workGlyph } from '../components/agent';
 import { LiveReply, Transcript, type TranscriptExtra } from '../components/TranscriptMessage';
 import { quoteForReply } from '../components/MessageMenu';
 import { ChatComposer } from './ChatComposer';
+import { DecisionDeck, chatDecisions } from './Decision';
 import { GhostDesignEditor } from './GhostDesign';
 import { ThreadPanel } from './ThreadPanel';
 import { useConversationFeed } from './conversationFeed';
@@ -62,8 +63,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
   const running = busy || Boolean(live?.running);
   const names = new Map(state.ghosts.map(item => [item.id, item.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
-  const pending = (workId: string) => state.decisions.find(decision => decision.state === 'pending' && decision.workId === workId);
-  const answer = (decisionId: string, text: string) => void run(() => client.send({ type: 'decision.resolve', decisionId, outcome: 'answer', answer: text }));
+  // What this screen needs from the owner, answered above the composer; an open thread's own decisions sit in its panel.
+  const decisions = chatDecisions(state, ghost.id, conversationId).filter(decision => !threadId || decision.workId !== threadId);
   const openWork = (id: string) => navigate(`/work/${encodeURIComponent(id)}`);
   // Threads begun here appear where they started, kept live, with the Ghosts they delegated to beneath.
   const extras: TranscriptExtra[] = conversationId ? state.works
@@ -72,13 +73,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
       const delegates = state.works.filter(child => child.rootId === work.id && child.id !== work.id)
         .sort((a, b) => a.createdAt - b.createdAt)
         .map(child => ({ work: child, ghostName: names.get(child.ghostId) ?? 'Ghost', needsOwner: waiting.has(child.id) }));
-      const question = pending(work.id);
       return { key: `thread:${work.id}`, at: work.createdAt, node: <ThreadCard work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'}
         needsOwner={waiting.has(work.id)} now={now} delegates={delegates}
-        question={question?.kind === 'question' ? question.title : undefined}
-        actions={question?.kind === 'question' && question.options.length > 0
-          ? question.options.map(option => <ThreadAnswer key={option} label={option} onAnswer={() => answer(question.id, option)}/>)
-          : undefined}
         onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
     }) : [];
 
@@ -98,8 +94,11 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
           onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
           onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
       </>}
-      composer={<ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft} inputRef={inputRef}
-        onSent={() => setFollowKey(key => key + 1)} onStop={stop} onError={setError}/>}
+      composer={<>
+        <DecisionDeck state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread} docked/>
+        <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft} inputRef={inputRef}
+          onSent={() => setFollowKey(key => key + 1)} onStop={stop} onError={setError}/>
+      </>}
       footer={<>
         {error && <div className="chat-error" role="alert"><CircleAlert size={15} aria-hidden="true"/><span>{error}</span><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label="오류 메시지 닫기" onClick={() => setError('')}><X size={14}/></Button></div>}
         <p id="composer-keyboard-help" className="sr-only m-0">Enter로 보내기 · Shift + Enter로 줄바꿈{busy ? ' · 추가 지시는 진행 중인 응답에 전달됩니다.' : ''}</p>

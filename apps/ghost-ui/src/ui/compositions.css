@@ -14,7 +14,7 @@
 .shell-sheet[data-fill] > * { min-height: 0; flex-shrink: 0; }
 .shell-sheet[data-fill] > :last-child { flex: 1; }
 @media (min-width: 56rem) {
-  .shell-sheet { margin: 0 8px 8px 0; border-radius: var(--radius-card); box-shadow: var(--shadow-card); }
+  .shell-sheet { margin: 8px 8px 8px 0; border-radius: var(--radius-card); box-shadow: var(--shadow-card); }
 }
 /* Title bar location: back/forward, then the trail. Steps above the page are quiet links; the page is ink. */
 .title-nav { display: flex; min-width: 0; align-items: center; gap: 6px; }

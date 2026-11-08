@@ -99,11 +99,13 @@ Feature-level compositions:
   composer. 맡기기 unfolds 완료 기준 and 기한 in place and sends `work.create`; nothing
   becomes a 맡긴 일 unless the owner chose it. Like the conversation composer it has the
   + menu bottom-left (files) and the model beside send.
-- **Decision deck** (home, 확인할 일): pending decisions stacked oldest-first, the top one
-  fully actionable. Questions answer with numbered tiles (digit keys) or free text;
+- **Decision deck** (home, 확인할 일, conversations): pending decisions stacked oldest-first,
+  the top one fully actionable. Questions answer with numbered tiles (digit keys) or free text;
   approvals show the exact request; results arrive as a receipt with files and the
   completion criteria (`⌘↵` approves). 확인할 일 lists every pending item beside the stack.
-  Work detail resolves its own decisions in place.
+  A conversation docks its own above the composer: every pending decision of its Ghost (what
+  the sidebar row announces) and those of threads begun there; a single card drops the deck
+  head and a long card scrolls inside. Work detail and the thread panel resolve their own in place.
 - **Tool trail** (conversations): consecutive tool results fold into one line of chips;
   opening it shows each call's output on a thread. Live tools tick in at the end; the
   composer edge carries a travelling signal while the Ghost responds: a comet on the edge,
@@ -140,8 +142,8 @@ Each Ghost keeps one durable conversation, like Dots: there is no "new conversat
 The Ghost floats as a round button at the top center (its presence ring; it opens the
 profile and look editor) and content fades beneath it. Work the conversation spins off
 appears as **thread cards** at the moment it started, kept live (state glyph, carrier,
-lifecycle); a card waiting on a question shows it with its options as chips answerable in
-place. A settled thread folds to one quiet line — its OutcomeLine returns beneath it, so the
+lifecycle); a card waiting on the owner is answered from the decision deck above the composer.
+A settled thread folds to one quiet line — its OutcomeLine returns beneath it, so the
 branch stays readable without saying the result twice. Opening a card or a thread from the
 thread button (top right) brings the
 **thread panel** beside the conversation (over it below 64rem, `?thread=` in the URL):
