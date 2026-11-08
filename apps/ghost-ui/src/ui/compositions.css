@@ -93,6 +93,9 @@
 }
 .ghost-navigation-item[aria-current]:not([aria-current="false"]) svg { color: var(--ghost-ink); }
 .ghost-sidebar { padding: 4px 0 0; }
+.sidebar-pool-toggle { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 24px; padding: 0 6px; margin: 12px 4px 0 0; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink3); background: none; font: 600 var(--text-micro)/1 var(--font-sans); cursor: pointer; }
+.sidebar-pool-toggle:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+.sidebar-pool-toggle[aria-expanded="false"] { color: var(--ghost-ink2); }
 /* Destinations stay put; the roster scrolls under sticky labels and fades out while more follows. */
 @property --sidebar-fade { syntax: '<length>'; inherits: false; initial-value: 0px; }
 .sidebar-scroll-frame { position: relative; display: flex; min-height: 0; flex: 1; margin-inline: -10px; }

@@ -21,7 +21,11 @@ destination on an inset sheet (rounded, card shadow) beside it.
   Ghosts as presence rows — portrait in its state ring, name, and a one-line "now" (the
   question waiting on the owner, the Work in progress, or 응답 중) and its live Work count.
   A row only opens the Ghost's conversation; there are no per-Ghost submenus, so the
-  roster stays a glanceable list. 프로젝트 with 새 프로젝트. 설정 at the bottom; host trouble shows
+  roster stays a glanceable list — in two groups: **고정** (the default Ghost plus the owner's
+  pins, set from a row's context menu) and the **Ghost pool**, folded from its own header,
+  which sticks while scrolling; a folded pool still admits the Ghosts that need the owner or
+  hold the conversation on screen, and an expanded pool past eight rows grows a filter.
+  프로젝트 with 새 프로젝트. 설정 at the bottom; host trouble shows
   there only when the host is not connected. The three destinations and 설정 stay put; only
   the roster and projects scroll, under sticky group labels, fading out while more follows, with
   a ScrollRail marking Ghosts that are working or need the owner. Opening a Ghost from

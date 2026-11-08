@@ -50,8 +50,8 @@ function render(overrides: Partial<Parameters<typeof WorkspaceSidebar>[0]> = {})
   }));
 }
 
-/** The markup inside the Ghost navigation group, where the roster rows live. */
-const roster = (html: string) => html.slice(html.indexOf('Ghost</p>'));
+/** The markup of the roster groups: the pinned group first, then the pool. */
+const roster = (html: string) => html.slice(html.indexOf('고정</p>'));
 
 const storeSidebar = (value: unknown) => vi.stubGlobal('localStorage', {
   getItem: (key: string) => key === 'ghost-ui:sidebar' ? JSON.stringify(value) : null,
@@ -102,73 +102,46 @@ it('never renders retired or deleted Ghosts', () => {
   expect(html).not.toContain('sidebar-more');
 });
 
-it('keeps a team of seven or fewer exactly as before', () => {
+it('shows the default Ghost in 고정 even with no pins, the rest in the pool', () => {
   const html = render({ state: team(['도우미', '연구원', '기록가']) });
-  expect(html).not.toContain('sidebar-more');
-  expect(html).not.toContain('Ghost 찾기');
-  const ghosts = roster(html);
-  expect(ghosts.indexOf('도우미')).toBeLessThan(ghosts.indexOf('연구원'));
-  expect(ghosts.indexOf('연구원')).toBeLessThan(ghosts.indexOf('기록가'));
+  const pinned = html.slice(html.indexOf('고정</p>'), html.indexOf('Ghost</p>'));
+  const pool = html.slice(html.indexOf('Ghost</p>'));
+  expect(pinned).toContain('도우미');
+  expect(pinned).not.toContain('연구원');
+  expect(pool).toContain('연구원');
+  expect(pool).toContain('기록가');
+  expect(pool.indexOf('기록가')).toBeLessThan(pool.indexOf('연구원'));
 });
 
-it('collapses a bigger team into the top list behind a +N disclosure', () => {
-  const html = render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9']) });
-  expect(html).toContain('aria-expanded="false"');
-  expect(html).toContain('Ghost 9명 더 보기');
-  expect(html).toContain('+9');
-  const ghosts = roster(html);
-  expect(ghosts).toContain('도우미');
-  for (const hidden of ['g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9']) expect(ghosts).not.toContain(hidden);
-  expect(html).not.toContain('Ghost 찾기');
+it('pins Ghosts in pin order after the default, apart from the pool', () => {
+  storeSidebar({ pinned: ['g7', 'g2'], expanded: true });
+  const html = render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8']) });
+  const pinned = html.slice(html.indexOf('고정</p>'), html.indexOf('Ghost</p>'));
+  expect(pinned.indexOf('도우미')).toBeLessThan(pinned.indexOf('g7'));
+  expect(pinned.indexOf('g7')).toBeLessThan(pinned.indexOf('g2'));
+  expect(pinned).not.toContain('g1');
+  expect(html.slice(html.indexOf('Ghost</p>'))).toContain('g1');
 });
 
-it('keeps attention Ghosts in the top list, decision before busy conversation', () => {
+it('folds the pool from its header, keeping what needs the owner or is on screen', () => {
+  storeSidebar({ pinned: [], expanded: false });
   const html = render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9'], {
     decisions: [decision('d1', 'g3')],
     conversations: [{ id: 'conv-g5', ghostId: 'g5', kind: 'direct', workId: null, title: '대화', model: null, busy: true, createdAt: 1, lastActivityAt: 1 }],
-  }) });
-  const ghosts = roster(html);
-  expect(ghosts).toContain('g3');
-  expect(ghosts).toContain('g5');
-  expect(ghosts.indexOf('g3')).toBeLessThan(ghosts.indexOf('g5'));
-  expect(html).toContain('방향 확인');
-  expect(html).toContain('응답 중');
-  expect(html).toContain('Ghost 7명 더 보기');
-});
-
-it('pins Ghosts in pin order above the hidden rest', () => {
-  storeSidebar({ pinned: ['g7', 'g2'], expanded: false });
-  const html = render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9']) });
-  const ghosts = roster(html);
-  expect(ghosts).toContain('g7');
-  expect(ghosts).toContain('g2');
-  expect(ghosts.indexOf('g7')).toBeLessThan(ghosts.indexOf('g2'));
-  expect(html).toContain('Ghost 7명 더 보기');
-  expect(ghosts).not.toContain('g1');
-});
-
-it('keeps the conversation on screen in the top list', () => {
-  const html = render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9']), openGhostId: 'g4' });
-  const ghosts = roster(html);
-  expect(ghosts).toContain('g4');
-  expect(html).toContain('aria-current="page"');
-  expect(html).toContain('Ghost 8명 더 보기');
-});
-
-it('expanded, the rest appear by name with paused Ghosts dimmed', () => {
-  storeSidebar({ pinned: [], expanded: true });
-  const ghosts9 = ['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8'];
-  const html = render({ state: team(ghosts9, { ghosts: ghosts9.map((name, index) => ghost(name, index === 0, index === 2 ? { state: 'paused' as const } : {})) }) });
-  expect(html).toContain('aria-expanded="true"');
-  expect(html).toContain('Ghost 목록 접기');
-  for (const shown of ['g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8']) expect(roster(html)).toContain(shown);
-  expect(html).toContain('data-dimmed');
+  }), openGhostId: 'g4' });
+  expect(html).toContain('aria-expanded="false"');
+  expect(html).toContain('Ghost 목록 펼치기 (9)');
+  const pool = html.slice(html.indexOf('Ghost</p>'));
+  for (const shown of ['g3', 'g4', 'g5']) expect(pool).toContain(shown);
+  for (const hidden of ['g1', 'g2', 'g6', 'g7', 'g8', 'g9']) expect(pool).not.toContain(hidden);
   expect(html).not.toContain('Ghost 찾기');
 });
 
-it('an expanded overflow past eight rows grows its own filter', () => {
+it('an expanded pool past eight rows grows its own filter, paused Ghosts dimmed', () => {
   storeSidebar({ pinned: [], expanded: true });
-  const html = render({ state: team(['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9']) });
-  expect(html).toContain('type="search"');
+  const ghosts10 = ['도우미', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9'];
+  const html = render({ state: team(ghosts10, { ghosts: ghosts10.map((name, index) => ghost(name, index === 0, index === 3 ? { state: 'paused' as const } : {})) }) });
+  expect(html).toContain('aria-expanded="true"');
   expect(html).toContain('Ghost 찾기');
+  expect(html).toContain('data-dimmed');
 });
