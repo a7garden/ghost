@@ -8,7 +8,7 @@ import { Type } from "typebox";
 import {
   ArtifactRef,
   CommandResponse,
-  GHOST_TOOLS,
+  DEFAULT_GHOST_TOOLS,
   LedgerEvent as LedgerEventSchema,
   Notification as NotificationSchema,
   ProviderCatalog,
@@ -307,7 +307,7 @@ describe("API server", () => {
     expect(state.ghosts.filter((ghost) => ghost.name === "Bad" || ghost.name === "Dup")).toHaveLength(0);
   });
 
-  test("ghost.create defaults to the full tool list; ghost.update narrows it", async () => {
+  test("ghost.create defaults to every tool except host tools; ghost.update narrows it", async () => {
     const created = parse(CommandResponse, await (await runCommand({ type: "ghost.create", name: "Tooled", persona: "flexible" }, OWNER_TOKEN)).json());
     if (!created.ok || typeof created.result.ghostId !== "string") throw new Error("ghost.create failed");
     const tooledId = created.result.ghostId;
@@ -317,7 +317,8 @@ describe("API server", () => {
       if (!ghost) throw new Error("the created Ghost is missing from state");
       return ghost.tools;
     };
-    expect(await readTools()).toEqual([...GHOST_TOOLS]);
+    expect(await readTools()).toEqual([...DEFAULT_GHOST_TOOLS]);
+    expect(DEFAULT_GHOST_TOOLS.some((tool) => tool.startsWith("host_"))).toBe(false);
     const narrowed = parse(CommandResponse, await (await runCommand({ type: "ghost.update", ghostId: tooledId, tools: ["work_list"] }, OWNER_TOKEN)).json());
     expect(narrowed.ok).toBe(true);
     expect(await readTools()).toEqual(["work_list"]);

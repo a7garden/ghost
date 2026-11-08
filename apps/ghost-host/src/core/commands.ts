@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { GhostToolList, validate, type Command, type CommandRequest, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
+import { FallbackList, GhostToolList, SkillList, validate, type Command, type CommandRequest, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
 import type { Access } from "./access.ts";
 import type { Core } from "./core.ts";
 import type { DocumentsPort } from "../integrations/ports.ts";
@@ -111,7 +111,15 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
       return {};
 
     case "ghost.create": {
-      const ghost = core.createGhost({ name: command.name, persona: command.persona, model: command.model ?? null, look: command.look, tools: command.tools });
+      const ghost = core.createGhost({
+        name: command.name,
+        persona: command.persona,
+        model: command.model ?? null,
+        look: command.look,
+        tools: command.tools,
+        fallbacks: command.fallbacks,
+        skills: command.skills,
+      });
       return { ghostId: ghost.id };
     }
 
@@ -123,7 +131,13 @@ async function run(core: Core, access: Access, { requestId, command }: CommandRe
         look: command.look,
         state: command.state,
         tools: command.tools,
+        fallbacks: command.fallbacks,
+        skills: command.skills,
       });
+      return {};
+
+    case "ghost.delete":
+      deleteGhost(core, command.ghostId);
       return {};
 
     case "ghost.set_default": {
@@ -289,6 +303,8 @@ export interface GhostPatch {
   look?: Look;
   state?: GhostState;
   tools?: GhostTool[];
+  fallbacks?: ModelRef[];
+  skills?: string[];
 }
 
 /**
@@ -297,8 +313,11 @@ export interface GhostPatch {
  */
 export function updateGhost(core: Core, ghostId: string, patch: GhostPatch): Ghost {
   const ghost = core.ledger.ghost(ghostId);
+  if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
   if (patch.state && patch.state !== "active" && ghost.isDefault) throw conflict("choose another default Ghost first");
   if (patch.tools !== undefined && !validate(GhostToolList, patch.tools)) throw invalid("tools must be a duplicate-free list of known tool names");
+  if (patch.fallbacks !== undefined && !validate(FallbackList, patch.fallbacks)) throw invalid("fallbacks must be at most 3 models");
+  if (patch.skills !== undefined && !validate(SkillList, patch.skills)) throw invalid("skills must be a duplicate-free list of skill names");
   const next: Ghost = {
     ...ghost,
     name: patch.name ?? ghost.name,
@@ -307,6 +326,8 @@ export function updateGhost(core: Core, ghostId: string, patch: GhostPatch): Gho
     look: patch.look ?? ghost.look,
     state: patch.state ?? ghost.state,
     tools: patch.tools ?? ghost.tools,
+    fallbacks: patch.fallbacks ?? ghost.fallbacks,
+    skills: patch.skills ?? ghost.skills,
     updatedAt: Date.now(),
   };
   core.ledger.tx(() => {
@@ -317,6 +338,35 @@ export function updateGhost(core: Core, ghostId: string, patch: GhostPatch): Gho
   });
   core.refreshGhost(ghost.id);
   return next;
+}
+
+const LIVE_WORK_STATES = ["queued", "running", "waiting", "verifying", "blocked"] as const;
+
+/**
+ * Remove a retired Ghost from every list. Its row stays as a tombstone (`deletedAt`) so past Works,
+ * conversations and effects keep their assignee; its schedules and every grant naming it go away.
+ */
+export function deleteGhost(core: Core, ghostId: string): void {
+  const { ledger } = core;
+  const ghost = ledger.ghost(ghostId);
+  if (ghost.deletedAt !== null) return;
+  if (ghost.isDefault) throw conflict("the default Ghost cannot be deleted");
+  if (ghost.state !== "retired") throw conflict(`retire ${ghost.name} before deleting it`);
+  if (ledger.worksInState(...LIVE_WORK_STATES).some((work) => work.ghostId === ghost.id)) throw conflict(`${ghost.name} still has live Work`);
+  if (ledger.pendingDecisions().some((decision) => decision.ghostId === ghost.id)) throw conflict(`${ghost.name} still has pending decisions`);
+  const now = Date.now();
+  ledger.tx(() => {
+    for (const schedule of ledger.schedules()) if (schedule.ghostId === ghost.id) ledger.deleteSchedule(schedule.id);
+    for (const device of ledger.devices()) {
+      const grants = device.grants.filter((grant) => grant.ghostId !== ghost.id);
+      if (grants.length !== device.grants.length) ledger.updateDevice({ ...device, grants });
+    }
+    for (const space of ledger.spaces()) {
+      const grants = space.grants.filter((grant) => grant.ghostId !== ghost.id);
+      if (grants.length !== space.grants.length) ledger.putSpace({ ...space, grants });
+    }
+    ledger.putGhost({ ...ghost, deletedAt: now, updatedAt: now });
+  });
 }
 
 export function settingsView(core: Core) {

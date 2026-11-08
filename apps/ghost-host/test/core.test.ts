@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
-import { GHOST_TOOLS, type Principal } from "@ghost/contract";
+import { type Principal } from "@ghost/contract";
 import { Access } from "../src/core/access.ts";
 import { execute } from "../src/core/commands.ts";
 import { Core } from "../src/core/core.ts";
@@ -10,6 +10,7 @@ import { snapshot } from "../src/core/state.ts";
 import { MAX_REVISIONS } from "../src/core/works.ts";
 import { FakeEngine, MemorySecrets, harness, noSandbox, tempDir } from "./support.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
+import { MIGRATION_3_TOOLS } from "../src/ledger/schema.ts";
 import type { Submission } from "../src/core/ports.ts";
 
 const owner = { kind: "owner" } as const satisfies Principal;
@@ -375,19 +376,37 @@ describe("commands and access", () => {
     await first.core.idle();
     first.ledger.close();
 
-    // Rewind to the schema that predates tool allow-lists.
+    // Rewind to the schema that predates tool allow-lists (and everything after it).
     const db = new Database(path);
-    db.exec("ALTER TABLE ghosts DROP COLUMN tools");
+    for (const column of ["tools", "fallbacks", "skills", "deleted_at"]) db.exec(`ALTER TABLE ghosts DROP COLUMN ${column}`);
     db.exec("PRAGMA user_version = 2");
     db.close();
 
     const second = harness(path);
-    expect(second.ledger.ghost(ghost.id).tools).toEqual([...GHOST_TOOLS]);
-    expect(second.ledger.ghosts().every((item) => item.tools.length === GHOST_TOOLS.length)).toBe(true);
+    // Established Ghosts get the tool list as it stood at migration 3; later tools stay opt-in.
+    expect(second.ledger.ghost(ghost.id).tools).toEqual([...MIGRATION_3_TOOLS]);
+    expect(second.ledger.ghosts().every((item) => item.tools.length === MIGRATION_3_TOOLS.length)).toBe(true);
     // The migrated allow-list is an ordinary editable allow-list.
     const helper = second.ledger.ghosts().find((item) => item.name === "H")!;
     second.ledger.tx(() => second.ledger.putGhost({ ...helper, tools: ["read"], updatedAt: Date.now() }));
     expect(second.ledger.ghost(helper.id).tools).toEqual(["read"]);
+    second.ledger.close();
+  });
+
+  test("migrating a ledger from before fallbacks and skills gives established Ghosts none and keeps them listed", async () => {
+    const path = join(tempDir(), "ghost-fallbacks.db");
+    const first = harness(path);
+    const ghost = first.core.createGhost({ name: "G", persona: "", fallbacks: [{ provider: "p", model: "m" }], skills: ["anti-slop"] });
+    await first.core.idle();
+    first.ledger.close();
+
+    const db = new Database(path);
+    for (const column of ["fallbacks", "skills", "deleted_at"]) db.exec(`ALTER TABLE ghosts DROP COLUMN ${column}`);
+    db.exec("PRAGMA user_version = 3");
+    db.close();
+
+    const second = harness(path);
+    expect(second.ledger.ghost(ghost.id)).toMatchObject({ fallbacks: [], skills: [], deletedAt: null });
     second.ledger.close();
   });
 });

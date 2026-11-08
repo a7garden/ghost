@@ -45,7 +45,7 @@ export type Look = Static<typeof Look>;
 export const GhostState = Type.Union([Type.Literal("active"), Type.Literal("paused"), Type.Literal("retired")]);
 export type GhostState = Static<typeof GhostState>;
 
-/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, complete, work_status, artifact_read, effect_list, verdict) and the main-only ghost_inspect/ghost_update are not selectable. */
+/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, complete, work_status, artifact_read, effect_list, verdict) and the main-only ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
@@ -69,6 +69,18 @@ export const GhostTool = Type.Union([
   Type.Literal("document_list"),
   Type.Literal("document_read"),
   Type.Literal("document_propose"),
+  Type.Literal("web_search"),
+  Type.Literal("web_read"),
+  Type.Literal("reach"),
+  Type.Literal("skill_read"),
+  Type.Literal("host_status"),
+  Type.Literal("host_services"),
+  Type.Literal("host_disk_scan"),
+  Type.Literal("host_disk_usage"),
+  Type.Literal("host_list"),
+  Type.Literal("host_read"),
+  Type.Literal("host_nodes"),
+  Type.Literal("host_command_propose"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 
@@ -96,7 +108,32 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "document_list",
   "document_read",
   "document_propose",
+  "web_search",
+  "web_read",
+  "reach",
+  "skill_read",
+  "host_status",
+  "host_services",
+  "host_disk_scan",
+  "host_disk_usage",
+  "host_list",
+  "host_read",
+  "host_nodes",
+  "host_command_propose",
 ];
+
+/** Tools that observe or change the owner's Mac. Granted only explicitly, never by default. */
+export const HOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("host_"));
+
+/** The allow-list a new Ghost gets when none is given: every selectable tool except host tools. */
+export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool));
+
+/** A skill directory name under the configured skills root. */
+export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });
+export const SkillList = Type.Array(SkillName, { uniqueItems: true, maxItems: 16 });
+
+/** Models tried in order when the Ghost's model fails with a retryable, rate-limit or quota error. */
+export const FallbackList = Type.Array(ModelRef, { maxItems: 3 });
 
 /** An explicit allow-list: unknown names and duplicates are schema errors. */
 export const GhostToolList = Type.Array(GhostTool, { uniqueItems: true, maxItems: GHOST_TOOLS.length });
@@ -110,8 +147,13 @@ export const Ghost = Type.Object({
   model: nullable(ModelRef),
   isDefault: Type.Boolean(),
   state: GhostState,
-  /** The persisted allow-list of optional tools; [] disables all of them. */
   tools: GhostToolList,
+  /** Fallback models after the Ghost's own model; empty means no fallback. */
+  fallbacks: FallbackList,
+  /** Skill names whose SKILL.md is part of this Ghost's instructions. */
+  skills: SkillList,
+  /** Set once the owner deleted a retired Ghost; such Ghosts stay only so past Works keep their assignee. */
+  deletedAt: nullable(Timestamp),
   directConversationId: Id,
   createdAt: Timestamp,
   updatedAt: Timestamp,

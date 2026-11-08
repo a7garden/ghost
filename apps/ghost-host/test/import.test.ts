@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ModelRef } from "@ghost/contract";
-import { GHOST_TOOLS } from "@ghost/contract";
+import { DEFAULT_GHOST_TOOLS } from "@ghost/contract";
 import { sha256 } from "../src/core/ids.ts";
 import { runImport } from "../src/import/index.ts";
 import { harness, tempDir } from "./support.ts";
@@ -199,7 +199,7 @@ describe("runImport", () => {
     expect(alpha.name).toBe("Alpha");
     expect(alpha.isDefault).toBe(true);
     expect(alpha.look).toEqual({ avatarId: "av1" });
-    expect(alpha.tools).toEqual([...GHOST_TOOLS]);
+    expect(alpha.tools).toEqual([...DEFAULT_GHOST_TOOLS]);
     expect(alpha.directConversationId).toBe(CONV_A);
     expect(ledger.defaultGhost()?.id).toBe(GHOST_A);
     const beta = ledger.ghost(GHOST_B);

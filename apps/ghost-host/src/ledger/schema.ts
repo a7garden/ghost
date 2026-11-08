@@ -1,4 +1,11 @@
-import { GHOST_TOOLS } from "@ghost/contract";
+import type { GhostTool } from "@ghost/contract";
+
+/** The selectable tools when migration 3 was written. Migrations are immutable; later tools are opt-in. */
+export const MIGRATION_3_TOOLS: readonly GhostTool[] = [
+  "work_create", "work_list", "work_inspect", "work_update", "work_cancel", "schedule_create", "schedule_list", "schedule_cancel",
+  "ghost_list", "read", "write", "edit", "bash", "publish_artifact", "delegate", "memory_search", "memory_recall", "memory_retain",
+  "document_spaces", "document_list", "document_read", "document_propose",
+];
 
 /**
  * Ledger migrations, applied in order inside one transaction each.
@@ -210,7 +217,12 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE conversations DROP COLUMN privacy;
   ALTER TABLE providers DROP COLUMN local;
   `,
-  /* 3: explicit per-Ghost tool allow-lists; established Ghosts keep the full set they effectively had */ `
-  ALTER TABLE ghosts ADD COLUMN tools TEXT NOT NULL DEFAULT '${JSON.stringify(GHOST_TOOLS)}';
+  /* 3: explicit per-Ghost tool allow-lists; established Ghosts keep the full set they effectively had (frozen: the tool list as of migration 3) */ `
+  ALTER TABLE ghosts ADD COLUMN tools TEXT NOT NULL DEFAULT '${JSON.stringify(MIGRATION_3_TOOLS)}';
+  `,
+  /* 4: per-Ghost model fallbacks and skills; deleted Ghosts stay as tombstones for their past Works */ `
+  ALTER TABLE ghosts ADD COLUMN fallbacks TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE ghosts ADD COLUMN skills TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE ghosts ADD COLUMN deleted_at INTEGER;
   `,
 ];

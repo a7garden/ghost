@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { GhostState, GhostToolList, Look, ModelRef, nullable, type Ghost } from "@ghost/contract";
+import { FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
@@ -18,6 +18,8 @@ function renderGhost(ghost: Ghost): string {
       model: ghost.model,
       look: ghost.look,
       tools: ghost.tools,
+      fallbacks: ghost.fallbacks,
+      skills: ghost.skills,
       persona: ghost.persona,
       directConversationId: ghost.directConversationId,
       createdAt: ghost.createdAt,
@@ -67,7 +69,7 @@ export function createMainTools(core: Core): Extension {
   const ghostUpdate = defineTool({
     name: "ghost_update",
     description:
-      "Change another Ghost's name, persona, model, look, state or tool allow-list, and re-apply its conversations. Main Ghost only; the main designation, document grants and credentials stay with the owner.",
+      "Change another Ghost's name, persona, model, fallback models, skills, look, state or tool allow-list, and re-apply its conversations. Main Ghost only; the main designation, host tools, document grants and credentials stay with the owner.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "The Ghost to update" }),
       name: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
@@ -76,11 +78,18 @@ export function createMainTools(core: Core): Extension {
       look: Type.Optional(Look),
       state: Type.Optional(GhostState),
       tools: Type.Optional(GhostToolList),
+      fallbacks: Type.Optional(FallbackList),
+      skills: Type.Optional(SkillList),
     }),
     replay: "unsafe",
     async execute(args, api) {
       try {
         const { target } = requireMain(core, api, args.ghost_id);
+        if (target.deletedAt !== null) throw forbidden(`${target.name} was deleted`);
+        // Host tools reach the owner's Mac outside the sandbox: only the owner grants or revokes them.
+        if (args.tools !== undefined && HOST_TOOLS.some((tool) => args.tools!.includes(tool) !== target.tools.includes(tool))) {
+          throw forbidden("host tools are granted or revoked only by the owner");
+        }
         const next = updateGhost(core, target.id, {
           name: args.name,
           persona: args.persona,
@@ -88,6 +97,8 @@ export function createMainTools(core: Core): Extension {
           look: args.look,
           state: args.state,
           tools: args.tools,
+          fallbacks: args.fallbacks,
+          skills: args.skills,
         });
         return text(`Updated.\n${renderGhost(next)}`);
       } catch (error) {

@@ -15,6 +15,7 @@ import {
   ProviderPreset,
   Sandbox,
   Schedule,
+  SkillName,
   Settings,
   Space,
   Timestamp,
@@ -111,6 +112,12 @@ export type PairingResult = Static<typeof PairingResult>;
 /** GET /api/providers/catalog (owner only). Bundled provider presets with the installed SDK's static model catalogs; no credentials, no account verification. */
 export const ProviderCatalog = Type.Array(ProviderPreset, { maxItems: 64 });
 export type ProviderCatalog = Static<typeof ProviderCatalog>;
+
+/** GET /api/skills (owner only). Skills under the configured skill roots that a Ghost may be given. */
+export const SkillCatalog = Type.Object({
+  skills: Type.Array(Type.Object({ name: SkillName, description: Type.String({ maxLength: 2048 }) }), { maxItems: 512 }),
+});
+export type SkillCatalog = Static<typeof SkillCatalog>;
 
 /** GET /api/spaces/:id/pages?query= (owner only) */
 export const PageSummary = Type.Object({

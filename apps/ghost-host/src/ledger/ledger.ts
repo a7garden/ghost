@@ -162,13 +162,17 @@ export class Ledger {
     if (ghost.isDefault) this.db.query("UPDATE ghosts SET is_default = 0 WHERE is_default = 1 AND id <> ?").run(ghost.id);
     this.db
       .query(
-        `INSERT INTO ghosts (id, name, persona, look, model, is_default, state, tools, direct_conversation_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO ghosts (id, name, persona, look, model, is_default, state, tools, fallbacks, skills, deleted_at, direct_conversation_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, persona = excluded.persona, look = excluded.look,
            model = excluded.model, is_default = excluded.is_default, state = excluded.state, tools = excluded.tools,
+           fallbacks = excluded.fallbacks, skills = excluded.skills, deleted_at = excluded.deleted_at,
            direct_conversation_id = excluded.direct_conversation_id, updated_at = excluded.updated_at`,
       )
-      .run(ghost.id, ghost.name, ghost.persona, json(ghost.look), json(ghost.model), ghost.isDefault ? 1 : 0, ghost.state, json(ghost.tools), ghost.directConversationId, ghost.createdAt, ghost.updatedAt);
+      .run(
+        ghost.id, ghost.name, ghost.persona, json(ghost.look), json(ghost.model), ghost.isDefault ? 1 : 0, ghost.state, json(ghost.tools),
+        json(ghost.fallbacks), json(ghost.skills), ghost.deletedAt, ghost.directConversationId, ghost.createdAt, ghost.updatedAt,
+      );
     this.emit({ type: "ghost", ghost });
   }
 
@@ -762,6 +766,9 @@ function toGhost(row: Row): Ghost {
     isDefault: bool(row.is_default),
     state: String(row.state) as Ghost["state"],
     tools: parseJson(row.tools),
+    fallbacks: parseJson(row.fallbacks),
+    skills: parseJson(row.skills),
+    deletedAt: row.deleted_at === null ? null : Number(row.deleted_at),
     directConversationId: String(row.direct_conversation_id),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),

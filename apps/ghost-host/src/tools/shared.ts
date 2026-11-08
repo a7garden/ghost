@@ -38,6 +38,18 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   document_list: ["direct"],
   document_read: ["direct"],
   document_propose: ["direct"],
+  web_search: ["direct", "work"],
+  web_read: ["direct", "work"],
+  reach: ["direct", "work"],
+  skill_read: ["direct", "work"],
+  host_status: ["direct", "work"],
+  host_services: ["direct", "work"],
+  host_disk_scan: ["direct", "work"],
+  host_disk_usage: ["direct", "work"],
+  host_list: ["direct", "work"],
+  host_read: ["direct", "work"],
+  host_nodes: ["direct", "work"],
+  host_command_propose: ["direct", "work"],
 };
 
 /**
