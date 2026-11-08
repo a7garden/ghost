@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-fa25e91` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-f9bfa2c` (`main`, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -45,7 +45,8 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 �
 - 유휴(바쁜 대화·진행 중 Work 0) 확인 후 config에 `reach`·`skills`·`mac`을 넣고 `current`를 원자적으로 교체해 Host를 정상 재기동했다(PID 26248 → 43570 → 49085). 단일 리스너·실행 경로·준비 상태(`provider zai-coding is ready`)를 확인했다. 운영 실측: 리서치가 `web_search`로 실제 결과를 가져왔고, 3D 아트가 `skill_read`를 썼다. Mac 관리는 첫 점검 기준 검토를 받아 host 도구로 `com.a7.infra.git-sync` 마지막 실행 실패(exit 1)를 찾고, 읽기 전용 `cat` 실행 승인을 요청했다(소유자 결정 대기). 재기동 뒤 일일 검토가 중복되지 않았다. 설치 앱(external)에서 `+20` 사이드바와 실행 승인 카드를 창 캡처로 확인했다.
 - 로스터 정리: `specialist-engineering`·`specialist-operations` 삭제(tombstone). 활성 22개. Codex `gpt-6.1-sol`(대체: `gpt-6-luna` → `glm-5.3`): 메인·디자이너·3D 아트·플레이테스터·콘셉트·보안 점검. Codex `gpt-6-luna`(대체: `glm-5.3` → MiniMax): 레퍼런스. MiniMax(대체: `glm-5.3` → `gpt-6-luna`): 사용량·이슈 정리. 나머지 GLM `glm-5.3`(대체: MiniMax → `gpt-6-luna`). 웹 도구는 고객 응대·밸런스·플레이테스터·사용량·기억 관리를 뺀 Ghost, Mac 읽기 도구는 보안 점검, Mac 전체 도구는 Mac 관리만 가진다. 스킬: 메인·패널·하네스 회고·사용량 `agent-orchestra`(하네스 회고는 `agent-harness-construction`·`agent-introspection-debugging` 추가), 디자이너·콘텐츠 작가·SNS·고객 응대·레퍼런스 `anti-slop`, 3D 아트 `blender-general`·`tripo`·`game-asset-studio`, 기획·플레이테스터·밸런스 `game-dev-workflow`, 콘셉트 `anti-slop`·`pixel-art-aseprite`·`game-asset-studio`, 문서 작가 `anti-slop`·`a7garden-blog`·`portable-document-contract`, 리서치·경쟁 분석·AI 소식·이슈 정리 `agent-reach`, 보안 점검·Mac 관리 `pc-infra`. 웹을 얻은 Ghost의 역할 지시에서 "웹에 접근하지 못한다"를 지웠다.
 - Macfra: 상주 에이전트 `dev.garden.macfra.agent`를 `launchctl bootout` 후 `launchctl disable`로 껐다(plist와 앱은 그대로). Macfra의 메일 승인 경로는 옮기지 않았고, 승인은 Ghost 앱·iPhone의 실행 승인으로 한다. 되살릴 때는 `launchctl enable gui/$(id -u)/dev.garden.macfra.agent && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.garden.macfra.agent.plist`.
-- 되돌리기: UI만 되돌릴 때는 `current`를 `releases/20261108-bun-a71402d`로 바꾼다(같은 Host·스키마). 그 이전 릴리스는 원장 `user_version` 4를 "newer than this host"로 거부하므로, `5bbeacb`로 되돌리려면 `config.json`과 두 DB를 위 백업으로 복원해야 하고 그 사이의 대화·Work·설정 변경을 잃는다. 데이터 복원이므로 별도 승인을 받는다.
+- 통합: `ghost-team`과 `main`의 `1e87198`(제목 표시줄 탐색·사이드바 스크롤 레일)·`ed2f526`을 합친 `f9bfa2c`를 `main`에 fast-forward로 올리고 `releases/20261108-bun-f9bfa2c`에 설치했다. 사이드바는 `1e87198`의 스크롤 프레임·레일 안에 주요 Ghost + `+N` 접기를 넣었다. Host 328개·UI 90개·`tsc -b`·시각 회귀 28개(team·work 8장 갱신) 통과, 백업 `backups/pre-merge-20261108-f9bfa2c/`(두 DB `integrity_check` ok, config 사본), 임시 루트 시험 실행 후 유휴에서 전환(PID 51934 → 54254)했다. 설치 앱에서 제목 표시줄 뒤로/앞으로와 `+20` 사이드바를 창 캡처로 확인했다.
+- 되돌리기: `current`를 `releases/20261108-bun-fa25e91`(같은 Host·스키마, `1e87198` UI 제외)로 바꾼다. 마이그레이션 4 이전 릴리스(`5bbeacb`, `1e87198`)는 원장 `user_version` 4를 거부하고 새 config 키(`reach`·`skills`·`mac`)도 거부하므로, 그쪽으로 되돌리려면 `config.json`과 두 DB를 `backups/pre-team-20261108-a71402d/`로 복원해야 하고 그 사이의 변경을 잃는다. 데이터 복원이므로 별도 승인을 받는다.
 
 ### 제목 표시줄 탐색·사이드바 스크롤 릴리스 대기, 잘못된 전환 복구 — 2026-11-08
 
