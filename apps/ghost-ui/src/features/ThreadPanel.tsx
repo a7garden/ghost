@@ -10,14 +10,19 @@ import { useConversationFeed } from './conversationFeed';
 import { liveWork, toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
 
+const EXIT_FALLBACK_MS = 700;
+
 /**
  * A thread opened beside the conversation it branched from: where it stands, what it asks of
  * the owner (resolved in place), its delegated threads, and the carrier's own work conversation,
  * live. The owner steers it through decisions; editing and cancelling stay on the full page.
  */
-export function ThreadPanel({ workId, state, onClose, onOpenThread, onOpenPage }: {
+export function ThreadPanel({ workId, state, closing = false, onClosed, onClose, onOpenThread, onOpenPage }: {
   workId: string;
   state: State;
+  /** The thread was closed: the panel plays its exit, then calls `onClosed` to unmount. */
+  closing?: boolean;
+  onClosed?(): void;
   onClose(): void;
   onOpenThread(id: string): void;
   onOpenPage(id: string): void;
@@ -49,10 +54,16 @@ export function ThreadPanel({ workId, state, onClose, onOpenThread, onOpenPage }
   const { feed, loading } = useConversationFeed(work?.conversationId ?? null);
   useEffect(() => {
     // An open popover or dialog consumes Escape first (Radix marks it handled).
-    const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing) onClose(); };
+    const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !closing && !event.defaultPrevented && !event.isComposing) onClose(); };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [onClose]);
+  }, [onClose, closing]);
+  // The exit normally ends on animationend; a panel that never animates (hidden, no CSS) still leaves.
+  useEffect(() => {
+    if (!closing || !onClosed) return;
+    const timer = setTimeout(onClosed, EXIT_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, [closing, onClosed]);
 
   const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
   const pending = (detail?.decisions ?? []).filter(decision => decision.state === 'pending');
@@ -60,7 +71,8 @@ export function ThreadPanel({ workId, state, onClose, onOpenThread, onOpenPage }
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
   const carrier = work ? names.get(work.ghostId) ?? 'Ghost' : '';
 
-  return <aside className="thread-panel" aria-label={work ? `스레드: ${work.title}` : '스레드'}>
+  return <aside className="thread-panel" data-closing={closing || undefined} aria-label={work ? `스레드: ${work.title}` : '스레드'} aria-hidden={closing || undefined}
+    onAnimationEnd={event => { if (closing && event.target === event.currentTarget) onClosed?.(); }}>
     <header className="thread-panel__head">
       {work && <StateGlyph state={workGlyph(work.state, pending.length > 0)}/>}
       <h2>{work?.title ?? (missing ? '스레드를 찾을 수 없습니다' : '스레드')}</h2>

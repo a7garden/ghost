@@ -1,5 +1,5 @@
 // App-owned UI. Retained-source notices: ./LICENSE.
-import type { ComponentProps } from "react"
+import type { ComponentProps, ReactNode } from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cn } from "./utils"
 
@@ -13,11 +13,13 @@ export function Navigation({ label, className, ...props }: NavigationProps) {
 
 export interface NavigationGroupProps extends ComponentProps<"div"> {
   label: string
+  /** A small control beside the label (e.g. "new"); it stays with the label when the label sticks. */
+  action?: ReactNode
 }
 
-export function NavigationGroup({ label, children, className, ...props }: NavigationGroupProps) {
+export function NavigationGroup({ label, action, children, className, ...props }: NavigationGroupProps) {
   return <div className={cn("ghost-navigation-group", className)} {...props}>
-    <p className="ghost-navigation-group__label">{label}</p>
+    <div className="ghost-navigation-group__head"><p className="ghost-navigation-group__label">{label}</p>{action}</div>
     <div className="ghost-navigation-group__items">{children}</div>
   </div>
 }

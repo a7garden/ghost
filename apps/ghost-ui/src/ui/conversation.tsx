@@ -3,7 +3,7 @@ import * as React from "react"
 import { ArrowDown, ChevronRight } from "lucide-react"
 
 import { Button } from "./button"
-import { TranscriptRail } from "./transcript-rail"
+import { ScrollRail } from "./scroll-rail"
 import { cn } from "./utils"
 
 export interface ConversationProps {
@@ -168,7 +168,7 @@ export function Conversation({
             <div className="ghost-conversation__messages">{children}</div>
           </div>
         </div>
-        <TranscriptRail viewportRef={viewportRef} contentRef={contentRef} onScrub={markUserScroll} />
+        <ScrollRail viewportRef={viewportRef} contentRef={contentRef} onScrub={markUserScroll} />
         {showJumpToLatest && (
           <Button
             type="button"

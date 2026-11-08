@@ -16,6 +16,7 @@ export { Page, PageHeader } from './page';
 export { TitleBar } from './title-bar';
 export { Composer } from './composer';
 export { Conversation, ConversationMessage, ConversationActivity } from './conversation';
+export { ScrollRail } from './scroll-rail';
 export { SettingsLayout, SettingsGroup, SettingsRow } from './settings';
 export { CommandPalette } from './command-palette';
 export { SelectField } from './select';
