@@ -10,6 +10,7 @@ import type {
   PageSummary,
   ProviderPreset,
   PageView,
+  SkillCatalog,
   State,
   WorkDetail,
 } from '@ghost/contract';
@@ -60,6 +61,11 @@ export class HostClient {
 
   state(): Promise<State> {
     return this.json('/api/state');
+  }
+
+  /** Skills a Ghost may be given (owner only); 404 or empty when no skill root is configured. */
+  skills(): Promise<SkillCatalog> {
+    return this.json('/api/skills');
   }
 
   conversation(id: string, before?: string | null, limit = 50): Promise<ConversationPage> {

@@ -5,6 +5,7 @@ import { Badge, Button, Checkbox, FormField, InlineError, Input, SettingsGroup, 
 import type { Device, DeviceGrant } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
+import { visibleGhosts } from './ghostState';
 import { Modal } from '../components/Modal';
 
 /** The payload the iPhone's camera scans: `ghost://pair?origin=…&code=…`. Pure; exported for tests. */
@@ -32,6 +33,7 @@ export function MobilePairing() {
   const { state } = useHostState(store);
   const devices = state?.devices ?? [];
   const ghosts = state?.ghosts ?? [];
+  const roster = visibleGhosts(ghosts);
   const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? '알 수 없는 Ghost';
   const [offer, setOffer] = useState<{ code: string; expiresAt: number; origin: string }>();
   const [creating, setCreating] = useState(false);
@@ -94,12 +96,12 @@ export function MobilePairing() {
       : state && <div className="calm"><Smartphone size={16} aria-hidden="true"/><p>페어링된 기기 없음</p></div>}
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
-    {creating && <GrantEditor title="기기 페어링" ghosts={ghosts} nameHint="iPhone 15 Pro" busy={pending !== ''} onClose={() => setCreating(false)} onSave={async input => {
+    {creating && <GrantEditor title="기기 페어링" ghosts={roster} nameHint="iPhone 15 Pro" busy={pending !== ''} onClose={() => setCreating(false)} onSave={async input => {
       const result = await client.send<{ code: string; expiresAt: number; origin: string }>({ type: 'device.pairing_start', name: input.name, grants: input.grants });
       setCreating(false);
       setOffer(result);
     }}/>}
-    {editing && <GrantEditor title={`${editing.name} 권한 편집`} ghosts={ghosts} initialName={editing.name} initialGrants={editing.grants} busy={pending !== ''} onClose={() => setEditing(undefined)} onSave={async input => {
+    {editing && <GrantEditor title={`${editing.name} 권한 편집`} ghosts={roster} initialName={editing.name} initialGrants={editing.grants} busy={pending !== ''} onClose={() => setEditing(undefined)} onSave={async input => {
       const saved = await run(async () => {
         const command: { type: 'device.update'; deviceId: string; name?: string; grants?: DeviceGrant[] } = { type: 'device.update', deviceId: editing.id };
         if (input.name !== editing.name) command.name = input.name;

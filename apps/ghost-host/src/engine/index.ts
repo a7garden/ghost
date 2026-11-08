@@ -2,18 +2,25 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AttachedReplicatedState } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Models, MutableModels } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Models, MutableModels } from "@earendil-works/pi-ai";
 import {
   AssistantEntry,
   createRegistry,
+  configure as configureAgent,
+  defineExtension,
+  GenerationTask,
   Harness,
+  hook,
   LiveDoc,
   UserEntry,
   type Conversation as PiConversation,
   type ConversationId,
   type ConversationView,
   type EntryId,
+  type HarnessSettings,
   type EntryRecord,
+  type Extension,
+  type Registry,
   type LiveState,
   type SubmissionRecord,
   type ToolRegistration,
@@ -28,6 +35,7 @@ import type { ToolSet } from "../tools/types.ts";
 import { liveFrom, renderUserContent, sameLive, toMessage, type UserMeta } from "./messages.ts";
 import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
+import { FallbackDoc, fallbackModels, fallbackReason } from "./fallback.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
@@ -68,6 +76,8 @@ export interface EngineDeps {
   /** The model catalog; tests inject their own. */
   models?: Models;
   log: (message: string, detail?: unknown) => void;
+  /** Optional harness policy override; production uses Pi's bounded retries. */
+  harnessSettings?: HarnessSettings;
 }
 
 /** The entry a submission placed, when it has one. */
@@ -86,6 +96,7 @@ class HostEngine implements Engine {
   private readonly tools: ToolSet;
   private readonly log: (message: string, detail?: unknown) => void;
   private readonly harness: Harness;
+  private readonly fallbackExtension: Extension;
   /** The catalog the harness uses; rebuilt in place when the settings change. */
   private readonly ownedModels: MutableModels | null;
   private readonly states = new Map<string, ConversationState>();
@@ -95,12 +106,31 @@ class HostEngine implements Engine {
   private readonly unsubscribeLedger: () => void;
   private readonly unsubscribeCommits: () => void;
 
-  constructor(deps: EngineDeps, harness: Harness, ownedModels: MutableModels | null) {
+  constructor(deps: EngineDeps, harness: Harness, ownedModels: MutableModels | null, registry: Registry) {
     this.core = deps.core;
     this.tools = deps.tools;
     this.log = deps.log;
     this.harness = harness;
     this.ownedModels = ownedModels;
+    this.fallbackExtension = defineExtension({
+      name: "ghost.model-fallback",
+      hooks: [hook(GenerationTask, {
+        // Reset before Pi admits a queued next turn, not after its request is prepared.
+        onYield: async (_answer, api): Promise<undefined> => {
+          const state = this.byPiId.get(api.conversationId);
+          const conversation = state && this.core.ledger.findConversation(state.hostId);
+          if (!state || !conversation) return;
+          const ghost = this.core.ledger.ghost(conversation.ghostId);
+          const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
+          const primary = this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
+          await state.pi.configure({
+            model: primary ? { provider: primary.provider, modelId: primary.model } : null,
+            thinkingLevel: primary?.thinking ?? "off",
+          }, ctx);
+        },
+      })],
+    });
+    registry.install(this.fallbackExtension);
     this.unsubscribeLedger = this.core.ledger.subscribe((event) => {
       if (event.data.type === "settings") this.rebuildModels();
     });
@@ -129,11 +159,11 @@ class HostEngine implements Engine {
   }
 
   /** Apply the conversation's agent: model, thinking level, instructions and tools. */
-  private async configure(state: ConversationState, setup: ConversationSetup): Promise<void> {
+  private async configure(state: ConversationState, setup: ConversationSetup, servingModel?: ModelRef): Promise<void> {
     const { conversation, ghost, work } = setup;
-    const model = this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
+    const model = servingModel ?? this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
     const kindInstructions = this.tools.instructionsFor(conversation, ghost, work);
-    const extensions = this.tools.extensionsFor(conversation, ghost, work);
+    const extensions = [...this.tools.extensionsFor(conversation, ghost, work), this.fallbackExtension];
     // Pi resolves extension names from its registry; filtering copied extensions would not filter the model's tools.
     const grantedTools: ToolRegistration[] = [];
     for (const extension of extensions) {
@@ -159,9 +189,22 @@ class HostEngine implements Engine {
     let model = conversation.model;
     if (!model && conversation.kind === "review") {
       const reviewer = work?.acceptance.reviewer ?? null;
-      model = reviewer?.kind === "model" ? reviewer.model : settings.reviewModel;
+      // A named reviewer Ghost judges with its own model; only an unnamed review takes the review model.
+      if (reviewer?.kind === "model") model = reviewer.model;
+      else if (reviewer === null) model = settings.reviewModel;
     }
     return model ?? ghost.model ?? settings.defaultModel;
+  }
+
+  private allowsFallback(settings: Settings, conversation: HostConversation, work: Work | null): boolean {
+    return conversation.model === null && (conversation.kind !== "review" ||
+      (work?.acceptance.reviewer?.kind !== "model" && settings.reviewModel === null));
+  }
+
+  private available(model: ModelRef, settings: Settings): boolean {
+    const provider = settings.providers.find((item) => item.id === model.provider);
+    return !!provider && this.core.secrets.has(provider.id) &&
+      (provider.models.length === 0 || provider.models.some((item) => item.id === model.model));
   }
 
   // Submitting
@@ -179,11 +222,21 @@ class HostEngine implements Engine {
     if (provider.models.length > 0 && !provider.models.some((info) => info.id === model.model)) {
       throw new CommandError("unavailable", `provider ${provider.id} has no model ${model.model}`);
     }
-    if (!this.core.secrets.has(provider.id)) {
-      throw new CommandError("unavailable", `provider ${provider.id} has no credential`);
-    }
     const state = await this.ensureState(conversationId);
-    if (!state.configured) await this.configure(state, { conversation, ghost, work });
+    // A duplicate admission must not reset an in-flight fallback or start another run.
+    const existing = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, submission.requestId), ctx);
+    if (existing) return;
+    let serving = model;
+    if (!this.core.secrets.has(provider.id)) {
+      const next = this.allowsFallback(settings, conversation, work)
+        ? fallbackModels(ghost, model).find((candidate) => this.available(candidate, settings))
+        : undefined;
+      if (!next) throw new CommandError("unavailable", `provider ${provider.id} has no credential`);
+      this.logFallback(state, model, next, `provider ${provider.id} has no credential`);
+      serving = next;
+    }
+    // A new turn always starts at the primary, not the previous turn's serving model.
+    if (!state.busy || !state.configured) await this.configure(state, { conversation, ghost, work }, serving);
     const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [] };
     const content = await renderUserContent(submission.text, meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
     await this.recordOrigin(state, submission.requestId, meta);
@@ -347,7 +400,7 @@ class HostEngine implements Engine {
         const running = liveFrom(await this.liveState(state), hostId).running;
         state.expectRun = running;
         await this.attachView(state);
-        this.setBusy(state, running);
+        if (running) this.setBusy(state, true); // The idle observer first checks for an exhausted-model fallback.
       }
     } catch (error) {
       this.log("engine: could not resume the interrupted runs", error);
@@ -445,12 +498,76 @@ class HostEngine implements Engine {
     // Pi stores the live document as the JSON of its own `LiveState`.
     const live = liveFrom(document === undefined ? undefined : (document as unknown as LiveState), state.hostId);
     if (live.running) state.expectRun = false;
-    this.setBusy(state, live.running);
+    if (live.running) this.setBusy(state, true);
+    if (!live.running) {
+      this.enqueue(state, async () => {
+        if (await this.continueFallback(state)) return;
+        const current = liveFrom(await this.liveState(state), state.hostId);
+        if (current.running) return;
+        this.setBusy(state, false);
+        if (!sameLive(state.live, current)) {
+          state.live = current;
+          this.emit(state, { type: "live", live: current });
+        }
+        if (!state.expectRun && state.listeners.size === 0) this.detachView(state);
+      });
+      return;
+    }
     if (!sameLive(state.live, live)) {
       state.live = live;
       this.emit(state, { type: "live", live });
     }
-    if (!live.running && !state.expectRun && state.listeners.size === 0) queueMicrotask(() => this.detachView(state));
+  }
+
+  private logFallback(state: ConversationState, from: ModelRef, to: ModelRef, reason: string): void {
+    this.log(`fallback: ${state.hostId} ${from.provider}/${from.model} -> ${to.provider}/${to.model} (${reason.replace(/[\r\n]+/g, " ").slice(0, 300)})`);
+  }
+
+  /** Continue committed context, not input: no second user entry or request-id admission. */
+  private async continueFallback(state: ConversationState): Promise<boolean> {
+    // Merely opening an idle historical conversation must not retry its old error.
+    if (!state.busy) return false;
+    const conversation = this.core.ledger.findConversation(state.hostId);
+    if (!conversation) return false;
+    const settings = this.core.ledger.settings();
+    const ghost = this.core.ledger.ghost(conversation.ghostId);
+    const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
+    if (!this.allowsFallback(settings, conversation, work)) return false;
+    const primary = this.resolveModel(settings, conversation, ghost, work);
+    if (!primary || ghost.fallbacks.length === 0) return false;
+    const switched = await state.pi.commit(async (tx) => {
+      const live = await tx.doc(LiveDoc, state.piId);
+      if (live.run) return null; // Pi's own retry or another input is still running.
+      const entries = await tx.scanEntries({ conversationId: state.piId }, 10);
+      const tail = entries.items.find((entry) => entry.kind === "pi.assistant" || entry.kind === "pi.user");
+      if (!tail || tail.kind !== "pi.assistant") return null;
+      const message = tail.model?.find((item): item is AssistantMessage => item.role === "assistant");
+      const reason = message ? fallbackReason(message) : null;
+      if (!message || reason === null) return null;
+      const fallback = await tx.doc(FallbackDoc, state.piId);
+      if (fallback.lastError >= tail.id) return null;
+      const candidates = fallbackModels(ghost, primary);
+      const failedIndex = candidates.findIndex((candidate) => candidate.provider === message.provider && candidate.model === message.model);
+      const next = candidates.slice(failedIndex + 1).find((candidate) => this.available(candidate, settings));
+      fallback.lastError = tail.id;
+      if (!next) return null;
+      await configureAgent(tx, state.piId, {
+        model: { provider: next.provider, modelId: next.model },
+        thinkingLevel: next.thinking ?? "off",
+      });
+      // Pi exposes no retry API. Re-arm its exported generation task over the existing
+      // context, atomically with the model and handled-error marker. No submission is
+      // replayed; completed tool tasks/results remain in context, including unsafe effects.
+      live.run = {
+        taskId: await tx.createTask(GenerationTask, {}, { conversationId: state.piId, ownership: { kind: "conversation" } }),
+        inputs: [],
+      };
+      return { from: { provider: message.provider, model: message.model }, next, reason };
+    }, ctx);
+    if (!switched) return false;
+    this.logFallback(state, switched.from, switched.next, switched.reason);
+    this.setBusy(state, true);
+    return true;
   }
 
   /** Report a run's start or end to core, once per transition. */
@@ -577,6 +694,7 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
     {
       models,
       registry,
+      settings: deps.harnessSettings,
       env: async ({ conversationId }) => {
         const host = core.ledger.conversationByPiId(String(conversationId));
         if (!host || host.kind !== "work" || !host.workId) return undefined;
@@ -586,5 +704,5 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
     },
     ctx,
   );
-  return new HostEngine(deps, harness, ownedModels);
+  return new HostEngine(deps, harness, ownedModels, registry);
 }

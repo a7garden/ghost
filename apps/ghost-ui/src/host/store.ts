@@ -178,5 +178,6 @@ export class HostStore {
 }
 
 export function useHostState(store: HostStore) {
-  return useSyncExternalStore(store.subscribe, store.get);
+  // The snapshot getter doubles as the server snapshot so components also render in SSR tests.
+  return useSyncExternalStore(store.subscribe, store.get, store.get);
 }

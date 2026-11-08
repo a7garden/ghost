@@ -326,12 +326,16 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
 
   const delegate = defineTool({
     name: "delegate",
-    description: "Hand a self-contained part of this Work to another Ghost as a child Work. Its result arrives here when it settles.",
+    description:
+      "Hand a self-contained part of this Work to another Ghost as a child Work, optionally naming the Ghost that judges its result. Its result arrives here when it settles.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "Assignee Ghost" }),
       title: Type.String({ minLength: 1, maxLength: 256 }),
       brief: Type.String({ minLength: 1, maxLength: 32768 }),
       criteria: Type.Optional(Type.String({ maxLength: 8192, description: "When the delegated Work is done" })),
+      reviewer_ghost_id: Type.Optional(
+        Type.String({ minLength: 1, description: "Ghost that reviews the result; defaults to the Ghost that delegated" }),
+      ),
       deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Deadline in minutes from now; capped by this Work's own deadline" })),
     }),
     replay: "unsafe",
@@ -342,7 +346,11 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
           ghostId: args.ghost_id,
           title: args.title,
           brief: args.brief,
-          acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: null },
+          acceptance: {
+            criteria: args.criteria ?? "",
+            checks: [],
+            reviewer: args.reviewer_ghost_id ? { kind: "ghost", ghostId: args.reviewer_ghost_id } : null,
+          },
           deadlineAt: args.deadline_minutes === undefined ? null : Date.now() + args.deadline_minutes * 60_000,
           id: idFor(scope.conversation.id, api.callId),
         });

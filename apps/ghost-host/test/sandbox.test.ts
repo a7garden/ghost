@@ -34,6 +34,8 @@ function localConfig(root: string): Config {
     memory: null,
     voice: null,
     apns: null,
+    skills: null,
+    reach: null,
   };
 }
 

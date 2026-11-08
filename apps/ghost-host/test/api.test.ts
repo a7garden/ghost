@@ -93,8 +93,10 @@ const config: Config = {
   memory: null,
   voice: null,
   apns: null,
+  skills: null,
+  reach: null,
 };
-const server = startServer({ core, config, ownerToken: OWNER_TOKEN, documents: null });
+const server = startServer({ core, config, ownerToken: OWNER_TOKEN, documents: null, skills: null });
 const base = `http://127.0.0.1:${server.port}`;
 const port = server.port;
 

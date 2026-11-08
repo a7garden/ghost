@@ -62,7 +62,10 @@ export class Works {
     if (parent.state !== "running") throw conflict(`parent Work is ${parent.state}`);
     if (!parent.conversationId) throw conflict("parent Work has no conversation");
     const target = this.ledger.ghost(input.ghostId);
+    if (target.deletedAt !== null) throw conflict(`${target.name} was deleted`);
     if (target.state !== "active") throw conflict(`${target.name} is ${target.state}`);
+    if (target.id === parent.ghostId) throw conflict("a Work cannot delegate to its own Ghost");
+    this.checkReviewer(input.acceptance?.reviewer ?? null, input.ghostId);
     if (this.depth(parent) + 1 > MAX_DEPTH) throw conflict(`delegation deeper than ${MAX_DEPTH} levels`);
     const live = this.ledger.children(parent.id).filter((child) => !isTerminal(child));
     if (live.length >= MAX_LIVE_CHILDREN) throw conflict(`at most ${MAX_LIVE_CHILDREN} live delegations per Work`);
@@ -452,6 +455,15 @@ export class Works {
   /** Checks come from the Work's own owner/parent-authored spec; a model never writes its own. */
   private inheritedChecks(work: Work) {
     return work.acceptance.checks;
+  }
+
+  /** A named reviewer must be an active, non-deleted Ghost other than the assignee. */
+  private checkReviewer(reviewer: Acceptance["reviewer"], assigneeId: string) {
+    if (reviewer?.kind !== "ghost") return;
+    const ghost = this.ledger.ghost(reviewer.ghostId);
+    if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
+    if (ghost.state !== "active") throw conflict(`${ghost.name} is ${ghost.state}`);
+    if (ghost.id === assigneeId) throw invalid("the reviewer must be a Ghost other than the assignee");
   }
 
   /**

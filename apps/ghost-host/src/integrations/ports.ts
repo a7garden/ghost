@@ -66,3 +66,102 @@ export interface DocumentsPort {
   /** Owner edit from the UI: same checks and atomic write as `apply`, returns the saved page. */
   save(proposal: DocumentProposal): Promise<Page>;
 }
+
+/** One result entry of an `agent-reach` invocation. All fields come from untrusted web content. */
+export interface ReachItem {
+  title: string | null;
+  url: string | null;
+  author: string | null;
+  publishedAt: string | null;
+  text: string | null;
+}
+
+export interface ReachError {
+  code: string;
+  message: string;
+  hint: string | null;
+}
+
+/** One normalized `agent-reach` invocation. `ok:false` carries `error`; `ok:true` carries `items`. */
+export interface ReachResult {
+  ok: boolean;
+  channel: string | null;
+  action: string | null;
+  items: ReachItem[];
+  error: ReachError | null;
+}
+
+export interface ReachChannel {
+  name: string;
+  actions: { name: string }[];
+}
+
+/** Read-only web research through the installed `agent-reach` CLI. Implemented in src/integrations/reach.ts. */
+export interface ReachPort {
+  /** `agent-reach web search <query> --limit <limit>`. */
+  search(query: string, limit: number): Promise<ReachResult>;
+  /** `agent-reach read <url>`. The caller must have vetted the URL against the SSRF guard. */
+  read(url: string): Promise<ReachResult>;
+  /** `agent-reach <channel> <action> ...args`. The caller must have validated channel/action against the catalog. */
+  run(channel: string, action: string, args: string[]): Promise<ReachResult>;
+  /** The channel/action catalog the CLI reports (`agent-reach channels`); cached after the first call. */
+  catalog(): Promise<ReachChannel[]>;
+}
+
+export interface HostCommand {
+  title: string;
+  reason: string;
+  program: string;
+  args: string[];
+  cwd: string;
+  risk: string;
+}
+
+export interface HostStatus {
+  collectedAt: number;
+  disks: { path: string; totalBytes: number; freeBytes: number; pressure: "healthy" | "pressure" | "critical" }[];
+  ramBytes: number;
+  memoryFreePct: number | null;
+  cores: number;
+  loadAverage: number[];
+  topProcesses: { name: string; cpuPct: number }[];
+  listeningPortCount: number;
+  warnings: string[];
+}
+
+export interface HostServices {
+  services: { label: string; state: "running" | "loaded" | "unloaded" | "unknown"; lastExit: number | null }[];
+  failed: HostServices["services"];
+  partial: boolean;
+}
+
+export interface HostNodes {
+  nodes: { name: string; online: boolean; os: string; lastSeen: string | null }[];
+  healthWarnings: string[];
+  error: string | null;
+}
+
+/** Owner-enabled, guarded Mac probes; callers cannot supply an arbitrary probe command. */
+export interface HostPort {
+  status(): Promise<HostStatus>;
+  services(): Promise<HostServices>;
+  nodes(): Promise<HostNodes>;
+  diskScan(): Promise<unknown>;
+  diskUsage(path: string): Promise<unknown>;
+  list(path: string): Promise<unknown>;
+  read(path: string): Promise<unknown>;
+  validateCommand(input: HostCommand): HostCommand;
+  executeCommand(input: HostCommand): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
+}
+
+/** The owner's skill folders, read-only. Implemented in src/integrations/skills.ts. */
+export interface SkillsPort {
+  /** Skills across the configured roots, first root wins on duplicate names; cached briefly. */
+  catalog(): { name: string; description: string }[];
+  /** A skill's SKILL.md without its frontmatter, or null when the skill is missing or unreadable. */
+  body(name: string): string | null;
+  /** Relative file paths of a skill, files only, dotfiles skipped. */
+  list(name: string): string[];
+  /** One skill file as UTF-8 text, bounded. */
+  readFile(name: string, relPath: string): string;
+}

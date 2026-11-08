@@ -22,11 +22,12 @@ import {
   type StreamFrame,
   type PageSummary,
   type PageView,
+  type SkillCatalog,
   parse,
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
 import { PROVIDER_PRESETS } from "../integrations/provider-catalog.ts";
-import type { DocumentsPort } from "../integrations/ports.ts";
+import type { DocumentsPort, SkillsPort } from "../integrations/ports.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { Access } from "../core/access.ts";
@@ -137,8 +138,8 @@ function eventVisible(ledger: Core["ledger"], access: Access, event: LedgerEvent
   return exhaustive;
 }
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null }): { port: number; stop(): Promise<void> } {
-  const { core, config, ownerToken, documents } = deps;
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null }): { port: number; stop(): Promise<void> } {
+  const { core, config, ownerToken, documents, skills } = deps;
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
@@ -519,6 +520,16 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       try {
         if (!access.isOwner) throw new CommandError("forbidden", "provider catalog needs the owner");
         return json(PROVIDER_PRESETS);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+
+    if (pathname === "/api/skills" && request.method === "GET") {
+      try {
+        if (!access.isOwner) throw new CommandError("forbidden", "skills need the owner");
+        if (!skills) throw new CommandError("unavailable", "skill folders are not configured");
+        return json({ skills: skills.catalog() } satisfies SkillCatalog);
       } catch (caught) {
         return failure(caught);
       }

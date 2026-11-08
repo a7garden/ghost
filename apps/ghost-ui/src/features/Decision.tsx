@@ -153,7 +153,17 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
 function RequestPreview({ value }: { value: Record<string, unknown> }) {
   const command = typeof value.command === 'string' ? value.command : null;
   const json = JSON.stringify(value, null, 2);
-  if (command) return <pre className="decision__request"><span aria-hidden="true">$ </span>{command}</pre>;
+  if (command) {
+    // A host command proposal: why, where, what, and how risky. The command stays monospace.
+    const cwd = typeof value.cwd === 'string' && value.cwd ? value.cwd : null;
+    const reason = typeof value.reason === 'string' ? value.reason.trim() : '';
+    const risk = typeof value.risk === 'string' && value.risk ? value.risk : null;
+    return <div className="decision__request-block">
+      {reason && <p className="decision__request-reason">{reason}</p>}
+      <pre className="decision__request">{cwd && <span>{cwd} </span>}<span aria-hidden="true">$ </span>{command}</pre>
+      {risk && <p className="decision__request-risk" data-risk={risk}>{risk}</p>}
+    </div>;
+  }
   if (json.length > 480) return <details className="decision__request-more"><summary>요청 내용 보기</summary><pre className="decision__request">{json}</pre></details>;
   return <pre className="decision__request">{json}</pre>;
 }

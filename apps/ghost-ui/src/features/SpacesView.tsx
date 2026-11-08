@@ -5,7 +5,7 @@ import type { PageSummary, Space } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { routeLabels } from '../uiText';
-import { toneFor } from './ghostState';
+import { toneFor, visibleGhosts } from './ghostState';
 import { DotAvatar } from '../components/DotAvatar';
 import { defaultSpaceGrants, noteSpaceEdit, spaceLastEdit } from './spacePages';
 import { useNow } from './time';
@@ -31,7 +31,7 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
   const { store, client } = useHost();
   const { state } = useHostState(store);
   const spaces = state?.spaces ?? [];
-  const ghosts = state?.ghosts ?? [];
+  const ghosts = visibleGhosts(state?.ghosts ?? []);
   const space = spaces.find(item => item.id === selectedSpace);
   const [creating, setCreating] = useState(false);
   const [armed, setArmed] = useState(false);
@@ -71,8 +71,7 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
   const closeCreate = () => { setCreating(false); onCreateClosed?.(); };
 
   if (creating) {
-    const roster = [...ghosts].sort((a, b) => Number(b.isDefault) - Number(a.isDefault))
-      .map(ghost => ({ id: ghost.id, name: ghost.name }));
+    const roster = ghosts.map(ghost => ({ id: ghost.id, name: ghost.name }));
     return <Page width="reading">
       <PageHeader title="새 프로젝트"/>
       <ProjectCreate ghosts={roster} busy={pending !== ''} defaultGrants={defaultSpaceGrants(ghosts)} onClose={closeCreate}

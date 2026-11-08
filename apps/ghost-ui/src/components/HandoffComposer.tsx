@@ -3,7 +3,7 @@ import { ChevronDown, Paperclip } from 'lucide-react';
 import { Composer, InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import type { Ghost } from '@ghost/contract';
 import { DotAvatar } from './DotAvatar';
-import { toneFor } from '../features/ghostState';
+import { toneFor, visibleGhosts } from '../features/ghostState';
 import { ModelPicker } from '../pets/ModelPicker';
 import { useHost } from '../host/context';
 import { ComposerPlus } from './composer/ComposerPlus';
@@ -18,6 +18,7 @@ type Mode = 'talk' | 'work';
  */
 export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigate(path: string): void }) {
   const { client } = useHost();
+  const roster = visibleGhosts(ghosts);
   const [text, setText] = useState('');
   const [criteria, setCriteria] = useState('');
   const [deadline, setDeadline] = useState('');
@@ -28,7 +29,7 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments();
-  const target = ghosts.find(ghost => ghost.id === ghostId) ?? ghosts[0];
+  const target = roster.find(ghost => ghost.id === ghostId) ?? roster[0];
 
   const send = async (value: string) => {
     if (!target || sending) return;
@@ -64,7 +65,7 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
       placeholder={assigning ? '맡길 일을 적어 주세요. 첫 줄이 제목이 됩니다.' : `${target.name}에게 메시지`}
       submitLabel={assigning ? '일 맡기기' : '보내기'} disabled={sending} pending={sending}
       header={<div className="handoff__head">
-        <RecipientToken ghosts={ghosts} value={target} disabled={sending} onChange={id => { setGhostId(id); inputRef.current?.focus(); }}/>
+        <RecipientToken ghosts={roster} value={target} disabled={sending} onChange={id => { setGhostId(id); inputRef.current?.focus(); }}/>
         <div className="handoff__mode" role="radiogroup" aria-label="보내는 방식">
           {(['talk', 'work'] as const).map(value => <button key={value} type="button" role="radio" aria-checked={mode === value}
             disabled={value === 'work' && attachments.items.length > 0}
@@ -92,7 +93,13 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
 /** The addressed Ghost as a token at the start of the message; opens the team to readdress. */
 function RecipientToken({ ghosts, value, onChange, disabled }: { ghosts: Ghost[]; value: Ghost; onChange(id: string): void; disabled: boolean }) {
   const [open, setOpen] = useState(false);
-  return <Popover open={open} onOpenChange={setOpen}>
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+  const searchable = ghosts.length > 8;
+  const needle = query.trim().toLowerCase();
+  const shown = ghosts.filter(ghost => !needle || ghost.name.toLowerCase().includes(needle)
+    || ghost.persona.split('\n')[0]!.toLowerCase().includes(needle));
+  return <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) setQuery(''); }}>
     <PopoverTrigger asChild>
       <button type="button" className="recipient" disabled={disabled} aria-label={`받는 Ghost: ${value.name}`}>
         <DotAvatar profileId={value.id} tone={toneFor(value.id)} size={18}/>
@@ -100,8 +107,13 @@ function RecipientToken({ ghosts, value, onChange, disabled }: { ghosts: Ghost[]
         <ChevronDown size={13} aria-hidden="true"/>
       </button>
     </PopoverTrigger>
-    <PopoverContent side="bottom" align="start" aria-label="받는 Ghost" className="grid w-60 gap-0.5 p-1.5">
-      {ghosts.map(ghost => <button key={ghost.id} type="button" aria-pressed={ghost.id === value.id}
+    <PopoverContent side="bottom" align="start" aria-label="받는 Ghost"
+      className="grid w-60 gap-0.5 p-1.5 max-h-[min(320px,var(--radix-popover-content-available-height))]"
+      onOpenAutoFocus={event => { if (searchable) { event.preventDefault(); searchRef.current?.focus(); } }}>
+      {searchable && <input ref={searchRef} type="search" className="recipient-search" aria-label="Ghost 찾기"
+        placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
+        onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
+      {shown.map(ghost => <button key={ghost.id} type="button" aria-pressed={ghost.id === value.id}
         className="menu-row" onClick={() => { onChange(ghost.id); setOpen(false); }}>
         <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={20}/><span className="min-w-0 flex-1 truncate">{ghost.name}</span>
         {ghost.isDefault && <span className="presence-row__main-mark">메인</span>}

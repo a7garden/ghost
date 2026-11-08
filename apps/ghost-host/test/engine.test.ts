@@ -410,7 +410,7 @@ test("a tool call shows up as a tool message", async () => {
 
 test("present_ui persists through the real tool journal without optional privileges, alongside ordinary text", async () => {
   const { core, engine, ledger, root, faux } = await fixture(
-    (core) => createToolSet({ core, sandbox, memory: null, documents: null }),
+    (core) => createToolSet({ core, sandbox, memory: null, documents: null, skills: null }),
   );
   let active: Engine | null = engine;
   const ghost = core.createGhost({ name: "Presenter", persona: "사용자의 자료를 그대로 보여 주세요.", tools: [] });
@@ -451,7 +451,7 @@ test("present_ui persists through the real tool journal without optional privile
     active = await createEngine({
       core,
       storagePath: join(root, "pi.db"),
-      tools: createToolSet({ core, sandbox, memory: null, documents: null }),
+      tools: createToolSet({ core, sandbox, memory: null, documents: null, skills: null }),
       sandbox,
       models,
       log: () => {},
@@ -559,7 +559,7 @@ test("the model catalog follows the configured providers", async () => {
 
 test("changing the main Ghost transfers real management authority without restarting conversations", async () => {
   const { core, engine, ledger, root, ghostId, conversationId, faux } = await fixture(
-    (core) => createToolSet({ core, sandbox, memory: null, documents: null }),
+    (core) => createToolSet({ core, sandbox, memory: null, documents: null, skills: null }),
   );
   const helper = core.createGhost({ name: "Helper", persona: "Original helper.", tools: [] });
   await core.idle();
@@ -601,7 +601,7 @@ test("changing the main Ghost transfers real management authority without restar
 
 test("the real model request offers only granted selectable tools after live permission changes", async () => {
   const { core, engine, ledger, root, faux } = await fixture(
-    (core) => createToolSet({ core, sandbox, memory: null, documents: null }),
+    (core) => createToolSet({ core, sandbox, memory: null, documents: null, skills: null }),
   );
   const helper = core.createGhost({ name: "Restricted", persona: "Only use granted tools.", tools: [] });
   await core.idle();

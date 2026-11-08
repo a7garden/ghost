@@ -1,0 +1,599 @@
+import { describe, expect, spyOn, test } from "bun:test";
+import {
+  chmodSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import type { ToolExecutionApi } from "@earendil-works/pi-durable";
+import { HOST_TOOLS } from "@ghost/contract";
+import {
+  MacHost,
+  redactHostText,
+  runHostCommand,
+  sensitiveText,
+  type HostRun,
+  type HostRunner,
+} from "../src/integrations/host.ts";
+import type {
+  HostCommand,
+  HostPort,
+  HostStatus,
+  HostServices,
+  HostNodes,
+} from "../src/integrations/ports.ts";
+import { HostWatch } from "../src/core/hostwatch.ts";
+import { createHostTools } from "../src/tools/host.ts";
+import { loadConfig } from "../src/config.ts";
+import { harness, tempDir } from "./support.ts";
+
+const GB = 1_073_741_824;
+const HOUR = 3_600_000;
+function fixture(runner?: HostRunner) {
+  const home = realpathSync(tempDir());
+  const root = join(home, "projects");
+  mkdirSync(root);
+  mkdirSync(join(home, "Library/Caches"), { recursive: true });
+  mkdirSync(join(home, ".cache"));
+  return { home, root, host: new MacHost({ roots: [root], home, runner }) };
+}
+const ok = (output = "") => ({
+  exitCode: 0,
+  output,
+  timedOut: false,
+  truncated: false,
+});
+function command(root: string): HostCommand {
+  return {
+    title: "Check",
+    reason: "Inspect explicitly",
+    program: "/bin/echo",
+    args: ["hello"],
+    cwd: root,
+    risk: "No writes",
+  };
+}
+
+class Probes implements HostPort {
+  free = 100 * GB;
+  total = 200 * GB;
+  lastExit = 0;
+  online = true;
+  executions = 0;
+  async status(): Promise<HostStatus> {
+    return {
+      collectedAt: 0,
+      disks: [
+        {
+          path: "/",
+          totalBytes: this.total,
+          freeBytes: this.free,
+          pressure:
+            this.free < 5 * GB
+              ? "critical"
+              : this.free < 50 * GB
+                ? "pressure"
+                : "healthy",
+        },
+      ],
+      ramBytes: 32 * GB,
+      memoryFreePct: 40,
+      cores: 8,
+      loadAverage: [1, 1, 1],
+      topProcesses: [],
+      listeningPortCount: 3,
+      warnings: [],
+    };
+  }
+  async services(): Promise<HostServices> {
+    const service = {
+      label: "dev.test",
+      state: "loaded" as const,
+      lastExit: this.lastExit,
+    };
+    return {
+      services: [service],
+      failed: this.lastExit ? [service] : [],
+      partial: false,
+    };
+  }
+  async nodes(): Promise<HostNodes> {
+    return {
+      nodes: [
+        { name: "test-node", online: this.online, os: "macOS", lastSeen: null },
+      ],
+      healthWarnings: [],
+      error: null,
+    };
+  }
+  async diskScan() {
+    return {};
+  }
+  async diskUsage() {
+    return {};
+  }
+  async list() {
+    return {};
+  }
+  async read() {
+    return {};
+  }
+  validateCommand(input: HostCommand) {
+    return input;
+  }
+  async executeCommand() {
+    this.executions++;
+    return ok("executed");
+  }
+}
+
+describe("guarded Mac host", () => {
+  test("canonical roots reject traversal, escape, secrets and private text; symlinks never read", async () => {
+    const f = fixture();
+    try {
+      writeFileSync(join(f.root, "hello.txt"), "hello");
+      writeFileSync(join(f.root, ".env.local"), "credential");
+      mkdirSync(join(f.root, "notes"));
+      writeFileSync(join(f.root, "notes", "one.txt"), "private");
+      mkdirSync(join(f.home, "outside"));
+      writeFileSync(join(f.home, "outside", "one.txt"), "outside");
+      symlinkSync(join(f.home, "outside"), join(f.root, "escape"));
+      symlinkSync(join(f.root, "hello.txt"), join(f.root, "alias"));
+      symlinkSync(join(f.root, ".env.local"), join(f.root, "hidden"));
+      expect(() => f.host.resolve(`${f.root}/../outside`)).toThrow("traversal");
+      expect(() => f.host.resolve(join(f.root, "escape", "one.txt"))).toThrow(
+        "escape",
+      );
+      expect(() => f.host.resolve(join(f.root, "hidden"))).toThrow("secret");
+      expect(() => f.host.resolve(join(f.root, ".env.local"))).toThrow(
+        "secret",
+      );
+      await expect(
+        f.host.read(join(f.root, "notes", "one.txt")),
+      ).rejects.toThrow("private");
+      await expect(f.host.read(join(f.root, "alias"))).rejects.toThrow(
+        "symlink",
+      );
+      expect(await f.host.read(join(f.root, "hello.txt"))).toMatchObject({
+        text: "hello",
+      });
+      const listing = await f.host.list(f.root);
+      expect(listing.entries.some((e) => e.name === ".env.local")).toBe(false);
+      writeFileSync(join(f.home, ".cache", "text.txt"), "cache");
+      expect(
+        await f.host.read(join(f.home, ".cache", "text.txt")),
+      ).toMatchObject({ text: "cache" });
+      writeFileSync(join(f.root, "huge.txt"), "x".repeat(12_001));
+      await expect(f.host.read(join(f.root, "huge.txt"))).rejects.toThrow(
+        "12 KB",
+      );
+      writeFileSync(join(f.root, "binary.txt"), Buffer.from([0xff]));
+      await expect(f.host.read(join(f.root, "binary.txt"))).rejects.toThrow();
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("sensitive text redacts credentials without removing ordinary evidence", () => {
+    for (const value of [
+      "GITHUB_TOKEN=ghp_example",
+      "SECRET_KEY='example'",
+      "passwd: value",
+      "Bearer abc",
+      "github_pat_example",
+      "-----BEGIN PRIVATE KEY-----",
+      "AbCdEfGhIjKlMnOpQrStUvWxYz012345678901234567890123",
+    ])
+      expect(sensitiveText(value)).toBe(true);
+    expect(redactHostText("normal\npassword: xyz\nlast line")).toBe(
+      "normal\n[REDACTED: sensitive text]\nlast line",
+    );
+    expect(sensitiveText("disk-cache secret management token budget")).toBe(
+      false,
+    );
+  });
+  test("absolute allowlist, canonical denylist, interpreters, metacharacters and cwd enforce preflight", () => {
+    const f = fixture();
+    try {
+      expect(f.host.validateCommand(command(f.root)).program).toBe(
+        realpathSync("/bin/echo"),
+      );
+      for (const program of [
+        "echo",
+        "/bin/sh",
+        "/bin/bash",
+        "/usr/bin/env",
+        "/usr/bin/python3",
+        "/usr/bin/sudo",
+        "/usr/bin/security",
+        "/usr/bin/osascript",
+        "/usr/bin/ssh",
+        "/bin/launchctl",
+      ])
+        expect(() =>
+          f.host.validateCommand({ ...command(f.root), program }),
+        ).toThrow();
+      for (const arg of [
+        "hello; rm file",
+        "$(id)",
+        "a|b",
+        "a&&b",
+        "`id`",
+        "a\nb",
+      ])
+        expect(() =>
+          f.host.validateCommand({ ...command(f.root), args: [arg] }),
+        ).toThrow("metacharacter");
+      expect(() =>
+        f.host.validateCommand({
+          ...command(f.root),
+          cwd: join(f.home, ".cache"),
+        }),
+      ).toThrow("outside");
+      symlinkSync("/bin/sh", join(f.root, "alias"));
+      expect(() =>
+        f.host.validateCommand({
+          ...command(f.root),
+          program: join(f.root, "alias"),
+        }),
+      ).toThrow("interpreter");
+      const tool = join(f.root, "tool");
+      writeFileSync(tool, "executable");
+      chmodSync(tool, 0o700);
+      expect(
+        f.host.validateCommand({ ...command(f.root), program: tool }).program,
+      ).toBe(tool);
+      expect(() =>
+        f.host.validateCommand({ ...command(f.root), title: "x".repeat(2001) }),
+      ).toThrow();
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("fake runner receives fixed bounded probes; process names only, service states correct", async () => {
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => {
+      calls.push(input);
+      if (input.program.endsWith("memory_pressure"))
+        return ok("System-wide memory free percentage: 42%\n");
+      if (input.program.endsWith("ps"))
+        return ok(
+          "33.5 /Applications/Example.app/Example\n2.0 /usr/bin/other\n",
+        );
+      if (input.program.endsWith("lsof"))
+        return ok(
+          "a TCP *:3000 (LISTEN)\nb TCP [::]:3000 (LISTEN)\nc TCP *:4000 (LISTEN)\n",
+        );
+      if (input.program.endsWith("launchctl"))
+        return ok("PID\tStatus\tLabel\n12\t0\tdev.running\n-\t7\tdev.failed\n");
+      if (input.program.endsWith("plutil"))
+        return ok(
+          input.args.at(-1)!.includes("one")
+            ? "dev.running"
+            : input.args.at(-1)!.includes("two")
+              ? "dev.failed"
+              : "dev.unloaded",
+        );
+      return ok("1\tpath\n");
+    });
+    try {
+      mkdirSync(join(f.home, "Library/LaunchAgents"));
+      for (const name of ["one", "two", "three"])
+        writeFileSync(
+          join(f.home, "Library/LaunchAgents", `${name}.plist`),
+          "",
+        );
+      const status = await f.host.status();
+      expect(status.memoryFreePct).toBe(42);
+      expect(status.topProcesses[0]).toEqual({ name: "Example", cpuPct: 33.5 });
+      expect(status.listeningPortCount).toBe(2);
+      expect(status.disks.map((d) => d.path)).toEqual(["/", f.root]);
+      const services = await f.host.services();
+      expect(services.failed.map((s) => s.label)).toEqual(["dev.failed"]);
+      expect(services.services.map((s) => s.state).sort()).toEqual([
+        "loaded",
+        "running",
+        "unloaded",
+      ]);
+      expect(calls.filter((c) => c.program.endsWith("launchctl"))).toHaveLength(
+        1,
+      );
+      expect(
+        calls.every(
+          (c) => c.timeoutMs > 0 && c.maxBytes > 0 && c.home === f.home,
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("disk scans include build children with at most four concurrent bounded du probes", async () => {
+    let active = 0;
+    let max = 0;
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => {
+      calls.push(input);
+      active++;
+      max = Math.max(max, active);
+      await Promise.resolve();
+      active--;
+      return ok("12\tpath\n");
+    });
+    try {
+      for (let n = 0; n < 40; n++) {
+        mkdirSync(join(f.root, `p${n}`));
+        for (const child of [
+          "target",
+          "build",
+          "node_modules",
+          ".next",
+          "dist",
+        ])
+          mkdirSync(join(f.root, `p${n}`, child));
+      }
+      const result = await f.host.diskScan();
+      expect(calls.length).toBeLessThanOrEqual(180);
+      expect(max).toBeLessThanOrEqual(4);
+      expect(max).toBe(4);
+      expect(result.entries.length).toBeLessThanOrEqual(20);
+      expect(calls.some((c) => c.args.at(-1)?.endsWith("node_modules"))).toBe(
+        true,
+      );
+      expect(calls.every((c) => c.timeoutMs <= 45_000)).toBe(true);
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("runner kills process group on timeout, caps output, and scrubs inherited environment", async () => {
+    // Real deadlines deliberately exercise OS process-group termination, not a simulated timer.
+    const root = realpathSync(tempDir());
+    try {
+      const started = Date.now();
+      const timed = await runHostCommand({
+        program: "/bin/sh",
+        args: ["-c", "sleep 30 & echo $!; wait"],
+        cwd: root,
+        home: root,
+        timeoutMs: 100,
+        maxBytes: 100,
+      });
+      expect(timed.timedOut).toBe(true);
+      expect(Date.now() - started).toBeLessThan(3000);
+      const pid = Number(timed.output.trim());
+      expect(pid).toBeGreaterThan(0);
+      expect(() => process.kill(pid, 0)).toThrow();
+      const huge = await runHostCommand({
+        program: "/usr/bin/yes",
+        args: ["abcdef"],
+        cwd: root,
+        home: root,
+        timeoutMs: 50,
+        maxBytes: 100,
+      });
+      expect(Buffer.byteLength(huge.output)).toBeLessThanOrEqual(100);
+      expect(huge.truncated).toBe(true);
+      const environment = await runHostCommand({
+        program: "/usr/bin/env",
+        args: [],
+        cwd: root,
+        home: root,
+        timeoutMs: 1000,
+        maxBytes: 4000,
+      });
+      expect(
+        environment.output
+          .trim()
+          .split("\n")
+          .every((line) => /^(PATH|HOME|LANG)=/.test(line)),
+      ).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  test("mac configuration coexists with API host and expands roots", () => {
+    const root = tempDir();
+    try {
+      writeFileSync(
+        join(root, "config.json"),
+        JSON.stringify({
+          host: "127.0.0.1",
+          mac: {
+            roots: ["~/Workspace/Projects"],
+            watch: { ghostId: "watcher", intervalMinutes: 5 },
+          },
+        }),
+      );
+      const config = loadConfig({}, root);
+      expect(config.host).toBe("127.0.0.1");
+      expect(config.mac?.roots[0]).not.toContain("~");
+      writeFileSync(
+        join(root, "config.json"),
+        JSON.stringify({
+          mac: { roots: [], watch: { ghostId: "a", intervalMinutes: 0 } },
+        }),
+      );
+      expect(() => loadConfig({}, root)).toThrow("mac.watch");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("host command approval", () => {
+  test("proposal opens approve_effect, never executes until approval; expired effects are denied", async () => {
+    const h = harness();
+    const probes = new Probes();
+    const ghost = h.core.createGhost({
+      name: "Mac",
+      persona: "",
+      tools: [...HOST_TOOLS],
+    });
+    const conversation = h.ledger.conversation(ghost.directConversationId);
+    const extension = createHostTools(h.core, probes);
+    const tool = extension.tools!.find(
+      (t) => t.name === "host_command_propose",
+    )!;
+    h.ledger.setPiConversationId(conversation.id, "pi-host-test");
+    const api = (callId: string) =>
+      ({
+        conversationId: "pi-host-test",
+        callId,
+      }) as unknown as ToolExecutionApi;
+    const invoke = tool.execute as unknown as (
+      input: HostCommand,
+      api: ToolExecutionApi,
+    ) => Promise<unknown>;
+    await invoke(command("/project"), api("first"));
+    const decision = h.ledger.pendingDecisions()[0]!;
+    expect(decision.kind).toBe("approve_effect");
+    expect(decision.proposal).toMatchObject({
+      title: "Check",
+      cwd: "/project",
+      reason: "Inspect explicitly",
+    });
+    expect(probes.executions).toBe(0);
+    await h.core.effects.resolveApproval(decision.effectId!, true);
+    expect(probes.executions).toBe(1);
+    expect(h.ledger.effect(decision.effectId!).state).toBe("done");
+    await invoke(command("/project"), api("expired"));
+    const expired = h.ledger
+      .pendingDecisions()
+      .find((d) => d.effectId !== decision.effectId)!;
+    const effect = h.ledger.effect(expired.effectId!);
+    const clock = spyOn(Date, "now").mockReturnValue(
+      effect.createdAt + 24 * HOUR + 1,
+    );
+    try {
+      await h.core.effects.resolveApproval(effect.id, true);
+      expect(probes.executions).toBe(1);
+      expect(h.ledger.effect(effect.id).state).toBe("denied");
+    } finally {
+      clock.mockRestore();
+    }
+    h.ledger.close();
+  });
+});
+
+describe("HostWatch durable admission", () => {
+  test("baseline, two-sample pressure, six-hour cooldown and daily review have deterministic IDs; persist before submission", async () => {
+    const h = harness();
+    const probes = new Probes();
+    const ghost = h.core.createGhost({ name: "Watch", persona: "" });
+    const watch = new HostWatch(h.core, probes, { ghostId: ghost.id });
+    const original = h.engine.submit.bind(h.engine);
+    h.engine.submit = async (id, submission) => {
+      const state = h.ledger.setting<{ pending: { requestId: string }[] }>(
+        "hostWatch",
+        { pending: [] },
+      );
+      expect(
+        state.pending.some((p) => p.requestId === submission.requestId),
+      ).toBe(true);
+      await original(id, submission);
+    };
+    const start = 100 * HOUR;
+    await watch.tick(start);
+    expect(
+      h.engine.to(ghost.directConversationId).map((s) => s.requestId),
+    ).toEqual([`hostwatch:review:${start}`]);
+    probes.free = 40 * GB;
+    await watch.tick(start + 5 * 60_000);
+    expect(h.engine.submissions.size).toBe(1);
+    await watch.tick(start + 10 * 60_000);
+    expect(h.engine.submissions.size).toBe(2);
+    const pressure = h.engine.to(ghost.directConversationId)[1]!;
+    expect(pressure.requestId).toMatch(/^hostwatch:disk:[a-f0-9]+:pressure:/);
+    expect(pressure.text).toContain("NO_UPDATE");
+    await watch.tick(start + HOUR);
+    expect(
+      h.engine
+        .to(ghost.directConversationId)
+        .filter((s) => s.requestId.includes(":pressure:")).length,
+    ).toBe(1);
+    const restarted = new HostWatch(h.core, probes, { ghostId: ghost.id });
+    await restarted.tick(start + 7 * HOUR);
+    expect(
+      h.engine
+        .to(ghost.directConversationId)
+        .filter((s) => s.requestId.includes(":pressure:")).length,
+    ).toBe(2);
+    await restarted.tick(start + 24 * HOUR);
+    expect(
+      h.engine.submissions.has(`hostwatch:review:${start + 24 * HOUR}`),
+    ).toBe(true);
+    for (let i = 1; i < 15; i++)
+      await restarted.tick(start + 24 * HOUR + i * 60_000);
+    expect(
+      h.ledger.setting<{ samples: unknown[] }>("hostWatch", { samples: [] })
+        .samples.length,
+    ).toBe(12);
+    h.ledger.close();
+  });
+  test("critical is immediate, growth uses older sample, service failure and node offline are edges", async () => {
+    const h = harness();
+    const probes = new Probes();
+    const ghost = h.core.createGhost({ name: "Watch", persona: "" });
+    const watch = new HostWatch(h.core, probes, { ghostId: ghost.id });
+    const start = 100 * HOUR;
+    await watch.tick(start);
+    probes.free = 4 * GB;
+    probes.lastExit = 7;
+    probes.online = false;
+    await watch.tick(start + 60_000);
+    const ids = h.engine.to(ghost.directConversationId).map((s) => s.requestId);
+    expect(ids.some((id) => id.includes(":critical:"))).toBe(true);
+    expect(ids.some((id) => id.includes("hostwatch:service:"))).toBe(true);
+    expect(ids.some((id) => id.includes("hostwatch:node:"))).toBe(true);
+    probes.free = 80 * GB;
+    await watch.tick(start + HOUR / 2);
+    expect(
+      h.engine
+        .to(ghost.directConversationId)
+        .some((s) => s.requestId.includes(":growth:")),
+    ).toBe(true);
+    const count = h.engine.submissions.size;
+    await watch.tick(start + HOUR / 2 + 60_000);
+    expect(h.engine.submissions.size).toBe(count);
+    h.ledger.close();
+  });
+  test("failed admissions persist and retry exact identities; retired/deleted Ghosts never submit", async () => {
+    const h = harness();
+    const probes = new Probes();
+    const ghost = h.core.createGhost({ name: "Watch", persona: "" });
+    const watch = new HostWatch(h.core, probes, { ghostId: ghost.id });
+    const start = 100 * HOUR;
+    const submit = h.engine.submit.bind(h.engine);
+    h.engine.submit = async () => {
+      throw new Error("offline");
+    };
+    await expect(watch.tick(start)).rejects.toThrow("offline");
+    const pending = h.ledger.setting<{ pending: { requestId: string }[] }>(
+      "hostWatch",
+      { pending: [] },
+    );
+    expect(pending.pending[0]?.requestId).toBe(`hostwatch:review:${start}`);
+    h.engine.submit = submit;
+    await new HostWatch(h.core, probes, { ghostId: ghost.id }).tick(
+      start + 60_000,
+    );
+    expect(h.engine.submissions.has(`hostwatch:review:${start}`)).toBe(true);
+    h.ledger.tx(() =>
+      h.ledger.putGhost({ ...h.ledger.ghost(ghost.id), state: "retired" }),
+    );
+    probes.free = 1 * GB;
+    await watch.tick(start + 2 * HOUR);
+    expect(h.engine.submissions.size).toBe(1);
+    h.ledger.tx(() =>
+      h.ledger.putGhost({
+        ...h.ledger.ghost(ghost.id),
+        state: "active",
+        deletedAt: start,
+      }),
+    );
+    await watch.tick(start + 24 * HOUR);
+    expect(h.engine.submissions.size).toBe(1);
+    h.ledger.close();
+  });
+});

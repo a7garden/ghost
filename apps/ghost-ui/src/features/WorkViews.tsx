@@ -6,7 +6,7 @@ import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { PresenceAvatar, WorkLane } from '../components/agent';
 import { Modal } from '../components/Modal';
 import { uiTerms } from '../uiText';
-import { ghostPresence } from './ghostState';
+import { ghostPresence, visibleGhosts } from './ghostState';
 import { useNow } from './time';
 import { useHost } from '../host/context';
 
@@ -43,25 +43,31 @@ export function WorkView({ state, navigate, filterGhostId }: {
         ? <Button variant="ghost" size="sm" aria-label={`${work.title} 취소`} onClick={() => cancel(work)}>취소</Button> : undefined}
       branch={children.length > 0 ? children.map(lane) : undefined}/>;
   };
-  const ghosts = [...state.ghosts].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  const ghosts = visibleGhosts(state.ghosts);
   return <Page className="grid content-start gap-6">
     <PageHeader title={uiTerms.work} className="mb-2" actions={<Button onClick={() => setCreating(true)} disabled={!state.ghosts.length}><Plus/>일 맡기기</Button>}/>
     <div className="board-bar">
       <SegmentedControl aria-label="맡긴 일 상태" value={tab} onValueChange={setTab}
         options={[{ value: 'active', label: '진행 중', count: counts.active }, { value: 'finished', label: '끝난 일', count: counts.finished }]}/>
-      {ghosts.length > 1 && <div className="ghost-filter" role="group" aria-label="담당 Ghost">
-        <button type="button" aria-pressed={!filterGhostId} onClick={() => navigate('/work')}>전체</button>
-        {ghosts.map(ghost => <button key={ghost.id} type="button" aria-pressed={filterGhostId === ghost.id} title={ghost.name}
-          onClick={() => navigate(filterGhostId === ghost.id ? '/work' : `/work?ghost=${encodeURIComponent(ghost.id)}`)}>
-          <PresenceAvatar ghostId={ghost.id} state={ghostPresence(ghost, state).state} size={18}/><span>{ghost.name}</span>
-        </button>)}
-      </div>}
+      {/* A small team shows presence chips; past six Ghosts the row becomes a select. */}
+      {ghosts.length > 6
+        ? <SelectField label="담당 Ghost" value={filterGhostId ?? ''} disabled={!ghosts.length}
+          onValueChange={value => navigate(value ? `/work?ghost=${encodeURIComponent(value)}` : '/work')}
+          options={[{ value: '', label: '모든 Ghost' }, ...ghosts.map(ghost => ({ value: ghost.id, label: ghost.name }))]}
+          className="ghost-filter__select"/>
+        : ghosts.length > 1 && <div className="ghost-filter" role="group" aria-label="담당 Ghost">
+          <button type="button" aria-pressed={!filterGhostId} onClick={() => navigate('/work')}>전체</button>
+          {ghosts.map(ghost => <button key={ghost.id} type="button" aria-pressed={filterGhostId === ghost.id} title={ghost.name}
+            onClick={() => navigate(filterGhostId === ghost.id ? '/work' : `/work?ghost=${encodeURIComponent(ghost.id)}`)}>
+            <PresenceAvatar ghostId={ghost.id} state={ghostPresence(ghost, state).state} size={18}/><span>{ghost.name}</span>
+          </button>)}
+        </div>}
     </div>
     {error && <InlineError>{error}</InlineError>}
     {roots.length > 0
       ? <div className="lanes">{roots.map(lane)}</div>
       : <div className="calm"><p>{tab === 'active' ? '진행 중인 일 없음' : '끝난 일 없음'}</p></div>}
-    {creating && <NewWorkModal state={state} defaultGhostId={filterGhostId ?? state.ghosts.find(ghost => ghost.isDefault)?.id ?? state.ghosts[0]?.id ?? ''}
+    {creating && <NewWorkModal state={state} defaultGhostId={filterGhostId && ghosts.some(ghost => ghost.id === filterGhostId) ? filterGhostId : ghosts.find(ghost => ghost.isDefault)?.id ?? ghosts[0]?.id ?? ''}
       onClose={() => setCreating(false)} onCreated={id => { setCreating(false); navigate(`/work/${encodeURIComponent(id)}`); }}/>}
   </Page>;
 }
@@ -76,7 +82,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
   const { client } = useHost();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const ghosts = [...state.ghosts].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  const ghosts = visibleGhosts(state.ghosts);
   const [ghostId, setGhostId] = useState(defaultGhostId ?? ghosts[0]?.id ?? '');
   const submit = (data: FormData) => {
     const title = String(data.get('title')).trim();

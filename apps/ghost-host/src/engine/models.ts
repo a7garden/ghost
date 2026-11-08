@@ -39,6 +39,16 @@ const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 /** Codex OAuth login/refresh implementation, memoized so every OAuth-backed OpenAI provider shares one. */
 let codexAuth: OAuthAuth | undefined;
 
+/** Which pi-ai API speaks a configured provider: an OAuth (ChatGPT) OpenAI credential switches it to the Codex backend. */
+export function apiFor(provider: ContractProvider, credential: Credential | undefined): Api {
+  return provider.kind === "openai" && credential?.type === "oauth" ? "openai-codex-responses" : API_BY_KIND[provider.kind];
+}
+
+/** The static input capability of one configured model; the same API choice `createHostProvider` makes. */
+export function modelInputOf(provider: ContractProvider, modelId: string, credential: Credential | undefined): Model<Api>["input"] {
+  return modelInputFor(provider.kind, modelId, apiFor(provider, credential));
+}
+
 function streamsFor(api: Api): ProviderStreams {
   switch (api) {
     case "openai-responses":
@@ -77,8 +87,8 @@ function modelOf(provider: ContractProvider, info: ModelInfo, api: Api, baseUrl:
  * trusted ChatGPT backend, whatever base URL the row configures.
  */
 export function createHostProvider(provider: ContractProvider, credential: Credential | undefined): Provider | null {
-  const codex = provider.kind === "openai" && credential?.type === "oauth";
-  const api: Api = codex ? "openai-codex-responses" : API_BY_KIND[provider.kind];
+  const api: Api = apiFor(provider, credential);
+  const codex = api === "openai-codex-responses";
   const baseUrl = codex ? CODEX_BASE_URL : (provider.baseUrl ?? BASE_URL_BY_KIND[provider.kind]);
   if (!baseUrl) return null;
   return createProvider<Api>({

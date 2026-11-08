@@ -159,4 +159,39 @@ button.main-mark:hover:not(:disabled) svg { animation: pop-in var(--duration-bas
 .sandbox-strip__action:hover { color: var(--ghost-ink); background: var(--ghost-hover2); }
 .sandbox-strip__action svg { width: 13px; height: 13px; }
 .sandbox-strip__action[data-danger] { color: #fff; background: var(--ghost-danger); }
+
+.main-mark[data-danger] { color: var(--ghost-danger); background: none; box-shadow: inset 0 0 0 1px var(--ghost-danger); }
+.main-mark[data-danger]:hover:not(:disabled) { color: #fff; background: var(--ghost-danger); box-shadow: none; }
+
+.model-choice[data-add] { color: var(--ghost-ink3); background: none; box-shadow: inset 0 0 0 1.5px var(--ghost-line-strong); }
+.model-choice[data-add]:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+.model-choice[data-add] .model-choice__model { color: inherit; }
+
+.fallbacks { display: grid; justify-items: start; gap: 6px; }
+.fallback { display: flex; align-items: center; gap: 2px; }
+.fallback__order { width: 20px; color: var(--ghost-ink3); font: 500 var(--text-caption)/1 var(--font-mono); text-align: center; }
+.fallback__move {
+  display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: var(--radius-pill);
+  color: var(--ghost-ink3); background: none; cursor: pointer;
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease;
+}
+.fallback__move:hover:not(:disabled) { color: var(--ghost-ink); background: var(--ghost-hover); }
+.fallback__move:disabled { opacity: .35; cursor: default; }
+.fallback__move svg { width: 13px; height: 13px; }
+
+.skills { display: flex; flex-wrap: wrap; gap: 6px; }
+.skill {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 0; border-radius: var(--radius-pill);
+  color: var(--ghost-ink3); background: var(--ghost-hover); font: 500 var(--text-caption)/1 var(--font-mono); cursor: pointer;
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) var(--ease-spring);
+}
+.skill:hover:not(:disabled) { color: var(--ghost-ink2); background: var(--ghost-hover2); }
+.skill:active:not(:disabled) { transform: scale(.95); }
+.skill[aria-pressed="true"] { color: var(--ghost-signal-ink); background: var(--ghost-signal-tint); }
+.skill:disabled { opacity: .45; cursor: not-allowed; }
+.skill[data-unavailable] { color: var(--ghost-ink3); background: none; box-shadow: inset 0 0 0 1px var(--ghost-ink4); text-decoration: line-through; }
+.skill[data-unavailable]:hover:not(:disabled) { color: var(--ghost-danger); background: none; box-shadow: inset 0 0 0 1px var(--ghost-danger); text-decoration: none; }
+
+.capabilities__group[data-privileged] .capabilities__head { color: var(--ghost-amber-ink); }
+.capabilities__lock { width: 12px; height: 12px; flex: none; color: var(--ghost-amber-ink); }
 }

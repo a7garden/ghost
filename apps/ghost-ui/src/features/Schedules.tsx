@@ -5,6 +5,7 @@ import type { Schedule, ScheduleSpec } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
+import { visibleGhosts } from './ghostState';
 import { uiTerms } from '../uiText';
 
 const dateTime = (ms: number) => new Date(ms).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -104,7 +105,7 @@ function ScheduleCreateDialog({ fixedGhostId, onClose, onCreate }: {
 }) {
   const { store } = useHost();
   const { state } = useHostState(store);
-  const ghosts = state?.ghosts ?? [];
+  const ghosts = visibleGhosts(state?.ghosts ?? []);
   const [ghostKey, setGhostKey] = useState(fixedGhostId ?? ghosts[0]?.id ?? '');
   const [prompt, setPrompt] = useState('');
   const [mode, setMode] = useState<'at' | 'every'>('at');

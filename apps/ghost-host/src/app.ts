@@ -8,18 +8,23 @@ import type { Engine } from "./core/ports.ts";
 import { createEngine } from "./engine/index.ts";
 import { createDocuments } from "./integrations/documents.ts";
 import { createMemory } from "./integrations/memory.ts";
+import { createReach } from "./integrations/reach.ts";
+import { createSkills } from "./integrations/skills.ts";
 import { Ledger } from "./ledger/ledger.ts";
 import { createSandbox } from "./sandbox/index.ts";
 import { FsArtifactStore } from "./stores/artifacts.ts";
 import { FileSecrets } from "./stores/secrets.ts";
 import { createToolSet } from "./tools/index.ts";
-import type { DocumentsPort } from "./integrations/ports.ts";
+import type { DocumentsPort, SkillsPort } from "./integrations/ports.ts";
+import { MacHost } from "./integrations/host.ts";
+import { HostWatch } from "./core/hostwatch.ts";
 
 export interface App {
   core: Core;
   engine: Engine;
   ledger: Ledger;
   documents: DocumentsPort;
+  skills: SkillsPort | null;
   close(): Promise<void>;
 }
 
@@ -45,15 +50,21 @@ export async function openApp(config: Config): Promise<App> {
   const sandbox = createSandbox(config, artifacts);
   const core = new Core({ ledger, artifacts, sandbox, secrets: new FileSecrets(config.root), log });
   const documents = createDocuments(core);
-  const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents });
+  const skills = createSkills(config);
+  const host = config.mac ? new MacHost({ roots: config.mac.roots }) : null;
+  const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config) });
   const engine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, log });
   core.attach(engine);
+  const hostWatch = host && config.mac?.watch ? new HostWatch(core, host, config.mac.watch) : null;
+  hostWatch?.start();
   return {
     core,
     engine,
     ledger,
     documents,
+    skills,
     async close() {
+      await hostWatch?.stop();
       core.stop();
       await core.idle();
       await engine.close();
@@ -78,7 +89,7 @@ export async function serve(config: Config) {
   if (app.ledger.ghosts().length === 0) app.core.createGhost({ name: "Ghost", persona: "", isDefault: true });
   await app.core.start();
   const token = ownerToken(config.root);
-  const server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents });
+  const server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills });
   const push = startPush(app.core, config);
   const hostFile = join(config.root, "host.json");
   writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });

@@ -91,7 +91,7 @@ function setup(): Setup {
   const artifacts = new TempArtifacts(join(root, "artifacts"));
   const sandbox = new TempSandbox(join(root, "sandboxes"));
   const h = harness(":memory:", artifacts);
-  const tools = createToolSet({ core: h.core, sandbox, memory: null, documents: null });
+  const tools = createToolSet({ core: h.core, sandbox, memory: null, documents: null, skills: null });
   const ghost = h.core.createGhost({ name: "Garden", persona: "You are Garden.\nSecond line" });
   return { root, ledger: h.ledger, core: h.core, engine: h.engine, tools, ghost, direct: h.ledger.conversation(ghost.directConversationId), sandbox };
 }

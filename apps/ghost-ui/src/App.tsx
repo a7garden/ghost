@@ -10,7 +10,7 @@ import { AvatarProvider } from './pets/AvatarProvider';
 import { usePreferences } from './pets/preferences';
 import { HostProvider, useHost } from './host/context';
 import { useHostState } from './host/store';
-import { pendingDecisions } from './features/ghostState';
+import { pendingDecisions, visibleGhosts } from './features/ghostState';
 import { hostStatus } from './features/hostStatus';
 import { Overview } from './features/Overview';
 import { GhostChat } from './features/GhostChat';
@@ -82,7 +82,7 @@ function Shell() {
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
     { id: 'spaces', label: routeLabels.spaces, group: '이동', onSelect: go('/spaces') },
-    ...ghosts.map(ghost => ({ id: `ghost:${ghost.id}`, label: ghost.name, description: ghost.isDefault ? '메인 Ghost' : undefined, group: 'Ghost', onSelect: () => switchGhost(ghost.id) })),
+    ...visibleGhosts(ghosts).map(ghost => ({ id: `ghost:${ghost.id}`, label: ghost.name, description: ghost.isDefault ? '메인 Ghost' : undefined, group: 'Ghost', onSelect: () => switchGhost(ghost.id) })),
     ...state.spaces.map(space => ({ id: `space:${space.id}`, label: space.name, group: '프로젝트', onSelect: () => navigate(`/spaces/${space.id}`) })),
     { id: 'team', label: uiTerms.ghostSettings, group: '설정', onSelect: go('/settings?tab=team') },
     { id: 'devices', label: '기기', group: '설정', onSelect: go('/settings?tab=devices') },

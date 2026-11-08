@@ -150,6 +150,8 @@ function engineFixture(token = "test-token"): EngineFixture {
     memory: { executable: script, dir: brainDir, token, spaces: { "ghost-1": "space-a" } },
     voice: null,
     apns: null,
+    skills: null,
+    reach: null,
   };
   return {
     config,

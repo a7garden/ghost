@@ -7,7 +7,7 @@ import { newId } from "./ids.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import type { ArtifactStore, Engine, EngineEvents, SandboxControl, Secrets } from "./ports.ts";
 import { Schedules } from "./schedules.ts";
-import { Works } from "./works.ts";
+import { isTerminal, Works } from "./works.ts";
 
 export interface CoreDeps {
   ledger: Ledger;
@@ -35,6 +35,7 @@ export class Core implements EngineEvents {
   readonly log: (message: string, detail?: unknown) => void;
   private engineRef: Engine | null = null;
   private readonly lanes = new Map<string, Promise<void>>();
+  private readonly unsubscribeGhostEvents: () => void;
 
   constructor(deps: CoreDeps) {
     this.ledger = deps.ledger;
@@ -46,6 +47,11 @@ export class Core implements EngineEvents {
     this.effects = new Effects(this);
     this.decisions = new Decisions(this);
     this.schedules = new Schedules(this);
+    // Every Ghost write (create, update, retire, delete) re-opens the work conversations of
+    // Ghosts that hold `delegate`, so the roster in their instructions stays true.
+    this.unsubscribeGhostEvents = this.ledger.subscribe((event) => {
+      if (event.data.type === "ghost") this.refreshRosters();
+    });
   }
 
   get engine(): Engine {
@@ -100,6 +106,7 @@ export class Core implements EngineEvents {
   }
 
   stop() {
+    this.unsubscribeGhostEvents();
     this.schedules.stop();
   }
 
@@ -172,6 +179,20 @@ export class Core implements EngineEvents {
         const work = this.ledger.work(conversation.workId);
         if (["done", "failed", "cancelled"].includes(work.state)) continue;
       }
+      void this.lane(`conversation:${conversation.id}`, () => this.openConversation(conversation.id));
+    }
+  }
+
+  /**
+   * Re-open the live work conversations of Ghosts that hold `delegate`, so the delegation roster in
+   * their instructions reflects the Ghost that just changed. Only delegate-holders with live Work
+   * are re-opened; the changed Ghost's own conversations are `refreshGhost`'s business.
+   */
+  private refreshRosters() {
+    for (const conversation of this.ledger.conversations({ kind: "work" })) {
+      if (!this.ledger.ghost(conversation.ghostId).tools.includes("delegate")) continue;
+      const work = conversation.workId ? this.ledger.findWork(conversation.workId) : null;
+      if (!work || isTerminal(work)) continue;
       void this.lane(`conversation:${conversation.id}`, () => this.openConversation(conversation.id));
     }
   }
