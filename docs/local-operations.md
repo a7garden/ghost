@@ -47,6 +47,13 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 �
 - Macfra: 상주 에이전트 `dev.garden.macfra.agent`를 `launchctl bootout` 후 `launchctl disable`로 껐다(plist와 앱은 그대로). Macfra의 메일 승인 경로는 옮기지 않았고, 승인은 Ghost 앱·iPhone의 실행 승인으로 한다. 되살릴 때는 `launchctl enable gui/$(id -u)/dev.garden.macfra.agent && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.garden.macfra.agent.plist`.
 - 되돌리기: UI만 되돌릴 때는 `current`를 `releases/20261108-bun-a71402d`로 바꾼다(같은 Host·스키마). 그 이전 릴리스는 원장 `user_version` 4를 "newer than this host"로 거부하므로, `5bbeacb`로 되돌리려면 `config.json`과 두 DB를 위 백업으로 복원해야 하고 그 사이의 대화·Work·설정 변경을 잃는다. 데이터 복원이므로 별도 승인을 받는다.
 
+### 제목 표시줄 탐색·사이드바 스크롤 릴리스 대기, 잘못된 전환 복구 — 2026-11-08
+
+- `main`의 `1e87198`(제목 표시줄 뒤로/앞으로·breadcrumb, 사이드바 roster 스크롤·레일, 스레드 패널 열고 닫기 애니메이션, 빈 대화의 초상 제거)을 `releases/20261108-bun-1e87198`에 설치·검증했다(UI 93개 파일 해시 일치, 임시 루트 시험 실행, 백업 `backups/pre-title-nav-20261108-bun-1e87198/`, `ghost-backup/2` complete, 두 DB `integrity_check` ok).
+- 전환 1분 전(19:16 KST) `wt/ghost-team` 작업이 `releases/20261108-bun-fa25e91`을 배포하고 운영 `config.json`에 `reach`·`skills`·`mac`을 추가한 것을 확인하지 않고 `current`를 `1e87198`로 바꿨다. `main`의 Host는 `reach`를 모르는 키로 거부해 재기동하지 못했다(`config.json: unknown key reach`, 약 2분 중단).
+- `current`를 원자적으로 `releases/20261108-bun-fa25e91`로 되돌리자 LaunchAgent가 Host를 다시 띄웠다(PID 51934). health·준비 상태(`provider zai-coding is ready`), Ghost 24·대화 40·맡긴 일 39를 확인했다. 데이터·설정 파일은 바꾸지 않았다.
+- `1e87198`은 `ghost-team`과 합쳐질 때까지 대기 중이다. 두 브랜치가 `WorkspaceSidebar.tsx`·`compositions.css`·`App.tsx`를 함께 바꿨으므로 통합 빌드를 검증한 뒤에 배포한다. 전환 직전에는 `current`의 대상과 `config.json` 변경 시각을 다시 확인한다.
+
 ### 사람이 읽는 보고·참조 표식·대화 지도 스크롤 운영 반영 — 2026-11-08
 
 - 소스 `176d1d6`(+ 후속 UI `e82cf30` 줄인 id의 고유 접두 해석, `5bbeacb` 코드 스팬 id의 괄호 흡수)를 `releases/20261108-bun-5bbeacb`에 설치했다. Host 변경은 직접 대화·작업 지시문(`OWNER_VOICE`: 소유자에게는 id·해시·바이트·종료 코드·도구 이름 없이 결과부터 말하기, 보고를 되풀이하지 않기, `complete` 요약 첫 문장과 `ask_owner` 질문도 사람용)뿐이고 계약·DB 스키마·셸은 그대로다. 컴파일 Host는 `176d1d6` 빌드를 그대로 썼고(이후 Host·계약 변경 없음, 바이트 일치) UI 93개 파일 해시가 빌드 원본과 일치한다. 설치 사본을 백업 DB 사본 위 임시 루트·포트에서 실행해 health·새 번들을 확인했다.
