@@ -17,6 +17,7 @@ export function firstRun(spec: ScheduleSpec, now: number): number {
 export class Schedules {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private pollingSources = false;
 
   constructor(private readonly core: Core) {}
 
@@ -82,11 +83,18 @@ export class Schedules {
     this.timer = null;
   }
 
+  /** Re-arm after owner rule edits without starting a stopped scheduler. */
+  refresh() { this.arm(); }
+
   private arm() {
     if (!this.running) return;
     clearTimeout(this.timer ?? undefined);
-    const next = this.ledger.nextScheduleAt();
-    const delay = next === null ? MAX_TICK_MS : Math.max(0, Math.min(MAX_TICK_MS, next - Date.now()));
+    const scheduleAt = this.ledger.nextScheduleAt();
+    // Ignore an in-flight source poll's stale due timestamp, but keep scheduled
+    // activities and bounded self-checks authoritative while transport waits.
+    const activityAt = this.core.activities.nextDueAt(!this.pollingSources);
+    const next = scheduleAt === null ? activityAt : activityAt === null ? scheduleAt : Math.min(scheduleAt, activityAt);
+    const delay = next === null ? MAX_TICK_MS : Math.max(1000, Math.min(MAX_TICK_MS, next - Date.now()));
     this.timer = setTimeout(() => void this.tick(), delay);
   }
 
@@ -96,6 +104,8 @@ export class Schedules {
       this.core.works.expire(now);
       for (const schedule of this.ledger.dueSchedules(now)) await this.fire(schedule, now);
       this.ledger.pruneEvents(now);
+      await this.core.activities.tickTimers(now);
+      this.pollSources(now);
       this.ledger.pruneHistory(now);
       this.ledger.prunePairings(now);
     } catch (error) {
@@ -103,6 +113,19 @@ export class Schedules {
     } finally {
       this.arm();
     }
+  }
+
+  private pollSources(now: number) {
+    if (this.pollingSources) return;
+    this.pollingSources = true;
+    // Keep the existing core lane authoritative (including shutdown draining),
+    // but never hold schedule/deadline wakes behind a source request.
+    void this.core.activities.tickSources(now)
+      .catch((error) => this.core.log("activity source tick failed", error))
+      .finally(() => {
+        this.pollingSources = false;
+        this.arm();
+      });
   }
 
   /** Submit first, then advance: a crash in between re-fires with the same request id, which Pi ignores. */

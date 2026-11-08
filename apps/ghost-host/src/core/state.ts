@@ -22,13 +22,16 @@ export function snapshot(core: Core, access: Access): State {
     conversations: ledger.conversations().filter((conversation) => conversation.kind === "direct" || conversation.workId !== null).filter((conversation) => access.canSeeConversation(conversation)),
     works,
     decisions: ledger.decisionsForState().filter((decision) => access.canSeeDecision(decision)),
-    notifications: ledger.notificationsForState().filter((notification) => access.isOwner || (notification.ghostId !== null && access.canSeeGhost(notification.ghostId))),
+    notifications: ledger.notificationsForState().filter((notification) => access.canSeeNotification(notification)),
     schedules: access.isOwner ? ledger.schedules() : [],
     spaces: access.isOwner ? ledger.spaces() : [],
     avatars: ledger.avatars(),
     settings: access.isOwner ? settings : { defaultModel: settings.defaultModel, reviewModel: null, providers: [] },
     devices: access.isOwner ? ledger.devices() : ledger.devices().filter((device) => access.principal.kind === "device" && device.id === access.principal.deviceId),
     sandboxes: access.isOwner ? ghosts.map((ghost) => core.sandbox.status(ghost.id)) : [],
+    activities: access.isOwner ? ledger.activities() : [],
+    activityRuns: access.isOwner ? ledger.activityRuns() : [],
+    connections: access.isOwner ? ledger.connections().map((connection) => ({ ...connection, hasCredential: core.activitySources?.credentialPresent(connection.id) ?? false })) : [],
   };
 }
 

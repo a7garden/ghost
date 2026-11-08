@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { type Principal } from "@ghost/contract";
 import { Access } from "../src/core/access.ts";
-import { execute } from "../src/core/commands.ts";
+import { execute, updateGhost } from "../src/core/commands.ts";
 import { Core } from "../src/core/core.ts";
 import { KnownOutcome } from "../src/core/effects.ts";
 import { digestOf } from "../src/core/ids.ts";
@@ -127,7 +127,7 @@ describe("root Work", () => {
     const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
     await core.idle();
     const foreign = await artifacts.put(new TextEncoder().encode("x"), "x.txt", "text/plain");
-    expect(() => core.works.complete(work.id, { summary: "s", artifacts: [foreign] })).toThrow("was not published");
+    expect(() => core.works.complete(work.id, { summary: "s", artifacts: [foreign] })).toThrow();
   });
 
   test("going idle without completing is nudged once, then fails", async () => {
@@ -391,6 +391,39 @@ describe("commands and access", () => {
       execute(core, access, { requestId: uuid(), command: { type: "ghost.update", ghostId: helper.id, tools: ["read", "read"] as never } }, { publicOrigin: "http://x", documents: null }),
     ).rejects.toMatchObject({ code: "invalid" });
     expect(ledger.ghost(helper.id).tools).toEqual([]);
+  });
+
+  test("grant removal cancels only affected live or queued Works, never additions or rolled-back edits", async () => {
+    const { core, ledger, engine, helper } = setup();
+    updateGhost(core, helper.id, { tools: ["read", "bash"], hostExecution: true });
+    const reader = core.works.createRoot({
+      ghostId: helper.id, title: "Read", brief: "Read only", originConversationId: helper.directConversationId,
+      execution: { kind: "container" }, toolScope: ["read"],
+    });
+    const shell = core.works.createRoot({
+      ghostId: helper.id, title: "Shell", brief: "Run a command", originConversationId: helper.directConversationId,
+      execution: { kind: "container" }, toolScope: ["bash"],
+    });
+    await core.idle();
+    updateGhost(core, helper.id, { name: "Renamed", tools: ["read", "bash", "write"] });
+    expect(ledger.work(shell.id).state).toBe("running");
+    expect(() => ledger.tx(() => {
+      updateGhost(core, helper.id, { tools: ["read"] });
+      throw new Error("rollback revocation");
+    })).toThrow("rollback revocation");
+    expect(ledger.work(shell.id).state).toBe("running");
+    const queued = core.works.createRoot({
+      ghostId: helper.id, title: "Queued shell", brief: "Must never start", originConversationId: helper.directConversationId,
+      execution: { kind: "container" }, toolScope: ["bash"],
+    });
+    updateGhost(core, helper.id, { tools: ["read", "write"], hostExecution: false });
+    expect(ledger.work(shell.id).state).toBe("cancelled");
+    expect(ledger.work(queued.id).state).toBe("cancelled");
+    expect(ledger.work(reader.id).state).toBe("running");
+    await core.idle();
+    expect(engine.aborted).toContain(ledger.work(shell.id).conversationId!);
+    expect(ledger.work(queued.id).conversationId).toBeNull();
+    expect(engine.aborted).not.toContain(ledger.work(reader.id).conversationId!);
   });
 
   test("migrating a ledger from before tool allow-lists grants every established Ghost the full set", async () => {

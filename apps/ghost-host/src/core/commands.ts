@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { FallbackList, GhostToolList, SkillList, validate, type Command, type CommandRequest, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
+import { FallbackList, GhostToolList, SkillList, validate, type Command, type CommandRequest, type Connection, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
 import type { Access } from "./access.ts";
 import type { Core } from "./core.ts";
 import type { CommandEffectTool } from "./effects.ts";
@@ -8,6 +8,7 @@ import type { DocumentsPort } from "../integrations/ports.ts";
 import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId, sha256 } from "./ids.ts";
 import { supportsAutomaticModels } from "../integrations/provider-catalog.ts";
+import { validateConnectionConfig } from "../integrations/activity-sources.ts";
 
 export interface CommandContext {
   /** Origin a paired device should use, e.g. https://ghost.example.ts.net */
@@ -47,7 +48,7 @@ export async function execute(core: Core, access: Access, request: CommandReques
   access.authorize(request.command);
   // Start on the next microtask, after publishing the same-process join point.
   const outcome = Promise.resolve().then(async () => {
-    const asyncCommand = ["message.send", "message.cancel", "decision.resolve", "sandbox.control", "document.save", "avatar.create", "provider.delete"].includes(request.command.type)
+    const asyncCommand = ["message.send", "message.cancel", "decision.resolve", "sandbox.control", "document.save", "avatar.create", "provider.delete", "connection.upsert", "connection.delete", "connection.test", "activity.run"].includes(request.command.type)
       || (request.command.type === "provider.upsert" && request.command.apiKey !== undefined);
     if (!asyncCommand) {
       return core.ledger.tx(() => {
@@ -58,11 +59,13 @@ export async function execute(core: Core, access: Access, request: CommandReques
     }
     if (!previous) core.ledger.tx(() => {
       let claim: Outcome = {};
-      if (["document.save", "provider.upsert", "provider.delete"].includes(request.command.type)) {
+      if (["document.save", "provider.upsert", "provider.delete", "connection.delete"].includes(request.command.type)
+        || (request.command.type === "connection.upsert" && request.command.credential !== undefined)) {
         const ghost = core.ledger.defaultGhost();
         if (!ghost) throw conflict("a default Ghost is required to journal this command");
-        claim = { conversationId: ghost.directConversationId };
+        claim.conversationId = ghost.directConversationId;
       }
+      if (request.command.type === "connection.upsert") claim.connectionId = request.command.connectionId ?? newId();
       core.ledger.claimRequest(request.requestId, principal, digest, claim);
       if (request.command.type === "decision.resolve") core.decisions.resolveState(request.command.decisionId, { outcome: request.command.outcome, answer: request.command.answer });
     });
@@ -97,6 +100,78 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
     case "decision.resolve":
       await core.run(`decision:${command.decisionId}`, () => core.decisions.finishResolution(command.decisionId));
       return {};
+    case "activity.run":
+      return core.run(`activity:request:${requestId}`, () => core.activities.run(command.activityId, { dryRun: command.dryRun, requestId }));
+    case "connection.upsert":
+    case "connection.delete":
+    case "connection.test": {
+      const connectionId = command.type === "connection.upsert"
+        ? ledger.request(requestId)!.outcome.connectionId as string
+        : command.connectionId;
+      if (!core.activitySources) throw new CommandError("unavailable", "source connections are not available");
+      const sources = core.activitySources;
+      return core.run(`connection:${connectionId}`, async () => {
+        if (command.type === "connection.test") return sources.test(ledger.connection(connectionId));
+        const previous = command.type === "connection.delete" || command.connectionId !== undefined
+          ? ledger.connection(connectionId) : ledger.findConnection(connectionId);
+        if (command.type === "connection.upsert") {
+          try { validateConnectionConfig(command.config); }
+          catch (error) { throw invalid(error instanceof Error ? error.message : "invalid connection configuration"); }
+          if (command.credential !== undefined && command.credential !== null && (!command.credential || command.credential.length > 8192 || /[\r\n\0]/.test(command.credential))) {
+            throw invalid("enter a non-empty token or app password without line breaks");
+          }
+          if (command.credential === undefined) {
+            if (previous && digestOf(previous.config) !== digestOf(command.config)) throw invalid("re-enter or explicitly remove the credential when changing account configuration");
+            return ledger.tx(() => {
+              const now = Date.now();
+              ledger.putConnection({
+                id: connectionId, name: command.name, config: command.config,
+                hasCredential: previous?.hasCredential ?? false, credentialVersion: previous?.credentialVersion ?? null,
+                createdAt: previous?.createdAt ?? now, updatedAt: now,
+              });
+              const result = { connectionId };
+              ledger.putRequest(requestId, principal, digest, result);
+              return result;
+            });
+          }
+        }
+        const conversationId = ledger.request(requestId)!.outcome.conversationId as string;
+        const credential = command.type === "connection.delete" ? null : command.credential!;
+        const credentialVersion = credential === null ? null : newId();
+        const staged = ledger.tx(() => {
+          const start = core.effects.beginCommand({ conversationId, requestId, tool: command.type, input: command, summary: `API ${command.type}` });
+          if (start.kind === "replay") return { start, connection: null };
+          const now = Date.now();
+          const connection: Connection = {
+            id: connectionId,
+            name: command.type === "connection.upsert" ? command.name : previous!.name,
+            config: command.type === "connection.upsert" ? command.config : previous!.config,
+            hasCredential: false, credentialVersion, createdAt: previous?.createdAt ?? now, updatedAt: now,
+          };
+          ledger.putConnection(connection);
+          core.activities.invalidateConnection(connectionId);
+          return { start, connection };
+        });
+        if (staged.start.kind === "replay") return recordedCommandOutcome(staged.start.effect.state, staged.start.effect.result);
+        try {
+          // Disconnect and invalidate old source authority before touching the secret file.
+          await sources.setCredential(connectionId, credential, credentialVersion);
+          return ledger.tx(() => {
+            if (command.type === "connection.delete") ledger.deleteConnection(connectionId);
+            else ledger.putConnection({ ...staged.connection!, hasCredential: credential !== null, updatedAt: Date.now() });
+            const result = command.type === "connection.delete" ? {} : { connectionId };
+            core.effects.finish(staged.start.effect.id, `api-result:${JSON.stringify(result)}`);
+            ledger.putRequest(requestId, principal, digest, result);
+            return result;
+          });
+        } catch {
+          // Transport/filesystem errors may contain the supplied credential. Persist no raw text.
+          const message = "connection credential change has an unknown outcome; reconcile it before retrying";
+          core.effects.unknown(staged.start.effect.id, message);
+          throw new CommandError("unavailable", message);
+        }
+      });
+    }
     case "sandbox.control": {
       const ghost = ledger.ghost(command.ghostId);
       return journalCommand(core, requestId, command, ghost.directConversationId, async () => {
@@ -207,6 +282,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         acceptance: command.acceptance,
         deadlineAt: command.deadlineAt ?? null,
         originConversationId: command.originConversationId ?? ghost.directConversationId,
+        execution: command.execution,
       });
       return { workId: work.id };
     }
@@ -230,6 +306,10 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
     case "document.save":
     case "avatar.create":
     case "provider.delete":
+    case "connection.upsert":
+    case "connection.delete":
+    case "connection.test":
+    case "activity.run":
       throw new Error(`async command ${command.type} entered a ledger transaction`);
 
     case "ghost.create": {
@@ -241,6 +321,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         tools: command.tools,
         fallbacks: command.fallbacks,
         skills: command.skills,
+        hostExecution: command.hostExecution,
       });
       return { ghostId: ghost.id };
     }
@@ -255,6 +336,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         tools: command.tools,
         fallbacks: command.fallbacks,
         skills: command.skills,
+        hostExecution: command.hostExecution,
       });
       return {};
 
@@ -286,6 +368,28 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
     case "schedule.delete":
       core.schedules.delete(command.scheduleId);
       return {};
+    case "activity.create":
+      return { activityId: core.activities.create(command.config).id };
+
+    case "activity.update":
+      core.activities.update(command.activityId, command.expectedRevision, command.config);
+      return {};
+
+    case "activity.pause":
+      core.activities.pause(command.activityId, command.paused, command.cancelRunning);
+      return {};
+
+    case "activity.delete":
+      core.activities.delete(command.activityId);
+      return {};
+
+    case "activity.stop_all":
+      if (command.ghostId !== undefined) ledger.ghost(command.ghostId);
+      for (const activity of ledger.activities()) {
+        if (activity.deletedAt === null && (command.ghostId === undefined || activity.ghostId === command.ghostId)) core.activities.pause(activity.id, true, true);
+      }
+      return {};
+
 
     case "space.create": {
       if (!isAbsolute(command.path) || !existsSync(command.path) || !statSync(command.path).isDirectory()) throw invalid("the space path must be an existing absolute directory");
@@ -377,7 +481,7 @@ function refreshGrantees(core: Core, grants: { ghostId: string }[]) {
   for (const ghostId of new Set(grants.map((grant) => grant.ghostId))) core.refreshGhost(ghostId);
 }
 
-/** One editable aspect of a Ghost; `undefined` leaves it unchanged. Never isDefault, grants or credentials. */
+/** One editable aspect of a Ghost; owner-only hostExecution is never passed by model tools. */
 export interface GhostPatch {
   name?: string;
   persona?: string;
@@ -387,6 +491,7 @@ export interface GhostPatch {
   tools?: GhostTool[];
   fallbacks?: ModelRef[];
   skills?: string[];
+  hostExecution?: boolean;
 }
 
 /**
@@ -410,6 +515,7 @@ export function updateGhost(core: Core, ghostId: string, patch: GhostPatch): Gho
     tools: patch.tools ?? ghost.tools,
     fallbacks: patch.fallbacks ?? ghost.fallbacks,
     skills: patch.skills ?? ghost.skills,
+    hostExecution: patch.hostExecution ?? ghost.hostExecution ?? false,
     updatedAt: Date.now(),
   };
   core.ledger.tx(() => {

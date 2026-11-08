@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, Clock3, MonitorSmartphone, Server, Smartphone, Users } from 'lucide-react';
+import { CircleAlert, Clock3, MonitorSmartphone, PlugZap, Repeat2, Server, Smartphone, Users } from 'lucide-react';
 import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
 import { AppFrame } from './components/AppFrame';
@@ -24,6 +24,8 @@ import { HostView } from './features/HostView';
 import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
 import { Schedules } from './features/Schedules';
+import { Activities } from './features/Activities';
+import { Connections } from './features/Connections';
 import { SpacesView } from './features/SpacesView';
 import { routeLabels, uiTerms } from './uiText';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
@@ -101,6 +103,8 @@ function Shell() {
     { id: 'team', label: uiTerms.ghostSettings, group: '설정', onSelect: go('/settings?tab=team') },
     { id: 'devices', label: '기기', group: '설정', onSelect: go('/settings?tab=devices') },
     { id: 'schedules', label: uiTerms.schedules, group: '설정', onSelect: go('/settings?tab=schedules') },
+    { id: 'activities', label: uiTerms.activities, group: '설정', onSelect: go('/settings?tab=activities') },
+    { id: 'connections', label: uiTerms.connections, group: '설정', onSelect: go('/settings?tab=connections') },
     { id: 'host', label: routeLabels.host, group: '설정', onSelect: go('/settings?tab=host') },
     { id: 'settings', label: uiTerms.settings, group: '설정', onSelect: go('/settings') },
   ] : [];
@@ -114,6 +118,8 @@ function Shell() {
       selectedGhostId={params.get('ghost') ?? undefined}/> },
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
+    { id: 'activities', label: uiTerms.activities, icon: Repeat2, content: <Activities navigate={navigate}/> },
+    { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
       {desktopError && <Banner variant="warning" className="mb-4">{desktopError}</Banner>}

@@ -343,6 +343,77 @@ describe("tools", () => {
     expect(verifying.result?.artifacts.map((artifact) => artifact.name)).toEqual(["report.txt"]);
   });
 
+  test("output completion recovers from malformed attachments and accepts only attached, reopened published bytes", async () => {
+    const s = setup();
+    const { work, conversation, pi } = await runningWork(s);
+    const body = "Measured result: 42\n";
+    const digest = sha256(body);
+    s.core.works.update(work.id, {
+      acceptance: {
+        criteria: "Deliver the measured report",
+        checks: [
+          { kind: "artifact_contains", name: "report.txt", text: "Measured result: 42" },
+          { kind: "artifact_sha256", name: "report.txt", sha256: digest },
+        ],
+        reviewer: null,
+      },
+    });
+    const workspace = s.sandbox.workspacePath(work);
+    const publish = toolOf(s, conversation, s.ghost, "publish_artifact");
+    const complete = toolOf(s, conversation, s.ghost, "complete");
+    writeFileSync(join(workspace, "report.txt"), body);
+    writeFileSync(join(workspace, "scratch.txt"), "not a deliverable");
+    for (const name of ["report.txt", "scratch.txt"]) {
+      expect((await call(publish, { path: name }, apiOf(pi, `publish-${name}`))).isError).toBeFalsy();
+    }
+    const published = s.ledger.artifactsForWork(work.id);
+    const report = published.find((artifact) => artifact.name === "report.txt")!;
+    const summary = "Delivered report.txt containing Measured result: 42";
+    const malformed = [{ summary }, { summary, artifacts: null }, { summary, artifacts: "report.txt" }, { summary, artifacts: [null] }];
+    for (const [index, args] of malformed.entries()) {
+      const refused = await call(complete, args, apiOf(pi, `malformed-${index}`));
+      expect(refused.isError).toBe(true);
+      expect(refused.control?.terminate).toBeFalsy();
+      const running = s.ledger.work(work.id);
+      expect(running.state).toBe("running");
+      expect(running.result).toBeNull();
+      expect(running.verdict).toBeNull();
+      expect(running.revisionsUsed).toBe(0);
+      expect(s.ledger.pendingDecisions({ workId: work.id })).toHaveLength(0);
+    }
+
+    // A valid empty array cannot substitute a summary for the required output attachment.
+    expect((await call(complete, { summary, artifacts: [] }, apiOf(pi, "unattached"))).isError).toBeFalsy();
+    await s.core.idle();
+    const unattached = s.ledger.work(work.id);
+    expect(unattached.state).toBe("running");
+    expect(unattached.verdict?.outcome).toBe("revise");
+    expect(unattached.result?.artifacts).toEqual([]);
+    expect(s.ledger.artifactsForWork(work.id)).toEqual(published);
+
+    // Acceptance must reopen the stored bytes, not trust the attached digest or summary.
+    const stored = join(s.root, "artifacts", report.digest);
+    writeFileSync(stored, "tampered result");
+    expect((await call(complete, { summary, artifacts: ["report.txt"] }, apiOf(pi, "tampered"))).isError).toBeFalsy();
+    await s.core.idle();
+    expect(s.ledger.work(work.id).state).toBe("running");
+    expect(s.ledger.work(work.id).verdict?.outcome).toBe("revise");
+
+    writeFileSync(stored, body);
+    writeFileSync(join(workspace, "report.txt"), "workspace changed after publication");
+    const corrected = await call(complete, { summary, artifacts: ["report.txt"] }, apiOf(pi, "corrected"));
+    expect(corrected.isError).toBeFalsy();
+    expect(corrected.control?.terminate).toBe(true);
+    await s.core.idle();
+    const done = s.ledger.work(work.id);
+    expect(done.state).toBe("done");
+    expect(done.verdict?.outcome).toBe("pass");
+    expect(done.verdict?.source).toBe("checks");
+    expect(done.result?.artifacts).toEqual([report]);
+    expect(new TextDecoder().decode(await s.core.artifacts.read(done.result!.artifacts[0]!.digest))).toBe(body);
+    expect(s.ledger.pendingDecisions({ workId: work.id })).toHaveLength(0);
+  });
+
   test("verdict from a review conversation settles the Work, once per verification", async () => {
     const s = setup();
     const reviewer = s.core.createGhost({ name: "Critic", persona: "You review." });

@@ -36,6 +36,7 @@ import { liveFrom, renderUserContent, sameLive, toMessage, type UserMeta } from 
 import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
 import { FallbackDoc, fallbackModels, fallbackReason } from "./fallback.ts";
+import { digestOf } from "../core/ids.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
@@ -173,9 +174,21 @@ class HostEngine implements Engine {
     const extensions = [...this.tools.extensionsFor(conversation, ghost, work), this.fallbackExtension];
     // Pi resolves extension names from its registry; filtering copied extensions would not filter the model's tools.
     const grantedTools: ToolRegistration[] = [];
+    const activity = work?.activityId ? this.core.ledger.findActivity(work.activityId) : null;
+    const activityRun = work?.activityRunId ? this.core.ledger.findActivityRun(work.activityRunId) : null;
     for (const extension of extensions) {
       for (const tool of extension.tools ?? []) {
-        if (!SELECTABLE_TOOLS.has(tool.name) || ghost.tools.some((name) => name === tool.name)) grantedTools.push(tool);
+        if (SELECTABLE_TOOLS.has(tool.name)) {
+          if (!ghost.tools.some((name) => name === tool.name)) continue;
+          if (work?.toolScope && !work.toolScope.some((name) => name === tool.name)) continue;
+          if (work?.activityId && (!activity || !activity.tools.some((name) => name === tool.name))) continue;
+        }
+        if (tool.name.startsWith("activity_") && tool.name !== "activity_propose" && (conversation.kind !== "work" || !work?.activityId)) continue;
+        if (tool.name === "activity_propose" && conversation.kind !== "direct") continue;
+        if (tool.name === "activity_read" && activity?.source.kind === "schedule") continue;
+        if (tool.name === "activity_action" && (!activity || activity.policy.externalActions === "deny" || activityRun?.dryRun)) continue;
+        if (tool.name === "activity_next_check" && (!activity?.policy.allowSelfCheck || activity.paused || activityRun?.dryRun)) continue;
+        grantedTools.push(tool);
       }
     }
     await state.pi.configure(
@@ -745,7 +758,15 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
           const host = core.ledger.conversationByPiId(String(conversationId));
           if (!host || host.kind !== "work" || !host.workId) return undefined;
           const work = core.ledger.workByConversation(host.id);
-          return work ? sandbox.envFor(work) : undefined;
+          return work ? sandbox.envFor(work, () => {
+            const current = core.ledger.work(work.id);
+            const ghost = core.ledger.ghost(current.ghostId);
+            if (!ghost.hostExecution || ghost.deletedAt !== null) throw new CommandError("forbidden", "direct PC execution was revoked");
+            if (!["running", "waiting"].includes(current.state)) throw new CommandError("forbidden", `Work is ${current.state}`);
+            if (current.deadlineAt !== null && current.deadlineAt <= Date.now()) throw new CommandError("forbidden", "Work deadline has passed");
+            const activity = current.activityId ? core.activities.authorize(current.id) : null;
+            return digestOf({ tools: ghost.tools, hostExecution: ghost.hostExecution, toolScope: current.toolScope, execution: current.execution, revision: activity?.activity.revision ?? null });
+          }) : undefined;
         },
       },
       ctx,

@@ -86,7 +86,7 @@ type EventPayload =
   | { type: "decision"; decision: Decision }
   | { type: "effect"; effect: Effect }
   | { type: "notification"; notification: Notification }
-  | { type: "schedule" | "schedule.removed" | "space" | "space.removed" | "settings" | "sandbox" }
+  | { type: "schedule" | "schedule.removed" | "space" | "space.removed" | "settings" | "sandbox" | "activity" | "activity_run" | "connection" | "connection.removed" }
   | { type: "avatar" | "avatar.removed" }
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
@@ -117,13 +117,17 @@ function eventVisible(ledger: Core["ledger"], access: Access, event: LedgerEvent
       return conversation !== null && access.canSeeConversation(conversation);
     }
     case "notification":
-      return access.isOwner || (data.notification.ghostId !== null && access.canSeeGhost(data.notification.ghostId));
+      return access.canSeeNotification(data.notification);
     case "schedule":
     case "schedule.removed":
     case "space":
     case "space.removed":
     case "settings":
     case "sandbox":
+    case "activity":
+    case "activity_run":
+    case "connection":
+    case "connection.removed":
       return access.isOwner;
     case "avatar":
     case "avatar.removed":

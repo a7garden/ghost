@@ -2,9 +2,11 @@ import { createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { connect, type ClientHttp2Session, type ClientHttp2Stream } from "node:http2";
 import { Buffer } from "node:buffer";
-import type { Notification } from "@ghost/contract";
+import type { DeviceGrant, Notification } from "@ghost/contract";
 import type { Config } from "../config.ts";
 import type { Core } from "../core/core.ts";
+import { Access } from "../core/access.ts";
+import type { Ledger } from "../ledger/ledger.ts";
 
 const APNS_HOSTS = { sandbox: "api.sandbox.push.apple.com", production: "api.push.apple.com" } as const;
 const TICK_MS = 5_000;
@@ -44,6 +46,13 @@ const payload = (notification: Notification) => ({
   aps: { alert: { title: notification.title, body: notification.body }, sound: "default" },
   notification_id: notification.id,
 });
+
+/** Use the same source scope as snapshot, SSE and notification.read. */
+export function notificationReceivers<T extends { deviceId: string; grants: DeviceGrant[] }>(ledger: Ledger, notification: Notification, targets: T[]) {
+  return targets.filter((target) =>
+    new Access(ledger, { kind: "device", deviceId: target.deviceId, name: "", grants: target.grants }).canSeeNotification(notification),
+  );
+}
 
 /**
  * HTTP/2 delivery against api[.sandbox].push.apple.com. One settlement per call: the deadline
@@ -133,9 +142,9 @@ function sendAlert(
 }
 
 /**
- * Every 5 s, sends each unpushed notification to the devices whose grants cover its Ghost
- * (owner-wide notifications go to all devices), then marks it pushed. A 410 clears that
- * device's token; transport failures are logged, never repeated automatically.
+ * Every 5 s, sends each unpushed notification to devices whose grants cover its source
+ * conversation or Work, then marks it pushed. Unscoped notifications remain owner-only.
+ * A 410 clears that device's token; transport failures are logged, never repeated automatically.
  */
 export function startPush(core: Core, config: Config): { stop(): void } | null {
   const apns = config.apns;
@@ -154,8 +163,7 @@ export function startPush(core: Core, config: Config): { stop(): void } | null {
     const targets = core.ledger.pushTargets();
     if (targets.length === 0) return;
     for (const notification of notifications) {
-      const receivers =
-        notification.ghostId === null ? targets : targets.filter((target) => target.grants.some((grant) => grant.ghostId === notification.ghostId));
+      const receivers = notificationReceivers(core.ledger, notification, targets);
       const jwt = tokenFor();
       for (const receiver of receivers) {
         try {

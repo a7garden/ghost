@@ -4,6 +4,8 @@ export const uiTerms = {
   work: '맡긴 일',
   workResults: '작업 결과',
   schedules: '반복 작업',
+  activities: '자동 활동',
+  connections: '연결 계정',
   conversationHistory: '대화 기록',
   roleInstructions: '역할 지시',
   ghostSettings: 'Ghost 설정',

@@ -13,6 +13,8 @@ export interface SegmentedControlOption<T extends string> {
 
 export interface SegmentedControlProps<T extends string> {
   "aria-label": string
+  id?: string
+  "aria-describedby"?: string
   value: T
   onValueChange: (value: T) => void
   options: readonly SegmentedControlOption<T>[]
@@ -23,6 +25,8 @@ export interface SegmentedControlProps<T extends string> {
 /** A compact, accessible single-choice control built on Radix RadioGroup. */
 function SegmentedControl<T extends string>({
   "aria-label": ariaLabel,
+  id,
+  "aria-describedby": ariaDescribedBy,
   value,
   onValueChange,
   options,
@@ -34,6 +38,8 @@ function SegmentedControl<T extends string>({
   return (
     <RadioGroupPrimitive.Root
       data-slot="segmented-control"
+      id={id}
+      aria-describedby={ariaDescribedBy}
       data-variant={variant}
       aria-label={ariaLabel}
       value={value}

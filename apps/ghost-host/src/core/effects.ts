@@ -15,7 +15,7 @@ export interface BeginEffect {
 }
 
 /** Host-only API journals; these names are not model tools or tool exclusion scopes. */
-const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete"] as const;
+const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete", "connection.upsert", "connection.delete"] as const;
 export type CommandEffectTool = typeof COMMAND_EFFECT_TOOLS[number];
 
 export interface BeginCommandEffect extends Omit<BeginEffect, "tool" | "callId"> {
@@ -277,6 +277,7 @@ export class Effects {
   }
 
   private notifyResolved(effect: Effect, result: string) {
+    if (effect.workId) this.core.works.resumeFromWaiting(effect.workId);
     return this.core.engine.submit(effect.conversationId, {
       text: `${effect.tool} (${effect.callId}): ${result}`,
       origin: "decision",

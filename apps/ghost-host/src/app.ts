@@ -21,6 +21,7 @@ import { MacHost } from "./integrations/host.ts";
 import { HostWatch } from "./core/hostwatch.ts";
 import { ProviderCatalog } from "./integrations/provider-catalog.ts";
 import { settingsView } from "./core/commands.ts";
+import { SourceConnections } from "./integrations/activity-sources.ts";
 
 export interface App {
   core: Core;
@@ -57,6 +58,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedCore: Core | null = null;
   let openedCatalog: ProviderCatalog | null = null;
   let openedEngine: Engine | null = null;
+  let openedSources: SourceConnections | null = null;
   let unsafeEngine = false;
   let coreStopped = false;
   let coreDrained = false;
@@ -71,10 +73,9 @@ export async function openApp(config: Config): Promise<App> {
       attempt(async () => { await openedCatalog?.close(); }),
       attempt(async () => { await openedCore?.codexCatalog.close(); }),
     ]);
-    if (openedCore) {
-      if (!coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
-      if (!coreDrained) await attempt(async () => { await openedCore!.idle(); coreDrained = true; });
-    }
+    if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
+    await attempt(async () => { await openedSources?.close(); });
+    if (openedCore && !coreDrained) await attempt(async () => { await openedCore!.idle(); coreDrained = true; });
     if (openedEngine) await attempt(async () => {
       await openedEngine!.close();
       openedEngine = null;
@@ -100,10 +101,12 @@ export async function openApp(config: Config): Promise<App> {
     const artifacts = new FsArtifactStore(config.root);
     const sandbox = createSandbox(config, artifacts);
     openedCatalog = new ProviderCatalog({ cachePath: join(config.root, "models.json") });
+    openedSources = new SourceConnections({ root: config.root, currentConnection: (id) => ledger.findConnection(id) });
     const core = (openedCore = new Core({
       ledger, artifacts, sandbox, secrets: new FileSecrets(config.root), log,
       catalog: openedCatalog,
       codexCachePath: join(config.root, "codex-models.json"),
+      activitySources: openedSources,
     }));
     const documents = createDocuments(core);
     const skills = createSkills(config);

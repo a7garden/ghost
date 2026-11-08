@@ -1,4 +1,4 @@
-import { DEVICE_COMMANDS, type Command, type Conversation, type Decision, type Principal, type Work } from "@ghost/contract";
+import { DEVICE_COMMANDS, type Command, type Conversation, type Decision, type Notification, type Principal, type Work } from "@ghost/contract";
 import type { Ledger } from "../ledger/ledger.ts";
 import { forbidden } from "./errors.ts";
 
@@ -47,6 +47,20 @@ export class Access {
     return conversation !== null && this.canSeeConversation(conversation);
   }
 
+  /** Notifications inherit their most specific source scope, never just its Ghost. */
+  canSeeNotification(notification: Notification): boolean {
+    if (this.isOwner) return true;
+    if (notification.workId !== null) {
+      const work = this.ledger.findWork(notification.workId);
+      return work !== null && this.canSeeWork(work);
+    }
+    if (notification.conversationId !== null) {
+      const conversation = this.ledger.findConversation(notification.conversationId);
+      return conversation !== null && this.canSeeConversation(conversation);
+    }
+    return notification.ghostId !== null && this.canSeeGhost(notification.ghostId);
+  }
+
   /** Throws unless the principal may send this command for these targets. */
   authorize(command: Command) {
     if (this.isOwner) return;
@@ -79,7 +93,7 @@ export class Access {
       case "notification.read":
         for (const id of command.notificationIds) {
           const notification = this.ledger.notification(id);
-          if (notification.ghostId && !this.canSeeGhost(notification.ghostId)) deny();
+          if (!this.canSeeNotification(notification)) deny();
         }
         return;
       case "device.push_register":
