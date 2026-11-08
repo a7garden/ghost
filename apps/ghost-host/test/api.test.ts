@@ -250,9 +250,9 @@ const notify = (id: string, ghostId: string | null) =>
   );
 
 /** Starts pairing and claims the code, yielding a fresh device identity. Successes never touch the failure budget. */
-async function pairDevice(name: string, ghostId: string): Promise<{ deviceId: string; token: string }> {
+async function pairDevice(name: string): Promise<{ deviceId: string; token: string }> {
   const started = (await (
-    await runCommand({ type: "device.pairing_start", name, grants: [{ ghostId, conversationId: null }] }, OWNER_TOKEN)
+    await runCommand({ type: "device.pairing_start" }, OWNER_TOKEN)
   ).json()) as { ok: boolean; result: { code: string } };
   expect(started.ok).toBe(true);
   const claim = await postJson("/api/pairing/claim", { code: started.result.code, deviceName: name });
@@ -354,12 +354,12 @@ describe("API server", () => {
 
   test("pairing: owner starts, device claims once", async () => {
     const started = (await (
-      await runCommand({ type: "device.pairing_start", name: "Test Phone", grants: [{ ghostId: alphaId, conversationId: alphaDirectId }] }, OWNER_TOKEN)
+      await runCommand({ type: "device.pairing_start" }, OWNER_TOKEN)
     ).json()) as { ok: boolean; result: { code: string; expiresAt: number; origin: string } };
     expect(started.ok).toBe(true);
     expect(started.result.origin).toBe("http://127.0.0.1");
 
-    const claim = await postJson("/api/pairing/claim", { code: started.result.code, deviceName: "Test Phone" });
+    const claim = await postJson("/api/pairing/claim", { code: started.result.code, deviceName: "  Test Phone  " });
     expect(claim.status).toBe(200);
     const granted = (await claim.json()) as { deviceId: string; token: string };
     deviceId = granted.deviceId;
@@ -372,28 +372,79 @@ describe("API server", () => {
     expect(forged.status).toBe(404);
   });
 
-  test("a paired device sees only its granted Ghost", async () => {
+  test("a paired device sees every Ghost, including new ones, but no owner-only collections", async () => {
     betaId = ((await (await runCommand({ type: "ghost.create", name: "Beta", persona: "quiet" }, OWNER_TOKEN)).json()) as {
       result: { ghostId: string };
     }).result.ghostId;
-
-    const state = (await (await get("/api/state", deviceToken)).json()) as State;
-    expect(state.ghosts.map((ghost) => ghost.id)).toEqual([alphaId]);
-    expect(state.conversations.map((conversation) => conversation.id)).toEqual([alphaDirectId]);
-    expect(state.principal).toEqual({ kind: "device", deviceId, name: "Test Phone", grants: [{ ghostId: alphaId, conversationId: alphaDirectId }] });
-    expect(state.schedules).toEqual([]);
+    await pairDevice("Other Phone");
+    ledger.tx(() => {
+      ledger.putSpace({ id: "owner-vault", name: "Vault", path: root, grants: [], createdAt: Date.now() });
+      ledger.putSchedule({
+        id: "owner-schedule", ghostId: betaId, conversationId: ledger.ghost(betaId).directConversationId,
+        prompt: "Later", spec: { kind: "at", at: Date.now() + 60_000 }, nextAt: Date.now() + 60_000,
+        state: "active", createdAt: Date.now(),
+      });
+    });
+    const state = parse(State, await (await get("/api/state", deviceToken)).json());
+    const ownerState = parse(State, await (await get("/api/state", OWNER_TOKEN)).json());
+    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications"] as const) {
+      expect(state[key]).toEqual(ownerState[key]);
+    }
+    expect(state.ghosts.map((ghost) => ghost.id)).toContain(betaId);
+    expect(state.principal).toEqual({ kind: "device", deviceId, name: "Test Phone" });
+    expect(ledger.device(deviceId).name).toBe("Test Phone");
     expect(state.devices.map((device) => device.id)).toEqual([deviceId]);
+    expect(ownerState.devices.length).toBeGreaterThan(1);
+    expect(ownerState.schedules.length).toBeGreaterThan(0);
+    expect(ownerState.spaces.length).toBeGreaterThan(0);
+    expect(state.schedules).toEqual([]);
+    expect(state.spaces).toEqual([]);
+    expect(state.sandboxes).toEqual([]);
+    expect(state.settings.providers).toEqual([]);
+    expect(state.settings.reviewModel).toBeNull();
+    expect(state.devices[0]).not.toHaveProperty("grants");
+  });
 
-    const ownerState = (await (await get("/api/state", OWNER_TOKEN)).json()) as State;
-    const ownerGhostIds = ownerState.ghosts.map((ghost) => ghost.id);
-    expect(ownerGhostIds).toContain(alphaId);
-    expect(ownerGhostIds).toContain(betaId);
+  test("pairing claims name the device, default empty names, and retain readable legacy columns", async () => {
+    for (const name of ["", "   ", "x".repeat(128)]) {
+      const paired = await pairDevice(name);
+      expect(ledger.device(paired.deviceId).name).toBe(name.trim() || "iPhone");
+      expect(ledger.db.query("SELECT grants FROM devices WHERE id = ?").get(paired.deviceId)).toEqual({ grants: "[]" });
+    }
+    expect(ledger.db.query("SELECT DISTINCT grants FROM pairings").all()).toEqual([{ grants: "[]" }]);
+    const started = (await (await runCommand({ type: "device.pairing_start" }, OWNER_TOKEN)).json()) as { result: { code: string } };
+    expect((await postJson("/api/pairing/claim", { code: started.result.code, deviceName: "x".repeat(129) })).status).toBe(400);
+    expect((await postJson("/api/pairing/claim", { code: started.result.code, deviceName: "Valid" })).status).toBe(200);
   });
 
   test("a device cannot send owner commands", async () => {
-    const response = await runCommand({ type: "ghost.create", name: "Rogue", persona: "no" }, deviceToken);
-    expect(response.status).toBe(403);
-    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("forbidden");
+    for (const command of [
+      { type: "ghost.create", name: "Rogue", persona: "no" },
+      { type: "conversation.create", ghostId: alphaId },
+      { type: "provider.delete", providerId: "private" },
+      { type: "schedule.delete", scheduleId: "owner-schedule" },
+      { type: "space.delete", spaceId: "owner-vault" },
+      { type: "device.pairing_start" },
+      { type: "device.update", deviceId, name: "Cannot rename myself" },
+      { type: "device.revoke", deviceId },
+    ]) {
+      const response = await runCommand(command, deviceToken);
+      expect(response.status).toBe(403);
+      const body = parse(CommandResponse, await response.json());
+      expect(body.ok ? "ok" : body.error.message).toBe(`${command.type} needs the owner`);
+    }
+  });
+
+  test("paired devices register push targets without per-Ghost filtering", async () => {
+    const paired = await pairDevice("Push Phone");
+    const response = await runCommand({
+      type: "device.push_register", token: "ab".repeat(32), environment: "sandbox",
+    }, paired.token);
+    expect(response.status).toBe(200);
+    expect(ledger.pushTargets()).toEqual([{ deviceId: paired.deviceId, token: "ab".repeat(32), environment: "sandbox" }]);
+    expect(ledger.device(paired.deviceId).pushEnabled).toBe(true);
+    expect((await runCommand({ type: "device.revoke", deviceId: paired.deviceId }, OWNER_TOKEN)).status).toBe(200);
+    expect(ledger.pushTargets()).toEqual([]);
   });
   test("owner uploads raw artifacts and reads them without a Work row", async () => {
     const bytes = new TextEncoder().encode("첨부 파일 내용");
@@ -537,21 +588,23 @@ describe("API server", () => {
     expect(core.secrets.has("auth-typed")).toBe(false);
   });
 
-  test("transcript pages are access-checked", async () => {
+  test("devices can read every Ghost's transcript pages", async () => {
     const owner = await get(`/api/conversations/${alphaDirectId}`, OWNER_TOKEN);
     expect(owner.status).toBe(200);
     expect(((await owner.json()) as { conversation: { id: string } }).conversation.id).toBe(alphaDirectId);
     const device = await get(`/api/conversations/${alphaDirectId}`, deviceToken);
     expect(device.status).toBe(200);
+    const beta = await get(`/api/conversations/${ledger.ghost(betaId).directConversationId}`, deviceToken);
+    expect(beta.status).toBe(200);
   });
 
-  test("artifact access follows Work visibility", async () => {
+  test("devices can read Work and artifacts from conversations created after pairing", async () => {
     const created = (await (
       await runCommand({ type: "conversation.create", ghostId: alphaId, title: "Second direct" }, OWNER_TOKEN)
     ).json()) as { result: { conversationId: string } };
     const secondDirect = created.result.conversationId;
     const work = (await (
-      await runCommand({ type: "work.create", ghostId: alphaId, originConversationId: secondDirect, title: "Hidden", brief: "b" }, OWNER_TOKEN)
+      await runCommand({ type: "work.create", ghostId: alphaId, originConversationId: secondDirect, title: "Shared", brief: "b" }, deviceToken)
     ).json()) as { result: { workId: string } };
     const workId = work.result.workId;
 
@@ -566,9 +619,10 @@ describe("API server", () => {
     expect(new Uint8Array(await ownerResponse.arrayBuffer())).toEqual(content);
 
     const deviceResponse = await get(`/api/artifacts/${ref.digest}`, deviceToken);
-    expect(deviceResponse.status).toBe(404);
+    expect(deviceResponse.status).toBe(200);
+    expect(new Uint8Array(await deviceResponse.arrayBuffer())).toEqual(content);
     expect((await get(`/api/artifacts/${ref.digest}`)).status).toBe(401);
-    expect((await get(`/api/works/${workId}`, deviceToken)).status).toBe(404);
+    expect((await get(`/api/works/${workId}`, deviceToken)).status).toBe(200);
     expect((await get(`/api/artifacts/${"z".repeat(64)}`, OWNER_TOKEN)).status).toBe(404);
   });
 
@@ -599,31 +653,30 @@ describe("API server", () => {
     stream.close();
   });
 
-  test("a device stream never sees events for ungranted Ghosts", async () => {
-    const notification = "sse-device-1";
-    notify(notification, alphaId);
-    const replayStream = new EventStream(await sse("/api/events?after=0", deviceToken));
-    const seen = await replayStream.drainUntil((frame) => frame.event === "ledger" && notificationId(frame) === notification);
-    expect(seen).not.toBeNull();
-    for (const frame of replayStream.frames) {
-      if (frame.event !== "ledger") continue;
-      expect(mentions(ledgerFrame(frame), betaId)).toBe(false);
-    }
-    replayStream.close();
+  test("a device stream replays every Ghost and receives new Ghosts, Work, decisions and notifications live", async () => {
+    notify("sse-device-replay", betaId);
+    const replay = new EventStream(await sse("/api/events?after=0", deviceToken));
+    expect(await replay.drainUntil((frame) => notificationId(frame) === "sse-device-replay")).not.toBeNull();
+    expect(replay.frames.some((frame) => frame.event === "ledger" && mentions(ledgerFrame(frame), betaId))).toBe(true);
+    replay.close();
 
-    const gap = ledger.seq();
-    const gammaId = ((await (await runCommand({ type: "ghost.create", name: "Gamma", persona: "shy" }, OWNER_TOKEN)).json()) as {
-      result: { ghostId: string };
-    }).result.ghostId;
-    const live = "sse-device-2";
-    notify(live, alphaId);
-    const liveStream = new EventStream(await sse(`/api/events?after=${gap}`, deviceToken));
-    const next = await liveStream.next();
-    expect(next).not.toBeNull();
-    expect(next!.event).toBe("ledger");
-    expect(notificationId(next!)).toBe(live);
-    expect(mentions(ledgerFrame(next!), gammaId)).toBe(false);
-    liveStream.close();
+    const stream = new EventStream(await sse(`/api/events?after=${ledger.seq()}`, deviceToken));
+    const gamma = core.createGhost({ name: "Gamma", persona: "shy" });
+    const work = (await (await runCommand({ type: "work.create", ghostId: gamma.id, title: "New Work", brief: "b" }, deviceToken)).json()) as {
+      result: { workId: string };
+    };
+    const question = core.decisions.ask(gamma.directConversationId, "Which?", "Pick one", ["A", "B"]);
+    notify("sse-device-global", null);
+    expect(await stream.drainUntil((frame) => notificationId(frame) === "sse-device-global")).not.toBeNull();
+    for (const id of [gamma.id, gamma.directConversationId, work.result.workId, question.id]) {
+      expect(stream.frames.some((frame) => frame.event === "ledger" && mentions(ledgerFrame(frame), id))).toBe(true);
+    }
+    expect((await runCommand({ type: "decision.resolve", decisionId: question.id, outcome: "answer", answer: "B" }, deviceToken)).status).toBe(200);
+    expect((await runCommand({ type: "notification.read", notificationIds: ["sse-device-global"] }, deviceToken)).status).toBe(200);
+    expect(ledger.notification("sse-device-global").readAt).not.toBeNull();
+    const state = parse(State, await (await get("/api/state", deviceToken)).json());
+    expect(state.notifications.some((notification) => notification.id === "sse-device-global")).toBe(true);
+    stream.close();
   });
 
   test("a stale replay cursor gets a reset frame", async () => {
@@ -679,7 +732,7 @@ describe("API server", () => {
   });
 
   test("revoking a device closes its open event stream", async () => {
-    const paired = await pairDevice("Stream Phone", alphaId);
+    const paired = await pairDevice("Stream Phone");
     const stream = new EventStream(await sse(`/api/events?after=${ledger.seq()}`, paired.token));
     notify("revoke-marker", alphaId);
     const seen = await stream.drainUntil((frame) => frame.event === "ledger" && notificationId(frame) === "revoke-marker");
@@ -691,34 +744,30 @@ describe("API server", () => {
     expect(await stream.next()).toBeNull();
     notify("after-revoke", alphaId);
     expect(await stream.next()).toBeNull();
+    expect((await get("/api/state", paired.token)).status).toBe(401);
   });
 
-  test("narrowing a device's grants stops events for the removed Ghost", async () => {
-    const createdA = (await (await runCommand({ type: "ghost.create", name: "StreamA", persona: "calm" }, OWNER_TOKEN)).json()) as {
-      result: { ghostId: string };
-    };
-    const ghostA = createdA.result.ghostId;
-    const createdB = (await (await runCommand({ type: "ghost.create", name: "StreamB", persona: "warm" }, OWNER_TOKEN)).json()) as {
-      result: { ghostId: string };
-    };
-    const ghostB = createdB.result.ghostId;
-    const paired = await pairDevice("Narrow Phone", ghostA);
+  test("renaming preserves device visibility and owner-only events stay private", async () => {
+    const paired = await pairDevice("Rename Phone");
     const stream = new EventStream(await sse(`/api/events?after=${ledger.seq()}`, paired.token));
-    notify("narrow-before", ghostA);
-    const before = await stream.drainUntil((frame) => frame.event === "ledger" && notificationId(frame) === "narrow-before");
-    expect(before).not.toBeNull();
-
-    const updated = await runCommand({ type: "device.update", deviceId: paired.deviceId, grants: [{ ghostId: ghostB, conversationId: null }] }, OWNER_TOKEN);
-    expect(updated.status).toBe(200);
-    // Consume the device event itself so the grants rebuild has definitely been applied.
-    await stream.drainUntil((frame) => frame.event === "ledger" && mentions(ledgerFrame(frame), paired.deviceId));
-
-    notify("narrow-a-hidden", ghostA);
-    notify("narrow-b-shown", ghostB);
-    const shown = await stream.drainUntil((frame) => frame.event === "ledger" && notificationId(frame) === "narrow-b-shown");
-    expect(shown).not.toBeNull();
-    // Frames are ordered by seq, so the later B event proves the earlier A event was filtered.
-    expect(stream.frames.filter((frame) => frame.event === "ledger" && notificationId(frame) === "narrow-a-hidden")).toHaveLength(0);
+    const other = await pairDevice("Private Phone");
+    expect((await runCommand({ type: "device.update", deviceId: paired.deviceId, name: "Renamed" }, OWNER_TOKEN)).status).toBe(200);
+    expect(await stream.drainUntil((frame) => frame.event === "ledger" && mentions(ledgerFrame(frame), paired.deviceId))).not.toBeNull();
+    const state = parse(State, await (await get("/api/state", paired.token)).json());
+    expect(state.principal).toEqual({ kind: "device", deviceId: paired.deviceId, name: "Renamed" });
+    ledger.tx(() => {
+      ledger.putSchedule({ ...ledger.schedule("owner-schedule"), prompt: "Private schedule" });
+      ledger.putSpace({ ...ledger.space("owner-vault"), name: "Private vault" });
+      ledger.emit({ type: "settings", settings: ledger.settings() });
+      ledger.emit({ type: "sandbox", sandbox: { ghostId: alphaId, state: "none", detail: "" } });
+    });
+    notify("rename-alpha", alphaId);
+    notify("rename-beta", betaId);
+    expect(await stream.drainUntil((frame) => notificationId(frame) === "rename-beta")).not.toBeNull();
+    const events = stream.frames.filter((frame) => frame.event === "ledger").map(ledgerFrame);
+    expect(events.some((event) => mentions(event, other.deviceId))).toBe(false);
+    expect(events.some((event) => ["schedule", "space", "settings", "sandbox"].includes(event.data.type))).toBe(false);
+    expect(stream.frames.some((frame) => notificationId(frame) === "rename-alpha")).toBe(true);
     stream.close();
   });
 
@@ -765,13 +814,13 @@ describe("API server", () => {
   });
 
   test("pairing claims are rate limited by failed attempts", async () => {
-    // Successes never count: the only earlier failures are the repeat and forged claims
-    // from the pairing test, so the eighth attempt here crosses the per-address limit.
+    // Successes never count: earlier failures are the repeat, forged and overlong-name claims.
+    // Seven more failures exhaust the per-address budget.
     const statuses: number[] = [];
     for (let attempt = 0; attempt < 10; attempt += 1) {
       statuses.push((await postJson("/api/pairing/claim", { code: "AAAAAAAA", deviceName: "flood" })).status);
     }
-    expect(statuses.slice(0, 8)).toEqual(Array.from({ length: 8 }, () => 404));
-    expect(statuses.slice(8)).toEqual(Array.from({ length: 2 }, () => 429));
+    expect(statuses.slice(0, 7)).toEqual(Array.from({ length: 7 }, () => 404));
+    expect(statuses.slice(7)).toEqual(Array.from({ length: 3 }, () => 429));
   });
 });

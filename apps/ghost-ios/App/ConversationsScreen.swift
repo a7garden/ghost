@@ -8,9 +8,7 @@ struct ConversationsScreen: View {
     @AppStorage("ghost.roster.pinned") private var savedPins = "[]"
     @AppStorage("ghost.roster.expanded") private var expanded = false
 
-    private var ghosts: [Ghost] {
-        model.snapshot.visibleGhosts.filter { model.grantedGhostIDs.contains($0.id) }
-    }
+    private var ghosts: [Ghost] { model.snapshot.visibleGhosts }
     private var pins: [String] {
         (try? JSONDecoder().decode([String].self, from: Data(savedPins.utf8))) ?? []
     }
@@ -33,9 +31,14 @@ struct ConversationsScreen: View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    // A host always has its main Ghost, so an empty roster only means nothing has loaded yet.
                     if ghosts.isEmpty {
-                        ContentUnavailableView("연결된 대화 없음", systemImage: "bubble.left",
-                            description: Text("PC에서 이 기기의 Ghost 사용 권한을 조정해 주세요."))
+                        if model.isOnline || model.connectionError == nil {
+                            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 64)
+                        } else {
+                            ContentUnavailableView("Ghost를 불러오지 못했습니다", systemImage: "wifi.exclamationmark",
+                                description: Text(model.connectionError ?? ""))
+                        }
                     }
                     if !fixed.isEmpty {
                         Section {
@@ -85,14 +88,14 @@ struct ConversationsScreen: View {
         .onChange(of: ghosts.map(\.id)) { prunePins() }
         .onChange(of: model.chatRoute) {
             guard let route = model.chatRoute,
-                  model.grantedConversations.contains(where: { $0.id == route.conversationId }) else { return }
+                  model.directConversations.contains(where: { $0.id == route.conversationId }) else { return }
             path.append(route.conversationId)
         }
         .onChange(of: model.notificationRoute) {
             guard let route = model.notificationRoute,
                   let notification = model.snapshot.notifications.first(where: { $0.id == route.notificationId }),
                   let id = notification.conversationId,
-                  model.grantedConversations.contains(where: { $0.id == id }) else { return }
+                  model.directConversations.contains(where: { $0.id == id }) else { return }
             path.append(id)
         }
     }
@@ -104,8 +107,8 @@ struct ConversationsScreen: View {
     }
 
     private func conversation(for ghost: Ghost) -> Conversation? {
-        let granted = model.grantedConversations.filter { $0.ghostId == ghost.id }
-        return granted.first { $0.id == ghost.directConversationId } ?? granted.first
+        let direct = model.directConversations.filter { $0.ghostId == ghost.id }
+        return direct.first { $0.id == ghost.directConversationId } ?? direct.first
     }
 
     @ViewBuilder private func rosterRow(_ ghost: Ghost) -> some View {

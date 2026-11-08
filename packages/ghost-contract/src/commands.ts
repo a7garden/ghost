@@ -2,7 +2,6 @@ import { Type, type Static } from "typebox";
 import {
   Acceptance,
   ArtifactRef,
-  DeviceGrant,
   FallbackList,
   GhostToolList,
   SkillList,
@@ -147,8 +146,8 @@ export const Command = Type.Union([
   command("provider.delete", { providerId: Id }),
 
   // Devices
-  command("device.pairing_start", { name: Text(128), grants: Type.Array(DeviceGrant, { maxItems: 64 }) }),
-  command("device.update", { deviceId: Id, name: Type.Optional(Text(128)), grants: Type.Optional(Type.Array(DeviceGrant, { maxItems: 64 })) }),
+  command("device.pairing_start", {}),
+  command("device.update", { deviceId: Id, name: Type.Optional(Text(128)) }),
   command("device.revoke", { deviceId: Id }),
   /** Device principal only. */
   command("device.push_register", {
@@ -163,7 +162,7 @@ export type Command = Static<typeof Command>;
 export type CommandType = Command["type"];
 export type CommandOf<T extends CommandType> = Extract<Command, { type: T }>;
 
-/** Commands a paired device may send, always further limited to its grants. */
+/** Commands a paired device may send across every Ghost and conversation. */
 export const DEVICE_COMMANDS: readonly CommandType[] = [
   "message.send",
   "message.cancel",

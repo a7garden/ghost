@@ -119,6 +119,35 @@ import XCTest
         capture("Compact work — largest accessibility type", app: app)
     }
 
+    func testPairingScreens() {
+        for dark in [false, true] {
+            let theme = dark ? "dark" : "light"
+            let app = XCUIApplication()
+            app.launchArguments = ["--ui-testing", "--pairing"] + (dark ? ["--dark"] : [])
+            app.launch()
+            XCTAssertTrue(app.buttons["pairing-scan-qr"].waitForExistence(timeout: 8))
+            XCTAssertTrue(app.staticTexts["내 Ghost와 연결"].exists)
+            capture("ios-pairing-\(theme)", app: app)
+            app.buttons["pairing-type-code"].tap()
+            let origin = app.textFields["pairing-origin-field"]
+            XCTAssertTrue(origin.waitForExistence(timeout: 5))
+            origin.tap()
+            origin.typeText("http://127.0.0.1:62062")
+            app.textFields["pairing-code-field"].tap()
+            app.textFields["pairing-code-field"].typeText("ab cd2345")
+            XCTAssertEqual(app.textFields["pairing-code-field"].value as? String, "ABCD2345")
+            XCTAssertTrue(app.buttons["pairing-code-submit"].isEnabled)
+            capture("ios-pairing-code-\(theme)", app: app)
+            app.terminate()
+
+            app.launchArguments = ["--ui-testing", "--pairing", "--pairing-issue"] + (dark ? ["--dark"] : [])
+            app.launch()
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '만료'")).firstMatch.waitForExistence(timeout: 8))
+            capture("ios-pairing-issue-\(theme)", app: app)
+            app.terminate()
+        }
+    }
+
     func testShippedDesignLightAndDark() {
         for dark in [false, true] {
             let theme = dark ? "dark" : "light"

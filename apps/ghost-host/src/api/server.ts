@@ -95,31 +95,19 @@ type EventPayload =
 
 /**
  * Which ledger events reach which principal over SSE. Mirrors `snapshot`'s filters:
- * owner-only entity types never go to devices, and a device sees only entities inside its grants.
+ * owner-only entity types never go to devices; shared entities reach every principal.
  */
-function eventVisible(ledger: Core["ledger"], access: Access, event: LedgerEvent, seenConversations: Set<string>): boolean {
+function eventVisible(access: Access, event: LedgerEvent): boolean {
   const data = event.data as EventPayload;
   switch (data.type) {
     case "ghost":
-      return access.canSeeGhost(data.ghost.id);
-    case "conversation": {
-      const visible = access.canSeeConversation(data.conversation);
-      if (visible) seenConversations.add(data.conversation.id);
-      return visible;
-    }
-    // The row is already gone, so visibility is judged by what the stream has seen.
+    case "conversation":
     case "conversation.removed":
-      return seenConversations.has(data.id);
     case "work":
-      return access.canSeeWork(data.work);
     case "decision":
-      return access.canSeeDecision(data.decision);
-    case "effect": {
-      const conversation = ledger.findConversation(data.effect.conversationId);
-      return conversation !== null && access.canSeeConversation(conversation);
-    }
+    case "effect":
     case "notification":
-      return access.isOwner || (data.notification.ghostId !== null && access.canSeeGhost(data.notification.ghostId));
+      return true;
     case "schedule":
     case "schedule.removed":
     case "space":
@@ -176,11 +164,11 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     const token = header.slice("Bearer ".length).trim();
     if (token.length === 0) return null;
     const candidate = Buffer.from(hashSecret(token));
-    if (candidate.length === ownerHash.length && timingSafeEqual(candidate, ownerHash)) return new Access(core.ledger, { kind: "owner" });
+    if (candidate.length === ownerHash.length && timingSafeEqual(candidate, ownerHash)) return new Access({ kind: "owner" });
     const device = core.ledger.deviceByTokenHash(hashSecret(token));
     if (device === null) return null;
     core.ledger.touchDevice(device.id, Date.now());
-    return new Access(core.ledger, { kind: "device", deviceId: device.id, name: device.name, grants: device.grants });
+    return new Access({ kind: "device", deviceId: device.id, name: device.name });
   }
 
   /**
@@ -201,13 +189,13 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     }
     try {
       const input = parse(PairingClaim, body);
+      const name = input.deviceName.trim() || "iPhone";
       core.ledger.prunePairings(now);
       const deviceId = newId();
       const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
       const claimed = core.ledger.tx((): Device | null => {
-        const offer = core.ledger.claimPairing(hashSecret(input.code.toUpperCase()), deviceId, now);
-        if (offer === null) return null;
-        const device: Device = { id: deviceId, name: offer.name, grants: offer.grants, pushEnabled: false, createdAt: now, lastSeenAt: null };
+        if (!core.ledger.claimPairing(hashSecret(input.code.toUpperCase()), deviceId, now)) return null;
+        const device: Device = { id: deviceId, name, pushEnabled: false, createdAt: now, lastSeenAt: null };
         core.ledger.insertDevice(device, hashSecret(token));
         return device;
       });
@@ -238,9 +226,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     }
   }
 
-  async function serveConversation(id: string, url: URL, access: Access): Promise<Response> {
+  async function serveConversation(id: string, url: URL): Promise<Response> {
     const conversation = core.ledger.conversation(id);
-    if (!access.canSeeConversation(conversation)) throw notFound(`conversation ${id}`);
     const limitParameter = url.searchParams.get("limit");
     const limit = limitParameter === null ? 100 : Math.min(Math.max(Number.parseInt(limitParameter, 10) || 0, 1), 500);
     const page = await core.engine.page(id, url.searchParams.get("before"), limit);
@@ -294,7 +281,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   async function serveArtifact(digest: string, access: Access): Promise<Response> {
     if (!DIGEST.test(digest)) throw notFound(`artifact ${digest}`);
     const rows = core.ledger.artifactsForDigest(digest);
-    const visibleWork = rows.some((row) => row.workId !== null && access.canSeeWork(core.ledger.work(row.workId)));
+    const visibleWork = rows.some((row) => row.workId !== null);
     const avatarImage = core.ledger.avatars().some((avatar) => avatar.imageDigest === digest);
     if (!access.isOwner && !visibleWork && !avatarImage) throw notFound(`artifact ${digest}`);
     if (!core.artifacts.has(digest)) throw notFound(`artifact ${digest}`);
@@ -350,43 +337,23 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         request.signal.addEventListener("abort", cleanup);
 
         // Subscribe before replaying so no event falls into the gap; early arrivals buffer until replay passes them.
-        const seenConversations = new Set(
-          core.ledger.conversations().filter((conversation) => access.canSeeConversation(conversation)).map((conversation) => conversation.id),
-        );
-        // A device stream tracks its own device: revocation closes it, a grant change
-        // rebuilds visibility so events outside the new grants stop delivering at once.
-        let active = access;
-        const liveWatched = new Set<string>();
+        // Revoking a device closes its active stream immediately.
         if (access.principal.kind === "device") {
           const streamDeviceId = access.principal.deviceId;
           unwatch.push(
             core.ledger.subscribe((event) => {
               const data = event.data as EventPayload;
-              if (data.type === "device.removed") {
-                if (data.id === streamDeviceId) cleanup();
-                return;
-              }
-              if (data.type !== "device" || data.device.id !== streamDeviceId) return;
-              active = new Access(core.ledger, { kind: "device", deviceId: streamDeviceId, name: data.device.name, grants: data.device.grants });
-              for (const id of [...seenConversations]) {
-                const conversation = core.ledger.findConversation(id);
-                if (conversation === null || !active.canSeeConversation(conversation)) seenConversations.delete(id);
-              }
-              for (const id of [...liveWatched]) {
-                const conversation = core.ledger.findConversation(id);
-                if (conversation === null || !active.canSeeConversation(conversation)) liveWatched.delete(id);
-              }
+              if (data.type === "device.removed" && data.id === streamDeviceId) cleanup();
             }),
           );
         }
-        const visible = (event: LedgerEvent) => eventVisible(core.ledger, active, event, seenConversations);
         let cursor = after;
         let replayed = false;
         const buffered: LedgerEvent[] = [];
         unwatch.push(
           core.ledger.subscribe((event) => {
             if (event.seq <= cursor) return;
-            if (!visible(event)) return;
+            if (!eventVisible(access, event)) return;
             if (!replayed) {
               buffered.push(event);
               return;
@@ -397,15 +364,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         );
 
         for (const id of url.searchParams.getAll("conversation")) {
-          const conversation = core.ledger.findConversation(id);
-          if (conversation === null || !access.canSeeConversation(conversation)) continue;
-          liveWatched.add(id);
-          unwatch.push(
-            core.engine.watch(id, (liveEvent) => {
-              if (!liveWatched.has(id)) return;
-              sendFrame({ event: "live", data: liveEvent });
-            }),
-          );
+          if (core.ledger.findConversation(id) === null) continue;
+          unwatch.push(core.engine.watch(id, (liveEvent) => sendFrame({ event: "live", data: liveEvent })));
         }
 
         const history = core.ledger.eventsAfter(after);
@@ -414,7 +374,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
           sendFrame({ event: "reset", data: { seq: cursor } });
         } else {
           for (const event of history) {
-            if (visible(event)) sendFrame({ event: "ledger", data: event });
+            if (eventVisible(access, event)) sendFrame({ event: "ledger", data: event });
             cursor = event.seq;
           }
           for (const event of buffered) {
@@ -554,7 +514,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     const work = /^\/api\/works\/([^/]+)$/.exec(pathname);
     if (work !== null && request.method === "GET") {
       try {
-        return json(workDetail(core, access, decodeURIComponent(work[1]!)));
+        return json(workDetail(core, decodeURIComponent(work[1]!)));
       } catch (caught) {
         return failure(caught);
       }
@@ -562,7 +522,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     const conversation = /^\/api\/conversations\/([^/]+)$/.exec(pathname);
     if (conversation !== null && request.method === "GET") {
       try {
-        return await serveConversation(decodeURIComponent(conversation[1]!), url, access);
+        return await serveConversation(decodeURIComponent(conversation[1]!), url);
       } catch (caught) {
         return failure(caught);
       }

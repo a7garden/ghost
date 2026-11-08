@@ -335,14 +335,13 @@ describe("GET /api/skills", () => {
 
     expect((await get("/api/skills")).status).toBe(401);
 
-    const ghost = h.core.createGhost({ name: "G", persona: "" });
     const started = (await (
       await fetch(`${base}/api/commands`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${OWNER_TOKEN}` },
         body: JSON.stringify({
           requestId: randomUUID(),
-          command: { type: "device.pairing_start", name: "Phone", grants: [{ ghostId: ghost.id, conversationId: ghost.directConversationId }] },
+          command: { type: "device.pairing_start" },
         }),
       })
     ).json()) as { ok: boolean; result: { code: string } };

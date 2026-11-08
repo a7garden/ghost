@@ -1,7 +1,6 @@
 import { Type } from "typebox";
 import type { Ghost, Work, WorkDetail } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
-import { Access } from "../core/access.ts";
 import type { Core } from "../core/core.ts";
 import { invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
@@ -91,7 +90,7 @@ export function createDirectTools(core: Core): Extension {
         if (root.originConversationId !== scope.conversation.id && !assignedHere) {
           throw invalid("this Work neither originates from this conversation nor is assigned to this Ghost");
         }
-        const detail = workDetail(core, new Access(core.ledger, { kind: "owner" }), work.id);
+        const detail = workDetail(core, work.id);
         return text(renderDetail(core, detail.work, detail));
       } catch (error) {
         return errorResult(error);

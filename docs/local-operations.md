@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-570c27d` (`main`, UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-1fde344` (`main`, UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,14 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 기기 범위 제거·한 단계 페어링 운영 반영 — 2026-11-08
+
+- 소유자 결정: 연결된 iPhone은 고른 Ghost로 제한하지 않는다. 기기 Ghost/대화 권한을 계약·Host·웹 UI·iPhone에서 없앴다. 기기는 소유자 전용 모음(반복 작업·Space·제공자·다른 기기·샌드박스)을 제외한 모든 Ghost·대화·맡긴 일·결정·알림을 보고, 기기용 명령만 보낸다. 철회가 통제 수단이다. `device.pairing_start`는 필드가 없고, 기기 이름은 휴대전화가 claim에 보낸 이름이다. 원장 스키마는 바꾸지 않았다(`devices.grants`·`pairings.grants` 열은 `'[]'`로 남겨 이전 릴리스가 원장을 열 수 있다).
+- 검사: Host 397개 중 395 통과·2 생략, 타입 검사, UI 82개·빌드, 계약 타입 검사, iOS core 44개·시뮬레이터 UI 13개. 격리 Host(임시 루트·62199)와 시뮬레이터에서 딥링크 페어링→기기 자체 이름 등록→페어링 뒤 만든 Ghost까지 목록 표시→대화 열기를 확인했다. 독립 검토: Host·계약·웹(Codex 작성)은 Claude, iPhone(Claude 작성)은 Codex가 검토했고 P0–P2 지적은 없었다. 지적된 문서 한 줄과 기존 재시도 이름 문제는 고쳤다.
+- 소스 `1fde344`를 `releases/20261108-bun-1fde344`에 설치했다. Host 원본·사본, UI 93개 파일 해시 일치, 설치 사본을 별도 루트·포트에서 실행해 health·UI 제공을 확인했다. 백업 `~/.local/share/ghost/backups/pre-20261108-bun-1fde344-1794149284782/`(`ghost-backup/2`, `complete: true`, artifacts·secrets·config·모델 캐시·console 설정 포함). 유휴 확인 뒤 `current`를 원자 교체하고 정상 재기동했다(PID 23039 → 31957). 단일 리스너·새 실행 경로·운영 DB·준비 상태와 Ghost 24·대화 40·맡긴 일 39·결정 9의 식별자 보존을 확인했다. 공개 origin health 200, 제공 UI 번들이 설치 사본과 같다.
+- 설치된 `Ghost.app`을 정상 종료 후 external 모드로 다시 열어 설정 › 기기에서 새 화면(`기기 연결`, 권한 편집 없음)을 확인했다. 운영 페어링 코드는 만들지 않았다. iPhone14에는 빌드 5를 설치했다(개인 팀, 알림 권한 없이 서명). 운영 Host에는 아직 연결된 기기가 없다.
+- 되돌릴 때는 `current`를 `releases/20261108-bun-570c27d`로 바꿔 LaunchAgent를 정상 재시작한다. 스키마·자격 형식은 그대로라 DB·secrets 복원은 필요 없다. 이전 릴리스에서는 이 기간에 연결한 기기의 권한이 `[]`로 읽혀 아무 Ghost도 보이지 않는다.
 
 ### 실행 안전성 보강 운영 반영 — 2026-11-08
 

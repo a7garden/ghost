@@ -7,7 +7,6 @@ import type {
   Conversation,
   Decision,
   Device,
-  DeviceGrant,
   Effect,
   Ghost,
   LedgerEvent,
@@ -730,26 +729,26 @@ export class Ledger {
     return row ? toDevice(row) : null;
   }
 
-  pushTargets(): { deviceId: string; token: string; environment: "sandbox" | "production"; grants: DeviceGrant[] }[] {
-    return (this.db.query("SELECT id, push_token, push_environment, grants FROM devices WHERE revoked_at IS NULL AND push_token IS NOT NULL").all() as Row[]).map(
+  pushTargets(): { deviceId: string; token: string; environment: "sandbox" | "production" }[] {
+    return (this.db.query("SELECT id, push_token, push_environment FROM devices WHERE revoked_at IS NULL AND push_token IS NOT NULL").all() as Row[]).map(
       (row) => ({
         deviceId: String(row.id),
         token: String(row.push_token),
         environment: row.push_environment === "production" ? "production" : "sandbox",
-        grants: parseJson<DeviceGrant[]>(row.grants),
       }),
     );
   }
 
   insertDevice(device: Device, tokenHash: string) {
     this.db
-      .query("INSERT INTO devices (id, name, token_hash, grants, created_at) VALUES (?, ?, ?, ?, ?)")
-      .run(device.id, device.name, tokenHash, json(device.grants), device.createdAt);
+      .query(`INSERT INTO devices
+        (id, name, token_hash, grants, created_at) VALUES (?, ?, ?, '[]', ?)`)
+      .run(device.id, device.name, tokenHash, device.createdAt);
     this.emit({ type: "device", device });
   }
 
   updateDevice(device: Device) {
-    this.db.query("UPDATE devices SET name = ?, grants = ?, last_seen_at = ? WHERE id = ?").run(device.name, json(device.grants), device.lastSeenAt, device.id);
+    this.db.query("UPDATE devices SET name = ?, last_seen_at = ? WHERE id = ?").run(device.name, device.lastSeenAt, device.id);
     this.emit({ type: "device", device });
   }
 
@@ -767,30 +766,19 @@ export class Ledger {
     this.emit({ type: "device.removed", id });
   }
 
-  insertPairing(codeHash: string, name: string, grants: DeviceGrant[], expiresAt: number) {
-    this.db.query("INSERT INTO pairings (code_hash, name, grants, expires_at) VALUES (?, ?, ?, ?)").run(codeHash, name, json(grants), expiresAt);
+  insertPairing(codeHash: string, expiresAt: number) {
+    this.db.query("INSERT INTO pairings (code_hash, name, grants, expires_at) VALUES (?, 'iPhone', '[]', ?)").run(codeHash, expiresAt);
   }
 
-  /** Atomically claim an unexpired pairing; returns its offer or null. */
-  claimPairing(codeHash: string, deviceId: string, now: number): { name: string; grants: DeviceGrant[] } | null {
-    const row = this.db
-      .query("UPDATE pairings SET device_id = ? WHERE code_hash = ? AND device_id IS NULL AND expires_at > ? RETURNING name, grants")
-      .get(deviceId, codeHash, now) as Row | null;
-    return row ? { name: String(row.name), grants: parseJson<DeviceGrant[]>(row.grants) } : null;
+  /** Atomically claim an unexpired pairing. */
+  claimPairing(codeHash: string, deviceId: string, now: number): boolean {
+    return this.db
+      .query("UPDATE pairings SET device_id = ? WHERE code_hash = ? AND device_id IS NULL AND expires_at > ? RETURNING code_hash")
+      .get(deviceId, codeHash, now) !== null;
   }
 
   prunePairings(now: number) {
     this.db.query("DELETE FROM pairings WHERE expires_at <= ?").run(now);
-  }
-
-  /** Drop one Ghost from every unclaimed pairing offer, so a later claim cannot grant it. */
-  scrubPairingGrants(ghostId: string) {
-    const rows = this.db.query("SELECT code_hash, grants FROM pairings WHERE device_id IS NULL").all() as Row[];
-    for (const row of rows) {
-      const grants = parseJson<DeviceGrant[]>(row.grants);
-      const kept = grants.filter((grant) => grant.ghostId !== ghostId);
-      if (kept.length !== grants.length) this.db.query("UPDATE pairings SET grants = ? WHERE code_hash = ?").run(json(kept), String(row.code_hash));
-    }
   }
 
   // Spaces
@@ -1027,7 +1015,6 @@ function toDevice(row: Row): Device {
   return {
     id: String(row.id),
     name: String(row.name),
-    grants: parseJson(row.grants),
     pushEnabled: row.push_token !== null,
     createdAt: Number(row.created_at),
     lastSeenAt: row.last_seen_at === null ? null : Number(row.last_seen_at),

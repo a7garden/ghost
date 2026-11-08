@@ -151,7 +151,7 @@ export const MIGRATIONS: readonly string[] = [
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
-    grants TEXT NOT NULL,
+    grants TEXT NOT NULL, -- Unused since 2026-11-08; kept so the previous release stays readable.
     push_token TEXT,
     push_environment TEXT,
     created_at INTEGER NOT NULL,
@@ -162,7 +162,7 @@ export const MIGRATIONS: readonly string[] = [
   CREATE TABLE pairings (
     code_hash TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    grants TEXT NOT NULL,
+    grants TEXT NOT NULL, -- Unused since 2026-11-08; kept so the previous release stays readable.
     expires_at INTEGER NOT NULL,
     device_id TEXT
   );

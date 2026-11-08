@@ -25,6 +25,7 @@ enum MobileUIFixture {
     static var empty: Bool { ProcessInfo.processInfo.arguments.contains("--empty-conversation") }
     static var designReview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--design-review") }
     static var longConversation: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--long-conversation") }
+    static var pairing: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--pairing") }
     static var reviewWidth: CGFloat? {
         let prefix = "--review-width="
         guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) }),
@@ -160,7 +161,6 @@ enum MobileUIFixture {
                                criteria: designReview ? "안건별 결정 · 담당 · 다음 단계 · Markdown 파일" : "짧게 읽을 에세이 5권 · 주제와 읽는 시간 · Markdown 파일",
                                state: designReview ? .verifying : .running, created: designReview ? 50 : 3, updated: designReview ? 68 : 4)
         var works = empty ? [] : [fixtureWork]
-        var grants = [DeviceGrant(ghostId: ghostID, conversationId: nil)]
         if designReview {
             ghosts += [
                 ghost(researcherID, "연구원", persona: "자료를 찾고 출처를 정리하는 리서처입니다.",
@@ -181,11 +181,10 @@ enum MobileUIFixture {
                 work(researchWorkID, ghost: researcherID, parent: workID, root: workID, title: "회의 참고 자료 조사", brief: "회의 메모 요약에 필요한 자료를 모아 주세요.",
                      criteria: "출처 3개 이상", state: .waiting, created: 52, updated: 60),
             ]
-            grants += [DeviceGrant(ghostId: researcherID, conversationId: nil), DeviceGrant(ghostId: scribeID, conversationId: nil)]
         }
         return GhostStateSnapshot(
             seq: 10,
-            principal: .device(deviceId: "fixture-device", name: "Fixture iPhone", grants: grants),
+            principal: .device(deviceId: "fixture-device", name: "Fixture iPhone"),
             runtime: Runtime(ready: true, detail: "", version: "fixture"),
             ghosts: ghosts, conversations: conversations, works: works, decisions: designReview ? reviewDecisions : [], notifications: [])
     }

@@ -339,17 +339,15 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       return {};
 
     case "device.pairing_start": {
-      for (const grant of command.grants) ledger.ghost(grant.ghostId);
       const code = newPairingCode();
       const expiresAt = Date.now() + PAIRING_TTL_MS;
-      ledger.tx(() => ledger.insertPairing(hashSecret(code), command.name, command.grants, expiresAt));
+      ledger.tx(() => ledger.insertPairing(hashSecret(code), expiresAt));
       return { code, expiresAt, origin: context.publicOrigin };
     }
 
     case "device.update": {
       const device = ledger.device(command.deviceId);
-      for (const grant of command.grants ?? []) ledger.ghost(grant.ghostId);
-      ledger.tx(() => ledger.updateDevice({ ...device, name: command.name ?? device.name, grants: command.grants ?? device.grants }));
+      ledger.tx(() => ledger.updateDevice({ ...device, name: command.name ?? device.name }));
       return {};
     }
 
@@ -431,7 +429,7 @@ const LIVE_WORK_STATES = ["queued", "running", "waiting", "verifying", "blocked"
 
 /**
  * Remove a retired Ghost from every list. Its row stays as a tombstone (`deletedAt`) so past Works,
- * conversations and effects keep their assignee; its schedules and every grant naming it go away.
+ * conversations and effects keep their assignee; its schedules and Space grants naming it go away.
  */
 export function deleteGhost(core: Core, ghostId: string): void {
   const { ledger } = core;
@@ -448,11 +446,6 @@ export function deleteGhost(core: Core, ghostId: string): void {
   const now = Date.now();
   ledger.tx(() => {
     for (const schedule of ledger.schedules()) if (schedule.ghostId === ghost.id) ledger.deleteSchedule(schedule.id);
-    ledger.scrubPairingGrants(ghost.id);
-    for (const device of ledger.devices()) {
-      const grants = device.grants.filter((grant) => grant.ghostId !== ghost.id);
-      if (grants.length !== device.grants.length) ledger.updateDevice({ ...device, grants });
-    }
     for (const space of ledger.spaces()) {
       const grants = space.grants.filter((grant) => grant.ghostId !== ghost.id);
       if (grants.length !== space.grants.length) ledger.putSpace({ ...space, grants });

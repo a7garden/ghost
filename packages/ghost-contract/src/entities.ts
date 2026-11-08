@@ -473,17 +473,9 @@ export const Notification = Type.Object({
 });
 export type Notification = Static<typeof Notification>;
 
-export const DeviceGrant = Type.Object({
-  ghostId: Id,
-  /** Null grants every direct conversation of the Ghost. */
-  conversationId: nullable(Id),
-});
-export type DeviceGrant = Static<typeof DeviceGrant>;
-
 export const Device = Type.Object({
   id: Id,
   name: Type.String({ minLength: 1, maxLength: 128 }),
-  grants: Type.Array(DeviceGrant, { maxItems: 64 }),
   pushEnabled: Type.Boolean(),
   createdAt: Timestamp,
   lastSeenAt: nullable(Timestamp),

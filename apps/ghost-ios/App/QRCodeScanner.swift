@@ -186,38 +186,36 @@ private struct ScannerPreview: UIViewRepresentable {
     }
 }
 
-// The full-screen scan sheet: live preview while running, and the actual
-// workflow when the camera is refused — open Settings, or fall back to the
-// nearby-server list and the 8-character code.
+// The full-screen scan sheet: the live preview with a clear frame to aim at, and the
+// actual way forward when the camera is refused — open Settings or type the code.
 struct QRScannerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let sink: QRScanSink
+    /// Leaves the camera for the typed-code fallback.
+    var typeInstead: () -> Void = {}
     @State private var controller: QRScannerController?
     @State private var outcome: QRScannerStartOutcome?
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                if let controller {
-                    GeometryReader { geometry in
-                        ScannerPreview(session: controller.session)
-                            .frame(width: geometry.size.width, height: geometry.size.height)
-                            .task {
-                                outcome = await controller.start()
-                            }
-                    }
-                    .ignoresSafeArea()
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let controller {
+                GeometryReader { geometry in
+                    ScannerPreview(session: controller.session)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .task { outcome = await controller.start() }
                 }
-                statusOverlay
+                .ignoresSafeArea()
             }
-            .navigationTitle("QR 스캔")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("닫기") { dismiss() }
-                }
+            if outcome == .running { ScanFrame() }
+            statusOverlay
+        }
+        .overlay(alignment: .topLeading) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(.white)
+                    .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
             }
+            .accessibilityLabel("닫기").padding(16)
         }
         .preferredColorScheme(.dark)
         .task {
@@ -234,54 +232,78 @@ struct QRScannerSheet: View {
     @ViewBuilder private var statusOverlay: some View {
         switch outcome {
         case .running:
-            VStack {
-                Spacer()
-                if let issue = sink.parseIssue {
-                    Text(issue)
-                        .font(.callout)
-                        .foregroundStyle(.white)
-                        .padding(12)
-                        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
-                        .padding(.horizontal, 24)
-                } else {
-                    Text("PC 화면의 QR 코드를 비춰 주세요.")
-                        .font(.callout)
-                        .foregroundStyle(.white)
-                        .padding(12)
-                        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
-                }
-                Spacer().frame(height: 48)
-            }
-        case .permissionDenied, .permissionRestricted:
             VStack(spacing: 16) {
-                Image(systemName: "camera.badge.ellipsis").font(.largeTitle).foregroundStyle(.white)
-                Text("카메라를 사용할 수 없습니다").font(.headline).foregroundStyle(.white)
-                Text("iOS 설정 > Ghost > 카메라를 허용한 뒤 다시 스캔해 주세요. 카메라 없이는 아래 화면에서 서버 주소와 연결 코드를 직접 입력해 연결할 수 있습니다.")
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.85))
+                Spacer()
+                Text(sink.parseIssue ?? "PC 화면의 QR 코드를 틀 안에 맞춰 주세요")
+                    .font(.callout.weight(.medium)).foregroundStyle(.white)
                     .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(sink.parseIssue == nil ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(GhostStyle.danger.opacity(0.85)), in: Capsule())
+                Button("코드로 연결", action: typeInstead)
+                    .font(.callout.weight(.semibold)).foregroundStyle(.white).frame(minHeight: 44)
+                Spacer().frame(height: 24)
+            }
+            .padding(.horizontal, 24)
+        case .permissionDenied, .permissionRestricted:
+            refusal(title: "카메라를 쓸 수 없어요", detail: "설정에서 Ghost의 카메라를 허용하거나 코드로 연결하세요.", settings: true)
+        case .unavailable(let message):
+            refusal(title: "카메라를 쓸 수 없어요", detail: message, settings: false)
+        case .none:
+            ProgressView().tint(.white)
+        }
+    }
+
+    private func refusal(title: String, detail: String, settings: Bool) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: "camera.badge.ellipsis").font(.largeTitle).foregroundStyle(.white)
+            Text(title).font(.headline).foregroundStyle(.white)
+            Text(detail).font(.callout).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center)
+            if settings {
                 Button("설정 열기") {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                 }
                 .buttonStyle(GhostPrimaryButtonStyle())
-                Button("닫기") { dismiss() }
             }
-            .padding(24)
-        case .unavailable(let message):
-            VStack(spacing: 16) {
-                Image(systemName: "camera.badge.ellipsis").font(.largeTitle).foregroundStyle(.white)
-                Text(message).font(.callout).foregroundStyle(.white)
-                Button("닫기") { dismiss() }
+            Button("코드로 연결", action: typeInstead)
+                .font(.callout.weight(.semibold)).foregroundStyle(.white).frame(minHeight: 44)
+        }
+        .padding(32)
+    }
+}
+
+/// The aiming frame: four rounded corners over a gently dimmed camera.
+private struct ScanFrame: View {
+    var body: some View {
+        GeometryReader { geometry in
+            let side = min(geometry.size.width, geometry.size.height) * 0.66
+            let rect = CGRect(x: (geometry.size.width - side) / 2, y: (geometry.size.height - side) / 2 - 24, width: side, height: side)
+            ZStack {
+                Path { path in
+                    path.addRect(CGRect(origin: .zero, size: geometry.size))
+                    path.addRoundedRect(in: rect, cornerSize: CGSize(width: 28, height: 28))
+                }
+                .fill(Color.black.opacity(0.45), style: FillStyle(eoFill: true))
+                Corners(rect: rect)
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 4, lineCap: .round))
             }
-            .padding(24)
-        case .none:
-            VStack(spacing: 16) {
-                Image(systemName: "camera.badge.ellipsis").font(.largeTitle).foregroundStyle(.white)
-                Text("카메라를 준비하고 있습니다.").font(.callout).foregroundStyle(.white)
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+
+    private struct Corners: Shape {
+        let rect: CGRect
+        func path(in _: CGRect) -> Path {
+            var p = Path()
+            let arm: CGFloat = 34, r: CGFloat = 28
+            for (x, y, sx, sy) in [(rect.minX, rect.minY, 1.0, 1.0), (rect.maxX, rect.minY, -1.0, 1.0),
+                                   (rect.minX, rect.maxY, 1.0, -1.0), (rect.maxX, rect.maxY, -1.0, -1.0)] {
+                p.move(to: CGPoint(x: x, y: y + sy * (r + arm - r)))
+                p.addLine(to: CGPoint(x: x, y: y + sy * r))
+                p.addQuadCurve(to: CGPoint(x: x + sx * r, y: y), control: CGPoint(x: x, y: y))
+                p.addLine(to: CGPoint(x: x + sx * (r + arm - r), y: y))
             }
-            .padding(24)
+            return p
         }
     }
 }

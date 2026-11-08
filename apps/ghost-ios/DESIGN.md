@@ -1,6 +1,6 @@
 # Ghost Mobile
 
-The native iPhone client shares Ghost's quiet neutral identity. The 2026-11-04 owner direction keeps direct conversation central and makes every granted Ghost accessible without an external messenger. The 2026-11-08 port brings the web/Mac agent surface to the phone with components drawn for touch rather than stock lists: the roster, threads that branch and return, a docked decision deck and a hand-off composer.
+The native iPhone client shares Ghost's quiet neutral identity. The 2026-11-04 owner direction keeps direct conversation central and makes every Ghost accessible without an external messenger. The 2026-11-08 port brings the web/Mac agent surface to the phone with components drawn for touch rather than stock lists: the roster, threads that branch and return, a docked decision deck and a hand-off composer.
 
 ## Structure
 
@@ -20,7 +20,7 @@ The in-app Ghost portrait keeps the approved two bar eyes and small round mouth 
 
 ## Interaction
 
-The composer stays above the keyboard and system tab bar. Sending preserves the existing durable draft/receipt contract; a lost acknowledgment remains unresolved and is never silently retried. Earlier-message reading must not jump when refresh brings new content; `이전 메시지` loads older pages in place. The header shows the Ghost's face and presence; its branch button opens the thread sheet (live and settled threads, earlier conversations, 맡긴 일 전체). The composer's `+`, `/` and `@` turn a message into a 맡긴 일 for this or another granted Ghost, with completion criteria and an optional deadline, reporting back to this conversation. The phone omits what the host reserves for the owner: attachment upload, the model chip and send-later. Their original authority and disclosure guards remain enforced.
+The composer stays above the keyboard and system tab bar. Sending preserves the existing durable draft/receipt contract; a lost acknowledgment remains unresolved and is never silently retried. Earlier-message reading must not jump when refresh brings new content; `이전 메시지` loads older pages in place. The header shows the Ghost's face and presence; its branch button opens the thread sheet (live and settled threads, earlier conversations, 맡긴 일 전체). The composer's `+`, `/` and `@` turn a message into a 맡긴 일 for this or another Ghost, with completion criteria and an optional deadline, reporting back to this conversation. The phone omits what the host reserves for the owner: attachment upload, the model chip and send-later. Their original authority and disclosure guards remain enforced.
 
 Work summaries distinguish running, produced, accepted, failed and unconfirmed. Completion is not acceptance. Approval details must still show the exact operation, destination, input and target before any decision. Technical facts can be disclosed within the relevant detail rather than injected into every default screen.
 
@@ -34,14 +34,21 @@ Every action states its real outcome: sending, stopping a response, cancelling o
 
 Use native navigation and short opacity/press transitions, no page-load animation. Honor Reduce Motion. Maintain Dynamic Type, VoiceOver labels, selected-state semantics, meaningful focus, contrast and safe areas. Verify compact phone widths, the actual iPhone14, larger phone/tablet widths and dark mode. Preserve the existing app bundle/Keychain on device reinstall.
 
-## Pairing and equality
+## Pairing and reach
 
-The owner chooses the exact Ghost/conversation pairs for a new phone connection.
-The phone validates the saved origin and code before claiming, then stores the
-issued device credential. Adding another Ghost later does not silently expand a
-device grant: the host filters every read and command by the device's grants.
-Existing grants retain their original scope. Display actual Ghost names, not raw
-IDs as default navigation labels.
+A paired phone reaches every Ghost (owner decision, 2026-11-08): pairing has no Ghost or
+conversation choice, and a Ghost created later appears on the phone at once. The host
+still limits the phone to device commands and never sends it owner-only collections;
+revoking the device on the PC is the control. Display actual Ghost names, not raw IDs as
+default navigation labels.
+
+The connect screen is one decision: scan the QR the PC shows under 설정 › 기기 › 기기 연결,
+drawn as that path rather than a sentence. Typing the server and code is the fallback in
+a sheet (uppercase, spaces dropped, the address checked before the sheet closes). The
+phone names itself at claim; the name is editable before connecting. Connecting, an
+interrupted claim (send again unchanged or start over) and a failure each replace the
+action area instead of stacking warnings. The phone validates the origin and code before
+claiming, then stores the issued device credential.
 
 Switching keeps each draft in its original pair, clears pending attachment selection,
 and restores the chosen conversation after reopening. An uncertain send remains tied

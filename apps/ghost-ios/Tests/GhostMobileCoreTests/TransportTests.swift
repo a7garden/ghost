@@ -6,7 +6,7 @@ import Testing
     private let stateJSON = """
     {
       "seq": 42,
-      "principal": {"kind": "device", "deviceId": "device-1", "name": "Test iPhone", "grants": [{"ghostId": "ghost-1", "conversationId": null}]},
+      "principal": {"kind": "device", "deviceId": "device-1", "name": "Test iPhone"},
       "runtime": {"ready": true, "detail": "", "version": "1.0.0"},
       "ghosts": [{"id": "ghost-1", "name": "Ghost", "persona": "비서", "look": {"avatarId": null},
                   "model": null, "isDefault": true, "state": "active",
@@ -40,12 +40,7 @@ import Testing
     @Test func decodesStateSnapshotForDevicePrincipal() throws {
         let state = try JSONDecoder().decode(GhostStateSnapshot.self, from: json(stateJSON))
         #expect(state.seq == 42)
-        guard case .device(let deviceId, let name, let grants) = state.principal else {
-            Issue.record("expected device principal"); return
-        }
-        #expect(deviceId == "device-1")
-        #expect(name == "Test iPhone")
-        #expect(grants == [DeviceGrant(ghostId: "ghost-1", conversationId: nil)])
+        #expect(state.principal == .device(deviceId: "device-1", name: "Test iPhone"))
         #expect(state.runtime.ready)
         #expect(state.ghosts[0].isDefault)
         #expect(state.ghosts[0].state == .active)
@@ -63,11 +58,10 @@ import Testing
 
     @Test func decodesOwnerPrincipal() throws {
         let ownerState = stateJSON.replacingOccurrences(
-            of: #"{"kind": "device", "deviceId": "device-1", "name": "Test iPhone", "grants": [{"ghostId": "ghost-1", "conversationId": null}]}"#,
+            of: #"{"kind": "device", "deviceId": "device-1", "name": "Test iPhone"}"#,
             with: #"{"kind": "owner"}"#)
         let state = try JSONDecoder().decode(GhostStateSnapshot.self, from: json(ownerState))
         #expect(state.principal == .owner)
-        #expect(state.principal.grants.isEmpty)
     }
 
     @Test func decodesConversationPage() throws {

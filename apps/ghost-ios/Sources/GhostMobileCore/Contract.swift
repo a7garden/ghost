@@ -311,16 +311,6 @@ public struct Effect: Codable, Identifiable, Hashable, Sendable {
     public var endedAt: Int?
 }
 
-public struct DeviceGrant: Codable, Hashable, Sendable {
-    public var ghostId: String
-    public var conversationId: String?
-
-    public init(ghostId: String, conversationId: String?) {
-        self.ghostId = ghostId
-        self.conversationId = conversationId
-    }
-}
-
 public struct Runtime: Codable, Hashable, Sendable {
     public var ready: Bool
     public var detail: String
@@ -331,17 +321,13 @@ public struct Runtime: Codable, Hashable, Sendable {
     }
 }
 
-/// Contract `Principal`: owner or a device with its grants.
+/// Contract `Principal`: the owner or a paired device. A device sees every Ghost; the
+/// host limits it to device commands, not to chosen Ghosts.
 public enum Principal: Codable, Hashable, Sendable {
     case owner
-    case device(deviceId: String, name: String, grants: [DeviceGrant])
+    case device(deviceId: String, name: String)
 
-    public var grants: [DeviceGrant] {
-        if case .device(_, _, let grants) = self { return grants }
-        return []
-    }
-
-    private enum CodingKeys: String, CodingKey { case kind, deviceId, name, grants }
+    private enum CodingKeys: String, CodingKey { case kind, deviceId, name }
     private enum Kind: String, Decodable { case owner, device }
 
     public init(from decoder: Decoder) throws {
@@ -352,8 +338,7 @@ public enum Principal: Codable, Hashable, Sendable {
         case .device:
             self = .device(
                 deviceId: try container.decode(String.self, forKey: .deviceId),
-                name: try container.decode(String.self, forKey: .name),
-                grants: try container.decode([DeviceGrant].self, forKey: .grants))
+                name: try container.decode(String.self, forKey: .name))
         }
     }
 
@@ -362,17 +347,15 @@ public enum Principal: Codable, Hashable, Sendable {
         switch self {
         case .owner:
             try container.encode("owner", forKey: .kind)
-        case .device(let deviceId, let name, let grants):
+        case .device(let deviceId, let name):
             try container.encode("device", forKey: .kind)
             try container.encode(deviceId, forKey: .deviceId)
             try container.encode(name, forKey: .name)
-            try container.encode(grants, forKey: .grants)
         }
     }
 }
 
-/// GET /api/state. Device principals receive only what their grants cover;
-/// owner-only collections are omitted here because the phone never reads them.
+/// GET /api/state. Owner-only collections are omitted here because the phone never reads them.
 public struct GhostStateSnapshot: Codable, Sendable {
     public var seq: Int
     public var principal: Principal

@@ -2,7 +2,6 @@ import type { State, WorkDetail } from "@ghost/contract";
 import type { Access } from "./access.ts";
 import { settingsView } from "./commands.ts";
 import type { Core } from "./core.ts";
-import { notFound } from "./errors.ts";
 
 export const HOST_VERSION = "2.0.0";
 
@@ -11,18 +10,17 @@ export function snapshot(core: Core, access: Access): State {
   const { ledger } = core;
   const seq = ledger.seq();
   const engine = core.engine.status();
-  const ghosts = ledger.ghosts().filter((ghost) => access.canSeeGhost(ghost.id));
-  const works = ledger.worksForState().filter((work) => access.canSeeWork(work));
+  const ghosts = ledger.ghosts();
   const settings = settingsView(core);
   return {
     seq,
     principal: access.principal,
     runtime: { ready: engine.ready, detail: engine.detail, version: HOST_VERSION },
     ghosts,
-    conversations: ledger.conversations().filter((conversation) => conversation.kind === "direct" || conversation.workId !== null).filter((conversation) => access.canSeeConversation(conversation)),
-    works,
-    decisions: ledger.decisionsForState().filter((decision) => access.canSeeDecision(decision)),
-    notifications: ledger.notificationsForState().filter((notification) => access.isOwner || (notification.ghostId !== null && access.canSeeGhost(notification.ghostId))),
+    conversations: ledger.conversations().filter((conversation) => conversation.kind === "direct" || conversation.workId !== null),
+    works: ledger.worksForState(),
+    decisions: ledger.decisionsForState(),
+    notifications: ledger.notificationsForState(),
     schedules: access.isOwner ? ledger.schedules() : [],
     spaces: access.isOwner ? ledger.spaces() : [],
     avatars: ledger.avatars(),
@@ -32,10 +30,9 @@ export function snapshot(core: Core, access: Access): State {
   };
 }
 
-export function workDetail(core: Core, access: Access, workId: string): WorkDetail {
+export function workDetail(core: Core, workId: string): WorkDetail {
   const { ledger } = core;
   const work = ledger.work(workId);
-  if (!access.canSeeWork(work)) throw notFound(`work ${workId}`);
   const ancestors = [];
   let current = work;
   while (current.parentId) {
