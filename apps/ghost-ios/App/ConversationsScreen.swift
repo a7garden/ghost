@@ -1,227 +1,177 @@
 import SwiftUI
 import GhostMobileCore
 
-// 대화 tab: the direct conversations this device is granted, grouped per
-// Ghost, with the live transcript, streaming text, and the composer.
 struct ConversationsScreen: View {
     let model: GhostModel
     @State private var path = NavigationPath()
+    @State private var search = ""
+    @AppStorage("ghost.roster.pinned") private var savedPins = "[]"
+    @AppStorage("ghost.roster.expanded") private var expanded = false
 
-    private var entries: [(ghost: Ghost, conversations: [Conversation])] {
-        let grouped = Dictionary(grouping: model.grantedConversations, by: \.ghostId)
-        let ghosts = model.snapshot.ghosts
-            .filter { model.grantedGhostIDs.contains($0.id) }
-            .sorted { lhs, rhs in
-                if lhs.isDefault != rhs.isDefault { return lhs.isDefault }
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-            }
-        return ghosts.map { ghost in
-            let conversations = (grouped[ghost.id] ?? []).sorted { $0.lastActivityAt > $1.lastActivityAt }
-            return (ghost, conversations)
+    private var ghosts: [Ghost] {
+        model.snapshot.visibleGhosts.filter { model.grantedGhostIDs.contains($0.id) }
+    }
+    private var pins: [String] {
+        (try? JSONDecoder().decode([String].self, from: Data(savedPins.utf8))) ?? []
+    }
+    private var fixed: [Ghost] {
+        ghosts.filter(\.isDefault) + pins.compactMap { id in ghosts.first { $0.id == id && !$0.isDefault } }
+    }
+    private var pool: [Ghost] {
+        let fixedIDs = Set(fixed.map(\.id))
+        return ghosts.filter { !fixedIDs.contains($0.id) }
+    }
+    private var shownPool: [Ghost] {
+        pool.filter { ghost in
+            let matches = search.isEmpty || ghost.name.localizedCaseInsensitiveContains(search)
+                || (ghost.persona.split(whereSeparator: \.isNewline).first.map(String.init) ?? "").localizedCaseInsensitiveContains(search)
+            return matches && (expanded || !search.isEmpty || model.snapshot.presence(of: ghost).state != .idle)
         }
     }
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                if entries.isEmpty {
-                    ContentUnavailableView("연결된 대화 없음", systemImage: "bubble.left",
-                        description: Text("PC에서 이 기기의 Ghost 사용 권한을 조정해 주세요."))
-                }
-                ForEach(entries, id: \.ghost.id) { entry in
-                    Section(entry.ghost.name) {
-                        ForEach(entry.conversations) { conversation in
-                            NavigationLink(value: conversation.id) {
-                                HStack(spacing: 14) {
-                                    GhostPortrait(ghost: entry.ghost, size: 44, presence:
-                                        model.snapshot.decisions.contains { $0.ghostId == entry.ghost.id && $0.isPending } ? .needsOwner :
-                                            (conversation.busy || model.liveByConversation[conversation.id]?.running == true ? .working : .idle))
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(conversation.title.isEmpty ? "대화" : conversation.title)
-                                            .font(.subheadline.weight(.medium))
-                                        HStack(spacing: 6) {
-                                            if conversation.busy {
-                                                Label("응답 중", systemImage: "circle.dotted").font(.caption)
-                                            } else if let live = model.liveByConversation[conversation.id], live.running {
-                                                Label("입력 중", systemImage: "circle.dotted").font(.caption)
-                                            }
-                                            Text(model.relativeTime(conversation.lastActivityAt))
-                                                .font(.caption).foregroundStyle(GhostStyle.secondary)
-                                        }
-                                        .foregroundStyle(GhostStyle.secondary)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    if ghosts.isEmpty {
+                        ContentUnavailableView("연결된 대화 없음", systemImage: "bubble.left",
+                            description: Text("PC에서 이 기기의 Ghost 사용 권한을 조정해 주세요."))
+                    }
+                    if !fixed.isEmpty {
+                        Section {
+                            ForEach(fixed) { ghost in rosterRow(ghost) }
+                        } header: { groupLabel("고정") }
+                    }
+                    if !pool.isEmpty {
+                        Section {
+                            if pool.count > 8 {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "magnifyingglass").foregroundStyle(GhostStyle.secondary)
+                                    TextField("Ghost 찾기", text: $search).accessibilityLabel("Ghost 찾기")
+                                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                    if !search.isEmpty {
+                                        Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                                            .frame(minWidth: 44, minHeight: 44).accessibilityLabel("검색 지우기")
                                     }
-                                }.padding(.vertical, 4)
+                                }.padding(.horizontal, 20).frame(minHeight: 44)
                             }
-                            .accessibilityIdentifier("conversation-\(conversation.id)")
+                            ForEach(shownPool) { ghost in rosterRow(ghost) }
+                        } header: {
+                            Button { expanded.toggle() } label: {
+                                HStack(spacing: 8) {
+                                    Text("Ghost")
+                                    if !expanded { Text("\(pool.count)").monospacedDigit() }
+                                    Spacer()
+                                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                                }
+                                .font(.caption.weight(.medium)).foregroundStyle(GhostStyle.secondary)
+                                .padding(.horizontal, 20).frame(minHeight: 44).background(GhostStyle.canvas)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(expanded ? "Ghost 목록 접기" : "Ghost 목록 펼치기 (\(pool.count))")
                         }
                     }
-                }
-                if let error = model.error {
-                    Section { Text(error).font(.caption).foregroundStyle(GhostStyle.warning) }
-                }
+                    if let error = model.error {
+                        Text(error).font(.footnote).foregroundStyle(GhostStyle.warning).padding(20)
+                    }
+                }.padding(.bottom, 24)
             }
-            .listStyle(.insetGrouped).scrollContentBackground(.hidden).background(GhostStyle.canvas)
+            .background(GhostStyle.canvas)
             .navigationTitle("대화")
-            .navigationDestination(for: String.self) { conversationId in
-                ChatScreen(model: model, conversationId: conversationId)
-            }
+            .navigationDestination(for: String.self) { id in ChatScreen(model: model, conversationId: id) }
             .refreshable { await model.refresh() }
         }
+        .onAppear { prunePins() }
+        .onChange(of: ghosts.map(\.id)) { prunePins() }
         .onChange(of: model.chatRoute) {
-            guard let route = model.chatRoute else { return }
+            guard let route = model.chatRoute,
+                  model.grantedConversations.contains(where: { $0.id == route.conversationId }) else { return }
             path.append(route.conversationId)
         }
         .onChange(of: model.notificationRoute) {
             guard let route = model.notificationRoute,
                   let notification = model.snapshot.notifications.first(where: { $0.id == route.notificationId }),
-                  let conversationId = notification.conversationId else { return }
-            path.append(conversationId)
+                  let id = notification.conversationId,
+                  model.grantedConversations.contains(where: { $0.id == id }) else { return }
+            path.append(id)
         }
     }
-}
 
-struct ChatScreen: View {
-    let model: GhostModel
-    let conversationId: String
-    @State private var messages: [Message] = []
-    @State private var olderBefore: String?
-    @State private var loadingOlder = false
-    @State private var loadError: String?
-    @State private var sending = false
-    @State private var scrollRequest = UUID()
-    @State private var pageLive: Live?
-
-    private var conversation: Conversation? { model.snapshot.conversations.first { $0.id == conversationId } }
-    private var ghost: Ghost? { conversation.map { model.ghost($0.ghostId) } ?? nil }
-    private var title: String { conversation?.title.isEmpty == false ? conversation!.title : (ghost?.name ?? "대화") }
-    private var live: Live? { model.liveByConversation[conversationId] ?? pageLive }
-    private var isBusy: Bool { conversation?.busy == true || live?.running == true }
-    private var threads: [Work] { model.snapshot.works.filter { $0.originConversationId == conversationId } }
-    private var needsOwner: Bool { model.snapshot.decisions.contains { $0.ghostId == ghost?.id && $0.isPending } }
-
-    private var draftAddress: DraftAddress { model.draftAddress(conversationId: conversationId) }
-    private var draftText: Binding<String> {
-        let address = draftAddress
-        return Binding(
-            get: { model.drafts?.draft(at: address)?.text ?? "" },
-            set: { model.drafts?.update($0, at: address) })
+    private func groupLabel(_ title: String) -> some View {
+        Text(title).font(.caption.weight(.medium)).foregroundStyle(GhostStyle.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 20).background(GhostStyle.canvas)
     }
 
-    var body: some View {
-        MessageHistory(model: model, ghost: ghost, works: threads, messages: messages, live: live, scrollRequest: scrollRequest)
-        .id(conversationId)
-        .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 8) {
-                    GhostPortrait(ghost: ghost, size: 38, presence: needsOwner ? .needsOwner : (isBusy ? .working : .idle))
-                    Text(ghost?.name ?? title).font(.headline)
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                if isBusy {
-                    Button {
-                        Task { await cancel() }
-                    } label: {
-                        Label("응답 중지", systemImage: "stop.circle")
+    private func conversation(for ghost: Ghost) -> Conversation? {
+        let granted = model.grantedConversations.filter { $0.ghostId == ghost.id }
+        return granted.first { $0.id == ghost.directConversationId } ?? granted.first
+    }
+
+    @ViewBuilder private func rosterRow(_ ghost: Ghost) -> some View {
+        if let conversation = conversation(for: ghost) {
+            NavigationLink(value: conversation.id) { rowContent(ghost, conversation: conversation) }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("conversation-\(conversation.id)")
+                .contextMenu {
+                    Button("대화 열기", systemImage: "bubble.left") { path.append(conversation.id) }
+                    Button("맡긴 일", systemImage: "checklist") {
+                        model.workFilterGhostId = ghost.id
+                        model.tab = .works
                     }
-                    .disabled(sending || !model.isOnline)
-                    .accessibilityIdentifier("chat-stop")
+                    if !ghost.isDefault {
+                        Button(pins.contains(ghost.id) ? "고정 해제" : "고정", systemImage: pins.contains(ghost.id) ? "pin.slash" : "pin") {
+                            var updated = pins.filter { $0 != ghost.id }
+                            if !pins.contains(ghost.id) { updated.append(ghost.id) }
+                            savePins(updated)
+                        }
+                    }
+                }
+        } else {
+            rowContent(ghost, conversation: nil)
+        }
+    }
+
+    private func rowContent(_ ghost: Ghost, conversation: Conversation?) -> some View {
+        let presence = model.snapshot.presence(of: ghost)
+        let count = model.snapshot.works.filter { $0.ghostId == ghost.id && !$0.state.isTerminal }.count
+        return HStack(spacing: 12) {
+            GhostPortrait(ghost: ghost, size: 44, presence: GhostPresence(presence.state))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(ghost.name).font(.body.weight(.medium)).foregroundStyle(GhostStyle.ink)
+                    if ghost.isDefault {
+                        Text("메인").font(.caption2).foregroundStyle(GhostStyle.secondary)
+                            .padding(.horizontal, 4).padding(.vertical, 4)
+                            .overlay { RoundedRectangle(cornerRadius: 4).stroke(GhostStyle.border, lineWidth: 1) }
+                    }
+                }
+                if let line = presence.line {
+                    Text(line).font(.footnote).lineLimit(2)
+                        .foregroundStyle(presence.state == .attention ? GhostStyle.amberInk : GhostStyle.signalInk)
+                } else if let conversation {
+                    Text(model.relativeTime(conversation.lastActivityAt)).font(.caption).foregroundStyle(GhostStyle.secondary)
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let error = model.draftError { Text(error).font(.caption).foregroundStyle(GhostStyle.warning) }
-                if let error = model.error { Text(error).font(.caption).foregroundStyle(GhostStyle.warning).lineLimit(3) }
-                HStack(alignment: .bottom, spacing: 12) {
-                    TextField("Ghost에게 이야기하기", text: draftText, axis: .vertical).lineLimit(1...5).padding(.vertical, 10).disabled(model.drafts == nil).accessibilityIdentifier("chat-composer")
-                    Button { Task { await submit() } } label: {
-                        Group {
-                            if sending { ProgressView().tint(GhostStyle.surface) }
-                            else { Image(systemName: "arrow.up").font(.headline) }
-                        }.foregroundStyle(GhostStyle.surface).frame(width: 44, height: 44).background(GhostStyle.text, in: Circle())
-                    }.accessibilityLabel(sending ? "보내는 중" : "메시지 보내기")
-                        .disabled(sending || (model.drafts?.draft(at: draftAddress)?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.isOnline)
-                }.padding(12).background(GhostStyle.under, in: RoundedRectangle(cornerRadius: 28))
-            }.padding(.horizontal, 16).padding(.bottom, 8).background(GhostStyle.surface)
-        }
-        .task(id: conversationId) { await loadLatest() }
-        #if DEBUG
-        .task(id: "fixture-incoming-\(conversationId)") {
-            if MobileUIFixture.incoming, conversationId == MobileUIFixture.conversationID {
-                do {
-                    try await Task.sleep(for: .seconds(12))
-                    model.appendUITestMessage()
-                } catch { }
+            Spacer(minLength: 8)
+            if count > 0 {
+                Text("\(count)").font(.caption.monospacedDigit()).foregroundStyle(GhostStyle.secondary)
+                    .accessibilityLabel("맡긴 일 진행 중 \(count)개")
             }
         }
-        #endif
-        .overlay {
-            if messages.isEmpty, let loadError {
-                ContentUnavailableView("대화를 불러오지 못했습니다", systemImage: "wifi.exclamationmark", description: Text(loadError))
-            }
-        }
-        .onChange(of: model.appendedMessages[conversationId]?.count ?? 0) {
-            let fresh = model.drainAppendedMessages(conversationId: conversationId, loadedIDs: Set(messages.map(\.id)))
-            guard !fresh.isEmpty else { return }
-            messages += fresh
-            if fresh.contains(where: { $0.role == .assistant }) { pageLive = nil }
-            model.noteLoadedMessages(conversationId: conversationId, ids: fresh.map(\.id))
-        }
-        .task(id: draft?.revision) {
-            do { try await Task.sleep(for: .milliseconds(300)); model.saveDrafts() } catch { }
-        }
-        .onDisappear { model.saveDrafts() }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
     }
 
-    private func loadLatest() async {
-        do {
-            let page = try await model.conversationPage(id: conversationId)
-            messages = page.messages
-            olderBefore = page.before
-            loadError = nil
-            pageLive = page.live
-            model.noteLoadedMessages(conversationId: conversationId, ids: page.messages.map(\.id))
-        } catch {
-            loadError = error.localizedDescription
-        }
+    private func prunePins() {
+        guard model.snapshot.seq > 0 || !model.snapshot.ghosts.isEmpty else { return }
+        let valid = Set(ghosts.filter { !$0.isDefault }.map(\.id))
+        var seen = Set<String>()
+        let updated = pins.filter { valid.contains($0) && seen.insert($0).inserted }
+        if updated != pins { savePins(updated) }
     }
 
-    private func loadOlder() async {
-        guard let before = olderBefore, !loadingOlder else { return }
-        loadingOlder = true
-        defer { loadingOlder = false }
-        do {
-            let page = try await model.conversationPage(id: conversationId, before: before)
-            let pageIDs = Set(page.messages.map(\.id))
-            messages = page.messages + messages.filter { !pageIDs.contains($0.id) }
-            olderBefore = page.before
-        } catch {
-            loadError = error.localizedDescription
-        }
-    }
-
-    private func submit() async {
-        guard !sending, let drafts = model.drafts, let submitted = draft else { return }
-        let text = submitted.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, model.saveDrafts() else { return }
-        sending = true
-        defer { sending = false }
-        do {
-            _ = try await model.send(.messageSend(conversationId: conversationId, text: text))
-            drafts.clear(submitted, at: draftAddress)
-            try drafts.save()
-            scrollRequest = UUID()
-            model.error = nil
-            await loadLatest()
-        } catch { /* model.send already surfaced the error */ }
-    }
-
-    private var draft: ConversationDraft? { model.drafts?.draft(at: draftAddress) }
-
-    private func cancel() async {
-        _ = try? await model.send(.messageCancel(conversationId: conversationId))
-        await loadLatest()
+    private func savePins(_ ids: [String]) {
+        if let data = try? JSONEncoder().encode(ids), let text = String(data: data, encoding: .utf8) { savedPins = text }
     }
 }

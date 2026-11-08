@@ -35,56 +35,6 @@ struct GhostSilhouette: Shape {
     }
 }
 
-struct GhostEmptyConversation: View {
-    var ghost: Ghost?
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            GhostPortrait(ghost: ghost, size: 64)
-            Text("무슨 일을\n함께할까요?")
-                .font(.system(.largeTitle, design: .rounded, weight: .semibold))
-                .tracking(-0.8)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("짧은 질문부터 오래 걸리는 일까지.\n평소처럼 이야기해 주세요.")
-                .font(.body).lineSpacing(5).foregroundStyle(GhostStyle.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 28).padding(.vertical, 32)
-    }
-}
-
-struct GhostMessageBubble<Accessory: View>: View {
-    let text: String
-    let isUser: Bool
-    var label = "Ghost"
-    var ghost: Ghost? = nil
-    @ViewBuilder var accessory: Accessory
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if isUser { Spacer(minLength: 44) }
-            if !isUser { GhostPortrait(ghost: ghost, size: 32).padding(.top, 2) }
-            VStack(alignment: .leading, spacing: 8) {
-                if !isUser {
-                    Text(label).font(.caption.weight(.semibold)).foregroundStyle(GhostStyle.secondary)
-                }
-                Text(text)
-                    .font(.body).lineSpacing(4).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                accessory
-            }
-            .padding(isUser ? 16 : 0)
-            .foregroundStyle(isUser ? GhostStyle.onInk : GhostStyle.text)
-            .background {
-                if isUser { RoundedRectangle(cornerRadius: 22).fill(GhostStyle.ink) }
-            }
-            if !isUser { Spacer(minLength: 8) }
-        }
-        .frame(maxWidth: 680, alignment: isUser ? .trailing : .leading)
-        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
-    }
-}
-
 struct GhostStatusBadge: View {
     let state: String
     var body: some View {
@@ -99,21 +49,14 @@ struct GhostStatusBadge: View {
             .fixedSize(horizontal: false, vertical: true)
     }
     private var title: String {
+        if let glyph = GlyphState(rawValue: state) { return glyph.label }
         switch state {
-        case "queued": "대기 중"
-        case "running": "진행 중"
-        case "waiting": "대기 중"
-        case "verifying": "검증 중"
-        case "blocked": "결과 미확정"
-        case "done": "완료"
-        case "failed": "실패"
-        case "cancelled": "취소됨"
-        case "approved": "승인됨"
-        case "answered": "답변됨"
-        case "denied": "거절됨"
-        case "pending": "확인 필요"
-        case "unknown": "결과 확인 필요"
-        default: "상태 확인 중"
+        case "approved": return "승인됨"
+        case "answered": return "답변됨"
+        case "denied": return "거절됨"
+        case "pending": return "확인 필요"
+        case "unknown": return "결과 확인 필요"
+        default: return "상태 확인 중"
         }
     }
 }
@@ -142,7 +85,7 @@ enum GhostStateToken {
     static func ink(_ state: String) -> Color {
         switch state {
         case "running", "verifying": GhostStyle.signalInk
-        case "blocked", "pending", "unknown": GhostStyle.amberInk
+        case "blocked", "pending", "unknown", "attention": GhostStyle.amberInk
         case "done", "approved", "answered": GhostStyle.successInk
         case "failed", "denied": GhostStyle.dangerInk
         default: GhostStyle.secondary
@@ -151,14 +94,14 @@ enum GhostStateToken {
     static func tint(_ state: String) -> Color {
         switch state {
         case "running", "verifying": GhostStyle.signalTint
-        case "blocked", "pending", "unknown": GhostStyle.amberTint
+        case "blocked", "pending", "unknown", "attention": GhostStyle.amberTint
         case "done", "approved", "answered": GhostStyle.successTint
         case "failed", "denied": GhostStyle.dangerTint
         default: GhostStyle.under
         }
     }
     static func workState(_ state: WorkState, needsOwner: Bool) -> String {
-        needsOwner && state != .blocked && !state.isTerminal ? "pending" : state.rawValue
+        GlyphState(work: state, needsOwner: needsOwner).rawValue
     }
 }
 
@@ -199,7 +142,7 @@ struct StateGlyph: View {
                         p.addArc(center: CGPoint(x: 10, y: 10), radius: 4.7, startAngle: .degrees(-90), endAngle: .degrees(90), clockwise: false)
                         p.closeSubpath()
                         context.fill(p, with: color)
-                    case "blocked", "pending", "unknown":
+                    case "blocked", "pending", "unknown", "attention":
                         context.fill(Path(ellipseIn: CGRect(x: 1.8, y: 1.8, width: 16.4, height: 16.4)), with: color)
                         p.move(to: CGPoint(x: 10, y: 6)); p.addLine(to: CGPoint(x: 10, y: 10.6))
                         context.stroke(p, with: cutout, style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -454,6 +397,35 @@ struct GhostPrimaryButtonStyle: ButtonStyle {
             .foregroundStyle(isEnabled ? GhostStyle.onInk : GhostStyle.secondary)
             .padding(.horizontal, 16).padding(.vertical, 10).frame(minHeight: 44)
             .background(isEnabled ? GhostStyle.ink : GhostStyle.ink.opacity(0.12), in: Capsule())
+            .opacity(configuration.isPressed ? 0.75 : 1)
+    }
+}
+
+/// The quieter partner of the primary action: hairline capsule, ink label.
+struct GhostSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(isEnabled ? GhostStyle.ink : GhostStyle.secondary)
+            .padding(.horizontal, 16).padding(.vertical, 10).frame(minHeight: 44)
+            .background(GhostStyle.surface, in: Capsule())
+            .overlay { Capsule().stroke(GhostStyle.ink.opacity(isEnabled ? 0.18 : 0.08), lineWidth: 1) }
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+/// A round send control: 32pt visual inside a 44pt target.
+struct GhostSendButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(isEnabled ? GhostStyle.onInk : GhostStyle.secondary)
+            .frame(width: 32, height: 32)
+            .background(isEnabled ? GhostStyle.ink : GhostStyle.ink.opacity(0.1), in: Circle())
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
             .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }
