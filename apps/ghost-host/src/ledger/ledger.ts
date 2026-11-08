@@ -20,6 +20,7 @@ import type {
   Space,
   Work,
   ArtifactRef,
+  Verdict,
 } from "@ghost/contract";
 import { MIGRATIONS } from "./schema.ts";
 
@@ -34,6 +35,22 @@ const bool = (value: unknown) => value === 1 || value === true;
 /** Days of change events kept for reconnecting clients. */
 const EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Internal collaboration records; clients observe the associated Work change event. */
+export interface WorkQuestion {
+  id: string;
+  workId: string;
+  parentWorkId: string;
+  question: string;
+  answer: string | null;
+  state: "pending" | "answered" | "cancelled";
+  createdAt: number;
+  answeredAt: number | null;
+  submittedAt: number | null;
+  answerSubmittedAt: number | null;
+}
+
+export type ReviseLesson = Pick<Verdict, "source" | "reasons" | "evidence" | "scope" | "at">;
 
 export class NotFound extends Error {
   constructor(what: string) {
@@ -364,6 +381,66 @@ export class Ledger {
         work.updatedAt,
       );
     this.emit({ type: "work", work });
+  }
+
+  reviseHistory(workId: string): ReviseLesson[] {
+    const row = this.db.query("SELECT revise_history FROM works WHERE id = ?").get(workId) as Row | null;
+    if (!row) throw new NotFound(`work ${workId}`);
+    return parseJson<ReviseLesson[]>(row.revise_history);
+  }
+
+  appendReviseHistory(workId: string, verdict: Verdict) {
+    const history = this.reviseHistory(workId);
+    history.push({
+      source: verdict.source, reasons: verdict.reasons.slice(0, 8192), at: verdict.at,
+      ...(verdict.evidence === undefined ? {} : { evidence: verdict.evidence.slice(0, 8192) }),
+      ...(verdict.scope === undefined ? {} : { scope: verdict.scope.slice(0, 2048) }),
+    });
+    // Resumed roots may accumulate revisions over many attempts. Keep the newest lessons,
+    // with a strict serialized cap even when text requires JSON escaping.
+    while (history.length > 1 && JSON.stringify(history).length > 131072) history.shift();
+    this.db.query("UPDATE works SET revise_history = ? WHERE id = ?").run(JSON.stringify(history), workId);
+    this.emit({ type: "work", work: this.work(workId) });
+  }
+
+  findWorkQuestion(id: string): WorkQuestion | null {
+    const row = this.db.query("SELECT * FROM work_questions WHERE id = ?").get(id) as Row | null;
+    return row ? {
+      id: String(row.id), workId: String(row.work_id), parentWorkId: String(row.parent_work_id),
+      question: String(row.question), answer: row.answer === null ? null : String(row.answer),
+      state: String(row.state) as WorkQuestion["state"], createdAt: Number(row.created_at),
+      answeredAt: row.answered_at === null ? null : Number(row.answered_at),
+      submittedAt: row.submitted_at === null ? null : Number(row.submitted_at),
+      answerSubmittedAt: row.answer_submitted_at === null ? null : Number(row.answer_submitted_at),
+    } : null;
+  }
+
+  workQuestions(workId: string, asParent = false): WorkQuestion[] {
+    return (this.db.query(`SELECT id FROM work_questions WHERE ${asParent ? "parent_work_id" : "work_id"} = ? ORDER BY created_at, id`).all(workId) as Row[])
+      .map((row) => this.findWorkQuestion(String(row.id))!);
+  }
+
+  workQuestionsAwaitingSubmission(): WorkQuestion[] {
+    return (this.db.query(`SELECT id FROM work_questions
+      WHERE (state = 'pending' AND submitted_at IS NULL) OR (state = 'answered' AND answer_submitted_at IS NULL)
+      ORDER BY created_at, id`).all() as Row[]).map((row) => this.findWorkQuestion(String(row.id))!);
+  }
+
+  putWorkQuestion(question: WorkQuestion) {
+    this.db.query(`INSERT INTO work_questions
+      (id, work_id, parent_work_id, question, answer, state, created_at, answered_at, submitted_at, answer_submitted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (id) DO UPDATE SET answer = excluded.answer, state = excluded.state, answered_at = excluded.answered_at,
+        submitted_at = excluded.submitted_at, answer_submitted_at = excluded.answer_submitted_at`)
+      .run(question.id, question.workId, question.parentWorkId, question.question, question.answer, question.state,
+        question.createdAt, question.answeredAt, question.submittedAt, question.answerSubmittedAt);
+    this.emit({ type: "work", work: this.work(question.workId) });
+  }
+
+  cancelWorkQuestions(workId: string) {
+    for (const question of this.workQuestions(workId)) {
+      if (question.state === "pending") this.putWorkQuestion({ ...question, state: "cancelled" });
+    }
   }
 
   // Decisions

@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { Check } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
@@ -327,12 +328,13 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
   const delegate = defineTool({
     name: "delegate",
     description:
-      "Hand a self-contained part of this Work to another Ghost as a child Work, optionally naming the Ghost that judges its result. Its result arrives here when it settles.",
+      "Hand a self-contained part of this Work to another Ghost. Optional checks gate review; the named reviewer or delegating Ghost still judges a passing result.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "Assignee Ghost" }),
       title: Type.String({ minLength: 1, maxLength: 256 }),
       brief: Type.String({ minLength: 1, maxLength: 32768 }),
       criteria: Type.Optional(Type.String({ maxLength: 8192, description: "When the delegated Work is done" })),
+      checks: Type.Optional(Type.Array(Check, { maxItems: 16, description: "Deterministic checks the child must pass before review" })),
       reviewer_ghost_id: Type.Optional(
         Type.String({ minLength: 1, description: "Ghost that reviews the result; defaults to the Ghost that delegated" }),
       ),
@@ -348,13 +350,48 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
           brief: args.brief,
           acceptance: {
             criteria: args.criteria ?? "",
-            checks: [],
+            checks: args.checks ?? [],
             reviewer: args.reviewer_ghost_id ? { kind: "ghost", ghostId: args.reviewer_ghost_id } : null,
           },
           deadlineAt: args.deadline_minutes === undefined ? null : Date.now() + args.deadline_minutes * 60_000,
           id: idFor(scope.conversation.id, api.callId),
         });
         return text(`Delegated "${child.title}" (${child.id}) to ${core.ledger.ghost(child.ghostId).name}. Its result arrives here.`);
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  });
+
+  const askParent = defineTool({
+    name: "ask_parent",
+    description: "Ask the Ghost that delegated this child Work. Wait for its answer; root Works use ask_owner.",
+    parameters: Type.Object({ question: Type.String({ minLength: 1, maxLength: 8192 }) }),
+    replay: "unsafe",
+    async execute(args, api) {
+      try {
+        const scope = requireWork(scopeOf(core, api));
+        const question = core.works.askParent(scope.work.id, args.question, idFor(scope.conversation.id, api.callId));
+        return text(`Your delegating Ghost was asked (${question.id}). Its answer arrives as a message.`);
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  });
+
+  const answerChild = defineTool({
+    name: "answer_child",
+    description: "Answer a pending question from one of this Work's own children, promptly. Escalate owner-only decisions with ask_owner first.",
+    parameters: Type.Object({
+      question_id: Type.String({ minLength: 1 }),
+      answer: Type.String({ minLength: 1, maxLength: 8192 }),
+    }),
+    replay: "unsafe",
+    async execute(args, api) {
+      try {
+        const scope = requireWork(scopeOf(core, api));
+        const question = core.works.answerChild(scope.work.id, args.question_id, args.answer);
+        return text(`Answer recorded for child Work ${question.workId} (question ${question.id}).`);
       } catch (error) {
         return errorResult(error);
       }
@@ -407,6 +444,12 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
             ? `Children:\n${children.map((child) => `  ${describeOutcome(child).replaceAll("\n", "\n  ")}`).join("\n")}`
             : "",
           artifacts.length ? `Artifacts:\n${artifacts.map((artifact) => `  - ${artifact.name} ${artifact.digest.slice(0, 12)} (${artifact.size} bytes)`).join("\n")}` : "",
+          core.ledger.workQuestions(work.id).length
+            ? `Questions to parent:\n${core.ledger.workQuestions(work.id).map((question) => `- ${question.id} [${question.state}]: ${question.question}${question.answer ? `\n  Answer: ${question.answer}` : ""}`).join("\n")}`
+            : "",
+          core.ledger.workQuestions(work.id, true).some((question) => question.state === "pending")
+            ? `Children awaiting answers:\n${core.ledger.workQuestions(work.id, true).filter((question) => question.state === "pending").map((question) => `- ${question.id} (child ${question.workId}): ${question.question}`).join("\n")}`
+            : "",
         ];
         return text(parts.filter(Boolean).join("\n\n"));
       } catch (error) {
@@ -417,6 +460,6 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
 
   return defineExtension({
     name: "ghost.work",
-    tools: [read, writeTool, editTool, bash, publishArtifact, delegate, complete, workStatus, askOwnerTool(core)],
+    tools: [read, writeTool, editTool, bash, publishArtifact, delegate, complete, workStatus, askParent, answerChild, askOwnerTool(core)],
   });
 }
