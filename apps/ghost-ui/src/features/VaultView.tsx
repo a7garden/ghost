@@ -44,42 +44,41 @@ export function toggleGhostGrant(ghostIds: readonly string[], ghostId: string, o
 }
 
 /**
- * The wire body for one vault write. Text fields trim; passwords and secret values stay
- * verbatim (spaces can be part of a secret). Empty secret fields drop out, so an edit
- * leaves them unchanged; the card travels only as a whole replacement. Pure; tests pin it.
+ * The wire body for one vault write, built only from the selected kind's fields —
+ * the host rejects fields of other kinds. Text fields trim; passwords and secret
+ * values stay verbatim (spaces can be part of a secret). Empty secret fields drop
+ * out, so an edit leaves them unchanged; the card travels only as a whole
+ * replacement. A cleared login username and a cleared contact travel explicitly.
+ * Pure; tests pin it.
  */
 export function vaultWriteBody(form: VaultForm, mode: 'create' | 'edit'): { body: VaultItemWrite } | { error: string } {
   const title = form.title.trim();
   if (!title) return { error: '이름을 입력해 주세요.' };
-  if (mode === 'create') {
-    if (form.kind === 'login' && (!form.username.trim() || !form.password)) return { error: '사용자 이름과 비밀번호를 입력해 주세요.' };
-    if (form.kind === 'card' && (!form.cardNumber.trim() || !form.cardExpiry.trim() || !form.cardCvc.trim())) return { error: '카드 번호와 유효기간, CVC를 입력해 주세요.' };
-    if (form.kind === 'contact' && ![form.contactName, form.contactPhone, form.contactEmail, form.contactAddress].some(field => field.trim())) return { error: '한 항목 이상 입력해 주세요.' };
-    if (form.kind === 'secret' && !form.value) return { error: '값을 입력해 주세요.' };
+  const base = { title, hints: form.hints.trim(), ghostIds: [...form.ghostIds] };
+  if (form.kind === 'login') {
+    const origin = form.origin.trim();
+    if (!origin || !origin.startsWith('https://')) return { error: '로그인에는 https://로 시작하는 주소가 필요합니다.' };
+    if (mode === 'create' && (!form.username.trim() || !form.password)) return { error: '사용자 이름과 비밀번호를 입력해 주세요.' };
+    return { body: { ...base, kind: form.kind, origin, username: form.username.trim(),
+      ...(form.password ? { password: form.password } : {}), ...(form.totp.trim() ? { totp: form.totp.trim() } : {}) } };
   }
-  // The card travels only as a whole replacement: a typed number or CVC demands all three fields.
-  const cardIntent = Boolean(form.cardNumber.trim() || form.cardCvc.trim());
-  if (cardIntent && (!form.cardNumber.trim() || !form.cardExpiry.trim() || !form.cardCvc.trim())) return { error: '카드 번호와 유효기간, CVC를 입력해 주세요.' };
-  const card = cardIntent
-    ? { number: form.cardNumber.trim(), expiry: form.cardExpiry.trim(), cvc: form.cardCvc.trim(), ...(form.cardName.trim() ? { name: form.cardName.trim() } : {}) }
-    : undefined;
-  const contactFields = { name: form.contactName.trim(), phone: form.contactPhone.trim(), email: form.contactEmail.trim(), address: form.contactAddress.trim() };
-  const contact = Object.values(contactFields).some(Boolean)
-    ? Object.fromEntries(Object.entries(contactFields).filter(([, value]) => value))
-    : undefined;
-  return { body: {
-    kind: form.kind,
-    title,
-    ...(form.origin.trim() ? { origin: form.origin.trim() } : {}),
-    ...(form.username.trim() ? { username: form.username.trim() } : {}),
-    ...(form.password ? { password: form.password } : {}),
-    ...(form.totp.trim() ? { totp: form.totp.trim() } : {}),
-    ...(card ? { card } : {}),
-    ...(contact ? { contact } : {}),
-    ...(form.value ? { value: form.value } : {}),
-    hints: form.hints.trim(),
-    ghostIds: [...form.ghostIds],
-  } };
+  if (form.kind === 'card') {
+    const full = form.cardNumber.trim() && form.cardExpiry.trim() && form.cardCvc.trim() && form.cardName.trim();
+    if (mode === 'create' || form.cardNumber.trim() || form.cardCvc.trim()) {
+      if (!full) return { error: '카드 번호와 유효기간, CVC, 이름을 모두 입력해 주세요.' };
+    }
+    return { body: { ...base, kind: form.kind, ...(full ? { card: {
+      number: form.cardNumber.trim(), expiry: form.cardExpiry.trim(), cvc: form.cardCvc.trim(), name: form.cardName.trim() } } : {}) } };
+  }
+  if (form.kind === 'contact') {
+    const fields = { name: form.contactName.trim(), phone: form.contactPhone.trim(), email: form.contactEmail.trim(), address: form.contactAddress.trim() };
+    const contact = Object.fromEntries(Object.entries(fields).filter(([, value]) => value));
+    if (mode === 'create' && !Object.keys(contact).length) return { error: '한 항목 이상 입력해 주세요.' };
+    return { body: { ...base, kind: form.kind, contact } };
+  }
+  if (mode === 'create' && !form.value) return { error: '값을 입력해 주세요.' };
+  return { body: { ...base, kind: form.kind, ...(form.origin.trim() ? { origin: form.origin.trim() } : {}),
+    ...(form.value ? { value: form.value } : {}) } };
 }
 
 const passwordAlphabet = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$%^&*-_=+';
@@ -114,10 +113,10 @@ export function vaultRowDetail(item: VaultItem): string {
   return parts.join(' · ');
 }
 
-/** Whom the item serves, for the row description. Pure; tests pin the wording. */
+/** Whom the item serves, for the row description; the 일회용 badge already says the kind of expiry. Pure; tests pin the wording. */
 export function vaultGrantsLabel(item: VaultItem, ghostName: (id: string) => string): string {
   const names = item.ghostIds.map(ghostName);
-  const expiry = item.expiresAt ? `일회용 · ${absoluteTime(item.expiresAt)}에 삭제` : '';
+  const expiry = item.expiresAt ? `${absoluteTime(item.expiresAt)}에 삭제` : '';
   return [names.length ? `${names.join(', ')} 사용 가능` : 'Ghost 권한 없음', expiry].filter(Boolean).join(' · ');
 }
 
@@ -184,7 +183,11 @@ export function VaultView() {
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
     {editing && <VaultItemDialog item={editing} ghosts={ghosts} onClose={() => setEditing(null)}
       onSave={async (body, id) => {
-        if (await run(() => id ? client.vaultUpdate(id, body) : client.vaultCreate(body), '금고 항목을 저장했습니다.')) setEditing(null);
+        // Errors throw so the dialog shows them and clears 저장 중…; it closes only on success.
+        if (id) await client.vaultUpdate(id, body); else await client.vaultCreate(body);
+        setNotice('금고 항목을 저장했습니다.');
+        await reload();
+        setEditing(null);
       }}/>}
     {importing && <VaultImportDialog onClose={() => setImporting(false)} onImport={async csv => {
       const result = await client.vaultImportCsv(csv);
@@ -243,22 +246,22 @@ function VaultItemDialog({ item, ghosts, onClose, onSave }: {
         options={Object.entries(kindLabels).map(([value, label]) => ({ value, label }))}/>}
       {field('title', '이름', { required: true })}
       {(kind === 'login' || kind === 'secret') && field('origin', '주소', { placeholder: 'https://example.com', autoComplete: 'off',
-        description: '이 주소의 로그인에만 씁니다.' })}
+        description: kind === 'login' ? '이 주소의 로그인에만 씁니다.' : '비우면 저장된 주소를 유지합니다.' })}
       {kind === 'login' && <>
         {field('username', '사용자 이름', { autoComplete: 'off' })}
-        {field('password', '비밀번호', { password: true, generate: true, autoComplete: 'new-password',
+        {field('password', '비밀번호', { password: true, generate: true, autoComplete: 'off',
           description: editing && item.hasPassword ? '저장됨 · 새 값을 입력하면 바꿉니다.' : undefined })}
-        {field('totp', '일회용 코드 시드', { autoComplete: 'off',
+        {field('totp', '일회용 코드 시드', { password: true, autoComplete: 'off',
           description: editing && item.hasTotp ? '저장됨 · 새 값을 입력하면 바꿉니다.' : '비워 두어도 됩니다. 저장하면 Ghost가 코드를 직접 만듭니다.' })}
       </>}
       {kind === 'card' && <>
-        {field('cardNumber', '카드 번호', { autoComplete: 'cc-number', inputMode: 'numeric',
-          description: editing ? '저장됨 · 번호와 CVC를 새로 입력하면 카드 정보를 모두 바꿉니다.' : undefined })}
+        {field('cardNumber', '카드 번호', { required: true, autoComplete: 'cc-number', inputMode: 'numeric',
+          description: editing ? '저장됨 · 번호와 유효기간, CVC, 이름을 새로 입력하면 카드 정보를 모두 바꿉니다.' : undefined })}
         <div className="grid gap-4 sm:grid-cols-2">
-          {field('cardExpiry', '유효기간', { placeholder: 'MM/YY', autoComplete: 'cc-exp' })}
-          {field('cardCvc', 'CVC', { password: true, autoComplete: 'cc-csc' })}
+          {field('cardExpiry', '유효기간', { required: true, placeholder: 'MM/YY', autoComplete: 'cc-exp' })}
+          {field('cardCvc', 'CVC', { required: true, password: true, autoComplete: 'cc-csc' })}
         </div>
-        {field('cardName', '카드 소유자 이름', { autoComplete: 'cc-name' })}
+        {field('cardName', '카드 소유자 이름', { required: true, autoComplete: 'cc-name' })}
       </>}
       {kind === 'contact' && <>
         {field('contactName', '이름', { autoComplete: 'off' })}
@@ -308,7 +311,7 @@ function VaultImportDialog({ onClose, onImport }: {
     <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={event => {
       const file = event.target.files?.[0];
       event.target.value = '';
-      if (file) void importFile(file);
+      if (file) { setFileName(file.name); void importFile(file); }
     }}/>
     <div className="mt-4 flex items-center justify-between gap-3">
       <span className="min-w-0 truncate text-caption text-ink-3">{fileName || '파일을 고르세요.'}</span>

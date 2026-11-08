@@ -15,6 +15,12 @@ export function decisionHeading(decision: Decision, state: State): string {
 export const secureFormLabel = '금고 요청';
 export const browserHandoffLabel = '브라우저 대기';
 
+/** The chip of one decision: a question reads its proposal shape, every other kind its own label. */
+export function decisionChip(decision: Decision): string {
+  if (decision.kind !== 'question') return decisionLabel[decision.kind];
+  return secureFormProposal(decision) ? secureFormLabel : browserHandoffProposal(decision) ? browserHandoffLabel : decisionLabel.question;
+}
+
 /** The completion answer a browser handoff suggests; it goes through the ordinary answer path. */
 export const handoffDoneAnswer = '다 했어요';
 
@@ -35,6 +41,7 @@ export function browserHandoffProposal(decision: Decision): BrowserHandoff | nul
 
 /** Every field a secure form collects; a kind reads only its own. */
 export type SecureFormValues = {
+  origin: string;
   username: string; password: string; totp: string;
   cardNumber: string; cardExpiry: string; cardCvc: string; cardName: string;
   contactName: string; contactPhone: string; contactEmail: string; contactAddress: string;
@@ -42,6 +49,7 @@ export type SecureFormValues = {
 };
 
 export const emptySecureForm: SecureFormValues = {
+  origin: '',
   username: '', password: '', totp: '',
   cardNumber: '', cardExpiry: '', cardCvc: '', cardName: '',
   contactName: '', contactPhone: '', contactEmail: '', contactAddress: '',
@@ -52,8 +60,10 @@ const trim = (value: string) => value.trim();
 
 /**
  * The exact body a secure-form submit posts to `/api/vault/requests/:decisionId`:
- * item fields plus `save`. Passwords and secret values stay verbatim (spaces can
- * be part of a secret); every other field is trimmed. Pure; tests pin it.
+ * `kind` (the host rejects a mismatch), the item fields of that kind, and `save`.
+ * Passwords and secret values stay verbatim (spaces can be part of a secret);
+ * every other field is trimmed. A login without a requested origin carries the
+ * typed `origin`. Pure; tests pin it.
  */
 export function secureFormBody(request: SecureFormRequest, values: SecureFormValues, save: boolean):
   { body: Record<string, unknown> } | { error: string } {
@@ -62,12 +72,14 @@ export function secureFormBody(request: SecureFormRequest, values: SecureFormVal
     if (!username) return { error: '사용자 이름을 입력해 주세요.' };
     if (!values.password) return { error: '비밀번호를 입력해 주세요.' };
     const totp = trim(values.totp);
-    return { body: { username, password: values.password, ...(totp ? { totp } : {}), save } };
+    const origin: Record<string, unknown> = request.origin ? {} : { origin: trim(values.origin) };
+    if (!request.origin && !origin.origin) return { error: 'https://로 시작하는 주소를 입력해 주세요.' };
+    return { body: { kind: request.kind, username, password: values.password, ...(totp ? { totp } : {}), ...origin, save } };
   }
   if (request.kind === 'card') {
     const number = trim(values.cardNumber), expiry = trim(values.cardExpiry), cvc = trim(values.cardCvc), name = trim(values.cardName);
-    if (!number || !expiry || !cvc) return { error: '카드 번호와 유효기간, CVC를 입력해 주세요.' };
-    return { body: { card: { number, expiry, cvc, ...(name ? { name } : {}) }, save } };
+    if (!number || !expiry || !cvc || !name) return { error: '카드 번호와 유효기간, CVC, 이름을 입력해 주세요.' };
+    return { body: { kind: request.kind, card: { number, expiry, cvc, name }, save } };
   }
   if (request.kind === 'contact') {
     const contact: VaultContact = {
@@ -77,8 +89,8 @@ export function secureFormBody(request: SecureFormRequest, values: SecureFormVal
       ...(trim(values.contactAddress) ? { address: trim(values.contactAddress) } : {}),
     };
     if (!Object.keys(contact).length) return { error: '한 항목 이상 입력해 주세요.' };
-    return { body: { contact, save } };
+    return { body: { kind: request.kind, contact, save } };
   }
   if (!values.value) return { error: '값을 입력해 주세요.' };
-  return { body: { value: values.value, save } };
+  return { body: { kind: request.kind, value: values.value, save } };
 }
