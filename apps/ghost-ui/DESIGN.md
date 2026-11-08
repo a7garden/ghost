@@ -22,8 +22,14 @@ destination on an inset sheet (rounded, card shadow) beside it.
   question waiting on the owner, the Work in progress, or 응답 중) and its live Work count.
   A row only opens the Ghost's conversation; there are no per-Ghost submenus, so the
   roster stays a glanceable list. 프로젝트 with 새 프로젝트. 설정 at the bottom; host trouble shows
-  there only when the host is not connected.
-- Title bar: location on the left, the activity island in the center, command search
+  there only when the host is not connected. The three destinations and 설정 stay put; only
+  the roster and projects scroll, under sticky group labels, fading out while more follows, with
+  a ScrollRail marking Ghosts that are working or need the owner. Opening a Ghost from
+  elsewhere brings its row into view.
+- Title bar: back/forward (`⌘[` `⌘]`, positions kept in history state) and the page's trail on
+  the left — section, then the thing inside it, then the open thread and the threads it was
+  delegated from (`src/features/crumbs.ts`); every step above the page goes up to it. Below
+  760px only back and the page remain. The activity island sits in the center, command search
   (`⌘K`) on the right. Below 56rem the sidebar opens from the title bar menu.
 
 Theme follows the `.dark` class on `<html>`.
@@ -76,9 +82,10 @@ Built for supervising agents instead of reusing generic cards and badges
 - **RefMark** — an id or digest a Ghost wrote into prose (`src/components/refs.ts` finds
   them outside code blocks and links) shows what it points at: a Work's state glyph that opens
   it, a Ghost's face, a file icon, else a quiet #. The value itself is behind a Peek.
-- **TranscriptRail** (`src/ui/transcript-rail.tsx`) — the conversation's scrollbar as a map:
-  a hairline thumb and ticks for the owner's turns (`data-rail="owner"`), thread cards and
-  outcomes in their state color. Hover names a tick, click jumps, drag scrubs. It shows with
+- **ScrollRail** (`src/ui/scroll-rail.tsx`) — a scrollbar drawn as a map of what it scrolls:
+  a hairline thumb and ticks for every `data-rail` element inside — in the conversation the
+  owner's turns, thread cards and outcomes, in the sidebar Ghosts that are working or need the
+  owner — in their state color. Hover names a tick, click jumps, drag scrubs. It shows with
   the pointer or the owner's own scrolling, never for auto-follow; touch keeps native
   scrolling. Other scroll areas use trackless pills that appear with the pointer.
 
@@ -123,7 +130,10 @@ lifecycle). Opening a card or a thread from the thread button (top right) brings
 **thread panel** beside the conversation (over it below 64rem, `?thread=` in the URL):
 status and lifecycle, its decisions resolved in place, delegated threads, and the
 carrier's work conversation streaming live. Editing and cancelling stay on the full
-맡긴 일 page. Direct conversations kept from before stay reachable as 이전 대화.
+맡긴 일 page. The panel opens by growing its width so the conversation eases aside while its
+content slides in from the edge, and closes the same way in reverse (over the conversation it
+slides). Direct conversations kept from before stay reachable as 이전 대화. An empty
+conversation shows the Ghost's name and starters only; its portrait already floats above.
 Host wakes (reports, child results, decision answers, schedules, verdicts) render as quiet
 event lines, never as the owner's bubble. The host writes them for the receiving Ghost; the
 transcript reads them for the owner (`src/components/wake.ts`): one Korean line, the Ghost's

@@ -10,17 +10,18 @@ const ACTIVE_MS = 900
 const INTENT_MS = 600
 
 /**
- * The conversation's scrollbar, redrawn as a map of the conversation: a hairline thumb for the
- * view and a tick for every landmark — the owner's turns, threads that branched off, Work that
- * came back in its state color. Hover a tick for what it is, click to go there, drag anywhere to
- * scrub. It appears with the pointer or while scrolling and is gone otherwise. Pointer-only:
- * keyboard and touch keep native scrolling on the transcript itself.
+ * A scrollbar redrawn as a map of what it scrolls: a hairline thumb for the view and a tick for
+ * every landmark inside — in the conversation the owner's turns, threads that branched off and
+ * Work that came back; in the sidebar the Ghosts that are working or need the owner. Hover a
+ * tick for what it is, click to go there, drag anywhere to scrub. It appears with the pointer or
+ * the owner's own scrolling and is gone otherwise. Pointer-only: keyboard and touch keep native
+ * scrolling on the scroller itself.
  */
-export function TranscriptRail({ viewportRef, contentRef, onScrub }: {
+export function ScrollRail({ viewportRef, contentRef, onScrub }: {
   viewportRef: React.RefObject<HTMLDivElement | null>
   contentRef: React.RefObject<HTMLDivElement | null>
-  /** Called when the owner moves the view from the rail, so following the latest turn stops. */
-  onScrub(): void
+  /** Called when the owner moves the view from the rail, e.g. so a transcript stops following its latest turn. */
+  onScrub?(): void
 }) {
   const railRef = React.useRef<HTMLDivElement>(null)
   const thumbRef = React.useRef<HTMLDivElement>(null)
@@ -112,7 +113,7 @@ export function TranscriptRail({ viewportRef, contentRef, onScrub }: {
     event.preventDefault()
     rail.setPointerCapture(event.pointerId)
     rail.dataset.dragging = ""
-    onScrub()
+    onScrub?.()
     const railTop = rail.getBoundingClientRect().top
     const at = event.clientY - railTop
     // Grabbing the thumb keeps the grip point under the pointer; anywhere else centres the view there.
@@ -122,7 +123,7 @@ export function TranscriptRail({ viewportRef, contentRef, onScrub }: {
       viewport.scrollTop = Math.min(1, Math.max(0, (clientY - railTop - grip) / room)) * (viewport.scrollHeight - viewport.clientHeight)
     }
     move(event.clientY)
-    const onMove = (next: PointerEvent) => { onScrub(); move(next.clientY) }
+    const onMove = (next: PointerEvent) => { onScrub?.(); move(next.clientY) }
     const release = () => {
       delete rail.dataset.dragging
       rail.removeEventListener("pointermove", onMove)
@@ -135,8 +136,9 @@ export function TranscriptRail({ viewportRef, contentRef, onScrub }: {
   }
 
   const go = (mark: Landmark) => {
-    onScrub()
-    viewportRef.current?.scrollTo({ top: Math.max(0, mark.y - 56), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })
+    onScrub?.()
+    const viewport = viewportRef.current
+    viewport?.scrollTo({ top: Math.max(0, mark.y - viewport.clientHeight / 3), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })
   }
 
   const label = hovered !== null ? landmarks[hovered] : undefined

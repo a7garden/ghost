@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, CircleAlert, GitBranch, X } from 'lucide-react';
 import { Button, Conversation, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
-import { DotAvatar } from '../components/DotAvatar';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
 import { OpenWorkProvider, StateGlyph, ThreadCard, workGlyph } from '../components/agent';
@@ -14,7 +13,7 @@ import { ThreadPanel } from './ThreadPanel';
 import { useConversationFeed } from './conversationFeed';
 import { conversationStarters } from './conversationSuggestions';
 import { profileSummary } from './profileSummary';
-import { ghostPresence, toneFor } from './ghostState';
+import { ghostPresence } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { useHost } from '../host/context';
@@ -50,6 +49,10 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
   const chatPath = `/ghosts/${encodeURIComponent(ghost.id)}${conversationId && conversationId !== ghost.directConversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ''}`;
   const openThread = (id: string) => navigate(`${chatPath}${chatPath.includes('?') ? '&' : '?'}thread=${encodeURIComponent(id)}`);
   const closeThread = () => navigate(chatPath);
+  // The panel stays mounted while it slides out after the thread closes; a new thread replaces it at once.
+  const [panelId, setPanelId] = useState(threadId);
+  if (threadId && threadId !== panelId) setPanelId(threadId);
+  const panelClosing = !threadId && panelId !== null;
 
   const live = page.live;
   const hasContent = page.messages.length > 0 || Boolean(live?.running);
@@ -94,7 +97,6 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
         <p id="composer-keyboard-help" className="sr-only m-0">Enter로 보내기 · Shift + Enter로 줄바꿈{busy ? ' · 추가 지시는 진행 중인 응답에 전달됩니다.' : ''}</p>
       </>}>
       {!hasContent && !loading && <div className="chat-empty">
-        <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={56}/>
         <h2>{ghost.name}</h2>
         {ghost.persona.trim() && <div className="chat-empty__starters" role="group" aria-label="대화 시작 제안">{conversationStarters(ghost.persona).map(({ label, prompt }) =>
           <button type="button" key={label} title={prompt} onClick={() => { setDraft(prompt); inputRef.current?.focus(); }}>{label}</button>)}</div>}
@@ -111,7 +113,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
         } : undefined}/>
       {live && <LiveReply live={live} ghostId={ghost.id} ghostName={ghost.name}/>}
     </Conversation>
-    {threadId && <ThreadPanel key={threadId} workId={threadId} state={state} onClose={closeThread} onOpenThread={openThread} onOpenPage={openWork}/>}
+    {panelId && <ThreadPanel key={panelId} workId={panelId} state={state} closing={panelClosing} onClosed={() => setPanelId(null)}
+      onClose={closeThread} onOpenThread={openThread} onOpenPage={openWork}/>}
   </div></OpenWorkProvider>;
 }
 

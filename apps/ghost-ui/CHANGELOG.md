@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Title bar: back/forward (`⌘[` `⌘]`) and a breadcrumb trail — section, the thing inside it,
+  the open thread and the threads it came from; each step goes up to it.
+- Sidebar: destinations and 설정 stay put; the roster scrolls under sticky labels, fades out
+  while more follows, and a rail marks Ghosts that are working or need you. Opening a Ghost
+  brings its row into view.
+- The thread panel grows open beside the conversation and closes in reverse.
+- The empty conversation no longer repeats the Ghost's portrait.
 - Reports read like a person: a returned Work is an outcome line hooked to its thread card
   (state, title, files as chips, a failure's reason); who judged it, how long it took and its
   id wait behind a hover (Peek). Other host wakes are one line in Korean with the Ghost's

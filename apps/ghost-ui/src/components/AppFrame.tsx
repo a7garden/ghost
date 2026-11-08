@@ -10,7 +10,8 @@ export function AppFrame({ desktop, macOSInset, location, island, sidebar, fill,
   /** Inside the Tauri window: draw the draggable title bar above everything. */
   desktop: boolean;
   macOSInset: number;
-  location: string;
+  /** Where the owner is: back/forward and the page's trail. */
+  location: ReactNode;
   /** Live activity across Ghosts; renders nothing while the workspace is quiet. */
   island: ReactNode;
   sidebar: ReactNode;
@@ -26,7 +27,7 @@ export function AppFrame({ desktop, macOSInset, location, island, sidebar, fill,
     <Search aria-hidden="true"/><span className="shell-search__label">검색</span><kbd>⌘K</kbd>
   </button>;
   const menu = <button type="button" className="shell-icon-button min-[56rem]:hidden" aria-label="전체 메뉴" onClick={() => setMenuOpen(true)}><Menu aria-hidden="true"/></button>;
-  const left = <>{menu}<span className="shell-location">{location}</span></>;
+  const left = <>{menu}{location}</>;
   return <div className="shell" data-fill={fill || undefined}>
     {desktop
       ? <TitleBar aria-label="Ghost" macOSInset={macOSInset} left={left} center={island} right={search}/>

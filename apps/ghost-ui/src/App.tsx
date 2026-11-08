@@ -3,6 +3,9 @@ import { CircleAlert, Clock3, MonitorSmartphone, Server, Smartphone, Users } fro
 import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
 import { AppFrame } from './components/AppFrame';
+import { TitleNav } from './components/TitleNav';
+import { crumbsFor } from './features/crumbs';
+import { useHistoryNav } from './features/historyNav';
 import { ActivityIsland } from './components/agent';
 import { PortraitAppearances } from './components/DotAvatar';
 import { Settings, type SettingsSection } from './pets/Settings';
@@ -56,8 +59,19 @@ function Shell() {
   // The main region owns scrolling; a new destination starts at its top.
   const resetScroll = () => { document.getElementById('main-content')?.scrollTo(0, 0); };
   useEffect(() => { const change = () => setRoute(currentRoute()); window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
-  useEffect(() => { const key = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); location.hash = '/settings'; } if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setPaletteOpen(true); } }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, []);
-  const navigate = (path: string) => { resetScroll(); if (currentRoute() !== path) history.pushState(null, '', `#${path}`); setRoute(path); };
+  const historyNav = useHistoryNav();
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); location.hash = '/settings'; }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setPaletteOpen(true); }
+      // ⌘[ / ⌘] walk history, except where text editing owns them (indent in the document editor).
+      const editing = e.target instanceof Element && e.target.closest('input, textarea, [contenteditable="true"], .cm-editor');
+      if ((e.metaKey || e.ctrlKey) && !editing && (e.key === '[' || e.key === ']')) { e.preventDefault(); if (e.key === '[') history.back(); else history.forward(); }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, []);
+  const navigate = (path: string) => { resetScroll(); if (currentRoute() !== path) historyNav.push(`#${path}`); setRoute(path); };
   const [path, query = ''] = route.split('?');
   const params = new URLSearchParams(query);
   const section = path.split('/')[1]?.split('?')[0] || 'home';
@@ -119,7 +133,8 @@ function Shell() {
     <PortraitAppearances.Provider value={portraits}>
       <AvatarProvider animate={preferences.animate}>
         <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0}
-          location={openGhost?.name ?? pageLabel(section, state?.spaces.find(space => space.id === selectedSpace)?.name ?? null)}
+          location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
+            onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
           sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
           {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>{error}</Banner>}
@@ -148,9 +163,4 @@ function Shell() {
       </AvatarProvider>
     </PortraitAppearances.Provider>
   </div>;
-}
-
-function pageLabel(section: string, spaceName: string | null): string {
-  if (spaceName) return spaceName;
-  return (routeLabels[section as keyof typeof routeLabels] as string | undefined) ?? '찾을 수 없는 화면';
 }

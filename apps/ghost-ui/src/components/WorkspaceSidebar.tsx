@@ -1,6 +1,6 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { Folder, Home, Inbox, LayoutList, MessageCircle, Pin, Plus, Settings2 } from 'lucide-react';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Navigation, NavigationGroup, NavigationItem } from '../ui'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Navigation, NavigationGroup, NavigationItem, ScrollRail } from '../ui'
 import type { Ghost, State } from '@ghost/contract';
 import { ghostLiveWork, ghostPresence, liveWorks, visibleGhosts, type Presence } from '../features/ghostState';
 import { useSidebarPreferences } from '../features/sidebarPreferences';
@@ -19,6 +19,10 @@ const SEARCH_LIMIT = 8;
  * reached from the conversation header, so the list stays a glanceable roster. Once the
  * team grows past seven, only the Ghosts that need the owner stay up: the default, those
  * with a presence line, pinned ones and the open conversation — the rest sit behind +N.
+ *
+ * The destinations stay put; only the roster and projects scroll, under sticky group labels,
+ * fading out at the bottom while more follows. The rail beside it marks Ghosts that are
+ * working or need the owner, so a long roster still shows where to look.
  */
 export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, attentionCount, status, navigate, openGhost }: {
   state: State | null;
@@ -36,6 +40,13 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
   const spaces = state?.spaces ?? [];
   const live = state ? liveWorks(state).length : 0;
   const hostTrouble = status.state !== 'connected';
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollEdges(scrollRef);
+  // Opening a Ghost from elsewhere (a card, search) brings its row into view.
+  useEffect(() => {
+    if (!openGhostId) return;
+    scrollRef.current?.querySelector<HTMLElement>('.presence-row__main[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
+  }, [openGhostId]);
   // Deleted and retired Ghosts leave the roster. Small teams keep the classic order:
   // the default leads, the rest follow in roster order.
   const ghosts = (state?.ghosts ?? []).filter(ghost => ghost.state !== 'retired' && ghost.deletedAt === null);
@@ -71,7 +82,10 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
     return <ContextMenu key={ghost.id}>
       <ContextMenuTrigger asChild>
         <button type="button" className="presence-row__main" data-dimmed={dimmed && ghost.state === 'paused' ? '' : undefined}
-          aria-current={ghost.id === openGhostId ? 'page' : undefined} onClick={() => openGhost(ghost.id)}>
+          aria-current={ghost.id === openGhostId ? 'page' : undefined} onClick={() => openGhost(ghost.id)}
+          data-rail={now.state !== 'idle' || ghost.id === openGhostId ? 'ghost' : undefined}
+          data-rail-tone={now.state === 'attention' ? 'amber' : now.state === 'working' ? 'signal' : ghost.id === openGhostId ? 'muted' : undefined}
+          data-rail-label={now.line ? `${ghost.name} · ${now.line}` : ghost.name}>
           <PresenceAvatar ghostId={ghost.id} state={now.state} size={26}/>
           <span className="presence-row__copy">
             <span className="presence-row__name"><span className="truncate">{ghost.name}</span>{ghost.isDefault && <span className="presence-row__main-mark">메인</span>}</span>
@@ -90,7 +104,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
   };
 
   return <>
-    <Navigation label="작업실" className="ghost-sidebar min-h-0 flex-1 overflow-y-auto">
+    <Navigation label="작업실" className="ghost-sidebar min-h-0 flex-1">
       <div className="sidebar-primary">
         <NavigationItem current={section === 'home'} onClick={() => navigate('/')}>
           <Home/><span className="flex-1">{routeLabels.home}</span>
@@ -104,26 +118,31 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
           {live > 0 && <span className="sidebar-count"><span className="sr-only">진행 중 </span>{live}</span>}
         </NavigationItem>
       </div>
-      {ghosts.length > 0 && <NavigationGroup label="Ghost">
-        {overflow ? <>
-          {top.map(ghost => row(ghost))}
-          {expanded && rest.length > SEARCH_LIMIT && <input type="search" className="sidebar-search" aria-label="Ghost 찾기"
-            placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
-            onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
-          {expanded && shownRest.map(ghost => row(ghost, true))}
-          {rest.length > 0 && <button type="button" className="sidebar-more" aria-expanded={expanded}
-            aria-label={expanded ? 'Ghost 목록 접기' : `Ghost ${rest.length}명 더 보기`}
-            onClick={() => { setQuery(''); setExpanded(!expanded); }}>
-            <span aria-hidden="true">{expanded ? `−${rest.length}` : `+${rest.length}`}</span>
-          </button>}
-        </> : flat.map(ghost => row(ghost))}
-      </NavigationGroup>}
-      <NavigationGroup label="프로젝트" className="relative">
-        <button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/spaces?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>
-        {spaces.map(space => <NavigationItem key={space.id} current={section === 'spaces' && space.id === selectedSpace} onClick={() => navigate(`/spaces/${space.id}`)}>
-          <Folder/><span className="truncate">{space.name}</span>
-        </NavigationItem>)}
-      </NavigationGroup>
+      <div className="sidebar-scroll-frame">
+        <div ref={scrollRef} className="sidebar-scroll">
+          {ghosts.length > 0 && <NavigationGroup label="Ghost">
+            {overflow ? <>
+              {top.map(ghost => row(ghost))}
+              {expanded && rest.length > SEARCH_LIMIT && <input type="search" className="sidebar-search" aria-label="Ghost 찾기"
+                placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
+                onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
+              {expanded && shownRest.map(ghost => row(ghost, true))}
+              {rest.length > 0 && <button type="button" className="sidebar-more" aria-expanded={expanded}
+                aria-label={expanded ? 'Ghost 목록 접기' : `Ghost ${rest.length}명 더 보기`}
+                onClick={() => { setQuery(''); setExpanded(!expanded); }}>
+                <span aria-hidden="true">{expanded ? `−${rest.length}` : `+${rest.length}`}</span>
+              </button>}
+            </> : flat.map(ghost => row(ghost))}
+          </NavigationGroup>}
+          <NavigationGroup label="프로젝트"
+            action={<button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/spaces?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>}>
+            {spaces.map(space => <NavigationItem key={space.id} current={section === 'spaces' && space.id === selectedSpace} onClick={() => navigate(`/spaces/${space.id}`)}>
+              <Folder/><span className="truncate">{space.name}</span>
+            </NavigationItem>)}
+          </NavigationGroup>
+        </div>
+        <ScrollRail viewportRef={scrollRef} contentRef={scrollRef}/>
+      </div>
     </Navigation>
     <div className="sidebar-foot">
       <NavigationItem className="w-full" current={section === 'settings'} aria-describedby={hostTrouble ? hostStatusId : undefined}
@@ -133,4 +152,22 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
       </NavigationItem>
     </div>
   </>;
+}
+
+/** Marks a scroller with `data-more-below` while content continues past its bottom edge. */
+function useScrollEdges(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const update = () => {
+      const more = element.scrollTop + element.clientHeight < element.scrollHeight - 2;
+      if (more) element.dataset.moreBelow = ''; else delete element.dataset.moreBelow;
+    };
+    const resize = new ResizeObserver(update);
+    resize.observe(element);
+    for (const group of element.children) resize.observe(group);
+    element.addEventListener('scroll', update, { passive: true });
+    update();
+    return () => { resize.disconnect(); element.removeEventListener('scroll', update); };
+  }, [ref]);
 }
