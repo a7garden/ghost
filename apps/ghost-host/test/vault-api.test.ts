@@ -59,9 +59,8 @@ test("owner routes accept write-only values, return only validated metadata, and
     const response = await h.request("/api/vault/items", "POST", input); expect(response.status).toBe(400); assertNoValues(await response.text());
   }
   const malformed = await h.request(`/api/vault/items/${item.id}`, "PATCH", { password: null }); expect(malformed.status).toBe(400); assertNoValues(await malformed.text());
-  const device = { id: "device-vault-test", name: "Phone", grants: [{ ghostId: h.ghost.id, conversationId: null }] };
   // Exercise owner-only authorization with a device principal directly; token authentication is shared by all routes.
-  const denied = await serveVault(new Request("http://localhost/api/vault/items"), new URL("http://localhost/api/vault/items"), new Access(h.ledger, { kind: "device", deviceId: device.id, name: device.name, grants: device.grants }), h.core, h.vault);
+  const denied = await serveVault(new Request("http://localhost/api/vault/items"), new URL("http://localhost/api/vault/items"), new Access({ kind: "device", deviceId: "device-vault-test", name: "Phone" }), h.core, h.vault);
   expect(denied.status).toBe(403);
   expect((await h.request("/api/vault/items", "GET", undefined, "wrong-token")).status).toBe(401);
   expect((await h.request(`/api/vault/items/${item.id}`, "DELETE")).status).toBe(200);
@@ -133,21 +132,19 @@ test("a crash after secure vault commit can resume without duplicating the saved
   const item = parse(VaultItem, await response.json()); expect(item.id).toBe(first.id); expect(h.vault.list().length).toBe(1); expect(h.ledger.decision(decisionId).state).toBe("answered");
 });
 
-test("devices cannot distinguish a secure form from another decision outside their grants", async () => {
+test("a paired device cannot answer a secure form outside the vault route, and leaves no receipt", async () => {
   const h = fixture();
-  await h.tool("vault_request", { kind: "secret", reason: "Need token" }, "private-form");
-  const secureId = idFor(h.conversation.id, "private-form");
-  const ordinary = h.core.decisions.ask(h.conversation.id, "Ordinary question", "Not granted", []);
-  const device = { id: "ungranted-device", name: "Phone", grants: [], pushEnabled: false, createdAt: Date.now(), lastSeenAt: null };
-  h.ledger.tx(() => h.ledger.insertDevice(device, hashSecret("ungranted-token")));
-  const replies: string[] = [];
-  for (const decisionId of [secureId, ordinary.id]) {
-    const requestId = idFor("unauthorized-answer", decisionId);
-    const response = await h.request("/api/commands", "POST", { requestId, command: { type: "decision.resolve", decisionId, outcome: "answer", answer: PASSWORD } }, "ungranted-token");
-    expect(response.status).toBe(403);
-    replies.push(await response.text());
-    expect(h.ledger.request(requestId)).toBeNull();
-    expect(h.ledger.decision(decisionId).state).toBe("pending");
-  }
-  expect(replies[0]).toBe(replies[1]); expect(replies[0]).not.toContain("secure form");
+  await h.tool("vault_request", { kind: "secret", reason: "Need token" }, "device-form");
+  const secureId = idFor(h.conversation.id, "device-form");
+  const device = { id: "paired-device", name: "Phone", pushEnabled: false, createdAt: Date.now(), lastSeenAt: null };
+  h.ledger.tx(() => h.ledger.insertDevice(device, hashSecret("device-token")));
+  const requestId = idFor("device-answer", secureId);
+  const response = await h.request("/api/commands", "POST", { requestId, command: { type: "decision.resolve", decisionId: secureId, outcome: "answer", answer: PASSWORD } }, "device-token");
+  expect(response.status).toBe(409);
+  assertNoValues(await response.text());
+  expect(h.ledger.request(requestId)).toBeNull();
+  expect(h.ledger.decision(secureId).state).toBe("pending");
+  const vaultRoute = await h.request(`/api/vault/requests/${secureId}`, "POST", { save: true, kind: "secret", title: "Token", value: VALUE }, "device-token");
+  expect(vaultRoute.status).toBe(403);
+  expect(h.vault.list()).toEqual([]);
 });
