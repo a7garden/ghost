@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-9db4166` (UI는 같은 디렉터리의 `ui/`) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-5bbeacb` (UI는 같은 디렉터리의 `ui/`) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain) |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`9db4166` 셸: 데스크톱 아바타 창 포함, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,15 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 모든 Ghost와 대화는 기본 모델(Z.AI `glm-5.3`)을 따르고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 사람이 읽는 보고·참조 표식·대화 지도 스크롤 운영 반영 — 2026-11-08
+
+- 소스 `176d1d6`(+ 후속 UI `e82cf30` 줄인 id의 고유 접두 해석, `5bbeacb` 코드 스팬 id의 괄호 흡수)를 `releases/20261108-bun-5bbeacb`에 설치했다. Host 변경은 직접 대화·작업 지시문(`OWNER_VOICE`: 소유자에게는 id·해시·바이트·종료 코드·도구 이름 없이 결과부터 말하기, 보고를 되풀이하지 않기, `complete` 요약 첫 문장과 `ask_owner` 질문도 사람용)뿐이고 계약·DB 스키마·셸은 그대로다. 컴파일 Host는 `176d1d6` 빌드를 그대로 썼고(이후 Host·계약 변경 없음, 바이트 일치) UI 93개 파일 해시가 빌드 원본과 일치한다. 설치 사본을 백업 DB 사본 위 임시 루트·포트에서 실행해 health·새 번들을 확인했다.
+- UI: 끝난 Work의 보고와 위임 결과는 스레드 카드에서 돌아오는 OutcomeLine(상태 색 갈고리·알약, 파일 칩, 실패 사유)으로, 다른 Host 깨움은 한국어 한 줄 + 접힌 원문으로 보인다. 담당·판정·걸린 시간·식별자·크기·해시는 Peek(호버·키보드 포커스, 클릭 복사)로 옮겼다. 응답 본문의 UUID·줄인 id·해시는 RefMark(Work 상태 표식은 스레드를 열고, Ghost 얼굴, 파일 아이콘, 그 밖은 #)로 바뀐다. 대화 스크롤은 TranscriptRail(가는 thumb, 소유자 발화·스레드·돌아온 Work 눈금, 호버 이름·클릭 이동·끌기 탐색)로, 그 밖의 스크롤바는 트랙 없는 알약으로 바꿨다.
+- 검사: Host 테스트 246개(+1 생략)·타입 검사, UI 테스트 71개(참조 분리·괄호 흡수·깨움 해석 추가)·타입 검사·빌드, 시각 회귀 28개(대화 화면 4개 기준 갱신 후 재통과; 모의 제공자가 보고 응답에 Work id를 되풀이해 표식 렌더링을 고정). 격리 Host·브라우저에서 Peek 호버, 표식 클릭 → 스레드 패널, 레일 눈금 호버·클릭 이동, thumb 끌기(77 → 0, 놓은 뒤 최신 따라가기로 튀지 않음)를 확인했다.
+- 백업: `~/.local/share/ghost/backups/pre-human-reports-20261108-bun-{176d1d6,e82cf30,5bbeacb}/`, 각각 `ghost-backup/2`, `complete: true`, 두 DB `integrity_check` ok, artifacts·secrets·config 복사. 마지막 시각 `2026-11-08T09:48Z` 전후(`created_ms` 1794131315049).
+- 유휴(바쁜 대화·진행 중 Work 0) 확인 후 세 번 `current`를 원자적으로 교체하고 Host를 정상 재기동했다(PID 39276 → 20886 → 23268 → 26248). 실행 파일·운영 DB·단일 리스너·준비 상태(`provider zai-coding is ready`), Ghost 23·대화 39·맡긴 일 39, config·secrets 보존을 확인했다. 설치 앱(external)을 정상 종료·백그라운드 재실행하고 메인 대화를 열어, 운영 데이터의 `3D 아트 위임 확인` 보고가 OutcomeLine + `result.py` 칩으로, 기존 응답의 id·해시·줄인 id가 표식으로 보이는 것을 창 캡처로 확인했다.
+- 되돌릴 때는 `current`를 `releases/20261108-bun-9db4166`으로 교체하고 LaunchAgent를 정상 재시작한다. 저장 형식 변화는 없다.
 
 ### Ghost 설정·입력창 + 메뉴·첨부·데스크톱 아바타 운영 반영 — 2026-11-08
 
