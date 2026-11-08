@@ -6,6 +6,8 @@ import remarkGfm from 'remark-gfm';
 import type { Element, ElementContent, Root } from 'hast';
 import './MessageBody.css';
 import { ExternalAnchor } from './ExternalAnchor';
+import { RefMark } from './agent/RefMark';
+import { REF_TAG, rehypeRefs, type Ref } from './refs';
 
 /** Transcript links have no document base; only external URLs and local footnotes are navigable. */
 const allowedSchemes: Record<string, true> = { http: true, https: true, mailto: true };
@@ -129,18 +131,23 @@ function ScrollableTable({ children }: { children?: ReactNode }) {
   return <div className="message-body__tablewrap" role="region" aria-label="표" tabIndex={0}><table>{children}</table></div>;
 }
 
-const components: Components = {
+function RefNode({ 'data-kind': kind, 'data-value': value }: { 'data-kind'?: Ref['kind']; 'data-value'?: string }) {
+  return kind && value ? <RefMark kind={kind} value={value}/> : null;
+}
+
+const components = {
   a: SafeLink,
   img: ImageLink,
   pre: FencedCode,
   table: ScrollableTable,
-};
+  [REF_TAG]: RefNode,
+} as Components;
 
 const remarkPlugins = [remarkGfm];
 const remarkRehypeOptions = { footnoteLabel: '각주', footnoteBackLabel: '본문으로 돌아가기' };
 
 /** Code keeps its exact characters as one node. */
-const KEEP_WHOLE: Record<string, true> = { pre: true, code: true, svg: true };
+const KEEP_WHOLE: Record<string, true> = { pre: true, code: true, svg: true, [REF_TAG]: true };
 
 const isStreamWord = (node: ElementContent) => node.type === 'element' && node.tagName === 'span'
   && Array.isArray(node.properties.className) && node.properties.className.includes('stream-word');
@@ -183,12 +190,13 @@ function rehypeStreaming() {
     tail(tree).children.push({ type: 'element', tagName: 'span', properties: { className: ['stream-caret'], ariaHidden: 'true' }, children: [] });
   };
 }
-const streamingRehypePlugins = [rehypeStreaming];
+const rehypePlugins = [rehypeRefs];
+const streamingRehypePlugins = [rehypeRefs, rehypeStreaming];
 
 /** Assistant transcript body: GFM markdown kept inside the message column, no raw HTML, no automatic remote resources. */
 export function MessageBody({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return <div className="message-body" data-streaming={streaming || undefined}>
-    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={streaming ? streamingRehypePlugins : undefined} remarkRehypeOptions={remarkRehypeOptions} urlTransform={safeUrl} components={components}>{text}</Markdown>
+    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={streaming ? streamingRehypePlugins : rehypePlugins} remarkRehypeOptions={remarkRehypeOptions} urlTransform={safeUrl} components={components}>{text}</Markdown>
   </div>;
 }
 

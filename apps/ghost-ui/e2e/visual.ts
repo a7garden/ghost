@@ -5,9 +5,10 @@ import { readRunState, type VisualRunState } from './run-state';
  * Screen-opening helpers shared by the visual spec. Every screen freezes the
  * browser clock (`page.clock.setFixedTime`) at the seeding end so `Date.now()`
  * is constant, and covers the nondeterministic regions: `<time>` elements
- * (relative-time text) and transcript event lines, whose report text carries
- * the Work's random id. The verdict stamp's absolute timestamp is a plain span
- * with proportional digits, so it is hidden outright instead of masked.
+ * (relative-time text) and host wake lines, whose text depends on run timing.
+ * A returned Work renders as its outcome line, whose id stays behind a hover.
+ * The verdict stamp's absolute timestamp is a plain span with proportional
+ * digits, so it is hidden outright instead of masked.
  */
 
 const MASK_SELECTORS = ['time', '.transcript-event'];

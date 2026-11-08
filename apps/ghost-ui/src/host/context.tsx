@@ -30,3 +30,8 @@ export function useHost(): HostContextValue {
   if (!value) throw new Error('useHost must be used inside <HostProvider>');
   return value;
 }
+
+/** The host when one is provided; static renders and previews have none. */
+export function useOptionalHost(): HostContextValue | null {
+  return useContext(HostContext);
+}

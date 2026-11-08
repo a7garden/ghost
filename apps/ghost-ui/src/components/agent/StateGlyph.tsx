@@ -12,16 +12,19 @@ export const glyphLabel: Record<GlyphState, string> = {
 export const workGlyph = (state: WorkState, needsOwner: boolean): GlyphState =>
   needsOwner && state !== 'blocked' && !TERMINAL_WORK_STATES.includes(state) ? 'attention' : state;
 
+/** The state color family a glyph wears; landmarks elsewhere (the transcript rail) wear the same. */
+export const glyphTone = (state: GlyphState) => state === 'attention' || state === 'blocked' ? 'amber'
+  : state === 'failed' ? 'danger'
+    : state === 'done' ? 'success'
+      : state === 'running' || state === 'verifying' ? 'signal' : 'muted';
+
 /**
  * One shape per state, so state never depends on color alone:
  * hollow ring queued, spinning arc running, pause bars waiting, half disc verifying,
  * exclamation needs the owner, check done, cross failed, slash cancelled.
  */
 export function StateGlyph({ state, size = 16, label, className = '' }: { state: GlyphState; size?: number; label?: boolean; className?: string }) {
-  const tone = state === 'attention' || state === 'blocked' ? 'amber'
-    : state === 'failed' ? 'danger'
-      : state === 'done' ? 'success'
-        : state === 'running' || state === 'verifying' ? 'signal' : 'muted';
+  const tone = glyphTone(state);
   return <span className={`state-glyph ${className}`} data-tone={tone} data-state={state}>
     <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" className={state === 'running' ? 'state-glyph__spin' : undefined}>
       {state === 'queued' && <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2.2 2.1"/>}

@@ -287,9 +287,19 @@ body {
 .chat-thinking { display: inline-flex; align-items: center; gap: 10px; color: var(--ghost-ink3); font-size: var(--text-ui); font-weight: 500; animation: fade-in var(--duration-slow) ease both; }
 .chat-thinking > span:not(.presence) { background: linear-gradient(90deg, var(--ghost-ink3) 0%, var(--ghost-ink) 50%, var(--ghost-ink3) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer-text 1.8s linear infinite; }
 .transcript-note { align-self: center; margin: 0; padding: 4px 12px; border-radius: var(--radius-pill); color: var(--ghost-ink3); background: var(--ghost-hover); font-size: var(--text-caption); white-space: pre-wrap; overflow-wrap: anywhere; text-align: center; }
-.transcript-event { display: flex; min-width: 0; align-items: baseline; gap: 10px; padding: 8px 14px; border-radius: var(--radius-card); color: var(--ghost-ink2); background: var(--ghost-hover); font-size: var(--text-caption); line-height: 1.55; }
+/* Host wakes read as one quiet line; the Ghost's exact text folds beneath when there is more. */
+.transcript-event { display: flex; min-width: 0; align-items: baseline; gap: 10px; padding: 5px 10px; margin-inline: -10px; border-radius: var(--radius-control); color: var(--ghost-ink2); font-size: var(--text-caption); line-height: 1.5; }
+details.transcript-event { display: block; padding: 0; }
+details.transcript-event > summary { display: flex; min-width: 0; align-items: baseline; gap: 10px; padding: 5px 10px; border-radius: inherit; list-style: none; cursor: pointer; transition: background var(--duration-fast) ease, color var(--duration-fast) ease; }
+details.transcript-event > summary::-webkit-details-marker { display: none; }
+details.transcript-event > summary:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+details.transcript-event > summary:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 1px; }
+details.transcript-event[open] { background: var(--ghost-hover); }
 .transcript-event__kind { flex: none; color: var(--ghost-ink3); font-weight: 600; }
-.transcript-event__text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; overflow: hidden; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
+.transcript-event__text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transcript-event__chevron { flex: none; align-self: center; width: 13px; height: 13px; color: var(--ghost-ink3); opacity: .7; transition: transform var(--duration-base) var(--ease-enter); }
+details.transcript-event[open] .transcript-event__chevron { transform: rotate(90deg); }
+.transcript-event__detail { max-height: 280px; margin: 0 10px; padding: 8px 0 10px; overflow: auto; border-top: 1px solid var(--ghost-line); color: var(--ghost-ink3); white-space: pre-wrap; overflow-wrap: anywhere; animation: fade-in var(--duration-base) var(--ease-enter); }
 
 /* A thread opens beside the conversation on wide sheets and over it on narrow ones. */
 .chat-layout { position: relative; display: flex; height: 100%; min-height: 0; width: 100%; min-width: 0; }

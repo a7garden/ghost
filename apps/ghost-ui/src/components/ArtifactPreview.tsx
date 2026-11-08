@@ -2,12 +2,16 @@ import { useState } from 'react';
 import { FileCode2, FileImage, FileText, File as FileIcon } from 'lucide-react';
 import type { ArtifactRef } from '@ghost/contract';
 import { useHost } from '../host/context';
+import { Peek } from './agent/Peek';
 import { Modal } from './Modal';
 
-const sizeLabel = (size: number) => size < 1024 ? `${size} B` : size < 1048576 ? `${Math.round(size / 1024)} KB` : `${(size / 1048576).toFixed(1)} MB`;
+export const sizeLabel = (size: number) => size < 1024 ? `${size} B` : size < 1048576 ? `${Math.round(size / 1024)} KB` : `${(size / 1048576).toFixed(1)} MB`;
 
-/** 첨부 자료: fetches bytes on demand and previews them in place; the object URL dies with the dialog. */
-export function ArtifactPreview({ artifact, label }: { artifact: ArtifactRef; label?: string }) {
+/**
+ * 첨부 자료: fetches bytes on demand and previews them in place; the object URL dies with the dialog.
+ * `chip` is the inline form for a report line: the name alone, size and hash behind a hover.
+ */
+export function ArtifactPreview({ artifact, label, variant = 'tile' }: { artifact: ArtifactRef; label?: string; variant?: 'tile' | 'chip' }) {
   const { client } = useHost();
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState<{ url: string; mediaType: string; text?: string } | null>(null);
@@ -31,13 +35,18 @@ export function ArtifactPreview({ artifact, label }: { artifact: ArtifactRef; la
     if (content?.url) URL.revokeObjectURL(content.url);
     setContent(null);
   };
+  const icon = artifact.mediaType.startsWith('image/') ? <FileImage/> : artifact.mediaType === 'application/json' || /\.(ts|js|py|sh|json|ya?ml|toml)$/i.test(artifact.name) ? <FileCode2/> : artifact.mediaType.startsWith('text/') ? <FileText/> : <FileIcon/>;
   return <>
-    <button type="button" className="artifact-tile" onClick={openPreview} title={artifact.name}>
-      <span className="artifact-tile__icon" aria-hidden="true">
-        {artifact.mediaType.startsWith('image/') ? <FileImage/> : artifact.mediaType === 'application/json' || /\.(ts|js|py|sh|json|ya?ml|toml)$/i.test(artifact.name) ? <FileCode2/> : artifact.mediaType.startsWith('text/') ? <FileText/> : <FileIcon/>}
-      </span>
-      <span className="artifact-tile__copy"><span>{label ?? artifact.name}</span><small className="tabular">{sizeLabel(artifact.size)}</small></span>
-    </button>
+    {variant === 'chip'
+      ? <Peek facts={[{ label: '크기', value: sizeLabel(artifact.size) }, { label: '형식', value: artifact.mediaType }, { label: '해시', value: artifact.digest, copy: true }]}>
+        <button type="button" className="file-chip" onClick={openPreview}>
+          <span className="file-chip__icon" aria-hidden="true">{icon}</span><span className="file-chip__name">{label ?? artifact.name}</span>
+        </button>
+      </Peek>
+      : <button type="button" className="artifact-tile" onClick={openPreview} title={artifact.name}>
+        <span className="artifact-tile__icon" aria-hidden="true">{icon}</span>
+        <span className="artifact-tile__copy"><span>{label ?? artifact.name}</span><small className="tabular">{sizeLabel(artifact.size)}</small></span>
+      </button>}
     {open && <Modal title={artifact.name} onClose={close}>
       {error && <p className="m-0 text-caption text-red" role="alert">{error}</p>}
       {!error && !content && <p className="m-0 text-caption text-ink-2" aria-busy="true">읽는 중…</p>}

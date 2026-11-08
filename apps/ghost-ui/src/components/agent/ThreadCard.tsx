@@ -5,7 +5,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { toneFor } from '../../features/ghostState';
 import { relativeTime } from '../../features/time';
 import { LifecycleTrack } from './LifecycleTrack';
-import { StateGlyph, glyphLabel, workGlyph } from './StateGlyph';
+import { StateGlyph, glyphLabel, glyphTone, workGlyph } from './StateGlyph';
 
 /** A Work another Ghost carries for this thread, at any depth below it. */
 export interface ThreadDelegate { work: Work; ghostName: string; needsOwner: boolean }
@@ -30,7 +30,7 @@ export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], o
   const shown = delegates.slice(0, SHOWN_DELEGATES);
   return <ContextMenu>
     <ContextMenuTrigger asChild>
-      <div className="thread-card" data-kind="thread">
+      <div className="thread-card" data-kind="thread" data-rail="thread" data-rail-tone={glyphTone(glyph)} data-rail-label={work.title}>
         <button type="button" onClick={onOpen} aria-label={`스레드: ${work.title}, ${glyphLabel[glyph]}${delegates.length ? `, 위임 ${delegates.length}` : ''}`}>
           <StateGlyph state={glyph}/>
           <span className="thread-card__copy">
