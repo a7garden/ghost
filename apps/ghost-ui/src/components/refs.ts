@@ -1,16 +1,20 @@
 import type { Element, ElementContent, Root } from 'hast';
 
-/** A machine reference inside prose: an entity id or a content digest. */
+/** A machine reference inside prose: an entity id (or the abbreviated head of one) or a content digest. */
 export interface Ref { kind: 'id' | 'digest'; value: string }
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/** Ghosts shorten ids as `66eb43f1-…` or `01a1ba5c-5590-...`; the head still names one entity. */
+const ABBREVIATED = '[0-9a-f]{8}(?:-[0-9a-f]{4}){0,3}-?(?:…|\\.{3})';
 /** Candidates only; a digest also needs a digit and a letter, so plain numbers and words stay text. */
-const REF = new RegExp(`(\\()?\\b(${UUID}|[0-9a-f]{12,64})\\b(\\))?`, 'gi');
-const WHOLE = new RegExp(`^(?:${UUID}|[0-9a-f]{12,64})$`, 'i');
+const REF = new RegExp(`(\\()?\\b(${UUID}\\b|${ABBREVIATED}|[0-9a-f]{12,64}\\b)(\\))?`, 'gi');
+const WHOLE = new RegExp(`^(?:${UUID}|${ABBREVIATED}|[0-9a-f]{12,64})$`, 'i');
 
 function refOf(value: string): Ref | null {
-  if (value.length === 36 && value.includes('-')) return { kind: 'id', value: value.toLowerCase() };
-  return /\d/.test(value) && /[a-f]/i.test(value) ? { kind: 'digest', value: value.toLowerCase() } : null;
+  const lower = value.toLowerCase();
+  if (/(?:…|\.{3})$/.test(lower)) return /\d/.test(lower) ? { kind: 'id', value: lower.replace(/-?(?:…|\.{3})$/, '') } : null;
+  if (lower.length === 36 && lower.includes('-')) return { kind: 'id', value: lower };
+  return /\d/.test(lower) && /[a-f]/.test(lower) ? { kind: 'digest', value: lower } : null;
 }
 
 /**

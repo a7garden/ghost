@@ -30,10 +30,18 @@ export function useHostSnapshot(): State | null {
 export function RefMark({ kind, value }: Ref) {
   const state = useHostSnapshot();
   const openWork = useOpenWork();
-  const raw: PeekFact = { label: kind === 'id' ? '식별자' : '해시', value, copy: true };
+  // A shortened id resolves only when exactly one entity of any kind starts with it.
+  const matching = <T extends { id: string }>(items: T[] | undefined) => kind !== 'id' ? []
+    : (items ?? []).filter(item => value.length === 36 ? item.id === value : item.id.startsWith(value));
+  const works = matching(state?.works);
+  const ghosts = matching(state?.ghosts);
+  const conversations = matching(state?.conversations);
+  const unique = works.length + ghosts.length + conversations.length === 1;
+  const raw: PeekFact = { label: kind === 'id' ? '식별자' : '해시', value: kind === 'id' && value.length < 36 ? `${value}…` : value, copy: true };
 
-  const work = kind === 'id' ? state?.works.find(item => item.id === value) : undefined;
+  const work = unique ? works[0] : undefined;
   if (work) {
+    raw.value = work.id;
     const waiting = state!.decisions.some(decision => decision.state === 'pending' && decision.workId === work.id);
     const glyph = workGlyph(work.state, waiting);
     const assignee = state!.ghosts.find(ghost => ghost.id === work.ghostId)?.name;
@@ -43,16 +51,18 @@ export function RefMark({ kind, value }: Ref) {
       </button>
     </Peek>;
   }
-  const ghost = kind === 'id' ? state?.ghosts.find(item => item.id === value) : undefined;
+  const ghost = unique ? ghosts[0] : undefined;
   if (ghost) {
+    raw.value = ghost.id;
     return <Peek title={ghost.name} facts={[raw]}>
       <span className="ref-mark" data-kind="ghost" role="img" tabIndex={0} aria-label={ghost.name}>
         <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={15}/>
       </span>
     </Peek>;
   }
-  const conversation = kind === 'id' ? state?.conversations.find(item => item.id === value) : undefined;
+  const conversation = unique ? conversations[0] : undefined;
   if (conversation) {
+    raw.value = conversation.id;
     const owner = state!.ghosts.find(item => item.id === conversation.ghostId)?.name;
     return <Peek title={conversation.title || (owner ? `${owner}와 대화` : '대화')} facts={[raw]}>
       <span className="ref-mark" data-kind="raw" role="img" tabIndex={0} aria-label="대화"><MessageCircle aria-hidden="true"/></span>

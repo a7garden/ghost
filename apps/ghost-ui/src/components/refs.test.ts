@@ -12,6 +12,13 @@ it('takes an id out of prose, with its own parentheses but never a lone bracket'
   expect(splitRefs(`Work ${ID.toUpperCase()}이 완료`)).toEqual(['Work ', { kind: 'id', value: ID }, '이 완료']);
 });
 
+it('recognizes the shortened heads Ghosts write, but not hex-looking words', () => {
+  expect(splitRefs('메인 (66eb43f1-…) — 입구, 작가 (01a1ba5c-5590-...) — 글')).toEqual([
+    '메인 ', { kind: 'id', value: '66eb43f1' }, ' — 입구, 작가 ', { kind: 'id', value: '01a1ba5c-5590' }, ' — 글',
+  ]);
+  expect(splitRefs('deadbeef... and so on')).toEqual(['deadbeef... and so on']);
+});
+
 it('treats hex runs as digests only when they mix digits and letters', () => {
   expect(splitRefs('digest 60083fa5e45e, 4,667 bytes')).toEqual(['digest ', { kind: 'digest', value: '60083fa5e45e' }, ', 4,667 bytes']);
   // Timestamps, phone-like numbers and plain words stay text.
