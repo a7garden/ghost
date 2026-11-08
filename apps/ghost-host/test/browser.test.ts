@@ -32,10 +32,15 @@ if (command[0] === "grow-count" || command[0] === "grow-bytes") {
   if (command[0] === "grow-count") for (let n = 0; n < 33; n++) writeFileSync(downloads + "/" + n, "");
   else { writeFileSync(downloads + "/large", ""); truncateSync(downloads + "/large", 65 * 1024 * 1024); }
 }
-if (command[0] === "open") data = { url: command[1], title: "Example Domain", lifecycle: { noise: "must-not-reach-model" } };
+if (command[0] === "open") {
+  if (!argv.includes("--headed") && existsSync(root + "/open-fail-once")) { rmSync(root + "/open-fail-once"); process.exit(1); }
+  writeFileSync(root + "/url", command[1]);
+  data = { url: command[1], title: "Example Domain", lifecycle: { noise: "must-not-reach-model" } };
+}
 if (command[0] === "tab" && command[1] === "list") data = { tabs: [{ active: true, targetId: existsSync(root + "/tab-id") ? readFileSync(root + "/tab-id", "utf8") : "tab1", url: existsSync(root + "/url") ? readFileSync(root + "/url", "utf8") : "https://example.com/" }] };
 if (command[0] === "get" && command[1] === "title") data = { title: "Example Domain" };
 if (command[0] === "get" && command[1] === "url") data = { url: existsSync(root + "/url") ? readFileSync(root + "/url", "utf8") : "https://example.com/" };
+if (command[0] === "get" && command[1] === "url" && argv.includes("--headed") && existsSync(root + "/headed-url-fail")) process.exit(1);
 if (command[0] === "get" && command[1] === "text") data = { text: existsSync(root + "/page-text") ? readFileSync(root + "/page-text", "utf8") : "Submit" };
 if (command[0] === "snapshot") data = existsSync(root + "/snapshot") ? JSON.parse(readFileSync(root + "/snapshot", "utf8")) : { origin: "https://example.com/", title: "Example Domain", snapshot: "- link More information [ref=e1]", refs: { e1: { role: "link", name: "More information" } }, lifecycle: { noise: "must-not-reach-model" } };
 if (command[0] === "screenshot") { writeFileSync(command[1], Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=", "base64")); data = { path: command[1] }; }
@@ -349,14 +354,50 @@ describe("browser tools", () => {
       await f.call("browser_handoff", { reason: "Complete SSO" });
       const decision = f.ledger.pendingDecisions()[0]!;
       expect(decision.kind).toBe("question"); expect(decision.proposal?.browserHandoff).toEqual({ url: "https://example.com/", reason: "Complete SSO" });
+      expect(decision.title).toBe("브라우저에서 직접 처리해 주세요"); expect(decision.options).toEqual([]);
       expect(records(f.root).some((r) => r.argv.includes("--headed"))).toBe(true);
       expect((await f.call("browser_snapshot")).isError).toBe(true);
       await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "Done" });
+      writeFileSync(join(f.root, "url"), "https://example.com/owner-finished");
       const before = commands(f.root).filter((a) => a[0] === "close").length;
       await f.call("browser_snapshot"); expect(commands(f.root).filter((a) => a[0] === "close")).toHaveLength(before + 1);
+      const resumed = records(f.root).filter((record) => !record.argv.includes("--headed") && record.argv.at(-2) === "open").at(-1)!;
+      expect(resumed.argv.at(-1)).toBe("https://example.com/owner-finished");
       const after = commands(f.root).filter((a) => a[0] === "close").length;
       await f.call("browser_snapshot"); expect(commands(f.root).filter((a) => a[0] === "close")).toHaveLength(after);
       await f.call("browser_close");
+    } finally { await f.browser.shutdown(); }
+  });
+  test("a failed headed URL read resumes at about:blank and reports the fallback even when the pending action fails", async () => {
+    for (const pending of ["browser_snapshot", "browser_click"]) {
+      const f = fixture();
+      try {
+        await f.call("browser_handoff", { reason: "Finish SSO" });
+        const decision = f.ledger.pendingDecisions()[0]!;
+        await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "다 했어요" });
+        writeFileSync(join(f.root, "headed-url-fail"), "1");
+        if (pending === "browser_click") writeFileSync(join(f.root, "snapshot"), JSON.stringify({ snapshot: "blank page", refs: {} }));
+        const result = await f.call(pending, pending === "browser_click" ? { ref: "@e1" } : {});
+        expect(JSON.stringify(result)).toContain("the browser resumed at about:blank");
+        expect(result.isError === true).toBe(pending === "browser_click");
+        expect(commands(f.root).some((argv) => argv[0] === "open" && argv[1] === "about:blank")).toBe(true);
+        expect(JSON.stringify(await f.call("browser_snapshot"))).not.toContain("the browser resumed at about:blank");
+      } finally { await f.browser.shutdown(); }
+    }
+  });
+  test("a failed headless reopen retains the owner's captured URL for an explicit retry", async () => {
+    const f = fixture();
+    try {
+      await f.call("browser_handoff", { reason: "Finish identity check" });
+      const decision = f.ledger.pendingDecisions()[0]!;
+      await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "다 했어요" });
+      const completed = "https://example.com/completed";
+      writeFileSync(join(f.root, "url"), completed);
+      writeFileSync(join(f.root, "open-fail-once"), "1");
+      expect((await f.call("browser_snapshot")).isError).toBe(true);
+      writeFileSync(join(f.root, "url"), "about:blank");
+      expect((await f.call("browser_snapshot")).isError).toBeFalsy();
+      expect(commands(f.root).filter((argv) => argv[0] === "open").at(-1)).toEqual(["open", completed]);
     } finally { await f.browser.shutdown(); }
   });
   test("uploads/downloads are work-only and reject traversal, symlinks and overwrites", async () => {

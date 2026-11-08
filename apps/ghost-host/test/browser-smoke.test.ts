@@ -96,3 +96,23 @@ import { tempDir } from "./support.ts";
     console.log("Screenshot privacy lifecycle passed; root:", root);
   } finally { await browser.shutdown(); }
 }, 180_000);
+
+(process.env.GHOST_BROWSER_SMOKE === "1" ? test : test.skip)("real Chrome: the owner's final headed page and login state resume headlessly", async () => {
+  const root = tempDir();
+  const browser = new AgentBrowser({ executable: join(homedir(), ".local/bin/agent-browser") }, root);
+  const session = { ghostId: "handoff", conversationId: "handoff" };
+  const completed = "https://example.com/?owner-finished=1";
+  try {
+    expect((await browser.run(session, ["open", "https://example.com/"])).ok).toBe(true);
+    await browser.handoff(session, "https://example.com/");
+    expect((await browser.run(session, ["open", completed])).ok).toBe(true);
+    expect((await browser.run(session, ["eval", 'localStorage.setItem("ghost_handoff_probe", "retained"); "stored"'])).ok).toBe(true);
+    expect(await browser.endHandoff(session)).toEqual({ fallback: false });
+    const resumed = await browser.run(session, ["get", "url"]);
+    expect(resumed.data).toMatchObject({ url: completed });
+    expect((await browser.run(session, ["eval", 'localStorage.getItem("ghost_handoff_probe")'])).data).toMatchObject({ result: "retained" });
+    const snapshot = await browser.run(session, ["snapshot", "-i"]);
+    expect(snapshot.ok).toBe(true);
+    console.log("Headed-to-headless handoff retained page:", completed, "and login state; root:", root);
+  } finally { await browser.shutdown(); }
+}, 180_000);

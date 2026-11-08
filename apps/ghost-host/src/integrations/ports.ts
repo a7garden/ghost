@@ -202,6 +202,11 @@ export interface BrowserCommandResult {
   error: string | null;
 }
 
+export interface BrowserHandoffEnd {
+  /** The headed page URL could not be recovered; the headless session resumed at about:blank. */
+  fallback: boolean;
+}
+
 export interface BrowserRunOptions {
   stdin?: string;
   timeoutMs?: number;
@@ -220,8 +225,8 @@ export interface BrowserPort {
   run(session: BrowserSessionRef, argv: string[], options?: BrowserRunOptions): Promise<BrowserCommandResult>;
   /** Reopen the session in a visible window (same Ghost login state) at `url` so the owner can act. */
   handoff(session: BrowserSessionRef, url: string | null): Promise<void>;
-  /** End the visible window after the owner is done; the next command starts headless with the saved state. */
-  endHandoff(session: BrowserSessionRef): Promise<void>;
+  /** Save the headed state and reopen headless at the owner's final page before the next command. */
+  endHandoff(session: BrowserSessionRef): Promise<BrowserHandoffEnd>;
   /** Close the conversation's session; the Ghost's login state is saved. */
   close(session: BrowserSessionRef): Promise<void>;
   /** Stop every session and the egress proxy (host shutdown). */
