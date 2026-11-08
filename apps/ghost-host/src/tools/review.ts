@@ -68,13 +68,20 @@ export function createReviewTools(core: Core): Extension {
     parameters: Type.Object({
       outcome: Type.Union([Type.Literal("pass"), Type.Literal("revise"), Type.Literal("fail")]),
       reasons: Type.String({ minLength: 1, maxLength: 8192, description: "What the evidence shows; for revise, what to fix" }),
+      evidence: Type.Optional(Type.String({ maxLength: 8192, description: "Observed facts: file/line, failing check, expected vs actual" })),
+      scope: Type.Optional(Type.String({ maxLength: 2048, description: "What a revision may change and what must stay untouched" })),
     }),
     replay: "unsafe",
     async execute(args, api) {
       try {
         const scope = requireReview(scopeOf(core, api));
         if (scope.work.state !== "verifying") throw conflict(`the Work is ${scope.work.state}; it is not awaiting a verdict`);
-        const next = core.works.applyVerdict(scope.work.id, { outcome: args.outcome, source: "review", reasons: args.reasons, at: Date.now() });
+        const next = core.works.applyVerdict(scope.work.id, {
+          outcome: args.outcome, source: "review", reasons: args.reasons,
+          ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
+          ...(args.scope === undefined ? {} : { scope: args.scope }),
+          at: Date.now(),
+        });
         return {
           content: [{ type: "text", text: `Verdict recorded: the Work "${next.title}" is ${next.state}.` }],
           control: { terminate: true },

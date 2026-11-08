@@ -228,4 +228,21 @@ export const MIGRATIONS: readonly string[] = [
   /* 5: reserve API identities before asynchronous effects; old receipts are complete */ `
   ALTER TABLE requests ADD COLUMN state TEXT NOT NULL DEFAULT 'done' CHECK (state IN ('pending', 'done'));
   `,
+  /* 6: parent-first questions and bounded internal revision lessons */ `
+  ALTER TABLE works ADD COLUMN revise_history TEXT NOT NULL DEFAULT '[]';
+  CREATE TABLE work_questions (
+    id TEXT PRIMARY KEY,
+    work_id TEXT NOT NULL REFERENCES works(id),
+    parent_work_id TEXT NOT NULL REFERENCES works(id),
+    question TEXT NOT NULL,
+    answer TEXT,
+    state TEXT NOT NULL CHECK (state IN ('pending','answered','cancelled')),
+    created_at INTEGER NOT NULL,
+    answered_at INTEGER,
+    submitted_at INTEGER,
+    answer_submitted_at INTEGER
+  );
+  CREATE INDEX work_questions_by_work ON work_questions(work_id, state);
+  CREATE INDEX work_questions_by_parent ON work_questions(parent_work_id, state);
+  `,
 ];
