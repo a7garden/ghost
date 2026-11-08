@@ -6,6 +6,9 @@
   searchable roster; role, model and capabilities precede separate operating controls.
 - Model fallbacks form a connected route with provider names, search, reorder/remove
   actions and duplicate-choice prevention. Failed edits preserve the saved order.
+- Models: standard providers expose refreshed models.dev catalogs automatically; ChatGPT
+  subscriptions discover account models from Codex. Cached metadata keeps offline selection
+  working, and manual model entries stay editable without saving the automatic catalog.
 - Files open on a broad reading sheet instead of inside a small generic dialog. Markdown
   has 읽기/원문 views, document typography and local footnote navigation; source files have
   line numbers and optional wrapping. Copy and save preserve the original content.

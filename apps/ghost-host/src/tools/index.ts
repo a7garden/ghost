@@ -175,7 +175,7 @@ function delegationRoster(core: Core, ghost: Ghost, installed: { web: boolean; h
     const model = peer.model ?? settings.defaultModel;
     const provider = model ? settings.providers.find((item) => item.id === model.provider) : undefined;
     const acceptsImages =
-      model && provider ? modelInputOf(provider, model.model, core.secrets.credential(provider.id)).includes("image") : false;
+      model && provider ? modelInputOf(provider, model.model, core.secrets.credential(provider.id), core.catalog).includes("image") : false;
     const tags = [
       model ? `${model.provider}/${model.model}` : "",
       acceptsImages ? "image" : "",

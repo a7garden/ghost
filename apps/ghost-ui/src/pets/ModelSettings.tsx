@@ -69,7 +69,7 @@ export function ModelSettings() {
             : <Badge variant="warning"><ShieldOff aria-hidden="true"/>인증 정보 없음</Badge>}
         </span>}
         description={<>
-          {provider.models.length ? `${provider.models.slice(0, 2).map(model => model.name || model.id).join(', ')}${provider.models.length > 2 ? ` 외 ${provider.models.length - 2}개` : ''}` : '선택한 모델 없음'}
+          {provider.models.length ? `${provider.models.slice(0, 2).map(model => model.name || model.id).join(', ')}${provider.models.length > 2 ? ` 외 ${provider.models.length - 2}개` : ''}` : '등록된 모델 없음'}
           {provider.baseUrl && <span className="mt-0.5 block">{provider.baseUrl}</span>}
         </>}>
         <span className="flex flex-wrap items-center gap-1">

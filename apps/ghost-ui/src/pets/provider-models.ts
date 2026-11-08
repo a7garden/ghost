@@ -1,16 +1,14 @@
 import type { ModelInfo } from '@ghost/contract';
 
-/**
- * Rows for the model selector: saved selections first with their stored metadata intact
- * (the catalog never overwrites it), then catalog entries the user has not chosen yet.
- */
+/** Stored entries keep their position; current catalog metadata wins for known IDs. */
 export function mergeModels(selected: ModelInfo[], catalog: ModelInfo[]): ModelInfo[] {
   const seen = new Set<string>();
+  const latest = new Map(catalog.map(model => [model.id, model]));
   const merged: ModelInfo[] = [];
   for (const model of [...selected, ...catalog]) {
     if (seen.has(model.id)) continue;
     seen.add(model.id);
-    merged.push(model);
+    merged.push(latest.get(model.id) ?? model);
   }
   return merged;
 }

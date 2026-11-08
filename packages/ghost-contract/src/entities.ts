@@ -410,7 +410,14 @@ export const ModelInfo = Type.Object({
   id: Type.String({ minLength: 1, maxLength: 256 }),
   name: Type.String({ maxLength: 256 }),
   contextWindow: Type.Optional(Type.Integer({ minimum: 1 })),
+  maxTokens: Type.Optional(Type.Integer({ minimum: 1 })),
+  input: Type.Optional(Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]), { minItems: 1, maxItems: 2, uniqueItems: true })),
   reasoning: Type.Optional(Type.Boolean()),
+  reasoningEfforts: Type.Optional(Type.Array(Type.Union([
+    Type.Literal("none"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"),
+    Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max"),
+  ]), { minItems: 1, maxItems: 7, uniqueItems: true })),
+  reasoningToggle: Type.Optional(Type.Boolean()),
 });
 export type ModelInfo = Static<typeof ModelInfo>;
 
@@ -434,6 +441,12 @@ export const Provider = Type.Object({
   name: Type.String({ minLength: 1, maxLength: 128 }),
   baseUrl: nullable(Type.String({ maxLength: 2048 })),
   models: Type.Array(ModelInfo, { maxItems: 256 }),
+  /** Stored model entries, distinct from the effective catalog in `models`; settings projection only. */
+  configuredModels: Type.Optional(Type.Array(ModelInfo, { maxItems: 256 })),
+  /** Stored IDs outside the automatic catalog; settings projection only. */
+  manualModelIds: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 256 })),
+  /** Whether this endpoint automatically includes its compatible catalog; settings projection only. */
+  automaticModels: Type.Optional(Type.Boolean()),
   /** Credential kind while a valid credential exists; emitted by the host's settingsView, never stored in the ledger. */
   authType: Type.Optional(AuthType),
   hasCredential: Type.Boolean(),
@@ -448,9 +461,9 @@ export const Settings = Type.Object({
 export type Settings = Static<typeof Settings>;
 
 /**
- * A named provider the host offers for setup. `models` and `oauthModels` are
- * the bundled SDK's static chat catalogs — never account-verified — and the
- * recommendation ids only ever point into those catalogs. The custom
+ * A named provider the host offers for setup. Models combine the refreshed
+ * external catalog with the bundled SDK fallback, not account verification.
+ * OAuth models remain separate from the API-key catalog. The custom
  * OpenAI-compatible preset carries empty catalogs and null urls.
  */
 export const ProviderPreset = Type.Object({

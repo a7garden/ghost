@@ -109,7 +109,7 @@ export type PairingClaim = Static<typeof PairingClaim>;
 export const PairingResult = Type.Object({ deviceId: Id, token: Type.String() });
 export type PairingResult = Static<typeof PairingResult>;
 
-/** GET /api/providers/catalog (owner only). Bundled provider presets with the installed SDK's static model catalogs; no credentials, no account verification. */
+/** GET /api/providers/catalog (owner only). Cached provider presets and model metadata; public API catalogs are not account-verified. */
 export const ProviderCatalog = Type.Array(ProviderPreset, { maxItems: 64 });
 export type ProviderCatalog = Static<typeof ProviderCatalog>;
 

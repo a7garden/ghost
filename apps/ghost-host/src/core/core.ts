@@ -8,6 +8,8 @@ import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import type { ArtifactStore, Engine, EngineEvents, SandboxControl, Secrets } from "./ports.ts";
 import { Schedules } from "./schedules.ts";
 import { isTerminal, Works } from "./works.ts";
+import { ProviderCatalog } from "../integrations/provider-catalog.ts";
+import { CodexCatalog } from "../integrations/codex-catalog.ts";
 
 export interface CoreDeps {
   ledger: Ledger;
@@ -15,6 +17,8 @@ export interface CoreDeps {
   /** Sandbox control; `stageInputs` copies a settled child's artifacts into its parent's workspace; `release` frees a settled Work's container. */
   sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release">>;
   secrets: Secrets;
+  catalog?: ProviderCatalog;
+  codexCachePath?: string;
   log?: (message: string, detail?: unknown) => void;
 }
 
@@ -28,6 +32,8 @@ export class Core implements EngineEvents {
   readonly artifacts: ArtifactStore;
   readonly sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release">>;
   readonly secrets: Secrets;
+  readonly catalog: ProviderCatalog;
+  readonly codexCatalog: CodexCatalog;
   readonly works: Works;
   readonly effects: Effects;
   readonly decisions: Decisions;
@@ -42,6 +48,13 @@ export class Core implements EngineEvents {
     this.artifacts = deps.artifacts;
     this.sandbox = deps.sandbox;
     this.secrets = deps.secrets;
+    this.catalog = deps.catalog ?? new ProviderCatalog();
+    this.codexCatalog = new CodexCatalog({
+      catalog: this.catalog,
+      secrets: this.secrets,
+      providers: () => this.ledger.settings().providers,
+      cachePath: deps.codexCachePath,
+    });
     this.log = deps.log ?? ((message, detail) => console.error(`[core] ${message}`, detail ?? ""));
     this.works = new Works(this);
     this.effects = new Effects(this);

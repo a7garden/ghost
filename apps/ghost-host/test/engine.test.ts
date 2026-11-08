@@ -9,7 +9,7 @@ import type { Live, Message, MessageRole } from "@ghost/contract";
 import { GHOST_TOOLS, parseInteractiveUi, readInteractiveUi } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
 import { Access } from "../src/core/access.ts";
-import { execute } from "../src/core/commands.ts";
+import { execute, settingsView } from "../src/core/commands.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import { CommandError } from "../src/core/errors.ts";
 import { createEngine } from "../src/engine/index.ts";
@@ -20,6 +20,7 @@ import type { Engine } from "../src/core/ports.ts";
 import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
 import type { ToolSet } from "../src/tools/types.ts";
 import { MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
+import { ProviderCatalog } from "../src/integrations/provider-catalog.ts";
 
 const echo = defineTool({
   name: "echo",
@@ -531,6 +532,88 @@ test("the engine is ready when the default provider has a credential", async () 
   const { engine } = await fixture();
   expect(engine.status()).toEqual({ ready: true, detail: "provider faux is ready" });
   await engine.close();
+});
+
+test("a catalog refresh makes a newly released model executable without rewriting saved models or replaying turns", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ghost-live-catalog-"));
+  const ledger = new Ledger(join(root, "ledger.db"));
+  const secrets = new MemorySecrets();
+  const catalog = new ProviderCatalog({
+    fetch: (async () => Response.json({
+      "zai-coding-plan": { id: "zai-coding-plan", models: {
+        "glm-future": {
+          id: "glm-future", name: "GLM Future", tool_call: true, reasoning: true,
+          modalities: { input: ["text", "image"], output: ["text"] },
+          limit: { context: 262_144, output: 16_384 },
+        },
+      } },
+    })),
+  });
+  const core = new RecordingCore({ ledger, artifacts: new MemoryArtifacts(), sandbox: noSandbox, secrets, catalog, log: () => {} });
+  ledger.tx(() => {
+    ledger.putProvider({ id: "zai", kind: "zai", name: "Z.AI", baseUrl: null, models: [{ id: "legacy-manual", name: "Legacy" }] });
+    ledger.putSetting("defaultModel", { provider: "zai", model: "legacy-manual" });
+  });
+  secrets.put("zai", "private-key");
+  const originalFetch = globalThis.fetch;
+  const requests: Record<string, unknown>[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url !== "https://api.z.ai/api/coding/paas/v4/chat/completions") return originalFetch(input, init);
+    const body = input instanceof Request ? await input.json() : JSON.parse(String(init?.body));
+    requests.push(body);
+    const frame = (delta: Record<string, unknown>, finish: string | null) => `data: ${JSON.stringify({
+      id: "catalog-response", object: "chat.completion.chunk", created: 1, model: body.model,
+      choices: [{ index: 0, delta, finish_reason: finish }],
+    })}\n\n`;
+    return new Response(frame({ role: "assistant", content: "catalog answer" }, null) + frame({}, "stop") + "data: [DONE]\n\n", {
+      headers: { "content-type": "text/event-stream" },
+    });
+  }) as typeof fetch;
+  let engine: Engine | undefined;
+  try {
+    engine = await createEngine({ core, storagePath: join(root, "pi.db"), tools, sandbox, log: () => {} });
+    core.attach(engine);
+    const ghost = core.createGhost({ name: "Catalog Ghost", persona: "" });
+    await core.idle();
+    const first = nextMessage(engine, ghost.directConversationId, "assistant");
+    await core.sendMessage(ghost.directConversationId, "first turn", "before-refresh");
+    await first;
+    const refreshed = Promise.withResolvers<void>();
+    catalog.start(() => {
+      ledger.tx(() => ledger.emit({ type: "settings", settings: settingsView(core) }));
+      refreshed.resolve();
+    });
+    await refreshed.promise;
+    expect(requests).toHaveLength(1);
+    expect(ledger.settings().providers[0]?.models).toEqual([{ id: "legacy-manual", name: "Legacy" }]);
+    const projected = settingsView(core).providers[0];
+    expect(projected?.models.find(model => model.id === "glm-future")).toMatchObject({
+      input: ["text", "image"], reasoning: true, contextWindow: 262_144, maxTokens: 16_384,
+    });
+    const executable = buildModels(ledger.settings(), secrets, catalog).getModel("zai", "glm-future");
+    expect(executable).toMatchObject({ input: ["text", "image"], reasoning: true, contextWindow: 262_144, maxTokens: 16_384 });
+    await execute(core, new Access(ledger, { kind: "owner" }), {
+      requestId: crypto.randomUUID(), command: { type: "settings.update", defaultModel: { provider: "zai", model: "glm-future", thinking: "high" } },
+    }, { publicOrigin: "http://localhost", documents: null });
+    await core.idle();
+    const image = await core.artifacts.put(Uint8Array.fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="), "pixel.png", "image/png");
+    const next = nextMessage(engine, ghost.directConversationId, "assistant");
+    await engine.submit(ghost.directConversationId, { text: "inspect", attachments: [image], origin: "owner", requestId: "after-refresh" });
+    await next;
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toMatchObject({ model: "glm-future", thinking: { type: "enabled" } });
+    expect(JSON.stringify(requests[1]?.messages)).toContain('"image_url"');
+  } finally {
+    await catalog.close();
+    await core.codexCatalog.close();
+    core.stop();
+    await core.idle();
+    await engine?.close();
+    globalThis.fetch = originalFetch;
+    ledger.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the model catalog follows the configured providers", async () => {

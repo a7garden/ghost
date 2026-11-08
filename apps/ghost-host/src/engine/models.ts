@@ -1,6 +1,6 @@
 import type { ModelInfo, Provider as ContractProvider, Settings } from "@ghost/contract";
-import type { Api, Credential, Model, MutableModels, OAuthAuth, Provider, ProviderStreams } from "@earendil-works/pi-ai";
-import { createModels, createProvider } from "@earendil-works/pi-ai/models";
+import type { Api, Credential, Model, MutableModels, OAuthAuth, Provider, ProviderStreams, ThinkingLevelMap } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, createModels, createProvider } from "@earendil-works/pi-ai/models";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
@@ -8,7 +8,7 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import type { Secrets } from "../core/ports.ts";
-import { modelInputFor } from "../integrations/provider-catalog.ts";
+import { modelInputFor, ProviderCatalog } from "../integrations/provider-catalog.ts";
 
 /** Which pi-ai API speaks each provider kind. */
 const API_BY_KIND = {
@@ -44,9 +44,10 @@ export function apiFor(provider: ContractProvider, credential: Credential | unde
   return provider.kind === "openai" && credential?.type === "oauth" ? "openai-codex-responses" : API_BY_KIND[provider.kind];
 }
 
-/** The static input capability of one configured model; the same API choice `createHostProvider` makes. */
-export function modelInputOf(provider: ContractProvider, modelId: string, credential: Credential | undefined): Model<Api>["input"] {
-  return modelInputFor(provider.kind, modelId, apiFor(provider, credential));
+/** Resolve the same live capabilities used by the execution registry. */
+export function modelInputOf(provider: ContractProvider, modelId: string, credential: Credential | undefined, catalog: ProviderCatalog): Model<Api>["input"] {
+  return catalog.modelsFor(provider, credential?.type).find((info) => info.id === modelId)?.input
+    ?? modelInputFor(provider.kind, modelId, apiFor(provider, credential));
 }
 
 function streamsFor(api: Api): ProviderStreams {
@@ -55,13 +56,41 @@ function streamsFor(api: Api): ProviderStreams {
       return openAIResponsesApi();
     case "openai-completions":
       return openAICompletionsApi();
-    case "anthropic-messages":
-      return anthropicMessagesApi();
+    case "anthropic-messages": {
+      const streams = anthropicMessagesApi();
+      return {
+        ...streams,
+        streamSimple(model, context, options) {
+          if (model.compat !== undefined && "forceAdaptiveThinking" in model.compat && model.compat.forceAdaptiveThinking === true && model.thinkingLevelMap !== undefined) {
+            // Durable keeps the owner's choice; resolve unsupported levels only at the wire boundary.
+            const level = clampThinkingLevel(model, options?.reasoning ?? "off");
+            return streams.streamSimple(model, context, { ...options, reasoning: level === "off" ? undefined : level });
+          }
+          return streams.streamSimple(model, context, options);
+        },
+      };
+    }
     case "google-generative-ai":
       return googleGenerativeAIApi();
     default:
       throw new Error(`no pi-ai API implementation for ${api}`);
   }
+}
+
+/** Anthropic-compatible reasoning controls come from declarations, never model names. */
+function anthropicThinking(info: ModelInfo): Pick<Model<"anthropic-messages">, "compat" | "thinkingLevelMap"> {
+  if (!info.reasoning || (info.reasoningEfforts === undefined && info.reasoningToggle !== true)) return {};
+  const thinkingLevelMap: ThinkingLevelMap = {
+    off: info.reasoningToggle === true ? "" : null,
+    minimal: null, low: null, medium: null, high: null, xhigh: null, max: null,
+  };
+  if (info.reasoningEfforts !== undefined) {
+    for (const effort of info.reasoningEfforts) thinkingLevelMap[effort === "none" ? "off" : effort] = effort;
+  } else {
+    // A toggle enables thinking but exposes no tunable output_config.effort.
+    for (const level of ["minimal", "low", "medium", "high", "xhigh", "max"] as const) thinkingLevelMap[level] = "";
+  }
+  return { compat: { forceAdaptiveThinking: true }, thinkingLevelMap };
 }
 
 function modelOf(provider: ContractProvider, info: ModelInfo, api: Api, baseUrl: string): Model<Api> {
@@ -71,11 +100,12 @@ function modelOf(provider: ContractProvider, info: ModelInfo, api: Api, baseUrl:
     api,
     provider: provider.id,
     baseUrl,
-    input: modelInputFor(provider.kind, info.id, api),
+    input: info.input ?? modelInputFor(provider.kind, info.id, api),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: info.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-    maxTokens: DEFAULT_MAX_TOKENS,
+    maxTokens: info.maxTokens ?? DEFAULT_MAX_TOKENS,
     reasoning: info.reasoning ?? false,
+    ...(api === "anthropic-messages" ? anthropicThinking(info) : {}),
   };
 }
 
@@ -86,7 +116,7 @@ function modelOf(provider: ContractProvider, info: ModelInfo, api: Api, baseUrl:
  * An OpenAI row carrying an OAuth credential speaks the Codex API against the
  * trusted ChatGPT backend, whatever base URL the row configures.
  */
-export function createHostProvider(provider: ContractProvider, credential: Credential | undefined): Provider | null {
+export function createHostProvider(provider: ContractProvider, credential: Credential | undefined, catalog: ProviderCatalog): Provider | null {
   const api: Api = apiFor(provider, credential);
   const codex = api === "openai-codex-responses";
   const baseUrl = codex ? CODEX_BASE_URL : (provider.baseUrl ?? BASE_URL_BY_KIND[provider.kind]);
@@ -107,23 +137,23 @@ export function createHostProvider(provider: ContractProvider, credential: Crede
                 : undefined,
           },
         },
-    models: provider.models.map((info) => modelOf(provider, info, api, baseUrl)),
+    models: catalog.modelsFor(provider, credential?.type).map((info) => modelOf(provider, info, api, baseUrl)),
     api: codex ? openAICodexResponsesApi() : streamsFor(api),
   });
 }
 
 /** The model catalog of every configured provider. */
-export function buildModels(settings: Settings, secrets: Secrets): MutableModels {
+export function buildModels(settings: Settings, secrets: Secrets, catalog = new ProviderCatalog()): MutableModels {
   const models = createModels({ credentials: secrets });
-  applyProviders(models, settings, secrets);
+  applyProviders(models, settings, secrets, catalog);
   return models;
 }
 
 /** Replace the catalog with the configured providers; a provider that is gone goes with it. */
-export function applyProviders(models: MutableModels, settings: Settings, secrets: Secrets): void {
+export function applyProviders(models: MutableModels, settings: Settings, secrets: Secrets, catalog = new ProviderCatalog()): void {
   models.clearProviders();
   for (const provider of settings.providers) {
-    const created = createHostProvider(provider, secrets.credential(provider.id));
+    const created = createHostProvider(provider, secrets.credential(provider.id), catalog);
     if (created) models.setProvider(created);
   }
 }

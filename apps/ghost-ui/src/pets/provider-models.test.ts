@@ -6,13 +6,9 @@ const catalog = [
   { id: 'glm-4.7', name: 'GLM-4.7', contextWindow: 128000 },
 ];
 
-it('keeps saved metadata for ids that also exist in the catalog', () => {
-  const selected = [{ id: 'glm-5.3', name: '내가 쓰는 GLM', contextWindow: 999 }];
-  expect(mergeModels(selected, catalog)).toEqual([
-    { id: 'glm-5.3', name: '내가 쓰는 GLM', contextWindow: 999 },
-    catalog[1],
-  ]);
-  // checking a catalog row that is already selected must not resurrect catalog metadata either
+it('refreshes catalog metadata without losing saved ordering or manual entries', () => {
+  const selected = [{ id: 'glm-5.3', name: '내가 쓰는 GLM', contextWindow: 999 }, { id: 'manual', name: 'Manual' }];
+  expect(mergeModels(selected, catalog)).toEqual([catalog[0], selected[1], catalog[1]]);
   expect(toggleModel(selected, catalog[0], true)).toBe(selected);
 });
 
@@ -29,5 +25,5 @@ it('matches slash ids exactly instead of splitting on /', () => {
   const selected = [{ id: 'org/mini', name: '' }, { id: 'mini', name: '' }];
   expect(toggleModel(selected, { id: 'org/mini', name: '' }, false)).toEqual([{ id: 'mini', name: '' }]);
   expect(toggleModel(selected, { id: 'org', name: '' }, true)).toEqual([...selected, { id: 'org', name: '' }]);
-  expect(mergeModels(selected, [{ id: 'org/mini', name: '카탈로그' }])).toEqual(selected);
+  expect(mergeModels(selected, [{ id: 'org/mini', name: '카탈로그' }])).toEqual([{ id: 'org/mini', name: '카탈로그' }, selected[1]]);
 });

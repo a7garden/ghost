@@ -210,7 +210,7 @@ class HostEngine implements Engine {
   private available(model: ModelRef, settings: Settings): boolean {
     const provider = settings.providers.find((item) => item.id === model.provider);
     return !!provider && this.core.secrets.has(provider.id) &&
-      (provider.models.length === 0 || provider.models.some((item) => item.id === model.model));
+      this.core.catalog.modelsFor(provider, this.core.secrets.credential(provider.id)?.type).some((item) => item.id === model.model);
   }
 
   // Submitting
@@ -225,7 +225,7 @@ class HostEngine implements Engine {
     if (!model) throw new CommandError("unavailable", "no model is configured for this conversation");
     const provider = settings.providers.find((item) => item.id === model.provider);
     if (!provider) throw new CommandError("unavailable", `provider ${model.provider} is not configured`);
-    if (provider.models.length > 0 && !provider.models.some((info) => info.id === model.model)) {
+    if (!this.core.catalog.modelsFor(provider, this.core.secrets.credential(provider.id)?.type).some((info) => info.id === model.model)) {
       throw new CommandError("unavailable", `provider ${provider.id} has no model ${model.model}`);
     }
     const state = await this.ensureState(conversationId);
@@ -352,7 +352,10 @@ class HostEngine implements Engine {
     if (!model) return { ready: false, detail: "no default model is configured" };
     const provider = settings.providers.find((item) => item.id === model.provider);
     if (!provider) return { ready: false, detail: `provider ${model.provider} is not configured` };
-    if (this.core.secrets.has(provider.id)) return { ready: true, detail: `provider ${provider.id} is ready` };
+    if (this.core.secrets.has(provider.id)) {
+      if (!this.available(model, settings)) return { ready: false, detail: `provider ${provider.id} has no model ${model.model}` };
+      return { ready: true, detail: `provider ${provider.id} is ready` };
+    }
     return { ready: false, detail: `provider ${provider.id} has no credential` };
   }
 
@@ -695,7 +698,8 @@ class HostEngine implements Engine {
 
   private rebuildModels(): void {
     if (!this.ownedModels) return;
-    applyProviders(this.ownedModels, this.core.ledger.settings(), this.core.secrets);
+    this.core.codexCatalog.sync();
+    applyProviders(this.ownedModels, this.core.ledger.settings(), this.core.secrets, this.core.catalog);
   }
 }
 
@@ -706,7 +710,8 @@ class HostEngine implements Engine {
 export async function createEngine(deps: EngineDeps): Promise<Engine> {
   const { core, sandbox, tools, log } = deps;
   mkdirSync(dirname(deps.storagePath), { recursive: true });
-  const ownedModels = deps.models === undefined ? buildModels(core.ledger.settings(), core.secrets) : null;
+  core.codexCatalog.sync();
+  const ownedModels = deps.models === undefined ? buildModels(core.ledger.settings(), core.secrets, core.catalog) : null;
   const models = deps.models ?? ownedModels;
   if (!models) throw new Error("the engine needs a model catalog");
   const registry = createRegistry();
