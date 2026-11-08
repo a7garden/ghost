@@ -114,6 +114,16 @@ Feature-level compositions:
   it into the reply (assistant) or bring it back into the composer (owner); a thread card
   opens its thread or Work page; a sidebar Ghost opens its conversation, 맡긴 일 or
   settings. Text fields keep the system menu.
+- **File sheet** (`ArtifactPreview`): one wide, quiet reading surface over the conversation,
+  without a second inset card or background blur. File identity and copy/save/close stay
+  above the scroll area; type/size stay below it. Markdown offers underline-style 읽기/원문
+  views, a 668px body measure and 15px/1.85 text; source uses a separate non-copyable gutter
+  and optional wrapping. The gutter disappears when wrapping or over 10,000 lines, never
+  truncating source. Remote Markdown images remain opt-in links and raw HTML stays literal.
+  SVG uses an image decoder; PDF uses the browser's native PDF view, never an HTML preview.
+  Other binary files offer save instead of an empty frame. Requests and blob URLs belong to
+  each opening; dismissing a pending request cannot update a later opening. Escape/outside
+  dismissal returns keyboard focus to the initiating file.
 
 Motion stays short and purposeful: pages rise in, list rows cascade once, the owner's
 message and a starting reply rise in (a finished reply replaces its live article without a

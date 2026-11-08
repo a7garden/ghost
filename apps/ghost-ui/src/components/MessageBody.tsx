@@ -101,7 +101,7 @@ function SafeLink({ children, href, node: _node, ...props }: ComponentPropsWitho
       try { id = decodeURIComponent(href.slice(1)); } catch { return; }
       const target = [...(body?.querySelectorAll<HTMLElement>('[id]') ?? [])].find(element => element.id === id);
       if (target) {
-        const viewport = target.closest<HTMLElement>('.ghost-conversation__transcript, #main-content');
+        const viewport = target.closest<HTMLElement>('[data-file-scroll], .ghost-conversation__transcript, #main-content');
         if (viewport) {
           const content = target.getBoundingClientRect();
           const frame = viewport.getBoundingClientRect();

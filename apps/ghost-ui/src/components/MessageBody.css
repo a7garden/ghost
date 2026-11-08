@@ -290,3 +290,15 @@
     outline-color: Highlight;
   }
 }
+
+/* A file is a reading surface, not a compact transcript reply. Keep these
+   beside the renderer's unlayered typography so the sheet can set its scale. */
+.file-sheet__document > .message-body { font-size: 15px; line-height: 1.85; word-break: keep-all; }
+.file-sheet__document .message-body > :first-child { margin-top: 0; }
+.file-sheet__document .message-body h1 { font-size: 30px; line-height: 1.35; letter-spacing: -.035em; margin-bottom: 24px; }
+.file-sheet__document .message-body h2 { font-size: 20px; margin-top: 40px; }
+.file-sheet__document .message-body h3 { font-size: 16px; margin-top: 28px; }
+.file-sheet__document .message-body :is(p, ul, ol, blockquote, .message-body__tablewrap, .message-body__code) { margin-top: 1em; }
+@media (max-width: 640px) {
+  .file-sheet__document .message-body h1 { font-size: 26px; }
+}

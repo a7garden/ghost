@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Files open on a broad reading sheet instead of inside a small generic dialog. Markdown
+  has 읽기/원문 views, document typography and local footnote navigation; source files have
+  line numbers and optional wrapping. Copy and save preserve the original content.
+  Images (including SVG), PDFs, empty files and unsupported binary files keep distinct
+  presentations; the sheet adapts to narrow screens and restores focus on dismissal.
 - Thread cards: a settled thread folds to one quiet line (its outcome line already returns
   beneath it); a card waiting on a question shows the question with answer chips in place.
 - Composer: `/` opens the composer's actions by keyboard (Korean words match), `@` hands the
