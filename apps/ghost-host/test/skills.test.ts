@@ -39,6 +39,7 @@ function configOf(skills: Config["skills"]): Config {
     apns: null,
     skills,
     reach: null,
+    browser: null,
   };
 }
 

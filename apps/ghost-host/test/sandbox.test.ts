@@ -36,6 +36,7 @@ function localConfig(root: string): Config {
     apns: null,
     skills: null,
     reach: null,
+    browser: null,
   };
 }
 

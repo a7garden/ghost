@@ -152,6 +152,7 @@ function engineFixture(token = "test-token"): EngineFixture {
     apns: null,
     skills: null,
     reach: null,
+    browser: null,
   };
   return {
     config,
