@@ -10,6 +10,7 @@ import { MessageMenu } from './MessageMenu';
 import { describeWake, parseOutcome } from './wake';
 import { InteractivePresentation } from './interactive/InteractivePresentation';
 import type { UiSubmit } from './interactive/UiInputBlock';
+import { ProjectChips } from './composer/ProjectMentions';
 
 function Attachments({ message }: { message: Message }) {
   if (message.attachments.length === 0) return null;
@@ -125,6 +126,7 @@ export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReu
     return <MessageMenu text={message.text} onReuse={onReuse}>
       <ConversationMessage role="user" label={speaker(message)} data-rail="owner" data-rail-label={message.text.replace(/\s+/g, ' ').trim().slice(0, 80)}>
         <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</div>
+        <ProjectChips spaces={message.spaces ?? []}/>
         <Attachments message={message}/>
       </ConversationMessage>
     </MessageMenu>;

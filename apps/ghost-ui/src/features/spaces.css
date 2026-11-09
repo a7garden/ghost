@@ -1,4 +1,4 @@
-/* 프로젝트: list rows, place header, Ghost access row, document index,
+/* 프로젝트: list rows, place header, document index,
    creation canvas and the hold-to-delete strip. Component-layer rules;
    Tailwind utilities passed via className win over these. */
 @layer components {
@@ -18,9 +18,6 @@
 .project-row__copy { display: grid; min-width: 0; flex: 1; gap: 1px; }
 .project-row__name { overflow: hidden; font-size: var(--text-ui); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .project-row__path { overflow: hidden; color: var(--ghost-ink3); font: 500 var(--text-micro)/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.project-row__stack { display: flex; flex: none; align-items: center; }
-.project-row__stack > * + * { margin-left: -6px; }
-.project-row__stack .dot-avatar { border-radius: 50%; box-shadow: 0 0 0 2px var(--ghost-surface); }
 .project-row__go { flex: none; width: 15px; height: 15px; color: var(--ghost-ink4); }
 
 /* Place header ------------------------------------------------------------ */
@@ -42,24 +39,6 @@
 .place__crumb-gap { flex: none; margin: 0 6px; color: var(--ghost-ink4); }
 .place__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .place__meta > * + *::before { content: '·'; margin-right: 10px; color: var(--ghost-ink4); }
-
-/* Ghost access row --------------------------------------------------------- */
-.access { display: flex; flex-wrap: wrap; gap: 14px 26px; }
-.access__ghost { display: flex; min-width: 0; align-items: center; gap: 10px; }
-.access__id { display: grid; flex: none; justify-items: center; gap: 4px; }
-.access__portrait { position: relative; display: grid; place-items: center; border-radius: 50%; transition: opacity var(--duration-base) var(--ease-enter), filter var(--duration-base) var(--ease-enter); }
-.access__portrait .dot-avatar { border-radius: 50%; }
-.access__ghost[data-level="none"] .access__portrait { opacity: .38; filter: saturate(.25); }
-.access__name { max-width: 104px; overflow: hidden; color: var(--ghost-ink2); font-size: var(--text-micro); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.access__modes { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); padding: 2px; border-radius: var(--radius-pill); background: var(--ghost-hover); }
-.access__thumb { position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / 3); border-radius: var(--radius-pill); background: var(--ghost-surface); box-shadow: var(--shadow-btn); transform: translateX(calc(var(--at, 0) * 100%)); transition: transform var(--duration-base) var(--ease-spring); }
-.access__modes[data-at="0"] { --at: 0; }
-.access__modes[data-at="1"] { --at: 1; }
-.access__modes[data-at="2"] { --at: 2; }
-.access__mode { position: relative; z-index: 1; height: 24px; padding: 0 9px; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink3); background: none; font: 600 var(--text-micro)/1 var(--font-sans); white-space: nowrap; cursor: pointer; transition: color var(--duration-fast) ease; }
-.access__mode:hover:not([aria-disabled]) { color: var(--ghost-ink); }
-.access__mode[aria-checked="true"] { color: var(--ghost-ink); }
-.access__mode[aria-disabled] { cursor: default; }
 
 /* Document index ------------------------------------------------------------ */
 .doc { display: grid; gap: 10px; }
@@ -121,11 +100,10 @@
 .hold-btn__fill { position: absolute; inset: 0; background: var(--ghost-danger-ink); transform-origin: left; transform: scaleX(var(--hold-progress, 0)); }
 .hold-btn__label { position: relative; }
 
-/* Below 34rem the place header and access tiles stack ----------------------------- */
+/* Below 34rem the place header stacks --------------------------------------- */
 @media (max-width: 34rem) {
   .place__title { flex-wrap: wrap; }
   .place__crumb { order: 3; max-width: 100%; }
-  .access__ghost { flex: 1 1 240px; justify-content: space-between; }
 }
 
 }

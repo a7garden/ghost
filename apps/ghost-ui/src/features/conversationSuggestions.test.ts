@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { conversationSuggestions } from './conversationSuggestions';
+import { conversationSuggestions, projectMentionQuery } from './conversationSuggestions';
 
 it('uses the role introduction for planning and editing examples', () => {
   expect(conversationSuggestions('계획과 작은 할 일을 놓치지 않게 챙기는 파트너').join(' ')).toContain('맡긴 일의 진행 상황');
@@ -22,4 +22,13 @@ it('supports English role names without classifying unrelated word fragments', (
   expect(conversationSuggestions('A software engineer').join(' ')).toContain('오류 메시지');
   expect(conversationSuggestions('주간 계획과 플래너를 관리합니다').join(' ')).toContain('맡긴 일의 진행 상황');
   expect(conversationSuggestions('An editorial historian')).toEqual(conversationSuggestions(''));
+});
+
+it('finds project mentions at the caret anywhere in a draft', () => {
+  expect(projectMentionQuery('#')).toEqual({ start: 0, end: 1, query: '' });
+  expect(projectMentionQuery('먼저 #비행')).toEqual({ start: 3, end: 6, query: '비행' });
+  expect(projectMentionQuery('먼저 #비행 뒤에', 6)).toEqual({ start: 3, end: 6, query: '비행' });
+  expect(projectMentionQuery('hello#project')).toBeNull();
+  expect(projectMentionQuery('#project ')).toBeNull();
+  expect(projectMentionQuery('https://example.com/#anchor')).toBeNull();
 });

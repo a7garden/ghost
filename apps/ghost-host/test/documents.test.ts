@@ -40,12 +40,12 @@ function vault() {
   return path;
 }
 
-function setup(mode: "read" | "propose" = "propose") {
+function setup() {
   const path = vault();
   const { ledger, core, engine } = harness();
   const ghost = core.createGhost({ name: "Tester", persona: "A tester." });
   ledger.tx(() =>
-    ledger.putSpace({ id: "space-1", name: "Garden", path, grants: [{ ghostId: ghost.id, mode }], createdAt: Date.now() }),
+    ledger.putSpace({ id: "space-1", name: "Garden", path, createdAt: Date.now() }),
   );
   const documents = createDocuments(core);
   return { path, ledger, core, engine, documents, ghost };
@@ -72,10 +72,10 @@ function documentDecision(ghostId: string, conversationId: string, proposal: Rec
 
 describe("documents", () => {
   test("lists and reads a markdown page", async () => {
-    const { documents, ghost } = setup();
-
-    expect(documents.spacesFor(ghost.id).map((entry) => [entry.space.id, entry.mode])).toEqual([["space-1", "propose"]]);
-    expect(documents.spacesFor("another-ghost")).toEqual([]);
+    const { documents, ghost, core } = setup();
+    const another = core.createGhost({ name: "Another", persona: "" });
+    expect(documents.spacesFor(ghost.id).map(space => space.id)).toEqual(["space-1"]);
+    expect(documents.spacesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
 
     const pages = await documents.listPages("space-1", null);
 
@@ -333,20 +333,16 @@ describe("documents", () => {
     expect(readFileSync(join(path, "note.md"), "utf8")).toContain("An outside editor changed this file.");
   });
 
-  test("a Ghost with a read grant cannot write", async () => {
-    const { documents, ghost } = setup("read");
-
-    await expect(
-      documents.apply(
-        documentDecision(ghost.id, ghost.directConversationId, {
-          spaceId: "space-1",
-          title: "Watering plan",
-          body: "Water the tomatoes.",
-          profile: "pdc-markdown/1",
-          pageId: null,
-          expectedHash: null,
-        }),
-      ),
-    ).rejects.toThrow(/may only read/);
+  test("every Ghost can apply an owner-approved proposal but pending proposals cannot write", async () => {
+    const { documents, core, path } = setup();
+    const ghost = core.createGhost({ name: "New Ghost", persona: "" });
+    const decision = documentDecision(ghost.id, ghost.directConversationId, {
+      spaceId: "space-1", title: "Watering plan", body: "Water the tomatoes.",
+      profile: "pdc-markdown/1", pageId: null, expectedHash: null,
+    });
+    const before = readdirSync(path);
+    await expect(documents.apply({ ...decision, state: "pending" })).rejects.toThrow(/only an approved/);
+    expect(readdirSync(path)).toEqual(before);
+    await expect(documents.apply(decision)).resolves.toContain("Watering plan");
   });
 });

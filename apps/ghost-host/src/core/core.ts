@@ -12,6 +12,7 @@ import { ProviderCatalog } from "../integrations/provider-catalog.ts";
 import { CodexCatalog } from "../integrations/codex-catalog.ts";
 import { Activities } from "./activities.ts";
 import type { ActivitySourcePort } from "../integrations/activity-sources.ts";
+import { projectContext } from "@ghost/contract";
 
 export interface CoreDeps {
   ledger: Ledger;
@@ -253,14 +254,15 @@ export class Core implements EngineEvents {
   }
 
   /** Submit an owner message; rejects when the engine refuses it (no model, no credential). */
-  sendMessage(conversationId: string, text: string, requestId: string, attachments: ArtifactRef[] = []): Promise<void> {
+  sendMessage(conversationId: string, text: string, requestId: string, attachments: ArtifactRef[] = [], spaceIds: string[] = []): Promise<void> {
     const conversation = this.ledger.conversation(conversationId);
     if (conversation.kind !== "direct") throw invalid("owner messages go to direct conversations; edit a Work to steer it");
     const ghost = this.ledger.ghost(conversation.ghostId);
     if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
-    return this.run(`conversation:${conversationId}`, () =>
-      this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments }),
-    );
+    return this.run(`conversation:${conversationId}`, () => {
+      const spaces = spaceIds.map(id => { const { name } = this.ledger.space(id); return { id, name }; });
+      return this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments, spaces, context: projectContext(spaces) });
+    });
   }
 
   // Notifications

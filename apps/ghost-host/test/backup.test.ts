@@ -25,7 +25,7 @@ describe("ghost backup", () => {
     const ledger = new Ledger(join(root, "ledger.db"));
     const pi = new Database(join(root, "pi.db"));
     try {
-      ledger.tx(() => ledger.putSpace({ id: "s1", name: "Notes", path: "/Users/someone/Notes", grants: [], createdAt: 1 }));
+      ledger.tx(() => ledger.putSpace({ id: "s1", name: "Notes", path: "/Users/someone/Notes", createdAt: 1 }));
       pi.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('kept')");
       const dir = join(tempDir(), "snapshot");
       const manifest = backup(root, dir, 42);
@@ -69,7 +69,7 @@ describe("ghost backup", () => {
     const root = tempDir();
     const app = await openApp(loadConfig({}, root));
     try {
-      app.ledger.tx(() => app.ledger.putSpace({ id: "s1", name: "Notes", path: "/Users/someone/Notes", grants: [], createdAt: 1 }));
+      app.ledger.tx(() => app.ledger.putSpace({ id: "s1", name: "Notes", path: "/Users/someone/Notes", createdAt: 1 }));
       const dir = join(tempDir(), "snapshot");
       const manifest = backup(root, dir);
       expect(manifest.complete).toBe(true);

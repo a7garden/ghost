@@ -380,7 +380,7 @@ describe("API server", () => {
     }).result.ghostId;
     await pairDevice("Other Phone");
     ledger.tx(() => {
-      ledger.putSpace({ id: "owner-vault", name: "Vault", path: root, grants: [], createdAt: Date.now() });
+      ledger.putSpace({ id: "owner-vault", name: "Vault", path: root, createdAt: Date.now() });
       ledger.putSchedule({
         id: "owner-schedule", ghostId: betaId, conversationId: ledger.ghost(betaId).directConversationId,
         prompt: "Later", spec: { kind: "at", at: Date.now() + 60_000 }, nextAt: Date.now() + 60_000,

@@ -171,7 +171,7 @@ export const MIGRATIONS: readonly string[] = [
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     path TEXT NOT NULL UNIQUE,
-    grants TEXT NOT NULL,
+    grants TEXT NOT NULL, -- Unused since 2026-11-09; kept so the previous release stays readable.
     created_at INTEGER NOT NULL
   );
 

@@ -13,7 +13,6 @@ import {
   ModelRef,
   ProviderKind,
   ScheduleSpec,
-  SpaceGrant,
   Timestamp,
   GhostState,
   DeviceAlerts,
@@ -33,6 +32,7 @@ export const Command = Type.Union([
     conversationId: Id,
     text: Text(32768),
     attachments: Type.Optional(Type.Array(ArtifactRef, { maxItems: 16 })),
+    spaceIds: Type.Optional(Type.Array(Id, { maxItems: 8, uniqueItems: true })),
   }),
   command("message.cancel", { conversationId: Id }),
   command("conversation.create", { ghostId: Id, title: Type.Optional(Text(256)) }),
@@ -47,6 +47,7 @@ export const Command = Type.Union([
     ghostId: Id,
     title: Text(256),
     brief: Text(32768),
+    spaceIds: Type.Optional(Type.Array(Id, { maxItems: 8, uniqueItems: true })),
     acceptance: Type.Optional(Acceptance),
     deadlineAt: Type.Optional(nullable(Timestamp)),
     execution: Type.Optional(ExecutionTarget),
@@ -131,8 +132,8 @@ export const Command = Type.Union([
   command("activity.stop_all", { ghostId: Type.Optional(Id) }),
 
   // Documents
-  command("space.create", { name: Text(128), path: Text(4096), grants: Type.Optional(Type.Array(SpaceGrant, { maxItems: 64 })) }),
-  command("space.update", { spaceId: Id, name: Type.Optional(Text(128)), grants: Type.Optional(Type.Array(SpaceGrant, { maxItems: 64 })) }),
+  command("space.create", { name: Text(128), path: Text(4096) }),
+  command("space.update", { spaceId: Id, name: Type.Optional(Text(128)) }),
   command("space.delete", { spaceId: Id }),
   /** Owner writes a page: new when `pageId` is null, otherwise an edit guarded by `expectedHash`. */
   command("document.save", {

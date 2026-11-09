@@ -121,7 +121,6 @@ async function expectLegacyWriteRefused(dir: string, caseId: string, input: stri
       id: spaceId,
       name: caseId,
       path,
-      grants: [{ ghostId: "ghost-corpus", mode: "propose" }],
       createdAt: Date.now(),
     }),
   );

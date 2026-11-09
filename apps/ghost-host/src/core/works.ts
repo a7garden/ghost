@@ -1,4 +1,4 @@
-import { Acceptance, TERMINAL_WORK_STATES, validate, type ExecutionTarget, type GhostTool, type Verdict, type Work, type WorkResult } from "@ghost/contract";
+import { Acceptance, TERMINAL_WORK_STATES, validate, splitProjectBrief, type ExecutionTarget, type GhostTool, type Verdict, type Work, type WorkResult } from "@ghost/contract";
 import type { WorkQuestion } from "../ledger/ledger.ts";
 import type { Core } from "./core.ts";
 import { CommandError, conflict, invalid } from "./errors.ts";
@@ -153,7 +153,9 @@ export class Works {
   update(workId: string, change: Partial<Pick<Work, "title" | "brief" | "acceptance" | "deadlineAt">>): Work {
     const work = this.ledger.work(workId);
     if (isTerminal(work)) throw conflict(`Work is ${work.state}`);
-    const next: Work = { ...work, ...stripUndefined(change), revision: work.revision + 1, updatedAt: Date.now() };
+    const context = splitProjectBrief(work.brief).context;
+    const brief = change.brief !== undefined && context && !change.brief.startsWith(context) ? context + change.brief : change.brief ?? work.brief;
+    const next: Work = { ...work, ...stripUndefined(change), brief, revision: work.revision + 1, updatedAt: Date.now() };
     this.ledger.tx(() => this.ledger.putWork(next));
     if (next.conversationId && (next.brief !== work.brief || digestOf(next.acceptance) !== digestOf(work.acceptance))) {
       const conversationId = next.conversationId;

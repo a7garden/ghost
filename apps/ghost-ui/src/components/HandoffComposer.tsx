@@ -9,6 +9,7 @@ import { useHost } from '../host/context';
 import { ComposerPlus } from './composer/ComposerPlus';
 import { AttachmentTray, useAttachments } from './composer/attachments';
 import { blurTouchSearchOnEnter } from '../ui/adaptive';
+import { useProjectMentions } from './composer/ProjectMentions';
 
 type Mode = 'talk' | 'work';
 
@@ -17,13 +18,13 @@ type Mode = 'talk' | 'work';
  * Assigning unfolds the brief's completion criteria and deadline in place, so a request
  * becomes a 맡긴 일 without a separate form. Nothing is assigned unless the owner chose it.
  */
-export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigate(path: string): void }) {
+export function HandoffComposer({ ghosts, navigate, initialSpaceIds = [], initialMode = 'talk' }: { ghosts: Ghost[]; navigate(path: string): void; initialSpaceIds?: string[]; initialMode?: Mode }) {
   const { client } = useHost();
   const roster = visibleGhosts(ghosts);
   const [text, setText] = useState('');
   const [criteria, setCriteria] = useState('');
   const [deadline, setDeadline] = useState('');
-  const [mode, setMode] = useState<Mode>('talk');
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [ghostId, setGhostId] = useState<string>();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -31,6 +32,7 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments();
   const target = roster.find(ghost => ghost.id === ghostId) ?? roster[0];
+  const projects = useProjectMentions(text, setText, inputRef, initialSpaceIds, sending);
 
   const send = async (value: string) => {
     if (!target || sending) return;
@@ -40,17 +42,18 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
       if (mode === 'work') {
         const title = value.split(/\n/, 1)[0].slice(0, 256);
         const created = await client.send<{ workId: string }>({
-          type: 'work.create', ghostId: target.id, title, brief: value,
+          type: 'work.create', ghostId: target.id, title, brief: value, spaceIds: projects.spaceIds,
           ...(criteria.trim() ? { acceptance: { criteria: criteria.trim(), checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}),
         });
         navigate(`/work/${encodeURIComponent(created.workId)}`);
       } else {
-        await client.send({ type: 'message.send', conversationId: target.directConversationId, text: value, ...(attachments.refs.length ? { attachments: attachments.refs } : {}) });
+        await client.send({ type: 'message.send', conversationId: target.directConversationId, text: value, spaceIds: projects.spaceIds, ...(attachments.refs.length ? { attachments: attachments.refs } : {}) });
         attachments.clear();
         navigate(`/ghosts/${encodeURIComponent(target.id)}`);
       }
       setText(''); setCriteria(''); setDeadline('');
+      projects.clear();
     } catch (e) { setError(e instanceof Error ? e.message : '보내지 못했습니다.'); }
     finally { setSending(false); }
   };
@@ -59,9 +62,10 @@ export function HandoffComposer({ ghosts, navigate }: { ghosts: Ghost[]; navigat
   const assigning = mode === 'work';
   return <div className="handoff" data-mode={mode}>
     <input ref={fileInput} type="file" multiple hidden onChange={event => { attachments.add(Array.from(event.target.files ?? [])); event.target.value = ''; inputRef.current?.focus(); }}/>
-    <Composer inputId="handoff-message" inputRef={inputRef} value={text} onValueChange={setText} onSubmit={value => void send(value)}
+    <Composer inputId="handoff-message" inputRef={inputRef} value={text} onValueChange={projects.onChange} onSubmit={value => void send(value)}
+      onSelect={projects.onSelect} onKeyDown={projects.onKeyDown} above={projects.above} inputAria={projects.inputAria}
       onFiles={assigning ? undefined : attachments.add}
-      tray={<AttachmentTray items={attachments.items} onRemove={attachments.remove}/>}
+      tray={<>{projects.chips}<AttachmentTray items={attachments.items} onRemove={attachments.remove}/></>}
       label={`${target.name}에게 ${assigning ? '일 맡기기' : '메시지'}`}
       placeholder={assigning ? '맡길 일을 적어 주세요. 첫 줄이 제목이 됩니다.' : `${target.name}에게 메시지`}
       submitLabel={assigning ? '일 맡기기' : '보내기'} disabled={sending} pending={sending}

@@ -113,7 +113,7 @@ test.describe('Connection and activity edits', () => {
     });
   });
 
-  test('offers only Work-capable grants while retaining live browser and vault choices', async ({ page }) => {
+  test('offers only Work-capable tools including documents, browser and vault', async ({ page }) => {
     const ghostId = String((await send(page, { type: 'ghost.create', name: 'Capability Ghost', persona: '',
       tools: ['read', 'browser_open', 'vault_list', 'document_read', 'activity_propose', 'work_create'] })).ghostId);
     ghosts.push(ghostId);
@@ -123,8 +123,8 @@ test.describe('Connection and activity edits', () => {
     await dialog.getByRole('combobox', { name: 'Ghost', exact: true }).click();
     await page.getByRole('option', { name: 'Capability Ghost', exact: true }).click();
     const tools = dialog.getByRole('group', { name: '활동 도구', exact: true });
-    await expect(tools.getByRole('button')).toHaveCount(3);
-    for (const name of ['파일 읽기', '브라우저 열기', '금고 목록']) {
+    await expect(tools.getByRole('button')).toHaveCount(4);
+    for (const name of ['파일 읽기', '문서 읽기', '브라우저 열기', '금고 목록']) {
       await expect(tools.getByRole('button', { name, exact: true })).toBeVisible();
     }
     await expect(dialog.getByText('브라우저 도구는 별도의 브라우저·금고 승인 규칙을 따르며', { exact: false })).toBeVisible();

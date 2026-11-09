@@ -206,9 +206,9 @@ function Shell() {
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
               : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')}/>)}
             {section === 'ghosts' && (openGhost
-              ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} threadId={params.get('thread')} navigate={navigate}/>
+              ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}:${params.get('space') ?? ''}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} threadId={params.get('thread')} navigate={navigate} initialSpaceIds={params.getAll('space').slice(0, 8)}/>
               : ghostNotFound)}
-            {section === 'spaces' && <SpacesView key={`${selectedSpace ?? 'empty'}:${params.get('new') ?? ''}`} selectedSpace={selectedSpace}
+            {section === 'spaces' && <SpacesView key={`${selectedSpace ?? 'empty'}:${params.get('new') ?? ''}`} selectedSpace={selectedSpace} navigate={navigate}
               onSelectSpace={id => navigate(`/spaces/${id}`)} createRequested={params.get('new') === '1'}
               onCreateClosed={() => {
                 const next = path.startsWith('/spaces/') ? path : '/spaces';

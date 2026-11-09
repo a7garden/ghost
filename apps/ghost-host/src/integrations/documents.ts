@@ -1084,13 +1084,9 @@ function newDocumentBytes(id: string, title: string, body: string, profile: stri
 class VaultDocuments implements DocumentsPort {
   constructor(private readonly core: Core) {}
 
-  spacesFor(ghostId: string): { space: Space; mode: "read" | "propose" }[] {
-    const spaces: { space: Space; mode: "read" | "propose" }[] = [];
-    for (const space of this.core.ledger.spaces()) {
-      const grant = space.grants.find((item) => item.ghostId === ghostId);
-      if (grant) spaces.push({ space, mode: grant.mode });
-    }
-    return spaces;
+  spacesFor(ghostId: string): Space[] {
+    const ghost = this.core.ledger.ghost(ghostId);
+    return ghost.state === "active" && ghost.deletedAt === null ? this.core.ledger.spaces() : [];
   }
 
   async listPages(spaceId: string, query: string | null): Promise<PageMeta[]> {
@@ -1151,9 +1147,6 @@ class VaultDocuments implements DocumentsPort {
     if (decision.state !== "approved") throw new Error("only an approved document decision can be applied");
     const proposal = parseProposal(decision.proposal);
     const space = this.requireSpace(proposal.spaceId);
-    const grant = space.grants.find((item) => item.ghostId === decision.ghostId);
-    if (!grant) throw new Error("this Ghost has no grant for this document space");
-    if (grant.mode !== "propose") throw new Error("this Ghost may only read this document space");
     const page = await this.save(proposal);
     return proposal.pageId === null
       ? `Saved "${proposal.title}" as ${page.locator} in ${space.name}.`

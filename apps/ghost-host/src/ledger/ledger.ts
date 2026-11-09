@@ -920,10 +920,10 @@ export class Ledger {
   putSpace(space: Space) {
     this.db
       .query(
-        `INSERT INTO spaces (id, name, path, grants, created_at) VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO spaces (id, name, path, grants, created_at) VALUES (?, ?, ?, '[]', ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, grants = excluded.grants`,
       )
-      .run(space.id, space.name, space.path, json(space.grants), space.createdAt);
+      .run(space.id, space.name, space.path, space.createdAt);
     this.emit({ type: "space", space });
   }
 
@@ -1152,7 +1152,7 @@ function toDevice(row: Row, alerts: DeviceAlerts): Device {
 }
 
 function toSpace(row: Row): Space {
-  return { id: String(row.id), name: String(row.name), path: String(row.path), grants: parseJson(row.grants), createdAt: Number(row.created_at) };
+  return { id: String(row.id), name: String(row.name), path: String(row.path), createdAt: Number(row.created_at) };
 }
 
 function toAvatar(row: Row): Avatar {

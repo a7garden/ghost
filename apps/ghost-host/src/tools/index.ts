@@ -112,7 +112,7 @@ export function createToolSet(deps: {
         case "direct": {
           const selected = [direct, interactive, activities];
           if (deps.memory?.available(ghost.id) && memory) selected.push(memory);
-          if ((deps.documents?.spacesFor(ghost.id).length ?? 0) > 0 && documents) selected.push(documents);
+          if (documents) selected.push(documents);
           if (host) selected.push(host);
           if (skills) selected.push(skills);
           if (web) selected.push(web);
@@ -125,6 +125,7 @@ export function createToolSet(deps: {
         case "work": {
           const selected = _work?.activityId ? [work, activities] : [work];
           if (deps.memory?.available(ghost.id) && memory) selected.push(memory);
+          if (documents) selected.push(documents);
           if (host) selected.push(host);
           if (skills) selected.push(skills);
           if (web) selected.push(web);

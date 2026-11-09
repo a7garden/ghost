@@ -69,7 +69,7 @@ export function createMainTools(core: Core): Extension {
   const ghostUpdate = defineTool({
     name: "ghost_update",
     description:
-      "Change another Ghost's name, persona, model, fallback models, skills, look, state or tool allow-list, and re-apply its conversations. Main Ghost only; the main designation, host tools, document grants and credentials stay with the owner.",
+      "Change another Ghost's name, persona, model, fallback models, skills, look, state or tool allow-list, and re-apply its conversations. Main Ghost only; the main designation, host tools and credentials stay with the owner.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "The Ghost to update" }),
       name: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),

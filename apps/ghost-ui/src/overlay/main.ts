@@ -9,6 +9,13 @@ import '../ui/styles.css';
 import './overlay.css';
 import { installWindowDrag } from '../host/windowDrag';
 import { describeWake } from '../components/wake';
+import { createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Folder } from 'lucide-react';
+import { projectMentionQuery } from '../features/conversationSuggestions';
+import { ProjectChips } from '../components/composer/ProjectMentions';
+import { ComposerSuggest } from '../components/composer/ComposerSuggest';
+import '../components/composer/composer.css';
 
 // The overlay follows the system theme independently of the main window.
 const systemDark = matchMedia('(prefers-color-scheme: dark)');
@@ -43,6 +50,53 @@ let connectionError = '';
 let sendError = '';
 let followLatest = true;
 const targetKey = 'ghost-overlay:target';
+let projectIds: string[] = [];
+let projectActive = 0;
+let projectDismissed = '';
+const projectTray = document.createElement('div');
+const projectSuggest = document.createElement('div');
+projectTray.className = 'overlay-project-tray';
+projectSuggest.style.display = 'contents';
+composerEl.style.position = 'relative';
+composerEl.prepend(projectTray, projectSuggest);
+const chipsRoot = createRoot(projectTray);
+const suggestRoot = createRoot(projectSuggest);
+
+function projectOptions() {
+  const token = projectMentionQuery(inputEl.value, inputEl.selectionStart);
+  const key = `${inputEl.value}:${inputEl.selectionStart}`;
+  const matches = token && key !== projectDismissed && projectIds.length < 8
+    ? (state?.spaces ?? []).filter(space => !projectIds.includes(space.id) && space.name.toLocaleLowerCase().includes(token.query)).slice(0, 8) : [];
+  return { token, matches };
+}
+
+function chooseProject(id: string) {
+  const { token } = projectOptions();
+  if (!token) return;
+  projectIds.push(id);
+  inputEl.value = inputEl.value.slice(0, token.start) + inputEl.value.slice(token.end);
+  inputEl.focus(); inputEl.setSelectionRange(token.start, token.start);
+  projectActive = 0; renderProjects(); autoresize(); updateControls();
+}
+
+function renderProjects() {
+  chipsRoot.render(createElement(ProjectChips, {
+    spaces: (state?.spaces ?? []).filter(space => projectIds.includes(space.id)),
+    onRemove: id => { projectIds = projectIds.filter(item => item !== id); renderProjects(); },
+  }));
+  const { matches } = projectOptions();
+  projectActive = Math.min(projectActive, Math.max(0, matches.length - 1));
+  inputEl.setAttribute('role', 'combobox');
+  inputEl.setAttribute('aria-expanded', String(matches.length > 0));
+  if (matches.length) {
+    inputEl.setAttribute('aria-controls', 'overlay-projects');
+    inputEl.setAttribute('aria-activedescendant', `overlay-projects-${projectActive}`);
+  } else { inputEl.removeAttribute('aria-controls'); inputEl.removeAttribute('aria-activedescendant'); }
+  suggestRoot.render(matches.length ? createElement(ComposerSuggest, {
+    id: 'overlay-projects', label: '프로젝트', active: projectActive, onActive: index => { projectActive = index; renderProjects(); },
+    items: matches.map(space => ({ id: space.id, label: space.name, icon: createElement(Folder, { size: 18 }), onSelect: () => chooseProject(space.id) })),
+  }) : null);
+}
 
 function loadTarget(): Target {
   try {
@@ -80,7 +134,7 @@ function render() {
       if (message.origin && message.origin !== 'owner') {
         const wake = describeWake(message.origin, message.text);
         rows.push(`<li class="row event">${escapeHtml(wake.label)} · ${escapeHtml(wake.line)}</li>`);
-      } else rows.push(`<li class="row user"><div>${escapeHtml(message.text)}</div></li>`);
+      } else rows.push(`<li class="row user"><div>${escapeHtml(message.text)}${(message.spaces ?? []).map(space => `<span class="project-chip">${escapeHtml(space.name)}</span>`).join('')}</div></li>`);
     } else if (message.role === 'assistant' && message.text.trim()) {
       rows.push(`<li class="row ghost"><div>${escapeHtml(message.text)}</div></li>`);
     }
@@ -98,6 +152,7 @@ function render() {
   titleEl.textContent = ghost?.name ?? 'Ghost';
   inputEl.placeholder = `${ghost?.name ?? 'Ghost'}에게 메시지`;
   updateControls();
+  renderProjects();
 }
 
 /** Serialize snapshot reads; a target change supersedes the old response before paint. */
@@ -152,9 +207,10 @@ async function send() {
   sendError = '';
   updateControls();
   try {
-    await client.send({ type: 'message.send', conversationId: destination, text });
+    await client.send({ type: 'message.send', conversationId: destination, text, spaceIds: projectIds });
     if (destination === conversationId) {
       inputEl.value = '';
+      projectIds = []; renderProjects();
       followLatest = true;
       autoresize();
     }
@@ -178,6 +234,7 @@ function onTargetChange() {
   if ((target.ghostId && target.ghostId !== ghostId) || (target.conversationId && target.conversationId !== conversationId)) {
     conversationId = '';
     inputEl.value = '';
+    projectIds = []; renderProjects();
     renderedSignature = '';
     logEl.replaceChildren();
     titleEl.textContent = state?.ghosts.find(ghost => ghost.id === target.ghostId)?.name ?? 'Ghost';
@@ -188,8 +245,17 @@ function onTargetChange() {
 }
 
 composerEl.addEventListener('submit', event => { event.preventDefault(); void send(); });
-inputEl.addEventListener('input', () => { sendError = ''; autoresize(); updateControls(); });
+inputEl.addEventListener('input', () => { sendError = ''; projectActive = 0; projectDismissed = ''; renderProjects(); autoresize(); updateControls(); });
+inputEl.addEventListener('select', renderProjects);
 inputEl.addEventListener('keydown', event => {
+  const { matches } = projectOptions();
+  if (matches.length && !event.isComposing) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault(); projectActive = (projectActive + (event.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length; renderProjects(); return;
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); chooseProject(matches[projectActive]!.id); return; }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); projectDismissed = `${inputEl.value}:${inputEl.selectionStart}`; renderProjects(); return; }
+  }
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     composerEl.requestSubmit();

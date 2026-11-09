@@ -324,7 +324,8 @@ export const Work = Type.Object({
   /** Additional owner-approved activity allow-list; inherited by delegated children. */
   toolScope: Type.Optional(GhostToolList),
   title: Type.String({ minLength: 1, maxLength: 256 }),
-  brief: Type.String({ minLength: 1, maxLength: 32768 }),
+  /** Owner text is bounded to 32,768 characters; allow room for the durable project preface. */
+  brief: Type.String({ minLength: 1, maxLength: 49152 }),
   acceptance: Acceptance,
   state: WorkState,
   revision: Type.Integer({ minimum: 1 }),
@@ -509,17 +510,10 @@ export const Device = Type.Object({
 });
 export type Device = Static<typeof Device>;
 
-export const SpaceGrant = Type.Object({
-  ghostId: Id,
-  mode: Type.Union([Type.Literal("read"), Type.Literal("propose")]),
-});
-export type SpaceGrant = Static<typeof SpaceGrant>;
-
 export const Space = Type.Object({
   id: Id,
   name: Type.String({ minLength: 1, maxLength: 128 }),
   path: Type.String({ minLength: 1, maxLength: 4096 }),
-  grants: Type.Array(SpaceGrant, { maxItems: 64 }),
   createdAt: Timestamp,
 });
 export type Space = Static<typeof Space>;
@@ -654,6 +648,8 @@ export const Message = Type.Object({
   /** Present on tool results. */
   tool: nullable(Type.Object({ callId: Type.String(), name: Type.String(), isError: Type.Boolean() })),
   attachments: Type.Array(ArtifactRef),
+  /** Project references captured at submission, independent of later renames/deletion. */
+  spaces: Type.Optional(Type.Array(Type.Object({ id: Id, name: Type.String() }), { maxItems: 8 })),
   createdAt: Timestamp,
 });
 export type Message = Static<typeof Message>;

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Button, FormField, Page, PageHeader, InlineError, Input, SegmentedControl, SelectField, Textarea } from '../ui'
 import type { ExecutionTarget, State, Work } from '@ghost/contract';
@@ -10,6 +10,7 @@ import { ghostPresence, visibleGhosts } from './ghostState';
 import { useNow } from './time';
 import { useHost } from '../host/context';
 import { useCompact } from '../ui/adaptive';
+import { useProjectMentions } from '../components/composer/ProjectMentions';
 
 type WorkTab = 'active' | 'finished';
 
@@ -90,6 +91,9 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
   const [ghostId, setGhostId] = useState(defaultGhostId ?? ghosts[0]?.id ?? '');
   const [execution, setExecution] = useState<'container' | 'host'>('container');
   const [cwd, setCwd] = useState('');
+  const [briefText, setBriefText] = useState('');
+  const briefRef = useRef<HTMLTextAreaElement>(null);
+  const projects = useProjectMentions(briefText, setBriefText, briefRef, [], busy);
   const selected = ghosts.find(ghost => ghost.id === ghostId) ?? null;
   const hostAllowed = selected?.hostExecution === true;
   const pickGhost = (id: string) => {
@@ -114,7 +118,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
     void (async () => {
       try {
         const created = await client.send<{ workId: string }>({
-          type: 'work.create', ghostId, title, brief,
+          type: 'work.create', ghostId, title, brief, spaceIds: projects.spaceIds,
           ...(criteria ? { acceptance: { criteria, checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}),
           execution: target,
@@ -136,7 +140,12 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
         {control => <Input {...control} name="title" placeholder="예: 1분기 회고 자료 모으기" required maxLength={256}/>}
       </FormField>
       <FormField label="할 일" required>
-        {control => <Textarea {...control} name="brief" placeholder="무엇을, 어떻게 완료할지 적어 주세요." required maxLength={32768} rows={5}/>}
+        {control => <div className="relative">
+          {projects.above}{projects.chips}
+          <Textarea {...control} {...projects.inputAria} ref={briefRef} name="brief" value={briefText}
+            onChange={event => projects.onChange(event.target.value)} onSelect={projects.onSelect} onKeyDown={projects.onKeyDown}
+            placeholder="무엇을, 어떻게 완료할지 적어 주세요." required maxLength={32768} rows={5}/>
+        </div>}
       </FormField>
       <FormField label="완료 기준">
         {control => <Input {...control} name="criteria" placeholder="무엇이 되면 끝난 것인지" maxLength={8192}/>}

@@ -24,12 +24,12 @@ export const DEFAULT_POLICY: ActivityPolicy = {
 
 /**
  * Tools a Work conversation never receives. Optional Work capabilities include browser
- * and vault, but direct conversations alone get activity proposals and document tools.
+ * and vault; direct conversations alone get activity/document proposals and Work creation.
  */
 const DENIED_IN_WORK: Partial<Record<GhostTool, true>> = {
   work_create: true, work_list: true, work_inspect: true, work_update: true, work_cancel: true,
   schedule_create: true, schedule_list: true, schedule_cancel: true, ghost_list: true, activity_propose: true,
-  document_spaces: true, document_list: true, document_read: true, document_propose: true,
+  document_propose: true,
 };
 
 /** Tools the form may offer, in contract order, kept inside the Ghost's own grants. Pure. */

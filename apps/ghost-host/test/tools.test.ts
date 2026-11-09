@@ -17,6 +17,7 @@ import { createToolSet } from "../src/tools/index.ts";
 import { MAX_ARTIFACT_BYTES } from "../src/tools/work.ts";
 import type { ToolSet } from "../src/tools/types.ts";
 import { harness, tempDir, type FakeEngine } from "./support.ts";
+import { createDocuments } from "../src/integrations/documents.ts";
 
 /** Artifact bytes in a temp directory. */
 class TempArtifacts implements ArtifactStore {
@@ -142,6 +143,39 @@ async function runningWork(setup: Setup) {
 }
 
 describe("tools", () => {
+  test("Work conversations can list and read every Space while preserving scope and direct-only proposals", async () => {
+    const s = setup();
+    try {
+      const documents = createDocuments(s.core);
+      s.tools = createToolSet({ core: s.core, sandbox: s.sandbox, memory: null, documents, skills: null });
+      const path = join(s.root, "project");
+      mkdirSync(path);
+      s.ledger.tx(() => s.ledger.putSpace({ id: "project", name: "비행 기록", path, createdAt: Date.now() }));
+      const page = await documents.save({ spaceId: "project", title: "비행 계획", body: "이륙 전에 바람을 확인한다.", profile: "pdc-markdown/1", pageId: null, expectedHash: null });
+      const { work, conversation, pi } = await runningWork(s);
+      const spaces = await call(toolOf(s, conversation, s.ghost, "document_spaces"), {}, apiOf(pi, "spaces"));
+      expect(spaces.isError).toBeFalsy();
+      expect(contentOf(spaces)).toContain("비행 기록 (project)");
+      const listTool = toolOf(s, conversation, s.ghost, "document_list");
+      const listed = await call(listTool, { space_id: "project" }, apiOf(pi, "list"));
+      expect(listed.isError).toBeFalsy();
+      expect(contentOf(listed)).toContain("비행 계획");
+      const readTool = toolOf(s, conversation, s.ghost, "document_read");
+      const read = await call(readTool, { space_id: "project", page_id: page.pageId }, apiOf(pi, "read"));
+      expect(read.isError).toBeFalsy();
+      expect(contentOf(read)).toContain("이륙 전에 바람을 확인한다.");
+      const proposed = await call(toolOf(s, conversation, s.ghost, "document_propose"), { space_id: "project", title: "No", body: "No" }, apiOf(pi, "propose"));
+      expect(proposed.isError).toBe(true);
+      expect(contentOf(proposed)).toContain("does not run in a work conversation");
+      expect(s.ledger.pendingDecisions()).toHaveLength(0);
+      s.ledger.tx(() => s.ledger.putWork({ ...s.ledger.work(work.id), toolScope: ["document_list"] }));
+      const scopedRead = await call(readTool, { space_id: "project", page_id: page.pageId }, apiOf(pi, "scoped-read"));
+      expect(scopedRead.isError).toBe(true);
+      expect(contentOf(scopedRead)).toContain("outside this Work's approved tool scope");
+      expect((await call(listTool, { space_id: "project" }, apiOf(pi, "scoped-list"))).isError).toBeFalsy();
+      await s.core.idle();
+    } finally { s.core.stop(); s.ledger.close(); }
+  });
   test("present_ui is deterministic presentation even with every optional tool disabled", async () => {
     const s = setup();
     const ghost = { ...s.ghost, tools: [] };

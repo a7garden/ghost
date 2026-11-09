@@ -69,7 +69,7 @@ describe("the state root lock", () => {
     let app: App | undefined;
     try {
       app = await openApp(loadConfig({}, root));
-      app.ledger.tx(() => app!.ledger.putSpace({ id: "s1", name: "Notes", path: "/Users/someone/Notes", grants: [], createdAt: 1 }));
+      app.ledger.tx(() => app!.ledger.putSpace({ id: "s1", name: "Notes", path: "/Users/someone/Notes", createdAt: 1 }));
       const before = snapshot(root);
       await expect(openApp(loadConfig({}, root))).rejects.toThrow("already owned");
       expect(snapshot(root)).toEqual(before);

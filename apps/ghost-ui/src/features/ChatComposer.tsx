@@ -10,6 +10,7 @@ import { ModelPicker } from '../pets/ModelPicker';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { toneFor } from './ghostState';
+import { useProjectMentions } from '../components/composer/ProjectMentions';
 
 /** Words each `/` command also answers to, so `/파일` and `/work` find the same action. */
 const commandWords: Record<string, string[]> = {
@@ -35,7 +36,7 @@ const whenLabel = (at: number) => new Date(at).toLocaleString('ko-KR', { month: 
  * Typing `/` at the start offers the same actions by keyboard; `@` hands the message to a Ghost as a 맡긴 일
  * that reports back here.
  */
-export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, inputRef, onSent, onStop, onError }: {
+export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, inputRef, onSent, onStop, onError, initialSpaceIds = [], initialMode = 'talk' }: {
   ghost: Ghost;
   conversationId: string | null;
   running: boolean;
@@ -47,12 +48,14 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   onSent(): void;
   onStop(): void;
   onError(message: string): void;
+  initialSpaceIds?: string[];
+  initialMode?: 'talk' | 'work';
 }) {
   const { client, store } = useHost();
   const { state } = useHostState(store);
   const attachments = useAttachments();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [mode, setMode] = useState<Mode>('talk');
+  const [mode, setMode] = useState<Mode>(initialMode);
   /** Who a 맡긴 일 goes to; null is this conversation's Ghost. */
   const [assignee, setAssignee] = useState<Ghost | null>(null);
   const [criteria, setCriteria] = useState('');
@@ -63,6 +66,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const suggestId = useId();
+  const projects = useProjectMentions(draft, setDraft, inputRef, initialSpaceIds, sending || mode === 'later');
 
   const focus = () => inputRef.current?.focus();
   const switchMode = (next: Mode) => {
@@ -77,7 +81,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
     setSending(true); onError(''); setConfirmation('');
     try {
       if (mode === 'work') {
-        await client.send({ type: 'work.create', ghostId: assignee?.id ?? ghost.id, title: text.split(/\n/, 1)[0].slice(0, 256), brief: text, originConversationId: conversationId,
+        await client.send({ type: 'work.create', ghostId: assignee?.id ?? ghost.id, title: text.split(/\n/, 1)[0].slice(0, 256), brief: text, spaceIds: projects.spaceIds, originConversationId: conversationId,
           ...(criteria.trim() ? { acceptance: { criteria: criteria.trim(), checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}) });
         switchMode('talk');
@@ -88,10 +92,11 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
         switchMode('talk');
       } else {
         onSent();
-        await client.send({ type: 'message.send', conversationId, text, ...(attachments.refs.length ? { attachments: attachments.refs } : {}) });
+        await client.send({ type: 'message.send', conversationId, text, spaceIds: projects.spaceIds, ...(attachments.refs.length ? { attachments: attachments.refs } : {}) });
         attachments.clear();
       }
       setDraft('');
+      projects.clear();
     } catch (reason) { onError(reason instanceof Error ? reason.message : '보내지 못했습니다.'); }
     finally { setSending(false); }
   };
@@ -102,7 +107,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const actions: PlusAction[] = [
     { id: 'files', icon: <Paperclip/>, label: '사진·파일 첨부', disabled: mode !== 'talk', onSelect: () => fileInput.current?.click() },
     { id: 'work', icon: <BriefcaseBusiness/>, label: '일로 맡기기', disabled: hasFiles || mode === 'work', onSelect: () => switchMode('work') },
-    { id: 'later', icon: <Clock3/>, label: '나중에 보내기', disabled: hasFiles || mode === 'later', onSelect: () => switchMode('later') },
+    { id: 'later', icon: <Clock3/>, label: '나중에 보내기', disabled: hasFiles || mode === 'later' || projects.spaceIds.length > 0, onSelect: () => switchMode('later') },
   ];
 
   // `/word` or `@name` as the whole draft opens suggestions until it is picked, dismissed or edited away.
@@ -122,6 +127,8 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const open = suggestions.length > 0;
   const current = Math.min(active, suggestions.length - 1);
   const steer = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    projects.onKeyDown(event);
+    if (event.defaultPrevented) return;
     if (!open || event.nativeEvent.isComposing) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -136,10 +143,11 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   };
   return <>
     <input ref={fileInput} type="file" multiple hidden onChange={event => { attachments.add(Array.from(event.target.files ?? [])); event.target.value = ''; focus(); }}/>
-    <Composer inputId="message-input" inputRef={inputRef} value={draft} onValueChange={value => { setDraft(value); setActive(0); }} onSubmit={value => void send(value)}
+    <Composer inputId="message-input" inputRef={inputRef} value={draft} onValueChange={value => { projects.onChange(value); setActive(0); }} onSubmit={value => void send(value)}
       onKeyDown={steer}
-      inputAria={{ role: 'combobox', 'aria-expanded': open, 'aria-controls': open ? suggestId : undefined, 'aria-activedescendant': open ? `${suggestId}-${current}` : undefined, 'aria-autocomplete': 'list' }}
-      above={open && <ComposerSuggest id={suggestId} label={typed?.[1] === '@' ? '맡길 Ghost' : '명령'} items={suggestions} active={current} onActive={setActive}/>}
+      onSelect={projects.onSelect}
+      inputAria={projects.open ? projects.inputAria : { role: 'combobox', 'aria-expanded': open, 'aria-controls': open ? suggestId : undefined, 'aria-activedescendant': open ? `${suggestId}-${current}` : undefined, 'aria-autocomplete': 'list' }}
+      above={projects.above || (open && <ComposerSuggest id={suggestId} label={typed?.[1] === '@' ? '맡길 Ghost' : '명령'} items={suggestions} active={current} onActive={setActive}/>)}
       label={`${ghost.name}에게 ${mode === 'work' ? '일 맡기기' : '메시지'}`} placeholder={placeholder}
       submitLabel={mode === 'work' ? '일 맡기기' : mode === 'later' ? '예약하기' : '메시지 보내기'}
       disabled={!conversationId} pending={sending} running={running} describedBy="composer-keyboard-help"
@@ -152,7 +160,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
           <button type="button" className="composer-mode__close" aria-label="일반 메시지로" onClick={() => switchMode('talk')}><X size={11} aria-hidden="true"/></button>
         </span>
       </div>}
-      tray={<AttachmentTray items={attachments.items} onRemove={attachments.remove}/>}
+      tray={<>{projects.chips}<AttachmentTray items={attachments.items} onRemove={attachments.remove}/></>}
       extension={mode === 'work' ? <div className="composer-fields">
         <label className="composer-field"><span>완료 기준</span>
           <input value={criteria} onChange={event => setCriteria(event.target.value)} maxLength={8192} disabled={sending} placeholder="무엇이 되면 끝난 것인지"/></label>

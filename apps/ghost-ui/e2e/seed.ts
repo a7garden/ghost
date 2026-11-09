@@ -163,7 +163,6 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
     type: 'space.create',
     name: '비행 기록',
     path: host.spacePath,
-    grants: [{ ghostId: researchGhostId, mode: 'read' }],
   })).spaceId);
   await command(host, {
     type: 'document.save', spaceId, pageId: null, expectedHash: null, profile: 'pdc-markdown/1',

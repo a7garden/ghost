@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 프로젝트별 Ghost 접근 설정을 없앴다. 모든 활성 Ghost가 프로젝트 문서를 읽고 수정안을 제안하며, 실제 저장은 기존 소유자 검토를 거친다.
+- 대화·홈·맡기기 작성창에서 `#`로 프로젝트를 골라 함께 보낸다. 대화 기록에는 프로젝트 칩이 남고, Ghost는 답하기 전에 해당 문서를 읽도록 안내받는다.
+- 프로젝트 화면에서 바로 대화를 시작하거나, 프로젝트를 포함해 Ghost에게 일을 맡긴다.
 - iPhone은 같은 웹 UI를 연다. 56rem 아래에서는 하단의 홈·받은 일·맡긴 일·작업실·설정으로
   이동하고, 대화와 상세 화면은 본문에 자리를 내준다. 터치 메뉴·적응형 시트·키보드 높이에
   맞는 작성창을 공유 컴포넌트에서 제공한다. 데스크톱 레이아웃은 유지한다.
@@ -54,8 +57,8 @@
   do not wake an unrestricted direct-conversation turn. Successful no-change runs stay quiet.
 - Failed account saves keep the dialog and typed fields. Activity edits retain exact
   cadence and second precision; SMTP distinguishes implicit TLS from required STARTTLS.
-- Activity tools retain granted browser/vault capabilities but exclude direct-only proposals
-  and document tools. PR 댓글·메일 회신 applies only to bound mail replies/PR comments,
+- Activity tools retain granted browser/vault capabilities and document reads but exclude direct-only proposals.
+  PR 댓글·메일 회신 applies only to bound mail replies/PR comments,
   not generic browser actions or file/shell tools. Selected browser/Host tools retain
   their independent authority; browser/vault keep their separate approvals, and the PC
   grant is not a jail or approval-enforcement boundary.

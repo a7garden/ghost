@@ -55,8 +55,8 @@ export interface DocumentProposal {
 
 /** PDC document vaults registered as Spaces. Implemented in src/integrations/documents.ts. */
 export interface DocumentsPort {
-  /** Spaces the Ghost may read, with its mode. */
-  spacesFor(ghostId: string): { space: Space; mode: "read" | "propose" }[];
+  /** Every active Ghost may read and propose to every registered Space. */
+  spacesFor(ghostId: string): Space[];
   listPages(spaceId: string, query: string | null): Promise<PageMeta[]>;
   readPage(spaceId: string, ref: { pageId?: string; locator?: string }): Promise<Page>;
   /** Validate a proposal without writing; throws when it can never apply (stale hash, bad profile). */

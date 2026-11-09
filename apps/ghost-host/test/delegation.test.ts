@@ -484,7 +484,7 @@ describe("ghost.delete", () => {
     expect(s.ledger.ghost(s.helper.id).deletedAt).not.toBeNull();
   });
 
-  test("deleting scrubs schedules and Space grants, and a repeat delete is a no-op", () => {
+  test("deleting scrubs schedules and leaves projects intact; a repeat delete is a no-op", () => {
     const s = setup();
     const other = s.core.createGhost({ name: "Keeper", persona: "Stays." });
     s.ledger.tx(() => {
@@ -508,23 +508,14 @@ describe("ghost.delete", () => {
         state: "active",
         createdAt: Date.now(),
       });
-      s.ledger.putSpace({
-        id: "space-1",
-        name: "Vault",
-        path: "/tmp/vault",
-        grants: [
-          { ghostId: s.helper.id, mode: "read" },
-          { ghostId: other.id, mode: "propose" },
-        ],
-        createdAt: Date.now(),
-      });
+      s.ledger.putSpace({ id: "space-1", name: "Vault", path: "/tmp/vault", createdAt: Date.now() });
     });
     retireAndDelete(s, s.helper.id);
     // A repeat delete is a no-op, not an update of a deleted row.
     deleteGhost(s.core, s.helper.id);
 
     expect(s.ledger.schedules().map((schedule) => schedule.id)).toEqual(["sch-kept"]);
-    expect(s.ledger.space("space-1").grants).toEqual([{ ghostId: other.id, mode: "propose" }]);
+    expect(s.ledger.space("space-1").name).toBe("Vault");
     expect(s.ledger.ghost(s.helper.id)).toMatchObject({ deletedAt: expect.any(Number), state: "retired" });
   });
 
