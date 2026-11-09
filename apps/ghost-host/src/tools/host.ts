@@ -8,7 +8,6 @@ import type { Core } from "../core/core.ts";
 import { NoEffect } from "../core/effects.ts";
 import { digestOf } from "../core/ids.ts";
 import type { HostCommand, HostPort } from "../integrations/ports.ts";
-import { isReadOnlyHostCommand } from "../integrations/host.ts";
 import { errorResult, requireAllowed } from "./shared.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -99,7 +98,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
   const propose = defineTool({
     name: "host_command_propose",
     description:
-      "Inspect read-only Mac facts directly: strict allowlisted ls/cat/head/tail/wc/stat/file/du/find, df/ps/sw_vers/uptime, plutil -p, launchctl list/print and Git read commands execute immediately without approval or an effect journal. Paths/cwd must resolve inside owner home; secrets/private paths are refused. Git ls-remote uses HTTPS only. Use absolute executables and argv, no shell syntax. Other commands propose ONE change for owner approval with a configured-project cwd; explain deletion/lost-data/rebuild risks. Batch owner questions, not read approvals. 90s deadline; change proposals expire after 24h and may partially apply before failure.",
+      "Inspect read-only Mac facts directly: strictly allowlisted filesystem/system commands and Git reads execute without approval or effect journaling. Paths/cwd must resolve inside owner home; text reads refuse private paths, and all inspection refuses secrets and Ghost state. head/tail accept line counts, not byte slicing. launchctl print returns status fields only. Git ls-remote accepts configured public HTTPS remotes or explicit github.com repository URLs, never arbitrary URLs or IP literals. Commands outside inspection policy fall through to individual owner approval with a configured-project cwd. Explain deletion/lost-data/rebuild risks. Use absolute executables and argv, no shell syntax. Inspect facts first and batch owner questions. 90s deadline; change proposals expire after 24h and may partially apply before failure.",
     parameters: Type.Object({
       title: Type.String({ minLength: 1, maxLength: 2000 }),
       reason: Type.String({ minLength: 1, maxLength: 2000 }),
@@ -112,13 +111,13 @@ export function createHostTools(core: Core, host: HostPort): Extension {
     async execute(args, api) {
       try {
         const scope = requireAllowed(core, api, "host_command_propose");
-        const command = host.validateCommand(args);
-        if (isReadOnlyHostCommand(command)) {
-          const result = await host.executeCommand(command);
+        const result = await host.inspect(args);
+        if (result !== null) {
           return {
             content: [{ type: "text", text: JSON.stringify(result) }],
           };
         }
+        const command = host.validateCommand(args);
         const risk = `${command.program.endsWith("/rm") ? "삭제: 파일이 영구 제거될 수 있습니다. " : ""}${command.risk}`;
         const display = [command.program, ...command.args]
           .map((part) => JSON.stringify(part))

@@ -91,30 +91,34 @@ export function createMainTools(core: Core): Extension {
           ...(args.host_execution === true && !target.hostExecution ? ["PC 직접 실행"] : []),
           ...HOST_TOOLS.filter((tool) => args.tools?.includes(tool) && !target.tools.includes(tool)),
         ];
-        const next = updateGhost(core, target.id, {
-          name: args.name,
-          persona: args.persona,
-          model: args.model === undefined ? undefined : args.model,
-          look: args.look,
-          state: args.state,
-          tools: args.tools,
-          fallbacks: args.fallbacks,
-          skills: args.skills,
-          hostExecution: args.host_execution,
+        // The Mac is the owner's: the main Ghost may open it to a teammate, but never silently —
+        // the grant and its notification commit together.
+        const next = core.ledger.tx(() => {
+          const updated = updateGhost(core, target.id, {
+            name: args.name,
+            persona: args.persona,
+            model: args.model === undefined ? undefined : args.model,
+            look: args.look,
+            state: args.state,
+            tools: args.tools,
+            fallbacks: args.fallbacks,
+            skills: args.skills,
+            hostExecution: args.host_execution,
+          });
+          if (granted.length > 0) {
+            core.notify({
+              id: `grant:${scope.conversation.id}:${api.callId}`,
+              kind: "message",
+              ghostId: scope.ghost.id,
+              conversationId: scope.conversation.id,
+              workId: scope.work?.id ?? null,
+              decisionId: null,
+              title: `${updated.name}에게 ${granted.join(", ")} 허용`,
+              body: `${scope.ghost.name}이(가) 작업에 필요해 허용했습니다. 설정 › Ghost에서 되돌릴 수 있습니다.`,
+            });
+          }
+          return updated;
         });
-        // The Mac is the owner's: the main Ghost may open it to a teammate, but never silently.
-        if (granted.length > 0) {
-          core.ledger.tx(() => core.notify({
-            id: `grant:${scope.conversation.id}:${api.callId}`,
-            kind: "message",
-            ghostId: scope.ghost.id,
-            conversationId: scope.conversation.id,
-            workId: scope.work?.id ?? null,
-            decisionId: null,
-            title: `${next.name}에게 ${granted.join(", ")} 허용`,
-            body: `${scope.ghost.name}이(가) 작업에 필요해 허용했습니다. 설정 › Ghost에서 되돌릴 수 있습니다.`,
-          }));
-        }
         return text(`Updated.\n${renderGhost(next)}`);
       } catch (error) {
         return errorResult(error);

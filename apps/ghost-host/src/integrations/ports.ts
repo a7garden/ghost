@@ -152,6 +152,8 @@ export interface HostPort {
   diskUsage(path: string): Promise<unknown>;
   list(path: string): Promise<unknown>;
   read(path: string): Promise<unknown>;
+  /** Runs an eligible inspection; null means the requested command did not run and needs approval. */
+  inspect(input: HostCommand): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean } | null>;
   validateCommand(input: HostCommand): HostCommand;
   executeCommand(input: HostCommand): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
 }

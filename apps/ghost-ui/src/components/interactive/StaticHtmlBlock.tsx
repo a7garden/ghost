@@ -11,8 +11,13 @@ const attributes = ['class', 'id', 'style', 'title', 'lang', 'dir', 'role', 'ari
 const csp = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; form-action 'none'; base-uri 'none'; navigate-to 'none'";
 const previewStyles = 'body{display:flow-root;margin:16px;font:14px/1.6 system-ui,sans-serif;color:#1a1c1f;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{border-collapse:collapse;max-width:100%}th,td{padding:6px 10px;border:1px solid #ddd}pre{overflow:auto}*{box-sizing:border-box}';
 
+/** The inert measurement deliberately omits authored styles and image resources. */
+export function staticHtmlPreviewHeight(sanitizedHtml: string): number | undefined {
+  return /<(?:style|img)(?:\s|\/?>)/i.test(sanitizedHtml) ? 380 : undefined;
+}
+
 /** Sanitized static markup only. The separate opaque-origin frame has no bridge to Ghost. */
-export function staticHtmlDocument(source: string): string {
+export function staticHtmlPreview(source: string) {
   const purifier = createDOMPurify(window);
   purifier.addHook('uponSanitizeAttribute', (node, attribute) => {
     if (attribute.attrName === 'src') {
@@ -30,16 +35,19 @@ export function staticHtmlDocument(source: string): string {
     FORBID_TAGS: ['script', 'form', 'input', 'button', 'textarea', 'select', 'option', 'meta', 'base', 'link', 'a', 'iframe', 'object', 'embed', 'svg', 'math'],
     FORBID_ATTR: ['href', 'srcset', 'action', 'formaction', 'target', 'download', 'ping', 'is', 'autofocus', 'contenteditable', 'tabindex'],
   });
-  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${csp}"><meta charset="utf-8"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light}${previewStyles}</style></head><body>${html}</body></html>`;
+  return {
+    document: `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${csp}"><meta charset="utf-8"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light}${previewStyles}</style></head><body>${html}</body></html>`,
+    fixedHeight: staticHtmlPreviewHeight(html),
+  };
 }
 
 /** Measure inert markup, never the opaque frame or a script/bridge inside it. */
-function HtmlPreview({ title, html, document: source, fullscreen = false }: { title: string; html: string; document: string; fullscreen?: boolean }) {
+function HtmlPreview({ title, html, document: source, fixedHeight, fullscreen = false }: { title: string; html: string; document: string; fixedHeight?: number; fullscreen?: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(80);
   useEffect(() => {
     const iframe = frame.current;
-    if (!iframe || fullscreen) return;
+    if (!iframe || fullscreen || fixedHeight !== undefined) return;
     const host = window.document.createElement('div');
     host.inert = true;
     host.setAttribute('aria-hidden', 'true');
@@ -63,15 +71,15 @@ function HtmlPreview({ title, html, document: source, fullscreen = false }: { ti
     observer.observe(viewport);
     measure();
     return () => { observer.disconnect(); host.remove(); };
-  }, [html, fullscreen]);
-  return <iframe ref={frame} className="ghost-ui-html" style={fullscreen ? undefined : { height }} title={`${title} · 정적 HTML 미리보기`} sandbox="" referrerPolicy="no-referrer" srcDoc={source}/>;
+  }, [html, fullscreen, fixedHeight]);
+  return <iframe ref={frame} className="ghost-ui-html" style={fullscreen ? undefined : { height: fixedHeight ?? height }} title={`${title} · 정적 HTML 미리보기`} sandbox="" referrerPolicy="no-referrer" srcDoc={source}/>;
 }
 export function StaticHtmlBlock({ title, html }: { title: string; html: string }) {
   const [view, setView] = useState<'preview' | 'source'>('preview');
   const [fullscreen, setFullscreen] = useState(false);
   const compact = useCompact();
   const titleId = useId();
-  const document = useMemo(() => staticHtmlDocument(html), [html]);
+  const preview = useMemo(() => staticHtmlPreview(html), [html]);
   return <section className="ghost-ui-block" aria-labelledby={titleId}>
     <div className="ghost-ui-block__bar"><h3 id={titleId}>{title}</h3>
       <div className="ghost-ui-block__tools">
@@ -80,10 +88,10 @@ export function StaticHtmlBlock({ title, html }: { title: string; html: string }
       </div>
     </div>
     {view === 'preview'
-      ? <HtmlPreview title={title} html={html} document={document}/>
+      ? <HtmlPreview title={title} html={html} {...preview}/>
       : <pre className="ghost-ui-source" tabIndex={0}>{html}</pre>}
     {fullscreen && <Modal title={title} onClose={() => setFullscreen(false)} className="ghost-ui-html-fullscreen" focusClose>
-      <HtmlPreview title={title} html={html} document={document} fullscreen/>
+      <HtmlPreview title={title} html={html} {...preview} fullscreen/>
     </Modal>}
   </section>;
 }

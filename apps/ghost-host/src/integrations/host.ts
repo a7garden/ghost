@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import type { Dirent } from "node:fs";
 import { open, opendir, statfs } from "node:fs/promises";
+import { isIP } from "node:net";
 import { cpus, homedir, loadavg, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
@@ -17,6 +18,7 @@ import type {
   HostServices,
   HostNodes,
 } from "./ports.ts";
+import { assertFetchableUrl } from "./netguard.ts";
 import { NoEffect } from "../core/effects.ts";
 
 const GB = 1_073_741_824;
@@ -179,46 +181,30 @@ const secretNames: Record<string, true> = {
   keystore: true,
   credentials: true,
   secrets: true,
-  private: true,
   id_rsa: true,
   id_ed25519: true,
   id_dsa: true,
   id_ecdsa: true,
   id_ecdsa_sk: true,
   id_ed25519_sk: true,
-  keys: true,
-  keyrings: true,
-  passwords: true,
-  containers: true,
-  "group containers": true,
-  "mobile documents": true,
   "cookies.binarycookies": true,
-  vault: true,
-  ".docker": true,
-  ".config": true,
-  ".npm": true,
-  ".password-store": true,
-  ".1password": true,
   ".git-credentials": true,
   ".gitconfig": true,
   ".bash_history": true,
   ".zsh_history": true,
-  safari: true,
-  firefox: true,
-  chrome: true,
-  chromium: true,
-  brave: true,
-  "brave-browser": true,
-  "microsoft edge": true,
-  thunderbird: true,
-  mail: true,
-  messages: true,
-  accounts: true,
-  "internet accounts": true,
-  addressbook: true,
-  calendars: true,
 };
+
+// These are owner app-data locations, not forbidden names in a project tree.
+const homeDotDirectories = [".docker", ".config", ".npm", ".password-store", ".1password", ".mozilla", ".thunderbird"];
+const privateLibraryDirectories = [
+  "Keychains", "Mail", "Messages", "Accounts", "Containers", "Group Containers",
+  "Mobile Documents", "Safari", "Calendars", "Cookies",
+  "Application Support/Google/Chrome", "Application Support/Chromium",
+  "Application Support/BraveSoftware", "Application Support/Microsoft Edge",
+  "Application Support/Firefox", "Application Support/Thunderbird", "Application Support/AddressBook",
+];
 const privateNames: Record<string, true> = {
+  private: true,
   finance: true,
   financial: true,
   trading: true,
@@ -242,7 +228,7 @@ export const secretPath = (path: string) =>
       Object.hasOwn(secretNames, n) ||
       n.startsWith(".env") ||
       /secret|credential|api_key|apikey/.test(n) ||
-      /\.(pem|key|p12|sqlite|db)$/.test(n)
+      /\.(pem|key|p12|sqlite|db)$|-(?:wal|shm|journal)$/.test(n)
     );
   });
 export const privateTextPath = (path: string) =>
@@ -252,6 +238,7 @@ export const privateTextPath = (path: string) =>
 export function sensitiveText(text: string): boolean {
   return (
     /macfra-approval-[a-f0-9]{64}|-----begin|bearer /i.test(text) ||
+    /\b[a-f0-9]{48,}\b|(?:^|[\s"'=:])[a-z0-9+/_-]{64,}={0,2}(?=$|[\s"',;}])/i.test(text) ||
     /(?:^|[^a-z0-9])(?:ghp_|github_pat_|sk-|xoxb-|xoxp-|akia|glpat-)[a-z0-9]/i.test(
       text,
     ) ||
@@ -293,6 +280,7 @@ const expand = (path: string, home: string) =>
 interface InspectionShape {
   paths: number[];
   git?: boolean;
+  gitRemote?: boolean;
   findAction?: boolean;
 }
 
@@ -325,7 +313,7 @@ function inspectionShape(program: string, args: string[]): InspectionShape | nul
       return operands(0, /^-[benstuv]+$/) && paths.length ? { paths } : null;
     case "/usr/bin/head":
     case "/usr/bin/tail":
-      return operands(0, /^-(?:[qvr]+|\d{1,9})$/, ["-n", "-c"]) && paths.length ? { paths } : null;
+      return operands(0, /^-(?:[qvr]+|\d{1,9})$/, ["-n"]) && paths.length ? { paths } : null;
     case "/usr/bin/wc":
       return operands(0, /^-[clmw]+$/) && paths.length ? { paths } : null;
     case "/usr/bin/stat":
@@ -400,14 +388,15 @@ function inspectionShape(program: string, args: string[]): InspectionShape | nul
         case "config": allowed = rest.length === 2 && rest[0] === "--get" &&
           /^(?:user\.(?:name|email)|core\.(?:bare|repositoryformatversion|filemode|ignorecase)|remote\.[a-zA-Z0-9_-]+\.(?:url|fetch)|branch\.[a-zA-Z0-9_/-]+\.(?:remote|merge))$/.test(rest[1]!); break;
         case "ls-remote":
-          // Configured names are safe only with the HTTPS-only transport policy below.
+          // Literal destinations are limited to GitHub. Named remotes are resolved
+          // and checked against the shared public-network guard before any request.
           allowed = rest.length > 0 && rest.every((arg, n) =>
             n === rest.length - 1
-              ? /^(?:https:\/\/[a-zA-Z0-9.-]+(?::\d+)?\/[a-zA-Z0-9._~/%+-]+|[a-zA-Z0-9][a-zA-Z0-9_-]*)$/.test(arg)
+              ? /^(?:https:\/\/github\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+|[a-zA-Z0-9][a-zA-Z0-9_-]*)$/.test(arg)
               : /^(?:--heads|--tags|--refs|--symref|--exit-code)$/.test(arg));
           break;
       }
-      return allowed ? { paths, git: true } : null;
+      return allowed ? { paths, git: true, gitRemote: sub === "ls-remote" } : null;
     }
     default: return null;
   }
@@ -441,11 +430,13 @@ export class MacHost implements HostPort {
     options: {
       roots?: string[];
       home?: string;
+      stateRoot?: string;
       runner?: HostRunner;
       now?: () => number;
     } = {},
   ) {
     this.home = options.home ?? homedir();
+    this.stateRoot = options.stateRoot ? resolve(expand(options.stateRoot, this.home)) : null;
     this.runner = options.runner ?? runHostCommand;
     this.now = options.now ?? Date.now;
     this.roots = (options.roots ?? [join(this.home, "Workspace/Projects")]).map(
@@ -459,6 +450,7 @@ export class MacHost implements HostPort {
       throw new Error("host roots must be absolute paths without traversal");
   }
   private readonly home: string;
+  private readonly stateRoot: string | null;
   private readonly runner: HostRunner;
   private readonly now: () => number;
   private run(
@@ -478,6 +470,26 @@ export class MacHost implements HostPort {
       home: this.home,
       inspection,
     });
+  }
+  private statePaths(): string[] {
+    if (!this.stateRoot) return [];
+    try { return [...new Set([this.stateRoot, realpathSync(this.stateRoot)])]; }
+    catch { return [this.stateRoot]; }
+  }
+  private refuseStatePath(...paths: string[]) {
+    if (this.statePaths().some((root) => paths.some((path) => inside(path, root))))
+      throw new Error("Ghost state root is not available for inspection");
+  }
+  private homePrivatePaths(): string[] {
+    const paths = [this.home, realpathSync(this.home)].flatMap((home) => [
+      ...homeDotDirectories.map((name) => join(home, name)),
+      ...privateLibraryDirectories.map((name) => join(home, "Library", name)),
+      join(home, ".local/share/keyrings"),
+    ]);
+    return [...new Set(paths.flatMap((path) => {
+      try { return [path, realpathSync(path)]; }
+      catch { return [path]; }
+    }))];
   }
   resolve(path: string, text = false, projectsOnly = false): string {
     if (
@@ -505,6 +517,10 @@ export class MacHost implements HostPort {
     )
       throw new Error("path is outside allowed roots");
     const canonical = realpathSync(path);
+    this.refuseStatePath(path, canonical);
+    if (this.homePrivatePaths().some((root) => [path, canonical].some((candidate) =>
+      inside(candidate.toLowerCase(), root.toLowerCase()))))
+      throw new Error("private home app-data path refused");
     if (!bases.some((root) => inside(canonical, root.canonical)))
       throw new Error("symlink escapes allowed roots");
     for (const candidate of [path, canonical]) {
@@ -520,12 +536,16 @@ export class MacHost implements HostPort {
     }
     return canonical;
   }
-  private inspectionPath(path: string, base = this.home, gitMetadata = false): string {
+  private inspectionPath(path: string, base = this.home, gitMetadata = false, text = false): string {
     if (typeof path !== "string" || !path || path.length > 4096 || /[\0\r\n]/.test(path))
       throw new Error("invalid inspection path");
     const home = realpathSync(this.home);
     const raw = resolve(base, expand(path, this.home));
     const canonical = realpathSync(raw);
+    this.refuseStatePath(raw, canonical);
+    if (this.homePrivatePaths().some((root) => [raw, canonical].some((candidate) =>
+      inside(candidate.toLowerCase(), root.toLowerCase()))))
+      throw new Error("private home app-data path refused");
     for (const candidate of [raw, canonical]) {
       const root = inside(candidate, home) ? home :
         candidate === raw && inside(candidate, this.home) ? this.home : null;
@@ -533,7 +553,7 @@ export class MacHost implements HostPort {
       const parts = relative(root, candidate).split(sep);
       // Git may inspect its own metadata, never arbitrary .git text via cat.
       const guarded = gitMetadata ? parts.filter((part) => part !== ".git").join(sep) : parts.join(sep);
-      if (secretPath(guarded) || privateTextPath(guarded))
+      if (secretPath(guarded) || (text && privateTextPath(guarded)))
         throw new Error("secret or private inspection path refused");
     }
     return canonical;
@@ -572,13 +592,14 @@ export class MacHost implements HostPort {
       if (dir === home) return null;
     }
   }
-  private inspectCommand(input: HostCommand, shape: InspectionShape): HostCommand {
+  private prepareInspection(input: HostCommand, shape: InspectionShape): HostCommand {
     const cwd = this.inspectionPath(input.cwd);
     if (!statSync(cwd).isDirectory()) throw new Error("cwd must be a directory");
     const args = [...input.args];
     let base = cwd;
     for (const index of shape.paths) {
-      args[index] = this.inspectionPath(args[index]!, base);
+      args[index] = this.inspectionPath(args[index]!, base, false,
+        ["/bin/cat", "/usr/bin/head", "/usr/bin/tail", "/usr/bin/wc", "/usr/bin/plutil"].includes(input.program));
       if (shape.git) {
         if (!statSync(args[index]!).isDirectory()) throw new Error("git -C requires a directory");
         base = args[index]!;
@@ -586,6 +607,12 @@ export class MacHost implements HostPort {
           !statSync(args[index]!).isFile()) {
         throw new Error("inspection requires regular files");
       }
+    }
+    if (input.program === "/usr/bin/du") {
+      const roots = shape.paths.length ? shape.paths.map((index) => args[index]!) : [cwd];
+      if (roots.some((root) => [...this.statePaths(), ...this.homePrivatePaths()].some((path) =>
+        inside(path.toLowerCase(), root.toLowerCase()))))
+        throw new Error("recursive disk measurement includes private home app-data");
     }
     if (shape.git) this.gitDirectory(base);
     const executable = realpathSync(input.program);
@@ -976,7 +1003,7 @@ export class MacHost implements HostPort {
       warnings: warnings.slice(0, 30),
     };
   }
-  validateCommand(input: HostCommand): HostCommand {
+  private validateCommandInput(input: HostCommand) {
     for (const text of [input.title, input.reason, input.risk])
       if (
         typeof text !== "string" ||
@@ -995,8 +1022,9 @@ export class MacHost implements HostPort {
       input.args.join("").length > 12_000
     )
       throw new Error("invalid arguments or shell metacharacter snippet");
-    const inspection = inspectionShape(input.program, input.args);
-    if (inspection) return this.inspectCommand(input, inspection);
+  }
+  validateCommand(input: HostCommand): HostCommand {
+    this.validateCommandInput(input);
     const cwd = this.resolve(input.cwd, false, true);
     if (!statSync(cwd).isDirectory())
       throw new Error("cwd must be a directory");
@@ -1059,6 +1087,54 @@ export class MacHost implements HostPort {
       risk: input.risk,
     };
   }
+  private async prepareRemote(input: HostCommand, shape: InspectionShape, deadline: number): Promise<HostCommand | null> {
+    let base = input.cwd;
+    for (const index of shape.paths) base = input.args[index]!;
+    const repository = this.gitDirectory(base);
+    const prefix = repository ? ["--git-dir", repository.directory] : [];
+    const remote = input.args.at(-1)!;
+    const resolveRemote = (name: string) => this.run("/usr/bin/git",
+      [...prefix, "ls-remote", "--get-url", name],
+      Math.min(6000, Math.max(1, deadline - Date.now())), 4096, base, true);
+    const resolved = await resolveRemote(remote);
+    if (resolved.exitCode !== 0 || resolved.timedOut || resolved.truncated) return null;
+    const destination = resolved.stdout.trim();
+    let url: URL;
+    try {
+      url = new URL(destination);
+      if (url.protocol !== "https:" || url.username || url.password || url.hash ||
+          isIP(url.hostname.replace(/^\[|\]$/g, "")) !== 0) return null;
+      if (remote.startsWith("https://") && destination !== remote) return null;
+      await assertFetchableUrl(destination, "Git remote");
+    } catch { return null; }
+    // Git applies insteadOf and named-remote configuration again when given a URL.
+    // Require a fixed point so the checked destination is the one Git will contact.
+    const stable = await resolveRemote(destination);
+    if (stable.exitCode !== 0 || stable.timedOut || stable.truncated ||
+        stable.stdout.trim() !== destination) return null;
+    // Repository HTTP routing must not bypass the destination's DNS/public-host check.
+    const routing = await this.run("/usr/bin/git",
+      [...prefix, "config", "--includes", "--name-only", "--get-regexp", "^(http\\..*(proxy|curloptresolve)|remote\\..*\\.proxy)$"],
+      Math.min(6000, Math.max(1, deadline - Date.now())), 4096, base, true);
+    if (routing.timedOut || routing.truncated || routing.exitCode !== 1 || Date.now() >= deadline) return null;
+    return { ...input, args: [...input.args.slice(0, -1), destination] };
+  }
+  /** A refusal is not execution: the caller may offer the ordinary approval path. */
+  async inspect(input: HostCommand) {
+    this.validateCommandInput(input);
+    const shape = inspectionShape(input.program, input.args);
+    if (!shape) return null;
+    const deadline = Date.now() + 90_000;
+    let checked: HostCommand;
+    try { checked = this.prepareInspection(input, shape); }
+    catch { return null; }
+    if (shape.gitRemote) {
+      const remote = await this.prepareRemote(checked, shape, deadline);
+      if (!remote) return null;
+      checked = remote;
+    }
+    return this.runCommand(checked, shape, deadline);
+  }
   async executeCommand(input: HostCommand) {
     let checked: HostCommand;
     try {
@@ -1070,18 +1146,21 @@ export class MacHost implements HostPort {
         error instanceof Error ? error.message : String(error),
       );
     }
-    const inspection = inspectionShape(checked.program, checked.args);
-    const deadline = Date.now() + 90_000;
+    return this.runCommand(checked, null);
+  }
+  private async runCommand(checked: HostCommand, inspection: InspectionShape | null, deadline = Date.now() + 90_000) {
     let args = checked.args;
     if (inspection) {
       args = [...args];
-      const ignored = [...Object.keys(secretNames), ...Object.keys(privateNames),
-        ".env*", "*secret*", "*credential*", "*api_key*", "*apikey*", "*.pem", "*.key", "*.p12", "*.sqlite", "*.db"];
+      const ignored = [...Object.keys(secretNames),
+        ".env*", "*secret*", "*credential*", "*api_key*", "*apikey*", "*.pem", "*.key", "*.p12", "*.sqlite", "*.db", "*-wal", "*-shm", "*-journal"];
+      const privatePaths = [...this.statePaths(), ...this.homePrivatePaths()];
       if (checked.program === "/usr/bin/find") {
         const end = Math.max(...inspection.paths) + 1;
         const predicates = args.slice(end);
         args = ["-P", ...args.slice(0, end).filter((a) => a !== "-P"), "(",
           ...ignored.flatMap((name, index) => [...(index ? ["-o"] : []), "-iname", name]),
+          ...privatePaths.flatMap((path) => ["-o", "-ipath", path.replace(/[\\*?[\]]/g, "\\$&")]),
           ")", "-prune", "-o", "(", ...predicates, ...(!inspection.findAction ? ["-print"] : []), ")"];
       } else if (checked.program === "/usr/bin/du") {
         args.unshift("-P", ...ignored.flatMap((name) => [
@@ -1129,7 +1208,10 @@ export class MacHost implements HostPort {
       exitCode: result.exitCode,
       timedOut: result.timedOut,
       truncated: result.truncated,
-      output: redactHostText(result.output),
+      output: redactHostText(checked.program === "/bin/launchctl" && checked.args[0] === "print"
+        ? result.output.split("\n").filter((line) =>
+          /^\s*(?:pid|state|type|runs|last exit code|last terminating signal|active count)\s*=/.test(line)).join("\n")
+        : result.output),
     };
   }
 }

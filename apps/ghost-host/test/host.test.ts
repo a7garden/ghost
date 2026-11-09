@@ -44,7 +44,9 @@ function fixture(runner?: HostRunner) {
   mkdirSync(root);
   mkdirSync(join(home, "Library/Caches"), { recursive: true });
   mkdirSync(join(home, ".cache"));
-  return { home, root, host: new MacHost({ roots: [root], home, runner }) };
+  const stateRoot = join(home, "Library/Application Support/Ghost");
+  mkdirSync(stateRoot, { recursive: true });
+  return { home, root, stateRoot, host: new MacHost({ roots: [root], home, runner, stateRoot }) };
 }
 const ok = (output = "") => ({
   exitCode: 0,
@@ -135,6 +137,9 @@ class Probes implements HostPort {
   validateCommand(input: HostCommand) {
     return input;
   }
+  async inspect() {
+    return null;
+  }
   async executeCommand() {
     this.executions++;
     return ok("executed");
@@ -142,6 +147,170 @@ class Probes implements HostPort {
 }
 
 describe("guarded Mac host", () => {
+  test("Ghost state and SQLite sidecars are never inspected, including aliases and recursive probes", async () => {
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => { calls.push(input); return ok("must not read"); });
+    try {
+      for (const file of ["browser/key", "browser/home/.agent-browser/session", "ledger.db-wal", "pi.db-shm", "ledger.db-journal"]) {
+        const path = join(f.stateRoot, file);
+        mkdirSync(join(path, ".."), { recursive: true });
+        writeFileSync(path, "a".repeat(64));
+        expect(await f.host.inspect({ ...command(f.root), program: "/bin/cat", args: [path] })).toBeNull();
+      }
+      symlinkSync(f.stateRoot, join(f.root, "state-alias"));
+      expect(await f.host.inspect({
+        ...command(f.root), program: "/bin/cat", args: [join(f.root, "state-alias/browser/key")],
+      })).toBeNull();
+      const broad = new MacHost({ home: f.home, roots: [f.home], stateRoot: f.stateRoot });
+      await expect(broad.read(join(f.stateRoot, "browser/key"))).rejects.toThrow("state root");
+      await expect(broad.read(join(f.root, "state-alias/browser/key"))).rejects.toThrow("state root");
+      for (const name of ["ledger.db-wal", "pi.db-shm", "ledger.db-journal", "temporary-journal"]) {
+        const path = join(f.root, name);
+        writeFileSync(path, "sidecar");
+        expect(await f.host.inspect({ ...command(f.root), program: "/bin/cat", args: [path] })).toBeNull();
+        await expect(f.host.read(path)).rejects.toThrow("secret");
+      }
+      const storage = join(f.home, "storage");
+      mkdirSync(storage);
+      writeFileSync(join(storage, "key"), "key");
+      symlinkSync(storage, join(f.home, "state-link"));
+      const linked = new MacHost({ home: f.home, roots: [f.root], stateRoot: join(f.home, "state-link") });
+      expect(await linked.inspect({
+        ...command(f.root), program: "/bin/cat", args: [join(storage, "key")],
+      })).toBeNull();
+      expect(await f.host.inspect({ ...command(f.root), program: "/usr/bin/du", args: [f.home] })).toBeNull();
+      expect(calls).toHaveLength(0);
+      const found = await broad.inspect({ ...command(f.home), program: "/usr/bin/find", args: [f.home, "-type", "f"] });
+      expect(found?.exitCode).toBe(0);
+      expect(found?.output).not.toContain(f.stateRoot);
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("opaque hex and base64 secrets are redacted without hiding Git commit hashes", () => {
+    for (const secret of ["a".repeat(64), "0123456789abcdef".repeat(4), "abcdEFGHijklMNOP01234567+/".repeat(3)])
+      expect(redactHostText(`normal\n${secret}\nlast line`)).toBe("normal\n[REDACTED: sensitive text]\nlast line");
+    expect(redactHostText(`${"a".repeat(40)} commit summary`)).toBe(`${"a".repeat(40)} commit summary`);
+  });
+  test("home app-data guards do not reserve ordinary project directory names", async () => {
+    const f = fixture(async () => ok(""));
+    try {
+      for (const name of ["containers", "messages", "keys", "mail", "accounts", "safari", "chrome", ".config"]) {
+        const directory = join(f.root, "src", name);
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(join(directory, "example.tsx"), "export const value = 1;");
+        expect(await f.host.read(join(directory, "example.tsx"))).toMatchObject({ text: "export const value = 1;" });
+        expect((await f.host.list(directory)).entries).toHaveLength(1);
+        expect(f.host.validateCommand({ ...command(directory) }).cwd).toBe(directory);
+        expect(await f.host.inspect({ ...command(directory), program: "/bin/ls", args: [directory] })).not.toBeNull();
+      }
+      mkdirSync(join(f.root, "private"));
+      expect(f.host.validateCommand(command(join(f.root, "private"))).cwd).toBe(join(f.root, "private"));
+      for (const path of ["Library/Mail", "Library/Messages", "Library/Containers", ".config"]) {
+        const directory = join(f.home, path);
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(join(directory, "example.txt"), "private");
+        const broad = new MacHost({ home: f.home, roots: [f.home], stateRoot: f.stateRoot });
+        await expect(broad.read(join(directory, "example.txt"))).rejects.toThrow("private");
+        expect(await f.host.inspect({ ...command(f.root), program: "/bin/cat", args: [join(directory, "example.txt")] })).toBeNull();
+      }
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("metadata inspection allows private-text directories without permitting their contents", async () => {
+    const f = fixture(async (input) => ok(input.args.includes("config") ? "" : "metadata"));
+    try {
+      const directory = join(f.root, "notes");
+      mkdirSync(directory);
+      const file = join(directory, "entry.txt");
+      writeFileSync(file, "private");
+      for (const program of ["/bin/ls", "/usr/bin/du", "/usr/bin/find", "/usr/bin/stat", "/bin/df"])
+        expect(await f.host.inspect({ ...command(f.root), program, args: [directory] })).not.toBeNull();
+      expect(await f.host.inspect({
+        ...command(f.root), program: "/usr/bin/git", args: ["-C", directory, "status"],
+      })).not.toBeNull();
+      expect(await f.host.inspect({ ...command(f.root), program: "/bin/cat", args: [file] })).toBeNull();
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("canonical argv expansion retains the original inspection shape and find pruning", async () => {
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => { calls.push(input); return ok(""); });
+    try {
+      const deep = join(f.root, ...Array.from({ length: 8 }, () => "level".repeat(10)));
+      mkdirSync(deep, { recursive: true });
+      const result = await f.host.inspect({
+        ...command(deep), program: "/usr/bin/find", args: [...Array<string>(60).fill("."), "-name", "*.log", "-print"],
+      });
+      expect(result).not.toBeNull();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.args.join("").length).toBeGreaterThan(12_000);
+      expect(calls[0]!.inspection).toBe(true);
+      expect(calls[0]!.args).toContain("-prune");
+      expect(calls[0]!.args).toContain("*-wal");
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("launchctl print exposes status fields but no service environment or argument dump", async () => {
+    const f = fixture(async () => ok("gui/501/dev.infra = {\n\tstate = running\n\tpid = 123\n\tenvironment = {\n\t\tOWNER_TOKEN => short-secret-value\n\t}\n\targuments = {\n\t\t--password\n\t\tanother-secret\n\t}\n\tlast exit code = 0\n}\n"));
+    try {
+      const result = await f.host.inspect({
+        ...command(f.root), program: "/bin/launchctl", args: ["print", "gui/501/dev.infra"],
+      });
+      expect(result?.output).toContain("state = running");
+      expect(result?.output).toContain("pid = 123");
+      expect(result?.output).not.toContain("environment");
+      expect(result?.output).not.toContain("short-secret-value");
+      expect(result?.output).not.toContain("arguments");
+      expect(result?.output).not.toContain("another-secret");
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("ls-remote only reaches configured public HTTPS destinations or explicit GitHub repositories", async () => {
+    let destination = "https://github.com/owner/repo.git";
+    let rewrite = false;
+    let proxy = false;
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => {
+      calls.push(input);
+      if (input.args.includes("--get-url"))
+        return ok(`${rewrite && input.args.at(-1) === destination ? "https://127.0.0.1/private/repo" : destination}\n`);
+      if (input.args.includes("config") && input.args.includes("--name-only") && !input.args.includes("--null"))
+        return { ...ok(proxy ? "http.proxy\n" : ""), exitCode: proxy ? 0 : 1 };
+      return ok(input.args.includes("config") ? "" : "refs/heads/main\n");
+    });
+    try {
+      mkdirSync(join(f.root, ".git"));
+      writeFileSync(join(f.root, ".git/config"), '[remote "origin"]\n url = https://github.com/owner/repo.git\n');
+      for (const url of ["https://example.com/leak/repo", "https://127.0.0.1/private/repo", "https://localhost/private/repo"]) {
+        expect(await f.host.inspect({ ...command(f.root), program: "/usr/bin/git", args: ["ls-remote", url] })).toBeNull();
+      }
+      expect(calls).toHaveLength(0);
+      for (const url of ["https://127.0.0.1/repo", "https://[::1]/repo", "https://localhost/repo", "https://forge.local/repo", "https://forge.internal/repo", "https://token@github.com/owner/repo"]) {
+        destination = url;
+        expect(await f.host.inspect({ ...command(f.root), program: "/usr/bin/git", args: ["ls-remote", "origin"] })).toBeNull();
+      }
+      expect(calls.every((call) => call.args.includes("--get-url"))).toBe(true);
+      destination = "https://github.com/owner/repo.git";
+      rewrite = true;
+      expect(await f.host.inspect({ ...command(f.root), program: "/usr/bin/git", args: ["ls-remote", "origin"] })).toBeNull();
+      rewrite = false;
+      proxy = true;
+      expect(await f.host.inspect({ ...command(f.root), program: "/usr/bin/git", args: ["ls-remote", "origin"] })).toBeNull();
+      proxy = false;
+      const result = await f.host.inspect({ ...command(f.root), program: "/usr/bin/git", args: ["ls-remote", "origin"] });
+      expect(result?.output).toContain("refs/heads/main");
+      const requests = calls.filter((call) => call.args.includes("ls-remote") && !call.args.includes("--get-url"));
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.args.at(-1)).toBe(destination);
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
   test("inspection classification accepts only fixed programs and read-only argv shapes", () => {
     const allowed: [string, string[]][] = [
       ["/bin/ls", ["-lah", "~/Backup/mirror"]],
@@ -182,6 +351,11 @@ describe("guarded Mac host", () => {
       ["/bin/cat", ["log;touch result"]],
       ["/bin/ls", ["-R", "."]],
       ["/usr/bin/tail", ["-f", "log"]],
+      ["/usr/bin/head", ["-c", "52", "host.json"]],
+      ["/usr/bin/tail", ["-c", "52", "host.json"]],
+      ["/usr/bin/git", ["ls-remote", "https://example.com/exfil/repo"]],
+      ["/usr/bin/git", ["ls-remote", "https://127.0.0.1/private/repo"]],
+      ["/usr/bin/git", ["ls-remote", "https://localhost/private/repo"]],
       ["/usr/bin/file", ["-C", "."]],
       ["/usr/bin/stat", ["-L", "."]],
       ["/usr/bin/du", ["-L", "."]],
@@ -211,37 +385,36 @@ describe("guarded Mac host", () => {
         mkdirSync(join(f.home, directory), { recursive: true });
         const path = join(f.home, directory, "operations.log");
         writeFileSync(path, "healthy");
-        const checked = f.host.validateCommand({
+        const result = await f.host.inspect({
           ...command(f.root), program: "/bin/cat", cwd: join(f.home, directory), args: [path],
         });
-        const result = await f.host.executeCommand(checked);
-        expect(result.output).toBe("healthy\n[REDACTED: sensitive text]\n");
+        expect(result?.output).toBe("healthy\n[REDACTED: sensitive text]\n");
       }
       expect(calls).toHaveLength(4);
       expect(calls.every((call) => call.inspection && call.timeoutMs <= 90_000 && call.maxBytes === 24_000)).toBe(true);
       for (const sensitive of [
         ".ssh/id_ed25519", ".gnupg/pubring.kbx", ".aws/config", ".env.production",
         "Library/Keychains/login.keychain-db", "Library/Application Support/Google/Chrome/Default/Preferences",
-        "Library/Mail/inbox.txt", "Library/Messages/chat.txt", "state/secrets/provider.json", "state/vault/key",
+        "Library/Mail/inbox.txt", "Library/Messages/chat.txt", "state/secrets/provider.json", "Library/Application Support/Ghost/vault/key",
         "private/record.txt", "notes/note.txt", ".git/config", ".git-credentials",
       ]) {
         const path = join(f.home, sensitive);
         mkdirSync(join(path, ".."), { recursive: true });
         writeFileSync(path, "private");
-        expect(() => f.host.validateCommand({
+        expect(await f.host.inspect({
           ...command(f.root), program: "/bin/cat", args: [path],
-        })).toThrow("secret or private");
+        })).toBeNull();
       }
       writeFileSync(join(outside, "outside.log"), "outside");
       symlinkSync(join(outside, "outside.log"), join(f.root, "escape.log"));
       symlinkSync(join(f.home, ".env.production"), join(f.root, "innocent.log"));
       for (const path of [join(f.root, "escape.log"), join(f.root, "innocent.log")])
-        expect(() => f.host.validateCommand({
+        expect(await f.host.inspect({
           ...command(f.root), program: "/bin/cat", args: [path],
-        })).toThrow();
-      expect(() => f.host.validateCommand({
+        })).toBeNull();
+      expect(await f.host.inspect({
         ...command(f.root), program: "/bin/ls", args: [], cwd: outside,
-      })).toThrow("outside owner home");
+      })).toBeNull();
       expect(calls).toHaveLength(4);
     } finally {
       rmSync(f.home, { recursive: true, force: true });
@@ -256,14 +429,13 @@ describe("guarded Mac host", () => {
       writeFileSync(join(f.root, "Secrets", "hidden.log"), "hidden");
       writeFileSync(join(f.root, ".env.local"), "hidden");
       symlinkSync(join(f.root, "Secrets"), join(f.root, "linked"));
-      const checked = f.host.validateCommand({
+      const result = await f.host.inspect({
         ...command(f.root), program: "/usr/bin/find", args: [f.root, "-type", "f"],
       });
-      const result = await f.host.executeCommand(checked);
-      expect(result.exitCode).toBe(0);
-      expect(result.output).toContain("visible.log");
-      expect(result.output).not.toContain("hidden.log");
-      expect(result.output).not.toContain(".env.local");
+      expect(result?.exitCode).toBe(0);
+      expect(result?.output).toContain("visible.log");
+      expect(result?.output).not.toContain("hidden.log");
+      expect(result?.output).not.toContain(".env.local");
     } finally {
       rmSync(f.home, { recursive: true, force: true });
     }
@@ -284,28 +456,28 @@ describe("guarded Mac host", () => {
       appendFileSync(join(f.root, ".git/config"), `\n[filter "unsafe"]\n clean = /usr/bin/touch ${marker}\n process = /usr/bin/touch ${marker}\n required = true\n[core]\n fsmonitor = /usr/bin/touch ${marker}\n[diff]\n external = /usr/bin/touch ${marker}\n`);
       writeFileSync(join(f.root, "example.txt"), "after\n");
       for (const args of [["status", "--short"], ["diff", "--stat"], ["log", "-1", "--stat"]]) {
-        const checked = f.host.validateCommand({ ...command(f.root), program: "/usr/bin/git", args });
-        const result = await f.host.executeCommand(checked);
-        expect(result.exitCode).toBe(0);
+        const result = await f.host.inspect({ ...command(f.root), program: "/usr/bin/git", args });
+        expect(result?.exitCode).toBe(0);
         expect(existsSync(marker)).toBe(false);
       }
     } finally {
       rmSync(f.home, { recursive: true, force: true });
     }
   });
-  test("Git inspection checks chained -C and repository metadata symlinks", () => {
-    const f = fixture();
+  test("Git inspection checks chained -C and repository metadata symlinks", async () => {
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => { calls.push(input); return ok(""); });
     const outside = realpathSync(tempDir());
     try {
       mkdirSync(join(f.root, "child"));
-      const checked = f.host.validateCommand({
+      await f.host.inspect({
         ...command(f.home), program: "/usr/bin/git", args: ["-C", "projects", "-C", "child", "status"],
       });
-      expect(checked.args).toEqual(["-C", f.root, "-C", join(f.root, "child"), "status"]);
+      expect(calls.at(-1)?.args).toEqual(["-C", f.root, "-C", join(f.root, "child"), "status", "--ignore-submodules=all"]);
       symlinkSync(outside, join(f.root, ".git"));
-      expect(() => f.host.validateCommand({
+      expect(await f.host.inspect({
         ...command(f.root), program: "/usr/bin/git", args: ["status"],
-      })).toThrow("outside owner home");
+      })).toBeNull();
     } finally {
       rmSync(f.home, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
@@ -704,6 +876,34 @@ describe("guarded Mac host", () => {
 });
 
 describe("host command approval", () => {
+  test("inspection path refusals and byte-sliced reads fall through to owner approval", async () => {
+    const h = harness();
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => { calls.push(input); return ok("approved"); });
+    try {
+      const ghost = h.core.createGhost({ name: "Mac", persona: "", tools: ["host_command_propose"] });
+      const conversation = h.ledger.conversation(ghost.directConversationId);
+      h.ledger.setPiConversationId(conversation.id, "pi-host-fallback");
+      const tool = createHostTools(h.core, f.host).tools!.find((candidate) => candidate.name === "host_command_propose")!;
+      const invoke = tool.execute as unknown as (input: HostCommand, api: ToolExecutionApi) => Promise<unknown>;
+      const cases: [string, string[]][] = [
+        ["/bin/ls", ["/etc"]], ["/bin/cat", ["/etc/hosts"]],
+        ["/usr/bin/head", ["-c", "52", "/etc/hosts"]], ["/usr/bin/tail", ["-c", "52", "/etc/hosts"]],
+      ];
+      for (const [index, [program, args]] of cases.entries()) {
+        await invoke({ ...command(f.root), program, args }, {
+          conversationId: "pi-host-fallback", callId: `fallback-${index}`,
+        } as unknown as ToolExecutionApi);
+        expect(calls).toHaveLength(0);
+        const decision = h.ledger.pendingDecisions()[0]!;
+        expect(decision.kind).toBe("approve_effect");
+        await h.core.effects.resolveApproval(decision.effectId!, false);
+      }
+    } finally {
+      h.ledger.close();
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
   test("an existing command grant inspects without effects or decisions, while mutations still await approval", async () => {
     const h = harness();
     const calls: HostRun[] = [];

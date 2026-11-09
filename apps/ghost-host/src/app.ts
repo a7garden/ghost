@@ -125,7 +125,7 @@ export async function openApp(config: Config): Promise<App> {
     }));
     const documents = createDocuments(core);
     const skills = createSkills(config);
-    const host = config.mac ? new MacHost({ roots: config.mac.roots }) : null;
+    const host = config.mac ? new MacHost({ roots: config.mac.roots, stateRoot: config.root }) : null;
     const vault = (openedVault = createVault(config.root));
     const browser = (openedBrowser = createBrowser(config, { root: config.root }));
     const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config), browser, vault });
