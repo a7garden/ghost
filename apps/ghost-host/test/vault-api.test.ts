@@ -136,7 +136,7 @@ test("a paired device cannot answer a secure form outside the vault route, and l
   const h = fixture();
   await h.tool("vault_request", { kind: "secret", reason: "Need token" }, "device-form");
   const secureId = idFor(h.conversation.id, "device-form");
-  const device = { id: "paired-device", name: "Phone", pushEnabled: false, createdAt: Date.now(), lastSeenAt: null };
+  const device = { id: "paired-device", name: "Phone", pushEnabled: false, alerts: { mutedKinds: [], mutedGhostIds: [] }, createdAt: Date.now(), lastSeenAt: null };
   h.ledger.tx(() => h.ledger.insertDevice(device, hashSecret("device-token")));
   const requestId = idFor("device-answer", secureId);
   const response = await h.request("/api/commands", "POST", { requestId, command: { type: "decision.resolve", decisionId: secureId, outcome: "answer", answer: PASSWORD } }, "device-token");
