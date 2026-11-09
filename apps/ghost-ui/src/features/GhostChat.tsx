@@ -25,7 +25,7 @@ import { useTouch } from '../ui/adaptive';
  * the work it takes on branches off as threads (맡긴 일), shown where they started and
  * gathered behind the thread button. Older direct conversations stay readable there.
  */
-export function GhostChat({ ghost, state, conversationId, threadId, navigate }: {
+export function GhostChat({ ghost, state, conversationId, threadId, navigate, initialSpaceIds = [] }: {
   ghost: Ghost;
   state: State;
   /** The conversation on screen; null when this Ghost has none yet. */
@@ -33,6 +33,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
   /** A thread opened beside the conversation (`?thread=`). */
   threadId: string | null;
   navigate(path: string): void;
+  initialSpaceIds?: string[];
 }) {
   const { client } = useHost();
   const touch = useTouch();
@@ -98,7 +99,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
       </>}
       composer={<>
         <DecisionDeck state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread} docked/>
-        <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft} inputRef={inputRef}
+        <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft} inputRef={inputRef} initialSpaceIds={initialSpaceIds}
           onSent={() => setFollowKey(key => key + 1)} onStop={stop} onError={setError}/>
       </>}
       footer={<>

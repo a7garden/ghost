@@ -5,6 +5,9 @@ import { defineDoc } from "@earendil-works/pi-durable";
 export type OriginRecord = {
   origin: MessageOrigin;
   attachments: ArtifactRef[];
+  spaces?: { id: string; name: string }[];
+  /** Exact visible text; project context is only part of the model input. */
+  text?: string;
 };
 
 /**

@@ -21,6 +21,7 @@ import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
 import type { ToolSet } from "../src/tools/types.ts";
 import { MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
 import { ProviderCatalog } from "../src/integrations/provider-catalog.ts";
+import { createDocuments } from "../src/integrations/documents.ts";
 
 const echo = defineTool({
   name: "echo",
@@ -522,6 +523,64 @@ test("a Ghost answering a scheduled wake speaks first: one message notification,
   ledger.close();
 });
 
+test("project context reaches the model while original text and chips survive restart and project deletion", async () => {
+  const { core, engine, ledger, root, conversationId, faux } = await fixture();
+  let active = engine;
+  try {
+    ledger.tx(() => ledger.putSpace({ id: "project", name: "비행 기록", path: root, createdAt: 1 }));
+    let modelInput = "";
+    faux.setResponses([(context) => {
+      modelInput = String(context.messages.find(message => message.role === "user")?.content);
+      return fauxAssistantMessage(fauxText("확인했어요"));
+    }]);
+    const answered = nextMessage(active, conversationId, "assistant");
+    const settled = core.nextActivity(conversationId, core.activityCount(conversationId) + 1);
+    await core.sendMessage(conversationId, "계획을 알려줘", "project-message", [], ["project"]);
+    await answered;
+    await settled;
+    expect(modelInput).toContain('"name":"비행 기록","spaceId":"project"');
+    expect(modelInput).toContain("document_list and document_read");
+    expect(modelInput.endsWith("계획을 알려줘")).toBe(true);
+    ledger.tx(() => ledger.deleteSpace("project"));
+    await active.close();
+    const models = createModels();
+    models.setProvider(fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux 1" }] }).provider);
+    active = await createEngine({ core, storagePath: join(root, "pi.db"), tools, sandbox, models, log: () => {} });
+    core.attach(active);
+    const owner = (await active.page(conversationId, null, 50)).messages.find(message => message.origin === "owner");
+    await expect(core.sendMessage(conversationId, "계획을 알려줘", "project-message", [], ["project"])).resolves.toBeUndefined();
+    await expect(core.sendMessage(conversationId, "새 요청", "deleted-project-new-message", [], ["project"])).rejects.toThrow();
+    expect(owner?.text).toBe("계획을 알려줘");
+    expect(owner?.spaces).toEqual([{ id: "project", name: "비행 기록" }]);
+    expect((await active.page(conversationId, null, 50)).messages.filter(message => message.origin === "owner")).toHaveLength(1);
+  } finally {
+    core.stop(); await core.idle(); await active.close(); ledger.close(); rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a Ghost can propose in any project but still opens owner review without writing", async () => {
+  const { core, engine, ledger, root, conversationId, faux } = await fixture(
+    core => createToolSet({ core, sandbox, memory: null, documents: createDocuments(core), skills: null }),
+  );
+  try {
+    ledger.tx(() => ledger.putSpace({ id: "project", name: "Docs", path: root, createdAt: 1 }));
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("document_propose", { space_id: "project", title: "Plan", body: "Proposed body" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxText("검토를 기다려요")),
+    ]);
+    const called = nextMessage(engine, conversationId, "tool");
+    const settled = core.nextActivity(conversationId, core.activityCount(conversationId) + 1);
+    await core.sendMessage(conversationId, "계획을 제안해줘", "project-proposal");
+    const result = await called;
+    await settled;
+    expect(result.tool?.isError).toBe(false);
+    expect(result.text).toContain("awaiting owner review");
+    expect(ledger.pendingDecisions()).toContainEqual(expect.objectContaining({ kind: "document_review", state: "pending" }));
+    expect(await createDocuments(core).listPages("project", null)).toEqual([]);
+  } finally {
+    core.stop(); await core.idle(); await engine.close(); ledger.close(); rmSync(root, { recursive: true, force: true });
+  }
+});
 test("the transcript pages backwards", async () => {
   const { engine, conversationId, faux } = await fixture();
   faux.setResponses([fauxAssistantMessage(fauxText("hello there"))]);

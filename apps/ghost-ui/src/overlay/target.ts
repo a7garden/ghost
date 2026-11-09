@@ -18,3 +18,8 @@ export function pickConversation(state: State, ghost: Ghost, wanted?: string): s
   if (wanted && state.conversations.some(conversation => conversation.ghostId === ghost.id && conversation.kind === 'direct' && conversation.id === wanted)) return wanted;
   return ghost.directConversationId;
 }
+
+/** Keep visible chips and outgoing references in sync when a project is removed. */
+export function currentProjectIds(state: Pick<State, 'spaces'> | null, ids: readonly string[]): string[] {
+  return ids.filter(id => state?.spaces.some(space => space.id === id));
+}

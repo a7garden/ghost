@@ -28,7 +28,7 @@ const state = (overrides: Partial<State> = {}): State => ({
   decisions: [],
   notifications: [],
   schedules: [],
-  spaces: [{ id: 'sp1', name: '메모', path: '/v', grants: [], createdAt: 1 }],
+  spaces: [{ id: 'sp1', name: '메모', path: '/v', createdAt: 1 }],
   avatars: [],
   settings: { defaultModel: null, reviewModel: null, providers: [] },
   devices: [],

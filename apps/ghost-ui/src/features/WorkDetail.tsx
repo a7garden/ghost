@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ChevronRight, Pencil, Play, Square } from 'lucide-react';
 import { Button, Page, InlineError, Input, Textarea, FormField } from '../ui'
 import type { Effect, Message, State, Verdict, Work, WorkDetail as WorkDetailData } from '@ghost/contract';
-import { TERMINAL_WORK_STATES } from '@ghost/contract';
+import { TERMINAL_WORK_STATES, splitProjectBrief } from '@ghost/contract';
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph, type GlyphState } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
@@ -16,6 +16,7 @@ import { absoluteTime, relativeTime, useNow } from './time';
 import { useHost } from '../host/context';
 import { uiTerms } from '../uiText';
 import { executionLabel } from './activity-config';
+import { ProjectChips } from '../components/composer/ProjectMentions';
 
 const effectGlyph: Record<Effect['state'], GlyphState> = { pending: 'running', done: 'done', unknown: 'blocked', denied: 'cancelled' };
 const effectLabel: Record<Effect['state'], string> = { pending: '실행 중', done: '완료', unknown: '결과 미확정', denied: '거부됨' };
@@ -62,6 +63,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   if (!detail) return <Page><div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">읽는 중</span></div></Page>;
 
   const { work, children, effects, artifacts, ancestors, decisions } = detail;
+  const brief = splitProjectBrief(work.brief);
   const pending = decisions.filter(decision => decision.state === 'pending');
   const live = !TERMINAL_WORK_STATES.includes(work.state);
   const needsOwner = pending.length > 0;
@@ -114,7 +116,8 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
 
         <section className="work-section" aria-labelledby="work-brief">
           <h2 id="work-brief" className="section-title">할 일</h2>
-          <p className="work-brief">{work.brief}</p>
+          <ProjectChips spaces={brief.spaces}/>
+          <p className="work-brief">{brief.text}</p>
           {work.acceptance.criteria.trim() && <div className="work-criteria"><span>완료 기준</span><p>{work.acceptance.criteria}</p></div>}
           {work.execution && <div className="work-criteria"><span>실행 환경</span><p>{executionLabel[work.execution.kind]}{work.execution.kind === 'host' ? ` · ${work.execution.cwd}` : ''}</p></div>}
           {work.activityId && <Button variant="ghost" size="sm" onClick={() => navigate('/settings?tab=activities')}>자동 활동 열기</Button>}
@@ -210,6 +213,7 @@ function EditWorkModal({ work, onClose, onSaved }: { work: Work; onClose(): void
   const { client } = useHost();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const currentBrief = splitProjectBrief(work.brief);
   const submit = (data: FormData) => {
     setBusy(true); setError('');
     void (async () => {
@@ -220,7 +224,7 @@ function EditWorkModal({ work, onClose, onSaved }: { work: Work; onClose(): void
         await client.send({
           type: 'work.update', workId: work.id,
           ...(title && title !== work.title ? { title } : {}),
-          ...(brief && brief !== work.brief ? { brief } : {}),
+          ...(brief && brief !== currentBrief.text ? { brief } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : { deadlineAt: null }),
         });
         onSaved();
@@ -234,7 +238,8 @@ function EditWorkModal({ work, onClose, onSaved }: { work: Work; onClose(): void
   return <Modal title="맡긴 일 수정" onClose={() => { if (!busy) onClose(); }}>
     <form className="grid gap-4" onSubmit={e => { e.preventDefault(); submit(new FormData(e.currentTarget)); }}>
       <FormField label="제목">{control => <Input {...control} name="title" defaultValue={work.title} maxLength={256}/>}</FormField>
-      <FormField label="할 일">{control => <Textarea {...control} name="brief" defaultValue={work.brief} rows={6} maxLength={32768}/>}</FormField>
+      <ProjectChips spaces={currentBrief.spaces}/>
+      <FormField label="할 일">{control => <Textarea {...control} name="brief" defaultValue={currentBrief.text} rows={6} maxLength={32768}/>}</FormField>
       <FormField label="기한">{control => <Input {...control} type="datetime-local" name="deadline" defaultValue={deadlineValue}/>}</FormField>
       <p className="m-0 text-caption text-ink-2">저장하면 작업 대화에 변경 사항이 전달됩니다.</p>
       {error && <InlineError>{error}</InlineError>}

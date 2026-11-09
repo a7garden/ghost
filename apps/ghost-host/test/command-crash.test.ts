@@ -147,7 +147,7 @@ describe("API command crash atomicity", () => {
     mkdirSync(vault);
     const first = harness(path);
     const ghost = first.core.createGhost({ name: "Owner", persona: "" });
-    first.ledger.tx(() => first.ledger.putSpace({ id: "space", name: "Docs", path: vault, grants: [], createdAt: Date.now() }));
+    first.ledger.tx(() => first.ledger.putSpace({ id: "space", name: "Docs", path: vault, createdAt: Date.now() }));
     await first.core.idle();
     const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "document.save", spaceId: "space", title: "Once", body: "Durable\n", pageId: null, expectedHash: null } };
     // Permit the pending identity, fail only the final success receipt.
@@ -175,7 +175,7 @@ describe("API command crash atomicity", () => {
     mkdirSync(vault);
     const first = harness(path);
     const ghost = first.core.createGhost({ name: "Owner", persona: "" });
-    first.ledger.tx(() => first.ledger.putSpace({ id: "space", name: "Docs", path: vault, grants: [], createdAt: Date.now() }));
+    first.ledger.tx(() => first.ledger.putSpace({ id: "space", name: "Docs", path: vault, createdAt: Date.now() }));
     await first.core.idle();
     first.core.stop();
     first.ledger.close();
@@ -391,7 +391,7 @@ describe("API command crash atomicity", () => {
       const conversationId = ghost.directConversationId;
       ledger.tx(() => {
         ledger.putProvider({ id: "revoked-provider", kind: "openai", name: "Revoked", baseUrl: null, models: [] });
-        ledger.putSpace({ id: "owner-docs", name: "Docs", path: vault, grants: [], createdAt: Date.now() });
+        ledger.putSpace({ id: "owner-docs", name: "Docs", path: vault, createdAt: Date.now() });
       });
       secrets.put("revoked-provider", "must-be-revoked");
       core.effects.onApproved("host_command_propose", async () => { throw new Error("approval must not execute"); });
@@ -476,7 +476,7 @@ describe("API command crash atomicity", () => {
     const { core, ledger } = harness();
     core.createGhost({ name: "Owner", persona: "" });
     const vault = tempDir();
-    ledger.tx(() => ledger.putSpace({ id: "space", name: "Docs", path: vault, grants: [], createdAt: Date.now() }));
+    ledger.tx(() => ledger.putSpace({ id: "space", name: "Docs", path: vault, createdAt: Date.now() }));
     const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "document.save", spaceId: "space", title: "T", body: "Body", pageId: null, expectedHash: null } };
     const documents = createDocuments(core);
     const check = documents.check.bind(documents);

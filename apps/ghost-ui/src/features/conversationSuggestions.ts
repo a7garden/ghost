@@ -39,3 +39,10 @@ export function conversationStarters(persona: string): readonly { label: string;
 export function conversationSuggestions(persona: string): readonly string[] {
   return conversationStarters(persona).map(starter => starter.prompt);
 }
+
+/** A project token ends at the caret, not necessarily at the end of the draft. */
+export function projectMentionQuery(text: string, caret = text.length): { start: number; end: number; query: string } | null {
+  const before = text.slice(0, caret);
+  const match = /(?:^|\s)#([^\s#]*)$/.exec(before);
+  return match ? { start: caret - match[1].length - 1, end: caret, query: match[1].toLocaleLowerCase() } : null;
+}

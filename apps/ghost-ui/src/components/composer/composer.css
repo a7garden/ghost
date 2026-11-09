@@ -90,7 +90,8 @@
   position: absolute; z-index: 6; left: 8px; bottom: calc(100% + 8px); display: grid; width: min(340px, calc(100% - 16px)); max-height: 280px; gap: 1px; overflow-y: auto; padding: 5px;
   border-radius: var(--radius-lg); background: var(--ghost-raised); box-shadow: var(--shadow-overlay); animation: suggest-in 160ms var(--ease-enter) both;
 }
-.composer-suggest__item { display: flex; min-width: 0; align-items: center; gap: 10px; min-height: 38px; padding: 5px 10px 5px 6px; border-radius: var(--radius-control); color: var(--ghost-ink2); font: 500 var(--text-ui)/1.3 var(--font-sans); cursor: pointer; }
+.composer-suggest[data-below] { top: calc(100% + 8px); bottom: auto; }
+.composer-suggest__item { display: flex; min-width: 0; align-items: center; gap: 10px; min-height: 44px; padding: 5px 10px 5px 6px; border-radius: var(--radius-control); color: var(--ghost-ink2); font: 500 var(--text-ui)/1.3 var(--font-sans); cursor: pointer; }
 .composer-suggest__item[aria-selected="true"] { color: var(--ghost-ink); background: var(--ghost-hover2); }
 .composer-suggest__icon { display: grid; width: 26px; height: 26px; flex: none; place-items: center; border-radius: 50%; color: var(--ghost-ink2); background: var(--ghost-hover); }
 .composer-suggest__icon .dot-avatar { border-radius: 50%; }

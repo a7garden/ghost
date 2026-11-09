@@ -29,6 +29,17 @@ it('keeps the owner message literal instead of interpreting Markdown or HTML', (
   expect(html).not.toContain('<strong>');
 });
 
+it('shows project chips on the owner message without changing its text', () => {
+  const html = renderToStaticMarkup(createElement(TranscriptMessage, {
+    message: { id: 'm', conversationId: 'c', role: 'user', text: '계획을 알려줘', origin: 'owner', toolCalls: [], tool: null, attachments: [], spaces: [{ id: 'project', name: '비행 <기록>' }], createdAt: 1 },
+    speaker: () => '나',
+  }));
+  expect(html).toContain('계획을 알려줘');
+  expect(html).toContain('href="#/spaces/project"');
+  expect(html).toContain('비행 &lt;기록&gt;');
+  expect(html).not.toContain('document_list');
+});
+
 it('preserves a linked image destination without nesting anchors or loading the image', () => {
   const html = render('[![build](https://example.com/badge.svg)](https://example.com/build)');
   expect(html.match(/<a /g)).toHaveLength(1);

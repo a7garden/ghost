@@ -1,16 +1,14 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { ChevronRight, Folder, FolderPlus } from 'lucide-react';
+import { ChevronRight, Folder, FolderPlus, MessageCircle, BriefcaseBusiness } from 'lucide-react';
 import { Button, InlineError, Page, PageHeader } from '../ui'
 import type { PageSummary, Space } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { routeLabels } from '../uiText';
-import { toneFor, visibleGhosts } from './ghostState';
-import { DotAvatar } from '../components/DotAvatar';
-import { defaultSpaceGrants, noteSpaceEdit, spaceLastEdit } from './spacePages';
+import { noteSpaceEdit, spaceLastEdit } from './spacePages';
 import { useNow } from './time';
 import { Modal } from '../components/Modal';
-import { AccessRow, type AccessGhost } from '../components/projects/AccessRow';
+import { HandoffComposer } from '../components/HandoffComposer';
 import { DocumentIndex } from '../components/projects/DocumentIndex';
 import { HoldButton } from '../components/projects/HoldButton';
 import { ProjectCreate } from '../components/projects/ProjectCreate';
@@ -19,19 +17,20 @@ import './spaces.css';
 
 const PageEditorDrawer = lazy(() => import('./PageEditorDrawer'));
 
-/** 프로젝트(문서 공간): 목록·만들기·프로젝트 화면. 등록·권한·삭제는 space.*, 문서 저장은 document.save로 보낸다. */
-export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCreateClosed }: {
+/** 프로젝트(문서 공간): 목록·만들기·대화·문서. */
+export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCreateClosed, navigate }: {
   selectedSpace?: string;
   onSelectSpace?(id: string): void;
   /** Opens the creation canvas once, from the sidebar's 새 프로젝트. */
   createRequested?: boolean;
   /** Clears the request from the route so the same entry can open the canvas again. */
   onCreateClosed?(): void;
+  navigate(path: string): void;
 }) {
   const { store, client } = useHost();
   const { state } = useHostState(store);
   const spaces = state?.spaces ?? [];
-  const ghosts = visibleGhosts(state?.ghosts ?? []);
+  const ghosts = (state?.ghosts ?? []).filter(ghost => ghost.state === 'active' && ghost.deletedAt === null);
   const space = spaces.find(item => item.id === selectedSpace);
   const [creating, setCreating] = useState(false);
   const [armed, setArmed] = useState(false);
@@ -43,6 +42,7 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
   const [listError, setListError] = useState('');
   const [reload, setReload] = useState(0);
   const [open, setOpen] = useState<{ pageId: string | null }>();
+  const [handoff, setHandoff] = useState(false);
   const now = useNow();
   useEffect(() => { if (createRequested) setCreating(true); }, [createRequested]);
   useEffect(() => {
@@ -71,12 +71,11 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
   const closeCreate = () => { setCreating(false); onCreateClosed?.(); };
 
   if (creating) {
-    const roster = ghosts.map(ghost => ({ id: ghost.id, name: ghost.name }));
     return <Page width="reading">
       <PageHeader title="새 프로젝트"/>
-      <ProjectCreate ghosts={roster} busy={pending !== ''} defaultGrants={defaultSpaceGrants(ghosts)} onClose={closeCreate}
+      <ProjectCreate busy={pending !== ''} onClose={closeCreate}
         onCreate={async input => {
-          const saved = await client.send<{ spaceId: string }>({ type: 'space.create', name: input.name, path: input.path, grants: input.grants });
+          const saved = await client.send<{ spaceId: string }>({ type: 'space.create', name: input.name, path: input.path });
           setCreating(false);
           if (onSelectSpace) onSelectSpace(saved.spaceId); else onCreateClosed?.();
         }}/>
@@ -84,12 +83,7 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
   }
 
   if (space) {
-    /** Grants may point at Ghosts missing from the roster; keep them toggleable. */
-    const accessGhosts: AccessGhost[] = [
-      ...ghosts.map(ghost => ({ id: ghost.id, name: ghost.name })),
-      ...space.grants.filter(grant => !ghosts.some(ghost => ghost.id === grant.ghostId))
-        .map(grant => ({ id: grant.ghostId, name: '알 수 없는 Ghost' })),
-    ];
+    const main = ghosts.find(ghost => ghost.isDefault) ?? ghosts[0];
     const remove = async () => {
       const gone: Space = space;
       if (await run(() => client.send({ type: 'space.delete', spaceId: gone.id }))) {
@@ -101,12 +95,15 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
       <div className="grid gap-10">
         <ProjectHeader space={space} total={total} lastEditAt={spaceLastEdit(space.id)} now={now} disabled={pending !== ''}
           onRename={async name => { await client.send({ type: 'space.update', spaceId: space.id, name }); }}/>
-        <section className="grid gap-3" aria-label="Ghost 접근">
-          <h2 className="section-title">Ghost 접근</h2>
-          <AccessRow ghosts={accessGhosts} grants={space.grants} disabled={pending !== ''}
-            onChange={grants => void run(() => client.send({ type: 'space.update', spaceId: space.id, grants }))}/>
-          {error && <InlineError>{error}</InlineError>}
-        </section>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" className="min-h-11" disabled={!main} onClick={() => navigate(`/ghosts/${encodeURIComponent(main!.id)}?space=${encodeURIComponent(space.id)}`)}>
+            <MessageCircle size={16} aria-hidden="true"/>대화하기
+          </Button>
+          <Button type="button" variant="outline" className="min-h-11" disabled={!main} onClick={() => setHandoff(true)}>
+            <BriefcaseBusiness size={16} aria-hidden="true"/>맡기기
+          </Button>
+        </div>
+        {error && <InlineError>{error}</InlineError>}
         <DocumentIndex pages={pages} total={total} search={search} onSearch={setSearch} loading={pagesLoading} error={listError}
           onOpen={pageId => setOpen({ pageId })} onCreate={() => { setError(''); setOpen({ pageId: null }); }}/>
         <section className="place-end" aria-label="프로젝트 삭제">
@@ -121,6 +118,9 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
             </div>}
         </section>
       </div>
+      {handoff && <Modal title="맡기기" onClose={() => setHandoff(false)}>
+        <HandoffComposer ghosts={ghosts} navigate={navigate} initialSpaceIds={[space.id]} initialMode="work"/>
+      </Modal>}
       {open && <Suspense fallback={<Modal title={open.pageId ? '문서' : '새 문서'} onClose={() => setOpen(undefined)} drawer focusClose><p className="m-0 text-ui text-ink-2" role="status">편집기를 불러오는 중…</p></Modal>}>
         <PageEditorDrawer spaceId={space.id} pageId={open.pageId} onClose={() => setOpen(undefined)}
           onSaved={() => { noteSpaceEdit(space.id); setReload(value => value + 1); }}/>
@@ -138,9 +138,6 @@ export function SpacesView({ selectedSpace, onSelectSpace, createRequested, onCr
         <span className="project-row__copy">
           <span className="project-row__name">{item.name}</span>
           <span className="project-row__path">{item.path}</span>
-        </span>
-        <span className="project-row__stack">
-          {item.grants.map(grant => <DotAvatar key={grant.ghostId} profileId={grant.ghostId} tone={toneFor(grant.ghostId)} size={20}/>)}
         </span>
         <ChevronRight className="project-row__go" aria-hidden="true"/>
       </button>)}</div>

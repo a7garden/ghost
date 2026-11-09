@@ -34,6 +34,7 @@ export interface ComposerProps {
   onFiles?: (files: File[]) => void
   /** Runs before the composer's own keys; `preventDefault()` keeps Enter from sending (e.g. to pick a suggestion). */
   onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  onSelect?: (event: React.SyntheticEvent<HTMLTextAreaElement>) => void
   /** Combobox wiring for the text field while suggestions float above it. */
   inputAria?: Pick<React.AriaAttributes, "aria-expanded" | "aria-controls" | "aria-activedescendant" | "aria-autocomplete"> & { role?: "combobox" }
   /** Floats just above the composer: suggestions for what is being typed. */
@@ -65,6 +66,7 @@ export function Composer({
   trailing,
   onFiles,
   onKeyDown,
+  onSelect,
   inputAria,
   above,
   inputRef,
@@ -144,6 +146,7 @@ export function Composer({
           id={resolvedInputId}
           value={value}
           onChange={(event) => onValueChange(event.target.value)}
+          onSelect={onSelect}
           onKeyDown={(event) => {
             onKeyDown?.(event)
             if (event.defaultPrevented) return

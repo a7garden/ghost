@@ -24,16 +24,17 @@ it('offers the activity no tool the Ghost itself does not have', () => {
   expect(narrowed).toEqual(['web_search']);
 });
 
-it('matches selectable Work extensions, retaining browser and vault without direct-only proposals or documents', () => {
+it('matches selectable Work extensions, retaining documents, browser and vault without direct-only proposals', () => {
   const choices = activityToolChoices(GHOST_TOOLS);
   expect(choices).toEqual([
     'read', 'write', 'edit', 'bash', 'publish_artifact', 'delegate',
     'memory_search', 'memory_recall', 'memory_retain',
+    'document_spaces', 'document_list', 'document_read',
     'web_search', 'web_read', 'reach', 'skill_read',
     ...HOST_TOOLS, ...BROWSER_TOOLS, ...VAULT_TOOLS,
   ]);
   expect(intersectTools(['activity_propose', 'document_read', 'browser_open', 'vault_list'], GHOST_TOOLS))
-    .toEqual(['browser_open', 'vault_list']);
+    .toEqual(['document_read', 'browser_open', 'vault_list']);
 });
 
 it('keeps skipped reasons, exact run timestamps and self-check explanations in history', () => {

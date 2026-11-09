@@ -22,6 +22,8 @@ export const ATTACHMENT_MARKER = "\n\n<attachments>\n";
 export interface UserMeta {
   origin: MessageOrigin | null;
   attachments: ArtifactRef[];
+  spaces?: { id: string; name: string }[];
+  text?: string;
 }
 
 /** The text of a message body, whatever shape it has. */
@@ -90,8 +92,9 @@ export function toMessage(entry: EntryRecord, conversationId: string, userMeta: 
         ...base,
         role: "user",
         origin: userMeta?.origin ?? null,
-        text: cutAttachmentBlock(text),
+        text: userMeta?.text ?? cutAttachmentBlock(text),
         attachments: userMeta?.attachments ?? [],
+        ...(userMeta?.spaces?.length ? { spaces: userMeta.spaces } : {}),
         createdAt: message?.timestamp ?? 0,
       };
     }

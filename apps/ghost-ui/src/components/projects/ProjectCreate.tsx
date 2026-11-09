@@ -2,28 +2,22 @@ import { useEffect, useState } from 'react';
 import { Folder, FolderOpen, LoaderCircle } from 'lucide-react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { Button, InlineError } from '../../ui';
-import type { SpaceGrant } from '@ghost/contract';
 import { canPickFolder, pickFolder } from '../../host/folderPicker';
 import { pathCrumb, spaceNameFromPath } from '../../features/spacePages';
-import { AccessRow, type AccessGhost } from './AccessRow';
 
 /**
  * Creation starts from the folder: a large pick/drop target, the path it
- * fills, a name that follows the path's last segment until typed over, and
- * the Ghost access the project starts with.
+ * fills and a name that follows the folder's last segment until typed over.
  */
-export function ProjectCreate({ ghosts, busy, defaultGrants, onClose, onCreate }: {
-  ghosts: readonly AccessGhost[];
+export function ProjectCreate({ busy, onClose, onCreate }: {
   busy: boolean;
-  defaultGrants: SpaceGrant[];
   onClose(): void;
-  onCreate(input: { name: string; path: string; grants: SpaceGrant[] }): Promise<void>;
+  onCreate(input: { name: string; path: string }): Promise<void>;
 }) {
   const [path, setPath] = useState('');
   /** While the owner has not typed a name, it follows the folder's last segment. */
   const [named, setNamed] = useState(false);
   const [name, setName] = useState('');
-  const [grants, setGrants] = useState<SpaceGrant[]>(() => defaultGrants.map(grant => ({ ...grant })));
   const [picking, setPicking] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [fields, setFields] = useState<{ name?: string; path?: string }>({});
@@ -70,7 +64,7 @@ export function ProjectCreate({ ghosts, busy, defaultGrants, onClose, onCreate }
     if (next.name || next.path) return;
     setSaving(true); setError('');
     try {
-      await onCreate({ name: name.trim(), path: path.trim(), grants });
+      await onCreate({ name: name.trim(), path: path.trim() });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '프로젝트를 만들지 못했습니다.');
     } finally { setSaving(false); }
@@ -116,12 +110,6 @@ export function ProjectCreate({ ghosts, busy, defaultGrants, onClose, onCreate }
             onChange={event => { setName(event.target.value); setNamed(true); }}/>
         </span>
         {fields.name && <p className="pcreate__invalid" role="alert">{fields.name}</p>}
-      </div>
-      <div className="pcreate__field">
-        <span className="pcreate__label" id="pcreate-access">Ghost 접근</span>
-        <div role="group" aria-labelledby="pcreate-access">
-          <AccessRow ghosts={ghosts} grants={grants} disabled={locked} onChange={setGrants}/>
-        </div>
       </div>
     </div>
     {error && <InlineError>{error}</InlineError>}

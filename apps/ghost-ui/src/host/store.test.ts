@@ -74,7 +74,7 @@ describe('applyEvent', () => {
   });
 
   it('removes schedules, spaces, avatars and devices', () => {
-    let state = applyEvent(baseState(), event({ type: 'space', space: { id: 'sp1', name: '메모', path: '/v', grants: [], createdAt: 1 } }));
+    let state = applyEvent(baseState(), event({ type: 'space', space: { id: 'sp1', name: '메모', path: '/v', createdAt: 1 } }));
     state = applyEvent(state, event({ type: 'space.removed', id: 'sp1' }));
     expect(state.spaces).toEqual([]);
     state = applyEvent(state, event({ type: 'device', device: { id: 'dev1', name: 'iPhone', pushEnabled: true, alerts: { mutedKinds: [], mutedGhostIds: [] }, createdAt: 1, lastSeenAt: null } }));

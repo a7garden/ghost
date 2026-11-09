@@ -37,6 +37,7 @@ import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
 import { FallbackDoc, fallbackModels, fallbackReason } from "./fallback.ts";
 import { digestOf } from "../core/ids.ts";
+import { projectContext, splitProjectBrief } from "@ghost/contract";
 
 const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
@@ -186,7 +187,7 @@ class HostEngine implements Engine {
           if (work?.activityId && (!activity || !activity.tools.some((name) => name === tool.name))) continue;
         }
         if (tool.name.startsWith("activity_") && tool.name !== "activity_propose" && (conversation.kind !== "work" || !work?.activityId)) continue;
-        if (tool.name === "activity_propose" && conversation.kind !== "direct") continue;
+        if ((tool.name === "activity_propose" || tool.name === "document_propose") && conversation.kind !== "direct") continue;
         if (tool.name === "activity_read" && activity?.source.kind === "schedule") continue;
         if (tool.name === "activity_action" && (!activity || activity.policy.externalActions === "deny" || activityRun?.dryRun)) continue;
         if (tool.name === "activity_next_check" && (!activity?.policy.allowSelfCheck || activity.paused || activityRun?.dryRun)) continue;
@@ -252,6 +253,10 @@ class HostEngine implements Engine {
     // A duplicate admission must not reset an in-flight fallback or start another run.
     const existing = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, submission.requestId), ctx);
     if (existing) return;
+    const spaces = submission.spaceIds
+      ? submission.spaceIds.map(id => { const { name } = this.core.ledger.space(id); return { id, name }; })
+      : work ? splitProjectBrief(work.brief).spaces : [];
+    const context = submission.origin === "owner" ? projectContext(spaces) : "";
     state.aborted = false;
     let serving = model;
     if (!this.core.secrets.has(provider.id)) {
@@ -264,8 +269,8 @@ class HostEngine implements Engine {
     }
     // A new turn always starts at the primary, not the previous turn's serving model.
     if (!state.busy || !state.configured) await this.configure(state, { conversation, ghost, work }, serving);
-    const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [] };
-    const content = await renderUserContent(submission.text, meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
+    const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [], spaces, ...(context ? { text: submission.text } : {}) };
+    const content = await renderUserContent(context + submission.text, meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
     await this.recordOrigin(state, submission.requestId, meta);
     // The run starts a commit after the admission; the view stays attached until that
     // run settles, so core hears busy and idle with or without a watcher.

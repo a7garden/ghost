@@ -253,13 +253,13 @@ export class Core implements EngineEvents {
   }
 
   /** Submit an owner message; rejects when the engine refuses it (no model, no credential). */
-  sendMessage(conversationId: string, text: string, requestId: string, attachments: ArtifactRef[] = []): Promise<void> {
+  sendMessage(conversationId: string, text: string, requestId: string, attachments: ArtifactRef[] = [], spaceIds: string[] = []): Promise<void> {
     const conversation = this.ledger.conversation(conversationId);
     if (conversation.kind !== "direct") throw invalid("owner messages go to direct conversations; edit a Work to steer it");
     const ghost = this.ledger.ghost(conversation.ghostId);
     if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
     return this.run(`conversation:${conversationId}`, () =>
-      this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments }),
+      this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments, spaceIds }),
     );
   }
 

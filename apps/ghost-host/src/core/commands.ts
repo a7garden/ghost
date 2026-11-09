@@ -9,6 +9,7 @@ import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId, sha256 } from "./ids.ts";
 import { supportsAutomaticModels } from "../integrations/provider-catalog.ts";
 import { validateConnectionConfig } from "../integrations/activity-sources.ts";
+import { projectContext } from "@ghost/contract";
 
 export interface CommandContext {
   /** Origin a paired device should use, e.g. https://ghost.example.ts.net */
@@ -97,7 +98,7 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
   switch (command.type) {
     case "message.send":
       // Pi admission identity is distinct from the API mutation/receipt transaction.
-      await core.sendMessage(command.conversationId, command.text, requestId, command.attachments ?? []);
+      await core.sendMessage(command.conversationId, command.text, requestId, command.attachments ?? [], command.spaceIds ?? []);
       return {};
     case "message.cancel":
       await core.effects.cancelMessage(command.conversationId, requestId);
@@ -283,7 +284,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       const work = core.works.createRoot({
         ghostId: ghost.id,
         title: command.title,
-        brief: command.brief,
+        brief: projectContext((command.spaceIds ?? []).map(id => ledger.space(id))) + command.brief,
         acceptance: command.acceptance,
         deadlineAt: command.deadlineAt ?? null,
         originConversationId: command.originConversationId ?? ghost.directConversationId,
@@ -398,26 +399,21 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
 
     case "space.create": {
       if (!isAbsolute(command.path) || !existsSync(command.path) || !statSync(command.path).isDirectory()) throw invalid("the space path must be an existing absolute directory");
-      for (const grant of command.grants ?? []) ledger.ghost(grant.ghostId);
-      const space: Space = { id: newId(), name: command.name, path: command.path, grants: command.grants ?? [], createdAt: Date.now() };
+      const space: Space = { id: newId(), name: command.name, path: command.path, createdAt: Date.now() };
       ledger.tx(() => ledger.putSpace(space));
-      refreshGrantees(core, space.grants);
       return { spaceId: space.id };
     }
 
     case "space.update": {
       const space = ledger.space(command.spaceId);
-      for (const grant of command.grants ?? []) ledger.ghost(grant.ghostId);
-      const next = { ...space, name: command.name ?? space.name, grants: command.grants ?? space.grants };
+      const next = { ...space, name: command.name ?? space.name };
       ledger.tx(() => ledger.putSpace(next));
-      refreshGrantees(core, [...space.grants, ...next.grants]);
       return {};
     }
 
     case "space.delete": {
       const space = ledger.space(command.spaceId);
       ledger.tx(() => ledger.deleteSpace(space.id));
-      refreshGrantees(core, space.grants);
       return {};
     }
 
@@ -485,9 +481,6 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
   throw new CommandError("invalid", `unknown command ${(exhaustive as Command).type}`);
 }
 
-function refreshGrantees(core: Core, grants: { ghostId: string }[]) {
-  for (const ghostId of new Set(grants.map((grant) => grant.ghostId))) core.refreshGhost(ghostId);
-}
 
 /** One editable aspect of a Ghost; owner-only hostExecution is never passed by model tools. */
 export interface GhostPatch {
@@ -540,7 +533,7 @@ const LIVE_WORK_STATES = ["queued", "running", "waiting", "verifying", "blocked"
 
 /**
  * Remove a retired Ghost from every list. Its row stays as a tombstone (`deletedAt`) so past Works,
- * conversations and effects keep their assignee; its schedules and Space grants naming it go away.
+ * conversations and effects keep their assignee; its schedules go away.
  */
 export function deleteGhost(core: Core, ghostId: string): void {
   const { ledger } = core;
@@ -557,10 +550,6 @@ export function deleteGhost(core: Core, ghostId: string): void {
   const now = Date.now();
   ledger.tx(() => {
     for (const schedule of ledger.schedules()) if (schedule.ghostId === ghost.id) ledger.deleteSchedule(schedule.id);
-    for (const space of ledger.spaces()) {
-      const grants = space.grants.filter((grant) => grant.ghostId !== ghost.id);
-      if (grants.length !== space.grants.length) ledger.putSpace({ ...space, grants });
-    }
     ledger.putGhost({ ...ghost, deletedAt: now, updatedAt: now });
   });
   // A retired Ghost can still be answering a direct message; deletion ends that run.
