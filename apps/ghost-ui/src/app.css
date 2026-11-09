@@ -165,6 +165,17 @@ body {
 .decision__document h4 { margin: 0; font-size: var(--text-body); font-weight: 650; }
 .decision__document-body { max-height: 24rem; overflow-y: auto; font-size: var(--text-ui); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 
+.decision__handoff { display: grid; gap: 6px; padding: 14px 16px; border-radius: var(--radius-card); background: var(--ghost-inset); }
+.decision__handoff-note { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--ghost-ink2); font-size: var(--text-ui); }
+.decision__handoff-note svg { flex: none; color: var(--ghost-ink3); }
+.decision__handoff-url { margin: 0; color: var(--ghost-ink3); font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.decision__secure { display: grid; gap: 12px; padding: 16px; border-radius: var(--radius-card); background: var(--ghost-inset); }
+.decision__secure-origin { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--ghost-ink3); font: 500 12px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+.decision__secure-origin svg { flex: none; }
+.decision__secure-fields { display: grid; gap: 12px; }
+.decision__secure-save { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--ghost-ink); font-size: var(--text-ui); font-weight: 500; cursor: pointer; }
+.decision__secure-save small { width: 100%; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 400; }
+
 .receipt { display: grid; gap: 14px; padding: 16px 18px; border-radius: var(--radius-card); background: var(--ghost-inset); background-image: radial-gradient(circle at 1px 1px, var(--ghost-line) 1px, transparent 0); background-size: 14px 14px; }
 .receipt__body { max-height: 22rem; overflow-y: auto; }
 .receipt__files { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -473,5 +484,12 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .timeline > li[data-state="unknown"] .timeline__meta > span { color: var(--ghost-amber-ink); }
 .timeline__result summary { width: fit-content; color: var(--ghost-ink3); font-size: var(--text-micro); cursor: pointer; }
 .timeline__result pre { max-height: 200px; margin: 6px 0 0; overflow: auto; padding: 8px 10px; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: var(--ghost-inset); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Vault ------------------------------------------------------------------- */
+.vault-gen { display: flex; align-items: center; gap: 8px; }
+.vault-gen input { flex: 1; min-width: 0; }
+.vault-grants { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 0; border: 0; }
+.vault-grants legend { padding: 0; color: var(--ghost-ink2); font-size: var(--text-ui); font-weight: 550; }
+.vault-grant { display: inline-flex; align-items: center; gap: 7px; color: var(--ghost-ink); font-size: var(--text-ui); cursor: pointer; }
 
 }

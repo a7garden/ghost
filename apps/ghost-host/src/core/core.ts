@@ -10,15 +10,18 @@ import { Schedules } from "./schedules.ts";
 import { isTerminal, Works } from "./works.ts";
 import { ProviderCatalog } from "../integrations/provider-catalog.ts";
 import { CodexCatalog } from "../integrations/codex-catalog.ts";
+import { Activities } from "./activities.ts";
+import type { ActivitySourcePort } from "../integrations/activity-sources.ts";
 
 export interface CoreDeps {
   ledger: Ledger;
   artifacts: ArtifactStore;
   /** Sandbox control; `stageInputs` copies a settled child's artifacts into its parent's workspace; `release` frees a settled Work's container. */
-  sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release">>;
+  sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release" | "workspacePath">>;
   secrets: Secrets;
   catalog?: ProviderCatalog;
   codexCachePath?: string;
+  activitySources?: ActivitySourcePort;
   log?: (message: string, detail?: unknown) => void;
 }
 
@@ -30,7 +33,7 @@ export interface CoreDeps {
 export class Core implements EngineEvents {
   readonly ledger: Ledger;
   readonly artifacts: ArtifactStore;
-  readonly sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release">>;
+  readonly sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release" | "workspacePath">>;
   readonly secrets: Secrets;
   readonly catalog: ProviderCatalog;
   readonly codexCatalog: CodexCatalog;
@@ -38,10 +41,12 @@ export class Core implements EngineEvents {
   readonly effects: Effects;
   readonly decisions: Decisions;
   readonly schedules: Schedules;
+  readonly activities: Activities;
+  readonly activitySources: ActivitySourcePort | null;
   readonly log: (message: string, detail?: unknown) => void;
   private engineRef: Engine | null = null;
   private readonly lanes = new Map<string, Promise<void>>();
-  private readonly unsubscribeGhostEvents: () => void;
+  private readonly unsubscribeLedgerEvents: () => void;
 
   constructor(deps: CoreDeps) {
     this.ledger = deps.ledger;
@@ -60,10 +65,37 @@ export class Core implements EngineEvents {
     this.effects = new Effects(this);
     this.decisions = new Decisions(this);
     this.schedules = new Schedules(this);
-    // Every Ghost write (create, update, retire, delete) re-opens the work conversations of
-    // Ghosts that hold `delegate`, so the roster in their instructions stays true.
-    this.unsubscribeGhostEvents = this.ledger.subscribe((event) => {
-      if (event.data.type === "ghost") this.refreshRosters();
+    this.activitySources = deps.activitySources ?? null;
+    this.activities = new Activities(this, this.activitySources);
+    const grants = new Map(this.ledger.ghosts().map((ghost) => [ghost.id, ghost]));
+    this.unsubscribeLedgerEvents = this.ledger.subscribe((event) => {
+      if (event.data.type === "work") {
+        const work = event.data.work;
+        if (work.execution?.kind === "host" && isTerminal(work) && this.sandbox.release) {
+          // Start cancellation now, not behind a Work lane that may itself be awaiting PC I/O.
+          const released = this.sandbox.release(work);
+          void this.lane(`execution:${work.id}`, () => released);
+        }
+        return;
+      }
+      if (event.data.type !== "ghost") return;
+      const ghost = event.data.ghost;
+      const previous = grants.get(ghost.id);
+      grants.set(ghost.id, ghost);
+      if (previous) {
+        const revokedPC = previous.hostExecution && !ghost.hostExecution;
+        const removedTools = previous.tools.filter((tool) => !ghost.tools.includes(tool));
+        for (const work of this.ledger.worksInState("queued", "running", "waiting", "verifying", "blocked")) {
+          if (work.ghostId !== ghost.id) continue;
+          const revokedTool = removedTools.some((tool) => !work.toolScope || work.toolScope.includes(tool));
+          const revokedExecution = revokedPC && work.execution?.kind === "host";
+          if (revokedExecution || revokedTool || ghost.deletedAt !== null) {
+            this.works.cancel(work.id, revokedExecution ? "owner revoked direct PC execution" : "owner revoked Work tool authority");
+          }
+        }
+      }
+      // Keep delegation rosters true after every Ghost write, including creates and retirement.
+      this.refreshRosters();
     });
   }
 
@@ -123,8 +155,9 @@ export class Core implements EngineEvents {
   }
 
   stop() {
-    this.unsubscribeGhostEvents();
+    this.unsubscribeLedgerEvents();
     this.schedules.stop();
+    this.activities.stop();
   }
 
   // Engine events
@@ -141,7 +174,7 @@ export class Core implements EngineEvents {
   // Ghosts and conversations
 
   /** Create a Ghost with its main direct conversation. New Ghosts default to every selectable tool except host tools. */
-  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "model" | "look" | "isDefault" | "tools" | "fallbacks" | "skills">>): Ghost {
+  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "model" | "look" | "isDefault" | "tools" | "fallbacks" | "skills" | "hostExecution">>): Ghost {
     const now = Date.now();
     const id = newId();
     const conversationId = newId();
@@ -156,6 +189,7 @@ export class Core implements EngineEvents {
       tools: input.tools ?? [...DEFAULT_GHOST_TOOLS],
       fallbacks: input.fallbacks ?? [],
       skills: input.skills ?? [],
+      hostExecution: input.hostExecution ?? false,
       deletedAt: null,
       directConversationId: conversationId,
       createdAt: now,

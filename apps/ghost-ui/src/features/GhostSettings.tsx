@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { GHOST_TOOLS, HOST_TOOLS, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
-import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow } from '../ui';
+import { BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { DotAvatar } from '../components/DotAvatar';
@@ -12,32 +12,41 @@ import { usableProviders } from '../pets/ModelPicker';
 import { uiTerms } from '../uiText';
 import './ghost-settings.css';
 
-const toolLabels: Record<GhostTool, string> = {
+export const toolLabels: Record<GhostTool, string> = {
   work_create: '일 만들기', work_list: '일 목록', work_inspect: '일 자세히', work_update: '일 고치기', work_cancel: '일 취소',
   schedule_create: '반복 만들기', schedule_list: '반복 보기', schedule_cancel: '반복 취소',
-  ghost_list: 'Ghost 목록', read: '파일 읽기', write: '파일 쓰기', edit: '파일 고치기', bash: '명령 실행',
+  ghost_list: 'Ghost 목록', activity_propose: '활동 제안', read: '파일 읽기', write: '파일 쓰기', edit: '파일 고치기', bash: '명령 실행',
   publish_artifact: '결과물 공유', delegate: '다른 Ghost에게 맡기기',
   memory_search: '기억 검색', memory_recall: '기억 불러오기', memory_retain: '기억 저장',
   document_spaces: '문서 공간', document_list: '문서 목록', document_read: '문서 읽기', document_propose: '문서 수정 제안',
   web_search: '웹 검색', web_read: '웹 읽기', reach: '외부 읽기', skill_read: '스킬 읽기',
   host_status: 'Mac 상태', host_services: 'Mac 서비스', host_disk_scan: 'Mac 디스크 검색', host_disk_usage: 'Mac 디스크 사용량',
   host_list: 'Mac 파일 목록', host_read: 'Mac 파일 읽기', host_nodes: 'Tailscale 노드', host_command_propose: 'Mac 명령 제안',
+  browser_open: '브라우저 열기', browser_snapshot: '브라우저 구조 읽기', browser_screenshot: '브라우저 캡처', browser_read: '브라우저 읽기',
+  browser_click: '브라우저 클릭', browser_fill: '브라우저 채우기', browser_type: '브라우저 입력', browser_press: '브라우저 키 누르기',
+  browser_select: '브라우저 선택', browser_check: '브라우저 체크', browser_scroll: '브라우저 스크롤', browser_navigate: '브라우저 이동',
+  browser_tabs: '브라우저 탭', browser_wait: '브라우저 대기', browser_upload: '브라우저 올리기', browser_download: '브라우저 내려받기',
+  browser_propose: '브라우저 클릭 제안', browser_handoff: '브라우저 넘겨주기', browser_fill_secret: '브라우저 금고 채우기', browser_close: '브라우저 닫기',
+  vault_list: '금고 목록', vault_request: '금고 저장 요청', vault_generate_login: '금고 로그인 만들기',
 };
 
-/** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. */
-const toolGroups: readonly { title: string; tools: readonly GhostTool[]; privileged?: boolean }[] = [
+/** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. Exported for the coverage test. */
+export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; privileged?: boolean }[] = [
   { title: '맡긴 일', tools: ['work_create', 'work_list', 'work_inspect', 'work_update', 'work_cancel'] },
   { title: '협업', tools: ['delegate', 'ghost_list', 'publish_artifact'] },
   { title: '파일과 명령', tools: ['read', 'write', 'edit', 'bash'] },
   { title: '웹', tools: ['web_search', 'web_read', 'reach'] },
+  { title: '브라우저', tools: [...BROWSER_TOOLS] },
+  { title: '금고', tools: [...VAULT_TOOLS] },
   { title: '스킬', tools: ['skill_read'] },
   { title: '기억', tools: ['memory_search', 'memory_recall', 'memory_retain'] },
   { title: '문서', tools: ['document_spaces', 'document_list', 'document_read', 'document_propose'] },
   { title: '반복 작업', tools: ['schedule_create', 'schedule_list', 'schedule_cancel'] },
+  { title: '자동 활동', tools: ['activity_propose'] },
   { title: 'Mac', tools: [...HOST_TOOLS], privileged: true },
 ];
 /** 대화 종류에 따라 항상 쓰는 도구. 선택 목록에 없고 끌 수 없다. */
-const alwaysTools = ['소유자에게 묻기', '일 완료 보고', '일 상태 보고', '결과물 읽기', '실행 기록 보기', '검토 판정'];
+const alwaysTools = ['소유자에게 묻기', '위임한 Ghost에게 묻기', '자식 일에 답하기', '일 완료 보고', '일 상태 보고', '결과물 읽기', '실행 기록 보기', '관측 근거 읽기', '검토 판정'];
 const states: { value: GhostState; label: string }[] = [{ value: 'active', label: '활성' }, { value: 'paused', label: '일시정지' }, { value: 'retired', label: '은퇴' }];
 
 /**
@@ -158,7 +167,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
   const [deleting, setDeleting] = useState(false);
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
   const sandbox = state?.sandboxes.find(item => item.ghostId === ghost.id);
-  const update = (patch: Partial<Pick<Ghost, 'name' | 'persona' | 'state' | 'tools' | 'fallbacks' | 'skills'>> & { model?: ModelRef | null }) =>
+  const update = (patch: Partial<Pick<Ghost, 'name' | 'persona' | 'state' | 'tools' | 'fallbacks' | 'skills' | 'hostExecution'>> & { model?: ModelRef | null }) =>
     save({ type: 'ghost.update', ghostId: ghost.id, ...patch });
   useEffect(() => {
     let alive = true;
@@ -195,6 +204,10 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
           <Crown aria-hidden="true"/>메인으로 지정
         </button>
       </SettingsRow>}
+      <SettingsRow label="PC 직접 실행" description="이 Ghost가 샌드박스 없이 이 Mac의 파일과 셸 명령을 직접 실행합니다. Mac 전체와 네트워크에 영향을 줄 수 있고, 활동의 PR 댓글·메일 회신 승인 설정으로 제한되지 않습니다. 허용을 끄면 진행 중인 PC 작업도 중지됩니다.">
+        <Switch checked={ghost.hostExecution === true} disabled={saving} aria-label="PC 직접 실행 허용"
+          onCheckedChange={next => void update({ hostExecution: next })}/>
+      </SettingsRow>
       {canDeleteGhost(ghost) && <SettingsRow label="Ghost 삭제" description="목록에서 제거합니다. 지난 맡긴 일의 기록은 남습니다.">
         <button type="button" className="sandbox-strip__action" data-danger onClick={() => setDeleting(true)}><Trash2 aria-hidden="true"/>삭제</button>
       </SettingsRow>}

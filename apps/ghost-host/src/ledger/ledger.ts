@@ -1,8 +1,12 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type {
   Acceptance,
+  Activity,
+  ActivityRun,
+  Connection,
   Avatar,
   Conversation,
   Decision,
@@ -20,6 +24,7 @@ import type {
   Space,
   Work,
   ArtifactRef,
+  Verdict,
 } from "@ghost/contract";
 import { MIGRATIONS } from "./schema.ts";
 
@@ -34,6 +39,25 @@ const bool = (value: unknown) => value === 1 || value === true;
 /** Days of change events kept for reconnecting clients. */
 const EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Internal collaboration records; clients observe the associated Work change event. */
+export interface WorkQuestion {
+  id: string;
+  workId: string;
+  parentWorkId: string;
+  question: string;
+  answer: string | null;
+  state: "pending" | "answered" | "cancelled";
+  createdAt: number;
+  answeredAt: number | null;
+  submittedAt: number | null;
+  answerSubmittedAt: number | null;
+  nudgeCount: number;
+  cancellationReason: string | null;
+  cancellationSubmittedAt: number | null;
+}
+
+export type ReviseLesson = Pick<Verdict, "source" | "reasons" | "evidence" | "scope" | "at">;
 
 export class NotFound extends Error {
   constructor(what: string) {
@@ -192,19 +216,123 @@ export class Ledger {
     if (ghost.isDefault) this.db.query("UPDATE ghosts SET is_default = 0 WHERE is_default = 1 AND id <> ?").run(ghost.id);
     this.db
       .query(
-        `INSERT INTO ghosts (id, name, persona, look, model, is_default, state, tools, fallbacks, skills, deleted_at, direct_conversation_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO ghosts (id, name, persona, look, model, is_default, state, tools, fallbacks, skills, deleted_at, direct_conversation_id, created_at, updated_at, host_execution)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, persona = excluded.persona, look = excluded.look,
            model = excluded.model, is_default = excluded.is_default, state = excluded.state, tools = excluded.tools,
            fallbacks = excluded.fallbacks, skills = excluded.skills, deleted_at = excluded.deleted_at,
-           direct_conversation_id = excluded.direct_conversation_id, updated_at = excluded.updated_at`,
+           direct_conversation_id = excluded.direct_conversation_id, updated_at = excluded.updated_at, host_execution = excluded.host_execution`,
       )
       .run(
         ghost.id, ghost.name, ghost.persona, json(ghost.look), json(ghost.model), ghost.isDefault ? 1 : 0, ghost.state, json(ghost.tools),
         json(ghost.fallbacks), json(ghost.skills), ghost.deletedAt, ghost.directConversationId, ghost.createdAt, ghost.updatedAt,
+        ghost.hostExecution ? 1 : 0,
       );
     this.emit({ type: "ghost", ghost });
   }
+
+  // Activities. Work rows remain the execution authority.
+
+  activities(includeDeleted = false): Activity[] {
+    const rows = this.db.query("SELECT data FROM activities ORDER BY rowid").all() as Row[];
+    return rows.map((row) => parseJson<Activity>(row.data)).filter((activity) => includeDeleted || activity.deletedAt === null);
+  }
+
+  findActivity(id: string): Activity | null {
+    const row = this.db.query("SELECT data FROM activities WHERE id = ?").get(id) as Row | null;
+    return row ? parseJson<Activity>(row.data) : null;
+  }
+
+  activity(id: string): Activity {
+    const activity = this.findActivity(id);
+    if (!activity) throw new NotFound(`activity ${id}`);
+    return activity;
+  }
+
+  putActivity(activity: Activity) {
+    const previous = this.findActivity(activity.id);
+    this.db.query("INSERT INTO activities (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
+      .run(activity.id, JSON.stringify(activity));
+    this.emit({ type: "activity", activity });
+    if (previous && previous.revision !== activity.revision) {
+      for (const run of this.activityRuns(activity.id)) {
+        if (run.nextCheckAt !== null) this.putActivityRun({ ...run, nextCheckAt: null, nextCheckReason: null });
+      }
+    }
+  }
+
+  connections(): Connection[] {
+    return (this.db.query("SELECT data FROM connections ORDER BY rowid").all() as Row[]).map((row) => parseJson<Connection>(row.data));
+  }
+
+  findConnection(id: string): Connection | null {
+    const row = this.db.query("SELECT data FROM connections WHERE id = ?").get(id) as Row | null;
+    return row ? parseJson<Connection>(row.data) : null;
+  }
+
+  connection(id: string): Connection {
+    const connection = this.findConnection(id);
+    if (!connection) throw new NotFound(`connection ${id}`);
+    return connection;
+  }
+
+  putConnection(connection: Connection) {
+    const previous = this.findConnection(connection.id);
+    const sourceChanged = !previous || previous.credentialVersion !== connection.credentialVersion || !isDeepStrictEqual(previous.config, connection.config);
+    const authorityChanged = sourceChanged || (previous?.hasCredential === true && !connection.hasCredential);
+    const ready = previous?.hasCredential === false && connection.hasCredential;
+    const now = Date.now();
+    this.db.query("INSERT INTO connections (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
+      .run(connection.id, JSON.stringify(connection));
+    // Display-only edits preserve bound authority; staging revokes once per epoch.
+    if (authorityChanged || ready) for (const activity of this.activities()) {
+      if (activity.source.kind !== "schedule" && activity.source.connectionId === connection.id) {
+        this.putActivity({ ...activity, revision: activity.revision + (authorityChanged ? 1 : 0), ...(authorityChanged ? { cursor: null, lastCheckedAt: null } : {}), nextAt: now, deferredUntil: null, deferredReason: null, updatedAt: now });
+      }
+    }
+    this.emit({ type: "connection", connection });
+  }
+
+  deleteConnection(id: string) {
+    this.db.query("DELETE FROM connections WHERE id = ?").run(id);
+    for (const activity of this.activities()) {
+      if (activity.source.kind !== "schedule" && activity.source.connectionId === id) {
+        this.putActivity({ ...activity, revision: activity.revision + 1, paused: true, pauseReason: "source connection removed", updatedAt: Date.now() });
+      }
+    }
+    this.emit({ type: "connection.removed", id });
+  }
+
+  activityRuns(activityId?: string): ActivityRun[] {
+    const rows = activityId === undefined
+      ? this.db.query("SELECT data FROM activity_runs ORDER BY rowid").all()
+      : this.db.query("SELECT data FROM activity_runs WHERE activity_id = ? ORDER BY rowid").all(activityId);
+    return (rows as Row[]).map((row) => this.projectActivityRun(parseJson<ActivityRun>(row.data)));
+  }
+
+  findActivityRun(id: string): ActivityRun | null {
+    const row = this.db.query("SELECT data FROM activity_runs WHERE id = ?").get(id) as Row | null;
+    return row ? this.projectActivityRun(parseJson<ActivityRun>(row.data)) : null;
+  }
+
+  private projectActivityRun(run: ActivityRun): ActivityRun {
+    const work = run.workId ? this.findWork(run.workId) : null;
+    return work ? { ...run, state: work.state, endedAt: work.endedAt, noChange: work.result?.noChange === true && !this.hasWorkTreeMutations(work.id), reason: work.reason ?? run.reason } : run;
+  }
+
+  putActivityRun(run: ActivityRun) {
+    this.db.query(`INSERT INTO activity_runs (id, activity_id, source_key, work_id, data) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET work_id = excluded.work_id, data = excluded.data`)
+      .run(run.id, run.activityId, run.sourceKey, run.workId, JSON.stringify(run));
+    this.emit({ type: "activity_run", run: this.projectActivityRun(run) });
+  }
+  /** Reads are never Effects. A completed/uncertain effect cannot be called unchanged. */
+  hasWorkTreeMutations(workId: string): boolean {
+    if (this.effectsForWork(workId).some((effect) => effect.state === "done" || effect.state === "unknown")) return true;
+    return this.children(workId).some((child) => this.hasWorkTreeMutations(child.id));
+  }
+
+
 
   // Conversations
 
@@ -334,12 +462,14 @@ export class Ledger {
     this.db
       .query(
         `INSERT INTO works (id, parent_id, root_id, ghost_id, origin_conversation_id, conversation_id, title, brief, acceptance, state,
-           revision, revisions_used, deadline_at, result, verdict, reason, created_at, started_at, ended_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           revision, revisions_used, deadline_at, result, verdict, reason, created_at, started_at, ended_at, updated_at,
+           execution, activity_id, activity_run_id, tool_scope)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET conversation_id = excluded.conversation_id, title = excluded.title, brief = excluded.brief,
            acceptance = excluded.acceptance, state = excluded.state, revision = excluded.revision, revisions_used = excluded.revisions_used,
            deadline_at = excluded.deadline_at, result = excluded.result, verdict = excluded.verdict, reason = excluded.reason,
-           started_at = excluded.started_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at`,
+           started_at = excluded.started_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at,
+           execution = excluded.execution, activity_id = excluded.activity_id, activity_run_id = excluded.activity_run_id, tool_scope = excluded.tool_scope`,
       )
       .run(
         work.id,
@@ -362,8 +492,87 @@ export class Ledger {
         work.startedAt,
         work.endedAt,
         work.updatedAt,
+        json(work.execution), work.activityId ?? null, work.activityRunId ?? null, json(work.toolScope),
       );
     this.emit({ type: "work", work });
+  }
+
+  reviseHistory(workId: string): ReviseLesson[] {
+    const row = this.db.query("SELECT revise_history FROM works WHERE id = ?").get(workId) as Row | null;
+    if (!row) throw new NotFound(`work ${workId}`);
+    return parseJson<ReviseLesson[]>(row.revise_history);
+  }
+
+  appendReviseHistory(workId: string, verdict: Verdict) {
+    const history = this.reviseHistory(workId);
+    history.push({
+      source: verdict.source, reasons: verdict.reasons.slice(0, 8192), at: verdict.at,
+      ...(verdict.evidence === undefined ? {} : { evidence: verdict.evidence.slice(0, 8192) }),
+      ...(verdict.scope === undefined ? {} : { scope: verdict.scope.slice(0, 2048) }),
+    });
+    // Resumed roots may accumulate revisions over many attempts. Keep the newest lessons,
+    // with a strict serialized cap even when text requires JSON escaping.
+    while (history.length > 1 && JSON.stringify(history).length > 131072) history.shift();
+    this.db.query("UPDATE works SET revise_history = ? WHERE id = ?").run(JSON.stringify(history), workId);
+    this.emit({ type: "work", work: this.work(workId) });
+  }
+
+  findWorkQuestion(id: string): WorkQuestion | null {
+    const row = this.db.query("SELECT * FROM work_questions WHERE id = ?").get(id) as Row | null;
+    return row ? {
+      id: String(row.id), workId: String(row.work_id), parentWorkId: String(row.parent_work_id),
+      question: String(row.question), answer: row.answer === null ? null : String(row.answer),
+      state: String(row.state) as WorkQuestion["state"], createdAt: Number(row.created_at),
+      answeredAt: row.answered_at === null ? null : Number(row.answered_at),
+      submittedAt: row.submitted_at === null ? null : Number(row.submitted_at),
+      answerSubmittedAt: row.answer_submitted_at === null ? null : Number(row.answer_submitted_at),
+      nudgeCount: Number(row.nudge_count),
+      cancellationReason: row.cancellation_reason === null ? null : String(row.cancellation_reason),
+      cancellationSubmittedAt: row.cancellation_submitted_at === null ? null : Number(row.cancellation_submitted_at),
+    } : null;
+  }
+
+  workQuestions(workId: string, asParent = false): WorkQuestion[] {
+    return (this.db.query(`SELECT id FROM work_questions WHERE ${asParent ? "parent_work_id" : "work_id"} = ? ORDER BY created_at, id`).all(workId) as Row[])
+      .map((row) => this.findWorkQuestion(String(row.id))!);
+  }
+
+  workQuestionsAwaitingSubmission(): WorkQuestion[] {
+    return (this.db.query(`SELECT id FROM work_questions
+      WHERE (state = 'pending' AND submitted_at IS NULL) OR (state = 'answered' AND answer_submitted_at IS NULL)
+        OR (state = 'cancelled' AND cancellation_reason IS NOT NULL AND cancellation_submitted_at IS NULL)
+      ORDER BY created_at, id`).all() as Row[]).map((row) => this.findWorkQuestion(String(row.id))!);
+  }
+
+  putWorkQuestion(question: WorkQuestion) {
+    this.db.query(`INSERT INTO work_questions
+      (id, work_id, parent_work_id, question, answer, state, created_at, answered_at, submitted_at, answer_submitted_at,
+        nudge_count, cancellation_reason, cancellation_submitted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (id) DO UPDATE SET answer = excluded.answer, state = excluded.state, answered_at = excluded.answered_at,
+        submitted_at = excluded.submitted_at, answer_submitted_at = excluded.answer_submitted_at,
+        nudge_count = excluded.nudge_count, cancellation_reason = excluded.cancellation_reason,
+        cancellation_submitted_at = excluded.cancellation_submitted_at`)
+      .run(question.id, question.workId, question.parentWorkId, question.question, question.answer, question.state,
+        question.createdAt, question.answeredAt, question.submittedAt, question.answerSubmittedAt,
+        question.nudgeCount, question.cancellationReason, question.cancellationSubmittedAt);
+    this.emit({ type: "work", work: this.work(question.workId) });
+  }
+
+  cancelWorkQuestions(workId: string) {
+    for (const question of this.workQuestions(workId)) {
+      if (question.state === "pending" || (question.state === "answered" && question.answerSubmittedAt === null)
+        || (question.state === "cancelled" && question.cancellationReason !== null && question.cancellationSubmittedAt === null)) {
+        this.putWorkQuestion({ ...question, state: "cancelled", cancellationReason: null });
+      }
+    }
+  }
+
+  /** Monotonic per-parent sequence; ids must not be reused for later question batches. */
+  nextQuestionNudge(workId: string): number {
+    const row = this.db.query("UPDATE works SET question_nudges = question_nudges + 1 WHERE id = ? RETURNING question_nudges").get(workId) as Row;
+    this.emit({ type: "work", work: this.work(workId) });
+    return Number(row.question_nudges);
   }
 
   // Decisions
@@ -817,6 +1026,7 @@ function toGhost(row: Row): Ghost {
     tools: parseJson(row.tools),
     fallbacks: parseJson(row.fallbacks),
     skills: parseJson(row.skills),
+    hostExecution: bool(row.host_execution),
     deletedAt: row.deleted_at === null ? null : Number(row.deleted_at),
     directConversationId: String(row.direct_conversation_id),
     createdAt: Number(row.created_at),
@@ -860,6 +1070,10 @@ function toWork(row: Row): Work {
     startedAt: row.started_at === null ? null : Number(row.started_at),
     endedAt: row.ended_at === null ? null : Number(row.ended_at),
     updatedAt: Number(row.updated_at),
+    ...(row.execution === null ? {} : { execution: parseJson<NonNullable<Work["execution"]>>(row.execution) }),
+    ...(row.activity_id === null ? {} : { activityId: String(row.activity_id) }),
+    ...(row.activity_run_id === null ? {} : { activityRunId: String(row.activity_run_id) }),
+    ...(row.tool_scope === null ? {} : { toolScope: parseJson<NonNullable<Work["toolScope"]>>(row.tool_scope) }),
   };
 }
 

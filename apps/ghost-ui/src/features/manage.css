@@ -48,4 +48,30 @@
 /* Lanes as selectable list rows (프로젝트) -------------------------------- */
 .lane__main[aria-current]:not([aria-current="false"]) { background: var(--ghost-hover2); }
 .lane__main:disabled { cursor: default; }
+
+/* Automatic activities (자동 활동) ---------------------------------------- */
+.activity-warn { margin: 0; padding: 10px 12px; border-radius: var(--radius-card); color: var(--ghost-amber-ink); background: var(--ghost-amber-tint); font-size: var(--text-caption); }
+.activity-warn--calm { color: var(--ghost-ink2); background: var(--ghost-hover); }
+.skill.activity-tool { font-family: var(--font-sans); }
+.activity-error { color: var(--ghost-danger-ink); font-size: var(--text-caption); }
+.activity-check { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; border-radius: var(--radius-card); background: var(--ghost-hover); }
+.activity-check__copy { display: grid; gap: 2px; min-width: 0; color: var(--ghost-ink); font-size: var(--text-ui); font-weight: 500; cursor: pointer; }
+.activity-check__copy small { color: var(--ghost-ink2); font-weight: 400; font-size: var(--text-caption); }
+.activity-runs { display: grid; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--ghost-line); background: var(--ghost-hover); }
+.activity-runs__policy { margin: 0; color: var(--ghost-ink2); font-size: var(--text-caption); }
+.activity-runs__list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.activity-runs__empty { margin: 0; color: var(--ghost-ink3); font-size: var(--text-ui); }
+.activity-run { display: grid; gap: 4px; padding: 8px 10px; border-radius: var(--radius-card); background: var(--ghost-surface); box-shadow: var(--shadow-btn); font-size: var(--text-caption); }
+.activity-run__head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.activity-run__item { color: var(--ghost-ink); font-weight: 500; }
+.activity-run__reason { color: var(--ghost-ink2); }
+.activity-run[data-state="failed"] .activity-run__reason { color: var(--ghost-danger-ink); }
+.activity-run__foot { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
+.activity-run__open { padding: 0; border: 0; color: var(--ghost-ink2); background: none; font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.activity-run__open:hover { color: var(--ghost-ink); }
+
+/* Connections (연결 계정) -------------------------------------------------- */
+.connection-test { padding: 10px 16px; border-bottom: 1px solid var(--ghost-line); background: var(--ghost-hover); font-size: var(--text-caption); }
+.connection-test[data-phase="error"] { color: var(--ghost-danger-ink); }
+.connection-clear { display: flex; align-items: center; gap: 8px; color: var(--ghost-ink2); font-size: var(--text-caption); cursor: pointer; }
 }

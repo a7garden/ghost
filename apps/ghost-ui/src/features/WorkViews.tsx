@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Button, FormField, Page, PageHeader, InlineError, Input, SegmentedControl, SelectField, Textarea } from '../ui'
-import type { State, Work } from '@ghost/contract';
+import type { ExecutionTarget, State, Work } from '@ghost/contract';
 import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { PresenceAvatar, WorkLane } from '../components/agent';
 import { Modal } from '../components/Modal';
@@ -84,12 +84,28 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
   const [busy, setBusy] = useState(false);
   const ghosts = visibleGhosts(state.ghosts);
   const [ghostId, setGhostId] = useState(defaultGhostId ?? ghosts[0]?.id ?? '');
+  const [execution, setExecution] = useState<'container' | 'host'>('container');
+  const [cwd, setCwd] = useState('');
+  const selected = ghosts.find(ghost => ghost.id === ghostId) ?? null;
+  const hostAllowed = selected?.hostExecution === true;
+  const pickGhost = (id: string) => {
+    setGhostId(id);
+    // PC execution is per-Ghost owner grant; losing it must never leave host selected invisibly.
+    if (ghosts.find(ghost => ghost.id === id)?.hostExecution !== true) { setExecution('container'); setCwd(''); }
+  };
   const submit = (data: FormData) => {
     const title = String(data.get('title')).trim();
     const brief = String(data.get('brief')).trim();
     const criteria = String(data.get('criteria') ?? '').trim();
     const deadline = String(data.get('deadline'));
     if (!title || !brief || !ghostId) return;
+    let target: ExecutionTarget = { kind: 'container' };
+    if (execution === 'host') {
+      const path = cwd.trim();
+      if (!path.startsWith('/')) { setError('작업 폴더는 /로 시작하는 전체 경로여야 합니다.'); return; }
+      if (path.length > 4096) { setError('작업 폴더 경로는 4,096자 이하여야 합니다.'); return; }
+      target = { kind: 'host', cwd: path };
+    }
     setBusy(true); setError('');
     void (async () => {
       try {
@@ -97,6 +113,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
           type: 'work.create', ghostId, title, brief,
           ...(criteria ? { acceptance: { criteria, checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}),
+          execution: target,
         });
         onCreated(created.workId);
       } catch (e) {
@@ -108,7 +125,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
   return <Modal title="일 맡기기" onClose={() => { if (!busy) onClose(); }}>
     <form className="grid gap-4" onSubmit={e => { e.preventDefault(); submit(new FormData(e.currentTarget)); }}>
       <FormField label="맡길 Ghost" required>
-        {control => <SelectField {...control} label="맡길 Ghost" value={ghostId} onValueChange={setGhostId} required
+        {control => <SelectField {...control} label="맡길 Ghost" value={ghostId} onValueChange={pickGhost} required
           options={ghosts.map(ghost => ({ value: ghost.id, label: ghost.isDefault ? `${ghost.name} · 메인` : ghost.name }))}/>}
       </FormField>
       <FormField label="제목" required>
@@ -123,6 +140,21 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
       <FormField label="기한" description="비워 두면 기한 없이 진행합니다.">
         {control => <Input {...control} type="datetime-local" name="deadline"/>}
       </FormField>
+      <FormField label="실행 환경" description={selected
+        ? hostAllowed ? undefined : '이 Ghost는 PC 직접 실행이 허용되지 않았습니다. Ghost 설정의 운영에서 허용할 수 있습니다.'
+        : undefined}>
+        {control => <SegmentedControl {...control} aria-label="실행 환경" value={execution}
+          onValueChange={value => setExecution(value as 'container' | 'host')}
+          options={[{ value: 'container', label: '컨테이너', disabled: busy },
+            { value: 'host', label: '이 Mac', disabled: busy || !hostAllowed }]}/>}
+      </FormField>
+      {execution === 'host' && <>
+        <FormField label="작업 폴더" required description="이 폴더 안에서 파일과 명령을 곧바로 실행합니다.">
+          {control => <Input {...control} name="cwd" value={cwd} required maxLength={4096} placeholder="/Users/garden/Workspace"
+            onChange={event => setCwd(event.target.value)}/>}
+        </FormField>
+        <p className="activity-warn">이 Mac 실행은 샌드박스 없이 셸을 씁니다. PC 전체와 네트워크에 영향을 줄 수 있습니다.</p>
+      </>}
       {error && <InlineError>{error}</InlineError>}
       <Button type="submit" className="justify-self-end" disabled={busy}>{busy ? '맡기는 중…' : '일 맡기기'}</Button>
     </form>

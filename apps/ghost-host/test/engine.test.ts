@@ -48,19 +48,19 @@ const sandbox: SandboxEnvFactory = {
 
 /** Records what the engine reports about a conversation's runs, and lets a test await them. */
 class RecordingCore extends Core {
-  readonly activities: { conversationId: string; busy: boolean }[] = [];
+  readonly activityLog: { conversationId: string; busy: boolean }[] = [];
   private readonly waits: (() => boolean)[] = [];
 
   /** How many activities a conversation has seen so far. */
   activityCount(conversationId: string): number {
-    return this.activities.filter((entry) => entry.conversationId === conversationId).length;
+    return this.activityLog.filter((entry) => entry.conversationId === conversationId).length;
   }
 
   /** The activity of a conversation at position `after`, once the engine reports it. */
   nextActivity(conversationId: string, after: number): Promise<{ busy: boolean }> {
     const { promise, resolve } = Promise.withResolvers<{ busy: boolean }>();
     const deliver = () => {
-      const entries = this.activities.filter((entry) => entry.conversationId === conversationId);
+      const entries = this.activityLog.filter((entry) => entry.conversationId === conversationId);
       const entry = entries[after];
       if (!entry) return false;
       resolve({ busy: entry.busy });
@@ -71,7 +71,7 @@ class RecordingCore extends Core {
   }
 
   override activity(conversationId: string, busy: boolean, at: number) {
-    this.activities.push({ conversationId, busy });
+    this.activityLog.push({ conversationId, busy });
     for (let index = this.waits.length - 1; index >= 0; index--) {
       if (this.waits[index]?.() === true) this.waits.splice(index, 1);
     }
@@ -367,7 +367,7 @@ test("the engine reports a run as busy and then idle", async () => {
   const settled = nextLive(engine, conversationId, (live) => !live.running);
   await engine.submit(conversationId, { text: "hi", origin: "owner", requestId: "r1" });
   await settled;
-  expect(core.activities.filter((entry) => entry.conversationId === conversationId).map((entry) => entry.busy)).toEqual([true, false]);
+  expect(core.activityLog.filter((entry) => entry.conversationId === conversationId).map((entry) => entry.busy)).toEqual([true, false]);
   await engine.close();
 });
 
@@ -384,7 +384,7 @@ test("a run is reported as busy and idle without a watcher", async () => {
   await engine.submit(conversationId, { text: "hi again", origin: "owner", requestId: "r2" });
   expect(await core.nextActivity(conversationId, before + 2)).toEqual({ busy: true });
   expect(await core.nextActivity(conversationId, before + 3)).toEqual({ busy: false });
-  expect(core.activities.filter((entry) => entry.conversationId === conversationId).map((entry) => entry.busy)).toEqual([
+  expect(core.activityLog.filter((entry) => entry.conversationId === conversationId).map((entry) => entry.busy)).toEqual([
     true,
     false,
     true,

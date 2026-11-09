@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { openApp } from "../src/app.ts";
 import { BACKUP_FORMAT, backup, type BackupManifest } from "../src/backup.ts";
@@ -37,6 +37,29 @@ describe("ghost backup", () => {
       const copy = new Database(join(dir, "pi.db"), { readonly: true });
       try { expect(copy.query("SELECT v FROM t").get()).toEqual({ v: "kept" }); } finally { copy.close(); }
     } finally {
+      pi.close();
+      ledger.close();
+    }
+  });
+
+  test("copies the vault store together with its key", () => {
+    const root = tempDir();
+    const ledger = new Ledger(join(root, "ledger.db"));
+    const pi = new Database(join(root, "pi.db"));
+    mkdirSync(join(root, "vault"), { mode: 0o700 });
+    const vault = new Database(join(root, "vault", "vault.db"));
+    try {
+      vault.exec("PRAGMA journal_mode = WAL; CREATE TABLE items (id TEXT); INSERT INTO items VALUES ('i1')");
+      writeFileSync(join(root, "vault", "key"), new Uint8Array(32).fill(7), { mode: 0o600 });
+      const dir = join(tempDir(), "snapshot");
+      const manifest = backup(root, dir);
+      expect(manifest.files.map((file) => file.path)).toEqual(["ledger.db", "pi.db", "vault/vault.db", "vault/key"]);
+      for (const file of manifest.files) expect(sha256(readFileSync(join(dir, file.path)))).toBe(file.sha256);
+      expect(statSync(join(dir, "vault", "key")).mode & 0o777).toBe(0o600);
+      const copy = new Database(join(dir, "vault", "vault.db"), { readonly: true });
+      try { expect(copy.query("SELECT id FROM items").get()).toEqual({ id: "i1" }); } finally { copy.close(); }
+    } finally {
+      vault.close();
       pi.close();
       ledger.close();
     }

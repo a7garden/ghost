@@ -228,4 +228,49 @@ export const MIGRATIONS: readonly string[] = [
   /* 5: reserve API identities before asynchronous effects; old receipts are complete */ `
   ALTER TABLE requests ADD COLUMN state TEXT NOT NULL DEFAULT 'done' CHECK (state IN ('pending', 'done'));
   `,
+  /* 6: parent-first questions and bounded internal revision lessons */ `
+  ALTER TABLE works ADD COLUMN revise_history TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE works ADD COLUMN question_nudges INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE work_questions (
+    id TEXT PRIMARY KEY,
+    work_id TEXT NOT NULL REFERENCES works(id),
+    parent_work_id TEXT NOT NULL REFERENCES works(id),
+    question TEXT NOT NULL,
+    answer TEXT,
+    state TEXT NOT NULL CHECK (state IN ('pending','answered','cancelled')),
+    created_at INTEGER NOT NULL,
+    answered_at INTEGER,
+    submitted_at INTEGER,
+    answer_submitted_at INTEGER,
+    nudge_count INTEGER NOT NULL DEFAULT 0,
+    cancellation_reason TEXT,
+    cancellation_submitted_at INTEGER
+  );
+  CREATE INDEX work_questions_by_work ON work_questions(work_id, state);
+  CREATE INDEX work_questions_by_parent ON work_questions(parent_work_id, state);
+  `,
+  /* 7: explicit execution grants and durable, owner-approved activities */ `
+  ALTER TABLE ghosts ADD COLUMN host_execution INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE works ADD COLUMN execution TEXT;
+  ALTER TABLE works ADD COLUMN activity_id TEXT;
+  ALTER TABLE works ADD COLUMN activity_run_id TEXT;
+  ALTER TABLE works ADD COLUMN tool_scope TEXT;
+  CREATE TABLE connections (
+    id TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+  );
+  CREATE TABLE activities (
+    id TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+  );
+  CREATE TABLE activity_runs (
+    id TEXT PRIMARY KEY,
+    activity_id TEXT NOT NULL REFERENCES activities(id),
+    source_key TEXT NOT NULL,
+    work_id TEXT REFERENCES works(id),
+    data TEXT NOT NULL,
+    UNIQUE(activity_id, source_key)
+  );
+  CREATE INDEX activity_runs_by_activity ON activity_runs(activity_id);
+  `,
 ];

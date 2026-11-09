@@ -1,15 +1,15 @@
-import type { Decision, Space, Work } from "@ghost/contract";
+import type { Decision, Space, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 
 /** Builds the Pi execution environment of a work conversation. Implemented in src/sandbox. */
 export interface SandboxEnvFactory {
-  /** Environment whose filesystem root is the Work's workspace (`/workspace` inside a container). */
-  envFor(work: Work): Promise<ExecutionEnv>;
-  /** Host path of the Work's workspace directory; created on demand. */
+  /** Uses the explicit Work target: real PC cwd for Host; otherwise the private workspace. */
+  envFor(work: Work, authorize?: () => string): Promise<ExecutionEnv>;
+  /** Private staging directory, never the Host target cwd; browser transfers stay confined here. */
   workspacePath(work: Work): string;
   /** Copy accepted child artifacts into `inputs/<child-id>/<name>` of the workspace. Refuses tampered bytes. */
   stageInputs(work: Work, inputs: { childId: string; name: string; digest: string }[]): Promise<void>;
-  /** Free a settled Work's compute (its container); the workspace stays. */
+  /** Abort a settled Work's Host processes or free its container; staging and owner files stay. */
   release(work: Work): Promise<void>;
 }
 
@@ -166,4 +166,69 @@ export interface SkillsPort {
   list(name: string): string[];
   /** One skill file as UTF-8 text, bounded. */
   readFile(name: string, relPath: string): string;
+}
+
+/** A secret field of a vault item. Values flow host → page only; no tool result carries one. */
+export type VaultField = "username" | "password" | "totp" | "card_number" | "card_expiry" | "card_cvc" | "card_name" | "value";
+
+/** Fields whose fill needs an owner-approved effect each time (money moves through them). */
+export const APPROVAL_FIELDS: readonly VaultField[] = ["card_number", "card_expiry", "card_cvc", "card_name"];
+
+/**
+ * The Ghost vault: encrypted items, per-Ghost grants, write-only secrets. Implemented in src/stores/vault.ts.
+ * `reveal` is host-internal (the browser fill path); its value must never enter a tool result, log, event or effect row.
+ */
+export interface VaultPort {
+  /** Metadata of the items a Ghost may use, optionally narrowed to an origin (exact canonical match) or kind. */
+  listFor(ghostId: string, filter?: { origin?: string; kind?: VaultItem["kind"] }): VaultItem[];
+  /** One item's metadata if the Ghost may use it; throws forbidden/not_found otherwise. */
+  itemFor(ghostId: string, itemId: string): VaultItem;
+  /** The secret value of one field, for filling into a page. Throws when not granted, expired or absent. */
+  reveal(ghostId: string, itemId: string, field: VaultField, at?: number): string;
+  /** Reuse a granted exact-origin/username login, otherwise generate one within the per-Ghost creation quota. Never returns the password. */
+  generateLogin(ghostId: string, input: { origin: string; username: string; title?: string; hints?: string }): VaultItem;
+}
+
+/** The conversation whose browser session a command runs in; logins persist per Ghost. */
+export interface BrowserSessionRef {
+  ghostId: string;
+  conversationId: string;
+}
+
+/** One normalized agent-browser `--json` response. Page-derived strings in `data` are untrusted. */
+export interface BrowserCommandResult {
+  ok: boolean;
+  data: unknown;
+  error: string | null;
+}
+
+export interface BrowserHandoffEnd {
+  /** The headed page URL could not be recovered; the headless session resumed at about:blank. */
+  fallback: boolean;
+}
+
+export interface BrowserRunOptions {
+  stdin?: string;
+  timeoutMs?: number;
+  /** Host-only ephemeral redaction registry. Never written to disk or passed in argv. */
+  sensitive?: { value: string; field: VaultField; origin: string };
+  /** Workspace paths never reach Chrome; the adapter stages/copies with no-follow semantics. */
+  transfer?: { kind: "upload"; workspace: string; path: string } | { kind: "download"; workspace: string; name: string };
+}
+
+/**
+ * Host-side Chrome through the installed agent-browser CLI, behind the host's egress proxy (no loopback,
+ * private, link-local or tailnet destinations, including page-issued requests). Implemented in src/integrations/browser.ts.
+ */
+export interface BrowserPort {
+  /** One command in the conversation's session. Secret material may only travel through `stdin`. */
+  run(session: BrowserSessionRef, argv: string[], options?: BrowserRunOptions): Promise<BrowserCommandResult>;
+  /** Reopen the session in a visible window (same Ghost login state) at `url` so the owner can act. */
+  handoff(session: BrowserSessionRef, url: string | null): Promise<void>;
+  /** Save the headed state and reopen headless at the owner's final page before the next command. */
+  endHandoff(session: BrowserSessionRef): Promise<BrowserHandoffEnd>;
+  /** Close the conversation's session; the Ghost's login state is saved. */
+  close(session: BrowserSessionRef): Promise<void>;
+  /** Stop every session and the egress proxy (host shutdown). */
+  shutdown(): Promise<void>;
 }

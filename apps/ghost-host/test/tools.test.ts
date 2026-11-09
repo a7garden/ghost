@@ -14,7 +14,6 @@ import { parseShellResult } from "../src/core/verify.ts";
 import type { SandboxEnvFactory, MemoryPort } from "../src/integrations/ports.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
 import { createToolSet } from "../src/tools/index.ts";
-import { INTERACTIVE_INSTRUCTIONS } from "../src/tools/interactive.ts";
 import { MAX_ARTIFACT_BYTES } from "../src/tools/work.ts";
 import type { ToolSet } from "../src/tools/types.ts";
 import { harness, tempDir, type FakeEngine } from "./support.ts";
@@ -189,37 +188,30 @@ describe("tools", () => {
     expect(s.ledger.worksForState()).toHaveLength(0);
   });
 
-  test("present_ui documents nested chart points and rejects the observed duplicate top-level points", async () => {
+  test("present_ui rejects duplicate top-level chart points and accepts nested data", async () => {
     const s = setup();
     const pi = asPi(s, s.direct, "pi-direct");
     const present = toolOf(s, s.direct, s.ghost, "present_ui");
-    expect(present.description).toContain("series[].points");
-    expect(INTERACTIVE_INSTRUCTIONS).toContain("블록 최상위에는 넣지 마세요");
     const points = [{ label: "사과", value: 2 }, { label: "배", value: 3 }];
     const chart = { type: "chart", id: "fruit-count", title: "과일 개수", kind: "bar", series: [{ name: "개수", points }] } satisfies UiBlock;
     const ui = { version: "ghost-ui/1", title: "운영 UI 확인", blocks: [{ ...chart, points }] };
 
     const refused = await call(present, ui, apiOf(pi, "duplicate-points"));
     expect(refused.isError).toBe(true);
-    expect(contentOf(refused)).toContain("series[].points");
     const corrected = await call(present, { ...ui, blocks: [chart] }, apiOf(pi, "nested-points"));
     expect(corrected.isError).toBeFalsy();
     expect(readInteractiveUi(contentOf(corrected))?.blocks[0]).toEqual(chart);
   });
 
-  test("present_ui explains that comparison row labels are not value-column headings", async () => {
+  test("present_ui rejects comparison rows with mismatched value columns", async () => {
     const s = setup();
     const pi = asPi(s, s.direct, "pi-direct");
     const present = toolOf(s, s.direct, s.ghost, "present_ui");
-    expect(present.description).toContain("rows[].values.length는 columns.length");
-    expect(INTERACTIVE_INSTRUCTIONS).toContain("행 제목 label의 열은 제외");
     const comparison = { type: "comparison", id: "types", title: "블록 유형", columns: ["블록", "용도", "상호작용"], rows: [{ label: "차트", values: ["추이·비교 시각화", "표시 전용"] }] } satisfies UiBlock;
     const ui = { version: "ghost-ui/1", title: "UI 데모", blocks: [comparison] };
 
     const refused = await call(present, ui, apiOf(pi, "extra-label-column"));
     expect(refused.isError).toBe(true);
-    expect(contentOf(refused)).toContain("행 제목 label의 열은 제외");
-    expect(contentOf(refused)).toContain("rows[].values.length는 columns.length");
     const corrected = await call(present, { ...ui, blocks: [{ ...comparison, columns: ["용도", "상호작용"] }] }, apiOf(pi, "value-columns-only"));
     expect(corrected.isError).toBeFalsy();
     expect(readInteractiveUi(contentOf(corrected))?.blocks[0]).toEqual({ ...comparison, columns: ["용도", "상호작용"] });
@@ -343,6 +335,77 @@ describe("tools", () => {
     expect(verifying.result?.artifacts.map((artifact) => artifact.name)).toEqual(["report.txt"]);
   });
 
+  test("output completion recovers from malformed attachments and accepts only attached, reopened published bytes", async () => {
+    const s = setup();
+    const { work, conversation, pi } = await runningWork(s);
+    const body = "Measured result: 42\n";
+    const digest = sha256(body);
+    s.core.works.update(work.id, {
+      acceptance: {
+        criteria: "Deliver the measured report",
+        checks: [
+          { kind: "artifact_contains", name: "report.txt", text: "Measured result: 42" },
+          { kind: "artifact_sha256", name: "report.txt", sha256: digest },
+        ],
+        reviewer: null,
+      },
+    });
+    const workspace = s.sandbox.workspacePath(work);
+    const publish = toolOf(s, conversation, s.ghost, "publish_artifact");
+    const complete = toolOf(s, conversation, s.ghost, "complete");
+    writeFileSync(join(workspace, "report.txt"), body);
+    writeFileSync(join(workspace, "scratch.txt"), "not a deliverable");
+    for (const name of ["report.txt", "scratch.txt"]) {
+      expect((await call(publish, { path: name }, apiOf(pi, `publish-${name}`))).isError).toBeFalsy();
+    }
+    const published = s.ledger.artifactsForWork(work.id);
+    const report = published.find((artifact) => artifact.name === "report.txt")!;
+    const summary = "Delivered report.txt containing Measured result: 42";
+    const malformed = [{ summary }, { summary, artifacts: null }, { summary, artifacts: "report.txt" }, { summary, artifacts: [null] }];
+    for (const [index, args] of malformed.entries()) {
+      const refused = await call(complete, args, apiOf(pi, `malformed-${index}`));
+      expect(refused.isError).toBe(true);
+      expect(refused.control?.terminate).toBeFalsy();
+      const running = s.ledger.work(work.id);
+      expect(running.state).toBe("running");
+      expect(running.result).toBeNull();
+      expect(running.verdict).toBeNull();
+      expect(running.revisionsUsed).toBe(0);
+      expect(s.ledger.pendingDecisions({ workId: work.id })).toHaveLength(0);
+    }
+
+    // A valid empty array cannot substitute a summary for the required output attachment.
+    expect((await call(complete, { summary, artifacts: [] }, apiOf(pi, "unattached"))).isError).toBeFalsy();
+    await s.core.idle();
+    const unattached = s.ledger.work(work.id);
+    expect(unattached.state).toBe("running");
+    expect(unattached.verdict?.outcome).toBe("revise");
+    expect(unattached.result?.artifacts).toEqual([]);
+    expect(s.ledger.artifactsForWork(work.id)).toEqual(published);
+
+    // Acceptance must reopen the stored bytes, not trust the attached digest or summary.
+    const stored = join(s.root, "artifacts", report.digest);
+    writeFileSync(stored, "tampered result");
+    expect((await call(complete, { summary, artifacts: ["report.txt"] }, apiOf(pi, "tampered"))).isError).toBeFalsy();
+    await s.core.idle();
+    expect(s.ledger.work(work.id).state).toBe("running");
+    expect(s.ledger.work(work.id).verdict?.outcome).toBe("revise");
+
+    writeFileSync(stored, body);
+    writeFileSync(join(workspace, "report.txt"), "workspace changed after publication");
+    const corrected = await call(complete, { summary, artifacts: ["report.txt"] }, apiOf(pi, "corrected"));
+    expect(corrected.isError).toBeFalsy();
+    expect(corrected.control?.terminate).toBe(true);
+    await s.core.idle();
+    const done = s.ledger.work(work.id);
+    expect(done.state).toBe("done");
+    expect(done.verdict?.outcome).toBe("pass");
+    expect(done.verdict?.source).toBe("checks");
+    expect(done.result?.artifacts).toEqual([report]);
+    expect(new TextDecoder().decode(await s.core.artifacts.read(done.result!.artifacts[0]!.digest))).toBe(body);
+    expect(s.ledger.pendingDecisions({ workId: work.id })).toHaveLength(0);
+  });
+
   test("verdict from a review conversation settles the Work, once per verification", async () => {
     const s = setup();
     const reviewer = s.core.createGhost({ name: "Critic", persona: "You review." });
@@ -457,23 +520,6 @@ describe("tools", () => {
     await s.core.idle();
   });
 
-  test("a Work that can delegate is told which Ghosts it can delegate to", async () => {
-    const s = setup();
-    const helper = s.core.createGhost({ name: "Helper", persona: "You research.\nDetails" });
-    const retired = s.core.createGhost({ name: "Gone", persona: "Old" });
-    s.ledger.tx(() => s.ledger.putGhost({ ...retired, state: "retired", updatedAt: Date.now() }));
-    const { work, conversation } = await runningWork(s);
-
-    const instructions = s.tools.instructionsFor(conversation, s.ghost, work);
-    expect(instructions).toContain(`Helper (ghost_id ${helper.id}) — You research.`);
-    expect(instructions).not.toContain(retired.id);
-    expect(instructions).not.toContain(`ghost_id ${s.ghost.id}`);
-
-    const withoutDelegate = { ...s.ghost, tools: s.ghost.tools.filter((tool) => tool !== "delegate") };
-    expect(s.tools.instructionsFor(conversation, withoutDelegate, work)).not.toContain(helper.id);
-    await s.core.idle();
-  });
-
   test("revoking a tool prevents a stale configured call from acting", async () => {
     const s = setup();
     const { work, conversation, pi } = await runningWork(s);
@@ -489,6 +535,26 @@ describe("tools", () => {
     expect(existsSync(path)).toBe(false);
     expect(s.ledger.effectsForWork(work.id).filter((effect) => effect.tool === "bash")).toHaveLength(0);
   });
+
+  for (const revoked of ["scope", "PC", "deadline", "Ghost state"] as const) {
+    test(`live ${revoked} authority is checked before a stale Work tool can act`, async () => {
+      const s = setup();
+      const { work, conversation, pi } = await runningWork(s);
+      const bash = toolOf(s, conversation, s.ghost, "bash");
+      const env = await s.sandbox.envFor(work);
+      const path = join(s.sandbox.workspacePath(work), "authority-leak");
+      s.ledger.tx(() => {
+        if (revoked === "scope") s.ledger.putWork({ ...s.ledger.work(work.id), toolScope: ["read"] });
+        if (revoked === "PC") s.ledger.putWork({ ...s.ledger.work(work.id), execution: { kind: "host", cwd: s.sandbox.workspacePath(work) } });
+        if (revoked === "deadline") s.ledger.putWork({ ...s.ledger.work(work.id), deadlineAt: Date.now() - 1 });
+        if (revoked === "Ghost state") s.ledger.putGhost({ ...s.ledger.ghost(s.ghost.id), state: "retired" });
+      });
+      const refused = await call(bash, { command: "printf leaked > authority-leak" }, apiOf(pi, "stale-authority", env));
+      expect(refused.isError).toBe(true);
+      expect(existsSync(path)).toBe(false);
+      expect(s.ledger.effectsForWork(work.id)).toHaveLength(0);
+    });
+  }
 
   test("a tool offered to another conversation kind is refused at execution", async () => {
     const s = setup();

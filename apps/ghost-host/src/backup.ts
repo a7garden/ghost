@@ -1,10 +1,13 @@
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sha256 } from "./core/ids.ts";
 
 export const BACKUP_FORMAT = "ghost-backup/2";
 const DATABASES = ["ledger.db", "pi.db"] as const;
+/** The vault store and its key, copied when present. The vault never shares a transaction with the ledger. */
+const VAULT_DB = join("vault", "vault.db");
+const VAULT_KEY = join("vault", "key");
 /** Maximum wait for the first store's in-flight writer; later guards fail fast. */
 const WRITER_LOCK_TIMEOUT_MS = 5_000;
 
@@ -69,6 +72,11 @@ export function backup(root: string, dir: string, now = Date.now()): BackupManif
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") errors.push(error);
       }
     }
+    try {
+      rmdirSync(join(dir, "vault"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") errors.push(error);
+    }
     if (errors.length) throw new AggregateError(errors, "failed to remove incomplete backup files");
   };
 
@@ -113,6 +121,31 @@ export function backup(root: string, dir: string, now = Date.now()): BackupManif
       }
       const bytes = readFileSync(target);
       files.push({ path: name, sha256: sha256(bytes), bytes: bytes.length });
+    }
+    if (existsSync(join(root, VAULT_DB))) {
+      mkdirSync(join(dir, "vault"), { recursive: true, mode: 0o700 });
+      const target = join(dir, VAULT_DB);
+      const reader = new Database(join(root, VAULT_DB), { readonly: true });
+      try {
+        copied.push(target);
+        reader.exec(`VACUUM INTO '${target.replaceAll("'", "''")}'`);
+      } finally {
+        reader.close();
+      }
+      const copy = new Database(target, { readonly: true });
+      try {
+        const results = copy.query("PRAGMA integrity_check").all() as { integrity_check: string }[];
+        if (results.length !== 1 || results[0]!.integrity_check !== "ok") throw new Error("vault.db copy failed its integrity check");
+      } finally {
+        copy.close();
+      }
+      const bytes = readFileSync(target);
+      files.push({ path: VAULT_DB, sha256: sha256(bytes), bytes: bytes.length });
+      // Without its key the vault copy cannot be restored.
+      const key = readFileSync(join(root, VAULT_KEY));
+      copied.push(join(dir, VAULT_KEY));
+      writeFileSync(join(dir, VAULT_KEY), key, { mode: 0o600 });
+      files.push({ path: VAULT_KEY, sha256: sha256(key), bytes: key.length });
     }
     const ledger = new Database(join(dir, "ledger.db"), { readonly: true });
     let spaces: BackupManifest["external_spaces"];

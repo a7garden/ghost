@@ -1,8 +1,10 @@
-import { TERMINAL_WORK_STATES, type Acceptance, type Verdict, type Work, type WorkResult } from "@ghost/contract";
+import { Acceptance, TERMINAL_WORK_STATES, validate, type ExecutionTarget, type GhostTool, type Verdict, type Work, type WorkResult } from "@ghost/contract";
+import type { WorkQuestion } from "../ledger/ledger.ts";
 import type { Core } from "./core.ts";
 import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
 import { verifyChecks } from "./verify.ts";
+import { validateExecutionTarget } from "../sandbox/index.ts";
 
 /** Automatic `revise` verdicts allowed before a Work fails. */
 export const MAX_REVISIONS = 2;
@@ -12,6 +14,8 @@ const MAX_IDLE_NUDGES = 1;
 export const MAX_DEPTH = 4;
 /** Live children per parent. */
 export const MAX_LIVE_CHILDREN = 8;
+/** Lifetime question budget per child Work, including answered/cancelled rows. */
+export const MAX_WORK_QUESTIONS = 16;
 
 const EMPTY_ACCEPTANCE: Acceptance = { criteria: "", checks: [], reviewer: null };
 
@@ -24,6 +28,10 @@ export interface CreateWork {
   acceptance?: Acceptance;
   deadlineAt?: number | null;
   originConversationId: string;
+  execution?: ExecutionTarget;
+  activityId?: string;
+  activityRunId?: string;
+  toolScope?: GhostTool[];
   /** Deterministic id from a tool call (see `idFor`), so a replayed call finds its Work. */
   id?: string;
 }
@@ -47,6 +55,7 @@ export class Works {
     if (ghost.state !== "active") throw conflict(`${ghost.name} is ${ghost.state}`);
     const origin = this.ledger.conversation(input.originConversationId);
     if (origin.kind !== "direct") throw invalid("a root Work reports to a direct conversation");
+    this.checkExecution(input.ghostId, input.execution);
     const id = input.id ?? newId();
     const work = this.newWork({ ...input, id, parentId: null, rootId: id });
     this.ledger.tx(() => this.ledger.putWork(work));
@@ -65,11 +74,17 @@ export class Works {
     if (target.deletedAt !== null) throw conflict(`${target.name} was deleted`);
     if (target.state !== "active") throw conflict(`${target.name} is ${target.state}`);
     if (target.id === parent.ghostId) throw conflict("a Work cannot delegate to its own Ghost");
+    if (input.acceptance && !validate(Acceptance, input.acceptance)) throw invalid("invalid delegated acceptance checks");
     this.checkReviewer(input.acceptance?.reviewer ?? null, input.ghostId);
     if (this.depth(parent) + 1 > MAX_DEPTH) throw conflict(`delegation deeper than ${MAX_DEPTH} levels`);
     const live = this.ledger.children(parent.id).filter((child) => !isTerminal(child));
     if (live.length >= MAX_LIVE_CHILDREN) throw conflict(`at most ${MAX_LIVE_CHILDREN} live delegations per Work`);
     const deadlineAt = minDeadline(parent.deadlineAt, input.deadlineAt ?? null);
+    if (parent.activityId) this.core.activities.authorize(parent.id, "delegate");
+    if (input.execution?.kind === "host" && parent.execution?.kind !== "host") throw invalid("delegation cannot elevate container work to PC execution");
+    const execution = input.execution ?? (parent.execution?.kind === "host" && !target.hostExecution ? { kind: "container" as const } : parent.execution);
+    this.checkExecution(target.id, execution);
+    const toolScope = (input.toolScope ?? parent.toolScope)?.filter((tool) => (!parent.toolScope || parent.toolScope.includes(tool)) && target.tools.includes(tool));
     const work = this.newWork({
       ...input,
       deadlineAt,
@@ -77,6 +92,10 @@ export class Works {
       parentId: parent.id,
       rootId: parent.rootId,
       originConversationId: parent.conversationId,
+      execution,
+      activityId: parent.activityId,
+      activityRunId: parent.activityRunId,
+      toolScope,
     });
     this.ledger.tx(() => this.ledger.putWork(work));
     this.kick(work.id);
@@ -92,6 +111,10 @@ export class Works {
       ghostId: input.ghostId,
       originConversationId: input.originConversationId,
       conversationId: null,
+      ...(input.execution ? { execution: input.execution } : {}),
+      ...(input.activityId ? { activityId: input.activityId } : {}),
+      ...(input.activityRunId ? { activityRunId: input.activityRunId } : {}),
+      ...(input.toolScope ? { toolScope: input.toolScope } : {}),
       title: input.title,
       brief: input.brief,
       acceptance: input.acceptance ?? EMPTY_ACCEPTANCE,
@@ -107,6 +130,13 @@ export class Works {
       endedAt: null,
       updatedAt: now,
     };
+  }
+
+  private checkExecution(ghostId: string, execution: ExecutionTarget | undefined) {
+    if (!execution) return;
+    if (execution.kind === "host" && !this.ledger.ghost(ghostId).hostExecution) throw invalid("the owner has not granted this Ghost direct PC execution");
+    try { validateExecutionTarget(execution); }
+    catch (error) { throw invalid(error instanceof Error ? error.message : "invalid execution target"); }
   }
 
   private depth(work: Work): number {
@@ -141,6 +171,128 @@ export class Works {
     return next;
   }
 
+  /** A child asks its delegator before escalating to the owner. */
+  askParent(workId: string, question: string, id: string): WorkQuestion {
+    const work = this.ledger.work(workId);
+    if (!work.parentId) throw invalid("root Works use ask_owner, not ask_parent");
+    if (!question.trim() || question.length > 8192) throw invalid("question must contain 1–8192 characters");
+    const existing = this.ledger.findWorkQuestion(id);
+    if (existing) {
+      if (existing.workId !== work.id) throw conflict("question belongs to another Work");
+      return existing;
+    }
+    if (work.state !== "running") throw conflict(`Work is ${work.state}`);
+    if (this.ledger.workQuestions(work.id).length >= MAX_WORK_QUESTIONS) throw conflict(`at most ${MAX_WORK_QUESTIONS} questions per Work`);
+    const parent = this.ledger.work(work.parentId);
+    if (isTerminal(parent)) throw conflict(`parent Work is ${parent.state}`);
+    const row: WorkQuestion = {
+      id, workId, parentWorkId: parent.id, question, answer: null, state: "pending",
+      createdAt: Date.now(), answeredAt: null, submittedAt: null, answerSubmittedAt: null,
+      nudgeCount: 0, cancellationReason: null, cancellationSubmittedAt: null,
+    };
+    this.ledger.tx(() => this.ledger.putWorkQuestion(row));
+    this.deliverQuestion(row.id);
+    return row;
+  }
+
+  answerChild(parentId: string, questionId: string, answer: string): WorkQuestion {
+    const parent = this.ledger.work(parentId);
+    if (parent.state !== "running" && parent.state !== "waiting") throw conflict(`parent Work is ${parent.state}`);
+    const question = this.ledger.findWorkQuestion(questionId);
+    if (!question || question.parentWorkId !== parent.id || this.ledger.work(question.workId).parentId !== parent.id) {
+      throw invalid("question is not from a child of this Work");
+    }
+    if (question.state !== "pending") throw conflict(`question is ${question.state}`);
+    if (isTerminal(this.ledger.work(question.workId))) throw conflict("child Work has settled");
+    if (!answer.trim() || answer.length > 8192) throw invalid("answer must contain 1–8192 characters");
+    const next: WorkQuestion = { ...question, answer, state: "answered", answeredAt: Date.now() };
+    this.ledger.tx(() => this.ledger.putWorkQuestion(next));
+    this.deliverQuestion(next.id);
+    return next;
+  }
+
+  private pendingQuestion(workId: string) {
+    return this.ledger.workQuestions(workId).some((question) => question.state === "pending");
+  }
+
+  private abandonQuestion(id: string, reason: string) {
+    const question = this.ledger.findWorkQuestion(id);
+    if (!question || question.state !== "pending") return;
+    this.ledger.tx(() => this.ledger.putWorkQuestion({ ...question, state: "cancelled", cancellationReason: reason }));
+    this.deliverQuestion(id);
+  }
+
+  /** A cancelled question's fallback notice is itself a recoverable deterministic wake. */
+  private async notifyQuestionCancellation(question: WorkQuestion) {
+    if (question.cancellationReason === null || question.cancellationSubmittedAt !== null) return;
+    const child = this.ledger.work(question.workId);
+    if (isTerminal(child)) {
+      this.ledger.tx(() => this.ledger.cancelWorkQuestions(child.id));
+      return;
+    }
+    if (!child.conversationId) {
+      this.fail(child.id, "the parent question could not be resolved because the child has no work conversation");
+      return;
+    }
+    this.resumeFromWaiting(child.id);
+    try {
+      await this.core.openConversation(child.conversationId);
+      await this.core.engine.submit(child.conversationId, {
+        text: `Question ${question.id} was cancelled: ${question.cancellationReason}\n\nProceed with your best judgment if safe, or use \`ask_owner\` if only the owner can decide. Do not keep waiting for your parent.`,
+        origin: "work",
+        requestId: `work-question:${question.id}:cancelled`,
+      });
+      this.ledger.tx(() => this.ledger.putWorkQuestion({ ...this.ledger.findWorkQuestion(question.id)!, cancellationSubmittedAt: Date.now() }));
+    } catch (error) {
+      if (!(error instanceof CommandError)) throw error;
+      this.core.log(`fallback notice for question ${question.id} not delivered`, error.message);
+    }
+  }
+
+  /** Journal first, submit second, mark last. Pi deduplicates either crash window. */
+  private deliverQuestion(id: string) {
+    void this.core.lane(`work-question:${id}`, async () => {
+      const question = this.ledger.findWorkQuestion(id);
+      if (!question) return;
+      if (question.state === "cancelled") return this.notifyQuestionCancellation(question);
+      const child = this.ledger.work(question.workId);
+      const parent = this.ledger.work(question.parentWorkId);
+      if (isTerminal(child) || isTerminal(parent)) {
+        this.ledger.tx(() => this.ledger.putWorkQuestion({
+          ...question, state: "cancelled",
+          cancellationReason: isTerminal(child) ? null : "Your parent Work settled before the question was resolved.",
+        }));
+        if (!isTerminal(child)) this.deliverQuestion(id);
+        return;
+      }
+      const answering = question.state === "answered";
+      if (answering ? question.answerSubmittedAt !== null : question.submittedAt !== null) return;
+      const recipient = answering ? child : parent;
+      try {
+        if (!recipient.conversationId) throw conflict("question recipient has no work conversation");
+        await this.core.openConversation(recipient.conversationId);
+        await this.core.engine.submit(recipient.conversationId, {
+          text: answering
+            ? `Your delegating Ghost answered question ${question.id}.\n\n## Question\n${question.question}\n\n## Answer\n${question.answer}\n\nContinue this Work.`
+            : `Child Work "${child.title}" (${child.id}) asks question ${question.id}.\n\n${question.question}\n\nAnswer promptly with \`answer_child\` using question_id "${question.id}". If only the owner can decide, use \`ask_owner\` and answer the child when resolved.`,
+          origin: "work",
+          requestId: `work-question:${question.id}:${answering ? "answer" : "question"}`,
+        });
+        this.ledger.tx(() => {
+          const current = this.ledger.findWorkQuestion(id)!;
+          // Cancellation/answering can happen while submit is in flight.
+          this.ledger.putWorkQuestion({ ...current, ...(answering ? { answerSubmittedAt: Date.now() } : { submittedAt: Date.now() }) });
+          if (!isTerminal(this.ledger.work(recipient.id))) this.resumeFromWaiting(recipient.id);
+        });
+      } catch (error) {
+        if (!(error instanceof CommandError)) throw error;
+        if (!answering) this.abandonQuestion(id, "Your parent could not be reached.");
+        else if (isTerminal(this.ledger.work(child.id))) this.ledger.tx(() => this.ledger.cancelWorkQuestions(child.id));
+        this.core.log(`${answering ? "answer" : "question"} ${id} not delivered`, error.message);
+      }
+    });
+  }
+
   /** Cancel a Work and every live descendant, deepest first. */
   cancel(workId: string, reason = "cancelled by the owner") {
     const work = this.ledger.work(workId);
@@ -151,6 +303,7 @@ export class Works {
     this.ledger.tx(() => {
       this.ledger.putWork(next);
       this.core.decisions.cancelFor(work.id);
+      this.ledger.cancelWorkQuestions(work.id);
     });
     if (work.conversationId) {
       const conversationId = work.conversationId;
@@ -202,6 +355,7 @@ export class Works {
     const work = this.ledger.work(workId);
     if (work.state !== "running") throw conflict(`Work is ${work.state}`);
     if (this.ledger.children(work.id).some((child) => !isTerminal(child))) throw conflict("delegated Work is still live; wait for it before completing");
+    if (this.pendingQuestion(work.id)) throw conflict("a question to the parent is pending; wait for its answer before completing");
     if (this.core.effects.unresolved(work.id).length > 0) throw conflict("an effect of this Work is unresolved");
     for (const artifact of result.artifacts) {
       if (!this.core.artifacts.has(artifact.digest) || !this.ledger.artifactWorkIds(artifact.digest).includes(work.id)) {
@@ -229,6 +383,7 @@ export class Works {
     }
     this.ledger.tx(() => {
       this.ledger.putWork(next);
+      if (verdict.outcome === "revise") this.ledger.appendReviseHistory(work.id, verdict);
       this.core.decisions.cancelFor(work.id, "accept_result");
       if (next.state === "running") this.ledger.setIdleNudges(work.id, 0);
     });
@@ -236,13 +391,20 @@ export class Works {
       const conversationId = next.conversationId;
       void this.core.lane(`work:${work.id}`, () =>
         this.core.engine.submit(conversationId, {
-          text: `Verification asked for a revision (${verdict.source}):\n${verdict.reasons}\n\nFix the result and call complete again.`,
+          text: [
+            `Verification asked for a revision (${verdict.source}).`,
+            `## Reasons\n${verdict.reasons}`,
+            verdict.evidence === undefined ? "" : `## Evidence\n${verdict.evidence}`,
+            verdict.scope === undefined ? "" : `## Scope\n${verdict.scope}`,
+            "Change only what the scope allows; leave unrelated behavior untouched. Fix the result and call complete again.",
+          ].filter(Boolean).join("\n\n"),
           origin: "verdict",
           requestId: `work:${work.id}:verdict:${next.revisionsUsed}`,
         }),
       );
     }
     if (isTerminal(next)) this.settled(next);
+    if (isTerminal(next)) this.ledger.tx(() => this.ledger.cancelWorkQuestions(next.id));
     return next;
   }
 
@@ -256,6 +418,7 @@ export class Works {
     this.ledger.tx(() => {
       this.ledger.putWork(next);
       this.core.decisions.cancelFor(work.id);
+      this.ledger.cancelWorkQuestions(work.id);
     });
     if (work.conversationId) {
       const conversationId = work.conversationId;
@@ -298,7 +461,35 @@ export class Works {
     if (work.state !== "running") return;
     const liveChildren = this.ledger.children(work.id).some((child) => !isTerminal(child));
     const pending = this.ledger.pendingDecisions({ workId: work.id }).length > 0;
-    if (liveChildren || pending) {
+    const childQuestions = this.ledger.workQuestions(work.id, true).filter((question) => question.state === "pending");
+    // An owner/upstream question is a legitimate escalation; keep waiting for its answer.
+    if (childQuestions.length > 0 && !pending && !this.pendingQuestion(work.id)) {
+      const exhausted = childQuestions.filter((question) => question.nudgeCount >= MAX_IDLE_NUDGES);
+      for (const question of exhausted) this.abandonQuestion(question.id, "Your parent did not answer after a reminder.");
+      const unanswered = childQuestions.filter((question) => question.nudgeCount < MAX_IDLE_NUDGES);
+      if (unanswered.length > 0) {
+        const count = this.ledger.tx(() => {
+          for (const question of unanswered) this.ledger.putWorkQuestion({ ...question, nudgeCount: question.nudgeCount + 1 });
+          return this.ledger.nextQuestionNudge(work.id);
+        });
+        void this.core.lane(`work:${work.id}`, async () => {
+          try {
+            if (!work.conversationId) throw conflict("parent has no work conversation");
+            await this.core.engine.submit(work.conversationId, {
+              text: `Your children are waiting for answers to questions ${unanswered.map((question) => question.id).join(", ")}. Answer with \`answer_child\`, or use \`ask_owner\` and relay the answer. Do not leave children waiting.`,
+              origin: "work",
+              requestId: `work:${work.id}:qnudge:${count}`,
+            });
+          } catch (error) {
+            if (!(error instanceof CommandError)) throw error;
+            for (const question of unanswered) this.abandonQuestion(question.id, "Your parent could not be reached.");
+            this.core.log(`child-question reminder for ${work.id} not delivered`, error.message);
+          }
+        });
+        return;
+      }
+    }
+    if (liveChildren || pending || this.pendingQuestion(work.id)) {
       this.ledger.tx(() => this.ledger.putWork({ ...work, state: "waiting", updatedAt: Date.now() }));
       this.kick(work.id);
       return;
@@ -312,7 +503,7 @@ export class Works {
     const conversationId = work.conversationId!;
     void this.core.lane(`work:${work.id}`, () =>
       this.core.engine.submit(conversationId, {
-        text: "You stopped without finishing. Call `complete` with the result, `delegate` part of the Work, or `ask_owner` if you are blocked.",
+        text: `You stopped without finishing. Call \`complete\` with the result, \`delegate\` part of the Work, or \`${work.parentId ? "ask_parent" : "ask_owner"}\` if you are blocked.`,
         origin: "work",
         requestId: `work:${work.id}:r${work.revision}:v${work.revisionsUsed}:nudge:${nudges + 1}`,
       }),
@@ -359,11 +550,15 @@ export class Works {
         // with a silent conversation; the start request id makes this a no-op otherwise.
         if (!work.conversationId) return;
         await this.core.openConversation(work.conversationId);
-        await this.core.engine.submit(work.conversationId, { text: describeWork(work), origin: "work", requestId: `work:${work.id}:start` });
+        await this.core.engine.submit(work.conversationId, { text: this.input(work), origin: "work", requestId: `work:${work.id}:start` });
         return;
       case "blocked":
         return;
     }
+  }
+
+  private input(work: Work): string {
+    return [describeWork(work), work.activityId ? this.core.activities.context(work) : ""].filter(Boolean).join("\n\n");
   }
 
   private async start(work: Work) {
@@ -382,7 +577,7 @@ export class Works {
     }
     await this.core.openConversation(conversationId);
     await this.core.engine.submit(conversationId, {
-      text: describeWork(work),
+      text: this.input(work),
       origin: "work",
       requestId: `work:${work.id}:start`,
     });
@@ -393,6 +588,7 @@ export class Works {
     const children = this.ledger.children(work.id);
     if (children.some((child) => !isTerminal(child))) return;
     if (this.ledger.pendingDecisions({ workId: work.id }).length > 0) return;
+    if (this.pendingQuestion(work.id)) return;
     for (const child of children) await this.notifyParent(child);
     if (children.length > 0) return;
     this.resumeFromWaiting(work.id);
@@ -423,9 +619,10 @@ export class Works {
       await this.core.sandbox.stageInputs(parent, artifacts.map((artifact) => ({ childId: child.id, name: artifact.name, digest: artifact.digest })));
     }
     this.resumeFromWaiting(parent.id);
-    const staged = artifacts.length > 0 && this.core.sandbox.stageInputs ? `\n\nIts files are in inputs/${child.id}/ in your workspace.` : "";
+    const inputRoot = parent.execution?.kind === "host" ? `${this.core.sandbox.workspacePath?.(parent) ?? ""}/inputs/${child.id}/` : `inputs/${child.id}/`;
+    const staged = artifacts.length > 0 && this.core.sandbox.stageInputs ? `\n\nIts files are in ${inputRoot} in your Work's staging workspace.` : "";
     await this.core.engine.submit(parent.conversationId, {
-      text: describeOutcome(child) + staged,
+      text: this.describeReport(child) + staged,
       origin: "child_result",
       requestId: `work:${parent.id}:child:${child.id}:${child.state}:${child.revision}`,
     });
@@ -439,11 +636,13 @@ export class Works {
     const checks = this.inheritedChecks(work);
     if (checks.length > 0) {
       const outcome = await verifyChecks(this.core, work, checks);
-      this.applyVerdict(work.id, { outcome: outcome.pass ? "pass" : "revise", source: "checks", reasons: outcome.reasons, at: Date.now() });
-      return;
+      if (!outcome.pass || !work.parentId) {
+        this.applyVerdict(work.id, { outcome: outcome.pass ? "pass" : "revise", source: "checks", reasons: outcome.reasons, at: Date.now() });
+        return;
+      }
     }
-    // Without checks or an explicit reviewer, a child is judged by the Ghost that delegated it;
-    // only a root Work falls through to the owner.
+    // Child checks gate review; owner-authored root checks still decide acceptance.
+    // Without an explicit reviewer, only a root Work falls through to the owner.
     const reviewer = work.acceptance.reviewer;
     if (reviewer || work.parentId) {
       await this.startReview(work, this.reviewerGhost(work));
@@ -491,7 +690,7 @@ export class Works {
     }
     await this.core.openConversation(conversationId);
     await this.core.engine.submit(conversationId, {
-      text: describeReview(work),
+      text: [describeReview(work), work.activityId ? this.core.activities.context(work) : ""].filter(Boolean).join("\n\n"),
       origin: "work",
       requestId: `review:${work.id}:r${work.revision}:v${work.revisionsUsed}`,
     });
@@ -501,6 +700,17 @@ export class Works {
     this.kick(work.id);
   }
 
+
+  private describeReport(work: Work) {
+    const history = this.ledger.reviseHistory(work.id);
+    if (history.length === 0) return describeOutcome(work);
+    const compact = history.slice(-8).map((lesson, index) => [
+      `${index + 1}. ${lesson.source}: ${lesson.reasons.slice(0, 600)}`,
+      lesson.evidence ? `Evidence: ${lesson.evidence.slice(0, 400)}` : "",
+      lesson.scope ? `Scope: ${lesson.scope.slice(0, 400)}` : "",
+    ].filter(Boolean).join("\n")).join("\n\n");
+    return `${describeOutcome(work)}\n\n## Revision history (${history.length} retained)\n${compact}\n\nKeep any durable constraint these revisions imply: use memory_retain if you hold memory tools; otherwise carry it into future briefs.`;
+  }
   /** A settled Work reports to whoever waits: its parent's conversation, or the owner for a root Work. */
   private async report(work: Work) {
     if (this.core.sandbox.release) {
@@ -513,6 +723,11 @@ export class Works {
     if (work.parentId) {
       await this.notifyParent(work);
     } else {
+      const activityOutcome = work.activityId ? this.core.activities.settled(work) : { notify: true };
+      if (!activityOutcome.notify) {
+        this.ledger.tx(() => this.ledger.markReported(work.id, Date.now()));
+        return;
+      }
       if (work.state !== "cancelled") {
         this.ledger.tx(() =>
           this.core.notify({
@@ -527,16 +742,19 @@ export class Works {
           }),
         );
       }
-      try {
-        await this.core.engine.submit(work.originConversationId, {
-          text: describeOutcome(work),
-          origin: "report",
-          requestId: `work:${work.id}:report:${work.state}:${work.revision}`,
-        });
-      } catch (error) {
-        // A refusal (no model, no credential) is final for this report; the notification stands.
-        if (!(error instanceof CommandError)) throw error;
-        this.core.log(`report of ${work.id} not delivered`, error.message);
+      // Automated outcomes remain inspectable data, not new direct turns with the Ghost's full authority.
+      if (!work.activityId) {
+        try {
+          await this.core.engine.submit(work.originConversationId, {
+            text: this.describeReport(work),
+            origin: "report",
+            requestId: `work:${work.id}:report:${work.state}:${work.revision}`,
+          });
+        } catch (error) {
+          // A refusal (no model, no credential) is final for this report; the notification stands.
+          if (!(error instanceof CommandError)) throw error;
+          this.core.log(`report of ${work.id} not delivered`, error.message);
+        }
       }
     }
     this.ledger.tx(() => this.ledger.markReported(work.id, Date.now()));
@@ -544,6 +762,7 @@ export class Works {
 
   /** Startup: deliver reports a crash cut off, and wake running Work whose wake was lost. */
   recover() {
+    for (const question of this.ledger.workQuestionsAwaitingSubmission()) this.deliverQuestion(question.id);
     for (const work of this.ledger.unreportedWorks()) this.kick(work.id);
     for (const work of this.ledger.worksInState("running")) {
       const conversation = work.conversationId ? this.ledger.findConversation(work.conversationId) : null;
@@ -553,7 +772,7 @@ export class Works {
       const conversationId = conversation.id;
       void this.core.lane(`work:${work.id}`, () =>
         this.core.engine.submit(conversationId, {
-          text: `The host restarted. Continue this Work from where you stopped; call \`work_status\` if you need to see what changed.\n\n${describeWork(work)}`,
+          text: `The host restarted. Continue this Work from where you stopped; call \`work_status\` if you need to see what changed.\n\n${this.input(work)}`,
           origin: "work",
           requestId: `work:${work.id}:recover:${work.updatedAt}`,
         }),

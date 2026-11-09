@@ -1,4 +1,4 @@
-import type { Decision, Work } from "@ghost/contract";
+import type { Decision, VaultItem, Work } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { NoEffect } from "./effects.ts";
 import { conflict, invalid } from "./errors.ts";
@@ -57,7 +57,7 @@ export class Decisions {
   }
 
   /** A question from a Ghost. Returns the decision; the answer arrives as a submission. */
-  ask(conversationId: string, title: string, detail: string, options: string[], id?: string): Decision {
+  ask(conversationId: string, title: string, detail: string, options: string[], id?: string, proposal: Decision["proposal"] = null): Decision {
     const existing = id ? this.ledger.findDecision(id) : null;
     if (existing) return existing;
     const conversation = this.ledger.conversation(conversationId);
@@ -72,7 +72,7 @@ export class Decisions {
         title,
         detail,
         options,
-        proposal: null,
+        proposal,
       }),
     );
   }
@@ -88,6 +88,21 @@ export class Decisions {
     }
   }
 
+  /** Only the write-only vault endpoint may answer a secure credential request. */
+  resolveSecureFormState(decisionId: string, item: Pick<VaultItem, "id" | "kind" | "title">): Decision {
+    const decision = this.ledger.decision(decisionId);
+    if (decision.state !== "pending") throw conflict("secure form decision is no longer pending");
+    const form = decision.proposal?.secureForm as { kind?: string } | undefined;
+    if (decision.kind !== "question" || !form || form.kind !== item.kind) throw invalid("decision is not a matching secure form request");
+    const resolved: Decision = {
+      ...decision, state: "answered",
+      answer: JSON.stringify({ id: item.id, kind: item.kind, title: item.title }),
+      resolvedAt: Date.now(),
+    };
+    this.ledger.tx(() => this.ledger.putDecision(resolved));
+    return resolved;
+  }
+
   async resolve(decisionId: string, resolution: Resolution) {
     const resolved = this.resolveState(decisionId, resolution);
     await this.followUp(resolved);
@@ -96,6 +111,7 @@ export class Decisions {
   /** Commit the owner's answer before external follow-ups; API receipts join this transaction. */
   resolveState(decisionId: string, resolution: Resolution): Decision {
     const decision = this.ledger.decision(decisionId);
+    if (decision.proposal?.secureForm && (resolution.outcome !== "deny" || resolution.answer !== undefined)) throw conflict("use the secure form to answer this request; ordinary answers are not accepted");
     if (decision.state !== "pending") throw conflict(`decision is already ${decision.state}`);
     const state = stateFor(decision, resolution);
     const resolved: Decision = { ...decision, state, answer: resolution.answer ?? null, resolvedAt: Date.now() };

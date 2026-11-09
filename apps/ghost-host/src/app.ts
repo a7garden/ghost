@@ -8,19 +8,22 @@ import type { Engine } from "./core/ports.ts";
 import { createEngine, EngineStartupCleanupError } from "./engine/index.ts";
 import { createDocuments } from "./integrations/documents.ts";
 import { createMemory } from "./integrations/memory.ts";
+import { createBrowser } from "./integrations/browser.ts";
 import { createReach } from "./integrations/reach.ts";
 import { createSkills } from "./integrations/skills.ts";
 import { Ledger } from "./ledger/ledger.ts";
-import { createSandbox } from "./sandbox/index.ts";
+import { createSandbox, type SandboxService } from "./sandbox/index.ts";
 import { FsArtifactStore } from "./stores/artifacts.ts";
 import { FileSecrets } from "./stores/secrets.ts";
+import { createVault, type Vault } from "./stores/vault.ts";
 import { acquireRootLock } from "./state-lock.ts";
 import { createToolSet } from "./tools/index.ts";
-import type { DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
+import type { BrowserPort, DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
 import { MacHost } from "./integrations/host.ts";
 import { HostWatch } from "./core/hostwatch.ts";
 import { ProviderCatalog } from "./integrations/provider-catalog.ts";
 import { settingsView } from "./core/commands.ts";
+import { SourceConnections } from "./integrations/activity-sources.ts";
 
 export interface App {
   core: Core;
@@ -29,6 +32,7 @@ export interface App {
   documents: DocumentsPort;
   skills: SkillsPort | null;
   host: HostPort | null;
+  vault: Vault;
   close(): Promise<void>;
 }
 
@@ -54,9 +58,13 @@ export async function openApp(config: Config): Promise<App> {
   }
   const lock = acquireRootLock(config.root);
   let openedLedger: Ledger | null = null;
+  let openedSandbox: SandboxService | null = null;
   let openedCore: Core | null = null;
   let openedCatalog: ProviderCatalog | null = null;
   let openedEngine: Engine | null = null;
+  let openedVault: Vault | null = null;
+  let openedBrowser: BrowserPort | null = null;
+  let openedSources: SourceConnections | null = null;
   let unsafeEngine = false;
   let coreStopped = false;
   let coreDrained = false;
@@ -71,10 +79,12 @@ export async function openApp(config: Config): Promise<App> {
       attempt(async () => { await openedCatalog?.close(); }),
       attempt(async () => { await openedCore?.codexCatalog.close(); }),
     ]);
-    if (openedCore) {
-      if (!coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
-      if (!coreDrained) await attempt(async () => { await openedCore!.idle(); coreDrained = true; });
-    }
+    if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
+    await Promise.all([
+      attempt(async () => { await openedSources?.close(); }),
+      attempt(async () => { await openedSandbox?.close(); openedSandbox = null; }),
+    ]);
+    if (openedCore && !coreDrained) await attempt(async () => { await openedCore!.idle(); coreDrained = true; });
     if (openedEngine) await attempt(async () => {
       await openedEngine!.close();
       openedEngine = null;
@@ -85,9 +95,15 @@ export async function openApp(config: Config): Promise<App> {
     }
     // A rejected engine close is not proof that its tasks stopped. Retain ownership
     // and the ledger in that case; close() can retry, or process exit releases the lock.
-    if (!unsafeEngine && !openedEngine && (!openedCore || (coreStopped && coreDrained))) {
-      await attempt(() => { openedLedger?.close(); openedLedger = null; });
-      if (!openedLedger) await attempt(() => lock.close());
+    if (!unsafeEngine && !openedEngine && !openedSandbox && (!openedCore || (coreStopped && coreDrained))) {
+      // No tool can run any more: end browser sessions (login state saved) and seal the vault.
+      await attempt(async () => { await openedBrowser?.shutdown(); openedBrowser = null; });
+      await attempt(() => { openedVault?.close(); openedVault = null; });
+      // Chrome sessions still running keep ownership: close() can retry their shutdown.
+      if (!openedBrowser) {
+        await attempt(() => { openedLedger?.close(); openedLedger = null; });
+        if (!openedLedger) await attempt(() => lock.close());
+      }
     }
     if (errors.length) throw new AggregateError(errors, "failed to close Ghost state root");
   };
@@ -98,17 +114,21 @@ export async function openApp(config: Config): Promise<App> {
   try {
     const ledger = (openedLedger = new Ledger(join(config.root, "ledger.db")));
     const artifacts = new FsArtifactStore(config.root);
-    const sandbox = createSandbox(config, artifacts);
+    const sandbox = (openedSandbox = createSandbox(config, artifacts));
     openedCatalog = new ProviderCatalog({ cachePath: join(config.root, "models.json") });
+    openedSources = new SourceConnections({ root: config.root, currentConnection: (id) => ledger.findConnection(id) });
     const core = (openedCore = new Core({
       ledger, artifacts, sandbox, secrets: new FileSecrets(config.root), log,
       catalog: openedCatalog,
       codexCachePath: join(config.root, "codex-models.json"),
+      activitySources: openedSources,
     }));
     const documents = createDocuments(core);
     const skills = createSkills(config);
     const host = config.mac ? new MacHost({ roots: config.mac.roots }) : null;
-    const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config) });
+    const vault = (openedVault = createVault(config.root));
+    const browser = (openedBrowser = createBrowser(config, { root: config.root }));
+    const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config), browser, vault });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, log }));
     core.attach(engine);
     return {
@@ -118,6 +138,7 @@ export async function openApp(config: Config): Promise<App> {
       documents,
       skills,
       host,
+      vault,
       close,
     };
   } catch (error) {
@@ -165,7 +186,7 @@ export async function serve(config: Config) {
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });

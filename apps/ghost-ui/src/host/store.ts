@@ -49,6 +49,14 @@ export function applyEvent(state: State, data: LedgerEventData): State {
       return { ...state, devices: upsert(state.devices, data.device) };
     case 'device.removed':
       return { ...state, devices: remove(state.devices, data.id) };
+    case 'activity':
+      return { ...state, activities: upsert(state.activities ?? [], data.activity) };
+    case 'activity_run':
+      return { ...state, activityRuns: upsert(state.activityRuns ?? [], data.run) };
+    case 'connection':
+      return { ...state, connections: upsert(state.connections ?? [], data.connection) };
+    case 'connection.removed':
+      return { ...state, connections: remove(state.connections ?? [], data.id) };
     case 'settings':
       return { ...state, settings: data.settings };
     case 'sandbox': {

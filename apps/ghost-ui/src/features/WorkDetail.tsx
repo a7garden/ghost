@@ -15,6 +15,7 @@ import { useConversationFeed } from './conversationFeed';
 import { absoluteTime, relativeTime, useNow } from './time';
 import { useHost } from '../host/context';
 import { uiTerms } from '../uiText';
+import { executionLabel } from './activity-config';
 
 const effectGlyph: Record<Effect['state'], GlyphState> = { pending: 'running', done: 'done', unknown: 'blocked', denied: 'cancelled' };
 const effectLabel: Record<Effect['state'], string> = { pending: '실행 중', done: '완료', unknown: '결과 미확정', denied: '거부됨' };
@@ -115,6 +116,8 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
           <h2 id="work-brief" className="section-title">할 일</h2>
           <p className="work-brief">{work.brief}</p>
           {work.acceptance.criteria.trim() && <div className="work-criteria"><span>완료 기준</span><p>{work.acceptance.criteria}</p></div>}
+          {work.execution && <div className="work-criteria"><span>실행 환경</span><p>{executionLabel[work.execution.kind]}{work.execution.kind === 'host' ? ` · ${work.execution.cwd}` : ''}</p></div>}
+          {work.activityId && <Button variant="ghost" size="sm" onClick={() => navigate('/settings?tab=activities')}>자동 활동 열기</Button>}
         </section>
 
         <WorkConversation work={work} ghostName={ghostName(work.ghostId)}/>
@@ -149,12 +152,14 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   </Page>;
 }
 
-function VerdictStamp({ verdict }: { verdict: Verdict }) {
+export function VerdictStamp({ verdict }: { verdict: Verdict }) {
   return <div className="verdict" data-outcome={verdict.outcome}>
     <StateGlyph state={verdict.outcome === 'pass' ? 'done' : verdict.outcome === 'fail' ? 'failed' : 'attention'} size={15}/>
     <strong>{verdictText[verdict.outcome]}</strong>
     <span>{verdictSource[verdict.source]} · {absoluteTime(verdict.at)}</span>
     {verdict.reasons.trim() && <details><summary>사유</summary><p>{verdict.reasons}</p></details>}
+    {verdict.evidence?.trim() && <details><summary>근거</summary><p>{verdict.evidence}</p></details>}
+    {verdict.scope?.trim() && <details><summary>수정 범위</summary><p>{verdict.scope}</p></details>}
   </div>;
 }
 
@@ -184,16 +189,20 @@ function WorkConversation({ work, ghostName }: { work: Work; ghostName: string }
 }
 
 function WorkTranscript({ conversationId, ghostId, ghostName }: { conversationId: string; ghostId: string; ghostName: string }) {
-  const { feed, loading } = useConversationFeed(conversationId);
+  const { feed, loading, olderLoading, loadOlder, error, setError } = useConversationFeed(conversationId);
   const speaker = (message: Message) => message.role === 'user' ? 'Ghost에게 전달' : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : ghostName;
   const running = Boolean(feed.live?.running);
   return <div className="work-transcript">
+    {error && <InlineError>{error}</InlineError>}
+    {feed.before && <div className="grid justify-items-center">
+      <button type="button" className="link-quiet" disabled={olderLoading} onClick={() => { setError(''); loadOlder(); }}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
+    </div>}
     {loading && !feed.messages.length ? <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>
       : feed.messages.length || running ? <div className="ghost-conversation__messages">
         <Transcript messages={feed.messages} speaker={speaker}/>
         {feed.live && <LiveReply live={feed.live} ghostId={ghostId} ghostName={ghostName}/>}
       </div>
-        : <p className="work-aside__empty">대화 기록 없음</p>}
+        : !error && <p className="work-aside__empty">대화 기록 없음</p>}
   </div>;
 }
 

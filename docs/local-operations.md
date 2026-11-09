@@ -14,27 +14,54 @@
 
 1. 해당 변경의 테스트·타입 검사·실행 검증과 필요한 독립 검토를 마치고 소스 커밋을 보존한다. 검증되지 않은 편집을 감시해 즉시 설치하는 watcher는 만들지 않는다.
 2. LaunchAgent, 실제 실행 파일, 포트 62062의 리스너, 열린 DB 경로와 상태 루트가 일치하는지 확인한다. 처리 중 대화·작업을 임의로 끊지 않고 유휴 시점에 전환한다. 유휴가 되지 않으면 검증한 릴리스를 준비한 채 차단 사유를 보고한다.
-3. 유휴 확인 후 `ghost backup <새 백업 디렉터리>`의 DB 무결성 확인·manifest와 백업 시각을 기록하고, `artifacts/`, `skills/`, `secrets/`, `config.json`도 권한을 유지해 보관한다. 이전 릴리스는 삭제하지 않는다.
-4. `~/.local/share/ghost/releases/<날짜>-bun-<소스 커밋>/`에 검증한 `ghost`와 `ui/`를 설치하고 원본·사본의 해시를 비교한다. 별도 임시 상태 루트·포트에서 설치 사본도 실행해 본다.
+3. 유휴 확인 후 **현재 운영 릴리스**의 `ghost backup <새 백업 디렉터리>`로 DB 무결성·manifest·시각을 확인한다. 금고 DB·키 포함 여부를 확인하고 `artifacts/`, `skills/`, `secrets/`(연결 계정 자격 포함), `config.json`, 앱 console 설정도 권한을 유지해 보관한다. 이전 릴리스는 삭제하지 않는다.
+4. `~/.local/share/ghost/releases/<날짜>-bun-<소스 커밋>/`에 검증한 `ghost`, `ui/`, 고정된 `agent-browser`를 설치하고 원본·사본 해시를 비교한다. 브라우저 CLI를 빠뜨리면 기존 config가 깨진다. 별도 임시 상태 루트·포트에서 설치 사본과 스키마 업그레이드도 실행한다.
 5. 유휴 상태를 다시 확인한 뒤 같은 디렉터리의 임시 심볼릭 링크를 `os.replace` 같은 원자적 rename으로 `current`에 교체한다. 실제 `readlink` 대상이 새 릴리스인지 확인한 후 LaunchAgent의 기존 Host를 `SIGTERM`으로 정상 종료해 재기동한다. 운영 루트에 두 번째 Host를 직접 띄우지 않는다.
 6. Owner API/health로 단일 리스너·실행 경로, 준비 상태와 기존 데이터 보존을 확인하고 **설치된 Ghost 앱**에서 바뀐 화면을 실제로 연다. 운영 루트에는 `ghost doctor`를 실행하지 않는다. Host/UI만 바뀌었으면 external 모드를 유지해 새 Host/UI를 사용하고, native shell 변경이 있을 때만 기존 서명·배포 검증을 거쳐 앱 번들을 교체한다.
 7. 검증 실패 시 저장 형식의 하위 호환성을 확인한 뒤 이전 릴리스 링크로 되돌려 정상 재기동한다. 새 릴리스가 인증 형식을 바꾸면 운영 검증 중 인증 정보를 저장하지 않는다. 저장 이후에는 이전 릴리스가 해당 인증을 읽지 못할 수 있으므로 별도 승인 없이 secrets를 복원하지 않고 보고한다. 데이터 복원·파괴적 마이그레이션도 별도 승인이 필요하다. 설치 경로·소스·백업·검증 결과를 이 문서에 기록한다.
 
 Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다.
 
-## 현재 설치 (2026-11-08)
+## 현재 설치 (2026-11-09)
 
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261108-bun-1fde344` (`main`, UI는 같은 디렉터리의 `ui/`) |
-| 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261109-bun-2bf4792` (`autonomy-integrated-20261109`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
+| 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent, `dev.garden.macfra.agent`(2026-11-08 Ghost `Mac 관리`로 이전, disabled) |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 자동 활동·PC 직접 실행 운영 반영 — 2026-11-09
+
+- 소스 `2bf4792`는 자동 활동 구현과 운영 `cd1527b`의 브라우저·금고·협업 및 전체 Ghost 기기 접근 정책을 합친 검증본이다. [구조와 권한 경계](architecture.md#standing-activities-not-an-always-thinking-agent), [설정 방법](#자동-활동과-pc-실행)을 따른다. Ghost별 상시 VM이나 LLM 하트비트 대신 Host 감지 → 한도가 있는 맡긴 일을 사용한다.
+- 검사: 계약·Host 타입 검사, Host 578 통과·5 생략(4,118 assertions), 실제 Chrome 검사 4 통과, UI 128 통과·타입/빌드, 브라우저 시각·기능 61 통과. 실제 Pi와 PC 파일·셸로 실패 → 같은 맡긴 일/대화 재개 → 새 OS 바이트 읽기·쓰기·실행·산출물 수용을 검증했다. 의심했던 환경 캐시 문제는 재현되지 않았고 런타임 우회 수정은 하지 않았다.
+- 독립 검토: Codex 작성 통합 Core·실행 환경·UI는 Claude, Claude 작성 계약·API·문서는 Codex가 검토했다. 실제 응답 메타데이터로 vendor 차이를 확인했다. 통합 검토의 확정 지적은 없다. 그 전 실제 실행에서 찾은 승인 뒤 대기 고착과 자동 활동 결과의 직접 대화 권한 확장 등은 구현·회귀·실제 실행으로 수정했다.
+- 격리된 실제 모델: PC 권한 전 거절·허용 뒤 정확한 cwd의 파일/셸·산출물 수용, Apple container의 Host 파일 비가시성과 원본 보존, 로컬 Gitea 및 엄격한 TLS IMAP/SMTP 원본 읽기 → 유휴 승인 대기(전송 0회) → 승인 후 정확히 1회 댓글/회신 → 완료를 확인했다. 중복 감지·변경된 head/UID·중지·수동 답글 대상 고정도 확인했다. 실제 메일 계정이나 외부 수신자에게 보내지 않았다.
+- 공식 Manus 문서 조사 뒤 240초 상대 다음 점검을 저장하고, 유휴 확인 후 Host를 정상 종료·재시작했다. 동일한 실행·시각·비교 기준이 남았고 자기 점검이 정확히 한 번 완료됐다(전체 2회); 변경 없음 결과는 알림 없이 종료했다. 실제 브라우저의 제목/본문 관측이 검토자의 `evidence_read`에 전달되는 것도 확인했다. 시험 원장·Pi·모델 캐시에서 제공자 자격 값의 일치가 0건이었다.
+- 설치: `releases/20261109-bun-2bf4792`, Host SHA-256 `1bfe723f…`, UI 93개 파일 원본/사본 일치, `agent-browser` SHA-256 `19680f06…` 보존(`release.json`에 전체 해시). 백업 `backups/pre-autonomy-20261109-1794158897180/`: `db/backup.json`은 `ghost-backup/2`, complete, 원장 스키마 6·두 DB 및 금고 DB/키의 무결성·해시 확인. 부속 상태 34개 파일과 console 설정의 바이트·권한도 확인했다.
+- 설치 사본을 자격·Mac watch·기억 연동을 끈 운영 백업 사본에서 실행했다. 스키마 6→7, Ghost 24·대화 40·맡긴 일 39와 질문·수정 이력 보존, 금고 API 200·제공 UI 바이트 일치를 확인했다. 모델 자격을 의도적으로 복사하지 않아 이 복원 검사의 모델 준비 상태는 false였고, 실제 모델 실행은 별도 새 루트에서 검증했다.
+- 유휴에서 `current`를 원자적 rename으로 교체·대상 확인 후 기존 Host에 `SIGTERM`을 보냈다(PID 57107→26240). 새 `host.json` 파일 이벤트로 재기동을 관측했다. 단일 62062 리스너·새 실행 경로·운영 DB 루트·스키마 7·모델 준비 상태·health/공개 origin/금고 API 200, 기존 Ghost·대화·맡긴 일·결정·기기 식별자와 모델·도구·자격·소유자 토큰·console 설정 보존을 확인했다. PC 권한·연결 계정·활동 규칙은 자동 부여/생성하지 않았다.
+- 설치된 Mac 앱은 external 모드에서 정상 종료·비활성 재실행했다(PID 54752→28423). 셸 번들은 교체하지 않았다. 새 창은 `accessible:false`, `is_focused:false`여서 네이티브 클릭은 확인하지 않았고 앞으로 강제 이동하지 않았다. 운영 Host가 제공하는 실제 UI에서 자동 활동 생성 양식(PC 미허용 상태), 연결 계정 탭을 열고 저장 없이 닫았다.
+- Git: 전용 브랜치는 일반 푸시했다. canonical `main`의 기존 미커밋 기기 알림 작업과 겹쳐 `git merge --ff-only`가 거절됐으므로 그 변경은 stage/commit/stash/reset하지 않았다. `main`은 미통합이며 검증 소스는 `autonomy-integrated-20261109`에 보존한다.
+- 되돌리기: 이전 `cd1527b`와 스키마 6 백업을 보존했다. 스키마 6 Host는 7을 거절하므로 링크만 되돌리지 않는다. 데이터·자격 복원은 별도 소유자 승인이 필요하다.
+
+
+### 브라우저·금고·협업 개선 운영 반영 — 2026-11-09
+
+- 설계: [agent-capabilities](agent-capabilities.md). Host 브라우저(agent-browser + Chrome, Host 출구 프록시, 결제·전송은 승인), Ghost 금고(Shade 모델 포팅, 보안 입력 양식, 값은 모델·원장에 남지 않음), 자식→부모 질문(`ask_parent`/`answer_child`), 판정 근거·수정 범위, 자식 검사, 교훈 전달, 효과 도구가 있는 라운드의 순차 실행. 원장 마이그레이션 6(`work_questions`, `works.revise_history`·`question_nudges`).
+- 검사: Host 468개 중 462 통과·6 생략(실제 Chrome 4개는 `GHOST_BROWSER_SMOKE=1`로 따로 통과: 공개 페이지·프록시 거절·Ghost별 로그인 복원, WebRTC UDP 0패킷, 스크린샷 잠금, 인계 후 마지막 페이지 복원), 타입 검사, UI 114개·빌드, 시각/기능 53개. 독립 검토: 협업·금고·브라우저(Codex 작성)는 Claude, UI(GLM 작성)는 Claude Opus, 통합 코드(Claude 작성)는 Codex가 검토했다. P1 4건(WebRTC UDP 우회, 업로드·다운로드 경로 경쟁, 보안 양식 `kind` 누락, 저장 실패 대화상자 고착)과 P2·P3를 고치고 회귀 검사를 더했다.
+- 실제 모델(운영 사본 위 격리 루트): 브라우저로 example.com→IANA 이동, 보안 양식 요청→금고 경로 답변(일반 답변은 409)→the-internet 로그인 성공(`[redacted]` 표시), 카드 채우기 승인 대기→승인 후 입력, 인계 창 열림→답변 후 이어가기, 자식의 `ask_parent`→부모 `answer_child`→검사·검토 통과. 원장·Pi·금고 DB에서 시험 비밀번호·카드 번호가 발견되지 않았다(사이트 본문에 원래 적힌 데모 비밀번호만 Pi 기록에 있음).
+- 설치: `releases/20261109-bun-eff8fba`로 먼저 전환한 뒤, `/tmp` 정리로 소켓 디렉터리가 사라져도 다시 만드는 수정을 더한 `releases/20261109-bun-cd1527b`로 다시 전환했다. Host 원본·사본 해시 일치, `agent-browser`는 upstream 공개 SHA-256(`19680f06…`)과 같다. 설치 사본을 운영 백업 사본 위 임시 루트·포트에서 실행해 스키마 6, health, 금고 API, UI, 실제 모델의 네이버 열기를 확인했다.
+- 백업: `backups/pre-capabilities-20261109-eff8fba-1794151213000/`(스키마 5, artifacts·secrets·config·모델 캐시·console) 와 `backups/pre-cd1527b-20261109-1794151565000/`(스키마 6, 금고 DB·키 포함). 두 번 모두 유휴(바쁜 대화·진행 중 맡긴 일 0)를 확인하고 전환했다.
+- 사고: 첫 전환에서 링크 교체 명령(`mv -h`)이 실패한 채 재기동 신호가 나가, 이전 실행 파일이 새 config의 `browser` 키를 거부하고 원장을 열기 전에 종료했다. 곧바로 `os.replace`로 링크를 바꿨고 launchd가 새 Host를 띄웠다. 데이터 변경은 없었다. 이후 전환은 `os.replace`만 쓴다.
+- 운영 확인: 단일 리스너, 새 실행 경로, 스키마 6, 준비 상태, Ghost 24·대화 40·맡긴 일 39 식별자 보존, 금고 API 200, 제공 UI 번들 일치, 설정 › 금고 탭을 운영 웹 UI에서 열었다. 활성 Ghost 22명에게 브라우저·금고 도구를 부여했다(소유자 지시: 넓은 권한). 운영 대화에 검증 메시지는 보내지 않았다.
+- Mac 앱은 external 모드로 정상 종료 후 다시 열었다. 화면이 꺼져 있어(CoreGraphics 활성 디스플레이 없음) 네이티브 창의 화면 확인은 하지 못했고, 같은 Host가 제공하는 웹 UI로 대신 확인했다.
+- 되돌리기: 스키마 6은 이전 실행 파일이 거부한다. 이전 릴리스로 돌아가려면 `config.json`에서 `browser` 키를 빼고 `pre-capabilities-…` 백업(스키마 5)을 복원해야 하며, 이는 소유자 승인이 필요하다. 같은 스키마 안의 되돌리기는 `current`를 `releases/20261109-bun-eff8fba`로 바꾸면 된다.
 
 ### 기기 범위 제거·한 단계 페어링 운영 반영 — 2026-11-08
 
@@ -311,6 +338,17 @@ Mac 앱의 **인증 페이지 열기**·**API 키 발급**과 대화의 웹 링�
 
 인증 정보는 Host의 `secrets/<provider>.json`에만 저장한다(0600). 만료 전 자동 갱신하며 새로고침 토큰도 원자적으로 교체한다. 로그인 취소는 기존 인증 정보를 유지한다. 로그아웃은 제공자 설정의 **고급 설정 → 저장된 인증 정보 삭제**를 선택한 뒤 저장한다. API 키로 전환하려면 인증 방법을 **API 키**로 바꾸고 새 키를 입력해 저장한다. Host를 재시작하면 미완료 로그인만 다시 시작해야 한다.
 
+## 자동 활동과 PC 실행
+
+1. **설정 → 연결 계정**에서 GitHub/Gitea 토큰 또는 IMAP/SMTP 앱 암호를 저장하고 연결을 확인한다. 값은 다시 표시하지 않는다. SMTP는 implicit TLS 또는 STARTTLS를 요구하며 연결 검사는 메일을 보내지 않는다. 운영 메일·PR을 시험 대상으로 자동 선택하지 않는다.
+2. **설정 → 자동 활동**에서 Ghost, 예약/PR/메일 원본, 조건, 지시·완료 기준, 도구, 실행 환경, 시간·일일·동시 한도와 알림을 설정한다. PR 댓글·메일 회신은 금지/승인/허용 중 고른다. 이는 원본에 묶인 답글 정책이며 일반 브라우저·PC 명령을 격리하지 않는다.
+3. PC를 쓰려면 **Ghost 설정 → PC 직접 실행**을 별도로 허용하고 맡긴 일/활동에서 PC와 절대 cwd를 고른다. cwd 밖 파일·네트워크·자격에도 OS 권한으로 접근할 수 있다. 기존 Ghost는 자동 허용되지 않는다. 컨테이너 선택은 드라이버가 없어도 PC로 대체하지 않으며, 셸 없이 격리 파일/API 작업만 가능하다.
+4. 시험 실행 뒤 기록·보류 사유·오류·한도를 확인한다. 읽기 전용 시험은 운영 커서를 진행하거나 원본에 답글을 보내지 않는다. 일시 중지는 새 실행만 막고, 실행도 중지하는 선택과 **모두 중지**는 하위 맡긴 일과 프로세스까지 취소한다.
+5. 계정 주소·자격 교체는 기존 실행 권한을 끊는다. 새 자격 입력 또는 저장 자격 제거를 명시하고 연결을 다시 확인한다. 이름만 바꾸면 커서와 자격은 보존한다. 결과가 불명확한 전송은 다시 누르지 말고 효과를 대사한다.
+
+원장 마이그레이션 7은 운영 마이그레이션 6의 질문·수정 이력을 유지하고 PC 권한·Work 실행 범위·`connections`·`activities`·`activity_runs`를 추가한다. 스키마 6 Host로 링크만 되돌리면 원장을 거절한다. 스키마 6 백업과 이전 릴리스는 보존하며 데이터 복원은 별도 소유자 승인이 필요하다.
+
+
 ## 원장 스키마 5와 요청 재시도
 
 동기 API 명령은 원장 변경·이벤트·성공 기록을 한 트랜잭션으로 저장한다. 비동기 명령은 I/O 전에 요청 ID·주체·명령 해시를 `pending`으로 보존하고, 기존 Pi 제출 ID나 효과 기록으로 재시도를 처리한다. 명령 본문과 자격은 요청 기록에 저장하지 않는다. 외부 결과가 불명확하면 소유자 확인을 요구하며, 확인했다는 사실만으로 API 성공 응답을 만들어 내지 않는다.
@@ -321,7 +359,7 @@ Mac 앱의 **인증 페이지 열기**·**API 키 발급**과 대화의 웹 링�
 
 `ghost backup <빈 디렉터리>`는 두 DB 모두에 SQLite writer 잠금을 확보한 뒤 `VACUUM INTO`로 복사한다. 두 사본이 끝나면 잠금을 풀고 무결성·해시를 검증한 뒤 `ghost-backup/2` manifest를 마지막에 쓴다. Host를 재시작하지 않지만 복사 중 쓰기와 이를 기다리는 API는 지연될 수 있다. 복사가 Host의 5초 busy timeout을 넘으면 쓰기가 `SQLITE_BUSY`로 실패할 수도 있으므로 배포 백업은 유휴 상태에서 수행한다. 잠금을 확보하지 못하거나 복사가 실패하면 완료 manifest를 만들지 않는다.
 
-`artifacts/`, `skills/`, `secrets/`, `config.json`은 권한을 유지해 별도로 보관한다. `lock.db`는 실행 중 소유권 잠금일 뿐 복구할 업무 데이터가 아니므로 백업 입력에서 제외한다. 새 Host는 이 잠금을 잡은 뒤 원장을 열며, 같은 루트를 쓰는 다른 Host·`doctor`·`import`는 거절한다. 운영 루트 점검은 Owner API로 한다.
+`ghost backup`은 금고가 있으면 `vault/vault.db`의 일관된 사본·무결성·해시와 `vault/key`(0600)도 manifest에 담는다. 금고는 원장과 공유 트랜잭션을 쓰지 않는다. `artifacts/`, `skills/`, `secrets/` 전체, `config.json`과 앱 console 설정은 권한 유지로 별도 보관한다. 브라우저 로그인 상태는 이 DB 백업에 포함되지 않는 소모성 상태다. `lock.db`는 복구 입력이 아니며 같은 루트의 두 번째 Host·`doctor`·`import`는 거절된다. 운영 점검은 Owner API를 쓴다.
 
 ## 개발 Host
 

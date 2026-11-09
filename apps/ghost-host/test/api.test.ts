@@ -109,6 +109,7 @@ const config: Config = {
   apns: null,
   skills: null,
   reach: null,
+  browser: null,
 };
 const server = startServer({ core, config, ownerToken: OWNER_TOKEN, documents: null, skills: null });
 const base = `http://127.0.0.1:${server.port}`;

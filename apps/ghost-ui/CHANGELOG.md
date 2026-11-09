@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+- 금고 (설정 → 금고): the owner's vault item list — kind, origin, username, card
+  ••••last4/expiry, per-Ghost grants and one-time expiry — with add/edit/delete.
+  Secret fields stay write-only: an empty field keeps the stored value, stored secrets
+  read as 저장됨 and never as a value; a password generator fills 20 random characters;
+  Apple Passwords/Chrome CSV import reports 가져옴·건너뜀·거부됨 counts.
+- A question carrying `proposal.secureForm` renders the secure form for its kind
+  (login·card·contact·secret fields, the requested origin and reason, 금고에 저장 checked
+  by default) and answers through `POST /api/vault/requests/:decisionId` only — the chat
+  answer path refuses these decisions. A `browserHandoff` question explains the waiting
+  Chrome window on this Mac, shows its url and reason, and offers 다 했어요 next to 거부.
+- Work verdicts show 근거 (what the reviewer observed) and 수정 범위 (what a revision may
+  change) whenever the verdict records them.
+- Ghost 설정 도구 권한: the new browser tools group as 브라우저 and the vault tools as 금고,
+  each with Korean labels; every contract tool is labeled, so none falls to 기타.
+- 자동 활동: per-Ghost standing activities live in 설정 → 자동 활동. The owner writes
+  the brief, completion criteria and source (일정, PR filters, mail filters), picks tools
+  from what the Ghost already has, sets limits (runs/day, concurrency, timeout, self-check
+  interval) and the bound source policy (PR 댓글·메일 회신: 거부 · 승인 후 실행 · 허용) — nothing
+  activates before a save. Rows show the next run, the last run's state, skipped/changed
+  marks and the last error; per-row 실행 runs once, 시험 dry-runs (no writes, cursor left
+  alone — the run itself still lands in history), pause offers to stop the running 맡긴 일
+  too, and 모두 멈추기 pauses every enabled activity's future auto runs and cancels the
+  currently running 맡긴 일. Run history lists each run with its watched item and opens its Work.
+- 연결 계정: GitHub·Gitea tokens and IMAP mail accounts are owner settings with
+  create/edit/test/delete. Secrets start blank every time and are never shown again; a
+  name-only edit keeps the stored credential, changing endpoint or account requires
+  retyping it or removing it explicitly; test results appear under their row, distinct
+  from an empty list.
+- PC 직접 실행: Ghost 설정 → 운영 carries the owner-only unrestricted-PC grant with a
+  warning that shell affects the whole Mac and network and is not confined by PR/mail
+  approval policy. 일 맡기기 offers 이 Mac — with the actual working folder — only for granted
+  Ghosts; container stays the default.
+- Ghosts can carry the 활동 제안 tool pill (`activity_propose`): a proposal for the owner,
+  never an activation.
+- A deferred activity (budget, concurrency) reads as 대기 on its row — the reason and the
+  retry time as ordinary waiting text, separate from the red last error. The host
+  auto-pauses an activity after repeated genuine failures; the row's 재개 is the owner's
+  reset and restarts the schedule.
+- Automatic activity outcomes stay in Work results, run history and notifications; they
+  do not wake an unrestricted direct-conversation turn. Successful no-change runs stay quiet.
+- Failed account saves keep the dialog and typed fields. Activity edits retain exact
+  cadence and second precision; SMTP distinguishes implicit TLS from required STARTTLS.
+- Activity tools retain granted browser/vault capabilities but exclude direct-only proposals
+  and document tools. PR 댓글·메일 회신 applies only to bound mail replies/PR comments,
+  not generic browser actions or file/shell tools. Selected browser/Host tools retain
+  their independent authority; browser/vault keep their separate approvals, and the PC
+  grant is not a jail or approval-enforcement boundary.
+- Deleted activities' retained runs stay visible; run history exposes self-check reasons,
+  and pause/stop failures remain inside the confirmation dialog. Work detail shows its
+  explicit execution environment and PC folder.
+  Work conversations expose older-message paging and keep read errors visible.
+- Visual tests mask the actual temporary project breadcrumb with stable test-only geometry,
+  rather than depending on a particular TMPDIR path.
+
 - Conversations answer their own decisions: a Ghost's pending questions, approvals and result
   reviews — including those from its older conversations and from threads begun there — sit
   above the composer, so opening a Ghost that needs you no longer means going to 확인할 일.

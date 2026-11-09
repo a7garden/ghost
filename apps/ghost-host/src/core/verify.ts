@@ -38,7 +38,10 @@ export async function verifyChecks(core: Core, work: Work, checks: readonly Chec
       case "artifact_contains": {
         const artifact = artifacts.find((item) => item.name === check.name);
         if (!artifact) {
-          failures.push(`artifact ${check.name} was not published`);
+          const published = core.ledger.artifactsForWork(work.id).some((item) => item.name === check.name);
+          failures.push(published
+            ? `artifact ${check.name} was published but is missing from the completed result; include its exact name in complete.artifacts`
+            : `artifact ${check.name} was not published by this Work; call publish_artifact and include its exact name in complete.artifacts`);
           break;
         }
         const bytes = await core.artifacts.read(artifact.digest);

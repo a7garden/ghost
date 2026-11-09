@@ -82,6 +82,41 @@ describe('applyEvent', () => {
     expect(state.devices).toEqual([]);
   });
 
+  it('tracks activities, their runs and account connections', () => {
+    const activity = {
+      ghostId: 'sage', name: '메일 정리', prompt: '살펴봐', acceptanceCriteria: '요약이 남는다',
+      source: { kind: 'schedule' as const, spec: { kind: 'every' as const, seconds: 300, startAt: 0 } },
+      execution: { kind: 'container' as const }, tools: [],
+      policy: { maxRunsPerDay: 10, maxConcurrent: 1, runTimeoutSeconds: 600, allowSelfCheck: false, minCheckSeconds: 900, externalActions: 'deny' as const, delivery: 'changes' as const },
+      id: 'a1', revision: 1, paused: false, pauseReason: null, nextAt: null, cursor: null, lastCheckedAt: null,
+      lastError: null, failureCount: 0, deletedAt: null, createdAt: 1, updatedAt: 1,
+    };
+    const run = {
+      id: 'r1', activityId: 'a1', workId: null, trigger: 'manual' as const, sourceKey: 'k1', sourceItem: null,
+      state: 'queued' as const, activityRevision: 1, reason: null, dryRun: false, noChange: false,
+      createdAt: 1, endedAt: null, nextCheckAt: null, nextCheckReason: null, followupOf: null,
+    };
+    const connection = {
+      id: 'c1', name: '소유자 GitHub', hasCredential: true, createdAt: 1, updatedAt: 1, credentialVersion: 'v1',
+      config: { kind: 'github' as const, baseUrl: 'https://api.github.com' },
+    };
+    let state = applyEvent(baseState(), event({ type: 'activity', activity }));
+    expect(state.activities?.map(row => row.id)).toEqual(['a1']);
+    state = applyEvent(state, event({ type: 'activity_run', run }));
+    expect(state.activityRuns?.[0]).toMatchObject({ id: 'r1', state: 'queued' });
+    state = applyEvent(state, event({ type: 'connection', connection }));
+    expect(state.connections?.map(row => row.id)).toEqual(['c1']);
+    // Upserts replace by id; a deleted activity stays listed with deletedAt until the host drops it from the snapshot.
+    state = applyEvent(state, event({ type: 'activity_run', run: { ...run, state: 'done' as const, endedAt: 2, createdAt: 1 } }));
+    state = applyEvent(state, event({ type: 'activity', activity: { ...activity, paused: true, revision: 2, updatedAt: 2 } }));
+    expect(state.activityRuns).toHaveLength(1);
+    expect(state.activityRuns?.[0]).toMatchObject({ state: 'done' });
+    expect(state.activities?.[0]).toMatchObject({ paused: true, revision: 2 });
+    state = applyEvent(state, event({ type: 'connection.removed', id: 'c1' }));
+    state = applyEvent(state, event({ type: 'connection.removed', id: 'missing' }));
+    expect(state.connections).toEqual([]);
+  });
+
   it('ignores effect events: they ride on work detail reads', () => {
     const before = baseState();
     const after = applyEvent(before, event({ type: 'effect', effect: { id: 'e1', workId: 'w1', conversationId: 'c9', callId: 'call', tool: 'bash', summary: 'ls', inputDigest: 'a'.repeat(64), state: 'done', result: null, createdAt: 1, endedAt: 2 } }));

@@ -207,14 +207,14 @@ wins). Everything else about a Ghost lives in **Ghost 설정** (설정 → Ghost
 portrait-and-name roster (searchable from eight Ghosts), then the selected Ghost's name
 edited in place, model route, 역할 지시, skills and grouped tool switch-pills. The route stays
 above potentially long role instructions so model settings remain immediately reachable. A group's
-label toggles its tools. State, default designation and retired-Ghost deletion live in a
+label toggles its tools. State, default designation, the PC 직접 실행 grant and retired-Ghost deletion live in a
 separate 운영 group; the main Ghost shows its locked active state instead of disabled
 choices. The sandbox keeps its two-step reset. New Ghosts start on the same sheet.
 There is no avatar library: stored sprite avatars stay selectable in 꾸미기, nothing creates new ones.
 
 ## Settings
 
-Ghost · 모델 · 기기 · 반복 작업 · 호스트 · 화면, plus **데스크톱 아바타** inside the Mac app.
+Ghost · 모델 · 금고 · 기기 · 반복 작업 · 자동 활동 · 연결 계정 · 호스트 · 화면, plus **데스크톱 아바타** inside the Mac app.
 화면 picks the theme from three little windows painted in their own palette. 데스크톱
 아바타 controls the Ghost that floats on the desktop above other apps (see the desktop shell).
 
@@ -229,6 +229,49 @@ carry their reorder/remove controls. Search stays inside the chooser; already-us
 models cannot be selected again. Primary-model inheritance is distinct from removing
 an alternative. A route edit waits for its save before the next edit; failures keep the
 stored route and show a sticky error, with no automatic replay.
+
+**자동 활동** is the owner's standing delegation per Ghost: one form owns brief, completion
+criteria, source (일정 · PR · 메일 with its filters), tools narrowed to the Ghost's Work-capable grants
+(browser and vault included; direct-only activity proposals and documents excluded),
+execution (컨테이너 by default; 이 Mac needs the Ghost's PC grant and an actual folder),
+and the policy limits. Saving is the activation — no activation follows from chat. Rows
+lead with state: next run, last run (건너뜀·변경 없음 included), last error as its own
+line, and a 연결 없음 mark when the source's account was deleted. A budget/concurrency
+deferral is waiting, not failure: a 대기 badge plus reason and retry time, kept apart
+from lastError; repeated genuine failures auto-pause on the host side and 재개 is the
+owner's reset. 시험 is the read-only
+dry run; it never writes or moves cursors, and its runs still land in history. PR 댓글·메일 회신
+labels only the bound source reply/comment policy. Selected browser/Host tools retain
+independent authority: browser tools keep their separate browser/vault approval rules,
+not confinement by this setting. Sandbox and PC file/shell tools are also outside it.
+Automatic outcomes are data in Work results, history and notifications, not new actionable
+direct-conversation turns. Successful unchanged results can be quiet; skipped oversized
+mail remains visible with a reason and an attention notification rather than a false summary.
+Deleted activities' retained runs remain reachable in 삭제된 활동 실행 기록, including
+skipped reasons and links to surviving Work. Run timestamps expose the exact instant
+and self-check reasons remain visible. Pause/stop errors stay inside their open dialog.
+
+
+**연결 계정** keeps credentials one-way: the secret field is blank on every open, stored
+secrets never return to the screen, and a changed endpoint or account forces re-entry or
+explicit removal — only a name-only edit preserves the credential. 테스트 reports under
+its row; errors are distinct from an empty list.
+Failed saves keep the dialog and typed draft. SMTP 암시적 TLS distinguishes TLS at
+connect from mandatory STARTTLS; neither transport disables certificate verification.
+
+Ghost 설정's 운영 group carries **PC 직접 실행**: an explicit owner grant whose warning
+states that shell reaches the whole Mac and network: the grant is not a jail or
+PR/mail approval enforcement boundary.
+일 맡기기 shows 이 Mac with an actual cwd field only for granted Ghosts.
+Work detail shows its explicit execution environment and PC cwd, with a route back to
+automatic activities for bound runs. Paired devices still see every Ghost; there is no
+per-Ghost device grant editor.
+Work conversations retain the previous-message pager and show read failures rather than
+presenting a failed history request as an empty conversation.
+
+Visual captures mask the existing project folder breadcrumb, whose title contains its
+actual private temporary path. Test-only fixed mask geometry keeps random TMPDIR names
+out of baselines without changing runtime paths or product rendering.
 
 ## Interactive responses
 

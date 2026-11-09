@@ -1,4 +1,4 @@
-import type { Effect } from "@ghost/contract";
+import { TERMINAL_WORK_STATES, type Effect } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { CommandError, conflict } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
@@ -15,7 +15,7 @@ export interface BeginEffect {
 }
 
 /** Host-only API journals; these names are not model tools or tool exclusion scopes. */
-const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete"] as const;
+const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete", "connection.upsert", "connection.delete"] as const;
 export type CommandEffectTool = typeof COMMAND_EFFECT_TOOLS[number];
 
 export interface BeginCommandEffect extends Omit<BeginEffect, "tool" | "callId"> {
@@ -63,8 +63,15 @@ export class Effects {
         throw conflict(`the outcome of call ${input.callId} is ${existing.state}; it will not run again`);
       }
       if (scope === "tool") {
-        const blocking = this.unresolvedInConversation(input.conversationId);
-        if (blocking.length > 0) throw conflict(`effect ${blocking[0]!.tool} (${blocking[0]!.callId}) is unresolved; nothing else runs until the owner reconciles it`);
+        const blocking = this.unresolvedInConversation(input.conversationId)[0];
+        if (blocking) {
+          const name = `effect ${blocking.tool} (${blocking.callId}) is unresolved`;
+          if (blocking.state === "unknown") throw conflict(`${name}; nothing else runs until the owner reconciles it`);
+          const awaitingOwner = this.ledger.pendingDecisions({ effectId: blocking.id }).some((decision) => decision.kind === "approve_effect");
+          throw conflict(awaitingOwner
+            ? `${name}: it waits for the owner's approval; nothing else that changes the outside world runs here until the owner decides`
+            : `${name}: it is still running; try again after it finishes`);
+        }
       }
       const conversation = this.ledger.conversation(input.conversationId);
       const effect: Effect = {
@@ -276,7 +283,12 @@ export class Effects {
     await this.notifyResolved(effect, result);
   }
 
-  private notifyResolved(effect: Effect, result: string) {
+  private async notifyResolved(effect: Effect, result: string) {
+    if (effect.workId) {
+      const work = this.ledger.work(effect.workId);
+      if (TERMINAL_WORK_STATES.includes(work.state) || work.state === "blocked") return;
+      this.core.works.resumeFromWaiting(work.id);
+    }
     return this.core.engine.submit(effect.conversationId, {
       text: `${effect.tool} (${effect.callId}): ${result}`,
       origin: "decision",
