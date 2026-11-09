@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-2024f08` (`main`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-c572f91` (`main`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,14 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### Ghost 스스로 일하기 운영 반영 — 2026-11-10
+
+- 소유자 지적: 정해 둔 시각에 프롬프트를 돌리는 반복 작업·예약 활동은 크론과 다르지 않다. 메인이 일정을 잡아 주거나 각 Ghost가 스스로 판단해 움직여야 상시 구동·자율이다.
+- 코드(`c572f91`): 모든 Ghost가 직접 대화에서 `plan_next`로 다음에 언제 무엇을 볼지와 지켜볼 프로젝트를 정한다. Host는 그 시각이나 지켜보는 프로젝트의 새 커밋에 `[Autonomous wake]`로 깨우고, Ghost가 조사·제안·스스로 시작한 일(`work_create initiative`, Ghost가 검토)·소유자에게 말하기·`[quiet]` 중에서 고른다. 메인은 매번 팀원 계획을 보고 일을 맡기거나 계획을 잡아 주며(`plan_next ghost_id`), 팀원의 스스로 일하기를 켜고 끈다. Ghost 설정에 스위치와 다음 계획이 보인다. 계획은 `settings`의 `autonomy:<ghostId>` 행이라 원장 마이그레이션이 없다. 깨움은 보내기 전에 기록하고 같은 id로 재시도한다. 하루 12회·동시 2개 한도. 먼저 말 걸기 알림은 실행이 끝난 뒤의 마지막 답으로 보내 도구 앞 설명이 알림으로 가지 않는다.
+- 검사: Host 616 통과·7 생략(경쟁·재시작·충돌 복구·반복 위치 포함 자율 9개), UI 146 통과·빌드, 브라우저 시각 160 통과(팀 설정 기준 이미지 4장 갱신, 다음 계획 시각은 `<time>` 마스크). 백업 사본 루트에서 실제 MiniMax로 메인·리서치 자율 깨움을 확인했다: 메인은 팀 결과를 묶어 말을 걸고 스스로 다음 시각을 잡았고, 리서치는 멈춘 조사를 취소하고 좁힌 일을 스스로 다시 맡긴 뒤 트윌룸을 지켜보도록 계획하고 `[quiet]`로 끝냈다. Claude 작성분을 Codex 계열 교차 검토로 4회 확인해 P1(보류 중 갱신 덮어쓰기, 동시 한도, 재시작 슬롯)과 P2(깨움 식별자, 반복 위치, 거절 시 계획 보존, 날짜 계산, 긴 실행의 알림 조회)를 고쳤다.
+- 운영 데이터: 고정 시각 반복 작업 5개와 예약 자동 활동 7개(아침 브리핑, AI 도구 변화, 심층 조사, 경쟁 동향, 공개면 점검, Talking Stage 기획, 기억 정리)를 삭제했다. PR 변화로 움직이는 트윌룸·트윌룸 스튜디오 PR 검토만 남겼다. 메인 페르소나의 "아침 브리핑" 문장을 스스로 깨어날 때마다 팀을 보고 움직이는 문장으로 바꿨다. 고성능 모델을 쓰는 `심층`은 스스로 일하기를 껐다(맡길 때만 움직임). 나머지 22개 활성 Ghost의 첫 계획은 배포 직후 2시간 안에 흩어 잡혔다.
+- 설치: `releases/20261110-bun-c572f91`, Host SHA-256 `c05aadd0…`, UI 95개 파일, `agent-browser` 복사. 백업 `backups/pre-20261110-bun-c572f91-1794264229262/`(complete). PID 46001 → 16242, Ghost 25·대화 67·맡긴 일 59·결정 30 보존, health 200, Mac 앱 재실행. 배포 뒤 첫 실제 깨움에서 레퍼런스는 Talking Stage 레퍼런스 분석을 스스로 맡기고 다음 시각을 잡았고, Mac 관리는 읽기 확인을 바로 돌려 백업 공백을 보고했다(두 건 모두 마지막 답이 소식 알림으로 감). iPhone14에는 같은 셸을 빌드 7(`0.1.0 (7)`, 개인 팀 W5SAS95CBV, push 권한 없음)로 다시 설치해 실행했다. 되돌릴 때는 `current`를 `releases/20261110-bun-2024f08`로 바꾸고 Mac 앱·iPhone을 다시 열어 새 스냅숏부터 받게 한다(이전 UI는 `autonomy` 이벤트를 모른다). 이전 릴리스는 `autonomy:*` 설정 행을 무시하고, 삭제한 반복 작업·활동은 위 백업이나 소유자 API로 다시 만든다.
 
 ### Ghost 팀 상시 작업 설정·운영 반영 — 2026-11-10
 
