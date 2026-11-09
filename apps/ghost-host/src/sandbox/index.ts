@@ -1,13 +1,14 @@
-import { mkdirSync, readdirSync, realpathSync } from "node:fs";
-import { join } from "node:path";
-import type { Sandbox, Work } from "@ghost/contract";
+import { mkdirSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { DEFAULT_GHOST_PERMISSIONS, TERMINAL_WORK_STATES, type GhostPermissions, type Sandbox, type Work } from "@ghost/contract";
 import { FileError, ok, type Result } from "@earendil-works/pi-durable/env";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { Config } from "../config.ts";
 import { sha256 } from "../core/ids.ts";
-import type { ArtifactStore, SandboxControl } from "../core/ports.ts";
+import type { ArtifactStore, SandboxControl, SandboxSweep } from "../core/ports.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
-import { CLI_TIMEOUT_MS, ContainerDriver, listContainers, runCli, type ContainerRow } from "./container.ts";
+import { CLI_TIMEOUT_MS, ContainerDriver, listContainers, listContainersAsync, runCli, type ContainerRow } from "./container.ts";
+import { ContainerTracker } from "./tracker.ts";
 import { confineDirChain, readFileNoFollow, WorkspaceEnv, writeFileNoFollow } from "./workspace-env.ts";
 
 /**
@@ -29,6 +30,46 @@ export function containerName(workId: string): string {
   return `ghost-${sha256(workId).slice(0, NAME_HASH_CHARS)}`;
 }
 
+/** The reviewer's read-only container over the same Work. */
+export function reviewContainerName(workId: string): string {
+  return `${containerName(workId)}-r`;
+}
+
+/** How often the scheduler's tick may sweep; the tick itself runs every 30 seconds at most. */
+const SWEEP_EVERY_MS = 60_000;
+/**
+ * How long a settled Work's directory is kept for inspection (2026-11-09). Its results are artifacts
+ * in the ledger already; what is lost is the scratch state (checkouts, `node_modules`, build output).
+ */
+export const WORKSPACE_RETAIN_MS = 30 * 24 * 60 * 60_000;
+
+export type SweepReason = "settled" | "stopped" | "idle";
+
+/** Why a sweep deletes a container of this state root, or null to keep it. `idle` is asked last, only for a running container. */
+export function sweepReason(work: Work | null, state: string, idle: () => boolean): SweepReason | null {
+  if (work === null || TERMINAL_WORK_STATES.includes(work.state)) return "settled";
+  if (state !== "running") return "stopped";
+  return idle() ? "idle" : null;
+}
+
+/**
+ * Whether a Work's directory may go. A failed root Work can be resumed into the same workspace, so it
+ * stays; a failed child cannot be resumed.
+ */
+export function workspaceExpired(work: Work | null, now: number): boolean {
+  if (work === null || work.endedAt === null || now - work.endedAt < WORKSPACE_RETAIN_MS) return false;
+  return work.state === "done" || work.state === "cancelled" || (work.state === "failed" && work.parentId !== null);
+}
+
+/** True when one path is the other or lies inside it. */
+function overlaps(a: string, b: string): boolean {
+  const inside = (child: string, parent: string) => {
+    const rel = relative(parent, child);
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  };
+  return inside(a, b) || inside(b, a);
+}
+
 /** A single path component: no separators, no dot segments, no empty name. */
 function safeComponent(value: string, what: string): string {
   if (value.length === 0 || value === "." || value === ".." || /[/\\\0]/.test(value))
@@ -44,7 +85,12 @@ function safeComponent(value: string, what: string): string {
  * isolation. `kind: "apple-container"` runs commands inside an Apple container with only the
  * workspace mounted; its file operations stay on the host workspace, confined the same way.
  */
-export function createSandbox(config: Config, artifacts: ArtifactStore): SandboxEnvFactory & SandboxControl {
+export function createSandbox(
+  config: Config,
+  artifacts: ArtifactStore,
+  /** The owner's grants for a Ghost; read when its Work's container starts. */
+  permissionsFor: (ghostId: string) => GhostPermissions = () => DEFAULT_GHOST_PERMISSIONS,
+): SandboxEnvFactory & SandboxControl {
   const container =
     config.sandbox.kind === "apple-container"
       ? { cli: config.sandbox.cli, image: config.sandbox.image }
@@ -53,6 +99,9 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     throw new Error("sandbox: kind apple-container needs a container CLI path and a pinned image");
 
   let lsCache: { at: number; rows: Result<ContainerRow[], Error> } | null = null;
+  const tracker = new ContainerTracker();
+  let sweeping: Promise<SandboxSweep> | null = null;
+  let sweptAt = 0;
 
   const containerRows = (fresh = false): Result<ContainerRow[], Error> => {
     if (container === null) return ok([]);
@@ -75,11 +124,23 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     return path;
   };
 
-  const envFor = async (work: Work): Promise<ExecutionEnv> => {
+  /** The state root holds the ledger, Pi's store and provider secrets: never mount it, nor a folder containing it. */
+  const mountRefusal = (path: string): string | null =>
+    overlaps(resolve(path), resolve(config.root)) ? `${path} overlaps the Ghost state root and cannot be mounted` : null;
+
+  const envFor = async (work: Work, options: { review?: boolean } = {}): Promise<ExecutionEnv> => {
     const workspace = workspacePath(work);
+    // `local` runs on the host: it is for tests and development, so network and mounts do not apply.
     if (container === null)
-      return new WorkspaceEnv({ hostRoot: workspace, id: `ghost-ws:${work.ghostId}/${work.id}` });
-    const name = containerName(work.id);
+      return new WorkspaceEnv({ hostRoot: workspace, id: `ghost-ws:${work.ghostId}/${work.id}${options.review ? ":review" : ""}` });
+    const review = options.review === true;
+    const name = review ? reviewContainerName(work.id) : containerName(work.id);
+    const grantsNow = () => {
+      const grants = permissionsFor(work.ghostId).sandbox;
+      // A mount that became unsafe after it was granted is dropped rather than started.
+      const mounts = grants.mounts.filter((mount) => mountRefusal(mount.path) === null);
+      return { network: grants.network, mounts, cpus: grants.cpus, memoryGiB: grants.memoryGiB };
+    };
     let driver: ContainerDriver | null = null;
     const env = new WorkspaceEnv({
       hostRoot: workspace,
@@ -88,13 +149,22 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
       exec: (command, options, context) => driver!.exec(command, options, context),
     });
     driver = new ContainerDriver(
-      { cli: container.cli, image: container.image, name, workspace: env.hostRoot, logicalRoot: "/workspace" },
+      {
+        cli: container.cli,
+        image: container.image,
+        name,
+        workspace: env.hostRoot,
+        logicalRoot: "/workspace",
+        readOnly: review,
+      },
       {
         onSpawn: (pid) => env.children.add(pid),
         onExit: (pid) => env.children.delete(pid),
         onChanged: () => {
           lsCache = null;
         },
+        grants: grantsNow,
+        tracker,
       },
     );
     return env;
@@ -148,7 +218,7 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     } catch {
       return [];
     }
-    return entries.map((workId) => containerName(workId));
+    return entries.flatMap((workId) => [containerName(workId), reviewContainerName(workId)]);
   };
 
   const status = (ghostId: string): Sandbox => {
@@ -178,6 +248,7 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     if (!rows.ok) throw new Error(`sandbox: container ls failed: ${rows.error.message}`);
     for (const row of rows.value) {
       if (!names.has(row.id)) continue;
+      tracker.forget(row.id);
       if (row.state === "running") {
         const stopped = await runCli(container.cli, ["stop", "--time", "2", row.id], CLI_TIMEOUT_MS);
         if (!stopped.ok || stopped.value.code !== 0)
@@ -195,18 +266,93 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     }
   };
 
-  /** A settled Work's container is deleted; its workspace stays for inspection. */
+  /** A settled Work's containers (its own and its reviewer's) are deleted; its workspace stays for inspection until a sweep retires it. */
   const release = async (work: Work): Promise<void> => {
     if (container === null) return;
-    const name = containerName(work.id);
     const rows = containerRows(true);
     lsCache = null;
     if (!rows.ok) throw new Error(`sandbox: container ls failed: ${rows.error.message}`);
-    if (!rows.value.some((row) => row.id === name)) return;
+    for (const name of [containerName(work.id), reviewContainerName(work.id)]) {
+      if (!rows.value.some((row) => row.id === name)) continue;
+      await deleteContainer(name);
+    }
+  };
+
+  const deleteContainer = async (name: string): Promise<void> => {
+    if (container === null) return;
+    tracker.forget(name);
+    lsCache = null;
     const deleted = await runCli(container.cli, ["delete", "--force", name], CLI_TIMEOUT_MS);
     if (!deleted.ok || deleted.value.code !== 0)
       throw new Error(`sandbox: deleting ${name} failed: ${(!deleted.ok ? deleted.error.message : deleted.value.stderr).trim().slice(0, 512)}`);
   };
 
-  return { envFor, workspacePath, stageInputs, status, control, release };
+  /** Every Work directory of this state root, as `{ ghostId, workId }`. */
+  const workDirs = (): { ghostId: string; workId: string }[] => {
+    const subdirs = (path: string) => {
+      try {
+        // Symlinks are not directories here, so a planted link is never followed or removed through.
+        return readdirSync(path, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+      } catch {
+        return [];
+      }
+    };
+    const base = join(config.root, "sandboxes");
+    return subdirs(base).flatMap((ghostId) => subdirs(join(base, ghostId)).map((workId) => ({ ghostId, workId })));
+  };
+
+  /**
+   * 2026-11-09: frees what `release` alone leaves behind. Deletes containers of settled or unknown Works
+   * (a failed release, a crash before it), stopped ones, and running ones idle for IDLE_MS; removes the
+   * directories of Works settled for WORKSPACE_RETAIN_MS. Only containers named after this state root's
+   * Work directories are touched: a development Host on the same Mac shares the container namespace.
+   * Runs at most once per SWEEP_EVERY_MS and never twice at once; failures are reported, not thrown.
+   */
+  const sweep = (now: number, workOf: (workId: string) => Work | null): Promise<SandboxSweep> => {
+    if (sweeping !== null) return sweeping;
+    if (now - sweptAt < SWEEP_EVERY_MS) return Promise.resolve({ containers: [], workspaces: [], failures: [] });
+    sweptAt = now;
+    sweeping = sweepOnce(now, workOf).finally(() => {
+      sweeping = null;
+    });
+    return sweeping;
+  };
+
+  const sweepOnce = async (now: number, workOf: (workId: string) => Work | null): Promise<SandboxSweep> => {
+    const result: SandboxSweep = { containers: [], workspaces: [], failures: [] };
+    const dirs = workDirs();
+    const works = new Map(dirs.map(({ workId }) => [workId, workOf(workId)]));
+    if (container !== null) {
+      const owners = new Map(dirs.flatMap(({ workId }) => [[containerName(workId), workId], [reviewContainerName(workId), workId]] as const));
+      const listed = await listContainersAsync(container.cli);
+      lsCache = null;
+      if (!listed.ok) {
+        result.failures.push(`container ls failed: ${listed.error.message}`);
+        return result;
+      }
+      for (const row of listed.value) {
+        const workId = owners.get(row.id);
+        if (workId === undefined) continue;
+        const reason = sweepReason(works.get(workId) ?? null, row.state, () => tracker.idle(row.id));
+        if (reason === null) continue;
+        try {
+          if (await tracker.retire(row.id, () => deleteContainer(row.id))) result.containers.push({ name: row.id, reason });
+        } catch (error) {
+          result.failures.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+    for (const { ghostId, workId } of dirs) {
+      if (!workspaceExpired(works.get(workId) ?? null, now)) continue;
+      try {
+        rmSync(join(config.root, "sandboxes", ghostId, workId), { recursive: true, force: true });
+        result.workspaces.push(workId);
+      } catch (error) {
+        result.failures.push(`removing the workspace of ${workId} failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return result;
+  };
+
+  return { envFor, workspacePath, stageInputs, status, control, release, mountRefusal, sweep };
 }

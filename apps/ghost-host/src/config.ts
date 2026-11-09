@@ -37,6 +37,11 @@ export interface Config {
   skills: null | { roots: string[] };
   /** Read-only web research through the installed `agent-reach` CLI; null turns it off. */
   reach: null | { executable: string };
+  /**
+   * The owner's browser through the installed `agent-browser` CLI (2026-11-09); null turns it off.
+   * `shade` is the Shade agent CLI; without it a Ghost cannot sign in from the vault.
+   */
+  browser?: null | { executable: string; shade?: string };
 }
 
 export const DEFAULT_ROOT = join(homedir(), "Library", "Application Support", "Ghost");
@@ -50,13 +55,16 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const root = resolve(rootOverride ?? env.GHOST_ROOT ?? DEFAULT_ROOT);
   const path = join(root, "config.json");
   const file = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Partial<Config>) : {};
-  const allowed = new Set(["host", "port", "publicOrigin", "uiDir", "sandbox", "memory", "voice", "apns", "skills", "mac", "reach"]);
+  const allowed = new Set(["host", "port", "publicOrigin", "uiDir", "sandbox", "memory", "voice", "apns", "skills", "mac", "reach", "browser"]);
   for (const key of Object.keys(file)) if (!allowed.has(key)) throw new Error(`config.json: unknown key ${key}`);
   const port = Number(env.GHOST_PORT ?? file.port ?? DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("GHOST_PORT must be a TCP port (0 picks a free one)");
   const host = env.GHOST_HOST ?? file.host ?? "127.0.0.1";
   if (file.skills !== undefined && file.skills !== null && !(Array.isArray(file.skills.roots) && file.skills.roots.length > 0 && file.skills.roots.every((path) => typeof path === "string" && path.length > 0))) {
     throw new Error("config.json: skills.roots must be a non-empty list of paths");
+  }
+  if (file.browser != null && (typeof file.browser !== "object" || typeof file.browser.executable !== "string" || !file.browser.executable.trim() || (file.browser.shade !== undefined && (typeof file.browser.shade !== "string" || !file.browser.shade.trim())))) {
+    throw new Error("config.json: browser needs an executable path (and optionally a shade path)");
   }
   if (file.mac != null) {
     if (typeof file.mac !== "object" || (file.mac.roots !== undefined && (!Array.isArray(file.mac.roots) || file.mac.roots.some((p) => typeof p !== "string" || !p.trim())))) throw new Error("config.json: mac.roots must be paths");
@@ -76,5 +84,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     apns: file.apns ?? null,
     skills: file.skills ?? null,
     reach: file.reach ?? null,
+    browser: file.browser ?? null,
   };
 }

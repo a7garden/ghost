@@ -39,7 +39,7 @@ function shellRecord(shell: { exitCode: number; stdout: string; stderr: string }
 }
 
 /** Run one command through the call's environment, keeping the streams apart for the journal. */
-async function runShell(env: ExecutionEnv, command: string, timeout: number | undefined, api: ToolExecutionApi, context: Context): Promise<ShellResult> {
+export async function runShell(env: ExecutionEnv, command: string, timeout: number | undefined, api: ToolExecutionApi, context: Context): Promise<ShellResult> {
   let stdout = "";
   let stderr = "";
   const result = await env.exec(

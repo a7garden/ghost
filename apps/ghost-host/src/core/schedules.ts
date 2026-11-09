@@ -13,7 +13,7 @@ export function firstRun(spec: ScheduleSpec, now: number): number {
   return spec.startAt + periods * spec.seconds * 1000;
 }
 
-/** Fires schedules as conversation submissions and enforces Work deadlines. */
+/** Fires schedules as conversation submissions, enforces Work deadlines and settles questions whose wait ended. */
 export class Schedules {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
@@ -94,10 +94,18 @@ export class Schedules {
   async tick(now = Date.now()) {
     try {
       this.core.works.expire(now);
+      this.core.decisions.expire(now);
       for (const schedule of this.ledger.dueSchedules(now)) await this.fire(schedule, now);
       this.ledger.pruneEvents(now);
       this.ledger.pruneHistory(now);
       this.ledger.prunePairings(now);
+      // Detached: deleting containers waits on the container CLI, which must not hold the next schedule back.
+      void this.core.sandbox.sweep?.(now, (workId) => this.ledger.findWork(workId)).then(
+        (swept) => {
+          for (const failure of swept.failures) this.core.log("sandbox sweep", failure);
+        },
+        (error) => this.core.log("sandbox sweep failed", error),
+      );
     } catch (error) {
       this.core.log("schedule tick failed", error);
     } finally {

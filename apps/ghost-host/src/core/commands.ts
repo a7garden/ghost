@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { FallbackList, GhostToolList, SkillList, validate, type Command, type CommandRequest, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
+import { FallbackList, GhostToolList, SkillList, validate, type Command, type GhostBrowserPermissions, type CommandRequest, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
 import type { Access } from "./access.ts";
 import type { Core } from "./core.ts";
 import type { CommandEffectTool } from "./effects.ts";
@@ -258,6 +258,18 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       });
       return {};
 
+    case "ghost.permissions_update": {
+      const ghost = ledger.ghost(command.ghostId);
+      if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
+      const permissions = { ...command.permissions, sandbox: { ...command.permissions.sandbox, mounts: command.permissions.sandbox.mounts.map((mount) => ({ ...mount, path: checkMount(core, mount.path) })) } };
+      if (new Set(permissions.sandbox.mounts.map((mount) => mount.path)).size !== permissions.sandbox.mounts.length) throw invalid("a folder is mounted twice");
+      if (permissions.browser) permissions.browser = checkBrowser(permissions.browser);
+      ledger.tx(() => ledger.setGhostPermissions(ghost.id, permissions));
+      // Instructions name the sandbox's network and mounts; live conversations pick the change up.
+      core.refreshGhost(ghost.id);
+      return {};
+    }
+
     case "ghost.delete":
       deleteGhost(core, command.ghostId);
       return {};
@@ -374,6 +386,46 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
   }
   const exhaustive: never = command;
   throw new CommandError("invalid", `unknown command ${(exhaustive as Command).type}`);
+}
+
+/** A mount is an existing absolute host folder outside the state root (which holds the ledger and secrets). */
+/**
+ * Browser grants are stored canonical, so the tools compare exact strings: a hostname per domain,
+ * an https origin per login. 2026-11-09: Shade only stores https origins, so nothing else can match.
+ */
+function checkBrowser(browser: GhostBrowserPermissions): GhostBrowserPermissions {
+  const domains = browser.domains.map((domain) => {
+    const host = domain.trim().toLowerCase().replace(/^\*\./, "").replace(/\.$/, "");
+    let parsed: URL;
+    try {
+      parsed = new URL(`https://${host}`);
+    } catch {
+      throw invalid(`"${domain}" is not a hostname`);
+    }
+    if (parsed.hostname !== host || !host.includes(".")) throw invalid(`"${domain}" is not a hostname`);
+    return host;
+  });
+  if (new Set(domains).size !== domains.length) throw invalid("a domain is listed twice");
+  const logins = browser.logins.map((login) => {
+    let origin: string;
+    try {
+      origin = new URL(login.origin).origin;
+    } catch {
+      throw invalid(`"${login.origin}" is not an https origin`);
+    }
+    if (!origin.startsWith("https://") || origin !== login.origin.replace(/\/$/, "").toLowerCase()) throw invalid(`"${login.origin}" is not an https origin`);
+    return { itemId: login.itemId, origin, title: login.title.trim() || origin };
+  });
+  if (new Set(logins.map((login) => login.itemId)).size !== logins.length) throw invalid("a login is listed twice");
+  return { commit: browser.commit, domains, logins };
+}
+
+function checkMount(core: Core, path: string): string {
+  if (!isAbsolute(path) || path.split(/[\\/]/).includes("..")) throw invalid(`mount ${path} must be an absolute path without ..`);
+  if (!existsSync(path) || !statSync(path).isDirectory()) throw invalid(`mount ${path} is not a folder`);
+  const refusal = core.sandbox.mountRefusal?.(path);
+  if (refusal) throw invalid(refusal);
+  return path.length > 1 ? path.replace(/[\\/]+$/, "") : path;
 }
 
 function refreshGrantees(core: Core, grants: { ghostId: string }[]) {

@@ -17,7 +17,7 @@
   .look-editor__stage { display: grid; width: 100%; height: 220px; place-items: center; overflow: hidden; border-radius: var(--radius-xl); background: var(--ghost-inset); box-shadow: inset 0 0 0 1px var(--ghost-line); transition: background-color var(--duration-slow) var(--ease-enter); }
   .look-editor__figure { animation: look-pop var(--duration-slow) var(--ease-spring) both; }
   .look-editor__float { animation: look-float 3.6s ease-in-out infinite; }
-  @keyframes look-pop { from { transform: scale(.86) rotate(-4deg); } 60% { transform: scale(1.04) rotate(1deg); } to { transform: none; } }
+  @keyframes look-pop { from { transform: scale(.86) rotate(-4deg); } to { transform: none; } }
   @keyframes look-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
   .look-editor__shuffle { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: var(--ghost-hover); font: 500 var(--text-caption)/1.35 var(--font-sans); cursor: pointer; transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) var(--ease-spring); }
   .look-editor__shuffle:hover:not(:disabled) { color: var(--ghost-ink); background: var(--ghost-hover2); }

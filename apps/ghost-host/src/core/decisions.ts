@@ -8,6 +8,31 @@ export type OpenDecision = Omit<Decision, "id" | "state" | "answer" | "createdAt
 
 export type Resolution = { outcome: "approve" | "deny" | "answer"; answer?: string };
 
+/** The answer a question settles to when the owner does not reply within `waitMs`. */
+export interface QuestionFallback {
+  answer: string;
+  waitMs: number;
+}
+
+/**
+ * A question's `proposal` holds its default and when it applies; the ledger never rewrites a proposal.
+ * `defaulted` is derived: answered with the default at or after the wait ended. An owner reply that
+ * lands after the wait with the same text means the same thing, so the two need no distinction.
+ */
+export interface QuestionDefault {
+  default: string;
+  expiresAt: number;
+  defaulted: boolean;
+}
+
+export function questionDefault(decision: Decision): QuestionDefault | null {
+  if (decision.kind !== "question" || !decision.proposal) return null;
+  const { default: answer, expiresAt } = decision.proposal;
+  if (typeof answer !== "string" || typeof expiresAt !== "number") return null;
+  const defaulted = decision.state === "answered" && decision.answer === answer && decision.resolvedAt !== null && decision.resolvedAt >= expiresAt;
+  return { default: answer, expiresAt, defaulted };
+}
+
 /** Owner decisions. Opening one notifies; resolving one wakes whoever waits on it. */
 export class Decisions {
   /** Applies an approved document proposal; registered by the documents integration. */
@@ -23,10 +48,14 @@ export class Decisions {
     this.documentApplier = apply;
   }
 
-  /** Must run inside a ledger transaction. */
-  open(input: OpenDecision & { id?: string }): Decision {
+  /**
+   * Must run inside a ledger transaction. `notify: false` is for a decision the owner's standing grant
+   * settles at once: it stays as the record of what was done, without asking anyone.
+   */
+  open(input: OpenDecision & { id?: string }, options: { notify?: boolean } = {}): Decision {
     const decision: Decision = { ...input, id: input.id ?? newId(), state: "pending", answer: null, createdAt: Date.now(), resolvedAt: null };
     this.ledger.putDecision(decision);
+    if (options.notify === false) return decision;
     this.core.notify({
       id: `decision:${decision.id}`,
       kind: "decision",
@@ -49,18 +78,23 @@ export class Decisions {
       conversationId: work.conversationId ?? work.originConversationId,
       workId: work.id,
       effectId: null,
-      title: `Accept "${work.title}"?`,
+      title: `「${work.title}」 결과 확인`,
       detail: [note, work.result?.summary].filter(Boolean).join("\n\n"),
       options: [],
       proposal: work.result ? { result: work.result, criteria: work.acceptance.criteria } : null,
     });
   }
 
-  /** A question from a Ghost. Returns the decision; the answer arrives as a submission. */
-  ask(conversationId: string, title: string, detail: string, options: string[], id?: string): Decision {
+  /**
+   * A question from a Ghost. Returns the decision; the answer arrives as a submission.
+   * With a `fallback`, an unanswered question settles itself to the default once the wait ends
+   * (`expire`), so a Ghost does not stand still while the owner is away.
+   */
+  ask(conversationId: string, title: string, detail: string, options: string[], id?: string, fallback?: QuestionFallback): Decision {
     const existing = id ? this.ledger.findDecision(id) : null;
     if (existing) return existing;
     const conversation = this.ledger.conversation(conversationId);
+    const proposal = fallback ? { default: fallback.answer, expiresAt: Date.now() + fallback.waitMs } : null;
     return this.ledger.tx(() =>
       this.open({
         id,
@@ -72,9 +106,29 @@ export class Decisions {
         title,
         detail,
         options,
-        proposal: null,
+        proposal,
       }),
     );
+  }
+
+  /**
+   * Settle every pending question whose wait ended to its default. Called by the scheduler tick.
+   * The answer commits first; the follow-up is the ordinary idempotent one, so `recover` finishes it after a crash.
+   */
+  expire(now: number) {
+    for (const pending of this.ledger.pendingDecisions()) {
+      const fallback = questionDefault(pending);
+      if (!fallback || fallback.expiresAt > now) continue;
+      const resolved = this.ledger.tx(() => {
+        // The owner may have answered since the list was read.
+        const current = this.ledger.decision(pending.id);
+        if (current.state !== "pending") return null;
+        const next: Decision = { ...current, state: "answered", answer: fallback.default, resolvedAt: Math.max(now, fallback.expiresAt) };
+        this.ledger.putDecision(next);
+        return next;
+      });
+      if (resolved) void this.core.lane(`decision:${resolved.id}`, () => this.followUp(resolved));
+    }
   }
 
   /**
@@ -129,7 +183,7 @@ export class Decisions {
         this.core.works.applyVerdict(decision.workId, {
           outcome: decision.state === "approved" ? "pass" : "revise",
           source: "owner",
-          reasons: decision.answer ?? (decision.state === "approved" ? "Accepted by the owner." : "The owner asked for changes."),
+          reasons: decision.answer ?? (decision.state === "approved" ? "사용자가 결과를 받아들였어요." : "사용자가 수정을 요청했어요."),
           at: decision.resolvedAt ?? Date.now(),
         });
         break;
@@ -147,8 +201,9 @@ export class Decisions {
   }
 
   private async answerQuestion(decision: Decision) {
-    const text =
-      decision.state === "answered"
+    const text = questionDefault(decision)?.defaulted
+      ? `The owner did not answer "${decision.title}" in time. Continue with your default: ${decision.answer ?? ""}. Say in your result that you assumed it, so the owner can correct it.`
+      : decision.state === "answered"
         ? `The owner answered "${decision.title}": ${decision.answer ?? ""}`
         : `The owner declined to answer "${decision.title}".`;
     if (decision.workId) this.core.works.resumeFromWaiting(decision.workId);

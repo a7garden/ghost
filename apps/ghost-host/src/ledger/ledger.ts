@@ -10,6 +10,7 @@ import type {
   DeviceAlerts,
   Effect,
   Ghost,
+  GhostPermissions,
   LedgerEvent,
   LedgerEventData,
   ModelRef,
@@ -21,6 +22,7 @@ import type {
   Work,
   ArtifactRef,
 } from "@ghost/contract";
+import { DEFAULT_GHOST_PERMISSIONS } from "@ghost/contract";
 import { MIGRATIONS } from "./schema.ts";
 
 type Row = Record<string, SQLQueryBindings>;
@@ -30,6 +32,15 @@ const json = (value: unknown): string | null => (value === null || value === und
 const parseJson = <T>(value: unknown): T => JSON.parse(String(value)) as T;
 const parseNullable = <T>(value: unknown): T | null => (value === null || value === undefined ? null : parseJson<T>(value));
 const bool = (value: unknown) => value === 1 || value === true;
+
+/** Run one post-commit callback; its failure is logged, never propagated into the settled transaction. */
+function isolated(callback: () => void, what: string) {
+  try {
+    callback();
+  } catch (error) {
+    console.error(`[ledger] ${what} failed`, error);
+  }
+}
 
 /** Days of change events kept for reconnecting clients. */
 const EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -105,8 +116,10 @@ export class Ledger {
       this.pending = null;
       this.committedTasks = null;
       this.rolledBackTasks = null;
-      for (const task of tasks ?? []) task();
-      if (committed) for (const event of events) for (const listener of this.listeners) listener(event);
+      // The outcome is settled here. A throwing callback must not report a committed transaction as
+      // failed, nor skip the callbacks after it: a skipped `core.run` task would never settle its caller.
+      for (const task of tasks ?? []) isolated(task, "post-transaction task");
+      if (committed) for (const event of events) for (const listener of this.listeners) isolated(() => listener(event), "ledger listener");
     }
   }
 
@@ -176,16 +189,34 @@ export class Ledger {
   ghost(id: string): Ghost {
     const row = this.db.query("SELECT * FROM ghosts WHERE id = ?").get(id) as Row | null;
     if (!row) throw new NotFound(`ghost ${id}`);
-    return toGhost(row);
+    return this.withPermissions(toGhost(row));
   }
 
   ghosts(): Ghost[] {
-    return (this.db.query("SELECT * FROM ghosts ORDER BY is_default DESC, created_at").all() as Row[]).map(toGhost);
+    return (this.db.query("SELECT * FROM ghosts ORDER BY is_default DESC, created_at").all() as Row[]).map((row) => this.withPermissions(toGhost(row)));
   }
 
   defaultGhost(): Ghost | null {
     const row = this.db.query("SELECT * FROM ghosts WHERE is_default = 1").get() as Row | null;
-    return row ? toGhost(row) : null;
+    return row ? this.withPermissions(toGhost(row)) : null;
+  }
+
+  /**
+   * Permissions live in `settings` under `ghost.permissions:<id>` (no schema change, so a previous
+   * release still opens this ledger and simply ignores them). Absent = the conservative defaults.
+   */
+  ghostPermissions(id: string): GhostPermissions {
+    return this.setting<GhostPermissions | null>(`ghost.permissions:${id}`, null) ?? DEFAULT_GHOST_PERMISSIONS;
+  }
+
+  /** Only inside `tx`; emits the Ghost so clients and the engine see the change. */
+  setGhostPermissions(id: string, permissions: GhostPermissions) {
+    this.putSetting(`ghost.permissions:${id}`, permissions);
+    this.emit({ type: "ghost", ghost: this.ghost(id) });
+  }
+
+  private withPermissions(ghost: Ghost): Ghost {
+    return { ...ghost, permissions: this.ghostPermissions(ghost.id) };
   }
 
   putGhost(ghost: Ghost) {
@@ -203,7 +234,7 @@ export class Ledger {
         ghost.id, ghost.name, ghost.persona, json(ghost.look), json(ghost.model), ghost.isDefault ? 1 : 0, ghost.state, json(ghost.tools),
         json(ghost.fallbacks), json(ghost.skills), ghost.deletedAt, ghost.directConversationId, ghost.createdAt, ghost.updatedAt,
       );
-    this.emit({ type: "ghost", ghost });
+    this.emit({ type: "ghost", ghost: this.withPermissions(ghost) });
   }
 
   // Conversations

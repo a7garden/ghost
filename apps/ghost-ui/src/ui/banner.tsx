@@ -38,8 +38,8 @@ function Banner({
   const { surfaceClass, icon: Icon } = VARIANT_CLASS[variant]
   return (
     <div
-      role="status"
-      aria-live="polite"
+      role={variant === "danger" ? "alert" : "status"}
+      aria-live={variant === "danger" ? "assertive" : "polite"}
       data-slot="banner"
       data-variant={variant}
       className={cn(

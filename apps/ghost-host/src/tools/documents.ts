@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { permissionsOf } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
@@ -80,7 +81,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
 
   const documentPropose = defineTool({
     name: "document_propose",
-    description: "Propose a new page or an edit of an existing page for owner review; nothing is written until the owner approves.",
+    description: "Propose a new page or an edit of an existing page. It waits for owner review unless the owner granted this Ghost document writes, in which case it is saved at once.",
     parameters: Type.Object({
       space_id: Type.String({ minLength: 1 }),
       title: Type.String({ minLength: 1, maxLength: 256 }),
@@ -105,6 +106,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
         };
         await documents.check(proposal);
         const id = idFor(scope.conversation.id, api.callId);
+        const autoWrite = permissionsOf(scope.ghost).documents.autoWrite;
         // `open` upserts, so an existing row from a replayed call must be reused as-is.
         const decision = core.ledger.findDecision(id) ?? core.ledger.tx(() =>
           core.decisions.open({
@@ -118,8 +120,14 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
             detail: `${proposal.pageId ? "Edit of an existing page" : "New page"} "${args.title}" in Space ${granted.spaceId}, awaiting owner review.`,
             options: [],
             proposal: { ...proposal },
-          }),
+          }, { notify: !autoWrite }),
         );
+        // 2026-11-09: with the owner's standing grant the same decision is approved at once, so the
+        // write still goes through the journaled document_write effect and stays on record.
+        if (autoWrite && decision.state === "pending") {
+          await core.decisions.resolve(decision.id, { outcome: "approve", answer: "Saved without review (owner grant)." });
+          return text(`Saved without review (owner grant, ${decision.id}). The save result follows as a message.`);
+        }
         return text(`The proposal is awaiting owner review (${decision.id}). Their answer arrives as a message.`);
       } catch (error) {
         return errorResult(error);

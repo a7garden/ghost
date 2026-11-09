@@ -30,6 +30,7 @@
 .place__name { display: inline-block; max-width: 100%; padding: 2px 8px; margin-left: -8px; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink); background: none; font: 650 var(--text-headingLg)/1.2 var(--font-sans); letter-spacing: -.028em; text-align: left; overflow-wrap: anywhere; cursor: pointer; transition: background-color var(--duration-fast) ease; }
 .place__name:hover:not(:disabled) { background: var(--ghost-hover); }
 .place__name-input { display: block; width: 100%; min-width: 0; padding: 0; border: 0; outline: none; color: var(--ghost-ink); background: none; font: 650 var(--text-headingLg)/1.2 var(--font-sans); letter-spacing: -.028em; }
+.place__name-input:focus-visible { border-radius: var(--radius-control); background: var(--ghost-hover); outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
 .place__rename { display: grid; flex: none; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 50%; color: var(--ghost-ink3); background: none; cursor: pointer; opacity: 0; transition: opacity var(--duration-fast) ease, background-color var(--duration-fast) ease, color var(--duration-fast) ease; }
 .place__title:hover .place__rename, .place__rename:focus-visible { opacity: 1; }
 .place__rename:hover:not(:disabled) { color: var(--ghost-ink); background: var(--ghost-hover); }
@@ -69,7 +70,7 @@
 .doc__search > svg { position: absolute; left: 10px; width: 14px; height: 14px; color: var(--ghost-ink3); pointer-events: none; }
 .doc__search input { height: 30px; width: 210px; max-width: 100%; padding: 0 30px; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink); background: var(--ghost-hover); font: 500 var(--text-ui)/1 var(--font-sans); outline: none; transition: background-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease; }
 .doc__search input::placeholder { color: var(--ghost-ink3); }
-.doc__search input:focus { background: var(--ghost-hover2); box-shadow: inset 0 0 0 1.5px var(--ghost-line-strong); }
+.doc__search input:focus { background: var(--ghost-hover2); outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 .doc__clear { position: absolute; right: 4px; display: grid; width: 22px; height: 22px; place-items: center; border: 0; border-radius: 50%; color: var(--ghost-ink3); background: none; cursor: pointer; }
 .doc__clear:hover { color: var(--ghost-ink); }
 .doc__clear svg { width: 13px; height: 13px; }
@@ -103,9 +104,9 @@
 .pcreate__field > label, .pcreate__label { padding-inline: 4px; color: var(--ghost-ink3); font-size: var(--text-micro); font-weight: 600; }
 .pcreate__path > input { display: block; width: 100%; min-width: 0; padding: 9px 12px; border: 0; border-radius: var(--radius-control); color: var(--ghost-ink); background: var(--ghost-inset); font: 500 var(--text-ui)/1.4 var(--font-mono); outline: none; transition: background-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease; }
 .pcreate__path > input::placeholder { color: var(--ghost-ink4); }
-.pcreate__path > input:focus { background: var(--ghost-hover2); box-shadow: inset 0 0 0 1.5px var(--ghost-line-strong); }
+.pcreate__path > input:focus { background: var(--ghost-hover2); outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 .pcreate__name > input { display: block; width: 100%; min-width: 0; height: 42px; padding: 0 12px; border: 0; border-radius: var(--radius-control); color: var(--ghost-ink); background: var(--ghost-hover); font: 600 var(--text-bodyLg)/1 var(--font-sans); outline: none; transition: background-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease; }
-.pcreate__name > input:focus { background: var(--ghost-hover2); box-shadow: inset 0 0 0 1.5px var(--ghost-line-strong); }
+.pcreate__name > input:focus { background: var(--ghost-hover2); outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 .pcreate__invalid { margin: 0; color: var(--ghost-danger-ink); font-size: var(--text-caption); }
 .pcreate__actions { display: flex; justify-content: flex-end; gap: 8px; }
 

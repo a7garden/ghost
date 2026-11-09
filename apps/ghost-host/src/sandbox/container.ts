@@ -14,6 +14,7 @@ import {
   type ShellExecOptions,
   type ShellExecResult,
 } from "@earendil-works/pi-durable/env";
+import type { ContainerTracker } from "./tracker.ts";
 import { ensureTempRoot, killTree } from "./workspace-env.ts";
 
 /** Longest single capture of container CLI output, like the legacy backend's bound. */
@@ -25,11 +26,11 @@ const RUN_TIMEOUT_MS = 300_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const SIGNAL_NUMBERS: Record<string, number> = { SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGTERM: 15 };
 /**
- * Conservative guest resource bounds, chosen flat for every Work: two CPUs and 2 GiB of memory
+ * Conservative guest resource bounds when the owner granted nothing else: two CPUs and 2 GiB of memory
  * leave headroom on any macOS host while keeping one runaway Work from starving the others.
  */
-const CONTAINER_CPUS = "2";
-const CONTAINER_MEMORY = "2G";
+const CONTAINER_CPUS = 2;
+const CONTAINER_MEMORY_GIB = 2;
 /**
  * The guest never sees host environment variables: a fixed base, extended per call by
  * `options.env`. `inheritEnv` is deliberately ignored.
@@ -58,6 +59,50 @@ export interface ContainerTarget {
   workspace: string;
   /** Caller-facing workspace root for spill diagnostics (`/workspace`). */
   logicalRoot: string;
+  /** Owner grants (GhostPermissions.sandbox); absent = no network, no mounts, default resources. */
+  network?: boolean;
+  /** Host folders mounted at the same absolute path. */
+  mounts?: readonly { path: string; writable: boolean }[];
+  cpus?: number;
+  memoryGiB?: number;
+  /** A review container: the workspace and every mount are read-only. */
+  readOnly?: boolean;
+}
+
+/**
+ * `container run` flags for one target. Root read-only, capabilities dropped and `/tmp` writable always;
+ * network, extra mounts and resources follow the owner's grants (2026-11-09), and a review container
+ * sees the Work's files without being able to change them.
+ */
+export function runFlags(target: ContainerTarget): string[] {
+  const readonly = target.readOnly ? ",readonly" : "";
+  return [
+    "--cap-drop",
+    "ALL",
+    "--read-only",
+    ...(target.network ? [] : ["--network", "none", "--no-dns"]),
+    // `HOME` and `TMPDIR` point at /tmp, so git, heredocs and similar tools need it writable.
+    "--tmpfs",
+    "/tmp",
+    "--init",
+    "--cpus",
+    String(target.cpus ?? CONTAINER_CPUS),
+    "--memory",
+    `${target.memoryGiB ?? CONTAINER_MEMORY_GIB}G`,
+    "--workdir",
+    "/workspace",
+    "--mount",
+    `source=${target.workspace},target=/workspace${readonly}`,
+    ...(target.mounts ?? []).flatMap((mount) => [
+      "--mount",
+      `source=${mount.path},target=${mount.path}${target.readOnly || !mount.writable ? ",readonly" : ""}`,
+    ]),
+  ];
+}
+
+/** The grant part of a target, as a stable key: a container started with another key is restarted. */
+export function grantsKey(target: ContainerTarget): string {
+  return JSON.stringify([target.network ?? false, target.mounts ?? [], target.cpus ?? CONTAINER_CPUS, target.memoryGiB ?? CONTAINER_MEMORY_GIB, target.readOnly ?? false]);
 }
 
 export interface ContainerHooks {
@@ -65,6 +110,13 @@ export interface ContainerHooks {
   onExit?: (pid: number) => void;
   /** The set of containers visible to `ls` changed; callers drop their caches. */
   onChanged?: () => void;
+  /**
+   * The owner's current grants, read at every start. A driver lives as long as its conversation,
+   * so grants captured once would never reach it (2026-11-09).
+   */
+  grants?: () => Pick<ContainerTarget, "network" | "mounts" | "cpus" | "memoryGiB">;
+  /** Shared across drivers: skips `container ls` for known containers, serialises starts, guards retirement. */
+  tracker?: ContainerTracker;
 }
 
 interface CliOutput {
@@ -246,10 +298,10 @@ class SpillWriter {
 }
 
 /**
- * One Apple container per live Work, started lazily on first `exec`: read-only root, network
- * `none`, no DNS, capabilities dropped, no init reaping left to the guest (`--init`), bounded
- * resources (2 CPUs / 2 GiB) and a writable tmpfs at `/tmp`; only the Work's workspace is
- * bind-mounted at `/workspace` — no host home, credentials or other mounts. File operations
+ * One Apple container per live Work, started lazily on first `exec`: read-only root, capabilities
+ * dropped, no init reaping left to the guest (`--init`) and a writable tmpfs at `/tmp`. The Work's
+ * workspace is bind-mounted at `/workspace`; network, further host folders and resources are only
+ * what the owner granted the Ghost (`runFlags`) — never host home or credentials by default. File operations
  * never enter the container; they run against the host workspace with the same confinement
  * (see `WorkspaceEnv`).
  */
@@ -269,7 +321,28 @@ export class ContainerDriver {
     if (!timeout.ok) return err(timeout.error);
     const workdir = workdirIn(options?.cwd, this.target.logicalRoot);
     if (!workdir.ok) return workdir;
-    const started = await this.ensureRunning();
+    const tracker = this.hooks.tracker;
+    // Counted before anything awaits, so a sweep never retires the container under this command.
+    const end = tracker?.begin(this.target.name);
+    try {
+      await tracker?.settled(this.target.name);
+      const result = await this.execStarted(command, options, context, workdir.value, timeout.ms);
+      if (!result.ok || result.value.exitCode !== 0) tracker?.doubt(this.target.name);
+      return result;
+    } finally {
+      end?.();
+    }
+  }
+
+  private async execStarted(
+    command: string | readonly string[],
+    options: ShellExecOptions | undefined,
+    context: Context,
+    workdir: string,
+    timeout: number | undefined,
+  ): Promise<Result<ShellExecResult, ExecutionError>> {
+    const tracker = this.hooks.tracker;
+    const started = tracker ? await tracker.once(this.target.name, () => this.ensureRunning()) : await this.ensureRunning();
     if (!started.ok) return started;
     const envFlags = [...GUEST_BASE_ENV, ...Object.entries(options?.env ?? {}).map(([key, value]) => `${key}=${value}`)].flatMap(
       (entry) => ["-e", entry],
@@ -278,22 +351,31 @@ export class ContainerDriver {
       this.target.cli,
       "exec",
       "-w",
-      workdir.value,
+      workdir,
       ...envFlags,
       ...userFlags(),
       this.target.name,
       ...(typeof command === "string" ? ["/bin/sh", "-lc", command] : [...command]),
     ];
-    return this.run(argv, timeout.ms, context, options);
+    return this.run(argv, timeout, context, options);
   }
 
-  /** Start the container if it is not running; a stopped one is deleted and rebuilt fresh. */
+  /**
+   * Start the container if it is not running; a stopped one is deleted and rebuilt fresh. A running one
+   * started with other grants is rebuilt too, unless another command of the Work is still running in it.
+   */
   private async ensureRunning(): Promise<Result<null, ExecutionError>> {
+    const target: ContainerTarget = { ...this.target, ...this.hooks.grants?.() };
+    const key = grantsKey(target);
+    const tracker = this.hooks.tracker;
+    if (tracker?.trusted(target.name, key)) return ok(null);
     const listed = await listContainersAsync(this.target.cli);
     if (!listed.ok)
       return err(new ExecutionError("spawn_error", `container ls failed: ${listed.error.message}`, toError(listed.error)));
     const row = listed.value.find((candidate) => candidate.id === this.target.name);
-    if (row?.state === "running") return ok(null);
+    // This command is counted in inFlight; more than one means the old container is busy, so keep it for now.
+    if (row?.state === "running" && (tracker === undefined || tracker.adopt(target.name, key) || tracker.inFlight(target.name) > 1))
+      return ok(null);
     if (row) {
       const deleted = await runCli(this.target.cli, ["delete", "--force", this.target.name], CLI_TIMEOUT_MS);
       if (!deleted.ok || deleted.value.code !== 0)
@@ -318,24 +400,7 @@ export class ContainerDriver {
         "--arch",
         "arm64",
         ...userFlags(),
-        "--cap-drop",
-        "ALL",
-        "--read-only",
-        "--network",
-        "none",
-        "--no-dns",
-        // `HOME` and `TMPDIR` point at /tmp, so git, heredocs and similar tools need it writable.
-        "--tmpfs",
-        "/tmp",
-        "--init",
-        "--cpus",
-        CONTAINER_CPUS,
-        "--memory",
-        CONTAINER_MEMORY,
-        "--workdir",
-        "/workspace",
-        "--mount",
-        `source=${this.target.workspace},target=/workspace`,
+        ...runFlags(target),
         this.target.image,
         "/bin/sh",
         "-c",
@@ -351,6 +416,7 @@ export class ContainerDriver {
           run.ok ? undefined : toError(run.error),
         ),
       );
+    tracker?.started(target.name, key);
     this.hooks.onChanged?.();
     return ok(null);
   }

@@ -8,8 +8,8 @@
   ],
   "scripts": {
     "host": "bun run --cwd apps/ghost-host start",
-    "test": "bun run --cwd apps/ghost-host test",
-    "typecheck": "bun run --cwd packages/ghost-contract typecheck && bun run --cwd apps/ghost-host typecheck"
+    "test": "bun run --cwd apps/ghost-host test && bun run --cwd apps/ghost-ui test",
+    "typecheck": "bun run --cwd packages/ghost-contract typecheck && bun run --cwd apps/ghost-host typecheck && bun run --cwd apps/ghost-ui typecheck"
   },
   "packageManager": "bun@1.4.2"
 }

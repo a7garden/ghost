@@ -1,4 +1,5 @@
 import type { WorkState } from '@ghost/contract';
+import { glyphLabel, workGlyph } from './StateGlyph';
 
 const steps = ['접수', '진행', '검증', '완료'] as const;
 
@@ -16,15 +17,26 @@ export function lifecyclePosition(state: WorkState, needsOwner: boolean): { step
   }
 }
 
+/** The step and the state the glyph shows, e.g. "진행 · 실패" or "검증 · 확인 필요"; color alone never carries it. */
+export function lifecycleLabel(state: WorkState, needsOwner: boolean): string {
+  const step = steps[lifecyclePosition(state, needsOwner).step];
+  const reading = glyphLabel[workGlyph(state, needsOwner)];
+  return reading === step ? step : `${step} · ${reading}`;
+}
+
 /**
  * Four segments from 접수 to 완료. Passed segments are solid ink, the current one carries
  * the state color (and a travelling sheen while the Ghost is actually working).
  */
-export function LifecycleTrack({ state, needsOwner = false, compact = false, className = '' }: { state: WorkState; needsOwner?: boolean; compact?: boolean; className?: string }) {
+export function LifecycleTrack({ state, needsOwner = false, compact = false, decorative = false, className = '' }: {
+  state: WorkState; needsOwner?: boolean; compact?: boolean;
+  /** Beside a StateGlyph that already speaks the state, the track stays out of the accessible name. */
+  decorative?: boolean; className?: string;
+}) {
   const { step, tone, moving } = lifecyclePosition(state, needsOwner);
   const ended = state === 'cancelled' || state === 'failed';
   return <div className={`lifecycle ${className}`} data-compact={compact || undefined} data-tone={tone}
-    role="img" aria-label={`${steps[step]} 단계`}>
+    {...decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': lifecycleLabel(state, needsOwner) }}>
     <div className="lifecycle__bars">
       {steps.map((name, index) => <span key={name} className="lifecycle__bar"
         data-phase={index < step ? 'past' : index === step ? 'current' : ended ? 'void' : 'future'}

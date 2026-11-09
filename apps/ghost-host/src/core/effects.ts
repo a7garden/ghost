@@ -1,4 +1,4 @@
-import type { Effect } from "@ghost/contract";
+import { permissionsOf, type Effect } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { CommandError, conflict } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
@@ -166,9 +166,17 @@ export class Effects {
   }
 
   private unresolvedInConversation(conversationId: string): Effect[] {
-    return [...this.ledger.effectsInState("unknown"), ...this.ledger.effectsInState("pending")].filter(
+    // An unknown the owner's grant lets the Ghost carry on past does not hold its later effects.
+    const unknownBlocks = !this.continuesPastUnknown(conversationId);
+    return [...(unknownBlocks ? this.ledger.effectsInState("unknown") : []), ...this.ledger.effectsInState("pending")].filter(
       (effect) => effect.conversationId === conversationId && !(COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool),
     );
+  }
+
+  /** GhostPermissions.effects.unknown of the conversation's Ghost (2026-11-09). */
+  private continuesPastUnknown(conversationId: string): boolean {
+    const conversation = this.ledger.findConversation(conversationId);
+    return conversation !== null && permissionsOf(this.ledger.ghost(conversation.ghostId)).effects.unknown === "continue";
   }
 
   /** At startup no effect can still be running: every `pending` becomes `unknown`. */
@@ -179,9 +187,23 @@ export class Effects {
     }
   }
 
-  /** Open the owner reconciliation for an unknown effect and stop its Work. */
+  /**
+   * Open the owner reconciliation for an unknown effect and stop its Work — or, when the owner
+   * granted the Ghost to carry on, keep the unknown on record and tell the Ghost instead.
+   * Either way the effect itself never runs again.
+   */
   private escalate(effect: Effect) {
     const conversation = this.ledger.conversation(effect.conversationId);
+    if (!(COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool) && this.continuesPastUnknown(conversation.id)) {
+      const note = `The outcome of ${effect.tool} "${effect.summary}" is unknown (${effect.result ?? "interrupted"}). It will not run again. Check its result yourself before relying on it, then continue.`;
+      void this.core.lane(`conversation:${conversation.id}`, () =>
+        this.core.engine.submit(conversation.id, { text: note, origin: "decision", requestId: `effect:${effect.id}:unknown` }).catch((error: unknown) => {
+          // No model or credential: the Work's next wake still sees the effect as unknown in work_status.
+          if (!(error instanceof CommandError)) throw error;
+        }),
+      );
+      return;
+    }
     this.ledger.tx(() => {
       if (effect.workId) this.core.works.block(effect.workId, `unknown outcome of ${effect.tool}`);
       if (this.ledger.pendingDecisions({ effectId: effect.id }).some((decision) => decision.kind === "reconcile_effect")) return;

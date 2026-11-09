@@ -1,10 +1,11 @@
 import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
-import { HOST_TOOLS } from "@ghost/contract";
+import { HOST_TOOLS, browserPermissionsOf, permissionsOf } from "@ghost/contract";
 import type { Extension } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { describeWork } from "../core/works.ts";
 import { modelInputOf } from "../engine/models.ts";
-import type { MemoryPort, DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort } from "../integrations/ports.ts";
+import type { MemoryPort, DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort } from "../integrations/ports.ts";
+import { createBrowserTools } from "./browser.ts";
 import { createDocumentsTools } from "./documents.ts";
 import { createDirectTools } from "./direct.ts";
 import { createInteractiveTools, INTERACTIVE_INSTRUCTIONS } from "./interactive.ts";
@@ -32,6 +33,7 @@ const DIRECT_INSTRUCTIONS = `This is a direct conversation with the owner: talk 
 Create a Work (work_create) only when the owner explicitly hands over a task — never for ideas, questions or chat. A Work runs in its own conversation and reports back here.
 work_list and work_inspect show progress; work_update edits a live Work; work_cancel stops one.
 ask_owner asks the owner a question when a decision is theirs; the answer arrives as a message.
+When the owner hands over a task, create the Work right away from what they said; fill gaps with sensible assumptions written into the brief instead of asking first. If something truly needs the owner, ask everything in one message before work_create, not piecemeal. A reviewer judges the result and the owner is told the outcome; pass owner_accepts only when the owner said they want to check it themselves.
 schedule_create wakes this conversation once at a given time or on an interval; schedule_list and schedule_cancel manage schedules.
 ghost_list shows the active Ghosts; hand a task to a better-fit Ghost with work_create and its ghost_id.
 
@@ -43,9 +45,11 @@ const WORK_INSTRUCTIONS = `This conversation executes exactly one Work. Stay on 
 read, write, edit and bash operate in the Work's sandbox workspace; publish everything the result needs with publish_artifact before completing.
 complete claims the result with a truthful summary naming only published artifacts; verification — checks, a reviewer or the owner — decides acceptance, not you. The owner reads that summary too: open it with one plain sentence saying what was made, then the evidence a reviewer needs.
 delegate hands a self-contained part to another Ghost with done-criteria you write. When the result matters, pass reviewer_ghost_id naming a reviewer whose model vendor differs from the assignee's. After delegating, end your turn: do not poll or sleep. Its outcome arrives here as a message when it settles, with its files under inputs/<child id>/; complete refuses while a child is still live.
-work_status shows this Work's state and children; ask_owner when only the owner can decide something, phrased for a person: plain words and the choice itself, without ids, paths or tool names.`;
+work_status shows this Work's state and children.
+Work on your own: the owner handed this over so they would not have to watch it. Decide what you reasonably can, keep going, and list your assumptions in the complete summary so they can correct them. ask_owner only for an irreversible or costly step or a preference with no sensible default, and give it a default so the Work continues if they are away. Phrase it for a person: plain words and the choice itself, without ids, paths or tool names.
+If you are truly blocked, call complete with what you have and exactly what blocks you; do not stop silently.`;
 
-const REVIEW_INSTRUCTIONS = `This conversation reviews one Work. Judge only from its artifacts (artifact_read) and recorded effects (effect_list) — never from the assignee's claims.
+const REVIEW_INSTRUCTIONS = `This conversation reviews one Work. Judge only from its artifacts (artifact_read), recorded effects (effect_list) and checks you run yourself (run_check over the Work's read-only files under /workspace) — never from the assignee's claims. When the result is code or data, run it or its tests before passing it.
 Call verdict exactly once: pass, revise, or fail with concrete reasons. revise sends your reasons back to the assignee for another attempt.`;
 
 const MAIN_INSTRUCTIONS = `As the current main Ghost you can ghost_inspect another Ghost's configuration and ghost_update its name, persona, model, look, state or tool allow-list. The main designation and your own settings belong to the owner.`;
@@ -60,6 +64,8 @@ export function createToolSet(deps: {
   skills: SkillsPort | null;
   /** Read-only web research (ghost.web); null leaves the tools out. */
   reach?: ReachPort | null;
+  /** The owner's browser (ghost.browser); null leaves the tools out. */
+  browser?: BrowserPort | null;
 }): ToolSet {
   const direct = createDirectTools(deps.core);
   const interactive = createInteractiveTools(deps.core);
@@ -71,10 +77,11 @@ export function createToolSet(deps: {
   const host = deps.host ? createHostTools(deps.core, deps.host) : null;
   const skills = deps.skills === null ? null : createSkillsTools(deps.core, deps.skills);
   const web = deps.reach ? createWebTools(deps.core, deps.reach) : null;
+  const browser = deps.browser ? createBrowserTools(deps.core, deps.browser) : null;
 
   return {
     all(): Extension[] {
-      return [direct, interactive, work, review, main, ...(memory ? [memory] : []), ...(documents ? [documents] : []), ...(host ? [host] : []), ...(skills ? [skills] : []), ...(web ? [web] : [])];
+      return [direct, interactive, work, review, main, ...(memory ? [memory] : []), ...(documents ? [documents] : []), ...(host ? [host] : []), ...(skills ? [skills] : []), ...(web ? [web] : []), ...(browser ? [browser] : [])];
     },
     extensionsFor(conversation: Conversation, ghost: Ghost, _work: Work | null): Extension[] {
       switch (conversation.kind) {
@@ -85,6 +92,7 @@ export function createToolSet(deps: {
           if (host) selected.push(host);
           if (skills) selected.push(skills);
           if (web) selected.push(web);
+          if (browser) selected.push(browser);
           // Main-only management: resolved again at every execution, so a stale main keeps nothing.
           if (ghost.isDefault && ghost.state === "active") selected.push(main);
           return selected;
@@ -95,6 +103,7 @@ export function createToolSet(deps: {
           if (host) selected.push(host);
           if (skills) selected.push(skills);
           if (web) selected.push(web);
+          if (browser) selected.push(browser);
           return selected;
         }
         case "review":
@@ -104,11 +113,11 @@ export function createToolSet(deps: {
     instructionsFor(conversation: Conversation, ghost: Ghost, work: Work | null): string {
       switch (conversation.kind) {
         case "direct":
-          return [DIRECT_INSTRUCTIONS, ghost.isDefault && ghost.state === "active" ? MAIN_INSTRUCTIONS : "", skillsInstructions(deps.skills, ghost)]
+          return [DIRECT_INSTRUCTIONS, ghost.isDefault && ghost.state === "active" ? MAIN_INSTRUCTIONS : "", grantsInstructions(ghost, "direct", { host: host !== null, documents: documents !== null, browser: browser !== null }), skillsInstructions(deps.skills, ghost)]
             .filter(Boolean)
             .join("\n\n");
         case "work":
-          return [WORK_INSTRUCTIONS, delegationRoster(deps.core, ghost, { web: web !== null, host: host !== null }), work ? describeWork(work) : "", skillsInstructions(deps.skills, ghost)]
+          return [WORK_INSTRUCTIONS, grantsInstructions(ghost, "work", { host: host !== null, documents: documents !== null, browser: browser !== null }), delegationRoster(deps.core, ghost, { web: web !== null, host: host !== null }), work ? describeWork(work) : "", skillsInstructions(deps.skills, ghost)]
             .filter(Boolean)
             .join("\n\n");
         case "review":
@@ -116,6 +125,38 @@ export function createToolSet(deps: {
       }
     },
   };
+}
+
+/**
+ * What the owner granted beyond the defaults, so the Ghost uses it instead of asking for it.
+ * Deterministic for a given grant, so prompt caching holds until the owner changes something.
+ */
+function grantsInstructions(ghost: Ghost, kind: "direct" | "work", installed: { host: boolean; documents: boolean; browser: boolean }): string {
+  const grants = permissionsOf(ghost);
+  const lines: string[] = [];
+  if (kind === "work") {
+    if (grants.sandbox.network) lines.push("Your sandbox has network access: you may fetch, clone and install what the Work needs.");
+    if (grants.sandbox.mounts.length > 0) {
+      const mounts = grants.sandbox.mounts.map((mount) => `${mount.path} (${mount.writable ? "read-write" : "read-only"})`).join(", ");
+      lines.push(`The owner's folders are mounted in your sandbox at the same paths: ${mounts}. Work on them with bash; read, write and edit act only inside /workspace. Publish what the owner should receive as artifacts.`);
+    }
+  }
+  if (installed.host && ghost.tools.includes("host_command_propose") && grants.host.approval === "never") {
+    const programs = [grants.host.interpreters && "shells and interpreters", grants.host.privileged && "privileged programs"].filter(Boolean).join(" and ");
+    lines.push(`host_command_propose runs the command on the Mac at once and returns its output; the owner granted this without approval${programs ? `, including ${programs}` : ""}. Every run is recorded.`);
+  }
+  if (installed.documents && ghost.tools.includes("document_propose") && grants.documents.autoWrite) {
+    lines.push("document_propose saves the page at once; the owner granted document writes without review.");
+  }
+  if (installed.browser && ghost.tools.some((tool) => tool.startsWith("browser_"))) {
+    const browser = browserPermissionsOf(ghost);
+    if (browser.domains.length > 0) lines.push(`Your browser may act only on ${browser.domains.join(", ")} (and their subdomains).`);
+    if (ghost.tools.includes("browser_act") && browser.commit === "never") lines.push("browser_act runs paying, sending, booking and publishing actions at once without the owner's approval; the owner granted this. Every action is recorded — be certain before you commit.");
+    if (ghost.tools.includes("browser_login") && browser.logins.length > 0) {
+      lines.push(`browser_login can sign you in with these logins (item_id · site): ${browser.logins.map((login) => `${login.itemId} · ${login.title} (${login.origin})`).join("; ")}.`);
+    }
+  }
+  return lines.length > 0 ? `## Granted by the owner\n${lines.map((line) => `- ${line}`).join("\n")}` : "";
 }
 
 /** The exact preface every skills section opens with, above any skill body. */

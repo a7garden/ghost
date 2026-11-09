@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import type { State } from '@ghost/contract';
 import { Popover, PopoverContent, PopoverTrigger } from '../../ui';
@@ -25,8 +25,18 @@ export function ActivityIsland({ state, navigate }: { state: State; navigate(pat
   const talking = state.conversations.filter(conversation => conversation.kind === 'direct' && conversation.busy);
   const active = state.ghosts.map(ghost => ({ ghost, presence: ghostPresence(ghost, state) })).filter(item => item.presence.state !== 'idle');
   const moving = works.filter(work => work.state !== 'blocked').length + talking.length;
-  const asks = decisions.length + works.filter(work => work.state === 'blocked').length;
-  if (!asks && !moving) return null;
+  const blocked = works.filter(work => work.state === 'blocked').length;
+  const asks = decisions.length + blocked;
+  // New pending decisions are announced once, when their count rises; a re-render or a resolution stays quiet.
+  const [announcement, setAnnouncement] = useState('');
+  const seen = useRef(decisions.length);
+  useEffect(() => {
+    if (decisions.length > seen.current) setAnnouncement(`${uiTerms.inbox} ${decisions.length}건`);
+    seen.current = decisions.length;
+  }, [decisions.length]);
+  // Mounted even while the island is hidden, so the first arrival is heard too.
+  const live = <span className="sr-only" role="status" aria-live="polite">{announcement}</span>;
+  if (!asks && !moving) return live;
 
   const go = (path: string) => () => { setOpen(false); navigate(path); };
   const attention: Entry[] = [
@@ -43,11 +53,13 @@ export function ActivityIsland({ state, navigate }: { state: State; navigate(pat
     ...works.filter(work => work.state !== 'blocked').map(work => ({ id: work.id, glyph: work.state as GlyphState, title: work.title,
       meta: names.get(work.ghostId) ?? 'Ghost', at: work.updatedAt, go: go(`/work/${encodeURIComponent(work.id)}`) })),
   ];
-  const summary = [asks ? `확인 필요 ${asks}` : '', moving ? `진행 중 ${moving}` : ''].filter(Boolean).join(', ');
+  // The amber count is decisions plus blocked work, wider than the sidebar's 확인할 일 (decisions only): say so.
+  const asksDetail = blocked ? `결정 ${decisions.length} · 막힌 일 ${blocked}` : '';
+  const summary = [asks ? `확인 필요 ${asks}${asksDetail ? ` (${asksDetail})` : ''}` : '', moving ? `진행 중 ${moving}` : ''].filter(Boolean).join(', ');
 
-  return <Popover open={open} onOpenChange={setOpen}>
+  return <>{live}<Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      <button type="button" className="island" data-attention={asks > 0 || undefined} aria-label={`활동: ${summary}`}>
+      <button type="button" className="island" data-attention={asks > 0 || undefined} aria-label={`활동: ${summary}`} title={summary}>
         <span className="island__faces" aria-hidden="true">
           {active.slice(0, 3).map(({ ghost }) => <DotAvatar key={ghost.id} profileId={ghost.id} tone={toneFor(ghost.id)} size={18}/>)}
         </span>
@@ -61,7 +73,7 @@ export function ActivityIsland({ state, navigate }: { state: State; navigate(pat
       {running.length > 0 && <IslandGroup title="진행 중" entries={running} now={now}
         more={{ label: uiTerms.work, go: go('/work') }}/>}
     </PopoverContent>
-  </Popover>;
+  </Popover></>;
 }
 
 function IslandGroup({ title, entries, now, more }: { title: string; entries: Entry[]; now: number; more: { label: string; go(): void } }) {

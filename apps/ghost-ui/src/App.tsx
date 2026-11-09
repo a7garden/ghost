@@ -6,14 +6,16 @@ import { AppFrame } from './components/AppFrame';
 import { TitleNav } from './components/TitleNav';
 import { crumbsFor } from './features/crumbs';
 import { useHistoryNav } from './features/historyNav';
-import { ActivityIsland } from './components/agent';
+import { ActivityIsland, glyphLabel, workGlyph } from './components/agent';
 import { PortraitAppearances } from './components/DotAvatar';
 import { Settings, type SettingsSection } from './pets/Settings';
 import { AvatarProvider } from './pets/AvatarProvider';
 import { usePreferences } from './pets/preferences';
 import { HostProvider, useHost } from './host/context';
 import { useHostState } from './host/store';
-import { pendingDecisions, visibleGhosts } from './features/ghostState';
+import { liveWorks, pendingDecisions, visibleGhosts } from './features/ghostState';
+import { decisionHeading } from './features/decisionText';
+import { isMac } from './ui/keys';
 import { hostStatus } from './features/hostStatus';
 import { Overview } from './features/Overview';
 import { GhostChat } from './features/GhostChat';
@@ -63,14 +65,24 @@ function Shell() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); location.hash = '/settings'; }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setPaletteOpen(true); }
-      // ⌘[ / ⌘] walk history, except where text editing owns them (indent in the document editor).
-      const editing = e.target instanceof Element && e.target.closest('input, textarea, [contenteditable="true"], .cm-editor');
+      // ⌘K/Ctrl+K belongs to the command palette, which binds it itself.
+      // ⌘[ / ⌘] (Ctrl elsewhere) walk history, except where text editing owns them (indent in the document editor).
+      // An open modal owns the page under it: walking history there would unmount what the dialog belongs to.
+      const editing = (e.target instanceof Element && e.target.closest('input, textarea, [contenteditable="true"], .cm-editor'))
+        || document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]');
       if ((e.metaKey || e.ctrlKey) && !editing && (e.key === '[' || e.key === ']')) { e.preventDefault(); if (e.key === '[') history.back(); else history.forward(); }
+      // Windows and Linux owners expect Alt+←/→ for back and forward; on macOS Option+arrow moves by word.
+      if (!isMac && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !editing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); if (e.key === 'ArrowLeft') history.back(); else history.forward(); }
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, []);
+  // A ?new=1 creator, once closed or done, drops the flag in place: Back must not land on it and reopen the form.
+  const clearCreateRequest = () => {
+    const next = currentRoute().replace(/([?&])new=1(&|$)/, (_, lead: string, tail: string) => tail ? lead : '').replace(/[?&]$/, '');
+    history.replaceState(history.state, '', `#${next}`);
+    setRoute(next);
+  };
   const navigate = (path: string) => { resetScroll(); if (currentRoute() !== path) historyNav.push(`#${path}`); setRoute(path); };
   const [path, query = ''] = route.split('?');
   const params = new URLSearchParams(query);
@@ -91,13 +103,31 @@ function Shell() {
   const ownsGeometry = section === 'settings' || section === 'ghosts';
 
   const go = (target: string) => () => navigate(target);
+  const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
+  // Searchable by title: what waits on the owner opens in 확인할 일, live Work opens its own page.
+  const decisionItems: CommandItem[] = state ? pendingDecisions(state).sort((a, b) => a.createdAt - b.createdAt).map(decision => ({
+    id: `decision:${decision.id}`, label: decisionHeading(decision, state), group: uiTerms.inbox,
+    description: ghostName(decision.ghostId), keywords: [ghostName(decision.ghostId)],
+    onSelect: go(`/inbox?decision=${encodeURIComponent(decision.id)}`),
+  })) : [];
+  const waitingWorks = new Set(state ? pendingDecisions(state).map(decision => decision.workId).filter(Boolean) : []);
+  const workItems: CommandItem[] = state ? liveWorks(state).map(work => ({
+    id: `work:${work.id}`, label: work.title, group: uiTerms.work,
+    description: `${ghostName(work.ghostId)} · ${glyphLabel[workGlyph(work.state, waitingWorks.has(work.id))]}`, keywords: [ghostName(work.ghostId)],
+    onSelect: go(`/work/${encodeURIComponent(work.id)}`),
+  })) : [];
   const commandItems: CommandItem[] = state ? [
+    { id: 'new-work', label: '일 맡기기', group: '실행', onSelect: go('/work?new=1') },
+    { id: 'new-ghost', label: '새 Ghost', group: '실행', onSelect: go('/settings?tab=team&new=1') },
+    { id: 'new-space', label: '새 프로젝트', group: '실행', onSelect: go('/spaces?new=1') },
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
     { id: 'spaces', label: routeLabels.spaces, group: '이동', onSelect: go('/spaces') },
     ...visibleGhosts(ghosts).map(ghost => ({ id: `ghost:${ghost.id}`, label: ghost.name, description: ghost.isDefault ? '메인 Ghost' : undefined, group: 'Ghost', onSelect: () => switchGhost(ghost.id) })),
     ...state.spaces.map(space => ({ id: `space:${space.id}`, label: space.name, group: '프로젝트', onSelect: () => navigate(`/spaces/${space.id}`) })),
+    ...decisionItems,
+    ...workItems,
     { id: 'team', label: uiTerms.ghostSettings, group: '설정', onSelect: go('/settings?tab=team') },
     { id: 'devices', label: '기기', group: '설정', onSelect: go('/settings?tab=devices') },
     { id: 'schedules', label: uiTerms.schedules, group: '설정', onSelect: go('/settings?tab=schedules') },
@@ -111,7 +141,7 @@ function Shell() {
   const settingsSections: SettingsSection[] = [
     { id: 'team', label: 'Ghost', icon: Users, content: <GhostSettings onChat={switchGhost}
       onSelect={id => navigate(`/settings?tab=team&ghost=${encodeURIComponent(id)}`)}
-      selectedGhostId={params.get('ghost') ?? undefined}/> },
+      selectedGhostId={params.get('ghost') ?? undefined} createRequested={params.get('new') === '1'} onCreateClosed={clearCreateRequest}/> },
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
@@ -144,7 +174,7 @@ function Shell() {
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
-              : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')}/>)}
+              : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')} createRequested={params.get('new') === '1'} onCreateClosed={clearCreateRequest}/>)}
             {section === 'ghosts' && (openGhost
               ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} threadId={params.get('thread')} navigate={navigate}/>
               : ghostNotFound)}

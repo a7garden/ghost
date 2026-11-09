@@ -81,6 +81,12 @@ export const GhostTool = Type.Union([
   Type.Literal("host_read"),
   Type.Literal("host_nodes"),
   Type.Literal("host_command_propose"),
+  Type.Literal("browser_open"),
+  Type.Literal("browser_snapshot"),
+  Type.Literal("browser_text"),
+  Type.Literal("browser_screenshot"),
+  Type.Literal("browser_act"),
+  Type.Literal("browser_login"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 
@@ -120,13 +126,22 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "host_read",
   "host_nodes",
   "host_command_propose",
+  "browser_open",
+  "browser_snapshot",
+  "browser_text",
+  "browser_screenshot",
+  "browser_act",
+  "browser_login",
 ];
 
 /** Tools that observe or change the owner's Mac. Granted only explicitly, never by default. */
 export const HOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("host_"));
 
-/** The allow-list a new Ghost gets when none is given: every selectable tool except host tools. */
-export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool));
+/** Tools that drive the owner's browser on the Mac, possibly signed in. Granted only explicitly, never by default (2026-11-09). */
+export const BROWSER_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("browser_"));
+
+/** The allow-list a new Ghost gets when none is given: every selectable tool except host and browser tools. */
+export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !BROWSER_TOOLS.includes(tool));
 
 /** A skill directory name under the configured skills root. */
 export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });
@@ -137,6 +152,82 @@ export const FallbackList = Type.Array(ModelRef, { maxItems: 3 });
 
 /** An explicit allow-list: unknown names and duplicates are schema errors. */
 export const GhostToolList = Type.Array(GhostTool, { uniqueItems: true, maxItems: GHOST_TOOLS.length });
+
+/** A host folder mounted into a Ghost's Work sandbox at the same absolute path. */
+export const GhostMount = Type.Object({
+  path: Type.String({ minLength: 1, maxLength: 4096 }),
+  writable: Type.Boolean(),
+});
+export type GhostMount = Static<typeof GhostMount>;
+
+/** A Shade login the owner lets one Ghost use; the Ghost sees only this metadata, never the secret. */
+export const GhostBrowserLogin = Type.Object({
+  /** Shade item UUID, lowercase. */
+  itemId: Type.String({ pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }),
+  /** The exact https origin the item belongs to; a login runs only on this origin. */
+  origin: Type.String({ minLength: 9, maxLength: 512 }),
+  title: Type.String({ minLength: 1, maxLength: 128 }),
+});
+export type GhostBrowserLogin = Static<typeof GhostBrowserLogin>;
+
+export const GhostBrowserPermissions = Type.Object({
+  /** `always`: a click that pays, sends, books, publishes or changes an account waits for the owner. `never`: it runs and is recorded. */
+  commit: Type.Union([Type.Literal("always"), Type.Literal("never")]),
+  /** Hostnames the browser may act on (subdomains included); empty = any public address. */
+  domains: Type.Array(Type.String({ minLength: 1, maxLength: 253 }), { maxItems: 32 }),
+  logins: Type.Array(GhostBrowserLogin, { maxItems: 32 }),
+});
+export type GhostBrowserPermissions = Static<typeof GhostBrowserPermissions>;
+
+export const DEFAULT_BROWSER_PERMISSIONS: GhostBrowserPermissions = { commit: "always", domains: [], logins: [] };
+
+/**
+ * What the owner lets a Ghost do beyond its tool allow-list. Only the owner changes it (never a Ghost,
+ * not even the main one). The defaults are the conservative behaviour from before 2026-11-09; every
+ * widening keeps the effect journal, so a granted action is recorded instead of asked about.
+ */
+export const GhostPermissions = Type.Object({
+  sandbox: Type.Object({
+    /** Network inside the Work sandbox. */
+    network: Type.Boolean(),
+    /** Host folders mounted into the sandbox; the Work's own workspace is always there. */
+    mounts: Type.Array(GhostMount, { maxItems: 8 }),
+    cpus: Type.Integer({ minimum: 1, maximum: 16 }),
+    memoryGiB: Type.Integer({ minimum: 1, maximum: 64 }),
+  }),
+  host: Type.Object({
+    /** `never`: an allowed Mac command runs at once and is journaled, without an owner decision. */
+    approval: Type.Union([Type.Literal("always"), Type.Literal("never")]),
+    /** Shells and interpreters (sh, python, node, bun …) as Mac command programs. */
+    interpreters: Type.Boolean(),
+    /** sudo, ssh, launchctl and similar programs. */
+    privileged: Type.Boolean(),
+  }),
+  documents: Type.Object({
+    /** A document proposal in a Space the Ghost may propose to is written at once. */
+    autoWrite: Type.Boolean(),
+  }),
+  effects: Type.Object({
+    /** An effect whose outcome is unknown after a crash: `block` waits for the owner, `continue` tells the Ghost and goes on. */
+    unknown: Type.Union([Type.Literal("block"), Type.Literal("continue")]),
+  }),
+  /** Optional so rows saved before 2026-11-09 still read; `browserPermissionsOf` fills the default. */
+  browser: Type.Optional(GhostBrowserPermissions),
+});
+export type GhostPermissions = Static<typeof GhostPermissions>;
+
+export const DEFAULT_GHOST_PERMISSIONS: GhostPermissions = {
+  sandbox: { network: false, mounts: [], cpus: 2, memoryGiB: 2 },
+  host: { approval: "always", interpreters: false, privileged: false },
+  documents: { autoWrite: false },
+  effects: { unknown: "block" },
+};
+
+/** A Ghost's effective permissions; rows read from the ledger always carry them. */
+export const permissionsOf = (ghost: { permissions?: GhostPermissions }): GhostPermissions => ghost.permissions ?? DEFAULT_GHOST_PERMISSIONS;
+
+/** The browser part of a Ghost's permissions, defaulted for rows saved before it existed. */
+export const browserPermissionsOf = (ghost: { permissions?: GhostPermissions }): GhostBrowserPermissions => permissionsOf(ghost).browser ?? DEFAULT_BROWSER_PERMISSIONS;
 
 export const Ghost = Type.Object({
   id: Id,
@@ -154,6 +245,8 @@ export const Ghost = Type.Object({
   skills: SkillList,
   /** Set once the owner deleted a retired Ghost; such Ghosts stay only so past Works keep their assignee. */
   deletedAt: nullable(Timestamp),
+  /** Owner-set permissions; absent means DEFAULT_GHOST_PERMISSIONS. */
+  permissions: Type.Optional(GhostPermissions),
   directConversationId: Id,
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -204,6 +297,12 @@ export const Acceptance = Type.Object({
   criteria: Type.String({ maxLength: 8192 }),
   checks: Type.Array(Check, { maxItems: 16 }),
   reviewer: nullable(Reviewer),
+  /**
+   * Who settles a root Work that has neither checks nor a reviewer. Absent or true: the owner
+   * (`accept_result`). false: a review conversation under the review model, and the owner is only
+   * notified of the outcome. A Ghost's `work_create` sets false unless the owner asked to accept it.
+   */
+  owner: Type.Optional(Type.Boolean()),
 });
 export type Acceptance = Static<typeof Acceptance>;
 

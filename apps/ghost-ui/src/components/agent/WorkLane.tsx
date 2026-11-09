@@ -37,7 +37,7 @@ export function WorkLane({ work, ghostName, needsOwner, now, onOpen, action, bra
             {note && <span className="lane__note">{note}</span>}
           </span>
         </span>
-        <LifecycleTrack state={work.state} needsOwner={needsOwner} compact className="lane__track"/>
+        <LifecycleTrack state={work.state} needsOwner={needsOwner} compact decorative className="lane__track"/>
       </button>
       {action && <span className="lane__action">{action}</span>}
     </div>

@@ -70,6 +70,18 @@ export interface ArtifactStore {
 export interface SandboxControl {
   status(ghostId: string): Sandbox;
   control(ghostId: string, action: "stop" | "reset"): Promise<void>;
+  /** Why a host folder may not be mounted into a sandbox (it overlaps the state root), or null. */
+  mountRefusal?(path: string): string | null;
+  /** Frees idle, stopped and leftover containers and old workspaces; `workOf` is null for an unknown Work. */
+  sweep?(now: number, workOf: (workId: string) => Work | null): Promise<SandboxSweep>;
+}
+
+/** What one sweep removed, and what it could not. */
+export interface SandboxSweep {
+  containers: { name: string; reason: "settled" | "stopped" | "idle" }[];
+  /** Work ids whose directories were removed. */
+  workspaces: string[];
+  failures: string[];
 }
 
 /**

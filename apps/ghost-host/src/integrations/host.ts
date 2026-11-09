@@ -11,6 +11,7 @@ import { cpus, homedir, loadavg, totalmem } from "node:os";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import type {
   HostCommand,
+  HostCommandPolicy,
   HostPort,
   HostStatus,
   HostServices,
@@ -708,7 +709,7 @@ export class MacHost implements HostPort {
       warnings: warnings.slice(0, 30),
     };
   }
-  validateCommand(input: HostCommand): HostCommand {
+  validateCommand(input: HostCommand, policy: HostCommandPolicy = { interpreters: false, privileged: false }): HostCommand {
     for (const text of [input.title, input.reason, input.risk])
       if (
         typeof text !== "string" ||
@@ -722,7 +723,10 @@ export class MacHost implements HostPort {
       input.args.length > 64 ||
       input.args.some(
         (a) =>
-          typeof a !== "string" || a.length > 4096 || /[\0\r\n;|&<>`$]/.test(a),
+          typeof a !== "string" || a.length > 4096 || a.includes("\0") ||
+          // Arguments go to the program as argv, never through a shell; shell syntax only means
+          // something to a shell, so it is allowed exactly when the owner allowed interpreters.
+          (!policy.interpreters && /[\r\n;|&<>`$]/.test(a)),
       ) ||
       input.args.join("").length > 12_000
     )
@@ -758,9 +762,12 @@ export class MacHost implements HostPort {
       /^(sudo|su|doas|security|osascript|tclsh|wish|ssh|scp|sftp|login|dscl|launchctl)$/;
     const interpreter =
       /^(sh|bash|zsh|fish|dash|env|python|ruby|perl|node|bun|deno|php|lua|js|jsc|osascript)(?:\d.*)?$/;
+    // 2026-11-09: refused unless the owner granted the class (GhostPermissions.host).
     if (
       [program, canonical].some(
-        (p) => denied.test(basename(p)) || interpreter.test(basename(p)),
+        (p) =>
+          (!policy.privileged && denied.test(basename(p))) ||
+          (!policy.interpreters && interpreter.test(basename(p))),
       )
     )
       throw new Error(
@@ -789,10 +796,10 @@ export class MacHost implements HostPort {
       risk: input.risk,
     };
   }
-  async executeCommand(input: HostCommand) {
+  async executeCommand(input: HostCommand, policy?: HostCommandPolicy) {
     let checked: HostCommand;
     try {
-      checked = this.validateCommand(input);
+      checked = this.validateCommand(input, policy);
       if (checked.cwd !== input.cwd || checked.program !== input.program)
         throw new Error("approved executable or cwd changed");
     } catch (error) {

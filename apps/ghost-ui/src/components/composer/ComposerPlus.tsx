@@ -2,13 +2,17 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { Plus } from 'lucide-react';
 import './composer.css';
 
-export interface PlusAction { id: string; icon: ReactNode; label: string; onSelect(): void; disabled?: boolean }
+export interface PlusAction {
+  id: string; icon: ReactNode; label: string; onSelect(): void; disabled?: boolean;
+  /** Why a disabled action is unavailable: it stays focusable, shows this as its title and reports it when chosen. */
+  reason?: string;
+}
 
 /**
  * The composer's + : the actions unfold upward one after another and the + turns into ×.
  * Arrow keys move between actions, Escape folds them back to the button.
  */
-export function ComposerPlus({ actions, disabled = false }: { actions: PlusAction[]; disabled?: boolean }) {
+export function ComposerPlus({ actions, disabled = false, onBlocked }: { actions: PlusAction[]; disabled?: boolean; onBlocked?(reason: string): void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const items = useRef<(HTMLButtonElement | null)[]>([]);
@@ -38,12 +42,13 @@ export function ComposerPlus({ actions, disabled = false }: { actions: PlusActio
       <Plus aria-hidden="true"/>
     </button>
     {open && <div className="composer-plus__menu" role="menu" aria-label="더하기">
-      {actions.map((action, index) => <button key={action.id} ref={node => { items.current[index] = node; }} type="button" role="menuitem"
-        className="composer-plus__item" style={{ '--i': index } as CSSProperties} disabled={action.disabled}
-        onClick={() => { close(false); action.onSelect(); }}>
+      {actions.map((action, index) => { const blocked = action.disabled && action.reason ? action.reason : null; return <button key={action.id} ref={node => { items.current[index] = node; }} type="button" role="menuitem"
+        className="composer-plus__item" style={{ '--i': index } as CSSProperties} disabled={action.disabled && !blocked}
+        aria-disabled={blocked ? true : undefined} title={blocked ?? undefined}
+        onClick={() => { if (blocked) { close(); onBlocked?.(blocked); } else { close(false); action.onSelect(); } }}>
         <span className="composer-plus__icon" aria-hidden="true">{action.icon}</span>
         <span>{action.label}</span>
-      </button>)}
+      </button>; })}
     </div>}
   </div>;
 }

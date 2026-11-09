@@ -34,7 +34,9 @@ destination on an inset sheet (rounded, card shadow) beside it.
   the left — section, then the thing inside it, then the open thread and the threads it was
   delegated from (`src/features/crumbs.ts`); every step above the page goes up to it. Below
   760px only back and the page remain. The activity island sits in the center, command search
-  (`⌘K`) on the right. Below 56rem the sidebar opens from the title bar menu.
+  (`⌘K`) on the right; it also hands off work, creates a Ghost or project and finds pending
+  decisions and live Work by title. Shortcut labels follow the platform (`src/ui/keys.ts`):
+  Ctrl on Windows, where Alt+←/→ also walk history. Below 56rem the sidebar opens from the title bar menu.
 
 Theme follows the `.dark` class on `<html>`.
 
@@ -48,7 +50,9 @@ Surfaces are neutral and layered (page → sheet → card → raised), separated
 shadows rather than borders. Color is reserved for agent state, each with a mark, an
 ink and a tint in `src/ui/theme.css`: signal blue for a Ghost actually working, amber for
 anything waiting on the owner, red for failure, green for an accepted result. Inter and
-JetBrains Mono remain; mono marks tool names, commands and times.
+JetBrains Mono remain; mono marks tool names, commands and times. Hangul falls through to
+Pretendard Variable (2026-11-09), which matches Inter's metrics and keeps the 450–650 weight
+steps on every platform. Shortcut keys share one look: a canvas key on a hairline, mono 11px.
 
 Text tiers meet WCAG AA: ink2/ink3 are 74%/61% ink in light and 70%/53% in dark, so
 secondary and meta text keep 4.5:1 on page, canvas and surface; ink4 is decoration only.
@@ -100,12 +104,23 @@ Feature-level compositions:
   becomes a 맡긴 일 unless the owner chose it. Like the conversation composer it has the
   + menu bottom-left (files) and the model beside send.
 - **Decision deck** (home, 확인할 일, conversations): pending decisions stacked oldest-first,
-  the top one fully actionable. Questions answer with numbered tiles (digit keys) or free text;
+  the top one fully actionable. A card waiting on the owner carries an amber hairline around its
+  whole edge, never a stripe on one side. Questions answer with numbered tiles (digit keys) or free text;
   approvals show the exact request; results arrive as a receipt with files and the
-  completion criteria (`⌘↵` approves). 확인할 일 lists every pending item beside the stack.
+  completion criteria (`⌘↵` approves). 수정 요청 on a result, an effect to reconcile or a
+  document review opens a reason field first (`D`), and the reason reaches the Ghost. An
+  approval that cannot be called back (a command whose risk speaks of loss, a browser click
+  that pays or changes an account) arms on the first press and approves on a second within 4s.
+  ←/→ page the deck; a resolved card leaves a short spoken and visible acknowledgement.
+  확인할 일 lists every pending item beside the stack.
   A conversation docks its own above the composer: every pending decision of its Ghost (what
   the sidebar row announces) and those of threads begun there; a single card drops the deck
-  head and a long card scrolls inside. Work detail and the thread panel resolve their own in place.
+  head and a long card scrolls inside under its pinned answer buttons; the card takes only what a short window
+  leaves after the transcript and composer. Work detail and the thread panel resolve their own in place.
+- **Confirmation** (`src/components/ConfirmDialog.tsx`): the one dialog for acts that widen a Ghost's
+  power or cannot be taken back (모두 허용, turning on the Mac or 브라우저 group, pausing or retiring a
+  Ghost with live Work, deleting a Ghost, cancelling Work). Its body states the consequence; the
+  button names the act; a failure stays in the dialog. Narrowing stays one click.
 - **Tool trail** (conversations): consecutive tool results fold into one line of chips;
   opening it shows each call's output on a thread. Live tools tick in at the end; the
   composer edge carries a travelling signal while the Ghost responds: a comet on the edge,
@@ -144,7 +159,8 @@ profile and look editor) and content fades beneath it. Work the conversation spi
 appears as **thread cards** at the moment it started, kept live (state glyph, carrier,
 lifecycle); a card waiting on the owner is answered from the decision deck above the composer.
 A settled thread folds to one quiet line — its OutcomeLine returns beneath it, so the
-branch stays readable without saying the result twice. Opening a card or a thread from the
+branch stays readable without saying the result twice; when nothing came between them, the
+outcome alone draws the branch and the folded line is dropped. Opening a card or a thread from the
 thread button (top right) brings the
 **thread panel** beside the conversation (over it below 64rem, `?thread=` in the URL):
 status and lifecycle, its decisions resolved in place, delegated threads, and the

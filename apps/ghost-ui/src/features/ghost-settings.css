@@ -41,7 +41,7 @@ button.ghost-sheet__portrait:focus-visible { outline: 2px solid var(--ghost-ink3
   transition: background-color var(--duration-fast) ease;
 }
 .ghost-sheet__name:hover { background: var(--ghost-hover); }
-.ghost-sheet__name:focus { background: var(--ghost-hover); box-shadow: inset 0 0 0 1.5px var(--ghost-line-strong); }
+.ghost-sheet__name:focus { background: var(--ghost-hover); outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 .ghost-sheet__name::placeholder { color: var(--ghost-ink4); }
 .ghost-sheet__marks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ghost-sheet__chat {
@@ -218,4 +218,39 @@ button.ghost-sheet__portrait:focus-visible { outline: 2px solid var(--ghost-ink3
 
 .capabilities__group[data-privileged] .capabilities__head { color: var(--ghost-amber-ink); }
 .capabilities__lock { width: 12px; height: 12px; flex: none; color: var(--ghost-amber-ink); }
+
+.permissions__quick { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.permissions__mounts { display: grid; gap: 6px; width: min(420px, 100%); min-width: 0; }
+.permissions__mount { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.permissions__mount code { flex: 1; min-width: 0; font: var(--text-caption)/1.4 var(--font-mono); color: var(--ghost-ink2); }
+.permissions__write { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: var(--text-caption); color: var(--ghost-ink2); }
+.permissions__add { display: flex; gap: 6px; min-width: 0; }
+.permissions__add input, .permissions__resources input {
+  min-width: 0; height: 30px; padding: 0 10px; border: 1px solid var(--ghost-line); border-radius: var(--radius-control);
+  color: var(--ghost-ink); background: var(--ghost-surface); font: var(--text-caption)/1 var(--font-sans);
+}
+.permissions__add input { flex: 1; }
+.permissions__resources { display: inline-flex; gap: 6px; }
+.permissions__resources input { width: 64px; }
+.permissions__add--login { flex-wrap: wrap; }
+.permissions__add--login input { min-width: 0; flex: 1 1 140px; }
+.permissions__mount > svg { flex: none; color: var(--ghost-ink2); }
+.permissions__mount > span { flex: 1; min-width: 0; font-size: var(--text-caption); color: var(--ghost-ink); }
+.permissions__mount > span code { font: var(--text-caption)/1.4 var(--font-mono); color: var(--ghost-ink2); }
+.permissions__warning { margin: 0; font-size: var(--text-caption); line-height: 1.5; color: var(--ghost-danger-ink); }
+/* 2026-11-09: owner-facing reasons sit beside the control they belong to, not at the sheet top. */
+.capabilities__side { display: grid; align-content: start; gap: 2px; min-width: 0; }
+.capabilities__note { margin: 0; padding: 0 8px 0 4px; color: var(--ghost-ink3); font-size: var(--text-micro); line-height: 1.45; }
+.capabilities__note strong { color: var(--ghost-amber-ink); font-weight: 600; }
+.capabilities__error { flex-basis: 100%; }
+.persona-note__unsaved { margin-right: auto; align-self: center; color: var(--ghost-amber-ink); font-size: var(--text-caption); }
+.persona-note__error { padding: 0 14px 10px; }
+.permissions__error { padding: 0 0 4px; }
+.permissions__resource { display: inline-grid; gap: 4px; }
+.permissions__resources input[aria-invalid] { border-color: var(--ghost-danger); }
+.permissions__invalid, .permissions__hint[data-invalid] { color: var(--ghost-danger-ink); }
+.permissions__invalid { font-size: var(--text-micro); line-height: 1.4; }
+.permissions__hint { flex-basis: 100%; margin: 0; color: var(--ghost-ink3); font-size: var(--text-micro); line-height: 1.45; }
+.permissions__add input[aria-invalid] { border-color: var(--ghost-danger); }
+.permissions__changes { margin: 0; padding-left: 1.2em; list-style: disc; display: grid; gap: 2px; }
 }

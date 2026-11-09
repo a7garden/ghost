@@ -104,7 +104,7 @@
   grid-column: 2;
   margin: 0;
   color: var(--ghost-ink3);
-  font-size: 11px;
+  font-size: var(--text-micro);
   font-style: normal;
 }
 .ghost-slash-menu .cm-completionMatchedText { text-decoration: none; font-weight: 650; }

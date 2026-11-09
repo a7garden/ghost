@@ -743,7 +743,9 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
         },
         env: async ({ conversationId }) => {
           const host = core.ledger.conversationByPiId(String(conversationId));
-          if (!host || host.kind !== "work" || !host.workId) return undefined;
+          if (!host || host.kind === "direct" || !host.workId) return undefined;
+          // A review conversation runs checks in its own read-only container over the Work's files.
+          if (host.kind === "review") return sandbox.envFor(core.ledger.work(host.workId), { review: true });
           const work = core.ledger.workByConversation(host.id);
           return work ? sandbox.envFor(work) : undefined;
         },

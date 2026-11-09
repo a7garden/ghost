@@ -38,6 +38,9 @@ export function createDirectTools(core: Core): Extension {
       criteria: Type.Optional(Type.String({ maxLength: 8192, description: "When the Work is done" })),
       ghost_id: Type.Optional(Type.String({ description: "Assignee Ghost; defaults to this Ghost" })),
       deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Deadline in minutes from now" })),
+      owner_accepts: Type.Optional(
+        Type.Boolean({ description: "true only when the owner said they want to check the result themselves; otherwise a reviewer judges it and the owner is told the outcome" }),
+      ),
     }),
     replay: "unsafe",
     async execute(args, api) {
@@ -47,7 +50,8 @@ export function createDirectTools(core: Core): Extension {
           ghostId: args.ghost_id ?? scope.ghost.id,
           title: args.title,
           brief: args.brief,
-          acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: null },
+          // 2026-11-09: a reviewer, not the owner, by default. Owner acceptance stopped every Work at its end.
+          acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: null, owner: args.owner_accepts === true },
           deadlineAt: args.deadline_minutes === undefined ? null : Date.now() + args.deadline_minutes * 60_000,
           originConversationId: scope.conversation.id,
           id: idFor(scope.conversation.id, api.callId),

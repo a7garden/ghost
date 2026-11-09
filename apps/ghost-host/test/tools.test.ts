@@ -257,7 +257,7 @@ describe("tools", () => {
     expect(work!.parentId).toBeNull();
     expect(work!.ghostId).toBe(s.ghost.id);
     expect(work!.originConversationId).toBe(s.direct.id);
-    expect(work!.acceptance).toEqual({ criteria: "A report exists", checks: [], reviewer: null });
+    expect(work!.acceptance).toEqual({ criteria: "A report exists", checks: [], reviewer: null, owner: false });
     await s.core.idle();
     const running = s.ledger.work(work!.id);
     expect(running.state).toBe("running");

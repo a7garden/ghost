@@ -28,6 +28,9 @@
 .composer-plus__item:hover:not(:disabled), .composer-plus__item:focus-visible { background: var(--ghost-surface); transform: translateX(3px); }
 .composer-plus__item:focus-visible { box-shadow: 0 0 0 2px var(--ghost-ink3), var(--shadow-overlay); }
 .composer-plus__item:disabled { opacity: .5; cursor: not-allowed; }
+.composer-plus__item[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+/* Why the composer cannot do what was just tried, or what it will do to the text. */
+.composer-hint { color: var(--ghost-ink2); font-size: var(--text-caption); }
 .composer-plus__icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: var(--ghost-ink2); background: var(--ghost-hover); }
 .composer-plus__icon svg { width: 15px; height: 15px; }
 @keyframes plus-unfold { from { opacity: 0; transform: translateY(14px) scale(.7); filter: blur(3px); } to { opacity: 1; transform: none; filter: none; } }

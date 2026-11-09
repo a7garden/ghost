@@ -15,6 +15,7 @@ import {
   Timestamp,
   GhostState,
   DeviceAlerts,
+  GhostPermissions,
   nullable,
 } from "./entities.ts";
 
@@ -91,6 +92,8 @@ export const Command = Type.Union([
     skills: Type.Optional(SkillList),
   }),
   /** Remove a retired Ghost from every list. Past Works keep it as their assignee. */
+  /** Owner only: a Ghost never changes its own or another Ghost's permissions. */
+  command("ghost.permissions_update", { ghostId: Id, permissions: GhostPermissions }),
   command("ghost.delete", { ghostId: Id }),
   command("ghost.set_default", { ghostId: Id }),
   command("sandbox.control", { ghostId: Id, action: Type.Union([Type.Literal("stop"), Type.Literal("reset")]) }),

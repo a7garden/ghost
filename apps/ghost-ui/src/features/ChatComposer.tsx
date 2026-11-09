@@ -60,13 +60,16 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const [laterAt, setLaterAt] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   const [confirmation, setConfirmation] = useState('');
+  /** Why the last chosen action could not run; shown while that reason still holds. */
+  const [blocked, setBlocked] = useState('');
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const suggestId = useId();
 
   const focus = () => inputRef.current?.focus();
+  // Criteria and deadline survive mode switches; only a successful send clears them.
   const switchMode = (next: Mode) => {
-    setMode(next); setCriteria(''); setDeadline(''); setAssignee(null);
+    setMode(next); setAssignee(null); setBlocked('');
     setLaterAt(next === 'later' ? whenPresets[0].at(new Date()).getTime() : null);
     focus();
   };
@@ -91,19 +94,23 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
         await client.send({ type: 'message.send', conversationId, text, ...(attachments.refs.length ? { attachments: attachments.refs } : {}) });
         attachments.clear();
       }
-      setDraft('');
+      setDraft(''); setCriteria(''); setDeadline('');
     } catch (reason) { onError(reason instanceof Error ? reason.message : '보내지 못했습니다.'); }
     finally { setSending(false); }
   };
 
   const hasFiles = attachments.items.length > 0;
   const handedTo = assignee && assignee.id !== ghost.id ? assignee : null;
-  const placeholder = mode === 'work' ? `${handedTo ? `${handedTo.name}에게 ` : ''}맡길 일을 적어 주세요. 첫 줄이 제목이 됩니다.` : mode === 'later' ? '나중에 보낼 메시지' : running ? '응답 중에도 덧붙일 수 있습니다' : `${ghost.name}에게 메시지`;
+  const placeholder = !conversationId ? '열린 대화가 없어 보낼 수 없습니다' : mode === 'work' ? `${handedTo ? `${handedTo.name}에게 ` : ''}맡길 일을 적어 주세요. 첫 줄이 제목이 됩니다.` : mode === 'later' ? '나중에 보낼 메시지' : running ? '응답 중에도 덧붙일 수 있습니다' : `${ghost.name}에게 메시지`;
+  // work.create and schedule.create carry text only; files ride on message.send alone.
   const actions: PlusAction[] = [
-    { id: 'files', icon: <Paperclip/>, label: '사진·파일 첨부', disabled: mode !== 'talk', onSelect: () => fileInput.current?.click() },
-    { id: 'work', icon: <BriefcaseBusiness/>, label: '일로 맡기기', disabled: hasFiles || mode === 'work', onSelect: () => switchMode('work') },
-    { id: 'later', icon: <Clock3/>, label: '나중에 보내기', disabled: hasFiles || mode === 'later', onSelect: () => switchMode('later') },
+    { id: 'files', icon: <Paperclip/>, label: '사진·파일 첨부', disabled: mode !== 'talk', reason: '맡기기·예약 메시지에는 파일을 붙일 수 없습니다 · 대화로 보내세요', onSelect: () => fileInput.current?.click() },
+    { id: 'work', icon: <BriefcaseBusiness/>, label: '일로 맡기기', disabled: hasFiles || mode === 'work', reason: hasFiles ? '파일이 붙은 메시지는 일로 맡길 수 없습니다 · 대화로 보내세요' : undefined, onSelect: () => switchMode('work') },
+    { id: 'later', icon: <Clock3/>, label: '나중에 보내기', disabled: hasFiles || mode === 'later', reason: hasFiles ? '파일이 붙은 메시지는 예약할 수 없습니다 · 바로 보내세요' : undefined, onSelect: () => switchMode('later') },
   ];
+  // The first line becomes the Work title; the host keeps 256 characters of it.
+  const titleCut = mode === 'work' && draft.split(/\n/, 1)[0].length > 256;
+  const hint = confirmation ? null : blocked && (mode !== 'talk' || hasFiles) ? blocked : titleCut ? '제목은 앞 256자만 씁니다' : null;
 
   // `/word` or `@name` as the whole draft opens suggestions until it is picked, dismissed or edited away.
   const typed = mode !== 'later' && !sending ? /^([/@])(\S*)$/.exec(draft) : null;
@@ -167,8 +174,8 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
               onChange={event => setLaterAt(event.target.value ? new Date(event.target.value).getTime() : null)}/></label>
         </div>
       </div> : undefined}
-      leading={<ComposerPlus disabled={!conversationId || sending} actions={actions}/>}
-      footer={confirmation && <span className="composer-confirmation" role="status">{confirmation}</span>}
+      leading={<ComposerPlus disabled={!conversationId || sending} actions={actions} onBlocked={setBlocked}/>}
+      footer={confirmation ? <span className="composer-confirmation" role="status">{confirmation}</span> : hint && <span className="composer-hint" role="status">{hint}</span>}
       trailing={<>
         {conversationId && mode !== 'work' && <ModelPicker conversationId={conversationId} disabled={sending || busy}/>}
         {running && <button type="button" className="chat-stop" aria-label="응답 취소" title="응답 취소" onClick={onStop}><Square aria-hidden="true"/></button>}

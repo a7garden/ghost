@@ -139,7 +139,7 @@ function blockedAddress(address: string): boolean {
  * (localhost, *.local, *.internal, *.ts.net), never a private-range literal, and never a name
  * whose DNS answer is one. Returns the normalized URL to hand to the CLI.
  */
-async function assertFetchableUrl(raw: string, what: string): Promise<URL> {
+export async function assertFetchableUrl(raw: string, what: string): Promise<URL> {
   let parsed: URL;
   try {
     parsed = new URL(raw);

@@ -312,7 +312,7 @@ export class Works {
     const conversationId = work.conversationId!;
     void this.core.lane(`work:${work.id}`, () =>
       this.core.engine.submit(conversationId, {
-        text: "You stopped without finishing. Call `complete` with the result, `delegate` part of the Work, or `ask_owner` if you are blocked.",
+        text: "You stopped without finishing. Continue with your best judgment, or `delegate` part of the Work. If you are blocked, call `complete` with what you have and what blocks you; use `ask_owner` with a default only for a choice that is truly the owner's.",
         origin: "work",
         requestId: `work:${work.id}:r${work.revision}:v${work.revisionsUsed}:nudge:${nudges + 1}`,
       }),
@@ -443,10 +443,21 @@ export class Works {
       return;
     }
     // Without checks or an explicit reviewer, a child is judged by the Ghost that delegated it;
-    // only a root Work falls through to the owner.
+    // a root Work goes to the owner only when its acceptance names the owner (absent = owner, for
+    // rows and UI-created Work from before 2026.11.09).
     const reviewer = work.acceptance.reviewer;
     if (reviewer || work.parentId) {
       await this.startReview(work, this.reviewerGhost(work));
+      return;
+    }
+    if (work.acceptance.owner === false) {
+      try {
+        await this.startReview(work, this.reviewerGhost(work));
+      } catch (error) {
+        // No model or credential for the reviewer: the owner settles it rather than leaving it in verifying.
+        if (!(error instanceof CommandError)) throw error;
+        this.ledger.tx(() => this.core.decisions.openAcceptance(work, `Automatic review could not start: ${error.message}`));
+      }
       return;
     }
     this.ledger.tx(() => this.core.decisions.openAcceptance(work, null));

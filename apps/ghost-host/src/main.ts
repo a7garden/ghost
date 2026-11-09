@@ -5,6 +5,7 @@ import { openApp, serve } from "./app.ts";
 import { backup } from "./backup.ts";
 import { loadConfig } from "./config.ts";
 import { runImport } from "./import/index.ts";
+import { runCredentialPluginCli } from "./integrations/browser-credential.ts";
 
 const USAGE = `ghost — one process for every Ghost
 
@@ -13,6 +14,8 @@ const USAGE = `ghost — one process for every Ghost
                                    copy a pre-Bun state root into an empty state root
   ghost backup <dir>               consistent ledger.db + pi.db copies and backup.json, safe while serving
   ghost doctor                     check the state root and configuration
+  ghost browser-credential --root <dir> --shade <cli>
+                                   agent-browser credential plugin (started by agent-browser, not by hand)
 
   --root <dir>                     override the state root`;
 
@@ -23,6 +26,11 @@ function option(args: string[], name: string): string | undefined {
 
 async function main(argv: string[]) {
   const [command, ...args] = argv;
+  // Started by agent-browser with its own environment; it reads only the grant file and Shade.
+  if (command === "browser-credential") {
+    process.exitCode = await runCredentialPluginCli(args);
+    return;
+  }
   const config = loadConfig(process.env, option(args, "--root"));
 
   switch (command) {

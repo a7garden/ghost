@@ -2,10 +2,14 @@ import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
 import { Type } from "typebox";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
-import { CommandError, forbidden, notFound } from "../core/errors.ts";
+import { CommandError, forbidden, invalid, notFound } from "../core/errors.ts";
 import { NoEffect } from "../core/effects.ts";
 import { idFor } from "../core/ids.ts";
 import { NotFound } from "../ledger/ledger.ts";
+
+/** 2026-11-09: a question with a default no longer holds a Work until the owner returns. */
+const DEFAULT_QUESTION_WAIT_MINUTES = 30;
+const MAX_QUESTION_WAIT_MINUTES = 24 * 60;
 
 /** What one tool call is bound to. Resolved from the ledger row of the calling conversation, never from model arguments. */
 export interface Scope {
@@ -50,6 +54,12 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   host_read: ["direct", "work"],
   host_nodes: ["direct", "work"],
   host_command_propose: ["direct", "work"],
+  browser_open: ["direct", "work"],
+  browser_snapshot: ["direct", "work"],
+  browser_text: ["direct", "work"],
+  browser_screenshot: ["direct", "work"],
+  browser_act: ["direct", "work"],
+  browser_login: ["direct", "work"],
 };
 
 /**
@@ -117,18 +127,26 @@ export function describeWorkLine(core: Core, work: Work): string {
 export function askOwnerTool(core: Core) {
   return defineTool({
     name: "ask_owner",
-    description: "Ask the owner a question; the answer arrives as a new message. Use it when a decision is theirs, not yours.",
+    description:
+      "Ask the owner a question; the answer arrives as a new message. Only for what you cannot reasonably decide: irreversible or costly choices, or a preference with no sensible default. Otherwise decide, proceed and state the assumption in your result. Give `default` whenever one answer is sensible: if the owner does not reply within `wait_minutes`, you continue with it.",
     parameters: Type.Object({
       question: Type.String({ minLength: 1, maxLength: 8192 }),
       options: Type.Optional(Type.Array(Type.String({ maxLength: 256 }), { maxItems: 8, description: "Suggested answers" })),
+      default: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: "The answer you will act on if the owner does not reply in time" })),
+      wait_minutes: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: MAX_QUESTION_WAIT_MINUTES, description: `How long to wait for a reply before using default; ${DEFAULT_QUESTION_WAIT_MINUTES} when omitted` }),
+      ),
     }),
     replay: "unsafe",
     async execute(args, api) {
       try {
         const scope = scopeOf(core, api);
-        const decision = core.decisions.ask(scope.conversation.id, firstLine(args.question), args.question, args.options ?? [], idFor(scope.conversation.id, api.callId));
+        if (args.wait_minutes !== undefined && args.default === undefined) throw invalid("wait_minutes needs a default to continue with");
+        const fallback = args.default === undefined ? undefined : { answer: args.default, waitMs: (args.wait_minutes ?? DEFAULT_QUESTION_WAIT_MINUTES) * 60_000 };
+        const decision = core.decisions.ask(scope.conversation.id, firstLine(args.question), args.question, args.options ?? [], idFor(scope.conversation.id, api.callId), fallback);
+        const wait = fallback ? ` If there is no reply in ${fallback.waitMs / 60_000} minutes, you will be told to continue with "${fallback.answer}".` : "";
         return {
-          content: [{ type: "text", text: `The owner was asked (${decision.id}). Their answer arrives as a message.` }],
+          content: [{ type: "text", text: `The owner was asked (${decision.id}). Their answer arrives as a message.${wait}` }],
         } satisfies ToolExecutionResult;
       } catch (error) {
         return errorResult(error);

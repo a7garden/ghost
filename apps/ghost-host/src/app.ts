@@ -9,6 +9,7 @@ import { createEngine, EngineStartupCleanupError } from "./engine/index.ts";
 import { createDocuments } from "./integrations/documents.ts";
 import { createMemory } from "./integrations/memory.ts";
 import { createReach } from "./integrations/reach.ts";
+import { createBrowser } from "./integrations/browser.ts";
 import { createSkills } from "./integrations/skills.ts";
 import { Ledger } from "./ledger/ledger.ts";
 import { createSandbox } from "./sandbox/index.ts";
@@ -98,7 +99,7 @@ export async function openApp(config: Config): Promise<App> {
   try {
     const ledger = (openedLedger = new Ledger(join(config.root, "ledger.db")));
     const artifacts = new FsArtifactStore(config.root);
-    const sandbox = createSandbox(config, artifacts);
+    const sandbox = createSandbox(config, artifacts, (ghostId) => ledger.ghostPermissions(ghostId));
     openedCatalog = new ProviderCatalog({ cachePath: join(config.root, "models.json") });
     const core = (openedCore = new Core({
       ledger, artifacts, sandbox, secrets: new FileSecrets(config.root), log,
@@ -108,7 +109,7 @@ export async function openApp(config: Config): Promise<App> {
     const documents = createDocuments(core);
     const skills = createSkills(config);
     const host = config.mac ? new MacHost({ roots: config.mac.roots }) : null;
-    const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config) });
+    const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config), browser: createBrowser(config, ghostCommand()) });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, log }));
     core.attach(engine);
     return {
@@ -129,6 +130,15 @@ export async function openApp(config: Config): Promise<App> {
     }
     throw error;
   }
+}
+
+/**
+ * argv that runs this Ghost CLI again, for agent-browser's credential plugin wrapper. A compiled
+ * binary is its own entry; under `bun src/main.ts` the script path follows the runtime.
+ */
+function ghostCommand(): string[] {
+  const compiled = Bun.main.startsWith("/$bunfs/") || /^[A-Z]:[\\/]~BUN[\\/]/i.test(Bun.main);
+  return compiled ? [process.execPath] : [process.execPath, Bun.main];
 }
 
 /** The owner token survives restarts so the Mac app keeps working; created once. */

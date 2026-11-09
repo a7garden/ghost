@@ -3,8 +3,11 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 
 /** Builds the Pi execution environment of a work conversation. Implemented in src/sandbox. */
 export interface SandboxEnvFactory {
-  /** Environment whose filesystem root is the Work's workspace (`/workspace` inside a container). */
-  envFor(work: Work): Promise<ExecutionEnv>;
+  /**
+   * Environment whose filesystem root is the Work's workspace (`/workspace` inside a container).
+   * `review` gives the reviewer its own container over the same files, read-only.
+   */
+  envFor(work: Work, options?: { review?: boolean }): Promise<ExecutionEnv>;
   /** Host path of the Work's workspace directory; created on demand. */
   workspacePath(work: Work): string;
   /** Copy accepted child artifacts into `inputs/<child-id>/<name>` of the workspace. Refuses tampered bytes. */
@@ -110,6 +113,14 @@ export interface ReachPort {
   catalog(): Promise<ReachChannel[]>;
 }
 
+/** Program classes the owner allowed for a Ghost's Mac commands (GhostPermissions.host). */
+export interface HostCommandPolicy {
+  /** Shells and interpreters; their arguments may then carry shell syntax. */
+  interpreters: boolean;
+  /** sudo, ssh, launchctl and similar. */
+  privileged: boolean;
+}
+
 export interface HostCommand {
   title: string;
   reason: string;
@@ -144,6 +155,31 @@ export interface HostNodes {
 }
 
 /** Owner-enabled, guarded Mac probes; callers cannot supply an arbitrary probe command. */
+/** One agent-browser answer: `--json` output's `data`, or the CLI's error text. */
+export type BrowserReply = { ok: true; data: Record<string, unknown> } | { ok: false; error: string };
+
+/**
+ * The owner's browser (`agent-browser`), one browser per Ghost over that Ghost's sign-in profile.
+ * Every call names the conversation's tab; calls for one Ghost run one after another because the
+ * daemon has a single active tab and refs belong to it.
+ */
+export interface BrowserPort {
+  /** Run one agent-browser command in the conversation's tab, creating the tab when it is missing. */
+  run(ghostId: string, tab: string, args: string[]): Promise<BrowserReply>;
+  /** Several commands in the conversation's tab within one turn of the Ghost's queue (re-resolving a target, then acting). */
+  exclusive<T>(ghostId: string, tab: string, body: (run: (args: string[]) => Promise<BrowserReply>) => Promise<T>): Promise<T>;
+  /** A fresh file path for a screenshot; the caller reads and removes it. */
+  scratchPath(extension: string): string;
+  /** Write a one-shot grant the credential plugin consumes; returns its token (the `auth login` name). */
+  grantLogin(grant: { itemId: string; origin: string }): string;
+  /** Remove a grant the plugin did not consume; a consumed one is already gone. */
+  revokeGrant(token: string): void;
+  /** Close tabs whose conversation no longer needs a browser. */
+  closeTabs(ghostId: string, keep: (tab: string) => boolean): Promise<void>;
+  /** Whether vault sign-in is configured (a Shade CLI path). */
+  readonly vault: boolean;
+}
+
 export interface HostPort {
   status(): Promise<HostStatus>;
   services(): Promise<HostServices>;
@@ -152,8 +188,9 @@ export interface HostPort {
   diskUsage(path: string): Promise<unknown>;
   list(path: string): Promise<unknown>;
   read(path: string): Promise<unknown>;
-  validateCommand(input: HostCommand): HostCommand;
-  executeCommand(input: HostCommand): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
+  /** `policy` widens the program rules to what the owner granted the Ghost; absent = the conservative rules. */
+  validateCommand(input: HostCommand, policy?: HostCommandPolicy): HostCommand;
+  executeCommand(input: HostCommand, policy?: HostCommandPolicy): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
 }
 
 /** The owner's skill folders, read-only. Implemented in src/integrations/skills.ts. */
