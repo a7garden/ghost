@@ -8,6 +8,7 @@ import { ModelPicker } from '../pets/ModelPicker';
 import { useHost } from '../host/context';
 import { ComposerPlus } from './composer/ComposerPlus';
 import { AttachmentTray, useAttachments } from './composer/attachments';
+import { blurTouchSearchOnEnter } from '../ui/adaptive';
 
 type Mode = 'talk' | 'work';
 
@@ -110,9 +111,9 @@ function RecipientToken({ ghosts, value, onChange, disabled }: { ghosts: Ghost[]
     <PopoverContent side="bottom" align="start" aria-label="받는 Ghost"
       className="grid w-60 gap-0.5 p-1.5 max-h-[min(320px,var(--radix-popover-content-available-height))]"
       onOpenAutoFocus={event => { if (searchable) { event.preventDefault(); searchRef.current?.focus(); } }}>
-      {searchable && <input ref={searchRef} type="search" className="recipient-search" aria-label="Ghost 찾기"
+      {searchable && <input ref={searchRef} type="text" enterKeyHint="search" className="recipient-search" aria-label="Ghost 찾기"
         placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
-        onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
+        onKeyDown={event => { blurTouchSearchOnEnter(event); if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
       {shown.map(ghost => <button key={ghost.id} type="button" aria-pressed={ghost.id === value.id}
         className="menu-row" onClick={() => { onChange(ghost.id); setOpen(false); }}>
         <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={20}/><span className="min-w-0 flex-1 truncate">{ghost.name}</span>

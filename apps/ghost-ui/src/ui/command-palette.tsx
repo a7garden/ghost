@@ -140,6 +140,7 @@ export function CommandPalette({
     } else if (event.key === "Enter") {
       const item = activeEnabledIndex >= 0 ? filteredItems[activeEnabledIndex] : undefined
       if (event.target === inputRef.current && item) {
+        if (matchMedia("(pointer: coarse)").matches) inputRef.current?.blur()
         event.preventDefault()
         run(item)
       }
@@ -176,6 +177,8 @@ export function CommandPalette({
           <Search aria-hidden="true" className="ghost-command-palette__search-icon" />
           <input
             ref={inputRef}
+            type="text"
+            enterKeyHint="search"
             className="ghost-command-palette__input"
             role="combobox"
             aria-label={strings.searchPlaceholder}

@@ -1,3 +1,4 @@
+import { shell, shellCall } from './shell';
 import type {
   ApiError,
   ArtifactRef,
@@ -76,6 +77,7 @@ export class HostClient {
       throw new HostError('network', 'Ghost 호스트에 연결할 수 없습니다.');
     }
     const body = (await response.json().catch(() => null)) as { error?: ApiError } | null;
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok) throw new HostError(body?.error?.code ?? 'internal', body?.error?.message ?? `요청이 실패했습니다 (${response.status}).`);
     return body as T;
   }
@@ -194,6 +196,7 @@ export class HostClient {
   /** Artifact bytes as an object URL; callers may type an image/PDF for its native decoder. Revoke when done. */
   async artifactUrl(digest: string, mediaType?: string): Promise<string> {
     const response = await fetch(`/api/artifacts/${digest}`, { headers: this.headers() });
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok) throw new HostError('not_found', '파일을 불러올 수 없습니다.');
     const blob = await response.blob();
     return URL.createObjectURL(mediaType ? blob.slice(0, blob.size, mediaType) : blob);
@@ -201,6 +204,7 @@ export class HostClient {
 
   async artifactText(digest: string): Promise<string> {
     const response = await fetch(`/api/artifacts/${digest}`, { headers: this.headers() });
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok) throw new HostError('not_found', '파일을 불러올 수 없습니다.');
     return response.text();
   }
@@ -213,6 +217,7 @@ export class HostClient {
     const query = new URLSearchParams({ after: String(after) });
     for (const id of conversations) query.append('conversation', id);
     const response = await fetch(`/api/events?${query}`, { headers: this.headers({ Accept: 'text/event-stream' }), signal });
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok || !response.body) throw new HostError('network', '이벤트 스트림에 연결할 수 없습니다.');
     const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = '';

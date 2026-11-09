@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- iPhone은 같은 웹 UI를 연다. 56rem 아래에서는 하단의 홈·받은 일·맡긴 일·작업실·설정으로
+  이동하고, 대화와 상세 화면은 본문에 자리를 내준다. 터치 메뉴·적응형 시트·키보드 높이에
+  맞는 작성창을 공유 컴포넌트에서 제공한다. 데스크톱 레이아웃은 유지한다.
+- iOS 셸은 알림 진입·복귀·테마·연결 해제를 웹 UI와 연결한다. 기기 설정은 이 기기의
+  알림 권한과 종류별·Ghost별 알림을 관리하며, 빠른 설정 변경도 순서대로 저장한다.
+- 좁은 화면의 제목·뒤로 가기는 상단에 모으고, 메시지 메뉴는 복사 옆으로 옮겨 본문 너비를
+  유지한다. 기기 알림 카드와 Ghost 목록은 같은 여백과 왼쪽 정렬로 다듬었다. 맡긴 일은
+  상태 선택과 일 맡기기를 한 줄에 놓고, 필터는 작은 알약 모양에 넉넉한 터치 영역을 둔다.
+- 좁은 Mac 앱 창은 기존 제목 표시줄·창 끌기·전체 메뉴를 유지한다. 검색의 Enter는 터치에서만
+  키보드를 닫고, 시트 손잡이는 키보드 초점을 차지하지 않는다.
 - 금고 (설정 → 금고): the owner's vault item list — kind, origin, username, card
   ••••last4/expiry, per-Ghost grants and one-time expiry — with add/edit/delete.
   Secret fields stay write-only: an empty field keeps the stored value, stored secrets

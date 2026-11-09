@@ -3,54 +3,49 @@ import UIKit
 
 // APNs alert delivery for the durable notification outbox. Registration is
 // idempotent: the token is re-uploaded whenever it changes, and delivery
-// state (transport_accepted / client_seen) stays in the Host ledger.
+// state stays in the Host ledger. A tap becomes a page event; the web UI routes it.
 @MainActor final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate {
     private weak var model: GhostModel?
+    /// Taps that arrived before the model attached (a tap that cold-started the app).
+    private var earlyTaps: [String] = []
 
     func activate(model: GhostModel) {
         self.model = model
         UNUserNotificationCenter.current().delegate = self
+        for id in earlyTaps { model.enqueue(.notificationOpen(id)) }
+        earlyTaps = []
     }
 
-    func requestAuthorizationAndRegister(model: GhostModel) {
-        activate(model: model)
-        model.pushStatus = nil
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
-            Task { @MainActor in
-                switch settings.authorizationStatus {
-                case .notDetermined:
-                    model.pushStatus = "알림 권한을 요청합니다."
-                    let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-                    model.pushStatus = granted ? nil : "알림이 꺼져 있어 완료 알림을 받지 못합니다."
-                case .denied:
-                    model.pushStatus = "알림이 꺼져 있어 완료 알림을 받지 못합니다."
-                default:
-                    model.pushStatus = nil
-                }
-                guard settings.authorizationStatus != .denied else { return }
-                UIApplication.shared.registerForRemoteNotifications()
-            }
+    /// Permission as the page sees it: `allowed`, `denied` or `undetermined`.
+    func status() async -> String {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined: return "undetermined"
+        case .denied: return "denied"
+        default: return "allowed"
         }
+    }
+
+    /// Asks iOS once when undetermined, then registers for remote alerts when allowed.
+    func requestAndRegister() async -> String {
+        let center = UNUserNotificationCenter.current()
+        if await status() == "undetermined" {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+        }
+        let current = await status()
+        if current == "allowed" { UIApplication.shared.registerForRemoteNotifications() }
+        return current
     }
 
     func handleDeviceToken(_ token: Data) {
         guard let model else { return }
         let tokenText = token.map { String(format: "%02x", $0) }.joined()
-        model.pushStatus = "알림 토큰을 등록하는 중…"
-        Task {
-            await model.registerPushToken(tokenText, environment: PushEnvironment.current)
-            if model.pushStatus == "알림 토큰을 등록하는 중…" { model.pushStatus = nil }
-        }
+        Task { await model.registerPushToken(tokenText, environment: PushEnvironment.current) }
     }
 
     func handleRegistrationFailure(_ error: Error) {
-        guard let model else { return }
-        #if targetEnvironment(simulator)
-        model.pushStatus = "시뮬레이터는 원격 알림을 등록하지 못합니다. 실기기에서 확인해 주세요."
-        #else
-        model.pushStatus = "원격 알림 등록이 실패했습니다: \(error.localizedDescription)"
-        #endif
+        // Without the push entitlement (personal signing team) iOS refuses a token;
+        // the page reads permission separately and nothing else depends on it.
     }
 
     nonisolated func userNotificationCenter(
@@ -68,9 +63,11 @@ import UIKit
     ) {
         let identifier = response.notification.request.content.userInfo["notification_id"] as? String ?? ""
         completionHandler()
+        guard !identifier.isEmpty else { return }
         let coordinator = self
         Task { @MainActor in
-            await coordinator.model?.openNotification(notificationID: identifier)
+            if let model = coordinator.model { model.enqueue(.notificationOpen(identifier)) }
+            else { coordinator.earlyTaps.append(identifier) }
         }
     }
 }

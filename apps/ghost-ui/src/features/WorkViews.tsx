@@ -9,6 +9,7 @@ import { uiTerms } from '../uiText';
 import { ghostPresence, visibleGhosts } from './ghostState';
 import { useNow } from './time';
 import { useHost } from '../host/context';
+import { useCompact } from '../ui/adaptive';
 
 type WorkTab = 'active' | 'finished';
 
@@ -20,6 +21,7 @@ export function WorkView({ state, navigate, filterGhostId }: {
   filterGhostId: string | null;
 }) {
   const { client } = useHost();
+  const compact = useCompact();
   const now = useNow();
   const [tab, setTab] = useState<WorkTab>('active');
   const [error, setError] = useState('');
@@ -44,11 +46,13 @@ export function WorkView({ state, navigate, filterGhostId }: {
       branch={children.length > 0 ? children.map(lane) : undefined}/>;
   };
   const ghosts = visibleGhosts(state.ghosts);
-  return <Page className="grid content-start gap-6">
-    <PageHeader title={uiTerms.work} className="mb-2" actions={<Button onClick={() => setCreating(true)} disabled={!state.ghosts.length}><Plus/>일 맡기기</Button>}/>
+  const createAction = <Button onClick={() => setCreating(true)} disabled={!state.ghosts.length}><Plus/>일 맡기기</Button>;
+  return <Page className="work-board grid content-start gap-6">
+    {!compact && <PageHeader title={uiTerms.work} className="work-board__header mb-2" actions={createAction}/>}
     <div className="board-bar">
       <SegmentedControl aria-label="맡긴 일 상태" value={tab} onValueChange={setTab}
         options={[{ value: 'active', label: '진행 중', count: counts.active }, { value: 'finished', label: '끝난 일', count: counts.finished }]}/>
+      {compact && createAction}
       {/* A small team shows presence chips; past six Ghosts the row becomes a select. */}
       {ghosts.length > 6
         ? <SelectField label="담당 Ghost" value={filterGhostId ?? ''} disabled={!ghosts.length}

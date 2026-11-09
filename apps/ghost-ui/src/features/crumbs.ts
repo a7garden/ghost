@@ -32,6 +32,8 @@ export function crumbsFor(route: string, state: State | null): Crumb[] {
   switch (section) {
     case '':
       return [{ label: routeLabels.home, path: null }];
+    case 'workspace':
+      return [{ label: '작업실', path: null }];
     case 'inbox':
       return [{ label: uiTerms.inbox, path: null }];
     case 'work': {

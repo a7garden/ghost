@@ -1,7 +1,6 @@
 import { SecureFormRequest, validate } from "@ghost/contract";
-import type { Access } from "../core/access.ts";
 import type { Core } from "../core/core.ts";
-import { CommandError, conflict, forbidden, invalid, notFound } from "../core/errors.ts";
+import { CommandError, conflict, invalid, notFound } from "../core/errors.ts";
 import { Vault, type VaultInput } from "../stores/vault.ts";
 
 const MAX_BODY = 8 * 1024 * 1024;
@@ -39,11 +38,10 @@ function routeId(raw: string): string {
   return id;
 }
 
-/** Called only after server authentication; every route independently requires the owner. */
-export async function serveVault(request: Request, url: URL, access: Access, core: Core, vault: Vault | null): Promise<Response> {
+/** Called only after server authentication; every authenticated principal may use the vault. */
+export async function serveVault(request: Request, url: URL, core: Core, vault: Vault | null): Promise<Response> {
   const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "cache-control": "no-store" } });
   try {
-    if (!access.isOwner) throw forbidden("vault access requires the owner");
     if (!vault) throw new CommandError("unavailable", "vault is not available");
     const path = url.pathname;
     if (path === "/api/vault/items") {

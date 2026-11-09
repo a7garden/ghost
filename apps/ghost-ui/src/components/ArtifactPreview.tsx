@@ -7,12 +7,14 @@ import { Peek } from './agent/Peek';
 import { Button, Dialog, DialogTitle, SegmentedControl } from '../ui';
 import { CopyButton, MessageBody } from './MessageBody';
 import './ArtifactPreview.css';
+import { SheetHandle, useCompact } from '../ui/adaptive';
 
 export const sizeLabel = (size: number) => size < 1024 ? `${size} B` : size < 1048576 ? `${Math.round(size / 1024)} KB` : `${(size / 1048576).toFixed(1)} MB`;
 
 /** The sheet owns its request and object URL, including a request finishing after dismissal. */
 function FileSheet({ artifact, onClose, returnFocus }: { artifact: ArtifactRef; onClose(): void; returnFocus(): void }) {
   const { client } = useHost();
+  const compact = useCompact();
   const [content, setContent] = useState<{ url: string; text?: string } | null>(null);
   const [error, setError] = useState('');
   const markdown = /(?:markdown)/i.test(artifact.mediaType) || /\.(md|markdown)$/i.test(artifact.name);
@@ -57,6 +59,7 @@ function FileSheet({ artifact, onClose, returnFocus }: { artifact: ArtifactRef; 
           event.preventDefault();
           (event.currentTarget as HTMLElement).querySelector<HTMLElement>('[data-file-close]')?.focus();
         }}>
+        {compact && <SheetHandle/>}
         <header className="file-sheet__bar">
           <div className="file-sheet__identity">
             {image ? <FileImage size={18} aria-hidden="true"/> : markdown ? <FileText size={18} aria-hidden="true"/> : <FileCode2 size={18} aria-hidden="true"/>}
@@ -86,7 +89,7 @@ function FileSheet({ artifact, onClose, returnFocus }: { artifact: ArtifactRef; 
             : pdf ? <iframe className="file-sheet__pdf" src={content.url} title={artifact.name}/>
             : <div className="file-sheet__unsupported"><FileIcon size={32} aria-hidden="true"/><p>이 파일은 저장해서 열어 주세요.</p><Button asChild variant="secondary"><a href={content.url} download={artifact.name}><Download aria-hidden="true"/>파일 저장</a></Button></div>}
         </div>
-        <footer className="file-sheet__foot"><span>{artifact.mediaType}</span><span>{sizeLabel(artifact.size)}{source !== undefined && ` · ${lines.toLocaleString()}줄`}</span></footer>
+        <footer className="file-sheet__foot"><span>{artifact.mediaType}</span>{compact && <CopyButton label="파일 해시 복사" getText={() => artifact.digest}/>}<span>{sizeLabel(artifact.size)}{source !== undefined && ` · ${lines.toLocaleString()}줄`}</span></footer>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   </Dialog>;

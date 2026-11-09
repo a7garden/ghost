@@ -7,6 +7,7 @@ import { useSidebarPreferences } from '../features/sidebarPreferences';
 import { PresenceAvatar } from './agent';
 import { routeLabels, uiTerms } from '../uiText';
 import type { HostStatus } from '../features/hostStatus';
+import { blurTouchSearchOnEnter } from '../ui/adaptive';
 
 /** An expanded pool grows its own filter once the rows alone pass this. */
 const SEARCH_LIMIT = 8;
@@ -117,9 +118,9 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
               {expanded ? <ChevronUp size={13} aria-hidden="true"/> : <ChevronDown size={13} aria-hidden="true"/>}
               {!expanded && pool.length > 0 && <span className="tabular">{pool.length}</span>}
             </button>}>
-            {expanded && pool.length > SEARCH_LIMIT && <input type="search" className="sidebar-search" aria-label="Ghost 찾기"
+            {expanded && pool.length > SEARCH_LIMIT && <input type="text" enterKeyHint="search" className="sidebar-search" aria-label="Ghost 찾기"
               placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
-              onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
+              onKeyDown={event => { blurTouchSearchOnEnter(event); if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
             {filteredPool.map(ghost => row(ghost, true))}
           </NavigationGroup>}
           <NavigationGroup label="프로젝트"

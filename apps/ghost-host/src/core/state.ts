@@ -5,13 +5,12 @@ import type { Core } from "./core.ts";
 
 export const HOST_VERSION = "2.0.0";
 
-/** The snapshot a client starts from; filtered by what the principal may see. */
+/** The snapshot every authenticated principal starts from; a device sees exactly what the owner sees. */
 export function snapshot(core: Core, access: Access): State {
   const { ledger } = core;
   const seq = ledger.seq();
   const engine = core.engine.status();
   const ghosts = ledger.ghosts();
-  const settings = settingsView(core);
   return {
     seq,
     principal: access.principal,
@@ -21,15 +20,15 @@ export function snapshot(core: Core, access: Access): State {
     works: ledger.worksForState(),
     decisions: ledger.decisionsForState(),
     notifications: ledger.notificationsForState(),
-    schedules: access.isOwner ? ledger.schedules() : [],
-    spaces: access.isOwner ? ledger.spaces() : [],
+    schedules: ledger.schedules(),
+    spaces: ledger.spaces(),
     avatars: ledger.avatars(),
-    settings: access.isOwner ? settings : { defaultModel: settings.defaultModel, reviewModel: null, providers: [] },
-    devices: access.isOwner ? ledger.devices() : ledger.devices().filter((device) => access.principal.kind === "device" && device.id === access.principal.deviceId),
-    sandboxes: access.isOwner ? ghosts.map((ghost) => core.sandbox.status(ghost.id)) : [],
-    activities: access.isOwner ? ledger.activities() : [],
-    activityRuns: access.isOwner ? ledger.activityRuns() : [],
-    connections: access.isOwner ? ledger.connections().map((connection) => ({ ...connection, hasCredential: core.activitySources?.credentialPresent(connection.id) ?? false })) : [],
+    settings: settingsView(core),
+    devices: ledger.devices(),
+    sandboxes: ghosts.map((ghost) => core.sandbox.status(ghost.id)),
+    activities: ledger.activities(),
+    activityRuns: ledger.activityRuns(),
+    connections: ledger.connections().map((connection) => ({ ...connection, hasCredential: core.activitySources?.credentialPresent(connection.id) ?? false })),
   };
 }
 

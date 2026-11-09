@@ -78,7 +78,7 @@ const error = (code: ErrorCode, message: string, status: number, headers: Record
 
 /**
  * Ledger event payloads as the ledger's row mappers build them. The typebox union's static
- * shape degrades behind its computed keys, so visibility filtering views them through this mirror.
+ * shape degrades behind its computed keys, so stream logic views them through this mirror.
  */
 type EventPayload =
   | { type: "ghost"; ghost: Ghost }
@@ -92,44 +92,6 @@ type EventPayload =
   | { type: "avatar" | "avatar.removed" }
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
-
-/**
- * Which ledger events reach which principal over SSE. Mirrors `snapshot`'s filters:
- * owner-only entity types never go to devices; shared entities reach every principal.
- */
-function eventVisible(access: Access, event: LedgerEvent): boolean {
-  const data = event.data as EventPayload;
-  switch (data.type) {
-    case "ghost":
-    case "conversation":
-    case "conversation.removed":
-    case "work":
-    case "decision":
-    case "effect":
-    case "notification":
-      return true;
-    case "schedule":
-    case "schedule.removed":
-    case "space":
-    case "space.removed":
-    case "settings":
-    case "sandbox":
-    case "activity":
-    case "activity_run":
-    case "connection":
-    case "connection.removed":
-      return access.isOwner;
-    case "avatar":
-    case "avatar.removed":
-      return true;
-    case "device":
-      return access.isOwner || (access.principal.kind === "device" && data.device.id === access.principal.deviceId);
-    case "device.removed":
-      return access.isOwner;
-  }
-  const exhaustive: never = data;
-  return exhaustive;
-}
 
 export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; vault?: Vault | null }): { port: number; stop(): Promise<void> } {
   const { core, config, ownerToken, documents, skills, vault = null } = deps;
@@ -238,8 +200,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     return json({ conversation, ...page } satisfies ConversationPage);
   }
 
-  async function uploadArtifact(request: Request, access: Access): Promise<Response> {
-    if (!access.isOwner) return error("forbidden", "artifact upload needs the owner", 403);
+  async function uploadArtifact(request: Request): Promise<Response> {
     let name: string;
     try {
       name = decodeURIComponent(request.headers.get("x-ghost-file-name") ?? "");
@@ -282,12 +243,9 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     }
   }
 
-  async function serveArtifact(digest: string, access: Access): Promise<Response> {
+  async function serveArtifact(digest: string): Promise<Response> {
     if (!DIGEST.test(digest)) throw notFound(`artifact ${digest}`);
     const rows = core.ledger.artifactsForDigest(digest);
-    const visibleWork = rows.some((row) => row.workId !== null);
-    const avatarImage = core.ledger.avatars().some((avatar) => avatar.imageDigest === digest);
-    if (!access.isOwner && !visibleWork && !avatarImage) throw notFound(`artifact ${digest}`);
     if (!core.artifacts.has(digest)) throw notFound(`artifact ${digest}`);
     const bytes = await core.artifacts.read(digest);
     // Store reads allocate fresh ArrayBuffer-backed bytes, which is what Bun's body union accepts.
@@ -357,7 +315,6 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         unwatch.push(
           core.ledger.subscribe((event) => {
             if (event.seq <= cursor) return;
-            if (!eventVisible(access, event)) return;
             if (!replayed) {
               buffered.push(event);
               return;
@@ -378,7 +335,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
           sendFrame({ event: "reset", data: { seq: cursor } });
         } else {
           for (const event of history) {
-            if (eventVisible(access, event)) sendFrame({ event: "ledger", data: event });
+            sendFrame({ event: "ledger", data: event });
             cursor = event.seq;
           }
           for (const event of buffered) {
@@ -469,7 +426,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
 
     const access = authenticate(request);
     if (access === null) return error("forbidden", "missing or invalid bearer token", 401);
-    if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) return serveVault(request, url, access, core, vault);
+    if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) return serveVault(request, url, core, vault);
 
     if (pathname === "/api/state" && request.method === "GET") {
       try {
@@ -479,12 +436,11 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
     if (pathname === "/api/commands" && request.method === "POST") return serveCommand(request, access);
-    if (pathname === "/api/artifacts" && request.method === "POST") return uploadArtifact(request, access);
+    if (pathname === "/api/artifacts" && request.method === "POST") return uploadArtifact(request);
     if (pathname === "/api/events" && request.method === "GET") return serveEvents(request, url, access);
 
     if (pathname === "/api/providers/catalog" && request.method === "GET") {
       try {
-        if (!access.isOwner) throw new CommandError("forbidden", "provider catalog needs the owner");
         return json(core.catalog.presets);
       } catch (caught) {
         return failure(caught);
@@ -493,7 +449,6 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
 
     if (pathname === "/api/skills" && request.method === "GET") {
       try {
-        if (!access.isOwner) throw new CommandError("forbidden", "skills need the owner");
         if (!skills) throw new CommandError("unavailable", "skill folders are not configured");
         return json({ skills: skills.catalog() } satisfies SkillCatalog);
       } catch (caught) {
@@ -504,7 +459,6 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     const providerOAuth = /^\/api\/providers\/([a-z0-9][a-z0-9_-]{0,63})\/oauth$/.exec(pathname);
     if (providerOAuth !== null) {
       try {
-        if (!access.isOwner) throw new CommandError("forbidden", "provider login needs the owner");
         const id = providerOAuth[1]!;
         if (request.method === "POST") return json(oauth.start(id));
         if (request.method === "GET") return json(oauth.status(id));
@@ -534,7 +488,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     const artifact = /^\/api\/artifacts\/([^/]+)$/.exec(pathname);
     if (artifact !== null && request.method === "GET") {
       try {
-        return await serveArtifact(decodeURIComponent(artifact[1]!), access);
+        return await serveArtifact(decodeURIComponent(artifact[1]!));
       } catch (caught) {
         return failure(caught);
       }
@@ -542,7 +496,6 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     const pages = /^\/api\/spaces\/([^/]+)\/pages(?:\/([^/]+))?$/.exec(pathname);
     if (pages !== null && request.method === "GET") {
       try {
-        if (!access.isOwner) throw new CommandError("forbidden", "documents need the owner");
         if (!documents) throw new CommandError("unavailable", "document spaces are not available");
         const spaceId = decodeURIComponent(pages[1]!);
         core.ledger.space(spaceId);

@@ -18,6 +18,7 @@ import { ghostPresence } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { useHost } from '../host/context';
+import { useTouch } from '../ui/adaptive';
 
 /**
  * The owner's conversation with one Ghost. Each Ghost keeps one durable conversation;
@@ -34,6 +35,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
   navigate(path: string): void;
 }) {
   const { client } = useHost();
+  const touch = useTouch();
   const now = useNow();
   const conversations = state.conversations
     .filter(conversation => conversation.ghostId === ghost.id && conversation.kind === 'direct')
@@ -42,7 +44,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
   const [draft, setDraft] = useState('');
   const [followKey, setFollowKey] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { inputRef.current?.focus(); }, [conversationId]);
+  useEffect(() => { if (!touch) inputRef.current?.focus(); }, [conversationId, touch]);
 
   const run = async (fn: () => Promise<unknown>) => { setError(''); try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다.'); } };
   const stop = () => { if (conversationId) void run(() => client.send({ type: 'message.cancel', conversationId })); };
@@ -101,7 +103,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate }: 
       </>}
       footer={<>
         {error && <div className="chat-error" role="alert"><CircleAlert size={15} aria-hidden="true"/><span>{error}</span><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label="오류 메시지 닫기" onClick={() => setError('')}><X size={14}/></Button></div>}
-        <p id="composer-keyboard-help" className="sr-only m-0">Enter로 보내기 · Shift + Enter로 줄바꿈{busy ? ' · 추가 지시는 진행 중인 응답에 전달됩니다.' : ''}</p>
+        <p id="composer-keyboard-help" className="sr-only m-0">{touch ? '보내기 버튼으로 전송 · Return으로 줄바꿈' : 'Enter로 보내기 · Shift + Enter로 줄바꿈'}{busy ? ' · 추가 지시는 진행 중인 응답에 전달됩니다.' : ''}</p>
       </>}>
       {!hasContent && !loading && <div className="chat-empty">
         <h2>{ghost.name}</h2>

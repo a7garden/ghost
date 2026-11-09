@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
-import { Cpu, Palette, type LucideIcon } from 'lucide-react';
+import { ChevronRight, Cpu, Palette, type LucideIcon } from 'lucide-react';
 import { SettingsLayout, InlineError, Switch } from '../ui'
 import type { Preferences } from './preferences';
 import { ModelSettings } from './ModelSettings';
+import { useCompact } from '../ui/adaptive';
 
 export interface SettingsSection { id: string; label: string; icon: LucideIcon; content: ReactNode }
 
@@ -20,13 +21,19 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
   sections: SettingsSection[];
 }) {
   const params = new URLSearchParams(route.split('?')[1]);
+  const compact = useCompact();
   const items = [...sections.slice(0, 1), { id: 'models', label: '모델', icon: Cpu }, ...sections.slice(1), { id: 'appearance', label: '화면', icon: Palette }];
   const requested = params.get('tab');
   const tab = items.some(item => item.id === requested) ? requested! : items[0].id;
   const ghost = params.get('ghost');
   const changeTab = (next: string) => navigate(`/settings?tab=${next}${ghost && next === 'team' ? `&ghost=${encodeURIComponent(ghost)}` : ''}`);
   const shellSection = sections.find(section => section.id === tab);
-  return <SettingsLayout title="설정" strings={{ navigationLabel: '설정 항목', contentLabel: '설정 내용' }}
+  if (compact && !requested) return <section className="compact-settings-list" aria-label="설정 항목">
+    {items.map(item => <button type="button" key={item.id} onClick={() => changeTab(item.id)}>
+      <item.icon size={20} aria-hidden="true"/><span>{item.label}</span><ChevronRight size={16} aria-hidden="true"/>
+    </button>)}
+  </section>;
+  return <SettingsLayout title="설정" compactDetail={compact} strings={{ navigationLabel: '설정 항목', contentLabel: '설정 내용' }}
     sections={items.map(item => ({ id: item.id, label: item.label, icon: <item.icon aria-hidden="true"/> }))}
     activeSection={tab} onSectionChange={changeTab}>
     {shellSection?.content}

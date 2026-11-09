@@ -37,7 +37,7 @@ export const Runtime = Type.Object({
 });
 export type Runtime = Static<typeof Runtime>;
 
-/** Owner-only /api/providers/:id/oauth; tokens never cross this boundary. */
+/** /api/providers/:id/oauth for the owner or a paired device; tokens never cross this boundary. */
 export const OAuthStatus = Type.Object({
   state: Type.Union([Type.Literal("pending"), Type.Literal("done"), Type.Literal("failed"), Type.Literal("cancelled")]),
   userCode: nullable(Type.String()),
@@ -47,7 +47,7 @@ export const OAuthStatus = Type.Object({
 });
 export type OAuthStatus = Static<typeof OAuthStatus>;
 
-/** GET /api/state. Devices see every Ghost; owner-only collections are empty for devices. */
+/** GET /api/state. Every authenticated principal receives the same snapshot except its own principal field. */
 export const State = Type.Object({
   /** Apply events with a greater seq on top of this snapshot. */
   seq: Type.Integer({ minimum: 0 }),
@@ -113,17 +113,17 @@ export type PairingClaim = Static<typeof PairingClaim>;
 export const PairingResult = Type.Object({ deviceId: Id, token: Type.String() });
 export type PairingResult = Static<typeof PairingResult>;
 
-/** GET /api/providers/catalog (owner only). Cached provider presets and model metadata; public API catalogs are not account-verified. */
+/** GET /api/providers/catalog. Cached provider presets and model metadata; public API catalogs are not account-verified. */
 export const ProviderCatalog = Type.Array(ProviderPreset, { maxItems: 64 });
 export type ProviderCatalog = Static<typeof ProviderCatalog>;
 
-/** GET /api/skills (owner only). Skills under the configured skill roots that a Ghost may be given. */
+/** GET /api/skills. Skills under the configured skill roots that a Ghost may be given. */
 export const SkillCatalog = Type.Object({
   skills: Type.Array(Type.Object({ name: SkillName, description: Type.String({ maxLength: 2048 }) }), { maxItems: 512 }),
 });
 export type SkillCatalog = Static<typeof SkillCatalog>;
 
-/** GET /api/spaces/:id/pages?query= (owner only) */
+/** GET /api/spaces/:id/pages?query= */
 export const PageSummary = Type.Object({
   pageId: Type.String(),
   locator: Type.String(),
@@ -133,7 +133,7 @@ export const PageSummary = Type.Object({
 });
 export type PageSummary = Static<typeof PageSummary>;
 
-/** GET /api/spaces/:id/pages/:pageId (owner only) */
+/** GET /api/spaces/:id/pages/:pageId */
 export const PageView = Type.Object({
   pageId: Type.String(),
   locator: Type.String(),

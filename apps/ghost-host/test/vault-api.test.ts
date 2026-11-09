@@ -6,8 +6,6 @@ import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { VaultItem, parse } from "@ghost/contract";
 import type { Config } from "../src/config.ts";
 import { startServer } from "../src/api/server.ts";
-import { Access } from "../src/core/access.ts";
-import { serveVault } from "../src/api/vault.ts";
 import { digestOf, idFor } from "../src/core/ids.ts";
 import { hashSecret } from "../src/core/commands.ts";
 import { createVault } from "../src/stores/vault.ts";
@@ -59,9 +57,6 @@ test("owner routes accept write-only values, return only validated metadata, and
     const response = await h.request("/api/vault/items", "POST", input); expect(response.status).toBe(400); assertNoValues(await response.text());
   }
   const malformed = await h.request(`/api/vault/items/${item.id}`, "PATCH", { password: null }); expect(malformed.status).toBe(400); assertNoValues(await malformed.text());
-  // Exercise owner-only authorization with a device principal directly; token authentication is shared by all routes.
-  const denied = await serveVault(new Request("http://localhost/api/vault/items"), new URL("http://localhost/api/vault/items"), new Access({ kind: "device", deviceId: "device-vault-test", name: "Phone" }), h.core, h.vault);
-  expect(denied.status).toBe(403);
   expect((await h.request("/api/vault/items", "GET", undefined, "wrong-token")).status).toBe(401);
   expect((await h.request(`/api/vault/items/${item.id}`, "DELETE")).status).toBe(200);
   expect(() => h.vault.itemFor(h.ghost.id, item.id)).toThrow("not found");
@@ -132,7 +127,7 @@ test("a crash after secure vault commit can resume without duplicating the saved
   const item = parse(VaultItem, await response.json()); expect(item.id).toBe(first.id); expect(h.vault.list().length).toBe(1); expect(h.ledger.decision(decisionId).state).toBe("answered");
 });
 
-test("a paired device cannot answer a secure form outside the vault route, and leaves no receipt", async () => {
+test("a paired device answers a secure form only through the vault route; ordinary answers stay refused", async () => {
   const h = fixture();
   await h.tool("vault_request", { kind: "secret", reason: "Need token" }, "device-form");
   const secureId = idFor(h.conversation.id, "device-form");
@@ -145,6 +140,8 @@ test("a paired device cannot answer a secure form outside the vault route, and l
   expect(h.ledger.request(requestId)).toBeNull();
   expect(h.ledger.decision(secureId).state).toBe("pending");
   const vaultRoute = await h.request(`/api/vault/requests/${secureId}`, "POST", { save: true, kind: "secret", title: "Token", value: VALUE }, "device-token");
-  expect(vaultRoute.status).toBe(403);
-  expect(h.vault.list()).toEqual([]);
+  expect(vaultRoute.status).toBe(201);
+  const item = parse(VaultItem, await vaultRoute.json());
+  assertNoValues(JSON.stringify(item));
+  expect(h.ledger.decision(secureId).state).toBe("answered");
 });

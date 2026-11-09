@@ -11,6 +11,7 @@ import { toneFor } from './ghostState';
 import { usableProviders } from '../pets/ModelPicker';
 import { uiTerms } from '../uiText';
 import './ghost-settings.css';
+import { blurTouchSearchOnEnter } from '../ui/adaptive';
 
 export const toolLabels: Record<GhostTool, string> = {
   work_create: '일 만들기', work_list: '일 목록', work_inspect: '일 자세히', work_update: '일 고치기', work_cancel: '일 취소',
@@ -75,7 +76,7 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId }: {
     <div className="roster-picker">
       {(ghosts.length >= 8 || query) && <label className="roster-search">
         <Search aria-hidden="true"/>
-        <input aria-label="설정할 Ghost 찾기" placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}/>
+        <input type="text" enterKeyHint="search" aria-label="설정할 Ghost 찾기" placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={blurTouchSearchOnEnter}/>
         {query && <button type="button" aria-label="Ghost 검색 지우기" onClick={() => setQuery('')}><X aria-hidden="true"/></button>}
       </label>}
       <div className="roster" aria-label="설정할 Ghost">
@@ -276,7 +277,7 @@ export function SkillsPanel({ catalog, skills, onChange }: {
   return <Panel title="스킬"><SkillBoard catalog={catalog.skills} skills={skills} onChange={onChange}/></Panel>;
 }
 
-/** Skills as toggle pills; the description rides on hover only, and skills gone from the catalog stay removable. */
+/** Skills as toggle pills; touch keeps the description in the pill rather than behind hover. */
 export function SkillBoard({ catalog, skills, onChange }: {
   catalog: readonly { name: string; description: string }[];
   skills: readonly string[];
@@ -288,7 +289,7 @@ export function SkillBoard({ catalog, skills, onChange }: {
     {catalog.map(skill => {
       const on = skills.includes(skill.name);
       return <button key={skill.name} type="button" className="skill" aria-pressed={on} disabled={!on && skills.length >= 16}
-        title={skill.description || undefined} onClick={() => toggle(skill.name, !on)}>{skill.name}</button>;
+        title={skill.description || undefined} onClick={() => toggle(skill.name, !on)}>{skill.name}{skill.description && <span className="skill__description">{skill.description}</span>}</button>;
     })}
     {[...skills].filter(name => !known.has(name)).map(name => <button key={name} type="button" className="skill" data-unavailable
       aria-pressed title="카탈로그에 없는 스킬" onClick={() => toggle(name, false)}>{name}</button>)}
@@ -378,7 +379,7 @@ function ModelChoice({ value, onChange, add = false, inherit = true, excluded = 
     </PopoverTrigger>
     <PopoverContent align="start" className="model-menu w-[min(380px,calc(100vw-32px))] p-1.5" aria-label={label ?? '대체 모델 추가'}>
       <label className="model-menu__search"><Search aria-hidden="true"/>
-        <input aria-label="모델 검색" placeholder="모델 검색" value={query} onChange={event => setQuery(event.target.value)}/>
+        <input type="text" enterKeyHint="search" aria-label="모델 검색" placeholder="모델 검색" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={blurTouchSearchOnEnter}/>
       </label>
       <div className="model-menu__list">
         {!add && inherit && !search && <button type="button" className="menu-row w-full" aria-pressed={!value} onClick={() => pick(null)}>

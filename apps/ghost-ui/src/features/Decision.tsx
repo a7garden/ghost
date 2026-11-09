@@ -1,3 +1,4 @@
+import { haptic } from '../host/shell';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, FileText, Monitor, KeyRound } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input } from '../ui'
@@ -77,7 +78,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     const command = decisionCommand(decision, outcome, text);
     if ('error' in command) { setError(command.error); setBusy(false); return; }
     void client.send(command)
-      .then(onResolved)
+      .then(() => { haptic(); onResolved(); })
       .catch(e => { setError(e instanceof Error ? e.message : '결정을 전달하지 못했습니다. 다시 시도해 주세요.'); setBusy(false); });
   };
   const proposal = documentProposal(decision);
@@ -221,7 +222,7 @@ function SecureForm({ decision, request, cardBusy, autoFocus, onResolved, onDecl
     if ('error' in built) { setError(built.error); return; }
     setBusy(true); setError('');
     void client.vaultRequestAnswer(decision.id, built.body)
-      .then(onResolved)
+      .then(() => { haptic(); onResolved(); })
       .catch(reason => { setError(reason instanceof Error ? reason.message : '금고에 전달하지 못했습니다. 다시 시도해 주세요.'); setBusy(false); });
   };
   // The host repeats the proposal reason in the decision detail; show it once.

@@ -21,6 +21,7 @@ export interface SettingsLayoutProps {
     contentLabel: string
   }
   className?: string
+  compactDetail?: boolean
 }
 
 export interface SettingsGroupProps {
@@ -49,6 +50,7 @@ export function SettingsLayout({
   pageTitle,
   strings,
   className,
+  compactDetail = false,
 }: SettingsLayoutProps) {
   const instanceId = useId()
   const panelId = `${instanceId}-panel`
@@ -96,7 +98,7 @@ export function SettingsLayout({
   }
 
   return (
-    <div ref={settingsRef} className={["ghost-settings", className].filter(Boolean).join(" ")}>
+    <div ref={settingsRef} className={["ghost-settings", className].filter(Boolean).join(" ")} data-compact-detail={compactDetail || undefined}>
       <div className="ghost-settings__layout">
         <nav className="ghost-settings__navigation" aria-label={strings.navigationLabel}>
           {title && <h1 className="ghost-settings__title">{title}</h1>}
@@ -136,7 +138,7 @@ export function SettingsLayout({
           id={panelId}
           className="ghost-settings__content"
           role="tabpanel"
-          aria-labelledby={selectedSection ? tabId(selectedSection.id) : undefined}
+          aria-labelledby={!compactDetail && selectedSection ? tabId(selectedSection.id) : undefined}
           aria-label={strings.contentLabel}
           tabIndex={0}
         >

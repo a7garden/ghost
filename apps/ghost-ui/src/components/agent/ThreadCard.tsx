@@ -1,7 +1,7 @@
 import type { Work } from '@ghost/contract';
 import { ExternalLink, PanelRight } from 'lucide-react';
 import { DotAvatar } from '../DotAvatar';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../../ui';
+import { ContextMenu, ContextMenuAction, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../../ui';
 import { toneFor } from '../../features/ghostState';
 import { relativeTime } from '../../features/time';
 import { LifecycleTrack } from './LifecycleTrack';
@@ -33,7 +33,7 @@ export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], o
   // branch mark stays. Live threads keep the carrier, lifecycle and their delegation.
   const settled = TERMINAL_WORK_STATES.includes(work.state);
   return <ContextMenu>
-    <ContextMenuTrigger asChild>
+    <ContextMenuTrigger asChild touchAction="inline">
       <div className="thread-card" data-kind="thread" data-settled={settled || undefined} data-rail="thread" data-rail-tone={glyphTone(glyph)} data-rail-label={work.title}>
         <button type="button" onClick={onOpen} aria-label={`스레드: ${work.title}, ${glyphLabel[glyph]}${delegates.length ? `, 위임 ${delegates.length}` : ''}`}>
           <StateGlyph state={glyph}/>
@@ -59,6 +59,7 @@ export function ThreadCard({ work, ghostName, needsOwner, now, delegates = [], o
           </span>
           {!settled && <LifecycleTrack state={work.state} needsOwner={needsOwner} compact/>}
         </button>
+        <ContextMenuAction/>
       </div>
     </ContextMenuTrigger>
     <ContextMenuContent aria-label="스레드 메뉴">

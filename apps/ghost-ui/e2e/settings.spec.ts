@@ -57,6 +57,8 @@ test.describe('Ghost model route', () => {
     await expect(page.getByRole('button', { name: /^Alpha/ })).toBeDisabled();
     await expect(page.getByRole('button', { name: /^Beta/ })).toBeDisabled();
     await page.getByRole('textbox', { name: '모델 검색', exact: true }).fill('delta');
+    await page.getByRole('textbox', { name: '모델 검색', exact: true }).press('Enter');
+    await expect(page.getByRole('textbox', { name: '모델 검색', exact: true })).toBeFocused();
     await page.getByRole('button', { name: 'Delta', exact: true }).click();
     await expect.poll(async () => (await storedGhost(page, ghostId)).fallbacks.map(ref => ref.model)).toEqual(['Beta', 'Gamma', 'Delta']);
     await expect(page.getByRole('button', { name: '대체 모델 추가', exact: true })).toHaveCount(0);
@@ -103,6 +105,8 @@ test.describe('Ghost model route', () => {
       extraGhostIds.push(String(created.ghostId));
     }
     await page.getByRole('textbox', { name: '설정할 Ghost 찾기', exact: true }).fill('모델 경로 검증용');
+    await page.getByRole('textbox', { name: '설정할 Ghost 찾기', exact: true }).press('Enter');
+    await expect(page.getByRole('textbox', { name: '설정할 Ghost 찾기', exact: true })).toBeFocused();
     await page.getByRole('radio', { name: '은퇴', exact: true }).click();
     await page.getByRole('button', { name: '삭제', exact: true }).click();
     await page.getByRole('dialog').getByRole('button', { name: '삭제', exact: true }).click();

@@ -78,7 +78,7 @@ export function ProjectCreate({ ghosts, busy, defaultGrants, onClose, onCreate }
   const crumb = pathCrumb(path);
 
   return <div className="pcreate">
-    {path
+    {canPickFolder && (path
       ? <div className="pcreate__chosen">
         <Folder aria-hidden="true"/>
         <span className="place__crumb" title={path} aria-label={`폴더 ${path}`}>
@@ -96,10 +96,11 @@ export function ProjectCreate({ ghosts, busy, defaultGrants, onClose, onCreate }
           ? <LoaderCircle aria-hidden="true" data-spin="true"/>
           : <FolderOpen aria-hidden="true"/>}
         <span>{dragging ? '여기에 놓기' : '폴더 선택'}</span>
-      </button>}
+      </button>)}
     <div className="pcreate__fields">
       <div className="pcreate__field">
         <label htmlFor="pcreate-path">폴더 경로</label>
+        {!canPickFolder && <span className="text-caption text-ink-3">호스트 PC의 폴더 경로</span>}
         <span className="pcreate__path">
           <input id="pcreate-path" type="text" value={path} maxLength={4096} spellCheck={false} autoCapitalize="off"
             autoComplete="off" disabled={locked} aria-invalid={Boolean(fields.path) || undefined} placeholder="/Users/me/Documents/notes"

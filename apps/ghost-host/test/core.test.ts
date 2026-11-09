@@ -381,19 +381,17 @@ describe("commands and access", () => {
 
     const state = snapshot(core, device);
     const ownerState = snapshot(core, new Access(owner));
-    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications"] as const) {
+    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications", "schedules", "spaces", "settings", "devices", "sandboxes", "activities", "activityRuns", "connections"] as const) {
       expect(state[key]).toEqual(ownerState[key]);
     }
     expect(state.ghosts.map((item) => item.id)).toContain(later.id);
     expect(state.works.map((item) => item.id).sort()).toEqual(workIds.sort());
-    expect(state.settings.providers).toEqual([]);
-    expect(state.schedules).toEqual([]);
-    expect(state.spaces).toEqual([]);
-    expect(state.sandboxes).toEqual([]);
 
-    await expect(execute(core, device, {
+    // Owner-equivalent: the device creates a Ghost like the owner can.
+    const created = await execute(core, device, {
       requestId: uuid(), command: { type: "ghost.create", name: "X", persona: "" },
-    }, context)).rejects.toThrow("ghost.create needs the owner");
+    }, context);
+    expect(ledger.ghosts().some((row) => row.id === created.ghostId)).toBe(true);
     for (const workId of workIds) {
       core.works.fail(workId, "Retry this Work");
       await execute(core, device, { requestId: uuid(), command: { type: "work.resume", workId } }, context);
@@ -402,6 +400,29 @@ describe("commands and access", () => {
       await execute(core, device, { requestId: uuid(), command: { type: "work.cancel", workId } }, context);
       expect(ledger.work(workId)).toMatchObject({ title: "Updated", state: "cancelled" });
     }
+  });
+
+  test("device management stays owner-only; a device may revoke itself", async () => {
+    const { core, ledger } = setup();
+    const device = new Access({ kind: "device", deviceId: "d2", name: "Phone" });
+    const context = { publicOrigin: "http://x", documents: null };
+    ledger.tx(() => {
+      ledger.insertDevice({ id: "d2", name: "Phone", pushEnabled: false, alerts: { mutedKinds: [], mutedGhostIds: [] }, createdAt: Date.now(), lastSeenAt: null }, "hash-d2");
+      ledger.insertDevice({ id: "d3", name: "Other", pushEnabled: false, alerts: { mutedKinds: [], mutedGhostIds: [] }, createdAt: Date.now(), lastSeenAt: null }, "hash-d3");
+    });
+
+    for (const request of [
+      { requestId: uuid(), command: { type: "device.pairing_start" as const } },
+      { requestId: uuid(), command: { type: "device.update" as const, deviceId: "d2", name: "Renamed" } },
+      { requestId: uuid(), command: { type: "device.revoke" as const, deviceId: "d3" } },
+    ]) {
+      await expect(execute(core, device, request, context)).rejects.toThrow("needs the owner");
+    }
+    expect(ledger.devices().map((row) => row.id).sort()).toEqual(["d2", "d3"]);
+
+    await execute(core, device, { requestId: uuid(), command: { type: "device.revoke", deviceId: "d2" } }, context);
+    expect(ledger.devices().map((row) => row.id)).toEqual(["d3"]);
+    expect(ledger.deviceByTokenHash("hash-d2")).toBeNull();
   });
 
   test("ghost.update changes tool permissions and rejects invalid allow-lists without changing them", async () => {

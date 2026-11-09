@@ -1,6 +1,7 @@
-import { useState, type ReactElement } from 'react';
+import { cloneElement, useState, type ReactElement, type ReactNode } from 'react';
 import { Copy, Link2, PencilLine, Quote, TextSelect } from 'lucide-react';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui';
+import { ContextMenu, ContextMenuAction, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui';
+import { useTouch } from '../ui/adaptive';
 
 /** What the pointer was on when the menu opened: selected text inside the message and a link under it. */
 interface Target { selection: string; href: string }
@@ -29,15 +30,18 @@ export function MessageMenu({ text, onQuote, onReuse, children }: {
   text: string;
   onQuote?(text: string): void;
   onReuse?(text: string): void;
-  children: ReactElement;
+  children: ReactElement<{ actions?: ReactNode }>;
 }) {
   const [target, setTarget] = useState<Target>({ selection: '', href: '' });
+  const touch = useTouch();
+  const link = target.href || (touch ? text.match(/\]\((https?:\/\/[^\s)]+)\)/i)?.[1] || text.match(/https?:\/\/[^\s<>)]+/i)?.[0] || '' : '');
   if (!text) return children;
+  const content = touch ? cloneElement(children, { actions: <>{children.props.actions}<ContextMenuAction/></> }) : children;
   return <ContextMenu>
-    <ContextMenuTrigger asChild onContextMenu={event => setTarget(targetOf(event))}>{children}</ContextMenuTrigger>
+    <ContextMenuTrigger asChild touchAction="inline" onContextMenu={event => setTarget(targetOf(event))}>{content}</ContextMenuTrigger>
     <ContextMenuContent aria-label="메시지 메뉴">
       {target.selection && <ContextMenuItem icon={<TextSelect/>} onSelect={() => copy(target.selection)}>선택한 텍스트 복사</ContextMenuItem>}
-      {target.href && <ContextMenuItem icon={<Link2/>} onSelect={() => copy(target.href)}>링크 복사</ContextMenuItem>}
+      {link && <ContextMenuItem icon={<Link2/>} onSelect={() => copy(link)}>링크 복사</ContextMenuItem>}
       <ContextMenuItem icon={<Copy/>} onSelect={() => copy(text)}>메시지 복사</ContextMenuItem>
       {(onQuote || onReuse) && <ContextMenuSeparator/>}
       {onQuote && <ContextMenuItem icon={<Quote/>} onSelect={() => onQuote(target.selection || text)}>{target.selection ? '선택 부분 인용' : '인용해서 답장'}</ContextMenuItem>}

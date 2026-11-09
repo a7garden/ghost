@@ -323,7 +323,7 @@ describe("skills in conversation setup", () => {
 describe("GET /api/skills", () => {
   const OWNER_TOKEN = "owner-skills-token";
 
-  test("the route is owner-only and serves the catalog", async () => {
+  test("the route serves the catalog to every principal", async () => {
     const root = tempDir();
     writeSkill(root, "alpha", "description: Alpha skill", "# Alpha");
     const h = harness(":memory:");
@@ -354,7 +354,9 @@ describe("GET /api/skills", () => {
     ).json()) as { token: string };
 
     const deviceResponse = await get("/api/skills", claim.token);
-    expect(deviceResponse.status).toBe(403);
+    expect(deviceResponse.status).toBe(200);
+    const deviceCatalog = parse(SkillCatalog, await deviceResponse.json());
+    expect(deviceCatalog.skills.map((skill) => skill.name)).toEqual(["alpha"]);
 
     const ownerResponse = await get("/api/skills", OWNER_TOKEN);
     expect(ownerResponse.status).toBe(200);

@@ -9,6 +9,7 @@ import { uiTerms } from '../uiText';
 import { DecisionDeck } from './Decision';
 import { toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
+import { notificationRoute } from './notificationRoute';
 
 const settledLabel: Record<Decision['state'], string> = { pending: '', approved: '승인됨', denied: '거부됨', answered: '답변됨', cancelled: '취소됨' };
 
@@ -32,10 +33,8 @@ export function InboxView({ state, navigate, focusDecisionId }: {
   const markRead = (ids: string[]) => { setError(''); void client.send({ type: 'notification.read', notificationIds: ids }).catch(e => setError(e instanceof Error ? e.message : '읽음 표시를 저장하지 못했습니다.')); };
   const open = (item: Notification) => {
     if (!item.readAt) markRead([item.id]);
-    if (item.decisionId && pending.some(decision => decision.id === item.decisionId)) return navigate(`/inbox?decision=${encodeURIComponent(item.decisionId)}`);
-    if (item.workId) return navigate(`/work/${encodeURIComponent(item.workId)}`);
-    const conversation = item.conversationId ? state.conversations.find(entry => entry.id === item.conversationId) : undefined;
-    if (conversation) navigate(`/ghosts/${encodeURIComponent(conversation.ghostId)}?conversation=${encodeURIComponent(conversation.id)}`);
+    const destination = notificationRoute(item, state);
+    if (destination) navigate(destination);
   };
   return <Page className="grid content-start gap-12">
     <PageHeader title={uiTerms.inbox} className="mb-0"/>

@@ -1,7 +1,7 @@
-import { DEVICE_COMMANDS, type Command, type Principal } from "@ghost/contract";
+import { OWNER_ONLY_COMMANDS, type Command, type Principal } from "@ghost/contract";
 import { forbidden } from "./errors.ts";
 
-/** Devices share the owner's Ghost visibility, but may send only device commands. */
+/** A paired device has owner-equivalent capability except device management. */
 export class Access {
   constructor(readonly principal: Principal) {}
 
@@ -11,6 +11,9 @@ export class Access {
 
   /** Throws unless the principal may send this command. */
   authorize(command: Command) {
-    if (!this.isOwner && !DEVICE_COMMANDS.includes(command.type)) throw forbidden(`${command.type} needs the owner`);
+    if (this.isOwner) return;
+    if (!OWNER_ONLY_COMMANDS.includes(command.type)) return;
+    if (command.type === "device.revoke" && this.principal.kind === "device" && command.deviceId === this.principal.deviceId) return;
+    throw forbidden(`${command.type} needs the owner`);
   }
 }

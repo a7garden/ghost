@@ -6,6 +6,7 @@ import type { Device } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
+import { ThisDevice } from './ThisDevice';
 
 /** The payload the iPhone's camera scans: `ghost://pair?origin=…&code=…`. Pure; exported for tests. */
 export function pairingUrl(offer: { code: string; origin: string }): string {
@@ -57,6 +58,11 @@ export function MobilePairing() {
     setKnownAtOffer(new Set(devices.map(device => device.id)));
     setOffer(await client.send<{ code: string; expiresAt: number; origin: string }>({ type: 'device.pairing_start' }));
   }, '');
+  if (state?.principal.kind === 'device') {
+    const deviceId = state.principal.deviceId;
+    const current = devices.find(device => device.id === deviceId);
+    return current ? <ThisDevice key={current.id} device={current} ghosts={state.ghosts}/> : <InlineError>이 기기의 연결 정보를 찾을 수 없습니다.</InlineError>;
+  }
   return <section className="flex min-w-0 flex-col gap-6" aria-label="기기">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">기기</h2>

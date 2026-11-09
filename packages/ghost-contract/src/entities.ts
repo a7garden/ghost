@@ -213,7 +213,7 @@ export const Ghost = Type.Object({
   fallbacks: FallbackList,
   /** Skill names whose SKILL.md is part of this Ghost's instructions. */
   skills: SkillList,
-  /** Owner-only grant for direct PC file/shell execution. Never implied by sandbox tools. */
+  /** Grant for direct PC file/shell execution (owner or paired device). Never implied by sandbox tools. */
   hostExecution: Type.Optional(Type.Boolean()),
   /** Set once the owner deleted a retired Ghost; such Ghosts stay only so past Works keep their assignee. */
   deletedAt: nullable(Timestamp),

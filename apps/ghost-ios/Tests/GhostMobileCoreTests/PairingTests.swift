@@ -124,7 +124,7 @@ import Testing
     @Test func definitiveRejectionClearsAttempt() async throws {
         let (session, registry, offer, store) = makeContext()
         _ = try await session.begin(offer, deviceName: "Test iPhone")
-        let rejection = stubJSON(ApiErrorBody(code: "conflict", message: "이 코드는 이미 사용되었습니다."))
+        let rejection = json(#"{"ok":false,"error":{"code":"conflict","message":"pairing code already used"}}"#)
         registry.enqueue(StubResponse(action: .reply(status: 409, body: rejection)))
         await #expect(throws: CommandError.self) { try await session.claim() }
         let restored = await session.restore()

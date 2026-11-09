@@ -44,7 +44,13 @@ export async function openScreen(page: Page, screen: Screen, theme: Theme): Prom
     await expect(page.getByText(text).filter({ visible: true }).first()).toBeVisible();
   }
   await page.evaluate(() => document.fonts.ready);
-  await page.addStyleTag({ content: STABILITY_CSS });
+  // Install in the main document directly: addStyleTag's global CSP listener mistakes
+  // an opaque presentation iframe's concurrent CSP diagnostics for a main-page failure.
+  await page.evaluate(css => {
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.head.append(style);
+  }, STABILITY_CSS);
   await page.waitForTimeout(250);
   return state;
 }

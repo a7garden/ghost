@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, Repeat2, Server, Smartphone, Users } from 'lucide-react';
 import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
@@ -31,12 +31,18 @@ import { SpacesView } from './features/SpacesView';
 import { routeLabels, uiTerms } from './uiText';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { installWindowDrag } from './host/windowDrag';
-import { initializeDesktopCompanion } from './host/desktop';
+import { initializeDesktopCompanion, isDesktopShell } from './host/desktop';
 import DesktopAvatarSettings from './features/DesktopAvatarSettings';
+import { onShellEvent, ready, shell, shellCall, type ShellEvent } from './host/shell';
+import { useVisibleViewport } from './host/viewport';
+import { notificationRoute } from './features/notificationRoute';
+import { useCompact } from './ui/adaptive';
+import './ui/mobile.css';
 
 // Tauri 웹뷰는 모든 내비게이션에 __TAURI_INTERNALS__를 주입한다. 데스크톱 창에서만 끌 수 있는 타이틀바를 그린다.
-const desktopShell = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window && !/iPhone|iPad/.test(navigator.userAgent);
+const desktopShell = isDesktopShell();
 const desktopMac = desktopShell && /Mac/.test(navigator.platform);
+if (typeof document !== 'undefined') document.documentElement.toggleAttribute('data-desktop-shell', desktopShell);
 if (desktopShell) {
   const tauri = (window as unknown as { __TAURI_INTERNALS__: { invoke(command: string): Promise<unknown> } }).__TAURI_INTERNALS__;
   installWindowDrag(command => tauri.invoke(command));
@@ -49,9 +55,11 @@ export function App() {
 }
 
 function Shell() {
-  const { store } = useHost();
+  const { store, client } = useHost();
   const { state, connection, error } = useHostState(store);
-  const { preferences, updatePreferences, storageError } = usePreferences();
+  const { preferences, resolvedTheme, updatePreferences, storageError } = usePreferences();
+  useVisibleViewport();
+  const compact = useCompact();
   const [route, setRoute] = useState(currentRoute);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [desktopError, setDesktopError] = useState('');
@@ -75,9 +83,45 @@ function Shell() {
     return () => window.removeEventListener('keydown', key);
   }, []);
   const navigate = (path: string) => { resetScroll(); if (currentRoute() !== path) historyNav.push(`#${path}`); setRoute(path); };
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  useEffect(() => {
+    if (!shell) return;
+    const queued = new Set<string>();
+    const drain = () => {
+      const current = store.get().state;
+      if (!current) return;
+      for (const id of queued) {
+        const item = current.notifications.find(entry => entry.id === id);
+        if (!item) continue;
+        queued.delete(id);
+        if (!item.readAt) void client.send({ type: 'notification.read', notificationIds: [id] }).catch(() => {});
+        const destination = notificationRoute(item, current);
+        if (destination) navigateRef.current(destination);
+      }
+    };
+    const handle = (event: ShellEvent) => {
+      if (event.type === 'resume') store.refresh();
+      else { queued.add(event.notificationId); drain(); }
+    };
+    const unsubscribe = onShellEvent(handle);
+    const unsubscribeStore = store.subscribe(drain);
+    void ready(handle).catch(reason => console.error('Ghost 셸을 준비하지 못했습니다.', reason));
+    return () => { unsubscribe(); unsubscribeStore(); };
+  }, [store, client]);
+  useEffect(() => {
+    if (shell) void shellCall({ type: 'theme', scheme: resolvedTheme }).catch(() => {});
+  }, [resolvedTheme]);
   const [path, query = ''] = route.split('?');
   const params = new URLSearchParams(query);
   const section = path.split('/')[1]?.split('?')[0] || 'home';
+  useEffect(() => {
+    if (section === 'workspace' && !compact) {
+      history.replaceState(history.state, '', '#/');
+      setRoute('/');
+      document.getElementById('main-content')?.scrollTo(0, 0);
+    }
+  }, [compact, section]);
 
   const ghosts = state?.ghosts ?? [];
   const defaultGhost = ghosts.find(ghost => ghost.isDefault) ?? null;
@@ -91,7 +135,7 @@ function Shell() {
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
   const selectedSpace = section === 'spaces' ? path.split('/')[2] : undefined;
-  const ownsGeometry = section === 'settings' || section === 'ghosts';
+  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace';
 
   const go = (target: string) => () => navigate(target);
   const commandItems: CommandItem[] = state ? [
@@ -131,7 +175,7 @@ function Shell() {
   ];
 
   const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>;
-  const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, settings: true };
+  const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, settings: true, workspace: true };
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
@@ -142,7 +186,13 @@ function Shell() {
     <PortraitAppearances.Provider value={portraits}>
       <AvatarProvider animate={preferences.animate}>
         <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0}
+          section={section} attentionCount={attentionCount} navigate={navigate}
+          hideDock={section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
+            compactBack={section === 'settings' && params.has('tab') ? '/settings'
+              : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/workspace'
+              : section === 'work' && path.split('/')[2] ? '/work'
+              : section === 'spaces' && selectedSpace ? '/workspace' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
           sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
@@ -150,6 +200,7 @@ function Shell() {
           {runtimeDown && state && section !== 'home' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate}/>}
+            {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>

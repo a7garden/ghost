@@ -185,19 +185,8 @@ export type Command = Static<typeof Command>;
 export type CommandType = Command["type"];
 export type CommandOf<T extends CommandType> = Extract<Command, { type: T }>;
 
-/** Commands a paired device may send across every Ghost and conversation. */
-export const DEVICE_COMMANDS: readonly CommandType[] = [
-  "message.send",
-  "message.cancel",
-  "work.create",
-  "work.update",
-  "work.cancel",
-  "work.resume",
-  "decision.resolve",
-  "device.push_register",
-  "device.alerts_update",
-  "notification.read",
-];
+/** Commands a paired device may not send; a device may still revoke its own id. */
+export const OWNER_ONLY_COMMANDS: readonly CommandType[] = ["device.pairing_start", "device.update", "device.revoke"];
 
 export const CommandRequest = Type.Object({
   /** Client-chosen UUID; a retry with the same id and bytes returns the original outcome. */

@@ -374,7 +374,7 @@ describe("API server", () => {
     expect(forged.status).toBe(404);
   });
 
-  test("a paired device sees every Ghost, including new ones, but no owner-only collections", async () => {
+  test("a paired device sees every Ghost and the same collections as the owner, including new ones", async () => {
     betaId = ((await (await runCommand({ type: "ghost.create", name: "Beta", persona: "quiet" }, OWNER_TOKEN)).json()) as {
       result: { ghostId: string };
     }).result.ghostId;
@@ -389,21 +389,15 @@ describe("API server", () => {
     });
     const state = parse(State, await (await get("/api/state", deviceToken)).json());
     const ownerState = parse(State, await (await get("/api/state", OWNER_TOKEN)).json());
-    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications"] as const) {
+    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications", "schedules", "spaces", "settings", "devices", "sandboxes", "activities", "activityRuns", "connections"] as const) {
       expect(state[key]).toEqual(ownerState[key]);
     }
     expect(state.ghosts.map((ghost) => ghost.id)).toContain(betaId);
     expect(state.principal).toEqual({ kind: "device", deviceId, name: "Test Phone" });
     expect(ledger.device(deviceId).name).toBe("Test Phone");
-    expect(state.devices.map((device) => device.id)).toEqual([deviceId]);
-    expect(ownerState.devices.length).toBeGreaterThan(1);
-    expect(ownerState.schedules.length).toBeGreaterThan(0);
-    expect(ownerState.spaces.length).toBeGreaterThan(0);
-    expect(state.schedules).toEqual([]);
-    expect(state.spaces).toEqual([]);
-    expect(state.sandboxes).toEqual([]);
-    expect(state.settings.providers).toEqual([]);
-    expect(state.settings.reviewModel).toBeNull();
+    expect(state.schedules.length).toBeGreaterThan(0);
+    expect(state.spaces.length).toBeGreaterThan(0);
+    expect(state.devices.length).toBeGreaterThan(1);
     expect(state.devices[0]).not.toHaveProperty("grants");
   });
 
@@ -419,22 +413,28 @@ describe("API server", () => {
     expect((await postJson("/api/pairing/claim", { code: started.result.code, deviceName: "Valid" })).status).toBe(200);
   });
 
-  test("a device cannot send owner commands", async () => {
+  test("device management stays owner-only; a device may still act like the owner elsewhere", async () => {
+    const other = await pairDevice("Managed Phone");
     for (const command of [
-      { type: "ghost.create", name: "Rogue", persona: "no" },
-      { type: "conversation.create", ghostId: alphaId },
-      { type: "provider.delete", providerId: "private" },
-      { type: "schedule.delete", scheduleId: "owner-schedule" },
-      { type: "space.delete", spaceId: "owner-vault" },
       { type: "device.pairing_start" },
       { type: "device.update", deviceId, name: "Cannot rename myself" },
-      { type: "device.revoke", deviceId },
+      { type: "device.revoke", deviceId: other.deviceId },
     ]) {
       const response = await runCommand(command, deviceToken);
       expect(response.status).toBe(403);
       const body = parse(CommandResponse, await response.json());
       expect(body.ok ? "ok" : body.error.message).toBe(`${command.type} needs the owner`);
     }
+    // Owner-equivalent elsewhere: the device creates a Ghost and a schedule like the owner can.
+    const created = parse(CommandResponse, await (await runCommand({ type: "ghost.create", name: "By Device", persona: "" }, deviceToken)).json());
+    expect(created.ok).toBe(true);
+    if (!created.ok || typeof created.result.ghostId !== "string") throw new Error("ghost.create returned no ghostId");
+    const ghostId = created.result.ghostId;
+    const scheduled = parse(CommandResponse, await (await runCommand({
+      type: "schedule.create", ghostId, conversationId: ledger.ghost(ghostId).directConversationId,
+      prompt: "From the phone", spec: { kind: "at", at: Date.now() + 60_000 },
+    }, deviceToken)).json());
+    expect(scheduled.ok).toBe(true);
   });
 
   test("paired devices register push targets without per-Ghost filtering", async () => {
@@ -453,8 +453,7 @@ describe("API server", () => {
     const alerts: DeviceAlerts = { mutedKinds: ["decision", "work_failed"], mutedGhostIds: ["ghost-to-mute"] };
     expect((await runCommand({ type: "device.alerts_update", alerts }, paired.token)).status).toBe(200);
     const state = parse(State, await (await get("/api/state", paired.token)).json());
-    expect(state.devices.map((device) => device.id)).toEqual([paired.deviceId]);
-    expect(state.devices[0]!.alerts).toEqual(alerts);
+    expect(state.devices.find((device) => device.id === paired.deviceId)?.alerts).toEqual(alerts);
 
     const ownerResponse = await runCommand({ type: "device.alerts_update", alerts: { mutedKinds: [], mutedGhostIds: [] } }, OWNER_TOKEN);
     expect(ownerResponse.status).toBe(400);
@@ -491,25 +490,39 @@ describe("API server", () => {
     const artifact = parse(ArtifactRef, await response.json());
     expect(artifact).toMatchObject({ name: "자료.txt", mediaType: "text/plain; charset=utf-8", size: bytes.byteLength });
     expect(ledger.artifactsForDigest(artifact.digest)).toEqual([]);
+    // Any stored digest is readable by every authenticated principal, unregistered ones included.
     const downloaded = await get(`/api/artifacts/${artifact.digest}`, OWNER_TOKEN);
     expect(downloaded.status).toBe(200);
     expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(bytes);
-    expect((await get(`/api/artifacts/${artifact.digest}`, deviceToken)).status).toBe(404);
+    expect((await get(`/api/artifacts/${artifact.digest}`, deviceToken)).status).toBe(200);
+    expect(new Uint8Array(await (await get(`/api/artifacts/${artifact.digest}`, deviceToken)).arrayBuffer())).toEqual(bytes);
     expect((await runCommand({ type: "message.send", conversationId: alphaDirectId, text: "첨부 확인", attachments: [artifact] }, OWNER_TOKEN)).status).toBe(200);
     expect(engine.submitted.at(-1)?.submission.attachments).toEqual([artifact]);
     expect((await get(`/api/artifacts/${artifact.digest}`, OWNER_TOKEN)).status).toBe(200);
   });
 
-  test("artifact uploads reject devices, missing auth, invalid metadata and bodies above 20 MiB", async () => {
+  test("a device uploads raw artifacts and reads them without a Work row", async () => {
+    const bytes = new TextEncoder().encode("기기에서 올린 파일");
+    const response = await fetch(`${base}/api/artifacts`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${deviceToken}`, "content-type": "text/plain; charset=utf-8", "x-ghost-file-name": encodeURIComponent("기기자료.txt") },
+      body: bytes,
+    });
+    expect(response.status).toBe(201);
+    const artifact = parse(ArtifactRef, await response.json());
+    expect(artifact).toMatchObject({ name: "기기자료.txt", mediaType: "text/plain; charset=utf-8", size: bytes.byteLength });
+    const downloaded = await get(`/api/artifacts/${artifact.digest}`, deviceToken);
+    expect(downloaded.status).toBe(200);
+    expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(bytes);
+  });
+
+  test("artifact uploads reject missing auth, invalid metadata and bodies above 20 MiB", async () => {
     const upload = (token: string | undefined, name: string, mediaType: string, body: BodyInit = "bytes") => fetch(`${base}/api/artifacts`, {
       method: "POST",
       headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": mediaType, "x-ghost-file-name": name },
       body,
     });
     expect((await upload(undefined, "test.txt", "text/plain")).status).toBe(401);
-    const forbidden = await upload(deviceToken, "test.txt", "text/plain");
-    expect(forbidden.status).toBe(403);
-    expect(await forbidden.json()).toMatchObject({ error: { code: "forbidden" } });
     for (const [name, mediaType] of [["", "text/plain"], ["x".repeat(257), "text/plain"], ["%broken", "text/plain"], ["bad%00name", "text/plain"], ["test", "not-a-type"], ["test", `text/${"x".repeat(124)}`]]) {
       const response = await upload(OWNER_TOKEN, name!, mediaType!);
       expect(response.status).toBe(400);
@@ -534,11 +547,12 @@ describe("API server", () => {
   });
 
 
-  test("OAuth attempts are owner-only for every operation", async () => {
+  test("provider login routes treat a device like the owner", async () => {
+    const path = `${base}/api/providers/codex/oauth`;
     for (const method of ["GET", "POST", "DELETE"]) {
-      const path = `${base}/api/providers/codex/oauth`;
       expect((await fetch(path, { method })).status).toBe(401);
-      expect((await fetch(path, { method, headers: { authorization: `Bearer ${deviceToken}` } })).status).toBe(403);
+      // Unknown provider answers 404: the device passed the principal gate.
+      expect((await fetch(path, { method, headers: { authorization: `Bearer ${deviceToken}` } })).status).toBe(404);
     }
   });
 
@@ -549,9 +563,11 @@ describe("API server", () => {
     expect(core.secrets.has("oauth-custom")).toBe(false);
   });
 
-  test("the provider catalog requires owner access and recommends only listed models", async () => {
+  test("the provider catalog serves every principal and recommends only listed models", async () => {
     expect((await get("/api/providers/catalog")).status).toBe(401);
-    expect((await get("/api/providers/catalog", deviceToken)).status).toBe(403);
+    const deviceResponse = await get("/api/providers/catalog", deviceToken);
+    expect(deviceResponse.status).toBe(200);
+    expect(parse(ProviderCatalog, await deviceResponse.json())).toEqual(parse(ProviderCatalog, await (await get("/api/providers/catalog", OWNER_TOKEN)).json()));
     const response = await get("/api/providers/catalog", OWNER_TOKEN);
     expect(response.status).toBe(200);
     const catalog = parse(ProviderCatalog, await response.json());
@@ -615,8 +631,8 @@ describe("API server", () => {
     const settingsEvent = events.filter((event) => event.data.type === "settings").map((event) => parse(settingsEventData, event.data)).at(-1);
     expect(settingsEvent?.settings.providers.find((row) => row.id === "auth-typed")?.authType).toBe("api_key");
 
-    // Device snapshots never contain provider rows, so auth type metadata cannot cross to them.
-    expect((await settingsOf(deviceToken)).providers).toEqual([]);
+    // Device snapshots carry the same provider rows, so auth type metadata reaches them too.
+    expect((await settingsOf(deviceToken)).providers).toEqual((await settingsOf(OWNER_TOKEN)).providers);
 
     await runCommand({ type: "provider.delete", providerId: "auth-typed" }, OWNER_TOKEN);
     expect(core.secrets.has("auth-typed")).toBe(false);
@@ -781,7 +797,7 @@ describe("API server", () => {
     expect((await get("/api/state", paired.token)).status).toBe(401);
   });
 
-  test("renaming preserves device visibility and owner-only events stay private", async () => {
+  test("renaming preserves device visibility and the device sees every owner event", async () => {
     const paired = await pairDevice("Rename Phone");
     const stream = new EventStream(await sse(`/api/events?after=${ledger.seq()}`, paired.token));
     const other = await pairDevice("Private Phone");
@@ -799,10 +815,26 @@ describe("API server", () => {
     notify("rename-beta", betaId);
     expect(await stream.drainUntil((frame) => notificationId(frame) === "rename-beta")).not.toBeNull();
     const events = stream.frames.filter((frame) => frame.event === "ledger").map(ledgerFrame);
-    expect(events.some((event) => mentions(event, other.deviceId))).toBe(false);
-    expect(events.some((event) => ["schedule", "space", "settings", "sandbox"].includes(event.data.type))).toBe(false);
+    expect(events.some((event) => mentions(event, other.deviceId))).toBe(true);
+    expect(events.some((event) => ["schedule", "space", "settings", "sandbox"].includes(event.data.type))).toBe(true);
     expect(stream.frames.some((frame) => notificationId(frame) === "rename-alpha")).toBe(true);
     stream.close();
+  });
+
+  test("a device revokes itself, its stream closes and its token is rejected", async () => {
+    const paired = await pairDevice("Self-revoking Phone");
+    const stream = new EventStream(await sse(`/api/events?after=${ledger.seq()}`, paired.token));
+    notify("self-revoke-marker", alphaId);
+    expect(await stream.drainUntil((frame) => frame.event === "ledger" && notificationId(frame) === "self-revoke-marker")).not.toBeNull();
+
+    const revoked = await runCommand({ type: "device.revoke", deviceId: paired.deviceId }, paired.token);
+    expect(revoked.status).toBe(200);
+    expect(await revoked.json()).toEqual({ ok: true, result: {} });
+    // The server closes the stream on device.removed; later events cannot arrive on it.
+    expect(await stream.next()).toBeNull();
+    notify("after-self-revoke", alphaId);
+    expect(await stream.next()).toBeNull();
+    expect((await get("/api/state", paired.token)).status).toBe(401);
   });
 
   test("UI read errors return the JSON error shape", async () => {

@@ -4,6 +4,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 
 import { cn } from "./utils"
+import { SheetHandle, useCompact } from "./adaptive"
 
 
 const DialogModalContext = React.createContext(true)
@@ -49,6 +50,7 @@ function DialogContent({
   ...props
 }: DialogContentProps) {
   const modal = React.useContext(DialogModalContext)
+  const compact = useCompact()
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -61,6 +63,7 @@ function DialogContent({
         )}
         {...props}
       >
+        {compact && <SheetHandle/>}
         {children}
         {showCloseButton && (
           <DialogPrimitive.Close

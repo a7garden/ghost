@@ -4,6 +4,7 @@ import { ArrowUp } from "lucide-react"
 
 import { Button } from "./button"
 import { cn } from "./utils"
+import { haptic } from "../host/shell"
 
 export interface ComposerProps {
   value: string
@@ -112,6 +113,7 @@ export function Composer({
   const submit = () => {
     const trimmedValue = value.trim()
     if (!trimmedValue || disabled || pending) return
+    haptic()
     onSubmit(trimmedValue)
   }
 
@@ -145,7 +147,7 @@ export function Composer({
           onKeyDown={(event) => {
             onKeyDown?.(event)
             if (event.defaultPrevented) return
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+            if (event.key === "Enter" && !matchMedia("(pointer: coarse)").matches && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
               event.preventDefault()
               submit()
             }

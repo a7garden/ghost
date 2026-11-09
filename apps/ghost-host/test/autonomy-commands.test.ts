@@ -120,26 +120,26 @@ describe("owner autonomy commands", () => {
     } finally { await f.close(); }
   });
 
-  test("paired devices cannot grant PC execution or manage activities/accounts", async () => {
+  test("paired devices grant PC execution and manage activities/accounts like the owner", async () => {
     const f = fixture();
     try {
       const device = new Access({ kind: "device", deviceId: "phone", name: "Phone" });
-      const commands: Command[] = [
-        { type: "ghost.create", name: "PC", persona: "", hostExecution: true },
-        { type: "ghost.update", ghostId: f.ghost.id, hostExecution: true },
-        { type: "connection.upsert", name: "Account", config: github, credential: "secret" },
-        { type: "connection.delete", connectionId: "account" }, { type: "connection.test", connectionId: "account" },
-        { type: "activity.create", config: f.config },
-        { type: "activity.update", activityId: "activity", expectedRevision: 1, config: f.config },
-        { type: "activity.pause", activityId: "activity", paused: true },
-        { type: "activity.delete", activityId: "activity" }, { type: "activity.run", activityId: "activity" },
-        { type: "activity.stop_all", ghostId: f.ghost.id },
-      ];
-      for (const command of commands) {
-        const req = request(command);
-        await expect(execute(f.core, device, req, context)).rejects.toThrow("needs the owner");
-        expect(f.ledger.request(req.requestId)).toBeNull();
-      }
+      const createdGhost = await execute(f.core, device, request({ type: "ghost.create", name: "PC", persona: "", hostExecution: true }), context);
+      const pcGhostId = createdGhost.ghostId as string;
+      expect(f.ledger.ghost(pcGhostId).hostExecution).toBe(true);
+      await execute(f.core, device, request({ type: "ghost.update", ghostId: f.ghost.id, hostExecution: true }), context);
+      expect(f.ledger.ghost(f.ghost.id).hostExecution).toBe(true);
+      const createdConnection = await execute(f.core, device, request({ type: "connection.upsert", name: "Account", config: github, credential: "secret" }), context);
+      const connectionId = createdConnection.connectionId as string;
+      expect(f.ledger.connection(connectionId).name).toBe("Account");
+      await execute(f.core, device, request({ type: "connection.test", connectionId }), context);
+      const createdActivity = await execute(f.core, device, request({ type: "activity.create", config: f.config }), context);
+      const activityId = createdActivity.activityId as string;
+      await execute(f.core, device, request({ type: "activity.update", activityId, expectedRevision: 1, config: f.config }), context);
+      await execute(f.core, device, request({ type: "activity.pause", activityId, paused: true }), context);
+      expect(f.ledger.activity(activityId).paused).toBe(true);
+      await execute(f.core, device, request({ type: "activity.delete", activityId }), context);
+      await execute(f.core, device, request({ type: "connection.delete", connectionId }), context);
       expect(f.ledger.connections()).toHaveLength(0);
       expect(f.ledger.activities()).toHaveLength(0);
     } finally { await f.close(); }
