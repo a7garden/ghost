@@ -310,7 +310,7 @@
 .ghost-conversation__dock { position: relative; z-index: 1; flex: 0 0 auto; padding: 6px var(--ghost-space-6) 16px; background: var(--ghost-canvas); }
 .ghost-conversation__dock::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px; background: linear-gradient(transparent, var(--ghost-canvas)); pointer-events: none; }
 .ghost-conversation__footer { margin-top: var(--ghost-space-2); color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.4; text-align: center; }
-.ghost-conversation__jump { position: absolute; z-index: 2; bottom: 12px; left: 50%; max-width: calc(100% - 24px); translate: -50% 0; border-radius: var(--radius-pill) !important; box-shadow: var(--shadow-raised); animation: rise-in var(--duration-base) var(--ease-enter) both; }
+.ghost-conversation__jump { position: absolute; z-index: 2; bottom: 12px; left: 50%; max-width: calc(100% - 24px); translate: -50% 0; border-radius: var(--radius-pill) !important; background: var(--ghost-raised) !important; box-shadow: var(--shadow-raised); animation: rise-in var(--duration-base) var(--ease-enter) both; }
 
 /* Transcript rail: the conversation's scrollbar as a map. Fine pointers only; touch keeps native scrolling. */
 .ghost-rail { position: absolute; z-index: 2; top: 30px; right: 2px; bottom: 18px; width: 22px; opacity: 0; touch-action: none; user-select: none; cursor: default; transition: opacity var(--duration-base) ease; }

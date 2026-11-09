@@ -57,7 +57,7 @@ export function Activities({ navigate }: { navigate(path: string): void }) {
   };
 
   return <section className="flex min-w-0 flex-col gap-6" aria-label={uiTerms.activities}>
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">{uiTerms.activities}</h2>
       <span className="flex items-center gap-2">
         {stoppable && <Button variant="outline" type="button" disabled={pending !== ''} onClick={() => { setError(''); setStopping(true); }}>

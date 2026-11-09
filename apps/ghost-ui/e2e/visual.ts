@@ -19,6 +19,10 @@ const STABILITY_CSS = `
   .verdict span { visibility: hidden !important; }
   /* Mask geometry must not depend on TMPDIR's random path length. Test-only. */
   .place__crumb[title] { width: 240px !important; max-width: 100%; overflow: hidden; }
+  /* The auto-color swatch hashes a newly seeded Ghost id; keep its geometry, not that random hue. */
+  .look-swatch[data-auto] { background: conic-gradient(#5b7fd4 0 50%, var(--ghost-hover2) 50%) !important; }
+  /* Finish the width/translation entrance before text can acquire a fractional compositor layer. */
+  .thread-panel, .thread-panel > * { animation: none !important; }
 `;
 
 export type Theme = 'light' | 'dark';

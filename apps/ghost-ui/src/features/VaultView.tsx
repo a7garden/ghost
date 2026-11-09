@@ -154,7 +154,7 @@ export function VaultView() {
   };
 
   return <section className="flex min-w-0 flex-col gap-6" aria-label="금고">
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">금고</h2>
       <span className="flex items-center gap-2">
         <Button variant="outline" type="button" disabled={!state} onClick={() => setImporting(true)}><FileUp size={15}/>CSV 가져오기</Button>
@@ -162,6 +162,7 @@ export function VaultView() {
       </span>
     </div>
     {loadError && <InlineError>{loadError}</InlineError>}
+    {items === null && !loadError && <p className="m-0 text-ui text-ink-2" role="status">금고를 불러오는 중…</p>}
     {items?.length
       ? <SettingsGroup title={<span className="sr-only">금고</span>}>{items.map(item => <SettingsRow key={item.id}
         label={<span className="flex min-w-0 flex-col gap-1.5">

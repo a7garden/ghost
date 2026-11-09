@@ -68,6 +68,8 @@ interface ConversationState {
   probed: Set<string>;
   /** Origin of a message, by the entry that carries it. */
   originByEntry: Map<EntryId, OriginRecord>;
+  /** The scheduled wake awaiting the Ghost's first words, if the last input was one. */
+  initiative: string | null;
 }
 
 export interface EngineDeps {
@@ -485,6 +487,7 @@ class HostEngine implements Engine {
       origins: new Map(),
       probed: new Set(),
       originByEntry: new Map(),
+      initiative: null,
     };
     this.states.set(hostId, state);
     this.byPiId.set(piId, state);
@@ -644,7 +647,38 @@ class HostEngine implements Engine {
 
   private async publishEntry(state: ConversationState, entry: EntryRecord): Promise<void> {
     const message = await this.toMessage(state, entry);
-    if (message) this.emit(state, { type: "message", message });
+    if (!message) return;
+    this.emit(state, { type: "message", message });
+    this.noteInitiative(state, message);
+  }
+
+  /**
+   * A Ghost speaking first — its reply to a scheduled wake in a direct conversation — reaches the
+   * owner as a notification. Owner-started turns and Work reports already have their own signal.
+   * The id is keyed by the wake, so the first reply notifies once and replays add nothing.
+   */
+  private noteInitiative(state: ConversationState, message: Message): void {
+    if (message.role === "user") {
+      state.initiative = message.origin === "schedule" ? message.id : null;
+      return;
+    }
+    if (message.role !== "assistant" || state.initiative === null || message.text.trim() === "") return;
+    const conversation = this.core.ledger.findConversation(message.conversationId);
+    const wake = state.initiative;
+    state.initiative = null;
+    if (conversation?.kind !== "direct") return;
+    const ghost = this.core.ledger.ghost(conversation.ghostId);
+    const line = message.text.trim().split("\n").find((part) => part.trim() !== "")?.replace(/[#*_`>]/g, "").trim() ?? "";
+    this.core.ledger.tx(() => this.core.notify({
+      id: `message:${wake}`,
+      kind: "message",
+      ghostId: ghost.id,
+      conversationId: conversation.id,
+      workId: null,
+      decisionId: null,
+      title: ghost.name.slice(0, 256),
+      body: line.length > 280 ? `${line.slice(0, 279)}…` : line,
+    }));
   }
 
   /** Learn which entry a submission placed, so its message knows its origin. */

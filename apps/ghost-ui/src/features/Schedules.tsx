@@ -58,7 +58,7 @@ export function Schedules({ ghostId }: { ghostId?: string }) {
     finally { setPending(''); }
   };
   return <section className="flex min-w-0 flex-col gap-6" aria-label={uiTerms.schedules}>
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">{uiTerms.schedules}</h2>
       <Button type="button" disabled={!state} onClick={() => setCreating(true)}><Plus size={15}/>반복 작업 예약</Button>
     </div>

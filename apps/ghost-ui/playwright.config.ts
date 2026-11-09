@@ -19,7 +19,7 @@ export default defineConfig({
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFileName}/{arg}{ext}',
   projects: [
     { name: 'desktop', testIgnore: /iphone\.spec\.ts/ },
-    { name: 'iphone', testMatch: /iphone\.spec\.ts/, use: {
+    { name: 'iphone', testMatch: /(?:iphone|audit)\.spec\.ts/, use: {
       viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
     } },

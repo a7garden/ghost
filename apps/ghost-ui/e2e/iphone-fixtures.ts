@@ -25,7 +25,12 @@ export async function mockIPhone(page: Page) {
     const seed = readRunState();
     const seededGhosts = new Set([seed.defaultGhostId, seed.researchGhostId, seed.scribeGhostId]);
     state.ghosts = state.ghosts.filter(ghost => seededGhosts.has(ghost.id));
-    state.settings = { ...state.settings, providers: state.settings.providers.filter(provider => provider.id === 'visual_mock') };
+    state.settings = { ...state.settings, providers: state.settings.providers.filter(provider => provider.id === 'visual_mock')
+      .map(provider => ({ ...provider, baseUrl: provider.baseUrl ? 'http://127.0.0.1:8080/v1' : null })) };
+    state.schedules = [];
+    state.activities = [];
+    state.activityRuns = [];
+    state.connections = [];
     const device: Device = { id: 'visual-phone', name: '나의 iPhone', createdAt: 1, lastSeenAt: null, pushEnabled: false, alerts };
     await route.fulfill({ response, json: { ...state, principal: { kind: 'device', deviceId: device.id, name: device.name }, devices: [...state.devices, device] } });
   });
@@ -76,6 +81,39 @@ export async function mockRichConversation(page: Page) {
       { ...base, id: 'mobile-markdown', role: 'assistant', tool: null, text: '## 비교 메모\n\n| 항목 | 관찰 내용 | 다음 확인 | 담당 |\n| --- | --- | --- | --- |\n| 처리 시간 | 핵심 경로의 지연 | 실제 요청과 비교 | 연구원 |\n| 오류 기록 | 반복되는 실패 | 재현 조건 확인 | 기록가 |\n\n```ts\nconst observation = { latency: 42, source: "verified-sample", next: "compare" };\n```\n\n[참고 자료](https://example.com/report)' },
     ];
     messages[1].attachments = files.map(file => ({ name: file.name, mediaType: file.mediaType, digest: file.digest, size: new TextEncoder().encode(file.content).length }));
-    await route.fulfill({ response, json: { ...data, messages, before: null, live: null } });
+    const submitted = (data.messages as Message[]).filter(message => message.role === 'user' && message.text.startsWith('UI 응답 · 주간 조사'));
+    await route.fulfill({ response, json: { ...data, messages: [...messages, ...submitted], before: null, live: null } });
+  });
+}
+
+export async function mockMessageNotification(page: Page) {
+  await mockIPhone(page);
+  await page.route('**/api/state', async route => {
+    const response = await route.fetch();
+    const state = await response.json() as State;
+    const seed = readRunState();
+    await route.fulfill({ response, json: { ...state, works: [], decisions: [], notifications: [{
+      id: 'visual-message', kind: 'message', ghostId: seed.defaultGhostId, conversationId: seed.conversationA,
+      decisionId: null, workId: null, title: '도우미', body: '아침에 확인한 자료를 정리했어요. 가장 중요한 변화부터 전해드릴게요.',
+      createdAt: seed.fixedNow - 30_000, readAt: null,
+    }] } });
+  });
+  await page.route('**/api/commands', async route => {
+    const command = route.request().postDataJSON()?.command;
+    if (command?.type === 'notification.read' && command.notificationIds.includes('visual-message')) await route.fulfill({ json: { ok: true, result: {} } });
+    else await route.fallback();
+  });
+}
+
+export async function mockConversationActivity(page: Page) {
+  await page.route('**/api/conversations/*?*', async route => {
+    const response = await route.fetch();
+    const data = await response.json();
+    const conversationId = data.conversation.id;
+    const base = { conversationId, role: 'tool', origin: null, toolCalls: [], attachments: [], createdAt: readRunState().fixedNow - 1000 };
+    await route.fulfill({ response, json: { ...data, messages: [...data.messages,
+      { ...base, id: 'audit-read', text: '세 가지 자료를 읽고 중요한 차이를 정리했습니다.', tool: { name: 'document_read', callId: 'audit-read', isError: false } },
+      { ...base, id: 'audit-search', text: '일치하는 자료가 없습니다. 다른 검색어로 확인합니다.', tool: { name: 'web_search', callId: 'audit-search', isError: false } },
+    ], live: { conversationId, running: true, partial: '자료를 비교하고 있어요. 확인이 필요한 차이부터 정리해서 전해드릴게요.', thinking: '자료의 날짜와 출처를 비교했습니다.', tools: [{ callId: 'audit-live', name: 'web_read', output: '자료 본문을 읽고 있습니다.' }] } } });
   });
 }

@@ -107,7 +107,7 @@ export function UiInputBlock({ ui, block, conversationId, messageId, onUiSubmit 
           if (field.type === 'select') return <SelectField {...props} label={field.label} disabled={disabled} value={String(value)} onValueChange={next => change(field.id, next)} options={field.options} className="ghost-ui-select"/>;
           if (field.type === 'text' && field.multiline) return <Textarea {...props} disabled={disabled} value={String(value)} maxLength={2000} placeholder={field.placeholder} onChange={event => change(field.id, event.target.value)}/>;
           if (field.type === 'text') return <Input {...props} disabled={disabled} value={String(value)} maxLength={2000} placeholder={field.placeholder} onChange={event => change(field.id, event.target.value)}/>;
-          return <Input {...props} disabled={disabled} type="number" min={field.min} max={field.max} step={field.step ?? 'any'} value={String(value)} onChange={event => change(field.id, event.target.value)}/>;
+          return <Input {...props} disabled={disabled} type="number" inputMode="decimal" min={field.min} max={field.max} step={field.step ?? 'any'} value={String(value)} onChange={event => change(field.id, event.target.value)}/>;
         }}
       </FormField>)}</div>}
       <div className="ghost-ui-input__actions">

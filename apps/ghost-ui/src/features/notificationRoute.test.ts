@@ -11,3 +11,8 @@ it('prioritizes a pending decision, then work, then the actual conversation', ()
 it('does not fabricate a destination for stale or non-navigable notifications', () => {
   expect(notificationRoute({ ...notification, decisionId: 'gone', workId: null, conversationId: 'gone' }, state)).toBeNull();
 });
+
+it('opens a proactive message in its actual direct conversation', () => {
+  expect(notificationRoute({ ...notification, kind: 'message', title: '도우미', body: '정리한 내용을 가져왔어요.', decisionId: null, workId: null }, state))
+    .toBe('/ghosts/ghost%2F1?conversation=chat%2F1');
+});

@@ -51,7 +51,7 @@ export function Connections() {
   };
 
   return <section className="flex min-w-0 flex-col gap-6" aria-label={uiTerms.connections}>
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">{uiTerms.connections}</h2>
       <Button type="button" disabled={!state} onClick={() => { setError(''); setCreating(true); }}><Plus size={15}/>연결 추가</Button>
     </div>

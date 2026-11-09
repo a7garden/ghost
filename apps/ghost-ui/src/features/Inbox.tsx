@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { CheckCheck, MessageCircle } from 'lucide-react';
+import { CheckCheck } from 'lucide-react';
 import { Button, Page, PageHeader, InlineError } from '../ui'
 import type { Decision, Notification, State } from '@ghost/contract';
-import { StateGlyph } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
+import { NotificationRow } from '../components/NotificationRow';
 import { useHost } from '../host/context';
 import { uiTerms } from '../uiText';
 import { DecisionDeck } from './Decision';
@@ -51,18 +51,8 @@ export function InboxView({ state, navigate, focusDecisionId }: {
       </header>
       <ul className="feed">{notifications.map(item => {
         const navigable = Boolean(item.workId || item.decisionId || item.conversationId);
-        return <li key={item.id} data-unread={!item.readAt || undefined}>
-          <button type="button" className="feed__row" disabled={!navigable && Boolean(item.readAt)} onClick={() => navigable ? open(item) : markRead([item.id])} data-inbox-kind="notification">
-            <span className="feed__mark">{item.kind === 'work_done' ? <StateGlyph state="done"/> : item.kind === 'work_failed' ? <StateGlyph state="failed"/>
-              : item.kind === 'decision' ? <StateGlyph state="attention"/> : <MessageCircle size={15} aria-hidden="true"/>}</span>
-            <span className="feed__copy">
-              <span className="feed__title">{item.title}</span>
-              {item.body && <span className="feed__body">{item.body}</span>}
-            </span>
-            <span className="feed__meta">{item.ghostId && <span>{ghostName(item.ghostId)}</span>}<time className="tabular">{relativeTime(item.createdAt, now)}</time></span>
-            {!item.readAt && <span className="feed__dot"><span className="sr-only">읽지 않음</span></span>}
-          </button>
-        </li>;
+        return <NotificationRow key={item.id} item={item} ghostName={ghostName(item.ghostId)} now={now}
+          disabled={!navigable && Boolean(item.readAt)} onOpen={() => navigable ? open(item) : markRead([item.id])}/>;
       })}</ul>
     </section>}
 

@@ -5,7 +5,9 @@ import { routeLabels, uiTerms } from '../uiText';
 export interface Crumb { label: string; path: string | null }
 
 const settingsTabs: Record<string, string> = {
-  team: 'Ghost', models: '모델', devices: '기기', schedules: uiTerms.schedules, host: routeLabels.host, desktop: '데스크톱 아바타', appearance: '화면',
+  team: 'Ghost', models: '모델', vault: '금고', devices: '기기', schedules: uiTerms.schedules,
+  activities: uiTerms.activities, connections: uiTerms.connections,
+  host: routeLabels.host, desktop: '데스크톱 아바타', appearance: '화면',
 };
 
 /** A Work and the Works above it, root first. Stops at a missing or cyclic parent. */

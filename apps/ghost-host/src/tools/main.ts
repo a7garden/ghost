@@ -69,7 +69,7 @@ export function createMainTools(core: Core): Extension {
   const ghostUpdate = defineTool({
     name: "ghost_update",
     description:
-      "Change another Ghost's name, persona, model, fallback models, skills, look, state or tool allow-list, and re-apply its conversations. Main Ghost only; the main designation, host tools, document grants and credentials stay with the owner.",
+      "Change another Ghost's name, persona, model, fallback models, skills, look, state, tool allow-list (host tools included) or direct PC execution, and re-apply its conversations. Main Ghost only; the main designation and credentials stay with the owner. Grant PC execution or host tools only when a concrete task needs them; the owner is told about every such grant.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "The Ghost to update" }),
       name: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
@@ -80,16 +80,17 @@ export function createMainTools(core: Core): Extension {
       tools: Type.Optional(GhostToolList),
       fallbacks: Type.Optional(FallbackList),
       skills: Type.Optional(SkillList),
+      host_execution: Type.Optional(Type.Boolean({ description: "Allow Works of this Ghost to run directly on the owner's Mac (files and shell under the owner's account)" })),
     }),
     replay: "unsafe",
     async execute(args, api) {
       try {
-        const { target } = requireMain(core, api, args.ghost_id);
+        const { target, ...scope } = requireMain(core, api, args.ghost_id);
         if (target.deletedAt !== null) throw forbidden(`${target.name} was deleted`);
-        // Host tools reach the owner's Mac outside the sandbox: only the owner grants or revokes them.
-        if (args.tools !== undefined && HOST_TOOLS.some((tool) => args.tools!.includes(tool) !== target.tools.includes(tool))) {
-          throw forbidden("host tools are granted or revoked only by the owner");
-        }
+        const granted = [
+          ...(args.host_execution === true && !target.hostExecution ? ["PC 직접 실행"] : []),
+          ...HOST_TOOLS.filter((tool) => args.tools?.includes(tool) && !target.tools.includes(tool)),
+        ];
         const next = updateGhost(core, target.id, {
           name: args.name,
           persona: args.persona,
@@ -99,7 +100,21 @@ export function createMainTools(core: Core): Extension {
           tools: args.tools,
           fallbacks: args.fallbacks,
           skills: args.skills,
+          hostExecution: args.host_execution,
         });
+        // The Mac is the owner's: the main Ghost may open it to a teammate, but never silently.
+        if (granted.length > 0) {
+          core.ledger.tx(() => core.notify({
+            id: `grant:${scope.conversation.id}:${api.callId}`,
+            kind: "message",
+            ghostId: scope.ghost.id,
+            conversationId: scope.conversation.id,
+            workId: scope.work?.id ?? null,
+            decisionId: null,
+            title: `${next.name}에게 ${granted.join(", ")} 허용`,
+            body: `${scope.ghost.name}이(가) 작업에 필요해 허용했습니다. 설정 › Ghost에서 되돌릴 수 있습니다.`,
+          }));
+        }
         return text(`Updated.\n${renderGhost(next)}`);
       } catch (error) {
         return errorResult(error);

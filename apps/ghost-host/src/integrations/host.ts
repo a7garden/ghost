@@ -2,13 +2,14 @@ import {
   constants,
   existsSync,
   lstatSync,
+  readFileSync,
   realpathSync,
   statSync,
 } from "node:fs";
 import type { Dirent } from "node:fs";
 import { open, opendir, statfs } from "node:fs/promises";
 import { cpus, homedir, loadavg, totalmem } from "node:os";
-import { basename, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
   HostCommand,
   HostPort,
@@ -35,6 +36,8 @@ export interface HostRun {
   timeoutMs: number;
   maxBytes: number;
   home: string;
+  /** Host-internal only; never supplied by a tool caller. */
+  inspection?: boolean;
 }
 export type HostRunner = (input: HostRun) => Promise<HostOutput>;
 
@@ -44,7 +47,33 @@ export const runHostCommand: HostRunner = async (input) => {
   try {
     child = Bun.spawn([input.program, ...input.args], {
       cwd: input.cwd,
-      env: { PATH, HOME: input.home, LANG: "en_US.UTF-8" },
+      env: {
+        PATH, HOME: input.home, LANG: "en_US.UTF-8",
+        ...(input.inspection && input.program === "/usr/bin/git" ? {
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_OPTIONAL_LOCKS: "0",
+          GIT_PAGER: "/bin/cat",
+          // Command-scope config wins over repository config, including includes.
+          GIT_CONFIG_COUNT: "15",
+          GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: "/dev/null",
+          GIT_CONFIG_KEY_1: "core.fsmonitor", GIT_CONFIG_VALUE_1: "false",
+          GIT_CONFIG_KEY_2: "core.pager", GIT_CONFIG_VALUE_2: "/bin/cat",
+          GIT_CONFIG_KEY_3: "diff.external", GIT_CONFIG_VALUE_3: "",
+          GIT_CONFIG_KEY_4: "credential.helper", GIT_CONFIG_VALUE_4: "",
+          GIT_CONFIG_KEY_5: "credential.interactive", GIT_CONFIG_VALUE_5: "false",
+          GIT_CONFIG_KEY_6: "protocol.allow", GIT_CONFIG_VALUE_6: "never",
+          GIT_CONFIG_KEY_7: "protocol.https.allow", GIT_CONFIG_VALUE_7: "always",
+          GIT_CONFIG_KEY_8: "core.sshCommand", GIT_CONFIG_VALUE_8: "/usr/bin/false",
+          GIT_CONFIG_KEY_9: "log.showSignature", GIT_CONFIG_VALUE_9: "false",
+          GIT_CONFIG_KEY_10: "diff.submodule", GIT_CONFIG_VALUE_10: "short",
+          GIT_CONFIG_KEY_11: "core.untrackedCache", GIT_CONFIG_VALUE_11: "false",
+          GIT_CONFIG_KEY_12: "http.followRedirects", GIT_CONFIG_VALUE_12: "false",
+          GIT_CONFIG_KEY_13: "log.mailmap", GIT_CONFIG_VALUE_13: "false",
+          GIT_CONFIG_KEY_14: "format.pretty", GIT_CONFIG_VALUE_14: "medium",
+        } : {}),
+      },
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
@@ -153,6 +182,41 @@ const secretNames: Record<string, true> = {
   private: true,
   id_rsa: true,
   id_ed25519: true,
+  id_dsa: true,
+  id_ecdsa: true,
+  id_ecdsa_sk: true,
+  id_ed25519_sk: true,
+  keys: true,
+  keyrings: true,
+  passwords: true,
+  containers: true,
+  "group containers": true,
+  "mobile documents": true,
+  "cookies.binarycookies": true,
+  vault: true,
+  ".docker": true,
+  ".config": true,
+  ".npm": true,
+  ".password-store": true,
+  ".1password": true,
+  ".git-credentials": true,
+  ".gitconfig": true,
+  ".bash_history": true,
+  ".zsh_history": true,
+  safari: true,
+  firefox: true,
+  chrome: true,
+  chromium: true,
+  brave: true,
+  "brave-browser": true,
+  "microsoft edge": true,
+  thunderbird: true,
+  mail: true,
+  messages: true,
+  accounts: true,
+  "internet accounts": true,
+  addressbook: true,
+  calendars: true,
 };
 const privateNames: Record<string, true> = {
   finance: true,
@@ -208,7 +272,9 @@ export function sensitiveText(text: string): boolean {
 export const redactHostText = (text: string) =>
   text
     .split("\n")
-    .map((line) => (sensitiveText(line) ? "[REDACTED: sensitive text]" : line))
+    .map((line) => (sensitiveText(line) ? "[REDACTED: sensitive text]" :
+      line.replace(/(https?:\/\/)[^/\s@]+@/gi, "$1[REDACTED]@")
+        .replace(/([?&](?:token|access_token|key|password)=)[^&\s]+/gi, "$1[REDACTED]")))
     .join("\n");
 const inside = (path: string, root: string) => {
   const rel = relative(root, path);
@@ -223,6 +289,132 @@ const expand = (path: string, home: string) =>
     : path.startsWith("~/")
       ? join(home, path.slice(2))
       : path;
+
+interface InspectionShape {
+  paths: number[];
+  git?: boolean;
+  findAction?: boolean;
+}
+
+/** Deliberately small argv grammar, not a blacklist of dangerous command names. */
+function inspectionShape(program: string, args: string[]): InspectionShape | null {
+  if (!Array.isArray(args) || args.length > 64 ||
+      args.some((arg) => typeof arg !== "string" || arg.length > 4096 || /[\0\r\n;|&<>`$]/.test(arg)) ||
+      args.join("").length > 12_000) return null;
+  const paths: number[] = [];
+  const operands = (start: number, flags: RegExp, valued: readonly string[] = []) => {
+    let positional = false;
+    for (let i = start; i < args.length; i++) {
+      const arg = args[i]!;
+      if (!positional && arg === "--") { positional = true; continue; }
+      if (!positional && valued.includes(arg)) {
+        if (!/^\d{1,9}$/.test(args[++i] ?? "")) return false;
+      } else if (!positional && arg.startsWith("-")) {
+        if (!flags.test(arg)) return false;
+      } else {
+        if (!arg || arg === "-") return false; // never read stdin
+        paths.push(i);
+      }
+    }
+    return true;
+  };
+  switch (program) {
+    case "/bin/ls":
+      return operands(0, /^-[1AacdfghiklmnopqrstuxFST]+$/) ? { paths } : null;
+    case "/bin/cat":
+      return operands(0, /^-[benstuv]+$/) && paths.length ? { paths } : null;
+    case "/usr/bin/head":
+    case "/usr/bin/tail":
+      return operands(0, /^-(?:[qvr]+|\d{1,9})$/, ["-n", "-c"]) && paths.length ? { paths } : null;
+    case "/usr/bin/wc":
+      return operands(0, /^-[clmw]+$/) && paths.length ? { paths } : null;
+    case "/usr/bin/stat":
+      return operands(0, /^-[lnqrsx]+$/) && paths.length ? { paths } : null;
+    case "/usr/bin/file":
+      return operands(0, /^-[bhiIN]+$/) && paths.length ? { paths } : null;
+    case "/usr/bin/du":
+      return operands(0, /^-[acdhkmnrsxP]+$/, ["-d"]) ? { paths } : null;
+    case "/bin/df":
+      return operands(0, /^-[HhiklmnPT]+$/) ? { paths } : null;
+    case "/usr/bin/find": {
+      let i = 0;
+      if (args[0] === "-P" || args[0] === "-x") i++;
+      while (i < args.length && !args[i]!.startsWith("-") && !["(", "!", ")"].includes(args[i]!))
+        paths.push(i++);
+      if (!paths.length) return null;
+      let findAction = false;
+      for (; i < args.length; i++) {
+        const arg = args[i]!;
+        if (["-print", "-print0", "-ls", "-prune"].includes(arg)) { findAction = true; continue; }
+        if (["-empty", "-a", "-and", "-o", "-or", "!", "-not", "(", ")", "-xdev"].includes(arg)) continue;
+        if (["-name", "-iname", "-path", "-ipath"].includes(arg)) {
+          if (!args[++i] || args[i]!.includes("/../")) return null;
+        } else if (arg === "-type") {
+          if (!/^[bcdflps]$/.test(args[++i] ?? "")) return null;
+        } else if (["-mtime", "-mmin", "-ctime", "-cmin", "-atime", "-amin", "-size", "-maxdepth", "-mindepth"].includes(arg)) {
+          if (!/^[+-]?\d{1,9}[ckMG]?$/i.test(args[++i] ?? "")) return null;
+        } else return null;
+      }
+      return { paths, findAction };
+    }
+    case "/bin/ps":
+      // No environment or command arguments: they commonly contain credentials.
+      return args.length === 0 || (args.length === 2 && args[0] === "-axo" &&
+        /^(?:pid|ppid|pcpu|pmem|rss|vsz|stat|comm|etime|time)(?:=)?(?:,(?:pid|ppid|pcpu|pmem|rss|vsz|stat|comm|etime|time)(?:=)?)*$/.test(args[1]!))
+        ? { paths } : null;
+    case "/usr/bin/sw_vers":
+      return args.length === 0 || (args.length === 1 && ["-productName", "-productVersion", "-buildVersion"].includes(args[0]!)) ? { paths } : null;
+    case "/usr/bin/uptime":
+      return args.length === 0 ? { paths } : null;
+    case "/usr/bin/plutil":
+      return args.length === 2 && args[0] === "-p" ? { paths: [1] } : null;
+    case "/bin/launchctl":
+      return (args[0] === "list" && args.length <= 2 &&
+        (!args[1] || /^[a-zA-Z0-9._-]+$/.test(args[1]))) ||
+        (args[0] === "print" && args.length === 2 &&
+          /^(?:system|user\/\d+|gui\/\d+)(?:\/[a-zA-Z0-9._-]+)?$/.test(args[1]!))
+        ? { paths } : null;
+    case "/usr/bin/git": {
+      let i = 0;
+      for (; i < args.length; i++) {
+        if (args[i] === "--no-optional-locks") continue;
+        if (args[i] === "-C" && args[i + 1]) { paths.push(++i); continue; }
+        break;
+      }
+      const sub = args[i++];
+      const rest = args.slice(i);
+      const all = (pattern: RegExp) => rest.every((arg) => pattern.test(arg));
+      let allowed = false;
+      switch (sub) {
+        case "status": allowed = all(/^(?:--short|--branch|--porcelain(?:=v[12])?|--untracked-files=(?:no|normal|all))$/); break;
+        case "log": allowed = all(/^(?:-\d{1,4}|--max-count=\d{1,4}|--oneline|--stat|--name-only|--all|--decorate(?:=short|=no)?|--no-decorate|--graph|--no-merges|--first-parent)$/); break;
+        case "show":
+        case "diff":
+          allowed = rest.some((a) => a === "--stat" || a === "--name-only") &&
+            all(/^(?:--stat|--name-only|--cached|--staged|--no-renames|--no-ext-diff|--no-textconv|HEAD(?:~\d{1,4}|\^\d?)?|[a-f0-9]{7,40})$/);
+          break;
+        case "branch": allowed = all(/^(?:--list|--all|--remotes|--verbose|-[arv]+|--show-current)$/); break;
+        case "remote": allowed = rest.length === 1 && rest[0] === "-v"; break;
+        case "rev-parse": allowed = rest.length > 0 && all(/^(?:--show-toplevel|--show-prefix|--git-dir|--is-inside-work-tree|--is-bare-repository|--short|--verify|--abbrev-ref|HEAD(?:~\d{1,4}|\^\d?)?)$/); break;
+        case "stash": allowed = rest.length === 1 && rest[0] === "list"; break;
+        case "config": allowed = rest.length === 2 && rest[0] === "--get" &&
+          /^(?:user\.(?:name|email)|core\.(?:bare|repositoryformatversion|filemode|ignorecase)|remote\.[a-zA-Z0-9_-]+\.(?:url|fetch)|branch\.[a-zA-Z0-9_/-]+\.(?:remote|merge))$/.test(rest[1]!); break;
+        case "ls-remote":
+          // Configured names are safe only with the HTTPS-only transport policy below.
+          allowed = rest.length > 0 && rest.every((arg, n) =>
+            n === rest.length - 1
+              ? /^(?:https:\/\/[a-zA-Z0-9.-]+(?::\d+)?\/[a-zA-Z0-9._~/%+-]+|[a-zA-Z0-9][a-zA-Z0-9_-]*)$/.test(arg)
+              : /^(?:--heads|--tags|--refs|--symref|--exit-code)$/.test(arg));
+          break;
+      }
+      return allowed ? { paths, git: true } : null;
+    }
+    default: return null;
+  }
+}
+
+export const isReadOnlyHostCommand = (input: Pick<HostCommand, "program" | "args">) =>
+  inspectionShape(input.program, input.args) !== null;
 async function entries(path: string, limit: number) {
   const result = [];
   const dir = await opendir(path);
@@ -275,6 +467,7 @@ export class MacHost implements HostPort {
     timeoutMs = 6000,
     maxBytes = 24_000,
     cwd = this.home,
+    inspection = false,
   ) {
     return this.runner({
       program,
@@ -283,6 +476,7 @@ export class MacHost implements HostPort {
       maxBytes,
       cwd,
       home: this.home,
+      inspection,
     });
   }
   resolve(path: string, text = false, projectsOnly = false): string {
@@ -325,6 +519,80 @@ export class MacHost implements HostPort {
         throw new Error("secret or private path refused");
     }
     return canonical;
+  }
+  private inspectionPath(path: string, base = this.home, gitMetadata = false): string {
+    if (typeof path !== "string" || !path || path.length > 4096 || /[\0\r\n]/.test(path))
+      throw new Error("invalid inspection path");
+    const home = realpathSync(this.home);
+    const raw = resolve(base, expand(path, this.home));
+    const canonical = realpathSync(raw);
+    for (const candidate of [raw, canonical]) {
+      const root = inside(candidate, home) ? home :
+        candidate === raw && inside(candidate, this.home) ? this.home : null;
+      if (!root) throw new Error("inspection path or symlink is outside owner home");
+      const parts = relative(root, candidate).split(sep);
+      // Git may inspect its own metadata, never arbitrary .git text via cat.
+      const guarded = gitMetadata ? parts.filter((part) => part !== ".git").join(sep) : parts.join(sep);
+      if (secretPath(guarded) || privateTextPath(guarded))
+        throw new Error("secret or private inspection path refused");
+    }
+    return canonical;
+  }
+  private gitDirectory(base: string): { directory: string; worktree: string | null } | null {
+    const home = realpathSync(this.home);
+    for (let dir = base;; dir = dirname(dir)) {
+      const dotgit = join(dir, ".git");
+      const worktree = existsSync(dotgit);
+      const bare = !worktree && existsSync(join(dir, "HEAD")) && existsSync(join(dir, "objects"));
+      if (worktree || bare) {
+        let directory = this.inspectionPath(worktree ? dotgit : dir, dir, true);
+        if (statSync(directory).isFile()) {
+          if (statSync(directory).size > 4096) throw new Error("invalid git directory file");
+          const match = /^gitdir: (.+)\r?\n?$/.exec(readFileSync(directory, "utf8"));
+          if (!match) throw new Error("invalid git directory file");
+          directory = this.inspectionPath(match[1]!, dir, true);
+        }
+        if (!statSync(directory).isDirectory()) throw new Error("invalid git directory");
+        const common = join(directory, "commondir");
+        const metadata = [directory];
+        if (existsSync(common)) {
+          if (statSync(common).size > 4096) throw new Error("invalid git common directory");
+          metadata.push(this.inspectionPath(readFileSync(common, "utf8").trim(), directory, true));
+        }
+        for (const root of metadata) {
+          for (const name of ["config", "config.worktree", "index", "HEAD", "packed-refs", "objects", "refs", "logs", "info"]) {
+            const path = join(root, name);
+            if (existsSync(path)) this.inspectionPath(path, root, true);
+          }
+          if (existsSync(join(root, "objects/info/alternates")))
+            throw new Error("alternate Git object stores are not supported for inspection");
+        }
+        return { directory, worktree: worktree ? dir : null };
+      }
+      if (dir === home) return null;
+    }
+  }
+  private inspectCommand(input: HostCommand, shape: InspectionShape): HostCommand {
+    const cwd = this.inspectionPath(input.cwd);
+    if (!statSync(cwd).isDirectory()) throw new Error("cwd must be a directory");
+    const args = [...input.args];
+    let base = cwd;
+    for (const index of shape.paths) {
+      args[index] = this.inspectionPath(args[index]!, base);
+      if (shape.git) {
+        if (!statSync(args[index]!).isDirectory()) throw new Error("git -C requires a directory");
+        base = args[index]!;
+      } else if (["/bin/cat", "/usr/bin/head", "/usr/bin/tail", "/usr/bin/wc", "/usr/bin/plutil"].includes(input.program) &&
+          !statSync(args[index]!).isFile()) {
+        throw new Error("inspection requires regular files");
+      }
+    }
+    if (shape.git) this.gitDirectory(base);
+    const executable = realpathSync(input.program);
+    if (!statSync(executable).isFile() || (statSync(executable).mode & 0o111) === 0)
+      throw new Error("executable file required");
+    // Retain the strict absolute allowlist spelling across revalidation.
+    return { ...input, args, program: input.program, cwd };
   }
   async status(): Promise<HostStatus> {
     const warnings: string[] = [];
@@ -727,6 +995,8 @@ export class MacHost implements HostPort {
       input.args.join("").length > 12_000
     )
       throw new Error("invalid arguments or shell metacharacter snippet");
+    const inspection = inspectionShape(input.program, input.args);
+    if (inspection) return this.inspectCommand(input, inspection);
     const cwd = this.resolve(input.cwd, false, true);
     if (!statSync(cwd).isDirectory())
       throw new Error("cwd must be a directory");
@@ -800,12 +1070,60 @@ export class MacHost implements HostPort {
         error instanceof Error ? error.message : String(error),
       );
     }
+    const inspection = inspectionShape(checked.program, checked.args);
+    const deadline = Date.now() + 90_000;
+    let args = checked.args;
+    if (inspection) {
+      args = [...args];
+      const ignored = [...Object.keys(secretNames), ...Object.keys(privateNames),
+        ".env*", "*secret*", "*credential*", "*api_key*", "*apikey*", "*.pem", "*.key", "*.p12", "*.sqlite", "*.db"];
+      if (checked.program === "/usr/bin/find") {
+        const end = Math.max(...inspection.paths) + 1;
+        const predicates = args.slice(end);
+        args = ["-P", ...args.slice(0, end).filter((a) => a !== "-P"), "(",
+          ...ignored.flatMap((name, index) => [...(index ? ["-o"] : []), "-iname", name]),
+          ")", "-prune", "-o", "(", ...predicates, ...(!inspection.findAction ? ["-print"] : []), ")"];
+      } else if (checked.program === "/usr/bin/du") {
+        args.unshift("-P", ...ignored.flatMap((name) => [
+          "-I", name.replace(/[a-z]/g, (letter) => `[${letter}${letter.toUpperCase()}]`),
+        ]));
+      } else if (checked.program === "/bin/ps" && args.length === 0) {
+        args = ["-axo", "pid,ppid,pcpu,pmem,comm"];
+      } else if (inspection.git) {
+        let base = checked.cwd;
+        for (const index of inspection.paths) base = args[index]!;
+        const repository = this.gitDirectory(base);
+        const prefix = repository ? ["--git-dir", repository.directory,
+          "-c", repository.worktree ? `core.worktree=${repository.worktree}` : "core.bare=true"] : [];
+        // Even status/diff can run arbitrary clean/process filters through attributes.
+        // Ask Git for config key names only, then disable every configured filter driver.
+        const config = await this.run("/usr/bin/git",
+          [...prefix, "config", "--includes", "--null", "--name-only", "--get-regexp", "^filter\\."],
+          Math.min(6000, Math.max(1, deadline - Date.now())), 24_000, base, true);
+        if (config.timedOut || config.truncated || (config.exitCode !== 0 && config.exitCode !== 1))
+          throw new NoEffect("could not safely inspect Git filter configuration");
+        const drivers = new Set<string>();
+        for (const key of config.stdout.split("\0").filter(Boolean)) {
+          const match = /^filter\.(.+)\.(?:clean|smudge|process|required)$/i.exec(key);
+          if (!match || /[\0\r\n=]/.test(match[1]!))
+            throw new NoEffect("unsupported Git filter configuration");
+          drivers.add(match[1]!);
+        }
+        args.unshift(...prefix, ...[...drivers].flatMap((driver) =>
+          ["clean", "smudge", "process", "required"].flatMap((key) =>
+            ["-c", `filter.${driver}.${key}=${key === "required" ? "false" : ""}`])));
+        const sub = args.find((arg) => ["log", "show", "diff", "status"].includes(arg));
+        if (sub) args.splice(args.indexOf(sub) + 1, 0,
+          ...(sub === "status" ? ["--ignore-submodules=all"] : ["--no-ext-diff", "--no-textconv", "--ignore-submodules=all"]));
+      }
+    }
     const result = await this.run(
       checked.program,
-      checked.args,
-      90_000,
+      args,
+      Math.max(1, deadline - Date.now()),
       24_000,
       checked.cwd,
+      inspection !== null,
     );
     return {
       exitCode: result.exitCode,

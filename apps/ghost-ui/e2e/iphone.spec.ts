@@ -32,7 +32,7 @@ for (const theme of ['light', 'dark'] as const) {
         expect(Math.abs(segmentBounds!.y + segmentBounds!.height / 2 - assignBounds!.y - assignBounds!.height / 2)).toBeLessThan(1);
         expect(assignBounds!.x).toBeGreaterThan(segmentBounds!.x + segmentBounds!.width);
         const chips = await page.locator('.ghost-filter > button').evaluateAll(buttons => buttons.map(button => ({
-          hitHeight: button.getBoundingClientRect().height,
+          hitHeight: button.clientHeight,
           pillHeight: parseFloat(getComputedStyle(button, '::before').height),
         })));
         expect(chips.every(chip => chip.hitHeight >= 44 && chip.pillHeight === 28)).toBe(true);
@@ -77,6 +77,18 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(composer).toHaveValue('함께 확인할 내용\n');
       await expect(composer).toBeFocused();
       await screenshot(page, `composer-focused-${theme}-iphone.png`);
+      await page.evaluate(() => {
+        Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 500 });
+        window.visualViewport!.dispatchEvent(new Event('resize'));
+      });
+      await expect(page.locator('html')).toHaveAttribute('data-keyboard', 'open');
+      const composerBounds = (await composer.boundingBox())!;
+      expect(composerBounds.y + composerBounds.height).toBeLessThanOrEqual(500);
+      await screenshot(page, `composer-keyboard-${theme}-iphone.png`);
+      await page.evaluate(() => {
+        Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 844 });
+        window.visualViewport!.dispatchEvent(new Event('resize'));
+      });
       await page.getByRole('button', { name: '모델 ', exact: false }).click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await screenshot(page, `model-sheet-${theme}-iphone.png`);
@@ -89,6 +101,12 @@ for (const theme of ['light', 'dark'] as const) {
       await transcript.evaluate(element => { element.scrollTop = 0; });
       await expect(page.getByRole('heading', { name: '주간 조사', exact: true })).toBeVisible();
       await screenshot(page, `rich-chart-${theme}-iphone.png`);
+      const chart = page.locator('.ghost-ui-block').filter({ has: page.getByRole('heading', { name: '처리량', exact: false }) });
+      await chart.getByRole('radio', { name: '데이터', exact: true }).click();
+      await expect(chart.getByRole('cell', { name: '23', exact: true })).toBeVisible();
+      await screenshot(page, `chart-data-${theme}-iphone.png`);
+      await chart.getByRole('radio', { name: '차트', exact: true }).click();
+      expect(await chart.locator('.ghost-ui-scroll').evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
       for (const [name, title] of [['comparison', '접근 방식 비교'], ['choices', '다음 조사'], ['form', '조사 범위'], ['html', '보고서 미리보기'], ['markdown', '비교 메모']]) {
         await page.getByRole('heading', { name: title, exact: true }).evaluate(element => element.scrollIntoView({ block: 'start' }));
         await screenshot(page, `rich-${name}-${theme}-iphone.png`);
@@ -110,6 +128,85 @@ for (const theme of ['light', 'dark'] as const) {
         if (name === 'pdf') await expect(sheet.locator('iframe')).toBeVisible();
         await screenshot(page, `file-${name}-${theme}-iphone.png`);
         await sheet.getByRole('button', { name: '파일 닫기' }).click();
+      }
+      const comparison = page.locator('.ghost-ui-scroll[aria-label="접근 방식 비교"]');
+      await comparison.scrollIntoViewIfNeeded();
+      const row = comparison.locator('tbody th').first();
+      const left = (await row.boundingBox())!.x;
+      await comparison.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+      expect(Math.abs((await row.boundingBox())!.x - left)).toBeLessThanOrEqual(1);
+      await screenshot(page, `comparison-scrolled-${theme}-iphone.png`);
+      const htmlBlock = page.locator('.ghost-ui-block').filter({ has: page.getByRole('heading', { name: '보고서 미리보기', exact: true }) });
+      await htmlBlock.getByRole('button', { name: '보고서 미리보기 전체 화면' }).click();
+      const full = page.getByRole('dialog', { name: '보고서 미리보기', exact: true });
+      await expect(full).toBeVisible();
+      expect((await full.boundingBox())!.height).toBe(844);
+      await expect(full.locator('iframe')).toHaveAttribute('sandbox', '');
+      await expect(full.locator('iframe')).toHaveCSS('resize', 'none');
+      await screenshot(page, `html-fullscreen-${theme}-iphone.png`);
+      await full.getByRole('button', { name: '닫기', exact: true }).click();
+    });
+    test('interactive inputs send ordinary owner messages and retain editing state', async ({ page }) => {
+      const state = await openScreen(page, { name: 'submit', route: () => '/', waits: () => [], prepare: mockRichConversation }, theme);
+      await expect(page.locator('.home')).toBeVisible();
+      const send = (command: Record<string, unknown>) => page.evaluate(async command => {
+        const response = await fetch('/api/commands', { method: 'POST', headers: { authorization: `Bearer ${window.__GHOST_TOKEN__}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ requestId: crypto.randomUUID(), command }) });
+        const body = await response.json();
+        if (!response.ok || !body.ok) throw new Error(JSON.stringify(body));
+        return body.result;
+      }, command);
+      const { ghostId } = await send({ type: 'ghost.create', name: '입력 확인', persona: '합성 UI 응답 검증용 Ghost입니다.',
+        look: { avatarId: null, body: '#5b7fd4', face: 'bars', mark: 'halo' } });
+      try {
+        await page.goto(`${state.baseUrl}/#/ghosts/${ghostId}`);
+        const choices = page.locator('.ghost-ui-block').filter({ has: page.getByRole('heading', { name: '다음 조사', exact: true }) });
+        await choices.getByLabel('속도 지표', { exact: false }).check();
+        const option = choices.locator('.ghost-ui-choice').first();
+        expect((await option.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        expect((await option.boundingBox())!.width).toBeGreaterThan(300);
+        const posted = page.waitForRequest(request => request.url().endsWith('/api/commands') && request.postDataJSON()?.command?.type === 'message.send');
+        await choices.getByRole('button', { name: '선택 보내기' }).click();
+        expect((await posted).postDataJSON().command.text).toBe(['UI 응답 · 주간 조사', '다음 조사', '속도 지표', '주요 경로의 처리 시간을 살펴봅니다.'].join('\n'));
+        await expect(choices.getByRole('status')).toHaveText('메시지로 보냈습니다.');
+        await expect(page.locator('[data-role="user"]').getByText('UI 응답 · 주간 조사', { exact: false })).toBeVisible();
+        await choices.scrollIntoViewIfNeeded();
+        await screenshot(page, `choices-sent-${theme}-iphone.png`);
+        await choices.getByRole('button', { name: '응답 수정' }).click();
+        await expect(choices.getByLabel('속도 지표', { exact: false })).toBeChecked();
+        await expect(choices.getByLabel('오류 패턴', { exact: true })).toBeEnabled();
+        await screenshot(page, `choices-editing-${theme}-iphone.png`);
+        const form = page.locator('.ghost-ui-block').filter({ has: page.getByRole('heading', { name: '조사 범위', exact: true }) });
+        await form.getByRole('textbox', { name: '주제' }).fill('모바일 사용성');
+        await expect(form.getByRole('spinbutton', { name: '자료 수' })).toHaveAttribute('inputmode', 'decimal');
+        await form.getByRole('spinbutton', { name: '자료 수' }).fill('7');
+        // WKWebView's layout viewport stays tall while the software keyboard reduces visualViewport.
+        await page.evaluate(() => {
+          Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 500 });
+          window.visualViewport!.dispatchEvent(new Event('resize'));
+        });
+        await expect(page.locator('html')).toHaveAttribute('data-keyboard', 'open');
+        await form.getByRole('button', { name: '범위 보내기' }).scrollIntoViewIfNeeded();
+        expect((await form.getByRole('button', { name: '범위 보내기' }).boundingBox())!.y + 44).toBeLessThanOrEqual(500);
+        const numberBounds = (await form.getByRole('spinbutton', { name: '자료 수' }).boundingBox())!;
+        const submitBounds = (await form.getByRole('button', { name: '범위 보내기' }).boundingBox())!;
+        expect(numberBounds.y + numberBounds.height).toBeLessThanOrEqual(submitBounds.y);
+        await screenshot(page, `form-keyboard-${theme}-iphone.png`);
+        await form.getByRole('button', { name: '범위 보내기' }).click();
+        await expect(form.getByRole('status')).toHaveText('메시지로 보냈습니다.');
+        await expect(page.locator('[data-role="user"]').getByText('- 주제: "모바일 사용성"', { exact: false })).toBeVisible();
+        await page.evaluate(() => {
+          Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 844 });
+          window.visualViewport!.dispatchEvent(new Event('resize'));
+        });
+        await form.scrollIntoViewIfNeeded();
+        await screenshot(page, `form-sent-${theme}-iphone.png`);
+        await page.reload();
+        await expect(form.getByRole('button', { name: '응답 수정' })).toBeAttached();
+        await expect(form.getByRole('textbox', { name: '주제' })).toHaveValue('모바일 사용성');
+      } finally {
+        await send({ type: 'ghost.update', ghostId, state: 'retired' });
+        await send({ type: 'ghost.delete', ghostId });
       }
     });
   });

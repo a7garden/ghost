@@ -12,6 +12,7 @@ import { blurTouchSearchOnEnter } from '../ui/adaptive';
 
 const kinds: { kind: NotificationKind; label: string; tone: string }[] = [
   { kind: 'decision', label: '확인 요청', tone: 'attention' },
+  { kind: 'message', label: '대화', tone: 'message' },
   { kind: 'work_done', label: '완료', tone: 'done' },
   { kind: 'work_failed', label: '실패', tone: 'failed' },
 ];

@@ -595,6 +595,31 @@ describe("tools", () => {
     expect(s.ledger.ghost(helper.id).tools).toEqual(["work_list", "read"]);
   });
 
+  test("the main Ghost can open the Mac to a teammate, and the owner is told every time", async () => {
+    const s = setup();
+    const helper = s.core.createGhost({ name: "Helper", persona: "You help." });
+    const pi = asPi(s, s.direct, "pi-direct");
+    const update = toolOf(s, s.direct, s.ghost, "ghost_update");
+    const spoken = () => s.ledger.notificationsForState().filter((item) => item.kind === "message");
+
+    const renamed = await call(update, { ghost_id: helper.id, name: "Helper 2" }, apiOf(pi, "rename"));
+    expect(renamed.isError).toBeFalsy();
+    expect(spoken()).toEqual([]);
+
+    const granted = await call(update, { ghost_id: helper.id, host_execution: true, tools: [...helper.tools, "host_read"] }, apiOf(pi, "grant"));
+    expect(granted.isError).toBeFalsy();
+    const after = s.ledger.ghost(helper.id);
+    expect(after.hostExecution).toBe(true);
+    expect(after.tools).toContain("host_read");
+    expect(spoken()).toHaveLength(1);
+    expect(spoken()[0]!.title).toContain("PC 직접 실행");
+    expect(spoken()[0]!.title).toContain("host_read");
+
+    const again = await call(update, { ghost_id: helper.id, host_execution: true }, apiOf(pi, "again"));
+    expect(again.isError).toBeFalsy();
+    expect(spoken()).toHaveLength(1);
+  });
+
   test("losing the main designation revokes ghost_update at execution, and the new main takes over", async () => {
     const s = setup();
     const helper = s.core.createGhost({ name: "Helper", persona: "You help." });

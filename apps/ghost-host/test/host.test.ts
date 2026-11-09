@@ -1,5 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
+  appendFileSync,
+  existsSync,
   chmodSync,
   mkdirSync,
   realpathSync,
@@ -12,6 +14,7 @@ import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { HOST_TOOLS } from "@ghost/contract";
 import {
   MacHost,
+  isReadOnlyHostCommand,
   redactHostText,
   runHostCommand,
   sensitiveText,
@@ -139,6 +142,175 @@ class Probes implements HostPort {
 }
 
 describe("guarded Mac host", () => {
+  test("inspection classification accepts only fixed programs and read-only argv shapes", () => {
+    const allowed: [string, string[]][] = [
+      ["/bin/ls", ["-lah", "~/Backup/mirror"]],
+      ["/bin/cat", ["~/Library/Logs/infra.log"]],
+      ["/usr/bin/head", ["-n", "40", "infra.log"]],
+      ["/usr/bin/tail", ["-n", "80", "infra.log"]],
+      ["/usr/bin/wc", ["-l", "infra.log"]],
+      ["/usr/bin/stat", ["-x", "infra.log"]],
+      ["/usr/bin/file", ["-b", "infra.log"]],
+      ["/usr/bin/du", ["-sh", "~/Backup/mirror"]],
+      ["/usr/bin/find", ["~/Backup/mirror", "-type", "f", "-name", "*.log", "-print"]],
+      ["/bin/df", ["-h"]],
+      ["/bin/ps", ["-axo", "pid,pcpu,comm"]],
+      ["/usr/bin/sw_vers", []],
+      ["/usr/bin/uptime", []],
+      ["/usr/bin/plutil", ["-p", "~/Library/LaunchAgents/infra.plist"]],
+      ["/bin/launchctl", ["list"]],
+      ["/bin/launchctl", ["print", "gui/501/dev.infra"]],
+      ["/usr/bin/git", ["-C", "~/Backup/mirror", "--no-optional-locks", "status", "--short"]],
+      ["/usr/bin/git", ["log", "-5", "--oneline"]],
+      ["/usr/bin/git", ["show", "--stat", "HEAD"]],
+      ["/usr/bin/git", ["diff", "--name-only", "--cached"]],
+      ["/usr/bin/git", ["branch", "-av"]],
+      ["/usr/bin/git", ["remote", "-v"]],
+      ["/usr/bin/git", ["ls-remote", "--heads", "https://github.com/owner/repo.git"]],
+      ["/usr/bin/git", ["ls-remote", "origin"]],
+      ["/usr/bin/git", ["rev-parse", "--show-toplevel"]],
+      ["/usr/bin/git", ["stash", "list"]],
+      ["/usr/bin/git", ["config", "--get", "user.email"]],
+    ];
+    for (const [program, args] of allowed)
+      expect(isReadOnlyHostCommand({ program, args })).toBe(true);
+    const denied: [string, string[]][] = [
+      ["/bin/sh", ["-c", "cat log"]],
+      ["/usr/local/bin/cat", ["log"]],
+      ["/usr/bin/curl", ["https://example.com"]],
+      ["/bin/cat", ["log", ">", "result"]],
+      ["/bin/cat", ["log;touch result"]],
+      ["/bin/ls", ["-R", "."]],
+      ["/usr/bin/tail", ["-f", "log"]],
+      ["/usr/bin/file", ["-C", "."]],
+      ["/usr/bin/stat", ["-L", "."]],
+      ["/usr/bin/du", ["-L", "."]],
+      ["/bin/ps", ["auxe"]],
+      ["/usr/bin/plutil", ["-replace", "Label", "-string", "changed", "agent.plist"]],
+      ["/bin/launchctl", ["bootout", "gui/501/dev.infra"]],
+      ...["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls", "-L"].map((flag): [string, string[]] =>
+        ["/usr/bin/find", [".", flag, "file"]]),
+      ...[
+        ["-c", "core.fsmonitor=evil", "status"], ["--config-env=core.fsmonitor=EVIL", "status"],
+        ["push"], ["fetch"], ["pull"], ["reset", "--hard"], ["checkout", "main"],
+        ["branch", "-D", "main"], ["branch", "new"], ["remote", "set-url", "origin", "https://example.com/repo"],
+        ["show", "HEAD:file"], ["diff", "--output=leak"], ["log", "--output=leak"], ["log", "--ext-diff"],
+        ["stash", "pop"], ["config", "user.name", "changed"], ["config", "--get", "credential.helper"],
+        ["config", "--get", "http.extraHeader"], ["ls-remote", "ext::touch result"], ["ls-remote", "file:///tmp/repo"],
+      ].map((args): [string, string[]] => ["/usr/bin/git", args]),
+    ];
+    for (const [program, args] of denied)
+      expect(isReadOnlyHostCommand({ program, args })).toBe(false);
+  });
+  test("home inspections cover operations paths, redact output and refuse sensitive paths and symlink escapes", async () => {
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => { calls.push(input); return ok("healthy\npassword=hidden\n"); });
+    const outside = realpathSync(tempDir());
+    try {
+      for (const directory of ["Library/Logs", ".local/state/infra", "Library/LaunchAgents", "Backup/mirror"]) {
+        mkdirSync(join(f.home, directory), { recursive: true });
+        const path = join(f.home, directory, "operations.log");
+        writeFileSync(path, "healthy");
+        const checked = f.host.validateCommand({
+          ...command(f.root), program: "/bin/cat", cwd: join(f.home, directory), args: [path],
+        });
+        const result = await f.host.executeCommand(checked);
+        expect(result.output).toBe("healthy\n[REDACTED: sensitive text]\n");
+      }
+      expect(calls).toHaveLength(4);
+      expect(calls.every((call) => call.inspection && call.timeoutMs <= 90_000 && call.maxBytes === 24_000)).toBe(true);
+      for (const sensitive of [
+        ".ssh/id_ed25519", ".gnupg/pubring.kbx", ".aws/config", ".env.production",
+        "Library/Keychains/login.keychain-db", "Library/Application Support/Google/Chrome/Default/Preferences",
+        "Library/Mail/inbox.txt", "Library/Messages/chat.txt", "state/secrets/provider.json", "state/vault/key",
+        "private/record.txt", "notes/note.txt", ".git/config", ".git-credentials",
+      ]) {
+        const path = join(f.home, sensitive);
+        mkdirSync(join(path, ".."), { recursive: true });
+        writeFileSync(path, "private");
+        expect(() => f.host.validateCommand({
+          ...command(f.root), program: "/bin/cat", args: [path],
+        })).toThrow("secret or private");
+      }
+      writeFileSync(join(outside, "outside.log"), "outside");
+      symlinkSync(join(outside, "outside.log"), join(f.root, "escape.log"));
+      symlinkSync(join(f.home, ".env.production"), join(f.root, "innocent.log"));
+      for (const path of [join(f.root, "escape.log"), join(f.root, "innocent.log")])
+        expect(() => f.host.validateCommand({
+          ...command(f.root), program: "/bin/cat", args: [path],
+        })).toThrow();
+      expect(() => f.host.validateCommand({
+        ...command(f.root), program: "/bin/ls", args: [], cwd: outside,
+      })).toThrow("outside owner home");
+      expect(calls).toHaveLength(4);
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+  test("recursive inspection prunes sensitive entries and never follows descendant links", async () => {
+    const f = fixture();
+    try {
+      writeFileSync(join(f.root, "visible.log"), "healthy");
+      mkdirSync(join(f.root, "Secrets"));
+      writeFileSync(join(f.root, "Secrets", "hidden.log"), "hidden");
+      writeFileSync(join(f.root, ".env.local"), "hidden");
+      symlinkSync(join(f.root, "Secrets"), join(f.root, "linked"));
+      const checked = f.host.validateCommand({
+        ...command(f.root), program: "/usr/bin/find", args: [f.root, "-type", "f"],
+      });
+      const result = await f.host.executeCommand(checked);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("visible.log");
+      expect(result.output).not.toContain("hidden.log");
+      expect(result.output).not.toContain(".env.local");
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("Git inspection disables configured filters, fsmonitor and external diff", async () => {
+    const f = fixture();
+    const git = (args: string[]) => Bun.spawnSync(["/usr/bin/git", "-C", f.root, ...args], {
+      env: { PATH: "/usr/bin:/bin", HOME: f.home, LANG: "en_US.UTF-8" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    try {
+      expect(git(["init"]).exitCode).toBe(0);
+      writeFileSync(join(f.root, ".gitattributes"), "*.txt filter=unsafe\n");
+      writeFileSync(join(f.root, "example.txt"), "before\n");
+      expect(git(["add", "."]).exitCode).toBe(0);
+      expect(git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"]).exitCode).toBe(0);
+      const marker = join(f.home, "executed");
+      appendFileSync(join(f.root, ".git/config"), `\n[filter "unsafe"]\n clean = /usr/bin/touch ${marker}\n process = /usr/bin/touch ${marker}\n required = true\n[core]\n fsmonitor = /usr/bin/touch ${marker}\n[diff]\n external = /usr/bin/touch ${marker}\n`);
+      writeFileSync(join(f.root, "example.txt"), "after\n");
+      for (const args of [["status", "--short"], ["diff", "--stat"], ["log", "-1", "--stat"]]) {
+        const checked = f.host.validateCommand({ ...command(f.root), program: "/usr/bin/git", args });
+        const result = await f.host.executeCommand(checked);
+        expect(result.exitCode).toBe(0);
+        expect(existsSync(marker)).toBe(false);
+      }
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("Git inspection checks chained -C and repository metadata symlinks", () => {
+    const f = fixture();
+    const outside = realpathSync(tempDir());
+    try {
+      mkdirSync(join(f.root, "child"));
+      const checked = f.host.validateCommand({
+        ...command(f.home), program: "/usr/bin/git", args: ["-C", "projects", "-C", "child", "status"],
+      });
+      expect(checked.args).toEqual(["-C", f.root, "-C", join(f.root, "child"), "status"]);
+      symlinkSync(outside, join(f.root, ".git"));
+      expect(() => f.host.validateCommand({
+        ...command(f.root), program: "/usr/bin/git", args: ["status"],
+      })).toThrow("outside owner home");
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
   test("canonical roots reject traversal, escape, secrets and private text; symlinks never read", async () => {
     const f = fixture();
     try {
@@ -532,6 +704,55 @@ describe("guarded Mac host", () => {
 });
 
 describe("host command approval", () => {
+  test("an existing command grant inspects without effects or decisions, while mutations still await approval", async () => {
+    const h = harness();
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => { calls.push(input); return ok("observed"); });
+    try {
+      const ghost = h.core.createGhost({ name: "Mac", persona: "", tools: ["host_command_propose"] });
+      const conversation = h.ledger.conversation(ghost.directConversationId);
+      h.ledger.setPiConversationId(conversation.id, "pi-host-inspect");
+      const extension = createHostTools(h.core, f.host);
+      const tool = extension.tools!.find((candidate) => candidate.name === "host_command_propose")!;
+      const invoke = tool.execute as unknown as (
+        input: HostCommand, api: ToolExecutionApi,
+      ) => Promise<unknown>;
+      const api = (callId: string) => ({
+        conversationId: "pi-host-inspect", callId,
+      }) as unknown as ToolExecutionApi;
+      const logs = join(f.home, "Library/Logs");
+      mkdirSync(logs);
+      const path = join(logs, "infra.log");
+      writeFileSync(path, "observed");
+      const before = h.ledger.seq();
+      const result = await invoke({
+        ...command(logs), program: "/bin/cat", args: [path],
+      }, api("inspect"));
+      expect(JSON.stringify(result)).toContain("observed");
+      expect(calls).toHaveLength(1);
+      expect(h.ledger.pendingDecisions()).toHaveLength(0);
+      expect(h.ledger.effectByCall(conversation.id, "inspect")).toBeNull();
+      expect(h.ledger.seq()).toBe(before);
+      await expect(invoke({
+        ...command(logs), program: "/bin/cat", args: [path, ">", "copied.log"],
+      }, api("redirection"))).rejects.toThrow("shell metacharacter");
+      expect(calls).toHaveLength(1);
+      expect(h.ledger.pendingDecisions()).toHaveLength(0);
+      await invoke({
+        ...command(f.root), program: "/bin/rm", args: [path], risk: "Deletes the log",
+      }, api("mutate"));
+      expect(calls).toHaveLength(1);
+      const decision = h.ledger.pendingDecisions()[0]!;
+      expect(decision.kind).toBe("approve_effect");
+      expect(h.ledger.effectByCall(conversation.id, "mutate")?.state).toBe("pending");
+      await h.core.effects.resolveApproval(decision.effectId!, true);
+      expect(calls).toHaveLength(2);
+      expect(calls[1]!.inspection).toBe(false);
+    } finally {
+      h.ledger.close();
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
   test("proposal opens approve_effect, never executes until approval; expired effects are denied", async () => {
     const h = harness();
     const probes = new Probes();

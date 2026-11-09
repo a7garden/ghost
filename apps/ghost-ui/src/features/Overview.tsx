@@ -1,6 +1,7 @@
 import { ArrowRight, ChevronRight } from 'lucide-react';
+import { useState } from 'react';
 import { TERMINAL_WORK_STATES, type State, type Work } from '@ghost/contract';
-import { Page } from '../ui'
+import { InlineError, Page } from '../ui'
 import { WorkLane } from '../components/agent';
 import { HandoffComposer } from '../components/HandoffComposer';
 import { DotAvatar } from '../components/DotAvatar';
@@ -8,6 +9,9 @@ import { DecisionDeck } from './Decision';
 import { liveWorks, toneFor } from './ghostState';
 import { useNow } from './time';
 import { uiTerms } from '../uiText';
+import { useHost } from '../host/context';
+import { NotificationRow } from '../components/NotificationRow';
+import { notificationRoute } from './notificationRoute';
 
 const RECENT_MS = 3 * 86_400_000;
 
@@ -17,6 +21,10 @@ const RECENT_MS = 3 * 86_400_000;
  */
 export function Overview({ state, navigate }: { state: State; navigate(path: string): void }) {
   const now = useNow();
+  const { client } = useHost();
+  const [error, setError] = useState('');
+  const messages = state.notifications.filter(item => item.kind === 'message' && !item.readAt)
+    .sort((a, b) => b.createdAt - a.createdAt).slice(0, 4);
   const ghosts = [...state.ghosts].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
   const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
@@ -32,7 +40,7 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
       onOpen={() => navigate(`/work/${encodeURIComponent(work.id)}`)}
       branch={children.length > 0 ? children.map(lane) : undefined}/>;
   };
-  const quiet = !roots.length && !recent.length && !state.decisions.some(decision => decision.state === 'pending');
+  const quiet = !roots.length && !recent.length && !messages.length && !state.decisions.some(decision => decision.state === 'pending');
   // Until a provider can run Ghosts, home leads with the one step that unblocks everything.
   const setup = !state.runtime.ready;
   const lead = ghosts[0];
@@ -46,6 +54,19 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
       <ChevronRight size={18} aria-hidden="true"/>
     </button>}
     <HandoffComposer ghosts={ghosts} navigate={navigate}/>
+    {messages.length > 0 && <section className="home__band" aria-labelledby="home-messages">
+      <header className="home__band-head"><h2 id="home-messages" className="section-title">새 대화</h2></header>
+      {error && <InlineError>{error}</InlineError>}
+      <ul className="feed">{messages.map(item => <NotificationRow key={item.id} item={item} ghostName={names.get(item.ghostId ?? '') ?? item.title} now={now}
+        onOpen={() => {
+          const destination = notificationRoute(item, state);
+          if (!destination) return;
+          setError('');
+          void client.send({ type: 'notification.read', notificationIds: [item.id] })
+            .then(() => navigate(destination))
+            .catch(reason => setError(reason instanceof Error ? reason.message : '읽음 표시를 저장하지 못했습니다.'));
+        }}/>)}</ul>
+    </section>}
     <DecisionDeck state={state} navigate={navigate}/>
     {roots.length > 0 && <section className="home__band" aria-labelledby="home-live">
       <header className="home__band-head">

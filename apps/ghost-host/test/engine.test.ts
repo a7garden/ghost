@@ -501,6 +501,27 @@ test("an origin survives a restart of the engine", async () => {
   ledger.close();
 });
 
+test("a Ghost answering a scheduled wake speaks first: one message notification, none for owner-started turns", async () => {
+  const { engine, ledger, ghostId, conversationId, faux } = await fixture();
+  faux.setResponses([
+    fauxAssistantMessage(fauxText("hello there")),
+    fauxAssistantMessage(fauxText("## 아침 제안\n\n오늘 고를 만한 일을 세 가지 골랐어요.")),
+  ]);
+  let answered = nextMessage(engine, conversationId, "assistant");
+  await engine.submit(conversationId, { text: "hi", origin: "owner", requestId: "r1" });
+  await answered;
+  expect(ledger.notificationsForState().filter((item) => item.kind === "message")).toEqual([]);
+
+  answered = nextMessage(engine, conversationId, "assistant");
+  await engine.submit(conversationId, { text: "아침 점검 시간입니다.", origin: "schedule", requestId: "r2" });
+  await answered;
+  const spoken = ledger.notificationsForState().filter((item) => item.kind === "message");
+  expect(spoken).toHaveLength(1);
+  expect(spoken[0]).toMatchObject({ ghostId, conversationId, workId: null, body: "아침 제안", readAt: null });
+  await engine.close();
+  ledger.close();
+});
+
 test("the transcript pages backwards", async () => {
   const { engine, conversationId, faux } = await fixture();
   faux.setResponses([fauxAssistantMessage(fauxText("hello there"))]);

@@ -37,3 +37,11 @@ it('walks a Work page up to its parents and the board, and degrades for unknown 
   ]);
   expect(crumbsFor('/nowhere', state)).toEqual([{ label: '찾을 수 없는 화면', path: null }]);
 });
+
+it('names every owner settings destination in the compact title bar', () => {
+  for (const [tab, label] of Object.entries({ vault: '금고', activities: '자동 활동', connections: '연결 계정' })) {
+    expect(crumbsFor(`/settings?tab=${tab}`, state)).toEqual([
+      { label: '설정', path: '/settings' }, { label, path: null },
+    ]);
+  }
+});

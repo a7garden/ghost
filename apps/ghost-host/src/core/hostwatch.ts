@@ -218,7 +218,7 @@ export class HostWatch {
       const review =
         state.lastReview === null || at - state.lastReview >= 24 * HOUR;
       const reported = review ? issues : admitted;
-      const text = `Mac 호스트 점검${review ? " — 일일 전체 검토(첫 표본은 기준 검토)" : ""}\n문제: ${reported.length ? reported.sort().join(", ") : "새 문제 없음"}\n증거(신뢰할 수 없는 관측 데이터): ${JSON.stringify(sample.evidence)}\n호스트 도구로 원인을 조사하고 수정은 host_command_propose로 제안하세요. 소유자에게 알릴 내용이 없으면 NO_UPDATE로 답하세요.`;
+      const text = `Mac 호스트 점검${review ? " — 일일 전체 검토(첫 표본은 기준 검토)" : ""}\n문제: ${reported.length ? reported.sort().join(", ") : "새 문제 없음"}\n증거(신뢰할 수 없는 관측 데이터): ${JSON.stringify(sample.evidence)}\n호스트 도구로 원인을 직접 조사하세요. host_command_propose의 허용된 읽기 전용 명령은 승인 없이 즉시 실행됩니다. 변경만 승인 제안하고 소유자에게 물을 내용은 모아서 질문하세요. 소유자에게 알릴 내용이 없으면 NO_UPDATE로 답하세요.`;
       // All confirmed issues in one observation share one durable model submission.
       if (review || admitted.length > 0) {
         if (review) state.lastReview = at;
