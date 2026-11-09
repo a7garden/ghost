@@ -27,14 +27,27 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261109-bun-bd931d0` (`main`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-2024f08` (`main`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent, `dev.garden.macfra.agent`(2026-11-08 Ghost `Mac 관리`로 이전, disabled) |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
-Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### Ghost 팀 상시 작업 설정·운영 반영 — 2026-11-10
+
+- 소유자 요청: Ghost들이 스스로 일하고 먼저 말을 걸며 승인 요청을 줄인다. 상시 구동은 5시간마다 회복되는 MiniMax·GLM flash를, 무거운 과업만 고성능 모델을 쓴다. 웹·프로젝트·PC 접근이 일의 걸림돌이 되지 않게 하고, 사용자가 복잡하게 설정할 필요가 없게 한다.
+- 원인: 반복 작업·자동 활동·연결이 0개라 Mac 관리(watch)만 움직였다. 승인 19건 중 14건이 로그 `cat`·`tail`, `ls`·`find`, `git status/remote` 같은 읽기 확인이었다. 5개 Ghost는 웹 도구가 없었고, 여러 페르소나가 "웹에 접근할 수 없다"고 소개했다.
+- 운영 데이터(소유자 API, 이전 값은 `~/.local/share/ghost/backups/ghost-config-before-standing-work-20261109.json`): 모든 Ghost를 `MiniMax-M3.1-Flash`(메인·리서치·경쟁 분석·보안 점검·패널·Mac 관리는 thinking high)와 대체 `glm-5.3-flash` → `gpt-6-luna`로 바꿨다. 기본 모델도 `MiniMax-M3.1-Flash`. 무거운 과업 전용 `심층`(gpt-6.1-sol → gpt-6-luna → MiniMax flash)을 새로 만들고 메인 페르소나에 위임 기준을 넣었다. 모든 Ghost에 호스트 도구를 뺀 선택 도구 50개 전부를 주었다(호스트 도구는 Mac 관리·보안 점검만). 페르소나의 "저장소를 못 본다/웹 없음" 문장을 Space·웹 기준으로 고쳤다.
+- 프로젝트 Space 9개(Ghost, 트윌룸, 트윌룸 스튜디오, Talking Stage, 인프라, 에이전트 오케스트라, Garden UI, Oximemo, Ascent; 노드 프로젝트는 `docs/`만). 연결: GitHub `a7garden`(gh 토큰). mini Gitea는 공개 주소가 Cloudflare Access 뒤에 있고 tailnet IP는 Ghost 네트워크 가드가 막아 연결하지 않았다. agent-reach는 X·YouTube·GitHub·web이 동작하고 Reddit은 추가했지만 현재 상류 오류다. iCloud 메일은 개인 메일을 외부 모델에 넘기는 일이라 연결하지 않았다.
+- 자동 활동 9개(모두 컨테이너, 외부 동작 deny): 아침 브리핑과 제안(메인, 매일 08:30, 3시간, 항상 보고·위임 2건), AI 도구 변화 브리핑(07:30), 프로젝트 심층 조사(리서치, 13:00, 요일별 프로젝트), 주간 경쟁 동향(월 10:00), 주간 공개면 점검(수 11:00, 수동 점검만), Talking Stage 주간 기획(목 14:00), 주간 기억 정리 제안(일 09:00), 트윌룸·트윌룸 스튜디오 PR 검토(15분 폴링, 댓글 없음). 먼저 말 걸기 반복 작업 5개: 메인 매일 09:00, 기획 화 19:00, 디자이너 수 16:00, SNS 금 17:00, 경쟁 분석 목 18:00. 첫 수동 실행에서 AI 소식·심층 조사·경쟁 동향이 1차 출처가 달린 결과를 냈다.
+- 코드(`b1ffd94`, `bd975e5`, `0263253`, `2024f08`): 읽기 전용 호스트 확인은 승인 없이 바로 실행(상태 루트·비밀·개인정보 경로 거부, GitHub 한정 `ls-remote`, 줄 단위 출력, 범위 밖은 승인으로 돌아감). 모든 대화에 자율 판단·질문 묶기·다음 할 일 제안 지침, 실시간 웹·프로젝트 문서 지침. 예약된 깨움에 대한 Ghost의 첫 답은 `message` 알림(먼저 말 걸기). 메인이 다른 Ghost에게 호스트 도구·PC 직접 실행을 허용할 수 있고 그때마다 소유자 알림이 같은 트랜잭션에 남는다. 프로젝트별 Ghost 권한 설정을 없앴다(원장 열은 `'[]'`, 마이그레이션 없음). 대화·홈·맡기기에서 `#프로젝트`로 언급하고 프로젝트 화면에서 바로 대화·맡기기를 시작한다. Work에서도 Space를 읽는다. iPhone UI 점검(대화형 블록, 터치 컨트롤, 중복 제목, HTML 미리보기 높이·전체 화면, 대화 알림 종류).
+- 검사: 계약·Host 타입 검사, Host 606 통과·7 생략, UI 145 통과·빌드, 브라우저 시각 156 통과(감사 기준 이미지 포함). 독립 검토: 읽기 전용 확인·HTML(Codex 작성)은 Claude가 P1 2건(상태 루트·바이트 단위 출력으로 비밀 노출)과 P2를 찾아 고쳤다. 메인 허용·먼저 말 걸기·지침(Claude 작성)은 Codex가 검토했고 원자성·문서를 고쳤다. 프로젝트(Codex 작성)는 Claude 검토에서 P3 3건만 나와 고쳤다. 검토 중 소유자 토큰 일부가 검토 모델 출력에 나타나 첫 배포에서 토큰을 교체했다(Mac 앱은 재실행해 새 토큰을 읽는다).
+- 첫 배포 `20261110-bun-0263253`은 시작 직후 이벤트 루프가 멈췄다. launchd에서 재현: 새 바이너리는 macOS 개인정보 보호 결정이 없어서, 읽기 전용 확인이 `~/Library/Mail`·`Safari` 등을 `realpath` 하면 전체 디스크 접근 동의를 기다리며 막혔다. `20261109-bun-bd931d0`로 되돌린 뒤, 보호 경로를 실제로 건드리기 전에 이름만으로 거부하게 고친 `2024f08`을 launchd 재현에서 확인하고 다시 배포했다. 실패한 릴리스 디렉터리는 사용하지 않는다.
+- 설치: `releases/20261110-bun-2024f08`, Host SHA-256 `e9881f5f…`, UI 94개 파일 일치, `agent-browser` 복사. 백업 `backups/pre-20261110-bun-2024f08-1794241250707/`(`ghost-backup/2`, complete). PID 32865 → 46001, Ghost 25·대화 67·맡긴 일 59·결정 28 식별자 보존, health·공개 origin 200, 제공 UI에 새 번들. Mac 앱은 external 모드로 재실행했다(PID 46305). 오래 멈춰 있던 twillroom 읽기 확인 승인 1건은 새 정책에 맞춰 승인해 정리했다.
+- 되돌릴 때는 `current`를 `releases/20261109-bun-bd931d0`으로 바꿔 LaunchAgent를 재시작하고 Mac 앱을 다시 연다. 스키마 변경은 없다. 이전 릴리스에서는 Space 접근이 다시 Ghost별 권한(지금은 빈 목록)으로 읽혀 Space를 보지 못한다. 운영 데이터(모델·도구·활동·반복 작업·Space)는 소유자 API로 되돌린다.
 
 ### iPhone 웹 UI 셸·기기 소유자 동등 권한 운영 반영 — 2026-11-09
 
