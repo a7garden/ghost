@@ -397,6 +397,7 @@ describe("guarded Mac host", () => {
         "Library/Keychains/login.keychain-db", "Library/Application Support/Google/Chrome/Default/Preferences",
         "Library/Mail/inbox.txt", "Library/Messages/chat.txt", "state/secrets/provider.json", "Library/Application Support/Ghost/vault/key",
         "private/record.txt", "notes/note.txt", ".git/config", ".git-credentials",
+        "Documents/tax.pdf", "Desktop/scan.txt", "Downloads/statement.csv", "Library/CloudStorage/Drive/file.txt",
       ]) {
         const path = join(f.home, sensitive);
         mkdirSync(join(path, ".."), { recursive: true });

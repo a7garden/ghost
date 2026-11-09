@@ -198,11 +198,18 @@ const secretNames: Record<string, true> = {
 const homeDotDirectories = [".docker", ".config", ".npm", ".password-store", ".1password", ".mozilla", ".thunderbird"];
 const privateLibraryDirectories = [
   "Keychains", "Mail", "Messages", "Accounts", "Containers", "Group Containers",
-  "Mobile Documents", "Safari", "Calendars", "Cookies",
+  "Mobile Documents", "CloudStorage", "Safari", "Calendars", "Reminders", "HomeKit", "Cookies",
+  "Suggestions", "IdentityServices", "Metadata/CoreSpotlight",
   "Application Support/Google/Chrome", "Application Support/Chromium",
   "Application Support/BraveSoftware", "Application Support/Microsoft Edge",
   "Application Support/Firefox", "Application Support/Thunderbird", "Application Support/AddressBook",
+  "Application Support/CallHistoryDB", "Application Support/com.apple.TCC",
 ];
+/**
+ * macOS privacy (TCC) guards these for a background process: touching them from the Host asks for
+ * consent and blocks its event loop until someone answers, and every release is a new identity.
+ */
+const privacyGuardedHomeDirectories = ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music"];
 const privateNames: Record<string, true> = {
   private: true,
   finance: true,
@@ -483,13 +490,13 @@ export class MacHost implements HostPort {
   private homePrivatePaths(): string[] {
     const paths = [this.home, realpathSync(this.home)].flatMap((home) => [
       ...homeDotDirectories.map((name) => join(home, name)),
+      ...privacyGuardedHomeDirectories.map((name) => join(home, name)),
       ...privateLibraryDirectories.map((name) => join(home, "Library", name)),
       join(home, ".local/share/keyrings"),
     ]);
-    return [...new Set(paths.flatMap((path) => {
-      try { return [path, realpathSync(path)]; }
-      catch { return [path]; }
-    }))];
+    // Lexical only: resolving Mail, Messages, Safari or Containers from a LaunchAgent asks macOS
+    // privacy (TCC) for consent and blocks the Host's event loop until someone answers.
+    return [...new Set(paths)];
   }
   resolve(path: string, text = false, projectsOnly = false): string {
     if (
@@ -541,11 +548,13 @@ export class MacHost implements HostPort {
       throw new Error("invalid inspection path");
     const home = realpathSync(this.home);
     const raw = resolve(base, expand(path, this.home));
+    const isPrivate = (candidate: string) => this.homePrivatePaths().some((root) => inside(candidate.toLowerCase(), root.toLowerCase()));
+    // Refuse private app data before touching it: resolving it would itself ask macOS privacy for consent.
+    this.refuseStatePath(raw);
+    if (isPrivate(raw)) throw new Error("private home app-data path refused");
     const canonical = realpathSync(raw);
     this.refuseStatePath(raw, canonical);
-    if (this.homePrivatePaths().some((root) => [raw, canonical].some((candidate) =>
-      inside(candidate.toLowerCase(), root.toLowerCase()))))
-      throw new Error("private home app-data path refused");
+    if (isPrivate(canonical)) throw new Error("private home app-data path refused");
     for (const candidate of [raw, canonical]) {
       const root = inside(candidate, home) ? home :
         candidate === raw && inside(candidate, this.home) ? this.home : null;
