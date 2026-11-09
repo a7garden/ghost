@@ -527,8 +527,11 @@ test("project context reaches the model while original text and chips survive re
     active = await createEngine({ core, storagePath: join(root, "pi.db"), tools, sandbox, models, log: () => {} });
     core.attach(active);
     const owner = (await active.page(conversationId, null, 50)).messages.find(message => message.origin === "owner");
+    await expect(core.sendMessage(conversationId, "계획을 알려줘", "project-message", [], ["project"])).resolves.toBeUndefined();
+    await expect(core.sendMessage(conversationId, "새 요청", "deleted-project-new-message", [], ["project"])).rejects.toThrow();
     expect(owner?.text).toBe("계획을 알려줘");
     expect(owner?.spaces).toEqual([{ id: "project", name: "비행 기록" }]);
+    expect((await active.page(conversationId, null, 50)).messages.filter(message => message.origin === "owner")).toHaveLength(1);
   } finally {
     core.stop(); await core.idle(); await active.close(); ledger.close(); rmSync(root, { recursive: true, force: true });
   }

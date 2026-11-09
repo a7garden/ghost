@@ -1084,9 +1084,8 @@ function newDocumentBytes(id: string, title: string, body: string, profile: stri
 class VaultDocuments implements DocumentsPort {
   constructor(private readonly core: Core) {}
 
-  spacesFor(ghostId: string): Space[] {
-    const ghost = this.core.ledger.ghost(ghostId);
-    return ghost.state === "active" && ghost.deletedAt === null ? this.core.ledger.spaces() : [];
+  spacesFor(_ghostId: string): Space[] {
+    return this.core.ledger.spaces();
   }
 
   async listPages(spaceId: string, query: string | null): Promise<PageMeta[]> {

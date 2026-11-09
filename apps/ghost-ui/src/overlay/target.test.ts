@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Ghost, State } from '@ghost/contract';
-import { pickConversation, pickGhost } from './target';
+import { currentProjectIds, pickConversation, pickGhost } from './target';
 
 const ghost = (id: string, isDefault = false, directId = `direct-${id}`): Ghost => ({
   id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault, state: 'active',
@@ -40,4 +40,16 @@ describe('pickConversation', () => {
     expect(pickConversation(snapshot, sage, 'gone')).toBe('direct-sage');
     expect(pickConversation(snapshot, sage)).toBe('direct-sage');
   });
+});
+
+it('prunes deleted projects from both the composer selection and outgoing references', () => {
+  const snapshot = state();
+  snapshot.spaces = ['first', 'second'].map(id => ({ id, name: id, path: `/tmp/${id}`, createdAt: 1 }));
+  let selected = ['second', 'first'];
+  expect(currentProjectIds(snapshot, selected)).toEqual(['second', 'first']);
+  snapshot.spaces = snapshot.spaces.filter(space => space.id !== 'second');
+  selected = currentProjectIds(snapshot, selected);
+  expect(selected).toEqual(['first']);
+  expect(currentProjectIds(snapshot, ['second', 'first'])).toEqual(selected);
+  expect(currentProjectIds(null, selected)).toEqual([]);
 });

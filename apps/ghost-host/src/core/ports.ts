@@ -25,9 +25,8 @@ export interface Submission {
   /** Deterministic; a repeated id is a no-op, which makes every wake crash-safe. */
   requestId: string;
   attachments?: ArtifactRef[];
-  spaces?: { id: string; name: string }[];
-  /** Model-only preface; never replaces the visible owner text. */
-  context?: string;
+  /** Resolve only after checking the durable submission identity, so retries survive deletion. */
+  spaceIds?: string[];
   /** Join the running turn instead of queueing a follow-up. */
   steer?: boolean;
 }

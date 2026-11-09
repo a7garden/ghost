@@ -76,6 +76,10 @@ describe("documents", () => {
     const another = core.createGhost({ name: "Another", persona: "" });
     expect(documents.spacesFor(ghost.id).map(space => space.id)).toEqual(["space-1"]);
     expect(documents.spacesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
+    core.ledger.tx(() => core.ledger.putGhost({ ...another, state: "paused" }));
+    expect(documents.spacesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
+    core.ledger.tx(() => core.ledger.putGhost({ ...another, state: "retired" }));
+    expect(documents.spacesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
 
     const pages = await documents.listPages("space-1", null);
 

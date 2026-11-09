@@ -4,7 +4,7 @@
  */
 import { HostClient } from '../host/client';
 import type { Live, Message, State } from '@ghost/contract';
-import { pickConversation, pickGhost, type Target } from './target';
+import { currentProjectIds, pickConversation, pickGhost, type Target } from './target';
 import '../ui/styles.css';
 import './overlay.css';
 import { installWindowDrag } from '../host/windowDrag';
@@ -80,6 +80,7 @@ function chooseProject(id: string) {
 }
 
 function renderProjects() {
+  projectIds = currentProjectIds(state, projectIds);
   chipsRoot.render(createElement(ProjectChips, {
     spaces: (state?.spaces ?? []).filter(space => projectIds.includes(space.id)),
     onRemove: id => { projectIds = projectIds.filter(item => item !== id); renderProjects(); },
@@ -207,7 +208,7 @@ async function send() {
   sendError = '';
   updateControls();
   try {
-    await client.send({ type: 'message.send', conversationId: destination, text, spaceIds: projectIds });
+    await client.send({ type: 'message.send', conversationId: destination, text, spaceIds: currentProjectIds(state, projectIds) });
     if (destination === conversationId) {
       inputEl.value = '';
       projectIds = []; renderProjects();

@@ -38,15 +38,12 @@ test("mentions resolve existing projects, preserve owner text and reach Work bri
     await send({ type: "message.send", conversationId: ghost.directConversationId, text: "계획을 알려줘", spaceIds: ["project"] });
     const submission = engine.to(ghost.directConversationId).at(-1)!;
     expect(submission.text).toBe("계획을 알려줘");
-    expect(submission.spaces).toEqual([{ id: "project", name: "비행 기록" }]);
-    expect(submission.context).toContain('"spaceId":"project"');
-    expect(submission.context).toContain("document_list and document_read");
+    expect(submission.spaceIds).toEqual(["project"]);
     const result = await send({ type: "work.create", ghostId: ghost.id, title: "계획", brief: "이륙 준비", spaceIds: ["project"] });
     expect(ledger.work(String(result.workId)).brief).toContain('"name":"비행 기록","spaceId":"project"');
     expect(ledger.work(String(result.workId)).brief).toEndWith("이륙 준비");
     await send({ type: "work.update", workId: String(result.workId), brief: "준비 계획 수정" });
     expect(splitProjectBrief(ledger.work(String(result.workId)).brief)).toMatchObject({ text: "준비 계획 수정", spaces: [{ id: "project", name: "비행 기록" }] });
-    await expect(send({ type: "message.send", conversationId: ghost.directConversationId, text: "No", spaceIds: ["missing"] })).rejects.toThrow();
     await expect(send({ type: "work.create", ghostId: ghost.id, title: "No", brief: "No", spaceIds: ["missing"] })).rejects.toThrow();
     expect(ledger.worksForState()).toHaveLength(1);
     await core.idle();
