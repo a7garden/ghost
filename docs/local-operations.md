@@ -27,7 +27,7 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261109-bun-2bf4792` (`autonomy-integrated-20261109`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261109-bun-bd931d0` (`main`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -35,6 +35,15 @@ Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진�
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 인프라 운영 반영"의 로스터 항목을 따른다. 기본 모델은 Z.AI `glm-5.3`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### iPhone 웹 UI 셸·기기 소유자 동등 권한 운영 반영 — 2026-11-09
+
+- 소유자 결정: iPhone은 하위 호환이 아니라 또 하나의 접속 방식이다. iPhone 앱은 Host가 제공하는 웹 UI를 WKWebView로 여는 셸이 되고, 페어링·Keychain 토큰·알림 권한·APNs·알림 탭 이동·첫 로드/연결 불가 화면만 네이티브로 남긴다. 페어링한 기기는 기기 관리(페어링 시작, 기기 이름 변경, 다른 기기 해제)를 뺀 소유자 동등 권한을 가진다. 기기는 스스로 해제할 수 있다. 기기 관리 예외는 격리 경계가 아니다(기기가 PC 실행을 허용할 수 있으므로). 웹 UI에 모바일 레이어(하단 독, 키보드 위 입력창, 하단 시트, 터치 메뉴, 설정 목록/상세, 이 기기 알림 설정)를 더했다. 원장 스키마는 바꾸지 않았다(기기별 알림 설정은 `settings` 키 `device.alerts:<id>`).
+- 소스: `main`을 `autonomy-integrated-20261109`와 병합한 뒤(`dfccbd8`, `f1227fa`) `bd931d0`. 검사: 계약·Host 타입 검사, Host 582 통과·7 생략, UI 137 통과·빌드, 브라우저 시각·기능 82 통과(데스크톱 기준 이미지 불변, 모바일·iPhone 기준 갱신), iOS core 20 통과, 시뮬레이터 UI 테스트(페어링 화면, 연결 불가, 격리 Host에 페어링한 셸의 홈·확인할 일·맡긴 일·설정·이 기기 및 대화 입력창-키보드) 통과. 독립 검토: Host·계약(GLM 작성)은 Claude Opus, 웹 UI(Codex 작성)는 Claude, iPhone 셸(Claude 작성)은 Codex가 검토했고 P0·P1 없음. 지적된 P2·P3(셸 준비 상태·APNs 재등록·IPv6 origin·이전 연결의 401, 데스크톱 메뉴·검색·Tauri 좁은 창·시트 포커스 등)는 수정했다.
+- 설치: `releases/20261109-bun-bd931d0`, Host SHA-256 `150692e8…`, UI 93개 파일 원본/사본 일치, `agent-browser` SHA-256 `19680f06…`(이전 릴리스에서 복사, `release.json`에 전체 해시). 백업 `backups/pre-20261109-bun-bd931d0-1794228611238/`(`ghost-backup/2`, complete). 13시간 전부터 대화가 멈춘 채 `running`으로 남은 맡긴 일 `71a1acf3…`(twillroom 푸시 상태 확인)은 진행 중인 실행이 없어(대화 busy false, live running false) 유휴로 판단했다. 설치 사본을 별도 루트·포트에서 실행해 health·UI를 확인한 뒤 `current`를 원자 교체하고 정상 재기동했다(PID 26240 → 31736). 단일 리스너·새 실행 경로·준비 상태, Ghost 24·대화 41·맡긴 일 40·결정 18 식별자 보존, 공개 origin health와 토큰 비주입, 제공 UI 번들 일치를 확인했다.
+- 처음 설치 사본에는 `agent-browser`가 빠져 `current/agent-browser`가 약 3분간 없었다. 같은 해시의 고정 바이너리를 새 릴리스에 복사해 복구했다(브라우저는 호출 시점에 실행 파일을 연다). 다음 릴리스도 `ghost`·`ui/`와 함께 `agent-browser`를 넣어야 한다.
+- Mac 앱은 external 모드로 다시 열었지만 화면이 잠겨 있어(활성 디스플레이 없음) 실제 창 확인은 하지 못했다. iPhone14에는 빌드 6을 설치했다(개인 팀, 알림 권한 없이 서명). 운영 Host에는 아직 페어링한 기기가 없다.
+- 되돌릴 때는 `current`를 `releases/20261109-bun-2bf4792`로 바꿔 LaunchAgent를 정상 재시작한다. 스키마·자격 형식은 그대로라 DB·secrets 복원은 필요 없다. 이전 릴리스는 이 기간에 연결한 기기를 기기 명령만 보낼 수 있는 기기로 읽는다.
 
 ### 자동 활동·PC 직접 실행 운영 반영 — 2026-11-09
 
