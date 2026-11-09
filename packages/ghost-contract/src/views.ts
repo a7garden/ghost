@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import {
   ArtifactRef,
+  AutonomyPlan,
   Avatar,
   Conversation,
   Decision,
@@ -68,6 +69,7 @@ export const State = Type.Object({
   activities: Type.Optional(Type.Array(Activity)),
   activityRuns: Type.Optional(Type.Array(ActivityRun)),
   connections: Type.Optional(Type.Array(Connection)),
+  autonomy: Type.Optional(Type.Array(AutonomyPlan)),
 });
 export type State = Static<typeof State>;
 

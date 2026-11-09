@@ -37,7 +37,7 @@ import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
 import { FallbackDoc, fallbackModels, fallbackReason } from "./fallback.ts";
 import { digestOf } from "../core/ids.ts";
-import { projectContext, splitProjectBrief } from "@ghost/contract";
+import { projectContext, splitProjectBrief, QUIET_REPLY as QUIET } from "@ghost/contract";
 
 const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
@@ -627,6 +627,11 @@ class HostEngine implements Engine {
     if (state.busy === busy) return;
     state.busy = busy;
     this.core.activity(state.hostId, busy, Date.now());
+    if (!busy && state.initiative !== null) {
+      const wake = state.initiative;
+      state.initiative = null;
+      void this.speakFirst(state, wake).catch((error) => this.log("engine: could not note a Ghost speaking first", error));
+    }
   }
 
   private emit(state: ConversationState, event: LiveEvent): void {
@@ -657,23 +662,36 @@ class HostEngine implements Engine {
     this.noteInitiative(state, message);
   }
 
-  /**
-   * A Ghost speaking first — its reply to a scheduled wake in a direct conversation — reaches the
-   * owner as a notification. Owner-started turns and Work reports already have their own signal.
-   * The id is keyed by the wake, so the first reply notifies once and replays add nothing.
-   */
+  /** Remember the scheduled or self-directed wake a run answers; owner input in between cancels it. */
   private noteInitiative(state: ConversationState, message: Message): void {
-    if (message.role === "user") {
-      state.initiative = message.origin === "schedule" ? message.id : null;
-      return;
-    }
-    if (message.role !== "assistant" || state.initiative === null || message.text.trim() === "") return;
-    const conversation = this.core.ledger.findConversation(message.conversationId);
-    const wake = state.initiative;
-    state.initiative = null;
+    if (message.role === "user") state.initiative = message.origin === "schedule" ? message.id : null;
+  }
+
+  /**
+   * A Ghost speaking first — the final reply of its run after a scheduled or self-directed wake in a
+   * direct conversation — reaches the owner as a notification, unless that reply is `[quiet]`.
+   * Narration before tools never notifies. Owner-started turns and Work reports already have their
+   * own signal. The id is keyed by the wake, so a replay adds nothing.
+   */
+  private async speakFirst(state: ConversationState, wake: string): Promise<void> {
+    const conversation = this.core.ledger.findConversation(state.hostId);
     if (conversation?.kind !== "direct") return;
+    // Page back to the wake: a long run with many tool steps can push it out of one page.
+    let messages: Message[] = [];
+    let before: string | null = null;
+    let start = -1;
+    for (let pages = 0; pages < 8; pages++) {
+      const page: TranscriptPage = await this.page(state.hostId, before, 500);
+      messages = [...page.messages, ...messages];
+      start = messages.findIndex((message) => message.id === wake);
+      if (start >= 0 || page.before === null) break;
+      before = page.before;
+    }
+    if (start < 0) return;
+    const reply = messages.slice(start + 1).filter((message) => message.role === "assistant" && message.text.trim() !== "").at(-1);
+    if (!reply || reply.text.trim() === QUIET) return;
     const ghost = this.core.ledger.ghost(conversation.ghostId);
-    const line = message.text.trim().split("\n").find((part) => part.trim() !== "")?.replace(/[#*_`>]/g, "").trim() ?? "";
+    const line = reply.text.trim().split("\n").find((part) => part.trim() !== "")?.replace(/[#*_`>]/g, "").trim() ?? "";
     this.core.ledger.tx(() => this.core.notify({
       id: `message:${wake}`,
       kind: "message",

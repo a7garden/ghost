@@ -1,6 +1,7 @@
 import { Type, type Static, type TLiteral, type TSchema } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import {
+  AutonomyPlan,
   Avatar,
   Conversation,
   Decision,
@@ -50,6 +51,7 @@ export const LedgerEventData = Type.Union([
   upsert("activity_run", "run", ActivityRun),
   upsert("connection", "connection", Connection),
   removed("connection.removed"),
+  upsert("autonomy", "plan", AutonomyPlan),
 ]);
 export type LedgerEventData = Static<typeof LedgerEventData>;
 

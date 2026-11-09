@@ -33,3 +33,12 @@ it('names each host wake in a line and keeps the Ghost-facing text as the detail
 it('falls back to the first line of an unknown wake under its origin', () => {
   expect(describeWake('schedule', '아침 브리핑\n\n어제 일 정리')).toEqual({ label: '반복 작업', line: '아침 브리핑', detail: '아침 브리핑\n\n어제 일 정리' });
 });
+
+it('shows a self-directed wake as the Ghost\'s own plan, or the project that woke it early', () => {
+  const planned = describeWake('schedule', '[Autonomous wake] 2030-01-15, Tue, 09:00\nPlan (set by you): 트윌룸 저장 버그 재현\n\nSince 2030-01-14:\n- nothing new reached the Host');
+  expect(planned.label).toBe('자율');
+  expect(planned.line).toBe('트윌룸 저장 버그 재현');
+  expect(planned.detail).toContain('Since 2030-01-14');
+  expect(describeWake('schedule', '[Autonomous wake] now\nPlan (set by you): weekly\nTrigger: a project you watch changed (Twill, Ghost).').line).toBe('Twill, Ghost 변경 확인');
+  expect(describeWake('schedule', '[Autonomous wake] now\nPlan: none yet.').line).toBe('할 일을 스스로 찾는 중');
+});

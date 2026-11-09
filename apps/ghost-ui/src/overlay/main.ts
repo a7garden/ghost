@@ -3,7 +3,7 @@
  * Ghost's existing direct conversation.
  */
 import { HostClient } from '../host/client';
-import type { Live, Message, State } from '@ghost/contract';
+import { QUIET_REPLY, type Live, type Message, type State } from '@ghost/contract';
 import { currentProjectIds, pickConversation, pickGhost, type Target } from './target';
 import '../ui/styles.css';
 import './overlay.css';
@@ -136,7 +136,7 @@ function render() {
         const wake = describeWake(message.origin, message.text);
         rows.push(`<li class="row event">${escapeHtml(wake.label)} · ${escapeHtml(wake.line)}</li>`);
       } else rows.push(`<li class="row user"><div>${escapeHtml(message.text)}${(message.spaces ?? []).map(space => `<span class="project-chip">${escapeHtml(space.name)}</span>`).join('')}</div></li>`);
-    } else if (message.role === 'assistant' && message.text.trim()) {
+    } else if (message.role === 'assistant' && message.text.trim() && message.text.trim() !== QUIET_REPLY) {
       rows.push(`<li class="row ghost"><div>${escapeHtml(message.text)}</div></li>`);
     }
   }

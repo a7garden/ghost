@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
 import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -158,6 +158,15 @@ export function deleteCommand(ghostId: string): { type: 'ghost.delete'; ghostId:
   return { type: 'ghost.delete', ghostId };
 }
 
+/** When and why a Ghost looks again on its own. */
+function planLine(plan: AutonomyPlan | undefined): ReactNode {
+  if (!plan) return undefined;
+  if (!plan.enabled) return '말을 걸 때만 움직입니다.';
+  if (plan.nextAt === null) return undefined;
+  const at = new Date(plan.nextAt).toLocaleString('ko-KR', { month: 'short', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  return <>다음 <time dateTime={new Date(plan.nextAt).toISOString()}>{at}</time>{plan.intent ? ` · ${plan.intent}` : ''}</>;
+}
+
 /** One Ghost's sheet; exported for tests. */
 export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) {
   const { store } = useHost();
@@ -168,6 +177,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
   const [deleting, setDeleting] = useState(false);
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
   const sandbox = state?.sandboxes.find(item => item.ghostId === ghost.id);
+  const plan = state?.autonomy?.find(item => item.ghostId === ghost.id);
   const update = (patch: Partial<Pick<Ghost, 'name' | 'persona' | 'state' | 'tools' | 'fallbacks' | 'skills' | 'hostExecution'>> & { model?: ModelRef | null }) =>
     save({ type: 'ghost.update', ghostId: ghost.id, ...patch });
   useEffect(() => {
@@ -199,6 +209,10 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
       <SettingsRow label="상태" description={ghost.isDefault ? '메인 Ghost는 활성 상태를 유지합니다.' : undefined}>
         {ghost.isDefault ? <span className="ghost-sheet__locked"><Lock aria-hidden="true"/>활성</span>
           : <StateSwitch value={ghost.state} disabled={saving} onChange={next => void update({ state: next })}/>}
+      </SettingsRow>
+      <SettingsRow label="스스로 일하기" description={planLine(plan)}>
+        <Switch checked={plan?.enabled !== false} disabled={saving} aria-label="스스로 일하기"
+          onCheckedChange={next => void save({ type: 'autonomy.set', ghostId: ghost.id, enabled: next })}/>
       </SettingsRow>
       {!ghost.isDefault && <SettingsRow label="메인 Ghost" description="새 대화와 일을 처음 받는 Ghost">
         <button type="button" className="sandbox-strip__action" disabled={saving || ghost.state !== 'active'} onClick={() => void save({ type: 'ghost.set_default', ghostId: ghost.id })}>

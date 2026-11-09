@@ -448,6 +448,15 @@ export class Ledger {
     ).map(toWork);
   }
 
+  /** Work that settled after `since`, newest first. */
+  worksSettledSince(since: number, limit = 40): Work[] {
+    return (
+      this.db
+        .query("SELECT * FROM works WHERE state IN ('done','failed','cancelled') AND updated_at > ? ORDER BY updated_at DESC LIMIT ?")
+        .all(since, limit) as Row[]
+    ).map(toWork);
+  }
+
   /** Times the work conversation went idle without completing at the current revision. Internal; not in the contract. */
   idleNudges(workId: string): number {
     const row = this.db.query("SELECT idle_nudges FROM works WHERE id = ?").get(workId) as Row | null;

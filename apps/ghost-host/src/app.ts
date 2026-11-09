@@ -172,6 +172,7 @@ export async function serve(config: Config) {
     const errors: unknown[] = [];
     try { push?.stop(); push = null; } catch (error) { errors.push(error); }
     try { await hostWatch?.stop(); hostWatch = null; } catch (error) { errors.push(error); }
+    try { await app.core.autonomy.stop(); } catch (error) { errors.push(error); }
     try { await server?.stop(); server = null; } catch (error) { errors.push(error); }
     // Do not release ownership while a server or watcher may still submit work.
     if (!push && !hostWatch && !server) {
@@ -193,6 +194,7 @@ export async function serve(config: Config) {
     chmodSync(hostFile, 0o600);
     hostWatch = app.host && config.mac?.watch ? new HostWatch(app.core, app.host, config.mac.watch) : null;
     hostWatch?.start();
+    app.core.autonomy.start();
     log(`serving ${config.root} on http://${config.host}:${server.port}`);
   } catch (error) {
     try {

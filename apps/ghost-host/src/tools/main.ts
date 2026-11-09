@@ -81,6 +81,7 @@ export function createMainTools(core: Core): Extension {
       fallbacks: Type.Optional(FallbackList),
       skills: Type.Optional(SkillList),
       host_execution: Type.Optional(Type.Boolean({ description: "Allow Works of this Ghost to run directly on the owner's Mac (files and shell under the owner's account)" })),
+      self_directed: Type.Optional(Type.Boolean({ description: "Whether this Ghost wakes on its own plans (plan_next) without the owner writing" })),
     }),
     replay: "unsafe",
     async execute(args, api) {
@@ -105,6 +106,7 @@ export function createMainTools(core: Core): Extension {
             skills: args.skills,
             hostExecution: args.host_execution,
           });
+          if (args.self_directed !== undefined) core.autonomy.setEnabled(target.id, args.self_directed);
           if (granted.length > 0) {
             core.notify({
               id: `grant:${scope.conversation.id}:${api.callId}`,

@@ -1,0 +1,48 @@
+import { Type } from "typebox";
+import { AUTONOMOUS_WAKE, QUIET_REPLY } from "@ghost/contract";
+import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
+import type { Core } from "../core/core.ts";
+import { PLAN_MAX_MINUTES, PLAN_MIN_MINUTES } from "../core/autonomy.ts";
+import { forbidden, invalid } from "../core/errors.ts";
+import { errorResult, scopeOf } from "./shared.ts";
+
+export const AUTONOMY_DRIVE = `You are always on, not only when the owner writes. The Host wakes this conversation with an ${AUTONOMOUS_WAKE} message when the time you planned comes, or earlier when a project you watch changes.
+On such a wake, decide on your own what is worth doing for the owner within your role: check or research something, move a project forward, draft a document proposal, start a bounded Work for yourself or hand one to a better-fit Ghost (work_create with initiative: true), or tell the owner something genuinely useful. When you can do something without the owner, do it now instead of proposing it. Read this conversation and your memory first and never repeat what you already said. Prefer concrete progress to status chatter. Work through tools without narrating.
+Before your final reply, call plan_next once: when you should look again and why, and which projects to watch. Choose the time from the situation — minutes to hours while something is moving, a day or more when it is quiet. Then write one final reply and stop.
+When nothing deserves the owner's attention, that reply is only ${QUIET_REPLY}. Any other reply reaches the owner as you speaking first, so make it worth reading.`;
+
+export const MAIN_DRIVE = `As main, each wake shows the team's plans. Keep the team moving: hand a teammate Work with work_create, or plan its next look with plan_next and its ghost_id.`;
+
+/** Fixed in direct conversations: a Ghost's own appointment with itself, kept by the Host. */
+export function createAutonomyTools(core: Core): Extension {
+  return defineExtension({
+    name: "ghost.autonomy",
+    tools: [defineTool({
+      name: "plan_next",
+      description: "Decide when you next look at your work on your own, and why. The Host wakes this conversation then, or earlier when a watched project changes. Replaces your previous plan. The main Ghost may plan another Ghost's next look with ghost_id.",
+      parameters: Type.Object({
+        after_minutes: Type.Optional(Type.Integer({ minimum: PLAN_MIN_MINUTES, maximum: PLAN_MAX_MINUTES, description: "Minutes from now" })),
+        at: Type.Optional(Type.String({ minLength: 1, description: "Exact ISO 8601 time instead of after_minutes" })),
+        intent: Type.String({ minLength: 1, maxLength: 1024, description: "What you will look at or do then, and why" }),
+        watch_space_ids: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 8, description: "Project Spaces whose new commits should wake you earlier; replaces the watched list" })),
+        ghost_id: Type.Optional(Type.String({ minLength: 1, description: "Main Ghost only: plan this teammate instead of yourself" })),
+      }),
+      replay: "safe",
+      async execute(args, api) {
+        try {
+          const scope = scopeOf(core, api);
+          if (scope.conversation.kind !== "direct") throw forbidden("plan_next runs only in a direct conversation");
+          if ((args.after_minutes === undefined) === (args.at === undefined)) throw invalid("give exactly one of after_minutes or at");
+          const now = Date.now();
+          const at = args.at === undefined ? now + args.after_minutes! * 60_000 : Date.parse(args.at);
+          if (!Number.isFinite(at)) throw invalid("at must be an ISO 8601 time");
+          const plan = await core.autonomy.plan(scope.ghost, args.ghost_id ?? scope.ghost.id, { at, intent: args.intent, watch: args.watch_space_ids }, now);
+          const who = plan.ghostId === scope.ghost.id ? "You" : core.ledger.ghost(plan.ghostId).name;
+          return { content: [{ type: "text", text: `${who} will look again at ${new Date(plan.nextAt!).toISOString()}${plan.watch.length ? `, earlier if a watched project changes` : ""}.` }] };
+        } catch (error) {
+          return errorResult(error);
+        }
+      },
+    })],
+  });
+}

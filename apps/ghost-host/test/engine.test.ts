@@ -502,23 +502,32 @@ test("an origin survives a restart of the engine", async () => {
   ledger.close();
 });
 
-test("a Ghost answering a scheduled wake speaks first: one message notification, none for owner-started turns", async () => {
-  const { engine, ledger, ghostId, conversationId, faux } = await fixture();
+test("a Ghost's final reply to a scheduled wake speaks first; owner turns, narration before tools and a quiet ending do not", async () => {
+  const { core, engine, ledger, ghostId, conversationId, faux } = await fixture();
   faux.setResponses([
     fauxAssistantMessage(fauxText("hello there")),
+    fauxAssistantMessage([fauxText("먼저 살펴볼게요."), fauxToolCall("echo", { text: "look" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage(fauxText("[quiet]")),
     fauxAssistantMessage(fauxText("## 아침 제안\n\n오늘 고를 만한 일을 세 가지 골랐어요.")),
   ]);
-  let answered = nextMessage(engine, conversationId, "assistant");
-  await engine.submit(conversationId, { text: "hi", origin: "owner", requestId: "r1" });
-  await answered;
-  expect(ledger.notificationsForState().filter((item) => item.kind === "message")).toEqual([]);
-
-  answered = nextMessage(engine, conversationId, "assistant");
-  await engine.submit(conversationId, { text: "아침 점검 시간입니다.", origin: "schedule", requestId: "r2" });
-  await answered;
-  const spoken = ledger.notificationsForState().filter((item) => item.kind === "message");
-  expect(spoken).toHaveLength(1);
-  expect(spoken[0]).toMatchObject({ ghostId, conversationId, workId: null, body: "아침 제안", readAt: null });
+  const spoken = () => ledger.notificationsForState().filter((item) => item.kind === "message");
+  const run = async (text: string, origin: "owner" | "schedule", requestId: string) => {
+    const settled = core.nextActivity(conversationId, core.activityCount(conversationId) + 1);
+    await engine.submit(conversationId, { text, origin, requestId });
+    await settled;
+  };
+  await run("hi", "owner", "r1");
+  await run("[Autonomous wake] 2026-11-10", "schedule", "quiet");
+  // The final wake's notification is the signal that every earlier run's outcome was decided.
+  const notified = Promise.withResolvers<void>();
+  const stop = ledger.subscribe((event) => {
+    if (event.data.type === "notification" && event.data.notification.kind === "message") notified.resolve();
+  });
+  await run("아침 점검 시간입니다.", "schedule", "r2");
+  await notified.promise;
+  stop();
+  expect(spoken()).toHaveLength(1);
+  expect(spoken()[0]).toMatchObject({ ghostId, conversationId, workId: null, body: "아침 제안", readAt: null });
   await engine.close();
   ledger.close();
 });

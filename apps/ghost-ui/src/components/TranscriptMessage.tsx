@@ -3,7 +3,7 @@ import type { Live } from '@ghost/contract';
 import { OutcomeLine, PresenceAvatar, RefText } from './agent';
 import { ChevronRight } from 'lucide-react';
 import { ConversationMessage } from '../ui'
-import { INTERACTIVE_UI_TOOL, readInteractiveUi, type LiveTool, type Message } from '@ghost/contract';
+import { INTERACTIVE_UI_TOOL, QUIET_REPLY, readInteractiveUi, type LiveTool, type Message } from '@ghost/contract';
 import { ArtifactPreview } from './ArtifactPreview';
 import { CopyButton, MessageBody, useSmoothText } from './MessageBody';
 import { MessageMenu } from './MessageMenu';
@@ -135,6 +135,8 @@ export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReu
     return <p className="transcript-note" data-kind="note">{message.text}</p>;
   }
   if (!message.text && !message.thinking && message.attachments.length === 0) return null;
+  // A Ghost that looked around on its own and found nothing worth saying stays out of the way.
+  if (message.text.trim() === QUIET_REPLY && message.attachments.length === 0) return null;
   return <MessageMenu text={message.text} onQuote={onQuote}>
     <ConversationMessage role="assistant" label={speaker(message)}
       actions={message.text ? <CopyButton label="메시지 복사" getText={() => message.text}/> : undefined}>

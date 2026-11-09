@@ -374,6 +374,10 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
     case "schedule.delete":
       core.schedules.delete(command.scheduleId);
       return {};
+
+    case "autonomy.set":
+      core.autonomy.setEnabled(command.ghostId, command.enabled);
+      return {};
     case "activity.create":
       return { activityId: core.activities.create(command.config).id };
 

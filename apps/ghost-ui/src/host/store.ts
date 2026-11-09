@@ -63,6 +63,10 @@ export function applyEvent(state: State, data: LedgerEventData): State {
       const others = state.sandboxes.filter((sandbox) => sandbox.ghostId !== data.sandbox.ghostId);
       return { ...state, sandboxes: [...others, data.sandbox] };
     }
+    case 'autonomy': {
+      const others = (state.autonomy ?? []).filter((plan) => plan.ghostId !== data.plan.ghostId);
+      return { ...state, autonomy: [...others, data.plan] };
+    }
   }
 }
 

@@ -115,6 +115,8 @@ export const Command = Type.Union([
     paused: Type.Optional(Type.Boolean()),
   }),
   command("schedule.delete", { scheduleId: Id }),
+  /** Switch a Ghost's self-directed drive on or off. */
+  command("autonomy.set", { ghostId: Id, enabled: Type.Boolean() }),
 
   // Owner-approved standing delegations and account-scoped connections.
   command("connection.upsert", {

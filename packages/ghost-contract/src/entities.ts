@@ -471,6 +471,27 @@ export const Schedule = Type.Object({
 });
 export type Schedule = Static<typeof Schedule>;
 
+/**
+ * A Ghost's self-directed drive: the Host wakes its direct conversation at the time the Ghost (or the
+ * main Ghost) planned, or earlier when a watched project Space changes. The owner can switch it off.
+ */
+export const AutonomyPlan = Type.Object({
+  ghostId: Id,
+  enabled: Type.Boolean(),
+  nextAt: nullable(Timestamp),
+  /** Why the Ghost will look again; empty before its first plan. */
+  intent: Type.String({ maxLength: 1024 }),
+  setBy: Type.Union([Type.Literal("self"), Type.Literal("main"), Type.Literal("host")]),
+  watch: Type.Array(Id, { maxItems: 8 }),
+  lastWakeAt: nullable(Timestamp),
+  wakesToday: Type.Integer({ minimum: 0 }),
+});
+export type AutonomyPlan = Static<typeof AutonomyPlan>;
+/** A Ghost's whole reply to a self-directed wake when nothing deserves the owner's attention. */
+export const QUIET_REPLY = "[quiet]";
+/** First line of the Host's self-directed wake. */
+export const AUTONOMOUS_WAKE = "[Autonomous wake]";
+
 export const NotificationKind = Type.Union([
   Type.Literal("decision"),
   Type.Literal("work_done"),

@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import type { Ghost, Work, WorkDetail } from "@ghost/contract";
+import type { Acceptance, Ghost, Work, WorkDetail } from "@ghost/contract";
 import { ExecutionTarget } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
@@ -32,7 +32,7 @@ function visibleWorks(core: Core, scope: Scope): Work[] {
 export function createDirectTools(core: Core): Extension {
   const workCreate = defineTool({
     name: "work_create",
-    description: "Create a Work from an explicit owner task and report it to this conversation. The Work runs in its own conversation.",
+    description: "Create a Work for an owner task, or on your own initiative (initiative: true), and report it to this conversation. The Work runs in its own conversation.",
     parameters: Type.Object({
       title: Type.String({ minLength: 1, maxLength: 256, description: "Short name of the Work" }),
       brief: Type.String({ minLength: 1, maxLength: 32768, description: "What to do, with everything the assignee needs" }),
@@ -40,16 +40,18 @@ export function createDirectTools(core: Core): Extension {
       ghost_id: Type.Optional(Type.String({ description: "Assignee Ghost; defaults to this Ghost" })),
       deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Deadline in minutes from now" })),
       execution: Type.Optional(ExecutionTarget),
+      initiative: Type.Optional(Type.Boolean({ description: "true when you start this Work on your own judgment, not an owner request: a Ghost then reviews the result instead of the owner" })),
     }),
     replay: "unsafe",
     async execute(args, api) {
       try {
         const scope = requireAllowed(core, api, "work_create");
+        const ghostId = args.ghost_id ?? scope.ghost.id;
         const work = core.works.createRoot({
-          ghostId: args.ghost_id ?? scope.ghost.id,
+          ghostId,
           title: args.title,
           brief: args.brief,
-          acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: null },
+          acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: args.initiative ? initiativeReviewer(core, scope.ghost, ghostId) : null },
           deadlineAt: args.deadline_minutes === undefined ? null : Date.now() + args.deadline_minutes * 60_000,
           originConversationId: scope.conversation.id,
           execution: args.execution,
@@ -234,6 +236,18 @@ export function createDirectTools(core: Core): Extension {
     name: "ghost.direct",
     tools: [workCreate, workList, workInspect, workUpdate, workCancel, askOwnerTool(core), scheduleCreate, scheduleList, scheduleCancel, ghostList],
   });
+}
+
+/**
+ * Self-started Work is judged by a Ghost, not the owner: the starting Ghost when it hands the Work to
+ * a teammate, else the main Ghost, else a review under the starter's own model.
+ */
+function initiativeReviewer(core: Core, starter: Ghost, assigneeId: string): Acceptance["reviewer"] {
+  if (starter.id !== assigneeId) return { kind: "ghost", ghostId: starter.id };
+  const main = core.ledger.defaultGhost();
+  if (main && main.id !== assigneeId && main.state === "active" && main.deletedAt === null) return { kind: "ghost", ghostId: main.id };
+  const model = starter.model ?? core.ledger.settings().defaultModel;
+  return model ? { kind: "model", model } : null;
 }
 
 function scheduleSpec(at: string | undefined, everyMinutes: number | undefined) {

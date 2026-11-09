@@ -29,6 +29,15 @@ const originLabel: Record<WakeOrigin, string> = {
 };
 
 const firstLine = (text: string) => text.split('\n').map(line => line.trim()).find(Boolean) ?? '';
+
+/** The Host's self-directed wake (host core/autonomy.ts): the Ghost's own plan, or what woke it early. */
+function autonomousLine(text: string): string {
+  const trigger = /^Trigger: a project you watch changed \((.+)\)\.$/m.exec(text)?.[1];
+  if (trigger) return `${trigger} 변경 확인`;
+  const plan = /^Plan \(set by [^)]*\): (.+)$/m.exec(text)?.[1]?.trim();
+  return plan || '할 일을 스스로 찾는 중';
+}
+
 const heading = (text: string) => /^# (.+)$/m.exec(text)?.[1]?.trim() ?? '';
 
 type Rule = { test: RegExp; view(match: RegExpExecArray, text: string): Omit<WakeView, 'detail'> & { detail?: string | null } };
@@ -51,6 +60,9 @@ const rules: Partial<Record<WakeOrigin, Rule[]>> = {
     { test: /^The owner declined to answer "([\s\S]*)"\.$/, view: match => ({ label: '답변 안 함', line: match[1]!, detail: null }) },
     { test: /^The owner declined the document proposal "([\s\S]*?)"\./, view: match => ({ label: '문서 거절', line: match[1]! }) },
     { test: /^[\w.-]+ \([^)\n]*\): ([\s\S]*)$/, view: match => ({ label: '승인 결과', line: firstLine(match[1]!), detail: match[1]!.trim() }) },
+  ],
+  schedule: [
+    { test: /^\[Autonomous wake\]/, view: (_match, text) => ({ label: '자율', line: autonomousLine(text) }) },
   ],
 };
 

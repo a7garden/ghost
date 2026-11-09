@@ -301,6 +301,19 @@ describe("tools", () => {
     expect(work!.originConversationId).toBe(s.direct.id);
   });
 
+  test("self-started Work is judged by a Ghost instead of waiting on the owner", async () => {
+    const s = setup();
+    const main = s.core.createGhost({ name: "Main", persona: "Lead", isDefault: true });
+    const helper = s.core.createGhost({ name: "Helper", persona: "You help." });
+    const pi = asPi(s, s.direct, "pi-direct");
+    const tool = toolOf(s, s.direct, s.ghost, "work_create");
+    await call(tool, { title: "Handed", brief: "Do it", ghost_id: helper.id, initiative: true }, apiOf(pi, "call-1"));
+    await call(tool, { title: "Own", brief: "Do it", initiative: true }, apiOf(pi, "call-2"));
+    const reviewer = (title: string) => s.ledger.worksForState().find((work) => work.title === title)!.acceptance.reviewer;
+    expect(reviewer("Handed")).toEqual({ kind: "ghost", ghostId: s.ghost.id });
+    expect(reviewer("Own")).toEqual({ kind: "ghost", ghostId: main.id });
+  });
+
   test("a work conversation cannot see work_create; a direct one cannot see bash", async () => {
     const s = setup();
     const { conversation } = await runningWork(s);

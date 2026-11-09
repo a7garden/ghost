@@ -84,6 +84,7 @@ docs/
 | Effect | One external side effect of a tool call (shell, file write, publish, browser mutation, memory write, document proposal). |
 | Artifact | Published bytes, addressed by SHA-256, attached to a Work result. Avatar images are artifacts too. |
 | Schedule | A timed submission into a conversation (wake, follow-up, reminder the owner asked for). |
+| AutonomyPlan | A Ghost's self-directed drive: on/off, the next time it looks at its work, why, the project Spaces it watches, its last wake and today's count. Kept in `settings` (`autonomy:<ghostId>`), not a table. |
 | Activity | An owner-approved standing rule for one Ghost: schedule, PR changes or mail; task instructions, tools, execution, limits, reply policy and notification mode. |
 | ActivityRun | Durable source/admission identity, linked Work, status, deduplication and follow-up state. Oversized mail is an explicit skipped run, never a successful analysis. |
 | Connection | Owner-configured GitHub/Gitea or IMAP/SMTP endpoint and credential epoch; secrets stay outside the ledger. |
@@ -136,9 +137,18 @@ A completion claim alone never accepts a Work.
 
 `complete.artifacts` explicitly lists the exact published filenames (`[]` for no files). Scratch files and filenames mentioned only in prose are not attached automatically. Reviewers start with `evidence_read {}` for the bound Work's recorded reads; optional `child_work_id` may name only its descendants. Recorded observations are paged and bounded, not fetched again from external sources.
 
-### Standing activities, not an always-thinking agent
+### Self-directed drive
 
-- The Host's cheap scheduler checks clocks and source metadata. It starts a fresh bounded Work only for a due schedule, a new source version or an admitted next check. Idle Ghosts consume no model turns. There is no separate LLM heartbeat protocol, generic trigger queue or second execution engine.
+Owner decision 2026-11-10: Ghosts are always on. A fixed timetable is not autonomy; each Ghost decides when it looks at its work again and what to do then.
+
+- Every active Ghost holds the fixed direct-conversation tool `plan_next {after_minutes | at, intent, watch_space_ids?}`. It records the Ghost's next look (10 minutes to 14 days ahead) and the Spaces whose new commits should wake it earlier. The main Ghost may plan another non-default Ghost (`ghost_id`) and switch a teammate's drive (`ghost_update.self_directed`); the owner switches any Ghost in its settings (`autonomy.set`). Plans live in `settings` keys `autonomy:<ghostId>`, appear in the snapshot as `autonomy` and change through `autonomy` events, so older releases ignore them.
+- `core/autonomy.ts` ticks every minute. A due plan, or a watched Space whose Git position (read from `.git` files, never by running Git) moved, prepares `[Autonomous wake]` for the Ghost's direct conversation with `origin: "schedule"`. The wake is first recorded in the plan (`pending`: request id `autonomy:<ghost>:<wake number>:<time>`, text and new positions) and only then submitted; a pending wake found later — after a crash — is resubmitted with the same id, so Pi admits it at most once. Every plan write is synchronous and bumps a revision: a switch-off or a new plan made while a wake was prepared or admitted is never undone, and a plan the Ghost makes during its wake replaces the fallback. The wake carries the plan and who set it, Work settled since the last wake, new commit subjects, pending owner decisions, the Ghost's live Work and, for the main Ghost, every teammate's plan.
+- The Ghost decides: research, a document proposal, a self-started Work for itself or a teammate (`work_create` `initiative: true`, judged by the starting Ghost, the main Ghost or a model review instead of an owner acceptance), a message to the owner, or nothing. When the run ends, its final non-empty reply is a `message` notification (the speak-first path) unless it is exactly `[quiet]`; narration before tools never notifies, owner input during the run cancels it, and the UI hides `[quiet]` replies. Ending without a new plan leaves the Host's fallback: look again 24 hours after admission.
+- Bounds keep a cheap-model team cheap: at most 12 self-directed wakes per Ghost per local day of admission (the next due plan moves to the next day), at most two running at once across the team (busy self-directed conversations keep their slots across a restart), watched-project wakes at most hourly, a busy direct conversation is never interrupted, and first plans are spread over two hours. A refused submission (no model or credential) retries six hours later unless the Ghost planned meanwhile.
+
+### Standing activities
+
+- The Host's cheap scheduler checks clocks and source metadata. It starts a fresh bounded Work only for a due schedule, a new source version or an admitted next check. There is no generic trigger queue or second execution engine.
 - Admission atomically records a deterministic ActivityRun and Work. Retries find the same run; a source cursor advances only after every returned item is admitted or durably accounted for. Daily/concurrent limits defer remaining items without losing them. Waiting roots occupy concurrent slots; each run's whole delegation tree is bounded to 16 Work nodes.
 - Clock/deadline processing and source I/O use separate lanes. One slow poll cannot hold scheduled wakes or Work deadlines. `tickSources` owns its shared source lane; callers must not wrap it in that same lane.
 - `activity_next_check` permits one owner-policy-bounded future check, expressed as relative seconds or an absolute timestamp. The Host computes relative time; a follow-up carries the reason/baseline into a fresh Work. Rules and pending checks persist across restart.
@@ -211,7 +221,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 
 | Kind | Extensions |
 | --- | --- |
-| `direct` | `ghost.direct`: root Work/schedule management and owner questions; `ghost.activities`: `activity_propose`; interactive UI, memory, documents, web, browser, vault, skills and guarded Mac probes as granted; `ghost.main` only for the active default Ghost |
+| `direct` | `ghost.direct`: root Work/schedule management and owner questions; `ghost.autonomy`: `plan_next`; `ghost.activities`: `activity_propose`; interactive UI, memory, documents, web, browser, vault, skills and guarded Mac probes as granted; `ghost.main` only for the active default Ghost |
 | `work` | `ghost.work`: file/shell/publish, scoped delegation, explicit completion, owner/parent questions, child answers and status; optional memory, document reads, web, browser, vault, skills and guarded Mac probes; `ghost.activities` only for bound Activity runs |
 | `review` | `ghost.review`: `evidence_read`, `artifact_read`, `effect_list`, `verdict` |
 
