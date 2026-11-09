@@ -363,10 +363,18 @@ export const Notification = Type.Object({
 });
 export type Notification = Static<typeof Notification>;
 
+/** Per-device push mute preferences; the in-app inbox is unaffected. */
+export const DeviceAlerts = Type.Object({
+  mutedKinds: Type.Array(NotificationKind, { maxItems: 8, uniqueItems: true }),
+  mutedGhostIds: Type.Array(Id, { maxItems: 512, uniqueItems: true }),
+});
+export type DeviceAlerts = Static<typeof DeviceAlerts>;
+
 export const Device = Type.Object({
   id: Id,
   name: Type.String({ minLength: 1, maxLength: 128 }),
   pushEnabled: Type.Boolean(),
+  alerts: DeviceAlerts,
   createdAt: Timestamp,
   lastSeenAt: nullable(Timestamp),
 });

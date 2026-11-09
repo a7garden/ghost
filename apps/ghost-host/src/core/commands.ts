@@ -356,6 +356,11 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       ledger.tx(() => ledger.setPushToken(access.principal.kind === "device" ? access.principal.deviceId : "", command.token, command.environment));
       return {};
 
+    case "device.alerts_update":
+      if (access.principal.kind !== "device") throw invalid("only a paired device sets its alerts");
+      ledger.tx(() => ledger.setDeviceAlerts(access.principal.kind === "device" ? access.principal.deviceId : "", command.alerts));
+      return {};
+
     case "notification.read": {
       const now = Date.now();
       ledger.tx(() => {

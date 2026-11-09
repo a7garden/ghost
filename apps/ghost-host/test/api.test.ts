@@ -13,6 +13,7 @@ import {
   Notification as NotificationSchema,
   ProviderCatalog,
   Settings,
+  type DeviceAlerts,
   type LedgerEvent,
   State,
   parse,
@@ -21,6 +22,7 @@ import {
 import type { Config } from "../src/config.ts";
 import { isLoopbackAddress, startServer } from "../src/api/server.ts";
 import { PairingLimiter } from "../src/api/pairing-limit.ts";
+import { shouldPush } from "../src/api/push.ts";
 import { Core } from "../src/core/core.ts";
 import type { ConversationSetup, Engine, Submission, TranscriptPage } from "../src/core/ports.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
@@ -440,10 +442,42 @@ describe("API server", () => {
       type: "device.push_register", token: "ab".repeat(32), environment: "sandbox",
     }, paired.token);
     expect(response.status).toBe(200);
-    expect(ledger.pushTargets()).toEqual([{ deviceId: paired.deviceId, token: "ab".repeat(32), environment: "sandbox" }]);
+    expect(ledger.pushTargets()).toEqual([{ deviceId: paired.deviceId, token: "ab".repeat(32), environment: "sandbox", alerts: { mutedKinds: [], mutedGhostIds: [] } }]);
     expect(ledger.device(paired.deviceId).pushEnabled).toBe(true);
     expect((await runCommand({ type: "device.revoke", deviceId: paired.deviceId }, OWNER_TOKEN)).status).toBe(200);
     expect(ledger.pushTargets()).toEqual([]);
+  });
+  test("a device mutes kinds and Ghosts for its own pushes and the owner cannot set them", async () => {
+    const paired = await pairDevice("Quiet Phone");
+    const alerts: DeviceAlerts = { mutedKinds: ["decision", "work_failed"], mutedGhostIds: ["ghost-to-mute"] };
+    expect((await runCommand({ type: "device.alerts_update", alerts }, paired.token)).status).toBe(200);
+    const state = parse(State, await (await get("/api/state", paired.token)).json());
+    expect(state.devices.map((device) => device.id)).toEqual([paired.deviceId]);
+    expect(state.devices[0]!.alerts).toEqual(alerts);
+
+    const ownerResponse = await runCommand({ type: "device.alerts_update", alerts: { mutedKinds: [], mutedGhostIds: [] } }, OWNER_TOKEN);
+    expect(ownerResponse.status).toBe(400);
+    const body = parse(CommandResponse, await ownerResponse.json());
+    expect(body.ok ? "ok" : body.error.message).toBe("only a paired device sets its alerts");
+    expect(ledger.device(paired.deviceId).alerts).toEqual(alerts);
+  });
+  test("a device's stored alert preferences read back and their settings key is deleted on revoke", async () => {
+    const paired = await pairDevice("Pref Phone");
+    const alerts: DeviceAlerts = { mutedKinds: ["work_done"], mutedGhostIds: ["ghost-to-mute"] };
+    expect((await runCommand({ type: "device.alerts_update", alerts }, paired.token)).status).toBe(200);
+    expect(ledger.device(paired.deviceId).alerts).toEqual(alerts);
+    const key = `device.alerts:${paired.deviceId}`;
+    expect(ledger.db.query("SELECT value FROM settings WHERE key = ?").get(key)).toEqual({ value: JSON.stringify(alerts) });
+    expect((await runCommand({ type: "device.revoke", deviceId: paired.deviceId }, OWNER_TOKEN)).status).toBe(200);
+    expect(ledger.db.query("SELECT value FROM settings WHERE key = ?").get(key)).toBeNull();
+  });
+  test("shouldPush drops only the muted kinds and muted Ghosts of that device", () => {
+    const alerts: DeviceAlerts = { mutedKinds: ["decision"], mutedGhostIds: ["g-mute"] };
+    expect(shouldPush({ id: "n1", kind: "decision", ghostId: null, conversationId: null, workId: null, decisionId: null, title: "t", body: "b", createdAt: 1, readAt: null }, alerts)).toBe(false);
+    expect(shouldPush({ id: "n2", kind: "work_done", ghostId: "g-mute", conversationId: null, workId: null, decisionId: null, title: "t", body: "b", createdAt: 1, readAt: null }, alerts)).toBe(false);
+    expect(shouldPush({ id: "n3", kind: "work_done", ghostId: null, conversationId: null, workId: null, decisionId: null, title: "t", body: "b", createdAt: 1, readAt: null }, alerts)).toBe(true);
+    expect(shouldPush({ id: "n4", kind: "work_done", ghostId: "g-other", conversationId: null, workId: null, decisionId: null, title: "t", body: "b", createdAt: 1, readAt: null }, alerts)).toBe(true);
+    expect(shouldPush({ id: "n5", kind: "decision", ghostId: "g-other", conversationId: null, workId: null, decisionId: null, title: "t", body: "b", createdAt: 1, readAt: null }, { mutedKinds: [], mutedGhostIds: [] })).toBe(true);
   });
   test("owner uploads raw artifacts and reads them without a Work row", async () => {
     const bytes = new TextEncoder().encode("첨부 파일 내용");

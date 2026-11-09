@@ -193,7 +193,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
       const claimed = core.ledger.tx((): Device | null => {
         if (!core.ledger.claimPairing(hashSecret(input.code.toUpperCase()), deviceId, now)) return null;
-        const device: Device = { id: deviceId, name, pushEnabled: false, createdAt: now, lastSeenAt: null };
+        const device: Device = { id: deviceId, name, pushEnabled: false, alerts: { mutedKinds: [], mutedGhostIds: [] }, createdAt: now, lastSeenAt: null };
         core.ledger.insertDevice(device, hashSecret(token));
         return device;
       });

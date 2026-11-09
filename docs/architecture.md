@@ -76,7 +76,7 @@ docs/
 | Artifact | Published bytes, addressed by SHA-256, attached to a Work result. Avatar images are artifacts too. |
 | Schedule | A timed submission into a conversation (wake, follow-up, reminder the owner asked for). |
 | Notification | Something the owner should see: decision needed, Work finished or failed. Pushed to devices. |
-| Device | A paired iPhone; it sees every Ghost and may send only device commands. |
+| Device | A paired iPhone; it sees every Ghost and may send only device commands. Its alert preferences live in the `settings` table keyed per device and filter only its own pushes. |
 | Space | A PDC document vault registered with the host; Ghosts get read or propose grants. |
 | Avatar | A named sprite design whose image is an artifact; a Ghost's look is an avatar plus colors. |
 | Sandbox | A Ghost's Apple container computer. The owner can stop or reset it. |
@@ -153,7 +153,7 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 | `spaces` | `id` | name, path, grants (Ghost + read/propose) |
 | `avatars` | `id` | name, description, image_digest, design |
 | `providers` | `id` | kind, name, base_url, models (keys live in `secrets/`) |
-| `settings` | `key` | default model, review model |
+| `settings` | `key` | default model, review model, `device.alerts:<deviceId>` mute preferences |
 | `requests` | `id` | principal, command digest, state (`pending` / `done`), small outcome; migration 5 |
 | `events` | `seq` | change event JSON; retained 7 days |
 

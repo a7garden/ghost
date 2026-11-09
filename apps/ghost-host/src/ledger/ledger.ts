@@ -7,6 +7,7 @@ import type {
   Conversation,
   Decision,
   Device,
+  DeviceAlerts,
   Effect,
   Ghost,
   LedgerEvent,
@@ -617,26 +618,32 @@ export class Ledger {
   // Devices and pairing
 
   devices(): Device[] {
-    return (this.db.query("SELECT * FROM devices WHERE revoked_at IS NULL ORDER BY created_at").all() as Row[]).map(toDevice);
+    return (this.db.query("SELECT * FROM devices WHERE revoked_at IS NULL ORDER BY created_at").all() as Row[]).map((row) => toDevice(row, this.deviceAlerts(String(row.id))));
   }
 
   device(id: string): Device {
     const row = this.db.query("SELECT * FROM devices WHERE id = ? AND revoked_at IS NULL").get(id) as Row | null;
     if (!row) throw new NotFound(`device ${id}`);
-    return toDevice(row);
+    return toDevice(row, this.deviceAlerts(id));
   }
 
   deviceByTokenHash(tokenHash: string): Device | null {
     const row = this.db.query("SELECT * FROM devices WHERE token_hash = ? AND revoked_at IS NULL").get(tokenHash) as Row | null;
-    return row ? toDevice(row) : null;
+    return row ? toDevice(row, this.deviceAlerts(String(row.id))) : null;
   }
 
-  pushTargets(): { deviceId: string; token: string; environment: "sandbox" | "production" }[] {
+  /** Alert preferences live in the settings KV, keyed per device; nothing stored means everything unmuted. */
+  deviceAlerts(id: string): DeviceAlerts {
+    return this.setting<DeviceAlerts | null>(`device.alerts:${id}`, null) ?? { mutedKinds: [], mutedGhostIds: [] };
+  }
+
+  pushTargets(): { deviceId: string; token: string; environment: "sandbox" | "production"; alerts: DeviceAlerts }[] {
     return (this.db.query("SELECT id, push_token, push_environment FROM devices WHERE revoked_at IS NULL AND push_token IS NOT NULL").all() as Row[]).map(
       (row) => ({
         deviceId: String(row.id),
         token: String(row.push_token),
         environment: row.push_environment === "production" ? "production" : "sandbox",
+        alerts: this.deviceAlerts(String(row.id)),
       }),
     );
   }
@@ -663,8 +670,14 @@ export class Ledger {
     this.emit({ type: "device", device: this.device(id) });
   }
 
+  setDeviceAlerts(id: string, alerts: DeviceAlerts) {
+    this.putSetting(`device.alerts:${id}`, alerts);
+    this.emit({ type: "device", device: this.device(id) });
+  }
+
   revokeDevice(id: string, at: number) {
     this.db.query("UPDATE devices SET revoked_at = ?, push_token = NULL WHERE id = ?").run(at, id);
+    this.db.query("DELETE FROM settings WHERE key = ?").run(`device.alerts:${id}`);
     this.emit({ type: "device.removed", id });
   }
 
@@ -913,11 +926,12 @@ function toNotification(row: Row): Notification {
   };
 }
 
-function toDevice(row: Row): Device {
+function toDevice(row: Row, alerts: DeviceAlerts): Device {
   return {
     id: String(row.id),
     name: String(row.name),
     pushEnabled: row.push_token !== null,
+    alerts,
     createdAt: Number(row.created_at),
     lastSeenAt: row.last_seen_at === null ? null : Number(row.last_seen_at),
   };

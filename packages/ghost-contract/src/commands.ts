@@ -14,6 +14,7 @@ import {
   SpaceGrant,
   Timestamp,
   GhostState,
+  DeviceAlerts,
   nullable,
 } from "./entities.ts";
 
@@ -154,6 +155,8 @@ export const Command = Type.Union([
     token: Type.String({ pattern: "^[a-f0-9]{16,256}$" }),
     environment: Type.Union([Type.Literal("sandbox"), Type.Literal("production")]),
   }),
+  /** Device principal only; replaces this device's whole alert preference set. */
+  command("device.alerts_update", { alerts: DeviceAlerts }),
 
   // Notifications
   command("notification.read", { notificationIds: Type.Array(Id, { minItems: 1, maxItems: 500 }) }),
@@ -172,6 +175,7 @@ export const DEVICE_COMMANDS: readonly CommandType[] = [
   "work.resume",
   "decision.resolve",
   "device.push_register",
+  "device.alerts_update",
   "notification.read",
 ];
 

@@ -2,7 +2,7 @@ import { createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { connect, type ClientHttp2Session, type ClientHttp2Stream } from "node:http2";
 import { Buffer } from "node:buffer";
-import type { Notification } from "@ghost/contract";
+import type { DeviceAlerts, Notification } from "@ghost/contract";
 import type { Config } from "../config.ts";
 import type { Core } from "../core/core.ts";
 
@@ -44,6 +44,12 @@ const payload = (notification: Notification) => ({
   aps: { alert: { title: notification.title, body: notification.body }, sound: "default" },
   notification_id: notification.id,
 });
+
+/** A device's mute preferences drop its own pushes only: muted kinds and muted Ghosts; a null ghostId has no Ghost to mute. */
+export function shouldPush(notification: Notification, alerts: DeviceAlerts): boolean {
+  if (alerts.mutedKinds.includes(notification.kind)) return false;
+  return notification.ghostId === null || !alerts.mutedGhostIds.includes(notification.ghostId);
+}
 
 /**
  * HTTP/2 delivery against api[.sandbox].push.apple.com. One settlement per call: the deadline
@@ -155,6 +161,7 @@ export function startPush(core: Core, config: Config): { stop(): void } | null {
     for (const notification of notifications) {
       const jwt = tokenFor();
       for (const receiver of targets) {
+        if (!shouldPush(notification, receiver.alerts)) continue;
         try {
           const outcome = await sendAlert(APNS_HOSTS[receiver.environment], jwt, apns.topic, receiver.token, JSON.stringify(payload(notification)));
           if (outcome.status === 410) {
