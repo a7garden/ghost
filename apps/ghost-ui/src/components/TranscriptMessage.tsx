@@ -1,11 +1,11 @@
 import { Fragment, type ReactNode } from 'react';
 import type { Live } from '@ghost/contract';
-import { OutcomeLine, PresenceAvatar, RefText } from './agent';
+import { OutcomeLine, PresenceAvatar } from './agent';
 import { ChevronRight } from 'lucide-react';
 import { ConversationMessage } from '../ui'
 import { INTERACTIVE_UI_TOOL, QUIET_REPLY, readInteractiveUi, type LiveTool, type Message } from '@ghost/contract';
 import { ArtifactPreview } from './ArtifactPreview';
-import { CopyButton, MessageBody, useSmoothText } from './MessageBody';
+import { CopyButton, InlineText, MessageBody, useSmoothText } from './MessageBody';
 import { MessageMenu } from './MessageMenu';
 import { describeWake, parseOutcome } from './wake';
 import { InteractivePresentation } from './interactive/InteractivePresentation';
@@ -91,7 +91,7 @@ function WakeEvent({ message, label }: { message: Message & { origin: Exclude<Me
   const view = describeWake(message.origin, message.text);
   const head = <>
     <span className="transcript-event__kind">{view.label}</span>
-    <span className="transcript-event__text"><RefText text={view.line}/></span>
+    <span className="transcript-event__text"><InlineText text={view.line}/></span>
   </>;
   if (!view.detail) return <div className="transcript-event" data-kind="note" data-origin={message.origin} role="note" aria-label={label}>{head}</div>;
   return <details className="transcript-event" data-kind="note" data-origin={message.origin} aria-label={label}>

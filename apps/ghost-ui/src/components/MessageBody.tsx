@@ -9,6 +9,7 @@ import type { Element, ElementContent, Root } from 'hast';
 import './MessageBody.css';
 import { ExternalAnchor } from './ExternalAnchor';
 import { RefMark } from './agent/RefMark';
+import { StateGlyph } from './agent/StateGlyph';
 import { REF_TAG, rehypeRefs, type Ref } from './refs';
 
 /** Transcript links have no document base; only external URLs and local footnotes are navigable. */
@@ -74,9 +75,17 @@ export function CopyButton({ getText, label, className }: {
   </Button>;
 }
 
-/** Fenced code with its language and a copy action; long lines scroll inside the block instead of the transcript. */
-function CodeBlock({ language, children }: { language?: string; children?: ReactNode }) {
+/**
+ * Fenced code with its language and a copy action; long lines scroll inside the block instead of the transcript.
+ * 2026.11.10 : a one-line command drops the language bar and keeps only its copy action at the line's end —
+ * replies that quote several commands read as stacked toolbars otherwise.
+ */
+function CodeBlock({ language, single = false, children }: { language?: string; single?: boolean; children?: ReactNode }) {
   const pre = useRef<HTMLPreElement>(null);
+  if (single) return <div className="message-body__code" data-single="">
+    <pre ref={pre} tabIndex={0}>{children}</pre>
+    <CopyButton className="message-body__code-copy" label="코드 복사" getText={() => pre.current?.textContent ?? ''}/>
+  </div>;
   return <div className="message-body__code">
     <div className="message-body__code-bar">
       {language && <span className="message-body__code-lang">{language}</span>}
@@ -90,7 +99,20 @@ function FencedCode({ children }: { children?: ReactNode }) {
   const child = Array.isArray(children) ? children[0] : children;
   const className = isValidElement<{ className?: string }>(child) && typeof child.props.className === 'string' ? child.props.className : '';
   const language = /language-([\w+#./-]+)/.exec(className)?.[1];
-  return <CodeBlock language={language}>{children}</CodeBlock>;
+  const source = isValidElement<{ children?: ReactNode }>(child) ? child.props.children : undefined;
+  const single = typeof source === 'string' && !source.replace(/\n$/, '').includes('\n');
+  return <CodeBlock language={language} single={single}>{children}</CodeBlock>;
+}
+
+/**
+ * A GFM task-list box becomes the Work state shape: a check for done, a dashed ring for not yet.
+ * A disabled form checkbox read as a half-filled form, not as a result.
+ */
+function TaskCheck({ type, checked, node: _node, ...props }: ComponentPropsWithoutRef<'input'> & { node?: unknown }) {
+  if (type !== 'checkbox') return <input type={type} checked={checked} {...props}/>;
+  return <span className="message-body__check" role="img" aria-label={checked ? '확인됨' : '확인 안 됨'}>
+    <StateGlyph state={checked ? 'done' : 'queued'} size={15}/>
+  </span>;
 }
 
 function SafeLink({ children, href, node: _node, ...props }: ComponentPropsWithoutRef<'a'> & { node?: unknown }) {
@@ -140,6 +162,7 @@ function RefNode({ 'data-kind': kind, 'data-value': value }: { 'data-kind'?: Ref
 const components = {
   a: SafeLink,
   img: ImageLink,
+  input: TaskCheck,
   pre: FencedCode,
   table: ScrollableTable,
   [REF_TAG]: RefNode,
@@ -206,6 +229,19 @@ export function MessageBody({ text, streaming = false, document = false }: { tex
   return <div className="message-body" data-streaming={streaming || undefined}>
     <Markdown remarkPlugins={document ? documentRemarkPlugins : messageRemarkPlugins} rehypePlugins={streaming ? streamingRehypePlugins : rehypePlugins} remarkRehypeOptions={remarkRehypeOptions} urlTransform={safeUrl} components={components}>{text}</Markdown>
   </div>;
+}
+
+const inlineRemarkPlugins = [remarkGfm, remarkCjkFriendly];
+const INLINE_ELEMENTS = ['strong', 'em', 'del', 'code', REF_TAG];
+
+/**
+ * Ghost text in a one-line slot (a failure reason, an outcome, a wake line): emphasis, short
+ * code and reference marks render, while blocks fold into the line. Line breaks become spaces
+ * first, so unwrapped paragraphs and list items never glue their words together.
+ */
+export function InlineText({ text }: { text: string }) {
+  return <Markdown remarkPlugins={inlineRemarkPlugins} rehypePlugins={rehypePlugins} allowedElements={INLINE_ELEMENTS} unwrapDisallowed
+    components={components}>{text.replace(/\s*\n\s*/g, ' ')}</Markdown>;
 }
 
 /**

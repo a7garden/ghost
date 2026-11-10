@@ -5,7 +5,7 @@ import { useOptionalHost } from '../../host/context';
 import { DotAvatar } from '../DotAvatar';
 import { toneFor } from '../../features/ghostState';
 import { sizeLabel } from '../ArtifactPreview';
-import { splitRefs, type Ref } from '../refs';
+import type { Ref } from '../refs';
 import { Peek, type PeekFact } from './Peek';
 import { StateGlyph, glyphLabel, workGlyph } from './StateGlyph';
 
@@ -84,9 +84,4 @@ export function RefMark({ kind, value }: Ref) {
   return <Peek facts={[raw]}>
     <span className="ref-mark" data-kind="raw" role="img" tabIndex={0} aria-label={`${raw.label} ${value}`}><Hash aria-hidden="true"/></span>
   </Peek>;
-}
-
-/** Plain text with its ids and digests turned into marks. */
-export function RefText({ text }: { text: string }) {
-  return <>{splitRefs(text).map((piece, index) => typeof piece === 'string' ? piece : <RefMark key={index} {...piece}/>)}</>;
 }

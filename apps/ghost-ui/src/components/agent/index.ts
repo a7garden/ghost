@@ -8,4 +8,4 @@ export { WorkLane } from './WorkLane';
 export { ThreadCard } from './ThreadCard';
 export { OutcomeLine } from './OutcomeLine';
 export { Peek, type PeekFact } from './Peek';
-export { OpenWorkProvider, RefMark, RefText } from './RefMark';
+export { OpenWorkProvider, RefMark } from './RefMark';

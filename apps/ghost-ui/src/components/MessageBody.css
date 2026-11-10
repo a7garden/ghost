@@ -85,14 +85,23 @@
   font-weight: 600;
 }
 
-/* GFM task lists keep their box but lose the redundant bullet. */
-.message-body li:has(> input[type='checkbox']) {
+/* GFM task lists: the Work state shape hangs where the bullet was, so results line up by their label. */
+.message-body li.task-list-item {
   list-style: none;
-  margin-inline-start: -1.2em;
+  margin-inline-start: -1.4em;
+  padding-inline-start: 1.4em;
+  text-indent: -1.4em;
 }
 
-.message-body input[type='checkbox'] {
-  margin-inline-end: var(--ghost-space-2, 8px);
+.message-body li.task-list-item > * {
+  text-indent: 0;
+}
+
+.message-body__check {
+  display: inline-flex;
+  width: 1.4em;
+  vertical-align: -0.2em;
+  text-indent: 0;
 }
 
 .message-body blockquote {
@@ -180,6 +189,19 @@
   font-size: inherit;
   white-space: pre;
   overflow-wrap: normal;
+}
+
+/* One-line command: the line and its copy action share a row, no language bar. */
+.message-body__code[data-single] {
+  display: flex;
+  align-items: center;
+  gap: var(--ghost-space-2, 8px);
+  padding-inline-end: var(--ghost-space-1, 4px);
+}
+
+.message-body__code[data-single] pre {
+  flex: 1;
+  padding-block: var(--ghost-space-2, 8px);
 }
 
 /* GFM tables: a quiet card with row hairlines that scrolls locally instead of stretching the transcript. */

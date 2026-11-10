@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
-import { MessageBody } from './MessageBody';
+import { InlineText, MessageBody } from './MessageBody';
 import { TranscriptMessage } from './TranscriptMessage';
 
 const render = (text: string) => renderToStaticMarkup(createElement(MessageBody, { text }));
@@ -77,4 +77,29 @@ it('keeps the single line breaks a Ghost writes in messages, but not in stored d
   expect(render('할 일\n두 항목만 다시 확인한다.')).toMatch(/할 일<br\/?>\s*두 항목/);
   const document = renderToStaticMarkup(createElement(MessageBody, { text: '할 일\n두 항목', document: true }));
   expect(document).not.toContain('<br');
+});
+
+it('draws task-list results as state shapes, not form checkboxes', () => {
+  const html = render('- [x] **확인 1** 추가 줄 있음\n- [ ] **확인 2** 출력이 잘림');
+  expect(html).not.toMatch(/<input/);
+  expect(html).toContain('aria-label="확인됨"');
+  expect(html).toContain('aria-label="확인 안 됨"');
+  expect(html).toContain('data-state="done"');
+});
+
+it('gives a one-line command its copy action without a language bar', () => {
+  const single = render('```bash\ngit show eee86ea1\n```');
+  expect(single).toContain('data-single');
+  expect(single).not.toContain('message-body__code-bar');
+  expect(single).toContain('git show eee86ea1');
+  const multi = render('```bash\ngit log\ngit status\n```');
+  expect(multi).toContain('message-body__code-bar');
+});
+
+it('renders a one-line slot inline: emphasis and code, no blocks, no glued words', () => {
+  const html = renderToStaticMarkup(createElement(InlineText, { text: '발주처 **「산림청」**이 `svn` 을\n\n막았습니다' }));
+  expect(html).toContain('<strong>「산림청」</strong>이');
+  expect(html).toContain('<code>svn</code>');
+  expect(html).not.toMatch(/<p|<br/);
+  expect(html).toContain('을 막았습니다');
 });

@@ -8,7 +8,7 @@ import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { LiveReply, Transcript } from '../components/TranscriptMessage';
 import { ArtifactPreview } from '../components/ArtifactPreview';
-import { MessageBody } from '../components/MessageBody';
+import { InlineText, MessageBody } from '../components/MessageBody';
 import { DecisionCard } from './Decision';
 import { toneFor } from './ghostState';
 import { useConversationFeed } from './conversationFeed';
@@ -106,7 +106,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
         {work.revision > 1 && <span>수정 {work.revisionsUsed}/{work.revision - 1}</span>}
       </div>
       <LifecycleTrack state={work.state} needsOwner={needsOwner} className="work-head__track"/>
-      {work.reason && (work.state === 'failed' || work.state === 'blocked' || work.state === 'cancelled') && <p className="work-head__reason" data-state={work.state}>{work.reason}</p>}
+      {work.reason && (work.state === 'failed' || work.state === 'blocked' || work.state === 'cancelled') && <p className="work-head__reason" data-state={work.state}><InlineText text={work.reason}/></p>}
     </header>
     {loadAlert}
     {error && <InlineError>{error}</InlineError>}
