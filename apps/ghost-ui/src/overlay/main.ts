@@ -16,6 +16,7 @@ import { projectMentionQuery } from '../features/conversationSuggestions';
 import { ProjectChips } from '../components/composer/ProjectMentions';
 import { ComposerSuggest } from '../components/composer/ComposerSuggest';
 import '../components/composer/composer.css';
+import { ScrollRails } from '../ui/scroll-rail';
 
 // The overlay follows the system theme independently of the main window.
 const systemDark = matchMedia('(prefers-color-scheme: dark)');
@@ -61,6 +62,9 @@ composerEl.style.position = 'relative';
 composerEl.prepend(projectTray, projectSuggest);
 const chipsRoot = createRoot(projectTray);
 const suggestRoot = createRoot(projectSuggest);
+const railsHost = document.createElement('div');
+document.body.append(railsHost);
+createRoot(railsHost).render(createElement(ScrollRails));
 
 function projectOptions() {
   const token = projectMentionQuery(inputEl.value, inputEl.selectionStart);

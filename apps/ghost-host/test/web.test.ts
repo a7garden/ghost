@@ -47,7 +47,8 @@ const flood = { ok: true, items: Array.from({ length: 20 }, (_, i) => ({ title: 
 const search = { ok: true, channel: "web", action: "search", items: [{ title: "Result for " + q, url: "https://example.com/a", author: "Ann", published_at: "2026-10-01T00:00:00.000Z", text: "y".repeat(5000) }] };
 const page = { ok: true, channel: "web", action: "read", items: [{ title: "Example", url: argv[1], text: "z".repeat(6000) }] };
 const generic = { ok: true, channel: argv[0], action: argv[1], items: [{ title: argv[0] + " hit", url: "https://example.com/x", text: "short" }] };
-const out = argv[0] === "channels" ? catalogOut : q === "NEED_LOGIN" ? loginError : q === "NEED_SETUP" ? setupError : q === "BAD_INPUT" ? badInputError : q === "DOWN" ? downError : q === "FLOOD" ? flood : q !== "" ? search : argv[0] === "read" ? page : generic;
+const githubRefusal = { ok: false, channel: "github", action: "read", items: [], error: { code: "BAD_INPUT", message: "target must be owner/repo or a github.com repo/issue/PR link", hint: null } };
+const out = argv[0] === "github" && argv[1] === "read" && (argv[2] ?? "").includes("/search") ? githubRefusal : argv[0] === "channels" ? catalogOut : q === "NEED_LOGIN" ? loginError : q === "NEED_SETUP" ? setupError : q === "BAD_INPUT" ? badInputError : q === "DOWN" ? downError : q === "FLOOD" ? flood : q !== "" ? search : argv[0] === "read" ? page : generic;
 process.stdout.write(JSON.stringify(out));
 `;
 
@@ -242,6 +243,31 @@ describe("web tools", () => {
     expect((await argvLines(s.log)).at(-1)).toEqual(["read", "https://example.com/page"]);
     expect(contentOf(read)).toContain("z".repeat(4000));
     expect(contentOf(read)).not.toContain("z".repeat(4001));
+  });
+
+  test("web_read reads github pages that are not repo/issue/PR targets with the generic web reader", async () => {
+    const s = setup();
+    for (const url of ["https://github.com/search?q=ghost+host", "https://api.github.com/users/octocat/repos", "https://raw.githubusercontent.com/octocat/repo/main/README.md"]) {
+      const read = await call(s, s.direct, s.ghost, "web_read", { url });
+      expect(read.isError, url).toBeFalsy();
+      expect(contentOf(read), url).toContain("web hit");
+      expect((await argvLines(s.log)).at(-1)).toEqual(["web", "read", url]);
+    }
+    for (const url of ["https://github.com/octocat/repo", "https://github.com/octocat/repo/issues/12", "https://github.com/octocat/repo/pull/7", "https://github.com/octocat/repo/discussions/3"]) {
+      const read = await call(s, s.direct, s.ghost, "web_read", { url });
+      expect(read.isError, url).toBeFalsy();
+      expect(contentOf(read), url).toContain("Example — " + url);
+      expect((await argvLines(s.log)).at(-1)).toEqual(["read", url]);
+    }
+  });
+
+  test("reach with a bad github target names the accepted forms and web_read", async () => {
+    const s = setup();
+    const refused = await call(s, s.direct, s.ghost, "reach", { channel: "github", action: "read", args: ["https://github.com/search?q=x"] });
+    expect(refused.isError).toBe(true);
+    expect(contentOf(refused)).toContain("owner/repo or a github.com repo/issue/PR link");
+    expect(contentOf(refused)).toContain("web_read");
+    expect((await argvLines(s.log)).at(-1)).toEqual(["github", "read", "https://github.com/search?q=x"]);
   });
 
   test("reach maps channel, action and args; the catalog is validated and cached", async () => {

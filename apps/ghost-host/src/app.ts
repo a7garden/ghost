@@ -10,6 +10,7 @@ import { createDocuments } from "./integrations/documents.ts";
 import { MemoryStore } from "./stores/memory.ts";
 import { MemoryDreams } from "./memory/dreams.ts";
 import { createBrowser } from "./integrations/browser.ts";
+import { createDesktop } from "./integrations/desktop.ts";
 import { createReach } from "./integrations/reach.ts";
 import { createSkills } from "./integrations/skills.ts";
 import { Ledger } from "./ledger/ledger.ts";
@@ -19,7 +20,7 @@ import { FileSecrets } from "./stores/secrets.ts";
 import { createVault, type Vault } from "./stores/vault.ts";
 import { acquireRootLock } from "./state-lock.ts";
 import { createToolSet } from "./tools/index.ts";
-import type { BrowserPort, DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
+import type { BrowserPort, DesktopPort, DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
 import { MacHost } from "./integrations/host.ts";
 import { HostWatch } from "./core/hostwatch.ts";
 import { ProviderCatalog } from "./integrations/provider-catalog.ts";
@@ -71,6 +72,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedEngine: Engine | null = null;
   let openedVault: Vault | null = null;
   let openedBrowser: BrowserPort | null = null;
+  let openedDesktop: DesktopPort | null = null;
   let openedSources: SourceConnections | null = null;
   let openedSourceStore: SourceStore | null = null;
   let openedMemory: MemoryStore | null = null;
@@ -109,11 +111,13 @@ export async function openApp(config: Config): Promise<App> {
     if (!unsafeEngine && !openedEngine && !openedSandbox && (!openedCore || (coreStopped && coreDrained))) {
       // No tool can run any more: end browser sessions (login state saved) and seal the vault.
       await attempt(async () => { await openedBrowser?.shutdown(); openedBrowser = null; });
+      // Stops Ghost Control and the Geist worker under it.
+      await attempt(async () => { await openedDesktop?.shutdown(); openedDesktop = null; });
       await attempt(() => { openedVault?.close(); openedVault = null; });
       await attempt(() => { openedSourceStore?.close(); openedSourceStore = null; });
       await attempt(() => { openedMemory?.close(); openedMemory = null; });
-      // Chrome sessions still running keep ownership: close() can retry their shutdown.
-      if (!openedBrowser) {
+      // Live browser or desktop processes keep ownership: close() can retry their shutdown.
+      if (!openedBrowser && !openedDesktop) {
         await attempt(() => { openedLedger?.close(); openedLedger = null; });
         if (!openedLedger) await attempt(() => lock.close());
       }
@@ -142,8 +146,9 @@ export async function openApp(config: Config): Promise<App> {
     const host = config.mac ? new MacHost({ roots: config.mac.roots, stateRoot: config.root }) : null;
     const vault = (openedVault = createVault(config.root));
     const browser = (openedBrowser = createBrowser(config, { root: config.root }));
+    const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
-    const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, reach: createReach(config), browser, vault });
+    const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, reach: createReach(config), browser, vault, desktop });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
     core.attach(engine);

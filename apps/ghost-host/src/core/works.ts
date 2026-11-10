@@ -134,7 +134,7 @@ export class Works {
 
   private checkExecution(ghostId: string, execution: ExecutionTarget | undefined) {
     if (!execution) return;
-    if (execution.kind === "host" && !this.ledger.ghost(ghostId).hostExecution) throw invalid("the owner has not granted this Ghost direct PC execution");
+    if (execution.kind === "host" && !this.ledger.ghost(ghostId).hostExecution) throw invalid("the owner has not granted this Ghost direct PC execution; ask once with capability_request (host_execution: true) and end your turn, or run it without execution (container) and read Mac files with host_read");
     try { validateExecutionTarget(execution); }
     catch (error) { throw invalid(error instanceof Error ? error.message : "invalid execution target"); }
   }
@@ -320,7 +320,7 @@ export class Works {
     const work = this.ledger.work(workId);
     if (work.parentId) throw invalid("only a root Work can be resumed");
     if (work.state !== "failed" && work.state !== "blocked") throw conflict(`Work is ${work.state}`);
-    if (this.core.effects.unresolved(work.id).length > 0) throw conflict("reconcile the unknown effect first");
+    if (this.core.effects.unresolved(work.id).some((effect) => !this.core.effects.awaitingApproval(effect))) throw conflict("reconcile the unknown effect first");
     const now = Date.now();
     const next: Work = {
       ...work,
@@ -358,14 +358,27 @@ export class Works {
     if (work.state !== "running") throw conflict(`Work is ${work.state}`);
     if (this.ledger.children(work.id).some((child) => !isTerminal(child))) throw conflict("delegated Work is still live; wait for it before completing");
     if (this.pendingQuestion(work.id)) throw conflict("a question to the parent is pending; wait for its answer before completing");
-    if (this.core.effects.unresolved(work.id).length > 0) throw conflict("an effect of this Work is unresolved");
+    const unresolved = this.core.effects.unresolved(work.id);
+    const blocking = unresolved.find((effect) => !this.core.effects.awaitingApproval(effect));
+    if (blocking) throw conflict(blocking.state === "unknown"
+      ? "an effect of this Work is unresolved; end the turn and wait for the owner's reconciliation message before completing"
+      : "an effect of this Work is unresolved and still executing; end the turn and complete after its result arrives");
     for (const artifact of result.artifacts) {
       if (!this.core.artifacts.has(artifact.digest) || !this.ledger.artifactWorkIds(artifact.digest).includes(work.id)) {
         throw invalid(`artifact ${artifact.name} was not published by this Work`);
       }
     }
     const next: Work = { ...work, state: "verifying", result, verdict: null, updatedAt: Date.now() };
-    this.ledger.tx(() => this.ledger.putWork(next));
+    this.ledger.tx(() => {
+      for (const effect of unresolved) {
+        for (const decision of this.ledger.pendingDecisions({ effectId: effect.id })) {
+          if (decision.kind === "approve_effect")
+            this.ledger.putDecision({ ...decision, state: "cancelled", resolvedAt: Date.now() });
+        }
+        this.core.effects.deny(effect.id, "withdrawn: the Work completed without it");
+      }
+      this.ledger.putWork(next);
+    });
     this.kick(work.id);
     return next;
   }
@@ -444,7 +457,7 @@ export class Works {
   /** The owner settled the blocking effect; continue the run. */
   unblock(workId: string, note: string) {
     const work = this.ledger.work(workId);
-    if (work.state !== "blocked" || this.core.effects.unresolved(work.id).length > 0) return;
+    if (work.state !== "blocked" || this.core.effects.unresolved(work.id).some((effect) => !this.core.effects.awaitingApproval(effect))) return;
     this.ledger.tx(() => {
       this.ledger.putWork({ ...work, state: "running", reason: null, updatedAt: Date.now() });
       this.ledger.setIdleNudges(work.id, 0);

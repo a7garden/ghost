@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import { Duty } from "./duty.ts";
 import {
+  Adaptation,
   ArtifactRef,
   AutonomyPlan,
   Avatar,
@@ -72,6 +73,8 @@ export const State = Type.Object({
   activityRuns: Type.Optional(Type.Array(ActivityRun)),
   connections: Type.Optional(Type.Array(Connection)),
   autonomy: Type.Optional(Type.Array(AutonomyPlan)),
+  /** What each Ghost learned about this environment; only Ghosts with notes appear. */
+  adaptations: Type.Optional(Type.Array(Adaptation)),
   /** 근무 상태. 이 기능 이전의 Host 는 보내지 않는다. */
   duty: Type.Optional(Duty),
 });

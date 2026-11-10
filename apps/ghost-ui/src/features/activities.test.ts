@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type ActivityConfig, type ActivityRun, type ActivitySource, type Ghost } from '@ghost/contract';
+import { BROWSER_TOOLS, DESKTOP_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type ActivityConfig, type ActivityRun, type ActivitySource, type Ghost } from '@ghost/contract';
 import { activityToolChoices, buildActivityConfig, draftFromConfig, emptyDraft, intersectTools, type ActivityDraft } from './activity-config';
 import { RunRow } from './Activities';
 
@@ -30,7 +30,7 @@ it('matches selectable Work extensions, retaining documents, browser and vault w
     'read', 'write', 'edit', 'bash', 'publish_artifact', 'delegate',
     'document_spaces', 'document_list', 'document_read',
     'web_search', 'web_read', 'reach', 'skill_read',
-    ...HOST_TOOLS, ...BROWSER_TOOLS, ...VAULT_TOOLS,
+    ...HOST_TOOLS, ...BROWSER_TOOLS, ...VAULT_TOOLS, ...DESKTOP_TOOLS,
   ]);
   expect(intersectTools(['activity_propose', 'document_read', 'browser_open', 'vault_list'], GHOST_TOOLS))
     .toEqual(['document_read', 'browser_open', 'vault_list']);

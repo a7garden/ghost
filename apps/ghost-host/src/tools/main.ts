@@ -1,15 +1,16 @@
 import { Type } from "typebox";
-import { FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
+import { ADAPTATION_MAX_CHARS, DESKTOP_TOOLS, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
-import { forbidden, invalid } from "../core/errors.ts";
+import { conflict, forbidden, invalid } from "../core/errors.ts";
+import { idFor } from "../core/ids.ts";
 import { errorResult, scopeOf, type Scope } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
 /** The target's full configuration, structured so the caller can inspect and edit it faithfully. */
-function renderGhost(ghost: Ghost): string {
+function renderGhost(core: Core, ghost: Ghost): string {
   return JSON.stringify(
     {
       id: ghost.id,
@@ -18,9 +19,11 @@ function renderGhost(ghost: Ghost): string {
       model: ghost.model,
       look: ghost.look,
       tools: ghost.tools,
+      hostExecution: ghost.hostExecution ?? false,
       fallbacks: ghost.fallbacks,
       skills: ghost.skills,
       persona: ghost.persona,
+      notes: core.adaptations.get(ghost.id)?.notes ?? "",
       directConversationId: ghost.directConversationId,
       createdAt: ghost.createdAt,
       updatedAt: ghost.updatedAt,
@@ -30,6 +33,17 @@ function renderGhost(ghost: Ghost): string {
   );
 }
 
+/** A main Ghost that keeps creating Ghosts is looping, not building a team. */
+const MAX_CREATED_PER_DAY = 10;
+
+/** Grants that open the owner's Mac; the owner hears about each one. */
+function macGrants(before: Pick<Ghost, "tools" | "hostExecution"> | null, tools: readonly string[] | undefined, hostExecution: boolean | undefined): string[] {
+  return [
+    ...(hostExecution === true && !before?.hostExecution ? ["PC 직접 실행"] : []),
+    ...[...HOST_TOOLS, ...DESKTOP_TOOLS].filter((tool) => tools?.includes(tool) && !before?.tools.includes(tool)),
+  ];
+}
+
 /**
  * Resolve the caller and the target of a main-only management call, straight from the ledger at
  * execution time: the caller must be the current main Ghost — direct conversation, isDefault,
@@ -37,21 +51,86 @@ function renderGhost(ghost: Ghost): string {
  * the moment the owner designates another Ghost, without any replay or caller-chosen identity.
  */
 function requireMain(core: Core, api: ToolExecutionApi, targetId: string): Scope & { target: Ghost } {
-  const scope = scopeOf(core, api);
-  if (scope.conversation.kind !== "direct") throw forbidden("ghost_inspect and ghost_update run only in a direct conversation");
-  if (!scope.ghost.isDefault) throw forbidden("only the current main Ghost may inspect or update other Ghosts");
-  if (scope.ghost.state !== "active") throw forbidden(`${scope.ghost.name} is ${scope.ghost.state}`);
+  const scope = requireMainCaller(core, api);
   const target = core.ledger.ghost(targetId);
-  if (target.id === scope.ghost.id) throw forbidden("a Ghost cannot manage itself; its own settings belong to the owner");
+  if (target.id === scope.ghost.id) throw forbidden("a Ghost cannot manage itself; its own settings belong to the owner (your own notes: self_adapt)");
   if (target.isDefault) throw forbidden("the main designation stays with the owner");
   return { ...scope, target };
 }
 
-/** `ghost_inspect` and `ghost_update`: main-only, never selectable, never granted to work or review conversations. */
+function requireMainCaller(core: Core, api: ToolExecutionApi): Scope {
+  const scope = scopeOf(core, api);
+  if (scope.conversation.kind !== "direct") throw forbidden("Ghost management runs only in a direct conversation");
+  if (!scope.ghost.isDefault) throw forbidden("only the current main Ghost may create, inspect or update other Ghosts");
+  if (scope.ghost.state !== "active") throw forbidden(`${scope.ghost.name} is ${scope.ghost.state}`);
+  return scope;
+}
+
+/** `ghost_create`, `ghost_inspect`, `ghost_update` and `decision_settle`: main-only, never selectable, never granted to work or review conversations. */
 export function createMainTools(core: Core): Extension {
+  const ghostCreate = defineTool({
+    name: "ghost_create",
+    description:
+      "Create a new Ghost when a recurring kind of work deserves its own identity, persona, model or tools, instead of stretching an existing one. " +
+      "Write its persona as a role brief (what it owns, how it works, how it reports). Tools default to every tool except Mac host tools. Main Ghost only; the owner is told about every new Ghost.",
+    parameters: Type.Object({
+      name: Type.String({ minLength: 1, maxLength: 128 }),
+      persona: Type.String({ minLength: 1, maxLength: 8192 }),
+      reason: Type.String({ minLength: 1, maxLength: 1000, description: "Why this Ghost should exist, in the owner's language" }),
+      model: Type.Optional(nullable(ModelRef)),
+      fallbacks: Type.Optional(FallbackList),
+      skills: Type.Optional(SkillList),
+      tools: Type.Optional(GhostToolList),
+      look: Type.Optional(Look),
+      host_execution: Type.Optional(Type.Boolean({ description: "Allow its Works to run directly on the owner's Mac; only when its role needs it" })),
+    }),
+    replay: "unsafe",
+    async execute(args, api) {
+      try {
+        const scope = requireMainCaller(core, api);
+        const id = idFor(scope.conversation.id, api.callId);
+        const replayed = core.ledger.ghosts().find((ghost) => ghost.id === id);
+        if (!replayed) {
+          const since = Date.now() - 24 * 60 * 60_000;
+          if (core.ledger.ghosts().filter((ghost) => ghost.createdAt >= since).length >= MAX_CREATED_PER_DAY) {
+            throw conflict(`at most ${MAX_CREATED_PER_DAY} Ghosts are created a day; give the work to an existing Ghost or update one with ghost_update`);
+          }
+          if (core.ledger.ghosts().some((ghost) => ghost.deletedAt === null && ghost.name === args.name.trim())) throw conflict(`a Ghost named ${args.name.trim()} already exists; update it with ghost_update or choose another name`);
+        }
+        const granted = macGrants(null, args.tools, args.host_execution);
+        const ghost = core.ledger.tx(() => {
+          const created = core.createGhost({
+            id,
+            name: args.name.trim(),
+            persona: args.persona,
+            model: args.model ?? null,
+            ...(args.look ? { look: args.look } : {}),
+            ...(args.tools ? { tools: args.tools } : {}),
+            ...(args.fallbacks ? { fallbacks: args.fallbacks } : {}),
+            ...(args.skills ? { skills: args.skills } : {}),
+            hostExecution: args.host_execution ?? false,
+          });
+          core.notify({
+            id: `ghost-created:${created.id}`,
+            kind: "message",
+            ghostId: scope.ghost.id,
+            conversationId: scope.conversation.id,
+            workId: null,
+            decisionId: null,
+            title: `새 Ghost ${created.name}${granted.length ? ` (${granted.join(", ")} 허용)` : ""}`,
+            body: `${args.reason.trim()}\n\n설정 › Ghost에서 고치거나 은퇴시킬 수 있습니다.`,
+          });
+          return created;
+        });
+        return text(`Created ${ghost.name} (ghost_id ${ghost.id}). Hand it Work with work_create and its ghost_id.\n${renderGhost(core, ghost)}`);
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  });
   const ghostInspect = defineTool({
     name: "ghost_inspect",
-    description: "Show another Ghost's full configuration: name, persona, look, model, state and tool allow-list. Main Ghost only.",
+    description: "Show another Ghost's full configuration: name, persona, notes about this environment, look, model, state, PC execution and tool allow-list. Main Ghost only.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "The Ghost to inspect" }),
     }),
@@ -59,7 +138,7 @@ export function createMainTools(core: Core): Extension {
     async execute(args, api) {
       try {
         const { target } = requireMain(core, api, args.ghost_id);
-        return text(renderGhost(target));
+        return text(renderGhost(core, target));
       } catch (error) {
         return errorResult(error);
       }
@@ -69,11 +148,14 @@ export function createMainTools(core: Core): Extension {
   const ghostUpdate = defineTool({
     name: "ghost_update",
     description:
-      "Change another Ghost's name, persona, model, fallback models, skills, look, state, tool allow-list (host tools included) or direct PC execution, and re-apply its conversations. Main Ghost only; the main designation and credentials stay with the owner. Grant PC execution or host tools only when a concrete task needs them; the owner is told about every such grant.",
+      "Change another Ghost's name, persona, notes about this environment, model, fallback models, skills, look, state, tool allow-list (host tools included) or direct PC execution, and re-apply its conversations. " +
+      "Correct its notes when its results show it keeps working the wrong way here. Main Ghost only; the main designation and credentials stay with the owner. Grant PC execution or host tools only when a concrete task needs them; the owner is told about every such grant.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "The Ghost to update" }),
       name: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
       persona: Type.Optional(Type.String({ maxLength: 8192 })),
+      notes: Type.Optional(Type.String({ maxLength: ADAPTATION_MAX_CHARS, description: "Its full notes about working in this environment; empty clears them" })),
+      notes_reason: Type.Optional(Type.String({ maxLength: 500, description: "Why you changed its notes, in the owner's language" })),
       model: Type.Optional(nullable(ModelRef)),
       look: Type.Optional(Look),
       state: Type.Optional(GhostState),
@@ -88,10 +170,7 @@ export function createMainTools(core: Core): Extension {
       try {
         const { target, ...scope } = requireMain(core, api, args.ghost_id);
         if (target.deletedAt !== null) throw forbidden(`${target.name} was deleted`);
-        const granted = [
-          ...(args.host_execution === true && !target.hostExecution ? ["PC 직접 실행"] : []),
-          ...HOST_TOOLS.filter((tool) => args.tools?.includes(tool) && !target.tools.includes(tool)),
-        ];
+        const granted = macGrants(target, args.tools, args.host_execution);
         // The Mac is the owner's: the main Ghost may open it to a teammate, but never silently —
         // the grant and its notification commit together.
         const next = core.ledger.tx(() => {
@@ -107,6 +186,7 @@ export function createMainTools(core: Core): Extension {
             hostExecution: args.host_execution,
           });
           if (args.self_directed !== undefined) core.autonomy.setEnabled(target.id, args.self_directed);
+          if (args.notes !== undefined) core.adaptations.set(target.id, args.notes, "main", args.notes_reason ?? "");
           if (granted.length > 0) {
             core.notify({
               id: `grant:${scope.conversation.id}:${api.callId}`,
@@ -121,7 +201,7 @@ export function createMainTools(core: Core): Extension {
           }
           return updated;
         });
-        return text(`Updated.\n${renderGhost(next)}`);
+        return text(`Updated.\n${renderGhost(core, next)}`);
       } catch (error) {
         return errorResult(error);
       }
@@ -154,5 +234,5 @@ export function createMainTools(core: Core): Extension {
     },
   });
 
-  return defineExtension({ name: "ghost.main", tools: [ghostInspect, ghostUpdate, decisionSettle] });
+  return defineExtension({ name: "ghost.main", tools: [ghostCreate, ghostInspect, ghostUpdate, decisionSettle] });
 }

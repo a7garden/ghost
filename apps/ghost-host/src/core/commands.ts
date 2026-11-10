@@ -350,6 +350,10 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       deleteGhost(core, command.ghostId);
       return {};
 
+    case "ghost.adapt":
+      core.adaptations.set(command.ghostId, command.notes, "owner", "");
+      return {};
+
     case "ghost.set_default": {
       const ghost = ledger.ghost(command.ghostId);
       if (ghost.state !== "active") throw conflict(`${ghost.name} is ${ghost.state}`);

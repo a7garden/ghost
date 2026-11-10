@@ -73,6 +73,17 @@ describe('applyEvent', () => {
     expect(state.sandboxes.map(row => [row.ghostId, row.state])).toEqual([['milo', 'stopped'], ['sage', 'error']]);
   });
 
+  it('swaps adaptation notes per ghost', () => {
+    const notes = { ghostId: 'sage', notes: '창작물은 ~/Works에 두고 bun으로 검증한다', previous: null, by: 'owner' as const, reason: '처음 기록', updatedAt: 1, revision: 0 };
+    let state = applyEvent(baseState(), event({ type: 'adaptation', adaptation: notes }));
+    expect(state.adaptations?.map(row => row.ghostId)).toEqual(['sage']);
+    state = applyEvent(state, event({ type: 'adaptation', adaptation: { ...notes, ghostId: 'milo', notes: '저장소는 pnpm으로', by: 'self' as const, reason: '', updatedAt: 2, revision: 1 } }));
+    expect(state.adaptations?.map(row => row.ghostId)).toEqual(['sage', 'milo']);
+    state = applyEvent(state, event({ type: 'adaptation', adaptation: { ...notes, notes: '경로가 바뀌어 다시 적는다', previous: notes.notes, by: 'self' as const, reason: '경로 바뀜', updatedAt: 3, revision: 2 } }));
+    expect(state.adaptations).toHaveLength(2);
+    expect(state.adaptations?.find(row => row.ghostId === 'sage')).toMatchObject({ notes: '경로가 바뀌어 다시 적는다', previous: notes.notes, updatedAt: 3 });
+  });
+
   it('removes schedules, spaces, avatars and devices', () => {
     let state = applyEvent(baseState(), event({ type: 'space', space: { id: 'sp1', name: '메모', path: '/v', createdAt: 1 } }));
     state = applyEvent(state, event({ type: 'space.removed', id: 'sp1' }));

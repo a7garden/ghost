@@ -417,7 +417,9 @@ describe("API command crash atomicity", () => {
       expect(readFileSync(sandboxActions, "utf8")).toBe("reset\n");
       expect(ledger.effect(approval.id)).toEqual(originalEffect);
       expect(ledger.pendingDecisions({ effectId: approval.id })).toEqual(originalDecisions);
-      expect(() => core.effects.begin({ conversationId, callId: "competing-model-write", tool: "write", input: {}, summary: "Must stay excluded" })).toThrow("unresolved");
+      const beginWrite = () => core.effects.begin({ conversationId, callId: "competing-model-write", tool: "write", input: {}, summary: "Independent write" });
+      if (state === "unknown") expect(beginWrite).toThrow("unresolved");
+      else expect(beginWrite().kind).toBe("run");
       await core.idle();
       core.stop();
       ledger.close();

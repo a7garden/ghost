@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Server, Smartphone, Users } from 'lucide-react';
 import { DutySwitch } from './components/DutySwitch';
 import { DutySettings } from './features/DutySettings';
-import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
+import { Banner, Button, EmptyState, ScrollRails, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
 import { AppFrame } from './components/AppFrame';
 import { TitleNav } from './components/TitleNav';
@@ -59,7 +59,7 @@ if (desktopShell) {
 const currentRoute = () => location.hash.replace(/^#/, '').replace(/^\/dots\//, '/ghosts/') || '/';
 
 export function App() {
-  return <HostProvider><Shell/></HostProvider>;
+  return <HostProvider><Shell/><ScrollRails/></HostProvider>;
 }
 
 function Shell() {
