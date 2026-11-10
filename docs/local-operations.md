@@ -43,7 +43,7 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.3.0-db54109`(GitHub Release `v2.3.0`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.1-5b14f11`(GitHub Release `v2.4.1`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -51,6 +51,15 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### Host 내장 기억 후보 — 2026-11-10, 배포 보류
+
+- 구현 소스 `7585ed5`, Host 후보 2.5.0. 저장·검색·대화 색인·유휴 정리를 Bun/TypeScript Host 안으로 옮겼다. Ghost별 개인/팀 namespace, 소유자 전용 프로필, 원문 인용 검증, CAS·이전 버전, 한국어 FTS, 편집 충돌 시 초안 보존을 포함한다. 기억은 내부 DB 레코드이며 PDC 문서 변환은 없다. Oxibrain CLI와 기억 관리 Ghost가 새 구현의 실행 경로에 없다.
+- Host 799 통과·9 생략, UI 176 통과, Rust 28 통과, 계약·Host·UI 타입 검사 통과. 실제 격리 UI에서 충돌 비교·명시적 덮어쓰기·이력, 한글 중첩 경로의 생성/재저장, 미저장 초안 보호와 390px 화면을 확인했다. 실제 SDK 모델의 격리 실행은 낡은 90분 메모를 소유자 정정 근거의 150분으로 고쳤고, 새 맡긴 일이 `memory_search`로 150분을 찾아 완료했다. 프로덕션 OAuth refresh 토큰을 복사하거나 회전시키지 않았다. MiniMax·Z.AI의 별도 시도는 실제 429로 실패했으며 성공으로 세지 않는다.
+- 이관 준비 시점의 Oxibrain 메모 58개는 완료된 기존 효과와 episode ID·입력 digest를 대조했다. 임시 새 저장소에서 58/58 원문 해시·바이트를 보존했고, 수동 정답을 정한 실자료 질의 10개의 top-3와 무관 질의 3개를 확인했다. 일반 성능 벤치마크나 다른 검색기의 우월성 증거는 아니다. 운영 원장 복사본은 버전 7→8 뒤 Ghost 26·대화 211·맡긴 일 156·효과 1,998·결정 160·자동 활동 9개의 모든 ID를 보존하고 구형 기억 권한을 제거했다. 운영 이관은 아직 하지 않았으며 설치 시 최신 완료 효과를 다시 대조해야 한다.
+- 필수 R2 수용은 미완료다. 실제 응답 메타데이터에서 저장소 검토는 GLM 긴급 대체, 정리기 검토는 작성자와 같은 Codex였다. Claude 작성 통합부의 Codex 검토만 타 공급자 조건을 충족했다. 강한 타 공급자 검토 재배정도 GLM으로 대체되었다. 예비 한도를 우회하거나 이를 독립 수용으로 간주하지 않는다. 병합된 펫·타이틀바 네이티브 변경의 기존 수용 차단도 함께 남아 있다.
+- `v2.5.0` 게시 시도는 이 차단을 확인한 뒤 게시 전에 중지했다. 운영은 Owner API `lastResult: installed`와 실제 프로세스·리스너·DB 경로로 확인한 2.4.1이다. 운영 설정의 Oxibrain 항목, 기존 기억 관리 Ghost, 원본 `~/.oxi/brain`은 건드리지 않았다. 앱 창은 다른 Space에서 접근 불가였으며 강제로 앞으로 가져오지 않았다. 수용 뒤 자체 업데이트 → 최신 메모 이관 → 구형 Ghost 은퇴/삭제 → 설치 UI 확인 순서로 마무리한다.
+- 로컬 `bun scripts/release.ts`는 소스 `7585ed5`의 전체 검사·Host/UI/Mac/iPhone 빌드·Developer ID·업데이트 서명·매니페스트·묶음 검증을 완료했다. 공증은 기존 배포 방식대로 생략했다. 게시하지 않은 서명 후보를 정본 `dist/release/2.5.0/`에 보존했다. 이관 스냅숏은 `~/.local/share/ghost/backups/host-memory-2.5.0/oxibrain-notes.json`(디렉터리 0700, 파일 0600)에 보관했고, 시험 Host·브라우저·OAuth 사본·임시 스크립트·원장 복사본은 정리했다.
 
 ### 펫의 펼침 일 목록 — 2026-11-10
 
