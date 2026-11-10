@@ -1,13 +1,15 @@
-import { describe, expect, test } from "bun:test";
-import { reviewOf } from "@ghost/contract";
-import { harness } from "./support.ts";
+import { describe, expect, spyOn, test } from "bun:test";
+import { reviewOf, type Ghost } from "@ghost/contract";
+import { join } from "node:path";
+import type { Core } from "../src/core/core.ts";
+import { harness, tempDir } from "./support.ts";
 
 const MINUTE = 60_000;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** A main Ghost and a teammate whose Work asks; the main is created first and so is the default. */
-async function team() {
-  const h = harness();
+async function team(path = ":memory:") {
+  const h = harness(path);
   const main = h.core.createGhost({ name: "Main", persona: "" });
   const mate = h.core.createGhost({ name: "Mate", persona: "" });
   const work = h.core.works.createRoot({ ghostId: mate.id, title: "T", brief: "B", originConversationId: mate.directConversationId });
@@ -24,7 +26,131 @@ async function team() {
   return { ...h, main, mate, work, conversationId, ask, command };
 }
 
+function newPage(t: { core: Core; mate: Ghost }, id = "new-page") {
+  return t.core.ledger.tx(() => t.core.decisions.open({
+    id, kind: "document_review", ghostId: t.mate.id, conversationId: t.mate.directConversationId,
+    workId: null, effectId: null, title: "New page", detail: "A new page for the project.", options: [],
+    proposal: { spaceId: "space", title: "Plan", body: "The plan.", pageId: null, expectedHash: null },
+  }));
+}
+
 describe("approvals that do not wait forever", () => {
+  test("restart repairs persisted new-page reviews and takes the recommendation after the original wait", async () => {
+    const path = join(tempDir(), "ledger.db");
+    const t = await team(path);
+    const clock = spyOn(Date, "now").mockReturnValue(Date.now() - 2 * 60 * MINUTE);
+    const opened = newPage(t);
+    clock.mockRestore();
+    await tick();
+    // A pending row written before review metadata existed survives an upgrade unchanged.
+    const { review: _review, ...proposal } = opened.proposal!;
+    t.ledger.tx(() => t.ledger.putDecision({ ...opened, proposal }));
+    t.core.stop();
+    await t.core.idle();
+    t.ledger.close();
+
+    const restarted = harness(path);
+    let writes = 0;
+    restarted.core.decisions.onDocumentApproved(async () => { writes++; return "Saved Plan."; });
+    await restarted.core.decisions.recover();
+    const settled = restarted.ledger.decision(opened.id);
+    expect(restarted.engine.to(t.main.directConversationId).filter(item => item.requestId === `decision-review:${opened.id}`)).toHaveLength(1);
+    expect(settled.state).toBe("approved");
+    expect(reviewOf(settled.proposal)).toMatchObject({ recommend: "approve", resolvedBy: "timeout", expiresAt: settled.createdAt + 30 * MINUTE });
+    expect(writes).toBe(1);
+    expect(restarted.engine.to(t.mate.directConversationId).at(-1)?.text).toBe("Saved Plan.");
+    await restarted.core.decisions.recover();
+    expect(writes).toBe(1);
+    restarted.core.stop();
+    restarted.ledger.close();
+  });
+
+  test("a missed main-review admission is retried after restart even while the main is busy", async () => {
+    const path = join(tempDir(), "ledger.db");
+    const t = await team(path);
+    t.core.activity(t.main.directConversationId, true, Date.now());
+    const submit = t.engine.submit.bind(t.engine);
+    t.engine.submit = async (conversationId, submission) => {
+      if (submission.requestId.startsWith("decision-review:")) throw new Error("admission unavailable");
+      await submit(conversationId, submission);
+    };
+    const opened = newPage(t);
+    await tick();
+    expect(t.engine.to(t.main.directConversationId)).toHaveLength(0);
+    t.core.stop();
+    await t.core.idle();
+    t.ledger.close();
+
+    const restarted = harness(path);
+    let writes = 0;
+    restarted.core.decisions.onDocumentApproved(async () => { writes++; return "Saved."; });
+    await restarted.core.decisions.recover();
+    await restarted.core.decisions.recover();
+    expect(restarted.engine.to(t.main.directConversationId).filter(item => item.requestId === `decision-review:${opened.id}`)).toHaveLength(1);
+    expect(restarted.ledger.decision(opened.id).state).toBe("pending");
+    await restarted.core.decisions.settleExpired(opened.createdAt + 31 * MINUTE);
+    expect(restarted.ledger.decision(opened.id).state).toBe("approved");
+    expect(writes).toBe(1);
+    restarted.core.stop();
+    restarted.ledger.close();
+  });
+
+  test("a failed review admission is retried by the live clock without waiting for another restart", async () => {
+    const t = await team();
+    const submit = t.engine.submit.bind(t.engine);
+    let unavailable = true;
+    t.engine.submit = async (conversationId, submission) => {
+      if (unavailable && submission.requestId.startsWith("decision-review:")) throw new Error("admission unavailable");
+      await submit(conversationId, submission);
+    };
+    const decision = t.ask("B");
+    await tick();
+    unavailable = false;
+    await t.core.decisions.settleExpired(decision.createdAt + MINUTE);
+    expect(t.engine.to(t.main.directConversationId).find(item => item.requestId === `decision-review:${decision.id}`)).toBeTruthy();
+    expect(t.ledger.decision(decision.id).state).toBe("pending");
+    await t.core.decisions.settleExpired(decision.createdAt + 31 * MINUTE);
+    expect(t.ledger.decision(decision.id).answer).toBe("B");
+  });
+
+  test("recovery never turns legacy document edits or an owner-only Ghost's new pages into automatic writes", async () => {
+    const t = await team();
+    const clock = spyOn(Date, "now").mockReturnValue(Date.now() - 2 * 60 * MINUTE);
+    const edit = newPage(t, "existing-page");
+    const optedOut = newPage(t, "owner-only");
+    clock.mockRestore();
+    await tick();
+    t.ledger.tx(() => {
+      t.ledger.putDecision({ ...edit, proposal: { ...edit.proposal, pageId: "existing", review: undefined } });
+      t.ledger.putDecision({ ...optedOut, proposal: { ...optedOut.proposal, review: undefined } });
+      t.ledger.putSetting("approvals", { autoMinutes: 30, delegate: "reversible", ghosts: { [t.mate.id]: "owner" } });
+    });
+    let writes = 0;
+    t.core.decisions.onDocumentApproved(async () => { writes++; return "Saved."; });
+    await t.core.decisions.recover();
+    expect(t.ledger.decision(edit.id).state).toBe("pending");
+    expect(reviewOf(t.ledger.decision(edit.id).proposal)).toBeNull();
+    expect(t.ledger.decision(optedOut.id).state).toBe("pending");
+    expect(reviewOf(t.ledger.decision(optedOut.id).proposal)?.expiresAt).toBeNull();
+    expect(writes).toBe(0);
+  });
+
+  test("recovery preserves a recommended answer's original deadline instead of starting the wait over", async () => {
+    const t = await team();
+    const createdAt = Date.now() - 2 * 60 * MINUTE;
+    const clock = spyOn(Date, "now").mockReturnValue(createdAt);
+    const question = t.ask("A");
+    clock.mockRestore();
+    t.ledger.tx(() => t.ledger.putDecision({
+      ...question, createdAt,
+      proposal: { ...question.proposal, review: { ...reviewOf(question.proposal), expiresAt: createdAt + 30 * MINUTE } },
+    }));
+    await t.core.decisions.recover();
+    expect(t.ledger.decision(question.id).state).toBe("answered");
+    expect(t.ledger.decision(question.id).answer).toBe("A");
+    expect(reviewOf(t.ledger.decision(question.id).proposal)?.expiresAt).toBe(createdAt + 30 * MINUTE);
+  });
+
   test("a recommended answer goes ahead after the owner's wait, and the Ghost is told it was the Host", async () => {
     const t = await team();
     const decision = t.ask("A");
