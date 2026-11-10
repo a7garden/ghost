@@ -33,6 +33,8 @@ export function snapshot(core: Core, access: Access): State {
     autonomy: core.autonomy.view(),
     adaptations: core.adaptations.view(),
     duty: core.duty.view(),
+    goals: core.goals.goals(),
+    milestones: core.goals.milestones(),
   };
 }
 

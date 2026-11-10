@@ -156,6 +156,20 @@ export class Autonomy {
   }
 
   /**
+   * A new owner goal pulls the current main's next look forward. Like a team change, the plan write is the
+   * whole signal: `wake()` still applies duty, the daily budget, busy conversations and the concurrency cap,
+   * and a pending wake keeps its identity. A wake prepared before the goal existed does not carry it; the
+   * revision bump keeps a due follow-up after that wake instead of the day-long fallback.
+   */
+  goalsChanged(): void {
+    const main = this.core.ledger.defaultGhost();
+    if (!main || main.state !== "active" || main.deletedAt !== null) return;
+    const now = Date.now();
+    this.update(main.id, (stored) => (stored.enabled ? { ...stored, nextAt: Math.min(stored.nextAt ?? now, now) } : stored));
+    void this.tick().catch((error) => this.core.log(`a new goal failed to admit ${main.name}'s look`, error));
+  }
+
+  /**
    * Record when a Ghost looks again. `by` is the caller: the Ghost itself, or the main Ghost planning a
    * teammate. Watched Spaces start from their current position, so only later changes wake early.
    */
@@ -367,6 +381,9 @@ export class Autonomy {
     const pending = ledger.decisionsForState().filter((decision) => decision.state === "pending");
     if (pending.length) lines.push(`- ${pending.length} decision(s) waiting for the owner`);
     if (settled.count === 0 && moved.length === 0 && pending.length === 0) lines.push("- nothing new reached the Host");
+    // Every Ghost sees the team's directions and boundaries; ids let it link Work to an active milestone.
+    const goals = this.core.goals.context();
+    if (goals) lines.push("", goals);
     const mine = ledger.worksInState("queued", "running", "waiting", "verifying", "blocked").filter((work) => work.ghostId === ghost.id && live(work));
     if (mine.length) lines.push("", "Your live Work:", ...mine.slice(0, 8).map((work) => `- "${work.title}" ${work.state}`));
     // The main connects the team: its wake also carries every live teammate Work and blocker, bounded; everyone else stays scoped to their own Work.
