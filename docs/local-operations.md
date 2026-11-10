@@ -15,12 +15,18 @@
 1. 해당 변경의 테스트·타입 검사·실행 검증과 필요한 독립 검토를 마치고 소스 커밋을 보존한다. 검증되지 않은 편집을 감시해 즉시 설치하는 watcher는 만들지 않는다.
 2. LaunchAgent, 실제 실행 파일, 포트 62062의 리스너, 열린 DB 경로와 상태 루트가 일치하는지 확인한다. 처리 중 대화·작업을 임의로 끊지 않고 유휴 시점에 전환한다. 유휴가 되지 않으면 검증한 릴리스를 준비한 채 차단 사유를 보고한다.
 3. 유휴 확인 후 **현재 운영 릴리스**의 `ghost backup <새 백업 디렉터리>`로 DB 무결성·manifest·시각을 확인한다. 금고 DB·키 포함 여부를 확인하고 `artifacts/`, `skills/`, `secrets/`(연결 계정 자격 포함), `config.json`, 앱 console 설정도 권한을 유지해 보관한다. 이전 릴리스는 삭제하지 않는다.
-4. `~/.local/share/ghost/releases/<날짜>-bun-<소스 커밋>/`에 검증한 `ghost`, `ui/`, 고정된 `agent-browser`를 설치하고 원본·사본 해시를 비교한다. 브라우저 CLI를 빠뜨리면 기존 config가 깨진다. 별도 임시 상태 루트·포트에서 설치 사본과 스키마 업그레이드도 실행한다.
+4. `~/.local/share/ghost/releases/<날짜>-bun-<소스 커밋>/`에 검증한 `ghost`, `ui/`, 고정된 `agent-browser`를 설치하고 원본·사본 해시를 비교한다. Obscura를 켠 Apple Silicon Host는 `apps/ghost-host/scripts/stage-obscura.sh <릴리스 디렉터리>`로 같은 릴리스에 엔진과 라이선스도 넣는다. 별도 임시 상태 루트·포트에서 설치 사본과 스키마 업그레이드도 실행한다.
 5. 유휴 상태를 다시 확인한 뒤 같은 디렉터리의 임시 심볼릭 링크를 `os.replace` 같은 원자적 rename으로 `current`에 교체한다. 실제 `readlink` 대상이 새 릴리스인지 확인한 후 LaunchAgent의 기존 Host를 `SIGTERM`으로 정상 종료해 재기동한다. 운영 루트에 두 번째 Host를 직접 띄우지 않는다.
 6. Owner API/health로 단일 리스너·실행 경로, 준비 상태와 기존 데이터 보존을 확인하고 **설치된 Ghost 앱**에서 바뀐 화면을 실제로 연다. 운영 루트에는 `ghost doctor`를 실행하지 않는다. Host/UI만 바뀌었으면 external 모드를 유지해 새 Host/UI를 사용하고, native shell 변경이 있을 때만 기존 서명·배포 검증을 거쳐 앱 번들을 교체한다.
 7. 검증 실패 시 저장 형식의 하위 호환성을 확인한 뒤 이전 릴리스 링크로 되돌려 정상 재기동한다. 새 릴리스가 인증 형식을 바꾸면 운영 검증 중 인증 정보를 저장하지 않는다. 저장 이후에는 이전 릴리스가 해당 인증을 읽지 못할 수 있으므로 별도 승인 없이 secrets를 복원하지 않고 보고한다. 데이터 복원·파괴적 마이그레이션도 별도 승인이 필요하다. 설치 경로·소스·백업·검증 결과를 이 문서에 기록한다.
 
 Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다.
+
+Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
+`"obscura": {"executable": "~/.local/share/ghost/current/obscura", "loginOrigins": []}`를
+추가한다. `loginOrigins`에는 검증한 로그인 주소의 정확한 HTTPS origin만 넣는다.
+운영 전에는 설치 사본의 절대 경로를 `GHOST_TEST_OBSCURA`와
+`GHOST_TEST_AGENT_BROWSER`에 넣어 `bun test apps/ghost-host/test/browser.test.ts`를 실행한다.
 
 ## 현재 설치 (2026-11-10)
 

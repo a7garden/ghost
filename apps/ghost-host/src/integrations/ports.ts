@@ -205,7 +205,7 @@ export interface BrowserCommandResult {
 }
 
 /** One live-view frame: base64 JPEG of the viewport at CSS-pixel size `width`×`height`. */
-export interface BrowserFrame { image: string; mediaType: "image/jpeg"; width: number; height: number; url: string; title: string }
+export interface BrowserFrame { image: string; mediaType: "image/jpeg"; width: number; height: number; url: string; title: string; windowAvailable?: boolean }
 
 /** Tap coordinates are fractions of the frame (0–1), so any screen size maps onto the same viewport. */
 export type BrowserControl =
@@ -221,6 +221,8 @@ export interface BrowserHandoffEnd {
 }
 
 export interface BrowserRunOptions {
+  /** Selected only on the first open of a conversation session. */
+  engine?: "chrome" | "obscura";
   stdin?: string;
   timeoutMs?: number;
   /** Host-only ephemeral redaction registry. Never written to disk or passed in argv. */
@@ -230,10 +232,12 @@ export interface BrowserRunOptions {
 }
 
 /**
- * Host-side Chrome through the installed agent-browser CLI, behind the host's egress proxy (no loopback,
+ * Host-side browser through the installed agent-browser CLI, behind the host's egress proxy (no loopback,
  * private, link-local or tailnet destinations, including page-issued requests). Implemented in src/integrations/browser.ts.
  */
 export interface BrowserPort {
+  readonly supportsObscura?: boolean;
+  assertVaultFill?(session: BrowserSessionRef, field: VaultField, origin: string): void;
   /** One command in the conversation's session. Secret material may only travel through `stdin`. */
   run(session: BrowserSessionRef, argv: string[], options?: BrowserRunOptions): Promise<BrowserCommandResult>;
   /** Reopen the session in a visible window (same Ghost login state) at `url` so the owner can act. */

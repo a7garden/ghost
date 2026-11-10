@@ -145,8 +145,8 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     observations.delete(scope.conversation.id);
     return resumed.fallback ? "The handoff page URL could not be recovered; the browser resumed at about:blank." : null;
   }
-  async function command(scope: Scope, argv: string[]) {
-    const result = await browser.run(sessionOf(scope), argv);
+  async function command(scope: Scope, argv: string[], options?: BrowserRunOptions) {
+    const result = await browser.run(sessionOf(scope), argv, options);
     if (!result.ok) throw new CommandError("unavailable", result.error ?? "Browser action failed");
     rememberTarget(scope, argv);
     return result.data;
@@ -184,6 +184,7 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     if (!APPROVAL_FIELDS.includes(field) && (item.kind === "login" || item.kind === "secret") && !originsOf(item).includes(origin)) {
       throw forbidden(`Secret fill refused (origin_mismatch): this page is ${origin}, the item is for ${originsOf(item).join(", ") || "no origin"}. If ${origin} is that site's own login page, ask the owner to add it to the item's login origins; never fill elsewhere.`);
     }
+    browser.assertVaultFill?.(sessionOf(scope), field, origin);
     return { item, origin };
   }
   async function fillSecret(scope: Scope, input: { ref: string; item_id: string; field: VaultField; url: string }, approved = false) {
@@ -241,7 +242,10 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
   });
   function tool<T extends TSchema>(name: GhostTool, parameters: T, mutation: boolean, perform: (args: Static<T>, scope: Scope, api: ToolExecutionApi) => Promise<ToolExecutionResult>) {
     return defineTool({
-      name, parameters, description: `${name.replaceAll("_", " ")}. ${BROWSER_INSTRUCTIONS}`,
+      name, parameters, description: `${name.replaceAll("_", " ")}. ${BROWSER_INSTRUCTIONS}` +
+        (name === "browser_open" && browser.supportsObscura
+          ? " For lightweight browsing choose engine=obscura on the first open. Its login state lasts until the session closes. Vault login requires a configured HTTPS origin."
+          : ""),
       replay: mutation ? "unsafe" : "safe",
       async execute(args, api) {
         let notice: string | null | undefined;
@@ -264,7 +268,8 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     });
   }
   async function mutate(scope: Scope, api: ToolExecutionApi, name: string, input: unknown, argv: string[], options?: BrowserRunOptions) {
-    await guardAction(scope, argv);
+    const prior = core.ledger.effectByCall(scope.conversation.id, api.callId);
+    if (prior?.state !== "done" && prior?.state !== "denied") await guardAction(scope, argv);
     return text(await core.effects.run({ conversationId: scope.conversation.id, callId: api.callId, tool: name, input, summary: name }, async () => {
       const result = await browser.run(sessionOf(scope), argv, options);
       if (!result.ok) throw new KnownOutcome("Browser action failed");
@@ -274,9 +279,9 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     }));
   }
   const tools = [
-    tool("browser_open", Type.Object({ url: bounded() }), false, async (a, s) => {
+    tool("browser_open", Type.Object({ url: bounded(), engine: Type.Optional(Type.Union([Type.Literal("chrome"), Type.Literal("obscura")])) }), false, async (a, s) => {
       const url = (await assertFetchableUrl(a.url, "url")).href;
-      const data = await command(s, ["open", url]);
+      const data = await command(s, ["open", url], a.engine ? { engine: a.engine } : undefined);
       const title = data && typeof data === "object" && "title" in data && typeof data.title === "string" ? data.title : "";
       const opened = data && typeof data === "object" && "url" in data && typeof data.url === "string" ? data.url : url;
       return pageText(`Opened ${opened}${title ? ` — ${title}` : ""}`);
@@ -371,7 +376,11 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
       });
       return text(result);
     }),
-    tool("browser_close", Type.Object({}), true, async (_a, s, api) => text(await core.effects.run({ conversationId: s.conversation.id, callId: api.callId, tool: "browser_close", input: {}, summary: "Close browser session" }, async () => { await browser.close(sessionOf(s)); return "Browser closed"; }))),
+    tool("browser_close", Type.Object({}), true, async (_a, s, api) => text(await core.effects.run({ conversationId: s.conversation.id, callId: api.callId, tool: "browser_close", input: {}, summary: "Close browser session" }, async () => {
+      await browser.close(sessionOf(s));
+      observations.delete(s.conversation.id);
+      return "Browser closed";
+    }))),
   ];
   return defineExtension({ name: "ghost.browser", tools });
 }

@@ -106,8 +106,8 @@ export function BrowserLiveView({ decisionId, disabled }: { decisionId: string; 
       <Button type="submit" size="icon" aria-label="글자 보내기" title="글자 보내기" disabled={disabled || sending || !text} className="rounded-pill"><Send/></Button>
     </form>
     {error && <InlineError>{error}</InlineError>}
-    <button type="button" className="browser-live__window" disabled={disabled || windowOpened} onClick={() => void openWindow()}>
+    {frame?.windowAvailable !== false && <button type="button" className="browser-live__window" disabled={disabled || windowOpened} onClick={() => void openWindow()}>
       <Monitor size={14} aria-hidden="true"/>{windowOpened ? 'Mac에 Chrome 창을 열었습니다' : 'Mac 앞이라면 Chrome 창으로 열기'}
-    </button>
+    </button>}
   </div>;
 }

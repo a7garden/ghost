@@ -37,8 +37,8 @@ export interface Config {
   skills: null | { roots: string[] };
   /** Read-only web research through the installed `agent-reach` CLI; null turns it off. */
   reach: null | { executable: string };
-  /** Host-owned Chrome sessions behind the public-internet egress proxy. */
-  browser: null | { executable: string; chrome?: string; idleTimeoutMinutes?: number };
+  /** Host-owned browser sessions behind the public-internet egress proxy. */
+  browser: null | { executable: string; chrome?: string; idleTimeoutMinutes?: number; obscura?: { executable: string; loginOrigins?: string[] } };
 }
 
 export const DEFAULT_ROOT = join(homedir(), "Library", "Application Support", "Ghost");
@@ -71,6 +71,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       (b.chrome !== undefined && (typeof b.chrome !== "string" || !b.chrome.trim())) ||
       (b.idleTimeoutMinutes !== undefined && (!Number.isFinite(b.idleTimeoutMinutes) || b.idleTimeoutMinutes <= 0 || b.idleTimeoutMinutes > 1440))) {
       throw new Error("config.json: invalid browser configuration");
+    }
+    if (b.obscura !== undefined) {
+      const engine = b.obscura;
+      if (!engine || typeof engine.executable !== "string" || !engine.executable.trim() ||
+        (engine.loginOrigins !== undefined && (!Array.isArray(engine.loginOrigins) || !engine.loginOrigins.every((origin) => {
+          try { return typeof origin === "string" && origin.startsWith("https://") && !origin.includes("*") && new URL(origin).origin === origin; }
+          catch { return false; }
+        })))) throw new Error("config.json: invalid Obscura executable or HTTPS login origins");
     }
   }
   return {

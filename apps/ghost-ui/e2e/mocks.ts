@@ -86,8 +86,10 @@ export async function mockVaultApi(page: Page): Promise<void> {
 }
 
 /** Adds synthetic decisions to the state snapshot; everything else stays the real seeded host. */
-export async function mockStateDecisions(page: Page): Promise<void> {
-  const decisions = visualDecisions();
+export async function mockStateDecisions(page: Page, liveHandoff = false): Promise<void> {
+  const decisions = visualDecisions().map(decision => decision.id === visualHandoffDecisionId && decision.proposal?.browserHandoff && liveHandoff
+    ? { ...decision, proposal: { ...decision.proposal, browserHandoff: { ...decision.proposal.browserHandoff, live: true } } }
+    : decision);
   await page.route('**/api/state', async route => {
     const response = await route.fetch();
     const state = await response.json() as { decisions: Decision[] };

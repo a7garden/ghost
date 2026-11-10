@@ -20,6 +20,17 @@ Design record for the capability release that lets Ghosts act on real websites, 
 
 ## Model-facing tools
 
+The Apple Silicon Host can ship Obscura as a second browser. Choose
+`browser_open { url, engine: "obscura" }` for a conversation's first browser
+open. Close the session before selecting a different engine. The Host starts
+the official binary under a macOS sandbox with an authenticated loopback CDP
+listener and network access to the Host proxy port. Obscura supports the app's
+live browser handoff. Its sessions are memory-only and require a fresh login
+after closing or expiry. For vault input the exact HTTPS origin must appear
+in `browser.obscura.loginOrigins` in addition to the existing Ghost and vault
+grants. The Obscura route accepts login fields. Use the existing browser for
+cards and file transfers.
+
 All browser and vault tools are selectable and part of the default allow-list for new Ghosts; host tools stay explicit. Page-derived text is untrusted evidence and is wrapped in agent-browser content boundaries.
 
 | Tool | Kind | Effect |

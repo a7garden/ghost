@@ -83,6 +83,19 @@ test('the handoff completion button answers the question normally', async ({ pag
   await expect.poll(() => commands[0]).toMatchObject({ type: 'decision.resolve', outcome: 'answer', answer: '다 했어요' });
 });
 
+test('a live handoff without a native window keeps input available in Ghost', async ({ page }) => {
+  const { baseUrl } = readRunState();
+  await mockStateDecisions(page, true);
+  await page.route('**/api/browser/handoffs/*/frame', route => route.fulfill({ json: {
+    image: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=',
+    mediaType: 'image/jpeg', width: 1280, height: 720, url: 'https://example.com/', title: 'Example Domain', windowAvailable: false,
+  } }));
+  await page.goto(`${baseUrl}/#/inbox?decision=${visualHandoffDecisionId}`);
+  await expect(page.getByRole('img', { name: '브라우저 화면: Example Domain' })).toBeVisible();
+  await expect(page.getByLabel('브라우저에 입력할 글자')).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Mac 앞이라면 Chrome 창으로 열기' })).toHaveCount(0);
+});
+
 test('a browser approval requires two deliberate presses', async ({ page }) => {
   const { baseUrl, defaultGhostId } = readRunState();
   const decisionId = 'test-browser-approval';
@@ -167,7 +180,7 @@ test('creating a login demands its primary fields and stores the generated passw
   await page.getByRole('button', { name: '새 항목' }).click();
   await expect(page.getByRole('heading', { name: '새 금고 항목' })).toBeVisible();
   await page.getByRole('textbox', { name: '이름', exact: true }).fill('새 로그인');
-  await page.getByLabel('주소').fill('https://new.example.com');
+  await page.getByLabel('주소', { exact: true }).fill('https://new.example.com');
   await page.getByLabel('사용자 이름').fill('new@example.com');
   await page.getByRole('button', { name: '저장', exact: true }).click();
   await expect(page.getByText('사용자 이름과 비밀번호를 입력해 주세요.')).toBeVisible();

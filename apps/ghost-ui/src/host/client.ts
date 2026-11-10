@@ -57,7 +57,7 @@ export type VaultItemWrite = {
 };
 
 /** One live-view frame of a browser handoff (see the host's `/api/browser/handoffs/:id/frame`). */
-export type BrowserFrame = { image: string; mediaType: 'image/jpeg'; width: number; height: number; url: string; title: string };
+export type BrowserFrame = { image: string; mediaType: 'image/jpeg'; width: number; height: number; url: string; title: string; windowAvailable?: boolean };
 
 /** One owner input into a handoff browser. */
 export type BrowserControl =
