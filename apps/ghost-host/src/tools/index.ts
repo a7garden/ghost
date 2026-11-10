@@ -84,7 +84,7 @@ const REVIEW_INSTRUCTIONS = `This conversation reviews one bound Work. Start by 
 Call verdict exactly once: pass, revise, or fail with concrete reasons. For revise, give the evidence you observed (failing check, file and line, expected vs actual) and the scope the fix must stay inside, so the assignee changes only that.`;
 
 const MAIN_INSTRUCTIONS = `As the current main Ghost you can ghost_inspect another Ghost's configuration and ghost_update its name, persona, model, look, state, tool allow-list or self-directed drive. The main designation and your own settings belong to the owner.
-When a [Decision review] arrives, another Ghost is waiting on a reversible decision: settle it with decision_settle when you can stand behind it for the owner, otherwise leave it with your recommendation. Do not let a teammate wait on what you can decide.`;
+When a [Decision review] arrives, another Ghost is waiting on a decision: settle a reversible one with decision_settle when you can stand behind it for the owner, otherwise leave your view and recommendation on the card. Do not let a teammate wait on what you can decide.`;
 
 /**
  * The effect journal admits one pending mutation per conversation, so a round that calls two effectful

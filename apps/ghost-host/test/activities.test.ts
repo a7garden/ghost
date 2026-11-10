@@ -498,6 +498,8 @@ describe("activity authority and delivery", () => {
     expect(decision.detail).toContain("Account A (https://api.github.com)");
     expect(decision.detail).toContain("받는 곳: owner/repo#1");
     expect(decision.detail).toContain("https://github.com/owner/repo/pull/1");
+    // The main Ghost's view on the card is not part of what was approved: the action still runs.
+    f.ledger.tx(() => f.ledger.putDecision({ ...decision, proposal: { ...decision.proposal, review: { expiresAt: null, mainNote: "받는 저장소가 맞습니다." } } }));
     await f.core.decisions.resolve(decision.id, { outcome: "approve" });
     await f.core.effects.resolveApproval(decision.effectId!, true);
     expect(f.source.actions).toHaveLength(1);

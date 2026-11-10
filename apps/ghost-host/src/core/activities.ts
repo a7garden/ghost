@@ -54,7 +54,9 @@ export class Activities {
       let bound: ActionAuthority;
       try {
         bound = this.actionAuthority(effect.workId, action);
-        if (digestOf(proposal) !== effect.inputDigest || proposal.workRevision !== core.ledger.work(effect.workId).revision) throw forbidden("the approved action input or Work revision changed");
+        // `review` is the Host's own note on the card (the main Ghost's view), never part of what was approved.
+        const { review: _review, ...approved } = proposal;
+        if (digestOf(approved) !== effect.inputDigest || proposal.workRevision !== core.ledger.work(effect.workId).revision) throw forbidden("the approved action input or Work revision changed");
         if (proposal.runId !== bound.run.id || proposal.activityRevision !== bound.activity.revision || digestOf(proposal.sourceItem) !== digestOf(bound.run.sourceItem)) throw forbidden("the source or approved activity revision changed");
       } catch (error) { throw new NoEffect(message(error)); }
       return (await this.sourcePort().act(bound.connection, bound.run.sourceItem!, action)).summary;

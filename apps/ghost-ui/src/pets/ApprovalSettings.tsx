@@ -60,9 +60,9 @@ export function ApprovalSettings() {
           onValueChange={value => save({ approvals: { ...policy, autoMinutes: Number(value) } }, '자동 진행 시간을 저장했습니다.')}
           options={autoWaits.some(option => option.value === String(policy.autoMinutes)) ? [...autoWaits] : [...autoWaits, { value: String(policy.autoMinutes), label: `${policy.autoMinutes}분` }]}/>
       </SettingsRow>
-      <SettingsRow label="메인 Ghost가 대신 판단" description="다른 Ghost의 되돌릴 수 있는 요청을 메인이 먼저 보고 승인하거나 의견을 남깁니다. 메인이 대신 정하면 알림으로 까닭을 알려 줍니다." htmlFor="delegate-switch">
+      <SettingsRow label="메인 Ghost가 먼저 검토" description="다른 Ghost의 요청을 메인이 먼저 봅니다. 되돌릴 수 있는 요청은 대신 정하고 알림으로 까닭을 알려 줍니다. 발송 · 결제 · 삭제 같은 요청은 정하지 않고 카드에 「메인 의견」만 남깁니다." htmlFor="delegate-switch">
         <Switch id="delegate-switch" checked={policy.delegate === 'reversible'} disabled={pending || !settings}
-          onCheckedChange={checked => save({ approvals: { ...policy, delegate: checked ? 'reversible' : 'none' } }, checked ? '메인 Ghost가 대신 판단합니다.' : '모든 요청을 직접 판단합니다.')}/>
+          onCheckedChange={checked => save({ approvals: { ...policy, delegate: checked ? 'reversible' : 'none' } }, checked ? '메인 Ghost가 먼저 검토합니다.' : '메인 검토 없이 직접 판단합니다.')}/>
       </SettingsRow>
     </SettingsGroup>
 
