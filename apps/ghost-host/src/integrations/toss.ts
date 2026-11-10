@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { CommandError, forbidden, invalid } from "../core/errors.ts";
 
 /**
@@ -8,10 +9,11 @@ import { CommandError, forbidden, invalid } from "../core/errors.ts";
 export const TOSS_ORIGIN = "https://openapi.tossinvest.com";
 
 /** The owner's vault credential: `keyId` is the client_id, `secret` the client_secret. */
-export interface TossCredential { itemId: string; version: number; keyId: string; secret: string }
+export interface TossCredential { keyId: string; secret: string }
 export interface TossResponse { status: number; body: string; retryAfter: string | null }
 export interface TossPort {
-  get(credential: TossCredential, path: string, query: URLSearchParams, account: number | null, signal?: AbortSignal): Promise<TossResponse>;
+  /** `credential` is read again before every token use, so an edit or revocation in the vault applies mid-call. */
+  get(credential: () => TossCredential, path: string, query: URLSearchParams, account: number | null, signal?: AbortSignal): Promise<TossResponse>;
 }
 
 /** Never `.` or `..`: those would be normalized into another route by URL parsing. */
@@ -51,7 +53,8 @@ const EXPIRY_MARGIN_MS = 60_000;
 const STALE_TOKEN_CODES: Record<string, true> = { "invalid-token": true, "expired-token": true, "token-revoked": true };
 
 type Token = { value: string; expiresAt: number };
-type TokenEntry = { version: number; token: Promise<Token> };
+/** `digest` binds the token to the secret that issued it; it is never written anywhere. */
+type TokenEntry = { digest: string; token: Promise<Token> };
 
 async function boundedText(response: Response): Promise<string> {
   if (!response.body) return "";
@@ -83,8 +86,10 @@ export function tossErrorCode(body: string): string | null {
 }
 
 /**
- * Issues one token per credential version and reuses it across Ghosts until shortly before expiry; issuing a second
- * one would revoke the first, so concurrent calls share the pending issuance.
+ * Toss keeps one valid token per client: issuing another revokes the first. Tokens are therefore kept per client id
+ * and bound to the exact secret that issued them, reused by every call and Ghost holding that same credential until
+ * shortly before expiry, and concurrent calls share a pending issuance. A different secret (rotation, or a deleted
+ * and recreated vault item) never receives a token issued for another.
  */
 export class TossClient implements TossPort {
   private readonly tokens = new Map<string, TokenEntry>();
@@ -121,39 +126,40 @@ export class TossClient implements TossPort {
     return { value, expiresAt: this.now() + Math.max(lifetime - EXPIRY_MARGIN_MS, lifetime / 2) };
   }
 
-  private async token(credential: TossCredential): Promise<{ value: string; entry: TokenEntry }> {
+  private async token(load: () => TossCredential): Promise<{ value: string; entry: TokenEntry; keyId: string }> {
     for (;;) {
-      let entry = this.tokens.get(credential.itemId);
-      // A call that read the item before an edit shares the newer token instead of re-issuing with the old key,
-      // which would revoke it.
-      if (!entry || entry.version < credential.version) {
-        entry = { version: credential.version, token: this.issue(credential) };
-        this.tokens.set(credential.itemId, entry);
+      // Read synchronously right before the cache check: no await separates the vault's current key from its use.
+      const credential = load();
+      const digest = createHash("sha256").update(credential.keyId).update("\0").update(credential.secret).digest("hex");
+      let entry = this.tokens.get(credential.keyId);
+      if (!entry || entry.digest !== digest) {
+        entry = { digest, token: this.issue(credential) };
+        this.tokens.set(credential.keyId, entry);
       }
       let token: Token;
       try { token = await entry.token; }
-      catch (error) { this.discard(credential, entry); throw error; }
-      if (token.expiresAt > this.now()) return { value: token.value, entry };
-      this.discard(credential, entry);
+      catch (error) { this.discard(credential.keyId, entry); throw error; }
+      if (token.expiresAt > this.now()) return { value: token.value, entry, keyId: credential.keyId };
+      this.discard(credential.keyId, entry);
     }
   }
 
   /** Forget a token only if no newer issuance replaced it meanwhile. */
-  private discard(credential: TossCredential, entry: TokenEntry) {
-    if (this.tokens.get(credential.itemId) === entry) this.tokens.delete(credential.itemId);
+  private discard(keyId: string, entry: TokenEntry) {
+    if (this.tokens.get(keyId) === entry) this.tokens.delete(keyId);
   }
 
-  async get(credential: TossCredential, path: string, query: URLSearchParams, account: number | null, signal?: AbortSignal): Promise<TossResponse> {
+  async get(credential: () => TossCredential, path: string, query: URLSearchParams, account: number | null, signal?: AbortSignal): Promise<TossResponse> {
     if (tossRoute(path).account !== (account !== null)) throw invalid("account must be given exactly for account routes");
     const url = `${TOSS_ORIGIN}${path}${query.size ? `?${query}` : ""}`;
     for (let attempt = 0; ; attempt++) {
-      const { value: token, entry } = await this.token(credential);
+      const { value: token, entry, keyId } = await this.token(credential);
       const headers: Record<string, string> = { authorization: `Bearer ${token}`, accept: "application/json" };
       if (account !== null) headers["x-tossinvest-account"] = String(account);
       const response = await this.request(url, { method: "GET", headers }, signal);
       const body = await boundedText(response);
       if (response.status === 401 && attempt === 0 && STALE_TOKEN_CODES[tossErrorCode(body) ?? ""]) {
-        this.discard(credential, entry);
+        this.discard(keyId, entry);
         continue;
       }
       return { status: response.status, body, retryAfter: response.headers.get("retry-after") };

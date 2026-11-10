@@ -27,17 +27,16 @@ describe("vault api credentials", () => {
     expect(() => vault.create({ kind: "secret", title: "s", value: SECRET, username: "x" })).toThrow("fields do not belong");
   });
 
-  test("give integrations exactly one granted credential and change version on every edit", () => {
+  test("give integrations exactly one granted credential, current after every edit", () => {
     const vault = openVault();
     expect(() => vault.apiCredential("ghost-a", TOSS_ORIGIN)).toThrow("no API key");
     const item = vault.create(apiItem(["ghost-a"]));
     expect(() => vault.apiCredential("ghost-b", TOSS_ORIGIN)).toThrow("no API key");
-    const first = vault.apiCredential("ghost-a", TOSS_ORIGIN);
-    expect(first).toEqual({ itemId: item.id, version: 1, keyId: CLIENT, secret: SECRET });
+    expect(vault.apiCredential("ghost-a", TOSS_ORIGIN)).toEqual({ keyId: CLIENT, secret: SECRET });
     vault.update(item.id, { value: "SYNTHETIC-rotated-secret" });
-    expect(vault.apiCredential("ghost-a", TOSS_ORIGIN)).toMatchObject({ version: 2, secret: "SYNTHETIC-rotated-secret" });
+    expect(vault.apiCredential("ghost-a", TOSS_ORIGIN)).toEqual({ keyId: CLIENT, secret: "SYNTHETIC-rotated-secret" });
     vault.create({ kind: "secret", title: "same origin, other kind", origin: TOSS_ORIGIN, value: "x", ghostIds: ["ghost-a"] });
-    expect(vault.apiCredential("ghost-a", TOSS_ORIGIN).itemId).toBe(item.id);
+    expect(vault.apiCredential("ghost-a", TOSS_ORIGIN).secret).toBe("SYNTHETIC-rotated-secret");
     vault.create(apiItem(["ghost-a"]));
     expect(() => vault.apiCredential("ghost-a", TOSS_ORIGIN)).toThrow("more than one");
   });
@@ -72,7 +71,7 @@ function fakeToss(handler: (call: Call, calls: Call[]) => Response | Promise<Res
   return { calls, fetcher };
 }
 const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json", ...headers } });
-const credential: TossCredential = { itemId: "item-1", version: 1, keyId: CLIENT, secret: SECRET };
+const credential = (): TossCredential => ({ keyId: CLIENT, secret: SECRET });
 
 describe("Toss client", () => {
   test("issues one token for concurrent calls, reuses it, and sends the account header only for account routes", async () => {
@@ -100,22 +99,42 @@ describe("Toss client", () => {
     await expect(client.get(credential, "/api/v1/holdings", new URLSearchParams(), null)).rejects.toThrow("account must be given");
   });
 
-  test("re-issues once after a revoked token, after expiry and after the vault item changes", async () => {
-    let now = 1_000_000, issued = 0;
+  test("re-issues once after a revoked token, after expiry and for a different secret", async () => {
+    let now = 1_000_000, issued = 0, current = credential();
     const { calls, fetcher } = fakeToss((call) => {
       if (call.url.endsWith("/oauth2/token")) return json({ access_token: `token-${++issued}`, expires_in: 3600 });
       if (call.headers.authorization === "Bearer token-1" && calls.filter((entry) => entry.headers.authorization === "Bearer token-1").length === 2) return json({ error: { code: "token-revoked", message: "replaced" } }, 401);
       return json({ ok: call.headers.authorization });
     });
     const client = new TossClient({ fetch: fetcher, now: () => now });
-    expect((await client.get(credential, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-1");
-    expect((await client.get(credential, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-2");
+    const load = () => current;
+    expect((await client.get(load, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-1");
+    expect((await client.get(load, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-2");
     now += 3600 * 1000;
-    expect((await client.get(credential, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-3");
-    expect((await client.get({ ...credential, version: 2 }, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-4");
-    // A call holding the pre-edit credential must not re-issue with the old key (that would revoke token-4).
-    expect((await client.get(credential, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-4");
+    expect((await client.get(load, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-3");
+    // A rotated secret, or a deleted and recreated item for the same client, never receives the old token.
+    current = { keyId: CLIENT, secret: "SYNTHETIC-rotated-secret" };
+    expect((await client.get(load, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-4");
+    expect(new URLSearchParams(calls.at(-2)!.body).get("client_secret")).toBe("SYNTHETIC-rotated-secret");
     expect(issued).toBe(4);
+  });
+
+  test("reads the vault again before re-issuing, so a key edited mid-call is used for the retry", async () => {
+    let current = credential();
+    const { calls, fetcher } = fakeToss((call) => {
+      if (call.url.endsWith("/oauth2/token")) return json({ access_token: `issued-with-${new URLSearchParams(call.body).get("client_secret")}`, expires_in: 3600 });
+      if (call.headers.authorization === `Bearer issued-with-${SECRET}`) {
+        current = { keyId: CLIENT, secret: "SYNTHETIC-new-secret" };
+        return json({ error: { code: "token-revoked" } }, 401);
+      }
+      return json({ ok: call.headers.authorization });
+    });
+    const response = await new TossClient({ fetch: fetcher }).get(() => current, "/api/v1/accounts", new URLSearchParams(), null);
+    expect(response.body).toContain("issued-with-SYNTHETIC-new-secret");
+    expect(calls.filter((call) => call.url.endsWith("/oauth2/token")).map((call) => new URLSearchParams(call.body).get("client_secret"))).toEqual([SECRET, "SYNTHETIC-new-secret"]);
+  });
+
+  test("stops after one re-issue when the new token is refused too", async () => {
     const persistent = fakeToss((call) => call.url.endsWith("/oauth2/token") ? json({ access_token: "t", expires_in: 3600 }) : json({ error: { code: "invalid-token" } }, 401));
     const response = await new TossClient({ fetch: persistent.fetcher }).get(credential, "/api/v1/accounts", new URLSearchParams(), null);
     expect(response.status).toBe(401);
@@ -133,7 +152,7 @@ describe("Toss client", () => {
     const error = await new TossClient({ fetch: fetcher }).get(credential, "/api/v1/accounts", new URLSearchParams(), null).catch((e: Error) => e);
     expect(String(error)).toContain("unreachable");
     expect(String(error)).not.toContain(SECRET);
-    await expect(new TossClient({ fetch: fetcher }).get({ ...credential, keyId: "" }, "/api/v1/accounts", new URLSearchParams(), null)).rejects.toThrow("no client ID");
+    await expect(new TossClient({ fetch: fetcher }).get(() => ({ ...credential(), keyId: "" }), "/api/v1/accounts", new URLSearchParams(), null)).rejects.toThrow("no client ID");
   });
 });
 
@@ -150,7 +169,7 @@ describe("toss_read tool", () => {
     };
     return { h, vault, ghost, call };
   }
-  const echo: TossPort = { async get(credential, path, query, account) { return { status: 200, body: JSON.stringify({ path, query: query.toString(), account, key: credential.keyId }), retryAfter: null }; } };
+  const echo: TossPort = { async get(credential, path, query, account) { return { status: 200, body: JSON.stringify({ path, query: query.toString(), account, key: credential().keyId }), retryAfter: null }; } };
 
   test("is not a default tool and refuses a Ghost without it", async () => {
     expect(DEFAULT_GHOST_TOOLS).not.toContain("toss_read");

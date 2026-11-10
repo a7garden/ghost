@@ -210,16 +210,16 @@ export class Vault implements VaultPort {
   }
   /**
    * Host integrations only: the one API credential granted to this Ghost for an exact origin. The secret goes to that
-   * service's own endpoint and never into a tool result, page or log. `version` changes whenever the item is edited.
+   * service's own endpoint and never into a tool result, page or log.
    */
-  apiCredential(ghostId: string, origin: string): { itemId: string; version: number; keyId: string; secret: string } {
+  apiCredential(ghostId: string, origin: string): { keyId: string; secret: string } {
     return this.storage(() => {
       const canonical = normalizeOrigin(origin);
       const items = this.listFor(ghostId, { kind: "api", origin: canonical });
       if (!items.length) throw forbidden(`no API key for ${canonical} is granted to this Ghost`);
       if (items.length > 1) throw conflict(`more than one API key for ${canonical} is granted to this Ghost; the owner must keep exactly one`);
       const item = items[0]!;
-      return { itemId: item.id, version: this.row(item.id).version, keyId: item.username ?? "", secret: this.field(item.id, "value") };
+      return { keyId: item.username ?? "", secret: this.field(item.id, "value") };
     });
   }
   remove(id: string) { return this.storage(() => { this.row(id); this.db.query("DELETE FROM items WHERE id=?").run(id); }); }
