@@ -65,7 +65,7 @@ function GoalSection({ goal, state, onEdit }: { goal: Goal; state: State; onEdit
       try { await client.send({ type: 'goal.update', goalId: goal.id, state: 'closed' }); }
       catch (reason) { throw new Error(goalError(reason)); }
     }}>
-      <p>「{goal.title}」을 종료합니다. 진행 중이거나 예정인 이정표는 모두 접힙니다.</p>
+      <p>「{goal.title}」 목표를 종료합니다. 진행 중이거나 예정인 이정표는 모두 접힙니다.</p>
       <p>종료한 목표는 다시 열 수 없습니다.</p>
     </ConfirmDialog>}
   </section>;
