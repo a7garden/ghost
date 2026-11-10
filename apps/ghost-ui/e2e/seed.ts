@@ -98,7 +98,12 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
     models: [{ id: 'mock-1', name: 'Mock 1', contextWindow: 32_000 }],
     apiKey: 'visual-mock-key',
   });
-  await command(host, { type: 'settings.update', defaultModel: { provider: 'visual_mock', model: 'mock-1' } });
+  await command(host, {
+    type: 'settings.update',
+    defaultModel: { provider: 'visual_mock', model: 'mock-1' },
+    // Keep the seeded owner decisions pending without a concurrent main Ghost reply/notification.
+    approvals: { autoMinutes: 0, delegate: 'none' },
+  });
 
   // Team: the bootstrap default Ghost plus two, each with a distinct look.
   const ghosts = (await stateRows(host)).ghosts;

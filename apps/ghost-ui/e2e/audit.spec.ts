@@ -89,7 +89,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.getByRole('dialog').locator('.cm-editor')).toBeVisible();
       await capture(page, 'document-editor', theme, info.project.name);
       await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
-      await page.locator('.shell-search').click();
+      await page.getByRole('button', { name: '명령 검색', exact: true }).click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await capture(page, 'command-palette', theme, info.project.name);
     });

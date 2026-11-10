@@ -21,6 +21,7 @@ import { isMac } from './ui/keys';
 import { hostStatus } from './features/hostStatus';
 import { Overview } from './features/Overview';
 import { GhostChat } from './features/GhostChat';
+import { Conversations } from './features/Conversations';
 import { WorkView } from './features/WorkViews';
 import { WorkDetail } from './features/WorkDetail';
 import { InboxView } from './features/Inbox';
@@ -209,7 +210,7 @@ function Shell() {
   ];
 
   const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>;
-  const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, settings: true, workspace: true };
+  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, spaces: true, inbox: true, work: true, settings: true, workspace: true };
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
@@ -224,7 +225,7 @@ function Shell() {
           hideDock={section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
             compactBack={section === 'settings' && params.has('tab') ? '/settings'
-              : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/workspace'
+              : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/conversations'
               : section === 'work' && path.split('/')[2] ? '/work'
               : section === 'spaces' && selectedSpace ? '/workspace' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
@@ -235,6 +236,7 @@ function Shell() {
           {runtimeDown && state && section !== 'home' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate}/>}
+            {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'work' && (path.split('/')[2]
