@@ -27,6 +27,16 @@ xcrun devicectl device install app --device <UDID> <DerivedData>/Build/Products/
 package이며 `swift test`로 페어링 URL·origin 파싱, 연결 요청 재시도, 셸 브리지(토큰 주입
 스크립트, origin 경계, 요청 파싱, 이벤트 전달), 푸시 등록 요청을 검증한다.
 
+## 업데이트
+
+호스트가 제공하는 웹 UI 변경은 앱 재설치 없이 반영된다. 네이티브 코드가 바뀌면
+개발용으로 서명한 IPA를 GitHub Release에 올린다. iPhone의 설정 › 업데이트 › 「앱 업데이트」를
+누르거나 Mac의 같은 화면에서 QR 코드를 표시해 iPhone으로 스캔하면 OTA로 설치한다.
+
+OTA 빌드는 개발용 프로비저닝 프로파일을 사용한다. 설치할 기기의 UDID가 프로파일에
+등록되어 있어야 하며, 프로파일은 매년 만료되므로 갱신해야 한다. 이 빌드에는 푸시 알림
+entitlement(`aps-environment`)이 없다.
+
 ## 페어링
 
 휴대전화에는 긴 연결 키를 입력하지 않는다. PC Ghost의 설정 › 기기 › 기기 연결이
@@ -45,10 +55,12 @@ Keychain에 저장된다.
 - 문서 시작 시점에 paired origin의 main frame에만 `window.__GHOST_TOKEN__`(기기 토큰)과
   `window.__GHOST_SHELL__`(`{platform, version, deviceId}`)을 넣는다.
 - 웹 → 네이티브: `window.webkit.messageHandlers.ghostShell.postMessage(request)`가 Promise로
-  답한다. 요청은 `ready`, `notifications.status|request|settings`, `theme`, `haptic`,
-  `disconnected`, `revoked`뿐이며 paired origin의 main frame에서 온 것만 처리한다.
+  답한다. 요청은 `ready`, `notifications.status|request|settings`, `app.install`, `theme`,
+  `haptic`, `disconnected`, `revoked`이며 paired origin의 main frame에서 온 것만 처리한다.
 - 네이티브 → 웹: `ghost-shell` CustomEvent(`notification.open`, `resume`). 페이지가 `ready`를
   보내기 전의 이벤트(예: 앱을 깨운 알림 탭)는 그 응답에 담긴다.
+- `app.install`은 `itms-services`의 `download-manifest` 요청만 허용한다. manifest는 paired
+  origin의 HTTPS `/api/update/ios/manifest.plist`여야 하며, 응답은 `{opened: boolean}`이다.
 - paired origin 밖의 최상위 링크는 앱 밖에서 열고, 다운로드는 공유 시트로 넘긴다.
 - 첫 로드 동안에는 Ghost 표시를, 호스트가 응답하지 않으면 다시 시도/연결 지우기 화면을 보인다.
 
@@ -56,8 +68,9 @@ Keychain에 저장된다.
 설정 › 기기에서 이 기기를 스스로 해제할 수 있다. 분실한 휴대전화는 PC에서 철회한다.
 
 알림은 APNs alert로 전달된다. 기기는 알림 권한 승인 뒤 토큰을 `device.push_register`로
-등록한다. DEBUG 빌드는 sandbox APNs 환경으로 등록한다. 실기기 원격 알림·APNs 자격과 닫힌 앱
-전달은 별도 수용이다.
+등록한다. APNs 환경은 빌드 구성과 관계없이 서명 프로파일의 `aps-environment`로 정한다.
+`development`는 sandbox, `production`은 production이며, 내장 프로파일이 없는
+App Store·TestFlight 앱도 production이다. 실기기 원격 알림·APNs 자격과 닫힌 앱 전달은 별도 수용이다.
 
 ## 검증
 

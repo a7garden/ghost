@@ -108,6 +108,11 @@ export class HostClient {
   update(): Promise<UpdateStatus> {
     return this.json('/api/update');
   }
+  /** Short-lived link for installing the offered iPhone app. */
+  iosUpdateLink(): Promise<{ install: string; page: string }> {
+    return this.json('/api/update/ios/link', { method: 'POST' });
+  }
+
 
   /** Ask the host to check GitHub for a newer release; resolves after the check finishes. */
   checkUpdate(): Promise<UpdateStatus> {

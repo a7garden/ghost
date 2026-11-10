@@ -9,6 +9,7 @@ export interface ReleaseManifest {
   storage: string;
   host: { asset: string; sha256: string; bytes: number };
   shell: { version: string; asset: string; signature: string; notes: string };
+  ios?: { version: string; build: number; bundleId: string; asset: "Ghost.ipa"; sha256: string; bytes: number; notes: string };
 }
 export interface ReleaseAsset { name: string; url: string; size: number }
 export interface GitHubRelease { tag_name: string; assets: ReleaseAsset[] }
@@ -16,6 +17,7 @@ export type UpdateFetch = (input: RequestInfo | URL, init?: RequestInit) => Prom
 export const MAX_ASSET_BYTES = 512 * 1024 * 1024;
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 export const RELEASE_NAME = /^[A-Za-z0-9._-]+$/;
+const BUNDLE_ID = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
 
 export function parseManifest(bytes: Uint8Array): ReleaseManifest {
   const value = JSON.parse(new TextDecoder().decode(bytes));
@@ -26,6 +28,16 @@ export function parseManifest(bytes: Uint8Array): ReleaseManifest {
     || !value.shell || typeof value.shell.version !== "string" || !VERSION.test(value.shell.version) || value.shell.asset !== "Ghost.app.tar.gz"
     || typeof value.shell.signature !== "string" || !value.shell.signature || typeof value.shell.notes !== "string") {
     throw new Error("업데이트 정보가 올바르지 않습니다.");
+  }
+  if ("ios" in value) {
+    const ios = value.ios;
+    if (!ios || typeof ios !== "object" || Array.isArray(ios)
+      || typeof ios.version !== "string" || !VERSION.test(ios.version) || !Number.isSafeInteger(ios.build) || ios.build < 1
+      || typeof ios.bundleId !== "string" || !BUNDLE_ID.test(ios.bundleId) || ios.asset !== "Ghost.ipa"
+      || typeof ios.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(ios.sha256)
+      || !Number.isSafeInteger(ios.bytes) || ios.bytes < 1 || ios.bytes > MAX_ASSET_BYTES || typeof ios.notes !== "string") {
+      throw new Error("iPhone 앱 업데이트 정보가 올바르지 않습니다.");
+    }
   }
   return value as ReleaseManifest;
 }

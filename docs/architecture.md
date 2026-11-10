@@ -182,6 +182,7 @@ The Host runs as a launchd service (`ghost service install`); the Mac app only c
 - Nothing installs by itself. 「설치」 downloads the tarball, checks its hash and every file, runs the new `ghost version`, stages `releases/<version>-<commit>`, waits until no conversation is busy and no core lane is active, backs up with a `ghost backup` child process (a busy writer means "not idle yet"), checks idle again, writes `update/pending`, swaps `current` atomically and exits through the normal graceful shutdown; a shutdown that does not finish within 60 seconds exits hard. launchd starts the new release.
 - The launcher counts starts while `update/pending` exists. A new Host that has been serving for 60 seconds clears it and records `installed`. After three failed starts the launcher points `current` back at the previous release, but only when the manifest's storage fingerprint (ledger migrations, Pi Durable version, vault format) equals the running one; otherwise it records `failed` and leaves the backup for an owner-approved restore. The fingerprint does not see row-level format changes, so a release that writes values older Hosts reject must change it.
 - The shell updates through the Host: `GET /api/update/shell/latest.json` serves the Tauri updater document for the newest verified release and proxies its signed `Ghost.app.tar.gz`. The shell version (`tauri.conf.json`) moves only when native code changes.
+- The iPhone app is a development-signed IPA in the same Release (`manifest.ios`: version, build, sha256). Host-served UI changes reach the phone with the Host; only native changes need it. The app offers it when `ios.build` is above its `CFBundleVersion`; 「설치」 asks the Host for a 15-minute token and hands the shell an `itms-services` URL, which the shell opens only when the manifest URL is its paired Host's `/api/update/ios/manifest.plist`. The manifest and the IPA (sha256-checked against the signed manifest) are served on `publicOrigin` behind that token, because the iOS installer sends no bearer. The Mac app shows the same token page as a QR code for a phone without the new shell. Only devices in the team's development profile can install it, and the build carries no push entitlement.
 
 ## Stores
 
@@ -229,7 +230,7 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 secrets/update-github.json   GitHub token for release checks, 0600
 update/state.json            update preferences, last check, last verified manifest, last result
 update/pending, attempts     launcher handshake while a new release starts; result.json after a rollback
-update/cache/                shell updater bundle proxied to the Mac app
+update/cache/                shell bundle and iPhone IPA proxied from the newest verified release
 ```
 
 ## Engine
@@ -316,6 +317,8 @@ update/cache/                shell updater bundle proxied to the Mac app
 | `GET/POST /api/vault/items`, `PATCH/DELETE /api/vault/items/:id`, `POST /api/vault/import`, `POST /api/vault/requests/:decisionId` | vault management and secure-form answers for every principal; values are accepted, never returned ([details](agent-capabilities.md#owner-api-vault)) |
 | `GET /api/update`, `POST /api/update/check`, `POST /api/update/install {version}`, `POST /api/update/cancel`, `PUT /api/update/settings {autoCheck?, token?}` | release update status and owner-started install for every principal; the token is accepted, never returned |
 | `GET /api/update/shell/latest.json`, `GET /api/update/shell/Ghost.app.tar.gz` | Tauri updater document and bundle for the Mac app, from the newest verified release |
+| `POST /api/update/ios/link` | a 15-minute token: `itms-services` URL for the iPhone shell and an install page URL for a QR code |
+| `GET /api/update/ios/install`, `GET /api/update/ios/manifest.plist`, `GET /api/update/ios/Ghost.ipa` (`?t=` token, no bearer) | install page, OTA manifest and the sha256-checked IPA for the iOS installer |
 | `GET /` | web UI |
 
 `space.create` registers `{ name, path }`; `space.update` changes `{ spaceId, name? }`. Neither accepts Ghost grants. `document.save` is the owner's direct save; `document_propose` remains direct-only, opens `document_review` and writes only after approval. `document_spaces`, `document_list` and `document_read` are available in both direct and Work conversations, subject to the ordinary tool allow-list and Activity scope.

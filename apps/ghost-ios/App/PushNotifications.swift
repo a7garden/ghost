@@ -1,5 +1,6 @@
 import UIKit
 @preconcurrency import UserNotifications
+import GhostMobileCore
 
 // APNs alert delivery for the durable notification outbox. Registration is
 // idempotent: the token is re-uploaded whenever it changes, and delivery
@@ -72,13 +73,10 @@ import UIKit
     }
 }
 
-enum PushEnvironment {
-    // Debug builds use Apple's sandbox environment; release builds use production.
-    static var current: String {
-        #if DEBUG
-        "sandbox"
-        #else
-        "production"
-        #endif
-    }
+extension PushEnvironment {
+    static let current: String = {
+        let profile = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision")
+            .flatMap { try? Data(contentsOf: $0) }
+        return fromProvisioningProfile(profile)
+    }()
 }
