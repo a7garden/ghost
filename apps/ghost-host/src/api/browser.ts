@@ -88,6 +88,7 @@ export async function serveBrowser(request: Request, url: URL, core: Core, brows
         if (!closed) stop = await browser.live(session, { maxFps: Number(raw) }, (event) => {
           if (closed) return;
           if (isAuthorized && !isAuthorized()) { close(); return; }
+          if (event.type === "end" && event.reason === "engine_changed") { close(); return; }
           const line = encoder.encode(JSON.stringify(event) + "\n");
           if (event.type === "end") { controller.enqueue(line); close(); return; }
           if ((controller.desiredSize ?? 0) > 0) controller.enqueue(line);
