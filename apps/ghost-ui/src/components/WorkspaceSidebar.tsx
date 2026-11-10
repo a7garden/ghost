@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
-import { ChevronDown, ChevronUp, Folder, Home, Inbox, LayoutList, Mail, MessageCircle, Pin, Plus, Settings2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Compass, Folder, Home, Inbox, LayoutList, Mail, MessageCircle, Pin, Plus, Settings2 } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Navigation, NavigationGroup, NavigationItem, ScrollRail } from '../ui'
 import type { Ghost, State } from '@ghost/contract';
 import { ghostLiveWork, ghostPresence, liveWorks, visibleGhosts, type Presence } from '../features/ghostState';
@@ -95,6 +95,9 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
 
   return <>
     <Navigation label="작업실" className="ghost-sidebar min-h-0 flex-1">
+      {section === 'workspace' && <NavigationItem onClick={() => navigate('/goals')}>
+        <Compass/><span className="flex-1">{uiTerms.goals}</span>
+      </NavigationItem>}
       <div className="sidebar-primary">
         <NavigationItem current={section === 'home'} onClick={() => navigate('/')}>
           <Home/><span className="flex-1">{routeLabels.home}</span>
@@ -109,6 +112,9 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
         </NavigationItem>
         <NavigationItem current={section === 'mail'} onClick={() => navigate('/mail')}>
           <Mail/><span className="flex-1">{routeLabels.mail}</span>
+        </NavigationItem>
+        <NavigationItem current={section === 'goals'} onClick={() => navigate('/goals')}>
+          <Compass/><span className="flex-1">{uiTerms.goals}</span>
         </NavigationItem>
       </div>
       <div className="sidebar-scroll-frame">

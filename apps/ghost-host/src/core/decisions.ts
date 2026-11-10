@@ -192,11 +192,12 @@ export class Decisions {
     const by = reviewOf(decision.proposal)?.resolvedBy;
     const who = by === "timeout" ? "The owner did not answer in time, so the Host took your recommended answer for" : by === "main" ? "The main Ghost answered for the owner" : "The owner answered";
     const granted = this.grantCapability(decision, by ?? "owner");
+    const goal = this.core.goals.settleProposal(decision);
     const text = granted
       ? `${who} "${decision.title}": ${decision.answer ?? CAPABILITY_GRANT}\n${granted}`
       : decision.state === "answered"
-        ? `${who} "${decision.title}": ${decision.answer ?? ""}`
-        : `${by === "main" ? "The main Ghost declined" : "The owner declined"} to answer "${decision.title}".`;
+        ? `${who} "${decision.title}": ${decision.answer ?? ""}${goal ? `\n${goal}` : ""}`
+        : `${by === "main" ? "The main Ghost declined" : "The owner declined"} to answer "${decision.title}".${goal ? `\n${goal}` : ""}`;
     if (decision.workId) this.core.works.resumeFromWaiting(decision.workId);
     // The granted tools must be configured before the turn that reads the answer starts.
     if (granted) await this.core.openConversation(decision.conversationId);
@@ -243,7 +244,8 @@ export class Decisions {
    */
   reversible(decision: Decision): boolean {
     const proposal = decision.proposal;
-    if (decision.kind === "question") return !!proposal && !proposal.secureForm && !proposal.browserHandoff && typeof reviewOf(proposal)?.answer === "string";
+    // A goal proposal never carries a recommendation: only the owner adopts a direction for the team.
+    if (decision.kind === "question") return !!proposal && !proposal.secureForm && !proposal.browserHandoff && !proposal.goal && typeof reviewOf(proposal)?.answer === "string";
     if (decision.kind === "document_review") return !!proposal && !(proposal.pageId ?? proposal.page_id);
     if (decision.kind !== "approve_effect" || !decision.effectId || !proposal) return false;
     const tool = this.ledger.effect(decision.effectId).tool;

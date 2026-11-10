@@ -61,7 +61,7 @@ function requireMain(core: Core, api: ToolExecutionApi, targetId: string): Scope
   return { ...scope, target };
 }
 
-function requireMainCaller(core: Core, api: ToolExecutionApi): Scope {
+export function requireMainCaller(core: Core, api: ToolExecutionApi): Scope {
   const scope = scopeOf(core, api);
   if (scope.conversation.kind !== "direct") throw forbidden("Ghost management runs only in a direct conversation");
   if (!scope.ghost.isDefault) throw forbidden("only the current main Ghost may create, inspect or update other Ghosts");

@@ -1,6 +1,7 @@
 import { Type, type Static } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import { Duty } from "./duty.ts";
+import { Goal, Milestone } from "./goals.ts";
 import {
   Adaptation,
   ArtifactRef,
@@ -77,6 +78,9 @@ export const State = Type.Object({
   adaptations: Type.Optional(Type.Array(Adaptation)),
   /** 근무 상태. 이 기능 이전의 Host 는 보내지 않는다. */
   duty: Type.Optional(Duty),
+  /** Team goals with every milestone; the Host before goals sends neither. */
+  goals: Type.Optional(Type.Array(Goal)),
+  milestones: Type.Optional(Type.Array(Milestone)),
 });
 export type State = Static<typeof State>;
 

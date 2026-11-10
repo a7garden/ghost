@@ -64,6 +64,24 @@ describe('applyEvent', () => {
     expect(state.decisions[0]).toMatchObject({ id: 'd1', state: 'pending' });
   });
 
+  it('upserts goals and milestones from snapshots without optional arrays', () => {
+    const goal = { id: 'g1', title: '방향', why: '', boundaries: '', signal: '', state: 'active' as const, proposedBy: null, createdAt: 1, updatedAt: 1, closedAt: null };
+    const milestone = { id: 'm1', goalId: 'g1', title: '첫걸음', hypothesis: '', exit: '', outcome: '', state: 'planned' as const, workIds: [], createdBy: 'sage', settledBy: null, createdAt: 1, startedAt: null, endedAt: null };
+    const initial = baseState();
+    let state = applyEvent(initial, { type: 'goal', goal });
+    state = applyEvent(state, { type: 'goal', goal: { ...goal, title: '새 방향', updatedAt: 2 } });
+    state = applyEvent(state, { type: 'goal', goal: { ...goal, id: 'g2' } });
+    state = applyEvent(state, { type: 'milestone', milestone });
+    state = applyEvent(state, { type: 'milestone', milestone: { ...milestone, state: 'active', startedAt: 2 } });
+    state = applyEvent(state, { type: 'milestone', milestone: { ...milestone, id: 'm2' } });
+    expect(state.goals?.map(item => item.id)).toEqual(['g1', 'g2']);
+    expect(state.goals?.[0].title).toBe('새 방향');
+    expect(state.milestones?.map(item => item.id)).toEqual(['m1', 'm2']);
+    expect(state.milestones?.[0]).toMatchObject({ state: 'active', startedAt: 2 });
+    expect(initial.goals).toBeUndefined();
+    expect(initial.milestones).toBeUndefined();
+  });
+
   it('replaces settings wholesale and swaps sandbox rows per ghost', () => {
     let state = applyEvent(baseState(), event({ type: 'settings', settings: { defaultModel: { provider: 'zai', model: 'glm-5.3' }, reviewModel: null, providers: [] } }));
     expect(state.settings.defaultModel).toEqual({ provider: 'zai', model: 'glm-5.3' });
