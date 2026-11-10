@@ -65,6 +65,33 @@ describe("approvals that do not wait forever", () => {
     restarted.ledger.close();
   });
 
+  test("a legacy page the owner denies while the pass is running stays denied", async () => {
+    const t = await team();
+    const clock = spyOn(Date, "now").mockReturnValue(Date.now() - 2 * 60 * MINUTE);
+    const first = newPage(t, "page-a");
+    const second = newPage(t, "page-b");
+    clock.mockRestore();
+    await tick();
+    for (const opened of [first, second]) {
+      const { review: _review, ...proposal } = opened.proposal!;
+      t.ledger.tx(() => t.ledger.putDecision({ ...opened, proposal }));
+    }
+    const written: string[] = [];
+    t.core.decisions.onDocumentApproved(async (decision) => { written.push(decision.id); return "Saved."; });
+    const submit = t.engine.submit.bind(t.engine);
+    t.engine.submit = async (conversationId, submission) => {
+      // The owner denies the second page while the pass awaits the first page's review wake.
+      if (submission.requestId === `decision-review:${first.id}`) await t.core.decisions.resolve(second.id, { outcome: "deny" });
+      return submit(conversationId, submission);
+    };
+    await t.core.decisions.settleExpired();
+    await t.core.decisions.settleExpired();
+    expect(t.ledger.decision(second.id).state).toBe("denied");
+    expect(written).toEqual([first.id]);
+    t.core.stop();
+    t.ledger.close();
+  });
+
   test("a missed main-review admission is retried after restart even while the main is busy", async () => {
     const path = join(tempDir(), "ledger.db");
     const t = await team(path);

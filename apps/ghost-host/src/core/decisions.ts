@@ -319,8 +319,16 @@ export class Decisions {
       // Pending rows from before review metadata existed must not wait forever after an upgrade.
       // Keep existing deadlines (including explicit opt-outs); backfill from the original opening time.
       if (!reviewOf(decision.proposal)?.recommend && this.reversible(decision)) {
-        decision = this.withReview(decision);
-        this.ledger.tx(() => this.ledger.putDecision(decision));
+        // Earlier iterations await; re-read so a decision resolved or cancelled meanwhile is never written back as pending.
+        const fresh = this.ledger.tx(() => {
+          const current = this.ledger.decision(decision.id);
+          if (current.state !== "pending" || reviewOf(current.proposal)?.recommend) return null;
+          const reviewed = this.withReview(current);
+          this.ledger.putDecision(reviewed);
+          return reviewed;
+        });
+        if (!fresh) continue;
+        decision = fresh;
       }
       try {
         await this.askMain(decision);
