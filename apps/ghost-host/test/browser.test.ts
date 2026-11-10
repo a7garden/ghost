@@ -11,6 +11,8 @@ import { startObscura } from "../src/integrations/obscura.ts";
 import { createEgressProxy } from "../src/integrations/egress-proxy.ts";
 import type { BrowserPort, BrowserSessionRef, SandboxEnvFactory, VaultPort } from "../src/integrations/ports.ts";
 import { createBrowserTools } from "../src/tools/browser.ts";
+import { LoginCapture } from "../src/integrations/login-capture.ts";
+import { createVault } from "../src/stores/vault.ts";
 import { loadConfig } from "../src/config.ts";
 import { harness, tempDir } from "./support.ts";
 
@@ -25,6 +27,8 @@ const i = argv.indexOf("--json");
 const command = argv.slice(i + 1);
 appendFileSync(root + "/calls", JSON.stringify({ argv, env: { HOME: process.env.HOME, PATH: process.env.PATH, OWNER_SECRET: process.env.OWNER_SECRET, keyLength: process.env.AGENT_BROWSER_ENCRYPTION_KEY?.length } }) + "\\n");
 let data = {};
+if (command[0] === "stream") data = { port: Number(readFileSync(root + "/stream-port", "utf8")) };
+if (command[0] === "batch") { await Bun.stdin.text(); process.stdout.write(JSON.stringify([{ error: null }])); process.exit(0); }
 if (command[0] === "hang") { writeFileSync(root + "/child-pid", String(process.pid)); setInterval(() => {}, 10000); await new Promise(() => {}); }
 if (command[0] === "flood") { process.stdout.write("x".repeat(2 * 1024 * 1024)); process.exit(0); }
 if (command[0] === "hold") { await fetch(command[1]); writeFileSync(root + "/hold-finished", "1"); }
@@ -89,7 +93,7 @@ function fixture(config?: ConstructorParameters<typeof AgentBrowser>[0]) {
   h.ledger.setPiConversationId(direct.id, "pi-browser");
   const item: VaultItem = { id: "login1", kind: "login", title: "Example", origin: "https://example.com", username: null, cardLast4: null, cardExpiry: null, contact: null, hints: "", ghostIds: [ghost.id], hasPassword: true, hasTotp: false, createdAt: 0, updatedAt: 0, expiresAt: null };
   let reveals = 0;
-  const vault: VaultPort = { listFor: () => [item], itemFor: (_g, id) => { if (id !== item.id) throw new Error("wrong item"); return item; }, reveal: () => { reveals++; return SECRET; }, generateLogin: () => item };
+  const vault: VaultPort = { listFor: () => [item], itemFor: (_g, id) => { if (id !== item.id) throw new Error("wrong item"); return item; }, reveal: (_ghost, _id, field) => { reveals++; return field === "card_expiry" ? "12/29" : SECRET; }, generateLogin: () => item };
   const extension = createBrowserTools(h.core, browser, { vault, sandbox: sandbox(workspace) });
   let seq = 0;
   const call = (name: string, args: unknown = {}, pi = "pi-browser", callId = `call-${++seq}`) => {
@@ -254,7 +258,7 @@ const obscuraTest = obscuraExecutable && agentBrowserExecutable && process.platf
 obscuraTest("isolated Obscura: CDP discovery and the WebSocket both require the token", async () => {
   const proxy = await createEgressProxy();
   try {
-    const engine = await startObscura(obscuraExecutable!, proxy.url);
+    const engine = await startObscura(obscuraExecutable!, proxy.url, tempDir());
     try {
       expect((await fetch(`${engine.endpoint}/json/list`)).status).toBe(401);
       const socket = new WebSocket(engine.websocket);
@@ -295,22 +299,30 @@ obscuraTest(
       expect((await f.browser.run(ref, ["eval", 'document.querySelector("#probe").value'])).data).toMatchObject({ result: "[redacted]" });
       await expect(f.browser.run(ref, ["screenshot"])).rejects.toThrow("until that tab's URL changes");
       expect((await f.browser.run(ref, ["eval", `document.body.insertAdjacentHTML("afterbegin", "<input id=owner style=position:fixed;left:20px;top:20px>"); "ready"`])).ok).toBe(true);
-      const position = await f.browser.run(ref, ["eval", `(() => { const r = document.querySelector("#owner").getBoundingClientRect(); return {x:(r.left+r.width/2)/(innerWidth-1),y:(r.top+r.height/2)/(innerHeight-1)}; })()`]);
+      const position = await f.browser.run(ref, ["eval", `(() => { const r = document.querySelector("#owner").getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`]);
       expect((await f.call("browser_handoff", { reason: "Test owner input" })).isError).toBeFalsy();
       const decision = f.ledger.pendingDecisions()[0]!;
       expect((await f.call("browser_snapshot")).isError).toBe(true);
-      const handoff = (action: "frame" | "control" | "window", input?: object) => {
-        const url = new URL(`http://localhost/api/browser/handoffs/${decision.id}/${action}`);
-        return serveBrowser(new Request(url, action === "frame" ? {} : { method: "POST", body: JSON.stringify(input ?? {}) }), url, f.core, f.browser);
+      const handoff = (action: "live" | "input", input?: object, signal?: AbortSignal) => {
+        const url = new URL(`http://localhost/api/browser/sessions/${ref.conversationId}/${action}`);
+        return serveBrowser(new Request(url, action === "live" ? { signal } : { method: "POST", body: JSON.stringify(input ?? {}) }), url, f.core, f.browser);
       };
-      const response = await handoff("frame");
+      const abort = new AbortController();
+      const response = await handoff("live", undefined, abort.signal);
       expect(response.status).toBe(200);
-      const frame = await response.json() as { image: string; windowAvailable: boolean };
-      expect(frame.windowAvailable).toBe(false);
-      expect(Buffer.from(frame.image, "base64").subarray(0, 3).toString("hex")).toBe("ffd8ff");
-      expect((await handoff("window")).status).toBe(503);
-      expect((await handoff("control", { type: "tap", ...(position.data as { result: { x: number; y: number } }).result })).ok).toBe(true);
-      expect((await handoff("control", { type: "text", text: "한글 test" })).ok).toBe(true);
+      const reader = response.body!.getReader();
+      let frame: { data: string } | undefined;
+      while (!frame) {
+        const value = await reader.read();
+        if (value.done) throw new Error("Stream ended before a frame");
+        for (const line of new TextDecoder().decode(value.value).trim().split("\n")) { const event = JSON.parse(line); if (event.type === "frame") frame = event; }
+      }
+      expect(Buffer.from(frame.data, "base64").subarray(0, 3).toString("hex")).toBe("ffd8ff");
+      const coordinates = (position.data as { result: { x: number; y: number } }).result;
+      expect((await handoff("input", { type: "mouse", event: "down", ...coordinates })).ok).toBe(true);
+      expect((await handoff("input", { type: "mouse", event: "up", ...coordinates })).ok).toBe(true);
+      expect((await handoff("input", { type: "text", text: "한글 test" })).ok).toBe(true);
+      abort.abort(); await reader.cancel();
       await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "Done" });
       expect((await f.call("browser_snapshot")).isError).toBeFalsy();
       expect((await f.browser.run(ref, ["eval", 'document.querySelector("#owner").value'])).data).toMatchObject({ result: "한글 test" });
@@ -419,12 +431,14 @@ describe("browser tools", () => {
   test("card fields require approval, preserve metadata only and re-check permission", async () => {
     const f = fixture(); f.item.kind = "card"; f.item.cardLast4 = "1234";
     try {
-      await f.call("browser_fill_secret", { ref: "@e1", item_id: f.item.id, field: "card_number" });
+      expect((await f.call("browser_fill_secret", { ref: "@e1", item_id: f.item.id, field: "card_number" })).isError).toBe(true);
+      expect(f.ledger.pendingDecisions()).toHaveLength(0);
+      await f.call("browser_fill_card", { number_ref: "@e1", item_id: f.item.id });
       expect(f.reveals()).toBe(0);
       const decision = f.ledger.pendingDecisions()[0]!; expect(JSON.stringify(decision)).toContain("1234"); expect(JSON.stringify(decision)).not.toContain(SECRET);
       await f.core.decisions.resolve(decision.id, { outcome: "approve" });
       expect(f.reveals()).toBe(1); expect(f.ledger.effect(decision.effectId!).state).toBe("done");
-      await f.call("browser_fill_secret", { ref: "@e1", item_id: f.item.id, field: "card_cvc" });
+      await f.call("browser_fill_card", { number_ref: "@e1", cvc_ref: "@e2", item_id: f.item.id });
       const revoked = f.ledger.pendingDecisions()[0]!;
       f.ledger.tx(() => f.ledger.putGhost({ ...f.ghost, tools: [] }));
       await f.core.decisions.resolve(revoked.id, { outcome: "approve" });
@@ -561,7 +575,7 @@ describe("browser tools", () => {
       expect(f.ledger.effect(proposal.effectId!).state).toBe("denied");
       expect(commands(f.root).some((argv) => argv[0] === "click")).toBe(false);
       f.item.kind = "card";
-      await f.call("browser_fill_secret", { ref: "@e1", item_id: f.item.id, field: "card_number" });
+      await f.call("browser_fill_card", { number_ref: "@e1", item_id: f.item.id });
       const card = f.ledger.pendingDecisions()[0]!;
       writeFileSync(join(f.root, "refuse-secret"), "refused:frame");
       await f.core.decisions.resolve(card.id, { outcome: "approve" });
@@ -595,4 +609,107 @@ describe("browser tools", () => {
       expect(f.ledger.effectsInState("unknown")).toHaveLength(0);
     } finally { await f.browser.shutdown(); }
   });
+});
+
+describe("owner login capture", () => {
+  test("redacts immediately but commits only a submitted successful attempt or completed handoff", async () => {
+    const saved: unknown[] = [], redacted: string[] = [];
+    const capture = new LoginCapture(async (login) => { saved.push({ ...login }); }, value => redacted.push(value));
+    const page = { origin: "https://example.com", url: "https://example.com/login", username: "owner", password: SECRET, hasPassword: true };
+    await capture.observe(JSON.stringify(page));
+    expect(redacted).toContain(SECRET);
+    await capture.observe(JSON.stringify({ ...page, url: "https://example.com/elsewhere" }));
+    expect(saved).toHaveLength(0);
+    capture.clear();
+    await capture.observe(JSON.stringify(page), true);
+    await capture.observe(JSON.stringify(page));
+    expect(saved).toHaveLength(0);
+    await capture.observe(JSON.stringify({ ...page, url: "https://example.com/account", password: "", username: "", hasPassword: false }));
+    expect(saved).toEqual([{ origin: page.origin, username: page.username, password: SECRET }]);
+    await capture.observe(JSON.stringify(page));
+    await capture.observe(null, false, true);
+    expect(saved).toHaveLength(2);
+    await capture.observe(JSON.stringify(page));
+    capture.clear();
+    await capture.observe(null, false, true);
+    expect(saved).toHaveLength(2);
+  });
+  test("saveLogin merges canonical origin/username, keeps history and grants without duplicate versions", () => {
+    const vault = createVault(tempDir());
+    try {
+      const first = vault.saveLogin("g1", { origin: "https://EXAMPLE.com:443/", username: "owner", password: SECRET });
+      expect(first).toMatchObject({ kind: "login", title: "example.com", origin: "https://example.com", ghostIds: ["g1"], hints: "소유자가 브라우저에서 직접 로그인" });
+      expect(vault.saveLogin("g1", { origin: first.origin!, username: "owner", password: SECRET }).id).toBe(first.id);
+      expect(vault.history(first.id)).toHaveLength(1);
+      expect(vault.saveLogin("g2", { origin: first.origin!, username: "owner", password: SECRET }).ghostIds).toEqual(["g1", "g2"]);
+      const updated = vault.saveLogin("g2", { origin: first.origin!, username: "owner", password: "new-password-456" });
+      expect(updated.id).toBe(first.id);
+      expect(vault.history(first.id)).toHaveLength(3);
+      expect(vault.reveal("g1", first.id, "password")).toBe("new-password-456");
+      expect(vault.saveLogin("g1", { origin: "https://other.example", username: "owner", password: SECRET }).id).not.toBe(first.id);
+      expect(vault.saveLogin("g1", { origin: first.origin!, username: "other", password: SECRET }).id).not.toBe(first.id);
+      expect(() => vault.saveLogin("g1", { origin: "http://example.com", username: "owner", password: SECRET })).toThrow();
+    } finally { vault.close(); }
+  });
+});
+
+describe("whole-card approval", () => {
+  test("one decision fills number, month/year selects and cvc; changed totals fill nothing", async () => {
+    const f = fixture(); f.item.kind = "card";
+    const original = f.browser.run.bind(f.browser);
+    const values: Record<string, string> = {}; let focused = "";
+    class Input {
+      ownerDocument: unknown; disabled = false; readOnly = false; type = "text"; tagName = "INPUT"; maxLength = 255;
+      set value(value: string) { values[focused] = value; }
+      dispatchEvent() {}
+    }
+    class Select extends Input {
+      override tagName = "SELECT";
+      options = [{ value: "12", text: "12", disabled: false }, { value: "2029", text: "2029", disabled: false }];
+      override set value(value: string) { values[focused] = value; }
+    }
+    const spy = spyOn(f.browser, "run").mockImplementation(async (ref, argv, options) => {
+      if (argv[0] === "focus") focused = argv[1]!;
+      if (!options?.stdin) return original(ref, argv, options);
+      const element = ["@e2", "@e3"].includes(focused) ? new Select() : new Input();
+      const document = { activeElement: element }; element.ownerDocument = document;
+      const window: { top?: unknown } = {}; window.top = window;
+      const result = runInNewContext(options.stdin, { window, document, location: { origin: "https://example.com" }, HTMLInputElement: Input, HTMLSelectElement: Select, HTMLTextAreaElement: class {}, Event: class {} });
+      return { ok: result === "filled", data: { status: result }, error: null };
+    });
+    const args = { item_id: f.item.id, number_ref: "@e1", expiry_month_ref: "@e2", expiry_year_ref: "@e3", cvc_ref: "@e4" };
+    try {
+      writeFileSync(join(f.root, "facts"), JSON.stringify({ origin: "https://example.com", checkout: true, amount: "1000", currency: "KRW" }));
+      await f.call("browser_fill_card", args);
+      expect(f.ledger.pendingDecisions()).toHaveLength(1);
+      const decision = f.ledger.pendingDecisions()[0]!;
+      expect(decision.proposal).toMatchObject({ merchant: "example.com", total: "1,000원", fields: ["card_number", "card_expiry_month", "card_expiry_year", "card_cvc"] });
+      expect(values).toEqual({});
+      await f.core.decisions.resolve(decision.id, { outcome: "approve" });
+      expect(values).toEqual({ "@e1": SECRET, "@e2": "12", "@e3": "2029", "@e4": SECRET });
+      expect(f.ledger.effect(decision.effectId!).state).toBe("done");
+      await f.call("browser_fill_card", args);
+      const changed = f.ledger.pendingDecisions()[0]!;
+      writeFileSync(join(f.root, "facts"), JSON.stringify({ origin: "https://example.com", checkout: true, amount: "9900", currency: "KRW" }));
+      const before = f.reveals();
+      await f.core.decisions.resolve(changed.id, { outcome: "approve" });
+      expect(f.reveals()).toBe(before);
+      expect(f.ledger.effect(changed.effectId!).state).toBe("denied");
+    } finally { spy.mockRestore(); await f.browser.shutdown(); }
+  });
+});
+
+test("legacy per-field card approvals are denied on extension startup and followed up without filling", async () => {
+  const f = fixture();
+  try {
+    f.core.effects.onApproved("browser_fill_secret", async () => { throw new Error("Retired executor must not run"); });
+    const effect = f.core.effects.propose({ conversationId: f.direct.id, callId: "legacy-card", tool: "browser_fill_secret", input: { ref: "@e1", item_id: f.item.id, field: "card_number", url: "https://example.com/" }, summary: "Old card fill", title: "카드 번호", detail: "", proposal: {} });
+    createBrowserTools(f.core, f.browser, { vault: null, sandbox: sandbox(f.workspace) });
+    expect(f.ledger.effect(effect.id).state).toBe("denied");
+    expect(f.ledger.effect(effect.id).result).toContain("browser_fill_card");
+    expect(f.ledger.pendingDecisions()).toHaveLength(0);
+    await f.core.decisions.recover();
+    expect(JSON.stringify([...f.engine.submissions.values()])).toContain("browser_fill_card");
+    expect(f.reveals()).toBe(0);
+  } finally { await f.browser.shutdown(); }
 });

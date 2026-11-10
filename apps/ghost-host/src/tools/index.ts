@@ -1,5 +1,5 @@
 import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
-import { BROWSER_TOOLS, DESKTOP_TOOLS, HOST_TOOLS } from "@ghost/contract";
+import { BROWSER_TOOLS, DESKTOP_TOOLS, HOST_TOOLS, MAIL_TOOLS } from "@ghost/contract";
 import type { Extension } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { describeWork } from "../core/works.ts";
@@ -26,6 +26,8 @@ import { createHostTools } from "./host.ts";
 import { ADAPT_INSTRUCTIONS, createSelfTools } from "./self.ts";
 import { activityTools } from "./activities.ts";
 import { AUTONOMY_DRIVE, MAIN_DRIVE, createAutonomyTools } from "./autonomy.ts";
+import type { MailService } from "../integrations/mail.ts";
+import { createMailTools, MAIL_INSTRUCTIONS } from "./mail.ts";
 
 /**
  * How a Ghost speaks to the owner. Briefs between Ghosts stay exact; what a person reads is a
@@ -130,6 +132,7 @@ export function createToolSet(deps: {
   vault?: Vault | null;
   /** PC control through Ghost Control (ghost.desktop); null leaves the tools out. */
   desktop?: DesktopPort | null;
+  mail?: MailService | null;
 }): ToolSet {
   const direct = sequentialEffects(createDirectTools(deps.core));
   const drive = createAutonomyTools(deps.core);
@@ -149,7 +152,8 @@ export function createToolSet(deps: {
   const browser = deps.browser ? sequentialEffects(createBrowserTools(deps.core, deps.browser, { vault: deps.vault ?? null, sandbox: deps.sandbox })) : null;
   const vault = deps.vault ? sequentialEffects(createVaultTools(deps.core, deps.vault)) : null;
   const desktop = deps.desktop ? sequentialEffects(createDesktopTools(deps.core, deps.desktop)) : null;
-  const optional = [memory, documents, host, skills, web, sources, browser, vault, desktop].filter((extension): extension is Extension => extension !== null);
+  const mail = deps.mail ? sequentialEffects(createMailTools(deps.core, deps.mail)) : null;
+  const optional = [memory, documents, host, skills, web, sources, browser, vault, desktop, mail].filter((extension): extension is Extension => extension !== null);
   /** Guidance for an installed capability, only for a Ghost that holds one of its tools. */
   const capabilityInstructions = (ghost: Ghost) =>
     [
@@ -158,8 +162,9 @@ export function createToolSet(deps: {
       sources && ghost.tools.includes("web_read") ? SOURCE_INSTRUCTIONS : "",
       documents && ghost.tools.includes("document_list") ? DOCUMENT_INSTRUCTIONS : "",
       browser && ghost.tools.some((tool) => BROWSER_TOOLS.includes(tool)) ? BROWSER_INSTRUCTIONS : "",
-      vault && ghost.tools.some((tool) => tool.startsWith("vault_") || tool === "browser_fill_secret") ? VAULT_INSTRUCTIONS : "",
+      vault && ghost.tools.some((tool) => tool.startsWith("vault_") || tool === "browser_fill_secret" || tool === "browser_fill_card") ? VAULT_INSTRUCTIONS : "",
       desktop && ghost.hostExecution && ghost.tools.some((tool) => DESKTOP_TOOLS.includes(tool)) ? DESKTOP_INSTRUCTIONS : "",
+      mail && ghost.tools.some((tool) => MAIL_TOOLS.includes(tool)) ? MAIL_INSTRUCTIONS : "",
     ];
 
   const language = () => deps.core.ledger.settings().ownerLanguage ?? "ko";
@@ -180,6 +185,7 @@ export function createToolSet(deps: {
           if (browser) selected.push(browser);
           if (vault) selected.push(vault);
           if (desktop) selected.push(desktop);
+          if (mail) selected.push(mail);
           // Main-only management: resolved again at every execution, so a stale main keeps nothing.
           if (ghost.isDefault && ghost.state === "active") selected.push(main);
           return selected;
@@ -195,6 +201,7 @@ export function createToolSet(deps: {
           if (browser) selected.push(browser);
           if (vault) selected.push(vault);
           if (desktop) selected.push(desktop);
+          if (mail) selected.push(mail);
           return selected;
         }
         case "review":

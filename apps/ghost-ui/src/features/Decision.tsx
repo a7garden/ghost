@@ -1,5 +1,5 @@
 import { haptic } from '../host/shell';
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useContext, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowRight, ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, FileText, Monitor, KeyRound } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input } from '../ui'
 import { DESTRUCTIVE_RISK, reviewOf, type ActivityConfig, type Decision, type SecureFormRequest, type State, type VaultItemKind, type WorkResult } from '@ghost/contract';
@@ -17,6 +17,7 @@ import { toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { isMac, modKey } from '../ui/keys';
+import { BrowserPaneContext } from './BrowserPaneContext';
 
 type DocumentProposal = { spaceId?: string; space_id?: string; title?: string; body?: string; profile?: string; pageId?: string | null; page_id?: string | null };
 
@@ -99,6 +100,8 @@ export function highRiskApproval(decision: Decision): boolean {
 }
 
 function commandRiskIsHigh(proposal: Record<string, unknown>): boolean {
+  // A protected card fill: which site gets which card, and which fields it will type into.
+  if (Array.isArray(proposal.fields) && proposal.fields.length > 0) return true;
   // Current Host browser approvals are used for commit clicks and protected card fields.
   if (typeof proposal.url === 'string' && (proposal.element || typeof proposal.itemTitle === 'string')) return true;
   return typeof proposal.command === 'string' && typeof proposal.risk === 'string' && DESTRUCTIVE_RISK.test(proposal.risk);
@@ -144,6 +147,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   autoFocus?: boolean;
 }) {
   const { client } = useHost();
+  const browserPane = useContext(BrowserPaneContext);
   const now = useNow();
   const [answer, setAnswer] = useState('');
   const [error, setError] = useState('');
@@ -258,11 +262,13 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
 
     {!secureForm && handoff && <div className="decision__handoff">
       <p className="decision__handoff-note"><Monitor size={14} aria-hidden="true"/>{handoff.live
-        ? 'Ghost의 브라우저입니다. 아래 화면을 탭하고 글자를 보내 직접 마무리한 뒤 「다 했어요」를 눌러 주세요.'
+        ? 'Ghost의 브라우저입니다. 아래 화면을 직접 조작해 마무리한 뒤 「다 했어요」를 눌러 주세요.'
         : 'Mac에서 Chrome 창을 열어 두었습니다. 창에서 직접 마무리해 주세요.'}</p>
       {handoff.url && <p className="decision__handoff-url">{handoff.url}</p>}
       {handoff.reason.trim() && handoff.reason.trim() !== decision.detail.trim() && <p className="decision__request-reason">{handoff.reason}</p>}
-      {decision.state === 'pending' && <BrowserLiveView decisionId={decision.id} disabled={busy}/>}
+      {decision.state === 'pending' && handoff.live && (browserPane?.conversationId === decision.conversationId
+        ? <Button type="button" variant="outline" className="h-[34px] justify-self-start rounded-pill px-4" disabled={busy} onClick={browserPane.open}>브라우저 화면 열기</Button>
+        : <BrowserLiveView conversationId={decision.conversationId} compact/>)}
     </div>}
 
     {review?.mainNote && <div className="decision__review"><p><strong>메인 의견</strong> {review.mainNote}</p></div>}
@@ -351,10 +357,12 @@ const secureInputs: Record<VaultItemKind, readonly { key: keyof SecureFormValues
     { key: 'cardName', label: '카드 소유자 이름', required: true, autoComplete: 'cc-name' },
   ],
   contact: [
-    { key: 'contactName', label: '이름' },
-    { key: 'contactPhone', label: '전화' },
-    { key: 'contactEmail', label: '이메일' },
-    { key: 'contactAddress', label: '주소' },
+    { key: 'contactName', label: '이름', autoComplete: 'name' },
+    { key: 'contactPhone', label: '전화', autoComplete: 'tel' },
+    { key: 'contactEmail', label: '이메일', autoComplete: 'email' },
+    { key: 'contactAddress', label: '주소', autoComplete: 'address-line1' },
+    { key: 'contactAddressDetail', label: '상세주소', autoComplete: 'address-line2' },
+    { key: 'contactPostalCode', label: '우편번호', autoComplete: 'postal-code' },
   ],
   secret: [{ key: 'value', label: '값', required: true, password: true, autoComplete: 'off' }],
 };
@@ -420,10 +428,15 @@ function SecureForm({ decision, request, cardBusy, autoFocus, onResolved, onDecl
   </form>;
 }
 
+/** The wire names of a card fill in the words the owner reads. */
+const cardFieldLabels: Record<string, string> = {
+  card_number: '카드 번호', card_expiry: '유효기간', card_expiry_month: '유효기간 월',
+  card_expiry_year: '유효기간 년', card_cvc: 'CVC', card_name: '소유자 이름',
+};
+
 /** The exact action a Ghost wants to run: short payloads inline, long ones one click away. */
 function RequestPreview({ value }: { value: Record<string, unknown> }) {
   const command = typeof value.command === 'string' ? value.command : null;
-  const json = JSON.stringify(value, null, 2);
   if (command) {
     // A host command proposal: why, where, what, and how risky. The command stays monospace.
     const cwd = typeof value.cwd === 'string' && value.cwd ? value.cwd : null;
@@ -436,8 +449,26 @@ function RequestPreview({ value }: { value: Record<string, unknown> }) {
       {risk && <p className="decision__request-risk" data-risk={commandRiskIsHigh(value) ? 'high' : undefined}>{risk}</p>}
     </div>;
   }
-  // A browser click approval: the merchant and total the host read off the page come first, not the raw JSON.
+  // A protected card fill at checkout: the merchant and total the host read off the page, the card, and the fields it types into.
+  const fields = Array.isArray(value.fields) && value.fields.every(field => typeof field === 'string') ? value.fields as string[] : null;
   const merchant = typeof value.merchant === 'string' && value.merchant ? value.merchant : null;
+  if (merchant && fields) {
+    const total = typeof value.total === 'string' && value.total ? value.total : '금액을 읽지 못함';
+    const reason = typeof value.reason === 'string' ? value.reason.trim() : '';
+    const card = typeof value.itemTitle === 'string' && value.itemTitle ? value.itemTitle : '카드';
+    const last4 = typeof value.last4 === 'string' && value.last4 ? ` •••• ${value.last4}` : '';
+    return <div className="decision__request-block">
+      {reason && <p className="decision__request-reason">{reason}</p>}
+      <dl className="decision__facts">
+        <div><dt>상점</dt><dd>{merchant}</dd></div>
+        <div><dt>금액</dt><dd className="tabular">{total}</dd></div>
+        <div><dt>카드</dt><dd>{card}{last4}</dd></div>
+        {fields.length > 0 && <div><dt>채우는 항목</dt><dd>{fields.map(field => cardFieldLabels[field] ?? field).join(', ')}</dd></div>}
+      </dl>
+      <p className="decision__request-risk">승인하면 이 사이트의 입력란에 카드 정보를 채웁니다.</p>
+    </div>;
+  }
+  const json = JSON.stringify(value, null, 2);
   if (merchant) {
     const page = value.page && typeof value.page === 'object' ? value.page as { checkout?: unknown } : null;
     const total = typeof value.total === 'string' && value.total ? value.total : page?.checkout ? '페이지에서 읽지 못했습니다 · 화면에서 직접 확인하세요' : '없음';

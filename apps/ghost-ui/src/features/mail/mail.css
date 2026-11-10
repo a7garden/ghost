@@ -1,0 +1,126 @@
+/* Mail (메일): a three-pane client on the sheet; below 56rem the navigation stacks and an
+   open message takes the whole sheet. Component-layer rules; Tailwind utilities passed via
+   className win over these. */
+@layer components {
+
+.mail {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: 208px minmax(280px, 400px) minmax(0, 1fr);
+}
+.mail--single {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  max-width: 460px;
+  margin-inline: auto;
+  padding: 24px;
+}
+
+/* Mailbox rail ----------------------------------------------------------- */
+.mail-nav { display: flex; min-height: 0; flex-direction: column; gap: 10px; padding: 14px 10px 14px 14px; overflow-y: auto; }
+.mail-switch {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--ghost-inset);
+  color: var(--ghost-ink);
+  font: 500 var(--text-ui)/1.4 var(--font-sans);
+}
+.mail-folders { display: grid; gap: 1px; margin: 0; padding: 4px; list-style: none; border-radius: var(--radius-card); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
+.mail-folder {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--ghost-ink2);
+  font: 500 var(--text-ui)/1.4 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.mail-folder:hover { background: var(--ghost-hover); }
+.mail-folder[aria-current] { color: var(--ghost-ink); background: var(--ghost-hover2); }
+.mail-folder__count { min-width: 20px; padding: 1px 6px; border-radius: var(--radius-pill); background: var(--ghost-hover2); color: var(--ghost-ink2); font-size: var(--text-micro); text-align: center; }
+.mail-nav__write { justify-self: start; }
+.mail-folders--pick { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.mail-folder__pick { justify-content: flex-start; width: 100%; }
+
+/* Message list ------------------------------------------------------------ */
+.mail-list { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--ghost-line); }
+.mail-list__bar { display: flex; flex: none; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--ghost-line); }
+.mail-search { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; padding: 0 10px; border-radius: var(--radius-control); background: var(--ghost-inset); color: var(--ghost-ink3); }
+.mail-search:focus-within { box-shadow: var(--shadow-inset-field); }
+.mail-search input { flex: 1; min-width: 0; height: 30px; border: 0; background: none; color: var(--ghost-ink); font: var(--text-ui)/1.4 var(--font-sans); outline: none; }
+.mail-search input::placeholder { color: var(--ghost-ink3); }
+.mail-list__scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.mail-rows { display: grid; gap: 1px; margin: 10px; padding: 4px; list-style: none; border-radius: var(--radius-lg); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
+.mail-row {
+  position: relative;
+  display: grid;
+  width: 100%;
+  gap: 2px;
+  padding: 9px 12px 9px 18px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--ghost-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mail-row:hover { background: var(--ghost-hover); }
+.mail-row[aria-current] { background: var(--ghost-hover2); }
+.mail-row__line { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.mail-row__from { flex: 1; min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.mail-row__flags { display: flex; flex: none; gap: 4px; color: var(--ghost-ink3); }
+.mail-row__date { flex: none; color: var(--ghost-ink3); font-size: var(--text-caption); }
+.mail-row__subject { overflow: hidden; font-size: var(--text-ui); line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.mail-row[data-unread] .mail-row__from, .mail-row[data-unread] .mail-row__subject { color: var(--ghost-ink); font-weight: 650; }
+/* Unread dot: the same mark the 소식 feed uses. */
+.mail-row[data-unread]::before { content: ''; position: absolute; top: 15px; left: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--ghost-signal); }
+.mail-row--loading { gap: 6px; }
+.mail-list__error, .mail-list__more { padding: 8px 16px 16px; }
+.mail-list__empty { margin: 12px; }
+
+/* Reader ------------------------------------------------------------------- */
+.mail-reader { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+.mail-reader__head { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--ghost-line); }
+.mail-reader__actions { display: flex; flex: 1; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.mail-reader__tools { display: inline-flex; align-items: center; gap: 2px; padding-left: 6px; border-left: 1px solid var(--ghost-line); }
+.mail-reader__error { display: grid; flex: none; gap: 6px; padding: 8px 16px; }
+.mail-reader__scroll { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 12px; padding: 16px 20px 28px; overflow-y: auto; }
+.mail-reader__subject { margin: 0; font-size: var(--text-headingSm); font-weight: 650; overflow-wrap: anywhere; }
+.mail-reader__headers { display: grid; gap: 3px; margin: 0; }
+.mail-reader__header { display: flex; gap: 10px; font-size: var(--text-caption); }
+.mail-reader__header dt { flex: none; width: 64px; color: var(--ghost-ink3); }
+.mail-reader__header dd { min-width: 0; margin: 0; color: var(--ghost-ink2); overflow-wrap: anywhere; }
+.mail-reader__sender { color: var(--ghost-ink); font-weight: 550; }
+.mail-reader__raw { color: var(--ghost-ink3); font-family: var(--font-mono); font-size: var(--text-micro); }
+.mail-reader__mode { display: flex; }
+/* HTML mail renders inside the empty-sandbox frame only; the frame owns its own scrolling. */
+.mail-reader__frame { width: 100%; height: min(60vh, 680px); min-height: 320px; border: 0; border-radius: var(--radius-card); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
+.mail-reader__text { margin: 0; color: var(--ghost-ink); font-size: var(--text-body); line-height: 1.7; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mail-reader--empty { align-items: flex-start; gap: 10px; padding: 16px 20px; }
+.mail-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.mail-attachment__name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-attachment__size { color: var(--ghost-ink3); font-weight: 400; }
+
+/* Stacked layout below 56rem ------------------------------------------------ */
+@media (max-width: 55.999rem) {
+  .mail { display: flex; flex-direction: column; }
+  .mail-nav { flex: none; flex-direction: column; gap: 8px; padding: 10px 12px 0; overflow: visible; }
+  .mail-list { flex: 1; border-right: 0; }
+  .mail-reader__scroll { padding-bottom: 40px; }
+}
+}

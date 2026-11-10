@@ -155,7 +155,7 @@ export class Vault implements VaultPort {
       hasPassword: input.password !== undefined || previous?.hasPassword === true, hasTotp: input.totp !== undefined || previous?.hasTotp === true,
       expiresAt: expiresAt ?? previous?.expiresAt ?? null, createdAt: previous?.createdAt ?? time, updatedAt: time,
     };
-    if (!validate(ItemSchema, item) || !item.title.trim() || [item.id, item.title, item.username, item.hints, ...item.ghostIds].some((s) => s?.includes("\0")) || (item.contact && Object.keys(item.contact).some((key) => !["name", "phone", "email", "address"].includes(key)))) throw invalid("invalid vault item metadata");
+    if (!validate(ItemSchema, item) || !item.title.trim() || [item.id, item.title, item.username, item.hints, ...item.ghostIds].some((s) => s?.includes("\0")) || (item.contact && Object.entries(item.contact).some(([key, value]) => !["name", "phone", "email", "address", "addressDetail", "postalCode"].includes(key) || typeof value !== "string" || value.includes("\0")))) throw invalid("invalid vault item metadata");
     if (!previous && ((kind === "login" && !item.hasPassword && !item.hasTotp) || (kind === "card" && !input.card) || (kind === "contact" && !item.contact) || (kind === "secret" && !input.value))) throw invalid("required vault fields are missing");
     return { item, secrets };
   }
@@ -212,6 +212,16 @@ export class Vault implements VaultPort {
     const existing = items.find((item) => item.kind === "login" && item.origin === origin && item.username === input.username && item.ghostIds.includes(ghostId));
     if (existing) return existing;
     return this.create({ ...input, id, origin, kind: "login", title: input.title ?? origin, password: generatePassword(), ghostIds: [ghostId] }, { creatorGhostId: ghostId });
+  }
+  /** Owner-entered credentials are owner items, not Ghost-generated quota entries. */
+  saveLogin(ghostId: string, input: { origin: string; username: string; password: string }): VaultItem {
+    const origin = normalizeOrigin(input.origin);
+    validatePassword(input.password);
+    const existing = this.list().find((item) => item.kind === "login" && item.origin === origin && item.username === input.username);
+    if (!existing) return this.create({ kind: "login", title: new URL(origin).hostname, origin, username: input.username, password: input.password, ghostIds: [ghostId], hints: "소유자가 브라우저에서 직접 로그인" });
+    const changed = !existing.hasPassword || this.field(existing.id, "password") !== input.password;
+    if (!changed && existing.ghostIds.includes(ghostId)) return existing;
+    return this.update(existing.id, { ...(changed ? { password: input.password } : {}), ghostIds: [...new Set([...existing.ghostIds, ghostId])] });
   }
   /** A decision's fixed item identity permits recovery after a vault commit but before ledger resolution. */
   answerSecureForm(decisionId: string, ghostId: string, request: SecureFormRequest, input: VaultInput, save: boolean): VaultItem {

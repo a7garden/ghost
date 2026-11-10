@@ -101,6 +101,45 @@ export function createHostTools(core: Core, host: HostPort): Extension {
         },
       }),
   );
+  const messageCodes = defineTool({
+    name: "host_message_codes",
+    description: `Read recent incoming SMS/iMessage verification codes from Mac Messages. SMS delivery requires iPhone Text Message Forwarding for this Mac. ${UNTRUSTED}`,
+    parameters: Type.Object({
+      within_minutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 60 })),
+      sender_contains: Type.Optional(Type.String({ maxLength: 64 })),
+    }),
+    replay: "safe",
+    async execute(args, api) {
+      try {
+        requireAllowed(core, api, "host_message_codes");
+        const withinMinutes = args.within_minutes ?? 10;
+        const { codes } = await host.messageCodes({
+          withinMinutes,
+          senderContains: args.sender_contains?.trim() || undefined,
+        });
+        if (codes.length === 0)
+          return {
+            content: [{
+              type: "text",
+              text: `No verification codes in the last ${withinMinutes} minutes. SMS codes need iPhone Text Message Forwarding enabled for this Mac.`,
+            }],
+          };
+        const pad = (value: number) => String(value).padStart(2, "0");
+        const lines = codes.map((entry) => {
+          const date = new Date(entry.receivedAt);
+          const offsetMinutes = -date.getTimezoneOffset();
+          const offset = `${offsetMinutes >= 0 ? "+" : "-"}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
+          const localIso = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${offset}`;
+          const sender = entry.sender || entry.service || "unknown sender";
+          const service = entry.service ? ` (${entry.service})` : "";
+          return `${entry.code} — ${sender}${service} — ${localIso} — ${entry.excerpt}`;
+        });
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  });
   const propose = defineTool({
     name: "host_command_propose",
     description:
@@ -161,6 +200,6 @@ export function createHostTools(core: Core, host: HostPort): Extension {
   });
   return defineExtension({
     name: "ghost.host",
-    tools: [...noArg, ...paths, propose],
+    tools: [...noArg, ...paths, messageCodes, propose],
   });
 }

@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs';
 import { stopMockProvider } from './mock-provider';
 import { readCleanupState } from './run-state';
 
-/** Global teardown: stop the host and the mock provider, remove the temporary state root. */
+/** Global teardown: only this run's metadata can identify its host and unique temporary root. */
 export default async function globalTeardown(): Promise<void> {
   await stopMockProvider().catch(() => {});
   const cleanup = readCleanupState();

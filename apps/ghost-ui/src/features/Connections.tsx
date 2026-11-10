@@ -6,7 +6,7 @@ import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
 import { uiTerms } from '../uiText';
-import { buildConnectionCommand, type ConnectionDraft, connectionKindLabel, connectionSummary, draftFromConnection, emptyConnectionDraft } from './connection-config';
+import { buildConnectionCommand, type ConnectionDraft, connectionKindLabel, connectionSummary, draftFromConnection, applyMailPreset, emptyConnectionDraft, mailPresetForHost, mailPresets } from './connection-config';
 
 type TestState = { phase: 'testing' } | { phase: 'ok'; summary: string } | { phase: 'error'; message: string };
 
@@ -113,16 +113,18 @@ const updatedLabel = (at: number) =>
   new Date(at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 /** 연결 만들기/편집. The secret field starts blank every time and never echoes a stored value. */
-export function ConnectionDialog({ existing, onClose, onSave }: {
+export function ConnectionDialog({ existing, initialKind = 'github', onClose, onSave }: {
   existing: Connection | null;
+  initialKind?: ConnectionConfig['kind'];
   onClose(): void;
   onSave(command: Command, done: string): Promise<void>;
 }) {
   const kinds = Object.keys(connectionKindLabel) as ConnectionConfig['kind'][];
-  const [draft, setDraft] = useState(() => existing ? draftFromConnection(existing) : emptyConnectionDraft('github'));
+  const [draft, setDraft] = useState(() => existing ? draftFromConnection(existing) : emptyConnectionDraft(initialKind));
   const [error, setError] = useState(''), [saving, setSaving] = useState(false);
   const set = (patch: Partial<ConnectionDraft>) => setDraft(prev => ({ ...prev, ...patch }));
   const mail = draft.kind === 'mail';
+  const preset = mail ? mailPresetForHost(draft.host) : null;
 
   const save = async () => {
     if (saving) return;
@@ -145,6 +147,11 @@ export function ConnectionDialog({ existing, onClose, onSave }: {
       </FormField>
       {mail
         ? <>
+          {!existing && <div className="connection-presets" role="group" aria-label="메일 서비스 선택">
+            {mailPresets.map(item => <Button key={item.id} variant="outline" size="sm" type="button" disabled={saving}
+              aria-pressed={draft.host === item.host && draft.port === String(item.port)}
+              onClick={() => set(applyMailPreset(draft, item))}>{item.label}</Button>)}
+          </div>}
           <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_120px]">
             <FormField label="IMAP 서버" required>
               {control => <Input {...control} value={draft.host} maxLength={253} required disabled={saving} placeholder="imap.example.com" autoComplete="off"
@@ -158,6 +165,7 @@ export function ConnectionDialog({ existing, onClose, onSave }: {
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label="사용자 이름" required>
               {control => <Input {...control} value={draft.username} maxLength={320} required disabled={saving} autoComplete="off"
+                placeholder={preset ? `이름@${preset.domain}` : 'owner@example.com'}
                 onChange={event => set({ username: event.target.value })}/>}
             </FormField>
             <FormField label="메일함">
@@ -189,11 +197,15 @@ export function ConnectionDialog({ existing, onClose, onSave }: {
       <FormField label={mail ? '앱 비밀번호' : '접근 토큰'}
         description={existing?.hasCredential
           ? '저장된 자격이 있습니다. 비워 두면 이름만 바꾼 저장에서 그대로 유지됩니다. 연결 정보를 바꾸면 다시 입력해야 합니다.'
-          : `${connectionKindLabel[draft.kind]} 계정의 자격 증명입니다. 저장 후에는 다시 표시되지 않습니다.`}>
+          : mail && preset ? preset.helpText
+            : `${connectionKindLabel[draft.kind]} 계정의 자격 증명입니다. 저장 후에는 다시 표시되지 않습니다.`}>
         {control => <Input {...control} type="password" value={draft.credential} autoComplete="new-password" disabled={saving}
           placeholder={existing?.hasCredential ? '••••••••' : undefined}
           onChange={event => set({ credential: event.target.value, clearCredential: false })}/>}
       </FormField>
+      {mail && preset?.helpUrl && <p className="connection-help">
+        <a href={preset.helpUrl} target="_blank" rel="noreferrer">{preset.helpLinkLabel}</a>
+      </p>}
       {existing?.hasCredential && <label className="connection-clear">
         <Checkbox checked={draft.clearCredential} disabled={saving}
           onCheckedChange={clearCredential => set({ clearCredential: clearCredential === true })}/>

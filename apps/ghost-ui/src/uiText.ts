@@ -18,6 +18,7 @@ export const routeLabels = {
   settings: uiTerms.settings,
   inbox: uiTerms.inbox,
   work: uiTerms.work,
+  mail: '메일',
   host: '호스트',
   spaces: '프로젝트',
   ghosts: 'Ghost',

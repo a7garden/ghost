@@ -74,4 +74,7 @@
 .connection-test { padding: 10px 16px; border-bottom: 1px solid var(--ghost-line); background: var(--ghost-hover); font-size: var(--text-caption); }
 .connection-test[data-phase="error"] { color: var(--ghost-danger-ink); }
 .connection-clear { display: flex; align-items: center; gap: 8px; color: var(--ghost-ink2); font-size: var(--text-caption); cursor: pointer; }
+.connection-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.connection-help { margin: -8px 0 0; color: var(--ghost-ink2); font-size: var(--text-caption); }
+.connection-help a { color: var(--ghost-accent-ink); text-underline-offset: 2px; }
 }

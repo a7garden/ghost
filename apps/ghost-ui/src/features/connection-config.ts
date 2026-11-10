@@ -48,6 +48,47 @@ export function draftFromConnection(connection: Connection): ConnectionDraft {
   };
 }
 
+/** One mail provider preset: the transports it needs and where its app password lives. */
+export interface MailPreset {
+  id: 'gmail' | 'icloud' | 'naver' | 'daum';
+  label: string;
+  host: string; port: number;
+  smtpHost: string; smtpPort: number; smtpSecure: boolean;
+  /** The account domain, so the username placeholder shows the mail address the server expects. */
+  domain: string;
+  /** The account's app-password page; '' when the provider has none (the copy says what to do instead). */
+  helpUrl: string;
+  helpText: string;
+  helpLinkLabel: string;
+}
+
+/**
+ * The mail presets the dialog offers. Outlook is deliberately absent: Microsoft dropped
+ * password-based IMAP for consumer accounts, so a preset would promise what cannot connect.
+ */
+export const mailPresets: readonly MailPreset[] = [
+  { id: 'gmail', label: 'Gmail', host: 'imap.gmail.com', port: 993, smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpSecure: true, domain: 'gmail.com',
+    helpUrl: 'https://myaccount.google.com/apppasswords', helpText: 'Google 계정의 앱 비밀번호입니다. 2단계 인증이 켜진 계정이 필요합니다.', helpLinkLabel: '앱 비밀번호 만들기' },
+  { id: 'icloud', label: 'iCloud', host: 'imap.mail.me.com', port: 993, smtpHost: 'smtp.mail.me.com', smtpPort: 587, smtpSecure: false, domain: 'icloud.com',
+    helpUrl: 'https://account.apple.com/account/manage', helpText: 'Apple 계정의 앱 암호입니다.', helpLinkLabel: '앱 암호 관리' },
+  { id: 'naver', label: 'Naver', host: 'imap.naver.com', port: 993, smtpHost: 'smtp.naver.com', smtpPort: 465, smtpSecure: true, domain: 'naver.com',
+    helpUrl: '', helpText: 'Naver 메일 환경설정에서 IMAP/SMTP 사용을 켠 뒤 계정 비밀번호를 입력해 주세요.', helpLinkLabel: '' },
+  { id: 'daum', label: 'Daum', host: 'imap.daum.net', port: 993, smtpHost: 'smtp.daum.net', smtpPort: 465, smtpSecure: true, domain: 'daum.net',
+    helpUrl: '', helpText: 'Daum 메일 환경설정에서 IMAP/SMTP 사용을 켠 뒤 계정 비밀번호를 입력해 주세요.', helpLinkLabel: '' },
+];
+
+/** The preset a typed IMAP host belongs to, so the dialog can mark it and show its help. */
+export const mailPresetForHost = (host: string): MailPreset | null =>
+  mailPresets.find(preset => preset.host === host.trim().toLowerCase()) ?? null;
+
+/** A preset fills the transports only; the name, account and secret stay the owner's. Pure; tests pin it. */
+export function applyMailPreset(draft: ConnectionDraft, preset: MailPreset): ConnectionDraft {
+  return { ...draft,
+    host: preset.host, port: String(preset.port),
+    smtpHost: preset.smtpHost, smtpPort: String(preset.smtpPort), smtpSecure: preset.smtpSecure,
+  };
+}
+
 const intIn = (value: string, min: number, max: number, label: string): number | string => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < min || parsed > max) return `${label}은 ${min}부터 ${max}까지의 수여야 합니다.`;

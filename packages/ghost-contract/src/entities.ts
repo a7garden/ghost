@@ -90,6 +90,7 @@ export const GhostTool = Type.Union([
   Type.Literal("host_read"),
   Type.Literal("host_nodes"),
   Type.Literal("host_command_propose"),
+  Type.Literal("host_message_codes"),
   Type.Literal("browser_open"),
   Type.Literal("browser_snapshot"),
   Type.Literal("browser_screenshot"),
@@ -109,6 +110,7 @@ export const GhostTool = Type.Union([
   Type.Literal("browser_propose"),
   Type.Literal("browser_handoff"),
   Type.Literal("browser_fill_secret"),
+  Type.Literal("browser_fill_card"),
   Type.Literal("browser_close"),
   Type.Literal("vault_list"),
   Type.Literal("vault_request"),
@@ -129,6 +131,10 @@ export const GhostTool = Type.Union([
   Type.Literal("desktop_pointer"),
   Type.Literal("desktop_keys"),
   Type.Literal("desktop_propose"),
+  Type.Literal("mail_search"),
+  Type.Literal("mail_read"),
+  Type.Literal("mail_update"),
+  Type.Literal("mail_send"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 
@@ -166,6 +172,7 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "host_read",
   "host_nodes",
   "host_command_propose",
+  "host_message_codes",
   "browser_open",
   "browser_snapshot",
   "browser_screenshot",
@@ -185,6 +192,7 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "browser_propose",
   "browser_handoff",
   "browser_fill_secret",
+  "browser_fill_card",
   "browser_close",
   "vault_list",
   "vault_request",
@@ -205,6 +213,10 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "desktop_pointer",
   "desktop_keys",
   "desktop_propose",
+  "mail_search",
+  "mail_read",
+  "mail_update",
+  "mail_send",
 ];
 
 /** Tools that observe or change the owner's Mac. Granted only explicitly, never by default. */
@@ -222,8 +234,11 @@ export const VAULT_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => to
  */
 export const DESKTOP_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("desktop_"));
 
-/** The allow-list a new Ghost gets when none is given: every selectable tool except host and PC control tools. */
-export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool));
+/** The owner's mail accounts: search, read, flag/move and approval-gated sending. */
+export const MAIL_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("mail_"));
+
+/** The allow-list a new Ghost gets when none is given: every selectable tool except host, PC control and mail tools. */
+export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool) && !MAIL_TOOLS.includes(tool));
 
 /** A skill directory name under the configured skills root. */
 export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });
@@ -425,7 +440,11 @@ export const VaultContact = Type.Object({
   name: Type.Optional(Type.String({ maxLength: 256 })),
   phone: Type.Optional(Type.String({ maxLength: 64 })),
   email: Type.Optional(Type.String({ maxLength: 256 })),
+  /** Base address (road/street) as a form's first address line takes it. */
   address: Type.Optional(Type.String({ maxLength: 1024 })),
+  /** Second address line: apartment, unit, floor (상세주소). */
+  addressDetail: Type.Optional(Type.String({ maxLength: 512 })),
+  postalCode: Type.Optional(Type.String({ maxLength: 32 })),
 });
 export type VaultContact = Static<typeof VaultContact>;
 

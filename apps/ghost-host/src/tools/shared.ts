@@ -48,6 +48,7 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   host_read: ["direct", "work"],
   host_nodes: ["direct", "work"],
   host_command_propose: ["direct", "work"],
+  host_message_codes: ["direct", "work"],
   browser_open: ["direct", "work"],
   browser_snapshot: ["direct", "work"],
   browser_screenshot: ["direct", "work"],
@@ -68,6 +69,7 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   browser_propose: ["direct", "work"],
   browser_handoff: ["direct", "work"],
   browser_fill_secret: ["direct", "work"],
+  browser_fill_card: ["direct", "work"],
   browser_close: ["direct", "work"],
   vault_list: ["direct", "work"],
   vault_request: ["direct", "work"],
@@ -88,6 +90,10 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   desktop_pointer: ["direct", "work"],
   desktop_keys: ["direct", "work"],
   desktop_propose: ["direct", "work"],
+  mail_search: ["direct", "work"],
+  mail_read: ["direct", "work"],
+  mail_update: ["direct", "work"],
+  mail_send: ["direct", "work"],
 };
 
 /**

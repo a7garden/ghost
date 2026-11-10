@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, CircleAlert, GitBranch, X } from 'lucide-react';
+import { ArrowRight, CircleAlert, GitBranch, Monitor, X } from 'lucide-react';
 import { Button, Conversation, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
@@ -9,6 +9,8 @@ import { LiveReply, Transcript, type TranscriptExtra } from '../components/Trans
 import { quoteForReply } from '../components/MessageMenu';
 import { ChatComposer } from './ChatComposer';
 import { DecisionDeck, chatDecisions } from './Decision';
+import { BrowserLiveView } from './BrowserLiveView';
+import { BrowserPaneContext } from './BrowserPaneContext';
 import { GhostDesignEditor } from './GhostDesign';
 import { ThreadPanel } from './ThreadPanel';
 import { useConversationFeed } from './conversationFeed';
@@ -18,7 +20,45 @@ import { ghostPresence } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { useHost } from '../host/context';
+import type { BrowserSession } from '../host/client';
 import { useTouch } from '../ui/adaptive';
+
+/** How often the conversation re-checks whether the Ghost's browser session is still there. */
+const SESSION_POLL_MS = 4000;
+
+/**
+ * The browser session the host keeps for the open conversation, polled only while the screen is
+ * visible and the Ghost may drive a browser at all; the last answer stays while the host is away.
+ */
+function useBrowserSession(conversationId: string | null, enabled: boolean): BrowserSession | null {
+  const { client } = useHost();
+  const [session, setSession] = useState<BrowserSession | null>(null);
+  useEffect(() => {
+    if (!conversationId || !enabled) { setSession(null); return; }
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      try {
+        const { sessions } = await client.browserSessions();
+        if (alive) setSession(sessions.find(item => item.conversationId === conversationId) ?? null);
+      } catch { /* the host is away; the next tick retries */ }
+      if (alive && document.visibilityState === 'visible') timer = setTimeout(() => void poll(), SESSION_POLL_MS);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible' || !alive) return;
+      if (timer !== null) clearTimeout(timer);
+      void poll();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    if (document.visibilityState === 'visible') void poll();
+    return () => {
+      alive = false;
+      if (timer !== null) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [client, conversationId, enabled]);
+  return session?.conversationId === conversationId ? session : null;
+}
 
 /**
  * The owner's conversation with one Ghost. Each Ghost keeps one durable conversation;
@@ -61,6 +101,21 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   const live = page.live;
   const hasContent = page.messages.length > 0 || Boolean(live?.running);
   const speaker = (message: Message) => message.role === 'user' ? '나' : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : ghost.name;
+  // The in-app browser shows only when the Ghost may drive one at all; the toggle follows the session.
+  const browserCapable = ghost.tools.some(tool => tool.startsWith('browser_'));
+  const browserSession = useBrowserSession(conversationId, browserCapable);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  // A handoff waiting on the owner opens the live view by itself, once per question.
+  const handoffSeen = useRef<string | null>(null);
+  useEffect(() => {
+    setBrowserOpen(false);
+    handoffSeen.current = null;
+  }, [conversationId]);
+  useEffect(() => {
+    const handoffId = browserSession?.handoffDecisionId ?? null;
+    if (handoffId && handoffSeen.current !== handoffId) { handoffSeen.current = handoffId; setBrowserOpen(true); }
+    if (!handoffId) handoffSeen.current = null;
+  }, [browserSession?.handoffDecisionId]);
   const currentConversation = conversations.find(conversation => conversation.id === conversationId);
   const busy = Boolean(currentConversation?.busy);
   const running = busy || Boolean(live?.running);
@@ -93,12 +148,21 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
             design={<GhostDesignEditor ghostId={ghost.id}/>}
             isMain={ghost.isDefault}/>
         </div>
-        <Threads ghost={ghost} state={state} conversations={conversations} currentId={conversationId} waiting={waiting} now={now}
-          onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
-          onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
+        <div className="chat-corner">
+          {conversationId && browserCapable && (browserSession || browserOpen) &&
+            <button type="button" className="chat-threads chat-browser" aria-pressed={browserOpen} data-live={browserSession ? '' : undefined}
+              aria-label="브라우저 화면" title="브라우저 화면" onClick={() => setBrowserOpen(value => !value)}>
+              <Monitor aria-hidden="true"/>
+            </button>}
+          <Threads ghost={ghost} state={state} conversations={conversations} currentId={conversationId} waiting={waiting} now={now}
+            onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
+            onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
+        </div>
       </>}
       composer={<>
-        <DecisionDeck state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread} docked/>
+        <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
+          <DecisionDeck state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread} docked/>
+        </BrowserPaneContext.Provider>
         <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft} inputRef={inputRef} initialSpaceIds={initialSpaceIds}
           onSent={() => setFollowKey(key => key + 1)} onStop={stop} onError={setError}/>
       </>}
@@ -123,6 +187,19 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         } : undefined}/>
       {live && <LiveReply live={live} ghostId={ghost.id} ghostName={ghost.name}/>}
     </Conversation>
+    {browserOpen && conversationId && <aside className="browser-pane" aria-label="브라우저 화면">
+      <header className="browser-pane__head">
+        <Monitor size={16} aria-hidden="true"/>
+        <h2>브라우저</h2>
+        {browserSession && <span className="browser-pane__engine">{browserSession.engine === 'obscura' ? 'Obscura' : 'Chrome'}</span>}
+        <button type="button" className="shell-icon-button" aria-label="브라우저 화면 닫기" title="닫기" onClick={() => setBrowserOpen(false)}><X aria-hidden="true"/></button>
+      </header>
+      <div className="browser-pane__body">
+        {browserSession
+          ? <BrowserLiveView key={conversationId} conversationId={conversationId}/>
+          : <p className="browser-pane__empty">브라우저 세션 없음</p>}
+      </div>
+    </aside>}
     {panelId && <ThreadPanel key={panelId} workId={panelId} state={state} closing={panelClosing} onClosed={() => setPanelId(null)}
       onClose={closeThread} onOpenThread={openThread} onOpenPage={openWork}/>}
   </div></OpenWorkProvider>;

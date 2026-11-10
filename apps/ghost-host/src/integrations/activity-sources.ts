@@ -147,6 +147,16 @@ export class SourceConnections implements ActivitySourcePort {
     const current = this.options.currentConnection(id);
     return Boolean(current?.hasCredential && current.credentialVersion === secret.version);
   }
+  /** Host mail transport only: never return this authority through an API or model tool. */
+  mailAuthority(connection: Connection): { credential: string; authorize(): void } {
+    if (this.closed || connection.config.kind !== "mail") fail("Mail account is unavailable.");
+    validateMail(connection.config);
+    const secret = this.authorized(connection);
+    return { credential: secret.credential, authorize: () => {
+      if (this.closed) fail("Source connections are closed.");
+      this.authorized(connection, secret);
+    } };
+  }
   async setCredential(id: string, value: string | null, version: string | null): Promise<void> {
     if (this.closed) fail("Source connections are closed.");
     const file = this.file(id);
