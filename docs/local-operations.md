@@ -33,7 +33,7 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-3f5459a` (`eeeeb02` Host와 고정한 `agent-browser` 0.41.2를 그대로 쓰고 UI만 기본 Ghost 동작을 더함) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-a7fd413` (`eeeeb02` Host와 고정한 `agent-browser` 0.41.2를 그대로 쓰고 UI만 기본 Ghost 동작·말랑한 몸을 더함) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -41,6 +41,13 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 말랑한 기본 Ghost 운영 반영 — 2026-11-10
+
+- 몸에 감쇠가 약한 납작함 스프링을 더했다. 누르면 웅크렸다가 늘어나며 뛰고, 착지 뒤 몇 번 출렁인다. 고개를 돌리면 윗부분이 뒤따라 흔들리고, 56px 이상은 숨을 쉰다(`main` `b7707c2`, 릴리스 브랜치 `release/ghost-life-20261110`의 `a7fd413`).
+- `releases/20261110-bun-a7fd413`: `ghost`·`agent-browser`는 `3f5459a`(= `eeeeb02`)와 바이트가 같고 UI 95개 파일 해시가 일치한다. UI 테스트 146개·빌드, 별도 루트·포트에서 health와 누를 때 세로 배율 0.85–1.11을 확인했다.
+- 유휴에서 백업 `backups/pre-20261110-bun-a7fd413-1794310574754/`(`ghost-backup/2`, complete, 금고 포함) 후 전환했다. PID 93704 → 95868, `provider minimax is ready`, Ghost 25·대화 199·맡긴 일 149·결정 139 보존, health·공개 origin 200, 제공 번들 해시 일치, Mac 앱 external 재실행(PID 96029). 운영 UI의 60px 초상이 숨쉬기(0.98–1.01)로 움직였다.
+- 되돌릴 때는 `current`를 `releases/20261110-bun-3f5459a`로 원자 교체하고 Host를 정상 재기동한다. 저장 형식 변경은 없다. 대기 중인 후보는 `b7707c2`도 포함해 다시 빌드한다.
 
 ### 기본 Ghost 생동감 운영 반영 — 2026-11-10
 
