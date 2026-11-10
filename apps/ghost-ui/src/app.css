@@ -513,6 +513,7 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .work-main, .work-aside { display: grid; align-content: start; gap: 32px; min-width: 0; }
 .work-section { display: grid; gap: 12px; min-width: 0; }
 .work-brief { margin: 0; color: var(--ghost-ink); font-size: var(--text-body); line-height: 1.7; overflow-wrap: anywhere; }
+.work-brief .message-body :is(h1, h2, h3, h4, h5, h6) { margin-block: 1em .25em; font-size: 1em; } /* the brief's own headings stay under the page's 「할 일」 title */
 .work-criteria { display: grid; gap: 4px; padding: 12px 14px; border-left: 2px solid var(--ghost-ink4); }
 .work-criteria > span { color: var(--ghost-ink3); font-size: var(--text-micro); font-weight: 600; }
 .work-criteria > :is(p, .message-body) { margin: 0; color: var(--ghost-ink2); font-size: var(--text-ui); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }

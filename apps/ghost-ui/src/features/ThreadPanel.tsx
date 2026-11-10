@@ -3,6 +3,7 @@ import { ArrowUpRight, X } from 'lucide-react';
 import type { State, WorkDetail } from '@ghost/contract';
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
+import { InlineText } from '../components/MessageBody';
 import { LiveReply, Transcript } from '../components/TranscriptMessage';
 import { useHost } from '../host/context';
 import { HostError } from '../host/client';
@@ -98,7 +99,7 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
         <time className="tabular">{relativeTime(work.updatedAt, now)}</time>
       </div>
       <LifecycleTrack state={work.state} needsOwner={pending.length > 0}/>
-      {work.reason && (work.state === 'failed' || work.state === 'blocked' || work.state === 'cancelled') && <p className="work-head__reason" data-state={work.state}>{work.reason}</p>}
+      {work.reason && (work.state === 'failed' || work.state === 'blocked' || work.state === 'cancelled') && <p className="work-head__reason" data-state={work.state}><InlineText text={work.reason}/></p>}
       {pending.map(decision => <DecisionCard key={decision.id} decision={decision} ghostName={names.get(decision.ghostId) ?? 'Ghost'} workTitle={work.title} onResolved={() => undefined}/>)}
       {children.length > 0 && <section className="thread-panel__section">
         <h3 className="section-title">위임한 스레드</h3>

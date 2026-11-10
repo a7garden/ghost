@@ -2,7 +2,8 @@ import type { Verdict, Work, WorkState } from '@ghost/contract';
 import { ArtifactPreview } from '../ArtifactPreview';
 import type { Outcome } from '../wake';
 import { Peek, type PeekFact } from './Peek';
-import { RefText, useHostSnapshot, useOpenWork } from './RefMark';
+import { InlineText } from '../MessageBody';
+import { useHostSnapshot, useOpenWork } from './RefMark';
 import { StateGlyph, glyphLabel, glyphTone, type GlyphState } from './StateGlyph';
 
 const judge: Record<Verdict['source'], string> = { checks: '자동 검사', review: '검토 Ghost', owner: '직접 확인' };
@@ -49,7 +50,7 @@ export function OutcomeLine({ outcome }: { outcome: Outcome }) {
         <span className="outcome__state">{glyphLabel[glyph]}</span>
       </button>
     </Peek>
-    {reason && <p className="outcome__reason"><RefText text={reason}/></p>}
+    {reason && <p className="outcome__reason"><InlineText text={reason}/></p>}
     {files.length > 0 && <div className="outcome__files">
       {files.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact} variant="chip"/>)}
     </div>}

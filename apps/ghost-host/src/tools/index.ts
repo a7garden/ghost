@@ -40,7 +40,7 @@ Keep the exactness for Ghost-to-Ghost briefs (work_create, delegate): done-crite
  */
 const OWNER_FORMAT = `The owner's app renders Markdown (GitHub-flavored; single line breaks are kept). Write for reading, not for a log:
 - A command, query, code or output excerpt the owner might copy or run goes in a fenced code block with its language (\`\`\`bash), one per line — never inside a sentence. Inline \`code\` is only for a short name.
-- One point per paragraph. Checks, steps and per-item results are a list, one item per line: the item's label in bold, then its result; the evidence line under it in a code block.
+- One point per paragraph. Steps are a list. Checks and per-item results are a task list, one item per line — \`- [x]\` confirmed or done, \`- [ ]\` not confirmed — with the item's label in bold, then its result; the evidence line goes under it in a code block.
 - Briefs you write with work_create or delegate are shown to the owner as the Work's to-do, so give them the same shape: labeled sections or lists, commands in code blocks.`;
 
 /**
