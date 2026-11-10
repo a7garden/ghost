@@ -14,6 +14,9 @@ export type ResolvedBy = "owner" | "main" | "timeout";
 
 const MINUTE = 60_000;
 
+/** Effect tools whose approval cards belong to the owner alone: no main settlement, no timeout recommendation. */
+const OWNER_ONLY_EFFECTS: Record<string, true> = { connection_request: true, connection_register: true };
+
 /** Owner decisions. Opening one notifies; resolving one wakes whoever waits on it. */
 export class Decisions {
   /** Applies an approved document proposal; registered by the documents integration. */
@@ -249,6 +252,8 @@ export class Decisions {
     if (decision.kind === "document_review") return !!proposal && !(proposal.pageId ?? proposal.page_id);
     if (decision.kind !== "approve_effect" || !decision.effectId || !proposal) return false;
     const tool = this.ledger.effect(decision.effectId).tool;
+    // Credential authority and external API writes are always the owner's decision, never an automatic one.
+    if (OWNER_ONLY_EFFECTS[tool]) return false;
     if (tool === "activity_propose") {
       const config = proposal.config as { execution?: { kind?: string }; policy?: { externalActions?: string }; tools?: unknown } | undefined;
       const drivesPc = Array.isArray(config?.tools) && config.tools.some((tool) => typeof tool === "string" && tool.startsWith("desktop_"));
@@ -288,6 +293,8 @@ export class Decisions {
     const main = this.ledger.defaultGhost();
     if (this.policy().delegate !== "reversible" || !main || main.state !== "active" || main.id === decision.ghostId) return false;
     if (decision.kind === "reconcile_effect" || decision.proposal?.secureForm || decision.proposal?.browserHandoff) return false;
+    // Credential authority and external API writes: the owner decides, the main does not even review.
+    if (decision.effectId && OWNER_ONLY_EFFECTS[this.ledger.effect(decision.effectId).tool]) return false;
     return true;
   }
 

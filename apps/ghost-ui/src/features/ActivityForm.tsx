@@ -38,7 +38,7 @@ export function ActivityFormDialog({ state, connections, activity, onClose, onSa
   });
 
   const sourceConnections = connections.filter(connection => draft.sourceKind === 'mail'
-    ? connection.config.kind === 'mail' : connection.config.kind !== 'mail');
+    ? connection.config.kind === 'mail' : connection.config.kind === 'github' || connection.config.kind === 'gitea');
   const staleConnection = draft.connectionId !== '' && !sourceConnections.some(connection => connection.id === draft.connectionId);
   const connectionOptions = sourceConnections.map(connection => ({
     value: connection.id,

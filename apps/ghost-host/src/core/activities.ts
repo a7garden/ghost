@@ -80,7 +80,8 @@ export class Activities {
     if (config.source.kind !== "schedule") {
       const connection = this.ledger.connection(config.source.connectionId);
       if (!connection.hasCredential || !this.sourcePort().credentialPresent(connection.id)) throw conflict("source connection credential is missing or being replaced");
-      if ((config.source.kind === "mail") !== (connection.config.kind === "mail")) throw invalid("source and connection kinds do not match");
+      if (config.source.kind === "mail" && connection.config.kind !== "mail") throw invalid("mail activities need an IMAP mail connection");
+      if (config.source.kind === "pull_request" && connection.config.kind !== "github" && connection.config.kind !== "gitea") throw invalid("pull request activities need a GitHub or Gitea connection");
     }
   }
 

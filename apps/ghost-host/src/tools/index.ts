@@ -18,6 +18,7 @@ import { createMemoryTools, MEMORY_INSTRUCTIONS } from "./memory.ts";
 import { createReviewTools } from "./review.ts";
 import { createSkillsTools } from "./skills.ts";
 import { createVaultTools, VAULT_INSTRUCTIONS } from "./vault.ts";
+import { CONNECTION_INSTRUCTIONS, createConnectionTools } from "./connections.ts";
 import { createWebTools } from "./web.ts";
 import { createSourceTools, SOURCE_INSTRUCTIONS } from "./sources.ts";
 import type { ToolSet } from "./types.ts";
@@ -150,8 +151,9 @@ export function createToolSet(deps: {
   const sources = deps.reach ? createSourceTools(deps.core) : null;
   const browser = deps.browser ? sequentialEffects(createBrowserTools(deps.core, deps.browser, { vault: deps.vault ?? null, sandbox: deps.sandbox })) : null;
   const vault = deps.vault ? sequentialEffects(createVaultTools(deps.core, deps.vault)) : null;
+  const connections = deps.core.activitySources ? sequentialEffects(createConnectionTools(deps.core, { sources: deps.core.activitySources, vault: deps.vault ?? null, browser: deps.browser ?? null })) : null;
   const desktop = deps.desktop ? sequentialEffects(createDesktopTools(deps.core, deps.desktop)) : null;
-  const optional = [memory, documents, host, skills, web, sources, browser, vault, desktop].filter((extension): extension is Extension => extension !== null);
+  const optional = [memory, documents, host, skills, web, sources, browser, vault, connections, desktop].filter((extension): extension is Extension => extension !== null);
   /** Guidance for an installed capability, only for a Ghost that holds one of its tools. */
   const capabilityInstructions = (ghost: Ghost) =>
     [
@@ -161,6 +163,7 @@ export function createToolSet(deps: {
       documents && ghost.tools.includes("document_list") ? DOCUMENT_INSTRUCTIONS : "",
       browser && ghost.tools.some((tool) => BROWSER_TOOLS.includes(tool)) ? BROWSER_INSTRUCTIONS : "",
       vault && ghost.tools.some((tool) => tool.startsWith("vault_") || tool === "browser_fill_secret") ? VAULT_INSTRUCTIONS : "",
+      connections && ghost.tools.some((tool) => tool.startsWith("connection_")) ? CONNECTION_INSTRUCTIONS : "",
       desktop && ghost.hostExecution && ghost.tools.some((tool) => DESKTOP_TOOLS.includes(tool)) ? DESKTOP_INSTRUCTIONS : "",
     ];
 
@@ -181,6 +184,7 @@ export function createToolSet(deps: {
           if (sources) selected.push(sources);
           if (browser) selected.push(browser);
           if (vault) selected.push(vault);
+          if (connections) selected.push(connections);
           if (desktop) selected.push(desktop);
           // Main-only management: resolved again at every execution, so a stale main keeps nothing.
           if (ghost.isDefault && ghost.state === "active") selected.push(main, goals);
@@ -196,6 +200,7 @@ export function createToolSet(deps: {
           if (sources) selected.push(sources);
           if (browser) selected.push(browser);
           if (vault) selected.push(vault);
+          if (connections) selected.push(connections);
           if (desktop) selected.push(desktop);
           return selected;
         }

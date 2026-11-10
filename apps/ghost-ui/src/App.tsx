@@ -208,7 +208,7 @@ function Shell() {
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
     { id: 'activities', label: uiTerms.activities, icon: Repeat2, content: <Activities navigate={navigate}/> },
-    { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections/> },
+    { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections navigate={navigate}/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
