@@ -43,7 +43,7 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.5-15a0428`(GitHub Release `v2.4.5`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.6-189b707`(GitHub Release `v2.4.6`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -51,6 +51,17 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 토스증권 조회·금고 API 키 — 2026-11-11
+
+- [v2.4.6](https://github.com/a7garden/ghost/releases/tag/v2.4.6), 소스 `189b707`(브랜치 `toss-assets-246`). 운영 2.4.5(`15a0428`) 위에 금고 `api` 종류와 `toss_read`만 더했다. `main`에는 같은 네 커밋을 옮겼다. 설계는 [에이전트 능력](agent-capabilities.md#decisions)의 Service API keys·Toss Securities.
+- 소유자 결정: API 자격증명은 Host `secrets/`가 아니라 금고를 확장해 Ghost별 부여·보안 양식·암호화 이력·백업을 그대로 쓴다. `api` 값은 페이지에 채우지 않고 Host 통합만 읽는다. 토스 키는 주문도 가능하므로 클라이언트가 읽기 GET 경로 허용 목록만 보낸다.
+- 검토: UI(GLM 작성)는 Opus 검토, Host(Claude 작성)는 GLM 검토 뒤 소유자가 승인한 예비 한도로 Codex(`openai-codex/gpt-6.1-sol`, 실제 응답 메타데이터) 검토. Codex의 P1(삭제 후 같은 id로 다시 만든 항목이 이전 토큰을 재사용)·P2(오래된 자격으로 재발급)는 토큰을 클라이언트 ID와 비밀 다이제스트에 묶고 사용 직전마다 금고를 다시 읽도록 고쳤다. GLM P3 두 건, Opus P3 한 건도 반영했다. 세션의 `retry.usageReservePct`는 소유자 승인으로 이 세션에서만 0으로 낮췄다.
+- 검증: 릴리스 Host 825 통과·10 생략, UI 189, Rust, 계약·Host·UI 타입·빌드·Developer ID·업데이터 서명·매니페스트·묶음 검증. `main` 통합본 Host 910 통과·10 생략, UI 189. 실제 토스 서버에 무효 자격을 보내 `invalid_client` 401이 「키 거절」 안내로 바뀌는 것을 확인했다. 공증은 기존 방식대로 생략했다.
+- 운영 자체 업데이트 완료: `lastResult: installed`, `2.4.5-15a0428` → `2.4.6-189b707`, 백업 `~/.local/share/ghost/backups/pre-2.4.6-189b707-1794350718346/`. health 2.4.6·runtime ready, PID 18566의 단일 62062 리스너·운영 루트·설치 실행 파일 `codesign --verify --strict` 확인. Ghost 28·대화 213·맡긴 일 156·기기 1·Space 9의 기존 ID와 금고 항목 209개를 보존했다.
+- 운영 UI(Host 제공 화면)에서 설정 › Ghost의 **자산 0/1 · 토스증권 조회**(잠금 표시)와 금고 › 새 항목의 **API 키**(주소·클라이언트 ID·비밀 키)를 열어 확인했고 저장하지 않았다. 콘솔 오류 없음. Mac 앱 창의 네이티브 확인은 하지 않았다.
+- 전용 Ghost **자산**(`01a1c7a6-d0b4-70ee-a1b6-7c0ec77205ae`, 기본 모델, 도구 `toss_read`·`vault_list`·`vault_request`·`web_search`·`web_read`, PC 실행 없음)을 만들었다. 설치 모델이 「계좌 목록 조회」 요청에 `toss_read`를 호출해 키 없음 거절을 받고 `vault_request`로 `https://openapi.tossinvest.com`용 `api` 보안 양식을 소유자에게 올린 것을 확인했다. 실제 계좌 응답은 소유자의 키 발급·허용 IP(현재 공인 IP `175.118.51.5`) 등록·보안 양식 입력 뒤에 확인한다.
+- 저장 형식 지문은 바뀌지 않았다(`api`는 금고 메타데이터의 새 종류). 2.4.5로 돌아가면 예전 Host는 `api` 항목을 알지 못해 그 항목의 사용만 실패한다.
 
 ### 서비스 선택형 연결·Ghost 연결 지원 — 2026-11-11
 
