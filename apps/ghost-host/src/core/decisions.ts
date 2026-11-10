@@ -46,8 +46,8 @@ export class Decisions {
   open(input: OpenDecision & { id?: string }): Decision {
     const decision = this.withReview({ ...input, id: input.id ?? newId(), state: "pending", answer: null, createdAt: Date.now(), resolvedAt: null });
     this.ledger.putDecision(decision);
-    // The main Ghost looks first at another Ghost's reversible decision; after the commit, never inside it.
-    if (this.delegable(decision)) queueMicrotask(() => void this.askMain(decision).catch((error) => this.core.log("main review wake failed", String(error))));
+    // The main Ghost looks first at another Ghost's decision; after the commit, never inside it.
+    if (this.mainReviews(decision)) queueMicrotask(() => void this.askMain(decision).catch((error) => this.core.log("main review wake failed", String(error))));
     this.core.notify({
       id: `decision:${decision.id}`,
       kind: "decision",
@@ -234,21 +234,32 @@ export class Decisions {
     return this.ledger.settings().approvals ?? { autoMinutes: 30, delegate: "reversible" as const };
   }
 
-  /** Another Ghost's reversible decision while the owner lets the main decide those. */
-  private delegable(decision: Decision): boolean {
+  /**
+   * Another Ghost's decision the main looks over first, while the owner lets it (2026-11-10). It may settle only
+   * reversible ones; on the rest it leaves its view for the owner. Not a vault form, a browser handoff or an
+   * unknown outside effect: only the owner can fill in or see those.
+   */
+  private mainReviews(decision: Decision): boolean {
     const main = this.ledger.defaultGhost();
-    return this.policy().delegate === "reversible" && this.automatic(decision) && !!main && main.state === "active" && main.id !== decision.ghostId && this.reversible(decision);
+    if (this.policy().delegate !== "reversible" || !main || main.state !== "active" || main.id === decision.ghostId) return false;
+    if (decision.kind === "reconcile_effect" || decision.proposal?.secureForm || decision.proposal?.browserHandoff) return false;
+    return true;
+  }
+
+  /** The main may decide this one for the owner, not only comment on it. */
+  private delegable(decision: Decision): boolean {
+    return this.mainReviews(decision) && this.automatic(decision) && this.reversible(decision);
   }
 
   /** The main Ghost decides for the owner, or leaves its view on the card. Only the main's tool calls this. */
   async settleForOwner(mainId: string, decisionId: string, choice: { outcome: "approve" | "deny" | "answer" | "leave"; answer?: string; note: string }) {
     const decision = this.ledger.decision(decisionId);
     if (decision.state !== "pending") throw conflict(`decision is already ${decision.state}`);
-    if (this.policy().delegate !== "reversible" || !this.automatic(decision)) throw conflict("the owner decides this one themselves");
     if (decision.ghostId === mainId) throw conflict("the main Ghost cannot settle its own requests");
-    if (!this.reversible(decision)) throw conflict("only the owner can settle this decision");
-    const review = reviewOf(decision.proposal)!;
-    const noted: Decision = { ...decision, proposal: { ...decision.proposal, review: { ...review, mainNote: choice.note.slice(0, 1000) } } };
+    if (!this.mainReviews(decision)) throw conflict("the owner decides this one themselves");
+    if (choice.outcome !== "leave" && !this.delegable(decision)) throw conflict("only the owner can settle this decision; leave your view with outcome leave");
+    const review: DecisionReview = { expiresAt: null, ...reviewOf(decision.proposal), mainNote: choice.note.slice(0, 1000) };
+    const noted: Decision = { ...decision, proposal: { ...decision.proposal, review } };
     this.ledger.tx(() => this.ledger.putDecision(noted));
     if (choice.outcome === "leave") return "Left for the owner with your note on the card.";
     await this.resolve(decisionId, { outcome: choice.outcome, ...(choice.answer ? { answer: choice.answer } : {}) }, "main");
@@ -264,7 +275,7 @@ export class Decisions {
     for (const decision of this.ledger.pendingDecisions()) {
       const review = reviewOf(decision.proposal);
       // Settings read now, not when the decision opened: turning automation off stops what is already waiting.
-      if (!review || review.expiresAt === null || review.expiresAt > now || this.policy().autoMinutes === 0 || !this.automatic(decision) || !this.reversible(decision)) continue;
+      if (!review?.recommend || review.expiresAt === null || review.expiresAt > now || this.policy().autoMinutes === 0 || !this.automatic(decision) || !this.reversible(decision)) continue;
       try {
         await this.resolve(decision.id, review.recommend === "answer" ? { outcome: "answer", answer: review.answer } : { outcome: "approve" }, "timeout");
       } catch (error) {
@@ -276,16 +287,22 @@ export class Decisions {
   /** Wake the main Ghost's direct conversation to look at one decision; a quiet reply never reaches the owner. */
   private async askMain(decision: Decision) {
     const main = this.ledger.defaultGhost();
-    if (!main || !this.delegable(this.ledger.decision(decision.id))) return;
+    const current = this.ledger.decision(decision.id);
+    if (!main || current.state !== "pending" || !this.mainReviews(current)) return;
     const asker = this.ledger.ghost(decision.ghostId).name;
     const review = reviewOf(decision.proposal);
+    const settle = this.delegable(current);
     const lines = [
-      `[Decision review] ${asker} needs a decision the owner would normally make. It is reversible, so you may decide it for the owner.`,
+      settle
+        ? `[Decision review] ${asker} needs a decision the owner would normally make. It is reversible, so you may decide it for the owner.`
+        : `[Decision review] ${asker} needs a decision only the owner can make (it sends, spends, deletes, enters a card or accepts a result). You cannot settle it; look it over for the owner.`,
       `Decision ${decision.id}: ${decision.title}`,
       decision.detail.slice(0, 4000),
       decision.options.length ? `Options: ${decision.options.join(" | ")}` : "",
       review?.answer ? `${asker} recommends: ${review.answer}` : "",
-      `If it clearly serves what the owner wants, settle it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. If only the owner can judge, use outcome "leave" with your recommendation so they see it. Then reply only [quiet].`,
+      settle
+        ? `If it clearly serves what the owner wants, settle it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. If only the owner can judge, use outcome "leave" with your recommendation so they see it. Then reply only [quiet].`
+        : `Check it against what you know (the owner's earlier words, the recipient, the amount, the files, the result against its brief). If there is something the owner should know to decide — a mismatch, a risk, a confirmation that it matches — call decision_settle with outcome "leave" and one or two sentences in the owner's language, ending with what you recommend. Then reply only [quiet].`,
     ].filter(Boolean);
     await this.core.engine.submit(main.directConversationId, { text: lines.join("\n\n"), origin: "schedule", requestId: `decision-review:${decision.id}` });
   }

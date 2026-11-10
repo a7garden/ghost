@@ -76,15 +76,23 @@ describe("approvals that do not wait forever", () => {
     expect(reviewOf(left.proposal)?.mainNote).toContain("B 가 낫지만");
   });
 
-  test("destructive commands are never reviewed, delegated or auto-approved", async () => {
+  test("destructive commands are looked over by the main but never settled by it or by the clock", async () => {
     const t = await team();
     const decision = t.command("삭제: 파일이 영구 제거될 수 있습니다.");
     await tick();
     expect(reviewOf(decision.proposal)).toBeNull();
-    expect(t.engine.to(t.main.directConversationId).some((item) => item.requestId === `decision-review:${decision.id}`)).toBe(false);
+    const wake = t.engine.to(t.main.directConversationId).find((item) => item.requestId === `decision-review:${decision.id}`);
+    expect(wake?.text).toContain("only the owner can make");
     await expect(t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "x" })).rejects.toThrow("only the owner");
+
+    await t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "leave", note: "지우는 폴더가 빌드 결과물뿐입니다. 승인해도 됩니다." });
+    const noted = t.ledger.decision(decision.id);
+    expect(reviewOf(noted.proposal)).toEqual({ expiresAt: null, mainNote: "지우는 폴더가 빌드 결과물뿐입니다. 승인해도 됩니다." });
     await t.core.decisions.settleExpired(decision.createdAt + 24 * 60 * MINUTE);
     expect(t.ledger.decision(decision.id).state).toBe("pending");
+    // The owner still approves it, and the note never changes what runs.
+    await t.core.decisions.resolve(decision.id, { outcome: "approve" });
+    expect(t.ledger.effect(decision.effectId!).state).toBe("done");
   });
 
   test("the main cannot settle its own requests", async () => {
@@ -103,8 +111,9 @@ describe("approvals that do not wait forever", () => {
     const later = t.ask("A", "after");
     await tick();
     expect(reviewOf(later.proposal)?.expiresAt).toBeNull();
-    expect(t.engine.to(t.main.directConversationId).some((item) => item.requestId === `decision-review:${later.id}`)).toBe(false);
-    await expect(t.core.decisions.settleForOwner(t.main.id, later.id, { outcome: "answer", answer: "A", note: "x" })).rejects.toThrow("themselves");
+    // The main still looks it over, but may only leave its view.
+    expect(t.engine.to(t.main.directConversationId).find((item) => item.requestId === `decision-review:${later.id}`)?.text).toContain("only the owner can make");
+    await expect(t.core.decisions.settleForOwner(t.main.id, later.id, { outcome: "answer", answer: "A", note: "x" })).rejects.toThrow("only the owner");
   });
 
   test("turning automation off keeps the recommendation but never settles", async () => {
