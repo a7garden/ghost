@@ -40,7 +40,7 @@ export function createDirectTools(core: Core): Extension {
       brief: Type.String({ minLength: 1, maxLength: 32768, description: "What to do, with everything the assignee needs" }),
       criteria: Type.Optional(Type.String({ maxLength: 8192, description: "When the Work is done" })),
       ghost_id: Type.Optional(Type.String({ description: "Assignee Ghost; defaults to this Ghost" })),
-      deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Deadline in minutes from now" })),
+      deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Deadline in minutes from now, defaults to 90" })),
       execution: Type.Optional(ExecutionTarget),
       initiative: Type.Optional(Type.Boolean({ description: "true when you start this Work on your own judgment, not an owner request: a Ghost then reviews the result instead of the owner" })),
     }),

@@ -1,6 +1,6 @@
 import type { Message, Models } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
-import { defineExtension, GenerationTask, hook } from "@earendil-works/pi-durable";
+import { CompactionTask, defineExtension, GenerationTask, hook, type ConversationId } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 
 const RETRY_WINDOW = 8;
@@ -10,11 +10,17 @@ function repeatedWithoutProgress(messages: readonly Message[]): boolean {
   // observation or different error gives the model a new opportunity to proceed.
   const recent = messages.slice(-RETRY_WINDOW * 3);
   const attempts = new Map<string, number>();
-  let count = 0;
+  let rounds = 0;
+  let hasResult = false;
   for (let index = recent.length - 1; index >= 0; index--) {
     const result = recent[index]!;
     if (result.role === "user") return false;
+    if (result.role === "assistant" && hasResult) {
+      hasResult = false;
+      if (++rounds === RETRY_WINDOW) return attempts.size <= 2 && [...attempts.values()].every((n) => n >= 3);
+    }
     if (result.role !== "toolResult") continue;
+    hasResult = true;
     const timedWait = result.toolName === "browser_wait" && recent.slice(0, index).some((message) =>
       message.role === "assistant" && message.content.some((call) =>
         call.type === "toolCall" && call.id === result.toolCallId && typeof call.arguments.ms === "number",
@@ -23,7 +29,7 @@ function repeatedWithoutProgress(messages: readonly Message[]): boolean {
     if (!result.isError && !timedWait) return false;
     const key = JSON.stringify([result.toolName, result.content]);
     attempts.set(key, (attempts.get(key) ?? 0) + 1);
-    if (++count === RETRY_WINDOW) return attempts.size <= 2 && [...attempts.values()].every((n) => n >= 3);
+    if (attempts.size > 2) return false;
   }
   return false;
 }
@@ -60,21 +66,26 @@ export function workGuard(core: Core, models: Models) {
       return typeof member === "function" ? member.bind(target) : member;
     },
   });
+  const awaitsApproval = (id: ConversationId) => {
+    const conversation = core.ledger.conversationByPiId(String(id));
+    return conversation?.kind === "work" && core.ledger.pendingDecisions({ conversationId: conversation.id })
+      .some((decision) => decision.kind === "approve_effect");
+  };
   const extension = defineExtension({
     name: "ghost.work-guard",
     hooks: [hook(GenerationTask, {
       beforeRequest({ messages }, api) {
-        const conversation = core.ledger.conversationByPiId(String(api.conversationId));
-        if (conversation?.kind !== "work" || !conversation.workId) return;
-        const pending = core.ledger.pendingDecisions({ conversationId: conversation.id })
-          .some((decision) => decision.kind === "approve_effect");
-        const reason = pending ? "승인 또는 거절을 기다리고 있습니다."
+        const reason = awaitsApproval(api.conversationId) ? "승인 또는 거절을 기다리고 있습니다."
           : repeatedWithoutProgress(messages) ? "같은 오류 또는 대기가 반복돼 이번 실행을 멈췄습니다."
           : null;
         if (!reason) return;
-        const marker: Message = { role: "user", content: "", timestamp: Date.now() };
+        const marker: Message = { role: "user", content: reason, timestamp: Date.now() };
         stops.set(marker, reason);
         return { messages: [...messages, marker] };
+      },
+    }), hook(CompactionTask, {
+      beforeCompact(_compaction, api) {
+        if (awaitsApproval(api.conversationId)) return { decline: true };
       },
     })],
   });
