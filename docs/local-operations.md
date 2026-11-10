@@ -38,12 +38,12 @@ Geist worker의 IPC는 실행 파일 identity를 기준으로 나뉘므로 Host�
 PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원장 → 서명 헬퍼 → agent-desktop/Geist 경로로 한글 값 채우기, 체크박스 변경, 화면 JPEG와 좌표 클릭 결과를 재관찰했다. Geist의 실제 키보드 한글 입력도 확인했다. 격리 Host가 제공하는 설정 화면에서 **PC 조작 16/16**과 **PC 직접 실행** 저장을 Owner API로 확인했다. PC 검사 20개·100개 단언과 타입 검사를 통과했다. 독립 검토의 출력 파이프 정리 제한·종료 단축키 일관성·다른 Space 창 거부를 반영했다. 물리 클릭은 전달 성공만으로 앱 반영을 단정하지 않는다. 시험 창은 첫 클릭이 활성화만 한 경우가 있어, 명시적 창 포커스 뒤 새 화면에서 클릭하고 결과를 확인했다.
 
 
-## 현재 설치 (2026-11-10)
+## 현재 설치 (2026-11-11)
 
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.1-5b14f11`(GitHub Release `v2.4.1`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.3-80bf347`(GitHub Release `v2.4.3`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -51,6 +51,15 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### PC 조작 내장·키보드 안전 경계 — 2026-11-11
+
+- [v2.4.3](https://github.com/a7garden/ghost/releases/tag/v2.4.3), 소스 `80bf347`. 배포된 `5b14f11`에서 만든 교정본이며 미수용 2.5.0 기억·네이티브 후보는 포함하지 않는다. `main` 통합 `3d129e3`은 후보의 2.5.0 버전을 보존했고 GitHub·Gitea 일반 푸시를 마쳤다.
+- 실제 응답 메타데이터로 확인한 Codex의 부모 작성 헬퍼 검토와 Opus의 Codex 작성 도구·전송부 검토에서 나온 지적을 반영했다. 두 키보드 경로 모두 modifier 별칭·순서·중복과 무관하게 종료·로그아웃·잠금·강제 종료·휴지통 비우기를 거부한다. Geist에 필드 포커스 정보가 없어 보호 필드가 하나라도 관측되면 물리 키 입력을 막으며, 마지막 접근성 대상의 보호 여부도 확인한다. PC 22개·124개 단언, 계약·Host·UI 타입, 릴리스 Host 755 통과·9 생략, UI 176, Rust 21, 빌드·Developer ID·매니페스트·묶음 검증을 통과했다. 공증은 기존 방식대로 생략했다.
+- 운영 Host 자체 업데이트 완료: `lastResult: installed`, `2.4.1-5b14f11` → `2.4.3-80bf347`. health 2.4.3·runtime ready, Ghost 27·대화 212·맡긴 일 156·기기 1·Space 9의 기존 ID 보존을 Owner API로 확인했다. 설치된 서명 헬퍼의 손쉬운 사용·화면 기록은 모두 승인 상태다. 메인 Ghost의 **PC 조작 16개**와 **PC 직접 실행**을 켰고, 교정 중 잠시 끈 두 키보드 도구도 복구했다.
+- 격리 실제 창의 한글·체크·캡처·좌표 입력과 운영 제공 설정 UI의 16/16은 앞선 검증에서 확인했다. 설치 모델의 창 채우기와 네이티브 셸 상호작용은 macOS 잠금으로 확인하지 못했으며 잠금을 우회하거나 창을 강제로 앞으로 가져오지 않았다. MiniMax의 Token Plan 2056 제한은 별도 제공자 차단으로 기록한다.
+- 운영의 실제 Codex 모델이 무효 `screen_id`와 `meta+q`로 `desktop_keys`를 한 번 호출했고, 새 시스템 단축키 거절문과 `isError: true`를 반환했다. 실제 키 입력·캡처 없이 설치본의 교정 경로를 확인했다. 검증용 Ghost는 은퇴·삭제 표시했고 기록은 기존 계약대로 보존했다. 전역·다른 Ghost 모델 설정은 바꾸지 않았다.
+
 
 ### Host 내장 기억 후보 — 2026-11-10, 배포 보류
 
