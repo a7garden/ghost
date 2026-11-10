@@ -33,14 +33,16 @@ async function mockVaultRequest(page: Page, answers: Record<string, unknown>[]):
 }
 
 test('a secure form answers through the vault route and never through the answer API', async ({ page }) => {
-  const { baseUrl } = readRunState();
+  const { baseUrl, researchGhostId } = readRunState();
   const vaultAnswers: Record<string, unknown>[] = [];
   const commands: CommandBody['command'][] = [];
   await mockStateDecisions(page);
   await recordCommands(page, commands);
   await mockVaultRequest(page, vaultAnswers);
-  await page.goto(`${baseUrl}/#/inbox?decision=${visualSecureDecisionId}`);
-  await expect(page.getByRole('button', { name: '금고에 전달' })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseUrl}/#/ghosts/${researchGhostId}`);
+  await page.getByRole('button', { name: /^서비스 로그인/ }).click();
+  await expect(page.getByRole('button', { name: '금고에 전달' })).toBeInViewport({ ratio: 1 });
   // The chat answer path is not on the card.
   await expect(page.getByLabel('답변')).toHaveCount(0);
   await expect(page.getByRole('checkbox', { name: '금고에 저장' })).toBeChecked();
@@ -117,7 +119,7 @@ test('a browser approval requires two deliberate presses', async ({ page }) => {
     await route.fulfill({ json: { ok: true } });
   });
   await page.goto(`${baseUrl}/#/inbox?decision=${decisionId}`);
-  await page.getByRole('button', { name: '승인', exact: true }).dblclick();
+  await page.getByRole('button', { name: '실행 승인', exact: true }).dblclick();
   const confirm = page.getByRole('button', { name: '한 번 더 눌러 실행 승인' });
   await expect(confirm).toBeVisible();
   expect(commands).toEqual([]);

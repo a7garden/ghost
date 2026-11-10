@@ -248,8 +248,9 @@ export class Decisions {
     if (decision.kind !== "approve_effect" || !decision.effectId || !proposal) return false;
     const tool = this.ledger.effect(decision.effectId).tool;
     if (tool === "activity_propose") {
-      const config = proposal.config as { execution?: { kind?: string }; policy?: { externalActions?: string } } | undefined;
-      return !!config && config.execution?.kind !== "host" && config.policy?.externalActions !== "allow";
+      const config = proposal.config as { execution?: { kind?: string }; policy?: { externalActions?: string }; tools?: unknown } | undefined;
+      const drivesPc = Array.isArray(config?.tools) && config.tools.some((tool) => typeof tool === "string" && tool.startsWith("desktop_"));
+      return !!config && config.execution?.kind !== "host" && config.policy?.externalActions !== "allow" && !drivesPc;
     }
     return tool === "host_command_propose" && typeof proposal.risk === "string" && !DESTRUCTIVE_RISK.test(proposal.risk);
   }

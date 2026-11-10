@@ -116,6 +116,22 @@ export const GhostTool = Type.Union([
   Type.Literal("vault_list"),
   Type.Literal("vault_request"),
   Type.Literal("vault_generate_login"),
+  Type.Literal("desktop_apps"),
+  Type.Literal("desktop_snapshot"),
+  Type.Literal("desktop_screenshot"),
+  Type.Literal("desktop_click"),
+  Type.Literal("desktop_fill"),
+  Type.Literal("desktop_type"),
+  Type.Literal("desktop_select"),
+  Type.Literal("desktop_check"),
+  Type.Literal("desktop_scroll"),
+  Type.Literal("desktop_press"),
+  Type.Literal("desktop_launch"),
+  Type.Literal("desktop_focus"),
+  Type.Literal("desktop_wait"),
+  Type.Literal("desktop_pointer"),
+  Type.Literal("desktop_keys"),
+  Type.Literal("desktop_propose"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 
@@ -179,6 +195,22 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "vault_list",
   "vault_request",
   "vault_generate_login",
+  "desktop_apps",
+  "desktop_snapshot",
+  "desktop_screenshot",
+  "desktop_click",
+  "desktop_fill",
+  "desktop_type",
+  "desktop_select",
+  "desktop_check",
+  "desktop_scroll",
+  "desktop_press",
+  "desktop_launch",
+  "desktop_focus",
+  "desktop_wait",
+  "desktop_pointer",
+  "desktop_keys",
+  "desktop_propose",
 ];
 
 /** Tools that observe or change the owner's Mac. Granted only explicitly, never by default. */
@@ -190,8 +222,14 @@ export const BROWSER_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => 
 /** Vault metadata and requests; secret values never reach a model. */
 export const VAULT_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("vault_"));
 
-/** The allow-list a new Ghost gets when none is given: every selectable tool except host tools. */
-export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool));
+/**
+ * PC control: the owner's apps through accessibility and real input. Granted only explicitly, and usable only by a
+ * Ghost the owner also allows PC 직접 실행, because driving the GUI reaches everything the owner's account can.
+ */
+export const DESKTOP_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("desktop_"));
+
+/** The allow-list a new Ghost gets when none is given: every selectable tool except host and PC control tools. */
+export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool));
 
 /** A skill directory name under the configured skills root. */
 export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });

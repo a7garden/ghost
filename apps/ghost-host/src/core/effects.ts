@@ -38,6 +38,7 @@ export type EffectStart = { kind: "run"; effect: Effect } | { kind: "replay"; ef
 const OWNER_CONFIRMS: Record<string, { title: string; check: string }> = {
   activity_action: { title: "메일 답장이나 PR 댓글이 실제로 보내졌나요?", check: "보낸편지함이나 PR 댓글에서 확인해 주세요." },
   browser_propose: { title: "브라우저에서 누르려던 버튼이 실제로 눌렸나요?", check: "주문 · 결제 내역이나 해당 사이트에서 확인해 주세요." },
+  desktop_propose: { title: "PC에서 누르려던 버튼이 실제로 눌렸나요?", check: "해당 앱 화면에서 확인해 주세요." },
 };
 
 export class Effects {

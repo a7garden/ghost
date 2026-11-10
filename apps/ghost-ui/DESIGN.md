@@ -105,20 +105,24 @@ Feature-level compositions:
   composer. 맡기기 unfolds 완료 기준 and 기한 in place and sends `work.create`; nothing
   becomes a 맡긴 일 unless the owner chose it. Like the conversation composer it has the
   + menu bottom-left (files) and the model beside send.
-- **Decision deck** (home, 확인할 일, conversations): pending decisions stacked oldest-first,
-  the top one fully actionable. A card waiting on the owner carries an amber hairline around its
-  whole edge, never a stripe on one side. Questions answer with numbered tiles (digit keys) or free text;
-  approvals show the exact request; results arrive as a receipt with files and the
-  completion criteria (`⌘↵` approves). 수정 요청 on a result, an effect to reconcile or a
-  document review opens a reason field first (`D`), and the reason reaches the Ghost. An
-  approval for a command whose risk speaks of loss, a browser commit click or a protected card
-  fill arms on the first press and approves on a second within 4s.
-  ←/→ page the deck; a resolved card leaves a short spoken and visible acknowledgement.
-  확인할 일 lists every pending item beside the stack.
-  A conversation docks its own above the composer: every pending decision of its Ghost (what
-  the sidebar row announces) and those of threads begun there; a single card drops the deck
-  head and a long card scrolls inside under its pinned answer buttons; the card takes only what a short window
-  leaves after the transcript and composer. Work detail and the thread panel resolve their own in place.
+- **Decision queue** (home, 확인할 일, conversations): one question or consequence,
+  its evidence, then a separate response area. No decorative stack, nested panels,
+  amber ring or recommendation pills. The pending kind remains visible in the
+  metadata; full-width answer rows keep option text, recommendation and action
+  together. Digit keys answer in displayed order. Free text stays visible for an
+  open question, and unfolds under 직접 답하기 when choices already answer it.
+  Approvals keep the exact command, location and stated risk visible; results
+  show their summary, files and completion criteria without a second card.
+  `⌘↵` approves; 수정 요청, reconciliation and document rejection open a reason
+  field first (`D`). Loss-speaking commands, browser commit clicks and protected
+  card fills still require two deliberate presses within 4s.
+  Multiple requests have a named queue (a horizontal strip in chat, a side list
+  on wide 확인할 일). ←/→ browse; resolution leaves an acknowledgement.
+  Chat docks the same component above the composer; long evidence scrolls separately
+  from the title and answer controls. Automatic-settlement conditions stay beside the
+  response. Exceptionally short windows can scroll the whole request; secure forms
+  pin their action row inside the evidence scroller. Work detail and thread panels
+  use the same component in place. Secure inputs still submit only to the vault route.
 - **Work cancellation** (`src/components/ConfirmDialog.tsx`): the dialog states the consequence,
   names the action on the confirmation button and shows a failed cancellation in place.
 - **Tool trail** (conversations): consecutive tool results fold into one line of chips;
@@ -302,6 +306,12 @@ Native controls own user interaction. Choice replies contain only visible labels
 and descriptions; forms submit their displayed fields. Neither is an approval or
 a privileged command, and messages sent during a run remain ordinary follow-ups.
 
+Choices use one aligned list of native radio rows rather than separate boxes.
+The option label and description share an edge; selection, submit and delivery
+feedback stay together. Forms keep familiar labeled controls without a nested
+panel. Selecting a radio never sends on its own: the explicit submit, retry identity,
+editing state and read-only boundary are unchanged.
+
 Block choice is guided in the host prompt (`INTERACTIVE_INSTRUCTIONS`, direct
 conversations only): prefer a suitable block over long prose when it reduces reading,
 comparison or input effort; pick from the content, not as decoration — charts
@@ -311,7 +321,6 @@ related inputs at once, HTML only for authored layout and static previews. A sim
 answer stays plain text; a widget never restates what the prose said, asks what the
 Ghost's tools can look up, duplicates an ask_owner question or an approval flow, or
 invents a question just to have something to render.
-
 Form values, selection and delivery state are tab-scoped in `sessionStorage`,
 keyed by conversation, immutable tool message and block identity. Refresh/reconnect
 keeps this state in the same tab; it is not a cross-device or browser-restart draft
