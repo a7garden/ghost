@@ -73,6 +73,7 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   const touchFieldRef = useRef<HTMLInputElement>(null);
   /** The frame size the pointer math scales into; mirrored from state so native listeners read it. */
   const dimsRef = useRef<{ width: number; height: number } | null>(null);
+  const pendingViewportRef = useRef<{ width: number; height: number } | null>(null);
   const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
   const [page, setPage] = useState<{ url: string; title: string } | null>(null);
   const [status, setStatus] = useState<Status>('connecting');
@@ -105,17 +106,25 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   statusRef.current = status;
 
   const drawFrame = useCallback((data: string, width: number, height: number) => {
-    dimsRef.current = { width, height };
-    setDims(current => current && current.width === width && current.height === height ? current : { width, height });
+    const pending = pendingViewportRef.current;
+    if (pending && (pending.width !== width || pending.height !== height)) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
     const image = imageRef.current ??= new Image();
     const token = ++frameTokenRef.current;
     image.onload = () => {
-      // Only the newest frame draws; a stale decode is dropped.
-      if (token !== frameTokenRef.current || !canvasRef.current) return;
-      canvasRef.current.getContext('2d')?.drawImage(image, 0, 0);
+      if (token !== frameTokenRef.current || canvasRef.current !== canvas) return;
+      const pending = pendingViewportRef.current;
+      if (pending && (pending.width !== width || pending.height !== height)) return;
+      if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+      canvas.getContext('2d')?.drawImage(image, 0, 0);
+      const dims = dimsRef.current;
+      if (!dims || dims.width !== width || dims.height !== height) {
+        const next = { width, height };
+        dimsRef.current = next;
+        setDims(next);
+      }
+      pendingViewportRef.current = null;
     };
     image.src = `data:image/jpeg;base64,${data}`;
   }, []);
@@ -179,6 +188,8 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       inputGenerationRef.current++;
+      frameTokenRef.current++;
+      pendingViewportRef.current = null;
       abortRef.current?.abort();
       if (reconnectRef.current !== null) clearTimeout(reconnectRef.current);
       if (moveGateRef.current.timer !== null) clearTimeout(moveGateRef.current.timer);
@@ -189,11 +200,16 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   const send = useCallback((input: BrowserInput): Promise<void> => {
     const generation = inputGenerationRef.current;
     const pending = (inputQueueRef.current ?? Promise.resolve()).then(async () => {
-      if (generation !== inputGenerationRef.current || statusRef.current === 'ended') return;
+      if (generation !== inputGenerationRef.current || statusRef.current === 'ended') {
+        if (input.type === 'viewport' && pendingViewportRef.current === input) pendingViewportRef.current = null;
+        return;
+      }
       try {
         await client.browserInput(conversationId, input);
-        setInputError(null);
+        if (generation === inputGenerationRef.current) setInputError(null);
       } catch (caught) {
+        if (generation !== inputGenerationRef.current) return;
+        pendingViewportRef.current = null;
         inputGenerationRef.current++;
         setInputError(caught instanceof Error && caught.message ? caught.message : '입력을 전달하지 못했습니다.');
       }
@@ -215,8 +231,14 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
       if (width === sentWidth && height === sentHeight) return;
       timer = setTimeout(() => {
         if (document.visibilityState !== 'visible' || statusRef.current !== 'live') return;
+        if (pointerRef.current.id !== null) { resize(); return; }
         sentWidth = width; sentHeight = height;
-        void send({ type: 'viewport', width, height });
+        if (dimsRef.current?.width === width && dimsRef.current.height === height) return;
+        const input = { type: 'viewport' as const, width, height };
+        pendingViewportRef.current = input;
+        dimsRef.current = null;
+        setDims(null);
+        void send(input);
       }, 150);
     };
     const observer = new ResizeObserver(resize);
