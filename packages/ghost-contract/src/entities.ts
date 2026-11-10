@@ -56,7 +56,7 @@ export const ExecutionTarget = Type.Union([
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTarget>;
 
-/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, ask_peer, answer_question, complete, work_status, artifact_read, effect_list, verdict), the fixed self_adapt/capability_request and main-only ghost_create/ghost_inspect/ghost_update/work_steer are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
+/** Selectable Ghost grants. Lifecycle tools (including ask_parent/ask_peer/answer_question), self_adapt/capability_request, Host memory and main-only management/work_steer are fixed, not selectable. Host and desktop tools reach the owner's Mac outside the sandbox and are never granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
@@ -74,9 +74,6 @@ export const GhostTool = Type.Union([
   Type.Literal("bash"),
   Type.Literal("publish_artifact"),
   Type.Literal("delegate"),
-  Type.Literal("memory_search"),
-  Type.Literal("memory_recall"),
-  Type.Literal("memory_retain"),
   Type.Literal("document_spaces"),
   Type.Literal("document_list"),
   Type.Literal("document_read"),
@@ -153,9 +150,6 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "bash",
   "publish_artifact",
   "delegate",
-  "memory_search",
-  "memory_recall",
-  "memory_retain",
   "document_spaces",
   "document_list",
   "document_read",
@@ -707,6 +701,8 @@ export const DEFAULT_OWNER_LANGUAGE = "ko";
 export const Settings = Type.Object({
   defaultModel: nullable(ModelRef),
   reviewModel: nullable(ModelRef),
+  /** Model for Host memory consolidation; null follows defaultModel. */
+  memoryModel: Type.Optional(nullable(ModelRef)),
   providers: Type.Array(Provider, { maxItems: 64 }),
   ownerLanguage: Type.Optional(OwnerLanguage),
   approvals: Type.Optional(ApprovalPolicy),

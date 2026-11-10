@@ -10,6 +10,7 @@ import type {
   Work,
 } from "@ghost/contract";
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
+import type { MemoryEngine } from "../memory/types.ts";
 
 /** What the engine needs to run one conversation. Built by core from ledger rows. */
 export interface ConversationSetup {
@@ -38,7 +39,7 @@ export interface TranscriptPage {
 }
 
 /** Pi Durable, seen from core. Implemented in src/engine. */
-export interface Engine {
+export interface Engine extends Partial<MemoryEngine> {
   /** Create the conversation if missing and (re)apply its agent: model, instructions, tools. Idempotent. */
   open(setup: ConversationSetup): Promise<void>;
   submit(conversationId: string, submission: Submission): Promise<void>;

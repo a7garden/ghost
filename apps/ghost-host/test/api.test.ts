@@ -105,7 +105,6 @@ const config: Config = {
   publicOrigin: "http://127.0.0.1",
   uiDir,
   sandbox: { kind: "local" },
-  memory: null,
   voice: null,
   apns: null,
   skills: null,

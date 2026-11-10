@@ -20,7 +20,7 @@ const tree = (send = "Send", id = "sabc") => ({ role: "window", name: "Doc", chi
 function fakeDesktop() {
   const calls: { runtime: "agent-desktop" | "geist"; argv: string[]; args?: Record<string, unknown>; stdin?: string }[] = [];
   const state = {
-    idle: 60, tree: tree(), snapshotId: "sabc", processInstance: "macos-proc-v1:1:2", extraInstance: false, windowVisible: true, windowAccessible: true,
+    idle: 60, tree: tree(), snapshotId: "sabc", processInstance: "macos-proc-v1:1:2", extraInstance: false, windowVisible: true, windowAccessible: true, protectedScreen: false,
     staleRefs: new Set<string>(),
     beforeDispatch: null as null | ((runtime: "agent-desktop" | "geist", command: string) => void),
   };
@@ -60,7 +60,10 @@ function fakeDesktop() {
         snapshot_id: `screen-${calls.length}`, app: { bundle_id: "com.apple.TextEdit", pid: Number(String(args.app).slice(4)) },
         window: { id: args.window_id, title: "Doc", bounds: { x: 100, y: 50, width: 800, height: 600 } },
         image: { data: "iVBORw0KGgo=", width: 1600, height: 1200 },
-        nodes: [{ title: "Delete", description: "", value: null, bounds: { x: 500, y: 350, width: 100, height: 40 } }],
+        nodes: [
+          { title: "Delete", description: "", value: null, bounds: { x: 500, y: 350, width: 100, height: 40 } },
+          ...(state.protectedScreen ? [{ role: "AXSecureTextField", title: "Password", value: null, bounds: { x: 200, y: 100, width: 100, height: 30 } }] : []),
+        ],
       });
       return ok({});
     },
@@ -136,7 +139,7 @@ describe("PC control tools", () => {
     // "Delete" spans window points 400–500 × 300–340, image pixels 200–250 × 150–170.
     expect(f.said(await f.call("desktop_pointer", { screen_id: screenId(), action: "click", x: 210, y: 160 }))).toContain("desktop_propose");
     lastScreenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
-    expect(f.said(await f.call("desktop_keys", { screen_id: screenId(), key: "cmd+q" }))).toContain("Quit shortcuts");
+    expect((await f.call("desktop_keys", { screen_id: screenId(), key: "cmd+q" })).isError).toBe(true);
     expect(f.calls.filter((c) => c.runtime === "geist" && c.argv[0] !== "get_app_state")).toHaveLength(1);
   });
 
@@ -306,12 +309,41 @@ describe("PC control tools", () => {
     expect(f.calls.some((c) => c.runtime === "geist" && c.argv[0] === "click")).toBe(false);
   });
 
-  test("targeted keyboard delivery refuses app quit and session quit shortcuts", async () => {
+  test("both keyboard paths refuse system shortcuts across aliases, token order and duplicate modifiers", async () => {
     const f = fixture();
-    for (const keys of ["cmd+q", "cmd+shift+q", "cmd+alt+esc", "ctrl+cmd+q"]) {
-      expect(f.said(await f.call("desktop_press", { app: "TextEdit", keys }))).toContain("Quit shortcuts");
+    const shot = await f.call("desktop_screenshot", { app: "TextEdit" });
+    const screen_id = /screen_id (\S+):/.exec(f.said(shot))![1]!;
+    for (const keys of ["cmd+q", "shift+cmd+q", "cmd+alt+shift+q", "q+control+meta", "option+command+escape", "esc+alt+super", "cmd+shift+delete", "backspace+shift+meta", "CMD+CMD+Q"]) {
+      expect((await f.call("desktop_press", { app: "TextEdit", keys })).isError).toBe(true);
+      expect((await f.call("desktop_keys", { screen_id, key: keys })).isError).toBe(true);
     }
-    expect(f.calls.some((c) => c.argv[0] === "press")).toBe(false);
+    expect(f.calls.some((c) => c.argv[0] === "press" || c.argv[0] === "press_key")).toBe(false);
+    // Refused shortcuts must not consume the screen or block ordinary keyboard use.
+    expect((await f.call("desktop_keys", { screen_id, key: "Tab" })).isError).not.toBe(true);
+    expect((await f.call("desktop_press", { app: "TextEdit", keys: "cmd+s" })).isError).not.toBe(true);
+    expect(f.calls.filter((c) => c.argv[0] === "press" || c.argv[0] === "press_key").map((c) => c.runtime === "geist" ? c.args?.key : c.argv[1])).toEqual(["Tab", "cmd+s"]);
+  });
+
+  test("a secure field without focus metadata blocks physical typing until a clean capture", async () => {
+    const f = fixture();
+    f.state.protectedScreen = true;
+    const shot = await f.call("desktop_screenshot", { app: "TextEdit" });
+    expect((await f.call("desktop_keys", { screen_id: /screen_id (\S+):/.exec(f.said(shot))![1]!, text: "Do not enter" })).isError).toBe(true);
+    expect(f.calls.some((c) => c.argv[0] === "type_text")).toBe(false);
+    f.state.protectedScreen = false;
+    const clean = await f.call("desktop_screenshot", { app: "TextEdit" });
+    expect((await f.call("desktop_keys", { screen_id: /screen_id (\S+):/.exec(f.said(clean))![1]!, text: "Draft" })).isError).not.toBe(true);
+    expect(f.calls.filter((c) => c.argv[0] === "type_text")).toHaveLength(1);
+  });
+
+  test("a protected accessibility target blocks physical keys even when absent from the image tree", async () => {
+    const f = fixture();
+    f.state.tree.children[2] = { ...f.state.tree.children[2]!, role: "securetextfield", name: "Password" };
+    await f.call("desktop_snapshot", { app: "TextEdit" });
+    expect((await f.call("desktop_click", { ref: "@sabc:e3" })).isError).not.toBe(true);
+    const shot = await f.call("desktop_screenshot", { app: "TextEdit" });
+    expect((await f.call("desktop_keys", { screen_id: /screen_id (\S+):/.exec(f.said(shot))![1]!, key: "Tab" })).isError).toBe(true);
+    expect(f.calls.some((c) => c.argv[0] === "press_key")).toBe(false);
   });
 
   test("protected values are not exposed or written, and text limits count UTF-8 bytes", async () => {

@@ -7,7 +7,7 @@ import { RunRow } from './Activities';
 
 const ghost = (patch: Partial<Ghost> = {}): Ghost => ({
   id: 'g1', name: '연구원', persona: '', look: { avatarId: null }, model: null, isDefault: false, state: 'active',
-  tools: ['read', 'web_search', 'web_read', 'memory_search', 'document_read', 'bash', 'write'], fallbacks: [], skills: [],
+  tools: ['read', 'web_search', 'web_read', 'document_read', 'bash', 'write'], fallbacks: [], skills: [],
   deletedAt: null, directConversationId: 'conv-g1', createdAt: 1, updatedAt: 1, ...patch,
 });
 
@@ -28,7 +28,6 @@ it('matches selectable Work extensions, retaining documents, browser and vault w
   const choices = activityToolChoices(GHOST_TOOLS);
   expect(choices).toEqual([
     'read', 'write', 'edit', 'bash', 'publish_artifact', 'delegate',
-    'memory_search', 'memory_recall', 'memory_retain',
     'document_spaces', 'document_list', 'document_read',
     'web_search', 'web_read', 'reach', 'skill_read',
     ...HOST_TOOLS, ...BROWSER_TOOLS, ...VAULT_TOOLS, ...DESKTOP_TOOLS,

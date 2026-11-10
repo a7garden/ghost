@@ -137,7 +137,7 @@ function isAlive(pid: number): boolean {
 
 describe("agent-reach port", () => {
   test("createReach maps config.reach and expands ~", () => {
-    const base = { root: "/tmp/ghost", host: "127.0.0.1", port: 0, publicOrigin: null, uiDir: null, sandbox: { kind: "local" as const }, memory: null, voice: null, apns: null, skills: null };
+    const base = { root: "/tmp/ghost", host: "127.0.0.1", port: 0, publicOrigin: null, uiDir: null, sandbox: { kind: "local" as const }, voice: null, apns: null, skills: null };
     expect(createReach({ ...base, reach: null } as Config)).toBeNull();
     const reach = createReach({ ...base, reach: { executable: "~/bin/agent-reach" } } as Config);
     expect(reach).not.toBeNull();

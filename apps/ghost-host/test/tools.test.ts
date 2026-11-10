@@ -11,7 +11,7 @@ import type { ArtifactStore } from "../src/core/ports.ts";
 import type { Core } from "../src/core/core.ts";
 import { sha256 } from "../src/core/ids.ts";
 import { parseShellResult } from "../src/core/verify.ts";
-import type { SandboxEnvFactory, MemoryPort } from "../src/integrations/ports.ts";
+import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import { splitQuestion } from "../src/tools/shared.ts";
@@ -58,23 +58,6 @@ class TempSandbox implements SandboxEnvFactory {
   async release() {}
 }
 
-/** MemoryPort stub that records retains and answers search/recall deterministically. */
-class FakeMemory implements MemoryPort {
-  readonly retained: { ghostId: string; text: string }[] = [];
-  available(): boolean {
-    return true;
-  }
-  async search(_ghostId: string, query: string, _limit: number) {
-    return [{ text: `hit for ${query}`, source: "stub", score: null }];
-  }
-  async recall(_ghostId: string, _query: string, _tokenBudget: number) {
-    return { text: "recalled text", sources: ["stub"] };
-  }
-  async retain(ghostId: string, text: string, _origin: { conversationId: string; workId: string | null }) {
-    this.retained.push({ ghostId, text });
-    return { id: `stub-${this.retained.length}` };
-  }
-}
 
 interface Setup {
   root: string;

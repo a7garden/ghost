@@ -70,7 +70,7 @@ async function main(argv: string[]) {
       try {
         const status = app.engine.status();
         const ghosts = app.ledger.ghosts();
-        console.log(JSON.stringify({ root: config.root, port: config.port, sandbox: config.sandbox.kind, memory: config.memory !== null, ghosts: ghosts.length, engine: status }, null, 2));
+        console.log(JSON.stringify({ root: config.root, port: config.port, sandbox: config.sandbox.kind, memory: "built-in", ghosts: ghosts.length, engine: status }, null, 2));
         if (!status.ready) process.exitCode = 1;
       } finally {
         await app.close();

@@ -27,7 +27,7 @@ function fixture(kind: Config["sandbox"] = { kind: "local" }) {
   const config: Config = {
     root: join(root, "state"), host: "127.0.0.1", port: 62062,
     publicOrigin: null, uiDir: null, sandbox: kind,
-    memory: null, voice: null, apns: null, skills: null, reach: null, browser: null,
+    voice: null, apns: null, skills: null, reach: null, browser: null,
   };
   const id = `work-${crypto.randomUUID()}`;
   const work: Work = {

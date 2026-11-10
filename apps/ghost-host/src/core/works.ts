@@ -900,7 +900,7 @@ export class Works {
       lesson.evidence ? `Evidence: ${lesson.evidence.slice(0, 400)}` : "",
       lesson.scope ? `Scope: ${lesson.scope.slice(0, 400)}` : "",
     ].filter(Boolean).join("\n")).join("\n\n");
-    return `${describeOutcome(work)}\n\n## Revision history (${history.length} retained)\n${compact}\n\nKeep any durable constraint these revisions imply: use memory_retain if you hold memory tools; otherwise carry it into future briefs.`;
+    return `${describeOutcome(work)}\n\n## Revision history (${history.length} retained)\n${compact}\n\nKeep any durable constraint these revisions imply: record it with the Host memory tool; otherwise carry it into future briefs.`;
   }
   /** A settled Work reports to whoever waits: its parent's conversation, or the owner for a root Work. */
   private async report(work: Work) {

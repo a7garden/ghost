@@ -140,7 +140,8 @@ run("bun", [
 chmodSync(host, 0o755);
 run("codesign", ["--force", "--sign", identity, "--timestamp", "--identifier", "dev.projectoxi.ghost.host", host]);
 run("codesign", ["--verify", "--strict", host]);
-const reported = JSON.parse(run(host, ["version"], { capture: true })) as { version: string; commit: string; storage: string };
+// Build probes must not read the installed Host's configuration or credentials.
+const reported = JSON.parse(run(host, ["version"], { capture: true, env: { GHOST_ROOT: join(out, "version-check") } })) as { version: string; commit: string; storage: string };
 if (reported.version !== version || reported.commit !== commit) throw new Error(`built host reports ${reported.version}/${reported.commit}`);
 
 step("ui");

@@ -43,7 +43,7 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.3.0-db54109`(GitHub Release `v2.3.0`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.1-5b14f11`(GitHub Release `v2.4.1`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -52,6 +52,37 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
 
+### Host 내장 기억 후보 — 2026-11-10, 배포 보류
+
+- 구현 소스 `7585ed5`, Host 후보 2.5.0. 저장·검색·대화 색인·유휴 정리를 Bun/TypeScript Host 안으로 옮겼다. Ghost별 개인/팀 namespace, 소유자 전용 프로필, 원문 인용 검증, CAS·이전 버전, 한국어 FTS, 편집 충돌 시 초안 보존을 포함한다. 기억은 내부 DB 레코드이며 PDC 문서 변환은 없다. Oxibrain CLI와 기억 관리 Ghost가 새 구현의 실행 경로에 없다.
+- Host 799 통과·9 생략, UI 176 통과, Rust 28 통과, 계약·Host·UI 타입 검사 통과. 실제 격리 UI에서 충돌 비교·명시적 덮어쓰기·이력, 한글 중첩 경로의 생성/재저장, 미저장 초안 보호와 390px 화면을 확인했다. 실제 SDK 모델의 격리 실행은 낡은 90분 메모를 소유자 정정 근거의 150분으로 고쳤고, 새 맡긴 일이 `memory_search`로 150분을 찾아 완료했다. 프로덕션 OAuth refresh 토큰을 복사하거나 회전시키지 않았다. MiniMax·Z.AI의 별도 시도는 실제 429로 실패했으며 성공으로 세지 않는다.
+- 이관 준비 시점의 Oxibrain 메모 58개는 완료된 기존 효과와 episode ID·입력 digest를 대조했다. 임시 새 저장소에서 58/58 원문 해시·바이트를 보존했고, 수동 정답을 정한 실자료 질의 10개의 top-3와 무관 질의 3개를 확인했다. 일반 성능 벤치마크나 다른 검색기의 우월성 증거는 아니다. 운영 원장 복사본은 버전 7→8 뒤 Ghost 26·대화 211·맡긴 일 156·효과 1,998·결정 160·자동 활동 9개의 모든 ID를 보존하고 구형 기억 권한을 제거했다. 운영 이관은 아직 하지 않았으며 설치 시 최신 완료 효과를 다시 대조해야 한다.
+- 필수 R2 수용은 미완료다. 실제 응답 메타데이터에서 저장소 검토는 GLM 긴급 대체, 정리기 검토는 작성자와 같은 Codex였다. Claude 작성 통합부의 Codex 검토만 타 공급자 조건을 충족했다. 강한 타 공급자 검토 재배정도 GLM으로 대체되었다. 예비 한도를 우회하거나 이를 독립 수용으로 간주하지 않는다. 병합된 펫·타이틀바 네이티브 변경의 기존 수용 차단도 함께 남아 있다.
+- `v2.5.0` 게시 시도는 이 차단을 확인한 뒤 게시 전에 중지했다. 운영은 Owner API `lastResult: installed`와 실제 프로세스·리스너·DB 경로로 확인한 2.4.1이다. 운영 설정의 Oxibrain 항목, 기존 기억 관리 Ghost, 원본 `~/.oxi/brain`은 건드리지 않았다. 앱 창은 다른 Space에서 접근 불가였으며 강제로 앞으로 가져오지 않았다. 수용 뒤 자체 업데이트 → 최신 메모 이관 → 구형 Ghost 은퇴/삭제 → 설치 UI 확인 순서로 마무리한다.
+- 로컬 `bun scripts/release.ts`는 소스 `7585ed5`의 전체 검사·Host/UI/Mac/iPhone 빌드·Developer ID·업데이트 서명·매니페스트·묶음 검증을 완료했다. 공증은 기존 배포 방식대로 생략했다. 게시하지 않은 서명 후보를 정본 `dist/release/2.5.0/`에 보존했다. 이관 스냅숏은 `~/.local/share/ghost/backups/host-memory-2.5.0/oxibrain-notes.json`(디렉터리 0700, 파일 0600)에 보관했고, 시험 Host·브라우저·OAuth 사본·임시 스크립트·원장 복사본은 정리했다.
+
+### 펫의 펼침 일 목록 — 2026-11-10
+
+- 잘리던 긴 말풍선 대신 건수만 남기고, 호버·클릭 시 확인할 일과 모든 진행 중인 맡긴 일을 펼친다. 긴 제목은 줄바꿈하고 많은 항목은 ScrollRail로 읽는다. 각 행은 실제 결정·맡긴 일 화면을 연다. 빈 상태에서는 표시를 숨긴다. 구현 `92bd43a`, Retina 배율 수정 `ade0a8e`, `main` 통합 `7f9c88c`; 병행 타이틀바 끌기 수정도 보존했다.
+- 전용 브라우저 검사 4개(작은 펫·긴 제목·18개 일·스크롤·항목 이동, 키보드·Escape·유휴, 결정 우선순위, 끌기 전 호버 타이머) 통과. 밝은/어두운 실제 화면을 검사했다. 네이티브 16개 검사 통과. 격리 앱 실행에서 저장 위치가 2450,1300 → 4900,2600으로 두 배가 되던 문제를 대상 모니터 배율의 Logical setter로 고쳤고, 재실행 후 2450,1300 보존을 확인했다. 네이티브 펫의 실제 호버 화면은 관측하지 못했다. 시험 앱·Host·모의 제공자·브라우저는 종료했다.
+- `624ef3c`의 로컬 후보 `dist/release/2.4.2/`는 Host 753 통과·9 생략, UI 176 통과, Rust 28 통과, 타입·빌드·Developer ID 서명·매니페스트·묶음 검증을 통과했다. 공증은 기존 방식대로 생략했다. 이 후보는 병행 타이틀바 수정 이전의 셸 0.2.3이므로, 같은 버전의 다른 릴리스를 대체하거나 운영에 직접 설치하지 않는다.
+- 배포 수용은 보류했다. 네이티브 작성자는 실제 Codex였고 지정 검토는 GLM, 강한 검토의 대체 실행은 같은 Codex여서 필요한 강한 타 공급자 독립 검토를 충족하지 못했다. 별도 새 컨텍스트의 `default` 검토는 잔여 지적이 없었으나 실제 제공자 메타데이터가 노출되지 않아 독립성 증거로 세지 않았다. UI의 Codex 검토에서 찾은 끌기·호버 경합은 수정하고 회귀 검사를 통과했다.
+- 마지막 Owner API 관측: 운영 health 2.3.0, 기존 2.4.1 업데이트가 `waiting`, `lastResult`는 2.3.0 설치 기록이다. 기존 요청을 취소하거나 진행 중 대화를 끊지 않았다. 이 작업에서는 Release를 게시하거나 운영 Host·설치 앱을 교체하지 않았다.
+
+### 확인·제안 UI 재구성 — 2026-11-10
+
+- 질문·근거·응답을 분리하고 중첩 상자·장식용 카드 겹침·추천 배지를 없앴다. 선택지는 행 전체로 답하고 직접 입력은 필요할 때 펼친다. 여러 요청은 제목이 보이는 대기열을 사용한다. 채팅의 긴 근거만 별도로 스크롤하며 자동 처리 조건은 응답 옆에 남긴다. 아주 짧은 창은 전체 요청도 스크롤할 수 있고 금고 입력은 전송 행을 고정한다. 채팅의 `present_ui` 선택 양식도 한 목록으로 묶되 명시적 전송·재시도 식별자·입력 보존을 유지했다.
+- 병행 `main`의 문서 읽기/원문 미리보기와 PC 조작 변경을 보존해 통합했다. UI 단위 176, Host 753 통과·9 생략, Rust 21, 타입·빌드 통과. 기능 8개 경로와 관련 시각 36개 조합을 확인하고 기준 이미지를 갱신했다. 통합 뒤 긴 근거·금고 전송·위험 요청 3개 및 문서 시각 4개를 재확인했다. `cross-reviewer`와 `deep-reviewer`의 확정 P0–P2 지적은 없었다. 1280×900·390×844·1024×640, 밝은/어두운 화면을 확인했다. 실제 iPhone 검수는 하지 않았다.
+- [v2.4.1](https://github.com/a7garden/ghost/releases/tag/v2.4.1), 소스 `5b14f11`, `main` 통합·GitHub 일반 푸시 완료. Developer ID 서명·매니페스트·묶음 검증을 통과했다. Mac 셸 0.2.2와 iPhone 0.1.0 (9)는 유지했고 공증은 기존 방식대로 생략했다. 준비 checkout에 복사된 미추적 `wt/`는 삭제하지 않고 작업 트리 보존 경로로 옮겼다.
+- 운영 반영은 **유휴 대기 중**이다. 대기하던 2.4.0을 취소하고 그 변경을 포함한 검증본 2.4.1로 교체 요청했다. Host가 `releases/2.4.1-5b14f11`을 받았고 실행 파일과 `Ghost Control.app`의 `codesign --verify --strict`가 통과했다. 60초 넘게 대화 1건이 실행 중이라 `phase: waiting`에 두었으며 중단하지 않았다. 관측 시 health·runtime은 여전히 2.3.0/ready, Ghost 26·대화 211·맡긴 일 156의 기존 id 누락은 없었다. `lastResult`는 이전 2.3.0 설치 기록이며 2.4.1 설치 완료가 아니다. 유휴 설치 뒤 `lastResult: installed`, 새 버전·상태 보존·설치 앱의 변경 UI 확인이 남는다.
+
+
+### 타이틀바 창 이동 수정 — 2026-11-10, 배포 보류
+
+- 소스 `89779c6`(통합·버전 `6733285`, Host 2.4.2·Mac 셸 0.2.4): 타이틀바의 비조작 자식 요소도 끌기 영역을 상속한다. 버튼·링크·입력·명시적 opt-out은 제외한다. macOS가 거절하던 합성 AppKit 누름 이벤트를 없애고, 기존 아바타의 포인터 추적을 메인 창·오버레이에서도 재사용한다. 아바타 위치 저장과 비-macOS 경로는 유지한다.
+- UI 타입·빌드, Tauri Playwright 2개, Rust fmt·빌드 통과. 별도 상태 루트·포트 62173의 실제 수정 셸에서 타이틀 글자를 끌어 창 좌표가 `(-1600, 690)` → `(-1592, 695)`로 바뀌었고, 검색 아이콘은 창을 옮기지 않고 명령 창을 열었다. Geist가 창 이동 자체를 `STALE_WINDOW`로 판정해 제스처를 중단하므로 전체 이동 거리 검증에는 제한이 있다(도구 문제 보고). 시험 셸·Host는 종료했다.
+- `main` 통합과 GitHub·Gitea 일반 푸시 완료. 독립 검토 두 번 모두 새 P0/P1/P2를 찾지 않았지만, 실제 응답 메타데이터는 `reviewer`가 GLM, `deep-reviewer`가 작성자와 같은 Codex였다. Claude 주간 사용 90%·예비 10% 유지 때문에 필수 다른 공급자의 강한 검토를 확보하지 못했다. R2 수용을 완료로 간주하지 않으며 GitHub 게시·운영 설치를 보류한다. 당시 운영은 Host 2.3.0·Mac 0.2.2이며, 메인의 busy 대화로 기존 2.4.1 업데이트도 `waiting`이다. 대화를 끊거나 예비 한도를 우회하지 않았다.
+- `bun scripts/release.ts` 로컬 릴리스 검사 완료: Host 753 통과·9 생략, UI 176 통과, Rust 28 통과, 계약·Host·UI 타입 검사와 빌드·Developer ID·업데이트 서명·묶음 검증 통과. 공증은 저장소의 기존 배포 방식과 같이 생략했다. 서명 묶음은 정본 `dist/release/2.4.2/`에 보존한다. `--publish` 실행은 필수 검토가 대체된 사실을 확인한 뒤 게시 전에 중단했으며, 실제 Release나 설치 완료를 주장하지 않는다.
 ### 팀 생성·환경 적응·도구 실패 수정 — 2026-11-10
 
 - 운영 Pi 기록을 읽기 전용으로 분석한 시점의 오늘 도구 호출은 9,629건, 오류는 3,026건이었다. 승인 대기 효과가 같은 대화의 모든 쓰기를 막은 오류가 1,420건(22개 대화), 산출물 경로 추측이 648건, `host_read` 12KB 제한이 141건이었다. 오늘 생성된 맡긴 일은 완료 38·실패 42·취소 17개였고 실패 중 31개가 마감 초과였다. 하나의 Mac 읽기 작업은 `tail -n +61` 승인 때문에 샌드박스 쓰기를 965번 거절당했다. 별도로 일반 Markdown 문서의 본문이 빈 문자열로 반환되는 실제 버그를 확인했다.
@@ -418,7 +449,7 @@ models.json   codex-models.json (자동 갱신 메타데이터 캐시)
 artifacts/sha256/…   skills/…   secrets/<provider>.json (0600)   sandboxes/<ghost>/<work>/workspace
 ```
 
-`config.json`은 `publicOrigin`, `uiDir`, `sandbox`(`local` 또는 `apple-container`), `memory`(Oxibrain; `spaces`는 Ghost id → space, `*`는 나머지 모든 Ghost), `apns`를 담는다. 환경 변수는 `GHOST_ROOT`, `GHOST_PORT`, `GHOST_HOST`, `GHOST_PUBLIC_ORIGIN`, `GHOST_UI_DIR`만 읽는다.
+`config.json`은 `publicOrigin`, `uiDir`, `sandbox`(`local` 또는 `apple-container`), `apns`와 선택 통합 설정을 담는다. 기억은 Host 내장 기능이며 `memory` 설정 키나 외부 실행 파일을 사용하지 않는다. 외부 Oxibrain 설정이 남은 기존 루트는 백업 후 해당 키를 제거하고 새 릴리스를 설치한다. 환경 변수는 `GHOST_ROOT`, `GHOST_PORT`, `GHOST_HOST`, `GHOST_PUBLIC_ORIGIN`, `GHOST_UI_DIR`만 읽는다.
 
 
 ## 승인 대기와 반복 실행 (2026-11-10)

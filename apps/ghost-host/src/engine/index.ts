@@ -39,6 +39,10 @@ import { FallbackDoc, fallbackModels, fallbackReason } from "./fallback.ts";
 import { digestOf } from "../core/ids.ts";
 import { workGuard } from "./work-guard.ts";
 import { projectContext, splitProjectBrief, QUIET_REPLY as QUIET } from "@ghost/contract";
+import type { MemoryStore } from "../stores/memory.ts";
+import type { MemoryDreamInput, MemoryEngine } from "../memory/types.ts";
+import { dreamInPi } from "../memory/pi.ts";
+import { gateRecoveredDreams, memoryRegistry } from "../memory/runtime.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
@@ -85,6 +89,7 @@ export interface EngineDeps {
   log: (message: string, detail?: unknown) => void;
   /** Optional harness policy override; production uses Pi's bounded retries. */
   harnessSettings?: HarnessSettings;
+  memory?: MemoryStore;
 }
 
 /** The entry a submission placed, when it has one. */
@@ -98,7 +103,7 @@ function placedEntry(record: SubmissionRecord): EntryId | undefined {
  * Pi Durable, seen from core: one harness over one storage, one agent per
  * conversation, and the transcript the owner reads.
  */
-class HostEngine implements Engine {
+class HostEngine implements Engine, MemoryEngine {
   private readonly core: Core;
   private readonly tools: ToolSet;
   private readonly log: (message: string, detail?: unknown) => void;
@@ -112,11 +117,16 @@ class HostEngine implements Engine {
   private readonly pendingListeners = new Map<string, Set<(event: LiveEvent) => void>>();
   private readonly unsubscribeLedger: () => void;
   private readonly unsubscribeCommits: () => void;
+  private readonly memory?: MemoryStore;
+  private readonly memoryCatchups = new Map<string, Promise<void>>();
+  private readonly memoryReady = new Set<string>();
+  private closing = false;
 
   constructor(deps: EngineDeps, harness: Harness, ownedModels: MutableModels | null, registry: Registry, private readonly guardExtension: Extension) {
     this.core = deps.core;
     this.tools = deps.tools;
     this.log = deps.log;
+    this.memory = deps.memory;
     this.harness = harness;
     this.ownedModels = ownedModels;
     this.fallbackExtension = defineExtension({
@@ -129,10 +139,11 @@ class HostEngine implements Engine {
           if (!state || !conversation) return;
           const ghost = this.core.ledger.ghost(conversation.ghostId);
           const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
-          const primary = this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
+          const model = this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
           await state.pi.configure({
-            model: primary ? { provider: primary.provider, modelId: primary.model } : null,
-            thinkingLevel: primary?.thinking ?? "off",
+            model: model ? { provider: model.provider, modelId: model.model } : null,
+            thinkingLevel: model?.thinking ?? "off",
+            instructions: this.instructionsFor({ conversation, ghost, work }),
           }, ctx);
         },
       })],
@@ -170,11 +181,16 @@ class HostEngine implements Engine {
     await this.attachView(state);
   }
 
+  private instructionsFor({ conversation, ghost, work }: ConversationSetup): string {
+    const kind = this.tools.instructionsFor(conversation, ghost, work);
+    const data = conversation.kind === "review" ? "" : this.memory?.injected(ghost.id) ?? "";
+    return [ghost.persona, kind, data].filter(Boolean).join("\n\n").trim();
+  }
+
   /** Apply the conversation's agent: model, thinking level, instructions and tools. */
   private async configure(state: ConversationState, setup: ConversationSetup, servingModel?: ModelRef): Promise<void> {
     const { conversation, ghost, work } = setup;
     const model = servingModel ?? this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
-    const kindInstructions = this.tools.instructionsFor(conversation, ghost, work);
     const extensions = [...this.tools.extensionsFor(conversation, ghost, work), this.fallbackExtension];
     if (conversation.kind === "work") extensions.push(this.guardExtension);
     // Pi resolves extension names from its registry; filtering copied extensions would not filter the model's tools.
@@ -203,7 +219,7 @@ class HostEngine implements Engine {
         thinkingLevel: model?.thinking ?? "off",
         extensions,
         tools: grantedTools,
-        instructions: kindInstructions ? `${ghost.persona}\n\n${kindInstructions}`.trim() : ghost.persona,
+        instructions: this.instructionsFor(setup),
       },
       ctx,
     );
@@ -426,6 +442,7 @@ class HostEngine implements Engine {
 
   resume(): void {
     this.harness.resume();
+    void this.catchUpMemory().catch((error) => this.log("memory: historical catch-up failed", error));
     void this.resumeLiveRuns();
   }
 
@@ -457,8 +474,11 @@ class HostEngine implements Engine {
   }
 
   async close(): Promise<void> {
+    this.closing = true;
+    await Promise.allSettled(this.memoryCatchups.values());
     this.unsubscribeLedger();
     this.unsubscribeCommits();
+    await Promise.allSettled([...this.states.values()].map((state) => state.dispatch));
     for (const state of this.states.values()) {
       state.stopView?.();
       state.view?.dispose();
@@ -663,6 +683,15 @@ class HostEngine implements Engine {
     if (!message) return;
     this.emit(state, { type: "message", message });
     this.noteInitiative(state, message);
+    if (this.memory && !this.closing) {
+      this.memoryReady.delete(state.hostId);
+      const conversation = this.core.ledger.findConversation(state.hostId);
+      if (conversation) {
+        try { this.memory.indexMessage(conversation.ghostId, message); }
+        catch (error) { this.log("memory: committed message could not be indexed", error); }
+        void this.catchUpMemory(conversation.ghostId).catch((error) => this.log("memory: incremental catch-up failed", error));
+      }
+    }
   }
 
   /** Remember the scheduled or self-directed wake a run answers; owner input in between cancels it. */
@@ -764,12 +793,58 @@ class HostEngine implements Engine {
   }
 
   private async toMessage(state: ConversationState, entry: EntryRecord): Promise<Message | null> {
-    if (entry.kind !== "pi.user") return toMessage(entry, state.hostId, null);
-    return toMessage(entry, state.hostId, await this.resolveUserMeta(state, entry.id));
+    return toMessage(entry, state.hostId, entry.kind === "pi.user" ? await this.resolveUserMeta(state, entry.id) : null);
   }
 
   private async liveState(state: ConversationState): Promise<LiveState | undefined> {
     return (await this.harness.snapshot(LiveDoc, state.piId, ctx)) ?? undefined;
+  }
+
+  /** Public Pi pages only. A checkpoint advances after the entire page was indexed. */
+  async catchUpMemory(ghostId?: string): Promise<void> {
+    if (!this.memory || this.closing) return;
+    const ids = ghostId ? [ghostId] : [...new Set(this.core.ledger.conversations().map((conversation) => conversation.ghostId))];
+    for (const id of ids) {
+      let pending = this.memoryCatchups.get(id);
+      if (!pending) {
+        pending = this.indexGhostHistory(id).finally(() => this.memoryCatchups.delete(id));
+        this.memoryCatchups.set(id, pending);
+      }
+      await pending;
+      if (this.closing) return;
+    }
+  }
+
+  private async indexGhostHistory(ghostId: string): Promise<void> {
+    const memory = this.memory!;
+    for (const conversation of this.core.ledger.conversations({ ghostId })) {
+      if (this.closing) return;
+      const state = await this.stateFor(conversation.id);
+      if (!state) { this.memoryReady.add(conversation.id); continue; }
+      for (;;) {
+        if (this.closing) return;
+        const after = memory.checkpoint(conversation.id);
+        const page = await state.pi.entries({ minEntryId: (after + 1) as EntryId, order: "ascending" }, 100, undefined, ctx);
+        if (page.items.length === 0) { this.memoryReady.add(conversation.id); break; }
+        for (const entry of page.items) {
+          const message = await this.toMessage(state, entry);
+          if (message) memory.indexMessage(ghostId, message);
+        }
+        memory.setCheckpoint(conversation.id, page.items.at(-1)!.id);
+        const { promise, resolve } = Promise.withResolvers<void>();
+        setTimeout(resolve, 0);
+        await promise;
+      }
+    }
+  }
+
+  memoryStatus(ghostId: string): { ready: boolean; pending: number } {
+    const pending = this.memory ? this.core.ledger.conversations({ ghostId }).filter((conversation) => !this.memoryReady.has(conversation.id)).length : 0;
+    return { ready: pending === 0, pending };
+  }
+
+  dreamMemory(input: MemoryDreamInput, signal: AbortSignal) {
+    return dreamInPi(this.harness, input, signal);
   }
 
   // Models
@@ -788,7 +863,7 @@ export class EngineStartupCleanupError extends AggregateError {}
  * Open the engine over one Pi storage. The harness owns every conversation; core
  * drives it through the `Engine` port.
  */
-export async function createEngine(deps: EngineDeps): Promise<Engine> {
+export async function createEngine(deps: EngineDeps): Promise<Engine & MemoryEngine> {
   const { core, sandbox, tools, log } = deps;
   mkdirSync(dirname(deps.storagePath), { recursive: true });
   core.codexCatalog.sync();
@@ -808,7 +883,7 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
       storage,
       {
         models: guard.models,
-        registry,
+        registry: memoryRegistry(registry),
         settings: deps.harnessSettings,
         // Harness.open reports an internal close failure here if its own startup
         // fails. Do not mistake its original rejection for successful cleanup.
@@ -834,6 +909,7 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
       },
       ctx,
     );
+    await gateRecoveredDreams(harness, (id) => Boolean(core.ledger.conversationByPiId(String(id))));
     opening = false;
     return new HostEngine(deps, harness, ownedModels, registry, guard.extension);
   } catch (error) {

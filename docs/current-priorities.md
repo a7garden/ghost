@@ -22,9 +22,8 @@
 
 | 구성 | 책임 |
 | --- | --- |
-| Ghost | 정체성·페르소나·모델·도구·기억·문서 권한. PC 직접 실행 권한은 소유자가 별도로 부여 |
-| Host (`apps/ghost-host`) | 원장·Pi Durable·도구·실행 환경·자동 활동 감지와 한도·API. 상태 루트의 단일 writer |
-| Oxibrain | 출처가 있는 기억. Host 원장이나 사용자 원문을 대체하지 않음 |
+| Ghost | 정체성·페르소나·모델·선택 도구. PC 직접 실행 권한은 소유자가 별도로 부여 |
+| Host (`apps/ghost-host`) | 원장·Pi Durable·도구·실행 환경·자동 활동 감지와 한도·기억 저장·검색·정리·API. 상태 루트의 단일 writer. 기억은 외부 CLI나 특정 Ghost에 의존하지 않음 |
 | 문서 평면 | PDC 2 Space. PDC 1 읽기 호환, 승인 없는 일괄 변환 금지 ([PDC 채택](pdc-adoption.md)) |
 | infra | 프로젝트 간 운영·복구·자원 조정 |
 
