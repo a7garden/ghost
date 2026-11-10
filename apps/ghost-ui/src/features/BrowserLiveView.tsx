@@ -125,12 +125,22 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
         setDims(next);
       }
       pendingViewportRef.current = null;
+      if (statusRef.current !== 'live' && statusRef.current !== 'ended') {
+        statusRef.current = 'live';
+        setStatus('live');
+      }
     };
     image.src = `data:image/jpeg;base64,${data}`;
   }, []);
 
   const scheduleReconnect = useCallback(() => {
-    setStatus(current => current === 'ended' ? current : 'reconnecting');
+    if (statusRef.current === 'ended') return;
+    statusRef.current = 'reconnecting';
+    frameTokenRef.current++;
+    pendingViewportRef.current = null;
+    dimsRef.current = null;
+    setDims(null);
+    setStatus('reconnecting');
     const attempt = ++failuresRef.current;
     if (reconnectRef.current !== null) clearTimeout(reconnectRef.current);
     reconnectRef.current = setTimeout(() => connectRef.current(), Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** (attempt - 1)));
@@ -142,6 +152,11 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     if (reconnectRef.current !== null) clearTimeout(reconnectRef.current);
     reconnectRef.current = null;
     if (document.visibilityState !== 'visible') return; // hidden: the effect reconnects on return
+    statusRef.current = 'connecting';
+    frameTokenRef.current++;
+    pendingViewportRef.current = null;
+    dimsRef.current = null;
+    setDims(null);
     const controller = new AbortController();
     abortRef.current = controller;
     setStatus('connecting');
@@ -149,11 +164,12 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     void client.browserLive(conversationId, STREAM_FPS, event => {
       if (controller.signal.aborted) return;
       if (performance.now() - connectedAt >= BACKOFF_MAX_MS) failuresRef.current = 0;
-      if (statusRef.current === 'connecting' || statusRef.current === 'reconnecting') setStatus('live');
       if (event.type === 'frame') drawFrame(event.data, event.width, event.height);
       else if (event.type === 'page') setPage({ url: event.url, title: event.title });
       else if (event.type === 'end') {
         controller.abort();
+        statusRef.current = 'ended';
+        frameTokenRef.current++;
         setStatus('ended');
         setEndReason(event.reason);
       }
@@ -163,7 +179,7 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     }).catch((caught: unknown) => {
       if (controller.signal.aborted) return;
       // The session itself is gone (404): say so instead of hammering a dead id.
-      if (caught instanceof HostError && caught.code === 'not_found') { setStatus('ended'); setEndReason(null); return; }
+      if (caught instanceof HostError && caught.code === 'not_found') { statusRef.current = 'ended'; setStatus('ended'); setEndReason(null); return; }
       scheduleReconnect();
     });
   }, [client, conversationId, drawFrame, scheduleReconnect]);
@@ -204,12 +220,20 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
         if (input.type === 'viewport' && pendingViewportRef.current === input) pendingViewportRef.current = null;
         return;
       }
+      if (statusRef.current !== 'live') {
+        if (input.type === 'viewport') pendingViewportRef.current = null;
+        else setInputError('화면을 다시 연결하고 있어요. 새 화면에서 다시 입력해 주세요.');
+        return;
+      }
       try {
         await client.browserInput(conversationId, input);
-        if (generation === inputGenerationRef.current) setInputError(null);
+        if (generation === inputGenerationRef.current && input.type !== 'viewport') setInputError(null);
       } catch (caught) {
         if (generation !== inputGenerationRef.current) return;
         pendingViewportRef.current = null;
+        frameTokenRef.current++;
+        dimsRef.current = null;
+        setDims(null);
         inputGenerationRef.current++;
         setInputError(caught instanceof Error && caught.message ? caught.message : '입력을 전달하지 못했습니다.');
       }
@@ -431,9 +455,9 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     <header className="browser-live__bar">
       <span className="browser-live__state" data-state={status} title={statusText} aria-label={statusText} role="img"/>
       <span className="browser-live__url truncate" title={page?.url ?? undefined}>{label}</span>
-      <button type="button" className="browser-live__icon" aria-label="뒤로" title="뒤로" disabled={status === 'ended'} onClick={() => void send({ type: 'navigate', action: 'back' })}><ArrowLeft size={15}/></button>
-      <button type="button" className="browser-live__icon" aria-label="앞으로" title="앞으로" disabled={status === 'ended'} onClick={() => void send({ type: 'navigate', action: 'forward' })}><ArrowRight size={15}/></button>
-      <button type="button" className="browser-live__icon" aria-label="새로고침" title="새로고침" disabled={status === 'ended'} onClick={() => void send({ type: 'navigate', action: 'reload' })}><RotateCw size={15}/></button>
+      <button type="button" className="browser-live__icon" aria-label="뒤로" title="뒤로" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'back' })}><ArrowLeft size={15}/></button>
+      <button type="button" className="browser-live__icon" aria-label="앞으로" title="앞으로" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'forward' })}><ArrowRight size={15}/></button>
+      <button type="button" className="browser-live__icon" aria-label="새로고침" title="새로고침" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'reload' })}><RotateCw size={15}/></button>
       {!shell && <button type="button" className="browser-live__mac" disabled={status === 'ended' || macOpened} onClick={openWindow}>
         <Monitor size={13} aria-hidden="true"/>{macOpened ? 'Mac에서 열었어요' : 'Mac 창으로 열기'}
       </button>}
@@ -446,16 +470,16 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
         {status === 'ended' ? endReason || '브라우저 세션이 종료되었습니다.' : busy ? '화면을 연결하는 중…' : ''}
       </div>}
       {/* The keyboard lands here: printable text, Korean composition and paste go out as text. */}
-      {!touch && <textarea ref={fieldRef} className="browser-live__field" aria-label="브라우저에 입력" rows={1} maxLength={2000}
+      {!touch && <textarea ref={fieldRef} className="browser-live__field" aria-label="브라우저에 입력" rows={1} maxLength={2000} disabled={status !== 'live'}
         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
         onInput={onFieldInput} onCompositionEnd={onCompositionEnd} onPaste={onFieldPaste}/>}
     </div>
     {touch && <form className="browser-live__type" onSubmit={submitTouchText}>
-      <Input ref={touchFieldRef} aria-label="브라우저에 입력할 내용" placeholder="선택한 곳에 입력됩니다" maxLength={2000}
+      <Input ref={touchFieldRef} aria-label="브라우저에 입력할 내용" placeholder="선택한 곳에 입력됩니다" maxLength={2000} disabled={status !== 'live'}
         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}/>
-      <button type="button" className="browser-live__icon" aria-label="Enter" title="Enter" disabled={status === 'ended'}
+      <button type="button" className="browser-live__icon" aria-label="Enter" title="Enter" disabled={status !== 'live'}
         onClick={() => void send({ type: 'key', event: 'down', key: 'Enter', code: 'Enter' }).then(() => send({ type: 'key', event: 'up', key: 'Enter', code: 'Enter' }))}><CornerDownLeft size={15}/></button>
-      <Button type="submit" size="icon" aria-label="글자 보내기" title="글자 보내기" className="rounded-pill"><Send/></Button>
+      <Button type="submit" size="icon" aria-label="글자 보내기" title="글자 보내기" className="rounded-pill" disabled={status !== 'live'}><Send/></Button>
     </form>}
     {inputError && <InlineError>{inputError}</InlineError>}
   </div>;
