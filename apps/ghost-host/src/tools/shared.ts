@@ -91,6 +91,7 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   desktop_pointer: ["direct", "work"],
   desktop_keys: ["direct", "work"],
   desktop_propose: ["direct", "work"],
+  toss_read: ["direct", "work"],
 };
 
 /**

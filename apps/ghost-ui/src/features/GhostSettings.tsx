@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, DESKTOP_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
 import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -35,6 +35,7 @@ export const toolLabels: Record<GhostTool, string> = {
   desktop_fill: 'PC 값 채우기', desktop_type: 'PC 입력', desktop_select: 'PC 선택', desktop_check: 'PC 체크',
   desktop_scroll: 'PC 스크롤', desktop_press: 'PC 키 누르기', desktop_launch: 'PC 앱 열기', desktop_focus: 'PC 창 앞으로',
   desktop_wait: 'PC 대기', desktop_pointer: 'PC 포인터 직접 조작', desktop_keys: 'PC 키보드 직접 입력', desktop_propose: 'PC 클릭 제안',
+  toss_read: '토스증권 조회',
 };
 
 /** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. Exported for the coverage test. */
@@ -52,6 +53,7 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '자동 활동', tools: ['activity_propose'] },
   { title: 'Mac', tools: [...HOST_TOOLS], privileged: true },
   { title: 'PC 조작', tools: [...DESKTOP_TOOLS], privileged: true },
+  { title: '자산', tools: [...FINANCE_TOOLS], privileged: true },
 ];
 /** 대화 종류에 따라 항상 쓰는 도구. 선택 목록에 없고 끌 수 없다. */
 const alwaysTools = ['소유자에게 묻기', '위임한 Ghost에게 묻기', '자식 일에 답하기', '일 완료 보고', '일 상태 보고', '결과물 읽기', '실행 기록 보기', '관측 근거 읽기', '검토 판정'];

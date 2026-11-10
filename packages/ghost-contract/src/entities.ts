@@ -56,7 +56,7 @@ export const ExecutionTarget = Type.Union([
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTarget>;
 
-/** Selectable Ghost grants. Lifecycle tools (including ask_parent/ask_peer/answer_question), self_adapt/capability_request, Host memory and main-only management/work_steer are fixed, not selectable. Host and desktop tools reach the owner's Mac outside the sandbox and are never granted by default. */
+/** Selectable Ghost grants. Lifecycle tools (including ask_parent/ask_peer/answer_question), self_adapt/capability_request, Host memory and main-only management/work_steer are fixed, not selectable. Host and desktop tools reach the owner's Mac outside the sandbox, and finance tools read the owner's brokerage accounts; none is granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
@@ -132,6 +132,7 @@ export const GhostTool = Type.Union([
   Type.Literal("desktop_pointer"),
   Type.Literal("desktop_keys"),
   Type.Literal("desktop_propose"),
+  Type.Literal("toss_read"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 
@@ -211,6 +212,7 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "desktop_pointer",
   "desktop_keys",
   "desktop_propose",
+  "toss_read",
 ];
 
 /** Tools that observe or change the owner's Mac. Granted only explicitly, never by default. */
@@ -228,8 +230,14 @@ export const VAULT_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => to
  */
 export const DESKTOP_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("desktop_"));
 
-/** The allow-list a new Ghost gets when none is given: every selectable tool except host and PC control tools. */
-export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool));
+/**
+ * The owner's brokerage accounts, read-only: holdings, transactions and orders reach the Ghost's model provider.
+ * Granted only explicitly, never by default; each call also needs an API key the owner granted in the vault.
+ */
+export const FINANCE_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("toss_"));
+
+/** The allow-list a new Ghost gets when none is given: every selectable tool except host, PC control and finance tools. */
+export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool) && !FINANCE_TOOLS.includes(tool));
 
 /** A skill directory name under the configured skills root. */
 export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });
@@ -424,7 +432,11 @@ export const Decision = Type.Object({
 });
 export type Decision = Static<typeof Decision>;
 
-export const VaultItemKind = Type.Union([Type.Literal("login"), Type.Literal("card"), Type.Literal("contact"), Type.Literal("secret")]);
+/**
+ * `api` is a service credential (an optional client/key id in `username`, the secret in `value`) that only Host
+ * integrations use; it is never filled into a page.
+ */
+export const VaultItemKind = Type.Union([Type.Literal("login"), Type.Literal("card"), Type.Literal("contact"), Type.Literal("secret"), Type.Literal("api")]);
 export type VaultItemKind = Static<typeof VaultItemKind>;
 
 export const VaultContact = Type.Object({
@@ -443,7 +455,7 @@ export const VaultItem = Type.Object({
   id: Id,
   kind: VaultItemKind,
   title: Type.String({ minLength: 1, maxLength: 256 }),
-  /** Canonical https origin a login or secret belongs to. */
+  /** Canonical https origin a login, secret or API credential belongs to. */
   origin: nullable(Type.String({ maxLength: 512 })),
   /** More exact https origins where the same login is entered, such as a separate login host (`https://login.example.com`). */
   extraOrigins: Type.Optional(Type.Array(Type.String({ maxLength: 512 }), { maxItems: 8 })),
