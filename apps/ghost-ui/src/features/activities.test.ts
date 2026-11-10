@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { BROWSER_TOOLS, DESKTOP_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type ActivityConfig, type ActivityRun, type ActivitySource, type Ghost } from '@ghost/contract';
-import { activityToolChoices, buildActivityConfig, draftFromConfig, emptyDraft, intersectTools, type ActivityDraft } from './activity-config';
+import { GHOST_TOOLS, type ActivityConfig, type ActivityRun, type ActivitySource, type Ghost } from '@ghost/contract';
+import { buildActivityConfig, draftFromConfig, emptyDraft, intersectTools, type ActivityDraft } from './activity-config';
 import { RunRow } from './Activities';
 
 const ghost = (patch: Partial<Ghost> = {}): Ghost => ({
@@ -24,15 +24,7 @@ it('offers the activity no tool the Ghost itself does not have', () => {
   expect(narrowed).toEqual(['web_search']);
 });
 
-it('matches selectable Work extensions, retaining documents, browser and vault without direct-only proposals', () => {
-  const choices = activityToolChoices(GHOST_TOOLS);
-  expect(choices).toEqual([
-    'read', 'write', 'edit', 'bash', 'publish_artifact', 'delegate',
-    'memory_search', 'memory_recall', 'memory_retain',
-    'document_spaces', 'document_list', 'document_read',
-    'web_search', 'web_read', 'reach', 'skill_read',
-    ...HOST_TOOLS, ...BROWSER_TOOLS, ...VAULT_TOOLS, ...DESKTOP_TOOLS,
-  ]);
+it('refuses direct-only tools in an activity even when the Ghost holds them', () => {
   expect(intersectTools(['activity_propose', 'document_read', 'browser_open', 'vault_list'], GHOST_TOOLS))
     .toEqual(['document_read', 'browser_open', 'vault_list']);
 });

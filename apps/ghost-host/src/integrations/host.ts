@@ -20,6 +20,7 @@ import type {
 } from "./ports.ts";
 import { assertFetchableUrl } from "./netguard.ts";
 import { NoEffect } from "../core/effects.ts";
+import { readVerificationCodes, type ReadVerificationCodesInput } from "./messages.ts";
 
 const GB = 1_073_741_824;
 const PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin";
@@ -918,6 +919,9 @@ export class MacHost implements HostPort {
         error: "invalid Tailscale status",
       };
     }
+  }
+  messageCodes(input: ReadVerificationCodesInput) {
+    return readVerificationCodes(input);
   }
   async diskUsage(path: string) {
     const canonical = this.resolve(path);

@@ -3,6 +3,7 @@ import './ui/styles.css';
 import './app.css';
 import './pets/pets.css';
 import './features/manage.css';
+import './features/mail/mail.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';

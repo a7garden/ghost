@@ -28,6 +28,7 @@ import type {
   Verdict,
 } from "@ghost/contract";
 import { MIGRATIONS } from "./schema.ts";
+import { migrateBrowserAuthority } from "./browser-authority.ts";
 
 type Row = Record<string, SQLQueryBindings>;
 type Listener = (event: LedgerEvent) => void;
@@ -86,6 +87,7 @@ export class Ledger {
     try {
       this.db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
       this.migrate();
+      migrateBrowserAuthority(this.db);
     } catch (error) {
       this.db.close();
       throw error;

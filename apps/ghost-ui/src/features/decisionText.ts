@@ -45,6 +45,7 @@ export type SecureFormValues = {
   username: string; password: string; totp: string;
   cardNumber: string; cardExpiry: string; cardCvc: string; cardName: string;
   contactName: string; contactPhone: string; contactEmail: string; contactAddress: string;
+  contactAddressDetail: string; contactPostalCode: string;
   value: string;
 };
 
@@ -53,6 +54,7 @@ export const emptySecureForm: SecureFormValues = {
   username: '', password: '', totp: '',
   cardNumber: '', cardExpiry: '', cardCvc: '', cardName: '',
   contactName: '', contactPhone: '', contactEmail: '', contactAddress: '',
+  contactAddressDetail: '', contactPostalCode: '',
   value: '',
 };
 
@@ -87,6 +89,8 @@ export function secureFormBody(request: SecureFormRequest, values: SecureFormVal
       ...(trim(values.contactPhone) ? { phone: trim(values.contactPhone) } : {}),
       ...(trim(values.contactEmail) ? { email: trim(values.contactEmail) } : {}),
       ...(trim(values.contactAddress) ? { address: trim(values.contactAddress) } : {}),
+      ...(trim(values.contactAddressDetail) ? { addressDetail: trim(values.contactAddressDetail) } : {}),
+      ...(trim(values.contactPostalCode) ? { postalCode: trim(values.contactPostalCode) } : {}),
     };
     if (!Object.keys(contact).length) return { error: '한 항목 이상 입력해 주세요.' };
     return { body: { kind: request.kind, contact, save } };

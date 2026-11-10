@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { BriefcaseBusiness, Home, Inbox, Menu, MessageCircle, PanelsTopLeft, Search, Settings } from 'lucide-react';
+import { BriefcaseBusiness, Home, Inbox, Mail, Menu, MessageCircle, PanelsTopLeft, Search, Settings } from 'lucide-react';
 import { CommandPalette, Dialog, DialogContent, DialogTitle, TitleBar, type CommandItem } from '../ui'
 import { routeLabels } from '../uiText';
 import { shortcut } from '../ui/keys';
@@ -39,6 +39,7 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
     { id: 'conversations', path: '/conversations', label: routeLabels.conversations, icon: MessageCircle },
     { id: 'inbox', path: '/inbox', label: routeLabels.inbox, icon: Inbox },
     { id: 'work', path: '/work', label: routeLabels.work, icon: BriefcaseBusiness },
+    { id: 'mail', path: '/mail', label: routeLabels.mail, icon: Mail },
     { id: 'workspace', path: '/workspace', label: '작업실', icon: PanelsTopLeft },
     { id: 'settings', path: '/settings', label: routeLabels.settings, icon: Settings },
   ];

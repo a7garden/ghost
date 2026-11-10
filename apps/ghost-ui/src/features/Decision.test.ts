@@ -152,6 +152,17 @@ describe('readable cards', () => {
     expect(markup).not.toContain('decision__detail');
   });
 
+  it('never exposes card number or CVC in a grouped fill approval', () => {
+    const fill = (total: string | null) => decision({ proposal: { input: { number: '4111 1111 1111 1111', cvc: '679' }, url: 'https://shop.example/pay', origin: 'https://shop.example',
+      merchant: '예시 상점', total, itemTitle: '회사 카드', last4: '1234', fields: ['card_number', 'card_expiry', 'card_cvc'], expiresAt: null } });
+    expect(highRiskApproval(fill('₩39,000'))).toBe(true);
+    expect(highRiskApproval(fill(null))).toBe(true);
+    for (const total of ['₩39,000', null]) {
+      const markup = render(fill(total));
+      expect(markup).not.toContain('4111 1111 1111 1111');
+      expect(markup).not.toContain('679');
+    }
+  });
 });
 
 describe('DecisionCard render', () => {
@@ -168,11 +179,13 @@ describe('DecisionCard render', () => {
     expect(markup).toContain('일회용 코드 시드');
     expect(markup).toContain('금고에 저장');
     expect(markup).toContain('금고에 전달');
+    expect(markup).toContain('aria-checked="true"');
     expect(markup).toContain('type="password"');
     // The chat answer path is gone from the card.
     expect(markup).not.toContain('답변을 적어 주세요');
     expect(markup).not.toContain('답변 보내기');
   });
+
 
 });
 
@@ -222,6 +235,8 @@ describe('secureFormBody', () => {
     const contact = { kind: 'contact' as const, origin: null, title: null, reason: '연락처가 필요합니다.' };
     expect(secureFormBody(contact, { ...emptySecureForm, contactName: '홍길동', contactEmail: ' h@e.com ' }, true))
       .toEqual({ body: { kind: 'contact', contact: { name: '홍길동', email: 'h@e.com' }, save: true } });
+    expect(secureFormBody(contact, { ...emptySecureForm, contactAddress: ' 서울시 ', contactAddressDetail: ' 101동 202호 ', contactPostalCode: ' 04524 ' }, true))
+      .toEqual({ body: { kind: 'contact', contact: { address: '서울시', addressDetail: '101동 202호', postalCode: '04524' }, save: true } });
     expect(secureFormBody(contact, emptySecureForm, true)).toEqual({ error: '한 항목 이상 입력해 주세요.' });
     const secret = { kind: 'secret' as const, origin: null, title: null, reason: '키가 필요합니다.' };
     expect(secureFormBody(secret, { ...emptySecureForm, value: ' raw value ' }, false))

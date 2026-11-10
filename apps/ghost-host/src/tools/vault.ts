@@ -7,7 +7,7 @@ import { Vault, normalizeOrigin } from "../stores/vault.ts";
 import { invalid } from "../core/errors.ts";
 import { errorResult, requireAllowed } from "./shared.ts";
 
-export const VAULT_INSTRUCTIONS = "Use vault_list to choose granted credentials by exact HTTPS origin and owner hints. Use vault_request for a secure owner form; never ask for or accept passwords, codes, card values or secrets in chat. vault_generate_login reuses a granted login for the exact origin and username, otherwise saves a generated password without revealing it (200 Ghost-created items per Ghost). Fill credentials only with browser_fill_secret; never try to reveal them.";
+export const VAULT_INSTRUCTIONS = "Use vault_list by exact HTTPS origin and hints. Use vault_request for a secure owner form, never credentials in chat. vault_generate_login saves generated passwords without revealing them (200 Ghost-created items per Ghost). Fill credentials with browser_fill_secret and cards with browser_fill_card. Contact items hold the owner's name, phone, email, address, addressDetail and postalCode for forms; these are not secrets, so use browser_fill.";
 
 export function createVaultTools(core: Core, vault: Vault): Extension {
   return defineExtension({
