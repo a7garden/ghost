@@ -32,6 +32,33 @@ test('a narrow Tauri Mac window retains desktop chrome and the original menu', a
   await expect(page.locator('.workspace-page')).toHaveCount(0);
 });
 
+test('Tauri titlebar descendants drag without stealing control clicks', async ({ page }) => {
+  await page.addInitScript(() => {
+    const bridge = { drags: 0, invoke: async (command: string) => {
+      if (command === 'drag_window') bridge.drags++;
+      return command === 'companion_enabled' ? false : undefined;
+    } };
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: bridge });
+  });
+  await openScreen(page, { name: 'home', route: () => '/', waits: () => [] }, 'light');
+  const drags = () => page.evaluate(() => {
+    const bridge = window.__TAURI_INTERNALS__;
+    return bridge && 'drags' in bridge ? bridge.drags : null;
+  });
+  await page.locator('.title-nav [aria-current="page"]').click();
+  expect(await drags()).toBe(1);
+
+  await page.getByRole('button', { name: '명령 검색', exact: true }).locator('svg').click();
+  await expect(page.getByRole('dialog', { name: '명령', exact: true })).toBeVisible();
+  expect(await drags()).toBe(1);
+  await page.keyboard.press('Escape');
+  await page.locator('.title-nav__step').first().locator('svg').dispatchEvent('mousedown', { button: 0, detail: 1, bubbles: true });
+  expect(await drags()).toBe(1);
+  await page.getByRole('button', { name: '설정', exact: true }).click();
+  await expect(page).toHaveURL(/#\/settings/);
+  expect(await drags()).toBe(1);
+});
+
 test('desktop message menus offer copy link only for the clicked link', async ({ page }) => {
   await openScreen(page, { name: 'rich', route: state => `/ghosts/${state.defaultGhostId}`, waits: () => [], prepare: mockRichConversation }, 'light');
   const transcript = page.locator('.ghost-conversation__transcript');

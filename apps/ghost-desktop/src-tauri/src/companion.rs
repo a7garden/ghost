@@ -678,6 +678,56 @@ pub fn companion_anchor(window: WebviewWindow, bounds: VisibleAnchor) -> Result<
     Ok(())
 }
 
+/// Track a held pointer on a worker; all NSWindow access stays on the main thread.
+/// WebKit IPC cannot provide the original AppKit press for performWindowDragWithEvent.
+#[cfg(target_os = "macos")]
+pub(super) fn track_window_drag(window: &WebviewWindow) -> Result<bool, String> {
+    use objc2_app_kit::{NSEvent, NSWindow};
+    use std::{sync::mpsc, time::Duration};
+    let (sender, receiver) = mpsc::channel();
+    let initial = window.clone();
+    window
+        .run_on_main_thread(move || {
+            let result = initial
+                .ns_window()
+                .map(|pointer| {
+                    // SAFETY: this callback runs on the main thread; Tauri owns the window.
+                    let native = unsafe { &*pointer.cast::<NSWindow>() };
+                    let origin = native.frame().origin;
+                    let mouse = NSEvent::mouseLocation();
+                    (origin.x, origin.y, mouse.x, mouse.y)
+                })
+                .map_err(|error| error.to_string());
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+    let (x, y, mouse_x, mouse_y) = receiver.recv().map_err(|error| error.to_string())??;
+    let mut moved = false;
+    while NSEvent::pressedMouseButtons() & 1 != 0 {
+        let mouse = NSEvent::mouseLocation();
+        let dx = mouse.x - mouse_x;
+        let dy = mouse.y - mouse_y;
+        if moved || dx.hypot(dy) >= 4.0 {
+            moved = true;
+            let target = window.clone();
+            window
+                .run_on_main_thread(move || {
+                    if let Ok(pointer) = target.ns_window() {
+                        // SAFETY: live Tauri window, accessed only on the main thread.
+                        let native = unsafe { &*pointer.cast::<NSWindow>() };
+                        let mut origin = native.frame().origin;
+                        origin.x = x + dx;
+                        origin.y = y + dy;
+                        native.setFrameOrigin(origin);
+                    }
+                })
+                .map_err(|error| error.to_string())?;
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    Ok(moved)
+}
+
 /// Borderless, non-key windows cannot reliably use AppKit's event-driven
 /// performWindowDragWithEvent through WebKit IPC. Track the global pointer
 /// without activating the app; frame updates stay on AppKit's main thread.
@@ -686,49 +736,8 @@ pub async fn companion_drag(window: WebviewWindow) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
         tauri::async_runtime::spawn_blocking(move || {
-            use objc2_app_kit::{NSEvent, NSWindow};
-            use std::{sync::mpsc, time::Duration};
-            let (sender, receiver) = mpsc::channel();
-            let initial = window.clone();
-            window
-                .run_on_main_thread(move || {
-                    let result = initial
-                        .ns_window()
-                        .map(|pointer| {
-                            // SAFETY: this callback runs on the main thread; Tauri owns the window.
-                            let native = unsafe { &*pointer.cast::<NSWindow>() };
-                            let origin = native.frame().origin;
-                            let mouse = NSEvent::mouseLocation();
-                            (origin.x, origin.y, mouse.x, mouse.y)
-                        })
-                        .map_err(|error| error.to_string());
-                    let _ = sender.send(result);
-                })
-                .map_err(|error| error.to_string())?;
-            let (x, y, mouse_x, mouse_y) = receiver.recv().map_err(|error| error.to_string())??;
-            let mut moved = false;
-            while NSEvent::pressedMouseButtons() & 1 != 0 {
-                let mouse = NSEvent::mouseLocation();
-                let dx = mouse.x - mouse_x;
-                let dy = mouse.y - mouse_y;
-                if moved || dx.hypot(dy) >= 4.0 {
-                    moved = true;
-                    let target = window.clone();
-                    window
-                        .run_on_main_thread(move || {
-                            if let Ok(pointer) = target.ns_window() {
-                                // SAFETY: live Tauri window, accessed only on the main thread.
-                                let native = unsafe { &*pointer.cast::<NSWindow>() };
-                                let mut origin = native.frame().origin;
-                                origin.x = x + dx;
-                                origin.y = y + dy;
-                                native.setFrameOrigin(origin);
-                            }
-                        })
-                        .map_err(|error| error.to_string())?;
-                }
-                std::thread::sleep(Duration::from_millis(16));
-            }
+            use std::sync::mpsc;
+            let moved = track_window_drag(&window)?;
             if moved {
                 // Queue after all frame updates, then save once on this worker.
                 let (sender, receiver) = mpsc::channel();
@@ -753,7 +762,7 @@ pub async fn companion_drag(window: WebviewWindow) -> Result<bool, String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        super::drag_window(window)?;
+        super::drag_window(window).await?;
         Ok(false)
     }
 }
