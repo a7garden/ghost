@@ -1,4 +1,5 @@
-import { DESTRUCTIVE_RISK, reviewOf, type Decision, type DecisionReview, type VaultItem, type Work } from "@ghost/contract";
+import { CAPABILITY_GRANT, DESTRUCTIVE_RISK, HOST_TOOLS, reviewOf, type CapabilityRequest, type Decision, type DecisionReview, type VaultItem, type Work } from "@ghost/contract";
+import { updateGhost } from "./commands.ts";
 import type { Core } from "./core.ts";
 import { NoEffect } from "./effects.ts";
 import { conflict, invalid } from "./errors.ts";
@@ -189,12 +190,49 @@ export class Decisions {
   private async answerQuestion(decision: Decision) {
     const by = reviewOf(decision.proposal)?.resolvedBy;
     const who = by === "timeout" ? "The owner did not answer in time, so the Host took your recommended answer for" : by === "main" ? "The main Ghost answered for the owner" : "The owner answered";
-    const text =
-      decision.state === "answered"
+    const granted = this.grantCapability(decision, by ?? "owner");
+    const text = granted
+      ? `${who} "${decision.title}": ${decision.answer ?? CAPABILITY_GRANT}\n${granted}`
+      : decision.state === "answered"
         ? `${who} "${decision.title}": ${decision.answer ?? ""}`
         : `${by === "main" ? "The main Ghost declined" : "The owner declined"} to answer "${decision.title}".`;
     if (decision.workId) this.core.works.resumeFromWaiting(decision.workId);
+    // The granted tools must be configured before the turn that reads the answer starts.
+    if (granted) await this.core.openConversation(decision.conversationId);
     await this.core.engine.submit(decision.conversationId, { text, origin: "decision", requestId: `decision:${decision.id}` });
+  }
+
+  /**
+   * The grant and its marker commit together; replaying a failed answer delivery never undoes a later revocation.
+   */
+  private grantCapability(decision: Decision, by: ResolvedBy): string | null {
+    const request = decision.proposal?.capability as CapabilityRequest | undefined;
+    if (!request || !(decision.state === "approved" || (decision.state === "answered" && grants(decision.answer)))) return null;
+    const ghost = this.ledger.ghost(request.ghostId);
+    if (ghost.deletedAt !== null) return null;
+    this.ledger.tx(() => {
+      const current = this.ledger.decision(decision.id);
+      if ((current.proposal?.capability as CapabilityRequest | undefined)?.grantedAt) return;
+      const fresh = this.ledger.ghost(ghost.id);
+      const tools = request.tools.filter((tool) => !fresh.tools.includes(tool));
+      const pc = request.hostExecution && !fresh.hostExecution;
+      const host = [...(pc ? ["PC 직접 실행"] : []), ...HOST_TOOLS.filter((tool) => tools.includes(tool))];
+      if (tools.length > 0 || pc) updateGhost(this.core, fresh.id, { tools: [...fresh.tools, ...tools], ...(pc ? { hostExecution: true } : {}) });
+      if (host.length > 0) {
+        this.core.notify({
+          id: `grant:decision:${decision.id}`, kind: "message", ghostId: fresh.id, conversationId: decision.conversationId, workId: decision.workId, decisionId: decision.id,
+          title: `${fresh.name}에게 ${host.join(", ")} 허용`,
+          body: `${by === "owner" ? "소유자가" : by === "main" ? "메인 Ghost가" : "기다리는 시간이 지나"} ${fresh.name}의 요청을 허용했습니다. 설정 › Ghost에서 되돌릴 수 있습니다.`,
+        });
+      }
+      this.ledger.putDecision({ ...current, proposal: { ...current.proposal, capability: { ...request, grantedAt: Date.now() } } });
+    });
+    const work = decision.workId ? this.ledger.work(decision.workId) : null;
+    return [
+      `Granted${request.tools.length ? `: ${request.tools.join(", ")}` : ""}${request.hostExecution ? `${request.tools.length ? " and" : ":"} direct PC execution` : ""}. The tools are yours from your next step.`,
+      work?.toolScope && request.tools.some((tool) => !work.toolScope!.includes(tool)) ? "This Work's own activity scope still excludes some of them; they apply to your other conversations." : "",
+      request.hostExecution && work && work.execution?.kind !== "host" ? "PC execution applies to Works created to run on the Mac; this Work keeps its environment." : "",
+    ].filter(Boolean).join(" ");
   }
 
   /**
@@ -224,7 +262,10 @@ export class Decisions {
   private withReview(decision: Decision): Decision {
     if (!this.reversible(decision)) return decision;
     const { autoMinutes } = this.policy();
-    const expiresAt = autoMinutes > 0 && this.automatic(decision) ? decision.createdAt + autoMinutes * MINUTE : null;
+    // A request to open the owner's Mac (PC execution, host tools) never goes ahead on silence: the main or the owner decides it.
+    const request = decision.proposal?.capability as CapabilityRequest | undefined;
+    const opensMac = !!request && (request.hostExecution || request.tools.some((tool) => HOST_TOOLS.includes(tool)));
+    const expiresAt = autoMinutes > 0 && this.automatic(decision) && !opensMac ? decision.createdAt + autoMinutes * MINUTE : null;
     const prior = reviewOf(decision.proposal);
     const review: DecisionReview = decision.kind === "question" ? { recommend: "answer", answer: prior!.answer, expiresAt } : { recommend: "approve", expiresAt };
     return { ...decision, proposal: { ...decision.proposal, review } };
@@ -341,4 +382,10 @@ function stateFor(decision: Decision, resolution: Resolution): Decision["state"]
     return "answered";
   }
   return resolution.outcome === "approve" ? "approved" : "denied";
+}
+
+/** Only exact affirmative tokens grant; “허용하지 마세요” must never open the Mac. */
+function grants(answer: string | null): boolean {
+  const text = (answer ?? "").trim().replace(/[.!。]+$/, "").toLowerCase();
+  return [CAPABILITY_GRANT, "allow", "grant", "approve", "yes", "예", "네"].includes(text);
 }

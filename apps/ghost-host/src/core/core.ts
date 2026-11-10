@@ -3,7 +3,7 @@ import type { Ledger } from "../ledger/ledger.ts";
 import { Decisions } from "./decisions.ts";
 import { Effects } from "./effects.ts";
 import { conflict, invalid } from "./errors.ts";
-import { newId } from "./ids.ts";
+import { idFor, newId } from "./ids.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import type { ArtifactStore, Engine, EngineEvents, SandboxControl, Secrets } from "./ports.ts";
 import { Schedules } from "./schedules.ts";
@@ -13,6 +13,7 @@ import { CodexCatalog } from "../integrations/codex-catalog.ts";
 import { Activities } from "./activities.ts";
 import type { ActivitySourcePort } from "../integrations/activity-sources.ts";
 import { Autonomy, type AutonomyDeps } from "./autonomy.ts";
+import { Adaptations } from "./adaptations.ts";
 import { DutyClock } from "./duty.ts";
 import type { SourceStore } from "../stores/sources.ts";
 
@@ -50,6 +51,7 @@ export class Core implements EngineEvents {
   readonly schedules: Schedules;
   readonly activities: Activities;
   readonly autonomy: Autonomy;
+  readonly adaptations: Adaptations;
   /** 출근 · 퇴근. 퇴근 중에는 Ghost 가 스스로 새 일을 시작하지 않는다. */
   readonly duty: DutyClock;
   readonly activitySources: ActivitySourcePort | null;
@@ -80,6 +82,7 @@ export class Core implements EngineEvents {
     this.sources = deps.sources ?? null;
     this.activities = new Activities(this, this.activitySources);
     this.autonomy = new Autonomy(this, deps.autonomy);
+    this.adaptations = new Adaptations(this);
     this.duty = new DutyClock(this);
     // 출근하면 퇴근 중에 때가 된 예약 · 활동 규칙 · 자율 깨우기를 바로 돌린다. 퇴근하면 예약 타이머를 다시 맞춘다.
     this.duty.onChange((onDuty) => {
@@ -202,11 +205,18 @@ export class Core implements EngineEvents {
 
   // Ghosts and conversations
 
-  /** Create a Ghost with its main direct conversation. New Ghosts default to every selectable tool except host tools. */
-  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "model" | "look" | "isDefault" | "tools" | "fallbacks" | "skills" | "hostExecution">>): Ghost {
+  /**
+   * Create a Ghost with its main direct conversation. New Ghosts default to every selectable tool except host tools.
+   * `id` comes from a tool call when the main Ghost creates one, so a replayed call finds the Ghost it made.
+   */
+  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "id" | "model" | "look" | "isDefault" | "tools" | "fallbacks" | "skills" | "hostExecution">>): Ghost {
+    if (input.id) {
+      const existing = this.ledger.ghosts().find((ghost) => ghost.id === input.id);
+      if (existing) return existing;
+    }
     const now = Date.now();
-    const id = newId();
-    const conversationId = newId();
+    const id = input.id ?? newId();
+    const conversationId = input.id ? idFor(input.id, "direct") : newId();
     const ghost: Ghost = {
       id,
       name: input.name,
@@ -252,9 +262,10 @@ export class Core implements EngineEvents {
     await this.engine.open({ conversation, ghost, work });
   }
 
-  /** Re-open every live conversation of a Ghost after its persona, model or grants changed. */
-  refreshGhost(ghostId: string) {
+  /** Re-open every live conversation of a Ghost after its persona, model, grants or notes changed; `except` keeps the caller's own run. */
+  refreshGhost(ghostId: string, except?: string) {
     for (const conversation of this.ledger.conversations({ ghostId })) {
+      if (conversation.id === except) continue;
       if (conversation.kind !== "direct" && conversation.workId) {
         const work = this.ledger.work(conversation.workId);
         if (["done", "failed", "cancelled"].includes(work.state)) continue;

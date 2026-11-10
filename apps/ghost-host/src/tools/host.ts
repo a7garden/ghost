@@ -71,10 +71,16 @@ export function createHostTools(core: Core, host: HostPort): Extension {
         name,
         description:
           name === "host_read"
-            ? `Read at most 12 KB of UTF-8 text from an absolute path inside configured project roots only, never caches. Secrets, private text paths and project symlinks are refused. ${UNTRUSTED}`
-            : `Inspect an absolute directory inside configured project/cache roots. Secret paths are refused and lists show at most 100 entries. ${UNTRUSTED}`,
+            ? `Read a line page of UTF-8 text (at most 12 KB, files at most 8 MiB) inside owner home; offset is a 1-based start line and limit is the maximum lines. Follow nextOffset for more. Secrets, private paths, Ghost state and descendant symlinks are refused. ${UNTRUSTED}`
+            : name === "host_list"
+              ? `List at most 100 entries inside owner home, excluding secret paths; private app-data and Ghost state are refused. ${UNTRUSTED}`
+              : `Inspect an absolute directory inside configured project/cache roots. Secret paths are refused. ${UNTRUSTED}`,
         parameters: Type.Object({
           path: Type.String({ minLength: 1, maxLength: 4096 }),
+          ...(name === "host_read" ? {
+            offset: Type.Optional(Type.Integer({ minimum: 1, description: "1-based start line; use nextOffset from the previous page." })),
+            limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum number of lines, still bounded to 12 KB." })),
+          } : {}),
         }),
         replay: "safe",
         async execute(args, api) {
@@ -85,7 +91,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
                 ? await host.diskUsage(args.path)
                 : name === "host_list"
                   ? await host.list(args.path)
-                  : await host.read(args.path);
+                  : await host.read(args.path, args.offset as number | undefined, args.limit as number | undefined);
             return {
               content: [{ type: "text", text: JSON.stringify(result) }],
             };
@@ -98,7 +104,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
   const propose = defineTool({
     name: "host_command_propose",
     description:
-      "Inspect read-only Mac facts directly: strictly allowlisted filesystem/system commands and Git reads execute without approval or effect journaling. Paths/cwd must resolve inside owner home; text reads refuse private paths, and all inspection refuses secrets and Ghost state. head/tail accept line counts, not byte slicing. launchctl print returns status fields only. Git ls-remote accepts configured public HTTPS remotes or explicit github.com repository URLs, never arbitrary URLs or IP literals. Commands outside inspection policy fall through to individual owner approval with a configured-project cwd. Explain deletion/lost-data/rebuild risks. Use absolute executables and argv, no shell syntax. Inspect facts first and batch owner questions. 90s deadline; change proposals expire after 24h and may partially apply before failure.",
+      "Inspect read-only Mac facts directly: allowlisted filesystem/system commands and Git reads execute without approval or effect journaling. Use a read program name (cat, tail, sed, grep, find, wc, which, ls, git) or its allowlisted absolute path plus args argv without a shell, one command per call. Paths/cwd resolve inside owner home; secrets, private text paths, Ghost state and descendant text symlinks are refused. head/tail accept line counts only, never automatic byte slicing; sed accepts only -n print ranges; grep never reads pattern files and recursive grep requires every path inside configured project roots, pruning secret/private entries. Git ls-remote accepts configured public HTTPS remotes or explicit github.com repository URLs. Other permitted programs require individual owner approval with a configured-project cwd; explain deletion/lost-data/rebuild risks. If approval is required nothing ran: do not retry or wait, continue other steps or end the turn; the outcome arrives as a message. 90s deadline; change proposals expire after 24h and may partially apply before failure.",
     parameters: Type.Object({
       title: Type.String({ minLength: 1, maxLength: 2000 }),
       reason: Type.String({ minLength: 1, maxLength: 2000 }),
@@ -144,7 +150,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
           content: [
             {
               type: "text",
-              text: `Owner approval required (${effect.id}); nothing has executed.`,
+              text: `Owner approval required (${effect.id}); nothing ran, so do not retry or wait — continue with other steps or end the turn; the outcome arrives as a message.`,
             },
           ],
         };

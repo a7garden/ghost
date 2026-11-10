@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
 import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -8,6 +8,7 @@ import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { GhostDesignEditor } from './GhostDesign';
 import { toneFor } from './ghostState';
+import { relativeTime, useNow } from './time';
 import { usableProviders } from '../pets/ModelPicker';
 import { uiTerms } from '../uiText';
 import './ghost-settings.css';
@@ -51,8 +52,8 @@ const alwaysTools = ['소유자에게 묻기', '위임한 Ghost에게 묻기', '
 const states: { value: GhostState; label: string }[] = [{ value: 'active', label: '활성' }, { value: 'paused', label: '일시정지' }, { value: 'retired', label: '은퇴' }];
 
 /**
- * Ghost 설정: 위쪽 초상 줄에서 Ghost를 고르고, 아래에서 그 Ghost의 이름·메인 지정·상태·모델·역할·도구·샌드박스를 고친다.
- * 모습은 초상을 눌러 여는 꾸미기가 맡는다. 모든 변경은 ghost.update · ghost.set_default · sandbox.control로 바로 저장된다.
+ * Ghost 설정: 위쪽 초상 줄에서 Ghost를 고르고, 아래에서 그 Ghost의 이름·메인 지정·상태·모델·역할·환경 적응·도구·샌드박스를 고친다.
+ * 모습은 초상을 눌러 여는 꾸미기가 맡는다. 모든 변경은 ghost.update · ghost.adapt · ghost.set_default · sandbox.control로 바로 저장된다.
  */
 /** The settings roster: deleted Ghosts leave it, the main Ghost leads, then oldest first. Pure; tests pin it. */
 export function settingsRoster(ghosts: readonly Ghost[]): Ghost[] {
@@ -171,6 +172,12 @@ function planLine(plan: AutonomyPlan | undefined): ReactNode {
   return <>다음 <time dateTime={new Date(plan.nextAt).toISOString()}>{at}</time>{plan.intent ? ` · ${plan.intent}` : ''}</>;
 }
 
+/** Who last wrote a Ghost's 환경 적응 notes, when, and why. Pure; tests pin it. */
+export function adaptationLine(adaptation: Adaptation, now: number): string {
+  const by = { self: '스스로', main: '메인', owner: '소유자' }[adaptation.by];
+  return [by, relativeTime(adaptation.updatedAt, now), adaptation.reason].filter(Boolean).join(' · ');
+}
+
 /** One Ghost's sheet; exported for tests. */
 export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) {
   const { store } = useHost();
@@ -182,6 +189,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
   const sandbox = state?.sandboxes.find(item => item.ghostId === ghost.id);
   const plan = state?.autonomy?.find(item => item.ghostId === ghost.id);
+  const adaptation = state?.adaptations?.find(item => item.ghostId === ghost.id);
   const update = (patch: Partial<Pick<Ghost, 'name' | 'persona' | 'state' | 'tools' | 'fallbacks' | 'skills' | 'hostExecution'>> & { model?: ModelRef | null }) =>
     save({ type: 'ghost.update', ghostId: ghost.id, ...patch });
   useEffect(() => {
@@ -207,6 +215,9 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
 
     <Panel title="모델"><ModelRoute ghost={ghost} save={save}/></Panel>
     <Panel title={uiTerms.roleInstructions}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
+    <Panel title="환경 적응">
+      <AdaptationNote key={adaptation?.notes ?? ''} adaptation={adaptation} onSave={notes => save({ type: 'ghost.adapt', ghostId: ghost.id, notes })}/>
+    </Panel>
     <SkillsPanel catalog={catalog} skills={ghost.skills} onChange={skills => void update({ skills })}/>
     <Panel title="도구"><CapabilityBoard tools={ghost.tools} onChange={tools => void update({ tools })}/></Panel>
     <Panel title="운영">
@@ -434,6 +445,27 @@ function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: str
     {changed && <div className="persona-note__actions">
       <button type="button" className="persona-note__revert" onClick={() => setDraft(persona)} aria-label="되돌리기"><RotateCcw aria-hidden="true"/></button>
       <button type="button" className="persona-note__save" disabled={!draft.trim()} onClick={commit}>저장</button>
+    </div>}
+  </div>;
+}
+
+/** 환경 적응 notes: the role editor's note, a quiet line about the last change, and 되돌리기 back to the previous notes. */
+function AdaptationNote({ adaptation, onSave }: { adaptation: Adaptation | undefined; onSave(notes: string): Promise<boolean> }) {
+  const notes = adaptation?.notes ?? '';
+  const previous = adaptation?.previous ?? null;
+  const [draft, setDraft] = useState(notes);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const now = useNow();
+  useEffect(() => { const node = area.current; if (!node) return; node.style.height = 'auto'; node.style.height = `${node.scrollHeight}px`; }, [draft]);
+  const changed = draft !== notes;
+  const commit = () => { if (changed) void onSave(draft); };
+  return <div className="persona-note" data-changed={changed || undefined}>
+    <textarea ref={area} aria-label="환경 적응" value={draft} maxLength={ADAPTATION_MAX_CHARS} rows={3} placeholder="이 Mac에서 배운 사용법과 습관" onChange={event => setDraft(event.target.value)}
+      onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); commit(); } }}/>
+    {adaptation && <p className="adaptation-note__meta">{adaptationLine(adaptation, now)}</p>}
+    {(changed || previous !== null) && <div className="persona-note__actions">
+      {previous !== null && <button type="button" className="adaptation-note__revert" onClick={() => void onSave(previous)}>되돌리기</button>}
+      {changed && <button type="button" className="persona-note__save" onClick={commit}>저장</button>}
     </div>}
   </div>;
 }

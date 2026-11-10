@@ -27,8 +27,8 @@ export interface BeginCommandEffect extends Omit<BeginEffect, "tool" | "callId">
 export type EffectStart = { kind: "run"; effect: Effect } | { kind: "replay"; effect: Effect };
 
 /**
- * Journal of external side effects. `pending` is committed before I/O and becomes
- * `done` after; a `pending` row found at startup becomes `unknown` and blocks the Work.
+ * `pending` is committed before I/O and becomes `done` after; restart reconciles
+ * interrupted executions while preserving unexecuted owner-approval proposals.
  */
 /**
  * 2026-11-10 owner decision: an uncertain outcome goes back to the Ghost, which can look at files, the shell,
@@ -73,14 +73,11 @@ export class Effects {
         throw conflict(`the outcome of call ${input.callId} is ${existing.state}; it will not run again`);
       }
       if (scope === "tool") {
-        const blocking = this.unresolvedInConversation(input.conversationId)[0];
+        const blocking = this.unresolvedInConversation(input.conversationId).find((effect) => !this.awaitingApproval(effect));
         if (blocking) {
           const name = `effect ${blocking.tool} (${blocking.callId}) is unresolved`;
           if (blocking.state === "unknown") throw conflict(`${name}; nothing else runs until the owner reconciles it`);
-          const awaitingOwner = this.ledger.pendingDecisions({ effectId: blocking.id }).some((decision) => decision.kind === "approve_effect");
-          throw conflict(awaitingOwner
-            ? `${name}: it waits for the owner's approval; nothing else that changes the outside world runs here until the owner decides`
-            : `${name}: it is still running; try again after it finishes`);
+          throw conflict(`${name}: it is still running; continue with read-only steps until its result arrives`);
         }
       }
       const conversation = this.ledger.conversation(input.conversationId);
@@ -211,16 +208,22 @@ export class Effects {
     return this.ledger.effectsForWork(workId).filter((effect) => effect.state === "pending" || effect.state === "unknown");
   }
 
+  /** An unexecuted proposal is optional, not an in-flight external change. */
+  awaitingApproval(effect: Effect): boolean {
+    return effect.state === "pending" && this.ledger.pendingDecisions({ effectId: effect.id })
+      .some((decision) => decision.kind === "approve_effect");
+  }
+
   private unresolvedInConversation(conversationId: string): Effect[] {
     return [...this.ledger.effectsInState("unknown"), ...this.ledger.effectsInState("pending")].filter(
       (effect) => effect.conversationId === conversationId && !(COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool),
     );
   }
 
-  /** At startup no effect can still be running: every `pending` becomes `unknown`. */
+  /** At startup executing effects are interrupted; unexecuted proposals retain their approvals. */
   recoverInterrupted() {
     for (const effect of this.ledger.effectsInState("pending")) {
-      if (this.approved.has(effect.tool) && this.ledger.pendingDecisions({ effectId: effect.id }).length > 0) continue;
+      if (this.awaitingApproval(effect)) continue;
       this.unknown(effect.id, "the host stopped while this effect was running");
     }
   }

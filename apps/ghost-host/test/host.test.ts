@@ -147,6 +147,192 @@ class Probes implements HostPort {
 }
 
 describe("guarded Mac host", () => {
+  test("ordinary read argv forms execute directly without proposals", async () => {
+    const calls: HostRun[] = [];
+    const f = fixture(async (input) => { calls.push(input); return ok(input.args.includes("config") ? "" : "observed"); });
+    const h = harness();
+    try {
+      for (const dir of ["docs", "qa", "data", "src"]) mkdirSync(join(f.root, dir));
+      for (const file of ["docs/X.md", "qa/X.md", "data/free_talk_intents.json", "src/server.ts"])
+        writeFileSync(join(f.root, file), "propose 배송 출고\n");
+      const source = join(f.root, "src/server.ts");
+      const cases: [string, string[]][] = [
+        ["/usr/bin/tail", ["-n", "+61", "docs/X.md"]],
+        ["/usr/bin/tail", ["-n", "+301", source]],
+        ["/usr/bin/sed", ["-n", "100,180p", "qa/X.md"]],
+        ["/usr/bin/sed", ["-n", "1,170p", source]],
+        ["/usr/bin/sed", ["-n", "-e", "1p", "-e", "$p", "-e", "1,$p", source]],
+        ["/usr/bin/grep", ["-n", "propose", source]],
+        ["/usr/bin/grep", ["-rn", "-e", "배송", "-e", "출고", f.root]],
+        ["/usr/bin/grep", ["-n", "-C", "2", "-e", "배송|출고;$", source]],
+        ["/usr/bin/grep", ["-rIl", "-e", "a", "-e", "b", f.root, "--include=*.md", "--include=*.ts"]],
+        ["/usr/bin/grep", ["-c", "x", source]],
+        ["/usr/bin/grep", ["-R", "-A2", "-B", "1", "-m3", "--exclude=*.log", "--exclude-dir=vendor", "--color=never", "x", f.root]],
+        ["/usr/bin/find", [f.root, "-type", "f", "(", "-iname", "*dialog*", "-o", "-iname", "*script*", ")"]],
+        ["/usr/bin/find", [f.root, "-newer", source, "-empty", "-ls"]],
+        ...["-c", "-l", "-w", "-m"].map((flag): [string, string[]] => ["/usr/bin/wc", [flag, source]]),
+        ["/usr/bin/which", ["grep"]],
+        ["/bin/cat", ["data/free_talk_intents.json"]],
+        ["/bin/ls", ["-d", f.root]],
+        ["/usr/bin/git", ["stash", "list"]],
+        ["/usr/bin/git", ["-C", f.root, "stash", "list"]],
+        ...([
+          ["tail", ["-n", "+1", source]], ["sed", ["-n", "1p", source]],
+          ["grep", ["-n", "x", source]], ["find", [f.root, "-type", "f"]],
+          ["wc", ["-l", source]], ["which", ["grep"]], ["cat", [source]],
+          ["ls", ["-d", f.root]], ["git", ["stash", "list"]],
+        ] as [string, string[]][]),
+      ];
+      const ghost = h.core.createGhost({ name: "Reader", persona: "", tools: ["host_command_propose"] });
+      h.ledger.setPiConversationId(ghost.directConversationId, "read-argv");
+      const tool = createHostTools(h.core, f.host).tools!.find((tool) => tool.name === "host_command_propose")!;
+      const invoke = tool.execute as unknown as (input: HostCommand, api: ToolExecutionApi) => Promise<unknown>;
+      for (const [index, [program, args]] of cases.entries()) {
+        const before = calls.length;
+        const result = await invoke({ ...command(f.root), program, args }, {
+          conversationId: "read-argv", callId: `read-${index}`,
+        } as unknown as ToolExecutionApi);
+        expect(JSON.stringify(result)).toContain("observed");
+        expect(calls.length).toBeGreaterThan(before);
+        expect(h.ledger.pendingDecisions()).toHaveLength(0);
+        expect(h.ledger.effectByCall(ghost.directConversationId, `read-${index}`)).toBeNull();
+      }
+      expect(calls.every((call) => call.inspection && call.program.startsWith("/"))).toBe(true);
+      expect(await f.host.read(join(f.root, "data/free_talk_intents.json"))).toMatchObject({ text: "propose 배송 출고\n" });
+      mkdirSync(join(f.home, "data"));
+      writeFileSync(join(f.home, "data/x"), "private");
+      await expect(f.host.read(join(f.home, "data/x"))).rejects.toThrow("private");
+      expect(await f.host.inspect({ ...command(f.root), program: "cat", args: [join(f.home, "data/x")] })).toBeNull();
+      for (const [program, args] of [
+        ["/usr/bin/sed", ["-n", "1w output", source]],
+        ["/usr/bin/sed", ["-n", "-e", "1p", "-e", "1r hidden", source]],
+        ["/usr/bin/sed", ["-i", "", "1p", source]],
+        ["/usr/bin/sed", ["-n", "-f", source, source]],
+        ["/usr/bin/grep", ["-f", source, source]],
+        ["/usr/bin/grep", ["--file=hidden", source]],
+        ["/usr/bin/grep", ["-d", "recurse", "x", f.root]],
+        ["/usr/bin/grep", ["--recursive", "x", f.root]],
+        ["/usr/bin/grep", ["--dereference-recursive", "x", f.root]],
+        ["/usr/bin/grep", ["-D", "read", "x", source]],
+        ["/usr/bin/find", [f.root, "-print0"]],
+        ["/usr/bin/find", [f.root, "-delete"]],
+        ["/usr/bin/find", [f.root, "-exec", "/bin/rm", "{}"]],
+      ] as [string, string[]][]) {
+        expect(await f.host.inspect({ ...command(f.root), program, args })).toBeNull();
+      }
+    } finally {
+      h.ledger.close();
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+  test("host_read tool forwards offset and limit for continuation", async () => {
+    const h = harness();
+    const f = fixture();
+    try {
+      const path = join(f.root, "source.txt");
+      writeFileSync(path, "one\ntwo\nthree\n");
+      const ghost = h.core.createGhost({ name: "Reader", persona: "", tools: ["host_read"] });
+      h.ledger.setPiConversationId(ghost.directConversationId, "paged-read");
+      const tool = createHostTools(h.core, f.host).tools!.find((tool) => tool.name === "host_read")!;
+      const invoke = tool.execute as unknown as (args: { path: string; offset?: number; limit?: number }, api: ToolExecutionApi) => Promise<{ content: { text: string }[] }>;
+      const result = await invoke({ path, offset: 2, limit: 1 }, { conversationId: "paged-read", callId: "page" } as unknown as ToolExecutionApi);
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({ text: "two\n", startLine: 2, endLine: 2, totalLines: 3, nextOffset: 3 });
+    } finally {
+      h.ledger.close();
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+
+
+  test("host_read pages bounded full lines and home paths retain all guards", async () => {
+    const f = fixture();
+    const outside = realpathSync(tempDir());
+    try {
+      const logs = join(f.home, "Library/Logs");
+      mkdirSync(logs);
+      const path = join(logs, "large.log");
+      const lines = Array.from({ length: 1000 }, (_, index) => `line ${index + 1}: ${"가".repeat(10)}\n`);
+      writeFileSync(path, lines.join(""));
+      const first = await f.host.read(path);
+      expect(first.startLine).toBe(1);
+      expect(first.totalLines).toBe(1000);
+      expect(Buffer.byteLength(first.text)).toBeLessThanOrEqual(12_000);
+      expect(first.nextOffset).toBe(first.endLine + 1);
+      const second = await f.host.read(path, first.nextOffset!, 2);
+      expect(second.text).toBe(lines.slice(first.endLine, first.endLine + 2).join(""));
+      expect(second.startLine).toBe(first.nextOffset!);
+      expect(second.endLine).toBe(first.endLine + 2);
+      const last = await f.host.read(path, 1000);
+      expect(last.text).toBe(lines[999]!);
+      expect(last.nextOffset).toBeNull();
+      await expect(f.host.read(path, 1001)).rejects.toThrow("past EOF");
+      await expect(f.host.read(path, 0)).rejects.toThrow("offset");
+      await expect(f.host.read(path, 1, 0)).rejects.toThrow("limit");
+      expect((await f.host.list(logs)).entries).toContainEqual({ name: "large.log", kind: "file" });
+      writeFileSync(join(logs, "empty.txt"), "");
+      expect(await f.host.read(join(logs, "empty.txt"))).toMatchObject({ text: "", totalLines: 0, nextOffset: null });
+      writeFileSync(join(logs, "too-large.txt"), Buffer.alloc(8 * 1024 * 1024 + 1, 32));
+      await expect(f.host.read(join(logs, "too-large.txt"))).rejects.toThrow("8 MiB");
+      writeFileSync(join(logs, "nul.txt"), "binary\0bytes");
+      await expect(f.host.read(join(logs, "nul.txt"))).rejects.toThrow("binary");
+      for (const privatePath of [join(f.home, ".ssh"), join(f.home, "Documents"), f.stateRoot]) {
+        mkdirSync(privatePath, { recursive: true });
+        writeFileSync(join(privatePath, "x.txt"), "private");
+        await expect(f.host.read(join(privatePath, "x.txt"))).rejects.toThrow();
+        await expect(f.host.list(privatePath)).rejects.toThrow();
+      }
+      writeFileSync(join(outside, "x.txt"), "outside");
+      symlinkSync(outside, join(logs, "escape"));
+      await expect(f.host.read(join(logs, "escape/x.txt"))).rejects.toThrow("outside owner home");
+      await expect(f.host.list(join(logs, "escape"))).rejects.toThrow("outside owner home");
+      await expect(f.host.list(outside)).rejects.toThrow("inside owner home");
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("grep preserves a literal double-dash pattern when adding guards", async () => {
+    const f = fixture();
+    try {
+      const path = join(f.root, "dash.txt");
+      writeFileSync(path, "-- x\nother\n");
+      for (const args of [["-e", "--", path], ["-e", "--", "--", path]]) {
+        const result = await f.host.inspect({ ...command(f.root), program: "grep", args });
+        expect(result?.exitCode).toBe(0);
+        expect(result?.output).toBe("-- x\n");
+      }
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
+
+  test("recursive grep cannot read secrets, private paths or descendant symlinks", async () => {
+    const f = fixture();
+    try {
+      for (const dir of ["src", "Secrets", "notes"]) mkdirSync(join(f.root, dir));
+      writeFileSync(join(f.root, "src/visible.txt"), "needle visible\n");
+      writeFileSync(join(f.root, "Secrets/hidden.txt"), "needle secret\n");
+      writeFileSync(join(f.root, "notes/hidden.txt"), "needle private\n");
+      writeFileSync(join(f.root, ".env"), "needle env\n");
+      mkdirSync(join(f.home, "Documents"));
+      writeFileSync(join(f.home, "Documents/hidden.txt"), "needle personal\n");
+      writeFileSync(join(f.stateRoot, "hidden.txt"), "needle state\n");
+      symlinkSync(join(f.home, "Documents/hidden.txt"), join(f.root, "linked.txt"));
+      symlinkSync(join(f.home, "Documents"), join(f.root, "linked-dir"));
+      for (const flag of ["-rIn", "-RIn"]) {
+        expect(await f.host.inspect({ ...command(f.root), program: "grep", args: [flag, "needle", f.home] })).toBeNull();
+        expect(await f.host.inspect({ ...command(f.root), program: "grep", args: [flag, "needle", f.root, f.home] })).toBeNull();
+        const result = await f.host.inspect({ ...command(f.root), program: "grep", args: [flag, "needle", f.root, "--include=*"] });
+        expect(result?.exitCode).toBe(0);
+        expect(result?.output).toContain("needle visible");
+        for (const hidden of ["needle secret", "needle private", "needle env", "needle personal", "needle state"])
+          expect(result?.output).not.toContain(hidden);
+      }
+    } finally {
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
   test("Ghost state and SQLite sidecars are never inspected, including aliases and recursive probes", async () => {
     const calls: HostRun[] = [];
     const f = fixture(async (input) => { calls.push(input); return ok("must not read"); });
@@ -353,6 +539,7 @@ describe("guarded Mac host", () => {
       ["/usr/bin/tail", ["-f", "log"]],
       ["/usr/bin/head", ["-c", "52", "host.json"]],
       ["/usr/bin/tail", ["-c", "52", "host.json"]],
+      ["/usr/bin/tail", ["-c52", "host.json"]],
       ["/usr/bin/git", ["ls-remote", "https://example.com/exfil/repo"]],
       ["/usr/bin/git", ["ls-remote", "https://127.0.0.1/private/repo"]],
       ["/usr/bin/git", ["ls-remote", "https://localhost/private/repo"]],
@@ -516,9 +703,7 @@ describe("guarded Mac host", () => {
       const listing = await f.host.list(f.root);
       expect(listing.entries.some((e) => e.name === ".env.local")).toBe(false);
       writeFileSync(join(f.home, ".cache", "text.txt"), "cache");
-      await expect(
-        f.host.read(join(f.home, ".cache", "text.txt")),
-      ).rejects.toThrow("outside");
+      expect(await f.host.read(join(f.home, ".cache", "text.txt"))).toMatchObject({ text: "cache" });
       expect(await f.host.list(join(f.home, ".cache"))).toMatchObject({
         entries: [{ name: "text.txt", kind: "file" }],
       });
@@ -890,6 +1075,8 @@ describe("host command approval", () => {
       const cases: [string, string[]][] = [
         ["/bin/ls", ["/etc"]], ["/bin/cat", ["/etc/hosts"]],
         ["/usr/bin/head", ["-c", "52", "/etc/hosts"]], ["/usr/bin/tail", ["-c", "52", "/etc/hosts"]],
+        ["/usr/bin/tail", ["-c", "52", join(f.root, "source.txt")]],
+        ["/usr/bin/tail", ["-c52", join(f.root, "source.txt")]],
       ];
       for (const [index, [program, args]] of cases.entries()) {
         await invoke({ ...command(f.root), program, args }, {
