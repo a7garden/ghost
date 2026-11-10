@@ -31,15 +31,25 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 
 | 항목 | 값 |
 | --- | --- |
-| LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-a0b941e` (`eeeeb02` Host와 고정한 `agent-browser` 0.41.2를 그대로 쓰고 UI만 기본 Ghost 동작·말랑한 몸·호버 반응을 더함) |
+| LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.1.2-9fd86d8`(GitHub Release `v2.1.2`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
-| Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
+| Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent, `dev.garden.macfra.agent`(2026-11-08 Ghost `Mac 관리`로 이전, disabled) |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### GitHub Release 자체 업데이트 도입 — 2026-11-10
+
+- Host가 GitHub Release를 확인해 소유자가 「설치」를 누르면 스스로 교체한다. 앱은 Host의 루프백 경로로 셸 업데이트를 받는다. 셸의 managed 모드는 없앴다. 구조는 [architecture](architecture.md#releases-and-updates), 절차는 위 "개발 변경의 자동 운영 반영"을 따른다.
+- 서명: Host와 앱은 키체인의 Developer ID Application(W5SAS95CBV)으로 서명한다. 업데이트 매니페스트와 앱 묶음은 `~/.tauri/ghost.key`로 서명한다. 비밀번호 없는 키이며 공개 키는 `tauri.conf.json`과 Host 빌드에 박혀 있다. 이 키를 잃으면 설치된 Host·앱이 더는 업데이트를 받지 못하므로 별도 백업이 필요하다.
+- `v2.1.0` 전환은 손으로 했다(이전 Host에는 업데이트 기능이 없었다). 백업은 `backups/pre-2.1.0-9669474-1794313953000/`(`ghost-backup/2` complete, secrets·config·artifacts·console·이전 plist·이전 `Ghost.app`) 뒤 `current`를 원자 교체하고 `ghost service install`. 이때 `launchctl bootout`이 이전 Host의 종료를 기다리지 않아 bootstrap이 EIO로 실패했고, 서비스가 약 15초 내려가 있었다. 손으로 bootstrap해 복구했고, 2.1.1에서 언로드를 기다리고 bootstrap을 재시도하도록 고쳤다.
+- 자체 업데이트 검증: 격리 루트·포트에서 launcher 루프로 2.1.0 → 2.1.1을 받았다(받기·검증 11초, 재기동 3초, 60초 뒤 `installed`). 운영은 Owner API로 2.1.0 → 2.1.1을, 설치된 앱의 설정 › 업데이트 「설치」로 2.1.1 → 2.1.2를 받았다. 각각 백업 `backups/pre-2.1.1-03763ab-*`, `backups/pre-2.1.2-9fd86d8-*`가 남았다. 다운타임은 약 2초였고 Ghost 25·대화 206·맡긴 일 154를 보존했다.
+- 앱 0.2.0은 손으로 설치했다. 0.2.1·0.2.2는 앱 안의 「설치」로 받았다. 0.2.1은 재시작 뒤 Dock에서 다시 열기 전까지 창이 보이지 않았고, 0.2.2부터 LaunchServices로 다시 열어 창이 바로 뜬다.
+- 업데이트 토큰은 소유자의 `gh` 토큰(`repo`·`admin:org` 등 넓은 범위)을 넣었다. `a7garden/ghost` 내용 읽기만 허용한 fine-grained 토큰으로 바꾸려면 설정 › 업데이트 › GitHub 토큰에서 바꾼다.
+- 되돌릴 때는 `current`를 이전 릴리스로 바꾸고 `launchctl kickstart -k gui/$(id -u)/com.a7.ghost`. 2.1.x는 저장 형식 지문(`ledger-7/pi-durable-1.1.0/vault-1`)이 같다. 업데이트 기능 이전으로 돌아가려면 `releases/20261110-bun-a0b941e`와 백업한 plist(infra `ghost-run.sh`)를 복원한다.
 
 ### 기본 Ghost 호버 반응·움직임 줄이기 운영 반영 — 2026-11-10
 
