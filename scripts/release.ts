@@ -155,6 +155,10 @@ chmodSync(browser, 0o755);
 step("obscura");
 run("sh", ["apps/ghost-host/scripts/stage-obscura.sh", stage]);
 
+step("pc control");
+run("bash", ["apps/ghost-host/scripts/stage-desktop.sh", stage, version, identity]);
+run("codesign", ["--verify", "--strict", join(stage, "Ghost Control.app")]);
+
 const files: Record<string, string> = {};
 for (const path of filesUnder(stage).sort()) files[relative(stage, path)] = sha256(path);
 writeFileSync(
@@ -166,7 +170,7 @@ const hostAsset = `ghost-${version}-darwin-arm64.tar.gz`;
 const hostArchive = join(out, hostAsset);
 // ustar with explicit top-level names: no pax/xattr records and no "./" root entry,
 // which the Host's archive check refuses.
-const payloadNames = ["ghost", "ui", "agent-browser", "obscura", "OBSCURA-LICENSE", "release.json"];
+const payloadNames = ["ghost", "ui", "agent-browser", "obscura", "OBSCURA-LICENSE", "Ghost Control.app", "agent-desktop", "agent-desktop-macos-helper", "AGENT-DESKTOP-LICENSE", "geist", "release.json"];
 const extra = readdirSync(stage).filter(name => !payloadNames.includes(name));
 if (extra.length > 0) throw new Error(`unexpected payload entries: ${extra.join(", ")}`);
 run("tar", ["--format", "ustar", "--no-mac-metadata", "--no-xattrs", "-czf", hostArchive, "-C", stage, ...payloadNames], { env: { COPYFILE_DISABLE: "1" } });
@@ -212,6 +216,8 @@ rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage);
 run("/usr/bin/tar", ["-xzf", hostArchive, "-C", stage, "--no-same-owner"]);
 verifyReleaseDirectory(stage, parsed);
+// The owner's macOS grant follows this bundle's signature; it must survive the archive round trip.
+run("codesign", ["--verify", "--strict", join(stage, "Ghost Control.app")]);
 rmSync(stage, { recursive: true, force: true });
 
 const assets = [hostArchive, join(out, "Ghost.app.tar.gz"), join(out, "Ghost.app.tar.gz.sig"), manifestPath, `${manifestPath}.sig`];

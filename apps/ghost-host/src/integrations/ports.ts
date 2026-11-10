@@ -253,3 +253,33 @@ export interface BrowserPort {
   /** Stop every session and the egress proxy (host shutdown). */
   shutdown(): Promise<void>;
 }
+
+/** One runtime reply. `delivered: false` only when the runtime reports the action certainly did not happen. */
+export interface DesktopResult {
+  ok: boolean;
+  data: unknown;
+  error: { code: string; message: string } | null;
+  delivered: boolean;
+}
+
+/** The Ghost Control identity's macOS permissions and diagnostic HID idle time (includes synthesized input). */
+export interface DesktopStatus {
+  accessibility: boolean;
+  screenRecording: boolean;
+  idleSeconds: number;
+}
+
+/**
+ * PC control through the signed Ghost Control helper, which owns the macOS privacy grant and runs agent-desktop
+ * (accessibility tree, semantic actions, apps and windows) and Geist (window image, physical input). One request
+ * at a time for the whole Host: there is one desktop. Implemented in src/integrations/desktop.ts.
+ */
+export interface DesktopPort {
+  /** `authorize` runs at queue dispatch, immediately before I/O; throwing prevents delivery. */
+  agentDesktop(argv: string[], options?: { stdin?: string; timeoutMs?: number; authorize?: () => void }): Promise<DesktopResult>;
+  geist(tool: string, args: Record<string, unknown>, options?: { timeoutMs?: number; authorize?: () => void }): Promise<DesktopResult>;
+  status(): Promise<DesktopStatus>;
+  /** A PNG window image as a JPEG no larger than `maxEdge` pixels on its long side, for model input. */
+  image(png: Uint8Array, maxEdge: number): Promise<{ data: string; mimeType: "image/jpeg"; width: number; height: number }>;
+  shutdown(): Promise<void>;
+}

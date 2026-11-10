@@ -27,6 +27,15 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 운영 전에는 설치 사본의 절대 경로를 `GHOST_TEST_OBSCURA`와
 `GHOST_TEST_AGENT_BROWSER`에 넣어 `bun test apps/ghost-host/test/browser.test.ts`를 실행한다.
 
+PC 조작은 릴리스의 `Ghost Control.app`·`agent-desktop` 1.2.0·Geist 0.5.0을 자동 감지한다. 끄려면 `config.json`에 `"desktop": null`을 넣는다. 개발 사본은 `"desktop": {"control": "/절대경로/Ghost Control.app", "agentDesktop": "/절대경로/agent-desktop", "geist": "/절대경로/geist"}`로 지정한다. `stage-desktop.sh`는 Geist 저장소의 고정 커밋 `f6254cc`만 빌드하며 미커밋 편집은 포함하지 않는다(`GEIST_REPO`로 저장소 위치 지정).
+
+처음에는 설치된 `Ghost Control.app/Contents/MacOS/ghost-control permissions --request`를 실행하고 시스템 설정에서 **Ghost Control**의 손쉬운 사용과 화면 기록을 승인한다. 앱은 권한 확인 전에 LaunchServices에 등록된다. 등록이 없으면 macOS가 승인을 저장하고도 설정 목록에서 숨기는 `kLSApplicationNotFoundErr`가 발생한다. 같은 번들 ID·Developer ID로 다시 빌드한 사본과 별도 launchd 작업에서 두 권한이 유지되는 것을 확인했다. 테스트용 ad-hoc 빌드는 별도 번들 ID를 써서 운영 권한을 덮어쓰지 않는다.
+
+Ghost 설정에서 **PC 조작** 도구와 **PC 직접 실행**을 함께 허용해야 한다. 화면과 입력은 실제 로그인한 사용자의 앱에 적용된다. 구조 읽기·일반 입력은 agent-desktop의 접근성 조작, 캔버스·좌표 입력은 Geist의 전경 조작이다. `desktop_press`는 앱 대상 키 입력이며 의미 기반 전달을 보장하지 않는다. 다른 Space의 창을 강제로 앞으로 가져오지 않는다. 물리 입력은 사용자의 포인터·키보드를 공유한다. 비밀번호·카드 입력은 브라우저 금고 경로를 쓴다.
+
+Geist worker의 IPC는 실행 파일 identity를 기준으로 나뉘므로 Host마다 `<root>/desktop/runtime/geist-*`에 전용 실행 파일을 APFS clone으로 만든다. 정상 종료가 확인되면 해당 사본을 제거한다. 강제 종료나 정리 실패 뒤에는 복구를 위해 보존하고, 다음 헬퍼는 새 사본을 쓴다.
+
+
 ## 현재 설치 (2026-11-10)
 
 | 항목 | 값 |

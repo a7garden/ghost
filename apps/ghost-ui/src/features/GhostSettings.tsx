@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { BROWSER_TOOLS, DESKTOP_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
 import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -29,6 +29,10 @@ export const toolLabels: Record<GhostTool, string> = {
   browser_tabs: '브라우저 탭', browser_wait: '브라우저 대기', browser_upload: '브라우저 올리기', browser_download: '브라우저 내려받기',
   browser_propose: '브라우저 클릭 제안', browser_handoff: '브라우저 넘겨주기', browser_fill_secret: '브라우저 금고 채우기', browser_close: '브라우저 닫기',
   vault_list: '금고 목록', vault_request: '금고 저장 요청', vault_generate_login: '금고 로그인 만들기',
+  desktop_apps: 'PC 앱 목록', desktop_snapshot: 'PC 화면 구조 읽기', desktop_screenshot: 'PC 화면 캡처', desktop_click: 'PC 클릭',
+  desktop_fill: 'PC 값 채우기', desktop_type: 'PC 입력', desktop_select: 'PC 선택', desktop_check: 'PC 체크',
+  desktop_scroll: 'PC 스크롤', desktop_press: 'PC 키 누르기', desktop_launch: 'PC 앱 열기', desktop_focus: 'PC 창 앞으로',
+  desktop_wait: 'PC 대기', desktop_pointer: 'PC 포인터 직접 조작', desktop_keys: 'PC 키보드 직접 입력', desktop_propose: 'PC 클릭 제안',
 };
 
 /** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. Exported for the coverage test. */
@@ -45,6 +49,7 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '반복 작업', tools: ['schedule_create', 'schedule_list', 'schedule_cancel'] },
   { title: '자동 활동', tools: ['activity_propose'] },
   { title: 'Mac', tools: [...HOST_TOOLS], privileged: true },
+  { title: 'PC 조작', tools: [...DESKTOP_TOOLS], privileged: true },
 ];
 /** 대화 종류에 따라 항상 쓰는 도구. 선택 목록에 없고 끌 수 없다. */
 const alwaysTools = ['소유자에게 묻기', '위임한 Ghost에게 묻기', '자식 일에 답하기', '일 완료 보고', '일 상태 보고', '결과물 읽기', '실행 기록 보기', '관측 근거 읽기', '검토 판정'];

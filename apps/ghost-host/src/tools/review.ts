@@ -25,6 +25,8 @@ const READ_TOOLS: Record<string, true> = {
   host_list: true,
   host_read: true,
   host_nodes: true,
+  desktop_apps: true,
+  desktop_snapshot: true,
 };
 
 export function createReviewTools(core: Core): Extension {

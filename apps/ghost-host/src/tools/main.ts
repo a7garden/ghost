@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
+import { DESKTOP_TOOLS, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
@@ -90,7 +90,7 @@ export function createMainTools(core: Core): Extension {
         if (target.deletedAt !== null) throw forbidden(`${target.name} was deleted`);
         const granted = [
           ...(args.host_execution === true && !target.hostExecution ? ["PC 직접 실행"] : []),
-          ...HOST_TOOLS.filter((tool) => args.tools?.includes(tool) && !target.tools.includes(tool)),
+          ...[...HOST_TOOLS, ...DESKTOP_TOOLS].filter((tool) => args.tools?.includes(tool) && !target.tools.includes(tool)),
         ];
         // The Mac is the owner's: the main Ghost may open it to a teammate, but never silently —
         // the grant and its notification commit together.
