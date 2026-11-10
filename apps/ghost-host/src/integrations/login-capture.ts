@@ -1,7 +1,7 @@
 import type { BrowserLogin } from "./ports.ts";
 
 export interface LoginField {
-  id: string; form: string; kind: "username" | "password" | "submit" | "other";
+  id: string; form: string; kind: "username" | "password" | "sensitive" | "submit" | "other";
   length: number; start: number | null; end: number | null; score: number;
 }
 export interface LoginPage {
@@ -20,18 +20,19 @@ export class LoginCapture {
   private candidate: Candidate | null = null;
   private ownerPair: Candidate | null = null;
   private sequence = 0;
-  constructor(private readonly save: (login: BrowserLogin) => Promise<void>, private readonly redact: (value: string, scope?: string) => void, private readonly rejected: (password: string) => boolean = () => false) {}
+  constructor(private readonly save: (login: BrowserLogin) => Promise<void>, private readonly redact: (value: string, scope?: string, sensitive?: boolean) => void, private readonly rejected: (password: string) => boolean = () => false) {}
   edit(page: LoginPage, field: LoginField, edit: LoginEdit, allowed = true) {
-    if (!this.validPage(page) || !page.fields.some(entry => entry.id === field.id) || !["username", "password"].includes(field.kind)) return;
+    if (!this.validPage(page) || !page.fields.some(entry => entry.id === field.id) || !["username", "password", "sensitive"].includes(field.kind)) return;
+    const secret = field.kind === "password" || field.kind === "sensitive";
     this.dropOwnerPair();
     if (!allowed || edit.type === "unknown") this.dropCandidate();
     const key = `${page.targetId}:${page.documentId}:${field.id}`;
     let entry = this.fields.get(key);
-    if (!entry && (!allowed || edit.type === "unknown")) { if (edit.type === "insert" && field.kind === "password") this.redact(edit.text); return; }
+    if (!entry && (!allowed || edit.type === "unknown")) { if (edit.type === "insert" && secret) this.redact(edit.text,undefined,field.kind === "sensitive"); return; }
     if (entry && (entry.field.form !== field.form || entry.field.kind !== field.kind || entry.page.origin !== page.origin)) { entry.value = ""; this.fields.delete(key); entry = undefined; }
     if (!entry) entry = { page, field, value: "", known: field.length === 0, sequence: 0 };
     if (!allowed || edit.type === "unknown" || field.start === null || field.end === null || field.start < 0 || field.end < field.start || field.end > field.length) {
-      if (edit.type === "insert" && field.kind === "password") this.redact(edit.text);
+      if (edit.type === "insert" && secret) this.redact(edit.text,undefined,field.kind === "sensitive");
       entry.value = ""; entry.known = false; this.dropCandidate();
     } else {
       const replacesAll = field.start === 0 && field.end === field.length;
@@ -50,8 +51,8 @@ export class LoginCapture {
         entry.value = entry.value.slice(0, start) + entry.value.slice(end);
       } else { entry.value = ""; entry.known = false; this.dropCandidate(); }
       if (entry.known && invalidUtf16.test(entry.value)) { entry.value = ""; entry.known = false; this.dropCandidate(); }
-      if (entry.known && entry.value && field.kind === "password") this.redact(entry.value,key);
-      if (edit.type === "insert" && !entry.known && field.kind === "password") this.redact(edit.text);
+      if (entry.known && entry.value && secret) this.redact(entry.value,key,field.kind === "sensitive");
+      if (edit.type === "insert" && !entry.known && secret) this.redact(edit.text,undefined,field.kind === "sensitive");
     }
     entry.field = field; entry.page = page; entry.sequence = ++this.sequence;
     this.fields.set(key, entry);
@@ -59,6 +60,11 @@ export class LoginCapture {
   }
   submit(page: LoginPage, form: string) {
     if (!this.validPage(page)) return;
+    // A submitted card/code remains private across runtime replacement, but never becomes a login.
+    for (const entry of this.fields.values()) {
+      const current = page.fields.find(field => field.id === entry.field.id);
+      if (entry.known && entry.value && entry.field.kind === "sensitive" && entry.page.targetId === page.targetId && entry.page.documentId === page.documentId && entry.page.origin === page.origin && entry.field.form === form && current?.kind === "sensitive" && current.form === form && current.length === entry.value.length) this.redact(entry.value,undefined,true);
+    }
     this.dropCandidate();
     this.candidate = this.pair(page, form);
     if (this.candidate) this.redact(this.candidate.password);
