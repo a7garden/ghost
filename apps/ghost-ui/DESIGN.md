@@ -292,15 +292,25 @@ out of baselines without changing runtime paths or product rendering.
 ## Interactive responses
 
 `present_ui` is a direct-conversation response format, available even when optional
-action tools are disabled. Valid `ghost-ui/1` tool results render inline in web/Mac
+action tools are disabled. Valid `ghost-ui/1` tool results render inline in web/Mac/iPhone
 chat; malformed, unknown-version and failed results retain the ordinary readable
-tool disclosure. iOS and the chat overlay retain text-only answers.
+tool disclosure. The chat overlay retains text-only answers.
 
 The model chooses ordinary Markdown or text, bar/line charts, comparisons, choices,
 forms and static HTML. Charts offer chart/data views rather than duplicating data.
 Native controls own user interaction. Choice replies contain only visible labels
 and descriptions; forms submit their displayed fields. Neither is an approval or
 a privileged command, and messages sent during a run remain ordinary follow-ups.
+
+Block choice is guided in the host prompt (`INTERACTIVE_INSTRUCTIONS`, direct
+conversations only): prefer a suitable block over long prose when it reduces reading,
+comparison or input effort; pick from the content, not as decoration — charts
+for quantitative trends and scale, comparisons for tradeoffs, choices for decisions
+that are conversational preferences, priorities or next steps, forms for several
+related inputs at once, HTML only for authored layout and static previews. A simple
+answer stays plain text; a widget never restates what the prose said, asks what the
+Ghost's tools can look up, duplicates an ask_owner question or an approval flow, or
+invents a question just to have something to render.
 
 Form values, selection and delivery state are tab-scoped in `sessionStorage`,
 keyed by conversation, immutable tool message and block identity. Refresh/reconnect
