@@ -150,7 +150,6 @@ export class Autonomy {
       if (stored.observedSeq !== null && changeSeq !== null) {
         if (changeSeq <= stored.observedSeq) return stored;
       } else if (work.updatedAt < (stored.observed ?? 0)) return stored;
-      if (stored.nextAt !== null && stored.nextAt <= now && !stored.pending) return stored;
       return { ...stored, nextAt: Math.min(stored.nextAt ?? now, now) };
     });
     void this.tick().catch((error) => this.core.log(`team change from ${work.id} failed to admit ${main.name}'s look`, error));

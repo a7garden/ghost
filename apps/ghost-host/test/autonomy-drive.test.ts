@@ -8,7 +8,7 @@ import { FakeEngine, MemoryArtifacts, MemorySecrets, noSandbox, tempDir } from "
 
 const MINUTE = 60_000;
 
-function fixture(options: { onHead?: (path: string) => void } = {}) {
+function fixture(options: { onHead?: (path: string) => void; onCommits?: () => Promise<void> } = {}) {
   const heads = new Map<string, string>();
   const ledger = new Ledger(":memory:");
   const core = new Core({
@@ -18,7 +18,10 @@ function fixture(options: { onHead?: (path: string) => void } = {}) {
         options.onHead?.(path);
         return heads.get(path) ?? null;
       },
-      commits: async () => ["Fix the save button", "Add export"],
+      commits: async () => {
+        await options.onCommits?.();
+        return ["Fix the save button", "Add export"];
+      },
     },
   });
   const engine = new HookedEngine();
@@ -45,6 +48,49 @@ class HookedEngine extends FakeEngine {
 }
 /** Local midnight of a fixed day, so per-day limits are deterministic. */
 const day = (hours = 0) => new Date(2030, 0, 15, hours).getTime();
+
+test("a teammate outcome during watched-project reads is included in the next admitted look", async () => {
+  const probes: { onCommits?: () => Promise<void> } = {};
+  const f = fixture(probes);
+  try {
+    f.core.duty.switch(false);
+    f.core.autonomy.setEnabled(f.mate.id, false);
+    const work = f.core.works.createRoot({
+      ghostId: f.mate.id, originConversationId: f.mate.directConversationId,
+      title: "Late project result", brief: "Collect the project result",
+    });
+    await f.core.idle();
+    const now = Date.now();
+    const spaceId = "11111111-1111-4111-8111-111111111111";
+    f.ledger.tx(() => {
+      f.ledger.putSpace({ id: spaceId, name: "Twill", path: "/work/twill", createdAt: now });
+      f.ledger.putSetting(`autonomy:${f.main.id}`, {
+        enabled: true, nextAt: now, intent: "Inspect the project", setBy: "host", watch: [spaceId],
+        lastWakeAt: null, wakesToday: 0, day: "", heads: { [spaceId]: `main@${"a".repeat(40)}` },
+        revision: 1, wakes: 0, pending: null,
+      });
+    });
+    f.heads.set("/work/twill", `main@${"b".repeat(40)}`);
+    probes.onCommits = async () => {
+      delete probes.onCommits;
+      f.core.works.fail(work.id, "credentials changed during project inspection");
+      await f.core.idle();
+    };
+    f.core.duty.switch(true);
+    await f.core.autonomy.tick(now);
+    expect(f.wakes(f.main.id)).toHaveLength(0);
+    expect(f.plan(f.main.id).nextAt!).toBeLessThanOrEqual(Date.now());
+    await f.core.autonomy.tick(Date.now() + MINUTE);
+    const wakes = f.wakes(f.main.id);
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]!.text).toContain(work.id);
+    expect(wakes[0]!.text).toContain("credentials changed during project inspection");
+  } finally {
+    await f.core.idle();
+    f.core.stop();
+    f.ledger.close();
+  }
+});
 
 test("a Ghost's planned time wakes it once in its direct conversation; without a new plan the Host looks again a day later", async () => {
   const f = fixture();
