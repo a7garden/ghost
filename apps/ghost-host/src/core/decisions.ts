@@ -23,7 +23,7 @@ export class Decisions {
 
   constructor(private readonly core: Core) {}
 
-  /** Settle reversible decisions whose wait ran out; started with the Host, checked twice a minute. */
+  /** Reconcile pending reviews and settle expired recommendations twice a minute. */
   start() {
     if (this.timer) return;
     this.timer = setInterval(() => void this.settleExpired().catch((error) => this.core.log("decision auto-settle failed", String(error))), 30_000);
@@ -48,7 +48,7 @@ export class Decisions {
     const decision = this.withReview({ ...input, id: input.id ?? newId(), state: "pending", answer: null, createdAt: Date.now(), resolvedAt: null });
     this.ledger.putDecision(decision);
     // The main Ghost looks first at another Ghost's decision; after the commit, never inside it.
-    if (this.mainReviews(decision)) queueMicrotask(() => void this.askMain(decision).catch((error) => this.core.log("main review wake failed", String(error))));
+    if (this.mainReviews(decision)) this.ledger.afterCommit(() => void this.askMain(decision).catch((error) => this.core.log("main review wake failed", String(error))));
     this.core.notify({
       id: `decision:${decision.id}`,
       kind: "decision",
@@ -150,9 +150,10 @@ export class Decisions {
     if (decision) await this.followUp(decision);
   }
 
-  /** Startup: finish follow-ups a crash interrupted after the owner's answer was committed. */
+  /** Startup: finish committed answers, restore pending reviews and retry their deterministic admissions. */
   async recover() {
     for (const decision of this.ledger.decisionsAwaitingFollowUp()) await this.followUp(decision);
+    await this.settleExpired();
   }
 
   /**
@@ -268,7 +269,7 @@ export class Decisions {
     const opensMac = !!request && (request.hostExecution || request.tools.some((tool) => HOST_TOOLS.includes(tool)));
     const expiresAt = autoMinutes > 0 && this.automatic(decision) && !opensMac ? decision.createdAt + autoMinutes * MINUTE : null;
     const prior = reviewOf(decision.proposal);
-    const review: DecisionReview = decision.kind === "question" ? { recommend: "answer", answer: prior!.answer, expiresAt } : { recommend: "approve", expiresAt };
+    const review: DecisionReview = decision.kind === "question" ? { ...prior, recommend: "answer", answer: prior!.answer, expiresAt } : { ...prior, recommend: "approve", expiresAt };
     return { ...decision, proposal: { ...decision.proposal, review } };
   }
 
@@ -312,12 +313,31 @@ export class Decisions {
     return "Settled for the owner; they were told why.";
   }
 
-  /** Take the recommendation of every reversible decision whose wait ran out. */
+  /** Re-derive missing pending reviews, retry main admission and take expired recommendations. */
   async settleExpired(now = Date.now()) {
-    for (const decision of this.ledger.pendingDecisions()) {
+    for (let decision of this.ledger.pendingDecisions()) {
+      // Pending rows from before review metadata existed must not wait forever after an upgrade.
+      // Keep existing deadlines (including explicit opt-outs); backfill from the original opening time.
+      if (!reviewOf(decision.proposal)?.recommend && this.reversible(decision)) {
+        // Earlier iterations await; re-read so a decision resolved or cancelled meanwhile is never written back as pending.
+        const fresh = this.ledger.tx(() => {
+          const current = this.ledger.decision(decision.id);
+          if (current.state !== "pending" || reviewOf(current.proposal)?.recommend) return null;
+          const reviewed = this.withReview(current);
+          this.ledger.putDecision(reviewed);
+          return reviewed;
+        });
+        if (!fresh) continue;
+        decision = fresh;
+      }
+      try {
+        await this.askMain(decision);
+      } catch (error) {
+        this.core.log(`decision ${decision.id} main review wake failed`, String(error));
+      }
       const review = reviewOf(decision.proposal);
       // Settings read now, not when the decision opened: turning automation off stops what is already waiting.
-      if (!review?.recommend || review.expiresAt === null || review.expiresAt > now || this.policy().autoMinutes === 0 || !this.automatic(decision) || !this.reversible(decision)) continue;
+      if (!review?.recommend || typeof review.expiresAt !== "number" || !Number.isFinite(review.expiresAt) || review.expiresAt > now || this.policy().autoMinutes === 0 || !this.automatic(decision) || !this.reversible(decision)) continue;
       try {
         await this.resolve(decision.id, review.recommend === "answer" ? { outcome: "answer", answer: review.answer } : { outcome: "approve" }, "timeout");
       } catch (error) {
@@ -330,9 +350,9 @@ export class Decisions {
   private async askMain(decision: Decision) {
     const main = this.ledger.defaultGhost();
     const current = this.ledger.decision(decision.id);
-    if (!main || current.state !== "pending" || !this.mainReviews(current)) return;
-    const asker = this.ledger.ghost(decision.ghostId).name;
-    const review = reviewOf(decision.proposal);
+    if (!main || current.state !== "pending" || !this.mainReviews(current) || reviewOf(current.proposal)?.mainNote !== undefined) return;
+    const asker = this.ledger.ghost(current.ghostId).name;
+    const review = reviewOf(current.proposal);
     const settle = this.delegable(current);
     const lines = [
       settle

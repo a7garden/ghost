@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { Decision } from "@ghost/contract";
+import type { ToolExecutionApi } from "@earendil-works/pi-durable";
+import { startServer } from "../src/api/server.ts";
+import type { Config } from "../src/config.ts";
+import { createDocumentsTools } from "../src/tools/documents.ts";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { sha256 } from "../src/core/ids.ts";
@@ -105,6 +109,66 @@ describe("documents", () => {
     expect(plain.profile).toBe("unclassified");
     // A plain Markdown file without an envelope stays readable: document_read returns its text, not just a title line.
     expect(plain.body).toBe(PLAIN_MARKDOWN);
+  });
+
+  test("the owner API and document_read expose plain and PDC 1 bodies without rewriting sources", async () => {
+    const { path, ledger, core, documents, ghost } = setup();
+    const htmlBody = "<h1>Legacy HTML</h1>\n<p>Existing project details.</p>\n";
+    const legacyHtml = `<!--
+---
+format: pdc-document/1
+body: pdc-html/1
+id: 0190f3a0-2222-7abc-8def-0123456789ab
+created: 2026-01-02T03:04:05.678Z
+updated: 2026-01-02T03:04:05.678Z
+title: Old HTML
+---
+-->
+${htmlBody}`;
+    writeFileSync(join(path, "legacy.html"), legacyHtml);
+    writeFileSync(join(path, "plain.html"), htmlBody);
+    const cases = [
+      { locator: "plain.md", source: PLAIN_MARKDOWN, body: PLAIN_MARKDOWN },
+      { locator: "legacy.djot", source: LEGACY_DJOT, body: "Old _djot_ body.\n" },
+      { locator: "legacy.html", source: legacyHtml, body: htmlBody },
+      { locator: "plain.html", source: htmlBody, body: htmlBody },
+    ];
+    const config: Config = {
+      root: dirname(path), host: "127.0.0.1", port: 0, publicOrigin: "http://127.0.0.1",
+      uiDir: null, sandbox: { kind: "local" }, memory: null, voice: null, apns: null,
+      skills: null, reach: null, browser: null,
+    };
+    const server = startServer({ core, config, ownerToken: "document-test", documents, skills: null });
+    try {
+      ledger.setPiConversationId(ghost.directConversationId, "pi-document-read");
+      const read = createDocumentsTools(core, documents).tools!.find(tool => tool.name === "document_read")!;
+      const base = `http://127.0.0.1:${server.port}/api/spaces/space-1/pages`;
+      const headers = { authorization: "Bearer document-test" };
+      const listing = await fetch(base, { headers });
+      expect(listing.status).toBe(200);
+      const pages = await listing.json() as { locator: string; pageId: string }[];
+      for (const { locator, source, body } of cases) {
+        const page = pages.find(page => page.locator === locator)!;
+        expect(page).toBeDefined();
+        const response = await fetch(`${base}/${encodeURIComponent(page.pageId)}`, { headers });
+        expect(response.status).toBe(200);
+        expect((await response.json() as { body: string }).body).toBe(body);
+        const result = await read.execute(
+          { space_id: "space-1", page_id: page.pageId } as never,
+          { conversationId: "pi-document-read", callId: locator } as unknown as ToolExecutionApi,
+          {} as never,
+        );
+        expect(result.isError).toBeFalsy();
+        const text = result.content?.map(block => block.type === "text" ? block.text : "").join("");
+        expect(text).toEndWith(`\n\n${body}`);
+        expect(readFileSync(join(path, locator), "utf8")).toBe(source);
+      }
+      expect(readdirSync(path)).not.toContain(".pdc");
+    } finally {
+      await server.stop();
+      core.stop();
+      ledger.close();
+    }
   });
 
   test("references the models actually send resolve inside the Space", async () => {
