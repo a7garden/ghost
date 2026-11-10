@@ -1,6 +1,6 @@
 import { haptic } from '../host/shell';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, FileText, Monitor, KeyRound } from 'lucide-react';
+import { ArrowRight, ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, FileText, Monitor, KeyRound } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input } from '../ui'
 import { DESTRUCTIVE_RISK, reviewOf, type ActivityConfig, type Decision, type SecureFormRequest, type State, type VaultItemKind, type WorkResult } from '@ghost/contract';
 import { executionLabel, policySummary, sourceSummary } from './activity-config';
@@ -72,7 +72,7 @@ export function decisionCommand(decision: Decision, outcome: 'approve' | 'deny' 
 }
 
 const actionLabels: Record<Decision['kind'], { approve: string; deny: string }> = {
-  approve_effect: { approve: '승인', deny: '거부' },
+  approve_effect: { approve: '실행 승인', deny: '실행 안 함' },
   question: { approve: '승인', deny: '거부' },
   accept_result: { approve: '결과 확인', deny: '수정 요청' },
   document_review: { approve: '저장 승인', deny: '거부' },
@@ -131,8 +131,8 @@ export function resolvedText(kind: Decision['kind'], outcome: 'approve' | 'deny'
 }
 
 /**
- * One decision, shaped by what the Ghost needs: numbered answer tiles for a question,
- * the exact request for an approval, a receipt for a result, the page for a document.
+ * One decision: the question or consequence first, evidence underneath, and a
+ * separate response area that stays reachable while long evidence scrolls.
  */
 export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpenWork, autoFocus = false }: {
   decision: Decision;
@@ -224,7 +224,8 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
 
   return <article ref={cardRef} tabIndex={-1} onKeyDown={onKeyDown} data-decision-kind={decision.kind} aria-label={heading} className="decision"
     onBlur={event => { if (armed && !event.currentTarget.contains(event.relatedTarget as Node | null)) setArmedAt(null); }}>
-    <header className="decision__meta">
+    <header className="decision__heading">
+    <div className="decision__meta">
       <DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={20}/>
       <span className="decision__who">{ghostName}</span>
       <span className="decision__kind">{kindLabel}</span>
@@ -232,8 +233,10 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
       {decision.workId && onOpenWork && <button type="button" className="decision__work" onClick={() => onOpenWork(decision.workId!)}>
         <span className="truncate">{workTitle && workTitle !== heading ? workTitle : uiTerms.work}</span><ArrowUpRight size={13} aria-hidden="true"/>
       </button>}
-    </header>
+    </div>
     <h3 className="decision__title">{heading}</h3>
+    </header>
+    <div className="decision__body">
     {showDetail && <div className="decision__detail decision__detail--md"><MessageBody text={detail}/></div>}
 
     {decision.kind === 'accept_result' && acceptance.result && <div className="receipt">
@@ -262,14 +265,12 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
       {decision.state === 'pending' && <BrowserLiveView decisionId={decision.id} disabled={busy}/>}
     </div>}
 
-    {isQuestion && !secureForm && !handoff && options.length > 0 && <div className="decision__options" role="group" aria-label="답 고르기">
-      {options.map((option, index) => <button key={option} type="button" className="decision__option" disabled={busy} data-recommended={option === recommended || undefined} onClick={() => resolve('answer', option)}>
-        <kbd aria-hidden="true">{index + 1}</kbd><span>{option}</span>{option === recommended && <span className="decision__badge">추천</span>}
-      </button>)}
-    </div>}
-    {(review || fallback) && <div className="decision__review">
+    {review?.mainNote && <div className="decision__review"><p><strong>메인 의견</strong> {review.mainNote}</p></div>}
+    </div>
+
+    <div className="decision__response">
+    {(review?.recommend === 'approve' || fallback) && <div className="decision__review">
       {review?.recommend === 'approve' && <p><strong>추천</strong> 승인 · 되돌릴 수 있는 요청입니다.</p>}
-      {review?.mainNote && <p><strong>메인 의견</strong> {review.mainNote}</p>}
       {fallback && <p className="decision__review-auto">{fallback}</p>}
     </div>}
 
@@ -277,17 +278,24 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
 
     {secureForm ? null : isQuestion
       ? <>
-        {handoff && <div className="decision__actions">
-          <Button variant="outline" className="h-[34px] rounded-pill px-4" disabled={busy} onClick={() => resolve('deny')}>{labels.deny}</Button>
-          <Button className="h-[34px] rounded-pill px-4" disabled={busy} onClick={() => resolve('answer', handoffDoneAnswer)}>{handoffDoneAnswer}</Button>
+        {options.length > 0 && !handoff && <div className="decision__options" role="group" aria-label="답 고르기">
+          {options.map((option, index) => <button key={option} type="button" className="decision__option" disabled={busy}
+            data-recommended={option === recommended || undefined} onClick={() => resolve('answer', option)}>
+            <kbd aria-hidden="true">{index + 1}</kbd>
+            <span className="decision__option-label">{option}</span>
+            {option === recommended && <span className="decision__recommend">추천</span>}
+            <ArrowRight size={16} className="decision__option-arrow" aria-hidden="true"/>
+          </button>)}
         </div>}
-        <form className="decision__answer" onSubmit={event => { event.preventDefault(); resolve('answer', answer); }}>
-          <textarea aria-label="답변" value={answer} onChange={event => setAnswer(event.target.value)} rows={1} maxLength={8192} disabled={busy}
-            placeholder={decision.options.length ? '직접 답하기' : '답변을 적어 주세요'}
-            onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); resolve('answer', answer); } }}/>
-          <Button type="submit" size="icon" aria-label="답변 보내기" title="답변 보내기" disabled={busy || !answer.trim()}
-            className="rounded-pill disabled:opacity-100 disabled:bg-hover-2 disabled:text-ink-3"><ArrowUp/></Button>
-        </form>
+        {handoff && <div className="decision__actions">
+          <Button variant="ghost" disabled={busy} onClick={() => resolve('deny')}>{labels.deny}</Button>
+          <Button disabled={busy} onClick={() => resolve('answer', handoffDoneAnswer)}>{handoffDoneAnswer}</Button>
+        </div>}
+        {options.length > 0 || handoff
+          ? <details className="decision__custom"><summary>직접 답하기</summary>
+            <AnswerField answer={answer} onChange={setAnswer} busy={busy} onSend={() => resolve('answer', answer)}/>
+          </details>
+          : <AnswerField answer={answer} onChange={setAnswer} busy={busy} onSend={() => resolve('answer', answer)}/>}
       </>
       : revising && reasonPrompt
         ? <form className="decision__revise" onSubmit={event => { event.preventDefault(); resolve('deny', reason); }}>
@@ -299,22 +307,33 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
               else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); resolve('deny', reason); }
             }}/>
           <div className="decision__actions">
-            <span className="decision__hint" aria-hidden="true"><span><kbd>{modKey}</kbd><kbd>↵</kbd>보내기</span><span><kbd>Esc</kbd>돌아가기</span></span>
-            <Button type="button" variant="ghost" className="h-[34px] rounded-pill px-4" disabled={busy} onClick={backOut}>돌아가기</Button>
-            <Button type="submit" className="h-[34px] rounded-pill px-4" disabled={busy} aria-keyshortcuts={approveKeys}>{labels.deny}</Button>
+            <Button type="button" variant="ghost" disabled={busy} onClick={backOut}>돌아가기</Button>
+            <Button type="submit" disabled={busy} aria-keyshortcuts={approveKeys}>{labels.deny}</Button>
           </div>
         </form>
         : <footer className="decision__actions">
-          <span className="decision__hint" aria-hidden="true">
-            {reasonPrompt && <span><kbd>D</kbd>{labels.deny}</span>}
-            <span><kbd>{modKey}</kbd><kbd>↵</kbd>{armed ? '한 번 더' : labels.approve}</span>
-          </span>
-          <Button variant="outline" className="h-[34px] rounded-pill px-4" disabled={busy} aria-keyshortcuts={reasonPrompt ? 'D' : undefined} onClick={event => { if (event.detail < 2) deny(); }}>{labels.deny}</Button>
-          <Button variant={armed ? 'destructive' : 'default'} className="h-[34px] rounded-pill px-4" disabled={busy} data-armed={armed || undefined}
-            aria-keyshortcuts={approveKeys} onClick={event => { if (event.detail < 2) approve(); }}>{armed ? '한 번 더 눌러 실행 승인' : labels.approve}</Button>
-          <span className="sr-only" role="status">{armed ? '되돌릴 수 없는 요청입니다. 4초 안에 한 번 더 누르면 실행을 승인합니다.' : ''}</span>
+          <Button variant="ghost" disabled={busy} aria-keyshortcuts={reasonPrompt ? 'D' : undefined}
+            title={reasonPrompt ? `${labels.deny} (D)` : undefined} onClick={event => { if (event.detail < 2) deny(); }}>{labels.deny}</Button>
+          <Button variant={armed ? 'destructive' : 'default'} disabled={busy} data-armed={armed || undefined}
+            aria-keyshortcuts={approveKeys} title={`${labels.approve} (${modKey}↵)`}
+            onClick={event => { if (event.detail < 2) approve(); }}>{busy ? '전달 중…' : armed ? '한 번 더 눌러 실행 승인' : labels.approve}</Button>
+          <span className="sr-only" role="status">{armed ? '위험을 확인해 주세요. 4초 안에 한 번 더 누르면 실행을 승인합니다.' : ''}</span>
         </footer>}
+    </div>
   </article>;
+}
+
+function AnswerField({ answer, onChange, busy, onSend }: {
+  answer: string; onChange(value: string): void; busy: boolean; onSend(): void;
+}) {
+  return <form className="decision__answer" onSubmit={event => { event.preventDefault(); onSend(); }}>
+    <textarea aria-label="답변" value={answer} onChange={event => onChange(event.target.value)} rows={1} maxLength={8192} disabled={busy}
+      placeholder="답변을 적어 주세요"
+      onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); onSend(); } }}/>
+    <Button type="submit" size="icon" aria-label="답변 보내기" title="답변 보내기" disabled={busy || !answer.trim()}>
+      <ArrowUp/>
+    </Button>
+  </form>;
 }
 
 /** The fields one secure-form kind collects. */
@@ -395,8 +414,8 @@ function SecureForm({ decision, request, cardBusy, autoFocus, onResolved, onDecl
     </label>
     {error && <InlineError>{error}</InlineError>}
     <div className="decision__actions">
-      <Button variant="outline" type="button" className="h-[34px] rounded-pill px-4" disabled={disabled} onClick={onDecline}>거부</Button>
-      <Button type="submit" className="h-[34px] rounded-pill px-4" disabled={disabled}>금고에 전달</Button>
+      <Button variant="ghost" type="button" disabled={disabled} onClick={onDecline}>거부</Button>
+      <Button type="submit" disabled={disabled}>{busy ? '전달 중…' : '금고에 전달'}</Button>
     </div>
   </form>;
 }
@@ -412,7 +431,8 @@ function RequestPreview({ value }: { value: Record<string, unknown> }) {
     const risk = typeof value.risk === 'string' && value.risk ? value.risk : null;
     return <div className="decision__request-block">
       {reason && <p className="decision__request-reason">{reason}</p>}
-      <pre className="decision__request">{cwd && <span>{cwd} </span>}<span aria-hidden="true">$ </span>{command}</pre>
+      {cwd && <p className="decision__request-location"><span>작업 위치</span> <code>{cwd}</code></p>}
+      <pre className="decision__request">{command}</pre>
       {risk && <p className="decision__request-risk" data-risk={commandRiskIsHigh(value) ? 'high' : undefined}>{risk}</p>}
     </div>;
   }
@@ -486,10 +506,8 @@ export function chatDecisions(state: State, ghostId: string, conversationId: str
 }
 
 /**
- * Pending decisions as a stack: the oldest on top and fully actionable, the rest
- * peeking behind it. Resolving one lifts the next; arrows browse without resolving.
- * The overview variant lists every pending item beside the stack; the docked variant sits
- * above a conversation's composer with only that conversation's decisions.
+ * Pending decisions as a browsable queue. The active item stays fully actionable;
+ * named queue entries show what else is waiting without decorative stacked cards.
  */
 export function DecisionDeck({ state, navigate, focusId, overview = false, docked = false, decisions, onOpenWork }: {
   state: State;
@@ -520,7 +538,6 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
   const current = pending[at] as Decision | undefined;
   const ghostName = state.ghosts.find(ghost => ghost.id === current?.ghostId)?.name ?? 'Ghost';
   const workTitle = current?.workId ? state.works.find(work => work.id === current.workId)?.title : undefined;
-  const behind = Math.max(0, Math.min(pending.length - 1, 2));
   const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
   // ←/→ (or [ ]) page like the arrows when no text field has focus; the new card takes focus so paging continues.
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -533,7 +550,7 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
     if (!step || next < 0 || next >= pending.length) return;
     event.preventDefault(); setIndex(next); setFocusNext(true);
   };
-  return <section className="deck" aria-label="확인 필요" data-depth={behind} data-overview={overview || undefined} data-docked={docked || undefined} onKeyDown={onKeyDown}>
+  return <section className="deck" aria-label="확인 필요" data-overview={overview || undefined} data-docked={docked || undefined} onKeyDown={onKeyDown}>
     {/* Docked, a single card speaks for itself; the head appears only to browse several. */}
     {current && (!docked || pending.length > 1) && <header className="deck__head">
       <h2 className="section-title">확인 필요<span className="count">{pending.length}</span></h2>
@@ -544,20 +561,17 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
       </div>}
     </header>}
     {current && <div className="deck__body">
-      {overview && pending.length > 1 && <ol className="deck__index" aria-label="확인 필요 목록">{pending.map((decision, position) => <li key={decision.id}>
-        <button type="button" aria-current={position === at || undefined} onClick={() => setIndex(position)}>
-          <DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={18}/>
+      {pending.length > 1 && <ol className="deck__index" aria-label="확인 필요 목록">{pending.map((decision, position) => <li key={decision.id}>
+        <button type="button" aria-current={position === at || undefined} onClick={() => { setIndex(position); setFocusNext(true); }}>
+          <span className="deck__position tabular" aria-hidden="true">{position + 1}</span>
           <span className="deck__index-copy"><span>{decisionHeading(decision, state)}</span>
             <small>{names.get(decision.ghostId) ?? 'Ghost'} · {decisionChip(decision)}</small></span>
         </button>
       </li>)}</ol>}
-      <div className="deck__stack">
-        {Array.from({ length: behind }, (_, layer) => <div key={layer} className="deck__ghost-card" data-layer={layer + 1} aria-hidden="true"/>)}
-        <div className="deck__top" key={current.id}>
+      <div className="deck__top" key={current.id}>
           <DecisionCard decision={current} ghostName={ghostName} workTitle={workTitle} autoFocus={focusNext || current.id === focusId}
             onOpenWork={onOpenWork ?? (id => navigate(`/work/${encodeURIComponent(id)}`))}
             onResolved={outcome => { setSettled({ id: current.id, kind: current.kind, outcome }); setFocusNext(true); }}/>
-        </div>
       </div>
     </div>}
     {/* Always in the same place, so a screen reader hears each change; empty, it takes no room. */}

@@ -93,7 +93,7 @@ export function UiInputBlock({ ui, block, conversationId, messageId, onUiSubmit 
   const disabled = !onUiSubmit || state.status === 'pending' || state.status === 'sent';
   return <section className="ghost-ui-block" aria-labelledby={headingId}>
     <h3 id={headingId}>{block.title}</h3>
-    <form className="ghost-ui-input" aria-labelledby={headingId} aria-describedby={feedbackId} aria-busy={state.status === 'pending'} onSubmit={event => { event.preventDefault(); void submit(); }}>
+    <form className="ghost-ui-input" data-kind={block.type} aria-labelledby={headingId} aria-describedby={feedbackId} aria-busy={state.status === 'pending'} onSubmit={event => { event.preventDefault(); void submit(); }}>
       {block.type === 'choices' ? <fieldset className="ghost-ui-choices" disabled={disabled}>
         <legend className="sr-only">{block.title}</legend>
         {block.options.map(option => <label key={option.id} className="ghost-ui-choice">
