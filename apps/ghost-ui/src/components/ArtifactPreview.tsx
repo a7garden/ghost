@@ -80,7 +80,7 @@ function FileSheet({ artifact, onClose, returnFocus }: { artifact: ArtifactRef; 
           {error ? <p className="file-sheet__notice text-red" role="alert">{error}</p>
             : !content ? <p className="file-sheet__notice" role="status">파일을 읽는 중…</p>
             : source !== undefined ? source === '' ? <p className="file-sheet__notice">빈 파일</p>
-              : markdown && view === 'preview' ? <article className="file-sheet__document"><MessageBody text={source}/></article>
+              : markdown && view === 'preview' ? <article className="file-sheet__document"><MessageBody text={source} document/></article>
               : <div className="file-sheet__source" data-wrap={wrap || undefined}>
                 {gutter && <pre className="file-sheet__gutter" aria-hidden="true">{gutter}</pre>}
                 <pre className="file-sheet__code">{source}</pre>

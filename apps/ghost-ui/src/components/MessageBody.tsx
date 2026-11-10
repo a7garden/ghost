@@ -2,6 +2,8 @@ import { createContext, isValidElement, useContext, useEffect, useRef, useState,
 import { Check, CircleAlert, Copy, Image as ImageIcon } from 'lucide-react';
 import { Button, cn } from '../ui'
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
+import remarkCjkFriendly from 'remark-cjk-friendly';
 import remarkGfm from 'remark-gfm';
 import type { Element, ElementContent, Root } from 'hast';
 import './MessageBody.css';
@@ -143,7 +145,13 @@ const components = {
   [REF_TAG]: RefNode,
 } as Components;
 
-const remarkPlugins = [remarkGfm];
+/**
+ * CommonMark drops `**「산림청」**을` to literal asterisks: a delimiter beside punctuation must
+ * also touch a space, which Korean prose never puts there. The CJK-friendly rule lifts that.
+ * Messages also keep the single line breaks a Ghost writes; a stored document keeps CommonMark's.
+ */
+const documentRemarkPlugins = [remarkGfm, remarkCjkFriendly];
+const messageRemarkPlugins = [remarkGfm, remarkCjkFriendly, remarkBreaks];
 const remarkRehypeOptions = { footnoteLabel: '각주', footnoteBackLabel: '본문으로 돌아가기' };
 
 /** Code keeps its exact characters as one node. */
@@ -194,9 +202,9 @@ const rehypePlugins = [rehypeRefs];
 const streamingRehypePlugins = [rehypeRefs, rehypeStreaming];
 
 /** Assistant transcript body: GFM markdown kept inside the message column, no raw HTML, no automatic remote resources. */
-export function MessageBody({ text, streaming = false }: { text: string; streaming?: boolean }) {
+export function MessageBody({ text, streaming = false, document = false }: { text: string; streaming?: boolean; document?: boolean }) {
   return <div className="message-body" data-streaming={streaming || undefined}>
-    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={streaming ? streamingRehypePlugins : rehypePlugins} remarkRehypeOptions={remarkRehypeOptions} urlTransform={safeUrl} components={components}>{text}</Markdown>
+    <Markdown remarkPlugins={document ? documentRemarkPlugins : messageRemarkPlugins} rehypePlugins={streaming ? streamingRehypePlugins : rehypePlugins} remarkRehypeOptions={remarkRehypeOptions} urlTransform={safeUrl} components={components}>{text}</Markdown>
   </div>;
 }
 

@@ -1,20 +1,25 @@
 import type { Element, ElementContent, Root } from 'hast';
 
-/** A machine reference inside prose: an entity id (or the abbreviated head of one) or a content digest. */
-export interface Ref { kind: 'id' | 'digest'; value: string }
+/**
+ * A machine reference inside prose: an entity id (or the abbreviated head of one), a content
+ * digest, or a short commit hash. 2026.11.10 : the owner asked that `b8fbb2ac`-style hashes stop
+ * showing raw, so 7–11 hex characters now count as a commit.
+ */
+export interface Ref { kind: 'id' | 'digest' | 'commit'; value: string }
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 /** Ghosts shorten ids as `66eb43f1-…` or `01a1ba5c-5590-...`; the head still names one entity. */
 const ABBREVIATED = '[0-9a-f]{8}(?:-[0-9a-f]{4}){0,3}-?(?:…|\\.{3})';
 /** Candidates only; a digest also needs a digit and a letter, so plain numbers and words stay text. */
-const REF = new RegExp(`(\\()?\\b(${UUID}\\b|${ABBREVIATED}|[0-9a-f]{12,64}\\b)(\\))?`, 'gi');
-const WHOLE = new RegExp(`^(?:${UUID}|${ABBREVIATED}|[0-9a-f]{12,64})$`, 'i');
+const REF = new RegExp(`(\\()?\\b(${UUID}\\b|${ABBREVIATED}|[0-9a-f]{7,64}\\b)(\\))?`, 'gi');
+const WHOLE = new RegExp(`^(?:${UUID}|${ABBREVIATED}|[0-9a-f]{7,64})$`, 'i');
 
 function refOf(value: string): Ref | null {
   const lower = value.toLowerCase();
   if (/(?:…|\.{3})$/.test(lower)) return /\d/.test(lower) ? { kind: 'id', value: lower.replace(/-?(?:…|\.{3})$/, '') } : null;
   if (lower.length === 36 && lower.includes('-')) return { kind: 'id', value: lower };
-  return /\d/.test(lower) && /[a-f]/.test(lower) ? { kind: 'digest', value: lower } : null;
+  if (!/\d/.test(lower) || !/[a-f]/.test(lower)) return null;
+  return { kind: lower.length < 12 ? 'commit' : 'digest', value: lower };
 }
 
 /**

@@ -23,8 +23,10 @@ it('treats hex runs as digests only when they mix digits and letters', () => {
   expect(splitRefs('digest 60083fa5e45e, 4,667 bytes')).toEqual(['digest ', { kind: 'digest', value: '60083fa5e45e' }, ', 4,667 bytes']);
   // Timestamps, phone-like numbers and plain words stay text.
   expect(splitRefs('at 1731000000000 the decafbadcafe')).toEqual(['at 1731000000000 the decafbadcafe']);
-  // Shorter than a digest prefix: a commit-like 7-character hash is not hidden.
-  expect(splitRefs('commit 9cde8c9')).toEqual(['commit 9cde8c9']);
+  // Shorter than a digest prefix: a 7–11 character hash is a commit, again only when it mixes digits and letters.
+  expect(splitRefs('커밋 9cde8c9 · b8fbb2ac에서')).toEqual(['커밋 ', { kind: 'commit', value: '9cde8c9' }, ' · ', { kind: 'commit', value: 'b8fbb2ac' }, '에서']);
+  expect(splitRefs('abcdefa 1234567 decade5d')).toEqual(['abcdefa 1234567 ', { kind: 'commit', value: 'decade5d' }]);
+  expect(splitRefs('ab12cd')).toEqual(['ab12cd']);
 });
 
 it('lets a code-span id take its surrounding parentheses along', () => {
