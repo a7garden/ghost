@@ -273,4 +273,9 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX activity_runs_by_activity ON activity_runs(activity_id);
   `,
+  /* 8: questions go to any live same-root peer Work, not only the delegator */ `
+  ALTER TABLE work_questions RENAME COLUMN parent_work_id TO recipient_work_id;
+  DROP INDEX work_questions_by_parent;
+  CREATE INDEX work_questions_by_recipient ON work_questions(recipient_work_id, state);
+  `,
 ];

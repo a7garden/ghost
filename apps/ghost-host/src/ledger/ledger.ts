@@ -45,7 +45,7 @@ const RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export interface WorkQuestion {
   id: string;
   workId: string;
-  parentWorkId: string;
+  recipientWorkId: string;
   question: string;
   answer: string | null;
   state: "pending" | "answered" | "cancelled";
@@ -431,6 +431,11 @@ export class Ledger {
     return (this.db.query("SELECT * FROM works WHERE parent_id = ? ORDER BY created_at").all(workId) as Row[]).map(toWork);
   }
 
+  /** Every Work of one root tree, all states included. */
+  worksInRoot(rootId: string): Work[] {
+    return (this.db.query("SELECT * FROM works WHERE root_id = ? ORDER BY created_at").all(rootId) as Row[]).map(toWork);
+  }
+
   worksInState(...states: Work["state"][]): Work[] {
     const marks = states.map(() => "?").join(",");
     return (this.db.query(`SELECT * FROM works WHERE state IN (${marks}) ORDER BY created_at`).all(...states) as Row[]).map(toWork);
@@ -449,13 +454,28 @@ export class Ledger {
     ).map(toWork);
   }
 
-  /** Work that settled after `since`, newest first. */
-  worksSettledSince(since: number, limit = 40): Work[] {
-    return (
-      this.db
-        .query("SELECT * FROM works WHERE state IN ('done','failed','cancelled') AND updated_at > ? ORDER BY updated_at DESC LIMIT ?")
-        .all(since, limit) as Row[]
-    ).map(toWork);
+  /** Latest durable change for one Work; clocks cannot order changes within one millisecond. */
+  workChangeSeq(workId: string): number | null {
+    const row = this.db.query("SELECT seq FROM events WHERE json_extract(data, '$.type') = 'work' AND json_extract(data, '$.work.id') = ? ORDER BY seq DESC LIMIT 1").get(workId) as Row | null;
+    return row ? Number(row.seq) : null;
+  }
+
+  /** Count before limiting: child churn must not hide roots or understate the team's backlog. */
+  settledRootsSince(since: number, observedSeq: number | null, ghostId: string | null): { count: number; works: Work[] } {
+    const changed = observedSeq === null
+      ? "updated_at >= ?"
+      : `(updated_at > ? OR EXISTS (
+          SELECT 1 FROM events e WHERE e.seq > ? AND json_extract(e.data, '$.type') = 'work'
+            AND json_extract(e.data, '$.work.id') = works.id
+        ))`;
+    const scope = ghostId === null ? "" : "AND (ghost_id = ? OR origin_conversation_id IN (SELECT id FROM conversations WHERE ghost_id = ?))";
+    const parameters: SQLQueryBindings[] = [since];
+    if (observedSeq !== null) parameters.push(observedSeq);
+    if (ghostId !== null) parameters.push(ghostId, ghostId);
+    const where = `parent_id IS NULL AND state IN ('done','failed','cancelled') AND ${changed} ${scope}`;
+    const count = this.db.query(`SELECT COUNT(*) AS total FROM works WHERE ${where}`).get(...parameters) as Row;
+    const works = (this.db.query(`SELECT * FROM works WHERE ${where} ORDER BY updated_at DESC, id LIMIT 12`).all(...parameters) as Row[]).map(toWork);
+    return { count: Number(count.total), works };
   }
 
   /** Times the work conversation went idle without completing at the current revision. Internal; not in the contract. */
@@ -530,7 +550,7 @@ export class Ledger {
   findWorkQuestion(id: string): WorkQuestion | null {
     const row = this.db.query("SELECT * FROM work_questions WHERE id = ?").get(id) as Row | null;
     return row ? {
-      id: String(row.id), workId: String(row.work_id), parentWorkId: String(row.parent_work_id),
+      id: String(row.id), workId: String(row.work_id), recipientWorkId: String(row.recipient_work_id),
       question: String(row.question), answer: row.answer === null ? null : String(row.answer),
       state: String(row.state) as WorkQuestion["state"], createdAt: Number(row.created_at),
       answeredAt: row.answered_at === null ? null : Number(row.answered_at),
@@ -542,8 +562,8 @@ export class Ledger {
     } : null;
   }
 
-  workQuestions(workId: string, asParent = false): WorkQuestion[] {
-    return (this.db.query(`SELECT id FROM work_questions WHERE ${asParent ? "parent_work_id" : "work_id"} = ? ORDER BY created_at, id`).all(workId) as Row[])
+  workQuestions(workId: string, asRecipient = false): WorkQuestion[] {
+    return (this.db.query(`SELECT id FROM work_questions WHERE ${asRecipient ? "recipient_work_id" : "work_id"} = ? ORDER BY created_at, id`).all(workId) as Row[])
       .map((row) => this.findWorkQuestion(String(row.id))!);
   }
 
@@ -556,14 +576,14 @@ export class Ledger {
 
   putWorkQuestion(question: WorkQuestion) {
     this.db.query(`INSERT INTO work_questions
-      (id, work_id, parent_work_id, question, answer, state, created_at, answered_at, submitted_at, answer_submitted_at,
+      (id, work_id, recipient_work_id, question, answer, state, created_at, answered_at, submitted_at, answer_submitted_at,
         nudge_count, cancellation_reason, cancellation_submitted_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (id) DO UPDATE SET answer = excluded.answer, state = excluded.state, answered_at = excluded.answered_at,
         submitted_at = excluded.submitted_at, answer_submitted_at = excluded.answer_submitted_at,
         nudge_count = excluded.nudge_count, cancellation_reason = excluded.cancellation_reason,
         cancellation_submitted_at = excluded.cancellation_submitted_at`)
-      .run(question.id, question.workId, question.parentWorkId, question.question, question.answer, question.state,
+      .run(question.id, question.workId, question.recipientWorkId, question.question, question.answer, question.state,
         question.createdAt, question.answeredAt, question.submittedAt, question.answerSubmittedAt,
         question.nudgeCount, question.cancellationReason, question.cancellationSubmittedAt);
     this.emit({ type: "work", work: this.work(question.workId) });

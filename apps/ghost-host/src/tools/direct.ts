@@ -12,9 +12,15 @@ const DEFAULT_WORK_MINUTES = 90;
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
-/** Works created here (their whole tree) plus this Ghost's live Work, one compact line each. */
+/** The caller is the current active main Ghost, resolved at execution; a former main loses the role at once. */
+function isCurrentMain(scope: Scope): boolean {
+  return scope.ghost.isDefault && scope.ghost.state === "active";
+}
+
+/** Works created here (their whole tree) plus this Ghost's live Work, one compact line each. The current main Ghost sees the whole team's Work. */
 function visibleWorks(core: Core, scope: Scope): Work[] {
   const { ledger } = core;
+  if (isCurrentMain(scope)) return ledger.worksForState();
   const found = new Map<string, Work>();
   const walk = (work: Work) => {
     if (found.has(work.id)) return;
@@ -71,7 +77,7 @@ export function createDirectTools(core: Core): Extension {
 
   const workList = defineTool({
     name: "work_list",
-    description: "List the Work created in this conversation and this Ghost's live Work.",
+    description: "List the Work created in this conversation and this Ghost's live Work. The current main Ghost instead sees the whole team's Work, live and recently settled.",
     parameters: Type.Object({}),
     replay: "safe",
     async execute(_args, api) {
@@ -87,7 +93,7 @@ export function createDirectTools(core: Core): Extension {
 
   const workInspect = defineTool({
     name: "work_inspect",
-    description: "Inspect one Work: its tree, effects, artifacts and decisions.",
+    description: "Inspect one Work: its tree, effects, artifacts and decisions. A Work of this conversation or assignee; the current main Ghost may inspect any team Work.",
     parameters: Type.Object({ work_id: Type.String({ minLength: 1, description: "The Work's id" }) }),
     replay: "safe",
     async execute(args, api) {
@@ -95,9 +101,11 @@ export function createDirectTools(core: Core): Extension {
         const scope = requireAllowed(core, api, "work_inspect");
         const work = core.ledger.work(args.work_id);
         const root = work.rootId === work.id ? work : core.ledger.work(work.rootId);
-        const assignedHere = work.ghostId === scope.ghost.id;
-        if (root.originConversationId !== scope.conversation.id && !assignedHere) {
-          throw invalid("this Work neither originates from this conversation nor is assigned to this Ghost");
+        if (!isCurrentMain(scope)) {
+          const assignedHere = work.ghostId === scope.ghost.id;
+          if (root.originConversationId !== scope.conversation.id && !assignedHere) {
+            throw invalid("this Work neither originates from this conversation nor is assigned to this Ghost");
+          }
         }
         const detail = workDetail(core, work.id);
         return text(renderDetail(core, detail.work, detail));

@@ -417,7 +417,7 @@ export class Activities {
     const ghost = this.ledger.ghost(work.ghostId);
     if (ghost.deletedAt !== null || ghost.state !== "active") throw forbidden("the executing Ghost is no longer active");
     if (work.execution?.kind === "host" && !ghost.hostExecution) throw forbidden("unrestricted PC execution grant was revoked");
-    if (toolName && !toolName.startsWith("activity_") && toolName !== "complete" && toolName !== "ask_owner" && toolName !== "ask_parent" && toolName !== "answer_child" && toolName !== "work_status") {
+    if (toolName && !toolName.startsWith("activity_") && toolName !== "complete" && toolName !== "ask_owner" && toolName !== "ask_parent" && toolName !== "ask_peer" && toolName !== "answer_question" && toolName !== "work_status") {
       const tool = toolName as GhostTool;
       if (!activity.tools.includes(tool) || !ghost.tools.includes(tool) || !work.toolScope?.includes(tool)) throw forbidden(`${toolName} is outside this activity's current scope`);
       if (run.dryRun && !DRY_TOOLS[tool]) throw forbidden(`${toolName} is disabled in dry runs`);

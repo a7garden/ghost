@@ -56,7 +56,7 @@ export const ExecutionTarget = Type.Union([
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTarget>;
 
-/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict), the fixed self_adapt/capability_request and the main-only ghost_create/ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
+/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, ask_peer, answer_question, complete, work_status, artifact_read, effect_list, verdict), the fixed self_adapt/capability_request and main-only ghost_create/ghost_inspect/ghost_update/work_steer are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
