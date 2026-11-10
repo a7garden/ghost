@@ -135,7 +135,7 @@ ${htmlBody}`;
     ];
     const config: Config = {
       root: dirname(path), host: "127.0.0.1", port: 0, publicOrigin: "http://127.0.0.1",
-      uiDir: null, sandbox: { kind: "local" }, memory: null, voice: null, apns: null,
+      uiDir: null, sandbox: { kind: "local" }, voice: null, apns: null,
       skills: null, reach: null, browser: null,
     };
     const server = startServer({ core, config, ownerToken: "document-test", documents, skills: null });
