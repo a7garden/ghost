@@ -43,7 +43,7 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.3-80bf347`(GitHub Release `v2.4.3`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.4-ab57e70`(GitHub Release `v2.4.4`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -51,6 +51,14 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 팀 목표·이정표 — 2026-11-11
+
+- [v2.4.4](https://github.com/a7garden/ghost/releases/tag/v2.4.4), 소스 `ab57e70`(브랜치 `release/goals-20261111`). 운영 2.4.3(`80bf347`) 위에 `main`의 목표 기능 `91b51f8`·`c407db1`만 옮긴 교정본이다. 배포 보류 중인 2.5.0 기억·2.6.0 협업 후보는 포함하지 않는다. 설계는 [팀 목표](architecture.md#team-goals). 저장은 `settings`의 `goals` 키 하나라 원장 저장 형식 지문은 그대로다.
+- 함께 고친 기존 결함: 커밋 이벤트보다 after-commit 작업이 먼저 실행돼, 그 작업이 쓴 이벤트가 먼저 나가면 seq 순서 SSE가 앞선 변경을 버렸다(새 목표가 화면에 바로 안 뜨던 원인). 커밋 이벤트를 먼저 내보낸다. 수정 전 실패·수정 후 통과 회귀 검사를 넣었다.
+- 검사: 릴리스 실행 Host 767 통과·9 생략, UI 182, Rust 21, 계약·Host·UI 타입, Developer ID·매니페스트·묶음 검증. 목표 e2e 8개(데스크톱·iPhone). 격리 Host·실제 브라우저에서 목표 추가·종료 확인, 이벤트로 즉시 반영, 3개 상한을 확인했다. Host 변경은 Codex(`gpt-6.1-sol`) 독립 검토의 P2 4건(Work·연결 원자성, 재실행 시 일시정지 목표 연결, 지키는 선 잘림, 준비된 깨우기 중 새 목표 신호 유실)을 고쳤다. UI 검토는 실제 GLM이 맡아 지적 1건(접근성 이름)만 반영했고 강한 타 공급자 검토로 세지 않는다(UI는 R1).
+- 운영 Host 자체 업데이트: `lastResult: installed`, `2.4.3-80bf347` → `2.4.4-ab57e70`, 백업 `backups/pre-2.4.4-ab57e70-*`. health 2.4.4·runtime ready, Ghost 28·대화 213·맡긴 일 156·기기 1·Space 9의 기존 ID 보존, 제공 UI 번들에 목표 화면 포함, `#/goals` 빈 상태를 확인했다. 설치된 Mac 앱은 실행 중이지만 창이 현재 Space에서 보이지 않아 네이티브 창 확인은 하지 못했다.
+- 병행 릴리스 브랜치 `release/browser-vault-20261111`(2.5.1)에는 목표가 없다. 그 릴리스를 게시하기 전에 `release/goals-20261111`을 합쳐야 목표 화면이 사라지지 않는다(저장된 목표는 남는다).
 
 ### PC 조작 내장·키보드 안전 경계 — 2026-11-11
 
