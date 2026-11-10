@@ -32,7 +32,7 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.1.2-9fd86d8`(GitHub Release `v2.1.2`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.2.0-873134c`(GitHub Release `v2.2.0`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -40,6 +40,12 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### iPhone 앱 OTA 업데이트 — 2026-11-10
+
+- Release에 팀 개발 프로필(`iOS Team Provisioning Profile: io.a7garden.ghost`, 등록 기기 3대, 2027-11-04 만료)로 서명한 `Ghost.ipa`를 넣는다. Host가 15분 토큰으로 공개 origin에서 설치 페이지·OTA 매니페스트·sha256을 검증한 IPA를 준다. 빌드 9부터 iPhone 앱 안의 「앱 업데이트」로 설치하고, 그 전 셸(현재 iPhone의 빌드 8)은 Mac 설정 › 업데이트 › iPhone 앱의 QR 코드를 카메라로 찍어 Safari에서 「설치」한다.
+- 운영 Host는 Owner API로 2.1.2 → 2.2.0을 자체 업데이트했다(20초, 백업 `backups/pre-2.2.0-873134c-*`). 공개 origin `https://macstudio.tail1d0d8d.ts.net:8443`에서 링크 발급, `application/xml` 매니페스트, 매니페스트 sha256과 일치하는 IPA(328,355 bytes), CSP가 붙은 설치 페이지, 잘못된 토큰 404를 확인했다. Mac 앱에서 `0.1.0 (9)`와 QR 코드가 뜬다. iPhone에서의 실제 설치 확인(시스템 설치 창 탭)은 소유자가 해야 한다.
+- 알림: 앱은 서명 프로필의 `aps-environment`로 APNs 환경(sandbox/production)을 정한다. Xcode가 팀 W5SAS95CBV를 `Personal Team`(무료)으로 보고 Push 기능 추가를 거부하므로, OTA 빌드에는 push 권한이 없다. 멤버십을 확인하거나 갱신하고, APNs 키(`.p8`)를 만든 뒤 `config.json`에 `apns`를 넣어야 알림이 동작한다. 무료 팀으로 남으면 새로 발급하는 개발 프로필은 7일 뒤 만료된다.
 
 ### GitHub Release 자체 업데이트 도입 — 2026-11-10
 
@@ -49,7 +55,7 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
 - 자체 업데이트 검증: 격리 루트·포트에서 launcher 루프로 2.1.0 → 2.1.1을 받았다(받기·검증 11초, 재기동 3초, 60초 뒤 `installed`). 운영은 Owner API로 2.1.0 → 2.1.1을, 설치된 앱의 설정 › 업데이트 「설치」로 2.1.1 → 2.1.2를 받았다. 각각 백업 `backups/pre-2.1.1-03763ab-*`, `backups/pre-2.1.2-9fd86d8-*`가 남았다. 다운타임은 약 2초였고 Ghost 25·대화 206·맡긴 일 154를 보존했다.
 - 앱 0.2.0은 손으로 설치했다. 0.2.1·0.2.2는 앱 안의 「설치」로 받았다. 0.2.1은 재시작 뒤 Dock에서 다시 열기 전까지 창이 보이지 않았고, 0.2.2부터 LaunchServices로 다시 열어 창이 바로 뜬다.
 - 업데이트 토큰은 소유자의 `gh` 토큰(`repo`·`admin:org` 등 넓은 범위)을 넣었다. `a7garden/ghost` 내용 읽기만 허용한 fine-grained 토큰으로 바꾸려면 설정 › 업데이트 › GitHub 토큰에서 바꾼다.
-- 되돌릴 때는 `current`를 이전 릴리스로 바꾸고 `launchctl kickstart -k gui/$(id -u)/com.a7.ghost`. 2.1.x는 저장 형식 지문(`ledger-7/pi-durable-1.1.0/vault-1`)이 같다. 업데이트 기능 이전으로 돌아가려면 `releases/20261110-bun-a0b941e`와 백업한 plist(infra `ghost-run.sh`)를 복원한다.
+- 되돌릴 때는 `current`를 이전 릴리스로 바꾸고 `launchctl kickstart -k gui/$(id -u)/com.a7.ghost`. 2.1.x·2.2.0은 저장 형식 지문(`ledger-7/pi-durable-1.1.0/vault-1`)이 같다. 업데이트 기능 이전으로 돌아가려면 `releases/20261110-bun-a0b941e`와 백업한 plist(infra `ghost-run.sh`)를 복원한다.
 
 ### 기본 Ghost 호버 반응·움직임 줄이기 운영 반영 — 2026-11-10
 
