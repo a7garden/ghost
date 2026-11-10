@@ -42,6 +42,8 @@ export function crumbsFor(route: string, state: State | null): Crumb[] {
       return [{ label: uiTerms.inbox, path: null }];
     case 'mail':
       return [{ label: routeLabels.mail, path: null }];
+    case 'goals':
+      return [{ label: uiTerms.goals, path: null }];
     case 'work': {
       if (!id) return [{ label: uiTerms.work, path: null }];
       const chain = state ? lineage(state, id) : [];

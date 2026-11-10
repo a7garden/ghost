@@ -132,8 +132,13 @@ export class Ledger {
       this.pending = null;
       this.committedTasks = null;
       this.rolledBackTasks = null;
-      for (const task of tasks ?? []) task();
-      if (committed) for (const event of events) for (const listener of this.listeners) listener(event);
+      // Committed events go out before after-commit tasks: a task that writes in its own transaction must not
+      // reach subscribers ahead of the change that caused it, or a seq-ordered stream drops the earlier event.
+      try {
+        if (committed) for (const event of events) for (const listener of this.listeners) listener(event);
+      } finally {
+        for (const task of tasks ?? []) task();
+      }
     }
   }
 

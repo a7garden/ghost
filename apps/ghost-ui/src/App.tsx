@@ -23,6 +23,7 @@ import { Overview } from './features/Overview';
 import { GhostChat } from './features/GhostChat';
 import { Conversations } from './features/Conversations';
 import { WorkView } from './features/WorkViews';
+import { Goals } from './features/goals/Goals';
 import { WorkDetail } from './features/WorkDetail';
 import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
@@ -179,6 +180,7 @@ function Shell() {
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
     { id: 'mail', label: '메일', group: '이동', onSelect: go('/mail') },
+    { id: 'goals', label: uiTerms.goals, group: '이동', onSelect: go('/goals') },
     { id: 'spaces', label: routeLabels.spaces, group: '이동', onSelect: go('/spaces') },
     ...visibleGhosts(ghosts).map(ghost => ({ id: `ghost:${ghost.id}`, label: ghost.name, description: ghost.isDefault ? '메인 Ghost' : undefined, group: 'Ghost', onSelect: () => switchGhost(ghost.id) })),
     ...state.spaces.map(space => ({ id: `space:${space.id}`, label: space.name, group: '프로젝트', onSelect: () => navigate(`/spaces/${space.id}`) })),
@@ -218,7 +220,7 @@ function Shell() {
   ];
 
   const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>;
-  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, spaces: true, inbox: true, work: true, mail: true, settings: true, workspace: true };
+  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, spaces: true, inbox: true, work: true, mail: true, goals: true, settings: true, workspace: true };
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
@@ -249,6 +251,7 @@ function Shell() {
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView/>}
+            {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
               : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')} createRequested={params.get('new') === '1'} onCreateClosed={clearCreateRequest}/>)}

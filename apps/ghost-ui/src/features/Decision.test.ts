@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { Decision, State, Work } from '@ghost/contract';
 import { HostProvider } from '../host/context';
 import { DecisionCard, autoSettleText, cardDetail, chatDecisions, decisionCommand, documentProposal, highRiskApproval, recommendedOption } from './Decision';
-import { browserHandoffProposal, emptySecureForm, secureFormBody, secureFormProposal } from './decisionText';
+import { browserHandoffProposal, decisionChip, emptySecureForm, goalProposal, secureFormBody, secureFormProposal } from './decisionText';
 
 const decision = (patch: Partial<Decision> = {}): Decision => ({
   id: 'd1', kind: 'approve_effect', ghostId: 'sage', conversationId: 'c1', workId: null, effectId: 'e1',
@@ -13,6 +13,18 @@ const decision = (patch: Partial<Decision> = {}): Decision => ({
 });
 
 const loginRequest = { kind: 'login' as const, origin: 'https://app.example.com', title: '예시 로그인', reason: '로그인이 필요합니다.' };
+
+it('previews a goal proposal as structured facts and keeps the registration options', () => {
+  const goal = { title: '오래 쓸 수 있는 도구', why: '일을 차분히 이어 가기 위해', boundaries: '허락 없는 발송 금지', signal: '다시 찾는 사람의 말' };
+  const item = decision({ kind: 'question', title: '이 방향을 등록할까요?', detail: '기술적인 대체 본문', proposal: { goal }, options: ['등록', '거절'] });
+  expect(goalProposal(item)).toEqual(goal);
+  expect(goalProposal(decision({ proposal: { goal } }))).toBeNull();
+  expect(decisionChip(item)).toBe('목표 제안');
+  const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, { decision: item, ghostName: '세이지', onResolved() {} })));
+  for (const value of ['방향', '이유', '지키는 선', '참고 신호', ...Object.values(goal), '등록', '거절']) expect(markup).toContain(value);
+  expect(markup).not.toContain('기술적인 대체 본문');
+  expect(decisionCommand(item, 'answer', '등록')).toEqual({ type: 'decision.resolve', decisionId: 'd1', outcome: 'answer', answer: '등록' });
+});
 
 describe('decisionCommand', () => {
   it('approves and denies effect decisions with the decision id', () => {

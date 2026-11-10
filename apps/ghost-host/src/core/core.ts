@@ -15,6 +15,7 @@ import type { ActivitySourcePort } from "../integrations/activity-sources.ts";
 import { Autonomy, type AutonomyDeps } from "./autonomy.ts";
 import { Adaptations } from "./adaptations.ts";
 import { DutyClock } from "./duty.ts";
+import { Goals } from "./goals.ts";
 import type { SourceStore } from "../stores/sources.ts";
 
 export interface CoreDeps {
@@ -52,6 +53,8 @@ export class Core implements EngineEvents {
   readonly activities: Activities;
   readonly autonomy: Autonomy;
   readonly adaptations: Adaptations;
+  /** Long-term team directions and their milestone lines. */
+  readonly goals: Goals;
   /** 출근 · 퇴근. 퇴근 중에는 Ghost 가 스스로 새 일을 시작하지 않는다. */
   readonly duty: DutyClock;
   readonly activitySources: ActivitySourcePort | null;
@@ -83,6 +86,7 @@ export class Core implements EngineEvents {
     this.activities = new Activities(this, this.activitySources);
     this.autonomy = new Autonomy(this, deps.autonomy);
     this.adaptations = new Adaptations(this);
+    this.goals = new Goals(this);
     this.duty = new DutyClock(this);
     // 출근하면 퇴근 중에 때가 된 예약 · 활동 규칙 · 자율 깨우기를 바로 돌린다. 퇴근하면 예약 타이머를 다시 맞춘다.
     this.duty.onChange((onDuty) => {

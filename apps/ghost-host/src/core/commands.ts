@@ -509,6 +509,21 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       });
       return {};
     }
+
+    case "goal.create": {
+      const goal = core.goals.create(command);
+      // A new direction is worth the main's next look; the wake path keeps its duty, budget and busy gates.
+      ledger.afterCommit(() => core.autonomy.goalsChanged());
+      return { goalId: goal.id };
+    }
+
+    case "goal.update":
+      core.goals.update(command.goalId, { title: command.title, why: command.why, boundaries: command.boundaries, signal: command.signal, state: command.state });
+      return {};
+
+    case "milestone.update":
+      core.goals.settleByOwner(command.milestoneId, command.state, command.outcome);
+      return {};
   }
   const exhaustive: never = command;
   throw new CommandError("invalid", `unknown command ${(exhaustive as Command).type}`);

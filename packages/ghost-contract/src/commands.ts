@@ -22,6 +22,7 @@ import {
   DeviceAlerts,
   nullable,
 } from "./entities.ts";
+import { GOAL_SIGNAL_MAX, GOAL_TEXT_MAX, GOAL_TITLE_MAX, GoalState } from "./goals.ts";
 
 const command = <K extends string, P extends Parameters<typeof Type.Object>[0]>(type: K, properties: P) =>
   Type.Object({ type: Type.Literal(type), ...properties }, { additionalProperties: false });
@@ -208,6 +209,29 @@ export const Command = Type.Union([
 
   // Notifications
   command("notification.read", { notificationIds: Type.Array(Id, { minItems: 1, maxItems: 500 }) }),
+
+  // Goals: long-term team directions and the milestone line under each
+  command("goal.create", {
+    title: Text(GOAL_TITLE_MAX),
+    why: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+    boundaries: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+    signal: Type.Optional(Type.String({ maxLength: GOAL_SIGNAL_MAX })),
+  }),
+  /** Edit, pause, resume or close. Closing drops its open milestones. */
+  command("goal.update", {
+    goalId: Id,
+    title: Type.Optional(Text(GOAL_TITLE_MAX)),
+    why: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+    boundaries: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+    signal: Type.Optional(Type.String({ maxLength: GOAL_SIGNAL_MAX })),
+    state: Type.Optional(GoalState),
+  }),
+  /** The owner settles a milestone: done needs no linked Work from the owner; dropped keeps the reason. */
+  command("milestone.update", {
+    milestoneId: Id,
+    state: Type.Union([Type.Literal("done"), Type.Literal("dropped")]),
+    outcome: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+  }),
 ]);
 export type Command = Static<typeof Command>;
 export type CommandType = Command["type"];

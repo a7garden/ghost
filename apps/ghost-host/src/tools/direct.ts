@@ -43,6 +43,7 @@ export function createDirectTools(core: Core): Extension {
       deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Deadline in minutes from now, defaults to 90" })),
       execution: Type.Optional(ExecutionTarget),
       initiative: Type.Optional(Type.Boolean({ description: "true when you start this Work on your own judgment, not an owner request: a Ghost then reviews the result instead of the owner" })),
+      milestone_id: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "The active team-goal milestone this Work serves, from the goals in your wake; its goal's boundaries then bind the Work" })),
     }),
     replay: "unsafe",
     async execute(args, api) {
@@ -51,18 +52,26 @@ export function createDirectTools(core: Core): Extension {
         // 퇴근 중에는 스스로 새 일을 시작하지 않는다. 소유자가 시킨 일은 막지 않는다.
         if (args.initiative && !core.duty.onDuty()) throw forbidden("the owner is off duty: do not start new Work on your own until they are back. Record what you would do with plan_next instead.");
         const ghostId = args.ghost_id ?? scope.ghost.id;
-        const work = core.works.createRoot({
-          ghostId,
-          title: args.title,
-          brief: args.brief,
-          acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: args.initiative ? initiativeReviewer(core, scope.ghost, ghostId) : null },
-          deadlineAt: Date.now() + (args.deadline_minutes ?? DEFAULT_WORK_MINUTES) * 60_000,
-          originConversationId: scope.conversation.id,
-          execution: args.execution,
-          id: idFor(scope.conversation.id, api.callId),
+        const id = idFor(scope.conversation.id, api.callId);
+        // Refused before the Work exists, so a stale milestone never leaves an unlinked Work behind; a replay finds its Work.
+        if (args.milestone_id && !core.ledger.findWork(id)) core.goals.checkLink(args.milestone_id);
+        // The Work and its milestone link commit together, so a crash never leaves a milestone Work without its goal's boundaries.
+        const work = core.ledger.tx(() => {
+          const created = core.works.createRoot({
+            ghostId,
+            title: args.title,
+            brief: args.brief,
+            acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: args.initiative ? initiativeReviewer(core, scope.ghost, ghostId) : null },
+            deadlineAt: Date.now() + (args.deadline_minutes ?? DEFAULT_WORK_MINUTES) * 60_000,
+            originConversationId: scope.conversation.id,
+            execution: args.execution,
+            id,
+          });
+          if (args.milestone_id) core.goals.link(args.milestone_id, created.id);
+          return created;
         });
         const assignee = core.ledger.ghost(work.ghostId).name;
-        return text(`Work "${work.title}" created (${work.id}), assigned to ${assignee}. It reports back here when it settles.`);
+        return text(`Work "${work.title}" created (${work.id}), assigned to ${assignee}${args.milestone_id ? ", serving the milestone" : ""}. It reports back here when it settles.`);
       } catch (error) {
         return errorResult(error);
       }

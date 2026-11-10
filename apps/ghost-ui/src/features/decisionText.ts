@@ -1,4 +1,4 @@
-import type { BrowserHandoff, Decision, DecisionKind, SecureFormRequest, State, VaultContact, VaultItemKind } from '@ghost/contract';
+import type { BrowserHandoff, Decision, DecisionKind, GoalProposal, SecureFormRequest, State, VaultContact, VaultItemKind } from '@ghost/contract';
 
 export const decisionLabel: Record<DecisionKind, string> = {
   approve_effect: '실행 승인', question: '답변 대기', accept_result: '결과 확인',
@@ -14,11 +14,18 @@ export function decisionHeading(decision: Decision, state: State): string {
 /** Chip text for the two question shapes that need more than a typed answer. */
 export const secureFormLabel = '금고 요청';
 export const browserHandoffLabel = '브라우저 대기';
+export const goalProposalLabel = '목표 제안';
+
+/** An owner-only goal proposal uses the ordinary question options. */
+export function goalProposal(decision: Decision): GoalProposal | null {
+  const goal = decision.kind === 'question' ? decision.proposal?.goal : undefined;
+  return goal !== null && typeof goal === 'object' && typeof (goal as GoalProposal).title === 'string' ? goal as GoalProposal : null;
+}
 
 /** The chip of one decision: a question reads its proposal shape, every other kind its own label. */
 export function decisionChip(decision: Decision): string {
   if (decision.kind !== 'question') return decisionLabel[decision.kind];
-  return secureFormProposal(decision) ? secureFormLabel : browserHandoffProposal(decision) ? browserHandoffLabel : decisionLabel.question;
+  return goalProposal(decision) ? goalProposalLabel : secureFormProposal(decision) ? secureFormLabel : browserHandoffProposal(decision) ? browserHandoffLabel : decisionLabel.question;
 }
 
 /** The completion answer a browser handoff suggests; it goes through the ordinary answer path. */
