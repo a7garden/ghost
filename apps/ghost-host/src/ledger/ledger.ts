@@ -454,6 +454,15 @@ export class Ledger {
     ).map(toWork);
   }
 
+  /** Settled Work, including delegated results, for bounded memory-consolidation admission. */
+  worksSettledSince(since: number, limit = 40): Work[] {
+    return (
+      this.db
+        .query("SELECT * FROM works WHERE state IN ('done','failed','cancelled') AND updated_at > ? ORDER BY updated_at DESC LIMIT ?")
+        .all(since, limit) as Row[]
+    ).map(toWork);
+  }
+
   /** Latest durable change for one Work; clocks cannot order changes within one millisecond. */
   workChangeSeq(workId: string): number | null {
     const row = this.db.query("SELECT seq FROM events WHERE json_extract(data, '$.type') = 'work' AND json_extract(data, '$.work.id') = ? ORDER BY seq DESC LIMIT 1").get(workId) as Row | null;
