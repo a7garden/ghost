@@ -19,6 +19,7 @@ export type VaultForm = {
   extraOrigins: string; hadExtraOrigins: boolean;
   cardNumber: string; cardExpiry: string; cardCvc: string; cardName: string;
   contactName: string; contactPhone: string; contactEmail: string; contactAddress: string;
+  contactAddressDetail: string; contactPostalCode: string;
   value: string; hints: string; ghostIds: string[];
 };
 
@@ -27,6 +28,7 @@ export const emptyVaultForm: VaultForm = {
   extraOrigins: '', hadExtraOrigins: false,
   cardNumber: '', cardExpiry: '', cardCvc: '', cardName: '',
   contactName: '', contactPhone: '', contactEmail: '', contactAddress: '',
+  contactAddressDetail: '', contactPostalCode: '',
   value: '', hints: '', ghostIds: [],
 };
 
@@ -38,6 +40,7 @@ export function vaultFormFromItem(item: VaultItem): VaultForm {
     cardExpiry: item.cardExpiry ?? '',
     contactName: item.contact?.name ?? '', contactPhone: item.contact?.phone ?? '',
     contactEmail: item.contact?.email ?? '', contactAddress: item.contact?.address ?? '',
+    contactAddressDetail: item.contact?.addressDetail ?? '', contactPostalCode: item.contact?.postalCode ?? '',
     hints: item.hints, ghostIds: [...item.ghostIds],
   };
 }
@@ -79,7 +82,8 @@ export function vaultWriteBody(form: VaultForm, mode: 'create' | 'edit'): { body
       number: form.cardNumber.trim(), expiry: form.cardExpiry.trim(), cvc: form.cardCvc.trim(), name: form.cardName.trim() } } : {}) } };
   }
   if (form.kind === 'contact') {
-    const fields = { name: form.contactName.trim(), phone: form.contactPhone.trim(), email: form.contactEmail.trim(), address: form.contactAddress.trim() };
+    const fields = { name: form.contactName.trim(), phone: form.contactPhone.trim(), email: form.contactEmail.trim(), address: form.contactAddress.trim(),
+      addressDetail: form.contactAddressDetail.trim(), postalCode: form.contactPostalCode.trim() };
     const contact = Object.fromEntries(Object.entries(fields).filter(([, value]) => value));
     if (mode === 'create' && !Object.keys(contact).length) return { error: '한 항목 이상 입력해 주세요.' };
     return { body: { ...base, kind: form.kind, contact } };
@@ -117,6 +121,7 @@ export function vaultRowDetail(item: VaultItem): string {
     item.cardLast4 ? `•••• ${item.cardLast4}` : '',
     item.cardExpiry,
     item.contact?.name, item.contact?.phone, item.contact?.email, item.contact?.address,
+    item.contact?.addressDetail, item.contact?.postalCode,
   ].filter((part): part is string => Boolean(part));
   return parts.join(' · ');
 }
@@ -279,6 +284,10 @@ function VaultItemDialog({ item, ghosts, onClose, onSave }: {
         {field('contactPhone', '전화', { autoComplete: 'off', inputMode: 'tel' })}
         {field('contactEmail', '이메일', { autoComplete: 'off', inputMode: 'email' })}
         {field('contactAddress', '주소', { autoComplete: 'off' })}
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_120px]">
+          {field('contactAddressDetail', '상세주소', { autoComplete: 'off' })}
+          {field('contactPostalCode', '우편번호', { autoComplete: 'off' })}
+        </div>
       </>}
       {kind === 'secret' && field('value', '값', { password: true, autoComplete: 'off', description: '저장한 뒤에는 다시 볼 수 없습니다.' })}
       <FormField label="메모" description="어떤 때 쓸지 Ghost에게 알려 주는 메모입니다.">

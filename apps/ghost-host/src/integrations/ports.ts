@@ -143,6 +143,15 @@ export interface HostNodes {
   error: string | null;
 }
 
+/** One incoming Messages row containing a verification code. */
+export interface MessageVerificationCode {
+  code: string;
+  sender: string;
+  service: string;
+  receivedAt: number;
+  excerpt: string;
+}
+
 /** Owner-enabled, guarded Mac probes; callers cannot supply an arbitrary probe command. */
 export interface HostPort {
   status(): Promise<HostStatus>;
@@ -152,6 +161,8 @@ export interface HostPort {
   diskUsage(path: string): Promise<unknown>;
   list(path: string): Promise<unknown>;
   read(path: string): Promise<unknown>;
+  /** Read incoming verification codes from Messages; dbPath is injectable for tests. */
+  messageCodes(input: { dbPath?: string; withinMinutes: number; senderContains?: string }): Promise<{ codes: MessageVerificationCode[] }>;
   /** Runs an eligible inspection; null means the requested command did not run and needs approval. */
   inspect(input: HostCommand): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean } | null>;
   validateCommand(input: HostCommand): HostCommand;
@@ -171,10 +182,10 @@ export interface SkillsPort {
 }
 
 /** A secret field of a vault item. Values flow host → page only; no tool result carries one. */
-export type VaultField = "username" | "password" | "totp" | "card_number" | "card_expiry" | "card_cvc" | "card_name" | "value";
+export type VaultField = "username" | "password" | "totp" | "card_number" | "card_expiry" | "card_expiry_month" | "card_expiry_year" | "card_cvc" | "card_name" | "value";
 
 /** Fields whose fill needs an owner-approved effect each time (money moves through them). */
-export const APPROVAL_FIELDS: readonly VaultField[] = ["card_number", "card_expiry", "card_cvc", "card_name"];
+export const APPROVAL_FIELDS: readonly VaultField[] = ["card_number", "card_expiry", "card_expiry_month", "card_expiry_year", "card_cvc", "card_name"];
 
 /**
  * The Ghost vault: encrypted items, per-Ghost grants, write-only secrets. Implemented in src/stores/vault.ts.
@@ -204,16 +215,17 @@ export interface BrowserCommandResult {
   error: string | null;
 }
 
-/** One live-view frame: base64 JPEG of the viewport at CSS-pixel size `width`×`height`. */
-export interface BrowserFrame { image: string; mediaType: "image/jpeg"; width: number; height: number; url: string; title: string; windowAvailable?: boolean }
-
-/** Tap coordinates are fractions of the frame (0–1), so any screen size maps onto the same viewport. */
-export type BrowserControl =
-  | { type: "tap"; x: number; y: number }
+export type BrowserLiveEvent =
+  | { type: "frame"; data: string; width: number; height: number }
+  | { type: "page"; url: string; title: string }
+  | { type: "end"; reason: string };
+export type BrowserLiveInput =
+  | { type: "mouse"; event: "down" | "up" | "move" | "wheel"; x: number; y: number; button?: "left" | "middle" | "right" | "none"; clickCount?: 1 | 2 | 3; deltaX?: number; deltaY?: number; modifiers?: number }
+  | { type: "key"; event: "down" | "up"; key: string; code: string; text?: string; keyCode?: number; modifiers?: number }
   | { type: "text"; text: string }
-  | { type: "key"; key: "Enter" | "Tab" | "Backspace" | "Escape" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" }
-  | { type: "scroll"; dy: number }
   | { type: "navigate"; action: "back" | "forward" | "reload" };
+export interface BrowserSessionInfo extends BrowserSessionRef { engine: "chrome" | "obscura"; headed: boolean }
+export interface BrowserLogin { origin: string; username: string; password: string }
 
 export interface BrowserHandoffEnd {
   /** The headed page URL could not be recovered; the headless session resumed at about:blank. */
@@ -242,10 +254,14 @@ export interface BrowserPort {
   run(session: BrowserSessionRef, argv: string[], options?: BrowserRunOptions): Promise<BrowserCommandResult>;
   /** Reopen the session in a visible window (same Ghost login state) at `url` so the owner can act. */
   handoff(session: BrowserSessionRef, url: string | null): Promise<void>;
-  /** Owner live view during a handoff: the visible viewport as a JPEG, never shown to a model. */
-  view(session: BrowserSessionRef): Promise<BrowserFrame>;
-  /** One owner input during a handoff, from any paired device. Not a Ghost effect. */
-  control(session: BrowserSessionRef, input: BrowserControl): Promise<void>;
+  sessions(): BrowserSessionInfo[];
+  /** Shared local screencast, owner-only. Returns an unsubscribe function. */
+  live(session: BrowserSessionRef, options: { maxFps: number }, sink: (event: BrowserLiveEvent) => void): Promise<() => void>;
+  input(session: BrowserSessionRef, input: BrowserLiveInput): Promise<void>;
+  /** Consumed once by the next Ghost browser call. */
+  takeNotice?(session: BrowserSessionRef): string | null;
+  /** Keep focus and all secret writes isolated from owner input. */
+  exclusive?<T>(session: BrowserSessionRef, perform: () => Promise<T>): Promise<T>;
   /** Save the headed state and reopen headless at the owner's final page before the next command. */
   endHandoff(session: BrowserSessionRef): Promise<BrowserHandoffEnd>;
   /** Close the conversation's session; the Ghost's login state is saved. */

@@ -41,6 +41,8 @@ import { serveVault } from "./vault.ts";
 import { serveBrowser } from "./browser.ts";
 import { serveUpdate } from "../update/api.ts";
 import type { Updater } from "../update/index.ts";
+import type { MailService } from "../integrations/mail.ts";
+import { serveMail } from "./mail.ts";
 
 const HTTP_STATUS: Record<ErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503, internal: 500 };
 const DIGEST = /^[0-9a-f]{64}$/;
@@ -96,7 +98,7 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; vault?: Vault | null; browser?: BrowserPort | null; updater?: Updater | null }): { port: number; stop(): Promise<void> } {
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null }): { port: number; stop(): Promise<void> } {
   const { core, config, ownerToken, documents, skills, vault = null, browser = null, updater = null } = deps;
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
@@ -188,7 +190,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     }
     try {
       const commandRequest = parse(CommandRequest, body);
-      const result = await execute(core, access, commandRequest, { publicOrigin, documents });
+      const result = await execute(core, access, commandRequest, { publicOrigin, documents, mail: deps.mail });
       return json({ ok: true, result } satisfies CommandResponse);
     } catch (caught) {
       return failure(caught);
@@ -433,7 +435,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       try { return await serveUpdate(request, url, updater); } catch (caught) { return failure(caught); }
     }
     if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) return serveVault(request, url, core, vault);
-    if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser);
+    if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser, () => authenticate(request) !== null);
+    if (pathname.startsWith("/api/mail/")) return serveMail(request, url, deps.mail ?? null);
 
     if (pathname === "/api/state" && request.method === "GET") {
       try {

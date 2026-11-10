@@ -8,8 +8,8 @@ import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { Core } from "../src/core/core.ts";
 import { verifyChecks } from "../src/core/verify.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
-import { parseControl, serveBrowser } from "../src/api/browser.ts";
-import type { BrowserControl, BrowserPort, BrowserSessionRef, SandboxEnvFactory, VaultPort } from "../src/integrations/ports.ts";
+import { parseInput, serveBrowser } from "../src/api/browser.ts";
+import type { BrowserLiveInput, BrowserLiveEvent, BrowserPort, BrowserSessionRef, SandboxEnvFactory, VaultPort } from "../src/integrations/ports.ts";
 import { createBrowserTools, FACTS_SCRIPT, parseFacts } from "../src/tools/browser.ts";
 import { citationFailures, SourceStore } from "../src/stores/sources.ts";
 import { validateExecutionTarget } from "../src/sandbox/host-env.ts";
@@ -49,10 +49,15 @@ class MemoryBrowser implements BrowserPort {
   facts = { origin: "https://shop.example", checkout: false, signal: null as string | null, amount: null as string | null, currency: null as string | null };
   refs: Record<string, { role: string; name: string }> = { e1: { role: "button", name: "다음" } };
   clicks: string[] = [];
-  inputs: BrowserControl[] = [];
+  inputs: BrowserLiveInput[] = [];
+  ref: BrowserSessionRef | null = null;
+  sink?: (event: BrowserLiveEvent) => void;
+  unsubscribed = 0;
+  notice: string | null = null;
   handoffs: (string | null)[] = [];
   ends = 0;
   async run(_session: BrowserSessionRef, argv: string[], options?: { stdin?: string }) {
+    this.ref = _session;
     // The real adapter reduces a secret fill to a fixed status; this one fills whatever is focused.
     if (options?.stdin !== undefined) return { ok: true, data: { status: "filled" }, error: null };
     switch (argv[0]) {
@@ -65,8 +70,14 @@ class MemoryBrowser implements BrowserPort {
   }
   async handoff(_session: BrowserSessionRef, url: string | null) { this.handoffs.push(url); }
   async endHandoff() { this.ends++; return { fallback: false }; }
-  async view() { return { image: "AAAA", mediaType: "image/jpeg" as const, width: 1280, height: 720, url: this.url, title: "Shop" }; }
-  async control(_session: BrowserSessionRef, input: BrowserControl) { this.inputs.push(input); }
+  sessions() { return this.ref ? [{ ...this.ref, engine: "chrome" as const, headed: false }] : []; }
+  async live(_ref: BrowserSessionRef, _options: { maxFps: number }, sink: (event: BrowserLiveEvent) => void) {
+    this.sink = sink;
+    sink({ type: "frame", data: "AAAA", width: 1280, height: 720 });
+    return () => { this.unsubscribed++; this.sink = undefined; };
+  }
+  async input(_session: BrowserSessionRef, input: BrowserLiveInput) { this.inputs.push(input); this.notice = "The owner used this browser; take a fresh browser_snapshot."; }
+  takeNotice() { const value = this.notice; this.notice = null; return value; }
   async close() {}
   async shutdown() {}
 }
@@ -131,34 +142,63 @@ describe("checkout approvals", () => {
   });
 });
 
-describe("live browser handoff", () => {
-  test("opens a live question without a Mac window; the owner drives it through the API until answering", async () => {
+describe("live browser sessions", () => {
+  test("owner drives any active session, with bounded frames, abort and token revocation", async () => {
+    const f = browserFixture();
+    await f.call("browser_snapshot");
+    const path = `/api/browser/sessions/${f.direct.id}`;
+    const api = (suffix: string, init?: RequestInit, authorized?: () => boolean) => serveBrowser(new Request(`http://host${suffix}`, init), new URL(`http://host${suffix}`), f.core, f.browser, authorized);
+    expect((await (await api("/api/browser/sessions")).json()).sessions).toHaveLength(1);
+    const abort = new AbortController();
+    const response = await api(`${path}/live`, { signal: abort.signal });
+    expect(response.headers.get("content-type")).toBe("application/x-ndjson");
+    const reader = response.body!.getReader();
+    expect(JSON.parse(new TextDecoder().decode((await reader.read()).value))).toMatchObject({ type: "frame", width: 1280 });
+    for (let n=0;n<100;n++) f.browser.sink!({ type: "frame", data: String(n), width: 1, height: 1 });
+    await reader.read(); // at most one queued frame and one latest frame
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain('\"data\":\"99\"');
+    abort.abort();
+    expect((await reader.read()).done).toBe(true);
+    expect(f.browser.unsubscribed).toBe(1);
+    expect((await api(`${path}/input`, { method: "POST", body: JSON.stringify({ type: "text", text: "한글" }) })).status).toBe(200);
+    expect(JSON.stringify(await f.call("browser_read"))).toContain("owner used");
+    expect(JSON.stringify(await f.call("browser_read"))).not.toContain("owner used");
+    expect((await api(`${path}/window`, { method: "POST" })).status).toBe(200);
+    expect(f.browser.handoffs).toEqual(["https://shop.example/product"]);
+    let authorized = true;
+    const revoked = await api(`${path}/live`, {}, () => authorized);
+    const revokedReader = revoked.body!.getReader();
+    await revokedReader.read();
+    authorized = false;
+    f.browser.sink!({ type: "frame", data: "BBBB", width: 1, height: 1 });
+    expect((await revokedReader.read()).done).toBe(true);
+    expect(f.browser.unsubscribed).toBe(2);
+    expect((await api("/api/browser/sessions/missing/input", { method: "POST", body: "{}" })).status).toBe(404);
+    expect((await api(`${path}/live?fps=99`)).status).toBe(400);
+  });
+  test("handoff blocks the Ghost, not the owner; answering resumes lazily", async () => {
     const f = browserFixture();
     await f.call("browser_handoff", { reason: "PASS 본인인증" });
     const decision = f.ledger.pendingDecisions()[0]!;
-    expect(decision.proposal?.browserHandoff).toMatchObject({ live: true, reason: "PASS 본인인증" });
-    expect(f.browser.handoffs).toEqual([]);
     expect((await f.call("browser_snapshot")).isError).toBe(true);
-
-    const api = (path: string, init?: RequestInit) => serveBrowser(new Request(`http://host${path}`, init), new URL(`http://host${path}`), f.core, f.browser);
-    const frame = await api(`/api/browser/handoffs/${decision.id}/frame`);
-    expect(frame.status).toBe(200);
-    expect(await frame.json()).toMatchObject({ mediaType: "image/jpeg", width: 1280, height: 720 });
-    expect((await api(`/api/browser/handoffs/${decision.id}/control`, { method: "POST", body: JSON.stringify({ type: "tap", x: 0.5, y: 0.25 }) })).status).toBe(200);
-    expect((await api(`/api/browser/handoffs/${decision.id}/control`, { method: "POST", body: JSON.stringify({ type: "text", text: "--json 123" }) })).status).toBe(200);
-    expect((await api(`/api/browser/handoffs/${decision.id}/control`, { method: "POST", body: JSON.stringify({ type: "key", key: "F12" }) })).status).toBe(400);
-    expect(f.browser.inputs).toEqual([{ type: "tap", x: 0.5, y: 0.25 }, { type: "text", text: "--json 123" }]);
-    expect((await api(`/api/browser/handoffs/${decision.id}/window`, { method: "POST" })).status).toBe(200);
-    expect(f.browser.handoffs).toEqual(["https://shop.example/product"]);
-
+    const url = new URL(`http://host/api/browser/sessions/${f.direct.id}/input`);
+    expect((await serveBrowser(new Request(url, { method: "POST", body: JSON.stringify({ type: "text", text: "인증" }) }), url, f.core, f.browser)).status).toBe(200);
     await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "다 했어요" });
-    expect((await api(`/api/browser/handoffs/${decision.id}/frame`)).status).toBe(409);
     expect((await f.call("browser_snapshot")).isError).toBeFalsy();
     expect(f.browser.ends).toBe(1);
   });
-  test("only well-formed inputs reach the browser", () => {
-    expect(parseControl({ type: "scroll", dy: -400 })).toEqual({ type: "scroll", dy: -400 });
-    for (const bad of [{ type: "tap", x: 2, y: 0 }, { type: "tap", x: 0.1, y: 0.1, extra: 1 }, { type: "text", text: "" }, { type: "navigate", action: "open" }, { type: "eval" }, null, []]) expect(() => parseControl(bad)).toThrow();
+  test("only exact, bounded, finite owner inputs reach the browser", () => {
+    expect(parseInput({ type: "mouse", event: "wheel", x: 4, y: 8, deltaY: -400 })).toMatchObject({ deltaY: -400 });
+    expect(parseInput({ type: "key", event: "down", key: "한", code: "KeyA", text: "한글", modifiers: 15 })).toMatchObject({ text: "한글" });
+    for (const bad of [
+      { type: "mouse", event: "down", x: -1, y: 0 }, { type: "mouse", event: "down", x: NaN, y: 0 },
+      { type: "mouse", event: "down", x: 1, y: Infinity }, { type: "mouse", event: "down", x: 1, y: 2, extra: 1 },
+      { type: "mouse", event: "wheel", x: 0, y: 0, deltaY: 10001 }, { type: "mouse", event: "down", x: 0, y: 0, modifiers: 16 },
+      { type: "key", event: "down", key: "Enter" }, { type: "key", event: "down", key: "Enter", code: "KeyA", text: "\n" },
+      { type: "key", event: "down", key: "bad;eval", code: "" }, { type: "key", event: "up", key: "a", code: "", keyCode: 256 },
+      { type: "key", event: "down", key: "a", code: "", modifiers: 0.5 }, { type: "text", text: "" },
+      { type: "text", text: "x\0y" }, { type: "navigate", action: "open" }, { type: "eval" }, null, [],
+    ]) expect(() => parseInput(bad)).toThrow();
   });
 });
 

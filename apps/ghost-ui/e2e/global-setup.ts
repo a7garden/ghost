@@ -1,22 +1,20 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startMockProvider } from './mock-provider';
-import { seed, type HostHandle } from './seed';
+import { seed } from './seed';
 import { writeCleanupState, writeRunState } from './run-state';
 
 /**
  * Global setup: one isolated Ghost host from source plus the in-process mock
  * provider, then deterministic seed data through the owner API. The run facts
- * land in `e2e/.run/state.json`; teardown kills the processes and removes the
- * temporary state root.
+ * land in this run's unique temporary root; workers inherit its path through the
+ * environment. Concurrent worktrees/runs never share metadata or host state.
  */
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
-/** A stable absolute path: the project space displays it verbatim, so it must not contain a random suffix. */
-const tempRoot = join(tmpdir(), 'ghost-visual-regression');
 
 async function waitForFile(path: string, timeoutMs: number, detail: () => string): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -44,19 +42,23 @@ export default async function globalSetup(): Promise<void> {
   if (!existsSync(join(uiDir, 'index.html'))) {
     throw new Error(`the UI is not built; run \`bun run build\` first (missing ${uiDir})`);
   }
-  rmSync(tempRoot, { recursive: true, force: true });
-  mkdirSync(join(tempRoot, 'projects'), { recursive: true });
+  const tempRoot = mkdtempSync(join(tmpdir(), 'ghost-visual-regression-'));
+  process.env.GHOST_VISUAL_RUN_ROOT = tempRoot;
+  const hostRoot = join(tempRoot, 'host');
+  mkdirSync(hostRoot);
+  mkdirSync(join(tempRoot, 'projects'));
 
   const mock = await startMockProvider();
   const host = spawn('bun', ['../ghost-host/src/main.ts', 'serve'], {
     cwd: join(dirname(fileURLToPath(import.meta.url)), '..'),
-    env: { ...process.env, GHOST_ROOT: tempRoot, GHOST_PORT: '0', GHOST_UI_DIR: uiDir },
+    env: { ...process.env, GHOST_ROOT: hostRoot, GHOST_PORT: '0', GHOST_UI_DIR: uiDir },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
+  writeCleanupState({ hostPid: host.pid, tempRoot });
   let hostErrors = '';
   host.stderr?.on('data', piece => { hostErrors += String(piece); });
 
-  const hostFilePath = join(tempRoot, 'host.json');
+  const hostFilePath = join(hostRoot, 'host.json');
   try {
     await waitForFile(hostFilePath, 120_000, () => `host stderr: ${hostErrors}`);
   } catch (error) {
@@ -65,7 +67,6 @@ export default async function globalSetup(): Promise<void> {
     throw error;
   }
   const hostFile = JSON.parse(readFileSync(hostFilePath, 'utf8')) as { port: number; token: string; pid: number };
-  writeCleanupState({ hostPid: hostFile.pid, tempRoot });
   const baseUrl = `http://127.0.0.1:${hostFile.port}`;
   await waitForHealth(baseUrl);
 

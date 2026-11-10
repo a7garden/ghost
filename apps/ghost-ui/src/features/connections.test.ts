@@ -1,6 +1,6 @@
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Connection } from '@ghost/contract';
-import { buildConnectionCommand, draftFromConnection, emptyConnectionDraft, type ConnectionDraft } from './connection-config';
+import { buildConnectionCommand, draftFromConnection, emptyConnectionDraft, applyMailPreset, mailPresetForHost, mailPresets, type ConnectionDraft } from './connection-config';
 
 const connection = (patch: Partial<Connection> = {}): Connection => ({
   id: 'c1', name: '소유자 GitHub', hasCredential: true, createdAt: 1, updatedAt: 1, credentialVersion: 'v1',
@@ -56,4 +56,36 @@ it('keeps custom mail ports and transport mode when renaming without replacing t
   if (!built.ok) throw new Error(built.error);
   expect(built.command.config).toEqual(existing.config);
   expect(built.command).not.toHaveProperty('credential');
+});
+
+describe('mail presets', () => {
+  it('a preset fills only the transports; name, account and secret stay the owner’s', () => {
+    const gmail = mailPresets.find(preset => preset.id === 'gmail');
+    if (!gmail) throw new Error('Gmail preset missing');
+    const draft = applyMailPreset(emptyConnectionDraft('mail'), gmail);
+    expect(draft).toEqual({
+      ...emptyConnectionDraft('mail'),
+      host: 'imap.gmail.com', port: '993', smtpHost: 'smtp.gmail.com', smtpPort: '465', smtpSecure: true,
+    });
+  });
+
+  it('Gmail runs implicit TLS on 465, iCloud STARTTLS on 587, Naver and Daum implicit TLS on 465', () => {
+    const byId = new Map(mailPresets.map(preset => [preset.id, preset]));
+    expect(byId.get('gmail')).toMatchObject({ host: 'imap.gmail.com', port: 993, smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpSecure: true });
+    expect(byId.get('icloud')).toMatchObject({ host: 'imap.mail.me.com', port: 993, smtpHost: 'smtp.mail.me.com', smtpPort: 587, smtpSecure: false });
+    expect(byId.get('naver')).toMatchObject({ host: 'imap.naver.com', port: 993, smtpHost: 'smtp.naver.com', smtpPort: 465, smtpSecure: true });
+    expect(byId.get('daum')).toMatchObject({ host: 'imap.daum.net', port: 993, smtpHost: 'smtp.daum.net', smtpPort: 465, smtpSecure: true });
+    // Microsoft dropped password IMAP for consumer accounts, so Outlook is not offered.
+    expect(mailPresets.some(preset => /outlook|office|microsoft/i.test(preset.label))).toBe(false);
+  });
+
+  it('recognizes a preset by its IMAP host and points at its app-password page', () => {
+    expect(mailPresetForHost(' imap.gmail.com ')?.helpUrl).toBe('https://myaccount.google.com/apppasswords');
+    expect(mailPresetForHost('imap.mail.me.com')).toMatchObject({ id: 'icloud', helpUrl: 'https://account.apple.com/account/manage' });
+    expect(mailPresetForHost('imap.example.com')).toBeNull();
+    // Naver and Daum have no app-password page; the copy tells what to switch on instead.
+    expect(mailPresetForHost('imap.naver.com')?.helpUrl).toBe('');
+    expect(mailPresetForHost('imap.naver.com')?.helpText).toContain('IMAP/SMTP');
+    expect(mailPresetForHost('imap.daum.net')?.helpText).toContain('IMAP/SMTP');
+  });
 });

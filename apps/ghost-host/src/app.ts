@@ -26,6 +26,7 @@ import { settingsView } from "./core/commands.ts";
 import { SourceConnections } from "./integrations/activity-sources.ts";
 import { SourceStore } from "./stores/sources.ts";
 import { hostIsIdle, Updater } from "./update/index.ts";
+import { MailService } from "./integrations/mail.ts";
 
 export interface App {
   core: Core;
@@ -37,6 +38,7 @@ export interface App {
   vault: Vault;
   /** Host-side Chrome; the owner's handoff live view reaches it through the API. */
   browser: BrowserPort | null;
+  mail: MailService;
   close(): Promise<void>;
 }
 
@@ -69,6 +71,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedVault: Vault | null = null;
   let openedBrowser: BrowserPort | null = null;
   let openedSources: SourceConnections | null = null;
+  let openedMail: MailService | null = null;
   let openedSourceStore: SourceStore | null = null;
   let unsafeEngine = false;
   let coreStopped = false;
@@ -86,6 +89,7 @@ export async function openApp(config: Config): Promise<App> {
     ]);
     if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
     await Promise.all([
+      attempt(async () => { await openedMail?.close(); }),
       attempt(async () => { await openedSources?.close(); }),
       attempt(async () => { await openedSandbox?.close(); openedSandbox = null; }),
     ]);
@@ -123,6 +127,7 @@ export async function openApp(config: Config): Promise<App> {
     const sandbox = (openedSandbox = createSandbox(config, artifacts));
     openedCatalog = new ProviderCatalog({ cachePath: join(config.root, "models.json") });
     openedSources = new SourceConnections({ root: config.root, currentConnection: (id) => ledger.findConnection(id) });
+    const mail = (openedMail = new MailService({ connections: () => ledger.connections(), sources: openedSources }));
     const core = (openedCore = new Core({
       ledger, artifacts, sandbox, secrets: new FileSecrets(config.root), log,
       catalog: openedCatalog,
@@ -134,8 +139,12 @@ export async function openApp(config: Config): Promise<App> {
     const skills = createSkills(config);
     const host = config.mac ? new MacHost({ roots: config.mac.roots, stateRoot: config.root }) : null;
     const vault = (openedVault = createVault(config.root));
-    const browser = (openedBrowser = createBrowser(config, { root: config.root }));
-    const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config), browser, vault });
+    const browser = (openedBrowser = createBrowser(config, { root: config.root, onLogin(ref, login) {
+      const item = vault.saveLogin(ref.ghostId, login);
+      core.ledger.tx(() => core.notify({ id: `browser-login:${item.id}:${item.updatedAt}`, kind: "message", ghostId: ref.ghostId, conversationId: ref.conversationId, workId: null, decisionId: null, title: "로그인 정보를 금고에 저장했어요", body: `${item.origin} · ${item.username}` }));
+      return item.id;
+    } }));
+    const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config), browser, vault, mail });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, log }));
     core.attach(engine);
     return {
@@ -147,6 +156,7 @@ export async function openApp(config: Config): Promise<App> {
       host,
       vault,
       browser,
+      mail,
       close,
     };
   } catch (error) {
@@ -199,7 +209,7 @@ export async function serve(config: Config) {
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault, browser: app.browser, updater });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault, browser: app.browser, mail: app.mail, updater });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });

@@ -3,19 +3,21 @@ import { isAbsolute } from "node:path";
 import { FallbackList, GhostToolList, SkillList, validate, type Command, type CommandRequest, type Connection, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
 import type { Access } from "./access.ts";
 import type { Core } from "./core.ts";
-import type { CommandEffectTool } from "./effects.ts";
+import { NoEffect, type CommandEffectTool } from "./effects.ts";
 import type { DocumentsPort } from "../integrations/ports.ts";
 import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId, sha256 } from "./ids.ts";
 import { supportsAutomaticModels } from "../integrations/provider-catalog.ts";
 import { validateConnectionConfig } from "../integrations/activity-sources.ts";
 import { projectContext } from "@ghost/contract";
+import type { MailService } from "../integrations/mail.ts";
 
 export interface CommandContext {
   /** Origin a paired device should use, e.g. https://ghost.example.ts.net */
   publicOrigin: string;
   /** PDC vault access; null when the host runs without document support. */
   documents: DocumentsPort | null;
+  mail?: MailService | null;
 }
 
 /** Pairing codes: 8 Crockford base32 characters, valid for 10 minutes. */
@@ -54,7 +56,7 @@ export async function execute(core: Core, access: Access, request: CommandReques
   if (previous?.state === "done") return previous.outcome;
   // Start on the next microtask, after publishing the same-process join point.
   const outcome = Promise.resolve().then(async () => {
-    const asyncCommand = ["message.send", "message.cancel", "decision.resolve", "sandbox.control", "document.save", "avatar.create", "provider.delete", "connection.upsert", "connection.delete", "connection.test", "activity.run"].includes(request.command.type)
+    const asyncCommand = ["message.send", "message.cancel", "decision.resolve", "sandbox.control", "document.save", "avatar.create", "provider.delete", "connection.upsert", "connection.delete", "connection.test", "activity.run", "mail.send", "mail.update"].includes(request.command.type)
       || (request.command.type === "provider.upsert" && request.command.apiKey !== undefined);
     if (!asyncCommand) {
       return core.ledger.tx(() => {
@@ -65,7 +67,7 @@ export async function execute(core: Core, access: Access, request: CommandReques
     }
     if (!previous) core.ledger.tx(() => {
       let claim: Outcome = {};
-      if (["document.save", "provider.upsert", "provider.delete", "connection.delete"].includes(request.command.type)
+      if (["document.save", "provider.upsert", "provider.delete", "connection.delete", "mail.send", "mail.update"].includes(request.command.type)
         || (request.command.type === "connection.upsert" && request.command.credential !== undefined)) {
         const ghost = core.ledger.defaultGhost();
         if (!ghost) throw conflict("a default Ghost is required to journal this command");
@@ -108,6 +110,21 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
       return {};
     case "activity.run":
       return core.run(`activity:request:${requestId}`, () => core.activities.run(command.activityId, { dryRun: command.dryRun, requestId }));
+    case "mail.send":
+    case "mail.update": {
+      if (!context.mail) throw new CommandError("unavailable", "메일 서비스를 사용할 수 없습니다.");
+      const mail = context.mail;
+      const conversationId = ledger.request(requestId)!.outcome.conversationId as string;
+      try {
+        return await journalCommand(core, requestId, command, conversationId, async () => {
+          if (command.type === "mail.send") return mail.send(command.connectionId, command);
+          return mail.update(command.connectionId, command.mailbox, command.uids, command.action, command.target);
+        });
+      } catch (error) {
+        if (error instanceof NoEffect) throw invalid(error.message);
+        throw error;
+      }
+    }
     case "connection.upsert":
     case "connection.delete":
     case "connection.test": {
@@ -316,6 +333,8 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
     case "connection.delete":
     case "connection.test":
     case "activity.run":
+    case "mail.send":
+    case "mail.update":
       throw new Error(`async command ${command.type} entered a ledger transaction`);
 
     case "ghost.create": {

@@ -101,6 +101,9 @@ class Probes implements HostPort {
       warnings: [],
     };
   }
+  async messageCodes() {
+    return { codes: [] };
+  }
   async services(): Promise<HostServices> {
     const service = {
       label: "dev.test",

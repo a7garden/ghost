@@ -15,7 +15,7 @@ export interface BeginEffect {
 }
 
 /** Host-only API journals; these names are not model tools or tool exclusion scopes. */
-const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete", "connection.upsert", "connection.delete"] as const;
+const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete", "connection.upsert", "connection.delete", "mail.send", "mail.update"] as const;
 export type CommandEffectTool = typeof COMMAND_EFFECT_TOOLS[number];
 
 export interface BeginCommandEffect extends Omit<BeginEffect, "tool" | "callId"> {
@@ -38,6 +38,7 @@ export type EffectStart = { kind: "run"; effect: Effect } | { kind: "replay"; ef
 const OWNER_CONFIRMS: Record<string, { title: string; check: string }> = {
   activity_action: { title: "메일 답장이나 PR 댓글이 실제로 보내졌나요?", check: "보낸편지함이나 PR 댓글에서 확인해 주세요." },
   browser_propose: { title: "브라우저에서 누르려던 버튼이 실제로 눌렸나요?", check: "주문 · 결제 내역이나 해당 사이트에서 확인해 주세요." },
+  mail_send: { title: "메일이 실제로 보내졌나요?", check: "보낸편지함에서 확인해 주세요." },
 };
 
 export class Effects {

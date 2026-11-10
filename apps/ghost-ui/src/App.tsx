@@ -29,6 +29,7 @@ import { HostView } from './features/HostView';
 import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
 import { VaultView } from './features/VaultView';
+import { MailView } from './features/mail/MailView';
 import { Schedules } from './features/Schedules';
 import { Activities } from './features/Activities';
 import { Connections } from './features/Connections';
@@ -154,7 +155,7 @@ function Shell() {
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
   const selectedSpace = section === 'spaces' ? path.split('/')[2] : undefined;
-  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace';
+  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail';
 
   const go = (target: string) => () => navigate(target);
   const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
@@ -177,6 +178,7 @@ function Shell() {
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
+    { id: 'mail', label: '메일', group: '이동', onSelect: go('/mail') },
     { id: 'spaces', label: routeLabels.spaces, group: '이동', onSelect: go('/spaces') },
     ...visibleGhosts(ghosts).map(ghost => ({ id: `ghost:${ghost.id}`, label: ghost.name, description: ghost.isDefault ? '메인 Ghost' : undefined, group: 'Ghost', onSelect: () => switchGhost(ghost.id) })),
     ...state.spaces.map(space => ({ id: `space:${space.id}`, label: space.name, group: '프로젝트', onSelect: () => navigate(`/spaces/${space.id}`) })),
@@ -216,7 +218,7 @@ function Shell() {
   ];
 
   const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>;
-  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, spaces: true, inbox: true, work: true, settings: true, workspace: true };
+  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, spaces: true, inbox: true, work: true, mail: true, settings: true, workspace: true };
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
@@ -246,6 +248,7 @@ function Shell() {
             {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
+            {section === 'mail' && <MailView/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
               : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')} createRequested={params.get('new') === '1'} onCreateClosed={clearCreateRequest}/>)}

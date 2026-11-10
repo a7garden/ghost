@@ -40,6 +40,8 @@ export function crumbsFor(route: string, state: State | null): Crumb[] {
       return [{ label: '작업실', path: null }];
     case 'inbox':
       return [{ label: uiTerms.inbox, path: null }];
+    case 'mail':
+      return [{ label: routeLabels.mail, path: null }];
     case 'work': {
       if (!id) return [{ label: uiTerms.work, path: null }];
       const chain = state ? lineage(state, id) : [];

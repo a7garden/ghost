@@ -5,6 +5,7 @@ import type { Decision, State, Work } from '@ghost/contract';
 import { HostProvider } from '../host/context';
 import { DecisionCard, autoSettleText, cardDetail, chatDecisions, decisionCommand, denyReasonPrompt, documentProposal, highRiskApproval, recommendedOption, resolvedText } from './Decision';
 import { browserHandoffProposal, decisionChip, emptySecureForm, secureFormBody, secureFormProposal } from './decisionText';
+import { BrowserPaneContext } from './BrowserPaneContext';
 
 const decision = (patch: Partial<Decision> = {}): Decision => ({
   id: 'd1', kind: 'approve_effect', ghostId: 'sage', conversationId: 'c1', workId: null, effectId: 'e1',
@@ -179,6 +180,23 @@ describe('readable cards', () => {
     expect(markup).not.toContain('decision__detail');
   });
 
+  it('shows a checkout card fill summary without exposing input values', () => {
+    const fill = (total: string | null) => decision({ proposal: { input: { number: '4111 1111 1111 1111', cvc: '123' }, url: 'https://shop.example/pay', origin: 'https://shop.example',
+      merchant: '예시 상점', total, itemTitle: '회사 카드', last4: '1234', fields: ['card_number', 'card_expiry', 'card_cvc'], expiresAt: null } });
+    expect(highRiskApproval(fill('₩39,000'))).toBe(true);
+    const markup = render(fill('₩39,000'));
+    expect(markup).toContain('예시 상점');
+    expect(markup).toContain('₩39,000');
+    expect(markup).toContain('회사 카드 •••• 1234');
+    expect(markup).toContain('카드 번호, 유효기간, CVC');
+    expect(markup).toContain('승인하면 이 사이트의 입력란에 카드 정보를 채웁니다');
+    expect(markup).not.toContain('decision__detail');
+    expect(markup).not.toContain('4111 1111 1111 1111');
+    expect(markup).not.toContain('123</dd>');
+    // A total the host could not read says so instead of showing an empty amount.
+    expect(render(fill(null))).toContain('금액을 읽지 못함');
+  });
+
   it('describes a standing activity proposal in words', () => {
     const config = { name: '메일 정리', prompt: 'p', acceptanceCriteria: 'c', ghostId: 'sage',
       source: { kind: 'schedule', spec: { kind: 'every', seconds: 3600 } }, execution: { kind: 'container' }, tools: ['read'],
@@ -219,10 +237,23 @@ describe('DecisionCard render', () => {
     expect(markup).toContain('일회용 코드 시드');
     expect(markup).toContain('금고에 저장');
     expect(markup).toContain('금고에 전달');
+    expect(markup).toContain('aria-checked="true"');
     expect(markup).toContain('type="password"');
     // The chat answer path is gone from the card.
     expect(markup).not.toContain('답변을 적어 주세요');
     expect(markup).not.toContain('답변 보내기');
+  });
+
+  it('renders contact detail address and postal code in the saved form', () => {
+    const contact = decision({ kind: 'question', title: '연락처', proposal: { secureForm: {
+      kind: 'contact', origin: null, title: '연락처', reason: '배송지가 필요합니다.',
+    } } });
+    const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, {
+      decision: contact, ghostName: '세이지', onResolved() {},
+    })));
+    expect(markup).toContain('상세주소');
+    expect(markup).toContain('우편번호');
+    expect(markup).toContain('aria-checked="true"');
   });
 
   it('renders the handoff note with the url, a completion button and deny', () => {
@@ -237,6 +268,29 @@ describe('DecisionCard render', () => {
     expect(markup).toContain('거부');
     // The ordinary answer path stays available beside it.
     expect(markup).toContain('답변 보내기');
+  });
+
+  it('keeps the live browser embedded when no conversation pane owns it', () => {
+    const card = decision({ kind: 'question', proposal: { browserHandoff: {
+      url: 'https://example.com/form', reason: '확인해 주세요.', live: true,
+    } } });
+    const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, {
+      decision: card, ghostName: '세이지', onResolved() {},
+    })));
+    expect(markup).toContain('browser-live');
+    expect(markup).toContain('다 했어요');
+  });
+
+  it('uses the conversation pane for a live handoff instead of rendering a second stream', () => {
+    const card = decision({ kind: 'question', title: '화면 확인', proposal: { browserHandoff: {
+      url: 'https://example.com/form', reason: '로그인 화면을 직접 확인해 주세요.', live: true,
+    } } });
+    const markup = renderToStaticMarkup(createElement(HostProvider, null,
+      createElement(BrowserPaneContext.Provider, { value: { conversationId: 'c1', open() {} } },
+        createElement(DecisionCard, { decision: card, ghostName: '세이지', onResolved() {} }))));
+    expect(markup).toContain('브라우저 화면 열기');
+    expect(markup).toContain('다 했어요');
+    expect(markup).not.toContain('browser-live');
   });
 });
 
@@ -294,6 +348,8 @@ describe('secureFormBody', () => {
     const contact = { kind: 'contact' as const, origin: null, title: null, reason: '연락처가 필요합니다.' };
     expect(secureFormBody(contact, { ...emptySecureForm, contactName: '홍길동', contactEmail: ' h@e.com ' }, true))
       .toEqual({ body: { kind: 'contact', contact: { name: '홍길동', email: 'h@e.com' }, save: true } });
+    expect(secureFormBody(contact, { ...emptySecureForm, contactAddress: ' 서울시 ', contactAddressDetail: ' 101동 202호 ', contactPostalCode: ' 04524 ' }, true))
+      .toEqual({ body: { kind: 'contact', contact: { address: '서울시', addressDetail: '101동 202호', postalCode: '04524' }, save: true } });
     expect(secureFormBody(contact, emptySecureForm, true)).toEqual({ error: '한 항목 이상 입력해 주세요.' });
     const secret = { kind: 'secret' as const, origin: null, title: null, reason: '키가 필요합니다.' };
     expect(secureFormBody(secret, { ...emptySecureForm, value: ' raw value ' }, false))

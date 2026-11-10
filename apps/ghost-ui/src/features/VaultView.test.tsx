@@ -19,11 +19,13 @@ describe('vaultFormFromItem', () => {
 
   it('carries contact fields so an edit replaces the whole contact', () => {
     const form = vaultFormFromItem(item({ kind: 'contact', origin: null, username: null,
-      contact: { name: '홍길동', phone: '010', email: 'h@e.com' } }));
+      contact: { name: '홍길동', phone: '010', email: 'h@e.com', address: '서울시 강남구', addressDetail: '101동 1203호', postalCode: '06236' } }));
     expect(form.contactName).toBe('홍길동');
     expect(form.contactPhone).toBe('010');
     expect(form.contactEmail).toBe('h@e.com');
-    expect(form.contactAddress).toBe('');
+    expect(form.contactAddress).toBe('서울시 강남구');
+    expect(form.contactAddressDetail).toBe('101동 1203호');
+    expect(form.contactPostalCode).toBe('06236');
   });
 });
 
@@ -90,6 +92,16 @@ describe('vaultWriteBody', () => {
     expect('body' in cleared && cleared.body.contact).toEqual({});
   });
 
+  it('writes 상세주소 and 우편번호 with the contact, trimmed, and drops them when empty', () => {
+    const body = vaultWriteBody({ ...emptyVaultForm, title: '연락처', kind: 'contact', contactName: '홍길동',
+      contactAddress: '서울시 강남구', contactAddressDetail: ' 101동 1203호 ', contactPostalCode: '06236' }, 'create');
+    expect('body' in body && body.body.contact).toEqual({
+      name: '홍길동', address: '서울시 강남구', addressDetail: '101동 1203호', postalCode: '06236',
+    });
+    const detailOnly = vaultWriteBody({ ...emptyVaultForm, title: '연락처', kind: 'contact', contactAddressDetail: '101동' }, 'create');
+    expect('body' in detailOnly && detailOnly.body.contact).toEqual({ addressDetail: '101동' });
+  });
+
   it('keeps a cleared secret origin off the wire and stores the value verbatim', () => {
     const body = vaultWriteBody({ ...emptyVaultForm, title: '키', kind: 'secret', origin: '  ', value: ' raw value ' }, 'edit');
     expect('body' in body && body.body).toEqual({ kind: 'secret', title: '키', hints: '', ghostIds: [], value: ' raw value ' });
@@ -142,6 +154,9 @@ describe('vaultRowDetail and vaultGrantsLabel', () => {
       .toBe('•••• 4242 · 12/28');
     expect(vaultRowDetail(item({ kind: 'secret', origin: 'https://e.com', username: null }))).toBe('https://e.com');
     expect(vaultRowDetail(item({ kind: 'secret', origin: null, username: null }))).toBe('');
+    expect(vaultRowDetail(item({ kind: 'contact', origin: null, username: null,
+      contact: { name: '홍길동', address: '서울시 강남구', addressDetail: '101동 1203호', postalCode: '06236' } })))
+      .toBe('홍길동 · 서울시 강남구 · 101동 1203호 · 06236');
   });
 
   it('names the granted Ghosts and the one-time expiry', () => {

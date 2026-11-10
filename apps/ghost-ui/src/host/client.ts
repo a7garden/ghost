@@ -3,6 +3,7 @@ import type {
   ApiError,
   ArtifactRef,
   Command,
+  CommandOf,
   CommandResponse,
   ConversationPage,
   LedgerEvent,
@@ -57,19 +58,84 @@ export type VaultItemWrite = {
   ghostIds?: string[];
 };
 
-/** One live-view frame of a browser handoff (see the host's `/api/browser/handoffs/:id/frame`). */
-export type BrowserFrame = { image: string; mediaType: 'image/jpeg'; width: number; height: number; url: string; title: string; windowAvailable?: boolean };
+/** One browser session the host keeps for a conversation (see `/api/browser/sessions`). */
+export type BrowserSession = {
+  conversationId: string;
+  ghostId: string;
+  engine: 'chrome' | 'obscura';
+  headed: boolean;
+  /** The pending handoff question waiting on the owner for this conversation, when one is open. */
+  handoffDecisionId: string | null;
+};
 
-/** One owner input into a handoff browser. */
-export type BrowserControl =
-  | { type: 'tap'; x: number; y: number }
+/** One line of a session's live stream: a JPEG frame, the page the Ghost is on, or the session's end. */
+export type BrowserLiveEvent =
+  | { type: 'frame'; data: string; width: number; height: number }
+  | { type: 'page'; url: string; title: string }
+  | { type: 'end'; reason: string };
+
+/** One owner input into a conversation's browser; coordinates are viewport CSS pixels. */
+export type BrowserInput =
+  | { type: 'mouse'; event: 'down' | 'up' | 'move' | 'wheel'; x: number; y: number; button?: 'left' | 'middle' | 'right' | 'none'; clickCount?: 1 | 2 | 3; deltaX?: number; deltaY?: number; modifiers?: number }
+  | { type: 'key'; event: 'down' | 'up'; key: string; code: string; text?: string; keyCode?: number; modifiers?: number }
   | { type: 'text'; text: string }
-  | { type: 'key'; key: 'Enter' | 'Tab' | 'Backspace' | 'Escape' | 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' }
-  | { type: 'scroll'; dy: number }
   | { type: 'navigate'; action: 'back' | 'forward' | 'reload' };
+
+/**
+ * Complete NDJSON lines out of one stream chunk against the previous remainder; the tail goes
+ * back in. Blank lines disappear. Pure; tests pin chunks split mid-line.
+ */
+export function ndjsonLines(buffer: string, chunk: string): { lines: string[]; rest: string } {
+  const joined = buffer + chunk;
+  const lines: string[] = [];
+  let start = 0;
+  for (;;) {
+    const boundary = joined.indexOf('\n', start);
+    if (boundary < 0) break;
+    const line = joined.slice(start, boundary).trim();
+    if (line) lines.push(line);
+    start = boundary + 1;
+  }
+  return { lines, rest: joined.slice(start) };
+}
 
 /** The result of importing an Apple Passwords or Chrome CSV export. */
 export type VaultImportResult = { imported: number; skipped: number; rejected: number };
+
+/** One address on a mail header, as IMAP parsed it. */
+export type MailAddr = { name: string; address: string };
+
+/** One IMAP mailbox of a connection, with its special-use role when the server declares one. */
+export type MailboxInfo = {
+  path: string; name: string; delimiter: string | null;
+  specialUse: 'inbox' | 'sent' | 'drafts' | 'trash' | 'junk' | 'archive' | 'all' | 'flagged' | null;
+  total: number | null; unseen: number | null;
+};
+
+/** What a mailbox listing says about one message. */
+export type MailSummary = {
+  uid: number; messageId: string | null; from: MailAddr | null; to: MailAddr[];
+  subject: string; date: number; seen: boolean; flagged: boolean; answered: boolean;
+  hasAttachments: boolean; size: number;
+};
+
+/** One message in full; the host reads with BODY.PEEK, so fetching never marks it seen. */
+export type MailMessage = MailSummary & {
+  uidValidity?: number;
+  cc: MailAddr[]; replyTo: MailAddr[]; text: string; html: string | null;
+  attachments: { part: string; filename: string; contentType: string; size: number }[];
+};
+
+/** Mail connections that hold a credential; `canSend` says SMTP is configured. */
+export type MailAccounts = { accounts: { connectionId: string; name: string; address: string; canSend: boolean }[] };
+
+/** One mailbox page, newest first; `nextBefore` feeds the next older page. */
+export type MailPage = { mailbox: string; uidValidity: number; messages: MailSummary[]; nextBefore: number | null };
+
+export type MailQuery = { mailbox: string; q?: string; before?: number; limit?: number };
+
+export type MailSendCommand = CommandOf<'mail.send'>;
+export type MailUpdateCommand = CommandOf<'mail.update'>;
 
 /**
  * The only way the UI talks to the host. Same origin; the owner token comes from the
@@ -227,19 +293,104 @@ export class HostClient {
     await this.json(`/api/vault/requests/${encodeURIComponent(decisionId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(answer) });
   }
 
-  /** The live frame of a pending browser handoff: a JPEG of the Ghost's page and its CSS-pixel size. */
-  browserFrame(decisionId: string): Promise<BrowserFrame> {
-    return this.json(`/api/browser/handoffs/${encodeURIComponent(decisionId)}/frame`);
+  // Mail (메일): the owner's IMAP/SMTP accounts, read through the host.
+
+  /** Mail connections that hold a credential; `canSend` says SMTP is configured. */
+  mailAccounts(): Promise<MailAccounts> {
+    return this.json('/api/mail/accounts');
   }
 
-  /** One owner input into a pending handoff's browser; tap coordinates are fractions of the frame. */
-  async browserControl(decisionId: string, input: BrowserControl): Promise<void> {
-    await this.json(`/api/browser/handoffs/${encodeURIComponent(decisionId)}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+  /** One account's mailboxes, server order; the UI sorts special-use mailboxes first. */
+  mailMailboxes(connectionId: string): Promise<{ mailboxes: MailboxInfo[] }> {
+    return this.json(`/api/mail/${encodeURIComponent(connectionId)}/mailboxes`);
   }
 
-  /** Open the same handoff session as a visible Chrome window on the Mac running the host. */
-  async browserWindow(decisionId: string): Promise<void> {
-    await this.json(`/api/browser/handoffs/${encodeURIComponent(decisionId)}/window`, { method: 'POST' });
+  /** One mailbox's summaries, newest first; `before` pages older mail via `nextBefore`. */
+  mailMessages(connectionId: string, query: MailQuery): Promise<MailPage> {
+    const params = new URLSearchParams({ mailbox: query.mailbox });
+    if (query.q) params.set('q', query.q);
+    if (query.before !== undefined) params.set('before', String(query.before));
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    return this.json(`/api/mail/${encodeURIComponent(connectionId)}/messages?${params}`);
+  }
+
+  /** One message with headers and body; BODY.PEEK means this never marks it seen. */
+  mailMessage(connectionId: string, mailbox: string, uid: number): Promise<MailMessage> {
+    const params = new URLSearchParams({ mailbox, uid: String(uid) });
+    return this.json(`/api/mail/${encodeURIComponent(connectionId)}/message?${params}`);
+  }
+
+  /** Download one attachment: fetch the bytes with the bearer token, then save them as a file. */
+  async mailAttachment(connectionId: string, mailbox: string, uid: number, part: string, filename: string): Promise<void> {
+    const params = new URLSearchParams({ mailbox, uid: String(uid), part });
+    const response = await fetch(`/api/mail/${encodeURIComponent(connectionId)}/attachment?${params}`, { headers: this.headers() });
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
+    if (!response.ok) throw new HostError('not_found', '첨부 파일을 저장하지 못했습니다.');
+    const url = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** mail.send through the command endpoint; a retried request id never sends twice. */
+  mailSend(command: MailSendCommand, requestId?: string): Promise<{ messageId: string }> {
+    return this.send<{ messageId: string }>(command, requestId);
+  }
+
+  /** mail.update: seen/flag state and mailbox moves. */
+  mailUpdate(command: MailUpdateCommand): Promise<{ updated: number }> {
+    return this.send<{ updated: number }>(command);
+  }
+
+  /** The browser sessions the host keeps, one per conversation, with any pending handoff question. */
+  browserSessions(): Promise<{ sessions: BrowserSession[] }> {
+    return this.json('/api/browser/sessions');
+  }
+
+  /**
+   * The live NDJSON stream of one conversation's browser: JSON lines until the session or the
+   * client ends. TextDecoderStream is missing in the iPhone shell's WKWebView, so the bytes
+   * decode incrementally. 404 means the session is gone; abort `signal` to stop watching.
+   */
+  async browserLive(conversationId: string, fps: number, onEvent: (event: BrowserLiveEvent) => void, signal: AbortSignal): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(`/api/browser/sessions/${encodeURIComponent(conversationId)}/live?fps=${fps}`, { cache: 'no-store', headers: this.headers({ Accept: 'application/x-ndjson' }), signal });
+    } catch {
+      throw new HostError('network', '브라우저 화면에 연결할 수 없습니다.');
+    }
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
+    if (!response.ok || !response.body) {
+      throw response.status === 404
+        ? new HostError('not_found', '브라우저 세션이 없습니다.')
+        : new HostError(response.status === 409 ? 'conflict' : 'network', '브라우저 화면을 볼 수 없습니다.');
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = ndjsonLines(buffer, '');
+      buffer = parsed.rest;
+      for (const line of parsed.lines) {
+        try { onEvent(JSON.parse(line) as BrowserLiveEvent); }
+        catch { /* a torn line never breaks the stream */ }
+      }
+    }
+  }
+
+  /** One owner input into a conversation's browser; the host validates the grammar again. */
+  async browserInput(conversationId: string, input: BrowserInput): Promise<void> {
+    await this.json(`/api/browser/sessions/${encodeURIComponent(conversationId)}/input`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+  }
+
+  /** Move the conversation's browser into a visible Chrome window on the Mac running the host. */
+  async browserWindow(conversationId: string): Promise<void> {
+    await this.json(`/api/browser/sessions/${encodeURIComponent(conversationId)}/window`, { method: 'POST' });
   }
 
   /** Upload owner message bytes; the returned reference can be passed to message.send. */

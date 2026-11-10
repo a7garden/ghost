@@ -5,11 +5,12 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Config } from "../config.ts";
 import { CommandError } from "../core/errors.ts";
 import { NoEffect, KnownOutcome } from "../core/effects.ts";
-import type { BrowserCommandResult, BrowserControl, BrowserFrame, BrowserPort, BrowserRunOptions, BrowserSessionRef, VaultField } from "./ports.ts";
+import type { BrowserCommandResult, BrowserLiveInput, BrowserLiveEvent, BrowserLogin, BrowserPort, BrowserRunOptions, BrowserSessionRef, VaultField } from "./ports.ts";
 import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
 import { assertFetchableUrl } from "./netguard.ts";
 import { startObscura, type ObscuraProcess } from "./obscura.ts";
 import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
+import { LoginCapture, loginCaptureScript } from "./login-capture.ts";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const CAP = 512 * 1024;
@@ -22,7 +23,32 @@ const NETWORK_INIT = `(() => {
     Object.defineProperty(globalThis, name, { value: undefined, writable: false, configurable: false });
   }
 })();`;
-const VIEWPORT_SCRIPT = `JSON.stringify({ w: innerWidth, h: innerHeight, url: location.href, title: document.title })`;
+// Neither raw CDP keyDown nor agent-browser press Meta+A performs Mac editing selection.
+// Owner-only static action; stdin keeps the boundary fixed and the response contains no form values.
+const SELECT_ALL_SCRIPT = `(() => { try {
+  const e = document.activeElement;
+  if (!e || e.disabled) return "refused:not_editable";
+  if (e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement) {
+    e.select(); return "filled";
+  }
+  let root = e;
+  if (e.isContentEditable) while (root.parentElement?.isContentEditable) root = root.parentElement;
+  else if (e !== document.body && e !== document.documentElement) return "refused:not_editable";
+  const selection = window.getSelection();
+  if (!selection) return "refused:not_editable";
+  const range = document.createRange(); range.selectNodeContents(root);
+  selection.removeAllRanges(); selection.addRange(range);
+  return "filled";
+} catch { return "refused:not_editable"; } })()`;
+interface LiveBridge {
+  socket?: WebSocket;
+  connecting?: Promise<WebSocket>;
+  subscribers: Set<(event: BrowserLiveEvent) => void>;
+  width: number; height: number; page?: Extract<BrowserLiveEvent, { type: "page" }>;
+  frame?: Extract<BrowserLiveEvent, { type: "frame" }>;
+  targetId?: string;
+  retry?: ReturnType<typeof setTimeout>;
+}
 const expand = (path: string) => path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 const nameFor = (id: string) => `ghost-${createHash("sha256").update(id).digest("hex").slice(0, 24)}`;
 interface Session {
@@ -37,11 +63,22 @@ interface Session {
   screenshotsBlocked: boolean;
   passwordScreenshots: Map<string, string>;
   active: boolean;
+  bridge?: LiveBridge;
+  notice?: string;
+  login?: LoginCapture;
+  captureArmed?: boolean;
+  modelPasswords?: Set<string>;
+  ownerActivity?: { url: string; count: number };
+  captureTimer?: ReturnType<typeof setTimeout>;
+  headedPoll?: ReturnType<typeof setInterval>;
+  ownerQueue?: Promise<unknown>;
+  secretGate?: Promise<void>;
+  ownerBusy?: Promise<unknown>;
 }
 
-export function createBrowser(config: Config, deps: { root: string }): BrowserPort | null {
+export function createBrowser(config: Config, deps: { root: string; onLogin?: (ref: BrowserSessionRef, login: BrowserLogin) => Promise<string | void> | string | void }): BrowserPort | null {
   if (!config.browser) return null;
-  return new AgentBrowser(config.browser, deps.root);
+  return new AgentBrowser(config.browser, deps.root, deps.onLogin);
 }
 
 /** A private HOME/config/key and namespace prevent owner plugins and sessions from entering Ghost. */
@@ -53,7 +90,7 @@ export class AgentBrowser implements BrowserPort {
   private readonly namespace: string;
   private readonly socketDir: string;
   private readonly key: string;
-  private readonly sessions = new Map<string, Session>();
+  private readonly sessionMap = new Map<string, Session>();
   private proxy: Promise<EgressProxy> | null = null;
   /** Admission is serialized; independent conversations may run concurrently. */
   private queue: Promise<unknown> = Promise.resolve();
@@ -62,7 +99,7 @@ export class AgentBrowser implements BrowserPort {
   private stopping = false;
   private initialized = false;
   private shutdownPromise: Promise<void> | null = null;
-  constructor(private readonly config: NonNullable<Config["browser"]>, private readonly root: string) {
+  constructor(private readonly config: NonNullable<Config["browser"]>, private readonly root: string, private readonly onLogin?: (ref: BrowserSessionRef, login: BrowserLogin) => Promise<string | void> | string | void) {
     const base = join(resolve(root), "browser");
     this.home = join(base, "home");
     mkdirSync(this.home, { recursive: true, mode: 0o700 });
@@ -153,7 +190,8 @@ export class AgentBrowser implements BrowserPort {
       const proxy = this.proxy; this.proxy = null; this.initialized = false;
       if (proxy) await (await proxy).close();
     }
-    this.sessions.delete(session.ref.conversationId);
+    this.disconnect(session, "download_limit");
+    this.sessionMap.delete(session.ref.conversationId);
     this.clearFiles(session);
   }
   private activeTab(data: unknown) {
@@ -206,7 +244,8 @@ export class AgentBrowser implements BrowserPort {
       throw error;
     } finally { closeSync(fd); }
   }
-  private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
+  private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean; capture?: boolean }): Promise<BrowserCommandResult> {
+    if (session.bridge && ["open", "back", "forward", "reload", "close"].includes(argv[0]!)) session.bridge.frame = undefined;
     const obscura = session.engine === "obscura";
     if (obscura) {
       clearTimeout(session.obscuraIdle);
@@ -219,7 +258,7 @@ export class AgentBrowser implements BrowserPort {
         const executable = this.config.obscura?.executable;
         if (!executable) throw new NoEffect("Obscura is not configured");
         const proxy = await (this.proxy ??= createEgressProxy());
-        try { session.obscura = await startObscura(expand(executable), proxy.url); }
+        try { session.obscura = await startObscura(expand(executable), proxy.url, this.root); }
         catch (error) { session.engine = undefined; throw error; }
         session.secrets = [];
         session.screenshotsBlocked = false;
@@ -235,9 +274,13 @@ export class AgentBrowser implements BrowserPort {
           session.obscura = undefined;
         } else {
           const idle = setTimeout(() => {
-            if (this.sessions.get(session.ref.conversationId) !== session) return;
+            if (this.sessionMap.get(session.ref.conversationId) !== session) return;
             void this.enqueueSession(session.ref, async (current) => {
-              if (current === session && session.obscuraIdle === idle) await this.invoke(session, ["close"]);
+              if (current === session && session.obscuraIdle === idle) {
+                await this.invoke(session, ["close"]);
+                this.disconnect(session, "idle_timeout"); this.clearFiles(session);
+                this.sessionMap.delete(session.ref.conversationId);
+              }
             }).catch(() => {});
           }, (this.config.idleTimeoutMinutes ?? 10) * 60_000);
           session.obscuraIdle = idle.unref();
@@ -245,7 +288,7 @@ export class AgentBrowser implements BrowserPort {
       }
     }
   }
-  private async invokeCli(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
+  private async invokeCli(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean; capture?: boolean }): Promise<BrowserCommandResult> {
     const proxy = await (this.proxy ??= createEgressProxy());
     const name = nameFor(session.ref.conversationId);
     const download = join(this.root, "browser", "downloads", name);
@@ -325,6 +368,7 @@ export class AgentBrowser implements BrowserPort {
         return { ok, data: null, error: ok ? null : "Browser input failed" };
       }
       // Secret eval responses are an allowlisted status only. Never forward raw output or an error.
+      if (options?.capture) return { ok: parsed.success === true, data: parsed.data && typeof parsed.data === "object" && "result" in parsed.data ? parsed.data.result : null, error: null };
       if (options?.stdin !== undefined) {
         const value = parsed.data && typeof parsed.data === "object" && "result" in parsed.data ? parsed.data.result : null;
         if (value === "uncertain") return { ok: false, data: { status: "uncertain" }, error: "Secret fill outcome is uncertain" };
@@ -351,31 +395,36 @@ export class AgentBrowser implements BrowserPort {
       this.initialized = true;
       for (const name of ["downloads", "staging"]) rmSync(join(this.root, "browser", name), { recursive: true, force: true });
     }
-    const existing = this.sessions.get(ref.conversationId);
+    const existing = this.sessionMap.get(ref.conversationId);
     if (existing && existing.ref.ghostId !== ref.ghostId) throw new CommandError("forbidden", "Browser session owner changed");
-    while (!existing && this.sessions.size >= MAX_SESSIONS) {
-      const idle = [...this.sessions].find(([, session]) => !session.active);
+    while (!existing && this.sessionMap.size >= MAX_SESSIONS) {
+      const idle = [...this.sessionMap].find(([, session]) => !session.active);
       if (!idle) { await this.available.promise; continue; }
       const [id, victim] = idle;
       const closed = await this.invoke(victim, ["close"]);
       if (!closed.ok) throw new CommandError("unavailable", "Browser session eviction failed");
+      this.disconnect(victim, "evicted");
       this.clearFiles(victim);
-      this.sessions.delete(id);
+      this.sessionMap.delete(id);
     }
     const session: Session = existing ?? { ref, headed: false, handoffUrl: null, handoffFallback: false, secrets: [], screenshotsBlocked: false, passwordScreenshots: new Map(), active: false };
     session.active = true;
-    this.sessions.delete(ref.conversationId);
-    this.sessions.set(ref.conversationId, session);
+    this.sessionMap.delete(ref.conversationId);
+    this.sessionMap.set(ref.conversationId, session);
     return session;
   }
   assertVaultFill(ref: BrowserSessionRef, field: VaultField, origin: string) {
-    if (this.sessions.get(ref.conversationId)?.engine === "obscura" &&
+    if (this.sessionMap.get(ref.conversationId)?.engine === "obscura" &&
       (!["username", "password", "totp"].includes(field) || !this.config.obscura?.loginOrigins?.includes(origin))) {
       throw new NoEffect("Vault login is unavailable on this Obscura site");
     }
   }
   run(ref: BrowserSessionRef, argv: string[], options?: BrowserRunOptions) {
     return this.enqueueSession(ref, async (session) => {
+      if (session.captureArmed && !session.secretGate) {
+        await session.ownerBusy;
+        await this.capture(session);
+      }
       if (options?.engine) {
         if (argv[0] !== "open" || session.engine && session.engine !== options.engine) throw new NoEffect("Close the browser session before choosing a different engine");
         if (options.engine === "obscura" && !this.supportsObscura) throw new NoEffect("Obscura is not configured");
@@ -383,6 +432,9 @@ export class AgentBrowser implements BrowserPort {
       session.engine ??= options?.engine ?? "chrome";
       if (session.engine === "obscura" && options?.transfer) throw new NoEffect("Obscura file transfers are unavailable");
       if (options?.sensitive) {
+        session.captureArmed = false;
+        session.login?.clear();
+        if (options.sensitive.field === "password") (session.modelPasswords ??= new Set()).add(options.sensitive.value);
         const { value, field } = options.sensitive;
         this.assertVaultFill(ref, field, options.sensitive.origin);
         if (value && !session.secrets.some((entry) => entry.variants.includes(value) && (field !== "card_number" || entry.cardPattern !== undefined))) {
@@ -445,7 +497,7 @@ export class AgentBrowser implements BrowserPort {
           } catch { throw new KnownOutcome("Download could not be saved: existing destination or workspace symlink"); }
         }
       } finally { if (staged) rmSync(staged, { force: true }); }
-      if (argv[0] === "close" && result.ok) this.clearFiles(session);
+      if (argv[0] === "close" && result.ok) { this.disconnect(session, "closed"); this.clearFiles(session); this.sessionMap.delete(ref.conversationId); }
       if (!session.secrets.length || options?.stdin !== undefined || argv[0] === "screenshot") return result;
       const redactText = (text: string) => {
         for (const secret of session.secrets) {
@@ -468,66 +520,255 @@ export class AgentBrowser implements BrowserPort {
       return { ok: result.ok, data: redact(result.data), error: result.error === null ? null : redactText(result.error) };
     });
   }
-  handoff(ref: BrowserSessionRef, url: string | null) {
-    return this.enqueueSession(ref, async (session) => {
-      if (session.engine === "obscura") throw new CommandError("unavailable", "Obscura handoff uses the live view in Ghost");
-      if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser state");
-      session.secrets = [];
-      session.screenshotsBlocked = false;
-      session.passwordScreenshots.clear();
-      this.clearFiles(session);
-      session.headed = true;
-      session.handoffUrl = url ?? "about:blank";
-      session.handoffFallback = false;
-      if (!(await this.invoke(session, ["open", session.handoffUrl])).ok) throw new CommandError("unavailable", "Could not open browser handoff");
-    });
+  sessions() { return [...this.sessionMap.values()].map((s) => ({ ...s.ref, engine: s.engine ?? "chrome" as const, headed: s.headed })); }
+  private existing(ref: BrowserSessionRef) {
+    const session = this.sessionMap.get(ref.conversationId);
+    if (!session || session.ref.ghostId !== ref.ghostId) throw new CommandError("not_found", "Browser session not found");
+    return session;
   }
-  /** The owner's live view goes straight to `invoke`: the Ghost-facing screenshot blocks guard models, not the owner. */
-  view(ref: BrowserSessionRef): Promise<BrowserFrame> {
-    return this.enqueueSession(ref, async (session) => {
-      const page = await this.invoke(session, ["eval", VIEWPORT_SCRIPT]);
-      const raw = page.data && typeof page.data === "object" && "result" in page.data ? page.data.result : null;
-      let info: { w?: unknown; h?: unknown; url?: unknown; title?: unknown } = {};
-      try { if (typeof raw === "string") info = JSON.parse(raw); } catch {}
-      const width = typeof info.w === "number" && info.w > 0 ? Math.round(info.w) : 0, height = typeof info.h === "number" && info.h > 0 ? Math.round(info.h) : 0;
-      if (!page.ok || !width || !height) throw new CommandError("unavailable", "The browser page could not be read");
-      const shot = await this.invoke(session, ["screenshot", "--screenshot-format", "jpeg", "--screenshot-quality", "60"]);
-      if (!shot.ok || !shot.data || typeof shot.data !== "object" || !("image" in shot.data) || typeof shot.data.image !== "string") throw new CommandError("unavailable", "The browser screenshot failed");
-      return { image: shot.data.image, mediaType: "image/jpeg", width, height, url: typeof info.url === "string" ? info.url.slice(0, 2048) : "", title: typeof info.title === "string" ? info.title.slice(0, 256) : "",
-        ...(session.engine === "obscura" ? { windowAvailable: false } : {}) };
-    });
+  takeNotice(ref: BrowserSessionRef) {
+    const session = this.sessionMap.get(ref.conversationId), notice = session?.notice ?? null;
+    if (session) session.notice = undefined;
+    return notice;
   }
-  control(ref: BrowserSessionRef, input: BrowserControl): Promise<void> {
-    return this.enqueueSession(ref, async (session) => {
-      const run = async (argv: string[], options?: { stdin?: string; batch?: boolean }) => {
-        const result = await this.invoke(session, argv, options);
-        if (!result.ok) throw new CommandError("unavailable", "Browser input failed");
-        return result;
-      };
-      switch (input.type) {
-        case "tap": {
-          const page = await run(["eval", VIEWPORT_SCRIPT]);
-          const raw = page.data && typeof page.data === "object" && "result" in page.data ? page.data.result : null;
-          let size: { w?: unknown; h?: unknown } = {};
-          try { if (typeof raw === "string") size = JSON.parse(raw); } catch {}
-          if (typeof size.w !== "number" || typeof size.h !== "number") throw new CommandError("unavailable", "The browser page could not be read");
-          const x = String(Math.round(Math.min(1, Math.max(0, input.x)) * (size.w - 1))), y = String(Math.round(Math.min(1, Math.max(0, input.y)) * (size.h - 1)));
-          await run(["mouse", "move", x, y]); await run(["mouse", "down"]); await run(["mouse", "up"]);
-          return;
+  async exclusive<T>(ref: BrowserSessionRef, perform: () => Promise<T>): Promise<T> {
+    const session = this.existing(ref);
+    while (session.secretGate) await session.secretGate;
+    const gate = Promise.withResolvers<void>(); session.secretGate = gate.promise;
+    try { await session.ownerBusy; return await perform(); }
+    finally { session.secretGate = undefined; gate.resolve(); }
+  }
+  private registerSecret(session: Session, value: string) {
+    if (!value || session.secrets.some((s) => s.variants.includes(value))) return;
+    const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+    let encoded = value; try { encoded = encodeURIComponent(value); } catch {}
+    session.secrets.push({ variants: [...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), JSON.stringify(value).slice(1, -1)])].sort((a,b) => b.length-a.length) });
+  }
+  private async capture(session: Session, submit: boolean | { x: number; y: number } = false, finished = false) {
+    if (!this.onLogin || !session.captureArmed && !finished) return;
+    session.login ??= new LoginCapture(async (login) => {
+      const id = await this.onLogin!(session.ref, login);
+      if (id) session.notice = `${session.notice ?? ""}\nThe owner's login was saved to vault item ${id}. Use browser_fill_secret for this login.`.trim();
+    }, (value) => this.registerSecret(session, value));
+    try {
+      const result = await this.invoke(session, ["eval", "--stdin"], { stdin: loginCaptureScript(submit === true ? "enter" : submit || undefined), capture: true, timeoutMs: 5000 });
+      if (this.sessionMap.get(session.ref.conversationId) !== session) return;
+      if (result.ok && typeof result.data === "string") {
+        let page: { password?: unknown; activity?: unknown; url?: unknown } = {};
+        try { page = JSON.parse(result.data); } catch {}
+        if (session.headed && page && typeof page.activity === "number" && typeof page.url === "string") {
+          if (page.activity > 0 && (session.ownerActivity?.url !== page.url || session.ownerActivity.count !== page.activity)) {
+            const activity = "The owner used this browser. Cached refs and observations were discarded; take a fresh browser_snapshot before acting.";
+            if (!session.notice?.includes(activity)) session.notice = `${session.notice ?? ""}\n${activity}`.trim();
+          }
+          session.ownerActivity = { url: page.url, count: page.activity };
         }
-        case "text":
-          // The owner may type a password here: it travels over stdin (a one-command batch), never in argv,
-          // which also keeps text such as "--json" from being read as an agent-browser flag.
-          await run(["batch", "--bail", "--omit-command"], { stdin: JSON.stringify([["keyboard", "inserttext", input.text]]), batch: true });
-          return;
-        case "key": await run(["press", input.key]); return;
-        case "scroll": await run(["scroll", input.dy < 0 ? "up" : "down", String(Math.min(10_000, Math.max(1, Math.round(Math.abs(input.dy)))))]); return;
-        case "navigate": await run([input.action]); return;
+        if (page && typeof page.password === "string" && page.password) {
+          if (session.modelPasswords?.has(page.password)) { session.login.clear(); return; }
+          this.registerSecret(session, page.password);
+          const tab = this.activeTab((await this.invoke(session, ["tab", "list"])).data);
+          if (tab) session.passwordScreenshots.set(tab.id, tab.url);
+          else session.screenshotsBlocked = true;
+        }
       }
+      await session.login.observe(result.ok ? result.data : null, false, finished);
+    } catch { /* Captured fields and raw errors never escape this owner-only lane. */ }
+  }
+  private scheduleCapture(session: Session) {
+    clearTimeout(session.captureTimer);
+    session.captureTimer = setTimeout(() => {
+      session.ownerQueue = (session.ownerQueue ?? Promise.resolve()).then(async () => {
+        while (session.secretGate) await session.secretGate;
+        if (this.sessionMap.get(session.ref.conversationId) !== session) return;
+        session.ownerBusy = this.capture(session);
+        try { await session.ownerBusy; } finally { session.ownerBusy = undefined; }
+      }).catch(() => {});
+    }, 450).unref();
+  }
+  private disconnect(session: Session, reason?: string) {
+    const bridge = session.bridge;
+    if (bridge) {
+      clearTimeout(bridge.retry);
+      bridge.frame = undefined; bridge.targetId = undefined;
+      const socket = bridge.socket; bridge.socket = undefined; socket?.close();
+      if (reason) {
+        for (const sink of bridge.subscribers) sink({ type: "end", reason });
+        bridge.subscribers.clear(); session.bridge = undefined;
+      }
+    }
+    if (reason) {
+      clearTimeout(session.captureTimer); clearInterval(session.headedPoll);
+      session.login?.clear(); session.login = undefined; session.secrets = []; session.notice = undefined;
+      session.modelPasswords?.clear(); session.captureArmed = false;
+    }
+  }
+  private async resumeClosedWindow(session: Session) {
+    if (!session.headed || this.sessionMap.get(session.ref.conversationId) !== session) return;
+    session.headed = false; clearInterval(session.headedPoll);
+    const url = session.bridge?.page?.url ?? session.handoffUrl ?? "about:blank";
+    session.handoffUrl = url;
+    await session.ownerBusy;
+    await session.login?.observe(null, false, true);
+    this.disconnect(session);
+    try {
+      if (url !== "about:blank") await assertFetchableUrl(url, "closed window URL");
+      if (!(await this.invoke(session, ["close"])).ok || !(await this.invoke(session, ["open", url])).ok) throw new Error("Window resume failed");
+      this.retryStream(session);
+    } catch {
+      this.disconnect(session, "window_closed"); this.clearFiles(session);
+      this.sessionMap.delete(session.ref.conversationId);
+    }
+  }
+  private connect(session: Session): Promise<WebSocket> {
+    const bridge = session.bridge ??= { subscribers: new Set(), width: 0, height: 0 };
+    if (bridge.connecting) return bridge.connecting;
+    if (bridge.socket?.readyState === WebSocket.OPEN) return Promise.resolve(bridge.socket);
+    bridge.frame = undefined;
+    bridge.connecting = (async () => {
+      const status = await this.invoke(session, ["stream", "status"], { timeoutMs: 5000 });
+      const port = status.data && typeof status.data === "object" && "port" in status.data ? status.data.port : null;
+      if (!status.ok || typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) throw new CommandError("unavailable", "Browser stream is unavailable");
+      const { promise, resolve, reject } = Promise.withResolvers<WebSocket>();
+      // No Origin header: agent-browser deliberately refuses browser-page clients.
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/?maxFps=15`); bridge.socket = socket;
+      const timeout = setTimeout(() => { socket.close(); reject(new CommandError("unavailable", "Browser stream timed out")); }, 5000);
+      socket.onerror = () => { clearTimeout(timeout); reject(new CommandError("unavailable", "Browser stream failed")); };
+      socket.onmessage = (message) => {
+        if (bridge.socket !== socket) return;
+        if (typeof message.data !== "string" || message.data.length > 12 * 1024 * 1024) return;
+        try {
+          const event = JSON.parse(String(message.data));
+          if (event.type === "status") {
+            if (bridge.frame && (Number.isFinite(event.viewportWidth) && event.viewportWidth > 0 && event.viewportWidth !== bridge.frame.width || Number.isFinite(event.viewportHeight) && event.viewportHeight > 0 && event.viewportHeight !== bridge.frame.height)) bridge.frame = undefined;
+            if (Number.isFinite(event.viewportWidth) && event.viewportWidth > 0) bridge.width = event.viewportWidth;
+            if (Number.isFinite(event.viewportHeight) && event.viewportHeight > 0) bridge.height = event.viewportHeight;
+            if (bridge.width && bridge.height) { clearTimeout(timeout); resolve(socket); }
+          } else if (event.type === "tabs" && Array.isArray(event.tabs)) {
+            const tab = event.tabs.find((tab: { active?: boolean }) => tab.active);
+            if (!event.tabs.length && bridge.page) {
+              if (session.headed) void this.resumeClosedWindow(session).catch(() => {});
+              else { this.disconnect(session, "session_ended"); this.sessionMap.delete(session.ref.conversationId); this.clearFiles(session); }
+              return;
+            }
+            if (tab && typeof tab.url === "string" && typeof tab.title === "string") {
+              const targetId = typeof tab.targetId === "string" ? tab.targetId.slice(0,128) : undefined;
+              const url = tab.url.slice(0,8192);
+              if (bridge.page && bridge.page.url !== url || bridge.targetId !== undefined && bridge.targetId !== targetId) bridge.frame = undefined;
+              bridge.targetId = targetId;
+              bridge.page = { type: "page", url, title: tab.title.slice(0,512) };
+              for (const sink of bridge.subscribers) sink(bridge.page);
+            }
+          } else if (event.type === "frame" && typeof event.data === "string" && event.data.length > 0 && event.data.length <= Math.ceil(8 * 1024 * 1024 * 4 / 3) && /^[A-Za-z0-9+/]*={0,2}$/.test(event.data) && bridge.width && bridge.height) {
+            // Damage-driven engines may remain static between viewers: retain exactly one bounded frame.
+            bridge.frame = { type: "frame", data: event.data, width: bridge.width, height: bridge.height };
+            for (const sink of bridge.subscribers) sink(bridge.frame);
+          }
+        } catch { /* Malformed upstream messages are never observations. */ }
+      };
+      socket.onclose = () => {
+        clearTimeout(timeout); reject(new CommandError("unavailable", "Browser stream closed"));
+        if (bridge.socket !== socket) return;
+        bridge.frame = undefined;
+        bridge.socket = undefined; this.retryStream(session);
+      };
+      return await promise;
+    })().finally(() => { bridge.connecting = undefined; });
+    return bridge.connecting;
+  }
+  private retryStream(session: Session) {
+    const bridge = session.bridge;
+    if (!bridge || !bridge.subscribers.size && !session.headed || this.stopping || this.sessionMap.get(session.ref.conversationId) !== session) return;
+    clearTimeout(bridge.retry);
+    bridge.retry = setTimeout(() => { void this.connect(session).catch(() => this.retryStream(session)); }, 750).unref();
+  }
+  async live(ref: BrowserSessionRef, options: { maxFps: number }, sink: (event: BrowserLiveEvent) => void) {
+    const session = this.existing(ref), bridge = session.bridge ??= { subscribers: new Set(), width: 0, height: 0 };
+    if (bridge.subscribers.size >= 4) throw new CommandError("conflict", "At most four live clients may watch a browser session");
+    let lastFrame = Number.NEGATIVE_INFINITY, receivedFrame = false;
+    const subscriber = (event: BrowserLiveEvent) => {
+      if (event.type === "frame") { const now = performance.now(); if (now - lastFrame < 1000 / options.maxFps) return; lastFrame = now; receivedFrame = true; }
+      sink(event);
+    };
+    bridge.subscribers.add(subscriber);
+    try { await this.connect(session); } catch (error) { bridge.subscribers.delete(subscriber); throw error; }
+    if (bridge.page) sink(bridge.page);
+    if (bridge.frame && !receivedFrame) subscriber(bridge.frame);
+    return () => { bridge.subscribers.delete(subscriber); };
+  }
+  input(ref: BrowserSessionRef, input: BrowserLiveInput): Promise<void> {
+    const session = this.existing(ref);
+    const next = (session.ownerQueue ?? Promise.resolve()).then(async () => {
+      while (session.secretGate) await session.secretGate;
+      this.existing(ref);
+      const perform = async () => {
+        const activity = "The owner used this browser. Cached refs and observations were discarded; take a fresh browser_snapshot before acting.";
+        if (!session.notice?.includes(activity)) session.notice = `${session.notice ?? ""}\n${activity}`.trim();
+        const initial = !session.captureArmed;
+        session.captureArmed = true;
+        if (initial || input.type === "key" && input.event === "down" && input.key === "Enter" || input.type === "mouse" && input.event === "down") await this.capture(session, input.type === "mouse" && input.event === "down" ? { x: input.x, y: input.y } : input.type === "key" && input.event === "down" && input.key === "Enter");
+        if (input.type === "navigate" || input.type === "text") {
+          const result = input.type === "navigate" ? await this.invoke(session, [input.action])
+            : await this.invoke(session, ["batch", "--bail", "--omit-command"], { stdin: JSON.stringify([["keyboard", "inserttext", input.text]]), batch: true });
+          if (!result.ok) throw new CommandError("unavailable", "Browser input failed");
+        } else if (input.type === "key" && input.event === "down" && input.key.toLowerCase() === "a" && ((input.modifiers ?? 0) & 6) !== 0 && ((input.modifiers ?? 0) & 9) === 0) {
+          const selected = await this.invoke(session, ["eval", "--stdin"], { stdin: SELECT_ALL_SCRIPT });
+          if (!selected.ok) throw new CommandError("unavailable", "Browser selection is unavailable on the focused element");
+        } else {
+          const socket = await this.connect(session), bridge = session.bridge!;
+          // CDP needs carriage-return text for Enter's default form action; clients cannot inject control text.
+          socket.send(JSON.stringify(input.type === "mouse" ? {
+            type: "input_mouse", eventType: { down: "mousePressed", up: "mouseReleased", move: "mouseMoved", wheel: "mouseWheel" }[input.event],
+            x: Math.min(bridge.width, Math.max(0, input.x)), y: Math.min(bridge.height, Math.max(0, input.y)), button: input.button ?? (input.event === "move" || input.event === "wheel" ? "none" : "left"),
+            clickCount: input.clickCount ?? 1, deltaX: input.deltaX ?? 0, deltaY: input.deltaY ?? 0, modifiers: input.modifiers ?? 0,
+          } : { type: "input_keyboard", eventType: input.event === "down" ? "keyDown" : "keyUp", key: input.key, code: input.code, text: input.text ?? (input.event === "down" && input.key === "Enter" && !((input.modifiers ?? 0) & 7) ? "\r" : undefined), windowsVirtualKeyCode: input.keyCode, modifiers: input.modifiers ?? 0 }));
+        }
+        if (input.type === "text") await this.capture(session);
+        this.scheduleCapture(session);
+      };
+      session.ownerBusy = perform();
+      try { await session.ownerBusy; } finally { session.ownerBusy = undefined; }
+    });
+    session.ownerQueue = next.catch(() => {}); return next;
+  }
+  handoff(ref: BrowserSessionRef, url: string | null) {
+    this.existing(ref);
+    return this.enqueueSession(ref, async (session) => {
+      if (session.headed) return;
+      let cookies: unknown = null;
+      if (session.engine === "obscura") {
+        const exported = await this.invoke(session, ["cookies", "get"]);
+        if (!exported.ok) throw new CommandError("unavailable", "Could not migrate browser cookies");
+        cookies = exported.data;
+      }
+      this.disconnect(session);
+      if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser state");
+      // Migrated sessions stay Chrome; future cookies persist in the Ghost's encrypted Chrome restore state.
+      session.engine = "chrome"; session.headed = true; session.handoffUrl = url ?? "about:blank"; session.handoffFallback = false;
+      if (!(await this.invoke(session, ["open", cookies ? "about:blank" : session.handoffUrl])).ok) throw new CommandError("unavailable", "Could not open browser window");
+      if (cookies) {
+        const staging = this.sessionDirs(session)[1]!; mkdirSync(staging, { recursive: true, mode: 0o700 });
+        const path = join(staging, randomUUID());
+        try {
+          const data = typeof cookies === "object" && "cookies" in cookies ? cookies.cookies : cookies;
+          writeFileSync(path, JSON.stringify(data), { flag: "wx", mode: 0o600 });
+          if (!(await this.invoke(session, ["cookies", "set", "--curl", path])).ok) throw new CommandError("unavailable", "Could not restore browser cookies");
+        } finally { rmSync(path, { force: true }); cookies = null; }
+        if (!(await this.invoke(session, ["open", session.handoffUrl])).ok) throw new CommandError("unavailable", "Could not open migrated page");
+      }
+      session.captureArmed = true;
+      await this.capture(session);
+      session.headedPoll = setInterval(() => {
+        if (session.secretGate || session.ownerBusy || session.active || this.stopping) return;
+        session.ownerBusy = this.capture(session).finally(() => { session.ownerBusy = undefined; });
+      }, 1500).unref();
+      void this.connect(session).catch(() => this.retryStream(session));
     });
   }
   endHandoff(ref: BrowserSessionRef) {
     return this.enqueueSession(ref, async (session) => {
+      clearTimeout(session.captureTimer); clearInterval(session.headedPoll);
+      await session.ownerBusy;
+      await this.capture(session, false, true);
       // A live-view handoff never left headless mode: the Ghost continues on the page the owner left. A session
       // lost to a host restart is new and empty either way, so there is nothing to reopen.
       if (!session.headed && session.handoffUrl === null) return { fallback: false };
@@ -543,35 +784,37 @@ export class AgentBrowser implements BrowserPort {
           session.handoffUrl = "about:blank";
           session.handoffFallback = true;
         }
+        this.disconnect(session);
         if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser handoff state");
         session.headed = false;
-        session.secrets = [];
-        session.screenshotsBlocked = false;
-        session.passwordScreenshots.clear();
         this.clearFiles(session);
       }
       // Retain the captured URL on this session: a failed reopen can be explicitly retried.
       if (!(await this.invoke(session, ["open", session.handoffUrl!])).ok) throw new CommandError("unavailable", "Could not resume the browser headlessly");
+      this.retryStream(session);
       return { fallback: session.handoffFallback };
     });
   }
   close(ref: BrowserSessionRef) {
     return this.enqueueSession(ref, async (session) => {
+      await this.capture(session, false, session.headed);
       if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not close browser session");
+      this.disconnect(session, "closed");
       this.clearFiles(session);
-      this.sessions.delete(ref.conversationId);
+      this.sessionMap.delete(ref.conversationId);
     });
   }
   shutdown() {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.stopping = true;
+    for (const session of this.sessionMap.values()) this.disconnect(session, "shutdown");
     this.shutdownPromise = Promise.allSettled([...this.sessionQueues.values()]).then(() => this.enqueue(async () => {
       let failure: unknown;
-      for (const [id, session] of this.sessions) {
+      for (const [id, session] of this.sessionMap) {
         try {
           if (!(await this.invoke(session, ["close"])).ok) throw new Error("Browser session did not close");
           this.clearFiles(session);
-          this.sessions.delete(id);
+          this.sessionMap.delete(id);
         } catch (error) { failure = error; }
       }
       if (this.proxy) { await (await this.proxy).close(); this.proxy = null; }
