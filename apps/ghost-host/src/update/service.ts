@@ -64,6 +64,7 @@ export interface ServiceInstallOptions {
   noLoad?: boolean;
   uid?: number;
   launchctl?: (args: string[]) => Promise<{ code: number; stderr: string }>;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export async function installService(options: ServiceInstallOptions): Promise<{ launcher: string; plist: string; link: string }> {
@@ -108,7 +109,18 @@ export async function installService(options: ServiceInstallOptions): Promise<{ 
     const domain = `gui/${uid}`;
     const stopped = await run(["bootout", `${domain}/com.a7.ghost`]);
     if (stopped.code !== 0 && stopped.code !== 3 && !/not (?:loaded|found)|no such process|could not find service/i.test(stopped.stderr)) throw new Error(`launchctl bootout: ${stopped.stderr}`);
-    const loaded = await run(["bootstrap", domain, plist]);
+    // bootout returns while the old Host is still shutting down (ExitTimeOut 30 s); bootstrapping
+    // before launchd forgets the label fails with "Input/output error" and leaves nothing loaded.
+    const pause = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    for (let waited = 0; (await run(["print", `${domain}/com.a7.ghost`])).code === 0; waited += 500) {
+      if (waited >= 60_000) throw new Error("launchctl bootout: the previous Host did not stop within 60 s");
+      await pause(500);
+    }
+    let loaded = await run(["bootstrap", domain, plist]);
+    for (let attempt = 1; loaded.code !== 0 && attempt < 5; attempt++) {
+      await pause(1000);
+      loaded = await run(["bootstrap", domain, plist]);
+    }
     if (loaded.code !== 0) throw new Error(`launchctl bootstrap: ${loaded.stderr}`);
   }
   return { launcher, plist, link };

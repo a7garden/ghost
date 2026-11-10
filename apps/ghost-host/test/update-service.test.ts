@@ -41,8 +41,17 @@ test("service writes escaped paths, plist and CLI link; launchctl uses argument 
   const root = join(f.temp, "state ' <&>"), home = join(f.temp, "home ' <&>");
   mkdirSync(root);
   const calls: string[][] = [];
-  const result = await installService({ root, home, execPath: join(f.old, "ghost"), uid: 501, launchctl: async (args) => { calls.push(args); return { code: args[0] === "bootout" ? 3 : 0, stderr: "" }; } });
-  expect(calls).toEqual([["bootout", "gui/501/com.a7.ghost"], ["bootstrap", "gui/501", result.plist]]);
+  // The old Host is still unloading for two polls, and the first bootstrap hits launchd's EIO.
+  let unloading = 2, bootstraps = 0;
+  const launchctl = async (args: string[]) => {
+    calls.push(args);
+    if (args[0] === "bootout") return { code: 0, stderr: "" };
+    if (args[0] === "print") return { code: unloading-- > 0 ? 0 : 113, stderr: "" };
+    return { code: bootstraps++ === 0 ? 5 : 0, stderr: "Bootstrap failed: 5: Input/output error" };
+  };
+  const result = await installService({ root, home, execPath: join(f.old, "ghost"), uid: 501, launchctl, sleep: async () => {} });
+  const print = ["print", "gui/501/com.a7.ghost"], bootstrap = ["bootstrap", "gui/501", result.plist];
+  expect(calls).toEqual([["bootout", "gui/501/com.a7.ghost"], print, print, print, bootstrap, bootstrap]);
   expect(readlinkSync(result.link)).toBe(join(f.base, "current", "ghost"));
   expect(statSync(result.launcher).mode & 0o777).toBe(0o755);
   const plist = readFileSync(result.plist, "utf8");
