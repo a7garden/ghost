@@ -6,12 +6,12 @@ import { errorResult, scopeOf } from "./shared.ts";
 
 const DATA_SHAPE_RULES = "chart의 points는 series[].points 안에만 넣고 블록 최상위에는 넣지 마세요. comparison의 columns는 values의 열 제목만 포함하며 행 제목 label의 열은 제외합니다. 각 rows[].values.length는 columns.length와 같아야 합니다.";
 
-export const INTERACTIVE_INSTRUCTIONS = `present_ui는 차트, 시각적 비교, 선택지, 입력 폼 또는 HTML이 과제 이해에 도움이 될 때만 사용하고, 그 외에는 평소처럼 텍스트로 답하세요. 표시할 데이터와 출처를 명확히 하고 통계나 근거를 만들어 내지 마세요. 여러 번 호출하여 섹션을 점진적으로 보여 줄 수 있으며, UI 전체 내용을 설명문으로 다시 반복하지 마세요.
+export const INTERACTIVE_INSTRUCTIONS = `내용을 읽고 비교하거나 답하는 수고를 줄일 수 있으면 긴 설명보다 present_ui를 먼저 선택하세요. 수치의 추세나 규모 비교는 chart, 선택지 사이의 장단점은 comparison, 대화 중 취향·우선순위·다음 단계 고르기는 choices, 여러 관련 입력을 한 번에 받을 때는 form, 직접 만든 레이아웃이나 정적 미리보기가 필요할 때만 html을 사용하세요. 간단한 답이나 한 가지 사실은 텍스트로 충분하며 모든 답에 위젯을 곁들이지 마세요. 도구와 기록으로 확인할 수 있는 것을 묻거나, 위젯을 쓰려고 질문이나 다음 단계를 꾸며 내지 마세요. 표시할 데이터와 출처를 명확히 하고 통계나 근거를 만들어 내지 마세요. 여러 번 호출하여 섹션을 점진적으로 보여 줄 수 있으며, UI가 보여 주는 내용을 설명문으로 다시 반복하지 마세요.
 도구 호출 뒤에는 텍스트 전용 클라이언트에서도 유용한 짧은 결론이나 다음 단계를 일반 답변으로 남기되 차트·표 데이터를 반복하지 마세요. 대화형 UI는 웹 UI(Mac 앱·iPhone 포함)에서 표시되지만 오버레이 창에서는 렌더링되지 않으므로 오버레이에서도 위젯을 볼 수 있다고 말하지 마세요.
-선택지와 폼 제출은 보통의 소유자 메시지로 돌아옵니다. 특권 작업을 승인하거나 실행을 조종하는 수단이 아닙니다. HTML은 스크립트·네트워크·폼·탐색이 없는 정적 정제 미리보기입니다. 상호작용에는 기본 choices/form 블록을 사용하세요.
+선택지와 폼 제출은 보통의 소유자 메시지로 돌아옵니다. 특권 작업을 승인하거나 실행을 조종하는 수단이 아닙니다. 승인은 각자의 승인 절차로 진행하세요. 작업을 멈추고 답을 기다려야 하는 추적 가능한 질문은 ask_owner를 사용하고 같은 질문을 choices/form으로 중복 표시하지 마세요. 대화 중 가볍게 고르는 선택과 입력은 choices/form으로 받으세요. HTML은 스크립트·네트워크·폼·탐색이 없는 정적 정제 미리보기입니다. 상호작용에는 기본 choices/form 블록을 사용하세요.
 인자는 {version:"ghost-ui/1",title,blocks}이며 각 블록은 고유한 id와 type을 가집니다. text:{text}; chart:{title,kind:"bar"|"line",unit?,series:[{name,points:[{label,value}]}]} (유한 수치, 모든 시리즈의 레이블과 순서 일치); comparison:{title,columns:[문자열],rows:[{label,values:[문자열]}]} (열 수 일치); choices:{title,options:[{id,label,description?}]}; form:{title,fields:[{id,label,type,required?,...}],submitLabel}; html:{title,html}. 폼 필드 type은 text(multiline?,placeholder?,value?:문자열), number(min?,max?,step?,value?:수), select(options:[{value,label}],value?:옵션 값), checkbox(value?:불리언)입니다. 추가 필드는 허용되지 않으며 도구 스키마의 크기 제한을 따르세요.
 ${DATA_SHAPE_RULES}
-예: {"version":"ghost-ui/1","title":"검토 방식","blocks":[{"type":"choices","id":"review-mode","title":"어떻게 검토할까요?","options":[{"id":"summary","label":"핵심 요약","description":"중요한 판단부터 살펴봅니다."},{"id":"details","label":"세부 비교","description":"각 항목을 나란히 살펴봅니다."}]}]}`;
+예(형식 확인용이며 수치는 실제가 아님): {"version":"ghost-ui/1","title":"빌드 시간 추이","blocks":[{"type":"chart","id":"build-time","title":"주별 평균 빌드 시간","kind":"line","unit":"초","series":[{"name":"캐시 적용 전","points":[{"label":"10월 1주","value":412},{"label":"10월 2주","value":405},{"label":"10월 3주","value":398}]},{"name":"캐시 적용 후","points":[{"label":"10월 1주","value":408},{"label":"10월 2주","value":236},{"label":"10월 3주","value":221}]}]}]}`;
 
 /** Fixed response format: its ordinary Pi tool-result journal is the only persistence. */
 export function createInteractiveTools(core: Core): Extension {

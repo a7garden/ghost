@@ -23,7 +23,7 @@ export function activityTools(core: Core): Extension {
         // 2026-11-10: the card draws the config itself (source · limits · tools); the detail is the plain-words version for notifications.
         const detail = `승인하면 이 활동이 승인을 다시 묻지 않고 계속 돌아갑니다.\n\n**할 일**\n\n${config.prompt}\n\n**완료 기준**\n\n${config.acceptanceCriteria}`;
         const effect = core.effects.propose({ conversationId: scope.conversation.id, callId: api.callId, tool: "activity_propose", input: { config }, summary: `Propose ongoing activity: ${config.name}`, title: `상시 활동 켜기: ${config.name}`, detail, proposal: { config } });
-        return text(`Activity proposal awaiting owner approval (${effect.id}). No activity was activated. Next: wait for the owner's decision.`);
+        return text(`Activity proposal awaiting owner approval (${effect.id}). No activity was activated. Do not retry or wait for it: continue with other steps or end your turn; the decision arrives as a message.`);
       } catch (error) { return errorResult(error); }
     },
   });

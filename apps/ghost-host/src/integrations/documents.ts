@@ -9,11 +9,12 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Core } from "../core/core.ts";
 import { sha256 } from "../core/ids.ts";
 import type { DocumentProposal, DocumentsPort, Page, PageMeta } from "./ports.ts";
@@ -911,15 +912,16 @@ function classify(locator: string, bytes: Uint8Array): VaultPage {
     diagnostic: null,
   };
   const classified = classifyDocument(locator, bytes);
+  const readable = decodeSource(bytes);
   switch (classified.outcome) {
     case "legacy_markdown":
-      return { ...base, legacy: true, diagnostic: "legacy_markdown: readable without conversion" };
+      return { ...base, legacy: true, body: readable, diagnostic: "legacy_markdown: readable without conversion" };
     case "legacy_html":
-      return { ...base, legacy: true, diagnostic: "legacy_html: readable without conversion" };
+      return { ...base, legacy: true, body: readable, diagnostic: "legacy_html: readable without conversion" };
     case "invalid":
-      return { ...base, diagnostic: `${classified.diagnostic.kind}: ${classified.diagnostic.message}` };
+      return { ...base, body: readable, diagnostic: `${classified.diagnostic.kind}: ${classified.diagnostic.message}` };
     case "valid": {
-      const text = decodeSource(bytes);
+      const text = readable;
       const body = text.slice(classified.bodyStart);
       const envelope = parseEnvelopeOf(text);
       const title = envelope ? stringField(envelope.map, "title") : null;
@@ -1110,11 +1112,9 @@ class VaultDocuments implements DocumentsPort {
 
   async readPage(spaceId: string, ref: { pageId?: string; locator?: string }): Promise<Page> {
     const space = this.requireSpace(spaceId);
-    if (ref.locator) return this.toPage(this.project(space, ref.locator));
-    if (!ref.pageId) throw new Error("a page reference needs a page id or a locator");
-    const matches = this.scan(space).filter((page) => page.documentId === ref.pageId || page.locator === ref.pageId);
-    if (matches.length !== 1) throw new Error("document missing or duplicate_document_id");
-    return this.toPage(this.project(space, matches[0]!.locator));
+    const raw = ref.locator ?? ref.pageId;
+    if (raw === undefined) throw new Error("a page reference needs a page id or a locator");
+    return this.toPage(this.project(space, this.requireLocator(space, raw)));
   }
 
   /** Validates a proposal without writing; it throws when the proposal can never apply. */
@@ -1205,8 +1205,12 @@ class VaultDocuments implements DocumentsPort {
   }
 
   private requireSpace(spaceId: string): Space {
-    const space = this.core.ledger.spaces().find((item) => item.id === spaceId);
-    if (!space) throw new Error("unknown document space");
+    const spaces = this.core.ledger.spaces();
+    const space = spaces.find((item) => item.id === spaceId) ?? spaces.find((item) => item.name.toLowerCase() === spaceId.toLowerCase());
+    if (!space) {
+      const known = spaces.slice(0, 10).map((item) => `"${item.name}" (${item.id})`).join(", ");
+      throw new Error(`unknown document space "${spaceId}"; registered Spaces: ${known || "none"}. Retry with one of these names or ids`);
+    }
     return space;
   }
 
@@ -1230,14 +1234,165 @@ class VaultDocuments implements DocumentsPort {
 
   /** The locator of the page with this id, or the locator itself when it names a file. */
   private locate(space: Space, pageId: string): string {
-    const matches = this.scan(space).filter((page) => page.documentId === pageId || page.locator === pageId);
-    if (matches.length === 0) throw new Error("document missing");
-    if (matches.length > 1) throw new Error("document missing or duplicate_document_id");
-    return matches[0]!.locator;
+    return this.requireLocator(space, pageId);
   }
 
-  /** Every document file in the space, sorted by locator. */
+  /**
+   * The locator a raw model reference points at, or null when nothing in the Space matches.
+   * A duplicated document id is refused first, before any filename alias can pick a copy;
+   * then the ladder, in order: exact id/locator, `?…`/`#…` stripped, an absolute path inside
+   * the Space, a leading segment equal to the Space folder's own name, `.md` added, a unique
+   * case-insensitive basename match, then a path in parentheses inside the reference.
+   * Confinement never widens: `safePath` still checks every candidate.
+   */
+  private requireLocator(space: Space, raw: string): string {
+    const locator = this.resolveLocator(space, raw);
+    if (locator === null) throw this.unresolvedError(space, raw);
+    return locator;
+  }
+
+  private resolveLocator(space: Space, raw: string): string | null {
+    const stripped = raw.replace(/[?#].*$/, "");
+    // An absolute path outside the Space, or a `..` segment, points somewhere else on the
+    // host: refuse here instead of letting a filename alias quietly pick an in-Space namesake.
+    if (isAbsolute(stripped) && this.insideSpace(space, stripped) === stripped) throw this.unresolvedError(space, raw);
+    if (stripped.split("/").includes("..")) throw this.unresolvedError(space, raw);
+    // Reference resolution sees every readable page: one unreadable file elsewhere never
+    // blocks an ID-ambiguity check or an unrelated read, and a direct read of the skipped
+    // file itself still fails with its own honest error.
+    const pages = this.scanReadable(space);
+    const candidates: string[] = [];
+    const push = (value: string) => {
+      if (value !== "" && !candidates.includes(value)) candidates.push(value);
+    };
+    push(raw);
+    let current = raw;
+    for (const step of [
+      () => stripped,
+      (value: string) => this.insideSpace(space, value),
+      (value: string) => this.withoutSpaceSegment(space, value),
+      (value: string) => (/\.(md|html|djot)$/i.test(value) ? value : `${value}.md`),
+    ]) {
+      current = step(current);
+      push(current);
+    }
+    // A duplicated document id is ambiguous data: refuse before any filename alias can pick one copy.
+    for (const candidate of candidates) {
+      const byId = pages.filter((page) => page.documentId === candidate);
+      if (byId.length > 1) {
+        throw new Error(`document id "${candidate}" is used by several files (${byId.map((page) => page.locator).join(", ")}); read one by its exact locator instead`);
+      }
+    }
+    for (const candidate of candidates) {
+      const exact = pages.filter((page) => page.locator === candidate || page.documentId === candidate);
+      if (exact.length === 1) return exact[0]!.locator;
+    }
+    for (const candidate of candidates) {
+      const base = candidate.slice(candidate.lastIndexOf("/") + 1).toLowerCase();
+      const hits = pages.filter((page) => page.locator.slice(page.locator.lastIndexOf("/") + 1).toLowerCase() === base);
+      if (hits.length === 1) return hits[0]!.locator;
+    }
+    const parenthesized = /\(([^()]+)\)/.exec(raw)?.[1];
+    if (parenthesized !== undefined) {
+      const inner = this.resolveLocator(space, parenthesized);
+      if (inner !== null) return inner;
+    }
+    // A well-formed relative path that names an existing regular file stays readable even
+    // when it is not a document the vault indexes (plain `.txt` notes, for example).
+    for (const candidate of candidates) {
+      if (this.isDirectLocator(candidate) && lstatSync(join(space.path, candidate), { throwIfNoEntry: false })?.isFile()) return candidate;
+    }
+    return null;
+  }
+
+  /** An absolute candidate becomes Space-relative only when it stays inside the Space. */
+  private insideSpace(space: Space, candidate: string): string {
+    if (!isAbsolute(candidate)) return candidate;
+    const target = resolve(candidate);
+    const roots = new Set<string>([space.path]);
+    try {
+      roots.add(realpathSync(space.path));
+    } catch {}
+    for (const root of roots) {
+      const base = resolve(root);
+      if (target === base || target.startsWith(base + sep)) return relative(base, target).split(sep).join("/");
+    }
+    return candidate;
+  }
+
+  /** `docs/wms-ux.md` inside the Space whose folder is itself named `docs`. */
+  private withoutSpaceSegment(space: Space, candidate: string): string {
+    const folder = basename(space.path).toLowerCase();
+    const parts = candidate.split("/");
+    if (parts.length > 1 && parts[0]!.toLowerCase() === folder) return parts.slice(1).join("/");
+    return candidate;
+  }
+
+  /** A relative path safe to `join` under the Space root: no empty, dot, `..` or dotfile segments. */
+  private isDirectLocator(candidate: string): boolean {
+    if (candidate === "" || isAbsolute(candidate) || candidate.includes("\\")) return false;
+    return candidate.split("/").every((part) => part !== "." && part !== ".." && !part.startsWith("."));
+  }
+
+  private unresolvedError(space: Space, raw: string): Error {
+    const near = this.closestDocuments(space, raw);
+    const listing = near.length > 0 ? near.join(", ") : "the Space holds no readable documents";
+    return new Error(`no document in Space "${space.name}" matches "${raw}"; closest documents: ${listing}. Retry with an exact page id or one of these locators`);
+  }
+
+  /** Up to 10 existing locators closest to a failed reference, by basename and substring match. */
+  private closestDocuments(space: Space, raw: string): string[] {
+    let pages: VaultPage[] = [];
+    try {
+      pages = this.scanReadable(space);
+    } catch {
+      return [];
+    }
+    const cleaned = raw.replace(/[?#].*$/, "").replace(/[()]/g, " ").trim();
+    const needle = cleaned.slice(cleaned.lastIndexOf("/") + 1).replace(/\.(md|html|djot)$/i, "").toLowerCase();
+    const scored = pages
+      .map((page) => {
+        const base = page.locator.slice(page.locator.lastIndexOf("/") + 1).replace(/\.(md|html|djot)$/i, "").toLowerCase();
+        const locator = page.locator.toLowerCase();
+        const title = page.title.toLowerCase();
+        let score = 0;
+        if (base === needle) score = 4;
+        else if (needle !== "" && base.includes(needle)) score = 3;
+        else if (needle !== "" && locator.includes(needle)) score = 2;
+        else if (needle !== "" && (title.includes(needle) || needle.split(/[^a-z0-9]+/).some((token) => token.length >= 3 && (base.includes(token) || title.includes(token))))) score = 1;
+        return { locator: page.locator, score };
+      })
+      .filter((entry) => entry.score > 0);
+    scored.sort((a, b) => b.score - a.score || a.locator.localeCompare(b.locator));
+    const found = scored.slice(0, 10).map((entry) => entry.locator);
+    return found.length > 0 ? found : pages.slice(0, 10).map((page) => page.locator);
+  }
+
+  /** Every document file in the space, sorted by locator. One unreadable file fails the listing. */
   private scan(space: Space): VaultPage[] {
+    return this.scanLocators(space).map((locator) => this.project(space, locator));
+  }
+
+  /**
+   * The readable pages of the space, for reference resolution: one unreadable file (an oversized
+   * document, a vanished file) is skipped instead of blocking every other lookup. Structural
+   * failures of the vault itself still throw, and a direct read of the skipped file still
+   * fails with its own honest error.
+   */
+  private scanReadable(space: Space): VaultPage[] {
+    const pages: VaultPage[] = [];
+    for (const locator of this.scanLocators(space)) {
+      try {
+        pages.push(this.project(space, locator));
+      } catch {
+        continue;
+      }
+    }
+    return pages;
+  }
+
+  /** Every indexed document locator in the space, sorted; shape failures throw. */
+  private scanLocators(space: Space): string[] {
     const root = space.path;
     const rootStat = lstatSync(root, { throwIfNoEntry: false });
     if (!rootStat) return [];
@@ -1258,7 +1413,7 @@ class VaultDocuments implements DocumentsPort {
     };
     walk("", 0);
     locators.sort();
-    return locators.map((locator) => this.project(space, locator));
+    return locators;
   }
 
   /** Classifies one file in the space. */

@@ -56,7 +56,7 @@ export const ExecutionTarget = Type.Union([
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTarget>;
 
-/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict) and the main-only ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
+/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict), the fixed self_adapt/capability_request and the main-only ghost_create/ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
@@ -116,6 +116,22 @@ export const GhostTool = Type.Union([
   Type.Literal("vault_list"),
   Type.Literal("vault_request"),
   Type.Literal("vault_generate_login"),
+  Type.Literal("desktop_apps"),
+  Type.Literal("desktop_snapshot"),
+  Type.Literal("desktop_screenshot"),
+  Type.Literal("desktop_click"),
+  Type.Literal("desktop_fill"),
+  Type.Literal("desktop_type"),
+  Type.Literal("desktop_select"),
+  Type.Literal("desktop_check"),
+  Type.Literal("desktop_scroll"),
+  Type.Literal("desktop_press"),
+  Type.Literal("desktop_launch"),
+  Type.Literal("desktop_focus"),
+  Type.Literal("desktop_wait"),
+  Type.Literal("desktop_pointer"),
+  Type.Literal("desktop_keys"),
+  Type.Literal("desktop_propose"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 
@@ -179,6 +195,22 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "vault_list",
   "vault_request",
   "vault_generate_login",
+  "desktop_apps",
+  "desktop_snapshot",
+  "desktop_screenshot",
+  "desktop_click",
+  "desktop_fill",
+  "desktop_type",
+  "desktop_select",
+  "desktop_check",
+  "desktop_scroll",
+  "desktop_press",
+  "desktop_launch",
+  "desktop_focus",
+  "desktop_wait",
+  "desktop_pointer",
+  "desktop_keys",
+  "desktop_propose",
 ];
 
 /** Tools that observe or change the owner's Mac. Granted only explicitly, never by default. */
@@ -190,8 +222,14 @@ export const BROWSER_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => 
 /** Vault metadata and requests; secret values never reach a model. */
 export const VAULT_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("vault_"));
 
-/** The allow-list a new Ghost gets when none is given: every selectable tool except host tools. */
-export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool));
+/**
+ * PC control: the owner's apps through accessibility and real input. Granted only explicitly, and usable only by a
+ * Ghost the owner also allows PC 직접 실행, because driving the GUI reaches everything the owner's account can.
+ */
+export const DESKTOP_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("desktop_"));
+
+/** The allow-list a new Ghost gets when none is given: every selectable tool except host and PC control tools. */
+export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool));
 
 /** A skill directory name under the configured skills root. */
 export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });
@@ -504,6 +542,44 @@ export type AutonomyPlan = Static<typeof AutonomyPlan>;
 export const QUIET_REPLY = "[quiet]";
 /** First line of the Host's self-directed wake. */
 export const AUTONOMOUS_WAKE = "[Autonomous wake]";
+
+/** Longest adaptation notes a Ghost keeps; they ride along in every direct and work instruction. */
+export const ADAPTATION_MAX_CHARS = 4000;
+
+/**
+ * What a Ghost learned about working in this owner's environment (owner decision 2026-11-10): paths, command
+ * forms, tools and habits that work here. The Ghost rewrites it itself, the main Ghost may correct a teammate's,
+ * and the owner may edit or clear it. It is kept apart from the persona, so a persona shared elsewhere stays
+ * portable while each installation adapts. Behavior only: tools and PC execution change through grants.
+ */
+export const Adaptation = Type.Object({
+  ghostId: Id,
+  notes: Type.String({ maxLength: ADAPTATION_MAX_CHARS }),
+  /** The notes before the last change, so the owner can put them back. */
+  previous: nullable(Type.String({ maxLength: ADAPTATION_MAX_CHARS })),
+  by: Type.Union([Type.Literal("self"), Type.Literal("main"), Type.Literal("owner")]),
+  /** Why the last change was made, in the owner's language. */
+  reason: Type.String({ maxLength: 500 }),
+  updatedAt: Timestamp,
+  revision: Type.Integer({ minimum: 0 }),
+});
+export type Adaptation = Static<typeof Adaptation>;
+
+/**
+ * `proposal.capability` of a `question` decision: a Ghost asks for tools or PC execution it lacks. The main
+ * Ghost may settle it for the owner; "허용" applies the grant before the answer reaches the Ghost.
+ */
+export const CapabilityRequest = Type.Object({
+  ghostId: Id,
+  tools: GhostToolList,
+  hostExecution: Type.Boolean(),
+  /** Committed with the grant, before answer delivery; recovery never re-grants after a later revocation. */
+  grantedAt: Type.Optional(Timestamp),
+});
+export type CapabilityRequest = Static<typeof CapabilityRequest>;
+/** The answer that grants a capability request; any other answer declines it. */
+export const CAPABILITY_GRANT = "허용";
+export const CAPABILITY_DECLINE = "거절";
 
 export const NotificationKind = Type.Union([
   Type.Literal("decision"),

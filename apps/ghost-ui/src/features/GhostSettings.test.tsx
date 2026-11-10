@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { GHOST_TOOLS, type Ghost } from '@ghost/contract';
-import { canDeleteGhost, editFallbacks, settingsRoster, toggleSkill, toolGroups, toolLabels } from './GhostSettings';
+import { GHOST_TOOLS, type Adaptation, type Ghost } from '@ghost/contract';
+import { adaptationLine, canDeleteGhost, editFallbacks, settingsRoster, toggleSkill, toolGroups, toolLabels } from './GhostSettings';
 
 const ghost = (patch: Partial<Ghost> = {}): Ghost => ({
   id: 'g1', name: '연구원', persona: '', look: { avatarId: null }, model: null, isDefault: false, state: 'retired',
@@ -41,6 +41,22 @@ describe('tool groups', () => {
     const grouped = toolGroups.flatMap(group => [...group.tools]);
     expect([...grouped].sort()).toEqual([...GHOST_TOOLS].sort());
     expect(GHOST_TOOLS.every(tool => Boolean(toolLabels[tool]))).toBe(true);
+  });
+});
+
+describe('환경 적응 meta line', () => {
+  const adaptation = (patch: Partial<Adaptation> = {}): Adaptation => ({
+    ghostId: 'g1', notes: '창작물은 ~/Works에 둔다', previous: null, by: 'self', reason: null, updatedAt: 0, revision: 0, ...patch,
+  });
+
+  it('names who changed the notes last, when, and the reason when present', () => {
+    expect(adaptationLine(adaptation({ by: 'self' }), 180_000)).toBe('스스로 · 3분 전');
+    expect(adaptationLine(adaptation({ by: 'main', reason: '메모 경로 정리' }), 30_000)).toBe('메인 · 방금 · 메모 경로 정리');
+    expect(adaptationLine(adaptation({ by: 'owner', reason: '명령을 bun으로 바꿈' }), 7_200_000)).toBe('소유자 · 2시간 전 · 명령을 bun으로 바꿈');
+  });
+
+  it('leaves the reason out when the last change had none', () => {
+    expect(adaptationLine(adaptation({ by: 'owner', reason: '' }), 45_000)).toBe('소유자 · 1분 전');
   });
 });
 

@@ -152,6 +152,10 @@ button.ghost-sheet__portrait:focus-visible { outline: 2px solid var(--ghost-ink3
 .persona-note__save { height: 30px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); color: var(--ghost-primary-ink); background: var(--ghost-primary); font: 600 var(--text-caption)/1 var(--font-sans); cursor: pointer; }
 .persona-note__save:disabled { opacity: .45; cursor: not-allowed; }
 
+.adaptation-note__meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0; padding: 0 16px 8px; color: var(--ghost-ink3); font-size: var(--text-caption); }
+.adaptation-note__revert { height: 30px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink3); background: none; font: 600 var(--text-caption)/1 var(--font-sans); cursor: pointer; }
+.adaptation-note__revert:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+
 .capabilities { display: grid; gap: 4px; padding: 6px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
 .capabilities__group { display: grid; grid-template-columns: 148px minmax(0, 1fr); align-items: start; gap: 12px; padding: 8px 10px; border-radius: var(--radius-card); }
 .capabilities__group + .capabilities__group { border-top: 1px solid var(--ghost-line); border-radius: 0; }

@@ -25,6 +25,8 @@ const READ_TOOLS: Record<string, true> = {
   host_list: true,
   host_read: true,
   host_nodes: true,
+  desktop_apps: true,
+  desktop_snapshot: true,
 };
 
 export function createReviewTools(core: Core): Extension {
@@ -43,7 +45,10 @@ export function createReviewTools(core: Core): Extension {
         const result = scope.work.result;
         if (!result) throw conflict("the Work has no result to review yet");
         const ref = result.artifacts.find((candidate) => (args.name !== undefined && candidate.name === args.name) || (args.digest !== undefined && candidate.digest.startsWith(args.digest)));
-        if (!ref) throw invalid("that artifact is not part of this Work's result");
+        if (!ref) {
+          const attached = result.artifacts.map((artifact) => `${artifact.name} (${artifact.digest.slice(0, 12)})`).join(", ");
+          throw invalid(`that artifact is not part of this Work's result; the result attaches: ${attached || "no artifacts"}. Read one of the attached names or digests`);
+        }
         const bytes = await core.artifacts.read(ref.digest);
         const start = Math.min(args.offset ?? 0, bytes.length);
         const end = Math.min(start + READ_WINDOW, bytes.length);
