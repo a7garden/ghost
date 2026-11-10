@@ -43,7 +43,7 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.4-ab57e70`(GitHub Release `v2.4.4`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.5-15a0428`(GitHub Release `v2.4.5`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -51,6 +51,18 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 서비스 선택형 연결·Ghost 연결 지원 — 2026-11-11
+
+- [v2.4.5](https://github.com/a7garden/ghost/releases/tag/v2.4.5), 소스 `15a0428`(브랜치 `release/service-connections-20261111-v244`). 운영 2.4.4(`ab57e70`)의 목표 기능을 보존하고 연결 변경만 옮겼다. `main`의 기억·협업·네이티브 미수용 후보는 포함하지 않는다. 후속 릴리스도 현재 운영 기능을 보존해야 한다.
+- 서비스 목록·계정 아이콘 그리드·메일 자동 서버 설정·직접 API 연결·메인 Ghost에게 연결 맡기기를 제공한다. OAuth 앱이 없는 Google·Outlook·X·Notion·Slack은 최초 앱 등록과 소유자 로그인/동의가 필요하다. 운영의 다섯 서비스는 아직 앱 미등록이며 실제 제공자 OAuth 로그인 수용으로 세지 않는다.
+- 발급 키는 Host가 발급처의 단일 입력 필드에서 캡처해 브라우저 출력에서 가린 뒤 소유자 승인으로 저장·인증 확인한다. 금고 참조도 지원한다. API 권한은 Ghost별로 부여하고 외부 쓰기는 확인한다(Slack GET RPC 포함). 자동 활동은 계정을 새로 등록하지 못한다.
+- mini Gitea의 `garden` 계정을 직접 연결했다. 토큰은 `read:repository,read:issue,read:user`만 허용하며 Host 비밀 저장소 밖에 남기지 않았다. 설치된 Host의 실제 인증 검사와 운영 UI의 「인증 확인됨」을 확인했다. 메인의 연결 목록·등록·API 요청 도구 3개를 소유자 API로 허용했고 기존 브라우저·금고 권한은 유지했다.
+- 검증: 릴리스 Host 813 통과·10 생략, UI 185, Rust 21, 계약·Host·UI 타입·빌드·Developer ID·업데이터 서명·매니페스트·묶음 검증. 연결 e2e 5개, 실제 Chrome의 캡처 원점·필드 선택·텍스트 가림·스크린샷 차단·재캡처 검증이 통과했다. 메일/Notion 인증과 도움 요청의 모델 실행은 e2e에서 실물 수용하지 않았다. 공증은 기존 배포 방식대로 생략했다.
+- 실제 응답 메타데이터가 `anthropic/claude-opus-5-5`인 독립 검토 두 건에서 OAuth/원본 계정과 모델 도구/UI 경계를 검토했다. 토큰 갱신의 소스 서명 키 보존, Google 시크릿, 즉시 인증 폐기, Slack 읽기 분류, 캡처 후 가림과 handoff 보존, 권한만 수정할 때 인증 유지, 인증 검사 큐 교착/경쟁을 교정했다. 도구 목록을 복제한 UI 검사는 삭제했다.
+- 운영 자체 업데이트 완료: `lastResult: installed`, `2.4.4-ab57e70` → `2.4.5-15a0428`, 백업 `~/.local/share/ghost/backups/pre-2.4.5-15a0428-1794349760056/`. health 2.4.5·runtime ready, PID 6603의 단일 62062 리스너·운영 루트·설치 실행 파일 서명을 확인했다. Ghost 28·대화 213·맡긴 일 156·기기 1·Space 9·연결 2의 기존 ID를 모두 보존했다.
+- 운영에서 제공하는 연결 화면의 목록·아이콘·실제 Gitea 인증을 확인했다. 격리 브라우저에서는 데스크톱과 390px 메일/Google 추가 화면을 확인했다. Mac 앱 0.2.2는 실행 중이지만 현재 Space에 접근 가능한 창이 없어 새로고침·네이티브 상호작용은 확인하지 못했고 강제로 앞으로 가져오지 않았다. 실물 iPhone 검수와 구분한다. 시험 Host와 브라우저는 종료했다.
+- 저장 형식 지문에 `connections-2`를 더했다. 예전 Host가 새 API/도구 메타데이터를 읽지 못하므로 2.4.4로 자동 롤백하지 않는다. 데이터·자격 복원은 별도 소유자 승인 대상이다.
 
 ### 팀 목표·이정표 — 2026-11-11
 
