@@ -1,6 +1,6 @@
 # Ghost desktop
 
-Ghost의 Mac 앱은 Tauri 2 셸이다. UI와 API는 OS 서비스로 실행되는 Ghost 호스트(하나의 Bun 프로세스)가 직접 제공하고, 셸은 그 호스트에 연결한다. 셸이 호스트를 기동하거나 UI를 서빙하지 않는다. 창 상단 46px 타이틀바는 ghost-ui의 앱 소유 `TitleBar`가 Tauri 셸에서만 렌더링한다(macOS traffic-light inset 80px, 전 구간 drag).
+Ghost의 Mac 앱은 Tauri 2 셸이다. UI와 API는 OS 서비스로 실행되는 Ghost 호스트(하나의 Bun 프로세스)가 직접 제공하고, 셸은 그 호스트에 연결한다. 셸이 호스트를 기동하거나 UI를 서빙하지 않는다. 창 상단 48px 타이틀바는 ghost-ui의 앱 소유 `TitleBar`가 Tauri 셸에서만 렌더링한다(macOS traffic-light inset 80px). 빈 영역과 현재 위치의 글자를 끌면 창을 옮긴다. 버튼·링크·입력 등 조작 요소와 `data-tauri-drag-region="false"` 영역은 창 이동에서 제외한다.
 
 ## 호스트 연결
 
