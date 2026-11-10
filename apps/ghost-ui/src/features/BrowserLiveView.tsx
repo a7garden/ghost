@@ -68,6 +68,7 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   const { client } = useHost();
   const touch = useTouch();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const screenRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const touchFieldRef = useRef<HTMLInputElement>(null);
   /** The frame size the pointer math scales into; mirrored from state so native listeners read it. */
@@ -186,6 +187,29 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     client.browserInput(conversationId, input).then(() => setInputError(null), (caught: unknown) => {
       setInputError(caught instanceof Error && caught.message ? caught.message : '입력을 전달하지 못했습니다.');
     }), [client, conversationId]);
+
+  useEffect(() => {
+    const screen = screenRef.current;
+    if (!screen || status !== 'live') return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let sentWidth = 0, sentHeight = 0;
+    const resize = () => {
+      if (!screen.clientWidth || !screen.clientHeight) return;
+      const width = Math.max(320, Math.min(2560, screen.clientWidth));
+      const height = Math.max(240, Math.min(1600, screen.clientHeight));
+      clearTimeout(timer);
+      if (width === sentWidth && height === sentHeight) return;
+      timer = setTimeout(() => {
+        if (document.visibilityState !== 'visible' || statusRef.current !== 'live') return;
+        sentWidth = width; sentHeight = height;
+        void send({ type: 'viewport', width, height });
+      }, 150);
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(screen);
+    resize();
+    return () => { observer.disconnect(); clearTimeout(timer); };
+  }, [send, status, page?.url]);
 
   const pointAt = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -378,7 +402,7 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
         <Monitor size={13} aria-hidden="true"/>{macOpened ? 'Mac에서 열었어요' : 'Mac 창으로 열기'}
       </button>}
     </header>
-    <div className="browser-live__screen" aria-busy={busy || undefined} onKeyDown={onKeyDown} onKeyUp={onKeyUp}>
+    <div ref={screenRef} className="browser-live__screen" aria-busy={busy || undefined} onKeyDown={onKeyDown} onKeyUp={onKeyUp}>
       <canvas ref={canvasRef} role="img" aria-label={`${label} — 클릭해 조작할 수 있습니다`}
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
         onContextMenu={event => event.preventDefault()}/>

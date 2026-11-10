@@ -79,6 +79,7 @@ export type BrowserInput =
   | { type: 'mouse'; event: 'down' | 'up' | 'move' | 'wheel'; x: number; y: number; button?: 'left' | 'middle' | 'right' | 'none'; clickCount?: 1 | 2 | 3; deltaX?: number; deltaY?: number; modifiers?: number }
   | { type: 'key'; event: 'down' | 'up'; key: string; code: string; text?: string; keyCode?: number; modifiers?: number }
   | { type: 'text'; text: string }
+  | { type: 'viewport'; width: number; height: number }
   | { type: 'navigate'; action: 'back' | 'forward' | 'reload' };
 
 /**
