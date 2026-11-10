@@ -171,6 +171,11 @@ body {
 .decision__time + .decision__work { margin-left: auto; }
 .decision__title { margin: 0; color: var(--ghost-ink); font-size: var(--text-headingSm); font-weight: 650; line-height: 1.35; letter-spacing: -.015em; overflow-wrap: anywhere; }
 .decision__detail { margin: -6px 0 0; color: var(--ghost-ink2); font-size: var(--text-body); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 2026-11-10: the detail is Markdown (lists, bold); pre-wrap would turn the gaps between its blocks into blank lines. */
+.decision__detail--md { white-space: normal; }
+.decision__detail--md .message-body { color: inherit; font-size: inherit; line-height: inherit; }
+.decision__detail--md .message-body > :first-child { margin-top: 0; }
+.decision__detail--md .message-body > :last-child { margin-bottom: 0; }
 .decision__options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px; }
 .decision__option {
   display: flex; min-width: 0; min-height: 48px; align-items: center; gap: 12px; padding: 10px 14px 10px 10px;
@@ -181,6 +186,13 @@ body {
 .decision__option:hover:not(:disabled) { background: var(--ghost-surface); box-shadow: var(--shadow-raised); transform: translateY(-1px); }
 .decision__option:active:not(:disabled) { transform: scale(.98); }
 .decision__option:disabled { opacity: .5; cursor: default; }
+/* 2026-11-10: the recommended answer and the Host's review (recommendation · main Ghost's view · when it goes ahead). */
+.decision__option[data-recommended] { box-shadow: inset 0 0 0 1.5px var(--ghost-ink3); }
+.decision__badge { margin-left: auto; padding: 1px 8px; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: var(--ghost-canvas); font-size: var(--text-micro); font-weight: 600; white-space: nowrap; }
+.decision__review { display: grid; gap: 4px; padding: 10px 12px; border-radius: var(--radius-control); background: var(--ghost-inset); color: var(--ghost-ink2); font-size: var(--text-caption); line-height: 1.55; }
+.decision__review p { margin: 0; overflow-wrap: anywhere; }
+.decision__review strong { margin-right: 6px; color: var(--ghost-ink); font-weight: 600; }
+.decision__review-auto { color: var(--ghost-ink3); }
 .decision__option kbd { display: grid; width: 22px; height: 22px; flex: none; place-items: center; }
 .decision__option > span { min-width: 0; overflow-wrap: anywhere; }
 .decision__answer { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 14px; border-radius: var(--radius-card); background: var(--ghost-hover); }

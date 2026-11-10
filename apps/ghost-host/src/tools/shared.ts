@@ -2,7 +2,7 @@ import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
 import { Type } from "typebox";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
-import { CommandError, forbidden, notFound } from "../core/errors.ts";
+import { CommandError, forbidden, invalid, notFound } from "../core/errors.ts";
 import { NoEffect } from "../core/effects.ts";
 import { idFor } from "../core/ids.ts";
 import { NotFound } from "../ledger/ledger.ts";
@@ -144,21 +144,43 @@ export function describeWorkLine(core: Core, work: Work): string {
   return `- ${work.title} (${work.id}) — ${work.state}${owner} · ${assignee}${deadline}`;
 }
 
+/**
+ * A question as the owner's card reads it: the first line is the heading, the rest the context under it.
+ * 2026-11-10: the whole question used to be the detail too, so the heading printed twice.
+ */
+export function splitQuestion(question: string): { title: string; detail: string } {
+  const [first = "", ...rest] = question.trim().split("\n");
+  const title = firstLine(first).trim();
+  // A first line cut at 200 characters keeps the whole text below, so nothing is lost.
+  if (title.length < first.trim().length) return { title, detail: question.trim() };
+  return { title, detail: rest.join("\n").trim() };
+}
+
 /** `ask_owner` behaves identically in direct and work conversations. */
 export function askOwnerTool(core: Core) {
   return defineTool({
     name: "ask_owner",
-    description: "Ask the owner a question; the answer arrives as a new message. Use it when a decision is theirs, not yours.",
+    description:
+      "Ask the owner a question; the answer arrives as a new message. Use it when a decision is theirs, not yours. " +
+      "The owner reads it on a phone card, in Korean unless they write otherwise: the first line is the question itself in one short plain sentence (it becomes the card's heading); " +
+      "the following lines give only the context needed to decide (Markdown lists welcome, no ids, paths, tool names or JSON). " +
+      "Each option is one complete, self-explanatory answer of a few words, mutually exclusive. " +
+      "Set recommended to the option you would pick: the owner sees it first, and if the choice is reversible the main Ghost or the Host may take it when the owner does not answer in time. Leave recommended out when the choice spends money, sends something, deletes, or only the owner can know.",
     parameters: Type.Object({
-      question: Type.String({ minLength: 1, maxLength: 8192 }),
-      options: Type.Optional(Type.Array(Type.String({ maxLength: 256 }), { maxItems: 8, description: "Suggested answers" })),
+      question: Type.String({ minLength: 1, maxLength: 8192, description: "First line: the question. Following lines: context." }),
+      options: Type.Optional(Type.Array(Type.String({ maxLength: 256 }), { maxItems: 8, description: "Suggested answers, each a short complete choice" })),
+      recommended: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: "The option you recommend; must be one of options" })),
     }),
     replay: "unsafe",
     async execute(args, api) {
       try {
         const scope = scopeOf(core, api);
         if (scope.work?.activityId) core.activities.authorize(scope.work.id, "ask_owner");
-        const decision = core.decisions.ask(scope.conversation.id, firstLine(args.question), args.question, args.options ?? [], idFor(scope.conversation.id, api.callId));
+        const { title, detail } = splitQuestion(args.question);
+        const options = args.options ?? [];
+        if (args.recommended !== undefined && !options.includes(args.recommended)) throw invalid("recommended must be one of options");
+        const proposal = args.recommended ? { review: { recommend: "answer", answer: args.recommended, expiresAt: null } } : null;
+        const decision = core.decisions.ask(scope.conversation.id, title, detail, options, idFor(scope.conversation.id, api.callId), proposal);
         return {
           content: [{ type: "text", text: `The owner was asked (${decision.id}). Their answer arrives as a message.` }],
         } satisfies ToolExecutionResult;

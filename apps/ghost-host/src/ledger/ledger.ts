@@ -2,6 +2,7 @@ import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { DEFAULT_APPROVAL_POLICY, DEFAULT_OWNER_LANGUAGE, type ApprovalPolicy } from "@ghost/contract";
 import type {
   Acceptance,
   Activity,
@@ -643,7 +644,7 @@ export class Ledger {
       .query(
         `INSERT INTO decisions (id, kind, ghost_id, conversation_id, work_id, effect_id, title, detail, options, proposal, state, answer, created_at, resolved_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET state = excluded.state, answer = excluded.answer, resolved_at = excluded.resolved_at`,
+         ON CONFLICT (id) DO UPDATE SET state = excluded.state, answer = excluded.answer, resolved_at = excluded.resolved_at, proposal = excluded.proposal`,
       )
       .run(
         decision.id,
@@ -966,6 +967,8 @@ export class Ledger {
       defaultModel: this.setting<ModelRef | null>("defaultModel", null),
       reviewModel: this.setting<ModelRef | null>("reviewModel", null),
       providers: this.providers(),
+      ownerLanguage: this.setting<string>("ownerLanguage", DEFAULT_OWNER_LANGUAGE),
+      approvals: { ...DEFAULT_APPROVAL_POLICY, ...this.setting<Partial<ApprovalPolicy>>("approvals", {}) },
     };
   }
 

@@ -481,7 +481,9 @@ export class Activities {
           } catch { /* Invalid provider URLs are not approval destinations. */ }
         }
       }
-      const proposal = this.core.effects.propose({ ...effect, title: `Approve ${action.kind}`, detail: `Sending account: ${account}\nDestination: ${destination}\nSource: ${item.title}\n\nBody:\n${action.body}`, proposal: input });
+      // 2026-11-10: the owner's card reads title and detail in Korean. The proposal stays the bare input — the executor checks its digest.
+      const verb = action.kind === "mail_reply" ? "메일 답장 보내기" : "PR 댓글 달기";
+      const proposal = this.core.effects.propose({ ...effect, title: `${verb}: ${item.title}`.slice(0, 200), detail: `- 보내는 계정: ${account}\n- 받는 곳: ${destination.replace("\nURL: ", " · ")}\n- 원본: ${item.title}\n\n**보낼 본문**\n\n${action.body}`, proposal: input });
       return `Action awaiting owner approval (${proposal.id}); nothing sent yet.`;
     }
     return this.core.effects.run(effect, async () => {

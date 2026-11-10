@@ -14,6 +14,7 @@ import { parseShellResult } from "../src/core/verify.ts";
 import type { SandboxEnvFactory, MemoryPort } from "../src/integrations/ports.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
 import { createToolSet } from "../src/tools/index.ts";
+import { splitQuestion } from "../src/tools/shared.ts";
 import { MAX_ARTIFACT_BYTES } from "../src/tools/work.ts";
 import type { ToolSet } from "../src/tools/types.ts";
 import { harness, tempDir, type FakeEngine } from "./support.ts";
@@ -712,5 +713,14 @@ describe("tools", () => {
     const stale = await call(inspect, { ghost_id: helper.id }, apiOf(pi, "inspect-paused"));
     expect(stale.isError).toBe(true);
     await s.core.idle();
+  });
+});
+
+describe("ask_owner card text", () => {
+  test("the first line is the heading and only the rest is context, so the card never repeats it", () => {
+    expect(splitQuestion("어느 쪽으로 할까요?\n\n- A는 빠릅니다")).toEqual({ title: "어느 쪽으로 할까요?", detail: "- A는 빠릅니다" });
+    expect(splitQuestion("한 줄 질문")).toEqual({ title: "한 줄 질문", detail: "" });
+    const long = "가".repeat(250);
+    expect(splitQuestion(long)).toEqual({ title: "가".repeat(200), detail: long });
   });
 });

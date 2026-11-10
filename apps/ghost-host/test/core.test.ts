@@ -235,6 +235,49 @@ describe("effects", () => {
     expect(await core.effects.run({ conversationId, callId: "c2", tool: "bash", input: { command: "true" }, summary: "true" }, async () => "ok")).toBe("ok");
   });
 
+  test("a change the Ghost can check itself never asks the owner after a restart", async () => {
+    const path = join(tempDir(), "ledger.db");
+    const first = harness(path);
+    const ghost = first.core.createGhost({ name: "G", persona: "" });
+    const work = first.core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
+    await first.core.idle();
+    const conversationId = first.ledger.work(work.id).conversationId!;
+    first.core.effects.begin({ conversationId, callId: "c1", tool: "write", input: { path: "a.txt" }, summary: "write a.txt" });
+    first.ledger.close();
+
+    const second = harness(path);
+    second.core.effects.recoverInterrupted();
+    expect(second.ledger.pendingDecisions({ workId: work.id })).toHaveLength(0);
+    expect(second.ledger.work(work.id).state).not.toBe("blocked");
+    const effect = second.ledger.effectByCall(conversationId, "c1")!;
+    expect(effect.state).toBe("done");
+    expect(effect.result).toContain("Outcome uncertain");
+    // Never run again on its own: the same call replays the recorded note.
+    expect(await second.core.effects.run({ conversationId, callId: "c1", tool: "write", input: { path: "a.txt" }, summary: "write a.txt" }, async () => "again")).toContain("Outcome uncertain");
+  });
+
+  test("a pending \"did bash happen?\" card from before goes back to the Ghost at startup and the Work resumes", async () => {
+    const { core, ledger, engine } = harness();
+    const ghost = core.createGhost({ name: "G", persona: "" });
+    const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
+    await core.idle();
+    const conversationId = ledger.work(work.id).conversationId!;
+    // The shape older Hosts left behind: an unknown bash effect, a blocked Work and an owner card.
+    const start = core.effects.begin({ conversationId, callId: "c1", tool: "bash", input: { command: "ls" }, summary: "ls" });
+    ledger.tx(() => {
+      ledger.putEffect({ ...start.effect, state: "unknown", result: "the host stopped while this effect was running", endedAt: Date.now() });
+      core.works.block(work.id, "unknown outcome of bash");
+      ledger.putDecision({ id: "old", kind: "reconcile_effect", ghostId: ghost.id, conversationId, workId: work.id, effectId: start.effect.id,
+        title: 'Did "bash" happen?', detail: "ls", options: [], proposal: null, state: "pending", answer: null, createdAt: Date.now(), resolvedAt: null });
+    });
+    core.effects.returnSelfCheckable();
+    await core.idle();
+    expect(ledger.decision("old").state).toBe("cancelled");
+    expect(ledger.effect(start.effect.id).state).toBe("done");
+    expect(ledger.work(work.id).state).toBe("running");
+    expect(engine.to(conversationId).at(-1)?.text).toContain("Outcome uncertain");
+  });
+
   test("an effect interrupted by a restart blocks the Work until the owner reconciles it", async () => {
     const path = join(tempDir(), "ledger.db");
     const first = harness(path);
@@ -242,7 +285,7 @@ describe("effects", () => {
     const work = first.core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
     await first.core.idle();
     const conversationId = first.ledger.work(work.id).conversationId!;
-    const start = first.core.effects.begin({ conversationId, callId: "c1", tool: "bash", input: { command: "deploy" }, summary: "deploy" });
+    const start = first.core.effects.begin({ conversationId, callId: "c1", tool: "activity_action", input: { title: "deploy" }, summary: "deploy" });
     expect(start.kind).toBe("run");
     first.ledger.close();
 

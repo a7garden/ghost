@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
-import { ChevronRight, Cpu, Palette, type LucideIcon } from 'lucide-react';
+import { ChevronRight, Cpu, Palette, ShieldCheck, type LucideIcon } from 'lucide-react';
 import { SettingsLayout, InlineError, Switch } from '../ui'
 import type { Preferences } from './preferences';
 import { ModelSettings } from './ModelSettings';
+import { ApprovalSettings } from './ApprovalSettings';
 import { useCompact } from '../ui/adaptive';
 
 export interface SettingsSection { id: string; label: string; icon: LucideIcon; content: ReactNode }
@@ -22,7 +23,7 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
 }) {
   const params = new URLSearchParams(route.split('?')[1]);
   const compact = useCompact();
-  const items = [...sections.slice(0, 1), { id: 'models', label: '모델', icon: Cpu }, ...sections.slice(1), { id: 'appearance', label: '화면', icon: Palette }];
+  const items = [...sections.slice(0, 1), { id: 'models', label: '모델', icon: Cpu }, { id: 'approvals', label: '승인과 언어', icon: ShieldCheck }, ...sections.slice(1), { id: 'appearance', label: '화면', icon: Palette }];
   const requested = params.get('tab');
   const tab = items.some(item => item.id === requested) ? requested! : items[0].id;
   const ghost = params.get('ghost');
@@ -39,6 +40,7 @@ export function Settings({ route, navigate, preferences, updatePreferences, stor
     {shellSection?.content}
     {storageError && <InlineError className="mt-4">{storageError}</InlineError>}
     {tab === 'models' && <ModelSettings/>}
+    {tab === 'approvals' && <ApprovalSettings/>}
     {tab === 'appearance' && <div className="appearance">
       <div className="theme-picker" role="radiogroup" aria-label="테마">
         {themes.map(theme => <button key={theme.value} type="button" role="radio" aria-checked={preferences.theme === theme.value}

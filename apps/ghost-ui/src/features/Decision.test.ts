@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Decision, State, Work } from '@ghost/contract';
 import { HostProvider } from '../host/context';
-import { DecisionCard, chatDecisions, decisionCommand, denyReasonPrompt, documentProposal, highRiskApproval, questionFallbackText, resolvedText } from './Decision';
+import { DecisionCard, autoSettleText, cardDetail, chatDecisions, decisionCommand, denyReasonPrompt, documentProposal, highRiskApproval, recommendedOption, resolvedText } from './Decision';
 import { browserHandoffProposal, decisionChip, emptySecureForm, secureFormBody, secureFormProposal } from './decisionText';
 
 const decision = (patch: Partial<Decision> = {}): Decision => ({
@@ -85,15 +85,34 @@ describe('resolvedText', () => {
   });
 });
 
-describe('questionFallbackText', () => {
-  it('says when and to what an unanswered question settles, only while it is pending', () => {
-    const question = decision({ kind: 'question', proposal: { default: 'PDF', expiresAt: 31 * 60_000 } });
-    expect(questionFallbackText(question, 60_000)).toBe('답이 없으면 30분 뒤 기본값으로 진행합니다: PDF');
-    expect(questionFallbackText(question, 31 * 60_000)).toBe('답이 없으면 곧 기본값으로 진행합니다: PDF');
-    expect(questionFallbackText(decision({ kind: 'question', proposal: { default: 'PDF', expiresAt: 3 * 60 * 60_000 } }), 0)).toBe('답이 없으면 3시간 뒤 기본값으로 진행합니다: PDF');
-    expect(questionFallbackText({ ...question, state: 'answered' }, 0)).toBeNull();
-    expect(questionFallbackText(decision({ kind: 'question' }), 0)).toBeNull();
-    expect(questionFallbackText(decision({ proposal: { default: 'x', expiresAt: 1 } }), 0)).toBeNull();
+describe('autoSettleText', () => {
+  const review = (patch: Record<string, unknown>) => ({ review: { recommend: 'answer', answer: 'PDF', expiresAt: 31 * 60_000, ...patch } });
+  it('says when and to what an unanswered decision settles, only while it is pending', () => {
+    const question = decision({ kind: 'question', options: ['PDF', 'HTML'], proposal: review({}) });
+    expect(autoSettleText(question, 60_000)).toBe('답이 없으면 30분 뒤 「PDF」(으)로 답합니다.');
+    expect(autoSettleText(question, 31 * 60_000)).toBe('답이 없으면 곧 「PDF」(으)로 답합니다.');
+    expect(autoSettleText(decision({ kind: 'question', proposal: review({ expiresAt: 3 * 60 * 60_000 }) }), 0)).toBe('답이 없으면 3시간 뒤 「PDF」(으)로 답합니다.');
+    expect(autoSettleText(decision({ proposal: { review: { recommend: 'approve', expiresAt: 10 * 60_000 } } }), 0)).toBe('답이 없으면 10분 뒤 추천대로 승인합니다.');
+    expect(autoSettleText({ ...question, state: 'answered' }, 0)).toBeNull();
+    expect(autoSettleText(decision({ kind: 'question' }), 0)).toBeNull();
+    expect(autoSettleText(decision({ kind: 'question', proposal: review({ expiresAt: null }) }), 0)).toBeNull();
+  });
+
+  it('puts the recommended answer first and marks it', () => {
+    const question = decision({ kind: 'question', options: ['HTML', 'PDF'], proposal: review({}) });
+    expect(recommendedOption(question)).toBe('PDF');
+    const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, { decision: question, ghostName: '세이지', onResolved() {} })));
+    expect(markup.indexOf('PDF')).toBeLessThan(markup.indexOf('HTML'));
+    expect(markup).toContain('data-recommended="true"');
+    expect(markup).toContain('추천');
+  });
+
+  it('shows the main Ghost\'s view on the card', () => {
+    const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, {
+      decision: decision({ proposal: { command: 'x', risk: '읽기만 합니다', review: { recommend: 'approve', expiresAt: null, mainNote: '설정만 읽습니다.' } } }), ghostName: '세이지', onResolved() {},
+    })));
+    expect(markup).toContain('메인 의견');
+    expect(markup).toContain('설정만 읽습니다.');
   });
 });
 
@@ -127,6 +146,47 @@ describe('chatDecisions', () => {
     expect(chatDecisions(state(decisions, works), 'sage', 'c1').map(item => item.id))
       .toEqual(['own-other-work', 'thread-root', 'thread-child', 'own-direct']);
     expect(chatDecisions(state(decisions, works), 'sage', null).map(item => item.id)).toEqual(['own-other-work', 'own-direct']);
+  });
+});
+
+describe('readable cards', () => {
+  const render = (node: Decision) => renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, {
+    decision: node, ghostName: '세이지', onResolved() {},
+  })));
+
+  it('drops a heading the detail repeats, so a question never prints twice', () => {
+    const old = decision({ kind: 'question', title: '어느 쪽으로 할까요?', detail: '어느 쪽으로 할까요?\n\n- A는 빠릅니다' });
+    expect(cardDetail(old, old.title, null)).toBe('- A는 빠릅니다');
+    expect(cardDetail(decision({ title: '같음', detail: '같음' }), '같음', null)).toBe('');
+  });
+
+  it('renders the detail as Markdown, not raw marks', () => {
+    const markup = render(decision({ kind: 'question', title: '고를까요?', detail: '**중요**\n\n- 하나\n- 둘' }));
+    expect(markup).toContain('<strong>중요</strong>');
+    expect(markup).toContain('<li>하나</li>');
+    expect(markup).not.toContain('**');
+  });
+
+  it('folds an unknown proposal instead of printing JSON inline', () => {
+    const markup = render(decision({ proposal: { workId: 'w1', action: { kind: 'mail_reply', body: '안녕' } } }));
+    expect(markup).toContain('<details');
+    expect(markup).toContain('요청 원문 보기');
+  });
+
+  it('shows a card fill as site and card, not its JSON', () => {
+    const markup = render(decision({ detail: '사이트: https://shop.example', proposal: { url: 'https://shop.example/pay', origin: 'https://shop.example', itemTitle: '회사 카드', last4: '1234', input: {} } }));
+    expect(markup).toContain('회사 카드 •••• 1234');
+    expect(markup).not.toContain('decision__detail');
+  });
+
+  it('describes a standing activity proposal in words', () => {
+    const config = { name: '메일 정리', prompt: 'p', acceptanceCriteria: 'c', ghostId: 'sage',
+      source: { kind: 'schedule', spec: { kind: 'every', seconds: 3600 } }, execution: { kind: 'container' }, tools: ['read'],
+      policy: { maxRunsPerDay: 5, maxConcurrent: 1, runTimeoutSeconds: 600, allowSelfCheck: false, minCheckSeconds: 3600, externalActions: 'approval', delivery: 'changes' } };
+    const markup = render(decision({ proposal: { config } }));
+    expect(markup).toContain('지켜볼 것');
+    expect(markup).toContain('파일 읽기');
+    expect(markup).toContain('하루 5회');
   });
 });
 
