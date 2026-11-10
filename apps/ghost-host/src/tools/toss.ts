@@ -51,12 +51,14 @@ export function createTossTools(core: Core, vault: { apiCredential(ghostId: stri
             const route = tossRoute(args.path);
             if (route.account && args.account === undefined) throw invalid("this route needs account: call /api/v1/accounts and pass its accountSeq");
             const query = tossQuery(args.query);
-            let credential: TossCredential;
-            try { credential = vault.apiCredential(scope.ghost.id, TOSS_ORIGIN); }
-            catch (error) {
-              if (error instanceof CommandError && error.code === "forbidden") throw forbidden(`No Toss Securities API key is granted to ${scope.ghost.name}. Ask the owner once with vault_request (kind "api", origin "${TOSS_ORIGIN}") if you have it, otherwise tell the owner to add one under 금고 and grant it to you.`);
-              throw error;
-            }
+            const credential = (): TossCredential => {
+              try { return vault.apiCredential(scope.ghost.id, TOSS_ORIGIN); }
+              catch (error) {
+                if (error instanceof CommandError && error.code === "forbidden") throw forbidden(`No Toss Securities API key is granted to ${scope.ghost.name}. Ask the owner once with vault_request (kind "api", origin "${TOSS_ORIGIN}") if you have it, otherwise tell the owner to add one under 금고 and grant it to you.`);
+                throw error;
+              }
+            };
+            credential();
             const response = await toss.get(credential, args.path, query, route.account ? args.account! : null, context?.abortSignal);
             if (response.status < 200 || response.status >= 300) throw failure(response.status, response.body, response.retryAfter);
             const body = response.body || "(empty response)";
