@@ -11,6 +11,7 @@ import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import { CLI_TIMEOUT_MS, ContainerDriver, listContainers, runCli, type ContainerRow } from "./container.ts";
 import { confineDirChain, readFileNoFollow, WorkspaceEnv, writeFileNoFollow } from "./workspace-env.ts";
 import { HostExecutionEnv, HostMutationQueue, validateExecutionTarget } from "./host-env.ts";
+import { ensureWorktree } from "./worktree.ts";
 
 export { validateExecutionTarget } from "./host-env.ts";
 
@@ -54,7 +55,8 @@ function safeComponent(value: string, what: string): string {
  * workspace mounted; its file operations stay on the host workspace, confined the same way.
  *
  * An explicit `work.execution` overrides that legacy default: `host` uses unrestricted PC file
- * and shell access at the selected cwd, sharing a mutation queue across Works. Its workspace is
+ * and shell access at the selected cwd, sharing a mutation queue across Works; with `worktree` the cwd
+ * is the Work's own git worktree (branch `ghost/<work>`) with its own queue. Its workspace is
  * only staging, never a replacement cwd. `container` files stay confined at `/workspace`; shell
  * execution requires the Apple driver and cannot fall back to local execution. Owner grants
  * are checked by the caller, not inferred here.
@@ -70,6 +72,7 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
   let lsCache: { at: number; rows: Result<ContainerRow[], Error> } | null = null;
   let closed = false;
   const hostMutations = new HostMutationQueue();
+  const worktreeMutations = new Map<string, HostMutationQueue>();
   const hostEnvs = new Map<HostExecutionEnv, Work>();
   const closingHostEnvs = new Map<HostExecutionEnv, Promise<void>>();
   const closeHostEnvs = async (matches: (work: Work) => boolean): Promise<void> => {
@@ -121,11 +124,18 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
         )),
       });
     if (work.execution?.kind === "host") {
+      // A worktree Work edits only its own checkout, so it waits on its own queue instead of every PC Work's.
+      const cwd = work.execution.worktree ? ensureWorktree(config.root, work, work.execution.cwd) : work.execution.cwd;
+      let mutations = hostMutations;
+      if (work.execution.worktree) {
+        mutations = worktreeMutations.get(cwd) ?? new HostMutationQueue();
+        worktreeMutations.set(cwd, mutations);
+      }
       const env = new HostExecutionEnv({
-        cwd: work.execution.cwd,
+        cwd,
         workspace,
         id: "ghost-host",
-        mutations: hostMutations,
+        mutations,
         deadlineAt: work.deadlineAt,
         authorize,
       });
