@@ -258,7 +258,7 @@ function VaultItemDialog({ item, ghosts, onClose, onSave }: {
     <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
       {!editing && <SegmentedControl aria-label="항목 종류" value={kind} onValueChange={value => set('kind', value)}
         options={Object.entries(kindLabels).map(([value, label]) => ({ value, label }))}/>}
-      {field('title', '이름', { required: true })}
+      {field('title', '항목 이름', { required: true })}
       {(kind === 'login' || kind === 'secret') && field('origin', '주소', { placeholder: 'https://example.com', autoComplete: 'off',
         description: kind === 'login' ? '이 주소의 로그인에만 씁니다.' : '비우면 저장된 주소를 유지합니다.' })}
       {kind === 'login' && field('extraOrigins', '추가 로그인 주소', { placeholder: 'https://login.example.com', autoComplete: 'off',
