@@ -1002,7 +1002,7 @@ fn main() {
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::RunEvent::Reopen { .. }) {
                 if !app.state::<DesktopHost>().exiting.load(Ordering::Acquire) {
-                    if let Err(error) = companion::focus_main(app.clone()) {
+                    if let Err(error) = companion::focus_main(app.clone(), None) {
                         eprintln!("[ghost] {error}");
                     }
                 }
