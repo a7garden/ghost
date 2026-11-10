@@ -331,3 +331,16 @@ HTML uses an explicit static-tag/attribute allow-list, an opaque sandboxed ifram
 and a resource-blocking CSP. Scripts, links, metadata refresh, forms, nested frames,
 SVG/MathML and remote assets are not supported. Source view is escaped text.
 There is no postMessage bridge, arbitrary JavaScript or direct Host access.
+
+## Goals
+
+목표 is a long-term team direction, never a quota or percentage. The owner writes it or
+answers the main Ghost's 목표 제안 with 등록 / 거절 in the existing decision deck.
+Each direction leads its own section; 이유, 지키는 선 and 참고 신호 stay quiet beneath it.
+The 이정표 line reads past → now → next → later, horizontal with a ScrollRail on desktop
+and upright on compact screens. Two active steps fork and rejoin: stacked in one desktop
+column, side by side on separate lanes of the same row on compact screens.
+Every state has its own shape; signal blue appears only for a linked Work actually running
+or verifying. Selecting a step opens evidence and owner settlement inline, without a modal.
+Paused directions stay visible, closed ones fold below; closing names its irreversible
+consequence before dropping open steps. There are at most three open directions.

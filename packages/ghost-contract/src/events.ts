@@ -21,6 +21,7 @@ import {
   Timestamp,
   Work,
 } from "./entities.ts";
+import { Goal, Milestone } from "./goals.ts";
 
 /** Literal `type` plus one literal key, so each member narrows to `{ type: "work"; work: Work }`. */
 const upsert = <K extends string, Key extends string, S extends TSchema>(type: K, key: Key, schema: S) =>
@@ -57,6 +58,8 @@ export const LedgerEventData = Type.Union([
   upsert("adaptation", "adaptation", Adaptation),
   /** 근무 상태가 바뀌었다(원버튼 · 시간표 경계 · 시간표 수정). */
   upsert("duty", "duty", Duty),
+  upsert("goal", "goal", Goal),
+  upsert("milestone", "milestone", Milestone),
 ]);
 export type LedgerEventData = Static<typeof LedgerEventData>;
 

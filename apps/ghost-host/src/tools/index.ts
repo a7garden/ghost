@@ -24,6 +24,7 @@ import { createHostTools } from "./host.ts";
 import { ADAPT_INSTRUCTIONS, createSelfTools } from "./self.ts";
 import { activityTools } from "./activities.ts";
 import { AUTONOMY_DRIVE, MAIN_DRIVE, createAutonomyTools } from "./autonomy.ts";
+import { GOALS_INSTRUCTIONS, createGoalTools } from "./goals.ts";
 
 /**
  * How a Ghost speaks to the owner. Briefs between Ghosts stay exact; what a person reads is a
@@ -133,6 +134,7 @@ export function createToolSet(deps: {
   const work = sequentialEffects(createWorkTools(deps.core, deps.sandbox));
   const review = sequentialEffects(createReviewTools(deps.core));
   const main = sequentialEffects(createMainTools(deps.core));
+  const goals = sequentialEffects(createGoalTools(deps.core));
   const self = sequentialEffects(createSelfTools(deps.core));
   const memory = deps.memory === null ? null : sequentialEffects(createMemoryTools(deps.core, deps.memory));
   const documents = deps.documents === null ? null : sequentialEffects(createDocumentsTools(deps.core, deps.documents));
@@ -159,7 +161,7 @@ export function createToolSet(deps: {
   const language = () => deps.core.ledger.settings().ownerLanguage ?? "ko";
   return {
     all(): Extension[] {
-      return [direct, interactive, drive, activities, work, review, main, self, ...optional];
+      return [direct, interactive, drive, activities, work, review, main, goals, self, ...optional];
     },
     extensionsFor(conversation: Conversation, ghost: Ghost, _work: Work | null): Extension[] {
       switch (conversation.kind) {
@@ -175,7 +177,7 @@ export function createToolSet(deps: {
           if (vault) selected.push(vault);
           if (desktop) selected.push(desktop);
           // Main-only management: resolved again at every execution, so a stale main keeps nothing.
-          if (ghost.isDefault && ghost.state === "active") selected.push(main);
+          if (ghost.isDefault && ghost.state === "active") selected.push(main, goals);
           return selected;
         }
         case "work": {
@@ -198,7 +200,7 @@ export function createToolSet(deps: {
     instructionsFor(conversation: Conversation, ghost: Ghost, work: Work | null): string {
       switch (conversation.kind) {
         case "direct":
-          return [DIRECT_INSTRUCTIONS, ADAPT_INSTRUCTIONS, ownerLanguageRule(language()), ghost.isDefault && ghost.state === "active" ? `${MAIN_INSTRUCTIONS}\n${MAIN_DRIVE}` : "", ...capabilityInstructions(ghost), skillsInstructions(deps.skills, ghost), deps.core.adaptations.instructions(ghost.id)]
+          return [DIRECT_INSTRUCTIONS, ADAPT_INSTRUCTIONS, ownerLanguageRule(language()), ghost.isDefault && ghost.state === "active" ? `${MAIN_INSTRUCTIONS}\n${MAIN_DRIVE}\n${GOALS_INSTRUCTIONS}` : "", ...capabilityInstructions(ghost), skillsInstructions(deps.skills, ghost), deps.core.adaptations.instructions(ghost.id)]
             .filter(Boolean)
             .join("\n\n");
         case "work":
@@ -217,6 +219,7 @@ export function createToolSet(deps: {
             ...capabilityInstructions(ghost),
             delegationRoster(deps.core, ghost, { web: web !== null, host: host !== null, browser: browser !== null, desktop: desktop !== null }),
             work ? describeWork(work) : "",
+            work ? deps.core.goals.workInstructions(work) : "",
             skillsInstructions(deps.skills, ghost),
             deps.core.adaptations.instructions(ghost.id),
           ]

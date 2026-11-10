@@ -11,8 +11,9 @@ import { DocumentProposalPreview } from '../components/DocumentProposalPreview';
 import { BrowserLiveView } from './BrowserLiveView';
 import { MessageBody } from '../components/MessageBody';
 import { useHost } from '../host/context';
-import { browserHandoffProposal, decisionChip, decisionHeading, emptySecureForm, handoffDoneAnswer,
+import { browserHandoffProposal, decisionChip, decisionHeading, emptySecureForm, goalProposal, handoffDoneAnswer,
   secureFormBody, secureFormProposal, type SecureFormValues } from './decisionText';
+import { goalError } from './goals/goalError';
 import { toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
@@ -118,6 +119,7 @@ export function cardDetail(decision: Decision, heading: string, resultSummary: s
 /** Proposals whose preview already shows every fact of the text detail. */
 export function previewCoversDetail(decision: Decision): boolean {
   const proposal = decision.proposal;
+  if (goalProposal(decision)) return true;
   if (decision.kind !== 'approve_effect' || !proposal) return false;
   return typeof proposal.command === 'string' || typeof proposal.merchant === 'string' || typeof proposal.itemTitle === 'string';
 }
@@ -169,7 +171,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     if ('error' in command) { setError(command.error); setBusy(false); return; }
     void client.send(command)
       .then(() => { haptic(); onResolved(outcome); })
-      .catch(e => { setError(e instanceof Error ? e.message : '결정을 전달하지 못했습니다. 다시 시도해 주세요.'); setBusy(false); });
+      .catch(e => { setError(goalProposal(decision) ? goalError(e) : e instanceof Error ? e.message : '결정을 전달하지 못했습니다. 다시 시도해 주세요.'); setBusy(false); });
   };
   const reasonPrompt = denyReasonPrompt[decision.kind];
   const highRisk = highRiskApproval(decision);
@@ -190,6 +192,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   const isQuestion = decision.kind === 'question';
   const secureForm = secureFormProposal(decision);
   const handoff = browserHandoffProposal(decision);
+  const proposedGoal = goalProposal(decision);
   const labels = actionLabels[decision.kind];
   const kindLabel = decisionChip(decision);
   const heading = decision.kind === 'accept_result' && workTitle ? workTitle : decision.title;
@@ -239,6 +242,12 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     </header>
     <div className="decision__body">
     {showDetail && <div className="decision__detail decision__detail--md"><MessageBody text={detail}/></div>}
+    {proposedGoal && <dl className="decision__goal">
+      <div><dt>방향</dt><dd>{proposedGoal.title}</dd></div>
+      {proposedGoal.why && <div><dt>이유</dt><dd>{proposedGoal.why}</dd></div>}
+      {proposedGoal.boundaries && <div><dt>지키는 선</dt><dd>{proposedGoal.boundaries}</dd></div>}
+      {proposedGoal.signal && <div><dt>참고 신호</dt><dd>{proposedGoal.signal}</dd></div>}
+    </dl>}
 
     {decision.kind === 'accept_result' && acceptance.result && <div className="receipt">
       <div className="receipt__body"><MessageBody text={acceptance.result.summary}/></div>

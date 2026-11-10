@@ -27,6 +27,10 @@ export function applyEvent(state: State, data: LedgerEventData): State {
       return { ...state, conversations: remove(state.conversations, data.id) };
     case 'work':
       return { ...state, works: upsert(state.works, data.work) };
+    case 'goal':
+      return { ...state, goals: upsert(state.goals ?? [], data.goal) };
+    case 'milestone':
+      return { ...state, milestones: upsert(state.milestones ?? [], data.milestone) };
     case 'decision':
       return { ...state, decisions: upsert(state.decisions, data.decision) };
     case 'effect':
