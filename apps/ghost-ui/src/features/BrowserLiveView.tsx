@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowLeft, ArrowRight, CornerDownLeft, Monitor, RotateCw, Send } from 'lucide-react';
 import { Button, InlineError, Input } from '../ui';
 import { HostError, type BrowserInput } from '../host/client';
@@ -76,6 +76,12 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   const pendingViewportRef = useRef<{ width: number; height: number } | null>(null);
   const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
   const [page, setPage] = useState<{ url: string; title: string } | null>(null);
+  const pageUrl = page?.url;
+  const pageOrigin = useMemo(() => {
+    if (!pageUrl) return '';
+    try { const url = new URL(pageUrl); return url.origin === 'null' ? pageUrl : url.origin; }
+    catch { return pageUrl; }
+  }, [pageUrl]);
   const [status, setStatus] = useState<Status>('connecting');
   const [endReason, setEndReason] = useState<string | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -448,13 +454,13 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   };
 
   const busy = status === 'connecting' || status === 'reconnecting';
-  const label = page?.title || page?.url || (status === 'ended' ? '세션 종료' : '연결 중…');
+  const label = pageOrigin || page?.title || (status === 'ended' ? '세션 종료' : '연결 중…');
   const statusText = { connecting: '연결 중', live: '연결됨', reconnecting: '다시 연결', ended: '세션 종료' }[status];
 
   return <div className="browser-live" data-compact={compact || undefined} data-touch={touch || undefined}>
     <header className="browser-live__bar">
       <span className="browser-live__state" data-state={status} title={statusText} aria-label={statusText} role="img"/>
-      <span className="browser-live__url truncate" title={page?.url ?? undefined}>{label}</span>
+      <span className="browser-live__url" title={page?.url ?? undefined}>{label}</span>
       <button type="button" className="browser-live__icon" aria-label="뒤로" title="뒤로" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'back' })}><ArrowLeft size={15}/></button>
       <button type="button" className="browser-live__icon" aria-label="앞으로" title="앞으로" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'forward' })}><ArrowRight size={15}/></button>
       <button type="button" className="browser-live__icon" aria-label="새로고침" title="새로고침" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'reload' })}><RotateCw size={15}/></button>

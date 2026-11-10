@@ -229,7 +229,7 @@ body {
 .browser-live__state[data-state="live"] { background: var(--ghost-signal-ink); }
 .browser-live__state[data-state="connecting"], .browser-live__state[data-state="reconnecting"] { background: var(--ghost-amber-ink); animation: browser-pulse 1.2s ease-in-out infinite; }
 @keyframes browser-pulse { 50% { opacity: .35; } }
-.browser-live__url { flex: 1; min-width: 0; color: var(--ghost-ink3); font: 12px/1.5 var(--font-mono); }
+.browser-live__url { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ghost-ink3); font: 12px/1.5 var(--font-mono); }
 .browser-live__icon { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--ghost-line-strong); background: transparent; color: var(--ghost-ink2); }
 .browser-live__icon:disabled { opacity: .5; }
 .browser-live__mac { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 30px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--ghost-line-strong); background: transparent; color: var(--ghost-ink2); font-size: 12px; font-weight: 600; }
@@ -244,6 +244,10 @@ body {
 .browser-live__screen:focus-within { outline: 2px solid var(--ghost-signal-ink); outline-offset: -2px; }
 .browser-live__type { display: flex; align-items: center; gap: 6px; }
 .browser-live__type > :first-child { flex: 1; min-width: 0; }
+@media (max-width: 36rem) {
+  .browser-live__bar { flex-wrap: wrap; }
+  .browser-live__url { flex-basis: 100%; order: -1; }
+}
 @media (prefers-reduced-motion: reduce) { .browser-live__state[data-state="connecting"], .browser-live__state[data-state="reconnecting"] { animation: none; } }
 /* The pane opens beside the transcript; below 64rem it covers the conversation like a thread panel. */
 .browser-pane { display: flex; width: clamp(420px, 50cqi, 660px); flex: none; min-height: 0; flex-direction: column; overflow: hidden; border-left: 1px solid var(--ghost-line); background: var(--ghost-canvas); animation: thread-open 380ms var(--ease-enter) both; }
