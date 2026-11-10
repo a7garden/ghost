@@ -6,6 +6,7 @@ import { CommandError } from "../core/errors.ts";
 const KOREAN_FONT = "/System/Library/Fonts/AppleSDGothicNeo.ttc";
 const FONT_FILE = "AppleSDGothicNeo.ttc";
 const FONT_SOURCE = "source.json";
+const STAGED_CACHE_FILE = /^\.(font|source)-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /** Cache one OS-owned font locally; never redistribute it or scan the system's full font collection. */
 export function prepareObscuraFonts(root: string): string {
@@ -22,7 +23,16 @@ export function prepareObscuraFonts(root: string): string {
     if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid?.() || (stat.mode & 0o7777) !== 0o700 || realpathSync(path) !== path) throw new CommandError("unavailable", "Unsafe Obscura font cache directory");
   }
   for (const name of readdirSync(directory)) {
-    if (name !== FONT_FILE && name !== FONT_SOURCE) throw new CommandError("unavailable", "Unexpected Obscura font cache entry");
+    if (name !== FONT_FILE && name !== FONT_SOURCE) {
+      const kind = STAGED_CACHE_FILE.exec(name)?.[1];
+      if (!kind) throw new CommandError("unavailable", "Unexpected Obscura font cache entry");
+      const path = join(directory, name), staged = lstatSync(path), mode = staged.mode & 0o7777;
+      // copyFileSync can leave the system font's read permissions if the process dies before chmod.
+      const safeMode = kind === "font" ? (mode & ~0o644) === 0 : mode === 0o600;
+      if (!staged.isFile() || staged.isSymbolicLink() || staged.nlink !== 1 || staged.uid !== process.getuid?.() || !safeMode) throw new CommandError("unavailable", "Unsafe Obscura font cache staging file");
+      rmSync(path, { force: true });
+      continue;
+    }
     const stat = lstatSync(join(directory, name));
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.uid !== process.getuid?.() || (stat.mode & 0o7777) !== 0o600) throw new CommandError("unavailable", "Unsafe Obscura font cache file");
   }
