@@ -357,6 +357,10 @@ const secureInputs: Record<VaultItemKind, readonly { key: keyof SecureFormValues
     { key: 'contactAddress', label: '주소' },
   ],
   secret: [{ key: 'value', label: '값', required: true, password: true, autoComplete: 'off' }],
+  api: [
+    { key: 'username', label: '클라이언트 ID', autoComplete: 'off' },
+    { key: 'value', label: '비밀 키', required: true, password: true, autoComplete: 'off' },
+  ],
 };
 
 /**
@@ -393,8 +397,8 @@ function SecureForm({ decision, request, cardBusy, autoFocus, onResolved, onDecl
   return <form ref={formRef} className="decision__secure" onSubmit={event => { event.preventDefault(); submit(); }}>
     {request.origin && <p className="decision__secure-origin"><KeyRound size={13} aria-hidden="true"/>{request.origin}</p>}
     {reason}
-    {!request.origin && request.kind === 'login' && <div className="decision__secure-fields">
-      <FormField label="주소" description="이 로그인을 저장할 https:// 주소입니다." required>
+    {!request.origin && (request.kind === 'login' || request.kind === 'api') && <div className="decision__secure-fields">
+      <FormField label="주소" description={request.kind === 'login' ? '이 로그인을 저장할 https:// 주소입니다.' : undefined} required>
         {control => <Input {...control} type="text" placeholder="https://example.com" value={values.origin} disabled={disabled}
           onChange={event => setValues(current => ({ ...current, origin: event.target.value }))}/>}
       </FormField>
