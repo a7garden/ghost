@@ -156,18 +156,21 @@ export class Core implements EngineEvents {
    */
   async start() {
     this.effects.recoverInterrupted();
+    this.effects.returnSelfCheckable();
     for (const ghost of this.ledger.ghosts()) if (ghost.state !== "retired") await this.openConversation(ghost.directConversationId);
     await this.decisions.recover();
     for (const work of this.ledger.worksInState("queued", "running", "waiting", "verifying")) this.works.kick(work.id);
     this.works.recover();
     this.engine.resume();
     this.schedules.start();
+    this.decisions.start();
   }
 
   stop() {
     this.unsubscribeLedgerEvents();
     this.schedules.stop();
     this.activities.stop();
+    this.decisions.stop();
   }
 
   // Engine events

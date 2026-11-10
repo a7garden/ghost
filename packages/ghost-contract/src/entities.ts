@@ -610,10 +610,30 @@ export const Provider = Type.Object({
 });
 export type Provider = Static<typeof Provider>;
 
+/**
+ * How long a decision may wait before the Host takes its recommendation, and whether the main Ghost may
+ * decide reversible ones for the owner. 2026-11-10 owner decision: 30 minutes, reversible only.
+ * Spending, card entry, sending and deleting always wait for the owner.
+ */
+export const ApprovalPolicy = Type.Object({
+  /** Minutes before a recommended answer or a reversible approval goes ahead; 0 turns it off. */
+  autoMinutes: Type.Integer({ minimum: 0, maximum: 1440 }),
+  delegate: Type.Union([Type.Literal("reversible"), Type.Literal("none")]),
+  /** Per-Ghost exception: `owner` makes every decision of that Ghost wait for the owner, whatever the defaults say. */
+  ghosts: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: 128 }), Type.Union([Type.Literal("auto"), Type.Literal("owner")]))),
+});
+export type ApprovalPolicy = Static<typeof ApprovalPolicy>;
+export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = { autoMinutes: 30, delegate: "reversible" };
+/** The language everything the owner reads is written in; Ghosts may reason in any language. */
+export const OwnerLanguage = Type.String({ minLength: 2, maxLength: 32, pattern: "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$" });
+export const DEFAULT_OWNER_LANGUAGE = "ko";
+
 export const Settings = Type.Object({
   defaultModel: nullable(ModelRef),
   reviewModel: nullable(ModelRef),
   providers: Type.Array(Provider, { maxItems: 64 }),
+  ownerLanguage: Type.Optional(OwnerLanguage),
+  approvals: Type.Optional(ApprovalPolicy),
 });
 export type Settings = Static<typeof Settings>;
 

@@ -3,7 +3,7 @@ import { FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, Sk
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
-import { forbidden } from "../core/errors.ts";
+import { forbidden, invalid } from "../core/errors.ts";
 import { errorResult, scopeOf, type Scope } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
@@ -128,5 +128,31 @@ export function createMainTools(core: Core): Extension {
     },
   });
 
-  return defineExtension({ name: "ghost.main", tools: [ghostInspect, ghostUpdate] });
+  // 2026-11-10 owner decision: the main may settle another Ghost's reversible decisions for the owner.
+  // The Host decides what is reversible (Decisions.reversible); sending, spending, card entry and deletion stay with the owner.
+  const decisionSettle = defineTool({
+    name: "decision_settle",
+    description:
+      "Settle another Ghost's reversible decision for the owner (it arrives as a [Decision review] message): approve, deny or answer it, or leave it for the owner with your recommendation. " +
+      "Write note in the owner's language: one sentence the owner reads about what you decided and why. Main Ghost only; the Host refuses anything that is not reversible.",
+    parameters: Type.Object({
+      decision_id: Type.String({ minLength: 1, maxLength: 128 }),
+      outcome: Type.Union([Type.Literal("approve"), Type.Literal("deny"), Type.Literal("answer"), Type.Literal("leave")]),
+      answer: Type.Optional(Type.String({ minLength: 1, maxLength: 1024, description: "The answer, for a question" })),
+      note: Type.String({ minLength: 1, maxLength: 1000 }),
+    }),
+    replay: "unsafe",
+    async execute(args, api) {
+      try {
+        const scope = scopeOf(core, api);
+        if (scope.conversation.kind !== "direct" || !scope.ghost.isDefault || scope.ghost.state !== "active") throw forbidden("only the current main Ghost may settle decisions for the owner");
+        if (args.outcome === "answer" && !args.answer) throw invalid("answer is required to answer a question");
+        return text(await core.decisions.settleForOwner(scope.ghost.id, args.decision_id, { outcome: args.outcome, answer: args.answer, note: args.note }));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  });
+
+  return defineExtension({ name: "ghost.main", tools: [ghostInspect, ghostUpdate, decisionSettle] });
 }

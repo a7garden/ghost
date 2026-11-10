@@ -30,6 +30,16 @@ export type EffectStart = { kind: "run"; effect: Effect } | { kind: "replay"; ef
  * Journal of external side effects. `pending` is committed before I/O and becomes
  * `done` after; a `pending` row found at startup becomes `unknown` and blocks the Work.
  */
+/**
+ * 2026-11-10 owner decision: an uncertain outcome goes back to the Ghost, which can look at files, the shell,
+ * pages and documents itself. The owner is asked only about what happened outside, where only they can see:
+ * a mail or PR comment sent, a purchase-like click. Owner API commands keep their own reconciliation.
+ */
+const OWNER_CONFIRMS: Record<string, { title: string; check: string }> = {
+  activity_action: { title: "메일 답장이나 PR 댓글이 실제로 보내졌나요?", check: "보낸편지함이나 PR 댓글에서 확인해 주세요." },
+  browser_propose: { title: "브라우저에서 누르려던 버튼이 실제로 눌렸나요?", check: "주문 · 결제 내역이나 해당 사이트에서 확인해 주세요." },
+};
+
 export class Effects {
   /** Executors run by the host after the owner approves an effect (browser mutations). */
   private readonly approved = new Map<string, (effect: Effect) => Promise<string>>();
@@ -104,9 +114,38 @@ export class Effects {
 
   /** The outcome cannot be known (process died, transport lost). Blocks the Work. */
   unknown(effectId: string, reason: string): Effect {
+    const current = this.ledger.effect(effectId);
+    // 2026-11-10: the owner was asked "did write happen?" and the Work waited on it. A change the Ghost can
+    // look at itself is recorded as uncertain and handed back to it; it never runs again on its own.
+    if (current.state === "pending" && this.selfCheckable(current)) {
+      return this.settle(effectId, "done", `Outcome uncertain (${reason}). Check the result yourself before relying on it; if it did not happen, do it again as a new step.`);
+    }
     const effect = this.settle(effectId, "unknown", reason);
     this.escalate(effect);
     return effect;
+  }
+
+  /** Everything a Ghost can look at itself: no owner reconciliation. */
+  selfCheckable(effect: Effect): boolean {
+    return !(effect.tool in OWNER_CONFIRMS) && !(COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool);
+  }
+
+  /**
+   * Startup: hand reconciliations that a Ghost can check back to it — cards opened before 2026-11-10
+   * asked the owner "did bash happen?" and held the Work. The effect is recorded as uncertain and the Work resumes.
+   */
+  returnSelfCheckable() {
+    for (const decision of this.ledger.pendingDecisions()) {
+      if (decision.kind !== "reconcile_effect" || !decision.effectId) continue;
+      const effect = this.ledger.effect(decision.effectId);
+      if (effect.state !== "unknown" || !this.selfCheckable(effect)) continue;
+      const note = `Outcome uncertain (${effect.result ?? "interrupted"}). Check the result yourself before relying on it; if it did not happen, do it again as a new step.`;
+      this.ledger.tx(() => {
+        this.ledger.putDecision({ ...decision, state: "cancelled", resolvedAt: Date.now() });
+        this.ledger.putEffect({ ...effect, state: "done", result: note, endedAt: Date.now() });
+      });
+      if (effect.workId) this.core.works.unblock(effect.workId, `${effect.summary.slice(0, 200)}: ${note}`);
+    }
   }
 
   private settle(effectId: string, state: Effect["state"], result: string): Effect {
@@ -198,8 +237,9 @@ export class Effects {
         conversationId: conversation.id,
         workId: effect.workId,
         effectId: effect.id,
-        title: `Did "${effect.tool}" happen?`,
-        detail: `${effect.summary}\n\n${effect.result ?? ""}`.trim(),
+        // 2026-11-10: only outside effects reach here (OWNER_CONFIRMS), asked as a plain yes/no about what the owner can see.
+        title: OWNER_CONFIRMS[effect.tool]?.title ?? "요청한 작업이 실제로 처리됐나요?",
+        detail: [`Ghost가 처리하던 중에 연결이 끊겨 결과를 알 수 없습니다. ${OWNER_CONFIRMS[effect.tool]?.check ?? "직접 확인해 주세요."}`, `- 하려던 일: ${effect.summary}`].join("\n"),
         options: [],
         proposal: null,
       });

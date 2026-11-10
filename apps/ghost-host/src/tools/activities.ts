@@ -19,9 +19,10 @@ export function activityTools(core: Core): Extension {
         const scope = requireAllowed(core, api, "activity_propose");
         if (scope.conversation.kind !== "direct") throw forbidden("activity proposals run only in direct conversations");
         const config = { ...args, ghostId: scope.ghost.id };
-        const detail = `Standing delegation requires owner approval.\n${JSON.stringify(config)}`;
-        if (detail.length > 32768) throw invalid("Activity proposal exceeds the owner review size limit; shorten its prompt or criteria. Nothing was activated.");
-        const effect = core.effects.propose({ conversationId: scope.conversation.id, callId: api.callId, tool: "activity_propose", input: { config }, summary: `Propose ongoing activity: ${config.name}`, title: `Activate activity: ${config.name}`, detail, proposal: { config } });
+        if (JSON.stringify(config).length > 32768) throw invalid("Activity proposal exceeds the owner review size limit; shorten its prompt or criteria. Nothing was activated.");
+        // 2026-11-10: the card draws the config itself (source · limits · tools); the detail is the plain-words version for notifications.
+        const detail = `승인하면 이 활동이 승인을 다시 묻지 않고 계속 돌아갑니다.\n\n**할 일**\n\n${config.prompt}\n\n**완료 기준**\n\n${config.acceptanceCriteria}`;
+        const effect = core.effects.propose({ conversationId: scope.conversation.id, callId: api.callId, tool: "activity_propose", input: { config }, summary: `Propose ongoing activity: ${config.name}`, title: `상시 활동 켜기: ${config.name}`, detail, proposal: { config } });
         return text(`Activity proposal awaiting owner approval (${effect.id}). No activity was activated. Next: wait for the owner's decision.`);
       } catch (error) { return errorResult(error); }
     },

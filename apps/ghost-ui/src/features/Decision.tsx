@@ -2,7 +2,9 @@ import { haptic } from '../host/shell';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, FileText, Monitor, KeyRound } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input } from '../ui'
-import type { Decision, SecureFormRequest, State, VaultItemKind, WorkResult } from '@ghost/contract';
+import { DESTRUCTIVE_RISK, reviewOf, type ActivityConfig, type Decision, type SecureFormRequest, type State, type VaultItemKind, type WorkResult } from '@ghost/contract';
+import { executionLabel, policySummary, sourceSummary } from './activity-config';
+import { toolLabels } from './GhostSettings';
 import { DotAvatar } from '../components/DotAvatar';
 import { ArtifactPreview } from '../components/ArtifactPreview';
 import { BrowserLiveView } from './BrowserLiveView';
@@ -31,16 +33,21 @@ function acceptanceProposal(decision: Decision): { result: WorkResult | null; cr
 }
 
 /**
- * What a question settles to when the owner does not reply in time (host `ask_owner` default),
- * as one line for the card; null when it waits for the owner.
+ * What a pending decision settles to when the owner does not reply in time (the Host's review,
+ * 2026-11-10), as one line for the card; null when it waits for the owner however long it takes.
  */
-export function questionFallbackText(decision: Decision, now: number): string | null {
-  if (decision.kind !== 'question' || decision.state !== 'pending' || !decision.proposal) return null;
-  const { default: answer, expiresAt } = decision.proposal;
-  if (typeof answer !== 'string' || typeof expiresAt !== 'number') return null;
-  const minutes = Math.ceil((expiresAt - now) / 60_000);
+export function autoSettleText(decision: Decision, now: number): string | null {
+  const review = reviewOf(decision.proposal);
+  if (decision.state !== 'pending' || !review || review.expiresAt === null) return null;
+  const minutes = Math.ceil((review.expiresAt - now) / 60_000);
   const when = minutes <= 0 ? '곧' : minutes < 60 ? `${minutes}분 뒤` : `${Math.round(minutes / 60)}시간 뒤`;
-  return `답이 없으면 ${when} 기본값으로 진행합니다: ${answer}`;
+  return review.recommend === 'answer' ? `답이 없으면 ${when} 「${review.answer}」(으)로 답합니다.` : `답이 없으면 ${when} 추천대로 승인합니다.`;
+}
+
+/** The recommended answer of a question, shown first and marked on its tile. */
+export function recommendedOption(decision: Decision): string | null {
+  const review = reviewOf(decision.proposal);
+  return review?.recommend === 'answer' && review.answer && decision.options.includes(review.answer) ? review.answer : null;
 }
 
 /**
@@ -69,7 +76,7 @@ const actionLabels: Record<Decision['kind'], { approve: string; deny: string }> 
   question: { approve: '승인', deny: '거부' },
   accept_result: { approve: '결과 확인', deny: '수정 요청' },
   document_review: { approve: '저장 승인', deny: '거부' },
-  reconcile_effect: { approve: '의도대로 처리됨', deny: '처리되지 않음' },
+  reconcile_effect: { approve: '네, 됐어요', deny: '아니요, 안 됐어요' },
 };
 
 /**
@@ -83,8 +90,7 @@ export const denyReasonPrompt: Partial<Record<Decision['kind'], { label: string;
 };
 
 // The host has no risk level, only the Ghost's own risk text (plus a host-added "삭제:" for rm).
-// Words of loss in it mark the command high-risk; a false match only costs one more press.
-const destructiveRisk = /삭제|영구|되돌릴 수 없|복구할 수 없|덮어|초기화|유실|손실|delete|overwrite|irreversib|wipe|destroy/i;
+// Words of loss in it (DESTRUCTIVE_RISK, shared with the Host) mark the command high-risk; a false match only costs one more press.
 
 /** A host command whose stated risk speaks of loss: it approves only on a second press. */
 export function highRiskApproval(decision: Decision): boolean {
@@ -94,14 +100,32 @@ export function highRiskApproval(decision: Decision): boolean {
 function commandRiskIsHigh(proposal: Record<string, unknown>): boolean {
   // Current Host browser approvals are used for commit clicks and protected card fields.
   if (typeof proposal.url === 'string' && (proposal.element || typeof proposal.itemTitle === 'string')) return true;
-  return typeof proposal.command === 'string' && typeof proposal.risk === 'string' && destructiveRisk.test(proposal.risk);
+  return typeof proposal.command === 'string' && typeof proposal.risk === 'string' && DESTRUCTIVE_RISK.test(proposal.risk);
+}
+
+/**
+ * The context under the heading: the result summary moves to the receipt, and a detail that opens by
+ * repeating the heading (questions asked before 2026-11-10 carried the whole question) loses that line.
+ */
+export function cardDetail(decision: Decision, heading: string, resultSummary: string | null): string {
+  let detail = (resultSummary ? decision.detail.replace(resultSummary, '') : decision.detail).trim();
+  const head = heading.trim();
+  if (head && detail.startsWith(head)) detail = detail.slice(head.length).trim();
+  return detail;
+}
+
+/** Proposals whose preview already shows every fact of the text detail. */
+export function previewCoversDetail(decision: Decision): boolean {
+  const proposal = decision.proposal;
+  if (decision.kind !== 'approve_effect' || !proposal) return false;
+  return typeof proposal.command === 'string' || typeof proposal.merchant === 'string' || typeof proposal.itemTitle === 'string';
 }
 
 /** The acknowledgement after a resolution, said in what the owner did. */
 export function resolvedText(kind: Decision['kind'], outcome: 'approve' | 'deny' | 'answer'): string {
   if (outcome === 'answer') return '답했습니다';
   if (kind === 'accept_result') return outcome === 'approve' ? '결과를 확인했습니다' : '수정을 요청했습니다';
-  if (kind === 'reconcile_effect') return outcome === 'approve' ? '처리됨으로 기록했습니다' : '처리되지 않음으로 기록했습니다';
+  if (kind === 'reconcile_effect') return outcome === 'approve' ? '됐다고 Ghost에게 알렸습니다' : '안 됐다고 Ghost에게 알렸습니다';
   if (kind === 'document_review' && outcome === 'approve') return '저장을 승인했습니다';
   return outcome === 'approve' ? '승인했습니다' : '거부했습니다';
 }
@@ -168,13 +192,14 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   const labels = actionLabels[decision.kind];
   const kindLabel = decisionChip(decision);
   const heading = decision.kind === 'accept_result' && workTitle ? workTitle : decision.title;
-  // The result summary is shown as the receipt; the detail repeats it after the reviewer's note.
-  const detail = (decision.kind === 'accept_result' && acceptance.result
-    ? decision.detail.replace(acceptance.result.summary, '') : decision.detail).trim();
-  // A host command proposal carries reason, command, folder and risk in its preview; the text detail repeats them for text-only clients.
-  const commandPreview = typeof decision.proposal?.command === 'string';
-  const showDetail = detail && detail !== heading.trim() && !commandPreview;
-  const fallback = questionFallbackText(decision, now);
+  const detail = cardDetail(decision, heading, acceptance.result?.summary ?? null);
+  // A structured preview (command, checkout click, card fill) says what the text detail says for text-only clients.
+  const showDetail = detail && !previewCoversDetail(decision);
+  const fallback = autoSettleText(decision, now);
+  const review = reviewOf(decision.proposal);
+  const recommended = recommendedOption(decision);
+  // The recommended answer leads; the digit keys follow what is shown.
+  const options = recommended ? [recommended, ...decision.options.filter(option => option !== recommended)] : decision.options;
 
   // Digits pick a suggested answer; ⌘/Ctrl+Enter approves; D opens the reason step. Typing in a field is never
   // intercepted, and a held key (repeat) never resolves.
@@ -186,7 +211,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     const fresh = Date.now() - mountedAt.current < 400;
     if (isQuestion && !secureForm && !handoff && /^[1-9]$/.test(event.key)) {
       if (fresh) { event.preventDefault(); return; }
-      const option = decision.options[Number(event.key) - 1];
+      const option = options[Number(event.key) - 1];
       if (option) { event.preventDefault(); resolve('answer', option); }
     } else if (!isQuestion && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault(); if (!fresh) approve();
@@ -209,7 +234,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
       </button>}
     </header>
     <h3 className="decision__title">{heading}</h3>
-    {showDetail && <p className="decision__detail">{detail}</p>}
+    {showDetail && <div className="decision__detail decision__detail--md"><MessageBody text={detail}/></div>}
 
     {decision.kind === 'accept_result' && acceptance.result && <div className="receipt">
       <div className="receipt__body"><MessageBody text={acceptance.result.summary}/></div>
@@ -237,12 +262,16 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
       {decision.state === 'pending' && <BrowserLiveView decisionId={decision.id} disabled={busy}/>}
     </div>}
 
-    {isQuestion && !secureForm && !handoff && decision.options.length > 0 && <div className="decision__options" role="group" aria-label="추천 답변">
-      {decision.options.map((option, index) => <button key={option} type="button" className="decision__option" disabled={busy} onClick={() => resolve('answer', option)}>
-        <kbd aria-hidden="true">{index + 1}</kbd><span>{option}</span>
+    {isQuestion && !secureForm && !handoff && options.length > 0 && <div className="decision__options" role="group" aria-label="답 고르기">
+      {options.map((option, index) => <button key={option} type="button" className="decision__option" disabled={busy} data-recommended={option === recommended || undefined} onClick={() => resolve('answer', option)}>
+        <kbd aria-hidden="true">{index + 1}</kbd><span>{option}</span>{option === recommended && <span className="decision__badge">추천</span>}
       </button>)}
     </div>}
-    {fallback && <p className="decision__detail">{fallback}</p>}
+    {(review || fallback) && <div className="decision__review">
+      {review?.recommend === 'approve' && <p><strong>추천</strong> 승인 · 되돌릴 수 있는 요청입니다.</p>}
+      {review?.mainNote && <p><strong>메인 의견</strong> {review.mainNote}</p>}
+      {fallback && <p className="decision__review-auto">{fallback}</p>}
+    </div>}
 
     {error && <InlineError>{error}</InlineError>}
 
@@ -392,17 +421,55 @@ function RequestPreview({ value }: { value: Record<string, unknown> }) {
   if (merchant) {
     const page = value.page && typeof value.page === 'object' ? value.page as { checkout?: unknown } : null;
     const total = typeof value.total === 'string' && value.total ? value.total : page?.checkout ? '페이지에서 읽지 못했습니다 · 화면에서 직접 확인하세요' : '없음';
+    const reason = typeof value.reason === 'string' ? value.reason.trim() : '';
+    const target = typeof value.description === 'string' ? value.description : null;
     return <div className="decision__request-block">
+      {reason && <p className="decision__request-reason">{reason}</p>}
       <dl className="decision__facts">
         <div><dt>상점</dt><dd>{merchant}</dd></div>
         <div><dt>금액</dt><dd className="tabular">{total}</dd></div>
+        {target && <div><dt>누를 곳</dt><dd>{target}</dd></div>}
       </dl>
       <p className="decision__request-risk">승인 뒤 금액이나 사이트가 바뀌면 누르지 않습니다.</p>
-      <details className="decision__request-more"><summary>요청 내용 보기</summary><pre className="decision__request">{json}</pre></details>
+      <RawRequest json={json}/>
     </div>;
   }
-  if (json.length > 480) return <details className="decision__request-more"><summary>요청 내용 보기</summary><pre className="decision__request">{json}</pre></details>;
-  return <pre className="decision__request">{json}</pre>;
+  // A protected card field: which site gets which card.
+  if (typeof value.itemTitle === 'string') {
+    const last4 = typeof value.last4 === 'string' && value.last4 ? ` •••• ${value.last4}` : '';
+    const site = typeof value.origin === 'string' ? value.origin : typeof value.url === 'string' ? value.url : '';
+    return <div className="decision__request-block">
+      <dl className="decision__facts">
+        <div><dt>사이트</dt><dd>{site}</dd></div>
+        <div><dt>카드</dt><dd>{value.itemTitle}{last4}</dd></div>
+      </dl>
+      <p className="decision__request-risk">승인하면 이 사이트의 입력란에 카드 정보를 채웁니다.</p>
+      <RawRequest json={json}/>
+    </div>;
+  }
+  // A standing activity: what it watches, where it runs, what it may use, how far it may go.
+  const config = activityConfigOf(value);
+  if (config) return <div className="decision__request-block">
+    <dl className="decision__facts">
+      <div><dt>지켜볼 것</dt><dd>{sourceSummary(config.source)}</dd></div>
+      <div><dt>실행 위치</dt><dd>{executionLabel[config.execution.kind]}</dd></div>
+      <div><dt>쓸 도구</dt><dd>{config.tools.length ? config.tools.map(tool => toolLabels[tool] ?? tool).join(', ') : '없음'}</dd></div>
+      <div><dt>한도</dt><dd>{policySummary(config.policy)}</dd></div>
+    </dl>
+    <RawRequest json={json}/>
+  </div>;
+  // Anything else: the detail above already says it in words; the raw request stays one click away.
+  return <RawRequest json={json}/>;
+}
+
+/** The exact request as sent, folded: a person reads the facts above, not JSON. */
+function RawRequest({ json }: { json: string }) {
+  return <details className="decision__request-more"><summary>요청 원문 보기</summary><pre className="decision__request">{json}</pre></details>;
+}
+
+function activityConfigOf(value: Record<string, unknown>): ActivityConfig | null {
+  const config = value.config as Partial<ActivityConfig> | undefined;
+  return config && typeof config === 'object' && config.source && config.execution && Array.isArray(config.tools) && config.policy ? config as ActivityConfig : null;
 }
 
 /**

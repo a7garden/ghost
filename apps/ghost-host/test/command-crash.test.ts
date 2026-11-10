@@ -217,9 +217,9 @@ describe("API command crash atomicity", () => {
     const target = join(root, "external-write");
     const first = harness(path);
     const ghost = first.core.createGhost({ name: "Owner", persona: "" });
-    first.core.effects.onApproved("test_write", async () => { throw new Error("not approved yet"); });
+    first.core.effects.onApproved("browser_propose", async () => { throw new Error("not approved yet"); });
     const effect = first.core.effects.propose({
-      conversationId: ghost.directConversationId, callId: "approved-write", tool: "test_write", input: { target },
+      conversationId: ghost.directConversationId, callId: "approved-write", tool: "browser_propose", input: { target },
       summary: "append once", title: "Append?", detail: "Append to external file", proposal: { target },
     });
     const decision = first.ledger.pendingDecisions({ effectId: effect.id })[0]!;
@@ -233,7 +233,7 @@ describe("API command crash atomicity", () => {
       import { Access } from ${source("../src/core/access.ts")};
       import { execute } from ${source("../src/core/commands.ts")};
       const { core, ledger } = harness(${JSON.stringify(path)});
-      core.effects.onApproved("test_write", async () => {
+      core.effects.onApproved("browser_propose", async () => {
         appendFileSync(${JSON.stringify(target)}, "once\\n");
         process.kill(process.pid, "SIGKILL");
         return "written";
@@ -246,7 +246,7 @@ describe("API command crash atomicity", () => {
     expect(await stderr).toBe("");
     expect(child.signalCode).toBe("SIGKILL");
     const { core, ledger } = harness(path);
-    core.effects.onApproved("test_write", async () => { appendFileSync(target, "duplicate\n"); return "written"; });
+    core.effects.onApproved("browser_propose", async () => { appendFileSync(target, "duplicate\n"); return "written"; });
     core.effects.recoverInterrupted();
     await core.decisions.recover();
     await execute(core, new Access(owner), request, context);

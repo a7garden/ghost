@@ -478,7 +478,7 @@ describe("activity authority and delivery", () => {
       await f.activities.action(run.workId!, "reply", { kind: "mail_reply", body: "Approved reply body" });
       const decision = f.ledger.pendingDecisions({ workId: run.workId! })[0]!;
       expect(decision.detail).toContain("Account A (sender@example.com)");
-      expect(decision.detail).toContain("Destination: actual-reply@example.com");
+      expect(decision.detail).toContain("받는 곳: actual-reply@example.com");
       expect(decision.detail).toContain("Approved reply body");
       expect(decision.detail).not.toContain("displayed-from@example.com");
       expect(f.source.actions).toHaveLength(0);
@@ -496,7 +496,7 @@ describe("activity authority and delivery", () => {
     await f.activities.action(run.workId!, "comment", { kind: "pr_comment", body: "Reviewed." });
     const decision = f.ledger.pendingDecisions({ workId: run.workId! })[0]!;
     expect(decision.detail).toContain("Account A (https://api.github.com)");
-    expect(decision.detail).toContain("Destination: owner/repo#1");
+    expect(decision.detail).toContain("받는 곳: owner/repo#1");
     expect(decision.detail).toContain("https://github.com/owner/repo/pull/1");
     await f.core.decisions.resolve(decision.id, { outcome: "approve" });
     await f.core.effects.resolveApproval(decision.effectId!, true);
