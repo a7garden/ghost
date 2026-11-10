@@ -462,7 +462,46 @@ async fn shell_update_install(
         .download_and_install(|_, _| {}, || {})
         .await
         .map_err(|_| "앱 업데이트를 설치하지 못했습니다.".to_string())?;
-    app.restart();
+    relaunch(&app);
+}
+
+/// Start the updated bundle again. A process spawned by `app.restart()` came up
+/// without its main window on screen; LaunchServices (`open`) launches and activates
+/// the bundle like a Dock click. The helper waits for this process to exit first so
+/// the new instance can take the global shortcut.
+#[cfg(target_os = "macos")]
+fn relaunch(app: &tauri::AppHandle) -> ! {
+    let bundle = std::env::current_exe().ok().and_then(|exe| {
+        exe.ancestors()
+            .find(|path| path.extension().is_some_and(|ext| ext == "app"))
+            .map(Path::to_path_buf)
+    });
+    if let Some(bundle) = bundle {
+        let pid = std::process::id().to_string();
+        let spawned = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open \"$2\"",
+                "ghost-relaunch",
+            ])
+            .arg(&pid)
+            .arg(&bundle)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if spawned.is_ok() {
+            // The same exit path `app.restart()` takes, minus its direct respawn.
+            app.cleanup_before_exit();
+            std::process::exit(0);
+        }
+    }
+    app.restart()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn relaunch(app: &tauri::AppHandle) -> ! {
+    app.restart()
 }
 
 /// The host answers `/api/health` with `{"ok":true}` while it is serving.
