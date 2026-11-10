@@ -22,7 +22,7 @@ flowchart LR
   docs[PDC vaults]
   models[Model providers]
   clock[Host clock]
-  accounts[GitHub / Gitea · IMAP / SMTP]
+  accounts[Service APIs · GitHub / Gitea · IMAP / SMTP]
   vm[Apple container · lazy]
   pc[Mac filesystem / shell · explicit grant]
   clients --> api --> core --> ledger
@@ -91,7 +91,7 @@ docs/
 | Milestone | 이정표. One step on a goal's line: hypothesis, the evidence that finishes it, linked root Works, and an outcome (evidence when done, reason when dropped). Planned, active, done or dropped. |
 | Activity | An owner-approved standing rule for one Ghost: schedule, PR changes or mail; task instructions, tools, execution, limits, reply policy and notification mode. |
 | ActivityRun | Durable source/admission identity, linked Work, status, deduplication and follow-up state. Oversized mail is an explicit skipped run, never a successful analysis. |
-| Connection | Owner-configured GitHub/Gitea or IMAP/SMTP endpoint and credential epoch; secrets stay outside the ledger. |
+| Connection | A named service account with catalog identity/icon, endpoint and credential epoch. GitHub/Gitea and IMAP/SMTP retain their source adapters; API connections bind an authentication header, identity probe and explicit Ghost grants. Secrets stay outside the ledger. |
 | Notification | Something the owner should see: decision needed, Work finished or failed. Pushed to devices. |
 | Device | A paired iPhone; it runs the same web UI with its paired token and has owner-equivalent capability except device management: only the owner starts pairing, renames devices or revokes *other* devices, while a device may revoke itself. Its alert preferences live in the `settings` table keyed per device and filter only its own pushes. |
 | Space | A project backed by a registered PDC document vault. Every active Ghost may list/read its documents and propose edits; saving a proposal still requires the owner's existing review decision. |
@@ -169,9 +169,20 @@ Owner decision 2026-11-11: a goal is a far direction for the whole team, not a t
 - Pausing prevents new runs; stopping also cancels live descendants and processes. Rule/account authority changes invalidate obsolete run trees. Three consecutive genuine failures pause the rule and notify once. Successful no-change reports may be quiet only when the run tree performed no mutation; failures and meaningful changes remain visible.
 - PR polling reads bounded metadata; `activity_read` fetches the bound diff/comments. Pagination refuses incomplete coverage beyond its safety cap instead of silently skipping records. IMAP uses read-only mailbox access and `BODY.PEEK`; mail above 2 MiB is recorded as skipped with an owner notice, without downloading its body or charging a model run.
 - `activity_action` can only comment on the bound PR or reply to the source message's mailbox. Its deny/approval/allow policy covers those connector replies, not arbitrary browser or PC actions. Approval presents the recipient/target and full bounded body; uncertain POST/SMTP outcomes are not replayed. Browser/vault retain their independent grants and approval rules.
-- Account credentials are mode-0600 files under `secrets/connections/`; ledger/events contain metadata and credential epochs, never values. Endpoint/credential replacement first disconnects old authority and cancels obsolete runs. Name-only account changes preserve authority and cursors. Source text is untrusted user/tool data, never static system instructions.
+- Account credentials are mode-0600 files under `secrets/connections/`; ledger/events contain metadata and credential epochs, never values. OAuth client configuration and refresh grants stay under `secrets/connection-oauth/`. Endpoint/credential replacement first disconnects old authority and cancels obsolete runs. Display-only changes preserve authority; API Ghost-grant edits preserve credentials and renewal but revoke obsolete requests and approvals. OAuth access rotation preserves source cursor/target signing keys. Source text is untrusted user/tool data, never static system instructions.
 
 The design follows the useful boundary in [Manus automations](https://manus.im/docs/automations.md): explicit sources, conditions, schedules, test runs, history and pause. [Manus cloud computers vs Studio](https://manus.im/docs/introduction/quickstart.md) also separates remote execution from deliberate local-PC access. Neither requires one permanently running VM or an always-prompting model per Ghost.
+
+#### Connecting services
+
+The account picker names services, not protocols. Mail presets supply TLS IMAP/SMTP endpoints; custom servers remain under advanced settings. Storing a credential is distinct from passing an authentication check.
+
+Google, Outlook, X, Notion and Slack offer OAuth login after a client application is configured. A catalog tile is not evidence that Ghost owns a vendor-approved client ID. Setup exposes the exact callback URI, client ID and write-only secret (Google/Outlook/Notion/Slack require it; public X PKCE may omit it). Slack needs an HTTPS callback. Each login adds an independent account. Google grants profile/email identity and explicitly selected read-only Drive access, not Gmail. Outlook uses delegated IMAP/SMTP OAuth; Gmail app passwords remain a separate mail preset.
+
+Other services can be registered through Ghost-assisted setup. Login, CAPTCHA, passkeys and two-factor checks use browser handoff. The Host captures issued keys from an exact HTTPS issuer input/textarea or granted vault item, never through model arguments or chat. A unique CSS selector avoids observing a newly issued key; proposal preflight atomically captures and protects it from browser output before approval. Confirmation names the endpoint and issuer, which may differ for developer consoles. Approved registration saves and then tests authentication; a failed probe never claims readiness. API use requires both `connection_request` and live account grants. Reads remain unjournaled; writes require an owner-confirmed effect and live authorization. Slack RPC GET is a read only for explicitly known read methods. API accounts are not PR activity sources. OAuth code exchanges are journaled before network I/O; refresh writes a durable pending marker before sending and never resends an uncertain rotating grant.
+
+Sources: [Google OAuth](https://developers.google.com/identity/protocols/oauth2/web-server), [Microsoft mail OAuth](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth), [X PKCE](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code), [Notion authorization](https://developers.notion.com/guides/authorization/overview), [Slack OAuth](https://docs.slack.dev/reference/methods/oauth.v2.access). Mail presets: [Apple](https://support.apple.com/en-us/102525), [Gmail](https://developers.google.com/workspace/gmail/imap/imap-smtp), [Yahoo](https://help.yahoo.com/kb/SLN4075.html), [Naver](https://help.naver.com/service/30029/contents/21344?lang=ko), [Daum](https://cs.daum.net/faq/service/43/category/9234/detail/30863).
+
 
 
 ### Restart
@@ -240,6 +251,8 @@ sandboxes/<ghost_id>/<work_id>/workspace   private staging / container mount; ne
 host.json                    port + owner token for local clients, 0600
 config.json                  optional: publicOrigin, uiDir, sandbox, memory, apns, reach, skills, mac, browser
 secrets/update-github.json   GitHub token for release checks, 0600
+secrets/connections/         per-account credentials, 0600, outside ledger/events
+secrets/connection-oauth/    OAuth client configuration and refresh grants, 0600
 update/state.json            update preferences, last check, last verified manifest, last result
 update/pending, attempts     launcher handshake while a new release starts; result.json after a rollback
 update/cache/                shell bundle and iPhone IPA proxied from the newest verified release

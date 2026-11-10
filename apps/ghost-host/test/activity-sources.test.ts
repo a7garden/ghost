@@ -639,3 +639,114 @@ test("SMTP failure before DATA is NoEffect; failure after DATA begins stays unce
     expect(error.message).not.toContain(TOKEN);
   } finally { await f.close(); }
 });
+
+const apiConfig = { kind: "api" as const, baseUrl: "https://api.notion.com/v1", authHeader: "Authorization", authPrefix: "Bearer", testPath: "/users/me", headers: { "Notion-Version": "2025-09-03" }, ghostIds: ["g1"] };
+const apiConnection = (overrides: Partial<Connection> = {}): Connection => ({ id: "notion", name: "Notion", config: apiConfig, hasCredential: true, credentialVersion: "v1", createdAt: 1, updatedAt: 1, ...overrides });
+function identityFetch(body: unknown, status = 200): ActivitySourceFetch {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.pathname !== "/v1/users/me") throw new Error(`unexpected fixture path ${url.pathname}`);
+    expect(init?.redirect).toBe("error");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("authorization")).toBe(`Bearer ${TOKEN}`);
+    expect(headers.get("notion-version")).toBe("2025-09-03");
+    return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
+  }) as ActivitySourceFetch;
+}
+
+test("api configuration validation keeps credentials in the credential header and private http owner-allowed", () => {
+  expect(() => validateConnectionConfig({ ...apiConfig, baseUrl: "http://100.81.146.46:3000/api/v1" })).not.toThrow();
+  expect(() => validateConnectionConfig({ ...apiConfig, authHeader: "Cookie" })).toThrow("credential header");
+  expect(() => validateConnectionConfig({ ...apiConfig, headers: { Authorization: "Bearer static" } })).toThrow("metadata");
+  expect(() => validateConnectionConfig({ ...apiConfig, headers: { Cookie: "k=v" } })).toThrow("metadata");
+  expect(() => validateConnectionConfig({ ...apiConfig, headers: { "Notion-Version": "v\n2" } })).toThrow("control characters");
+  expect(() => validateConnectionConfig({ ...apiConfig, authPrefix: "Bearer\r\nX" })).toThrow("control characters");
+  expect(() => validateConnectionConfig({ ...apiConfig, testPath: "https://evil.com/users" })).toThrow();
+  expect(() => validateConnectionConfig({ ...apiConfig, testPath: "//evil.com/users" })).toThrow();
+  expect(() => validateConnectionConfig({ ...apiConfig, baseUrl: "https://user:pw@api.notion.com/v1" })).toThrow("credentials, query parameters or fragments");
+});
+
+test("api connection tests validate identity JSON, not HTTP status alone", async () => {
+  const connection = apiConnection();
+  for (const body of [{ object: "user", id: "u1" }, { data: { id: "x1" } }, { sub: "google-sub" }, { ok: true, user_id: "U1" }, { self: true }]) {
+    const f = await fixture({ fetch: identityFetch(body) });
+    try {
+      await f.sources.setCredential("notion", TOKEN, "v1");
+      expect((await f.sources.test(connection)).summary).toContain("authenticated identity");
+    } finally { await f.close(); }
+  }
+  const slack = await fixture({ fetch: identityFetch({ ok: false, error: "invalid_auth" }) });
+  try {
+    await slack.sources.setCredential("notion", TOKEN, "v1");
+    await expect(slack.sources.test(connection)).rejects.toThrow("invalid_auth");
+  } finally { await slack.close(); }
+  const html = await fixture({ fetch: identityFetch("<html>login page</html>") });
+  try {
+    await html.sources.setCredential("notion", TOKEN, "v1");
+    await expect(html.sources.test(connection)).rejects.toThrow("did not return JSON");
+  } finally { await html.close(); }
+  const anonymous = await fixture({ fetch: identityFetch({ scope: "everything" }) });
+  try {
+    await anonymous.sources.setCredential("notion", TOKEN, "v1");
+    await expect(anonymous.sources.test(connection)).rejects.toThrow("no authenticated identity");
+  } finally { await anonymous.close(); }
+  const rejected = await fixture({ fetch: identityFetch({ message: "bad token" }, 401) });
+  try {
+    await rejected.sources.setCredential("notion", TOKEN, "v1");
+    await expect(rejected.sources.test(connection)).rejects.toThrow("401/403");
+  } finally { await rejected.close(); }
+});
+
+test("api requests redact the credential, keep static headers, and never leave the configured origin", async () => {
+  const f = await fixture({ fetch: (async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    const headers = new Headers(init?.headers);
+    if (url.pathname === "/v1/echo") return Response.json({ auth: headers.get("authorization"), version: headers.get("notion-version") });
+    throw new Error(`unexpected fixture path ${url.pathname}`);
+  }) as ActivitySourceFetch });
+  try {
+    await f.sources.setCredential("notion", TOKEN, "v1");
+    const connection = apiConnection();
+    const response = await f.sources.apiRequest(connection, { method: "GET", path: "/v1/echo" });
+    expect(response.status).toBe(200);
+    expect(response.json).toMatchObject({ auth: `Bearer [redacted]`, version: "2025-09-03" });
+    expect(JSON.stringify(response)).not.toContain(TOKEN);
+    for (const path of ["//evil.com/x", "https://evil.com/x", "/v1/../../evil", "/x#f", "/a b"]) {
+      await expect(f.sources.apiRequest(connection, { method: "GET", path })).rejects.toThrow();
+    }
+    await expect(f.sources.apiRequest(connection, { method: "GET", path: "/v1/echo", body: "x".repeat(65537) })).rejects.toThrow("1–65536");
+    await expect(f.sources.apiRequest(connection, { method: "GET", path: "/v1/echo" })).resolves.toMatchObject({ status: 200 });
+    // POST carries the body with a JSON content type beside the static metadata headers.
+    let contentType = "";
+    const writeFetch = new SourceConnections({ root: f.root, fetch: (async (input, init) => {
+      contentType = new Headers(init?.headers).get("content-type") ?? "";
+      return Response.json({ ok: true }, { status: 201 });
+    }) as ActivitySourceFetch, currentConnection: () => connection });
+    await writeFetch.setCredential("notion", TOKEN, "v1");
+    const written = await writeFetch.apiRequest(connection, { method: "POST", path: "/v1/query", body: JSON.stringify({ q: 1 }) });
+    expect(written.status).toBe(201);
+    expect(contentType).toBe("application/json");
+    await writeFetch.close();
+  } finally { await f.close(); }
+});
+
+
+test("OAuth access rotation preserves mail cursors and approved source seals, unlike account replacement", async () => {
+  const box = new MailboxFixture(27);
+  const smtp = smtpFixture();
+  const f = await fixture({ imap: box.factory, smtp: smtp.factory });
+  try {
+    if (mail.config.kind !== "mail") throw new Error("mail fixture required");
+    const oauthMail: Connection = { ...mail, config: { ...mail.config, authType: "oauth2" } };
+    const first = await f.sources.poll(oauthMail, mailSource, null);
+    await f.sources.rotateCredential(oauthMail.id, "new-oauth-access-token", oauthMail.credentialVersion!);
+    const next = await f.sources.poll(oauthMail, mailSource, first.cursor);
+    expect(next.items.map(item => item.target.uid)).toEqual(["21", "22", "23", "24", "25", "26", "27"]);
+    await f.sources.act(oauthMail, first.items[0]!, { kind: "mail_reply", body: "Approved before access rotation" });
+    expect(smtp.sent.map(message => message.text)).toEqual(["Approved before access rotation"]);
+    await f.sources.setCredential(oauthMail.id, "different-owner-account", oauthMail.credentialVersion);
+    await expect(f.sources.poll(oauthMail, mailSource, next.cursor)).rejects.toThrow();
+    await expect(f.sources.act(oauthMail, first.items[0]!, { kind: "mail_reply", body: "must not send" })).rejects.toThrow();
+    expect(smtp.sent.map(message => message.text)).toEqual(["Approved before access rotation"]);
+  } finally { await f.close(); }
+});

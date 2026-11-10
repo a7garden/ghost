@@ -374,6 +374,38 @@ export class AgentBrowser implements BrowserPort {
       throw new NoEffect("Vault login is unavailable on this Obscura site");
     }
   }
+  private protectValue(session: Session, value: string, field: VaultField): void {
+    if (value && !session.secrets.some(entry => entry.variants.includes(value) && (field !== "card_number" || entry.cardPattern !== undefined))) {
+      const json = JSON.stringify(value).slice(1, -1);
+      const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+      let encoded = value;
+      try { encoded = encodeURIComponent(value); } catch {}
+      const variants = [...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), json])].sort((a, b) => b.length - a.length);
+      const digits = field === "card_number" ? value.replace(/\D/g, "") : "";
+      session.secrets.push({ variants, ...(digits ? { cardPattern: new RegExp(digits.split("").join("[\\s-]*"), "g") } : {}) });
+    }
+    if (field.startsWith("card_") || field === "value") session.screenshotsBlocked = true;
+  }
+  captureCredential(ref: BrowserSessionRef, input: { origin: string; ref?: string; selector?: string }): Promise<string> {
+    return this.enqueueSession(ref, async session => {
+      if ((input.ref === undefined) === (input.selector === undefined)) throw new NoEffect("Choose exactly one credential input");
+      let origin: URL;
+      try { origin = new URL(input.origin); } catch { throw new NoEffect("Choose an exact HTTPS issuer origin"); }
+      if (origin.protocol !== "https:" || origin.origin !== input.origin) throw new NoEffect("Choose an exact HTTPS issuer origin");
+      session.engine ??= "chrome";
+      this.assertVaultFill(ref, "value", input.origin);
+      if (input.ref !== undefined && !(await this.invoke(session, ["focus", input.ref])).ok) throw new NoEffect("The credential field changed");
+      const selection = input.selector === undefined ? "const e = document.activeElement;" : `const fields = document.querySelectorAll(${JSON.stringify(input.selector)}); if (fields.length !== 1) return null; const e = fields[0];`;
+      const script = `(() => { if (window.top !== window || location.origin !== ${JSON.stringify(input.origin)}) return null; ${selection} return e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement ? e.value : null; })()`;
+      // invoke bypasses model-output redaction; only this Host-only method receives the value.
+      const result = await this.invoke(session, ["eval", script]);
+      const data = result.data;
+      const value = result.ok && data && typeof data === "object" && "result" in data && typeof data.result === "string" ? data.result.trim() : "";
+      if (!value || value.length > 16384 || /[\r\n\0]/.test(value)) throw new NoEffect("The issuer origin or credential field changed");
+      this.protectValue(session, value, "value");
+      return value;
+    });
+  }
   run(ref: BrowserSessionRef, argv: string[], options?: BrowserRunOptions) {
     return this.enqueueSession(ref, async (session) => {
       if (options?.engine) {
@@ -385,16 +417,7 @@ export class AgentBrowser implements BrowserPort {
       if (options?.sensitive) {
         const { value, field } = options.sensitive;
         this.assertVaultFill(ref, field, options.sensitive.origin);
-        if (value && !session.secrets.some((entry) => entry.variants.includes(value) && (field !== "card_number" || entry.cardPattern !== undefined))) {
-          const json = JSON.stringify(value).slice(1, -1);
-          const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
-          let encoded = value;
-          try { encoded = encodeURIComponent(value); } catch {}
-          const variants = [...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), json])].sort((a, b) => b.length - a.length);
-          const digits = field === "card_number" ? value.replace(/\D/g, "") : "";
-          session.secrets.push({ variants, ...(digits ? { cardPattern: new RegExp(digits.split("").join("[\\s-]*"), "g") } : {}) });
-        }
-        if (field.startsWith("card_") || field === "value") session.screenshotsBlocked = true;
+        this.protectValue(session, value, field);
         if (field === "password") {
           const tab = this.activeTab((await this.invoke(session, ["tab", "list"])).data);
           if (!tab) throw new CommandError("forbidden", "Secret fill refused (not_password_field)");
@@ -472,8 +495,6 @@ export class AgentBrowser implements BrowserPort {
     return this.enqueueSession(ref, async (session) => {
       if (session.engine === "obscura") throw new CommandError("unavailable", "Obscura handoff uses the live view in Ghost");
       if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser state");
-      session.secrets = [];
-      session.screenshotsBlocked = false;
       session.passwordScreenshots.clear();
       this.clearFiles(session);
       session.headed = true;
@@ -545,8 +566,6 @@ export class AgentBrowser implements BrowserPort {
         }
         if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser handoff state");
         session.headed = false;
-        session.secrets = [];
-        session.screenshotsBlocked = false;
         session.passwordScreenshots.clear();
         this.clearFiles(session);
       }

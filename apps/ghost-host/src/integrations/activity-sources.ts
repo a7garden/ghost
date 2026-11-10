@@ -6,6 +6,7 @@ import type { ActivityAction, ActivitySource, ActivitySourceItem, Connection, Co
 import { ImapFlow, type ImapFlowOptions, type MailboxObject } from "imapflow";
 import PostalMime, { type Email } from "postal-mime";
 import { activitySmtp, type ActivitySmtpClient, type ActivitySmtpOptions } from "./activity-mail.ts";
+import XOAuth2 from "nodemailer/lib/xoauth2";
 import { NoEffect } from "../core/effects.ts";
 
 export interface ActivitySourceExclusion {
@@ -22,14 +23,41 @@ export interface ActivitySourcePoll {
 export interface ActivitySourcePort {
   credentialPresent(id: string): boolean;
   setCredential(id: string, value: string | null, version: string | null): Promise<void>;
+  /** Rotate OAuth access under the same account epoch, preserving cursor and target seals. */
+  rotateCredential?(id: string, value: string, version: string): Promise<void>;
+  /** Host-only OAuth: run before every operation; null clears it. Implementations must not swallow refresh errors. */
+  setOAuthRefresher?(refresh: ((connection: Connection) => Promise<void>) | null): void;
   test(connection: Connection): Promise<{ summary: string }>;
   poll(connection: Connection, source: Exclude<ActivitySource, { kind: "schedule" }>, cursor: string | null, options?: { baseline?: boolean }): Promise<ActivitySourcePoll>;
   read(connection: Connection, item: ActivitySourceItem): Promise<ActivitySourceItem>;
   act(connection: Connection, item: ActivitySourceItem, action: ActivityAction): Promise<{ summary: string }>;
+  /** One bounded authenticated REST exchange against an api-kind connection; responses are sanitized. Absent on minimal ports. */
+  apiRequest?(connection: Connection, input: ApiRequestInput): Promise<ApiResponse>;
   close(): Promise<void>;
 }
 
+/** Model-supplied REST input: a relative path on the configured origin. Headers are never accepted. */
+export interface ApiRequestInput {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** Path (and optional query) inside the configured base origin/path boundary. */
+  path: string;
+  body?: string;
+  /** Host-only live authority check, after refresh and immediately before transport. */
+  authorize?: () => void;
+}
+
+export interface ApiResponse {
+  status: number;
+  contentType: string | null;
+  /** Sanitized body: every credential-bearing value is replaced before this leaves the port. */
+  body: string;
+  truncated: boolean;
+  /** Parsed JSON body, or undefined when the body is not JSON. */
+  json: unknown;
+}
+
 type MailConfig = Extract<Connection["config"], { kind: "mail" }>;
+type ApiConfig = Extract<Connection["config"], { kind: "api" }>;
 type Source = Exclude<ActivitySource, { kind: "schedule" }>;
 type PRSource = Extract<Source, { kind: "pull_request" }>;
 type MailSource = Extract<Source, { kind: "mail" }>;
@@ -58,7 +86,7 @@ const integer = (value: unknown): value is number => typeof value === "number" &
 const clip = (value: string, max: number) => value.length > max ? `${value.slice(0, max - 24)}\n[content truncated]` : value;
 function fail(message: string): never { throw new SourceError(message); }
 const clean = (value: string, max: number, secret: Secret) => clip(value.split(secret.credential).join("[redacted]"), max);
-class SourceError extends Error {}
+export class SourceError extends Error {}
 class OversizedMail extends SourceError {}
 function timestamp(value: unknown): string {
   const text = str(value);
@@ -72,7 +100,7 @@ function safeUrl(value: unknown): string | null {
   } catch { return null; }
 }
 function apiRoot(config: ConnectionConfig): URL {
-  if (config.kind === "mail") return fail("This connection is not a pull request account.");
+  if (config.kind !== "github" && config.kind !== "gitea") return fail("This connection is not a GitHub or Gitea API source.");
   let url: URL;
   try { url = new URL(config.baseUrl); } catch { return fail("Set a valid absolute API URL (GitHub: https://api.github.com; Gitea: https://your-server/api/v1)."); }
   if (url.username || url.password || url.search || url.hash || !["https:", ...(config.kind === "gitea" ? ["http:"] : [])].includes(url.protocol)) {
@@ -80,6 +108,86 @@ function apiRoot(config: ConnectionConfig): URL {
   }
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
   return url;
+}
+const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/;
+/** Headers that carry credentials on their own; an API key belongs in the configured credential header instead. */
+const FORBIDDEN_HEADERS: Record<string, true> = { authorization: true, "proxy-authorization": true, cookie: true, "set-cookie": true, host: true, connection: true, "content-length": true, "transfer-encoding": true, upgrade: true };
+/** The configured origin of an api connection: owner-trusted, so private and plain-HTTP endpoints stay usable. */
+function apiEndpoint(config: ApiConfig): URL {
+  let url: URL;
+  try { url = new URL(config.baseUrl); } catch { return fail("Set a valid absolute API base URL."); }
+  if (url.username || url.password || url.search || url.hash || !["https:", "http:"].includes(url.protocol)) {
+    return fail("API base URL must be http or https, without embedded credentials, query parameters or fragments.");
+  }
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
+  url.search = "";
+  url.hash = "";
+  return url;
+}
+function relativePath(value: string, what: string): string {
+  const path = value.trim();
+  if (!path || path.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(path) || path.includes("#") || /[\s\\\r\n\0]/.test(path) || path.length > 2048) {
+    fail(`Set ${what} as a relative API path, without a URL, scheme or fragment.`);
+  }
+  return path;
+}
+export function connectionRequestUrl(config: ApiConfig, path: string): URL {
+  const root = apiEndpoint(config);
+  const relative = relativePath(path, "the request path");
+  const url = new URL(relative.startsWith(root.pathname) ? relative : relative.replace(/^\//, ""), root);
+  if (url.origin !== root.origin || !url.pathname.startsWith(root.pathname)) fail("The request path escaped the configured API origin.");
+  return url;
+}
+
+// Slack's GET endpoints are RPC methods: HTTP GET alone does not make them reads.
+const SLACK_READ_METHODS = new Set(["api.test", "auth.test", "team.info", "team.profile.get", "users.list", "users.info", "users.lookupByEmail", "users.getPresence", "users.profile.get", "conversations.list", "conversations.info", "conversations.history", "conversations.replies", "conversations.members", "search.all", "search.messages", "search.files", "files.list", "files.info", "emoji.list", "reactions.get", "stars.list", "pins.list", "usergroups.list", "usergroups.users.list"]);
+export function connectionRequestIsReadOnly(connection: Connection, method: ApiRequestInput["method"], path: string): boolean {
+  if (method !== "GET" || connection.config.kind !== "api") return false;
+  const url = connectionRequestUrl(connection.config, path);
+  const slack = connection.serviceId === "slack" || /(^|\.)slack(?:-gov)?\.com$/.test(url.hostname);
+  return !slack || SLACK_READ_METHODS.has(url.pathname.slice(url.pathname.lastIndexOf("/") + 1));
+}
+function validateApi(config: ApiConfig): void {
+  apiEndpoint(config);
+  if (!HEADER_NAME.test(config.authHeader) || config.authHeader.toLowerCase() !== "authorization" && FORBIDDEN_HEADERS[config.authHeader.toLowerCase()]) {
+    fail("Set a valid credential header name (for example Authorization or X-Api-Key); cookies and response headers are not credentials.");
+  }
+  if (/[\r\n\0]/.test(config.authPrefix)) fail("The credential prefix must not contain control characters.");
+  relativePath(config.testPath, "the identity endpoint testPath");
+  for (const [name, value] of Object.entries(config.headers)) {
+    if (!HEADER_NAME.test(name) || /[\r\n\0]/.test(value)) fail("Static header names and values must be valid header content without control characters.");
+    if (FORBIDDEN_HEADERS[name.toLowerCase()] || /(?:auth|token|api[-_]?key|secret|cookie)/i.test(name) || name.toLowerCase() === config.authHeader.toLowerCase()) {
+      fail(`Static headers must stay metadata: "${name}" carries credentials or overrides the credential header; put keys in the credential header instead.`);
+    }
+  }
+}
+/**
+ * The authenticated identity a test endpoint must expose. HTTP status alone is not proof:
+ * Slack returns HTTP 200 with `{ok:false,error:"invalid_auth"}`, which must fail.
+ */
+function assertIdentity(json: unknown): string {
+  if (json === undefined) fail("The identity endpoint did not return JSON. Check testPath (identity probes return JSON, such as /v1/users/me, /2/users/me or /api/auth.test).");
+  if (!object(json)) fail("The identity endpoint returned a non-object JSON body.");
+  if (json.ok === false) {
+    const error = str(json.error).replace(/[\r\n\0]/g, " ").trim().slice(0, 64);
+    fail(`The provider rejected this credential${error ? ` (${error})` : ""}. Check the token and its scopes.`);
+  }
+  const identified = (value: unknown) => typeof value === "number" || value === true || str(value).length > 0;
+  const identityKeys = ["id", "login", "sub", "user", "user_id", "username", "email", "account_id", "self"];
+  const data = object(json.data) ? json.data : null;
+  if (json.ok === true || identityKeys.some((key) => identified(json[key])) || (data !== null && identityKeys.some((key) => identified(data[key])))) {
+    return "an authenticated identity";
+  }
+  fail("The identity endpoint returned no authenticated identity. Check the credential, its scopes and testPath.");
+}
+/** JWT expiry for honest OAuth messaging; null when the credential carries no parseable `exp`. */
+function tokenExpiry(credential: string): string | null {
+  const parts = credential.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")) as { exp?: unknown };
+    return typeof payload.exp === "number" && Number.isFinite(payload.exp) ? new Date(payload.exp * 1000).toISOString() : null;
+  } catch { return null; }
 }
 function validateMail(config: MailConfig): void {
   const host = (value: string) => value.length <= 253 && (isIP(value) !== 0 || /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.?$/.test(value));
@@ -92,6 +200,7 @@ function validateMail(config: MailConfig): void {
 /** Synchronous owner setup validation; never authenticates or writes credentials. */
 export function validateConnectionConfig(config: ConnectionConfig): void {
   if (config.kind === "mail") validateMail(config);
+  else if (config.kind === "api") validateApi(config);
   else apiRoot(config);
 }
 
@@ -123,6 +232,8 @@ export class SourceConnections implements ActivitySourcePort {
   private readonly options: Options;
   private readonly active = new Set<AbortController>();
   private readonly pending = new Set<Promise<unknown>>();
+  /** Host-registered OAuth access-token refresher; runs before every operation. */
+  private refresher: ((connection: Connection) => Promise<void>) | null = null;
   private closed = false;
 
   constructor(options: Options) {
@@ -148,6 +259,14 @@ export class SourceConnections implements ActivitySourcePort {
     return Boolean(current?.hasCredential && current.credentialVersion === secret.version);
   }
   async setCredential(id: string, value: string | null, version: string | null): Promise<void> {
+    this.storeCredential(id, value, version);
+  }
+  async rotateCredential(id: string, value: string, version: string): Promise<void> {
+    const existing = this.secret(id);
+    if (!existing || existing.version !== version) fail("The OAuth account authority changed before token rotation.");
+    this.storeCredential(id, value, version, existing.key);
+  }
+  private storeCredential(id: string, value: string | null, version: string | null, key?: string): void {
     if (this.closed) fail("Source connections are closed.");
     const file = this.file(id);
     if (value === null) { if (existsSync(file)) unlinkSync(file); return; }
@@ -155,7 +274,7 @@ export class SourceConnections implements ActivitySourcePort {
     if (!version || version.length > 128 || /[\r\n\0]/.test(version)) fail("Credential replacement requires a fresh non-empty account version.");
     const temporary = `${file}.${randomBytes(12).toString("hex")}.tmp`;
     try {
-      writeFileSync(temporary, JSON.stringify({ credential: value, key: randomBytes(32).toString("hex"), version }), { mode: 0o600, flag: "wx" });
+      writeFileSync(temporary, JSON.stringify({ credential: value, key: key ?? randomBytes(32).toString("hex"), version }), { mode: 0o600, flag: "wx" });
       chmodSync(temporary, 0o600);
       renameSync(temporary, file);
     } finally { if (existsSync(temporary)) unlinkSync(temporary); }
@@ -185,15 +304,26 @@ export class SourceConnections implements ActivitySourcePort {
     if (target.connectionId !== connection.id || target.scope !== this.scope(connection, secret) || !/^[a-f0-9]{64}$/.test(target.seal ?? "") || !timingSafeEqual(Buffer.from(expected), Buffer.from(target.seal!))) {
       fail("Source target is invalid or its account/configuration changed; obtain a fresh source item.");
     }
-    if (target.kind === "pr" && connection.config.kind !== "mail") {
+    if (target.kind === "pr") {
+      if (connection.config.kind !== "github" && connection.config.kind !== "gitea") fail("Pull request targets require a GitHub or Gitea connection.");
       repositoryPath(target.repository ?? "");
       if (!/^[1-9][0-9]{0,9}$/.test(target.number ?? "") || item.id !== `pr:${connection.id}:${target.repository}:${target.number}`) fail("Pull request target does not match this source item.");
     } else if (target.kind === "mail" && connection.config.kind === "mail") {
       if (target.mailbox !== connection.config.mailbox || !/^[1-9][0-9]{0,19}$/.test(target.validity ?? "") || !/^[1-9][0-9]{0,9}$/.test(target.uid ?? "") || item.id !== `mail:${connection.id}:${hash(target.mailbox).slice(0, 16)}:${target.validity}:${target.uid}`) fail("Mail target does not match this source item.");
     } else fail("Source provider does not match this connection.");
   }
+  /** Register the host's OAuth refresher; it must fail loudly so stale tokens are never used silently. */
+  setOAuthRefresher(refresh: ((connection: Connection) => Promise<void>) | null): void {
+    this.refresher = refresh;
+  }
   private async operation<T>(connection: Connection, run: (secret: Secret, signal: AbortSignal) => Promise<T>): Promise<T> {
     if (this.closed) fail("Source connections are closed.");
+    if (this.refresher) {
+      try { await this.refresher(connection); }
+      catch {
+        fail("OAuth access token could not be refreshed; reconnect this account.");
+      }
+    }
     const secret = this.authorized(connection);
     validateConnectionConfig(connection.config);
     const controller = new AbortController();
@@ -211,9 +341,14 @@ export class SourceConnections implements ActivitySourcePort {
       this.authorized(connection, secret);
       return result;
     } catch (error) {
-      if (error instanceof SourceError) throw error;
+      if (error instanceof SourceError || error instanceof NoEffect) throw error;
       const code = object(error) ? str(error.code) : "";
-      if (/AUTH|EAUTH|LOGIN|Authentication/i.test(code)) fail("Account authentication failed. Check the username and token/app password and enable IMAP/SMTP access for this account.");
+      if (/AUTH|EAUTH|LOGIN|Authentication/i.test(code)) {
+        if (connection.config.kind === "mail" && connection.config.authType === "oauth2") {
+          fail("OAuth access token rejected by the mail server. It has most likely expired or been revoked; reconnect or refresh this account's token.");
+        }
+        fail("Account authentication failed. Check the username and token/app password and enable IMAP/SMTP access for this account.");
+      }
       if (/CERT|TLS|SSL|SELF_SIGNED|ALTNAME/i.test(code)) fail("TLS verification failed. Use the server's certificate hostname and a trusted, unexpired certificate; insecure authentication is not supported.");
       fail("Source connection failed. Check the endpoint, network, account permissions and app password. No provider error body is exposed.");
     } finally {
@@ -263,12 +398,71 @@ export class SourceConnections implements ActivitySourcePort {
     const text = Buffer.concat(chunks, size).toString("utf8");
     return options.textLimit === undefined ? JSON.parse(text) as unknown : `${text}${truncated ? "\n[diff truncated]" : ""}`;
   }
+  /** One bounded authenticated REST exchange on the configured origin. Headers come only from the configuration. */
+  private async requestApi(connection: Connection, secret: Secret, input: ApiRequestInput, signal: AbortSignal): Promise<ApiResponse> {
+    if (connection.config.kind !== "api") fail("REST requests run only against api-kind connections.");
+    const config = connection.config as ApiConfig;
+    this.authorized(connection, secret);
+    if (input.body !== undefined && (input.body.length === 0 || input.body.length > 65536)) fail("A request body must contain 1–65536 characters.");
+    const url = connectionRequestUrl(config, input.path);
+    // Only the credential (raw and prefixed) is secret; static headers are metadata that may safely appear.
+    const secretValues = [secret.credential, JSON.stringify(secret.credential).slice(1, -1), encodeURIComponent(secret.credential)]
+      .filter(value => value.length > 0);
+    const redact = (text: string) => secretValues.reduce((out, value) => out.split(value).join("[redacted]"), text);
+    const headers: Record<string, string> = {
+      Accept: "application/json", "User-Agent": "Ghost-Connection",
+      ...config.headers,
+      [config.authHeader]: config.authPrefix ? `${config.authPrefix} ${secret.credential}` : secret.credential,
+    };
+    if (input.body !== undefined && !Object.keys(config.headers).some((name) => name.toLowerCase() === "content-type")) headers["Content-Type"] = "application/json";
+    let response: Response;
+    try {
+      input.authorize?.();
+      response = await (this.options.fetch ?? fetch)(url, {
+        method: input.method, redirect: "error", headers,
+        signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+        ...(input.body === undefined ? {} : { body: input.body }),
+      });
+    } catch (error) {
+      if (signal.aborted) fail("Source operation was closed before the API request.");
+      throw error;
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      if (response.status === 401 || response.status === 403) fail("API authentication or permission denied (HTTP 401/403). Check the credential, its scopes and the configured header form. No provider error body is exposed.");
+      fail(`API returned HTTP ${response.status}; no provider error body is exposed.`);
+    }
+    if (!response.body) return { status: response.status, contentType: redact(response.headers.get("content-type") ?? ""), body: "", truncated: false, json: undefined };
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    let truncated = false;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (size + value.byteLength > MAX_API) { chunks.push(value.subarray(0, MAX_API - size)); size = MAX_API; truncated = true; break; }
+        chunks.push(value); size += value.byteLength;
+      }
+    } finally { await reader.cancel(); reader.releaseLock(); }
+    const body = redact(Buffer.concat(chunks, size).toString("utf8"));
+    let json: unknown;
+    try { json = JSON.parse(body) as unknown; } catch { json = undefined; }
+    return { status: response.status, contentType: redact(response.headers.get("content-type") ?? "").slice(0, 128), body: `${body}${truncated ? "\n[body truncated]" : ""}`, truncated, json };
+  }
+  /** Model-facing REST entry: bounded, sanitized, and re-authorized around the exchange. */
+  async apiRequest(connection: Connection, input: ApiRequestInput): Promise<ApiResponse> {
+    return this.operation(connection, (secret, signal) => this.requestApi(connection, secret, input, signal));
+  }
   private async mail<T>(connection: Connection, secret: Secret, signal: AbortSignal, run: (client: ImapClient, mailbox: MailboxObject) => Promise<T>): Promise<T> {
     this.authorized(connection, secret);
     const config = connection.config as MailConfig;
     const options: ImapFlowOptions = {
       host: config.host, port: config.port, secure: true, tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" },
-      auth: { user: config.username, pass: secret.credential }, logger: false, logRaw: false, disableAutoIdle: true, disableCompression: true,
+      auth: config.authType === "oauth2"
+        ? { user: config.username, accessToken: secret.credential }
+        : { user: config.username, pass: secret.credential },
+      logger: false, logRaw: false, disableAutoIdle: true, disableCompression: true,
       connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000,
       maxLiteralSize: MAX_MAIL + 65536, maxResponseSize: MAX_MAIL + 131072, maxLineLength: 65536, maxResponseTokens: 20000,
     };
@@ -290,7 +484,10 @@ export class SourceConnections implements ActivitySourcePort {
     if (!config.smtpHost) fail("Replies are unavailable: configure SMTP host, port and TLS/STARTTLS in this connection first.");
     const options: ActivitySmtpOptions = {
       host: config.smtpHost, port: config.smtpPort, secure: config.smtpSecure, requireTLS: true, opportunisticTLS: false,
-      tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" }, auth: { user: config.username, pass: secret.credential },
+      tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" },
+      auth: config.authType === "oauth2"
+        ? { user: config.username, method: "XOAUTH2", oauth2: new XOAuth2({ user: config.username, accessToken: secret.credential }) }
+        : { user: config.username, pass: secret.credential },
       connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000, dnsTimeout: 15_000,
       logger: false, debug: false, transactionLog: false, maxResponseSize: 65536,
     };
@@ -298,7 +495,14 @@ export class SourceConnections implements ActivitySourcePort {
   }
   async test(connection: Connection): Promise<{ summary: string }> {
     return this.operation(connection, async (secret, signal) => {
-      if (connection.config.kind !== "mail") {
+      if (connection.config.kind === "api") {
+        const config = connection.config as ApiConfig;
+        if (!connectionRequestIsReadOnly(connection, "GET", config.testPath)) fail("The identity endpoint must be a read-only API method.");
+        const response = await this.requestApi(connection, secret, { method: "GET", path: config.testPath }, signal);
+        const identity = assertIdentity(response.json);
+        return { summary: `API authentication succeeded: HTTP ${response.status} returned ${identity}. Scoped permissions are checked when the Ghost requests.` };
+      }
+      if (connection.config.kind === "github" || connection.config.kind === "gitea") {
         const account = await this.api(connection, secret, "user", signal);
         if (!object(account) || (!integer(account.id) && !str(account.login))) fail("API URL did not return a valid authenticated user. Use the API endpoint, not the website URL.");
         return { summary: "API authentication succeeded. Repository permissions are checked when polling." };
@@ -314,7 +518,11 @@ export class SourceConnections implements ActivitySourcePort {
         this.authorized(connection, secret);
         await transport.verify();
       } finally { signal.removeEventListener("abort", abort); transport.close(); }
-      return { summary: "IMAP read-only mailbox access and SMTP TLS authentication succeeded. No message was sent." };
+      const expiry = config.authType === "oauth2" ? tokenExpiry(secret.credential) : null;
+      const tokenNote = config.authType === "oauth2"
+        ? ` The access token expires ${expiry ? `at ${expiry}` : "at an unknown time; reconnect when authentication is rejected"}.`
+        : "";
+      return { summary: `IMAP read-only mailbox access and SMTP TLS authentication succeeded. No message was sent.${tokenNote}` };
     });
   }
   async poll(connection: Connection, source: Source, cursor: string | null, options?: { baseline?: boolean }): Promise<ActivitySourcePoll> {
@@ -327,7 +535,7 @@ export class SourceConnections implements ActivitySourcePort {
       if (cursor) { try { parsed = JSON.parse(cursor); } catch { fail("Source cursor is invalid; reset the activity source baseline."); } }
       if (parsed !== null && (!object(parsed) || parsed.scope !== scope)) fail("Source cursor belongs to an old account or different source; reset the activity source baseline.");
       if (source.kind === "pull_request") {
-        if (connection.config.kind === "mail") fail("Pull request activities require a GitHub or Gitea connection.");
+        if (connection.config.kind !== "github" && connection.config.kind !== "gitea") fail("Pull request activities require a GitHub or Gitea connection.");
         return this.pollPR(connection, secret, source, parsed, scope, baseline, signal);
       }
       if (connection.config.kind !== "mail") fail("Mail activities require an IMAP connection.");

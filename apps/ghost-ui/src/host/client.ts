@@ -3,6 +3,9 @@ import type {
   ApiError,
   ArtifactRef,
   Command,
+  ConnectionOAuthView,
+  ConnectionOAuthClientInput,
+  ConnectionOAuthStart,
   CommandResponse,
   ConversationPage,
   LedgerEvent,
@@ -197,6 +200,26 @@ export class HostClient {
   /** Cancel a pending device-code login (owner only). */
   cancelOAuth(providerId: string): Promise<OAuthStatus> {
     return this.json(`/api/providers/${encodeURIComponent(providerId)}/oauth`, { method: 'DELETE' });
+  }
+
+  connectionOAuth(serviceId: string): Promise<ConnectionOAuthView> {
+    return this.json(`/api/connection-oauth/${encodeURIComponent(serviceId)}`);
+  }
+
+  configureConnectionOAuth(serviceId: string, input: ConnectionOAuthClientInput): Promise<ConnectionOAuthView> {
+    return this.json(`/api/connection-oauth/${encodeURIComponent(serviceId)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+  }
+
+  startConnectionOAuth(serviceId: string, input: ConnectionOAuthStart): Promise<ConnectionOAuthView> {
+    return this.json(`/api/connection-oauth/${encodeURIComponent(serviceId)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+  }
+
+  cancelConnectionOAuth(serviceId: string): Promise<ConnectionOAuthView> {
+    return this.json(`/api/connection-oauth/${encodeURIComponent(serviceId)}`, { method: 'DELETE' });
   }
 
   /** The owner's vault metadata; one-time items that expired are already gone. Values are never returned. */

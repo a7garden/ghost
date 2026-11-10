@@ -596,3 +596,20 @@ describe("browser tools", () => {
     } finally { await f.browser.shutdown(); }
   });
 });
+
+test("captured service credentials remain protected across owner handoff and return", async () => {
+  const root = tempDir();
+  const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
+  try {
+    await browser.run(session, ["open", "https://example.com"]);
+    writeFileSync(join(root, "facts"), SECRET);
+    writeFileSync(join(root, "page-text"), SECRET);
+    expect(await browser.captureCredential(session, { origin: "https://example.com", selector: "#key" })).toBe(SECRET);
+    await browser.handoff(session, "https://example.com");
+    await expect(browser.run(session, ["screenshot"])).rejects.toThrow();
+    await browser.endHandoff(session);
+    expect((await browser.run(session, ["get", "text"])).data).toEqual({ text: "[redacted]" });
+    await expect(browser.run(session, ["screenshot"])).rejects.toThrow();
+    expect(await browser.captureCredential(session, { origin: "https://example.com", selector: "#key" })).toBe(SECRET);
+  } finally { await browser.shutdown(); }
+});

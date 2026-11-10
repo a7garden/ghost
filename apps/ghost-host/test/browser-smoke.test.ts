@@ -116,3 +116,23 @@ import { tempDir } from "./support.ts";
     console.log("Headed-to-headless handoff retained page:", completed, "and login state; root:", root);
   } finally { await browser.shutdown(); }
 }, 180_000);
+
+(process.env.GHOST_BROWSER_SMOKE === "1" ? test : test.skip)("real Chrome: credential capture protects issuer fields atomically and remains host-readable", async () => {
+  const root = tempDir();
+  const browser = new AgentBrowser({ executable: join(homedir(), ".local/bin/agent-browser") }, root);
+  const session = { ghostId: "connection-capture", conversationId: "capture" };
+  const secret = "synthetic-service-token-for-capture";
+  try {
+    expect((await browser.run(session, ["open", "https://example.com"])).ok).toBe(true);
+    await browser.run(session, ["eval", `document.body.insertAdjacentHTML("beforeend", '<input id="key" value="${secret}"><input id="other" value="unrelated">'); "ready"`]);
+    await expect(browser.captureCredential(session, { origin: "https://www.iana.org", selector: "#key" })).rejects.toThrow();
+    await expect(browser.captureCredential(session, { origin: "https://example.com", selector: "input" })).rejects.toThrow();
+    expect(await browser.captureCredential(session, { origin: "https://example.com", selector: "#key" })).toBe(secret);
+    const observed = await browser.run(session, ["eval", "document.querySelector('#key').value"]);
+    expect(observed.data).toMatchObject({ result: "[redacted]" });
+    expect(JSON.stringify(await browser.run(session, ["snapshot", "-i"]))).not.toContain(secret);
+    await expect(browser.run(session, ["screenshot"])).rejects.toThrow();
+    // Approval re-captures the same field privately despite model-output redaction.
+    expect(await browser.captureCredential(session, { origin: "https://example.com", selector: "#key" })).toBe(secret);
+  } finally { await browser.shutdown(); }
+}, 120_000);
