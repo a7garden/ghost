@@ -329,7 +329,7 @@
 .ghost-conversation__footer { margin-top: var(--ghost-space-2); color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.4; text-align: center; }
 .ghost-conversation__jump { position: absolute; z-index: 2; bottom: 12px; left: 50%; max-width: calc(100% - 24px); translate: -50% 0; border-radius: var(--radius-pill) !important; background: var(--ghost-raised) !important; box-shadow: var(--shadow-raised); animation: rise-in var(--duration-base) var(--ease-enter) both; }
 
-/* Transcript rail: the conversation's scrollbar as a map. Fine pointers only; touch keeps native scrolling. */
+/* ScrollRail placed in its frame, here the transcript's. Fine pointers only; touch keeps native scrolling. */
 .ghost-rail { position: absolute; z-index: 2; top: 30px; right: 2px; bottom: 18px; width: 22px; opacity: 0; touch-action: none; user-select: none; cursor: default; transition: opacity var(--duration-base) ease; }
 .ghost-rail[hidden] { display: none; }
 .ghost-conversation__transcript-frame[data-overlay] > .ghost-rail { top: 64px; }
@@ -363,10 +363,15 @@
 .ghost-rail__label[data-tone="amber"] { color: var(--ghost-amber-ink); }
 .ghost-rail__label[data-tone="danger"] { color: var(--ghost-danger-ink); }
 @keyframes rail-label { from { opacity: 0; transform: translateX(4px); } }
-@media (hover: hover) and (pointer: fine) {
-  .ghost-conversation__transcript { scrollbar-width: none; }
-  .ghost-conversation__transcript::-webkit-scrollbar { display: none; }
-}
+/* Floating rails: ScrollRails draws one on the edge of any other scroller under the pointer or just scrolled. */
+.ghost-rail[data-floating] { position: fixed; z-index: 1100; right: auto; bottom: auto; width: 12px; pointer-events: auto; }
+.ghost-rail[data-floating][data-axis="x"] { width: auto; height: 12px; }
+.ghost-rail[data-floating][data-hover] { opacity: .7; }
+.ghost-rail[data-floating]:not([data-hover], [data-active], [data-dragging]) { pointer-events: none; }
+.ghost-rail[data-floating] .ghost-rail__thumb { right: 4px; }
+.ghost-rail[data-floating]:hover .ghost-rail__thumb, .ghost-rail[data-floating][data-dragging] .ghost-rail__thumb { right: 3px; }
+.ghost-rail[data-axis="x"] .ghost-rail__thumb { top: auto; right: auto; bottom: 4px; left: 0; height: 3px; transition: height var(--duration-fast) var(--ease-enter), bottom var(--duration-fast) var(--ease-enter), background var(--duration-fast) ease; }
+.ghost-rail[data-axis="x"]:hover .ghost-rail__thumb, .ghost-rail[data-axis="x"][data-dragging] .ghost-rail__thumb { right: auto; bottom: 3px; height: 5px; }
 @media not ((hover: hover) and (pointer: fine)) { .ghost-rail { display: none; } }
 
 /* Only what arrives now animates in: the owner's message and a reply that starts streaming. A finished reply

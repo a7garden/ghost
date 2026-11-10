@@ -90,12 +90,14 @@ Built for supervising agents instead of reusing generic cards and badges
 - **RefMark** — an id or digest a Ghost wrote into prose (`src/components/refs.ts` finds
   them outside code blocks and links) shows what it points at: a Work's state glyph that opens
   it, a Ghost's face, a file icon, else a quiet #. The value itself is behind a Peek.
-- **ScrollRail** (`src/ui/scroll-rail.tsx`) — a scrollbar drawn as a map of what it scrolls:
-  a hairline thumb and ticks for every `data-rail` element inside — in the conversation the
-  owner's turns, thread cards and outcomes, in the sidebar Ghosts that are working or need the
-  owner — in their state color. Hover names a tick, click jumps, drag scrubs. It shows with
-  the pointer or the owner's own scrolling, never for auto-follow; touch keeps native
-  scrolling. Other scroll areas use trackless pills that appear with the pointer.
+- **ScrollRail** (`src/ui/scroll-rail.tsx`) — the app's only scrollbar, drawn as a map of what
+  it scrolls: a hairline thumb and ticks for every `data-rail` element inside — in the
+  conversation the owner's turns, thread cards and outcomes, in the sidebar Ghosts that are
+  working or need the owner — in their state color. Hover names a tick, click jumps, drag
+  scrubs, wheel over it scrolls. It shows with the pointer or the owner's own scrolling, never
+  for auto-follow. Native scrollbars are hidden on fine pointers; `ScrollRails`, mounted once
+  per window, puts a bare rail (vertical or horizontal) on every other scroller under the
+  pointer or just scrolled. Touch keeps the platform's own indicator.
 
 Feature-level compositions:
 
