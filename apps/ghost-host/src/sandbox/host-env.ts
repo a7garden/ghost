@@ -13,6 +13,7 @@ import {
 } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { ensureTempRoot, killTree, WorkspaceEnv } from "./workspace-env.ts";
+import { repositoryOf } from "./worktree.ts";
 
 /** Both delivered output and spill storage are bounded; exceeding this fails and kills the command. */
 export const HOST_OUTPUT_LIMIT = 16 * 1024 * 1024;
@@ -26,9 +27,10 @@ export function validateExecutionTarget(target: ExecutionTarget): void {
   const cwd = realpathSync(target.cwd);
   if (!statSync(cwd).isDirectory()) throw new Error(`Host execution cwd is not a directory: ${target.cwd}`);
   accessSync(cwd, constants.R_OK | constants.X_OK);
+  if (target.worktree) repositoryOf(cwd);
 }
 
-/** One FIFO for this Host, shared by every explicitly PC-targeted Work. Reads need not take it. */
+/** One FIFO of PC mutations: shared by PC Works in owner directories, one per Work worktree. Reads need not take it. */
 export class HostMutationQueue {
   private tail: Promise<void> = Promise.resolve();
 

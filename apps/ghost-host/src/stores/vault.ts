@@ -11,13 +11,13 @@ import { parseCsv } from "./vault/csv.ts";
 export { generatePassword, normalizeOrigin, PASSWORD_ALPHABET, totp } from "./vault/model.ts";
 
 export interface VaultInput {
-  id?: string; kind: VaultItem["kind"]; title: string; origin?: string | null; username?: string | null;
+  id?: string; kind: VaultItem["kind"]; title: string; origin?: string | null; extraOrigins?: string[]; username?: string | null;
   password?: string; totp?: string; card?: { number: string; expiry: string; cvc: string; name: string };
   contact?: VaultItem["contact"]; value?: string; hints?: string; ghostIds?: string[];
 }
 type Stored = { metadata: string; version: number };
 type SecretRow = { field: VaultField; version: number; sealed: Uint8Array };
-const INPUT_KEYS: Record<string, true> = { id: true, kind: true, title: true, origin: true, username: true, password: true, totp: true, card: true, contact: true, value: true, hints: true, ghostIds: true };
+const INPUT_KEYS: Record<string, true> = { id: true, kind: true, title: true, origin: true, extraOrigins: true, username: true, password: true, totp: true, card: true, contact: true, value: true, hints: true, ghostIds: true };
 const KIND_FIELDS: Record<VaultItem["kind"], readonly VaultField[]> = { login: ["username", "password", "totp"], card: ["card_number", "card_expiry", "card_cvc", "card_name"], contact: [], secret: ["value"] };
 export const GHOST_VAULT_ITEM_LIMIT = 200;
 
@@ -86,7 +86,7 @@ export class Vault implements VaultPort {
   }
   listFor(ghostId: string, filter: { origin?: string; kind?: VaultItem["kind"] } = {}): VaultItem[] {
     const origin = filter.origin === undefined ? undefined : normalizeOrigin(filter.origin);
-    return this.list().filter((item) => item.ghostIds.includes(ghostId) && (origin === undefined || item.origin === origin) && (filter.kind === undefined || item.kind === filter.kind));
+    return this.list().filter((item) => item.ghostIds.includes(ghostId) && (origin === undefined || originsOf(item).includes(origin)) && (filter.kind === undefined || item.kind === filter.kind));
   }
   itemFor(ghostId: string, itemId: string): VaultItem {
     return this.storage(() => {
@@ -138,9 +138,15 @@ export class Vault implements VaultPort {
     const rawOrigin = input.origin === undefined ? previous?.origin ?? null : input.origin;
     const origin = rawOrigin === null ? null : normalizeOrigin(rawOrigin);
     if (kind === "login" && !origin) throw invalid("login requires an HTTPS origin");
+    // 2026-11-10: sites whose login form lives on another host (login.coupang.com, nid.naver.com) need more exact
+    // origins. Never widen to "same site": any other subdomain page of that site would then receive the password.
+    if (input.extraOrigins !== undefined && (!Array.isArray(input.extraOrigins) || input.extraOrigins.length > 8 || input.extraOrigins.some((value) => typeof value !== "string"))) throw invalid("invalid vault extra origins");
+    if (input.extraOrigins !== undefined && kind !== "login" && kind !== "secret") throw invalid("fields do not belong to vault item kind");
+    const extraOrigins = input.extraOrigins === undefined ? previous?.extraOrigins : [...new Set(input.extraOrigins.map(normalizeOrigin))].filter((value) => value !== origin);
     const time = this.now();
     const item: VaultItem = {
       id: previous?.id ?? input.id ?? randomUUID(), kind, title: input.title ?? previous?.title ?? "", origin,
+      ...(extraOrigins?.length ? { extraOrigins } : {}),
       username: kind === "login" ? input.username === undefined ? previous?.username ?? "" : input.username : null,
       cardLast4: input.card ? input.card.number.replace(/[ -]/g, "").slice(-4) : previous?.cardLast4 ?? null,
       cardExpiry: input.card?.expiry ?? previous?.cardExpiry ?? null,
@@ -235,3 +241,5 @@ export class Vault implements VaultPort {
   }
 }
 export function createVault(root: string, options: { now?: () => number } = {}): Vault { return new Vault(root, options); }
+/** Every exact origin where an item may be filled: its own and the owner's extra login origins. */
+export function originsOf(item: Pick<VaultItem, "origin" | "extraOrigins">): string[] { return [...(item.origin ? [item.origin] : []), ...(item.extraOrigins ?? [])]; }

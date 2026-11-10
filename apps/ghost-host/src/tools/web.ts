@@ -82,10 +82,11 @@ function failure(result: ReachResult): CommandError {
 }
 
 /** The untrusted-data warning, then one block per item, within {@link MAX_RESULT_CHARS}. */
-function render(result: ReachResult): ToolExecutionResult {
+function render(result: ReachResult, sources: readonly (string | null)[] = []): ToolExecutionResult {
   if (!result.ok) throw failure(result);
-  const blocks = result.items.map((item) => {
-    const head = [item.title ?? "(untitled)", item.url].filter((part) => part !== null).join(" — ");
+  const blocks = result.items.map((item, index) => {
+    const source = sources[index] ? `[${sources[index]}] ` : "";
+    const head = source + [item.title ?? "(untitled)", item.url].filter((part) => part !== null).join(" — ");
     const meta = [item.author, item.publishedAt].filter((part) => part !== null).join(", ");
     const body = item.text === null ? "" : `\n${clip(item.text, MAX_ITEM_CHARS)}`;
     return meta === "" ? `${head}${body}` : `${head} (${meta})${body}`;
@@ -136,16 +137,21 @@ export function createWebTools(core: Core, reach: ReachPort): Extension {
 
   const webRead = defineTool({
     name: "web_read",
-    description: `Read one http(s) page and return its text. Local, private and loopback addresses are refused. ${UNTRUSTED}`,
+    description: `Read one http(s) page and return its text, prefixed with its source id [S-…]. Cite facts from it with that id, and put an exact quote right before the id ("…" [S-…]) when wording matters; source_check verifies a quote. Local, private and loopback addresses are refused. ${UNTRUSTED}`,
     parameters: Type.Object({
       url: Type.String({ minLength: 1, maxLength: 2048, description: "The http(s) URL to read" }),
     }),
     replay: "safe",
     async execute(args, api) {
       try {
-        requireAllowed(core, api, "web_read");
+        const scope = requireAllowed(core, api, "web_read");
         const url = await assertFetchableUrl(args.url, "url");
-        return render(await reach.read(url.href));
+        const result = await reach.read(url.href);
+        // Every page read is kept as a citable snapshot; the full text is stored even where the reply is clipped.
+        const sources = result.ok && core.sources
+          ? result.items.map((item) => item.text ? core.sources!.record({ url: item.url ?? url.href, title: item.title, text: item.text, ghostId: scope.ghost.id, conversationId: scope.conversation.id }).id : null)
+          : [];
+        return render(result, sources);
       } catch (error) {
         return errorResult(error);
       }

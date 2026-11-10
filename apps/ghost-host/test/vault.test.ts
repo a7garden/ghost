@@ -33,6 +33,21 @@ describe("Shade origin and password rules", () => {
   });
 });
 
+describe("extra login origins", () => {
+  test("normalizes exact extra origins, matches them in listFor, clears them and refuses them on cards", () => {
+    const { vault } = fixture();
+    const item = vault.create(login({ extraOrigins: ["https://LOGIN.example.com:443/", "https://example.com", "https://login.example.com"] }));
+    expect(item.origin).toBe("https://example.com");
+    expect(item.extraOrigins).toEqual(["https://login.example.com"]);
+    expect(vault.listFor("ghost-a", { origin: "https://login.example.com" }).map((row) => row.id)).toEqual([item.id]);
+    expect(vault.listFor("ghost-a", { origin: "https://other.example.com" })).toEqual([]);
+    expect(vault.update(item.id, { title: "renamed" }).extraOrigins).toEqual(["https://login.example.com"]);
+    expect(vault.update(item.id, { extraOrigins: [] }).extraOrigins).toBeUndefined();
+    for (const extraOrigins of [["http://login.example.com"], ["https://example.com/login"], Array.from({ length: 9 }, (_, n) => `https://l${n}.example.com`)]) expect(() => vault.create(login({ extraOrigins }))).toThrow();
+    expect(() => vault.create({ kind: "card", title: "Card", card: { number: "4111 1111 1111 1111", expiry: "12/30", cvc: "123", name: "Owner" }, extraOrigins: ["https://pay.example.com"] })).toThrow("fields do not belong to vault item kind");
+  });
+});
+
 describe("encrypted vault", () => {
   test("encrypts fields and their history, restricts files and persists grants", () => {
     const { root, vault, dbPath } = fixture();

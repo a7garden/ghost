@@ -45,10 +45,14 @@ export type Look = Static<typeof Look>;
 export const GhostState = Type.Union([Type.Literal("active"), Type.Literal("paused"), Type.Literal("retired")]);
 export type GhostState = Static<typeof GhostState>;
 
-/** Host execution is unrestricted PC access, not filesystem confinement. */
+/**
+ * Host execution is unrestricted PC access, not filesystem confinement. With `worktree` the cwd must be
+ * a git repository: the Host gives the Work its own worktree on branch `ghost/<work>` and runs there,
+ * so the owner's checkout is never edited and Works on different worktrees run concurrently.
+ */
 export const ExecutionTarget = Type.Union([
   Type.Object({ kind: Type.Literal("container") }),
-  Type.Object({ kind: Type.Literal("host"), cwd: Type.String({ minLength: 1, maxLength: 4096 }) }),
+  Type.Object({ kind: Type.Literal("host"), cwd: Type.String({ minLength: 1, maxLength: 4096 }), worktree: Type.Optional(Type.Boolean()) }),
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTarget>;
 
@@ -254,6 +258,8 @@ export const Check = Type.Union([
   Type.Object({ kind: Type.Literal("artifact_contains"), name: Type.String({ minLength: 1 }), text: Type.String({ minLength: 1 }) }),
   Type.Object({ kind: Type.Literal("command_exit_zero"), command: Type.String({ minLength: 1 }) }),
   Type.Object({ kind: Type.Literal("command_stdout"), command: Type.String({ minLength: 1 }), stdout: Type.String() }),
+  /** The artifact cites recorded sources (`[S-…]`) only, and every quote placed right before a citation is in that source. */
+  Type.Object({ kind: Type.Literal("artifact_citations"), name: Type.String({ minLength: 1 }) }),
 ]);
 export type Check = Static<typeof Check>;
 
@@ -401,6 +407,8 @@ export const VaultItem = Type.Object({
   title: Type.String({ minLength: 1, maxLength: 256 }),
   /** Canonical https origin a login or secret belongs to. */
   origin: nullable(Type.String({ maxLength: 512 })),
+  /** More exact https origins where the same login is entered, such as a separate login host (`https://login.example.com`). */
+  extraOrigins: Type.Optional(Type.Array(Type.String({ maxLength: 512 }), { maxItems: 8 })),
   username: nullable(Type.String({ maxLength: 512 })),
   cardLast4: nullable(Type.String({ maxLength: 4 })),
   cardExpiry: nullable(Type.String({ maxLength: 16 })),
@@ -427,10 +435,15 @@ export const SecureFormRequest = Type.Object({
 });
 export type SecureFormRequest = Static<typeof SecureFormRequest>;
 
-/** `proposal.browserHandoff` of a `question` decision: a visible browser window waits for the owner. */
+/**
+ * `proposal.browserHandoff` of a `question` decision: the Ghost's browser waits for the owner. With `live`
+ * the owner works it from any paired device through the Host's live view (and may open it as a Mac window);
+ * without it (older decisions) a visible Mac window was opened when the question was asked.
+ */
 export const BrowserHandoff = Type.Object({
   url: nullable(Type.String({ maxLength: 2048 })),
   reason: Type.String({ maxLength: 2048 }),
+  live: Type.Optional(Type.Boolean()),
 });
 export type BrowserHandoff = Static<typeof BrowserHandoff>;
 

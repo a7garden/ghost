@@ -187,6 +187,7 @@ class HostEngine implements Engine {
           if (work?.activityId && (!activity || !activity.tools.some((name) => name === tool.name))) continue;
         }
         if (tool.name.startsWith("activity_") && tool.name !== "activity_propose" && (conversation.kind !== "work" || !work?.activityId)) continue;
+        if (tool.name.startsWith("source_") && conversation.kind !== "review" && (!ghost.tools.includes("web_read") || (work?.toolScope && !work.toolScope.includes("web_read")))) continue;
         if ((tool.name === "activity_propose" || tool.name === "document_propose") && conversation.kind !== "direct") continue;
         if (tool.name === "activity_read" && activity?.source.kind === "schedule") continue;
         if (tool.name === "activity_action" && (!activity || activity.policy.externalActions === "deny" || activityRun?.dryRun)) continue;

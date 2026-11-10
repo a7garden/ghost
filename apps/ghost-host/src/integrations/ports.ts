@@ -204,6 +204,17 @@ export interface BrowserCommandResult {
   error: string | null;
 }
 
+/** One live-view frame: base64 JPEG of the viewport at CSS-pixel size `width`×`height`. */
+export interface BrowserFrame { image: string; mediaType: "image/jpeg"; width: number; height: number; url: string; title: string }
+
+/** Tap coordinates are fractions of the frame (0–1), so any screen size maps onto the same viewport. */
+export type BrowserControl =
+  | { type: "tap"; x: number; y: number }
+  | { type: "text"; text: string }
+  | { type: "key"; key: "Enter" | "Tab" | "Backspace" | "Escape" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" }
+  | { type: "scroll"; dy: number }
+  | { type: "navigate"; action: "back" | "forward" | "reload" };
+
 export interface BrowserHandoffEnd {
   /** The headed page URL could not be recovered; the headless session resumed at about:blank. */
   fallback: boolean;
@@ -227,6 +238,10 @@ export interface BrowserPort {
   run(session: BrowserSessionRef, argv: string[], options?: BrowserRunOptions): Promise<BrowserCommandResult>;
   /** Reopen the session in a visible window (same Ghost login state) at `url` so the owner can act. */
   handoff(session: BrowserSessionRef, url: string | null): Promise<void>;
+  /** Owner live view during a handoff: the visible viewport as a JPEG, never shown to a model. */
+  view(session: BrowserSessionRef): Promise<BrowserFrame>;
+  /** One owner input during a handoff, from any paired device. Not a Ghost effect. */
+  control(session: BrowserSessionRef, input: BrowserControl): Promise<void>;
   /** Save the headed state and reopen headless at the owner's final page before the next command. */
   endHandoff(session: BrowserSessionRef): Promise<BrowserHandoffEnd>;
   /** Close the conversation's session; the Ghost's login state is saved. */

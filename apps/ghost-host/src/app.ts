@@ -24,6 +24,7 @@ import { HostWatch } from "./core/hostwatch.ts";
 import { ProviderCatalog } from "./integrations/provider-catalog.ts";
 import { settingsView } from "./core/commands.ts";
 import { SourceConnections } from "./integrations/activity-sources.ts";
+import { SourceStore } from "./stores/sources.ts";
 
 export interface App {
   core: Core;
@@ -33,6 +34,8 @@ export interface App {
   skills: SkillsPort | null;
   host: HostPort | null;
   vault: Vault;
+  /** Host-side Chrome; the owner's handoff live view reaches it through the API. */
+  browser: BrowserPort | null;
   close(): Promise<void>;
 }
 
@@ -65,6 +68,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedVault: Vault | null = null;
   let openedBrowser: BrowserPort | null = null;
   let openedSources: SourceConnections | null = null;
+  let openedSourceStore: SourceStore | null = null;
   let unsafeEngine = false;
   let coreStopped = false;
   let coreDrained = false;
@@ -99,6 +103,7 @@ export async function openApp(config: Config): Promise<App> {
       // No tool can run any more: end browser sessions (login state saved) and seal the vault.
       await attempt(async () => { await openedBrowser?.shutdown(); openedBrowser = null; });
       await attempt(() => { openedVault?.close(); openedVault = null; });
+      await attempt(() => { openedSourceStore?.close(); openedSourceStore = null; });
       // Chrome sessions still running keep ownership: close() can retry their shutdown.
       if (!openedBrowser) {
         await attempt(() => { openedLedger?.close(); openedLedger = null; });
@@ -122,6 +127,7 @@ export async function openApp(config: Config): Promise<App> {
       catalog: openedCatalog,
       codexCachePath: join(config.root, "codex-models.json"),
       activitySources: openedSources,
+      sources: (openedSourceStore = new SourceStore(config.root)),
     }));
     const documents = createDocuments(core);
     const skills = createSkills(config);
@@ -139,6 +145,7 @@ export async function openApp(config: Config): Promise<App> {
       skills,
       host,
       vault,
+      browser,
       close,
     };
   } catch (error) {
@@ -187,7 +194,7 @@ export async function serve(config: Config) {
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault, browser: app.browser });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });

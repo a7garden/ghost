@@ -5,6 +5,7 @@ import { Button, Checkbox, FormField, InlineError, Input } from '../ui'
 import type { Decision, SecureFormRequest, State, VaultItemKind, WorkResult } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
 import { ArtifactPreview } from '../components/ArtifactPreview';
+import { BrowserLiveView } from './BrowserLiveView';
 import { MessageBody } from '../components/MessageBody';
 import { useHost } from '../host/context';
 import { browserHandoffProposal, decisionChip, decisionHeading, emptySecureForm, handoffDoneAnswer,
@@ -228,9 +229,12 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
       onResolved={() => onResolved('answer')} onDecline={() => resolve('deny')}/>}
 
     {!secureForm && handoff && <div className="decision__handoff">
-      <p className="decision__handoff-note"><Monitor size={14} aria-hidden="true"/>Mac에서 Chrome 창을 열어 두었습니다. 창에서 직접 마무리해 주세요.</p>
+      <p className="decision__handoff-note"><Monitor size={14} aria-hidden="true"/>{handoff.live
+        ? 'Ghost의 브라우저입니다. 아래 화면을 탭하고 글자를 보내 직접 마무리한 뒤 「다 했어요」를 눌러 주세요.'
+        : 'Mac에서 Chrome 창을 열어 두었습니다. 창에서 직접 마무리해 주세요.'}</p>
       {handoff.url && <p className="decision__handoff-url">{handoff.url}</p>}
       {handoff.reason.trim() && handoff.reason.trim() !== decision.detail.trim() && <p className="decision__request-reason">{handoff.reason}</p>}
+      {decision.state === 'pending' && <BrowserLiveView decisionId={decision.id} disabled={busy}/>}
     </div>}
 
     {isQuestion && !secureForm && !handoff && decision.options.length > 0 && <div className="decision__options" role="group" aria-label="추천 답변">
@@ -381,6 +385,20 @@ function RequestPreview({ value }: { value: Record<string, unknown> }) {
       {reason && <p className="decision__request-reason">{reason}</p>}
       <pre className="decision__request">{cwd && <span>{cwd} </span>}<span aria-hidden="true">$ </span>{command}</pre>
       {risk && <p className="decision__request-risk" data-risk={commandRiskIsHigh(value) ? 'high' : undefined}>{risk}</p>}
+    </div>;
+  }
+  // A browser click approval: the merchant and total the host read off the page come first, not the raw JSON.
+  const merchant = typeof value.merchant === 'string' && value.merchant ? value.merchant : null;
+  if (merchant) {
+    const page = value.page && typeof value.page === 'object' ? value.page as { checkout?: unknown } : null;
+    const total = typeof value.total === 'string' && value.total ? value.total : page?.checkout ? '페이지에서 읽지 못했습니다 · 화면에서 직접 확인하세요' : '없음';
+    return <div className="decision__request-block">
+      <dl className="decision__facts">
+        <div><dt>상점</dt><dd>{merchant}</dd></div>
+        <div><dt>금액</dt><dd className="tabular">{total}</dd></div>
+      </dl>
+      <p className="decision__request-risk">승인 뒤 금액이나 사이트가 바뀌면 누르지 않습니다.</p>
+      <details className="decision__request-more"><summary>요청 내용 보기</summary><pre className="decision__request">{json}</pre></details>
     </div>;
   }
   if (json.length > 480) return <details className="decision__request-more"><summary>요청 내용 보기</summary><pre className="decision__request">{json}</pre></details>;

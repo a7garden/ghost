@@ -1,6 +1,7 @@
 import type { Check, Work } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { sha256 } from "./ids.ts";
+import { citationFailures } from "../stores/sources.ts";
 
 /** Recorded result of a `bash` effect. The bash tool must write exactly this JSON. */
 export interface ShellResult {
@@ -51,6 +52,24 @@ export async function verifyChecks(core: Core, work: Work, checks: readonly Chec
         }
         if (check.kind === "artifact_sha256" && artifact.digest !== check.sha256) failures.push(`artifact ${check.name} has sha256 ${artifact.digest}, expected ${check.sha256}`);
         if (check.kind === "artifact_contains" && !new TextDecoder().decode(bytes).includes(check.text)) failures.push(`artifact ${check.name} does not contain the expected text`);
+        break;
+      }
+      case "artifact_citations": {
+        const artifact = artifacts.find((item) => item.name === check.name);
+        if (!artifact) {
+          failures.push(`artifact ${check.name} is missing from the completed result; include its exact name in complete.artifacts`);
+          break;
+        }
+        const bytes = await core.artifacts.read(artifact.digest);
+        if (sha256(bytes) !== artifact.digest) {
+          failures.push(`artifact ${check.name} does not match its recorded digest`);
+          break;
+        }
+        if (!core.sources) {
+          failures.push("citation checks need the Host source store, which is not available");
+          break;
+        }
+        for (const problem of citationFailures(core.sources, new TextDecoder().decode(bytes))) failures.push(`artifact ${check.name} ${problem}`);
         break;
       }
       case "command_exit_zero":

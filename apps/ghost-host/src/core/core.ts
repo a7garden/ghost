@@ -13,6 +13,7 @@ import { CodexCatalog } from "../integrations/codex-catalog.ts";
 import { Activities } from "./activities.ts";
 import type { ActivitySourcePort } from "../integrations/activity-sources.ts";
 import { Autonomy, type AutonomyDeps } from "./autonomy.ts";
+import type { SourceStore } from "../stores/sources.ts";
 
 export interface CoreDeps {
   ledger: Ledger;
@@ -26,6 +27,8 @@ export interface CoreDeps {
   log?: (message: string, detail?: unknown) => void;
   /** Git readers for the self-directed drive; tests substitute them. */
   autonomy?: AutonomyDeps;
+  /** Snapshots of pages read for Ghosts, so citations can be checked; null leaves citation checks failing closed. */
+  sources?: SourceStore | null;
 }
 
 /**
@@ -47,6 +50,7 @@ export class Core implements EngineEvents {
   readonly activities: Activities;
   readonly autonomy: Autonomy;
   readonly activitySources: ActivitySourcePort | null;
+  readonly sources: SourceStore | null;
   readonly log: (message: string, detail?: unknown) => void;
   private engineRef: Engine | null = null;
   private readonly lanes = new Map<string, Promise<void>>();
@@ -70,6 +74,7 @@ export class Core implements EngineEvents {
     this.decisions = new Decisions(this);
     this.schedules = new Schedules(this);
     this.activitySources = deps.activitySources ?? null;
+    this.sources = deps.sources ?? null;
     this.activities = new Activities(this, this.activitySources);
     this.autonomy = new Autonomy(this, deps.autonomy);
     const grants = new Map(this.ledger.ghosts().map((ghost) => [ghost.id, ghost]));

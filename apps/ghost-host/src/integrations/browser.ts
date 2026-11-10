@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Config } from "../config.ts";
 import { CommandError } from "../core/errors.ts";
 import { NoEffect, KnownOutcome } from "../core/effects.ts";
-import type { BrowserCommandResult, BrowserPort, BrowserRunOptions, BrowserSessionRef } from "./ports.ts";
+import type { BrowserCommandResult, BrowserControl, BrowserFrame, BrowserPort, BrowserRunOptions, BrowserSessionRef } from "./ports.ts";
 import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
 import { assertFetchableUrl } from "./netguard.ts";
 import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
@@ -21,6 +21,7 @@ const NETWORK_INIT = `(() => {
     Object.defineProperty(globalThis, name, { value: undefined, writable: false, configurable: false });
   }
 })();`;
+const VIEWPORT_SCRIPT = `JSON.stringify({ w: innerWidth, h: innerHeight, url: location.href, title: document.title })`;
 const expand = (path: string) => path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 const nameFor = (id: string) => `ghost-${createHash("sha256").update(id).digest("hex").slice(0, 24)}`;
 interface Session {
@@ -200,14 +201,14 @@ export class AgentBrowser implements BrowserPort {
       throw error;
     } finally { closeSync(fd); }
   }
-  private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number }): Promise<BrowserCommandResult> {
+  private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
     const proxy = await (this.proxy ??= createEgressProxy());
     const name = nameFor(session.ref.conversationId);
     const download = join(this.root, "browser", "downloads", name);
     mkdirSync(download, { recursive: true, mode: 0o700 });
     if (argv[0] !== "close") try { this.checkBudget(session); }
     catch { await this.stopDownloads(session); throw new CommandError("unavailable", "Browser download limit exceeded; session closed"); }
-    const screenshot = argv[0] === "screenshot" ? join(download, `${randomUUID()}.png`) : null;
+    const screenshot = argv[0] === "screenshot" ? join(download, `${randomUUID()}.${argv.includes("jpeg") ? "jpg" : "png"}`) : null;
     const command = screenshot ? ["screenshot", screenshot, ...argv.slice(1)] : argv;
     const args = [expand(this.config.executable), "--session", name, "--namespace", this.namespace,
       "--restore", `ghost-${session.ref.ghostId}`, "--config", this.configPath,
@@ -267,6 +268,11 @@ export class AgentBrowser implements BrowserPort {
       if (timedOut || exceeded || exit !== 0) throw new CommandError("unavailable", timedOut ? "Browser command deadline exceeded; outcome may be unknown" : "Browser command failed; outcome may be unknown");
       let parsed: { success?: boolean; data?: unknown };
       try { parsed = JSON.parse(out); } catch { throw new CommandError("unavailable", "Browser returned an invalid response"); }
+      // An owner-input batch reports success only; its results may echo what the owner typed.
+      if (options?.batch) {
+        const ok = Array.isArray(parsed) && parsed.length > 0 && parsed.every((entry) => entry && typeof entry === "object" && "error" in entry && entry.error === null);
+        return { ok, data: null, error: ok ? null : "Browser input failed" };
+      }
       // Secret eval responses are an allowlisted status only. Never forward raw output or an error.
       if (options?.stdin !== undefined) {
         const value = parsed.data && typeof parsed.data === "object" && "result" in parsed.data ? parsed.data.result : null;
@@ -411,8 +417,54 @@ export class AgentBrowser implements BrowserPort {
       if (!(await this.invoke(session, ["open", session.handoffUrl])).ok) throw new CommandError("unavailable", "Could not open browser handoff");
     });
   }
+  /** The owner's live view goes straight to `invoke`: the Ghost-facing screenshot blocks guard models, not the owner. */
+  view(ref: BrowserSessionRef): Promise<BrowserFrame> {
+    return this.enqueueSession(ref, async (session) => {
+      const page = await this.invoke(session, ["eval", VIEWPORT_SCRIPT]);
+      const raw = page.data && typeof page.data === "object" && "result" in page.data ? page.data.result : null;
+      let info: { w?: unknown; h?: unknown; url?: unknown; title?: unknown } = {};
+      try { if (typeof raw === "string") info = JSON.parse(raw); } catch {}
+      const width = typeof info.w === "number" && info.w > 0 ? Math.round(info.w) : 0, height = typeof info.h === "number" && info.h > 0 ? Math.round(info.h) : 0;
+      if (!page.ok || !width || !height) throw new CommandError("unavailable", "The browser page could not be read");
+      const shot = await this.invoke(session, ["screenshot", "--screenshot-format", "jpeg", "--screenshot-quality", "60"]);
+      if (!shot.ok || !shot.data || typeof shot.data !== "object" || !("image" in shot.data) || typeof shot.data.image !== "string") throw new CommandError("unavailable", "The browser screenshot failed");
+      return { image: shot.data.image, mediaType: "image/jpeg", width, height, url: typeof info.url === "string" ? info.url.slice(0, 2048) : "", title: typeof info.title === "string" ? info.title.slice(0, 256) : "" };
+    });
+  }
+  control(ref: BrowserSessionRef, input: BrowserControl): Promise<void> {
+    return this.enqueueSession(ref, async (session) => {
+      const run = async (argv: string[], options?: { stdin?: string; batch?: boolean }) => {
+        const result = await this.invoke(session, argv, options);
+        if (!result.ok) throw new CommandError("unavailable", "Browser input failed");
+        return result;
+      };
+      switch (input.type) {
+        case "tap": {
+          const page = await run(["eval", VIEWPORT_SCRIPT]);
+          const raw = page.data && typeof page.data === "object" && "result" in page.data ? page.data.result : null;
+          let size: { w?: unknown; h?: unknown } = {};
+          try { if (typeof raw === "string") size = JSON.parse(raw); } catch {}
+          if (typeof size.w !== "number" || typeof size.h !== "number") throw new CommandError("unavailable", "The browser page could not be read");
+          const x = String(Math.round(Math.min(1, Math.max(0, input.x)) * (size.w - 1))), y = String(Math.round(Math.min(1, Math.max(0, input.y)) * (size.h - 1)));
+          await run(["mouse", "move", x, y]); await run(["mouse", "down"]); await run(["mouse", "up"]);
+          return;
+        }
+        case "text":
+          // The owner may type a password here: it travels over stdin (a one-command batch), never in argv,
+          // which also keeps text such as "--json" from being read as an agent-browser flag.
+          await run(["batch", "--bail", "--omit-command"], { stdin: JSON.stringify([["keyboard", "inserttext", input.text]]), batch: true });
+          return;
+        case "key": await run(["press", input.key]); return;
+        case "scroll": await run(["scroll", input.dy < 0 ? "up" : "down", String(Math.min(10_000, Math.max(1, Math.round(Math.abs(input.dy)))))]); return;
+        case "navigate": await run([input.action]); return;
+      }
+    });
+  }
   endHandoff(ref: BrowserSessionRef) {
     return this.enqueueSession(ref, async (session) => {
+      // A live-view handoff never left headless mode: the Ghost continues on the page the owner left. A session
+      // lost to a host restart is new and empty either way, so there is nothing to reopen.
+      if (!session.headed && session.handoffUrl === null) return { fallback: false };
       if (session.headed) {
         try {
           const current = await this.invoke(session, ["get", "url"]);
@@ -431,9 +483,6 @@ export class AgentBrowser implements BrowserPort {
         session.screenshotsBlocked = false;
         session.passwordScreenshots.clear();
         this.clearFiles(session);
-      } else if (session.handoffUrl === null) {
-        session.handoffUrl = "about:blank";
-        session.handoffFallback = true;
       }
       // Retain the captured URL on this session: a failed reopen can be explicitly retried.
       if (!(await this.invoke(session, ["open", session.handoffUrl!])).ok) throw new CommandError("unavailable", "Could not resume the browser headlessly");

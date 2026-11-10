@@ -45,6 +45,7 @@ export type VaultItemWrite = {
   kind: VaultItemKind;
   title: string;
   origin?: string;
+  extraOrigins?: string[];
   username?: string;
   password?: string;
   totp?: string;
@@ -54,6 +55,17 @@ export type VaultItemWrite = {
   hints?: string;
   ghostIds?: string[];
 };
+
+/** One live-view frame of a browser handoff (see the host's `/api/browser/handoffs/:id/frame`). */
+export type BrowserFrame = { image: string; mediaType: 'image/jpeg'; width: number; height: number; url: string; title: string };
+
+/** One owner input into a handoff browser. */
+export type BrowserControl =
+  | { type: 'tap'; x: number; y: number }
+  | { type: 'text'; text: string }
+  | { type: 'key'; key: 'Enter' | 'Tab' | 'Backspace' | 'Escape' | 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' }
+  | { type: 'scroll'; dy: number }
+  | { type: 'navigate'; action: 'back' | 'forward' | 'reload' };
 
 /** The result of importing an Apple Passwords or Chrome CSV export. */
 export type VaultImportResult = { imported: number; skipped: number; rejected: number };
@@ -179,6 +191,21 @@ export class HostClient {
    */
   async vaultRequestAnswer(decisionId: string, answer: Record<string, unknown>): Promise<void> {
     await this.json(`/api/vault/requests/${encodeURIComponent(decisionId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(answer) });
+  }
+
+  /** The live frame of a pending browser handoff: a JPEG of the Ghost's page and its CSS-pixel size. */
+  browserFrame(decisionId: string): Promise<BrowserFrame> {
+    return this.json(`/api/browser/handoffs/${encodeURIComponent(decisionId)}/frame`);
+  }
+
+  /** One owner input into a pending handoff's browser; tap coordinates are fractions of the frame. */
+  async browserControl(decisionId: string, input: BrowserControl): Promise<void> {
+    await this.json(`/api/browser/handoffs/${encodeURIComponent(decisionId)}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+  }
+
+  /** Open the same handoff session as a visible Chrome window on the Mac running the host. */
+  async browserWindow(decisionId: string): Promise<void> {
+    await this.json(`/api/browser/handoffs/${encodeURIComponent(decisionId)}/window`, { method: 'POST' });
   }
 
   /** Upload owner message bytes; the returned reference can be passed to message.send. */

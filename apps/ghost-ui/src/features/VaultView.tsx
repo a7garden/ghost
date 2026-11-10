@@ -15,6 +15,8 @@ const kindLabels: Record<VaultItemKind, string> = { login: '로그인', card: '�
 export type VaultForm = {
   kind: VaultItemKind;
   title: string; origin: string; username: string; password: string; totp: string;
+  /** More exact login addresses, separated by commas or spaces; `hadExtraOrigins` lets an edit clear them. */
+  extraOrigins: string; hadExtraOrigins: boolean;
   cardNumber: string; cardExpiry: string; cardCvc: string; cardName: string;
   contactName: string; contactPhone: string; contactEmail: string; contactAddress: string;
   value: string; hints: string; ghostIds: string[];
@@ -22,6 +24,7 @@ export type VaultForm = {
 
 export const emptyVaultForm: VaultForm = {
   kind: 'login', title: '', origin: '', username: '', password: '', totp: '',
+  extraOrigins: '', hadExtraOrigins: false,
   cardNumber: '', cardExpiry: '', cardCvc: '', cardName: '',
   contactName: '', contactPhone: '', contactEmail: '', contactAddress: '',
   value: '', hints: '', ghostIds: [],
@@ -31,6 +34,7 @@ export const emptyVaultForm: VaultForm = {
 export function vaultFormFromItem(item: VaultItem): VaultForm {
   return {
     ...emptyVaultForm, kind: item.kind, title: item.title, origin: item.origin ?? '', username: item.username ?? '',
+    extraOrigins: (item.extraOrigins ?? []).join(', '), hadExtraOrigins: Boolean(item.extraOrigins?.length),
     cardExpiry: item.cardExpiry ?? '',
     contactName: item.contact?.name ?? '', contactPhone: item.contact?.phone ?? '',
     contactEmail: item.contact?.email ?? '', contactAddress: item.contact?.address ?? '',
@@ -59,7 +63,11 @@ export function vaultWriteBody(form: VaultForm, mode: 'create' | 'edit'): { body
     const origin = form.origin.trim();
     if (!origin || !origin.startsWith('https://')) return { error: '로그인에는 https://로 시작하는 주소가 필요합니다.' };
     if (mode === 'create' && (!form.username.trim() || !form.password)) return { error: '사용자 이름과 비밀번호를 입력해 주세요.' };
+    const extraOrigins = form.extraOrigins.split(/[\s,]+/).map(value => value.trim()).filter(Boolean);
+    if (extraOrigins.some(value => !value.startsWith('https://'))) return { error: '추가 로그인 주소도 https://로 시작해야 합니다.' };
+    if (extraOrigins.length > 8) return { error: '추가 로그인 주소는 8개까지 적을 수 있습니다.' };
     return { body: { ...base, kind: form.kind, origin, username: form.username.trim(),
+      ...(extraOrigins.length || form.hadExtraOrigins ? { extraOrigins } : {}),
       ...(form.password ? { password: form.password } : {}), ...(form.totp.trim() ? { totp: form.totp.trim() } : {}) } };
   }
   if (form.kind === 'card') {
@@ -248,6 +256,8 @@ function VaultItemDialog({ item, ghosts, onClose, onSave }: {
       {field('title', '이름', { required: true })}
       {(kind === 'login' || kind === 'secret') && field('origin', '주소', { placeholder: 'https://example.com', autoComplete: 'off',
         description: kind === 'login' ? '이 주소의 로그인에만 씁니다.' : '비우면 저장된 주소를 유지합니다.' })}
+      {kind === 'login' && field('extraOrigins', '추가 로그인 주소', { placeholder: 'https://login.example.com', autoComplete: 'off',
+        description: '로그인 화면이 다른 주소에 있을 때만 적습니다. 여러 개는 쉼표로 나눕니다. 정확히 같은 주소에서만 채웁니다.' })}
       {kind === 'login' && <>
         {field('username', '사용자 이름', { autoComplete: 'off' })}
         {field('password', '비밀번호', { password: true, generate: true, autoComplete: 'off',

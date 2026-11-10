@@ -215,6 +215,23 @@ body {
 .decision__handoff-note { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--ghost-ink2); font-size: var(--text-ui); }
 .decision__handoff-note svg { flex: none; color: var(--ghost-ink3); }
 .decision__handoff-url { margin: 0; color: var(--ghost-ink3); font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.decision__facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+.decision__facts > div { display: contents; }
+.decision__facts dt { color: var(--ghost-ink3); font-size: var(--text-ui); }
+.decision__facts dd { margin: 0; color: var(--ghost-ink); font-weight: 600; overflow-wrap: anywhere; }
+.browser-live { display: grid; gap: 8px; margin-top: 4px; min-width: 0; }
+.browser-live__bar, .browser-live__keys { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.browser-live__url { flex: 1; min-width: 0; color: var(--ghost-ink3); font: 12px/1.5 var(--font-mono); }
+.browser-live__screen { position: relative; border-radius: 10px; overflow: hidden; background: var(--ghost-surface); border: 1px solid var(--ghost-line-strong); }
+.browser-live__screen[aria-busy="true"] { opacity: .75; }
+.browser-live__screen img { display: block; width: 100%; height: auto; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+.browser-live__placeholder { display: grid; place-items: center; aspect-ratio: 16 / 9; color: var(--ghost-ink3); font-size: var(--text-ui); }
+.browser-live__icon, .browser-live__key { display: inline-grid; place-items: center; min-width: 34px; height: 34px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--ghost-line-strong); background: transparent; color: var(--ghost-ink2); font-size: 12px; }
+.browser-live__icon:disabled, .browser-live__key:disabled { opacity: .5; }
+.browser-live__type { display: flex; gap: 6px; }
+.browser-live__type > :first-child { flex: 1; min-width: 0; }
+.browser-live__window { display: inline-flex; align-items: center; gap: 6px; justify-self: start; padding: 0; border: 0; background: none; color: var(--ghost-ink3); font-size: 12px; }
+.browser-live__window:disabled { opacity: .7; }
 .decision__secure { display: grid; gap: 12px; padding: 16px; border-radius: var(--radius-card); background: var(--ghost-inset); }
 .decision__secure-origin { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--ghost-ink3); font: 500 12px/1.4 var(--font-mono); overflow-wrap: anywhere; }
 .decision__secure-origin svg { flex: none; }

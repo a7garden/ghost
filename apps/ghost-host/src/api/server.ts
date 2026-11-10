@@ -26,7 +26,7 @@ import {
   parse,
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
-import type { DocumentsPort, SkillsPort } from "../integrations/ports.ts";
+import type { BrowserPort, DocumentsPort, SkillsPort } from "../integrations/ports.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { Access } from "../core/access.ts";
@@ -38,6 +38,7 @@ import { HOST_VERSION, snapshot, workDetail } from "../core/state.ts";
 import { NotFound } from "../ledger/ledger.ts";
 import type { Vault } from "../stores/vault.ts";
 import { serveVault } from "./vault.ts";
+import { serveBrowser } from "./browser.ts";
 
 const HTTP_STATUS: Record<ErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503, internal: 500 };
 const DIGEST = /^[0-9a-f]{64}$/;
@@ -93,8 +94,8 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; vault?: Vault | null }): { port: number; stop(): Promise<void> } {
-  const { core, config, ownerToken, documents, skills, vault = null } = deps;
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; vault?: Vault | null; browser?: BrowserPort | null }): { port: number; stop(): Promise<void> } {
+  const { core, config, ownerToken, documents, skills, vault = null, browser = null } = deps;
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
@@ -427,6 +428,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     const access = authenticate(request);
     if (access === null) return error("forbidden", "missing or invalid bearer token", 401);
     if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) return serveVault(request, url, core, vault);
+    if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser);
 
     if (pathname === "/api/state" && request.method === "GET") {
       try {

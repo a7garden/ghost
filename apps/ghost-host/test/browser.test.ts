@@ -44,7 +44,11 @@ if (command[0] === "get" && command[1] === "url" && argv.includes("--headed") &&
 if (command[0] === "get" && command[1] === "text") data = { text: existsSync(root + "/page-text") ? readFileSync(root + "/page-text", "utf8") : "Submit" };
 if (command[0] === "snapshot") data = existsSync(root + "/snapshot") ? JSON.parse(readFileSync(root + "/snapshot", "utf8")) : { origin: "https://example.com/", title: "Example Domain", snapshot: "- link More information [ref=e1]", refs: { e1: { role: "link", name: "More information" } }, lifecycle: { noise: "must-not-reach-model" } };
 if (command[0] === "screenshot") { writeFileSync(command[1], Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=", "base64")); data = { path: command[1] }; }
-if (command[0] === "eval") {
+if (command[0] === "eval" && command[1] !== "--stdin") {
+  // Host-authored reads: the viewport for the owner's live view, otherwise the page facts (checkout, total).
+  data = { result: command[1].includes("innerWidth") ? JSON.stringify({ w: 1280, h: 720, url: existsSync(root + "/url") ? readFileSync(root + "/url", "utf8") : "https://example.com/", title: "Example Domain" })
+    : existsSync(root + "/facts") ? readFileSync(root + "/facts", "utf8") : JSON.stringify({ origin: "https://example.com", checkout: false, signal: null, amount: null, currency: null }) };
+} else if (command[0] === "eval") {
   const script = await Bun.stdin.text();
   if (existsSync(root + "/fail-secret")) { process.stderr.write(script); process.stdout.write(script); process.exit(1); }
   if (!script.includes('window.top !== window') || !script.includes('location.origin !==') || !script.includes('Object.getOwnPropertyDescriptor')) throw new Error("missing fill guard");
@@ -348,15 +352,17 @@ describe("browser tools", () => {
       expect(commands(f.root).filter((a) => a[0] === "click")).toHaveLength(1);
     } finally { await f.browser.shutdown(); }
   });
-  test("handoff opens a deterministic owner question; later commands lazily end headed mode", async () => {
+  test("handoff opens a live owner question; a Mac window opens only on the owner's request and ends lazily", async () => {
     const f = fixture();
     try {
       await f.call("browser_handoff", { reason: "Complete SSO" });
       const decision = f.ledger.pendingDecisions()[0]!;
-      expect(decision.kind).toBe("question"); expect(decision.proposal?.browserHandoff).toEqual({ url: "https://example.com/", reason: "Complete SSO" });
+      expect(decision.kind).toBe("question"); expect(decision.proposal?.browserHandoff).toEqual({ url: "https://example.com/", reason: "Complete SSO", live: true });
       expect(decision.title).toBe("브라우저에서 직접 처리해 주세요"); expect(decision.options).toEqual([]);
-      expect(records(f.root).some((r) => r.argv.includes("--headed"))).toBe(true);
+      expect(records(f.root).some((r) => r.argv.includes("--headed"))).toBe(false);
       expect((await f.call("browser_snapshot")).isError).toBe(true);
+      await f.browser.handoff({ ghostId: f.ghost.id, conversationId: f.direct.id }, "https://example.com/");
+      expect(records(f.root).some((r) => r.argv.includes("--headed"))).toBe(true);
       await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "Done" });
       writeFileSync(join(f.root, "url"), "https://example.com/owner-finished");
       const before = commands(f.root).filter((a) => a[0] === "close").length;
@@ -374,6 +380,7 @@ describe("browser tools", () => {
       try {
         await f.call("browser_handoff", { reason: "Finish SSO" });
         const decision = f.ledger.pendingDecisions()[0]!;
+        await f.browser.handoff({ ghostId: f.ghost.id, conversationId: f.direct.id }, "https://example.com/");
         await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "다 했어요" });
         writeFileSync(join(f.root, "headed-url-fail"), "1");
         if (pending === "browser_click") writeFileSync(join(f.root, "snapshot"), JSON.stringify({ snapshot: "blank page", refs: {} }));
@@ -390,6 +397,7 @@ describe("browser tools", () => {
     try {
       await f.call("browser_handoff", { reason: "Finish identity check" });
       const decision = f.ledger.pendingDecisions()[0]!;
+      await f.browser.handoff({ ghostId: f.ghost.id, conversationId: f.direct.id }, "https://example.com/");
       await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "다 했어요" });
       const completed = "https://example.com/completed";
       writeFileSync(join(f.root, "url"), completed);
