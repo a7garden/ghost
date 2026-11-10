@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prepareObscuraFonts } from "../src/integrations/obscura.ts";
@@ -55,4 +56,28 @@ fontTest("Obscura never grants a cache containing unrelated entries to the engin
   const root = tempDir(), directory = prepareObscuraFonts(root);
   writeFileSync(join(directory, "unrelated-owner-file"), "private", { mode: 0o600 });
   expect(() => prepareObscuraFonts(root)).toThrow("Unexpected Obscura font cache entry");
+});
+
+fontTest("Obscura recovers its interrupted font copy and fingerprint staging without losing the valid cache", () => {
+  const root = tempDir(), directory = prepareObscuraFonts(root);
+  const fontStage = join(directory, `.font-${randomUUID()}`), sourceStage = join(directory, `.source-${randomUUID()}`);
+  writeFileSync(fontStage, "interrupted font copy", { mode: 0o644 });
+  chmodSync(fontStage, 0o644);
+  writeFileSync(sourceStage, "{\"interrupted\":", { mode: 0o600 });
+  prepareObscuraFonts(root);
+  expect(existsSync(fontStage)).toBe(false);
+  expect(existsSync(sourceStage)).toBe(false);
+  expect(lstatSync(join(directory, "AppleSDGothicNeo.ttc")).size).toBe(lstatSync(source).size);
+  expect(lstatSync(join(directory, "AppleSDGothicNeo.ttc")).mode & 0o777).toBe(0o600);
+  expect(JSON.parse(readFileSync(join(directory, "source.json"), "utf8")).path).toBe(source);
+});
+
+fontTest("Obscura refuses a staged-name symlink and leaves its owner's target intact", () => {
+  const root = tempDir(), directory = prepareObscuraFonts(root), outside = join(tempDir(), "owner-data");
+  writeFileSync(outside, "owner-kept", { mode: 0o600 });
+  const staged = join(directory, `.font-${randomUUID()}`);
+  symlinkSync(outside, staged);
+  expect(() => prepareObscuraFonts(root)).toThrow();
+  expect(lstatSync(staged).isSymbolicLink()).toBe(true);
+  expect(readFileSync(outside, "utf8")).toBe("owner-kept");
 });
