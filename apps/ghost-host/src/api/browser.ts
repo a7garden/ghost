@@ -26,6 +26,10 @@ export function parseInput(value: unknown): BrowserLiveInput {
       only("type", "text");
       if (typeof a.text !== "string" || !a.text.length || a.text.length > 2000 || a.text.includes("\0")) throw invalid("text must be 1–2000 characters");
       return { type: "text", text: a.text };
+    case "viewport":
+      only("type", "width", "height");
+      if (!number(a.width, 320, 2560, true) || !number(a.height, 240, 1600, true)) throw invalid("invalid viewport size");
+      return { type: "viewport", width: a.width as number, height: a.height as number };
     case "navigate":
       only("type", "action");
       if (a.action !== "back" && a.action !== "forward" && a.action !== "reload") throw invalid("invalid navigation");
