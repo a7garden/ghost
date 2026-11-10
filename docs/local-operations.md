@@ -32,7 +32,7 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.2.0-873134c`(GitHub Release `v2.2.0`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.2.1-4d63665`(GitHub Release `v2.2.1`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -40,6 +40,14 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### ScrollRail 통일 — 2026-11-10
+
+- `v2.2.1`(`4d63665`)을 GitHub Release로 게시하고 Owner API 자체 업데이트로 2.2.0 → 2.2.1을 설치했다. `lastResult: installed`, health 2.2.1, runtime ready. Ghost 25·대화 206·맡긴 일 154의 기존 id를 모두 보존했다. 저장 형식과 Mac/iPhone 셸 버전은 바뀌지 않았다. Developer ID 서명 검증 통과, 공증은 기존과 같이 생략했다.
+- 마우스·트랙패드의 기본 스크롤바를 숨기고 기존 ScrollRail을 나머지 스크롤 영역에도 적용했다. 포인터·직접 스크롤에 위치 막대가 나타나고 자동 따라가기에는 깨우지 않는다. 가로/세로 끌기·휠, 검색 목록을 끌 때 닫히지 않음, 대화 레일 위 휠이 최신 메시지로 튕기지 않음을 확인했다. 터치는 시스템 표시를 유지한다.
+- 검사: Host 707 통과·9 생략, UI 179 통과, Rust 21 통과, 타입·빌드 통과. 전용 Playwright 2 통과, 다른 공급자 리뷰의 휠 의도 전달 누락 1건 수정. 전체 데스크톱 Playwright는 34 통과·76 실패: 확인한 실패에는 오래된 UI 스냅숏과 중복 `status` 선택자가 포함된다. 관련 없는 기준 이미지를 일괄 갱신하지 않았다.
+- 설치된 앱을 종료·재실행해 새 UI를 받게 했다. 새 창은 잠시 보였으나 실제 스크롤 검사 시 창이 없어 네이티브 입력 검증은 완료하지 못했다(강제 전면 이동 없음). 운영 Host가 제공하는 UI에서는 실제 휠 뒤 scrollTop 260, native gutter 0, ScrollRail active를 확인하고 화면을 검사했다.
+- 되돌리기: 유휴 상태에서 `current`를 `releases/2.2.0-873134c`로 바꿔 launchd를 재시작한다. 데이터·자격 복원은 필요 없다.
 
 ### iPhone 앱 OTA 업데이트 — 2026-11-10
 
