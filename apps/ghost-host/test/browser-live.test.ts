@@ -74,7 +74,9 @@ test("one upstream serves four clients, bypasses a long Ghost read and isolates 
     expect((await serveBrowser(new Request(path), path, h.core, browser)).status).toBe(409);
     h.core.stop(); h.ledger.close();
     await browser.handoff(ref, "https://example.com/");
-    await reopened.promise; // Exercises the real reconnect timer; the socket-open event is the barrier.
+    expect(events).toContainEqual({type:"end",reason:"engine_changed"});
+    stops.push(await browser.live(ref,{maxFps:8},()=>{}));
+    await reopened.promise; // Re-resolve the upstream after runtime replacement; socket-open is the barrier.
     expect(connections).toBe(2);
     await browser.close(ref);
     expect(JSON.stringify(events)).toContain('"type":"end"');

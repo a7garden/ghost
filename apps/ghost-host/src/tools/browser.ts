@@ -444,6 +444,7 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
       // 2026-11-10: the owner works the same headless session from any paired device through the live view
       // (iPhone included) and may still open it as a Mac window from there; no window opens on its own.
       const result = await core.effects.run({ conversationId: s.conversation.id, callId: api.callId, tool: "browser_handoff", input: { url, reason: a.reason }, summary: "Browser owner handoff" }, async () => {
+        await browser.handoff(sessionOf(s),url,{headed:false});
         core.ledger.tx(() => core.decisions.open({ id, kind: "question", ghostId: s.ghost.id, conversationId: s.conversation.id, workId: s.work?.id ?? null, effectId: null, title: "브라우저에서 직접 처리해 주세요", detail: a.reason, options: [], proposal: { browserHandoff: { url, reason: a.reason, live: true } } }));
         return `Browser handoff (${id}); the owner can work this browser from their phone or Mac and answers when finished`;
       });
