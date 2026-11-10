@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
 import { ActivityConfig, ConnectionConfig } from "./autonomy.ts";
+import { DutyHours } from "./duty.ts";
 import {
   Acceptance,
   ArtifactRef,
@@ -117,6 +118,10 @@ export const Command = Type.Union([
   command("schedule.delete", { scheduleId: Id }),
   /** Switch a Ghost's self-directed drive on or off. */
   command("autonomy.set", { ghostId: Id, enabled: Type.Boolean() }),
+  /** 원버튼 출근 · 퇴근. 시간표가 있으면 다음 시간표 경계까지만 유지된다. */
+  command("duty.switch", { onDuty: Type.Boolean() }),
+  /** 근무 시간표. null 이면 시간표 없이 원버튼으로만 바꾼다. */
+  command("duty.hours", { hours: nullable(DutyHours) }),
 
   // Owner-approved standing delegations and account-scoped connections.
   command("connection.upsert", {

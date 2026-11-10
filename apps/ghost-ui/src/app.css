@@ -555,3 +555,6 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .vault-grant { display: inline-flex; align-items: center; gap: 7px; color: var(--ghost-ink); font-size: var(--text-ui); cursor: pointer; }
 
 }
+
+/* 퇴근 중에는 Ghost 가 스스로 일하지 않는다는 것이 한눈에 보이도록 원버튼을 주의 색으로. */
+.shell-search[data-duty="off"] { color: var(--ghost-warning); background: var(--ghost-warning-tint); }

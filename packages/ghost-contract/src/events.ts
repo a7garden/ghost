@@ -1,5 +1,6 @@
 import { Type, type Static, type TLiteral, type TSchema } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
+import { Duty } from "./duty.ts";
 import {
   AutonomyPlan,
   Avatar,
@@ -52,6 +53,8 @@ export const LedgerEventData = Type.Union([
   upsert("connection", "connection", Connection),
   removed("connection.removed"),
   upsert("autonomy", "plan", AutonomyPlan),
+  /** 근무 상태가 바뀌었다(원버튼 · 시간표 경계 · 시간표 수정). */
+  upsert("duty", "duty", Duty),
 ]);
 export type LedgerEventData = Static<typeof LedgerEventData>;
 

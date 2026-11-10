@@ -8,7 +8,7 @@ import { shortcut } from '../ui/keys';
  * The window: a quiet sidebar on the page tone, the destination on an inset sheet,
  * and a title bar that carries location, the activity island and command search.
  */
-export function AppFrame({ desktop, macOSInset, location, island, sidebar, fill, commands, paletteOpen, onPaletteOpenChange, section, attentionCount, navigate, hideDock, children }: {
+export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar, fill, commands, paletteOpen, onPaletteOpenChange, section, attentionCount, navigate, hideDock, children }: {
   /** Inside the Tauri window: draw the draggable title bar above everything. */
   desktop: boolean;
   macOSInset: number;
@@ -16,6 +16,8 @@ export function AppFrame({ desktop, macOSInset, location, island, sidebar, fill,
   location: ReactNode;
   /** Live activity across Ghosts; renders nothing while the workspace is quiet. */
   island: ReactNode;
+  /** 출근 · 퇴근 원버튼. */
+  duty?: ReactNode;
   sidebar: ReactNode;
   /** The page owns its height and scrolling (conversations, settings). */
   fill: boolean;
@@ -39,14 +41,15 @@ export function AppFrame({ desktop, macOSInset, location, island, sidebar, fill,
     { id: 'workspace', path: '/workspace', label: '작업실', icon: PanelsTopLeft },
     { id: 'settings', path: '/settings', label: routeLabels.settings, icon: Settings },
   ];
+  const right = <span className="flex items-center gap-2">{duty}{search}</span>;
   const left = <>{desktop && <button type="button" className="shell-icon-button min-[56rem]:hidden" aria-label="전체 메뉴" onClick={() => setMenuOpen(true)}><Menu aria-hidden="true"/></button>}{location}</>;
   return <div className="shell" data-fill={fill || undefined}>
     {desktop
-      ? <TitleBar aria-label="Ghost" macOSInset={macOSInset} left={left} center={island} right={search}/>
+      ? <TitleBar aria-label="Ghost" macOSInset={macOSInset} left={left} center={island} right={right}/>
       : <header className="ghost-titlebar shell-header">
         <div className="ghost-titlebar__slot ghost-titlebar__slot--left">{left}</div>
         <div className="ghost-titlebar__slot ghost-titlebar__slot--center">{island}</div>
-        <div className="ghost-titlebar__slot ghost-titlebar__slot--right">{search}</div>
+        <div className="ghost-titlebar__slot ghost-titlebar__slot--right">{right}</div>
       </header>}
     <div className="shell-body">
       <aside className="shell-sidebar" aria-label="작업실 탐색">{sidebar}</aside>

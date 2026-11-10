@@ -3,7 +3,7 @@ import type { Acceptance, Ghost, Work, WorkDetail } from "@ghost/contract";
 import { ExecutionTarget } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
-import { invalid } from "../core/errors.ts";
+import { forbidden, invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
 import { workDetail } from "../core/state.ts";
 import { askOwnerTool, describeWorkLine, errorResult, firstLine, requireAllowed, requireOrigin, type Scope } from "./shared.ts";
@@ -46,6 +46,8 @@ export function createDirectTools(core: Core): Extension {
     async execute(args, api) {
       try {
         const scope = requireAllowed(core, api, "work_create");
+        // 퇴근 중에는 스스로 새 일을 시작하지 않는다. 소유자가 시킨 일은 막지 않는다.
+        if (args.initiative && !core.duty.onDuty()) throw forbidden("the owner is off duty: do not start new Work on your own until they are back. Record what you would do with plan_next instead.");
         const ghostId = args.ghost_id ?? scope.ghost.id;
         const work = core.works.createRoot({
           ghostId,

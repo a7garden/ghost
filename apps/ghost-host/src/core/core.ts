@@ -13,6 +13,7 @@ import { CodexCatalog } from "../integrations/codex-catalog.ts";
 import { Activities } from "./activities.ts";
 import type { ActivitySourcePort } from "../integrations/activity-sources.ts";
 import { Autonomy, type AutonomyDeps } from "./autonomy.ts";
+import { DutyClock } from "./duty.ts";
 import type { SourceStore } from "../stores/sources.ts";
 
 export interface CoreDeps {
@@ -49,6 +50,8 @@ export class Core implements EngineEvents {
   readonly schedules: Schedules;
   readonly activities: Activities;
   readonly autonomy: Autonomy;
+  /** 출근 · 퇴근. 퇴근 중에는 Ghost 가 스스로 새 일을 시작하지 않는다. */
+  readonly duty: DutyClock;
   readonly activitySources: ActivitySourcePort | null;
   readonly sources: SourceStore | null;
   readonly log: (message: string, detail?: unknown) => void;
@@ -77,6 +80,12 @@ export class Core implements EngineEvents {
     this.sources = deps.sources ?? null;
     this.activities = new Activities(this, this.activitySources);
     this.autonomy = new Autonomy(this, deps.autonomy);
+    this.duty = new DutyClock(this);
+    // 출근하면 퇴근 중에 때가 된 예약 · 활동 규칙 · 자율 깨우기를 바로 돌린다. 퇴근하면 예약 타이머를 다시 맞춘다.
+    this.duty.onChange((onDuty) => {
+      this.schedules.refresh();
+      if (onDuty) void this.autonomy.tick().catch((error) => this.log("autonomy tick after duty change failed", error));
+    });
     const grants = new Map(this.ledger.ghosts().map((ghost) => [ghost.id, ghost]));
     this.unsubscribeLedgerEvents = this.ledger.subscribe((event) => {
       if (event.data.type === "work") {
@@ -162,10 +171,12 @@ export class Core implements EngineEvents {
     this.works.recover();
     this.engine.resume();
     this.schedules.start();
+    this.duty.start();
   }
 
   stop() {
     this.unsubscribeLedgerEvents();
+    this.duty.stop();
     this.schedules.stop();
     this.activities.stop();
   }

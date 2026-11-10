@@ -202,6 +202,8 @@ export class Autonomy {
   }
 
   private async wake(now: number) {
+    // 퇴근 중에는 자율 깨우기를 하지 않는다. 계획은 그대로 남아 출근하면 깨운다.
+    if (!this.core.duty.onDuty(now)) return;
     const ledger = this.core.ledger;
     const busy = (ghost: Ghost) => ledger.findConversation(ghost.directConversationId)?.busy === true;
     const ghosts = this.ghosts().filter((ghost) => ghost.state === "active");

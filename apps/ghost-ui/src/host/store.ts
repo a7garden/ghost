@@ -67,6 +67,8 @@ export function applyEvent(state: State, data: LedgerEventData): State {
       const others = (state.autonomy ?? []).filter((plan) => plan.ghostId !== data.plan.ghostId);
       return { ...state, autonomy: [...others, data.plan] };
     }
+    case 'duty':
+      return { ...state, duty: data.duty };
   }
 }
 
