@@ -87,7 +87,7 @@ export function GhostCharacter({ size = 48, state = 'idle', animate = true, colo
       const moving = animate && !media.matches && !document.hidden;
       const life = moving && size >= LIFE_MIN_SIZE;
       stop = startGhostLife({ svg: svg.current, body: body.current, face: faceGroup.current, eyes: eyes.current, mouth: mouth.current },
-        { talk: moving && state === 'running', life, follow: life && size >= FOLLOW_MIN_SIZE });
+        { talk: moving && state === 'running', life, follow: life && size >= FOLLOW_MIN_SIZE, size });
     };
     update(); media.addEventListener('change', update); document.addEventListener('visibilitychange', update);
     return () => { stop(); media.removeEventListener('change', update); document.removeEventListener('visibilitychange', update); };
