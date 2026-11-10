@@ -3,6 +3,12 @@ import type { CSSProperties } from 'react';
 import type { LookFace, LookMark, LookShape } from '@ghost/contract';
 import type { PetState } from './sprites';
 import { faceColor, isHexColor } from './appearance';
+import { startGhostLife } from './ghostLife';
+
+/** Below this size idle life (blinks, glances) would only add noise to dense lists. */
+const LIFE_MIN_SIZE = 28;
+/** Large portraits turn to follow a nearby pointer. */
+const FOLLOW_MIN_SIZE = 56;
 
 /**
  * The built-in Ghost: the approved face (two bar eyes, a small round mouth) on a body.
@@ -16,13 +22,6 @@ function Body({ shape }: { shape: LookShape }) {
     case 'sheet': return <path d="M212 500A288 288 0 0 1 788 500V770Q716 830 644 770Q572 830 500 770Q428 830 356 770Q284 830 212 770Z" fill="var(--g-body)"/>;
     default: return <circle cx="500" cy="500" r="288" fill="var(--g-body)"/>;
   }
-}
-const rhythm = [1, 1.56, 1.13, 1.42, 1.08, 1.70, 1.20, 1.50, 1.04, 1];
-export function ghostMotion(seconds: number) {
-  const phase = ((seconds % 5) + 5) % 5 / 5, index = phase * (rhythm.length - 1), left = Math.floor(index);
-  const ease = (1 - Math.cos((index - left) * Math.PI)) / 2;
-  const open = rhythm[left] + (rhythm[Math.min(left + 1, rhythm.length - 1)] - rhythm[left]) * ease;
-  return { x: 4 * Math.sin(2 * Math.PI * phase), y: 1.8 * (1 - Math.cos(2 * Math.PI * phase)), tilt: 2.4 * Math.sin(2 * Math.PI * phase), open };
 }
 
 function Eyes({ face }: { face: LookFace }) {
@@ -38,7 +37,8 @@ function Eyes({ face }: { face: LookFace }) {
 
 /**
  * Accents. Those behind the body are drawn in the body color so they belong to the Ghost;
- * those worn in front (bow, ear cups, glasses) take the face color so they read on the body.
+ * those worn in front (bow, ear cups) take the face color so they read on the body.
+ * Glasses are part of the face so they turn with it.
  */
 function Mark({ mark, front }: { mark: LookMark; front: boolean }) {
   const ink = 'var(--g-body)', face = 'var(--g-face)';
@@ -48,7 +48,6 @@ function Mark({ mark, front }: { mark: LookMark; front: boolean }) {
   if (front) switch (mark) {
     case 'bow': return <g fill={face} stroke={ink} strokeWidth="16" strokeLinejoin="round" transform="rotate(-20 652 262)"><path d="M652 262 L566 208 Q546 262 566 316Z"/><path d="M652 262 L738 208 Q758 262 738 316Z"/><circle cx="652" cy="262" r="30"/></g>;
     case 'headphones': return <g fill={face} stroke={ink} strokeWidth="18"><rect x="140" y="406" width="72" height="140" rx="36"/><rect x="788" y="406" width="72" height="140" rx="36"/></g>;
-    case 'glasses': return <g fill="none" stroke={face} strokeWidth="16" strokeLinecap="round"><circle cx="423" cy="417" r="54"/><circle cx="577" cy="417" r="54"/><path d="M477 410 Q500 396 523 410"/></g>;
     default: return null;
   }
   switch (mark) {
@@ -77,33 +76,35 @@ export function GhostCharacter({ size = 48, state = 'idle', animate = true, colo
   mark?: LookMark;
   className?: string;
 }) {
-  const body = useRef<SVGGElement>(null), mouth = useRef<SVGEllipseElement>(null);
+  const svg = useRef<SVGSVGElement>(null), body = useRef<SVGGElement>(null), faceGroup = useRef<SVGGElement>(null);
+  const eyes = useRef<SVGGElement>(null), mouth = useRef<SVGEllipseElement>(null);
   useEffect(() => {
     const media = matchMedia('(prefers-reduced-motion: reduce)');
-    let frame = 0, started = 0;
-    const render = (seconds: number) => {
-      const p = seconds < 0 ? { x: 0, y: 0, tilt: 0, open: 1 } : ghostMotion(seconds);
-      body.current?.setAttribute('transform', `translate(${p.x} ${p.y}) rotate(${p.tilt} 500 650)`);
-      mouth.current?.setAttribute('ry', String(15 * p.open));
-      mouth.current?.setAttribute('rx', String(15 * (1 + .12 * (p.open - 1))));
+    let stop = () => {};
+    const update = () => {
+      stop();
+      if (!svg.current || !body.current || !faceGroup.current || !eyes.current || !mouth.current) return;
+      const moving = animate && !media.matches && !document.hidden;
+      const life = moving && size >= LIFE_MIN_SIZE;
+      stop = startGhostLife({ svg: svg.current, body: body.current, face: faceGroup.current, eyes: eyes.current, mouth: mouth.current },
+        { talk: moving && state === 'running', life, follow: life && size >= FOLLOW_MIN_SIZE });
     };
-    const tick = (now: number) => { if (!started) started = now; render((now - started) / 1000); frame = requestAnimationFrame(tick); };
-    const update = () => { cancelAnimationFrame(frame); started = 0; render(-1); if (animate && state === 'running' && !media.matches && !document.hidden) frame = requestAnimationFrame(tick); };
     update(); media.addEventListener('change', update); document.addEventListener('visibilitychange', update);
-    return () => { cancelAnimationFrame(frame); media.removeEventListener('change', update); document.removeEventListener('visibilitychange', update); };
-  }, [state, animate]);
+    return () => { stop(); media.removeEventListener('change', update); document.removeEventListener('visibilitychange', update); };
+  }, [state, animate, size]);
   const chosen = color && color !== 'auto' ? color : undefined;
   const style = { width: size, height: size } as CSSProperties;
   const tone = chosen ?? fallback;
   const bodyFill = tone ?? 'var(--ghost-ink)';
   const faceFill = tone && isHexColor(tone) ? faceColor(tone) : 'var(--ghost-canvas)';
-  return <svg className={`ghost-character ${className}`} style={style} viewBox="100 100 800 800" fill="none" aria-hidden="true" data-ghost-state={state}>
+  return <svg ref={svg} className={`ghost-character ${className}`} style={style} viewBox="100 100 800 800" fill="none" aria-hidden="true" data-ghost-state={state}>
     <g ref={body} style={{ '--g-body': bodyFill, '--g-face': faceFill } as CSSProperties}>
       <Mark mark={mark} front={false}/>
       <Body shape={shape}/>
-      <g fill="var(--g-face)">
-        <Eyes face={face}/>
+      <g ref={faceGroup} fill="var(--g-face)">
+        <g ref={eyes}><Eyes face={face}/></g>
         <ellipse ref={mouth} cx="500" cy="484" rx="15" ry="15"/>
+        {mark === 'glasses' && <g fill="none" stroke="var(--g-face)" strokeWidth="16" strokeLinecap="round"><circle cx="423" cy="417" r="54"/><circle cx="577" cy="417" r="54"/><path d="M477 410 Q500 396 523 410"/></g>}
       </g>
       <Mark mark={mark} front/>
     </g>
