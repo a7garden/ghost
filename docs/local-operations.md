@@ -22,12 +22,12 @@
 
 Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다.
 
-## 현재 설치 (2026-11-09)
+## 현재 설치 (2026-11-10)
 
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-c572f91` (`main`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-eeeeb02` (운영판 기반 승인 대기 수정, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -341,6 +341,14 @@ artifacts/sha256/…   skills/…   secrets/<provider>.json (0600)   sandboxes/<
 ```
 
 `config.json`은 `publicOrigin`, `uiDir`, `sandbox`(`local` 또는 `apple-container`), `memory`(Oxibrain; `spaces`는 Ghost id → space, `*`는 나머지 모든 Ghost), `apns`를 담는다. 환경 변수는 `GHOST_ROOT`, `GHOST_PORT`, `GHOST_HOST`, `GHOST_PUBLIC_ORIGIN`, `GHOST_UI_DIR`만 읽는다.
+
+
+## 승인 대기와 반복 실행 (2026-11-10)
+
+- 맡긴 일 `c54a2f86`의 반복 모델 턴만 소유자 API로 중단했다. 원래 승인 요청과 작업을 보존한 채 `waiting`으로 전환됐다.
+- `main`의 `6cf135e`, `87b78e9`를 당시 운영판 `c572f91`에 적용해 `releases/20261110-bun-eeeeb02`를 만들었다. 승인 대기 작업의 다음 모델 호출을 막고, 결정 결과는 기존 제출 ID로 재개한다. 진전 없이 같은 결과가 이어진 도구 라운드는 8회에서 턴을 끝낸다. Ghost가 생성한 맡긴 일의 기본 기한은 90분이며 기존 기한 연장은 소유자 작업 수정에서 한다.
+- 배포 후보 Host 테스트 621개 통과, 6개 건너뜀, 타입 검사 및 격리된 루트에서 health·인증 API·UI 확인. 백업 `backups/pre-20261110-bun-eeeeb02-1794307084578/`의 원장·Pi·금고 DB 무결성을 검증했다. 전환 후 PID 16242 → 57727, 단일 리스너, 모델 준비, 기존 데이터 ID와 대상 작업의 승인 대기를 확인했다.
+- 설치된 Mac 앱의 external Host 프로브가 새 PID에 연결됐다. 브라우저에서 실제 작업 상세와 승인 대기를 확인했다. 현재 Mac 창의 접근성 상호작용은 확인할 수 없었다. 되돌릴 때는 유휴를 확인하고 `current`를 `releases/20261110-bun-c572f91`로 원자적으로 전환한 뒤 Host를 정상 재기동한다.
 
 ## 확인
 
