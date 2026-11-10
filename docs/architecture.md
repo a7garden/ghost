@@ -170,6 +170,7 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 
 - `pending` effects the Ghost can inspect are handed back to it as uncertain; outside effects become `unknown`, their Work blocks and its conversation stops until the owner reconciles. Reconciliation cards opened before 2026-11-10 for inspectable effects are cancelled and handed back at startup.
 - Resolved decisions without a recorded follow-up are followed up again (answers, verdicts, effect notices). An approved document write is itself a journaled effect, so it is never written twice.
+- Pending reversible decisions without review metadata (opened before reviews existed, or whose main-review wake was lost to a crash or a failed admission) get their review re-derived at startup and every 30 seconds, keeping the original opening time, deadline and per-Ghost opt-out. The main Ghost's review is resubmitted with the deterministic request id `decision-review:<id>` until it leaves its note, so retries never stack wakes. Owner-only decisions and document edits stay with the owner.
 - Settled Work without a recorded report reports again (deterministic request id, deterministic notification id).
 - A running Work whose conversation is idle gets one wake, keyed by the Work's last change, so repeated restarts do not stack wakes.
 - Schedules submit before they advance.
