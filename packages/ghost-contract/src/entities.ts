@@ -56,7 +56,7 @@ export const ExecutionTarget = Type.Union([
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTarget>;
 
-/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict) and the main-only ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
+/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict), the fixed self_adapt/capability_request and the main-only ghost_create/ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
@@ -542,6 +542,44 @@ export type AutonomyPlan = Static<typeof AutonomyPlan>;
 export const QUIET_REPLY = "[quiet]";
 /** First line of the Host's self-directed wake. */
 export const AUTONOMOUS_WAKE = "[Autonomous wake]";
+
+/** Longest adaptation notes a Ghost keeps; they ride along in every direct and work instruction. */
+export const ADAPTATION_MAX_CHARS = 4000;
+
+/**
+ * What a Ghost learned about working in this owner's environment (owner decision 2026-11-10): paths, command
+ * forms, tools and habits that work here. The Ghost rewrites it itself, the main Ghost may correct a teammate's,
+ * and the owner may edit or clear it. It is kept apart from the persona, so a persona shared elsewhere stays
+ * portable while each installation adapts. Behavior only: tools and PC execution change through grants.
+ */
+export const Adaptation = Type.Object({
+  ghostId: Id,
+  notes: Type.String({ maxLength: ADAPTATION_MAX_CHARS }),
+  /** The notes before the last change, so the owner can put them back. */
+  previous: nullable(Type.String({ maxLength: ADAPTATION_MAX_CHARS })),
+  by: Type.Union([Type.Literal("self"), Type.Literal("main"), Type.Literal("owner")]),
+  /** Why the last change was made, in the owner's language. */
+  reason: Type.String({ maxLength: 500 }),
+  updatedAt: Timestamp,
+  revision: Type.Integer({ minimum: 0 }),
+});
+export type Adaptation = Static<typeof Adaptation>;
+
+/**
+ * `proposal.capability` of a `question` decision: a Ghost asks for tools or PC execution it lacks. The main
+ * Ghost may settle it for the owner; "허용" applies the grant before the answer reaches the Ghost.
+ */
+export const CapabilityRequest = Type.Object({
+  ghostId: Id,
+  tools: GhostToolList,
+  hostExecution: Type.Boolean(),
+  /** Committed with the grant, before answer delivery; recovery never re-grants after a later revocation. */
+  grantedAt: Type.Optional(Timestamp),
+});
+export type CapabilityRequest = Static<typeof CapabilityRequest>;
+/** The answer that grants a capability request; any other answer declines it. */
+export const CAPABILITY_GRANT = "허용";
+export const CAPABILITY_DECLINE = "거절";
 
 export const NotificationKind = Type.Union([
   Type.Literal("decision"),

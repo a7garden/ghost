@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, it, vi } from 'vitest';
 import { expect } from 'vitest';
 import type { UpdateStatus } from '@ghost/contract';
-import { UPDATE_POLL_MS, UPDATE_REFRESH_MS, UpdateMonitor, updateOffer, type UpdateApi } from './useUpdate';
+import { IOS_INSTALL_BRIDGE_BUILD, UPDATE_POLL_MS, UPDATE_REFRESH_MS, UpdateMonitor, supportsIosInstall, updateOffer, type UpdateApi } from './useUpdate';
 
 const status = (patch: Partial<UpdateStatus> = {}): UpdateStatus => ({
   enabled: true,
@@ -12,6 +12,7 @@ const status = (patch: Partial<UpdateStatus> = {}): UpdateStatus => ({
   phase: 'idle',
   latest: null,
   shell: null,
+  ios: null,
   checkedAt: 1,
   nextCheckAt: null,
   error: null,
@@ -27,6 +28,7 @@ const fakeApi = (): UpdateApi => ({
   installUpdate: vi.fn().mockResolvedValue(status()),
   cancelUpdate: vi.fn().mockResolvedValue(status()),
   updateSettings: vi.fn().mockResolvedValue(status()),
+  iosUpdateLink: vi.fn().mockResolvedValue({ install: 'itms-services://install', page: 'https://example.test/install' }),
 });
 
 beforeEach(() => { vi.useFakeTimers(); });
@@ -177,12 +179,31 @@ it('installs the shell update through the bridge and surfaces its failures', asy
   expect(shellInstall).toHaveBeenCalledTimes(1);
   expect(monitor.get().error).toBe('앱 업데이트에 실패했습니다.');
 });
+it('requires build 9 before installing from the iPhone shell', () => {
+  expect(IOS_INSTALL_BRIDGE_BUILD).toBe(9);
+  expect(supportsIosInstall({ platform: 'ios', version: '8', deviceId: 'phone' })).toBe(false);
+  expect(supportsIosInstall({ platform: 'ios', version: '9', deviceId: 'phone' })).toBe(true);
+});
 
-it('offers the host release first, else the desktop shell', () => {
-  const shell = { version: '0.2.0', notes: '' };
+it('reports when the iPhone shell does not start installation', async () => {
+  const api = fakeApi();
+  const iosInstall = vi.fn().mockResolvedValue({ opened: false });
+  const monitor = new UpdateMonitor(api, { iosInstall });
+  await monitor.installIos();
+  expect(api.iosUpdateLink).toHaveBeenCalledTimes(1);
+  expect(iosInstall).toHaveBeenCalledWith('itms-services://install');
+  expect(monitor.get().error).toBe('설치를 시작하지 못했습니다');
+});
+
+it('offers the host release first, else a newer iPhone app only in an iPhone shell, else the desktop shell', () => {
+  const desktop = { version: '0.2.0', notes: '' };
+  const ios = { version: '0.3.0', build: 9, notes: 'iOS notes' };
   const latest = { version: '2.1.0', commit: 'def5678', notes: 'n', publishedAt: '2026-11-10T12:00:00Z' };
-  expect(updateOffer(status({ latest }), shell)).toEqual({ kind: 'host', version: '2.1.0', notes: 'n' });
-  expect(updateOffer(status(), shell)).toEqual({ kind: 'shell', version: '0.2.0', notes: '' });
+  const iphone = { platform: 'ios' as const, version: '8', deviceId: 'phone' };
+  expect(updateOffer(status({ latest, ios }), desktop, iphone)).toEqual({ kind: 'host', version: '2.1.0', notes: 'n' });
+  expect(updateOffer(status({ ios }), desktop)).toEqual({ kind: 'shell', version: '0.2.0', notes: '' });
+  expect(updateOffer(status({ ios }), desktop, iphone)).toEqual({ kind: 'ios', version: '0.3.0', notes: 'iOS notes', build: 9 });
+  expect(updateOffer(status({ ios: { ...ios, build: 8 } }), null, iphone)).toBeNull();
   expect(updateOffer(status(), null)).toBeNull();
-  expect(updateOffer(null, shell)).toEqual({ kind: 'shell', version: '0.2.0', notes: '' });
+  expect(updateOffer(null, desktop)).toEqual({ kind: 'shell', version: '0.2.0', notes: '' });
 });

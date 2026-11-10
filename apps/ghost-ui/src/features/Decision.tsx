@@ -7,6 +7,7 @@ import { executionLabel, policySummary, sourceSummary } from './activity-config'
 import { toolLabels } from './GhostSettings';
 import { DotAvatar } from '../components/DotAvatar';
 import { ArtifactPreview } from '../components/ArtifactPreview';
+import { DocumentProposalPreview } from '../components/DocumentProposalPreview';
 import { BrowserLiveView } from './BrowserLiveView';
 import { MessageBody } from '../components/MessageBody';
 import { useHost } from '../host/context';
@@ -17,7 +18,7 @@ import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { isMac, modKey } from '../ui/keys';
 
-type DocumentProposal = { spaceId?: string; space_id?: string; title?: string; body?: string; pageId?: string | null; page_id?: string | null };
+type DocumentProposal = { spaceId?: string; space_id?: string; title?: string; body?: string; profile?: string; pageId?: string | null; page_id?: string | null };
 
 /** The proposal payload of a document decision, in either spelling the ledger has used. */
 export function documentProposal(decision: Decision): DocumentProposal | null {
@@ -244,8 +245,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
 
     {decision.kind === 'document_review' && proposal && <div className="decision__document">
       <p className="decision__document-head"><FileText size={14} aria-hidden="true"/>제안된 문서{proposal.pageId || proposal.page_id ? ' · 기존 페이지 수정' : ' · 새 페이지'}</p>
-      {proposal.title && <h4>{proposal.title}</h4>}
-      <div className="decision__document-body">{proposal.body ?? '(본문 없음)'}</div>
+      <DocumentProposalPreview key={decision.id} title={proposal.title} body={proposal.body} profile={proposal.profile}/>
     </div>}
 
     {(decision.kind === 'approve_effect' || decision.kind === 'reconcile_effect') && decision.proposal && <RequestPreview value={decision.proposal}/>}

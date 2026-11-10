@@ -353,8 +353,12 @@ describe("browser tools", () => {
       await f.call("browser_click", { ref: "@e1" }, "pi-browser", "replay");
       const before = commands(f.root).length;
       await f.call("browser_click", { ref: "@e1" }, "pi-browser", "replay"); expect(commands(f.root)).toHaveLength(before);
-      expect((await f.call("browser_open", { url: "http://127.0.0.1" })).isError).toBe(true);
-      expect((await f.call("browser_tabs", { action: "new", url: "file:///etc/passwd" })).isError).toBe(true);
+      const localService = await f.call("browser_open", { url: "http://127.0.0.1" });
+      expect(localService.isError).toBe(true);
+      expect(JSON.stringify(localService)).toContain("local services are not reachable by design");
+      const localFile = await f.call("browser_tabs", { action: "new", url: "file:///etc/passwd" });
+      expect(localFile.isError).toBe(true);
+      expect(JSON.stringify(localFile)).toContain("host_read");
       const beforeInjection = records(f.root).length;
       for (const [name, args] of [["browser_fill", { ref: "@e1", text: "--config=/tmp/evil" }], ["browser_snapshot", { selector: "--auto-connect" }], ["browser_select", { ref: "@e1", values: ["--proxy-bypass=*"] }]] as const) expect((await f.call(name, args)).isError).toBe(true);
       expect(records(f.root)).toHaveLength(beforeInjection);

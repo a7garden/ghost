@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import { Duty } from "./duty.ts";
 import {
+  Adaptation,
   ArtifactRef,
   AutonomyPlan,
   Avatar,
@@ -71,6 +72,8 @@ export const State = Type.Object({
   activityRuns: Type.Optional(Type.Array(ActivityRun)),
   connections: Type.Optional(Type.Array(Connection)),
   autonomy: Type.Optional(Type.Array(AutonomyPlan)),
+  /** What each Ghost learned about this environment; only Ghosts with notes appear. */
+  adaptations: Type.Optional(Type.Array(Adaptation)),
   /** 근무 상태. 이 기능 이전의 Host 는 보내지 않는다. */
   duty: Type.Optional(Duty),
 });
@@ -170,6 +173,8 @@ export const UpdateStatus = Type.Object({
   latest: nullable(Type.Object({ version: Type.String(), commit: Type.String(), notes: Type.String(), publishedAt: Type.String() })),
   /** The desktop shell offered by the newest verified release; the shell compares it with its own version. */
   shell: nullable(Type.Object({ version: Type.String(), notes: Type.String() })),
+  /** The iPhone shell offered by the newest verified release; the app compares its native build number. */
+  ios: nullable(Type.Object({ version: Type.String(), build: Type.Integer({ minimum: 1 }), notes: Type.String() })),
   checkedAt: nullable(Timestamp),
   nextCheckAt: nullable(Timestamp),
   error: nullable(Type.String()),

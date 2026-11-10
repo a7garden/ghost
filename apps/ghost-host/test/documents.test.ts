@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Decision } from "@ghost/contract";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { sha256 } from "../src/core/ids.ts";
 import { createDocuments } from "../src/integrations/documents.ts";
 import { harness, tempDir } from "./support.ts";
@@ -103,6 +103,82 @@ describe("documents", () => {
 
     const plain = await documents.readPage("space-1", { locator: "plain.md" });
     expect(plain.profile).toBe("unclassified");
+    // A plain Markdown file without an envelope stays readable: document_read returns its text, not just a title line.
+    expect(plain.body).toBe(PLAIN_MARKDOWN);
+  });
+
+  test("references the models actually send resolve inside the Space", async () => {
+    const { path, ledger, documents } = setup();
+    // A Space whose root already is the docs folder, like the reported "Talking Stage" Space,
+    // plus a nested docs/ copy of the roadmap so exact locators beat basename matches.
+    const docs = join(dirname(path), "talking-stage", "docs");
+    mkdirSync(join(docs, "docs"), { recursive: true });
+    for (const name of ["wms-ux.md", "DESIGN.md", "RENDERING_UI_BASELINE.md", "TASK_UX_RESEARCH.md", "ROADMAP.md"]) {
+      writeFileSync(join(docs, name), PLAIN_MARKDOWN);
+    }
+    writeFileSync(join(docs, "docs", "ROADMAP.md"), PLAIN_MARKDOWN);
+    ledger.tx(() => ledger.putSpace({ id: "space-2", name: "Talking Stage", path: docs, createdAt: Date.now() }));
+
+    // A Space name (case-insensitive) is accepted for space_id.
+    expect((await documents.readPage("talking stage", { locator: "docs/wms-ux.md" })).locator).toBe("wms-ux.md");
+    expect((await documents.readPage("TALKING STAGE", { locator: "docs/DESIGN.md?rev=latest" })).locator).toBe("DESIGN.md");
+    // An absolute path inside the Space resolves to its locator.
+    expect((await documents.readPage("space-2", { locator: `${docs}/DESIGN.md` })).locator).toBe("DESIGN.md");
+    expect((await documents.readPage("space-2", { locator: "docs/DESIGN" })).locator).toBe("DESIGN.md");
+    // An extensionless basename finds the file anywhere in the Space.
+    expect((await documents.readPage("space-2", { locator: "RENDERING_UI_BASELINE" })).locator).toBe("RENDERING_UI_BASELINE.md");
+    // A filename passed as page_id and a path quoted inside a page_id both resolve.
+    expect((await documents.readPage("space-2", { pageId: "TASK_UX_RESEARCH.md" })).locator).toBe("TASK_UX_RESEARCH.md");
+    expect((await documents.readPage("space-2", { pageId: "ROADMAP (docs/ROADMAP.md)" })).locator).toBe("docs/ROADMAP.md");
+    // Nothing outside the Space resolves, even by absolute path.
+    await expect(documents.readPage("space-2", { locator: `${dirname(docs)}/vault/note.md` })).rejects.toThrow(/closest documents/);
+  });
+
+  test("an unresolvable reference names the Space and its documents without leaking host paths", async () => {
+    const { path, documents } = setup();
+    const failure = await documents.readPage("space-1", { locator: "docs/DESIGN.md" }).then(
+      () => null,
+      (error: Error) => error,
+    );
+    expect(failure?.message).toContain('Space "Garden"');
+    expect(failure?.message).toContain("legacy.djot, note.md, plain.md");
+    expect(failure?.message).not.toContain(path);
+    await expect(documents.readPage("space-1", { pageId: "zzz-does-not-exist" })).rejects.toThrow(/Retry with an exact page id/);
+    await expect(documents.listPages("Missing Space", null)).rejects.toThrow(/unknown document space "Missing Space"; registered Spaces: "Garden" \(space-1\)/);
+  });
+
+  test("duplicated ids, escape paths and vault-wide failures cannot silently reroute a read", async () => {
+    const { path, ledger, documents } = setup();
+    const envelope = (id: string) => `---
+format: pdc-document/2
+body: pdc-markdown/1
+id: ${id}
+created: 2026-01-02T03:04:05.678Z
+updated: 2026-01-02T03:04:05.678Z
+title: Duplicate
+---
+Body text.
+`;
+    const uuid = "0190f3a0-1234-7abc-8def-0123456789ab";
+    // One Space holding a duplicated document id, an unrelated oversized file and an ordinary document.
+    const dupDocs = join(dirname(path), "dup", "docs");
+    mkdirSync(dupDocs, { recursive: true });
+    writeFileSync(join(dupDocs, `${uuid}.md`), envelope(uuid));
+    writeFileSync(join(dupDocs, "copy.md"), envelope(uuid));
+    writeFileSync(join(dupDocs, "DESIGN.md"), PLAIN_MARKDOWN);
+    writeFileSync(join(dupDocs, "huge.md"), Buffer.alloc(4 * 1024 * 1024 + 1, 120));
+    ledger.tx(() => ledger.putSpace({ id: "space-3", name: "Dup", path: dupDocs, createdAt: Date.now() }));
+
+    // The duplicated id is still refused although the oversized file aborts a whole-vault projection.
+    await expect(documents.readPage("space-3", { pageId: uuid })).rejects.toThrow(new RegExp(`is used by several files \\(${uuid}\\.md, copy\\.md\\)`));
+    await expect(documents.readPage("space-3", { locator: uuid })).rejects.toThrow(/is used by several files/);
+    // An absolute path outside the Space and a `..` segment refuse instead of matching an in-Space namesake.
+    await expect(documents.readPage("space-3", { locator: "/outside/DESIGN.md" })).rejects.toThrow(/no document in Space "Dup" matches/);
+    await expect(documents.readPage("space-3", { locator: "../DESIGN.md" })).rejects.toThrow(/no document in Space "Dup" matches/);
+    // The unreadable file elsewhere does not abort a read of an unrelated document...
+    expect((await documents.readPage("space-3", { locator: "DESIGN.md" })).locator).toBe("DESIGN.md");
+    // ...and the oversized file itself fails with its own honest error.
+    await expect(documents.readPage("space-3", { locator: "huge.md" })).rejects.toThrow(/document_too_large/);
   });
 
   test("an approved decision writes a new page", async () => {

@@ -8,11 +8,13 @@ import { GitHubClient, MAX_ASSET_BYTES, newer, parseManifest, type ReleaseManife
 import { buildIdentity, RELEASE_PUBKEY, RELEASE_REPOSITORY } from "./identity.ts";
 import { verifyMinisign } from "./signature.ts";
 import { atomicWrite, detectLayout, readCredential, readPending, readState, validUpdateResult, type ReleaseLayout, type UpdateLog, type UpdateState } from "./storage.ts";
+import { IosTokens, iosLink, type IosInstall } from "./ios.ts";
 
 const HOUR = 60 * 60 * 1000;
 const BACKOFF = [5, 10, 20, 40, 60];
 export interface UpdaterOptions {
   root: string;
+  publicOrigin?: string | null;
   repository?: string | null;
   pubkey?: string | null;
   identity?: { version: string; commit: string; storage: string };
@@ -68,6 +70,8 @@ export class Updater {
   private installAbort: AbortController | null = null;
   private shellDownloading: Promise<string> | null = null;
   private shellAbort: AbortController | null = null;
+  private readonly iosTokens: IosTokens;
+  private readonly iosDownloads = new Map<string, { promise: Promise<string>; controller: AbortController }>();
   private readonly disabledReason: UpdateStatus["disabledReason"];
 
   constructor(private readonly options: UpdaterOptions) {
@@ -78,6 +82,7 @@ export class Updater {
     const env = options.env ?? process.env;
     this.disabledReason = !repository || !this.pubkey || this.identity.commit === "dev" ? "development" : !this.layout ? "layout" : env.GHOST_SERVICE !== "launchd" ? "service" : null;
     this.now = options.now ?? Date.now;
+    this.iosTokens = new IosTokens(this.now);
     this.log = options.log ?? ((message, detail) => console.error(`[ghost] ${message}`, detail ?? ""));
     this.state = readState(options.root, this.log);
     this.token = readCredential(options.root, this.log);
@@ -109,6 +114,7 @@ export class Updater {
       current: { version: this.identity.version, commit: this.identity.commit }, autoCheck: this.state.autoCheck, phase: this.phase,
       latest: manifest && newer(manifest.version, this.identity.version) ? { version: manifest.version, commit: manifest.commit, notes: manifest.notes, publishedAt: manifest.publishedAt } : null,
       shell: manifest ? { version: manifest.shell.version, notes: manifest.shell.notes } : null,
+      ios: manifest?.ios ? { version: manifest.ios.version, build: manifest.ios.build, notes: manifest.ios.notes } : null,
       checkedAt: this.state.checkedAt, nextCheckAt: this.nextCheckAt, error: this.error, lastResult: this.state.lastResult ?? null,
     };
   }
@@ -143,7 +149,9 @@ export class Updater {
     this.checkAbort?.abort();
     this.installAbort?.abort();
     this.shellAbort?.abort();
-    await Promise.allSettled([this.checking, this.installing, this.shellDownloading]);
+    this.iosTokens.clear();
+    for (const download of this.iosDownloads.values()) download.controller.abort();
+    await Promise.allSettled([this.checking, this.installing, this.shellDownloading, ...Array.from(this.iosDownloads.values(), (download) => download.promise)]);
   }
 
   settings(input: { autoCheck?: boolean; token?: string | null }): UpdateStatus {
@@ -368,5 +376,45 @@ export class Updater {
       return path;
     })().finally(() => { this.shellDownloading = null; this.shellAbort = null; });
     return this.shellDownloading;
+  }
+
+  iosLink(): { install: string; page: string } {
+    const manifest = this.manifest;
+    if (!manifest?.ios || !this.client || !this.token || this.disabledReason || this.closed) throw new CommandError("unavailable", "iPhone 앱 업데이트를 사용할 수 없습니다.");
+    let origin: URL;
+    try { origin = new URL(this.options.publicOrigin ?? ""); }
+    catch { throw new CommandError("unavailable", "HTTPS 공개 주소가 필요합니다."); }
+    if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) throw new CommandError("unavailable", "HTTPS 공개 주소가 필요합니다.");
+    return iosLink(this.iosTokens.issue(origin.origin, manifest as IosInstall["manifest"]));
+  }
+
+  iosInstall(token: string | null): IosInstall | null { return this.iosTokens.get(token); }
+
+  iosAsset(entry: IosInstall): Promise<string> {
+    if (!this.client || !this.token || this.disabledReason || this.closed) throw new CommandError("unavailable", "iPhone 앱 업데이트를 사용할 수 없습니다.");
+    const { manifest } = entry;
+    const { ios } = manifest;
+    const digest = ios.sha256.toLowerCase();
+    const path = join(this.options.root, "update", "cache", `${digest}-Ghost.ipa`);
+    const downloading = this.iosDownloads.get(path);
+    if (downloading) return downloading.promise;
+    const controller = new AbortController();
+    const promise = (async () => {
+      if (existsSync(path)) {
+        const cached = readFileSync(path);
+        if (cached.length === ios.bytes && sha256(cached) === digest) return path;
+        rmSync(path, { force: true });
+      }
+      const release = await this.client!.release(`v${manifest.version}`, controller.signal);
+      const verified = await this.client!.manifest(release, this.pubkey!, controller.signal);
+      if (JSON.stringify(verified.manifest) !== JSON.stringify(manifest)) throw new CommandError("conflict", "릴리스 정보가 변경되었습니다. 다시 확인해 주세요.");
+      const bytes = await this.client!.asset(release, ios.asset, ios.bytes, controller.signal);
+      controller.signal.throwIfAborted();
+      if (bytes.length !== ios.bytes || sha256(bytes) !== digest) throw new Error("iPhone 앱 업데이트 파일 검증에 실패했습니다.");
+      atomicWrite(path, bytes);
+      return path;
+    })().finally(() => { this.iosDownloads.delete(path); });
+    this.iosDownloads.set(path, { promise, controller });
+    return promise;
   }
 }

@@ -101,8 +101,8 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
 export function requireAllowed(core: Core, api: ToolExecutionApi, name: GhostTool): Scope {
   const scope = scopeOf(core, api);
   if (!TOOL_KINDS[name].includes(scope.conversation.kind)) throw forbidden(`${name} does not run in a ${scope.conversation.kind} conversation`);
-  if (!scope.ghost.tools.includes(name)) throw forbidden(`${name} is not enabled for ${scope.ghost.name}`);
-  if (scope.work?.toolScope && !scope.work.toolScope.includes(name)) throw forbidden(`${name} is outside this Work's approved tool scope`);
+  if (!scope.ghost.tools.includes(name)) throw forbidden(`${name} is not enabled for ${scope.ghost.name}; if the goal needs it, ask once with capability_request (tools: ["${name}"]) and end your turn`);
+  if (scope.work?.toolScope && !scope.work.toolScope.includes(name)) throw forbidden(`${name} is outside this Work's activity rule, which only the owner changes; do the step with another tool or report it in complete`);
   if (scope.work?.execution?.kind === "host" && ["read", "write", "edit", "bash", "publish_artifact"].includes(name) && !scope.ghost.hostExecution) throw forbidden("direct PC execution was revoked by the owner");
   if (scope.work && scope.ghost.state !== "active") throw forbidden("the executing Ghost is no longer active");
   if (scope.work && !["running", "waiting"].includes(scope.work.state)) throw forbidden(`Work is ${scope.work.state}`);

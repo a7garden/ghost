@@ -289,12 +289,23 @@ interface InspectionShape {
   git?: boolean;
   gitRemote?: boolean;
   findAction?: boolean;
+  findRootEnd?: number;
+  recursive?: boolean;
 }
+
+const inspectionPrograms: Record<string, string> = Object.fromEntries([
+  "/bin/ls", "/bin/cat", "/usr/bin/head", "/usr/bin/tail", "/usr/bin/wc",
+  "/usr/bin/sed", "/usr/bin/grep", "/usr/bin/which", "/usr/bin/stat",
+  "/usr/bin/file", "/usr/bin/du", "/bin/df", "/usr/bin/find", "/bin/ps",
+  "/usr/bin/sw_vers", "/usr/bin/uptime", "/usr/bin/plutil", "/bin/launchctl", "/usr/bin/git",
+].map((program) => [basename(program), program]));
+const inspectionProgram = (program: string) =>
+  Object.hasOwn(inspectionPrograms, program) ? inspectionPrograms[program]! : program;
 
 /** Deliberately small argv grammar, not a blacklist of dangerous command names. */
 function inspectionShape(program: string, args: string[]): InspectionShape | null {
   if (!Array.isArray(args) || args.length > 64 ||
-      args.some((arg) => typeof arg !== "string" || arg.length > 4096 || /[\0\r\n;|&<>`$]/.test(arg)) ||
+      args.some((arg) => typeof arg !== "string" || arg.length > 4096 || /[\0\r\n]/.test(arg)) ||
       args.join("").length > 12_000) return null;
   const paths: number[] = [];
   const operands = (start: number, flags: RegExp, valued: readonly string[] = []) => {
@@ -307,20 +318,76 @@ function inspectionShape(program: string, args: string[]): InspectionShape | nul
       } else if (!positional && arg.startsWith("-")) {
         if (!flags.test(arg)) return false;
       } else {
-        if (!arg || arg === "-") return false; // never read stdin
+        if (!arg || arg === "-" || /[;|&<>`$]/.test(arg)) return false; // never read stdin or shell snippets
         paths.push(i);
       }
     }
     return true;
   };
-  switch (program) {
+  switch (inspectionProgram(program)) {
     case "/bin/ls":
       return operands(0, /^-[1AacdfghiklmnopqrstuxFST]+$/) ? { paths } : null;
     case "/bin/cat":
       return operands(0, /^-[benstuv]+$/) && paths.length ? { paths } : null;
     case "/usr/bin/head":
-    case "/usr/bin/tail":
-      return operands(0, /^-(?:[qvr]+|\d{1,9})$/, ["-n"]) && paths.length ? { paths } : null;
+    case "/usr/bin/tail": {
+      let positional = false;
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i]!;
+        if (!positional && arg === "--") { positional = true; continue; }
+        if (!positional && arg === "-n") {
+          if (!/^\+?\d{1,9}$/.test(args[++i] ?? "")) return null;
+        } else if (!positional && /^-(?:[qvr]+|\d{1,9}|n\+?\d{1,9})$/.test(arg)) continue;
+        else if (!positional && arg.startsWith("-")) return null;
+        else {
+          if (!arg || arg === "-" || /[;|&<>`$]/.test(arg)) return null;
+          paths.push(i);
+        }
+      }
+      return paths.length ? { paths } : null;
+    }
+    case "/usr/bin/sed": {
+      if (args[0] !== "-n") return null;
+      const print = /^(?:[1-9]\d*(?:,(?:[1-9]\d*|\$))?|\$)p$/;
+      let i = 1;
+      if (args[i] === "-e") {
+        while (args[i] === "-e") if (!print.test(args[++i] ?? "")) return null; else i++;
+      } else if (!print.test(args[i++] ?? "")) return null;
+      if (args[i] === "--") i++;
+      for (; i < args.length; i++) {
+        if (!args[i] || args[i]!.startsWith("-") || /[;|&<>`$]/.test(args[i]!)) return null;
+        paths.push(i);
+      }
+      return paths.length ? { paths } : null;
+    }
+    case "/usr/bin/grep": {
+      let pattern = false;
+      let positional = false;
+      let recursive = false;
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i]!;
+        if (!positional && arg === "--") { positional = true; continue; }
+        if (!positional && arg === "-e") {
+          if (args[++i] === undefined) return null;
+          pattern = true;
+        } else if (!positional && /^-[rRnclLiwxvEFIHhosq]+$/.test(arg)) {
+          if (/[rR]/.test(arg)) recursive = true;
+        }
+        else if (!positional && /^-[CABm]\d{1,9}$/.test(arg)) continue;
+        else if (!positional && /^-[CABm]$/.test(arg)) {
+          if (!/^\d{1,9}$/.test(args[++i] ?? "")) return null;
+        } else if (!positional && /^(?:--(?:include|exclude|exclude-dir)=.+|--color=never)$/.test(arg)) continue;
+        else if (!positional && arg.startsWith("-")) return null;
+        else {
+          if (arg === "-") return null;
+          paths.push(i);
+        }
+      }
+      const hasPattern = pattern || paths.shift() !== undefined;
+      return hasPattern && paths.length && paths.every((index) => args[index]) ? { paths, recursive } : null;
+    }
+    case "/usr/bin/which":
+      return args.length > 0 && args.every((arg) => /^[a-zA-Z0-9_.+-]+$/.test(arg) && !arg.startsWith("-")) ? { paths } : null;
     case "/usr/bin/wc":
       return operands(0, /^-[clmw]+$/) && paths.length ? { paths } : null;
     case "/usr/bin/stat":
@@ -337,10 +404,11 @@ function inspectionShape(program: string, args: string[]): InspectionShape | nul
       while (i < args.length && !args[i]!.startsWith("-") && !["(", "!", ")"].includes(args[i]!))
         paths.push(i++);
       if (!paths.length) return null;
+      const findRootEnd = i;
       let findAction = false;
       for (; i < args.length; i++) {
         const arg = args[i]!;
-        if (["-print", "-print0", "-ls", "-prune"].includes(arg)) { findAction = true; continue; }
+        if (["-print", "-ls", "-prune"].includes(arg)) { findAction = true; continue; }
         if (["-empty", "-a", "-and", "-o", "-or", "!", "-not", "(", ")", "-xdev"].includes(arg)) continue;
         if (["-name", "-iname", "-path", "-ipath"].includes(arg)) {
           if (!args[++i] || args[i]!.includes("/../")) return null;
@@ -348,9 +416,12 @@ function inspectionShape(program: string, args: string[]): InspectionShape | nul
           if (!/^[bcdflps]$/.test(args[++i] ?? "")) return null;
         } else if (["-mtime", "-mmin", "-ctime", "-cmin", "-atime", "-amin", "-size", "-maxdepth", "-mindepth"].includes(arg)) {
           if (!/^[+-]?\d{1,9}[ckMG]?$/i.test(args[++i] ?? "")) return null;
+        } else if (arg === "-newer") {
+          if (!args[++i] || args[i]!.startsWith("-")) return null;
+          paths.push(i);
         } else return null;
       }
-      return { paths, findAction };
+      return { paths, findAction, findRootEnd };
     }
     case "/bin/ps":
       // No environment or command arguments: they commonly contain credentials.
@@ -551,19 +622,40 @@ export class MacHost implements HostPort {
     const isPrivate = (candidate: string) => this.homePrivatePaths().some((root) => inside(candidate.toLowerCase(), root.toLowerCase()));
     // Refuse private app data before touching it: resolving it would itself ask macOS privacy for consent.
     this.refuseStatePath(raw);
-    if (isPrivate(raw)) throw new Error("private home app-data path refused");
+    if (isPrivate(raw)) throw new Error("private home app-data path refused; use a non-private file inside owner home");
     const canonical = realpathSync(raw);
     this.refuseStatePath(raw, canonical);
     if (isPrivate(canonical)) throw new Error("private home app-data path refused");
     for (const candidate of [raw, canonical]) {
       const root = inside(candidate, home) ? home :
         candidate === raw && inside(candidate, this.home) ? this.home : null;
-      if (!root) throw new Error("inspection path or symlink is outside owner home");
+      if (!root) throw new Error("inspection path or symlink is outside owner home; use a non-private path inside owner home");
       const parts = relative(root, candidate).split(sep);
       // Git may inspect its own metadata, never arbitrary .git text via cat.
       const guarded = gitMetadata ? parts.filter((part) => part !== ".git").join(sep) : parts.join(sep);
-      if (secretPath(guarded) || (text && privateTextPath(guarded)))
-        throw new Error("secret or private inspection path refused");
+      const project = this.roots.some((project) => {
+        try { return inside(candidate, project) || inside(candidate, realpathSync(project)); } catch { return false; }
+      });
+      // Generic project data is not personal data; explicitly private directories remain guarded.
+      const privateParts = project ? guarded.split(sep).filter((part) =>
+        !["data", "store", "stores", "archive", "archives"].includes(part.toLowerCase())).join(sep) : guarded;
+      if (secretPath(guarded) || (text && privateTextPath(privateParts)))
+        throw new Error("secret or private inspection path refused; use a non-private, non-secret file inside owner home");
+    }
+    if (text) {
+      // Trust configured root aliases, but never follow links below them or elsewhere in home.
+      const roots = this.roots.flatMap((raw) => {
+        try { return [{ raw, canonical: realpathSync(raw) }]; } catch { return []; }
+      }).sort((a, b) => b.raw.length - a.raw.length);
+      const project = roots.find((root) => inside(raw, root.raw) || inside(raw, root.canonical));
+      const base = project ? (inside(raw, project.raw) ? project.raw : project.canonical) :
+        inside(raw, this.home) ? this.home : home;
+      let current = project?.canonical ?? home;
+      for (const component of relative(base, raw).split(sep).filter(Boolean)) {
+        current = join(current, component);
+        if (lstatSync(current).isSymbolicLink())
+          throw new Error("symlink reads refused; use the original non-private file path inside owner home");
+      }
     }
     return canonical;
   }
@@ -608,14 +700,22 @@ export class MacHost implements HostPort {
     let base = cwd;
     for (const index of shape.paths) {
       args[index] = this.inspectionPath(args[index]!, base, false,
-        ["/bin/cat", "/usr/bin/head", "/usr/bin/tail", "/usr/bin/wc", "/usr/bin/plutil"].includes(input.program));
+        ["/bin/cat", "/usr/bin/head", "/usr/bin/tail", "/usr/bin/wc", "/usr/bin/plutil", "/usr/bin/sed", "/usr/bin/grep"].includes(input.program));
       if (shape.git) {
         if (!statSync(args[index]!).isDirectory()) throw new Error("git -C requires a directory");
         base = args[index]!;
-      } else if (["/bin/cat", "/usr/bin/head", "/usr/bin/tail", "/usr/bin/wc", "/usr/bin/plutil"].includes(input.program) &&
+      } else if (["/bin/cat", "/usr/bin/head", "/usr/bin/tail", "/usr/bin/wc", "/usr/bin/plutil", "/usr/bin/sed"].includes(input.program) &&
           !statSync(args[index]!).isFile()) {
         throw new Error("inspection requires regular files");
       }
+      if (input.program === "/usr/bin/grep" &&
+          !statSync(args[index]!).isFile() && !statSync(args[index]!).isDirectory())
+        throw new Error("grep inspection requires regular files or directories");
+      if (input.program === "/usr/bin/grep" && shape.recursive &&
+          !this.roots.some((root) => {
+            try { return inside(args[index]!, realpathSync(root)); } catch { return false; }
+          }))
+        throw new Error("recursive grep requires configured project paths; select a project directory or inspect a single non-private file");
     }
     if (input.program === "/usr/bin/du") {
       const roots = shape.paths.length ? shape.paths.map((index) => args[index]!) : [cwd];
@@ -838,7 +938,7 @@ export class MacHost implements HostPort {
     };
   }
   async list(path: string) {
-    const canonical = this.resolve(path);
+    const canonical = this.inspectionPath(path);
     const listing = await entries(canonical, 1001);
     const visible = listing.filter((e) => !secretPath(e.name));
     return {
@@ -854,36 +954,20 @@ export class MacHost implements HostPort {
       truncated: listing.length >= 1001 || visible.length > 100,
     };
   }
-  async read(path: string) {
-    const canonical = this.resolve(path, true, true);
-    // A configured root may itself have a symlinked spelling (e.g. /var on macOS).
-    // Inspect only descendants of that trusted root, retaining the requested relative path
-    // so a symlink within the project cannot disappear during canonicalisation.
-    const root = this.roots
-      .flatMap((raw) => {
-        try {
-          return [{ raw, canonical: realpathSync(raw) }];
-        } catch {
-          return [];
-        }
-      })
-      .sort((a, b) => b.raw.length - a.raw.length)
-      .find((root) => inside(path, root.raw) || inside(path, root.canonical))!;
-    const base = inside(path, root.raw) ? root.raw : root.canonical;
-    let current = root.canonical;
-    for (const component of relative(base, path).split(sep).filter(Boolean)) {
-      current = join(current, component);
-      if (lstatSync(current).isSymbolicLink())
-        throw new Error("symlink reads refused");
-    }
+  async read(path: string, offset = 1, limit?: number) {
+    if (!Number.isSafeInteger(offset) || offset < 1 || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)))
+      throw new Error("invalid line range; use offset >= 1 and a positive integer limit");
+    const canonical = this.inspectionPath(path, this.home, false, true);
     const file = await open(
       canonical,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
     try {
-      if (!(await file.stat()).isFile())
-        throw new Error("regular UTF-8 file required");
-      const buffer = Buffer.alloc(12_001);
+      const info = await file.stat();
+      if (!info.isFile()) throw new Error("regular UTF-8 file required; choose a text file inside owner home");
+      const maxBytes = 8 * 1024 * 1024;
+      if (info.size > maxBytes) throw new Error("file exceeds 8 MiB; use host_command_propose with tail or sed to inspect a bounded section");
+      const buffer = Buffer.alloc(Math.min(info.size + 1, maxBytes + 1));
       let size = 0;
       while (size < buffer.length) {
         const result = await file.read(
@@ -895,14 +979,44 @@ export class MacHost implements HostPort {
         if (!result.bytesRead) break;
         size += result.bytesRead;
       }
-      if (size > 12_000) throw new Error("file exceeds 12 KB");
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(
-        buffer.subarray(0, size),
-      );
-      if (text.includes("\0")) throw new Error("binary file refused");
+      if (size > maxBytes || size > info.size) throw new Error("file grew during reading; retry host_read after the writer finishes");
+      let text: string;
+      try { text = new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, size)); }
+      catch { throw new Error("invalid UTF-8 file refused; choose a UTF-8 text file"); }
+      if (text.includes("\0")) throw new Error("binary file refused; choose a UTF-8 text file");
+      let totalLines = 0;
+      let cursor = 0;
+      let start = -1;
+      let end = 0;
+      let endLine = offset - 1;
+      let pageBytes = 0;
+      while (cursor < text.length) {
+        const newline = text.indexOf("\n", cursor);
+        const next = newline < 0 ? text.length : newline + 1;
+        totalLines++;
+        if (totalLines >= offset && endLine === totalLines - 1 && (limit === undefined || totalLines < offset + limit)) {
+          const bytes = Buffer.byteLength(text.slice(cursor, next));
+          if (pageBytes + bytes <= 12_000) {
+            if (start < 0) start = cursor;
+            end = next;
+            endLine = totalLines;
+            pageBytes += bytes;
+          }
+        }
+        cursor = next;
+      }
+      if (offset > Math.max(1, totalLines))
+        throw new Error(`offset is past EOF (${totalLines} lines); use an offset from 1 to ${Math.max(1, totalLines)}`);
+      if (text.length > 0 && start < 0)
+        throw new Error(`line ${offset} exceeds 12 KB; use host_command_propose with sed -n '${offset}p' to inspect that line`);
+      const selected = start < 0 ? "" : text.slice(start, end);
       return {
         path: canonical,
-        text: sensitiveText(text) ? "[REDACTED: sensitive text]" : text,
+        text: sensitiveText(selected) ? "[REDACTED: sensitive text]" : selected,
+        startLine: offset,
+        endLine,
+        totalLines,
+        nextOffset: endLine < totalLines ? endLine + 1 : null,
         untrusted: true,
       };
     } finally {
@@ -1026,18 +1140,19 @@ export class MacHost implements HostPort {
       input.args.length > 64 ||
       input.args.some(
         (a) =>
-          typeof a !== "string" || a.length > 4096 || /[\0\r\n;|&<>`$]/.test(a),
+          typeof a !== "string" || a.length > 4096 || /[\0\r\n]/.test(a) ||
+          (/[;|&<>`$]/.test(a) && !inspectionShape(input.program, input.args)),
       ) ||
       input.args.join("").length > 12_000
     )
-      throw new Error("invalid arguments or shell metacharacter snippet");
+      throw new Error("invalid arguments or shell metacharacter snippet; use program + args argv without a shell, one command per call");
   }
   validateCommand(input: HostCommand): HostCommand {
     this.validateCommandInput(input);
     const cwd = this.resolve(input.cwd, false, true);
     if (!statSync(cwd).isDirectory())
       throw new Error("cwd must be a directory");
-    const program = input.program;
+    const program = inspectionProgram(input.program);
     const system = [
       "/bin",
       "/usr/bin",
@@ -1059,7 +1174,7 @@ export class MacHost implements HostPort {
       program.split(sep).includes("..") ||
       !allowed.some((root) => inside(program, root))
     )
-      throw new Error("absolute allowlisted executable required");
+      throw new Error("absolute allowlisted executable required; use a read-only program name or its absolute path plus args argv without a shell, one command per call");
     const canonical = realpathSync(program);
     const denied =
       /^(sudo|su|doas|security|osascript|tclsh|wish|ssh|scp|sftp|login|dscl|launchctl)$/;
@@ -1071,7 +1186,7 @@ export class MacHost implements HostPort {
       )
     )
       throw new Error(
-        "privileged, remote, shell or interpreter program refused",
+        "privileged, remote, shell or interpreter program refused; use program + args argv without a shell, one command per call",
       );
     if (
       ![
@@ -1131,6 +1246,7 @@ export class MacHost implements HostPort {
   /** A refusal is not execution: the caller may offer the ordinary approval path. */
   async inspect(input: HostCommand) {
     this.validateCommandInput(input);
+    input = { ...input, program: inspectionProgram(input.program) };
     const shape = inspectionShape(input.program, input.args);
     if (!shape) return null;
     const deadline = Date.now() + 90_000;
@@ -1165,12 +1281,33 @@ export class MacHost implements HostPort {
         ".env*", "*secret*", "*credential*", "*api_key*", "*apikey*", "*.pem", "*.key", "*.p12", "*.sqlite", "*.db", "*-wal", "*-shm", "*-journal"];
       const privatePaths = [...this.statePaths(), ...this.homePrivatePaths()];
       if (checked.program === "/usr/bin/find") {
-        const end = Math.max(...inspection.paths) + 1;
+        const end = inspection.findRootEnd!;
         const predicates = args.slice(end);
         args = ["-P", ...args.slice(0, end).filter((a) => a !== "-P"), "(",
           ...ignored.flatMap((name, index) => [...(index ? ["-o"] : []), "-iname", name]),
           ...privatePaths.flatMap((path) => ["-o", "-ipath", path.replace(/[\\*?[\]]/g, "\\$&")]),
           ")", "-prune", "-o", "(", ...predicates, ...(!inspection.findAction ? ["-print"] : []), ")"];
+      } else if (checked.program === "/usr/bin/grep") {
+        const projectOnly = inspection.paths.every((index) => this.roots.some((root) => {
+          try { return inside(args[index]!, realpathSync(root)); } catch { return false; }
+        }));
+        const privateNamesToSkip = Object.keys(privateNames).filter((name) =>
+          !projectOnly || !["data", "store", "stores", "archive", "archives"].includes(name));
+        const patterns = [...ignored, ...privateNamesToSkip].map((name) =>
+          name.replace(/[a-z]/gi, (letter) => `[${letter.toLowerCase()}${letter.toUpperCase()}]`));
+        const guards = [
+          "-p", "-D", "skip", "-I",
+          ...patterns.flatMap((pattern) => [`--exclude=${pattern}`, `--exclude=*/${pattern}`,
+            `--exclude-dir=${pattern}`, `--exclude-dir=*/${pattern}`]),
+          ...privatePaths.map((path) => `--exclude-dir=${path.replace(/[\\*?[\]]/g, "\\$&")}`),
+        ];
+        // User includes must precede mandatory exclusions; -- still protects literal operands.
+        let separator = args.length;
+        for (let i = 0; i < args.length; i++) {
+          if (["-e", "-C", "-A", "-B", "-m"].includes(args[i]!)) { i++; continue; }
+          if (args[i] === "--") { separator = i; break; }
+        }
+        args.splice(separator, 0, ...guards);
       } else if (checked.program === "/usr/bin/du") {
         args.unshift("-P", ...ignored.flatMap((name) => [
           "-I", name.replace(/[a-z]/g, (letter) => `[${letter}${letter.toUpperCase()}]`),

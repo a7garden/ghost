@@ -36,6 +36,33 @@ const OWNER_CODES: Record<string, true> = { NEED_LOGIN: true, NEED_SETUP: true, 
 /** An argument that carries a scheme, e.g. `https://…` or `file://…`. */
 const URL_LIKE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
+/**
+ * True for URLs the CLI's bare `read` routes to its github channel: anything on github.com
+ * (including gists) or on the github raw/API hosts.
+ */
+function githubHost(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  return (
+    host === "github.com" ||
+    host === "www.github.com" ||
+    host === "gist.github.com" ||
+    host === "api.github.com" ||
+    host === "raw.githubusercontent.com" ||
+    host === "objects.githubusercontent.com"
+  );
+}
+
+/**
+ * True for the github targets that channel accepts: a repo (`owner/repo`) or an issue,
+ * pull request or discussion link. Search pages, listings and every other github host URL
+ * are refused there (`BAD_INPUT`), so they go to the generic web reader instead.
+ */
+function githubTargeted(url: URL): boolean {
+  const segments = url.pathname.split("/").filter((segment) => segment !== "");
+  if (segments.length === 2) return true;
+  return segments.length === 4 && ["issues", "pull", "discussions"].includes(segments[2]!) && /^\d+$/.test(segments[3]!);
+}
+
 const TIMEOUT_FLAG = /^--timeout(?:=(\d+))?$/;
 const TIMEOUT_VALUE = /^\d+$/;
 
@@ -146,7 +173,10 @@ export function createWebTools(core: Core, reach: ReachPort): Extension {
       try {
         const scope = requireAllowed(core, api, "web_read");
         const url = await assertFetchableUrl(args.url, "url");
-        const result = await reach.read(url.href);
+        // Repo/issue/PR/discussion links go through the CLI's github channel; other github hosts
+        // (search pages, api.github.com, raw.githubusercontent.com) are refused there, so the
+        // CLI's generic web reader takes them. Everything else keeps the plain page reader.
+        const result = githubHost(url) && !githubTargeted(url) ? await reach.run("web", "read", [url.href]) : await reach.read(url.href);
         // Every page read is kept as a citable snapshot; the full text is stored even where the reply is clipped.
         const sources = result.ok && core.sources
           ? result.items.map((item) => item.text ? core.sources!.record({ url: item.url ?? url.href, title: item.title, text: item.text, ghostId: scope.ghost.id, conversationId: scope.conversation.id }).id : null)
@@ -179,7 +209,13 @@ export function createWebTools(core: Core, reach: ReachPort): Extension {
         for (const value of extra) {
           if (URL_LIKE.test(value)) await assertFetchableUrl(value, "arg");
         }
-        return render(await reach.run(channel, action, clampTimeoutArgs(extra, reach.timeoutSeconds)));
+        const result = await reach.run(channel, action, clampTimeoutArgs(extra, reach.timeoutSeconds));
+        if (!result.ok && channel === "github" && result.error?.code === "BAD_INPUT") {
+          throw invalid(
+            "the github channel only accepts owner/repo or a github.com repo/issue/PR link as its target; search pages, api.github.com and raw.githubusercontent.com URLs are not github targets — read those with web_read instead",
+          );
+        }
+        return render(result);
       } catch (error) {
         return errorResult(error);
       }

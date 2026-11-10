@@ -2,6 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { UpdateStatus } from '@ghost/contract';
 import { HostClient } from '../../host/client';
 import { isDesktopShell, shellUpdateCheck, shellUpdateInstall, type ShellUpdate } from '../../host/desktop';
+import { shell as iosShell, shellCall, type ShellInfo } from '../../host/shell';
 
 /** An active phase moves on the host without a UI prompt; the UI follows it by polling. */
 export const UPDATE_POLL_MS = 2_000;
@@ -19,6 +20,7 @@ export type UpdateApi = {
   installUpdate(version: string): Promise<UpdateStatus>;
   cancelUpdate(): Promise<UpdateStatus>;
   updateSettings(patch: { autoCheck?: boolean; token?: string | null }): Promise<UpdateStatus>;
+  iosUpdateLink(): Promise<{ install: string; page: string }>;
 };
 
 export type UpdateSnapshot = {
@@ -31,11 +33,12 @@ export type UpdateSnapshot = {
   pending: boolean;
 };
 
-/** Tauri bridges, injectable for tests. */
+/** Native and desktop bridges, injectable for tests. */
 export type UpdateBridges = {
   desktop?: boolean;
   shellCheck?: () => Promise<ShellUpdate | null>;
   shellInstall?: () => Promise<void>;
+  iosInstall?: (url: string) => Promise<{ opened: boolean }>;
 };
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -109,6 +112,21 @@ export class UpdateMonitor {
   save = async (patch: { autoCheck?: boolean; token?: string | null }): Promise<void> => {
     await this.act(api => api.updateSettings(patch));
   };
+  getIosUpdateLink = (): Promise<{ install: string; page: string }> => this.api.iosUpdateLink();
+  /** Open the Host's verified iPhone install manifest in the native shell. */
+  installIos = async (): Promise<void> => {
+    this.set({ pending: true, error: null });
+    try {
+      const { install } = await this.api.iosUpdateLink();
+      const open = this.bridges.iosInstall ?? (url => shellCall({ type: 'app.install', url }));
+      const reply = await open(install);
+      if (!reply.opened) throw new Error('설치를 시작하지 못했습니다');
+    } catch (error) {
+      this.set({ error: message(error) });
+    }
+    this.set({ pending: false });
+  };
+
 
   /** Download, install and restart the desktop shell; the webview goes away on success. */
   installShell = async (): Promise<void> => {
@@ -174,12 +192,21 @@ export function useUpdate(client: HostClient, bridges: UpdateBridges = NO_BRIDGE
   return monitor;
 }
 
-/** One update worth asking about: the host release first, else the desktop shell. */
-export type UpdateOffer = { kind: 'host' | 'shell'; version: string; notes: string };
+/** One update worth asking about: the host release first, else an iPhone or desktop app. */
+export type UpdateOffer = { kind: 'host' | 'shell' | 'ios'; version: string; notes: string; build?: number };
 
-export function updateOffer(status: UpdateStatus | null, shell: ShellUpdate | null): UpdateOffer | null {
+export function updateOffer(status: UpdateStatus | null, shell: ShellUpdate | null, iosShellInfo = iosShell): UpdateOffer | null {
   const latest = status?.latest;
   if (latest) return { kind: 'host', version: latest.version, notes: latest.notes };
+  const ios = status?.ios;
+  if (iosShellInfo && ios && ios.build > Number(iosShellInfo.version)) {
+    return { kind: 'ios', version: ios.version, notes: ios.notes, build: ios.build };
+  }
   if (shell) return { kind: 'shell', version: shell.version, notes: shell.notes };
   return null;
+}
+export const IOS_INSTALL_BRIDGE_BUILD = 9;
+
+export function supportsIosInstall(shellInfo: ShellInfo): boolean {
+  return Number(shellInfo.version) >= IOS_INSTALL_BRIDGE_BUILD;
 }

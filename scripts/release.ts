@@ -7,7 +7,8 @@
 //
 // Needs: the Developer ID Application identity in the login keychain (or
 // GHOST_SIGNING_IDENTITY), the updater key ~/.tauri/ghost.key (or
-// GHOST_UPDATER_KEY), and `gh` logged in for --publish.
+// GHOST_UPDATER_KEY), Xcode signed in to the same team (the iPhone IPA uses its
+// automatic development profile), and `gh` logged in for --publish.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -184,6 +185,39 @@ cpSync(join(bundle, "Ghost.app.tar.gz"), join(out, "Ghost.app.tar.gz"));
 cpSync(join(bundle, "Ghost.app.tar.gz.sig"), join(out, "Ghost.app.tar.gz.sig"));
 run("codesign", ["--verify", "--deep", "--strict", join(bundle, "Ghost.app")]);
 
+// ── iPhone app ─────────────────────────────────────────────────────────────
+// Development-signed so it installs over the air on the team's registered devices.
+// The automatic profile has no push capability, so the push entitlement is left out.
+step("ios");
+const teamId = /\(([A-Z0-9]{10})\)$/.exec(identity)?.[1];
+if (!teamId) throw new Error(`no team ID in signing identity ${identity}`);
+const iosWork = join(out, "ios");
+mkdirSync(iosWork, { recursive: true });
+const plist = (body: string) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>${body}</dict></plist>\n`;
+writeFileSync(join(iosWork, "entitlements.plist"), plist(""));
+writeFileSync(join(iosWork, "export.plist"), plist(`<key>method</key><string>debugging</string><key>teamID</key><string>${teamId}</string><key>signingStyle</key><string>automatic</string><key>thinning</key><string>&lt;none&gt;</string>`));
+const iosArchive = join(iosWork, "Ghost.xcarchive");
+run("xcodebuild", [
+  "-quiet", "-project", "apps/ghost-ios/Ghost.xcodeproj", "-scheme", "Ghost", "-configuration", "Release",
+  "-destination", "generic/platform=iOS", "-archivePath", iosArchive, "-derivedDataPath", join(iosWork, "DerivedData"),
+  `DEVELOPMENT_TEAM=${teamId}`, `CODE_SIGN_ENTITLEMENTS=${join(iosWork, "entitlements.plist")}`, "-allowProvisioningUpdates", "archive",
+]);
+run("xcodebuild", ["-quiet", "-exportArchive", "-archivePath", iosArchive, "-exportOptionsPlist", join(iosWork, "export.plist"), "-exportPath", iosWork, "-allowProvisioningUpdates"]);
+const ipa = join(out, "Ghost.ipa");
+cpSync(join(iosWork, "Ghost.ipa"), ipa);
+// Read identity and signature from the exported IPA itself: export re-signs the archive.
+run("/usr/bin/ditto", ["-x", "-k", ipa, join(iosWork, "ipa")]);
+const iosApp = join(iosWork, "ipa/Payload/Ghost.app");
+const infoValue = (key: string) => run("plutil", ["-extract", key, "raw", join(iosApp, "Info.plist")], { capture: true });
+const ios = { version: infoValue("CFBundleShortVersionString"), build: Number(infoValue("CFBundleVersion")), bundleId: infoValue("CFBundleIdentifier") };
+if (!Number.isSafeInteger(ios.build) || ios.build < 1) throw new Error(`iPhone build number is not an integer: ${infoValue("CFBundleVersion")}`);
+run("codesign", ["--verify", "--deep", "--strict", iosApp]);
+const profilePlist = join(iosWork, "profile.plist");
+writeFileSync(profilePlist, run("security", ["cms", "-D", "-i", join(iosApp, "embedded.mobileprovision")], { capture: true }));
+const profileExpires = Date.parse(run("plutil", ["-extract", "ExpirationDate", "raw", profilePlist], { capture: true }));
+if (!(profileExpires > Date.now())) throw new Error("the iPhone provisioning profile has expired; refresh signing in Xcode");
+rmSync(iosWork, { recursive: true, force: true });
+
 // ── Manifest ───────────────────────────────────────────────────────────────
 step("manifest");
 const range = previousTag ? [`${previousTag}..HEAD`] : ["-n", "30", "HEAD"];
@@ -197,6 +231,7 @@ const manifest = {
   storage: reported.storage,
   host: { asset: hostAsset, sha256: sha256(hostArchive), bytes: statSync(hostArchive).size },
   shell: { version: shellVersion, asset: "Ghost.app.tar.gz", signature: readFileSync(join(out, "Ghost.app.tar.gz.sig"), "utf8").trim(), notes },
+  ios: { ...ios, asset: "Ghost.ipa", sha256: sha256(ipa), bytes: statSync(ipa).size, notes },
 };
 const manifestPath = join(out, "ghost-release.json");
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -211,6 +246,8 @@ if (!verifyMinisign(pubkey, readFileSync(`${manifestPath}.sig`, "utf8"), manifes
 const parsed = parseManifest(manifestBytes);
 const archiveBytes = readFileSync(hostArchive);
 if (sha256(hostArchive) !== parsed.host.sha256 || archiveBytes.length !== parsed.host.bytes) throw new Error("host archive does not match the manifest");
+if (!parsed.ios || sha256(ipa) !== parsed.ios.sha256 || statSync(ipa).size !== parsed.ios.bytes
+  || parsed.ios.version !== ios.version || parsed.ios.build !== ios.build || parsed.ios.bundleId !== ios.bundleId) throw new Error("iPhone app does not match the manifest");
 await validateTarball(archiveBytes);
 rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage);
@@ -220,7 +257,7 @@ verifyReleaseDirectory(stage, parsed);
 run("codesign", ["--verify", "--strict", join(stage, "Ghost Control.app")]);
 rmSync(stage, { recursive: true, force: true });
 
-const assets = [hostArchive, join(out, "Ghost.app.tar.gz"), join(out, "Ghost.app.tar.gz.sig"), manifestPath, `${manifestPath}.sig`];
+const assets = [hostArchive, join(out, "Ghost.app.tar.gz"), join(out, "Ghost.app.tar.gz.sig"), ipa, manifestPath, `${manifestPath}.sig`];
 console.log(`\nbuilt ${out}\n${assets.map(path => `  ${relative(out, path)}`).join("\n")}`);
 
 // ── Publish ────────────────────────────────────────────────────────────────

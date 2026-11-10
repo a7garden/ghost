@@ -149,6 +149,8 @@ test("a switch-off or a new plan made while a wake is prepared or admitted is ne
   let disable: (() => void) | null = null;
   const f = fixture({ onHead: () => disable?.() });
   const now = day(12);
+  // Keep the main Ghost's ID-spread first wake out of this admission race.
+  await f.core.autonomy.plan(f.main, f.main.id, { at: now + 6 * 60 * MINUTE, intent: "look later" }, now);
   f.ledger.tx(() => f.ledger.putSpace({ id: "11111111-1111-4111-8111-111111111111", name: "Twill", path: "/work/twill", createdAt: 1 }));
   await f.core.autonomy.plan(f.mate, f.mate.id, { at: now + 10 * MINUTE, intent: "first", watch: ["11111111-1111-4111-8111-111111111111"] }, now);
   disable = () => f.core.autonomy.setEnabled(f.mate.id, false);
@@ -159,11 +161,16 @@ test("a switch-off or a new plan made while a wake is prepared or admitted is ne
   disable = null;
   f.core.autonomy.setEnabled(f.mate.id, true);
   await f.core.autonomy.plan(f.mate, f.mate.id, { at: now + 20 * MINUTE, intent: "second" }, now + 10 * MINUTE);
-  f.engine.onSubmit = async () => {
+  let replans = 0;
+  f.engine.onSubmit = async (conversationId) => {
+    if (conversationId !== f.mate.directConversationId) return;
+    replans++;
     await f.core.autonomy.plan(f.mate, f.mate.id, { at: now + 5 * 60 * MINUTE, intent: "follow the release" }, now + 20 * MINUTE);
   };
   await f.core.autonomy.tick(now + 20 * MINUTE);
   expect(f.wakes(f.mate.id)).toHaveLength(1);
+  expect(replans).toBe(1);
+  expect(f.wakes(f.main.id)).toEqual([]);
   expect(f.plan(f.mate.id)).toMatchObject({ nextAt: now + 5 * 60 * MINUTE, intent: "follow the release", setBy: "self", lastWakeAt: now + 20 * MINUTE });
 });
 

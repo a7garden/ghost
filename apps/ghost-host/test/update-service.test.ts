@@ -16,6 +16,8 @@ async function run(script: string) {
   return { code, stderr };
 }
 
+// Budget 3s each for fixture tar creation and four sequential real shell launches,
+// including their mv/ln/date/rm subprocesses, under concurrent release-build load.
 test.each([true, false])("launcher records outcome after four starts, rollback=%s", async (rollback) => {
   const f = await fixture();
   const next = "2.2.0-new123", previous = f.oldName;
@@ -34,7 +36,7 @@ test.each([true, false])("launcher records outcome after four starts, rollback=%
   expect(result.at).toBeGreaterThan(0);
   expect(existsSync(join(f.root, "update", "pending"))).toBe(false);
   expect(existsSync(join(f.root, "update", "attempts"))).toBe(false);
-});
+}, 5 * 3_000);
 
 test("service writes escaped paths, plist and CLI link; launchctl uses argument vectors", async () => {
   const f = await fixture();

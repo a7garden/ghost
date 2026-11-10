@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { ActivityConfig, ConnectionConfig } from "./autonomy.ts";
 import { DutyHours } from "./duty.ts";
 import {
+  ADAPTATION_MAX_CHARS,
   ApprovalPolicy,
   OwnerLanguage,
   Acceptance,
@@ -102,6 +103,8 @@ export const Command = Type.Union([
   /** Remove a retired Ghost from every list. Past Works keep it as their assignee. */
   command("ghost.delete", { ghostId: Id }),
   command("ghost.set_default", { ghostId: Id }),
+  /** Edit or clear (empty notes) what a Ghost learned about this environment. */
+  command("ghost.adapt", { ghostId: Id, notes: Type.String({ maxLength: ADAPTATION_MAX_CHARS }) }),
   command("sandbox.control", { ghostId: Id, action: Type.Union([Type.Literal("stop"), Type.Literal("reset")]) }),
 
   // Schedules
