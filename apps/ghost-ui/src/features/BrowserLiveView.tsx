@@ -86,6 +86,8 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   const connectRef = useRef<() => void>(() => {});
   const imageRef = useRef<HTMLImageElement | null>(null);
   const frameTokenRef = useRef(0);
+  const inputQueueRef = useRef<Promise<void> | null>(null);
+  const inputGenerationRef = useRef(0);
   const moveGateRef = useRef<{ at: number; timer: ReturnType<typeof setTimeout> | null }>({ at: 0, timer: null });
   const pointerRef = useRef({
     id: null as number | null,
@@ -176,6 +178,7 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
+      inputGenerationRef.current++;
       abortRef.current?.abort();
       if (reconnectRef.current !== null) clearTimeout(reconnectRef.current);
       if (moveGateRef.current.timer !== null) clearTimeout(moveGateRef.current.timer);
@@ -183,10 +186,21 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     };
   }, [conversationId]);
 
-  const send = useCallback((input: BrowserInput): Promise<void> =>
-    client.browserInput(conversationId, input).then(() => setInputError(null), (caught: unknown) => {
-      setInputError(caught instanceof Error && caught.message ? caught.message : '입력을 전달하지 못했습니다.');
-    }), [client, conversationId]);
+  const send = useCallback((input: BrowserInput): Promise<void> => {
+    const generation = inputGenerationRef.current;
+    const pending = (inputQueueRef.current ?? Promise.resolve()).then(async () => {
+      if (generation !== inputGenerationRef.current || statusRef.current === 'ended') return;
+      try {
+        await client.browserInput(conversationId, input);
+        setInputError(null);
+      } catch (caught) {
+        inputGenerationRef.current++;
+        setInputError(caught instanceof Error && caught.message ? caught.message : '입력을 전달하지 못했습니다.');
+      }
+    });
+    inputQueueRef.current = pending;
+    return pending;
+  }, [client, conversationId]);
 
   useEffect(() => {
     const screen = screenRef.current;
