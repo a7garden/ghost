@@ -329,7 +329,8 @@ describe("API command crash atomicity", () => {
       const { core, ledger, engine } = harness();
       const ghost = core.createGhost({ name: "Owner", persona: "" });
       const conversationId = ghost.directConversationId;
-      const writer = core.effects.begin({ conversationId, callId: "running-write", tool: "memory_retain", input: { text: "Durable memory" }, summary: "Retain memory" }).effect;
+      // An outside write (a sent reply) stays unknown; writes the Ghost can inspect are handed back as uncertain.
+      const writer = core.effects.begin({ conversationId, callId: "running-write", tool: "activity_action", input: { text: "Reply" }, summary: "Send reply" }).effect;
       if (state === "unknown") core.effects.unknown(writer.id, "interrupted write");
       const competing = { conversationId, callId: "competing-write", tool: "memory_retain", input: { text: "Other memory" }, summary: "Other memory" };
       expect(() => core.effects.begin(competing)).toThrow("unresolved");
@@ -394,10 +395,10 @@ describe("API command crash atomicity", () => {
         ledger.putSpace({ id: "owner-docs", name: "Docs", path: vault, createdAt: Date.now() });
       });
       secrets.put("revoked-provider", "must-be-revoked");
-      core.effects.onApproved("host_command_propose", async () => { throw new Error("approval must not execute"); });
+      core.effects.onApproved("browser_propose", async () => { throw new Error("approval must not execute"); });
       const approval = core.effects.propose({
-        conversationId, callId: "waiting-host-command", tool: "host_command_propose", input: { command: "owner-reviewed command" },
-        summary: "Waiting for owner approval", title: "Run?", detail: "Owner review required", proposal: { command: "owner-reviewed command" },
+        conversationId, callId: "waiting-browser-click", tool: "browser_propose", input: { command: "owner-reviewed click" },
+        summary: "Waiting for owner approval", title: "Click?", detail: "Owner review required", proposal: { command: "owner-reviewed click" },
       });
       if (state === "unknown") core.effects.unknown(approval.id, "uncertain previous host command");
       const originalEffect = ledger.effect(approval.id);

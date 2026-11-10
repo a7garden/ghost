@@ -159,6 +159,11 @@ export class Core implements EngineEvents {
     while (this.lanes.size > 0) await Promise.all([...this.lanes.values()]);
   }
 
+  /** True while any lane task is queued or running. */
+  hasQueuedLanes(): boolean {
+    return this.lanes.size > 0;
+  }
+
   /**
    * Startup: settle interrupted effects, finish interrupted decision follow-ups and reports,
    * then re-derive engine actions for every live object.

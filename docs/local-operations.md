@@ -4,23 +4,22 @@
 
 | 역할 | 진입점 |
 | --- | --- |
-| Host | `ghost serve` 한 프로세스. 상태 루트(`~/Library/Application Support/Ghost`)의 단일 writer이고 API·웹 UI·기기 연결을 같은 포트(기본 `127.0.0.1:62062`)에서 제공한다. |
-| Mac 앱 | `~/Applications/Ghost.app`. `~/.config/ghost/console.json`의 `host_mode: external`이면 상태 루트의 `host.json`을 읽어 실행 중인 Host에 붙는다. `managed`이면 앱에 들어 있는 Host를 직접 띄운다. |
+| Host | `ghost serve` 한 프로세스. 상태 루트(`~/Library/Application Support/Ghost`)의 단일 writer이고 API·웹 UI·기기 연결을 같은 포트(기본 `127.0.0.1:62062`)에서 제공한다. LaunchAgent `com.a7.ghost`가 `ghost service install`이 만든 `~/.local/share/ghost/bin/ghost-launch`로 띄운다. |
+| Mac 앱 | `~/Applications/Ghost.app`. 상태 루트의 `host.json`을 읽어 실행 중인 Host에 붙기만 한다. Host를 띄우거나 끄지 않는다. `~/.config/ghost/console.json`은 `root`만 읽는다. |
 | iPhone | 페어링한 기기가 Host의 공개 origin(`publicOrigin`, TLS 리버스 프록시)으로 직접 접속한다. 별도 Gateway는 없다. |
 
 ## 개발 변경의 자동 운영 반영
 
-소유자 상시 승인(2026-11-07): 검증한 Ghost 구현 변경은 별도 확인을 묻지 않고 같은 작업에서 운영 앱까지 반영한다. 빌드만 하거나 “운영 미반영” 상태로 개발 작업을 끝내지 않는다. 런타임에 영향 없는 문서 수정만 배포 대상에서 제외한다.
+소유자 상시 승인(2026-11-07): 검증한 Ghost 구현 변경은 별도 확인을 묻지 않고 같은 작업에서 운영 앱까지 반영한다. 빌드만 하거나 “운영 미반영” 상태로 개발 작업을 끝내지 않는다. 런타임에 영향 없는 문서 수정만 배포 대상에서 제외한다. 2026-11-10부터 반영은 GitHub Release와 Host 자체 업데이트로 한다.
 
-1. 해당 변경의 테스트·타입 검사·실행 검증과 필요한 독립 검토를 마치고 소스 커밋을 보존한다. 검증되지 않은 편집을 감시해 즉시 설치하는 watcher는 만들지 않는다.
-2. LaunchAgent, 실제 실행 파일, 포트 62062의 리스너, 열린 DB 경로와 상태 루트가 일치하는지 확인한다. 처리 중 대화·작업을 임의로 끊지 않고 유휴 시점에 전환한다. 유휴가 되지 않으면 검증한 릴리스를 준비한 채 차단 사유를 보고한다.
-3. 유휴 확인 후 **현재 운영 릴리스**의 `ghost backup <새 백업 디렉터리>`로 DB 무결성·manifest·시각을 확인한다. 금고 DB·키 포함 여부를 확인하고 `artifacts/`, `skills/`, `secrets/`(연결 계정 자격 포함), `config.json`, 앱 console 설정도 권한을 유지해 보관한다. 이전 릴리스는 삭제하지 않는다.
-4. `~/.local/share/ghost/releases/<날짜>-bun-<소스 커밋>/`에 검증한 `ghost`, `ui/`, 고정된 `agent-browser`를 설치하고 원본·사본 해시를 비교한다. Obscura를 켠 Apple Silicon Host는 `apps/ghost-host/scripts/stage-obscura.sh <릴리스 디렉터리>`로 같은 릴리스에 엔진과 라이선스도 넣는다. 별도 임시 상태 루트·포트에서 설치 사본과 스키마 업그레이드도 실행한다.
-5. 유휴 상태를 다시 확인한 뒤 같은 디렉터리의 임시 심볼릭 링크를 `os.replace` 같은 원자적 rename으로 `current`에 교체한다. 실제 `readlink` 대상이 새 릴리스인지 확인한 후 LaunchAgent의 기존 Host를 `SIGTERM`으로 정상 종료해 재기동한다. 운영 루트에 두 번째 Host를 직접 띄우지 않는다.
-6. Owner API/health로 단일 리스너·실행 경로, 준비 상태와 기존 데이터 보존을 확인하고 **설치된 Ghost 앱**에서 바뀐 화면을 실제로 연다. 운영 루트에는 `ghost doctor`를 실행하지 않는다. Host/UI만 바뀌었으면 external 모드를 유지해 새 Host/UI를 사용하고, native shell 변경이 있을 때만 기존 서명·배포 검증을 거쳐 앱 번들을 교체한다.
-7. 검증 실패 시 저장 형식의 하위 호환성을 확인한 뒤 이전 릴리스 링크로 되돌려 정상 재기동한다. 새 릴리스가 인증 형식을 바꾸면 운영 검증 중 인증 정보를 저장하지 않는다. 저장 이후에는 이전 릴리스가 해당 인증을 읽지 못할 수 있으므로 별도 승인 없이 secrets를 복원하지 않고 보고한다. 데이터 복원·파괴적 마이그레이션도 별도 승인이 필요하다. 설치 경로·소스·백업·검증 결과를 이 문서에 기록한다.
+1. 해당 변경의 테스트·타입 검사·실행 검증과 필요한 독립 검토를 마치고 `main`에 커밋한다. 검증되지 않은 편집을 감시해 즉시 설치하는 watcher는 만들지 않는다.
+2. `apps/ghost-host/package.json`의 `version`을 올린다. 네이티브 셸(`apps/ghost-desktop/src-tauri`)이 바뀐 때만 `tauri.conf.json`·`Cargo.toml` 버전도 올린다. 커밋한다.
+3. 깨끗한 작업 트리에서 `bun scripts/release.ts --publish`. 검사(Host·계약 타입, Host·UI 테스트, 셸 `cargo test`)를 통과해야 빌드한다. Developer ID로 `ghost`와 `Ghost.app`에 서명하고, `~/.tauri/ghost.key`로 셸 번들과 `ghost-release.json`에 서명해 `v<version>` 태그와 Release를 올린다. 키를 잃으면 설치된 Host와 앱이 더는 업데이트를 받지 못한다.
+4. 설치는 Ghost 앱의 설정 › 업데이트 「설치」 또는 Owner API(`host.json`의 토큰)로 `POST /api/update/check` 뒤 `POST /api/update/install {"version"}`. Host가 받은 묶음의 해시·파일·`ghost version`을 확인해 `releases/<version>-<commit>`에 두고, 진행 중 대화·실행이 없을 때 `backups/pre-<version>-<commit>-<ms>/`에 백업한 뒤 `current`를 원자 교체하고 정상 종료한다. launchd가 새 릴리스를 띄운다. 유휴가 오지 않으면 `waiting`에 머문다. 끊지 말고 차단 사유로 보고하고, 필요하면 `POST /api/update/cancel`.
+5. `GET /api/update`의 `lastResult`가 `installed`인지, health 버전·준비 상태·기존 Ghost·대화·맡긴 일 보존을 Owner API로 확인한다. 운영 루트에는 `ghost doctor`를 실행하지 않는다. **설치된 Ghost 앱**에서 바뀐 화면을 실제로 연다. 셸 버전을 올린 릴리스는 같은 화면의 「앱 업데이트」로 앱을 바꾸고 다시 연 뒤 확인한다.
+6. 새 Host가 세 번 연속 뜨지 못하면 launcher가 저장 형식 지문이 같은 경우에만 이전 릴리스로 되돌리고 `rolled_back`을 남긴다. 지문이 다르면 `failed`로 남기고 되돌리지 않는다. 데이터 복원·파괴적 마이그레이션·secrets 복원은 별도 승인이 필요하다. 수동으로 되돌릴 때는 `current`를 이전 릴리스로 바꾸고 `launchctl kickstart -k gui/$(id -u)/com.a7.ghost`. 버전·백업·검증 결과를 이 문서에 기록한다.
 
-Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다.
+브랜치 푸시가 실패해도 Release를 올릴 수 있으면 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다. GitHub에 Release를 올릴 수 없으면 `dist/release/<version>/`에 검증한 묶음을 보존하고 차단 사유를 보고한다.
 
 Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 `"obscura": {"executable": "~/.local/share/ghost/current/obscura", "loginOrigins": []}`를

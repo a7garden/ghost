@@ -149,3 +149,37 @@ export const PageView = Type.Object({
   hash: Type.String(),
 });
 export type PageView = Static<typeof PageView>;
+
+/** GET /api/update. The Host's own release update; the owner starts every install. */
+export const UpdateStatus = Type.Object({
+  /** A release build running from `<base>/releases/<name>/ghost` with `<base>/current` pointing at it, started by the `ghost service install` launcher. */
+  enabled: Type.Boolean(),
+  disabledReason: Type.Union([Type.Null(), Type.Literal("development"), Type.Literal("layout"), Type.Literal("service")]),
+  hasCredential: Type.Boolean(),
+  current: Type.Object({ version: Type.String(), commit: Type.String() }),
+  autoCheck: Type.Boolean(),
+  phase: Type.Union([
+    Type.Literal("idle"),
+    Type.Literal("checking"),
+    Type.Literal("downloading"),
+    Type.Literal("waiting"),
+    Type.Literal("installing"),
+    Type.Literal("error"),
+  ]),
+  /** The newest verified release, only when it is newer than the running Host. */
+  latest: nullable(Type.Object({ version: Type.String(), commit: Type.String(), notes: Type.String(), publishedAt: Type.String() })),
+  /** The desktop shell offered by the newest verified release; the shell compares it with its own version. */
+  shell: nullable(Type.Object({ version: Type.String(), notes: Type.String() })),
+  checkedAt: nullable(Timestamp),
+  nextCheckAt: nullable(Timestamp),
+  error: nullable(Type.String()),
+  lastResult: nullable(
+    Type.Object({
+      outcome: Type.Union([Type.Literal("installed"), Type.Literal("rolled_back"), Type.Literal("failed")]),
+      from: Type.String(),
+      to: Type.String(),
+      at: Timestamp,
+    }),
+  ),
+});
+export type UpdateStatus = Static<typeof UpdateStatus>;

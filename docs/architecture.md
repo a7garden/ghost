@@ -55,7 +55,7 @@ flowchart LR
 package.json               Bun workspace root
 packages/ghost-contract/   entity, command and event schemas (TypeBox) + TS types
 apps/ghost-host/           the ghost process
-  src/main.ts              CLI: serve | import | backup | doctor
+  src/main.ts              CLI: serve | import | backup | doctor | version | service install
   src/config.ts            typed config: state root, ports, providers, sandbox, memory, vaults
   src/ledger/              bun:sqlite schema, migrations, repositories, events
   src/core/                commands → rules → ledger writes → engine effects
@@ -63,13 +63,15 @@ apps/ghost-host/           the ghost process
   src/tools/               model tools grouped by capability
   src/sandbox/             ExecutionEnv: Apple container, explicit PC, confined workspace
   src/integrations/        oxibrain, pdc, browser, source connections, push, providers
+  src/update/              release check, signed install, launcher and LaunchAgent
   src/api/                 Bun.serve routes, auth, pairing, SSE
   src/import/              one-shot importer from a legacy state root
   test/                    bun test
 apps/ghost-ui/             React web UI, served by the host and embedded by the Mac app
-apps/ghost-desktop/        Tauri shell
+apps/ghost-desktop/        Tauri shell: a client of the running Host, never its owner
 apps/ghost-ios/            SwiftUI app
 apps/ghost-voice-server/   unchanged follow-up scope
+scripts/release.ts         build, sign and publish a GitHub Release
 docs/
 ```
 
@@ -171,6 +173,16 @@ Every follow-up after a ledger commit is idempotent, and startup replays whateve
 - Schedules submit before they advance.
 - Tools that create rows (`work_create`, `delegate`, `schedule_create`, `ask_owner`, `ask_parent`, `document_propose`, `vault_request`, `browser_propose`, `browser_handoff`) derive the row id from the tool call, so a call Pi replays finds its row. Parent questions and answers that were recorded but not yet submitted are submitted again with their deterministic request ids.
 
+### Releases and updates
+
+The Host runs as a launchd service (`ghost service install`); the Mac app only connects to it through `host.json` and never starts or stops it. The Host owns its own updates, so a shell, a browser tab and the iPhone all see one update state.
+
+- `scripts/release.ts --publish` builds on the owner's Mac after the checks pass: a Developer ID-signed `ghost` with its repository, commit and update key compiled in, the UI, pinned `agent-browser` and Obscura with a per-file `release.json`, the Tauri shell's updater bundle, and `ghost-release.json` signed with the minisign key `~/.tauri/ghost.key`. Before publishing it runs the Host's own signature, archive and file checks on what it built, refuses a version that is not newer than the latest Release, and uploads a draft that becomes the latest Release only once every asset is there.
+- The Host checks the latest release hourly (backoff 5 → 60 minutes after failures) with the owner's GitHub token (the repository is private) and verifies the manifest signature against the compiled-in key. Development builds have no repository or key, and a release binary not started by the launcher (`GHOST_SERVICE=launchd`) has nobody to restart it; neither checks nor installs. Damaged update files are logged and ignored; they never stop the Host.
+- Nothing installs by itself. 「설치」 downloads the tarball, checks its hash and every file, runs the new `ghost version`, stages `releases/<version>-<commit>`, waits until no conversation is busy and no core lane is active, backs up with a `ghost backup` child process (a busy writer means "not idle yet"), checks idle again, writes `update/pending`, swaps `current` atomically and exits through the normal graceful shutdown; a shutdown that does not finish within 60 seconds exits hard. launchd starts the new release.
+- The launcher counts starts while `update/pending` exists. A new Host that has been serving for 60 seconds clears it and records `installed`. After three failed starts the launcher points `current` back at the previous release, but only when the manifest's storage fingerprint (ledger migrations, Pi Durable version, vault format) equals the running one; otherwise it records `failed` and leaves the backup for an owner-approved restore. The fingerprint does not see row-level format changes, so a release that writes values older Hosts reject must change it.
+- The shell updates through the Host: `GET /api/update/shell/latest.json` serves the Tauri updater document for the newest verified release and proxies its signed `Ghost.app.tar.gz`. The shell version (`tauri.conf.json`) moves only when native code changes.
+
 ## Stores
 
 ### `ledger.db`
@@ -214,6 +226,10 @@ browser/                     agent-browser HOME (per-Ghost login state, encrypte
 sandboxes/<ghost_id>/<work_id>/workspace   private staging / container mount; never the unrestricted PC cwd
 host.json                    port + owner token for local clients, 0600
 config.json                  optional: publicOrigin, uiDir, sandbox, memory, apns, reach, skills, mac, browser
+secrets/update-github.json   GitHub token for release checks, 0600
+update/state.json            update preferences, last check, last verified manifest, last result
+update/pending, attempts     launcher handshake while a new release starts; result.json after a rollback
+update/cache/                shell updater bundle proxied to the Mac app
 ```
 
 ## Engine
@@ -296,6 +312,8 @@ config.json                  optional: publicOrigin, uiDir, sandbox, memory, apn
 | `GET /api/providers/:id/oauth` | login status, verification URL and device code; never tokens |
 | `DELETE /api/providers/:id/oauth` | cancel a pending login, not an existing credential |
 | `GET/POST /api/vault/items`, `PATCH/DELETE /api/vault/items/:id`, `POST /api/vault/import`, `POST /api/vault/requests/:decisionId` | vault management and secure-form answers for every principal; values are accepted, never returned ([details](agent-capabilities.md#owner-api-vault)) |
+| `GET /api/update`, `POST /api/update/check`, `POST /api/update/install {version}`, `POST /api/update/cancel`, `PUT /api/update/settings {autoCheck?, token?}` | release update status and owner-started install for every principal; the token is accepted, never returned |
+| `GET /api/update/shell/latest.json`, `GET /api/update/shell/Ghost.app.tar.gz` | Tauri updater document and bundle for the Mac app, from the newest verified release |
 | `GET /` | web UI |
 
 `space.create` registers `{ name, path }`; `space.update` changes `{ spaceId, name? }`. Neither accepts Ghost grants. `document.save` is the owner's direct save; `document_propose` remains direct-only, opens `document_review` and writes only after approval. `document_spaces`, `document_list` and `document_read` are available in both direct and Work conversations, subject to the ordinary tool allow-list and Activity scope.

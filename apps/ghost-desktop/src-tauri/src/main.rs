@@ -1,9 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod companion;
-mod supervisor;
 
-use crate::supervisor::{ProcessState, ProcessSupervisor, SupervisorConfig};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
@@ -15,18 +13,15 @@ use std::{
 };
 use tauri::{Manager, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, ShortcutState};
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 /// The host origin the webviews may load. It is known only after the host
 /// answers, so both windows read it from one shared cell.
 type OriginCell = Arc<Mutex<Option<String>>>;
 
 struct DesktopHost {
-    /// The host process this app owns. An external host is never touched.
-    supervisor: Option<Arc<ProcessSupervisor>>,
-    /// Set when the app is quitting: the supervisor stops restarting.
+    /// Stop following the external host when the app quits.
     exiting: Arc<AtomicBool>,
-    /// Set when the supervisor thread has released the host process.
-    released: Arc<AtomicBool>,
     /// Whether the overlay currently holds window focus. Drives the
     /// focus-loss-to-hide behavior: a `Focused(false)` only hides the overlay
     /// when it had previously gained focus, so the show→focus sequence can't
@@ -34,23 +29,10 @@ struct DesktopHost {
     overlay_focused: AtomicBool,
 }
 
-/// Where the Ghost host lives and who starts it.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-enum HostMode {
-    /// The host runs outside this app; the app only talks to it.
-    External,
-    /// This app starts the host and keeps it running.
-    #[default]
-    Managed,
-}
-
 /// `~/.config/ghost/console.json`. Unknown keys are ignored: the file may
 /// still carry settings this app no longer reads.
 #[derive(Debug, Default, Deserialize)]
 struct ConsoleConfig {
-    #[serde(default)]
-    host_mode: HostMode,
     root: Option<String>,
 }
 
@@ -86,15 +68,8 @@ const OVERLAY_MIN_HEIGHT: f64 = 240.0;
 /// surfaces it in a single frame.
 const OVERLAY_PARK: (f64, f64) = (-32000.0, -32000.0);
 
-/// The host needs a moment to open the state root and answer.
-const HOST_READY_TIMEOUT: Duration = Duration::from_secs(30);
 /// An external host that is not up yet is retried, not failed.
 const EXTERNAL_RETRY_TIMEOUT: Duration = Duration::from_secs(10);
-/// Restart backoff for the managed host.
-const RESTART_BACKOFF_MIN: Duration = Duration::from_millis(500);
-const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(30);
-/// How long the quit path waits for the supervisor to release the host.
-const RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn overlay_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
     app.get_webview_window("overlay")
@@ -396,6 +371,100 @@ fn read_host_file(root: &Path) -> Result<HostFile, String> {
     Ok(file)
 }
 
+struct ShellUpdater {
+    root: PathBuf,
+    // One operation at a time; retain the verified offer until installation.
+    pending: tauri::async_runtime::Mutex<Option<Update>>,
+}
+
+#[derive(Serialize)]
+struct ShellUpdate {
+    version: String,
+    notes: String,
+}
+
+fn shell_update_url(port: u16, asset: &str) -> Result<tauri::Url, String> {
+    // Neither the renderer nor host.json can choose a non-loopback endpoint.
+    tauri::Url::parse(&format!("http://127.0.0.1:{port}/api/update/shell/{asset}"))
+        .map_err(|_| "앱 업데이트 주소를 읽지 못했습니다.".into())
+}
+
+#[tauri::command]
+fn shell_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
+async fn shell_update_check(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, ShellUpdater>,
+) -> Result<Option<ShellUpdate>, String> {
+    let mut pending = state
+        .pending
+        .try_lock()
+        .map_err(|_| "앱 업데이트가 진행 중입니다.".to_string())?;
+    *pending = None;
+    let host = read_host_file(&state.root)?;
+    let updater = app
+        .updater_builder()
+        .no_proxy()
+        .configure_client(|client| client.redirect(reqwest::redirect::Policy::none()))
+        .endpoints(vec![shell_update_url(host.port, "latest.json")?])
+        .map_err(|_| "앱 업데이트 주소를 설정하지 못했습니다.".to_string())?
+        .header("Authorization", format!("Bearer {}", host.token))
+        .map_err(|_| "호스트 인증 정보를 읽지 못했습니다.".to_string())?
+        .build()
+        .map_err(|_| "앱 업데이트를 시작하지 못했습니다.".to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|_| "앱 업데이트를 확인하지 못했습니다.".to_string())?;
+    if let Some(update) = update {
+        // The HTTP exception and owner bearer token are only for this Host.
+        if update.download_url != shell_update_url(host.port, "Ghost.app.tar.gz")? {
+            return Err("앱 업데이트 다운로드 주소가 올바르지 않습니다.".into());
+        }
+        let offer = ShellUpdate {
+            version: update.version.clone(),
+            notes: update.body.clone().unwrap_or_default(),
+        };
+        *pending = Some(update);
+        Ok(Some(offer))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+async fn shell_update_install(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, ShellUpdater>,
+) -> Result<(), String> {
+    let mut pending = state
+        .pending
+        .try_lock()
+        .map_err(|_| "앱 업데이트가 진행 중입니다.".to_string())?;
+    let update = pending
+        .as_mut()
+        .ok_or_else(|| "앱 업데이트를 먼저 확인하세요.".to_string())?;
+    // The Host may have restarted between checking and clicking 설치.
+    let host = read_host_file(&state.root)?;
+    update.download_url = shell_update_url(host.port, "Ghost.app.tar.gz")?;
+    let authorization = update
+        .headers
+        .get_mut("Authorization")
+        .ok_or_else(|| "호스트 인증 정보를 읽지 못했습니다.".to_string())?;
+    *authorization = format!("Bearer {}", host.token)
+        .parse()
+        .map_err(|_| "호스트 인증 정보를 읽지 못했습니다.".to_string())?;
+    authorization.set_sensitive(true);
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|_| "앱 업데이트를 설치하지 못했습니다.".to_string())?;
+    app.restart();
+}
+
 /// The host answers `/api/health` with `{"ok":true}` while it is serving.
 fn host_health(client: &reqwest::blocking::Client, port: u16) -> bool {
     let Ok(response) = client
@@ -422,24 +491,16 @@ fn health_client() -> Result<reqwest::blocking::Client, String> {
 }
 
 /// Wait until the host publishes a healthy endpoint.
-///
-/// `expected_pid` pins the answer to one process: a managed host rewrites
-/// `host.json` on every start, so a stale file must not be mistaken for the
-/// host that was just launched. `supervisor` lets the wait end as soon as the
-/// managed child dies instead of burning the whole timeout.
 fn wait_for_endpoint(
     client: &reqwest::blocking::Client,
     root: &Path,
-    expected_pid: Option<u32>,
-    supervisor: Option<&ProcessSupervisor>,
     exiting: &AtomicBool,
     timeout: Duration,
 ) -> Result<Endpoint, String> {
     let deadline = Instant::now() + timeout;
     loop {
         if let Ok(file) = read_host_file(root) {
-            let same_process = expected_pid.is_none_or(|pid| pid == file.pid);
-            if same_process && host_health(client, file.port) {
+            if host_health(client, file.port) {
                 return Ok(Endpoint {
                     origin: format!("http://127.0.0.1:{}", file.port),
                     pid: file.pid,
@@ -449,39 +510,13 @@ fn wait_for_endpoint(
         if exiting.load(Ordering::Acquire) {
             return Err("앱이 종료되었습니다.".into());
         }
-        if let Some(supervisor) = supervisor {
-            let running = supervisor
-                .status()
-                .map(|status| status.state == ProcessState::Running)
-                .unwrap_or(false);
-            if !running {
-                return Err("호스트가 종료되었습니다.".into());
-            }
-        }
         if Instant::now() >= deadline {
-            return Err("호스트가 준비되지 않았습니다.".into());
+            return Err(
+                "호스트에 연결할 수 없습니다. `ghost service install`을 실행하세요.".into(),
+            );
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-}
-
-/// The bundled host, supervised by this app.
-fn supervisor(resources: &Path, root: &Path) -> Result<Arc<ProcessSupervisor>, String> {
-    let mut config = SupervisorConfig::new(resources.join("host/ghost"));
-    config.arguments = vec!["serve".to_string()];
-    config.environment = vec![
-        ("GHOST_ROOT".into(), root.to_string_lossy().into_owned()),
-        (
-            "GHOST_UI_DIR".into(),
-            resources.join("ui").to_string_lossy().into_owned(),
-        ),
-    ];
-    config.working_directory = Some(resources.to_path_buf());
-    config.shutdown_timeout = Duration::from_secs(7);
-    config.restart_delay = Duration::from_millis(500);
-    // Restarts are driven from here so the delay can grow between failures.
-    config.restart_limit = 0;
-    ProcessSupervisor::new(config).map(Arc::new)
 }
 
 fn set_origin(origin: &OriginCell, value: &str) {
@@ -653,91 +688,14 @@ fn report(window: &WebviewWindow, error: &str, ui_loaded: bool) {
     let _ = window.eval(format!("document.getElementById('title').textContent='작업 공간을 열 수 없습니다';document.getElementById('status').textContent={message};"));
 }
 
-/// Keep a managed host running: start it, load its UI, and restart it with a
-/// growing delay when it dies.
-fn supervise_managed(
-    mut ui: HostUi,
-    supervisor: Arc<ProcessSupervisor>,
-    root: PathBuf,
-    exiting: Arc<AtomicBool>,
-    released: Arc<AtomicBool>,
-) {
-    let Ok(client) = health_client() else {
-        report(&ui.window, "상태 확인을 시작하지 못했습니다.", false);
-        released.store(true, Ordering::Release);
-        return;
-    };
-    let mut backoff = RESTART_BACKOFF_MIN;
-    let mut next_start = Instant::now();
-    while !exiting.load(Ordering::Acquire) {
-        let running = supervisor.status().ok().and_then(|status| {
-            if status.state == ProcessState::Running {
-                status.pid
-            } else {
-                None
-            }
-        });
-        match running {
-            Some(pid) => {
-                match wait_for_endpoint(
-                    &client,
-                    &root,
-                    Some(pid),
-                    Some(&supervisor),
-                    &exiting,
-                    HOST_READY_TIMEOUT,
-                ) {
-                    Ok(endpoint) => {
-                        ui.connect(&endpoint);
-                        backoff = RESTART_BACKOFF_MIN;
-                    }
-                    Err(message) => report(&ui.window, &message, ui.current.is_some()),
-                }
-                // Wait for the child to go away before starting a new one.
-                while !exiting.load(Ordering::Acquire) {
-                    let state = supervisor.status().map(|status| status.state);
-                    match state {
-                        Ok(ProcessState::Running) | Ok(ProcessState::Restarting) => {}
-                        _ => break,
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                next_start = Instant::now() + backoff;
-                backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
-            }
-            None => {
-                if Instant::now() >= next_start {
-                    if let Err(error) = supervisor.start() {
-                        report(&ui.window, &error, ui.current.is_some());
-                        next_start = Instant::now() + backoff;
-                        backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
-                    } else {
-                        next_start = Instant::now();
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
-    // The host must not outlive the app.
-    let _ = supervisor.stop();
-    released.store(true, Ordering::Release);
-}
-
 /// Follow an external host: load its UI and reload it when the host restarts.
-fn supervise_external(
-    mut ui: HostUi,
-    root: PathBuf,
-    exiting: Arc<AtomicBool>,
-    released: Arc<AtomicBool>,
-) {
+fn follow_host(mut ui: HostUi, root: PathBuf, exiting: Arc<AtomicBool>) {
     let Ok(client) = health_client() else {
         report(&ui.window, "상태 확인을 시작하지 못했습니다.", false);
-        released.store(true, Ordering::Release);
         return;
     };
     while !exiting.load(Ordering::Acquire) {
-        match wait_for_endpoint(&client, &root, None, None, &exiting, EXTERNAL_RETRY_TIMEOUT) {
+        match wait_for_endpoint(&client, &root, &exiting, EXTERNAL_RETRY_TIMEOUT) {
             Ok(endpoint) => {
                 if ui.current.as_ref() != Some(&endpoint) {
                     ui.connect(&endpoint);
@@ -747,22 +705,10 @@ fn supervise_external(
         }
         std::thread::sleep(Duration::from_secs(1));
     }
-    released.store(true, Ordering::Release);
 }
 
 // 창 상단 46px 타이틀바는 콘솔 UI가 렌더링한다(ghost-ui GTitleBar, Tauri 셸에서만).
 // 트래픽 라이트 overlay·드래그는 네이티브 창 플래그가 담당한다.
-
-/// The packaged resources of the running app.
-fn bundled_resources() -> Result<PathBuf, String> {
-    let executable =
-        std::env::current_exe().map_err(|_| "앱 경로를 찾지 못했습니다.".to_string())?;
-    executable
-        .parent()
-        .and_then(Path::parent)
-        .map(|contents| contents.join("Resources/resources"))
-        .ok_or_else(|| "앱 경로를 찾지 못했습니다.".to_string())
-}
 
 /// Integration probe: resolve the host the app would use and report it
 /// without opening a window. It does not claim that UI interactions work.
@@ -771,47 +717,15 @@ fn probe() -> Result<Value, String> {
     let root = state_root(&config);
     let client = health_client()?;
     let exiting = AtomicBool::new(false);
-    match config.host_mode {
-        HostMode::External => {
-            let endpoint =
-                wait_for_endpoint(&client, &root, None, None, &exiting, EXTERNAL_RETRY_TIMEOUT)?;
-            Ok(serde_json::json!({
-                "protocol": "ghost-desktop-probe/2",
-                "mode": "external",
-                "origin": endpoint.origin,
-                "host_pid": endpoint.pid,
-                "healthy": true,
-                "ui_interactions_verified": false,
-            }))
-        }
-        HostMode::Managed => {
-            let resources = bundled_resources()?;
-            let supervisor = supervisor(&resources, &root)?;
-            let result = (|| {
-                supervisor.start()?;
-                let pid = supervisor.status()?.pid;
-                wait_for_endpoint(
-                    &client,
-                    &root,
-                    pid,
-                    Some(&supervisor),
-                    &exiting,
-                    HOST_READY_TIMEOUT,
-                )
-            })();
-            let stopped = supervisor.stop().is_ok();
-            let endpoint = result?;
-            Ok(serde_json::json!({
-                "protocol": "ghost-desktop-probe/2",
-                "mode": "managed",
-                "origin": endpoint.origin,
-                "host_pid": endpoint.pid,
-                "stopped": stopped,
-                "healthy": true,
-                "ui_interactions_verified": false,
-            }))
-        }
-    }
+    let endpoint = wait_for_endpoint(&client, &root, &exiting, EXTERNAL_RETRY_TIMEOUT)?;
+    Ok(serde_json::json!({
+        "protocol": "ghost-desktop-probe/2",
+        "mode": "external",
+        "origin": endpoint.origin,
+        "host_pid": endpoint.pid,
+        "healthy": true,
+        "ui_interactions_verified": false,
+    }))
 }
 
 /// Present a sheet without nesting an event loop inside Tauri's main-thread callback.
@@ -929,6 +843,9 @@ fn main() {
         drag_window,
         open_external_url,
         pick_folder,
+        shell_version,
+        shell_update_check,
+        shell_update_install,
         companion::companion_set,
         companion::companion_enabled,
         companion::companion_reset_position,
@@ -942,6 +859,9 @@ fn main() {
     #[cfg(not(target_os = "macos"))]
     let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
         drag_window,
+        shell_version,
+        shell_update_check,
+        shell_update_install,
         companion::companion_set,
         companion::companion_enabled,
         companion::companion_reset_position,
@@ -954,9 +874,9 @@ fn main() {
     ];
     tauri::Builder::default()
         .plugin(ShortcutBuilder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(invoke_handler)
         .setup(|app| {
-            let resources = app.path().resource_dir()?.join("resources");
             let origin: OriginCell = Arc::new(Mutex::new(None));
 
             let window_origin = origin.clone();
@@ -1032,31 +952,18 @@ fn main() {
             }
 
             let exiting = Arc::new(AtomicBool::new(false));
-            let released = Arc::new(AtomicBool::new(false));
             let config = load_console_config();
-            let mode = config
-                .as_ref()
-                .map(|config| config.host_mode)
-                .unwrap_or_default();
             let root = config
                 .as_ref()
                 .map(state_root)
                 .unwrap_or_else(|_| default_root());
-            let managed = match mode {
-                HostMode::Managed => match supervisor(&resources, &root) {
-                    Ok(supervisor) => Some(supervisor),
-                    Err(error) => {
-                        report(&window, &error, false);
-                        None
-                    }
-                },
-                HostMode::External => None,
-            };
             app.manage(DesktopHost {
-                supervisor: managed.clone(),
                 exiting: exiting.clone(),
-                released: released.clone(),
                 overlay_focused: AtomicBool::new(false),
+            });
+            app.manage(ShellUpdater {
+                root: root.clone(),
+                pending: tauri::async_runtime::Mutex::new(None),
             });
             if let Err(error) = &config {
                 report(&window, error, false);
@@ -1070,18 +977,7 @@ fn main() {
                 origin,
                 current: None,
             };
-            std::thread::spawn(move || match mode {
-                HostMode::Managed => {
-                    let Some(supervisor) = managed else {
-                        released.store(true, Ordering::Release);
-                        return;
-                    };
-                    supervise_managed(ui, supervisor, root, exiting, released);
-                }
-                HostMode::External => {
-                    supervise_external(ui, root, exiting, released);
-                }
-            });
+            std::thread::spawn(move || follow_host(ui, root, exiting));
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -1096,36 +992,16 @@ fn main() {
                 }
                 return;
             }
-            // macOS application termination can reach Exit directly. The owned
-            // host process must be reaped before the runtime leaves.
+            // The host service is independent of the shell's lifetime.
             if matches!(event, tauri::RunEvent::Exit) {
                 let state = app.state::<DesktopHost>();
                 state.exiting.store(true, Ordering::Release);
-                if let Some(supervisor) = &state.supervisor {
-                    let _ = supervisor.stop();
-                }
                 return;
             }
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                let state = app.state::<DesktopHost>();
-                if !state.exiting.swap(true, Ordering::AcqRel) {
-                    api.prevent_exit();
-                    let supervisor = state.supervisor.clone();
-                    let released = state.released.clone();
-                    let app = app.clone();
-                    std::thread::spawn(move || {
-                        // The supervisor thread owns the host: wait for it to
-                        // release the process before the app leaves.
-                        let deadline = Instant::now() + RELEASE_TIMEOUT;
-                        while !released.load(Ordering::Acquire) && Instant::now() < deadline {
-                            std::thread::sleep(Duration::from_millis(50));
-                        }
-                        if let Some(supervisor) = supervisor {
-                            let _ = supervisor.stop();
-                        }
-                        app.exit(0);
-                    });
-                }
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                app.state::<DesktopHost>()
+                    .exiting
+                    .store(true, Ordering::Release);
             }
         });
 }
@@ -1454,5 +1330,36 @@ mod external_link_tests {
             &origin,
             &"https://auth.openai.com/codex/device".parse().unwrap()
         ));
+    }
+}
+
+#[cfg(test)]
+mod shell_update_tests {
+    use super::{shell_update_url, state_root, ConsoleConfig};
+    use std::path::PathBuf;
+
+    #[test]
+    fn console_reads_only_the_root_and_ignores_unknown_keys() {
+        let config: ConsoleConfig = serde_json::from_value(serde_json::json!({
+            "root": "/tmp/ghost-shell-test",
+            "unknown": {"value": true},
+        }))
+        .unwrap();
+        assert_eq!(state_root(&config), PathBuf::from("/tmp/ghost-shell-test"));
+    }
+
+    #[test]
+    fn updater_urls_are_fixed_to_the_loopback_host() {
+        for port in [1, 62062, u16::MAX] {
+            for asset in ["latest.json", "Ghost.app.tar.gz"] {
+                let url = shell_update_url(port, asset).unwrap();
+                assert_eq!(url.scheme(), "http");
+                assert_eq!(url.host_str(), Some("127.0.0.1"));
+                assert_eq!(url.port_or_known_default(), Some(port));
+                assert_eq!(url.path(), format!("/api/update/shell/{asset}"));
+                assert_eq!(url.username(), "");
+                assert!(url.password().is_none());
+            }
+        }
     }
 }

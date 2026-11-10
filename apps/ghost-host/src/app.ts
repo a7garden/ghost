@@ -25,6 +25,7 @@ import { ProviderCatalog } from "./integrations/provider-catalog.ts";
 import { settingsView } from "./core/commands.ts";
 import { SourceConnections } from "./integrations/activity-sources.ts";
 import { SourceStore } from "./stores/sources.ts";
+import { hostIsIdle, Updater } from "./update/index.ts";
 
 export interface App {
   core: Core;
@@ -175,11 +176,13 @@ export async function serve(config: Config) {
   let server: { port: number; stop(): Promise<void> } | null = null;
   let push: { stop(): void } | null = null;
   let hostWatch: HostWatch | null = null;
+  let updater: Updater | null = null;
   const closeServing = async () => {
     const errors: unknown[] = [];
     try { push?.stop(); push = null; } catch (error) { errors.push(error); }
     try { await hostWatch?.stop(); hostWatch = null; } catch (error) { errors.push(error); }
     try { await app.core.autonomy.stop(); } catch (error) { errors.push(error); }
+    try { await updater?.close(); } catch (error) { errors.push(error); }
     try { await server?.stop(); server = null; } catch (error) { errors.push(error); }
     // Do not release ownership while a server or watcher may still submit work.
     if (!push && !hostWatch && !server) {
@@ -188,13 +191,15 @@ export async function serve(config: Config) {
     if (errors.length) throw new AggregateError(errors, "failed to stop serving Ghost state root");
   };
   try {
+    try { updater = new Updater({ root: config.root, idle: () => hostIsIdle(app.core), log }); }
+    catch (error) { log("업데이트를 시작하지 못했습니다.", error); }
     if (app.ledger.ghosts().length === 0) app.core.createGhost({ name: "Ghost", persona: "", isDefault: true });
     await app.core.start();
     const catalogChanged = () => app.ledger.tx(() => app.ledger.emit({ type: "settings", settings: settingsView(app.core) }));
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault, browser: app.browser });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault, browser: app.browser, updater });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });
@@ -202,6 +207,7 @@ export async function serve(config: Config) {
     hostWatch = app.host && config.mac?.watch ? new HostWatch(app.core, app.host, config.mac.watch) : null;
     hostWatch?.start();
     app.core.autonomy.start();
+    updater?.start();
     log(`serving ${config.root} on http://${config.host}:${server.port}`);
   } catch (error) {
     try {

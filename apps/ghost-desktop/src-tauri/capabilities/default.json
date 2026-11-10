@@ -1,6 +1,6 @@
 {
   "identifier": "window",
-  "description": "Window dragging, HTTP(S) browser opening, and user-selected project folder paths for the Ghost main window. No general filesystem, shell, or process commands are exposed to the renderer.",
+  "description": "Window controls, project folder selection, and signed shell updates through the loopback Host for the Ghost main window. No general filesystem, shell, or process commands are exposed to the renderer.",
   "windows": [
     "main"
   ],
@@ -14,6 +14,9 @@
     "allow-drag-window",
     "allow-open-external-url",
     "allow-pick-folder",
+    "allow-shell-version",
+    "allow-shell-update-check",
+    "allow-shell-update-install",
     "allow-companion-set",
     "allow-companion-enabled",
     "allow-companion-reset-position"

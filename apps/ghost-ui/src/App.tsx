@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, Repeat2, Server, Smartphone, Users } from 'lucide-react';
+import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Server, Smartphone, Users } from 'lucide-react';
 import { DutySwitch } from './components/DutySwitch';
 import { DutySettings } from './features/DutySettings';
 import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
@@ -33,6 +33,9 @@ import { Schedules } from './features/Schedules';
 import { Activities } from './features/Activities';
 import { Connections } from './features/Connections';
 import { SpacesView } from './features/SpacesView';
+import { UpdatePrompt } from './features/UpdatePrompt';
+import { UpdateSettings } from './features/UpdateSettings';
+import { useUpdate } from './features/update/useUpdate';
 import { routeLabels, uiTerms } from './uiText';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { installWindowDrag } from './host/windowDrag';
@@ -61,6 +64,7 @@ export function App() {
 
 function Shell() {
   const { store, client } = useHost();
+  const update = useUpdate(client);
   const { state, connection, error } = useHostState(store);
   const { preferences, resolvedTheme, updatePreferences, storageError } = usePreferences();
   useVisibleViewport();
@@ -186,6 +190,7 @@ function Shell() {
     { id: 'activities', label: uiTerms.activities, group: '설정', onSelect: go('/settings?tab=activities') },
     { id: 'connections', label: uiTerms.connections, group: '설정', onSelect: go('/settings?tab=connections') },
     { id: 'host', label: routeLabels.host, group: '설정', onSelect: go('/settings?tab=host') },
+    { id: 'update', label: '업데이트', group: '설정', onSelect: go('/settings?tab=update') },
     { id: 'settings', label: uiTerms.settings, group: '설정', onSelect: go('/settings') },
   ] : [];
 
@@ -203,6 +208,7 @@ function Shell() {
     { id: 'activities', label: uiTerms.activities, icon: Repeat2, content: <Activities navigate={navigate}/> },
     { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
+    { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
       {desktopError && <Banner variant="warning" className="mb-4">{desktopError}</Banner>}
       <DesktopAvatarSettings/>
@@ -233,6 +239,7 @@ function Shell() {
           duty={state && <DutySwitch state={state}/>}
           sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
           {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>{error}</Banner>}
+          <UpdatePrompt monitor={update} navigate={navigate}/>
           {runtimeDown && state && section !== 'home' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate}/>}

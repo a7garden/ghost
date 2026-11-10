@@ -13,6 +13,7 @@ import type {
   PageView,
   SkillCatalog,
   State,
+  UpdateStatus,
   VaultContact,
   VaultItem,
   VaultItemKind,
@@ -101,6 +102,39 @@ export class HostClient {
   /** Skills a Ghost may be given (owner only); 404 or empty when no skill root is configured. */
   skills(): Promise<SkillCatalog> {
     return this.json('/api/skills');
+  }
+
+  /** The host's own release update state. */
+  update(): Promise<UpdateStatus> {
+    return this.json('/api/update');
+  }
+
+  /** Ask the host to check GitHub for a newer release; resolves after the check finishes. */
+  checkUpdate(): Promise<UpdateStatus> {
+    return this.json('/api/update/check', { method: 'POST' });
+  }
+
+  /** Start installing `version` in the background (202); refused while another phase is active. */
+  installUpdate(version: string): Promise<UpdateStatus> {
+    return this.json('/api/update/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version }),
+    });
+  }
+
+  /** Cancel a download or a waiting install; refused during installing. */
+  cancelUpdate(): Promise<UpdateStatus> {
+    return this.json('/api/update/cancel', { method: 'POST' });
+  }
+
+  /** Switch auto-checking or replace (`token`) / remove (`token: null`) the stored GitHub token. */
+  updateSettings(patch: { autoCheck?: boolean; token?: string | null }): Promise<UpdateStatus> {
+    return this.json('/api/update/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
   }
 
   conversation(id: string, before?: string | null, limit = 50): Promise<ConversationPage> {
