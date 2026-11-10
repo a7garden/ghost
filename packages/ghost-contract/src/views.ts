@@ -170,6 +170,8 @@ export const UpdateStatus = Type.Object({
   latest: nullable(Type.Object({ version: Type.String(), commit: Type.String(), notes: Type.String(), publishedAt: Type.String() })),
   /** The desktop shell offered by the newest verified release; the shell compares it with its own version. */
   shell: nullable(Type.Object({ version: Type.String(), notes: Type.String() })),
+  /** The iPhone shell offered by the newest verified release; the app compares its native build number. */
+  ios: nullable(Type.Object({ version: Type.String(), build: Type.Integer({ minimum: 1 }), notes: Type.String() })),
   checkedAt: nullable(Timestamp),
   nextCheckAt: nullable(Timestamp),
   error: nullable(Type.String()),

@@ -1,5 +1,23 @@
 import { CommandError } from "../core/errors.ts";
 import type { Updater } from "./index.ts";
+import { iosPage, iosPlist } from "./ios.ts";
+
+export function isIosTokenRoute(path: string): boolean {
+  return path === "/api/update/ios/install" || path === "/api/update/ios/manifest.plist" || path === "/api/update/ios/Ghost.ipa";
+}
+
+/** Registered after the host-header guard but before bearer authentication. */
+export async function serveIosUpdate(request: Request, url: URL, updater: Updater | null): Promise<Response> {
+  const entry = request.method === "GET" ? updater?.iosInstall(url.searchParams.get("t")) : null;
+  if (!entry || !updater) return new Response(null, { status: 404, headers: { "cache-control": "no-store" } });
+  const headers = { "cache-control": "no-store", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" };
+  if (url.pathname === "/api/update/ios/install") {
+    return new Response(iosPage(entry), { headers: { ...headers, "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'" } });
+  }
+  if (url.pathname === "/api/update/ios/manifest.plist") return new Response(iosPlist(entry), { headers: { ...headers, "content-type": "application/xml" } });
+  if (url.pathname === "/api/update/ios/Ghost.ipa") return new Response(Bun.file(await updater.iosAsset(entry)), { headers: { ...headers, "content-type": "application/octet-stream" } });
+  return new Response(null, { status: 404, headers });
+}
 
 /** Called only after owner/device bearer authentication by the API server. */
 export async function serveUpdate(request: Request, url: URL, updater: Updater | null): Promise<Response> {
@@ -9,6 +27,7 @@ export async function serveUpdate(request: Request, url: URL, updater: Updater |
   if (path === "/api/update" && request.method === "GET") return json(updater.status());
   if (path === "/api/update/check" && request.method === "POST") return json(await updater.check());
   if (path === "/api/update/cancel" && request.method === "POST") return json(await updater.cancel());
+  if (path === "/api/update/ios/link" && request.method === "POST") return json(updater.iosLink());
   if (path === "/api/update/shell/latest.json" && request.method === "GET") {
     const latest = updater.shellLatest(url.origin);
     return latest === null ? new Response(null, { status: 204, headers: { "cache-control": "no-store" } }) : json(latest);

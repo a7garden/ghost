@@ -30,6 +30,9 @@ export interface FixtureOptions {
   releaseMismatch?: boolean;
   idle?: UpdaterOptions["idle"];
   backup?: UpdaterOptions["backup"];
+  ios?: boolean;
+  publicOrigin?: string | null;
+  now?: UpdaterOptions["now"];
 }
 
 export interface UpdateFixture {
@@ -37,7 +40,7 @@ export interface UpdateFixture {
   manifest: ReleaseManifest; key: TestSigningKey;
   calls: { url: string; init?: RequestInit }[];
   updater: Updater; updaterOptions: UpdaterOptions; readonly shutdowns: number;
-  setFailure(value: boolean): void; setTarball(value: Buffer<ArrayBuffer>): void;
+  setFailure(value: boolean): void; setTarball(value: Buffer<ArrayBuffer>): void; setIpa(value: Buffer<ArrayBuffer>): void;
   tarball: Buffer<ArrayBuffer>;
 }
 
@@ -75,14 +78,16 @@ export async function updateFixture(options: FixtureOptions = {}): Promise<Updat
   const manifest: ReleaseManifest = { format: "ghost-release/1", version, commit, notes: "새 업데이트", publishedAt: "2026-11-10T12:00:00Z", storage,
     host: { asset: `ghost-${version}-darwin-arm64.tar.gz`, sha256: sha256(tarball), bytes: tarball.length },
     shell: { version: "0.3.0", asset: "Ghost.app.tar.gz", signature: "shell-signature", notes: "앱 업데이트" } };
+  let ipa = Buffer.from("ios-asset");
+  if (options.ios) manifest.ios = { version: "0.1.0", build: 9, bundleId: "io.a7garden.ghost", asset: "Ghost.ipa", sha256: sha256(ipa), bytes: ipa.length, notes: "iPhone 앱 업데이트" };
   const calls: { url: string; init?: RequestInit }[] = [];
   let fail = false;
-  const names = ["ghost-release.json", "ghost-release.json.sig", manifest.host.asset, "Ghost.app.tar.gz"];
+  const names = ["ghost-release.json", "ghost-release.json.sig", manifest.host.asset, "Ghost.app.tar.gz", "Ghost.ipa"];
   const fetcher: UpdateFetch = async (input, init) => {
     const url = String(input); calls.push({ url, init });
     if (fail) return new Response("error", { status: 503 });
     const manifestBytes = Buffer.from(JSON.stringify(manifest));
-    const bodies = [manifestBytes, Buffer.from(key.sign(manifestBytes)), tarball, Buffer.from("shell-asset")];
+    const bodies = [manifestBytes, Buffer.from(key.sign(manifestBytes)), tarball, Buffer.from("shell-asset"), ipa];
     if (url.includes("/releases/latest") || url.includes("/releases/tags/")) return Response.json({ tag_name: `v${manifest.version}`, assets: names.map((name, id) => ({ name, size: bodies[id]!.length, url: `https://api.github.com/repos/test/ghost/releases/assets/${id}` })) });
     const apiMatch = /\/releases\/assets\/(\d+)$/.exec(url);
     if (apiMatch) return new Response(null, { status: 302, headers: { location: `https://release-assets.example/${apiMatch[1]}` } });
@@ -91,8 +96,8 @@ export async function updateFixture(options: FixtureOptions = {}): Promise<Updat
     throw new Error(`unexpected fetch ${url}`);
   };
   let shutdowns = 0;
-  const updaterOptions: UpdaterOptions = { root, repository: "test/ghost", pubkey: key.pubkey, identity: { version: "2.1.0", commit: "old", storage: "test-storage" }, execPath: join(old, "ghost"), fetch: fetcher, idle: options.idle ?? (() => true), shutdown: () => { shutdowns++; }, pollMs: 5, backup: options.backup ?? backup, env: { GHOST_SERVICE: "launchd" } };
+  const updaterOptions: UpdaterOptions = { root, publicOrigin: options.publicOrigin, now: options.now, repository: "test/ghost", pubkey: key.pubkey, identity: { version: "2.1.0", commit: "old", storage: "test-storage" }, execPath: join(old, "ghost"), fetch: fetcher, idle: options.idle ?? (() => true), shutdown: () => { shutdowns++; }, pollMs: 5, backup: options.backup ?? backup, env: { GHOST_SERVICE: "launchd" } };
   const updater = new Updater(updaterOptions);
   updater.settings({ token: "test-token", autoCheck: false });
-  return { temp, root, base, old, oldName, manifest, key, calls, updater, updaterOptions, get shutdowns() { return shutdowns; }, setFailure(value: boolean) { fail = value; }, setTarball(value: Buffer<ArrayBuffer>) { tarball = value; }, tarball };
+  return { temp, root, base, old, oldName, manifest, key, calls, updater, updaterOptions, get shutdowns() { return shutdowns; }, setFailure(value: boolean) { fail = value; }, setTarball(value: Buffer<ArrayBuffer>) { tarball = value; }, setIpa(value: Buffer<ArrayBuffer>) { ipa = value; }, tarball };
 }

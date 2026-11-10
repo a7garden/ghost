@@ -39,7 +39,7 @@ import { NotFound } from "../ledger/ledger.ts";
 import type { Vault } from "../stores/vault.ts";
 import { serveVault } from "./vault.ts";
 import { serveBrowser } from "./browser.ts";
-import { serveUpdate } from "../update/api.ts";
+import { isIosTokenRoute, serveIosUpdate, serveUpdate } from "../update/api.ts";
 import type { Updater } from "../update/index.ts";
 
 const HTTP_STATUS: Record<ErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503, internal: 500 };
@@ -415,6 +415,9 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
 
     const url = new URL(request.url);
     const pathname = url.pathname;
+    if (isIosTokenRoute(pathname)) {
+      try { return await serveIosUpdate(request, url, updater); } catch (caught) { return failure(caught); }
+    }
     if (pathname === "/api/health" && request.method === "GET") return json({ ok: true, version: HOST_VERSION });
     if (pathname === "/api/pairing/claim" && request.method === "POST") {
       return claimPairing(request, peer === null ? "unknown" : peer.address);

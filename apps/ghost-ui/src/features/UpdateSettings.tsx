@@ -1,10 +1,12 @@
+import { toDataURL } from 'qrcode';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Download, KeyRound, RefreshCw } from 'lucide-react';
+import { Download, KeyRound, QrCode, RefreshCw } from 'lucide-react';
 import type { UpdateStatus } from '@ghost/contract';
 import { Badge, Button, InlineError, Input, SettingsGroup, SettingsRow, Switch } from '../ui';
+import { shell as iosShell } from '../host/shell';
 import { isDesktopShell, shellVersion } from '../host/desktop';
+import { supportsIosInstall, updatePollingPhase, type UpdateMonitor } from './update/useUpdate';
 import { relativeTime, useNow } from './time';
-import { updatePollingPhase, type UpdateMonitor } from './update/useUpdate';
 
 const phaseLabel: Record<'checking' | 'downloading' | 'waiting' | 'installing', string> = {
   checking: '확인 중',
@@ -33,6 +35,9 @@ export function UpdateSettings({ monitor }: { monitor: UpdateMonitor }) {
   const [appVersion, setAppVersion] = useState('');
   const [tokenDraft, setTokenDraft] = useState('');
   const [tokenEditing, setTokenEditing] = useState(false);
+  const [iosQr, setIosQr] = useState('');
+  const [iosError, setIosError] = useState('');
+  const [iosPending, setIosPending] = useState(false);
   useEffect(() => {
     if (isDesktopShell()) void shellVersion().then(setAppVersion).catch(() => {});
   }, []);
@@ -102,6 +107,29 @@ export function UpdateSettings({ monitor }: { monitor: UpdateMonitor }) {
             </span>
           : appVersion ? <span className="text-caption text-ink-2">최신 버전입니다</span> : null}
       </SettingsRow>}
+      {status?.ios && iosShell && supportsIosInstall(iosShell) && <SettingsRow label="앱 업데이트" description={`현재 ${iosShell.version} · ${status.ios.notes}`}>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="text-ui text-ink">{status.ios.version} ({status.ios.build})</span>
+          <Button variant="outline" disabled={pending || status.ios.build <= Number(iosShell.version)} onClick={() => void monitor.installIos()}>
+            <Download aria-hidden="true"/>앱 업데이트
+          </Button>
+        </span>
+      </SettingsRow>}
+      {status?.ios && (!iosShell || !supportsIosInstall(iosShell)) && <SettingsRow label="iPhone 앱" description={`${status.ios.version} (${status.ios.build})`}>
+        <Button variant="outline" disabled={iosPending} onClick={() => {
+          setIosPending(true); setIosError('');
+          void monitor.getIosUpdateLink().then(async ({ page }) => setIosQr(await toDataURL(page, { margin: 2, width: 240, errorCorrectionLevel: 'M' })))
+            .catch(reason => setIosError(reason instanceof Error ? reason.message : 'QR 코드를 만들지 못했습니다.'))
+            .finally(() => setIosPending(false));
+        }}><QrCode aria-hidden="true"/>QR 코드</Button>
+      </SettingsRow>}
+      {iosQr && (!iosShell || !supportsIosInstall(iosShell)) && <SettingsRow label="QR 코드">
+        <span className="grid justify-items-center gap-2">
+          <img src={iosQr} alt="iPhone 앱 설치 QR 코드" width={240} height={240} className="rounded-lg bg-canvas p-2"/>
+          <span className="text-caption text-ink-2">15분 동안 쓸 수 있습니다</span>
+        </span>
+      </SettingsRow>}
+      {iosError && <SettingsRow label="오류"><InlineError>{iosError}</InlineError></SettingsRow>}
     </SettingsGroup>
     <SettingsGroup title="자동 확인">
       <SettingsRow label="자동 확인" htmlFor="update-auto-check">

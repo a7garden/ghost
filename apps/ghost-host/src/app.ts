@@ -191,7 +191,7 @@ export async function serve(config: Config) {
     if (errors.length) throw new AggregateError(errors, "failed to stop serving Ghost state root");
   };
   try {
-    try { updater = new Updater({ root: config.root, idle: () => hostIsIdle(app.core), log }); }
+    try { updater = new Updater({ root: config.root, publicOrigin: config.publicOrigin, idle: () => hostIsIdle(app.core), log }); }
     catch (error) { log("업데이트를 시작하지 못했습니다.", error); }
     if (app.ledger.ghosts().length === 0) app.core.createGhost({ name: "Ghost", persona: "", isDefault: true });
     await app.core.start();

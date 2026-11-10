@@ -1,8 +1,8 @@
 export type ShellInfo = Readonly<{ platform: 'ios'; version: string; deviceId: string }>;
 export type PermissionStatus = 'allowed' | 'denied' | 'undetermined';
 export type ShellEvent = { type: 'notification.open'; notificationId: string } | { type: 'resume' };
-export type ShellRequest = { type: 'ready' } | { type: 'notifications.status' | 'notifications.request' | 'notifications.settings' } | { type: 'theme'; scheme: 'light' | 'dark' } | { type: 'haptic'; style: 'selection' | 'success' | 'warning' } | { type: 'disconnected' | 'revoked' };
-type Reply<R extends ShellRequest> = R extends { type: 'ready' } ? { events: ShellEvent[] } : R extends { type: 'notifications.status' | 'notifications.request' } ? { status: PermissionStatus } : Record<string, never>;
+export type ShellRequest = { type: 'ready' } | { type: 'notifications.status' | 'notifications.request' | 'notifications.settings' } | { type: 'theme'; scheme: 'light' | 'dark' } | { type: 'haptic'; style: 'selection' | 'success' | 'warning' } | { type: 'app.install'; url: string } | { type: 'disconnected' | 'revoked' };
+type Reply<R extends ShellRequest> = R extends { type: 'ready' } ? { events: ShellEvent[] } : R extends { type: 'notifications.status' | 'notifications.request' } ? { status: PermissionStatus } : R extends { type: 'app.install' } ? { opened: boolean } : Record<string, never>;
 declare global {
   interface Window {
     __GHOST_SHELL__?: ShellInfo;
@@ -21,6 +21,7 @@ export function isShellRequest(value: unknown): value is ShellRequest {
     case 'ready': case 'notifications.status': case 'notifications.request': case 'notifications.settings': case 'disconnected': case 'revoked': return true;
     case 'theme': return request.scheme === 'light' || request.scheme === 'dark';
     case 'haptic': return request.style === 'selection' || request.style === 'success' || request.style === 'warning';
+    case 'app.install': return typeof request.url === 'string' && request.url.startsWith('itms-services://');
     default: return false;
   }
 }
