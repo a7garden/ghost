@@ -58,7 +58,7 @@ function fakeDesktop() {
       calls.push({ runtime: "geist", argv: [tool], args });
       if (tool === "get_app_state") return ok({
         snapshot_id: `screen-${calls.length}`, app: { bundle_id: "com.apple.TextEdit", pid: Number(String(args.app).slice(4)) },
-        window: { title: "Doc", bounds: { x: 100, y: 50, width: 800, height: 600 } },
+        window: { id: args.window_id, title: "Doc", bounds: { x: 100, y: 50, width: 800, height: 600 } },
         image: { data: "iVBORw0KGgo=", width: 1600, height: 1200 },
         nodes: [{ title: "Delete", description: "", value: null, bounds: { x: 500, y: 350, width: 100, height: 40 } }],
       });
@@ -291,6 +291,27 @@ describe("PC control tools", () => {
     expect(f.calls.some((c) => c.argv[0] === "focus-window" || c.argv[0] === "launch")).toBe(false);
     f.state.windowAccessible = true;
     expect(f.said(await f.call("desktop_focus", { app: "TextEdit", window_id: "w-100" }))).toBe("Window focused");
+  });
+
+  test("physical input refuses an invisible window before capture and after a captured window changes Space", async () => {
+    const f = fixture();
+    f.state.windowVisible = false;
+    expect(f.said(await f.call("desktop_screenshot", { app: "TextEdit", window_id: "w-100" }))).toContain("another Space");
+    expect(f.calls.some((c) => c.runtime === "geist")).toBe(false);
+    f.state.windowVisible = true;
+    const capture = await f.call("desktop_screenshot", { app: "TextEdit", window_id: "w-100" });
+    const screen_id = /screen_id (\S+):/.exec(f.said(capture))![1]!;
+    f.state.windowVisible = false;
+    expect(f.said(await f.call("desktop_pointer", { screen_id, action: "click", x: 10, y: 10 }))).toContain("another Space");
+    expect(f.calls.some((c) => c.runtime === "geist" && c.argv[0] === "click")).toBe(false);
+  });
+
+  test("targeted keyboard delivery refuses app quit and session quit shortcuts", async () => {
+    const f = fixture();
+    for (const keys of ["cmd+q", "cmd+shift+q", "cmd+alt+esc", "ctrl+cmd+q"]) {
+      expect(f.said(await f.call("desktop_press", { app: "TextEdit", keys }))).toContain("Quit shortcuts");
+    }
+    expect(f.calls.some((c) => c.argv[0] === "press")).toBe(false);
   });
 
   test("protected values are not exposed or written, and text limits count UTF-8 bytes", async () => {
