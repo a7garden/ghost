@@ -33,7 +33,7 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-eeeeb02` (운영판 기반 승인 대기 수정, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-3f5459a` (`eeeeb02` Host와 고정한 `agent-browser` 0.41.2를 그대로 쓰고 UI만 기본 Ghost 동작을 더함) |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -42,11 +42,18 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
 
+### 기본 Ghost 생동감 운영 반영 — 2026-11-10
+
+- 기본 Ghost가 눈을 깜빡이고, 고개를 돌려 둘러보며 몸을 기울인다. 56px 이상은 가까운 포인터를 쳐다보고, 누르면 깡충 뛴다. 28px 미만, 애니메이션 끄기, 동작 줄이기에서는 정지한다(`main` `69a9641`).
+- 운영판 `eeeeb02`에 이 커밋만 얹은 `3f5459a`(브랜치 `release/ghost-life-20261110`)로 `releases/20261110-bun-3f5459a`를 만들었다. `ghost`·`agent-browser`는 `eeeeb02`와 바이트가 같고, UI 95개 파일 해시가 빌드 원본과 일치한다(`release.json`). UI 테스트 146개·빌드, 별도 루트·포트(62219)의 설치 사본에서 health와 움직이는 초상을 확인했다.
+- 대화 2건이 끝나 유휴가 된 뒤 백업 `backups/pre-20261110-bun-3f5459a-1794310261967/`(`ghost-backup/2`, complete, 원장·Pi·금고 DB와 key, artifacts·secrets·config·console 설정)을 만들고 전환했다. PID 57727 → 93704, 단일 리스너, `provider minimax is ready`, Ghost 25·대화 199·맡긴 일 149·결정 139 식별자 보존, health·공개 origin 200, 제공 번들 해시 일치. Mac 앱은 external 모드로 다시 실행했다(PID 93828). 운영 UI의 Ghost 설정에서 30px 이상 초상 24개가 모두 움직였다. 데스크톱 아바타는 Ghost 창 아래에 가려 있어 화면으로 보지 못했다.
+- 되돌릴 때는 유휴를 확인하고 `current`를 `releases/20261110-bun-eeeeb02`로 원자 교체한 뒤 Host를 정상 재기동한다. 저장 형식 변경은 없다. 대기 중인 Obscura(`90bc06b`)·모바일 대화 탭(`15d245e`) 후보에는 이 UI가 없으므로, 전환 전에 `69a9641`을 포함해 다시 빌드한다.
+
 ### Obscura 릴리스 후보 — 2026-11-10
 
 - `releases/20261110-bun-90bc06b`에 Host, UI, `agent-browser` 0.41.2, 공식 Obscura 0.2.6 arm64 및 라이선스를 준비했다. `release.json`의 191개 파일 해시와 설치 사본을 별도 상태 루트·포트에서 확인했다.
 - 격리 CDP, 가짜 볼트 입력, 앱 내 인계와 한글 입력, 네트워크 및 파일 접근 제한을 확인했다. 브라우저 UI 검사 8개와 기존 Chrome 헤드리스 검사 3개를 통과했다. Host 전체 검사에서 남은 두 API 효과 경합 실패는 기존 `0166573`에서도 재현됐다.
-- 운영에 실행 중인 맡긴 일과 대화가 있어 전환을 대기한다. `current`는 `20261110-bun-eeeeb02`를 가리킨다. 유휴 시점에 위 운영 절차로 백업하고 `browser.obscura`를 설정한 뒤 전환한다. 초기 `loginOrigins`는 비워 둔다.
+- 운영에 실행 중인 맡긴 일과 대화가 있어 전환을 대기한다. 이후 `current`는 `20261110-bun-3f5459a`(기본 Ghost 생동감)로 바뀌었으므로 이 후보는 `69a9641`을 포함해 다시 빌드해야 한다. 유휴 시점에 위 운영 절차로 백업하고 `browser.obscura`를 설정한 뒤 전환한다. 초기 `loginOrigins`는 비워 둔다.
 
 ### 모바일 대화 탭 릴리스 대기 — 2026-11-10
 
