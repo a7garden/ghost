@@ -203,8 +203,11 @@ body {
 .decision__request-risk[data-risk="high"] { color: var(--ghost-danger-ink); }
 .decision__document { display: grid; gap: 8px; min-width: 0; padding-block: 12px; border-block: 1px solid var(--ghost-line); }
 .decision__document-head { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); }
-.decision__document h4 { margin: 0; font-size: var(--text-body); font-weight: 650; }
-.decision__document-body { max-height: 24rem; overflow-y: auto; font-size: var(--text-ui); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.decision__document-title { margin: 0; font-size: var(--text-body); font-weight: 650; }
+.decision__document-body { max-height: min(32rem, 65dvh); min-width: 0; overflow: auto; overflow-wrap: anywhere; }
+.decision__document-body > .message-body { font-size: var(--text-ui); line-height: 1.8; }
+.decision__document-source { margin: 0; font: var(--text-caption)/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.decision__document-empty { margin: 0; color: var(--ghost-ink3); font-size: var(--text-ui); }
 .decision__handoff { display: grid; min-width: 0; gap: 6px; }
 .decision__handoff-note { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: var(--ghost-ink2); font-size: var(--text-ui); line-height: 1.5; }
 .decision__handoff-note svg { flex: none; margin-top: 2px; color: var(--ghost-ink3); }

@@ -1,12 +1,13 @@
 import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
-import { BROWSER_TOOLS, HOST_TOOLS } from "@ghost/contract";
+import { BROWSER_TOOLS, DESKTOP_TOOLS, HOST_TOOLS } from "@ghost/contract";
 import type { Extension } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { describeWork } from "../core/works.ts";
 import { modelInputOf } from "../engine/models.ts";
-import type { MemoryPort, DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort } from "../integrations/ports.ts";
+import type { MemoryPort, DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort, DesktopPort } from "../integrations/ports.ts";
 import type { Vault } from "../stores/vault.ts";
 import { BROWSER_INSTRUCTIONS, createBrowserTools } from "./browser.ts";
+import { createDesktopTools, DESKTOP_INSTRUCTIONS } from "./desktop.ts";
 import { createDocumentsTools } from "./documents.ts";
 import { createDirectTools } from "./direct.ts";
 import { createInteractiveTools, INTERACTIVE_INSTRUCTIONS } from "./interactive.ts";
@@ -122,6 +123,8 @@ export function createToolSet(deps: {
   browser?: BrowserPort | null;
   /** The Ghost vault (ghost.vault); null leaves the tools out and secret fills unavailable. */
   vault?: Vault | null;
+  /** PC control through Ghost Control (ghost.desktop); null leaves the tools out. */
+  desktop?: DesktopPort | null;
 }): ToolSet {
   const direct = sequentialEffects(createDirectTools(deps.core));
   const drive = createAutonomyTools(deps.core);
@@ -140,7 +143,8 @@ export function createToolSet(deps: {
   const sources = deps.reach ? createSourceTools(deps.core) : null;
   const browser = deps.browser ? sequentialEffects(createBrowserTools(deps.core, deps.browser, { vault: deps.vault ?? null, sandbox: deps.sandbox })) : null;
   const vault = deps.vault ? sequentialEffects(createVaultTools(deps.core, deps.vault)) : null;
-  const optional = [memory, documents, host, skills, web, sources, browser, vault].filter((extension): extension is Extension => extension !== null);
+  const desktop = deps.desktop ? sequentialEffects(createDesktopTools(deps.core, deps.desktop)) : null;
+  const optional = [memory, documents, host, skills, web, sources, browser, vault, desktop].filter((extension): extension is Extension => extension !== null);
   /** Guidance for an installed capability, only for a Ghost that holds one of its tools. */
   const capabilityInstructions = (ghost: Ghost) =>
     [
@@ -149,6 +153,7 @@ export function createToolSet(deps: {
       documents && ghost.tools.includes("document_list") ? DOCUMENT_INSTRUCTIONS : "",
       browser && ghost.tools.some((tool) => BROWSER_TOOLS.includes(tool)) ? BROWSER_INSTRUCTIONS : "",
       vault && ghost.tools.some((tool) => tool.startsWith("vault_") || tool === "browser_fill_secret") ? VAULT_INSTRUCTIONS : "",
+      desktop && ghost.hostExecution && ghost.tools.some((tool) => DESKTOP_TOOLS.includes(tool)) ? DESKTOP_INSTRUCTIONS : "",
     ];
 
   const language = () => deps.core.ledger.settings().ownerLanguage ?? "ko";
@@ -168,6 +173,7 @@ export function createToolSet(deps: {
           if (sources) selected.push(sources);
           if (browser) selected.push(browser);
           if (vault) selected.push(vault);
+          if (desktop) selected.push(desktop);
           // Main-only management: resolved again at every execution, so a stale main keeps nothing.
           if (ghost.isDefault && ghost.state === "active") selected.push(main);
           return selected;
@@ -182,6 +188,7 @@ export function createToolSet(deps: {
           if (sources) selected.push(sources);
           if (browser) selected.push(browser);
           if (vault) selected.push(vault);
+          if (desktop) selected.push(desktop);
           return selected;
         }
         case "review":
@@ -208,7 +215,7 @@ export function createToolSet(deps: {
             ownerLanguageRule(language()),
             environment,
             ...capabilityInstructions(ghost),
-            delegationRoster(deps.core, ghost, { web: web !== null, host: host !== null, browser: browser !== null }),
+            delegationRoster(deps.core, ghost, { web: web !== null, host: host !== null, browser: browser !== null, desktop: desktop !== null }),
             work ? describeWork(work) : "",
             skillsInstructions(deps.skills, ghost),
             deps.core.adaptations.instructions(ghost.id),
@@ -265,12 +272,12 @@ const WEB_TOOLS: readonly GhostTool[] = ["web_search", "web_read", "reach"];
 
 /**
  * The peers a Work can delegate to, each with what it can do: its resolved model (`provider/model`,
- * its own or the default) and whether that model takes images, plus `web`, `browser` and `host` tags. Work
+ * its own or the default) and whether that model takes images, plus `web`, `browser`, `host` and `pc` tags. Work
  * conversations have no ghost_list, so without this roster the model has no valid ghost_id for
  * delegate. Read when the conversation is configured — at Work start, and again whenever any Ghost
  * changes (core.refreshRosters).
  */
-function delegationRoster(core: Core, ghost: Ghost, installed: { web: boolean; host: boolean; browser: boolean }): string {
+function delegationRoster(core: Core, ghost: Ghost, installed: { web: boolean; host: boolean; browser: boolean; desktop: boolean }): string {
   if (!ghost.tools.includes("delegate")) return "";
   const settings = core.ledger.settings();
   const peers = core.ledger.ghosts().filter((peer) => peer.state === "active" && peer.deletedAt === null && peer.id !== ghost.id);
@@ -286,6 +293,7 @@ function delegationRoster(core: Core, ghost: Ghost, installed: { web: boolean; h
       installed.web && WEB_TOOLS.some((tool) => peer.tools.includes(tool)) ? "web" : "",
       installed.browser && peer.tools.includes("browser_open") ? "browser" : "",
       installed.host && HOST_TOOLS.some((tool) => peer.tools.includes(tool)) ? "host" : "",
+      installed.desktop && peer.hostExecution && DESKTOP_TOOLS.some((tool) => peer.tools.includes(tool)) ? "pc" : "",
     ].filter(Boolean);
     const persona = peer.persona.trim();
     return [`- ${peer.name} (ghost_id ${peer.id})`, persona && `— ${persona.split("\n")[0]}`, tags.length > 0 && `[${tags.join(" ")}]`]

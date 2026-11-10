@@ -75,6 +75,22 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   vault_list: ["direct", "work"],
   vault_request: ["direct", "work"],
   vault_generate_login: ["direct", "work"],
+  desktop_apps: ["direct", "work"],
+  desktop_snapshot: ["direct", "work"],
+  desktop_screenshot: ["direct", "work"],
+  desktop_click: ["direct", "work"],
+  desktop_fill: ["direct", "work"],
+  desktop_type: ["direct", "work"],
+  desktop_select: ["direct", "work"],
+  desktop_check: ["direct", "work"],
+  desktop_scroll: ["direct", "work"],
+  desktop_press: ["direct", "work"],
+  desktop_launch: ["direct", "work"],
+  desktop_focus: ["direct", "work"],
+  desktop_wait: ["direct", "work"],
+  desktop_pointer: ["direct", "work"],
+  desktop_keys: ["direct", "work"],
+  desktop_propose: ["direct", "work"],
 };
 
 /**

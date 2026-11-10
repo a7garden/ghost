@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { ADAPTATION_MAX_CHARS, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
+import { ADAPTATION_MAX_CHARS, DESKTOP_TOOLS, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
@@ -40,7 +40,7 @@ const MAX_CREATED_PER_DAY = 10;
 function macGrants(before: Pick<Ghost, "tools" | "hostExecution"> | null, tools: readonly string[] | undefined, hostExecution: boolean | undefined): string[] {
   return [
     ...(hostExecution === true && !before?.hostExecution ? ["PC 직접 실행"] : []),
-    ...HOST_TOOLS.filter((tool) => tools?.includes(tool) && !before?.tools.includes(tool)),
+    ...[...HOST_TOOLS, ...DESKTOP_TOOLS].filter((tool) => tools?.includes(tool) && !before?.tools.includes(tool)),
   ];
 }
 

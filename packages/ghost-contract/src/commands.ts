@@ -82,7 +82,7 @@ export const Command = Type.Union([
     persona: Type.String({ maxLength: 8192 }),
     model: Type.Optional(nullable(ModelRef)),
     look: Type.Optional(Look),
-    /** Omit for the default set (every selectable tool except host tools); [] disables every optional tool. */
+    /** Omit for the default set (every selectable tool except host and desktop tools); [] disables every optional tool. */
     tools: Type.Optional(GhostToolList),
     fallbacks: Type.Optional(FallbackList),
     skills: Type.Optional(SkillList),
