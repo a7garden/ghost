@@ -81,6 +81,11 @@ Built for supervising agents instead of reusing generic cards and badges
   delegated children hanging on a branch line.
 - **ActivityIsland** — the workspace pulse in the title bar: faces of active Ghosts and
   amber/blue counts; silent when nothing moves; opens into every live item.
+- **Companion work shelf** — the desktop pet carries a short count, not a clipped Work title.
+  Hover or press unfolds one roster above it: owner decisions first, then all its live Works,
+  each with a wrapping title and a quiet state. Rows open their actual destination in the main
+  window. The native frame grows only while open, restores its collapsed position at screen
+  edges, and never resizes mid-drag. The pet remains the chat/drag target, separate from the rows.
 - **OutcomeLine** — a Work coming back where its thread card branched off: a return hook
   in the state color, a state-tinted pill (glyph, title, 완료/실패) that opens the thread, the
   files as chips and a failure's reason. Report and 위임 결과 wakes render as this line.

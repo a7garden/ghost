@@ -17,6 +17,55 @@ struct Config {
     position: Option<Position>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Frame {
+    position: Position,
+    size: (u32, u32),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Expansion {
+    frame: Frame,
+    collapsed_size: (u32, u32),
+}
+
+struct Layout {
+    collapsed_size: (f64, f64),
+    expanded: Option<Expansion>,
+    resizing: bool,
+    positioned: bool,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            collapsed_size: SIZE,
+            expanded: None,
+            resizing: false,
+            positioned: false,
+        }
+    }
+}
+
+impl Layout {
+    fn moved(&mut self, frame: Frame, scale: f64) -> Option<Position> {
+        if self.resizing || !self.positioned {
+            return None;
+        }
+        let Some(expansion) = self.expanded.as_mut() else {
+            return Some(frame.position);
+        };
+        if expansion.frame == frame {
+            return None;
+        }
+        // A real move replaces the pre-expansion restore point with the pet's
+        // current bottom-center, not the shelf's top-left or its clamp offset.
+        expansion.frame = frame;
+        expansion.collapsed_size = physical_size(self.collapsed_size, scale);
+        Some(reframe(frame, expansion.collapsed_size).position)
+    }
+}
+
 /// CSS-pixel paint bounds, never persisted with the companion's preferences.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -94,6 +143,7 @@ pub struct CompanionState {
     path: PathBuf,
     config: Mutex<Config>,
     visible_anchor: Mutex<Option<VisibleAnchor>>,
+    layout: Mutex<Layout>,
 }
 
 impl CompanionState {
@@ -171,7 +221,142 @@ fn clamp(position: Position, origin: Position, area: (u32, u32), size: (u32, u32
     }
 }
 
+fn physical_size(size: (f64, f64), scale: f64) -> (u32, u32) {
+    (
+        (size.0 * scale).round() as u32,
+        (size.1 * scale).round() as u32,
+    )
+}
+
+/// Change the transparent frame while retaining its physical bottom-center.
+fn reframe(frame: Frame, size: (u32, u32)) -> Frame {
+    let coordinate = |value: i64| value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+    Frame {
+        position: Position {
+            x: coordinate(
+                i64::from(frame.position.x) + i64::from(frame.size.0 / 2) - i64::from(size.0 / 2),
+            ),
+            y: coordinate(i64::from(frame.position.y) + i64::from(frame.size.1) - i64::from(size.1)),
+        },
+        size,
+    }
+}
+
+fn place_frames(
+    collapsed: Frame,
+    collapsed_size: (u32, u32),
+    expanded_size: Option<(u32, u32)>,
+    area: Frame,
+) -> (Frame, Frame) {
+    let fit = |frame: Frame| Frame {
+        position: clamp(frame.position, area.position, area.size, frame.size),
+        ..frame
+    };
+    let collapsed = fit(reframe(collapsed, collapsed_size));
+    let visible = expanded_size
+        .map(|size| fit(reframe(collapsed, size)))
+        .unwrap_or(collapsed);
+    (collapsed, visible)
+}
+
+fn current_frame(window: &WebviewWindow) -> Result<Frame, String> {
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    let size = window.outer_size().map_err(|error| error.to_string())?;
+    Ok(Frame {
+        position: Position {
+            x: position.x,
+            y: position.y,
+        },
+        size: (size.width, size.height),
+    })
+}
+
+fn record_position(window: &WebviewWindow) -> Result<(), String> {
+    let state = window.state::<CompanionState>();
+    // Read the live frame rather than an older queued Moved event's point.
+    let frame = current_frame(window)?;
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let next = state
+        .layout
+        .lock()
+        .map_err(|_| "아바타 창 배치를 읽지 못했습니다.")?
+        .moved(frame, scale);
+    if let Some(next) = next {
+        state
+            .config
+            .lock()
+            .map_err(|_| "아바타 설정을 읽지 못했습니다.")?
+            .position = Some(next);
+    }
+    Ok(())
+}
+
+/// Called on the main thread, so Tauri applies both setters before IPC resolves.
+fn apply_frame(
+    window: &WebviewWindow,
+    collapsed: Frame,
+    visible: Frame,
+    collapsed_size: (f64, f64),
+    expanded: bool,
+) -> Result<(), String> {
+    let state = window.state::<CompanionState>();
+    {
+        let mut layout = state
+            .layout
+            .lock()
+            .map_err(|_| "아바타 창 배치를 읽지 못했습니다.")?;
+        layout.resizing = true;
+        layout.collapsed_size = collapsed_size;
+        layout.expanded = expanded.then_some(Expansion {
+            frame: visible,
+            collapsed_size: collapsed.size,
+        });
+    }
+    if let Ok(mut anchor) = state.visible_anchor.lock() {
+        *anchor = None;
+    }
+    // Do not hold a state lock through setters: AppKit can emit events inline.
+    let result = window
+        .set_size(tauri::PhysicalSize::new(visible.size.0, visible.size.1))
+        .and_then(|()| {
+            window.set_position(PhysicalPosition::new(visible.position.x, visible.position.y))
+        })
+        .map_err(|error| error.to_string());
+    {
+        let mut layout = state
+            .layout
+            .lock()
+            .map_err(|_| "아바타 창 배치를 읽지 못했습니다.")?;
+        layout.resizing = false;
+        layout.positioned |= result.is_ok();
+    }
+    result?;
+    let mut config = state
+        .config
+        .lock()
+        .map_err(|_| "아바타 설정을 읽지 못했습니다.")?;
+    config.position = Some(collapsed.position);
+    state.save(&config)
+}
+
 fn position(window: &WebviewWindow, reset: bool) -> Result<(), String> {
+    let (collapsed_size, expanded) = {
+        let state = window.state::<CompanionState>();
+        let layout = state
+            .layout
+            .lock()
+            .map_err(|_| "아바타 창 배치를 읽지 못했습니다.")?;
+        (layout.collapsed_size, layout.expanded.is_some())
+    };
+    position_layout(window, reset, collapsed_size, expanded)
+}
+
+fn position_layout(
+    window: &WebviewWindow,
+    reset: bool,
+    collapsed_size: (f64, f64),
+    expanded: bool,
+) -> Result<(), String> {
     let app = window.app_handle();
     let state = app.state::<CompanionState>();
     let saved = if reset {
@@ -208,40 +393,39 @@ fn position(window: &WebviewWindow, reset: bool) -> Result<(), String> {
         .or_else(|| window.primary_monitor().ok().flatten())
         .ok_or("아바타를 표시할 화면을 찾지 못했습니다.")?;
     let area = monitor.work_area();
-    let size = window.outer_size().map_err(|error| error.to_string())?;
+    let scale = monitor.scale_factor();
+    let size = physical_size(collapsed_size, scale);
     let gap = (20.0 * monitor.scale_factor()).round() as i32;
     let default = Position {
         x: area
             .position
             .x
             .saturating_add_unsigned(area.size.width)
-            .saturating_sub_unsigned(size.width)
+            .saturating_sub_unsigned(size.0)
             .saturating_sub(gap),
         y: area
             .position
             .y
             .saturating_add_unsigned(area.size.height)
-            .saturating_sub_unsigned(size.height)
+            .saturating_sub_unsigned(size.1)
             .saturating_sub(gap),
     };
-    let next = clamp(
-        saved.unwrap_or(default),
-        Position {
-            x: area.position.x,
-            y: area.position.y,
+    let (collapsed, visible) = place_frames(
+        Frame {
+            position: saved.unwrap_or(default),
+            size,
         },
-        (area.size.width, area.size.height),
-        (size.width, size.height),
+        size,
+        expanded.then(|| physical_size((320.0, collapsed_size.1 + 240.0), scale)),
+        Frame {
+            position: Position {
+                x: area.position.x,
+                y: area.position.y,
+            },
+            size: (area.size.width, area.size.height),
+        },
     );
-    window
-        .set_position(PhysicalPosition::new(next.x, next.y))
-        .map_err(|error| error.to_string())?;
-    let mut config = state
-        .config
-        .lock()
-        .map_err(|_| "아바타 설정을 읽지 못했습니다.")?;
-    config.position = Some(next);
-    state.save(&config)
+    apply_frame(window, collapsed, visible, collapsed_size, expanded)
 }
 
 pub fn create(app: &tauri::AppHandle, origin: &super::OriginCell) -> Result<WebviewWindow, String> {
@@ -251,6 +435,7 @@ pub fn create(app: &tauri::AppHandle, origin: &super::OriginCell) -> Result<Webv
         path,
         config: Mutex::new(config),
         visible_anchor: Mutex::new(None),
+        layout: Mutex::new(Layout::default()),
     });
     let allowed = origin.clone();
     let window = tauri::WebviewWindowBuilder::new(
@@ -289,14 +474,10 @@ pub fn create(app: &tauri::AppHandle, origin: &super::OriginCell) -> Result<Webv
     }
     let tracked = window.clone();
     window.on_window_event(move |event| match event {
-        WindowEvent::Moved(point) => {
-            let state = tracked.app_handle().state::<CompanionState>();
-            if let Ok(mut config) = state.config.lock() {
-                config.position = Some(Position {
-                    x: point.x,
-                    y: point.y,
-                });
-            };
+        WindowEvent::Moved(_) => {
+            if let Err(error) = record_position(&tracked) {
+                eprintln!("[ghost] {error}");
+            }
         }
         WindowEvent::Resized(_) => {
             let state = tracked.app_handle().state::<CompanionState>();
@@ -313,7 +494,7 @@ pub fn create(app: &tauri::AppHandle, origin: &super::OriginCell) -> Result<Webv
                 super::toggle_overlay(menu_window.app_handle());
                 Ok(())
             }
-            "companion-main" => focus_main(menu_window.app_handle().clone()),
+            "companion-main" => focus_main(menu_window.app_handle().clone(), None),
             "companion-hide" => companion_set(menu_window.clone(), false).and_then(|()| {
                 menu_window
                     .eval("window.dispatchEvent(new Event('ghost-companion-hide'))")
@@ -385,17 +566,70 @@ pub fn companion_reset_position(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn companion_resize(window: WebviewWindow, size: String) -> Result<(), String> {
+pub fn companion_resize(
+    window: WebviewWindow,
+    size: String,
+    expanded: Option<bool>,
+) -> Result<(), String> {
+    if window.label() != "companion" {
+        return Err("허용되지 않은 창입니다.".into());
+    }
     let dimensions = match size.as_str() {
         "s" => (112.0, 142.0),
         "m" => SIZE,
         "l" => (168.0, 198.0),
         _ => return Err("올바르지 않은 아바타 크기입니다.".into()),
     };
-    window
-        .set_size(tauri::LogicalSize::new(dimensions.0, dimensions.1))
-        .map_err(|error| error.to_string())?;
-    position(&window, false)
+    let expanded = expanded.unwrap_or(false);
+    let state = window.state::<CompanionState>();
+    let positioned = state
+        .layout
+        .lock()
+        .map_err(|_| "아바타 창 배치를 읽지 못했습니다.")?
+        .positioned;
+    // The initial native frame is only a hidden placeholder. Restore saved
+    // collapsed coordinates at the requested size before anchoring any resize.
+    if !positioned {
+        return position_layout(&window, false, dimensions, expanded);
+    }
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .ok_or("아바타 화면을 찾지 못했습니다.")?;
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let current = current_frame(&window)?;
+    let previous = {
+        let layout = state
+            .layout
+            .lock()
+            .map_err(|_| "아바타 창 배치를 읽지 못했습니다.")?;
+        match layout.expanded {
+            Some(expansion) => Frame {
+                position: state
+                    .config
+                    .lock()
+                    .map_err(|_| "아바타 설정을 읽지 못했습니다.")?
+                    .position
+                    .unwrap_or_else(|| reframe(current, expansion.collapsed_size).position),
+                size: expansion.collapsed_size,
+            },
+            None => current,
+        }
+    };
+    let (collapsed, visible) = place_frames(
+        previous,
+        physical_size(dimensions, scale),
+        expanded.then(|| physical_size((320.0, dimensions.1 + 240.0), scale)),
+        Frame {
+            position: Position {
+                x: area.position.x,
+                y: area.position.y,
+            },
+            size: (area.size.width, area.size.height),
+        },
+    );
+    apply_frame(&window, collapsed, visible, dimensions, expanded)
 }
 
 #[tauri::command]
@@ -478,22 +712,15 @@ pub async fn companion_drag(window: WebviewWindow) -> Result<bool, String> {
                 let final_window = window.clone();
                 window
                     .run_on_main_thread(move || {
-                        let _ = sender.send(final_window.outer_position());
+                        let _ = sender.send(record_position(&final_window));
                     })
                     .map_err(|error| error.to_string())?;
-                let point = receiver
-                    .recv()
-                    .map_err(|error| error.to_string())?
-                    .map_err(|error| error.to_string())?;
+                receiver.recv().map_err(|error| error.to_string())??;
                 let state = window.app_handle().state::<CompanionState>();
-                let mut config = state
+                let config = state
                     .config
                     .lock()
                     .map_err(|_| "아바타 설정을 읽지 못했습니다.")?;
-                config.position = Some(Position {
-                    x: point.x,
-                    y: point.y,
-                });
                 state.save(&config)?;
             }
             Ok(moved)
@@ -513,11 +740,31 @@ pub fn toggle_overlay(app: tauri::AppHandle) {
     super::toggle_overlay(&app);
 }
 
+fn main_route_script(route: &str) -> Result<String, String> {
+    let id = route
+        .strip_prefix("/work/")
+        .or_else(|| route.strip_prefix("/inbox?decision="))
+        .ok_or("허용되지 않은 이동 경로입니다.")?;
+    if id.is_empty()
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err("허용되지 않은 이동 경로입니다.".into());
+    }
+    let route = serde_json::to_string(route).map_err(|_| "이동 경로를 읽지 못했습니다.")?;
+    Ok(format!("window.location.hash = {route};"))
+}
+
 #[tauri::command]
-pub fn focus_main(app: tauri::AppHandle) -> Result<(), String> {
+pub fn focus_main(app: tauri::AppHandle, route: Option<String>) -> Result<(), String> {
+    let script = route.as_deref().map(main_route_script).transpose()?;
     let window = app
         .get_webview_window("main")
         .ok_or("Ghost 창을 찾지 못했습니다.")?;
+    if let Some(script) = script {
+        window.eval(script).map_err(|error| error.to_string())?;
+    }
     window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())
@@ -536,8 +783,160 @@ pub fn companion_menu(window: WebviewWindow) -> Result<(), String> {
 }
 #[cfg(test)]
 mod tests {
-    use super::{clamp, load_config, CompanionState, Config, Position, VisibleAnchor};
+    use super::{
+        clamp, load_config, main_route_script, physical_size, place_frames, reframe, CompanionState,
+        Config, Expansion, Frame, Layout, Position, VisibleAnchor,
+    };
     use std::sync::Mutex;
+
+    fn frame(x: i32, y: i32, width: u32, height: u32) -> Frame {
+        Frame {
+            position: Position { x, y },
+            size: (width, height),
+        }
+    }
+
+    #[test]
+    fn hidden_startup_frame_cannot_overwrite_the_saved_position() {
+        let mut layout = Layout::default();
+        assert_eq!(layout.moved(frame(0, 0, 140, 170), 1.0), None);
+        let saved = frame(-1700, 700, 112, 142);
+        let (collapsed, _) = place_frames(saved, saved.size, Some((320, 382)), frame(-1920, 24, 1920, 1056));
+        assert_eq!(collapsed, saved);
+    }
+
+    #[test]
+    fn shelf_preserves_bottom_center_and_round_trips_without_drift_at_each_scale() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            for dimensions in [(112.0, 142.0), (140.0, 170.0), (168.0, 198.0)] {
+                let size = physical_size(dimensions, scale);
+                let original = Frame {
+                    position: Position { x: -2100, y: 1200 },
+                    size,
+                };
+                let area = frame(-4000, 30, 4000, 3000);
+                let shelf_size = physical_size((320.0, dimensions.1 + 240.0), scale);
+                let mut restored = original;
+                for _ in 0..20 {
+                    let (saved, shelf) = place_frames(restored, size, Some(shelf_size), area);
+                    assert_eq!(saved, original);
+                    assert_eq!(shelf.size, shelf_size);
+                    assert_eq!(
+                        shelf.position.x + (shelf.size.0 / 2) as i32,
+                        original.position.x + (original.size.0 / 2) as i32
+                    );
+                    assert_eq!(
+                        shelf.position.y + shelf.size.1 as i32,
+                        original.position.y + original.size.1 as i32
+                    );
+                    restored = place_frames(saved, size, None, area).1;
+                    assert_eq!(restored, original);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shelf_clamps_to_the_same_work_area_and_retains_the_collapsed_restore_point() {
+        let area = frame(-1920, 24, 1920, 1056);
+        for x in [-1920, -140] {
+            for y in [24, 910] {
+                let original = frame(x, y, 140, 170);
+                let (saved, shelf) = place_frames(original, original.size, Some((320, 410)), area);
+                assert_eq!(saved, original);
+                assert!(shelf.position.x >= -1920);
+                assert!(shelf.position.x + shelf.size.0 as i32 <= 0);
+                assert!(shelf.position.y >= 24);
+                assert!(shelf.position.y + shelf.size.1 as i32 <= 1080);
+                assert_eq!(place_frames(saved, saved.size, None, area).1, original);
+                let mut layout = Layout {
+                    positioned: true,
+                    expanded: Some(Expansion {
+                        frame: shelf,
+                        collapsed_size: saved.size,
+                    }),
+                    ..Layout::default()
+                };
+                assert_eq!(layout.moved(shelf, 1.0), None);
+                let config = Config {
+                    enabled: true,
+                    position: Some(saved.position),
+                };
+                let reopened: Config =
+                    serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
+                assert_eq!(reopened.position, Some(original.position));
+            }
+        }
+    }
+
+    #[test]
+    fn resizing_pet_sizes_also_retains_the_physical_bottom_center() {
+        let original = frame(-700, 600, 175, 213);
+        let changed = reframe(original, (210, 248));
+        assert_eq!(reframe(changed, original.size), original);
+        assert_eq!(changed.position, Position { x: -718, y: 565 });
+    }
+
+    #[test]
+    fn dragging_an_expanded_shelf_replaces_its_preclamp_restore_point() {
+        let area = frame(0, 24, 1920, 1056);
+        let original = frame(0, 24, 140, 170);
+        let (_, shelf) = place_frames(original, original.size, Some((320, 410)), area);
+        let mut layout = Layout {
+            positioned: true,
+            expanded: Some(Expansion {
+                frame: shelf,
+                collapsed_size: original.size,
+            }),
+            ..Layout::default()
+        };
+        let dragged = frame(120, 100, 320, 410);
+        let saved = layout.moved(dragged, 1.0).unwrap();
+        assert_eq!(saved, Position { x: 210, y: 340 });
+        let collapsed = Frame {
+            position: saved,
+            size: original.size,
+        };
+        assert_eq!(place_frames(collapsed, collapsed.size, None, area).1, collapsed);
+        assert_ne!(saved, original.position);
+        assert_eq!(layout.moved(dragged, 1.0), None);
+    }
+
+    #[test]
+    fn expanded_drag_uses_the_destination_scale_and_ignores_resize_events() {
+        let mut layout = Layout {
+            positioned: true,
+            expanded: Some(Expansion {
+                frame: frame(100, 100, 320, 410),
+                collapsed_size: (140, 170),
+            }),
+            resizing: true,
+            ..Layout::default()
+        };
+        let retina = frame(-1500, 200, 640, 820);
+        assert_eq!(layout.moved(retina, 2.0), None);
+        layout.resizing = false;
+        assert_eq!(layout.moved(retina, 2.0), Some(Position { x: -1320, y: 680 }));
+        assert_eq!(layout.expanded.unwrap().collapsed_size, (280, 340));
+        assert_eq!(layout.moved(retina, 2.0), None);
+    }
+
+    #[test]
+    fn main_focus_routes_allow_only_work_and_decision_ids() {
+        for route in ["/work/work-123_ABC", "/inbox?decision=decision-123_ABC"] {
+            assert_eq!(
+                main_route_script(route).unwrap(),
+                format!("window.location.hash = {};", serde_json::to_string(route).unwrap())
+            );
+        }
+        for route in [
+            "", "/work/", "/inbox?decision=", "/settings", "/work/a/b",
+            "/work/a?x=1", "/inbox?decision=a&other=b", "/work/%2f", "/work/한글",
+            "https://example.com/work/a", "/work/a';alert(1)//",
+        ] {
+            assert!(main_route_script(route).is_err(), "{route}");
+        }
+    }
 
     fn anchor() -> VisibleAnchor {
         VisibleAnchor {
@@ -667,6 +1066,7 @@ mod tests {
             path: std::path::PathBuf::new(),
             config: Mutex::new(Config::default()),
             visible_anchor: Mutex::new(Some(anchor())),
+            layout: Mutex::new(super::Layout::default()),
         };
         let resized = super::super::PxRect {
             x: 20,
@@ -717,6 +1117,7 @@ mod tests {
             path: path.clone(),
             config: Mutex::new(config.clone()),
             visible_anchor: Mutex::new(None),
+            layout: Mutex::new(super::Layout::default()),
         };
         state.save(&config).unwrap();
         assert_eq!(load_config(&path), config);
