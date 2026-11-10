@@ -118,8 +118,11 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
         : command.connectionId;
       if (!core.activitySources) throw new CommandError("unavailable", "source connections are not available");
       const sources = core.activitySources;
-      // Authentication probes are reads; OAuth refresh owns the account's write lane.
-      if (command.type === "connection.test") return sources.test(ledger.connection(connectionId));
+      // Wait for prior credential commits, then release the lane before OAuth refresh/probing.
+      if (command.type === "connection.test") {
+        const connection = await core.run(`connection:${connectionId}`, async () => ledger.connection(connectionId));
+        return sources.test(connection);
+      }
       return core.run(`connection:${connectionId}`, async () => {
         context.authorize?.();
         const previous = command.type === "connection.delete" || command.connectionId !== undefined

@@ -701,3 +701,22 @@ test("OAuth binding cleanup failure cannot turn a committed account deletion int
     expect(observed).toContain("connection.removed");
   } finally { unwatch(); }
 });
+
+test("an owner authentication probe can renew OAuth without re-entering its own account lane", async () => {
+  const routes = new Map<string, Route>([[GOOGLE_TOKEN, () => Response.json({ access_token: ACCESS, refresh_token: REFRESH, expires_in: 3600 })]]);
+  const { manager, core, owner, ledger, sources, tick, requests } = setup({ routes });
+  await configure(manager, "google", owner, CLIENT_ID, CLIENT_SECRET);
+  const login = await startLogin(manager, "google", owner);
+  await runCallback(manager, callbackUrl(login, { code: "first" }));
+  const row = ledger.connection(requireId((await settled(manager, "google", owner)).body.connectionId));
+  sources.test = async connection => {
+    await manager.refresh(connection);
+    return { summary: "authenticated" };
+  };
+  routes.set(GOOGLE_TOKEN, () => Response.json({ access_token: ACCESS2, refresh_token: REFRESH2, expires_in: 3600 }));
+  tick(3600);
+  await execute(core, owner, { requestId: "probe-with-renewal", command: { type: "connection.test", connectionId: row.id } }, { publicOrigin: ORIGIN, documents: null });
+  expect(ledger.request("probe-with-renewal")?.state).toBe("done");
+  expect(sources.credentials.get(row.id)?.value).toBe(ACCESS2);
+  expect(requests).toHaveLength(2);
+});
