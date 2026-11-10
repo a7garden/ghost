@@ -142,7 +142,6 @@ for (const approved of [true, false]) {
       f.steps.worker.push(
         () => tool("activity_read", {}),
         () => tool("activity_action", { kind: "pr_comment", body: "Owner-approved response." }),
-        () => "Awaiting owner approval.",
         (request) => {
           expect(source.actions).toBe(approved ? 1 : 0);
           expect(request.messages.filter((message) => message.role === "user").map(body).join("\n")).toContain(approved ? "Unexpected external action" : "owner denied");
@@ -168,7 +167,8 @@ for (const approved of [true, false]) {
       const decision = decisions[0]!;
       expect(decision.kind).toBe("approve_effect");
       expect(source.actions).toBe(0);
-      expect((await f.engine.page(waiting.conversationId!, null, 30)).messages.some((message) => message.role === "assistant" && message.text === "Awaiting owner approval.")).toBe(true);
+      expect(f.steps.worker).toHaveLength(1);
+      expect((await f.engine.page(waiting.conversationId!, null, 30)).messages.some((message) => message.role === "assistant" && message.text === "승인 또는 거절을 기다리고 있습니다.")).toBe(true);
       await f.core.decisions.resolve(decision.id, { outcome: approved ? "approve" : "deny" });
       const result = await settled(f.ledger, waiting.id);
       await f.core.idle();

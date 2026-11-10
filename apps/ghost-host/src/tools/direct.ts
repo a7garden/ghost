@@ -8,6 +8,8 @@ import { idFor } from "../core/ids.ts";
 import { workDetail } from "../core/state.ts";
 import { askOwnerTool, describeWorkLine, errorResult, firstLine, requireAllowed, requireOrigin, type Scope } from "./shared.ts";
 
+const DEFAULT_WORK_MINUTES = 90;
+
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
 /** Works created here (their whole tree) plus this Ghost's live Work, one compact line each. */
@@ -54,7 +56,7 @@ export function createDirectTools(core: Core): Extension {
           title: args.title,
           brief: args.brief,
           acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: args.initiative ? initiativeReviewer(core, scope.ghost, ghostId) : null },
-          deadlineAt: args.deadline_minutes === undefined ? null : Date.now() + args.deadline_minutes * 60_000,
+          deadlineAt: Date.now() + (args.deadline_minutes ?? DEFAULT_WORK_MINUTES) * 60_000,
           originConversationId: scope.conversation.id,
           execution: args.execution,
           id: idFor(scope.conversation.id, api.callId),
@@ -107,7 +109,7 @@ export function createDirectTools(core: Core): Extension {
 
   const workUpdate = defineTool({
     name: "work_update",
-    description: "Edit a Work created in this conversation: title, brief, done-criteria or deadline.",
+    description: "Edit a Work created in this conversation: title, brief, done-criteria or shorten its deadline. Only the owner can extend an existing deadline.",
     parameters: Type.Object({
       work_id: Type.String({ minLength: 1, description: "The Work's id" }),
       title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -121,11 +123,15 @@ export function createDirectTools(core: Core): Extension {
         const scope = requireAllowed(core, api, "work_update");
         const work = requireOrigin(core, scope, args.work_id);
         const acceptance = args.criteria === undefined ? undefined : { ...work.acceptance, criteria: args.criteria };
+        const deadlineAt = args.deadline_minutes === undefined ? undefined : Date.now() + args.deadline_minutes * 60_000;
+        if (deadlineAt !== undefined && work.deadlineAt !== null && deadlineAt > work.deadlineAt) {
+          throw forbidden("Only the owner can extend an existing Work deadline.");
+        }
         const next = core.works.update(work.id, {
           title: args.title,
           brief: args.brief,
           acceptance,
-          deadlineAt: args.deadline_minutes === undefined ? undefined : Date.now() + args.deadline_minutes * 60_000,
+          deadlineAt,
         });
         return text(`Work "${next.title}" is now revision ${next.revision} (${next.state}).`);
       } catch (error) {

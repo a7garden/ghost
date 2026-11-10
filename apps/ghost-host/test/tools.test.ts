@@ -551,6 +551,25 @@ describe("tools", () => {
     expect(s.ledger.work(works[0]!.id).conversationId).not.toBeNull();
   });
 
+  test("only the owner can extend an existing Work deadline", async () => {
+    const s = setup();
+    const pi = asPi(s, s.direct, "pi-direct");
+    const workCreate = toolOf(s, s.direct, s.ghost, "work_create");
+    const workUpdate = toolOf(s, s.direct, s.ghost, "work_update");
+    await call(workCreate, { title: "Timed", brief: "Finish the report" }, apiOf(pi, "timed"));
+    const work = s.ledger.worksForState().find((item) => item.title === "Timed")!;
+    expect(work.deadlineAt).toBeGreaterThan(Date.now() + 89 * 60_000);
+    const extended = await call(workUpdate, { work_id: work.id, deadline_minutes: 180 }, apiOf(pi, "extend"));
+    expect(extended.isError).toBe(true);
+    expect(s.ledger.work(work.id).deadlineAt).toBe(work.deadlineAt);
+    const shortened = await call(workUpdate, { work_id: work.id, deadline_minutes: 10 }, apiOf(pi, "shorten"));
+    expect(shortened.isError).toBeFalsy();
+    expect(s.ledger.work(work.id).deadlineAt).toBeLessThan(work.deadlineAt!);
+    const ownerDeadline = Date.now() + 180 * 60_000;
+    expect(s.core.works.update(work.id, { deadlineAt: ownerDeadline }).deadlineAt).toBe(ownerDeadline);
+    await s.core.idle();
+  });
+
   test("a replayed delegate call finds the child it already created", async () => {
     const s = setup();
     const helper = s.core.createGhost({ name: "Helper", persona: "You help." });

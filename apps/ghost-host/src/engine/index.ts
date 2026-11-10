@@ -37,6 +37,7 @@ import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
 import { FallbackDoc, fallbackModels, fallbackReason } from "./fallback.ts";
 import { digestOf } from "../core/ids.ts";
+import { workGuard } from "./work-guard.ts";
 import { projectContext, splitProjectBrief, QUIET_REPLY as QUIET } from "@ghost/contract";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -112,7 +113,7 @@ class HostEngine implements Engine {
   private readonly unsubscribeLedger: () => void;
   private readonly unsubscribeCommits: () => void;
 
-  constructor(deps: EngineDeps, harness: Harness, ownedModels: MutableModels | null, registry: Registry) {
+  constructor(deps: EngineDeps, harness: Harness, ownedModels: MutableModels | null, registry: Registry, private readonly guardExtension: Extension) {
     this.core = deps.core;
     this.tools = deps.tools;
     this.log = deps.log;
@@ -175,6 +176,7 @@ class HostEngine implements Engine {
     const model = servingModel ?? this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
     const kindInstructions = this.tools.instructionsFor(conversation, ghost, work);
     const extensions = [...this.tools.extensionsFor(conversation, ghost, work), this.fallbackExtension];
+    if (conversation.kind === "work") extensions.push(this.guardExtension);
     // Pi resolves extension names from its registry; filtering copied extensions would not filter the model's tools.
     const grantedTools: ToolRegistration[] = [];
     const activity = work?.activityId ? this.core.ledger.findActivity(work.activityId) : null;
@@ -794,6 +796,8 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
   const models = deps.models ?? ownedModels;
   if (!models) throw new Error("the engine needs a model catalog");
   const registry = createRegistry();
+  const guard = workGuard(core, models);
+  registry.install(guard.extension);
   for (const extension of tools.all()) registry.install(extension);
   const storage = await openNodeSqliteStorage(deps.storagePath);
   let harness: Harness | null = null;
@@ -803,7 +807,7 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
     harness = await Harness.open(
       storage,
       {
-        models,
+        models: guard.models,
         registry,
         settings: deps.harnessSettings,
         // Harness.open reports an internal close failure here if its own startup
@@ -831,7 +835,7 @@ export async function createEngine(deps: EngineDeps): Promise<Engine> {
       ctx,
     );
     opening = false;
-    return new HostEngine(deps, harness, ownedModels, registry);
+    return new HostEngine(deps, harness, ownedModels, registry, guard.extension);
   } catch (error) {
     opening = false;
     const cleanupErrors = harness ? [] : startupReports;

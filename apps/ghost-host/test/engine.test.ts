@@ -19,6 +19,7 @@ import { Ledger } from "../src/ledger/ledger.ts";
 import type { Engine } from "../src/core/ports.ts";
 import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
 import type { ToolSet } from "../src/tools/types.ts";
+import { WorkspaceEnv } from "../src/sandbox/workspace-env.ts";
 import { MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
 import { ProviderCatalog } from "../src/integrations/provider-catalog.ts";
 import { createDocuments } from "../src/integrations/documents.ts";
@@ -90,7 +91,7 @@ interface Fixture {
   faux: FauxProviderHandle;
 }
 
-async function fixture(toolFactory: (core: Core) => ToolSet = () => tools): Promise<Fixture> {
+async function fixture(toolFactory: (core: Core) => ToolSet = () => tools, workSandbox = false): Promise<Fixture> {
   const root = mkdtempSync(join(tmpdir(), "ghost-engine-"));
   const ledger = new Ledger(join(root, "ledger.db"));
   const secrets = new MemorySecrets();
@@ -113,7 +114,7 @@ async function fixture(toolFactory: (core: Core) => ToolSet = () => tools): Prom
     core,
     storagePath: join(root, "pi.db"),
     tools: toolFactory(core),
-    sandbox,
+    sandbox: workSandbox ? { ...sandbox, envFor: async () => new WorkspaceEnv({ hostRoot: root, id: "test-workspace" }) } : sandbox,
     models,
     log: () => {},
   });
@@ -809,6 +810,92 @@ test("the real model request offers only granted selectable tools after live per
     expect(await offered()).toEqual(["work_list"]);
     await update([]);
     expect(await offered()).toEqual([]);
+  } finally {
+    core.stop();
+    await core.idle();
+    await engine.close();
+    ledger.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const outcome of ["approve", "deny"] as const) {
+  test(`a Work pauses after a mixed tool round and resumes after ${outcome}`, async () => {
+    let executions = 0;
+    const { core, engine, ledger, root, conversationId, ghostId, faux } = await fixture((core) => {
+      core.effects.onApproved("test_approval", async () => {
+        executions++;
+        return "executed";
+      });
+      const ask = defineTool({
+        name: "test_approval",
+        description: "Request approval for the fixture.",
+        parameters: Type.Object({}),
+        execute: async (_args, api) => {
+          const conversation = core.ledger.conversationByPiId(String(api.conversationId))!;
+          core.effects.propose({
+            conversationId: conversation.id, callId: api.callId, tool: "test_approval",
+            input: {}, summary: "approval", title: "Approve test action", detail: "", proposal: {},
+          });
+          return { content: [{ type: "text", text: "Waiting on approval" }] };
+        },
+      });
+      const ext = defineExtension({ name: "ghost.approval-test", tools: [echo, ask] });
+      return { ...tools, all: () => [ext], extensionsFor: () => [ext] };
+    }, true);
+    try {
+      faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("echo", { text: "inspect" }), fauxToolCall("test_approval", {})], { stopReason: "toolUse" }),
+        fauxAssistantMessage("resumed after resolution"),
+      ]);
+      const work = core.works.createRoot({ ghostId, title: "Approval", brief: "Ask first", originConversationId: conversationId });
+      await core.idle();
+      const workConversation = ledger.work(work.id).conversationId!;
+      await core.nextActivity(workConversation, 1);
+
+      expect(ledger.work(work.id).state).toBe("waiting");
+      expect(faux.getPendingResponseCount()).toBe(1);
+      expect(executions).toBe(0);
+      const decision = ledger.pendingDecisions({ workId: work.id })[0]!;
+      const resumed = nextMessage(engine, workConversation, "assistant");
+      await core.decisions.resolve(decision.id, { outcome });
+      expect((await resumed).text).toBe("resumed after resolution");
+      expect(executions).toBe(outcome === "approve" ? 1 : 0);
+      core.works.cancel(work.id);
+    } finally {
+      core.stop();
+      await core.idle();
+      await engine.close();
+      ledger.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("a repeated permanent Work error stops model calls at the retry window", async () => {
+  const failure = defineTool({
+    name: "test_failure",
+    description: "Return the same refusal every time.",
+    parameters: Type.Object({}),
+    execute: async () => ({ isError: true, content: [{ type: "text", text: "permanent refusal" }] }),
+  });
+  const ext = defineExtension({ name: "ghost.retry-test", tools: [failure] });
+  const { core, engine, ledger, root, conversationId, ghostId, faux } = await fixture(
+    () => ({ ...tools, all: () => [ext], extensionsFor: () => [ext] }), true,
+  );
+  try {
+    const refusal = () => fauxAssistantMessage(fauxToolCall("test_failure", {}), { stopReason: "toolUse" });
+    faux.setResponses(Array.from({ length: 9 }, refusal));
+    const work = core.works.createRoot({ ghostId, title: "Retry", brief: "Run the tool", originConversationId: conversationId });
+    // A prior idle nudge was already used, so this idle boundary should settle the Work.
+    ledger.tx(() => ledger.setIdleNudges(work.id, 1));
+    await core.idle();
+    const workConversation = ledger.work(work.id).conversationId!;
+    await core.nextActivity(workConversation, 1);
+    expect(ledger.work(work.id).state).toBe("failed");
+    expect(faux.getPendingResponseCount()).toBe(1);
+    const page = await engine.page(workConversation, null, 30);
+    expect(page.messages.at(-1)?.text).toContain("반복돼");
   } finally {
     core.stop();
     await core.idle();
