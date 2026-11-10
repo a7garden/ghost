@@ -93,7 +93,8 @@ export class Schedules {
     // Ignore an in-flight source poll's stale due timestamp, but keep scheduled
     // activities and bounded self-checks authoritative while transport waits.
     const activityAt = this.core.activities.nextDueAt(!this.pollingSources);
-    const next = scheduleAt === null ? activityAt : activityAt === null ? scheduleAt : Math.min(scheduleAt, activityAt);
+    // 퇴근 중에는 지난 예약 시각에 매 초 깨지 않도록 무시한다. 출근 전환은 duty 가 refresh 로 알린다.
+    const next = !this.core.duty.onDuty() ? null : scheduleAt === null ? activityAt : activityAt === null ? scheduleAt : Math.min(scheduleAt, activityAt);
     const delay = next === null ? MAX_TICK_MS : Math.max(1000, Math.min(MAX_TICK_MS, next - Date.now()));
     this.timer = setTimeout(() => void this.tick(), delay);
   }
@@ -102,10 +103,14 @@ export class Schedules {
   async tick(now = Date.now()) {
     try {
       this.core.works.expire(now);
-      for (const schedule of this.ledger.dueSchedules(now)) await this.fire(schedule, now);
+      // 퇴근 중에는 새 일을 시작하지 않는다. 때가 된 예약 · 활동 규칙은 그대로 두었다가 출근하면 돈다. 기한 처리는 계속한다.
+      const onDuty = this.core.duty.onDuty(now);
+      if (onDuty) for (const schedule of this.ledger.dueSchedules(now)) await this.fire(schedule, now);
       this.ledger.pruneEvents(now);
-      await this.core.activities.tickTimers(now);
-      this.pollSources(now);
+      if (onDuty) {
+        await this.core.activities.tickTimers(now);
+        this.pollSources(now);
+      }
       this.ledger.pruneHistory(now);
       this.ledger.prunePairings(now);
     } catch (error) {

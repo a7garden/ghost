@@ -378,6 +378,10 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
     case "autonomy.set":
       core.autonomy.setEnabled(command.ghostId, command.enabled);
       return {};
+    case "duty.switch":
+      return { duty: core.duty.switch(command.onDuty) };
+    case "duty.hours":
+      return { duty: core.duty.setHours(command.hours) };
     case "activity.create":
       return { activityId: core.activities.create(command.config).id };
 

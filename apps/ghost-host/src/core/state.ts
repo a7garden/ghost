@@ -30,6 +30,7 @@ export function snapshot(core: Core, access: Access): State {
     activityRuns: ledger.activityRuns(),
     connections: ledger.connections().map((connection) => ({ ...connection, hasCredential: core.activitySources?.credentialPresent(connection.id) ?? false })),
     autonomy: core.autonomy.view(),
+    duty: core.duty.view(),
   };
 }
 

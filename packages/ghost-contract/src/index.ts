@@ -4,6 +4,7 @@ export * from "./events.ts";
 export * from "./views.ts";
 export * from "./interactive.ts";
 export * from "./autonomy.ts";
+export * from "./duty.ts";
 export * from "./project-context.ts";
 export * from "./review.ts";
 export { validate, parse, ContractError } from "./validate.ts";

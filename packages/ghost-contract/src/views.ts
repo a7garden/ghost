@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
+import { Duty } from "./duty.ts";
 import {
   ArtifactRef,
   AutonomyPlan,
@@ -70,6 +71,8 @@ export const State = Type.Object({
   activityRuns: Type.Optional(Type.Array(ActivityRun)),
   connections: Type.Optional(Type.Array(Connection)),
   autonomy: Type.Optional(Type.Array(AutonomyPlan)),
+  /** 근무 상태. 이 기능 이전의 Host 는 보내지 않는다. */
+  duty: Type.Optional(Duty),
 });
 export type State = Static<typeof State>;
 

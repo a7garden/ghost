@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, Repeat2, Server, Smartphone, Users } from 'lucide-react';
+import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, Repeat2, Server, Smartphone, Users } from 'lucide-react';
+import { DutySwitch } from './components/DutySwitch';
+import { DutySettings } from './features/DutySettings';
 import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
 import { AppFrame } from './components/AppFrame';
@@ -176,6 +178,7 @@ function Shell() {
     ...decisionItems,
     ...workItems,
     { id: 'team', label: uiTerms.ghostSettings, group: '설정', onSelect: go('/settings?tab=team') },
+    { id: 'duty', label: '근무 시간', group: '설정', onSelect: go('/settings?tab=duty') },
     { id: 'vault', label: '금고', group: '설정', onSelect: go('/settings?tab=vault') },
     { id: 'devices', label: '기기', group: '설정', onSelect: go('/settings?tab=devices') },
     { id: 'schedules', label: uiTerms.schedules, group: '설정', onSelect: go('/settings?tab=schedules') },
@@ -192,6 +195,7 @@ function Shell() {
     { id: 'team', label: 'Ghost', icon: Users, content: <GhostSettings onChat={switchGhost}
       onSelect={id => navigate(`/settings?tab=team&ghost=${encodeURIComponent(id)}`)}
       selectedGhostId={params.get('ghost') ?? undefined} createRequested={params.get('new') === '1'} onCreateClosed={clearCreateRequest}/> },
+    { id: 'duty', label: '근무 시간', icon: BriefcaseBusiness, content: <DutySettings/> },
     { id: 'vault', label: '금고', icon: KeyRound, content: <VaultView/> },
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
@@ -225,6 +229,7 @@ function Shell() {
               : section === 'spaces' && selectedSpace ? '/workspace' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
+          duty={state && <DutySwitch state={state}/>}
           sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
           {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>{error}</Banner>}
           {runtimeDown && state && section !== 'home' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
