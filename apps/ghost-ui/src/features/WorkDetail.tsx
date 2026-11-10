@@ -129,8 +129,8 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
         <section className="work-section" aria-labelledby="work-brief">
           <h2 id="work-brief" className="section-title">할 일</h2>
           <ProjectChips spaces={brief.spaces}/>
-          <p className="work-brief">{brief.text}</p>
-          {work.acceptance.criteria.trim() && <div className="work-criteria"><span>완료 기준</span><p>{work.acceptance.criteria}</p></div>}
+          <div className="work-brief"><MessageBody text={brief.text}/></div>
+          {work.acceptance.criteria.trim() && <div className="work-criteria"><span>완료 기준</span><MessageBody text={work.acceptance.criteria}/></div>}
           {work.execution && <div className="work-criteria"><span>실행 환경</span><p>{executionLabel[work.execution.kind]}{work.execution.kind === 'host' ? ` · ${work.execution.cwd}` : ''}</p></div>}
           {work.activityId && <Button variant="ghost" size="sm" onClick={() => navigate('/settings?tab=activities')}>자동 활동 열기</Button>}
         </section>

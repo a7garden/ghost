@@ -65,3 +65,16 @@ it('streams words as their own nodes, keeps code exact and puts the caret after 
   const settled = render('마지막 문장');
   expect(settled).not.toContain('stream-');
 });
+
+it('bolds Korean text wrapped around brackets, where CommonMark alone leaves the asterisks', () => {
+  const html = render('발주처는 **「산림청」**이고 기한은 **11월 말**까지입니다.');
+  expect(html).toContain('<strong>「산림청」</strong>이고');
+  expect(html).toContain('<strong>11월 말</strong>까지');
+  expect(html).not.toContain('**');
+});
+
+it('keeps the single line breaks a Ghost writes in messages, but not in stored documents', () => {
+  expect(render('할 일\n두 항목만 다시 확인한다.')).toMatch(/할 일<br\/?>\s*두 항목/);
+  const document = renderToStaticMarkup(createElement(MessageBody, { text: '할 일\n두 항목', document: true }));
+  expect(document).not.toContain('<br');
+});

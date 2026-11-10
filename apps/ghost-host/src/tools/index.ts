@@ -35,6 +35,15 @@ const OWNER_VOICE = `Talk to the owner the way a capable colleague would. They r
 Keep the exactness for Ghost-to-Ghost briefs (work_create, delegate): done-criteria, paths and checks belong there, not in what the owner reads.`;
 
 /**
+ * 2026-11-10: the owner received a SVN-commit check as one run-on paragraph with the git command
+ * inline in a sentence. The app renders Markdown; without these rules a Ghost writes for a log.
+ */
+const OWNER_FORMAT = `The owner's app renders Markdown (GitHub-flavored; single line breaks are kept). Write for reading, not for a log:
+- A command, query, code or output excerpt the owner might copy or run goes in a fenced code block with its language (\`\`\`bash), one per line — never inside a sentence. Inline \`code\` is only for a short name.
+- One point per paragraph. Checks, steps and per-item results are a list, one item per line: the item's label in bold, then its result; the evidence line under it in a code block.
+- Briefs you write with work_create or delegate are shown to the owner as the Work's to-do, so give them the same shape: labeled sections or lists, commands in code blocks.`;
+
+/**
  * 2026-11-10: owner-facing text follows the owner's language setting in every conversation kind. Before, only direct
  * conversations said "in their language", and Work briefs are English, so approvals and questions reached the owner in English.
  */
@@ -66,6 +75,8 @@ ghost_list shows the active Ghosts; hand a task to a better-fit Ghost with work_
 ${AUTONOMY_DRIVE}
 
 ${OWNER_VOICE}
+
+${OWNER_FORMAT}
 
 ${INTERACTIVE_INSTRUCTIONS}`;
 
@@ -189,6 +200,7 @@ export function createToolSet(deps: {
           return [
             WORK_INSTRUCTIONS,
             OWNER_CARDS,
+            OWNER_FORMAT,
             ownerLanguageRule(language()),
             environment,
             ...capabilityInstructions(ghost),

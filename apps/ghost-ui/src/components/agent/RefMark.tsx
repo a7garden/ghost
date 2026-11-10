@@ -1,5 +1,5 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
-import { FileText, Hash, MessageCircle } from 'lucide-react';
+import { FileText, GitCommitHorizontal, Hash, MessageCircle } from 'lucide-react';
 import type { State } from '@ghost/contract';
 import { useOptionalHost } from '../../host/context';
 import { DotAvatar } from '../DotAvatar';
@@ -37,7 +37,7 @@ export function RefMark({ kind, value }: Ref) {
   const ghosts = matching(state?.ghosts);
   const conversations = matching(state?.conversations);
   const unique = works.length + ghosts.length + conversations.length === 1;
-  const raw: PeekFact = { label: kind === 'id' ? '식별자' : '해시', value: kind === 'id' && value.length < 36 ? `${value}…` : value, copy: true };
+  const raw: PeekFact = { label: kind === 'id' ? '식별자' : kind === 'commit' ? '커밋' : '해시', value: kind === 'id' && value.length < 36 ? `${value}…` : value, copy: true };
 
   const work = unique ? works[0] : undefined;
   if (work) {
@@ -69,10 +69,16 @@ export function RefMark({ kind, value }: Ref) {
     </Peek>;
   }
   // Ghosts often quote a file by a digest prefix; the file it names is what matters.
-  const file = kind === 'digest' ? state?.works.flatMap(item => item.result?.artifacts ?? []).find(artifact => artifact.digest.startsWith(value)) : undefined;
+  const file = kind !== 'id' ? state?.works.flatMap(item => item.result?.artifacts ?? []).find(artifact => artifact.digest.startsWith(value)) : undefined;
   if (file) {
     return <Peek title={file.name} facts={[{ label: '크기', value: sizeLabel(file.size) }, { ...raw, value: file.digest }]}>
       <span className="ref-mark" data-kind="file" role="img" tabIndex={0} aria-label={file.name}><FileText aria-hidden="true"/></span>
+    </Peek>;
+  }
+  // A short hash a Ghost quotes is a commit: the mark says so, the hash waits behind it.
+  if (kind === 'commit') {
+    return <Peek title="커밋" facts={[raw]}>
+      <span className="ref-mark" data-kind="raw" role="img" tabIndex={0} aria-label={`커밋 ${value}`}><GitCommitHorizontal aria-hidden="true"/></span>
     </Peek>;
   }
   return <Peek facts={[raw]}>
