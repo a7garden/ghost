@@ -4,12 +4,14 @@ import { join } from "node:path";
 import { expect, spyOn, test } from "bun:test";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import type { Message } from "@ghost/contract";
 import { createEngine } from "../src/engine/index.ts";
 import { MemoryStore } from "../src/stores/memory.ts";
 import { commitProposal, MemoryDreams, memoryIndex, memorySnapshot, readProposal } from "../src/memory/dreams.ts";
 import { memoryPrompt } from "../src/memory/pi.ts";
 import type { MemoryEngine } from "../src/memory/types.ts";
+import { MEMORY_OUTPUT_BYTES, memoryModels } from "../src/memory/stream.ts";
 import { harness } from "./support.ts";
 
 function memoryFixture() {
@@ -293,12 +295,15 @@ test("internal dream identity survives Pi restart with no Ghost row or tools", a
   try {
     const first = await engine.dreamMemory(input, new AbortController().signal);
     await engine.close();
-    engine = await open();
-    const second = await engine.dreamMemory(input, new AbortController().signal);
-    expect(first).toEqual(second);
-    expect(calls).toBe(1);
-    expect(h.ledger.ghosts()).toHaveLength(0);
-    expect(h.ledger.conversations()).toHaveLength(0);
+    const clock = spyOn(Date, "now").mockReturnValue(input.startedAt + 120_000);
+    try {
+      engine = await open();
+      const second = await engine.dreamMemory(input, new AbortController().signal);
+      expect(first).toEqual(second);
+      expect(calls).toBe(1);
+      expect(h.ledger.ghosts()).toHaveLength(0);
+      expect(h.ledger.conversations()).toHaveLength(0);
+    } finally { clock.mockRestore(); }
   } finally { await engine.close(); h.core.stop(); await h.core.idle(); h.ledger.close(); f.close(); }
 });
 
@@ -347,4 +352,133 @@ test("nested imported notes and own-team notes can be superseded/deleted with pr
     expect(f.memory.revisions("ghost", team).some((revision) => revision.content === null)).toBe(true);
     expect(f.memory.read("ghost", "/me/MEMORY.md")?.content).toContain(imported);
   } finally { f.close(); }
+});
+
+test("memory 429 consumes one durable attempt while ordinary Ghost retry policy stays enabled", async () => {
+  const f = memoryFixture();
+  const h = harness();
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }] });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  let calls = 0;
+  const limited = () => { calls++; return fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit exceeded" }); };
+  faux.setResponses([limited, limited, () => { calls++; return fauxAssistantMessage("ordinary recovered"); }]);
+  h.ledger.tx(() => {
+    h.ledger.putProvider({ id: "faux", kind: "openai_compatible", name: "Faux", baseUrl: null, models: [{ id: "faux-1", name: "Faux" }] });
+    h.ledger.putSetting("defaultModel", { provider: "faux", model: "faux-1" });
+  });
+  h.core.secrets.put("faux", "test-key");
+  const engine = await createEngine({
+    core: h.core, storagePath: join(f.root, "pi.db"), memory: f.memory, models, log: () => {},
+    tools: { all: () => [], extensionsFor: () => [], instructionsFor: () => "" },
+    sandbox: { envFor: async () => { throw new Error("no sandbox"); }, workspacePath: () => "", stageInputs: async () => {}, release: async () => {} },
+    harnessSettings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 0 } },
+  });
+  h.core.attach(engine);
+  try {
+    const input = { id: "one-429", snapshot: f.snapshot, model: { provider: "faux", model: "faux-1" }, startedAt: Date.now() };
+    await expect(engine.dreamMemory(input, new AbortController().signal)).rejects.toThrow("429");
+    await expect(engine.dreamMemory(input, new AbortController().signal)).rejects.toThrow("429");
+    expect(calls).toBe(1);
+    const ghost = h.core.createGhost({ name: "Ordinary", persona: "" });
+    await h.core.idle();
+    const answered = Promise.withResolvers<void>();
+    const stop = engine.watch(ghost.directConversationId, (event) => {
+      if (event.type === "message" && event.message.text === "ordinary recovered") answered.resolve();
+    });
+    try {
+      await engine.submit(ghost.directConversationId, { text: "retry normally", origin: "owner", requestId: "ordinary-retry" });
+      await answered.promise;
+      expect(calls).toBe(3);
+    } finally { stop(); }
+  } finally { h.core.stop(); await h.core.idle(); await engine.close(); h.ledger.close(); f.close(); }
+});
+
+test("oversize provider output is signal-cancelled even when the adapter ignores maxTokens", async () => {
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }] });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const model = models.getModel("faux", "faux-1")!;
+  const source = createAssistantMessageEventStream();
+  let providerSignal: AbortSignal | undefined;
+  const provider = spyOn(models, "streamSimple").mockImplementation((_model, _context, options) => {
+    providerSignal = options?.signal;
+    options?.signal?.addEventListener("abort", () => source.end(fauxAssistantMessage("", { stopReason: "aborted" })), { once: true });
+    return source;
+  });
+  try {
+    const stream = memoryModels(models, Date.now() + 90_000).streamSimple(model, { messages: [] });
+    source.push({ type: "start", partial: fauxAssistantMessage("") });
+    const text = "x".repeat(MEMORY_OUTPUT_BYTES + 1);
+    source.push({ type: "text_delta", contentIndex: 0, delta: text, partial: fauxAssistantMessage(text) });
+    const result = await stream.result();
+    expect(providerSignal?.aborted).toBe(true);
+    expect(result.stopReason).toBe("aborted");
+    expect(result.errorMessage).toContain("output exceeded");
+    expect(result.content).toHaveLength(0);
+    const events = [];
+    for await (const event of stream) events.push(event.type);
+    expect(events).toEqual(["error"]); // No mutable oversized partial reaches Pi.
+  } finally { provider.mockRestore(); }
+});
+
+test("memory stream propagates shutdown cancellation and expired deadlines without another request", async () => {
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }] });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const model = models.getModel("faux", "faux-1")!;
+  const source = createAssistantMessageEventStream();
+  let providerSignal: AbortSignal | undefined;
+  const provider = spyOn(models, "streamSimple").mockImplementation((_model, _context, options) => {
+    providerSignal = options?.signal;
+    options?.signal?.addEventListener("abort", () => source.end(fauxAssistantMessage("", { stopReason: "aborted" })), { once: true });
+    return source;
+  });
+  try {
+    const caller = new AbortController();
+    const active = memoryModels(models, Date.now() + 90_000).streamSimple(model, { messages: [] }, { signal: caller.signal });
+    caller.abort(new Error("Host shutdown cancellation"));
+    expect((await active.result()).errorMessage).toContain("Host shutdown cancellation");
+    expect(providerSignal?.aborted).toBe(true);
+    const expired = memoryModels(models, Date.now() - 1).streamSimple(model, { messages: [] });
+    expect((await expired.result()).errorMessage).toContain("deadline exceeded");
+    expect(provider).toHaveBeenCalledTimes(1);
+  } finally { provider.mockRestore(); }
+});
+
+test("startup gates an interrupted dream before shared resume even with a busy owner conversation", async () => {
+  const f = memoryFixture();
+  const h = harness();
+  const ghost = h.core.createGhost({ name: "Busy owner", persona: "" });
+  await h.core.idle();
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }] });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const began = Promise.withResolvers<void>();
+  let calls = 0;
+  faux.setResponses([
+    async (_context, options) => {
+      calls++;
+      const interrupted = Promise.withResolvers<never>();
+      options?.signal?.addEventListener("abort", () => interrupted.reject(new Error("process stopped")), { once: true });
+      began.resolve();
+      return interrupted.promise;
+    },
+    () => { calls++; return fauxAssistantMessage(f.output); },
+  ]);
+  const open = () => createEngine({ core: h.core, storagePath: join(f.root, "pi.db"), memory: f.memory, models, log: () => {}, tools: { all: () => [], extensionsFor: () => [], instructionsFor: () => "" }, sandbox: { envFor: async () => { throw new Error("no sandbox"); }, workspacePath: () => "", stageInputs: async () => {}, release: async () => {} } });
+  let engine = await open();
+  const input = { id: "interrupted-memory", snapshot: f.snapshot, model: { provider: "faux", model: "faux-1" }, startedAt: Date.now() };
+  try {
+    const interrupted = engine.dreamMemory(input, new AbortController().signal).catch((error: unknown) => error);
+    await began.promise;
+    await engine.close();
+    await interrupted;
+    h.ledger.tx(() => h.ledger.putConversation({ ...h.ledger.conversation(ghost.directConversationId), busy: true }));
+    engine = await open();
+    expect(h.ledger.conversation(ghost.directConversationId).busy).toBe(true);
+    engine.resume();
+    await expect(engine.dreamMemory(input, new AbortController().signal)).rejects.toThrow("host_restart");
+    expect(calls).toBe(1);
+  } finally { h.core.stop(); await h.core.idle(); await engine.close(); h.ledger.close(); f.close(); }
 });

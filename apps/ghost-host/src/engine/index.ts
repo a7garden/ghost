@@ -41,7 +41,8 @@ import { workGuard } from "./work-guard.ts";
 import { projectContext, splitProjectBrief, QUIET_REPLY as QUIET } from "@ghost/contract";
 import type { MemoryStore } from "../stores/memory.ts";
 import type { MemoryDreamInput, MemoryEngine } from "../memory/types.ts";
-import { dreamInPi, memoryModels } from "../memory/pi.ts";
+import { dreamInPi } from "../memory/pi.ts";
+import { gateRecoveredDreams, memoryRegistry } from "../memory/runtime.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
@@ -881,8 +882,8 @@ export async function createEngine(deps: EngineDeps): Promise<Engine & MemoryEng
     harness = await Harness.open(
       storage,
       {
-        models: memoryModels(guard.models),
-        registry,
+        models: guard.models,
+        registry: memoryRegistry(registry),
         settings: deps.harnessSettings,
         // Harness.open reports an internal close failure here if its own startup
         // fails. Do not mistake its original rejection for successful cleanup.
@@ -908,6 +909,7 @@ export async function createEngine(deps: EngineDeps): Promise<Engine & MemoryEng
       },
       ctx,
     );
+    await gateRecoveredDreams(harness, (id) => Boolean(core.ledger.conversationByPiId(String(id))));
     opening = false;
     return new HostEngine(deps, harness, ownedModels, registry, guard.extension);
   } catch (error) {
