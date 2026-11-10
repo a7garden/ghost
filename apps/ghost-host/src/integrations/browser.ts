@@ -563,17 +563,19 @@ export class AgentBrowser implements BrowserPort {
     try { await session.ownerBusy; return await perform(); }
     finally { session.secretGate = undefined; gate.resolve(); await session.loginObserver?.updateMode?.(); }
   }
-  private registerSecret(session: Session, value: string, scope?: string) {
+  private registerSecret(session: Session, value: string, scope?: string, sensitive = false) {
     if (scope) {
       const previous = session.ownerRedactions?.get(scope);
       if (previous?.ownerScope === scope) { const index = session.secrets.indexOf(previous); if (index >= 0) session.secrets.splice(index,1); }
     }
     if (!value) return;
+    const digits = sensitive && /^[\d\s-]+$/.test(value) ? value.replace(/\D/g,"") : "";
+    const cardPattern = digits.length >= 12 && digits.length <= 19 ? new RegExp(digits.split("").join("[\\s-]*"),"g") : undefined;
     const existing = session.secrets.find(entry => entry.variants.includes(value));
-    if (existing) { if (!scope) existing.ownerScope = undefined; return; }
+    if (existing) { if (!scope) existing.ownerScope = undefined; if (cardPattern) existing.cardPattern = cardPattern; return; }
     const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
     let encoded = value; try { encoded = encodeURIComponent(value); } catch {}
-    const entry = { variants:[...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), JSON.stringify(value).slice(1,-1)])].sort((a,b) => b.length-a.length), ...(scope ? {ownerScope:scope} : {}) };
+    const entry = { variants:[...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), JSON.stringify(value).slice(1,-1)])].sort((a,b) => b.length-a.length), ...(scope ? {ownerScope:scope} : {}), ...(cardPattern ? {cardPattern} : {}) };
     session.secrets.push(entry);
     if (scope) (session.ownerRedactions ??= new Map()).set(scope,entry);
   }
@@ -599,7 +601,7 @@ export class AgentBrowser implements BrowserPort {
       if (epoch !== (session.loginEpoch ?? 0)) return;
       const id = await this.onLogin!(session.ref, login);
       if (id) session.notice = `${session.notice ?? ""}\nThe owner's login was saved to vault item ${id}. Use browser_fill_secret for this login.`.trim();
-    }, (value,scope) => { if (epoch === (session.loginEpoch ?? 0)) this.registerSecret(session,value,scope); }, password => session.modelPasswords?.has(password) === true);
+    }, (value,scope,sensitive) => { if (epoch === (session.loginEpoch ?? 0)) this.registerSecret(session,value,scope,sensitive); }, password => session.modelPasswords?.has(password) === true);
     const result = await this.invokeCli(session,["get","cdp-url"]);
     if (!result.ok || !result.data || typeof result.data !== "object" || !("cdpUrl" in result.data) || typeof result.data.cdpUrl !== "string") throw new CommandError("unavailable","Trusted Chrome input capture is unavailable");
     const observer = await ChromeLoginObserver.start(result.data.cdpUrl,capture,{
@@ -607,7 +609,7 @@ export class AgentBrowser implements BrowserPort {
       isCurrent: () => epoch === (session.loginEpoch ?? 0) && session.headed && !this.stopping,
       ownerApiActive: () => epoch === (session.loginEpoch ?? 0) && !!session.ownerCaptureDepth,
       activity: () => { if (epoch === (session.loginEpoch ?? 0)) { session.captureArmed = true; this.ownerActivity(session); } },
-      password: page => { if (epoch === (session.loginEpoch ?? 0)) session.passwordScreenshots.set(page.targetId,page.url); },
+      secret: (page,kind) => { if (epoch === (session.loginEpoch ?? 0)) { if (kind === "sensitive") session.screenshotsBlocked = true; else session.passwordScreenshots.set(page.targetId,page.url); } },
       windowClosed: () => { if (epoch === (session.loginEpoch ?? 0) && session.headed) void this.resumeClosedWindow(session).catch(() => {}); },
     });
     if (epoch !== (session.loginEpoch ?? 0) || this.stopping) { observer.close(); throw new CommandError("unavailable","Browser input session changed"); }
@@ -797,7 +799,8 @@ export class AgentBrowser implements BrowserPort {
           if (input.type === "key" && input.event === "down" && (input.key === "Backspace" || input.key === "Delete")) edit = (input.modifiers ?? 0)&7 ? {type:"unknown"} : {type:input.key === "Backspace" ? "backspace" : "delete"};
           if (before && focused && edit) {
             session.login?.edit(before,focused,edit);
-            if (focused.kind === "password") session.passwordScreenshots.set(before.targetId,before.url);
+            if (focused.kind === "sensitive") session.screenshotsBlocked = true;
+            else if (focused.kind === "password") session.passwordScreenshots.set(before.targetId,before.url);
           }
           if (input.type === "navigate" || input.type === "text") {
             const result = input.type === "navigate" ? await this.invoke(session, [input.action])

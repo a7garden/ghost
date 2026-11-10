@@ -148,3 +148,76 @@ chromeTest("closing a native window without a successful submit never saves a pa
     expect(vault.history(item.id)).toHaveLength(1);
   } finally {stop?.();native?.close();await browser.shutdown();vault.close();}
 },90_000);
+
+for (const lane of ["api","native"] as const) for (const scenario of [
+  {name:"card",html:'<input id=first autocomplete="section-payment BILLING CC-NUMBER"><input id=second type=password autocomplete="cc-csc">',first:"4242424242424242",second:"679",formatted:"4242 4242 4242 4242"},
+  {name:"otp",html:'<input id=first type=email autocomplete=username><input id=second type=password autocomplete="section-auth ONE-TIME-CODE">',first:"owner@example.com",second:"123456",formatted:"owner@example.com"},
+]) chromeTest(`real Chrome ${lane}: ${scenario.name} is redaction-only, never a saved login or a model screenshot`,async()=>{
+  const root=tempDir(),vault=createVault(root),saved:string[]=[];
+  const ref={ghostId:`sensitive-${lane}-${scenario.name}`,conversationId:`sensitive-${lane}-${scenario.name}`};
+  const item=vault.saveLogin(ref.ghostId,{origin:"https://example.com",username:"owner@example.com",password:"existing-real-password"});
+  const browser=new AgentBrowser({executable:executable!,chrome},root,(session,login)=>{const stored=vault.saveLogin(session.ghostId,login);saved.push(stored.id);return stored.id;});
+  let native:BrowserCdp|undefined;
+  try {
+    await browser.run(ref,["open","https://example.com/"]);
+    if (lane === "native") await browser.handoff(ref,"https://example.com/");
+    await browser.run(ref,["eval",`document.body.innerHTML=${JSON.stringify(`<form>${scenario.html}<button>Continue</button></form>`)}; document.querySelector('form').onsubmit=e=>{e.preventDefault();document.body.replaceChildren();}; "ready"`]);
+    let sid:string|undefined;
+    if (lane === "native") {
+      const endpoint=await browser.run(ref,["get","cdp-url"]);
+      if (!endpoint.data || typeof endpoint.data!=="object" || !("cdpUrl" in endpoint.data) || typeof endpoint.data.cdpUrl!=="string") throw new Error("Missing test CDP endpoint");
+      native=await BrowserCdp.connect(endpoint.data.cdpUrl);
+      const listed=await native.request("Target.getTargets");
+      if (!Array.isArray(listed.targetInfos)) throw new Error("Missing test targets");
+      const target=listed.targetInfos.find((target:Record<string,unknown>)=>target.type==="page" && typeof target.url==="string" && target.url.startsWith("https://example.com/"));
+      if (!target || typeof target.targetId!=="string") throw new Error("Missing test page");
+      const attached=await native.request("Target.attachToTarget",{targetId:target.targetId,flatten:true});
+      if (typeof attached.sessionId!=="string") throw new Error("Missing test attachment");
+      sid=attached.sessionId;
+    }
+    const press=async(key:string)=>{
+      if (lane === "api") {
+        await browser.input(ref,{type:"key",event:"down",key,code:key});
+        await browser.input(ref,{type:"key",event:"up",key,code:key});
+      } else {
+        await native!.request("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,text:key==="Enter"?"\r":undefined,windowsVirtualKeyCode:key==="Enter"?13:9},sid);
+        await native!.request("Input.dispatchKeyEvent",{type:"keyUp",key,code:key,windowsVirtualKeyCode:key==="Enter"?13:9},sid);
+      }
+    };
+    const type=async(value:string)=>{
+      if (lane === "api") await browser.input(ref,{type:"text",text:value});
+      else for (const key of value) {
+        await native!.request("Input.dispatchKeyEvent",{type:"keyDown",key,code:"Unidentified",text:key,windowsVirtualKeyCode:0},sid);
+        await native!.request("Input.dispatchKeyEvent",{type:"keyUp",key,code:"Unidentified",windowsVirtualKeyCode:0},sid);
+      }
+    };
+    await press("Tab"); await type(scenario.first);
+    const first=JSON.stringify((await browser.run(ref,["eval","document.querySelector('#first').value"])).data);
+    if (scenario.name === "card") {
+      expect(first).not.toContain(scenario.first);
+      expect(first).toContain("[redacted]");
+      await expect(browser.run(ref,["screenshot"])).rejects.toThrow("Screenshots are disabled");
+    }
+    await press("Tab"); await type(scenario.second);
+    const second=JSON.stringify((await browser.run(ref,["eval","document.querySelector('#second').value"])).data);
+    expect(second).not.toContain(scenario.second);
+    expect(second).toContain("[redacted]");
+    await expect(browser.run(ref,["screenshot"])).rejects.toThrow("Screenshots are disabled");
+    await press("Enter");
+    await browser.endHandoff(ref);
+    expect(saved).toEqual([]);
+    expect(vault.history(item.id)).toHaveLength(1);
+    expect(vault.reveal(ref.ghostId,item.id,"password")).toBe("existing-real-password");
+    // A page can echo submitted data in a receipt. Both raw and regrouped PANs remain protected.
+    const echo=[scenario.first,scenario.formatted,scenario.second].join(" | ");
+    await browser.run(ref,["eval",`document.body.textContent=${JSON.stringify(echo)};history.pushState({},'','/after-sensitive-input');"ready"`]);
+    const receipt=JSON.stringify((await browser.run(ref,["get","text","body"])).data);
+    expect(receipt).not.toContain(scenario.second);
+    if (scenario.name === "card") {
+      expect(receipt).not.toContain(scenario.first);
+      expect(receipt).not.toContain(scenario.formatted);
+    }
+    expect(receipt).toContain("[redacted]");
+    await expect(browser.run(ref,["screenshot"])).rejects.toThrow("Screenshots are disabled");
+  } finally {native?.close();await browser.shutdown();vault.close();}
+},90_000);

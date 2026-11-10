@@ -13,7 +13,7 @@ function metadata(value: unknown): Metadata | null {
   for (const item of data.fields) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return null;
     const field = item as Record<string, unknown>;
-    if (Object.keys(field).some(key => !["id","form","kind","length","start","end","score"].includes(key)) || typeof field.id !== "string" || field.id.length > 256 || typeof field.form !== "string" || field.form.length > 256 || !["username","password","submit","other"].includes(String(field.kind)) || !Number.isSafeInteger(field.length) || Number(field.length) < 0 || Number(field.length) > 65536 || ![field.start,field.end].every(v => v === null || Number.isSafeInteger(v) && Number(v) >= 0 && Number(v) <= Number(field.length)) || typeof field.score !== "number" || !Number.isFinite(field.score) || field.score < 0 || field.score > 200) return null;
+    if (Object.keys(field).some(key => !["id","form","kind","length","start","end","score"].includes(key)) || typeof field.id !== "string" || field.id.length > 256 || typeof field.form !== "string" || field.form.length > 256 || !["username","password","sensitive","submit","other"].includes(String(field.kind)) || !Number.isSafeInteger(field.length) || Number(field.length) < 0 || Number(field.length) > 65536 || ![field.start,field.end].every(v => v === null || Number.isSafeInteger(v) && Number(v) >= 0 && Number(v) <= Number(field.length)) || typeof field.score !== "number" || !Number.isFinite(field.score) || field.score < 0 || field.score > 200) return null;
     fields.push(field as unknown as LoginField);
   }
   return { fields, focused: typeof data.focused === "string" ? data.focused : null, clicked: typeof data.clicked === "string" ? data.clicked : null, ...(typeof data.documentId === "string" && data.documentId.length <= 128 ? {documentId:data.documentId} : {}), ...(typeof data.url === "string" && data.url.length <= 65536 ? {url:data.url} : {}), ...(typeof data.origin === "string" && data.origin.length <= 2048 ? {origin:data.origin} : {}) };
@@ -36,7 +36,7 @@ interface ChromeOptions {
   nativeAllowed(): boolean;
   ownerApiActive(): boolean;
   activity(): void;
-  password(page: LoginPage): void;
+  secret(page: LoginPage, kind: "password" | "sensitive"): void;
   windowClosed(): void;
 }
 
@@ -120,7 +120,7 @@ export class ChromeLoginObserver implements LoginObserver {
     else if (edit.type === "backspace" || edit.type === "delete") operation = {type:edit.type};
     if (allowed && operation.type !== "unknown") this.options.activity();
     this.capture.edit(observed,descriptor,operation,allowed);
-    if (descriptor.kind === "password" && operation.type !== "unknown") this.options.password(observed);
+    if (descriptor.kind === "sensitive" || descriptor.kind === "password" && operation.type !== "unknown") this.options.secret(observed,descriptor.kind);
   }
   private async setup(page: PageAttachment) {
     try {

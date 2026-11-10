@@ -10,10 +10,12 @@ export function chromeLoginScript(controller: string, binding: string) {
     const field = e => {
       if (!(e instanceof HTMLInputElement || e instanceof HTMLButtonElement)) return null;
       const type = e.type, input = e instanceof HTMLInputElement;
+      const autocomplete = (e.getAttribute("autocomplete") || "").trim().toLowerCase().split(/\\s+/);
+      const sensitive = autocomplete.some(token => token.startsWith("cc-") || token === "one-time-code" || token === "new-password");
       const selection = selections.get(e), length = input ? e.value.length : 0;
-      return { id:id(e), form:id(e.form), kind:e.disabled || e.readOnly ? "other" : input && type === "password" && e.autocomplete !== "new-password" ? "password" : type === "submit" ? "submit" : input && ["text","email","tel"].includes(type) ? "username" : "other",
+      return { id:id(e), form:id(e.form), kind:e.disabled || e.readOnly ? "other" : input && sensitive ? "sensitive" : input && type === "password" ? "password" : type === "submit" ? "submit" : input && ["text","email","tel"].includes(type) ? "username" : "other",
         length, start:input ? Number.isInteger(e.selectionStart) ? e.selectionStart : selection?.start ?? length : null, end:input ? Number.isInteger(e.selectionEnd) ? e.selectionEnd : selection?.end ?? length : null,
-        score:(/username|email/.test(e.autocomplete || "") ? 100 : 0) + (type === "email" ? 40 : 0) + (/user|login|email|account|아이디/i.test(e.name + " " + e.id) ? 30 : 0) };
+        score:(autocomplete.some(token => token === "username" || token === "email") ? 100 : 0) + (type === "email" ? 40 : 0) + (/user|login|email|account|아이디/i.test(e.name + " " + e.id) ? 30 : 0) };
     };
     const metadata = point => {
       const fields = [...document.querySelectorAll("input,button")].slice(0,512).map(field).filter(Boolean);
@@ -57,7 +59,7 @@ export function chromeLoginScript(controller: string, binding: string) {
     window.addEventListener("beforeinput", e => {
       if (!e.isTrusted || composition) return;
       const target = field(e.target); pending = null;
-      if (!target || !["username","password"].includes(target.kind)) return;
+      if (!target || !["username","password","sensitive"].includes(target.kind)) return;
       let edit = null;
       const sameKey = key && key.element === e.target && key.field?.kind === target.kind;
       if (e.inputType === "insertText" && sameKey && !(key.modifiers & 7) && typeof e.data === "string" && e.data === key.key) edit = {type:"insert",text:e.data};
