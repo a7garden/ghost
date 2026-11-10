@@ -37,9 +37,11 @@ export function ModelSettings() {
     catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); }
     finally { setPending(''); }
   };
-  const roleCommand = (field: 'defaultModel' | 'reviewModel', key: string) => {
+  const roleCommand = (field: 'defaultModel' | 'reviewModel' | 'memoryModel', key: string) => {
     const model = modelFromKey(settings, key) ?? null;
-    void run(field, () => client.send(field === 'defaultModel' ? { type: 'settings.update', defaultModel: model } : { type: 'settings.update', reviewModel: model }), '모델을 저장했습니다.');
+    if (field === 'defaultModel') void run(field, () => client.send({ type: 'settings.update', defaultModel: model }), '모델을 저장했습니다.');
+    else if (field === 'reviewModel') void run(field, () => client.send({ type: 'settings.update', reviewModel: model }), '모델을 저장했습니다.');
+    else void run(field, () => client.send({ type: 'settings.update', memoryModel: model }), '모델을 저장했습니다.');
   };
   // Reasoning depth rides on the default model; models that cannot reason ignore it.
   const thinkingCommand = (thinking: Thinking) => {
@@ -93,6 +95,10 @@ export function ModelSettings() {
       <SettingsRow label="검토 모델" description="맡긴 일의 결과를 판정할 때 씁니다.">
         <SelectField label="검토 모델" className="w-[240px] max-w-full" value={settings?.reviewModel ? `${settings.reviewModel.provider}/${settings.reviewModel.model}` : NO_MODEL}
           disabled={pending !== '' || !settings} onValueChange={key => roleCommand('reviewModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
+      </SettingsRow>
+      <SettingsRow label="기억 모델" description="Ghost의 기억을 정리할 때 씁니다. 선택하지 않으면 기본 모델을 따릅니다.">
+        <SelectField label="기억 모델" className="w-[240px] max-w-full" value={settings?.memoryModel ? `${settings.memoryModel.provider}/${settings.memoryModel.model}` : NO_MODEL}
+          disabled={pending !== '' || !settings} onValueChange={key => roleCommand('memoryModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
       </SettingsRow>
     </SettingsGroup>
     {editor && <ProviderEditor initial={editor.initial} presets={catalog} providerIds={settings?.providers.map(provider => provider.id) ?? []} busy={pending !== ''} onClose={() => setEditor(undefined)} onSave={saveProvider}/>}

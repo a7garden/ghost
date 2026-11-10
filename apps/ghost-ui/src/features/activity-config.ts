@@ -10,8 +10,8 @@ import {
 } from '@ghost/contract';
 import { fromLocalInput, intervalLabel, toLocalInput } from './Schedules';
 
-/** A new activity starts on the contract defaults: read-only tools, deny writes, ten runs a day at most. */
-export const DEFAULT_ACTIVITY_TOOLS: readonly GhostTool[] = ['read', 'web_search', 'web_read', 'memory_search'];
+/** A new activity starts on the contract defaults: read-only tools, deny writes, ten runs a day at most. Memory search is intrinsic to every Ghost conversation, not an activity grant. */
+export const DEFAULT_ACTIVITY_TOOLS: readonly GhostTool[] = ['read', 'web_search', 'web_read'];
 export const DEFAULT_POLICY: ActivityPolicy = {
   maxRunsPerDay: 10,
   maxConcurrent: 1,

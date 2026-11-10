@@ -1,7 +1,6 @@
-import type { GhostTool } from "@ghost/contract";
 
 /** The selectable tools when migration 3 was written. Migrations are immutable; later tools are opt-in. */
-export const MIGRATION_3_TOOLS: readonly GhostTool[] = [
+export const MIGRATION_3_TOOLS: readonly string[] = [
   "work_create", "work_list", "work_inspect", "work_update", "work_cancel", "schedule_create", "schedule_list", "schedule_cancel",
   "ghost_list", "read", "write", "edit", "bash", "publish_artifact", "delegate", "memory_search", "memory_recall", "memory_retain",
   "document_spaces", "document_list", "document_read", "document_propose",
@@ -272,5 +271,19 @@ export const MIGRATIONS: readonly string[] = [
     UNIQUE(activity_id, source_key)
   );
   CREATE INDEX activity_runs_by_activity ON activity_runs(activity_id);
+  `,
+  /* 8: memory is an intrinsic Host facility, not an optional Ghost permission. Historical effect rows stay intact. */ `
+  UPDATE ghosts SET tools = (
+    SELECT COALESCE(json_group_array(value), '[]') FROM json_each(ghosts.tools)
+    WHERE value NOT IN ('memory_search', 'memory_recall', 'memory_retain')
+  );
+  UPDATE works SET tool_scope = (
+    SELECT COALESCE(json_group_array(value), '[]') FROM json_each(works.tool_scope)
+    WHERE value NOT IN ('memory_search', 'memory_recall', 'memory_retain')
+  ) WHERE tool_scope IS NOT NULL;
+  UPDATE activities SET data = json_set(data, '$.tools', json((
+    SELECT COALESCE(json_group_array(value), '[]') FROM json_each(activities.data, '$.tools')
+    WHERE value NOT IN ('memory_search', 'memory_recall', 'memory_retain')
+  )));
   `,
 ];

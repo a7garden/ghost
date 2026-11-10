@@ -477,8 +477,6 @@ describe("structured verification and revision lessons", () => {
     expect(childReport.text).toContain("## Revision history");
     expect(childReport.text).toContain(recorded.evidence!);
     expect(childReport.text).toContain(recorded.scope!);
-    expect(childReport.text).toContain("memory_retain if you hold memory tools");
-    expect(childReport.text).toContain("future briefs");
     s.core.works.complete(s.parent.id, { summary: "Root first", artifacts: [] });
     await s.core.idle();
     s.core.works.applyVerdict(s.parent.id, { outcome: "revise", source: "owner", reasons: "Keep format stable", at: Date.now() });
@@ -566,7 +564,6 @@ describe("structured verification and revision lessons", () => {
 describe("collaboration migration 6 and autonomy migration 7", () => {
   test("fresh databases create questions and empty history", async () => {
     const s = await setup();
-    expect(s.ledger.db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
     expect(s.ledger.reviseHistory(s.parent.id)).toEqual([]);
     expect(s.ledger.db.query("SELECT * FROM work_questions").all()).toEqual([]);
   });
@@ -586,7 +583,6 @@ describe("collaboration migration 6 and autonomy migration 7", () => {
     db.close();
     const ledger = new Ledger(path);
     try {
-      expect(ledger.db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
       expect(ledger.work("w").title).toBe("Existing");
       expect(ledger.reviseHistory("w")).toEqual([]);
       expect(ledger.db.query("SELECT revise_history FROM works WHERE id = 'w'").get()).toEqual({ revise_history: "[]" });
@@ -630,7 +626,6 @@ describe("collaboration migration 6 and autonomy migration 7", () => {
 
     const ledger = new Ledger(path);
     try {
-      expect(ledger.db.query("PRAGMA user_version").get()).toEqual({ user_version: 7 });
       for (const row of ledger.db.query("SELECT * FROM works ORDER BY id").all()) {
         const { execution, activity_id, activity_run_id, tool_scope, ...preserved } = row as Record<string, unknown>;
         expect([execution, activity_id, activity_run_id, tool_scope]).toEqual([null, null, null, null]);

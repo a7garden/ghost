@@ -218,4 +218,41 @@ button.ghost-sheet__portrait:focus-visible { outline: 2px solid var(--ghost-ink3
 
 .capabilities__group[data-privileged] .capabilities__head { color: var(--ghost-amber-ink); }
 .capabilities__lock { width: 12px; height: 12px; flex: none; color: var(--ghost-amber-ink); }
+
+/* Host memory panel: files as rows, one editor at a time, run history beneath. */
+.memory { display: grid; gap: 8px; min-width: 0; }
+.memory-new { display: flex; padding: 2px 4px; }
+.memory-editor { display: grid; gap: 8px; }
+.memory-editor__field { display: grid; gap: 6px; }
+.memory-editor__path { margin: 0; padding: 0 4px; color: var(--ghost-ink2); font: 600 var(--text-caption)/1.6 var(--font-mono); overflow-wrap: anywhere; }
+.memory-file__path { overflow-wrap: anywhere; font: 500 var(--text-caption)/1.5 var(--font-mono); }
+.memory-file__actions { display: flex; gap: 2px; }
+.memory-file__actions button { display: grid; place-items: center; width: 30px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--ghost-ink2); cursor: pointer; }
+.memory-file__actions button:hover:not(:disabled) { color: var(--ghost-ink); background: var(--ghost-hover); }
+.memory-file__actions button:disabled { opacity: .3; cursor: default; }
+.memory-file__actions button:focus-visible { outline: 2px solid var(--ghost-ink2); outline-offset: 2px; }
+.memory-file__actions svg { width: 14px; height: 14px; }
+.memory-file__actions [data-danger]:hover:not(:disabled) { color: var(--ghost-danger); }
+.memory-locked { margin: 0; padding: 2px 4px; color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.6; }
+.memory-runs { display: grid; gap: 10px; margin-top: 8px; padding: 14px 16px 6px; border-top: 1px solid var(--ghost-line); }
+.memory-runs__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.memory-runs__title { margin: 0; color: var(--ghost-ink2); font: 600 var(--text-caption)/1 var(--font-sans); }
+.memory-runs__empty { margin: 0; padding: 0 4px; color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.6; }
+.memory-conflict { display: grid; gap: 6px; padding: 10px 12px; border-radius: var(--radius-control); background: var(--ghost-amber-tint, var(--ghost-hover)); }
+.memory-conflict__title { margin: 0; color: var(--ghost-amber-ink, var(--ghost-ink2)); font: 600 var(--text-caption)/1.5 var(--font-sans); }
+.memory-conflict pre { margin: 0; max-height: 160px; overflow-y: auto; padding: 10px 12px; border-radius: var(--radius-control); background: var(--ghost-surface); color: var(--ghost-ink2); font: var(--text-caption)/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-conflict__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.memory-run { display: grid; gap: 2px; }
+.memory-run__line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0; font-size: var(--text-caption); }
+.memory-run__state { font-weight: 600; color: var(--ghost-ink3); }
+.memory-run[data-state="running"] .memory-run__state { color: var(--ghost-amber-ink); }
+.memory-run[data-state="done"] .memory-run__state { color: var(--ghost-success); }
+.memory-run[data-state="failed"] .memory-run__state { color: var(--ghost-danger); }
+.memory-run__at { color: var(--ghost-ink3); }
+.memory-run__report { margin: 0; max-height: 160px; overflow-y: auto; color: var(--ghost-ink2); font: var(--text-caption)/1.6 var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-revision { display: grid; gap: 6px; padding-block: 10px; }
+.memory-revision:first-of-type { padding-top: 2px; }
+.memory-revision + .memory-revision { border-top: 1px solid var(--ghost-line); }
+.memory-revision__line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); }
+.memory-revision pre { margin: 0; max-height: 200px; overflow-y: auto; padding: 10px 12px; border-radius: var(--radius-control); background: var(--ghost-hover); color: var(--ghost-ink2); font: var(--text-caption)/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 }

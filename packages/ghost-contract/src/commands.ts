@@ -164,7 +164,7 @@ export const Command = Type.Union([
   command("avatar.delete", { avatarId: Id }),
 
   // Settings and providers
-  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), reviewModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy) }),
+  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy) }),
   command("provider.upsert", {
     id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
     kind: ProviderKind,

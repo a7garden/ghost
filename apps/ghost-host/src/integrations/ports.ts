@@ -13,21 +13,6 @@ export interface SandboxEnvFactory {
   release(work: Work): Promise<void>;
 }
 
-export interface MemoryHit {
-  text: string;
-  source: string;
-  score: number | null;
-}
-
-/** Oxibrain personal memory, scoped per Ghost. Implemented in src/integrations/memory.ts. */
-export interface MemoryPort {
-  /** True when the Ghost has a mapped memory space and the engine is reachable. */
-  available(ghostId: string): boolean;
-  search(ghostId: string, query: string, limit: number): Promise<MemoryHit[]>;
-  recall(ghostId: string, query: string, tokenBudget: number): Promise<{ text: string; sources: string[] }>;
-  /** Store untrusted source text; never a fact or preference by itself. */
-  retain(ghostId: string, text: string, origin: { conversationId: string; workId: string | null }): Promise<{ id: string }>;
-}
 
 export interface PageMeta {
   pageId: string;

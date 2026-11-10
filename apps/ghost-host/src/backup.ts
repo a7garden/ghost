@@ -24,15 +24,17 @@ export interface BackupManifest {
 }
 
 /**
- * Freeze writers on both stores, in a fixed order, before copying either database.
- * Separate read connections perform VACUUM INTO while both BEGIN IMMEDIATE guards
+ * Freeze writers on all durable stores, in a fixed order, before copying any database.
+ * Separate read connections perform VACUUM INTO while BEGIN IMMEDIATE guards
  * remain held. Release writers before integrity checks and hashing. WAL readers can
  * continue, but a host's synchronous write may block its event loop until its busy
  * timeout or our release. This uses SQLite file locks, including against older hosts.
  */
 export function backup(root: string, dir: string, now = Date.now()): BackupManifest {
   if (existsSync(dir) && readdirSync(dir).length > 0) throw new Error(`${dir} is not empty`);
-  const sources = DATABASES.map((name) => {
+  const names: string[] = [...DATABASES];
+  if (existsSync(join(root, "memory.db"))) names.push("memory.db");
+  const sources = names.map((name) => {
     const source = join(root, name);
     if (!existsSync(source)) throw new Error(`${source} is missing`);
     return { name, source, target: join(dir, name) };

@@ -84,7 +84,7 @@ async function fixture(source?: ActivitySourcePort) {
   const artifacts = new MemoryArtifacts();
   const sandbox = createSandbox({
     root: join(root, "state"), host: "127.0.0.1", port: 0, publicOrigin: null, uiDir: null,
-    sandbox: { kind: "local" }, memory: null, voice: null, apns: null, skills: null, reach: null, browser: null,
+    sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null,
   }, artifacts);
   const core = new Core({ ledger, artifacts, sandbox, secrets, ...(source ? { activitySources: source } : {}), log: () => {} });
   let engine: Engine | undefined;

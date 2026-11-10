@@ -388,7 +388,7 @@ models.json   codex-models.json (자동 갱신 메타데이터 캐시)
 artifacts/sha256/…   skills/…   secrets/<provider>.json (0600)   sandboxes/<ghost>/<work>/workspace
 ```
 
-`config.json`은 `publicOrigin`, `uiDir`, `sandbox`(`local` 또는 `apple-container`), `memory`(Oxibrain; `spaces`는 Ghost id → space, `*`는 나머지 모든 Ghost), `apns`를 담는다. 환경 변수는 `GHOST_ROOT`, `GHOST_PORT`, `GHOST_HOST`, `GHOST_PUBLIC_ORIGIN`, `GHOST_UI_DIR`만 읽는다.
+`config.json`은 `publicOrigin`, `uiDir`, `sandbox`(`local` 또는 `apple-container`), `apns`와 선택 통합 설정을 담는다. 기억은 Host 내장 기능이며 `memory` 설정 키나 외부 실행 파일을 사용하지 않는다. 외부 Oxibrain 설정이 남은 기존 루트는 백업 후 해당 키를 제거하고 새 릴리스를 설치한다. 환경 변수는 `GHOST_ROOT`, `GHOST_PORT`, `GHOST_HOST`, `GHOST_PUBLIC_ORIGIN`, `GHOST_UI_DIR`만 읽는다.
 
 
 ## 승인 대기와 반복 실행 (2026-11-10)

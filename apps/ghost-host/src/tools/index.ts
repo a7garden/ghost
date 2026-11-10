@@ -4,14 +4,16 @@ import type { Extension } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { describeWork } from "../core/works.ts";
 import { modelInputOf } from "../engine/models.ts";
-import type { MemoryPort, DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort } from "../integrations/ports.ts";
+import type { DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort } from "../integrations/ports.ts";
+import type { MemoryStore } from "../stores/memory.ts";
+import type { MemoryEngine } from "../memory/types.ts";
 import type { Vault } from "../stores/vault.ts";
 import { BROWSER_INSTRUCTIONS, createBrowserTools } from "./browser.ts";
 import { createDocumentsTools } from "./documents.ts";
 import { createDirectTools } from "./direct.ts";
 import { createInteractiveTools, INTERACTIVE_INSTRUCTIONS } from "./interactive.ts";
 import { createMainTools } from "./main.ts";
-import { createMemoryTools } from "./memory.ts";
+import { createMemoryTools, MEMORY_INSTRUCTIONS } from "./memory.ts";
 import { createReviewTools } from "./review.ts";
 import { createSkillsTools } from "./skills.ts";
 import { createVaultTools, VAULT_INSTRUCTIONS } from "./vault.ts";
@@ -110,7 +112,8 @@ function sequentialEffects(extension: Extension): Extension {
 export function createToolSet(deps: {
   core: Core;
   sandbox: SandboxEnvFactory;
-  memory: MemoryPort | null;
+  memory: MemoryStore | null;
+  memoryEngine?: () => Partial<MemoryEngine> | null;
   documents: DocumentsPort | null;
   host?: HostPort | null;
   skills: SkillsPort | null;
@@ -128,7 +131,7 @@ export function createToolSet(deps: {
   const work = sequentialEffects(createWorkTools(deps.core, deps.sandbox));
   const review = sequentialEffects(createReviewTools(deps.core));
   const main = sequentialEffects(createMainTools(deps.core));
-  const memory = deps.memory === null ? null : sequentialEffects(createMemoryTools(deps.core, deps.memory));
+  const memory = deps.memory === null ? null : createMemoryTools(deps.core, deps.memory, deps.memoryEngine);
   const documents = deps.documents === null ? null : sequentialEffects(createDocumentsTools(deps.core, deps.documents));
   const host = deps.host ? sequentialEffects(createHostTools(deps.core, deps.host)) : null;
   const skills = deps.skills === null ? null : sequentialEffects(createSkillsTools(deps.core, deps.skills));
@@ -141,6 +144,7 @@ export function createToolSet(deps: {
   /** Guidance for an installed capability, only for a Ghost that holds one of its tools. */
   const capabilityInstructions = (ghost: Ghost) =>
     [
+      memory ? MEMORY_INSTRUCTIONS : "",
       web && ghost.tools.some((tool) => WEB_TOOLS.includes(tool)) ? WEB_INSTRUCTIONS : "",
       sources && ghost.tools.includes("web_read") ? SOURCE_INSTRUCTIONS : "",
       documents && ghost.tools.includes("document_list") ? DOCUMENT_INSTRUCTIONS : "",
@@ -157,7 +161,7 @@ export function createToolSet(deps: {
       switch (conversation.kind) {
         case "direct": {
           const selected = [direct, interactive, drive, activities];
-          if (deps.memory?.available(ghost.id) && memory) selected.push(memory);
+          if (memory) selected.push(memory);
           if (documents) selected.push(documents);
           if (host) selected.push(host);
           if (skills) selected.push(skills);
@@ -171,7 +175,7 @@ export function createToolSet(deps: {
         }
         case "work": {
           const selected = _work?.activityId ? [work, activities] : [work];
-          if (deps.memory?.available(ghost.id) && memory) selected.push(memory);
+          if (memory) selected.push(memory);
           if (documents) selected.push(documents);
           if (host) selected.push(host);
           if (skills) selected.push(skills);

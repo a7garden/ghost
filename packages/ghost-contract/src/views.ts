@@ -20,6 +20,7 @@ import {
   SkillName,
   Settings,
   Space,
+  Sha256,
   Timestamp,
   Work,
   nullable,
@@ -185,3 +186,22 @@ export const UpdateStatus = Type.Object({
   ),
 });
 export type UpdateStatus = Static<typeof UpdateStatus>;
+
+/** PUT /api/memory/:ghostId. One owner edit; a replay of the same requestId is the same edit. */
+export const MemoryWriteRequest = Type.Object({
+  /** Virtual memory path, e.g. /me/topic.md, /team/<ghostId>/topic.md or /owner.md. */
+  path: Type.String({ minLength: 1, maxLength: 256 }),
+  content: Type.String({ maxLength: 32 * 1024 }),
+  /** Exact hash of the version being replaced; null creates a new file only. */
+  expectedHash: nullable(Sha256),
+  requestId: Id,
+});
+export type MemoryWriteRequest = Static<typeof MemoryWriteRequest>;
+
+/** DELETE /api/memory/:ghostId. Deletes keep every revision. */
+export const MemoryDeleteRequest = Type.Object({
+  path: Type.String({ minLength: 1, maxLength: 256 }),
+  expectedHash: Sha256,
+  requestId: Id,
+});
+export type MemoryDeleteRequest = Static<typeof MemoryDeleteRequest>;

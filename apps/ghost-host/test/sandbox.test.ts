@@ -31,7 +31,6 @@ function localConfig(root: string): Config {
     publicOrigin: "http://127.0.0.1:62062",
     uiDir: null,
     sandbox: { kind: "local" },
-    memory: null,
     voice: null,
     apns: null,
     skills: null,

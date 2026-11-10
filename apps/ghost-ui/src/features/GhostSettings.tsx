@@ -7,6 +7,7 @@ import { useHostState } from '../host/store';
 import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { GhostDesignEditor } from './GhostDesign';
+import { GhostMemory } from './GhostMemory';
 import { toneFor } from './ghostState';
 import { usableProviders } from '../pets/ModelPicker';
 import { uiTerms } from '../uiText';
@@ -18,7 +19,6 @@ export const toolLabels: Record<GhostTool, string> = {
   schedule_create: '반복 만들기', schedule_list: '반복 보기', schedule_cancel: '반복 취소',
   ghost_list: 'Ghost 목록', activity_propose: '활동 제안', read: '파일 읽기', write: '파일 쓰기', edit: '파일 고치기', bash: '명령 실행',
   publish_artifact: '결과물 공유', delegate: '다른 Ghost에게 맡기기',
-  memory_search: '기억 검색', memory_recall: '기억 불러오기', memory_retain: '기억 저장',
   document_spaces: '문서 공간', document_list: '문서 목록', document_read: '문서 읽기', document_propose: '문서 수정 제안',
   web_search: '웹 검색', web_read: '웹 읽기', reach: '외부 읽기', skill_read: '스킬 읽기',
   host_status: 'Mac 상태', host_services: 'Mac 서비스', host_disk_scan: 'Mac 디스크 검색', host_disk_usage: 'Mac 디스크 사용량',
@@ -40,7 +40,6 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '브라우저', tools: [...BROWSER_TOOLS] },
   { title: '금고', tools: [...VAULT_TOOLS] },
   { title: '스킬', tools: ['skill_read'] },
-  { title: '기억', tools: ['memory_search', 'memory_recall', 'memory_retain'] },
   { title: '문서', tools: ['document_spaces', 'document_list', 'document_read', 'document_propose'] },
   { title: '반복 작업', tools: ['schedule_create', 'schedule_list', 'schedule_cancel'] },
   { title: '자동 활동', tools: ['activity_propose'] },
@@ -209,6 +208,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
     <Panel title={uiTerms.roleInstructions}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
     <SkillsPanel catalog={catalog} skills={ghost.skills} onChange={skills => void update({ skills })}/>
     <Panel title="도구"><CapabilityBoard tools={ghost.tools} onChange={tools => void update({ tools })}/></Panel>
+    <Panel title="기억"><GhostMemory ghost={ghost}/></Panel>
     <Panel title="운영">
       <SettingsRow label="상태" description={ghost.isDefault ? '메인 Ghost는 활성 상태를 유지합니다.' : undefined}>
         {ghost.isDefault ? <span className="ghost-sheet__locked"><Lock aria-hidden="true"/>활성</span>

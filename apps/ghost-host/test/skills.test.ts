@@ -34,7 +34,6 @@ function configOf(skills: Config["skills"]): Config {
     publicOrigin: "http://127.0.0.1",
     uiDir: null,
     sandbox: { kind: "local" },
-    memory: null,
     voice: null,
     apns: null,
     skills,

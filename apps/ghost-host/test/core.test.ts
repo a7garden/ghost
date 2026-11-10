@@ -11,7 +11,7 @@ import { snapshot } from "../src/core/state.ts";
 import { MAX_REVISIONS } from "../src/core/works.ts";
 import { FakeEngine, MemorySecrets, harness, noSandbox, tempDir } from "./support.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
-import { MIGRATIONS, MIGRATION_3_TOOLS } from "../src/ledger/schema.ts";
+import { MIGRATIONS } from "../src/ledger/schema.ts";
 import type { Submission } from "../src/core/ports.ts";
 
 const owner = { kind: "owner" } as const satisfies Principal;
@@ -521,14 +521,18 @@ describe("commands and access", () => {
     expect(engine.aborted).not.toContain(ledger.work(reader.id).conversationId!);
   });
 
-  test("migrating a ledger from before tool allow-lists grants every established Ghost the full set", async () => {
+  test("migration preserves established action authority while removing obsolete memory permissions", async () => {
     const path = join(tempDir(), "ghost-settings.db");
     const ghostId = historicalGhosts(path, 2, ["G", "H"])[0]!;
 
     const second = harness(path);
-    // Established Ghosts get the tool list as it stood at migration 3; later tools stay opt-in.
-    expect(second.ledger.ghost(ghostId).tools).toEqual([...MIGRATION_3_TOOLS]);
-    expect(second.ledger.ghosts().every((item) => item.tools.length === MIGRATION_3_TOOLS.length)).toBe(true);
+    for (const established of second.ledger.ghosts()) {
+      expect(established.tools).toContain("read");
+      expect(established.tools).toContain("bash");
+      expect(established.tools).toContain("document_read");
+      expect(established.tools.some((name: string) => name.startsWith("memory_"))).toBe(false);
+      expect(established.tools).not.toContain("host_read");
+    }
     // The migrated allow-list is an ordinary editable allow-list.
     const helper = second.ledger.ghosts().find((item) => item.name === "H")!;
     second.ledger.tx(() => second.ledger.putGhost({ ...helper, tools: ["read"], updatedAt: Date.now() }));

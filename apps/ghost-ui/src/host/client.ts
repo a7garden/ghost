@@ -7,6 +7,9 @@ import type {
   ConversationPage,
   LedgerEvent,
   LiveEvent,
+  MemoryFile,
+  MemoryRevision,
+  MemoryView,
   OAuthStatus,
   PageSummary,
   ProviderPreset,
@@ -150,6 +153,42 @@ export class HostClient {
 
   work(id: string): Promise<WorkDetail> {
     return this.json(`/api/works/${encodeURIComponent(id)}`);
+  }
+
+  /** One Ghost's Host memory: the visible files and recent consolidation runs. */
+  memory(ghostId: string): Promise<MemoryView> {
+    return this.json(`/api/memory/${encodeURIComponent(ghostId)}`);
+  }
+
+  /** Every kept version of one memory file, deletes included. */
+  memoryRevisions(ghostId: string, path: string): Promise<MemoryRevision[]> {
+    return this.json(`/api/memory/${encodeURIComponent(ghostId)}/revisions?path=${encodeURIComponent(path)}`);
+  }
+
+  /**
+   * Create or replace one memory file. `expectedHash` must match the stored version,
+   * so an edit that raced another writer is refused instead of overwriting it.
+   */
+  memoryWrite(ghostId: string, input: { path: string; content: string; expectedHash: string | null; requestId?: string }): Promise<MemoryFile | null> {
+    return this.json(`/api/memory/${encodeURIComponent(ghostId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: crypto.randomUUID(), ...input }),
+    });
+  }
+
+  /** Delete one memory file at its exact version; every revision is kept. */
+  async memoryDelete(ghostId: string, path: string, expectedHash: string): Promise<void> {
+    await this.json(`/api/memory/${encodeURIComponent(ghostId)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, expectedHash, requestId: crypto.randomUUID() }),
+    });
+  }
+
+  /** Ask the Host to consolidate this Ghost's memory at the next idle moment. */
+  async memoryDream(ghostId: string): Promise<void> {
+    await this.json(`/api/memory/${encodeURIComponent(ghostId)}/dream`, { method: 'POST' });
   }
 
   /** Document summaries of one space, newest edit last; `query` filters by title (owner only). */
