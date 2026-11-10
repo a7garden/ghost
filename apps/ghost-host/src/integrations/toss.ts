@@ -124,7 +124,9 @@ export class TossClient implements TossPort {
   private async token(credential: TossCredential): Promise<{ value: string; entry: TokenEntry }> {
     for (;;) {
       let entry = this.tokens.get(credential.itemId);
-      if (!entry || entry.version !== credential.version) {
+      // A call that read the item before an edit shares the newer token instead of re-issuing with the old key,
+      // which would revoke it.
+      if (!entry || entry.version < credential.version) {
         entry = { version: credential.version, token: this.issue(credential) };
         this.tokens.set(credential.itemId, entry);
       }

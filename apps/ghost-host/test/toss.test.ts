@@ -113,6 +113,9 @@ describe("Toss client", () => {
     now += 3600 * 1000;
     expect((await client.get(credential, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-3");
     expect((await client.get({ ...credential, version: 2 }, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-4");
+    // A call holding the pre-edit credential must not re-issue with the old key (that would revoke token-4).
+    expect((await client.get(credential, "/api/v1/accounts", new URLSearchParams(), null)).body).toContain("token-4");
+    expect(issued).toBe(4);
     const persistent = fakeToss((call) => call.url.endsWith("/oauth2/token") ? json({ access_token: "t", expires_in: 3600 }) : json({ error: { code: "invalid-token" } }, 401));
     const response = await new TossClient({ fetch: persistent.fetcher }).get(credential, "/api/v1/accounts", new URLSearchParams(), null);
     expect(response.status).toBe(401);

@@ -42,7 +42,7 @@ export function visualDecisions(): Decision[] {
   ];
 }
 
-const vaultKinds = ['login', 'card', 'contact', 'secret'] as const;
+const vaultKinds = ['login', 'card', 'contact', 'secret', 'api'] as const;
 
 /**
  * The write-shape checks the real host applies before anything is stored. Returns the
