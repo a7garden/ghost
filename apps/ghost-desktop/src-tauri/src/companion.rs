@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{io::Write, path::PathBuf, sync::Mutex};
-use tauri::{Manager, PhysicalPosition, WebviewWindow, WindowEvent};
+use tauri::{Manager, WebviewWindow, WindowEvent};
 
 const SIZE: (f64, f64) = (140.0, 170.0);
 
@@ -236,7 +236,9 @@ fn reframe(frame: Frame, size: (u32, u32)) -> Frame {
             x: coordinate(
                 i64::from(frame.position.x) + i64::from(frame.size.0 / 2) - i64::from(size.0 / 2),
             ),
-            y: coordinate(i64::from(frame.position.y) + i64::from(frame.size.1) - i64::from(size.1)),
+            y: coordinate(
+                i64::from(frame.position.y) + i64::from(frame.size.1) - i64::from(size.1),
+            ),
         },
         size,
     }
@@ -291,13 +293,14 @@ fn record_position(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-/// Called on the main thread, so Tauri applies both setters before IPC resolves.
+/// Use the target monitor's scale even while the hidden window still has its old scale.
 fn apply_frame(
     window: &WebviewWindow,
     collapsed: Frame,
     visible: Frame,
     collapsed_size: (f64, f64),
     expanded: bool,
+    scale: f64,
 ) -> Result<(), String> {
     let state = window.state::<CompanionState>();
     {
@@ -316,12 +319,32 @@ fn apply_frame(
         *anchor = None;
     }
     // Do not hold a state lock through setters: AppKit can emit events inline.
+    #[cfg(target_os = "macos")]
     let result = window
-        .set_size(tauri::PhysicalSize::new(visible.size.0, visible.size.1))
+        .set_size(tauri::LogicalSize::new(
+            f64::from(visible.size.0) / scale,
+            f64::from(visible.size.1) / scale,
+        ))
         .and_then(|()| {
-            window.set_position(PhysicalPosition::new(visible.position.x, visible.position.y))
+            window.set_position(tauri::LogicalPosition::new(
+                f64::from(visible.position.x) / scale,
+                f64::from(visible.position.y) / scale,
+            ))
         })
         .map_err(|error| error.to_string());
+    #[cfg(not(target_os = "macos"))]
+    let result = {
+        let _ = scale;
+        window
+            .set_size(tauri::PhysicalSize::new(visible.size.0, visible.size.1))
+            .and_then(|()| {
+                window.set_position(tauri::PhysicalPosition::new(
+                    visible.position.x,
+                    visible.position.y,
+                ))
+            })
+            .map_err(|error| error.to_string())
+    };
     {
         let mut layout = state
             .layout
@@ -425,7 +448,7 @@ fn position_layout(
             size: (area.size.width, area.size.height),
         },
     );
-    apply_frame(window, collapsed, visible, collapsed_size, expanded)
+    apply_frame(window, collapsed, visible, collapsed_size, expanded, scale)
 }
 
 pub fn create(app: &tauri::AppHandle, origin: &super::OriginCell) -> Result<WebviewWindow, String> {
@@ -629,7 +652,7 @@ pub fn companion_resize(
             size: (area.size.width, area.size.height),
         },
     );
-    apply_frame(&window, collapsed, visible, dimensions, expanded)
+    apply_frame(&window, collapsed, visible, dimensions, expanded, scale)
 }
 
 #[tauri::command]
@@ -784,8 +807,8 @@ pub fn companion_menu(window: WebviewWindow) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp, load_config, main_route_script, physical_size, place_frames, reframe, CompanionState,
-        Config, Expansion, Frame, Layout, Position, VisibleAnchor,
+        clamp, load_config, main_route_script, physical_size, place_frames, reframe,
+        CompanionState, Config, Expansion, Frame, Layout, Position, VisibleAnchor,
     };
     use std::sync::Mutex;
 
@@ -801,7 +824,12 @@ mod tests {
         let mut layout = Layout::default();
         assert_eq!(layout.moved(frame(0, 0, 140, 170), 1.0), None);
         let saved = frame(-1700, 700, 112, 142);
-        let (collapsed, _) = place_frames(saved, saved.size, Some((320, 382)), frame(-1920, 24, 1920, 1056));
+        let (collapsed, _) = place_frames(
+            saved,
+            saved.size,
+            Some((320, 382)),
+            frame(-1920, 24, 1920, 1056),
+        );
         assert_eq!(collapsed, saved);
     }
 
@@ -897,7 +925,10 @@ mod tests {
             position: saved,
             size: original.size,
         };
-        assert_eq!(place_frames(collapsed, collapsed.size, None, area).1, collapsed);
+        assert_eq!(
+            place_frames(collapsed, collapsed.size, None, area).1,
+            collapsed
+        );
         assert_ne!(saved, original.position);
         assert_eq!(layout.moved(dragged, 1.0), None);
     }
@@ -916,7 +947,10 @@ mod tests {
         let retina = frame(-1500, 200, 640, 820);
         assert_eq!(layout.moved(retina, 2.0), None);
         layout.resizing = false;
-        assert_eq!(layout.moved(retina, 2.0), Some(Position { x: -1320, y: 680 }));
+        assert_eq!(
+            layout.moved(retina, 2.0),
+            Some(Position { x: -1320, y: 680 })
+        );
         assert_eq!(layout.expanded.unwrap().collapsed_size, (280, 340));
         assert_eq!(layout.moved(retina, 2.0), None);
     }
@@ -926,13 +960,24 @@ mod tests {
         for route in ["/work/work-123_ABC", "/inbox?decision=decision-123_ABC"] {
             assert_eq!(
                 main_route_script(route).unwrap(),
-                format!("window.location.hash = {};", serde_json::to_string(route).unwrap())
+                format!(
+                    "window.location.hash = {};",
+                    serde_json::to_string(route).unwrap()
+                )
             );
         }
         for route in [
-            "", "/work/", "/inbox?decision=", "/settings", "/work/a/b",
-            "/work/a?x=1", "/inbox?decision=a&other=b", "/work/%2f", "/work/한글",
-            "https://example.com/work/a", "/work/a';alert(1)//",
+            "",
+            "/work/",
+            "/inbox?decision=",
+            "/settings",
+            "/work/a/b",
+            "/work/a?x=1",
+            "/inbox?decision=a&other=b",
+            "/work/%2f",
+            "/work/한글",
+            "https://example.com/work/a",
+            "/work/a';alert(1)//",
         ] {
             assert!(main_route_script(route).is_err(), "{route}");
         }
