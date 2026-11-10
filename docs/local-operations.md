@@ -32,7 +32,7 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.2.1-4d63665`(GitHub Release `v2.2.1`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.3.0-db54109`(GitHub Release `v2.3.0`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -47,8 +47,10 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
 - 메인은 `ghost_create`로 역할에 맞는 Ghost를 만들고 팀원의 설정을 고친다. 각 Ghost는 `self_adapt`로 페르소나와 분리된 환경 메모를 유지하고, 부족한 도구·PC 실행은 `capability_request`로 요청한다. 메모는 설정의 **환경 적응**에서 편집·되돌리기 가능하다. Mac 권한은 시간이 지나도 자동 허용되지 않으며, 거절 문장을 허용으로 읽거나 답변 재전송이 소유자의 후속 철회를 되돌리지 않도록 회귀 검사를 넣었다.
 - 승인만 기다리는 제안은 다른 효과를 막지 않고, 완료할 때 사용하지 않은 제안은 철회한다. 읽기 명령의 정상 argv, 프로젝트 `data/` 같은 일반 경로, 큰 파일의 줄 페이지를 지원한다. 비밀·개인 경로·상태 루트·재귀 grep의 비밀 파일 제외는 유지한다. `tail -c` 바이트 조각 읽기는 비밀 탐지를 피해갈 수 있어 자동 실행하지 않는다. 문서 참조의 이름·경로 차이를 해석하고, 산출물·웹 오류에 실제 다음 경로를 제시한다.
 - 격리 상태 루트·포트 62287의 실제 GLM Flash: 메인이 `배포 확인` Ghost를 만들고 검사·메모 수정, 팀원의 권한 요청→메인 거절→재요청→소유자 허용→같은 대화의 `self_adapt` 성공을 확인했다. 실제 명령 실행은 하지 않았다. 같은 Host의 웹 UI에서 메모 저장→재로드 후 보존→되돌리기를 확인했다. 시험 Host·브라우저·자격 사본은 제거했다.
-- 독립 검토: 메인·권한·환경 적응(Claude 작성)은 Codex, Host 가드·승인(Core, Codex 작성)은 Claude, 문서·오류 경로(GLM 작성)는 Claude Opus가 검토했다. 거절 해석·철회 뒤 재부여·다른 대화의 요청 대기 누락, 미해결 효과 대사 뒤 대기 고착, grep 구분자, 문서 ID 충돌·범위 밖 경로·다른 큰 파일의 영향 등 확정 지적을 고쳤다. 관련 Host 검사 194 통과·3 생략, UI 타입·빌드와 관련 단위 검사 17 통과, 팀 화면 8개 시각 검사와 관련 기준 이미지 12개 갱신을 확인했다.
-
+- 독립 검토의 실제 응답 메타데이터: 메인·권한·환경 적응(Claude 작성)은 Codex, Host 가드·승인(Core, Codex 작성)은 Claude Sonnet이 조사하고 GLM이 최종 지적을 전달했으며 메인이 각 지적을 확인했다. 문서·오류 경로(GLM 작성)는 지정 역할 대신 실제로 실행된 Codex가 검토했다. 거절 해석·철회 뒤 재부여·다른 대화의 요청 대기 누락, 미해결 효과 대사 뒤 대기 고착, grep 구분자, 문서 ID 충돌·범위 밖 경로·다른 큰 파일의 영향 등 확정 지적을 고쳤다. 관련 Host 검사 194 통과·3 생략, UI 타입·빌드와 관련 단위 검사 17 통과, 팀 화면 8개 시각 검사와 관련 기준 이미지 12개 갱신을 확인했다.
+- 릴리스 검사: Host 733 통과·9 생략, UI 182 통과, Rust 21 통과, 타입·빌드·Developer ID 서명 및 매니페스트 검증 통과. 첫 패키징은 새 worktree의 Tauri CLI 부재로 멈춰 의존성을 설치했다. 재실행 때 드러난 기존 검사 비결정성(메인 Ghost의 무작위 첫 wake가 다른 Ghost의 제출 hook을 호출, 실제 launcher 자식 프로세스 4회에 5초 한도)을 격리·수정한 뒤 전체 검사를 통과했다. 네이티브 셸은 기존 0.2.2이며 공증은 기존 릴리스와 같이 생략했다.
+- 배포: [v2.3.0](https://github.com/a7garden/ghost/releases/tag/v2.3.0), 소스 `db54109`, `main` 통합·GitHub/Gitea 일반 푸시 완료. 유휴와 PID 86925·62062 리스너·운영 DB 루트를 확인한 뒤 Owner API 자체 업데이트로 2.2.1 → 2.3.0을 설치했다(81초, 백업 `backups/pre-2.3.0-db54109-1794318201083/`). `lastResult: installed`, 새 PID 3573, health 2.3.0·runtime ready, 설치 실행 파일의 `codesign --verify --strict` 통과. 설치 직전 Ghost 26·대화 207·맡긴 일 154와 모든 대기 결정 id를 보존했다. 결정 snapshot은 최근 100개 완료 항목과 대기를 합친 유한 목록이라, 해소된 요청 때문에 오래된 완료 항목 3개가 snapshot 밖으로 이동했다.
+- 설치된 Mac 앱을 비활성 실행했으나 관측한 창은 접근 직전 사라져 네이티브 입력 검증은 못 했다(강제 전면 이동 없음). 운영 Host가 제공하는 실제 설정 화면의 **역할 지시 → 환경 적응 → 스킬** 배치를 열어 확인했고 콘솔 오류가 없었다. 운영 설정을 검증용으로 저장하지 않았다. 되돌리기는 유휴에서 이전 `releases/2.2.1-4d63665`를 사용한다. 저장 형식은 동일하며 새 환경 메모 설정은 이전 Host가 무시한다.
 
 ### ScrollRail 통일 — 2026-11-10
 
