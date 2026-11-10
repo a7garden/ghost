@@ -9,7 +9,7 @@ import { Modal } from '../components/Modal';
 import { visibleGhosts } from './ghostState';
 import { absoluteTime } from './time';
 
-const kindLabels: Record<VaultItemKind, string> = { login: '로그인', card: '카드', contact: '연락처', secret: '비밀' };
+const kindLabels: Record<VaultItemKind, string> = { login: '로그인', card: '카드', contact: '연락처', secret: '비밀', api: 'API 키' };
 
 /** Every field the vault dialog edits. Secret fields start empty and never receive a stored value. */
 export type VaultForm = {
@@ -52,7 +52,7 @@ export function toggleGhostGrant(ghostIds: readonly string[], ghostId: string, o
  * the host rejects fields of other kinds. Text fields trim; passwords and secret
  * values stay verbatim (spaces can be part of a secret). Empty secret fields drop
  * out, so an edit leaves them unchanged; the card travels only as a whole
- * replacement. A cleared login username and a cleared contact travel explicitly.
+ * replacement. A cleared login or api username and a cleared contact travel explicitly.
  * Pure; tests pin it.
  */
 export function vaultWriteBody(form: VaultForm, mode: 'create' | 'edit'): { body: VaultItemWrite } | { error: string } {
@@ -83,6 +83,15 @@ export function vaultWriteBody(form: VaultForm, mode: 'create' | 'edit'): { body
     const contact = Object.fromEntries(Object.entries(fields).filter(([, value]) => value));
     if (mode === 'create' && !Object.keys(contact).length) return { error: '한 항목 이상 입력해 주세요.' };
     return { body: { ...base, kind: form.kind, contact } };
+  }
+  if (form.kind === 'api') {
+    const origin = form.origin.trim();
+    if (!origin.startsWith('https://')) return { error: 'https://로 시작하는 주소를 입력해 주세요.' };
+    if (mode === 'create' && !form.value) return { error: '값을 입력해 주세요.' };
+    const username = form.username.trim();
+    return { body: { ...base, kind: form.kind, origin,
+      ...(mode === 'edit' || username ? { username } : {}),
+      ...(form.value ? { value: form.value } : {}) } };
   }
   if (mode === 'create' && !form.value) return { error: '값을 입력해 주세요.' };
   return { body: { ...base, kind: form.kind, ...(form.origin.trim() ? { origin: form.origin.trim() } : {}),
@@ -254,8 +263,9 @@ function VaultItemDialog({ item, ghosts, onClose, onSave }: {
       {!editing && <SegmentedControl aria-label="항목 종류" value={kind} onValueChange={value => set('kind', value)}
         options={Object.entries(kindLabels).map(([value, label]) => ({ value, label }))}/>}
       {field('title', '이름', { required: true })}
-      {(kind === 'login' || kind === 'secret') && field('origin', '주소', { placeholder: 'https://example.com', autoComplete: 'off',
-        description: kind === 'login' ? '이 주소의 로그인에만 씁니다.' : '비우면 저장된 주소를 유지합니다.' })}
+      {(kind === 'login' || kind === 'secret' || kind === 'api') && field('origin', '주소', {
+        placeholder: kind === 'api' ? 'https://openapi.example.com' : 'https://example.com', autoComplete: 'off', required: kind === 'api',
+        description: kind === 'login' ? '이 주소의 로그인에만 씁니다.' : kind === 'api' ? '이 서비스에 연결할 때만 씁니다.' : '비우면 저장된 주소를 유지합니다.' })}
       {kind === 'login' && field('extraOrigins', '추가 로그인 주소', { placeholder: 'https://login.example.com', autoComplete: 'off',
         description: '로그인 화면이 다른 주소에 있을 때만 적습니다. 여러 개는 쉼표로 나눕니다. 정확히 같은 주소에서만 채웁니다.' })}
       {kind === 'login' && <>
@@ -279,6 +289,10 @@ function VaultItemDialog({ item, ghosts, onClose, onSave }: {
         {field('contactPhone', '전화', { autoComplete: 'off', inputMode: 'tel' })}
         {field('contactEmail', '이메일', { autoComplete: 'off', inputMode: 'email' })}
         {field('contactAddress', '주소', { autoComplete: 'off' })}
+      </>}
+      {kind === 'api' && <>
+        {field('username', '클라이언트 ID', { autoComplete: 'off' })}
+        {field('value', '비밀 키', { password: true, autoComplete: 'off', description: '저장한 뒤에는 다시 볼 수 없습니다.' })}
       </>}
       {kind === 'secret' && field('value', '값', { password: true, autoComplete: 'off', description: '저장한 뒤에는 다시 볼 수 없습니다.' })}
       <FormField label="메모" description="어떤 때 쓸지 Ghost에게 알려 주는 메모입니다.">

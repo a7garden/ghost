@@ -10,7 +10,7 @@ import { isTerminal } from "./works.ts";
 
 const DAY = 86_400_000;
 export const MAX_ACTIVITY_WORK_ITEMS = 16;
-const DRY_TOOLS: Partial<Record<GhostTool, true>> = { read: true, web_search: true, web_read: true, memory_search: true, memory_recall: true, skill_read: true, delegate: true, host_status: true, host_services: true, host_disk_scan: true, host_disk_usage: true, host_list: true, host_read: true, host_nodes: true };
+const DRY_TOOLS: Partial<Record<GhostTool, true>> = { read: true, web_search: true, web_read: true, memory_search: true, memory_recall: true, skill_read: true, delegate: true, host_status: true, host_services: true, host_disk_scan: true, host_disk_usage: true, host_list: true, host_read: true, host_nodes: true, toss_read: true };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 2048);
 const FAILURE_PAUSE = "Repeated activity failures";
 
