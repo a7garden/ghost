@@ -10,7 +10,8 @@ import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
 import { assertFetchableUrl } from "./netguard.ts";
 import { startObscura, type ObscuraProcess } from "./obscura.ts";
 import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
-import { LoginCapture, loginCaptureScript } from "./login-capture.ts";
+import { LoginCapture, type LoginEdit, type LoginPage } from "./login-capture.ts";
+import { ChromeLoginObserver, type LoginObserver } from "./browser-login.ts";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const CAP = 512 * 1024;
@@ -18,6 +19,7 @@ const MAX_SESSIONS = 4;
 const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
 const MAX_DOWNLOAD_FILES = 32;
 const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
+const KEY_CODES: Readonly<Record<string,number>> = { Enter:13, Tab:9, Backspace:8, Delete:46, Escape:27, ArrowLeft:37, ArrowUp:38, ArrowRight:39, ArrowDown:40, Home:36, End:35 };
 const NETWORK_INIT = `(() => {
   for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCIceCandidate"]) {
     Object.defineProperty(globalThis, name, { value: undefined, writable: false, configurable: false });
@@ -59,7 +61,8 @@ interface Session {
   headed: boolean;
   handoffUrl: string | null;
   handoffFallback: boolean;
-  secrets: { variants: string[]; cardPattern?: RegExp }[];
+  secrets: { variants: string[]; cardPattern?: RegExp; ownerScope?: string }[];
+  ownerRedactions?: Map<string,{variants:string[];ownerScope?:string}>;
   screenshotsBlocked: boolean;
   passwordScreenshots: Map<string, string>;
   active: boolean;
@@ -68,12 +71,20 @@ interface Session {
   login?: LoginCapture;
   captureArmed?: boolean;
   modelPasswords?: Set<string>;
-  ownerActivity?: { url: string; count: number };
+  loginObserver?: LoginObserver;
+  loginBootstrapping?: boolean;
+  loginStarting?: Promise<void>;
+  loginEpoch?: number;
+  modelCaptureDepth?: number;
+  ownerCaptureDepth?: number;
   captureTimer?: ReturnType<typeof setTimeout>;
   headedPoll?: ReturnType<typeof setInterval>;
   ownerQueue?: Promise<unknown>;
   secretGate?: Promise<void>;
   ownerBusy?: Promise<unknown>;
+  promoting?: boolean;
+  ownerGeneration?: number;
+  ownerViewport?: { width: number; height: number };
 }
 
 export function createBrowser(config: Config, deps: { root: string; onLogin?: (ref: BrowserSessionRef, login: BrowserLogin) => Promise<string | void> | string | void }): BrowserPort | null {
@@ -244,7 +255,7 @@ export class AgentBrowser implements BrowserPort {
       throw error;
     } finally { closeSync(fd); }
   }
-  private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean; capture?: boolean }): Promise<BrowserCommandResult> {
+  private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
     if (session.bridge && ["open", "back", "forward", "reload", "close"].includes(argv[0]!)) session.bridge.frame = undefined;
     const obscura = session.engine === "obscura";
     if (obscura) {
@@ -264,6 +275,20 @@ export class AgentBrowser implements BrowserPort {
         session.screenshotsBlocked = false;
         session.passwordScreenshots.clear();
       }
+    }
+    if (argv[0] === "close") {
+      session.loginEpoch = (session.loginEpoch ?? 0) + 1;
+      session.loginStarting = undefined;
+      session.loginObserver?.close(); session.loginObserver = undefined; session.login?.clear(); session.login = undefined;
+      session.secrets = session.secrets.filter(entry => !entry.ownerScope); session.ownerRedactions?.clear();
+    } else if (!obscura && this.onLogin && !session.loginObserver && !session.loginBootstrapping) {
+      // Install Chrome's isolated preload on a blank document before any site's own scripts run.
+      // --restore and the network init still apply to this bootstrap just as to the real navigation.
+      session.loginBootstrapping = true;
+      try {
+        if (!(await this.invokeCli(session, ["open", "about:blank"])).ok) throw new CommandError("unavailable", "Could not initialize trusted browser input capture");
+        await this.ensureLogin(session);
+      } finally { session.loginBootstrapping = false; }
     }
     try { return await this.invokeCli(session, argv, options); }
     finally {
@@ -288,7 +313,7 @@ export class AgentBrowser implements BrowserPort {
       }
     }
   }
-  private async invokeCli(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean; capture?: boolean }): Promise<BrowserCommandResult> {
+  private async invokeCli(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
     const proxy = await (this.proxy ??= createEgressProxy());
     const name = nameFor(session.ref.conversationId);
     const download = join(this.root, "browser", "downloads", name);
@@ -368,7 +393,6 @@ export class AgentBrowser implements BrowserPort {
         return { ok, data: null, error: ok ? null : "Browser input failed" };
       }
       // Secret eval responses are an allowlisted status only. Never forward raw output or an error.
-      if (options?.capture) return { ok: parsed.success === true, data: parsed.data && typeof parsed.data === "object" && "result" in parsed.data ? parsed.data.result : null, error: null };
       if (options?.stdin !== undefined) {
         const value = parsed.data && typeof parsed.data === "object" && "result" in parsed.data ? parsed.data.result : null;
         if (value === "uncertain") return { ok: false, data: { status: "uncertain" }, error: "Secret fill outcome is uncertain" };
@@ -420,7 +444,7 @@ export class AgentBrowser implements BrowserPort {
     }
   }
   run(ref: BrowserSessionRef, argv: string[], options?: BrowserRunOptions) {
-    return this.enqueueSession(ref, async (session) => {
+    return this.enqueueSession(ref, async (session) => this.withModelCapture(session, async () => {
       if (session.captureArmed && !session.secretGate) {
         await session.ownerBusy;
         await this.capture(session);
@@ -437,6 +461,7 @@ export class AgentBrowser implements BrowserPort {
         if (options.sensitive.field === "password") (session.modelPasswords ??= new Set()).add(options.sensitive.value);
         const { value, field } = options.sensitive;
         this.assertVaultFill(ref, field, options.sensitive.origin);
+        for (const entry of session.secrets) if (entry.ownerScope && entry.variants.includes(value)) entry.ownerScope = undefined;
         if (value && !session.secrets.some((entry) => entry.variants.includes(value) && (field !== "card_number" || entry.cardPattern !== undefined))) {
           const json = JSON.stringify(value).slice(1, -1);
           const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -518,7 +543,7 @@ export class AgentBrowser implements BrowserPort {
         return value;
       };
       return { ok: result.ok, data: redact(result.data), error: result.error === null ? null : redactText(result.error) };
-    });
+    }));
   }
   sessions() { return [...this.sessionMap.values()].map((s) => ({ ...s.ref, engine: s.engine ?? "chrome" as const, headed: s.headed })); }
   private existing(ref: BrowserSessionRef) {
@@ -536,43 +561,68 @@ export class AgentBrowser implements BrowserPort {
     while (session.secretGate) await session.secretGate;
     const gate = Promise.withResolvers<void>(); session.secretGate = gate.promise;
     try { await session.ownerBusy; return await perform(); }
-    finally { session.secretGate = undefined; gate.resolve(); }
+    finally { session.secretGate = undefined; gate.resolve(); await session.loginObserver?.updateMode?.(); }
   }
-  private registerSecret(session: Session, value: string) {
-    if (!value || session.secrets.some((s) => s.variants.includes(value))) return;
+  private registerSecret(session: Session, value: string, scope?: string) {
+    if (scope) {
+      const previous = session.ownerRedactions?.get(scope);
+      if (previous?.ownerScope === scope) { const index = session.secrets.indexOf(previous); if (index >= 0) session.secrets.splice(index,1); }
+    }
+    if (!value) return;
+    const existing = session.secrets.find(entry => entry.variants.includes(value));
+    if (existing) { if (!scope) existing.ownerScope = undefined; return; }
     const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
     let encoded = value; try { encoded = encodeURIComponent(value); } catch {}
-    session.secrets.push({ variants: [...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), JSON.stringify(value).slice(1, -1)])].sort((a,b) => b.length-a.length) });
+    const entry = { variants:[...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), JSON.stringify(value).slice(1,-1)])].sort((a,b) => b.length-a.length), ...(scope ? {ownerScope:scope} : {}) };
+    session.secrets.push(entry);
+    if (scope) (session.ownerRedactions ??= new Map()).set(scope,entry);
   }
-  private async capture(session: Session, submit: boolean | { x: number; y: number } = false, finished = false) {
-    if (!this.onLogin || !session.captureArmed && !finished) return;
-    session.login ??= new LoginCapture(async (login) => {
+  private async withModelCapture<T>(session: Session, perform: () => Promise<T>): Promise<T> {
+    session.modelCaptureDepth = (session.modelCaptureDepth ?? 0) + 1;
+    try { await session.loginObserver?.updateMode?.(); return await perform(); }
+    finally { session.modelCaptureDepth = (session.modelCaptureDepth ?? 1) - 1; await session.loginObserver?.updateMode?.(); }
+  }
+  private ownerActivity(session: Session) {
+    const activity = "The owner used this browser. Cached refs and observations were discarded; take a fresh browser_snapshot before acting.";
+    if (!session.notice?.includes(activity)) session.notice = `${session.notice ?? ""}\n${activity}`.trim();
+  }
+  private async ensureLogin(session: Session) {
+    if (!this.onLogin || session.engine === "obscura" || session.loginObserver) return;
+    if (session.loginStarting) return session.loginStarting;
+    const starting = this.startLogin(session);
+    session.loginStarting = starting;
+    try { await starting; } finally { if (session.loginStarting === starting) session.loginStarting = undefined; }
+  }
+  private async startLogin(session: Session) {
+    const epoch = session.loginEpoch ?? 0;
+    const capture = session.login ??= new LoginCapture(async (login) => {
+      if (epoch !== (session.loginEpoch ?? 0)) return;
       const id = await this.onLogin!(session.ref, login);
       if (id) session.notice = `${session.notice ?? ""}\nThe owner's login was saved to vault item ${id}. Use browser_fill_secret for this login.`.trim();
-    }, (value) => this.registerSecret(session, value));
+    }, (value,scope) => { if (epoch === (session.loginEpoch ?? 0)) this.registerSecret(session,value,scope); }, password => session.modelPasswords?.has(password) === true);
+    const result = await this.invokeCli(session,["get","cdp-url"]);
+    if (!result.ok || !result.data || typeof result.data !== "object" || !("cdpUrl" in result.data) || typeof result.data.cdpUrl !== "string") throw new CommandError("unavailable","Trusted Chrome input capture is unavailable");
+    const observer = await ChromeLoginObserver.start(result.data.cdpUrl,capture,{
+      nativeAllowed: () => epoch === (session.loginEpoch ?? 0) && session.headed && !session.modelCaptureDepth && !session.ownerCaptureDepth && !session.secretGate && !this.stopping,
+      isCurrent: () => epoch === (session.loginEpoch ?? 0) && session.headed && !this.stopping,
+      ownerApiActive: () => epoch === (session.loginEpoch ?? 0) && !!session.ownerCaptureDepth,
+      activity: () => { if (epoch === (session.loginEpoch ?? 0)) { session.captureArmed = true; this.ownerActivity(session); } },
+      password: page => { if (epoch === (session.loginEpoch ?? 0)) session.passwordScreenshots.set(page.targetId,page.url); },
+      windowClosed: () => { if (epoch === (session.loginEpoch ?? 0) && session.headed) void this.resumeClosedWindow(session).catch(() => {}); },
+    });
+    if (epoch !== (session.loginEpoch ?? 0) || this.stopping) { observer.close(); throw new CommandError("unavailable","Browser input session changed"); }
+    session.loginObserver = observer;
+  }
+  private async capture(session: Session, finished = false) {
+    if (!this.onLogin || !session.captureArmed && !finished) return;
+    let page: LoginPage | null = null;
     try {
-      const result = await this.invoke(session, ["eval", "--stdin"], { stdin: loginCaptureScript(submit === true ? "enter" : submit || undefined), capture: true, timeoutMs: 5000 });
-      if (this.sessionMap.get(session.ref.conversationId) !== session) return;
-      if (result.ok && typeof result.data === "string") {
-        let page: { password?: unknown; activity?: unknown; url?: unknown } = {};
-        try { page = JSON.parse(result.data); } catch {}
-        if (session.headed && page && typeof page.activity === "number" && typeof page.url === "string") {
-          if (page.activity > 0 && (session.ownerActivity?.url !== page.url || session.ownerActivity.count !== page.activity)) {
-            const activity = "The owner used this browser. Cached refs and observations were discarded; take a fresh browser_snapshot before acting.";
-            if (!session.notice?.includes(activity)) session.notice = `${session.notice ?? ""}\n${activity}`.trim();
-          }
-          session.ownerActivity = { url: page.url, count: page.activity };
-        }
-        if (page && typeof page.password === "string" && page.password) {
-          if (session.modelPasswords?.has(page.password)) { session.login.clear(); return; }
-          this.registerSecret(session, page.password);
-          const tab = this.activeTab((await this.invoke(session, ["tab", "list"])).data);
-          if (tab) session.passwordScreenshots.set(tab.id, tab.url);
-          else session.screenshotsBlocked = true;
-        }
-      }
-      await session.login.observe(result.ok ? result.data : null, false, finished);
-    } catch { /* Captured fields and raw errors never escape this owner-only lane. */ }
+      await this.ensureLogin(session);
+      page = await session.loginObserver!.snapshot(session.bridge?.targetId);
+    } catch {
+      if (!finished) { session.login?.clear(); throw new CommandError("unavailable","Trusted browser login capture is unavailable"); }
+    }
+    if (this.sessionMap.get(session.ref.conversationId) === session) await session.login?.observe(page,finished);
   }
   private scheduleCapture(session: Session) {
     clearTimeout(session.captureTimer);
@@ -596,36 +646,47 @@ export class AgentBrowser implements BrowserPort {
         bridge.subscribers.clear(); session.bridge = undefined;
       }
     }
-    if (reason) {
+    if (reason && reason !== "engine_changed") {
       clearTimeout(session.captureTimer); clearInterval(session.headedPoll);
+      session.loginEpoch = (session.loginEpoch ?? 0) + 1; session.loginStarting = undefined;
+      session.loginObserver?.close(); session.loginObserver = undefined;
       session.login?.clear(); session.login = undefined; session.secrets = []; session.notice = undefined;
       session.modelPasswords?.clear(); session.captureArmed = false;
+      session.ownerRedactions?.clear();
     }
   }
   private async resumeClosedWindow(session: Session) {
     if (!session.headed || this.sessionMap.get(session.ref.conversationId) !== session) return;
+    let url = session.bridge?.page?.url ?? session.handoffUrl ?? "about:blank";
+    if (session.secrets.some(secret => secret.variants.some(value => value && url.includes(value)))) url = "about:blank";
     session.headed = false; clearInterval(session.headedPoll);
-    const url = session.bridge?.page?.url ?? session.handoffUrl ?? "about:blank";
-    session.handoffUrl = url;
-    await session.ownerBusy;
-    await session.login?.observe(null, false, true);
-    this.disconnect(session);
+    session.promoting = true; session.ownerGeneration = (session.ownerGeneration ?? 0) + 1;
+    session.loginEpoch = (session.loginEpoch ?? 0) + 1; session.loginStarting = undefined;
+    session.login?.clear(); // Closing a window is never an assertion that a login succeeded.
+    this.disconnect(session,"engine_changed");
     try {
-      if (url !== "about:blank") await assertFetchableUrl(url, "closed window URL");
-      if (!(await this.invoke(session, ["close"])).ok || !(await this.invoke(session, ["open", url])).ok) throw new Error("Window resume failed");
-      this.retryStream(session);
+      await this.enqueueSession(session.ref,async current => {
+        if (current !== session) return;
+        await session.ownerBusy;
+        if (url !== "about:blank") await assertFetchableUrl(url,"closed window URL");
+        if (!(await this.invoke(session,["close"])).ok) throw new Error("Window close failed");
+        if (this.stopping || this.sessionMap.get(session.ref.conversationId) !== session) return;
+        if (!(await this.invoke(session,["open",url])).ok) throw new Error("Window resume failed");
+        if (session.ownerViewport && !(await this.invoke(session,["set","viewport",String(session.ownerViewport.width),String(session.ownerViewport.height)])).ok) throw new Error("Window viewport restore failed");
+      });
     } catch {
-      this.disconnect(session, "window_closed"); this.clearFiles(session);
-      this.sessionMap.delete(session.ref.conversationId);
-    }
+      this.disconnect(session,"window_closed"); this.clearFiles(session); this.sessionMap.delete(session.ref.conversationId);
+    } finally { session.promoting = false; }
   }
   private connect(session: Session): Promise<WebSocket> {
+    if (session.promoting) return Promise.reject(new CommandError("conflict","브라우저를 전환하고 있어요. 새 화면을 기다려 주세요"));
     const bridge = session.bridge ??= { subscribers: new Set(), width: 0, height: 0 };
     if (bridge.connecting) return bridge.connecting;
     if (bridge.socket?.readyState === WebSocket.OPEN) return Promise.resolve(bridge.socket);
     bridge.frame = undefined;
     bridge.connecting = (async () => {
       const status = await this.invoke(session, ["stream", "status"], { timeoutMs: 5000 });
+      if (session.promoting || session.bridge !== bridge) throw new CommandError("conflict","브라우저가 바뀌었어요. 새 화면을 기다려 주세요");
       const port = status.data && typeof status.data === "object" && "port" in status.data ? status.data.port : null;
       if (!status.ok || typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) throw new CommandError("unavailable", "Browser stream is unavailable");
       const { promise, resolve, reject } = Promise.withResolvers<WebSocket>();
@@ -682,7 +743,9 @@ export class AgentBrowser implements BrowserPort {
     bridge.retry = setTimeout(() => { void this.connect(session).catch(() => this.retryStream(session)); }, 750).unref();
   }
   async live(ref: BrowserSessionRef, options: { maxFps: number }, sink: (event: BrowserLiveEvent) => void) {
-    const session = this.existing(ref), bridge = session.bridge ??= { subscribers: new Set(), width: 0, height: 0 };
+    const session = this.existing(ref);
+    if (session.promoting) throw new CommandError("conflict","브라우저를 전환하고 있어요. 새 화면을 기다려 주세요");
+    const bridge = session.bridge ??= { subscribers: new Set(), width: 0, height: 0 };
     if (bridge.subscribers.size >= 4) throw new CommandError("conflict", "At most four live clients may watch a browser session");
     let lastFrame = Number.NEGATIVE_INFINITY, receivedFrame = false;
     const subscriber = (event: BrowserLiveEvent) => {
@@ -696,79 +759,136 @@ export class AgentBrowser implements BrowserPort {
     return () => { bridge.subscribers.delete(subscriber); };
   }
   input(ref: BrowserSessionRef, input: BrowserLiveInput): Promise<void> {
-    const session = this.existing(ref);
+    const session = this.existing(ref), generation = session.ownerGeneration ?? 0;
+    if (session.promoting) return Promise.reject(new CommandError("conflict","브라우저를 전환하고 있어요. 새 화면을 기다려 주세요"));
     const next = (session.ownerQueue ?? Promise.resolve()).then(async () => {
       while (session.secretGate) await session.secretGate;
       this.existing(ref);
+      if (session.promoting || generation !== (session.ownerGeneration ?? 0)) throw new CommandError("conflict","브라우저가 바뀌었어요. 새 화면에서 다시 선택해 주세요");
+      if (input.type === "viewport") {
+        session.ownerBusy = this.invoke(session,["set","viewport",String(input.width),String(input.height)]).then(result => {
+          if (!result.ok) throw new CommandError("unavailable","Browser viewport could not resize");
+          session.ownerViewport = { width: input.width, height: input.height };
+          if (session.bridge) session.bridge.frame = undefined;
+          session.notice = `${session.notice ?? ""}\nThe owner resized the browser. Cached refs and observations were discarded; take a fresh browser_snapshot before acting.`.trim();
+        });
+        try { await session.ownerBusy; } finally { session.ownerBusy = undefined; }
+        return;
+      }
+      if (session.engine === "obscura") {
+        await this.handoff(ref,null,{headed:false});
+        throw new CommandError("conflict","안전한 Chrome 브라우저로 전환했어요. 새 화면에서 다시 선택해 주세요");
+      }
       const perform = async () => {
-        const activity = "The owner used this browser. Cached refs and observations were discarded; take a fresh browser_snapshot before acting.";
-        if (!session.notice?.includes(activity)) session.notice = `${session.notice ?? ""}\n${activity}`.trim();
-        const initial = !session.captureArmed;
+        this.ownerActivity(session);
         session.captureArmed = true;
-        if (initial || input.type === "key" && input.event === "down" && input.key === "Enter" || input.type === "mouse" && input.event === "down") await this.capture(session, input.type === "mouse" && input.event === "down" ? { x: input.x, y: input.y } : input.type === "key" && input.event === "down" && input.key === "Enter");
-        if (input.type === "navigate" || input.type === "text") {
-          const result = input.type === "navigate" ? await this.invoke(session, [input.action])
-            : await this.invoke(session, ["batch", "--bail", "--omit-command"], { stdin: JSON.stringify([["keyboard", "inserttext", input.text]]), batch: true });
-          if (!result.ok) throw new CommandError("unavailable", "Browser input failed");
-        } else if (input.type === "key" && input.event === "down" && input.key.toLowerCase() === "a" && ((input.modifiers ?? 0) & 6) !== 0 && ((input.modifiers ?? 0) & 9) === 0) {
-          const selected = await this.invoke(session, ["eval", "--stdin"], { stdin: SELECT_ALL_SCRIPT });
-          if (!selected.ok) throw new CommandError("unavailable", "Browser selection is unavailable on the focused element");
-        } else {
-          const socket = await this.connect(session), bridge = session.bridge!;
-          // CDP needs carriage-return text for Enter's default form action; clients cannot inject control text.
-          socket.send(JSON.stringify(input.type === "mouse" ? {
-            type: "input_mouse", eventType: { down: "mousePressed", up: "mouseReleased", move: "mouseMoved", wheel: "mouseWheel" }[input.event],
-            x: Math.min(bridge.width, Math.max(0, input.x)), y: Math.min(bridge.height, Math.max(0, input.y)), button: input.button ?? (input.event === "move" || input.event === "wheel" ? "none" : "left"),
-            clickCount: input.clickCount ?? 1, deltaX: input.deltaX ?? 0, deltaY: input.deltaY ?? 0, modifiers: input.modifiers ?? 0,
-          } : { type: "input_keyboard", eventType: input.event === "down" ? "keyDown" : "keyUp", key: input.key, code: input.code, text: input.text ?? (input.event === "down" && input.key === "Enter" && !((input.modifiers ?? 0) & 7) ? "\r" : undefined), windowsVirtualKeyCode: input.keyCode, modifiers: input.modifiers ?? 0 }));
+        session.ownerCaptureDepth = (session.ownerCaptureDepth ?? 0) + 1;
+        try {
+          await this.ensureLogin(session);
+          await session.loginObserver?.updateMode?.();
+          const observes = input.type === "text" || input.type === "key" && input.event === "down" || input.type === "mouse" && input.event === "down";
+          const before = observes && session.loginObserver ? await session.loginObserver.snapshot(session.bridge?.targetId,input.type === "mouse" ? {x:input.x,y:input.y} : undefined) : null;
+          if (this.onLogin && observes && !before) throw new CommandError("unavailable","Trusted browser input metadata is unavailable");
+          const focused = before?.fields.find(field => field.id === before.focused);
+          const clicked = before?.fields.find(field => field.id === before.clicked);
+          if (before && (input.type === "key" && input.event === "down" && input.key === "Enter" || clicked?.kind === "submit")) session.login?.submit(before,(clicked?.kind === "submit" ? clicked : focused)?.form ?? "");
+          const inserted = input.type === "text" ? input.text : input.type === "key" && input.event === "down" ? input.text : undefined;
+          let edit: LoginEdit | null = inserted !== undefined ? {type:"insert",text:inserted} : null;
+          if (input.type === "key" && input.event === "down" && (input.key === "Backspace" || input.key === "Delete")) edit = (input.modifiers ?? 0)&7 ? {type:"unknown"} : {type:input.key === "Backspace" ? "backspace" : "delete"};
+          if (before && focused && edit) {
+            session.login?.edit(before,focused,edit);
+            if (focused.kind === "password") session.passwordScreenshots.set(before.targetId,before.url);
+          }
+          if (input.type === "navigate" || input.type === "text") {
+            const result = input.type === "navigate" ? await this.invoke(session, [input.action])
+              : await this.invoke(session, ["batch", "--bail", "--omit-command"], { stdin: JSON.stringify([["keyboard", "inserttext", input.text]]), batch: true });
+            if (!result.ok) throw new CommandError("unavailable", "Browser input failed");
+          } else if (input.type === "key" && input.event === "down" && input.key.toLowerCase() === "a" && ((input.modifiers ?? 0) & 6) !== 0 && ((input.modifiers ?? 0) & 9) === 0) {
+            const selected = session.engine === "chrome" && session.loginObserver ? await session.loginObserver.selectAll?.(session.bridge?.targetId) : (await this.invoke(session,["eval","--stdin"],{stdin:SELECT_ALL_SCRIPT})).ok;
+            if (!selected) throw new CommandError("unavailable", "Browser selection is unavailable on the focused element");
+          } else {
+            const socket = await this.connect(session), bridge = session.bridge!;
+            const keyObserved = input.type === "key" && input.event === "down" ? session.loginObserver?.ownerKey?.(input.key) : undefined;
+            socket.send(JSON.stringify(input.type === "mouse" ? {
+              type: "input_mouse", eventType: { down: "mousePressed", up: "mouseReleased", move: "mouseMoved", wheel: "mouseWheel" }[input.event],
+              x: Math.min(bridge.width, Math.max(0, input.x)), y: Math.min(bridge.height, Math.max(0, input.y)), button: input.button ?? (input.event === "move" || input.event === "wheel" ? "none" : "left"),
+              clickCount: input.clickCount ?? 1, deltaX: input.deltaX ?? 0, deltaY: input.deltaY ?? 0, modifiers: input.modifiers ?? 0,
+            } : { type: "input_keyboard", eventType: input.event === "down" ? "keyDown" : "keyUp", key: input.key, code: input.code, text: input.text ?? (input.event === "down" && input.key === "Enter" && !((input.modifiers ?? 0) & 7) ? "\r" : undefined), windowsVirtualKeyCode: input.keyCode ?? KEY_CODES[input.key], modifiers: input.modifiers ?? 0 }));
+            await keyObserved;
+          }
+          if (observes) await this.capture(session);
+          this.scheduleCapture(session);
+        } catch (error) {
+          session.login?.clear();
+          throw error;
+        } finally {
+          session.ownerCaptureDepth = (session.ownerCaptureDepth ?? 1) - 1;
+          await session.loginObserver?.updateMode?.();
         }
-        if (input.type === "text") await this.capture(session);
-        this.scheduleCapture(session);
       };
       session.ownerBusy = perform();
       try { await session.ownerBusy; } finally { session.ownerBusy = undefined; }
     });
     session.ownerQueue = next.catch(() => {}); return next;
   }
-  handoff(ref: BrowserSessionRef, url: string | null) {
+  handoff(ref: BrowserSessionRef, url: string | null, options: { headed?: boolean } = {}) {
     this.existing(ref);
     return this.enqueueSession(ref, async (session) => {
-      if (session.headed) return;
+      const headed = options.headed !== false;
+      if (headed ? session.headed : session.engine === "chrome") return;
+      session.promoting = true;
+      session.ownerGeneration = (session.ownerGeneration ?? 0) + 1;
       let cookies: unknown = null;
-      if (session.engine === "obscura") {
-        const exported = await this.invoke(session, ["cookies", "get"]);
-        if (!exported.ok) throw new CommandError("unavailable", "Could not migrate browser cookies");
-        cookies = exported.data;
-      }
-      this.disconnect(session);
-      if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser state");
-      // Migrated sessions stay Chrome; future cookies persist in the Ghost's encrypted Chrome restore state.
-      session.engine = "chrome"; session.headed = true; session.handoffUrl = url ?? "about:blank"; session.handoffFallback = false;
-      if (!(await this.invoke(session, ["open", cookies ? "about:blank" : session.handoffUrl])).ok) throw new CommandError("unavailable", "Could not open browser window");
-      if (cookies) {
-        const staging = this.sessionDirs(session)[1]!; mkdirSync(staging, { recursive: true, mode: 0o700 });
-        const path = join(staging, randomUUID());
-        try {
-          const data = typeof cookies === "object" && "cookies" in cookies ? cookies.cookies : cookies;
-          writeFileSync(path, JSON.stringify(data), { flag: "wx", mode: 0o600 });
-          if (!(await this.invoke(session, ["cookies", "set", "--curl", path])).ok) throw new CommandError("unavailable", "Could not restore browser cookies");
-        } finally { rmSync(path, { force: true }); cookies = null; }
-        if (!(await this.invoke(session, ["open", session.handoffUrl])).ok) throw new CommandError("unavailable", "Could not open migrated page");
-      }
-      session.captureArmed = true;
-      await this.capture(session);
-      session.headedPoll = setInterval(() => {
-        if (session.secretGate || session.ownerBusy || session.active || this.stopping) return;
-        session.ownerBusy = this.capture(session).finally(() => { session.ownerBusy = undefined; });
-      }, 1500).unref();
-      void this.connect(session).catch(() => this.retryStream(session));
+      try {
+        await session.ownerBusy;
+        await session.bridge?.connecting?.catch(() => {});
+        if (url === null) {
+          const current = await this.invoke(session,["get","url"]);
+          const raw = current.data && typeof current.data === "object" && "url" in current.data ? current.data.url : current.data;
+          if (!current.ok || typeof raw !== "string") throw new CommandError("unavailable","Could not read the browser URL");
+          url = raw;
+        }
+        if (url !== "about:blank") await assertFetchableUrl(url,"takeover page URL");
+        if (session.secrets.some(secret => secret.variants.some(value => value && url!.includes(value)))) throw new CommandError("forbidden","Cannot reopen a URL containing a protected value");
+        if (session.engine === "obscura") {
+          const exported = await this.invoke(session, ["cookies", "get"]);
+          if (!exported.ok) throw new CommandError("unavailable", "Could not migrate browser cookies");
+          cookies = exported.data;
+        } else if (session.captureArmed) await this.capture(session);
+        this.disconnect(session,"engine_changed");
+        if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser state");
+        // Obscura's CDP pages are connection-scoped and have no isolated realm. Owner interaction uses Chrome.
+        // Cookies survive migration; DOM/localStorage/JS state cannot transfer. Chrome remains the session engine.
+        session.engine = "chrome"; session.headed = headed; session.handoffUrl = headed ? url : null; session.handoffFallback = false;
+        if (!(await this.invoke(session, ["open", cookies ? "about:blank" : url])).ok) throw new CommandError("unavailable", "Could not open the owner browser");
+        if (cookies) {
+          const staging = this.sessionDirs(session)[1]!; mkdirSync(staging, { recursive: true, mode: 0o700 });
+          const path = join(staging, randomUUID());
+          try {
+            const data = typeof cookies === "object" && "cookies" in cookies ? cookies.cookies : cookies;
+            writeFileSync(path, JSON.stringify({cookies:data,origins:[]}), { flag: "wx", mode: 0o600 });
+            if (!(await this.invoke(session, ["state", "load", path])).ok) throw new CommandError("unavailable", "Could not restore browser cookies");
+          } finally { rmSync(path, { force: true }); cookies = null; }
+          if (!(await this.invoke(session, ["open", url])).ok) throw new CommandError("unavailable", "Could not open migrated page");
+        }
+        if (session.ownerViewport && !(await this.invoke(session,["set","viewport",String(session.ownerViewport.width),String(session.ownerViewport.height)])).ok) throw new CommandError("unavailable","Could not restore the owner viewport");
+        if (headed) {
+          session.captureArmed = true;
+          await this.capture(session);
+          session.headedPoll = setInterval(() => {
+            if (session.secretGate || session.ownerBusy || session.active || this.stopping) return;
+            session.ownerBusy = this.capture(session).finally(() => { session.ownerBusy = undefined; });
+          }, 1500).unref();
+        }
+        session.notice = `${session.notice ?? ""}\nThe browser runtime changed. Cached refs and observations were discarded; take a fresh browser_snapshot before acting.`.trim();
+      } finally { cookies = null; session.promoting = false; }
     });
   }
   endHandoff(ref: BrowserSessionRef) {
     return this.enqueueSession(ref, async (session) => {
       clearTimeout(session.captureTimer); clearInterval(session.headedPoll);
       await session.ownerBusy;
-      await this.capture(session, false, true);
+      await this.capture(session, true);
       // A live-view handoff never left headless mode: the Ghost continues on the page the owner left. A session
       // lost to a host restart is new and empty either way, so there is nothing to reopen.
       if (!session.headed && session.handoffUrl === null) return { fallback: false };
@@ -791,13 +911,14 @@ export class AgentBrowser implements BrowserPort {
       }
       // Retain the captured URL on this session: a failed reopen can be explicitly retried.
       if (!(await this.invoke(session, ["open", session.handoffUrl!])).ok) throw new CommandError("unavailable", "Could not resume the browser headlessly");
+      if (session.ownerViewport && !(await this.invoke(session,["set","viewport",String(session.ownerViewport.width),String(session.ownerViewport.height)])).ok) throw new CommandError("unavailable","Could not restore the owner viewport");
       this.retryStream(session);
       return { fallback: session.handoffFallback };
     });
   }
   close(ref: BrowserSessionRef) {
     return this.enqueueSession(ref, async (session) => {
-      await this.capture(session, false, session.headed);
+      try { await this.capture(session); } catch { session.login?.clear(); }
       if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not close browser session");
       this.disconnect(session, "closed");
       this.clearFiles(session);

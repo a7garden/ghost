@@ -238,8 +238,8 @@ export interface BrowserPort {
   assertVaultFill?(session: BrowserSessionRef, field: VaultField, origin: string): void;
   /** One command in the conversation's session. Secret material may only travel through `stdin`. */
   run(session: BrowserSessionRef, argv: string[], options?: BrowserRunOptions): Promise<BrowserCommandResult>;
-  /** Reopen the session in a visible window (same Ghost login state) at `url` so the owner can act. */
-  handoff(session: BrowserSessionRef, url: string | null): Promise<void>;
+  /** Prepare secure Chrome owner interaction; headed defaults true for the explicit Mac-window action. */
+  handoff(session: BrowserSessionRef, url: string | null, options?: { headed?: boolean }): Promise<void>;
   sessions(): BrowserSessionInfo[];
   /** Shared local screencast, owner-only. Returns an unsubscribe function. */
   live(session: BrowserSessionRef, options: { maxFps: number }, sink: (event: BrowserLiveEvent) => void): Promise<() => void>;

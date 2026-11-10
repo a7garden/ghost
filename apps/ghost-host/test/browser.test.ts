@@ -11,7 +11,7 @@ import { startObscura } from "../src/integrations/obscura.ts";
 import { createEgressProxy } from "../src/integrations/egress-proxy.ts";
 import type { BrowserPort, BrowserSessionRef, SandboxEnvFactory, VaultPort } from "../src/integrations/ports.ts";
 import { createBrowserTools } from "../src/tools/browser.ts";
-import { LoginCapture } from "../src/integrations/login-capture.ts";
+import { LoginCapture, type LoginPage, type LoginField } from "../src/integrations/login-capture.ts";
 import { createVault } from "../src/stores/vault.ts";
 import { loadConfig } from "../src/config.ts";
 import { harness, tempDir } from "./support.ts";
@@ -254,6 +254,7 @@ describe("isolated browser port", () => {
 
 const obscuraExecutable = process.env.GHOST_TEST_OBSCURA;
 const agentBrowserExecutable = process.env.GHOST_TEST_AGENT_BROWSER;
+const chromeExecutable = process.env.GHOST_TEST_CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const obscuraTest = obscuraExecutable && agentBrowserExecutable && process.platform === "darwin" ? test : test.skip;
 obscuraTest("isolated Obscura: CDP discovery and the WebSocket both require the token", async () => {
   const proxy = await createEgressProxy();
@@ -273,10 +274,10 @@ obscuraTest("isolated Obscura: CDP discovery and the WebSocket both require the 
   } finally { await proxy.close(); }
 }, 10_000);
 
-obscuraTest(
-  "isolated Obscura: tool open, vault restrictions and input, private network refusal and live handoff",
+(existsSync(chromeExecutable) ? obscuraTest : test.skip)(
+  "isolated Obscura: vault restrictions, egress refusal and secure Chrome live takeover",
   async () => {
-    const f = fixture({ executable: agentBrowserExecutable!, chrome: "/unused/chrome",
+    const f = fixture({ executable: agentBrowserExecutable!, chrome: chromeExecutable,
       obscura: { executable: obscuraExecutable!, loginOrigins: ["https://example.com"] } });
     const ref = { ghostId: f.ghost.id, conversationId: f.direct.id };
     let localHits = 0;
@@ -298,9 +299,11 @@ obscuraTest(
       expect(JSON.stringify([fill, f.ledger.db.query("SELECT * FROM effects").all()])).not.toContain(SECRET);
       expect((await f.browser.run(ref, ["eval", 'document.querySelector("#probe").value'])).data).toMatchObject({ result: "[redacted]" });
       await expect(f.browser.run(ref, ["screenshot"])).rejects.toThrow("until that tab's URL changes");
+      expect((await f.call("browser_handoff", { reason: "Test owner input" })).isError).toBeFalsy();
+      expect(f.browser.sessions()[0]).toMatchObject({engine:"chrome",headed:false});
+      // A renderer transition carries cookies, not the former renderer's live DOM.
       expect((await f.browser.run(ref, ["eval", `document.body.insertAdjacentHTML("afterbegin", "<input id=owner style=position:fixed;left:20px;top:20px>"); "ready"`])).ok).toBe(true);
       const position = await f.browser.run(ref, ["eval", `(() => { const r = document.querySelector("#owner").getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`]);
-      expect((await f.call("browser_handoff", { reason: "Test owner input" })).isError).toBeFalsy();
       const decision = f.ledger.pendingDecisions()[0]!;
       expect((await f.call("browser_snapshot")).isError).toBe(true);
       const handoff = (action: "live" | "input", input?: object, signal?: AbortSignal) => {
@@ -612,27 +615,79 @@ describe("browser tools", () => {
 });
 
 describe("owner login capture", () => {
-  test("redacts immediately but commits only a submitted successful attempt or completed handoff", async () => {
+  test("only owner edits supply credentials; completion cannot manufacture or update a password", async () => {
     const saved: unknown[] = [], redacted: string[] = [];
-    const capture = new LoginCapture(async (login) => { saved.push({ ...login }); }, value => redacted.push(value));
-    const page = { origin: "https://example.com", url: "https://example.com/login", username: "owner", password: SECRET, hasPassword: true };
-    await capture.observe(JSON.stringify(page));
+    const capture = new LoginCapture(async login => { saved.push({...login}); },value => redacted.push(value));
+    const username: LoginField = {id:"user",form:"login",kind:"username",length:0,start:0,end:0,score:100};
+    const password: LoginField = {id:"pass",form:"login",kind:"password",length:0,start:0,end:0,score:0};
+    const empty: LoginPage = {targetId:"tab1",documentId:"doc1",origin:"https://example.com",url:"https://example.com/login",fields:[username,password],focused:"user",clicked:null};
+    const typed: LoginPage = {...empty,fields:[{...username,length:5,start:5,end:5},{...password,length:SECRET.length,start:SECRET.length,end:SECRET.length}]};
+    const enter = () => { capture.edit(empty,username,{type:"insert",text:"owner"}); capture.edit(empty,password,{type:"insert",text:SECRET}); };
+    capture.edit(empty,username,{type:"insert",text:"owner"});
+    await capture.observe({...empty,password:SECRET,username:"owner",submitted:true} as unknown as LoginPage,true);
+    capture.submit({...empty,fields:typed.fields},"login"); // A populated DOM password is not an owner edit.
+    await capture.observe({...empty,url:"https://example.com/account",fields:[]});
+    expect(saved).toHaveLength(0);
+    capture.clear(); enter();
     expect(redacted).toContain(SECRET);
-    await capture.observe(JSON.stringify({ ...page, url: "https://example.com/elsewhere" }));
+    await capture.observe({...typed,url:"https://example.com/elsewhere"});
+    expect(saved).toHaveLength(0); // navigation without a genuine submit is not enough
+    capture.clear(); enter(); capture.submit(typed,"login");
+    await capture.observe(typed);
+    expect(saved).toHaveLength(0); // failed submit, unchanged password field
+    await capture.observe({...typed,url:"https://example.com/account",fields:[]});
+    expect(saved).toEqual([{origin:empty.origin,username:"owner",password:SECRET}]);
+    enter(); await capture.observe(typed); await capture.observe(null,true);
+    expect(saved).toHaveLength(2);
+    enter(); capture.clear(); await capture.observe(null,true);
+    expect(saved).toHaveLength(2);
+    enter(); await capture.observe(typed); await capture.observe({...typed,fields:[]});
+    expect(saved).toHaveLength(2); // an ordinary script-driven transition is not an owner submission
+    await capture.observe({...typed,fields:[]},true);
+    expect(saved).toHaveLength(3); // explicit owner completion may confirm the last genuinely typed pair
+    enter(); await capture.observe(typed);
+    capture.edit(typed,typed.fields[1]!,{type:"unknown"});
+    await capture.observe(null,true);
+    expect(saved).toHaveLength(3);
+  });
+  test("unknown/model edits, other forms, targets and origins never acquire owner authority", async () => {
+    const saved: unknown[] = [];
+    const capture = new LoginCapture(async login => { saved.push({...login}); },()=>{},value => value === "model-password");
+    const user: LoginField = {id:"u",form:"login",kind:"username",length:0,start:0,end:0,score:100};
+    const pass: LoginField = {id:"p",form:"login",kind:"password",length:0,start:0,end:0,score:0};
+    const base: LoginPage = {targetId:"one",documentId:"doc",url:"https://example.com/",origin:"https://example.com",fields:[user,pass],focused:"u",clicked:null};
+    for (const other of [{...base,targetId:"two"},{...base,documentId:"other"},{...base,origin:"https://other.example",url:"https://other.example/"},{...base,fields:[user,{...pass,form:"other"}]}]) {
+      capture.edit(base,user,{type:"insert",text:"owner"});
+      capture.edit(other,other.fields[1]!,{type:"insert",text:SECRET});
+      capture.submit({...base,fields:[{...user,length:5},{...pass,length:SECRET.length}]},"login");
+      await capture.observe({...base,fields:[]});
+      expect(saved).toHaveLength(0); capture.clear();
+    }
+    capture.edit(base,user,{type:"insert",text:"owner"});
+    capture.edit(base,pass,{type:"insert",text:"model-password"},false);
+    await capture.observe(null,true);
     expect(saved).toHaveLength(0);
     capture.clear();
-    await capture.observe(JSON.stringify(page), true);
-    await capture.observe(JSON.stringify(page));
+    capture.edit(base,user,{type:"insert",text:"owner"});
+    capture.edit(base,pass,{type:"insert",text:"model-password"});
+    capture.submit({...base,fields:[{...user,length:5},{...pass,length:14}]},"login");
+    await capture.observe({...base,fields:[]});
     expect(saved).toHaveLength(0);
-    await capture.observe(JSON.stringify({ ...page, url: "https://example.com/account", password: "", username: "", hasPassword: false }));
-    expect(saved).toEqual([{ origin: page.origin, username: page.username, password: SECRET }]);
-    await capture.observe(JSON.stringify(page));
-    await capture.observe(null, false, true);
-    expect(saved).toHaveLength(2);
-    await capture.observe(JSON.stringify(page));
-    capture.clear();
-    await capture.observe(null, false, true);
-    expect(saved).toHaveLength(2);
+  });
+  test("owner deletion follows Unicode grapheme boundaries without manufacturing password bytes", async () => {
+    const saved: unknown[] = [];
+    const capture = new LoginCapture(async login => {saved.push({...login});},()=>{});
+    const user: LoginField = {id:"u",form:"login",kind:"username",length:0,start:0,end:0,score:100};
+    const pass: LoginField = {id:"p",form:"login",kind:"password",length:0,start:0,end:0,score:0};
+    const page: LoginPage = {targetId:"one",documentId:"doc",url:"https://example.com/",origin:"https://example.com",fields:[user,pass],focused:"p",clicked:null};
+    capture.edit(page,user,{type:"insert",text:"owner"});
+    capture.edit(page,pass,{type:"insert",text:"비밀😀"});
+    const populated = {...page,fields:[{...user,length:5},{...pass,length:4,start:4,end:4}]};
+    await capture.observe(populated);
+    capture.edit(populated,populated.fields[1]!,{type:"backspace"});
+    capture.submit({...populated,fields:[populated.fields[0]!,{...pass,length:2,start:2,end:2}]},"login");
+    await capture.observe({...page,fields:[]});
+    expect(saved).toEqual([{origin:page.origin,username:"owner",password:"비밀"}]);
   });
   test("saveLogin merges canonical origin/username, keeps history and grants without duplicate versions", () => {
     const vault = createVault(tempDir());
