@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
-import { MailPlus, MailX, Paperclip, Search, Star } from 'lucide-react';
+import { MailPlus, MailX, Paperclip, RotateCw, Search, Star } from 'lucide-react';
 import { Button, EmptyState, InlineError, Skeleton } from '../../ui';
 import type { MailAccounts, MailboxInfo, MailMessage, MailSummary } from '../../host/client';
 import { useHost } from '../../host/context';
@@ -330,6 +330,8 @@ export function MailView() {
           <input type="search" placeholder="메일 검색" aria-label="메일 검색" value={search}
             onChange={event => onSearchInput(event.target.value)} onKeyDown={onSearchKey}/>
         </label>
+        <Button variant="ghost" size="icon" aria-label="메일 새로고침" disabled={!accountId || !mailboxPath || phase === 'loading'}
+          onClick={() => { void loadList(); void reloadMailboxes(); }}><RotateCw size={15}/></Button>
       </div>
       <div className="mail-list__scroll">
         {phase === 'loading' && <ul className="mail-rows" aria-busy="true">
@@ -366,6 +368,6 @@ export function MailView() {
     {reader}
     </>}
     {compose && account && <MailCompose connectionId={accountId} canSend={account.canSend} seed={compose}
-      onSent={() => void reloadMailboxes()} onClose={() => setCompose(null)}/>}
+      onSent={() => { void loadList(); void reloadMailboxes(); }} onClose={() => setCompose(null)}/>}
   </div>;
 }
