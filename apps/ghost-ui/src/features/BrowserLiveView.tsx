@@ -4,7 +4,6 @@ import { Button, InlineError, Input } from '../ui';
 import { HostError, type BrowserInput } from '../host/client';
 import { useHost } from '../host/context';
 import { useTouch } from '../ui/adaptive';
-import { shell } from '../host/shell';
 
 /** Frames per second asked of the host's screencast; enough to follow a Ghost at a fraction of the cost. */
 const STREAM_FPS = 8;
@@ -85,7 +84,6 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   const [status, setStatus] = useState<Status>('connecting');
   const [endReason, setEndReason] = useState<string | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
-  const [macOpened, setMacOpened] = useState(false);
   const statusRef = useRef<Status>('connecting');
   const abortRef = useRef<AbortController | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -448,8 +446,11 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   };
 
   const openWindow = () => {
-    void client.browserWindow(conversationId).then(() => { setMacOpened(true); setInputError(null); }, (caught: unknown) => {
-      setInputError(caught instanceof Error && caught.message ? caught.message : 'Mac에서 창을 열지 못했습니다.');
+    const generation = inputGenerationRef.current;
+    void client.browserWindow(conversationId).then(() => {
+      if (generation === inputGenerationRef.current) setInputError(null);
+    }, (caught: unknown) => {
+      if (generation === inputGenerationRef.current) setInputError(caught instanceof Error && caught.message ? caught.message : 'Mac에서 창을 열지 못했습니다.');
     });
   };
 
@@ -464,9 +465,9 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
       <button type="button" className="browser-live__icon" aria-label="뒤로" title="뒤로" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'back' })}><ArrowLeft size={15}/></button>
       <button type="button" className="browser-live__icon" aria-label="앞으로" title="앞으로" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'forward' })}><ArrowRight size={15}/></button>
       <button type="button" className="browser-live__icon" aria-label="새로고침" title="새로고침" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'reload' })}><RotateCw size={15}/></button>
-      {!shell && <button type="button" className="browser-live__mac" disabled={status === 'ended' || macOpened} onClick={openWindow}>
-        <Monitor size={13} aria-hidden="true"/>{macOpened ? 'Mac에서 열었어요' : 'Mac 창으로 열기'}
-      </button>}
+      <button type="button" className="browser-live__mac" disabled={status === 'ended'} onClick={openWindow}>
+        <Monitor size={13} aria-hidden="true"/>Mac 창으로 열기
+      </button>
     </header>
     <div ref={screenRef} className="browser-live__screen" aria-busy={busy || undefined} onKeyDown={onKeyDown} onKeyUp={onKeyUp}>
       <canvas ref={canvasRef} role="img" aria-label={`${label} — 클릭해 조작할 수 있습니다`}
