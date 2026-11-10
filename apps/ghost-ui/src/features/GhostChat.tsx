@@ -76,7 +76,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
       const delegates = state.works.filter(child => child.rootId === work.id && child.id !== work.id)
         .sort((a, b) => a.createdAt - b.createdAt)
         .map(child => ({ work: child, ghostName: names.get(child.ghostId) ?? 'Ghost', needsOwner: waiting.has(child.id) }));
-      return { key: `thread:${work.id}`, at: work.createdAt, node: <ThreadCard work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'}
+      return { key: `thread:${work.id}`, at: work.createdAt, returnsAs: TERMINAL_WORK_STATES.includes(work.state) ? work.id : undefined, node: <ThreadCard work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'}
         needsOwner={waiting.has(work.id)} now={now} delegates={delegates}
         onOpen={() => openThread(work.id)} onOpenPage={() => openWork(work.id)}/> };
     }) : [];

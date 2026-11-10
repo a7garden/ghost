@@ -50,7 +50,7 @@
 .shell-search:hover { color: var(--ghost-ink2); background: var(--ghost-hover2); }
 .shell-search svg { width: 14px; height: 14px; }
 .shell-search__label { min-width: 72px; text-align: left; }
-.shell-search kbd { padding: 3px 6px; border-radius: 6px; color: var(--ghost-ink3); background: var(--ghost-canvas); box-shadow: 0 0 0 1px var(--ghost-line); font: 500 10px/1 var(--font-mono); }
+.shell-search kbd { padding: 3px 6px; }
 @media (max-width: 40rem) {
   .shell-search { width: 30px; justify-content: center; padding: 0; }
   .shell-search__label, .shell-search kbd { display: none; }
@@ -128,7 +128,7 @@
 .presence-row__main[aria-current="page"] { color: var(--ghost-ink); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
 .presence-row__copy { display: grid; min-width: 0; flex: 1; gap: 1px; }
 .presence-row__name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--text-ui); font-weight: 500; line-height: 1.3; }
-.presence-row__main-mark { flex: none; padding: 1px 5px; border-radius: 5px; color: var(--ghost-ink3); box-shadow: inset 0 0 0 1px var(--ghost-line-strong); font-size: 10px; font-weight: 600; }
+.presence-row__main-mark { flex: none; padding: 1px 5px; border-radius: 5px; color: var(--ghost-ink3); box-shadow: inset 0 0 0 1px var(--ghost-line-strong); font-size: var(--text-micro); font-weight: 600; }
 .presence-row__line { overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
 .presence-row__line[data-tone="attention"] { color: var(--ghost-amber-ink); }
 .presence-row__line[data-tone="working"] { color: var(--ghost-ink2); }
@@ -151,7 +151,7 @@
   font: 500 var(--text-caption)/1 var(--font-sans);
 }
 .sidebar-search::placeholder { color: var(--ghost-ink3); }
-.sidebar-search:focus-visible { box-shadow: inset 0 0 0 1px var(--ghost-line-strong); }
+.sidebar-search:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
 /* Paused Ghosts read as on hold, like the settings roster. */
 .presence-row__main[data-dimmed] { filter: grayscale(.85); opacity: .6; }
 
@@ -224,6 +224,22 @@
   .ghost-settings__content { padding-inline: var(--ghost-layout-page-gutter-compact); }
   .ghost-settings__content-inner { padding-top: 24px; padding-bottom: 32px; }
 }
+/* Horizontal strips (settings sections, the Ghost roster) fade at the edge where more follows, so a cut-off
+   item reads as "scroll" rather than as broken layout. Without scroll-driven animations they stay unfaded. */
+@property --strip-fade-start { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --strip-fade-end { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes strip-fade {
+  from { --strip-fade-start: 0px; --strip-fade-end: 32px; }
+  8%, 92% { --strip-fade-start: 32px; --strip-fade-end: 32px; }
+  to { --strip-fade-start: 32px; --strip-fade-end: 0px; }
+}
+@supports (animation-timeline: scroll()) {
+  :is(.ghost-settings__section-list, .roster) {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--strip-fade-start), #000 calc(100% - var(--strip-fade-end)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--strip-fade-start), #000 calc(100% - var(--strip-fade-end)), transparent);
+    animation: strip-fade linear both; animation-timeline: scroll(self inline);
+  }
+}
 @container ghost-settings-group (max-width: 560px) {
   .ghost-settings-row { grid-template-columns: minmax(0, 1fr); row-gap: 8px; align-items: start; }
   .ghost-settings-row__control { justify-content: flex-start; }
@@ -294,7 +310,8 @@
 .ghost-conversation { container-type: inline-size; display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; overflow: hidden; color: var(--ghost-ink); background: var(--ghost-canvas); }
 .ghost-conversation__column { box-sizing: border-box; width: min(100%, var(--ghost-layout-document-max)); min-width: 0; margin-inline: auto; }
 .ghost-conversation__header { flex: 0 0 auto; padding: 10px var(--ghost-space-6) 10px; }
-.ghost-conversation__transcript-frame { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; }
+/* Clipped so the floating face and thread button never spill over the docked decisions in a short window. */
+.ghost-conversation__transcript-frame { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: clip; }
 .ghost-conversation__transcript-frame::before { content: ''; position: absolute; z-index: 1; top: 0; left: 0; right: 0; height: 24px; background: linear-gradient(var(--ghost-canvas), transparent); pointer-events: none; }
 .ghost-conversation__transcript { box-sizing: border-box; width: 100%; min-width: 0; min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; overflow-anchor: auto; padding-inline: var(--ghost-space-6); }
 .ghost-conversation__transcript:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }

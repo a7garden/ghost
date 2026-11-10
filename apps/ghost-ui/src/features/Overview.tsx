@@ -14,6 +14,8 @@ import { NotificationRow } from '../components/NotificationRow';
 import { notificationRoute } from './notificationRoute';
 
 const RECENT_MS = 3 * 86_400_000;
+/** Home shows this many live lanes; the rest wait on the 맡긴 일 page behind a +N link. */
+const LIVE_LANES = 6;
 
 /**
  * Home: hand something off, settle what waits on you, glance at what moves.
@@ -44,7 +46,7 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
   // Until a provider can run Ghosts, home leads with the one step that unblocks everything.
   const setup = !state.runtime.ready;
   const lead = ghosts[0];
-  return <Page className="home" data-quiet={quiet || undefined}>
+  return <Page width="reading" className="home" data-quiet={quiet || undefined}>
     {setup && <button type="button" className="setup-card" onClick={() => navigate('/settings?tab=models')}>
       {lead && <DotAvatar profileId={lead.id} tone={toneFor(lead.id)} size={44}/>}
       <span className="setup-card__copy">
@@ -73,7 +75,9 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
         <h2 id="home-live" className="section-title">진행 중<span className="count">{live.length}</span></h2>
         <button type="button" className="link-quiet" onClick={() => navigate('/work')}>{uiTerms.work}<ArrowRight size={13} aria-hidden="true"/></button>
       </header>
-      <div className="lanes">{roots.slice(0, 6).map(lane)}</div>
+      <div className="lanes">{roots.slice(0, LIVE_LANES).map(lane)}</div>
+      {roots.length > LIVE_LANES && <button type="button" className="link-quiet justify-self-start" aria-label={`진행 중인 일 ${roots.length - LIVE_LANES}개 더 보기`}
+        onClick={() => navigate('/work')}>+{roots.length - LIVE_LANES}<ArrowRight size={13} aria-hidden="true"/></button>}
     </section>}
     {recent.length > 0 && <section className="home__band" aria-labelledby="home-recent">
       <header className="home__band-head"><h2 id="home-recent" className="section-title">최근 끝난 일</h2></header>

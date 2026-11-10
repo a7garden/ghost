@@ -14,9 +14,11 @@ import { toneFor } from './ghostState';
 import { useConversationFeed } from './conversationFeed';
 import { absoluteTime, relativeTime, useNow } from './time';
 import { useHost } from '../host/context';
+import { HostError } from '../host/client';
 import { uiTerms } from '../uiText';
 import { executionLabel } from './activity-config';
 import { ProjectChips } from '../components/composer/ProjectMentions';
+import { CancelWorkDialog } from './WorkViews';
 
 const effectGlyph: Record<Effect['state'], GlyphState> = { pending: 'running', done: 'done', unknown: 'blocked', denied: 'cancelled' };
 const effectLabel: Record<Effect['state'], string> = { pending: '실행 중', done: '완료', unknown: '결과 미확정', denied: '거부됨' };
@@ -30,19 +32,26 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   const [detail, setDetail] = useState<WorkDetailData | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState('');
+  /** The last read failed for another reason than not-found: the previous detail stays on screen. */
+  const [loadError, setLoadError] = useState('');
+  const [reloading, setReloading] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [cancellingWorkId, setCancellingWorkId] = useState<string | null>(null);
   const ghostName = (id: string) => state.ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
 
   const reload = useCallback(async () => {
     try {
       const next = await client.work(workId);
-      setDetail(next); setNotFound(false);
-    } catch {
-      setNotFound(true);
+      setDetail(next); setNotFound(false); setLoadError('');
+    } catch (e) {
+      // Only the host saying the Work is gone means gone; a dropped connection is not.
+      if (e instanceof HostError && e.code === 'not_found') { setNotFound(true); setLoadError(''); }
+      else setLoadError(e instanceof Error ? e.message : '맡긴 일을 읽지 못했습니다.');
     }
   }, [client, workId]);
+  const retry = () => { setReloading(true); void reload().finally(() => setReloading(false)); };
 
-  useEffect(() => { setDetail(null); setNotFound(false); void reload(); }, [reload]);
+  useEffect(() => { setDetail(null); setNotFound(false); setLoadError(''); void reload(); }, [reload]);
   // Ledger events carry the whole row; refetch the detail bundle when anything in this tree changes.
   useEffect(() => store.onLedgerEvent(event => {
     if (!detail) return;
@@ -60,6 +69,8 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
     <div className="calm"><p>맡긴 일을 찾을 수 없습니다. 끝난 지 오래된 일은 목록에서 사라집니다.</p></div>
     <Button variant="outline" className="justify-self-start" onClick={() => navigate('/work')}>{uiTerms.work} 목록</Button>
   </Page>;
+  const loadAlert = loadError && <InlineError onRetry={retry} retryLabel="다시 시도" pending={reloading}>맡긴 일을 새로 읽지 못했습니다 · {loadError}</InlineError>;
+  if (!detail && loadAlert) return <Page className="grid content-start gap-4">{loadAlert}</Page>;
   if (!detail) return <Page><div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">읽는 중</span></div></Page>;
 
   const { work, children, effects, artifacts, ancestors, decisions } = detail;
@@ -83,7 +94,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
         <h1 className="work-head__title">{work.title}</h1>
         <div className="work-head__actions">
           {live && <Button variant="outline" onClick={() => setEditing(true)}><Pencil/>수정</Button>}
-          {live && <Button variant="outline" onClick={() => run(() => client.send({ type: 'work.cancel', workId: work.id }))}><Square/>취소</Button>}
+          {live && <Button variant="outline" onClick={() => setCancellingWorkId(work.id)}><Square/>취소</Button>}
           {resumable && <Button onClick={() => run(() => client.send({ type: 'work.resume', workId: work.id }))}><Play/>재개</Button>}
         </div>
       </div>
@@ -97,6 +108,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
       <LifecycleTrack state={work.state} needsOwner={needsOwner} className="work-head__track"/>
       {work.reason && (work.state === 'failed' || work.state === 'blocked' || work.state === 'cancelled') && <p className="work-head__reason" data-state={work.state}>{work.reason}</p>}
     </header>
+    {loadAlert}
     {error && <InlineError>{error}</InlineError>}
 
     {pending.length > 0 && <section className="grid gap-3" aria-label="확인 필요">
@@ -152,6 +164,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
       </aside>
     </div>
     {editing && <EditWorkModal work={work} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }}/>}
+    {cancellingWorkId === work.id && <CancelWorkDialog work={work} onCancel={async () => { await client.send({ type: 'work.cancel', workId: work.id }); void reload(); }} onClose={() => setCancellingWorkId(null)}/>}
   </Page>;
 }
 

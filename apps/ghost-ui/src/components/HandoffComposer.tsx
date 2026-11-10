@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { ChevronDown, Paperclip } from 'lucide-react';
 import { Composer, InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui'
 import type { Ghost } from '@ghost/contract';
@@ -28,7 +28,10 @@ export function HandoffComposer({ ghosts, navigate, initialSpaceIds = [], initia
   const [ghostId, setGhostId] = useState<string>();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  /** Why the last chosen option could not apply; shown while that reason still holds. */
+  const [blocked, setBlocked] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const modeButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments();
   const target = roster.find(ghost => ghost.id === ghostId) ?? roster[0];
@@ -60,6 +63,27 @@ export function HandoffComposer({ ghosts, navigate, initialSpaceIds = [], initia
 
   if (!target) return null;
   const assigning = mode === 'work';
+  // work.create carries text only; files ride on message.send alone.
+  const workBlocked = attachments.items.length > 0 ? '파일이 붙은 메시지는 일로 맡길 수 없습니다 · 대화로 보내세요' : null;
+  const filesBlocked = '맡기기에는 파일을 붙일 수 없습니다 · 대화로 보내세요';
+  const choose = (value: Mode, focusInput: boolean) => {
+    if (value === 'work' && workBlocked) { setBlocked(workBlocked); return; }
+    setMode(value); setBlocked('');
+    if (focusInput) inputRef.current?.focus();
+  };
+  // WAI-ARIA radio group: arrows move and select, only the checked option sits in the tab order.
+  const modes = ['talk', 'work'] as const;
+  const modeKeys = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    const next = modes[(modes.indexOf(mode) + step + modes.length) % modes.length];
+    choose(next, false);
+    if (next !== 'work' || !workBlocked) modeButtons.current[modes.indexOf(next)]?.focus();
+  };
+  // The first line becomes the Work title; the host keeps 256 characters of it.
+  const titleCut = assigning && text.split(/\n/, 1)[0].length > 256;
+  const hint = blocked && (assigning || workBlocked) ? blocked : titleCut ? '제목은 앞 256자만 씁니다' : null;
   return <div className="handoff" data-mode={mode}>
     <input ref={fileInput} type="file" multiple hidden onChange={event => { attachments.add(Array.from(event.target.files ?? [])); event.target.value = ''; inputRef.current?.focus(); }}/>
     <Composer inputId="handoff-message" inputRef={inputRef} value={text} onValueChange={projects.onChange} onSubmit={value => void send(value)}
@@ -71,10 +95,11 @@ export function HandoffComposer({ ghosts, navigate, initialSpaceIds = [], initia
       submitLabel={assigning ? '일 맡기기' : '보내기'} disabled={sending} pending={sending}
       header={<div className="handoff__head">
         <RecipientToken ghosts={roster} value={target} disabled={sending} onChange={id => { setGhostId(id); inputRef.current?.focus(); }}/>
-        <div className="handoff__mode" role="radiogroup" aria-label="보내는 방식">
-          {(['talk', 'work'] as const).map(value => <button key={value} type="button" role="radio" aria-checked={mode === value}
-            disabled={value === 'work' && attachments.items.length > 0}
-            onClick={() => { setMode(value); inputRef.current?.focus(); }}>{value === 'talk' ? '대화' : '맡기기'}</button>)}
+        <div className="handoff__mode" role="radiogroup" aria-label="보내는 방식" onKeyDown={modeKeys}>
+          {modes.map((value, index) => { const reason = value === 'work' ? workBlocked : null; return <button key={value} ref={node => { modeButtons.current[index] = node; }}
+            type="button" role="radio" aria-checked={mode === value} tabIndex={mode === value ? 0 : -1}
+            aria-disabled={reason ? true : undefined} title={reason ?? undefined}
+            onClick={() => choose(value, true)}>{value === 'talk' ? '대화' : '맡기기'}</button>; })}
         </div>
       </div>}
       extension={assigning && <div className="handoff__brief">
@@ -87,9 +112,10 @@ export function HandoffComposer({ ghosts, navigate, initialSpaceIds = [], initia
           <input type="datetime-local" value={deadline} onChange={event => setDeadline(event.target.value)} disabled={sending}/>
         </label>
       </div>}
-      leading={<ComposerPlus disabled={sending} actions={[
-        { id: 'files', icon: <Paperclip/>, label: '사진·파일 첨부', disabled: assigning, onSelect: () => fileInput.current?.click() },
+      leading={<ComposerPlus disabled={sending} onBlocked={setBlocked} actions={[
+        { id: 'files', icon: <Paperclip/>, label: '사진·파일 첨부', disabled: assigning, reason: filesBlocked, onSelect: () => fileInput.current?.click() },
       ]}/>}
+      footer={hint && <span className="composer-hint" role="status">{hint}</span>}
       trailing={!assigning && <ModelPicker conversationId={target.directConversationId} disabled={sending}/>}/>
     {error && <InlineError className="mt-2">{error}</InlineError>}
   </div>;

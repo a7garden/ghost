@@ -65,7 +65,7 @@
   .file-sheet__gutter { min-width: 44px; padding-inline: 8px 12px; }
   .file-sheet__source { padding-right: 16px; }
   .file-sheet__source[data-wrap] { padding-left: 16px; }
-  .file-sheet__foot { padding: 10px 16px; font-size: 10px; }
+  .file-sheet__foot { padding: 10px 16px; font-size: var(--text-micro); }
   .file-sheet__image { padding: 16px; }
   .file-sheet__image img { max-height: calc(100dvh - 180px); }
 }

@@ -29,7 +29,7 @@ export interface CommandPaletteProps {
   strings: CommandPaletteStrings
   open?: boolean
   onOpenChange?: (open: boolean) => void
-  /** Bind Meta/Ctrl+P globally. Disable when a parent shell owns the shortcut. */
+  /** Bind Meta/Ctrl+K globally (P stays print). Disable when a parent shell owns the shortcut. */
   bindShortcut?: boolean
   className?: string
 }
@@ -84,7 +84,7 @@ export function CommandPalette({
     if (!bindShortcut) return
     const onGlobalKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || event.altKey || event.shiftKey) return
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "p") {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         // Let an existing modal own its keyboard interaction.
         if (!open && document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]')) return
         event.preventDefault()

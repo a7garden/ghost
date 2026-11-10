@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { cn } from '../../ui';
 
 /**
  * Hold-to-confirm button: the action fires when the hold outlasts `duration`;
  * releasing early resets it. Pointer and keyboard both hold (Space/Enter down
- * starts the fill, up cancels), so keyboard users take the same path.
+ * starts the fill, up cancels), so keyboard users take the same path. Assistive tech
+ * that only sends a click (detail 0) gets a second step instead: the first click arms
+ * "한 번 더 눌러 …" for a few seconds and a second click completes.
  */
 export function HoldButton({ label, holdingLabel, duration = 1200, disabled, className, onComplete }: {
   label: string;
@@ -17,14 +19,19 @@ export function HoldButton({ label, holdingLabel, duration = 1200, disabled, cla
 }) {
   const [holding, setHolding] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [armed, setArmed] = useState(false);
   const frame = useRef(0);
   const startedAt = useRef(0);
+  const armTimer = useRef(0);
+  // A Space/Enter hold also ends in a click with detail 0; that click is not an AT activation.
+  const keyHeld = useRef(false);
 
   const stop = () => {
     if (frame.current !== 0) cancelAnimationFrame(frame.current);
     frame.current = 0;
   };
-  useEffect(() => stop, []);
+  const disarm = () => { window.clearTimeout(armTimer.current); armTimer.current = 0; setArmed(false); };
+  useEffect(() => () => { stop(); window.clearTimeout(armTimer.current); }, []);
 
   const start = () => {
     if (disabled || frame.current !== 0) return;
@@ -43,16 +50,34 @@ export function HoldButton({ label, holdingLabel, duration = 1200, disabled, cla
     stop(); setHolding(false); setProgress(0);
   };
 
-  return <button type="button" disabled={disabled} data-holding={holding || undefined}
+  const activate = (event: MouseEvent<HTMLButtonElement>) => {
+    // Pointer clicks (detail ≥ 1) belong to the hold; only synthesized clicks take the two-step path.
+    if (event.detail !== 0 || disabled) return;
+    if (keyHeld.current) { keyHeld.current = false; return; }
+    if (armed) { disarm(); onComplete(); return; }
+    setArmed(true);
+    armTimer.current = window.setTimeout(() => { armTimer.current = 0; setArmed(false); }, 4000);
+  };
+  const isHoldKey = (key: string) => key === ' ' || key === 'Enter';
+
+  return <button type="button" disabled={disabled} data-holding={holding || undefined} data-armed={armed || undefined}
     className={cn('hold-btn', className)}
+    aria-description={armed ? undefined : `길게 눌러 ${label}`}
+    title={`길게 눌러 ${label}`}
     style={{ '--hold-progress': progress } as CSSProperties}
     onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture?.(event.pointerId); start(); }}
     onPointerUp={cancel}
     onPointerCancel={cancel}
-    onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); start(); } }}
-    onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') cancel(); }}
-    onBlur={cancel}>
+    onKeyDown={event => { if (isHoldKey(event.key)) { event.preventDefault(); keyHeld.current = true; if (!event.repeat) start(); } }}
+    onKeyUp={event => {
+      if (!isHoldKey(event.key)) return;
+      event.preventDefault(); cancel();
+      // The Space activation click, if the engine still sends one, arrives in this same task.
+      window.setTimeout(() => { keyHeld.current = false; }, 0);
+    }}
+    onClick={activate}
+    onBlur={() => { keyHeld.current = false; cancel(); disarm(); }}>
     <span className="hold-btn__fill" aria-hidden="true"/>
-    <span className="hold-btn__label">{holding && holdingLabel ? holdingLabel : label}</span>
+    <span className="hold-btn__label" aria-live="polite">{armed ? `한 번 더 눌러 ${label}` : holding && holdingLabel ? holdingLabel : label}</span>
   </button>;
 }

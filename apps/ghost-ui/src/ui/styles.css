@@ -1,5 +1,7 @@
 @layer theme, base, components, utilities;
 @import "@fontsource-variable/inter";
+/* 2026.11.09 : Inter has no Hangul. Without this, Windows drew Korean in Malgun Gothic, whose two weights collapsed 450/550/650. */
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 @import "@fontsource-variable/jetbrains-mono";
 @import "tailwindcss" source(none);
 @import "./theme.css";

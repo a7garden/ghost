@@ -148,16 +148,33 @@ export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReu
 }
 
 /** Something placed in the transcript at a moment of its own, such as a thread that started there. */
-export interface TranscriptExtra { key: string; at: number; node: ReactNode }
+export interface TranscriptExtra {
+  key: string; at: number; node: ReactNode;
+  /** A settled thread's Work id. When its outcome returns on the very next row, the outcome alone draws the branch; the card would only repeat its title. */
+  returnsAs?: string;
+}
+
+function outcomeWorkId(message: Message): string | null {
+  if (message.origin !== 'report' && message.origin !== 'child_result') return null;
+  return parseOutcome(message.text)?.workId ?? null;
+}
 
 /** A whole transcript: tool results that follow each other become one trail; extras sit where they happened. */
 export function Transcript({ messages, speaker, onUiSubmit, extras = [], onQuote, onReuse }: { messages: Message[]; speaker(message: Message): string; onUiSubmit?(message: Message): UiSubmit | undefined; extras?: TranscriptExtra[] } & TranscriptActions) {
   const rows: ReactNode[] = [];
   const pending = [...extras].sort((a, b) => a.at - b.at);
-  const flushBefore = (at: number) => { while (pending.length && pending[0].at <= at) { const extra = pending.shift()!; rows.push(<Fragment key={extra.key}>{extra.node}</Fragment>); } };
+  // The settled thread card placed last, until any other row follows it.
+  let folding: string | undefined;
+  const flushBefore = (at: number) => { while (pending.length && pending[0].at <= at) {
+    const extra = pending.shift()!;
+    rows.push(<Fragment key={extra.key}>{extra.node}</Fragment>);
+    folding = extra.returnsAs;
+  } };
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index];
     flushBefore(message.createdAt);
+    if (folding && outcomeWorkId(message) === folding) rows.pop();
+    folding = undefined;
     if (message.role === 'tool' && !standalone(message)) {
       const run = [message];
       // A thread that began between two results splits the trail so it sits where it started.

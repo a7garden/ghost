@@ -60,15 +60,19 @@ export function settingsRoster(ghosts: readonly Ghost[]): Ghost[] {
     .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.createdAt - b.createdAt);
 }
 
-export function GhostSettings({ onChat, onSelect, selectedGhostId }: {
+export function GhostSettings({ onChat, onSelect, selectedGhostId, createRequested = false, onCreateClosed }: {
   onChat(id: string): void;
   onSelect(id: string): void;
   selectedGhostId?: string;
+  createRequested?: boolean;
+  onCreateClosed?(): void;
 }) {
   const { store } = useHost();
   const { state } = useHostState(store);
   const ghosts = settingsRoster(state?.ghosts ?? []);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(createRequested);
+  useEffect(() => { if (createRequested) setCreating(true); }, [createRequested]);
+  const closeCreator = () => { setCreating(false); if (createRequested) onCreateClosed?.(); };
   const [query, setQuery] = useState('');
   const shown = ghosts.filter(ghost => ghost.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const selected = creating ? null : ghosts.find(ghost => ghost.id === selectedGhostId) ?? ghosts[0] ?? null;
@@ -81,7 +85,7 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId }: {
       </label>}
       <div className="roster" aria-label="설정할 Ghost">
         {shown.map(ghost => <button key={ghost.id} type="button" aria-pressed={!creating && ghost.id === selected?.id} className="roster__ghost"
-          title={ghost.name} data-state={ghost.state} onClick={() => { setCreating(false); onSelect(ghost.id); }}>
+          title={ghost.name} data-state={ghost.state} onClick={() => { closeCreator(); onSelect(ghost.id); }}>
           <span className="roster__portrait"><DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={30}/></span>
           <span className="roster__name">{ghost.name}</span>
           {ghost.isDefault && <Crown className="roster__crown" aria-label="메인"/>}
@@ -92,7 +96,7 @@ export function GhostSettings({ onChat, onSelect, selectedGhostId }: {
         </button>
       </div>
     </div>
-    {creating ? <GhostCreator onCancel={() => setCreating(false)} onCreated={id => { setCreating(false); onSelect(id); }}/>
+    {creating ? <GhostCreator onCancel={closeCreator} onCreated={id => { closeCreator(); onSelect(id); }}/>
       : selected && <GhostSheet key={selected.id} ghost={selected} onChat={() => onChat(selected.id)}/>}
   </section>;
 }

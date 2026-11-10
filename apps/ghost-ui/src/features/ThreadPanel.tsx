@@ -5,6 +5,8 @@ import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph } from '../components
 import { DotAvatar } from '../components/DotAvatar';
 import { LiveReply, Transcript } from '../components/TranscriptMessage';
 import { useHost } from '../host/context';
+import { HostError } from '../host/client';
+import { InlineError } from '../ui';
 import { DecisionCard } from './Decision';
 import { useConversationFeed } from './conversationFeed';
 import { liveWork, toneFor } from './ghostState';
@@ -31,6 +33,9 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
   const now = useNow();
   const [detail, setDetail] = useState<WorkDetail | null>(null);
   const [missing, setMissing] = useState(false);
+  /** The last read failed for another reason than not-found: the previous detail stays on screen. */
+  const [loadError, setLoadError] = useState('');
+  const [attempt, setAttempt] = useState(0);
   // The ledger row in the snapshot is current; the detail bundle adds children, decisions and effects.
   const work = state.works.find(item => item.id === workId) ?? detail?.work ?? null;
   useEffect(() => {
@@ -39,8 +44,13 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
     let latest = 0;
     const load = () => {
       const ticket = ++latest;
-      return client.work(workId).then(next => { if (alive && ticket === latest) { setDetail(next); setMissing(false); } })
-        .catch(() => { if (alive && ticket === latest) setMissing(true); });
+      return client.work(workId).then(next => { if (alive && ticket === latest) { setDetail(next); setMissing(false); setLoadError(''); } })
+        .catch((e: unknown) => {
+          if (!alive || ticket !== latest) return;
+          // Only the host saying the Work is gone means gone; a dropped connection is not.
+          if (e instanceof HostError && e.code === 'not_found') { setMissing(true); setLoadError(''); }
+          else setLoadError(e instanceof Error ? e.message : '스레드를 읽지 못했습니다.');
+        });
     };
     void load();
     const stop = store.onLedgerEvent(event => {
@@ -50,11 +60,12 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
       if (touched) void load();
     });
     return () => { alive = false; stop(); };
-  }, [client, store, workId]);
+  }, [client, store, workId, attempt]);
   const { feed, loading } = useConversationFeed(work?.conversationId ?? null);
   useEffect(() => {
-    // An open popover or dialog consumes Escape first (Radix marks it handled).
-    const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !closing && !event.defaultPrevented && !event.isComposing) onClose(); };
+    // An open popover or dialog consumes Escape first (Radix marks it handled); Escape while typing belongs to the field.
+    const editable = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+    const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !closing && !event.defaultPrevented && !event.isComposing && !editable(event.target)) onClose(); };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, [onClose, closing]);
@@ -79,6 +90,7 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
       {work && <button type="button" className="shell-icon-button" aria-label="맡긴 일 전체 화면" title="전체 화면" onClick={() => onOpenPage(work.id)}><ArrowUpRight aria-hidden="true"/></button>}
       <button type="button" className="shell-icon-button" aria-label="스레드 닫기" title="닫기" onClick={onClose}><X aria-hidden="true"/></button>
     </header>
+    {loadError && <InlineError className="mx-4 mb-2" onRetry={() => setAttempt(value => value + 1)} retryLabel="다시 시도">스레드를 새로 읽지 못했습니다 · {loadError}</InlineError>}
     {work && <div className="thread-panel__body">
       <div className="thread-panel__meta">
         <span className="work-head__who"><DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={16}/>{carrier}</span>

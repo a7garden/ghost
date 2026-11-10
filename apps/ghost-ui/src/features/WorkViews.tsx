@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Button, FormField, Page, PageHeader, InlineError, Input, SegmentedControl, SelectField, Textarea } from '../ui'
 import type { ExecutionTarget, State, Work } from '@ghost/contract';
 import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { PresenceAvatar, WorkLane } from '../components/agent';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Modal } from '../components/Modal';
 import { uiTerms } from '../uiText';
 import { ghostPresence, visibleGhosts } from './ghostState';
@@ -15,18 +16,23 @@ import { useProjectMentions } from '../components/composer/ProjectMentions';
 type WorkTab = 'active' | 'finished';
 
 /** 맡긴 일: every Work the host keeps as delegation trees — live first, then what settled. */
-export function WorkView({ state, navigate, filterGhostId }: {
+export function WorkView({ state, navigate, filterGhostId, createRequested = false, onCreateClosed }: {
   state: State;
   navigate: (path: string) => void;
   /** ?ghost= narrows the board to one assignee; null shows everyone. */
   filterGhostId: string | null;
+  /** ?new=1 opens 일 맡기기 on arrival, as the command palette asks. */
+  createRequested?: boolean;
+  /** Drops ?new=1 without a history entry once the creator closes or succeeds. */
+  onCreateClosed?(): void;
 }) {
   const { client } = useHost();
   const compact = useCompact();
   const now = useNow();
   const [tab, setTab] = useState<WorkTab>('active');
-  const [error, setError] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [cancelling, setCancelling] = useState<Work | null>(null);
+  const [creating, setCreating] = useState(createRequested);
+  useEffect(() => { if (createRequested) setCreating(true); }, [createRequested]);
   const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
   const settled = (work: Work) => TERMINAL_WORK_STATES.includes(work.state);
@@ -36,14 +42,13 @@ export function WorkView({ state, navigate, filterGhostId }: {
   const shown = new Set(inTab.map(work => work.id));
   const roots = inTab.filter(work => !work.parentId || !shown.has(work.parentId));
   const counts = { active: scoped.filter(work => !settled(work)).length, finished: scoped.filter(settled).length };
-  const cancel = (work: Work) => { setError(''); void client.send({ type: 'work.cancel', workId: work.id }).catch(e => setError(e instanceof Error ? e.message : '맡긴 일을 취소하지 못했습니다.')); };
   const lane = (work: Work) => {
     const children = inTab.filter(child => child.parentId === work.id);
     return <WorkLane key={work.id} work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'} needsOwner={waiting.has(work.id)} now={now}
       showGhost={!filterGhostId || work.ghostId !== filterGhostId}
       onOpen={() => navigate(`/work/${encodeURIComponent(work.id)}`)}
       action={work.state === 'running' || work.state === 'queued' || work.state === 'waiting'
-        ? <Button variant="ghost" size="sm" aria-label={`${work.title} 취소`} onClick={() => cancel(work)}>취소</Button> : undefined}
+        ? <Button variant="ghost" size="sm" aria-label={`${work.title} 취소`} onClick={() => setCancelling(work)}>취소</Button> : undefined}
       branch={children.length > 0 ? children.map(lane) : undefined}/>;
   };
   const ghosts = visibleGhosts(state.ghosts);
@@ -68,13 +73,25 @@ export function WorkView({ state, navigate, filterGhostId }: {
           </button>)}
         </div>}
     </div>
-    {error && <InlineError>{error}</InlineError>}
     {roots.length > 0
       ? <div className="lanes">{roots.map(lane)}</div>
       : <div className="calm"><p>{tab === 'active' ? '진행 중인 일 없음' : '끝난 일 없음'}</p></div>}
     {creating && <NewWorkModal state={state} defaultGhostId={filterGhostId && ghosts.some(ghost => ghost.id === filterGhostId) ? filterGhostId : ghosts.find(ghost => ghost.isDefault)?.id ?? ghosts[0]?.id ?? ''}
-      onClose={() => setCreating(false)} onCreated={id => { setCreating(false); navigate(`/work/${encodeURIComponent(id)}`); }}/>}
+      onClose={() => { setCreating(false); if (createRequested) onCreateClosed?.(); }}
+      onCreated={id => { setCreating(false); if (createRequested) onCreateClosed?.(); navigate(`/work/${encodeURIComponent(id)}`); }}/>}
+    {cancelling && <CancelWorkDialog work={cancelling} onCancel={() => client.send({ type: 'work.cancel', workId: cancelling.id })} onClose={() => setCancelling(null)}/>}
   </Page>;
+}
+
+/**
+ * Cancelling has no undo: the host stops the run, closes its pending decisions and cancels every
+ * live delegated Work beneath it, and a cancelled Work cannot be resumed.
+ */
+export function CancelWorkDialog({ work, onCancel, onClose }: { work: Work; onCancel(): Promise<unknown>; onClose(): void }) {
+  return <ConfirmDialog title="맡긴 일 취소" confirmLabel="일 취소" onConfirm={onCancel} onClose={onClose}>
+    <p className="m-0">「{work.title}」의 진행을 멈춥니다. 기다리던 확인 요청은 닫히고, 이 일이 위임한 일도 함께 취소됩니다.</p>
+    <p className="m-0">취소한 일은 다시 이어 갈 수 없습니다.</p>
+  </ConfirmDialog>;
 }
 
 /** 일 맡기기: one Ghost, what to do, how it is judged finished, and when it must be done. */

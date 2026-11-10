@@ -38,7 +38,7 @@
 .ghost-ui-input__actions button { min-height: 32px; height: auto; white-space: normal; overflow-wrap: anywhere; padding-block: 6px; max-width: 100%; }
 .ghost-ui-feedback { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.6; color: var(--ghost-ink2); overflow-wrap: anywhere; }
 .ghost-ui-feedback:empty { display: none; }
-.ghost-ui-feedback[role="alert"] { color: var(--ghost-danger); }
+.ghost-ui-feedback[role="alert"] { color: var(--ghost-danger-ink); }
 .ghost-ui-html { display: block; width: 100%; min-width: 0; height: 380px; resize: none; border: 1px solid var(--ghost-line-strong); border-radius: 8px; background: #fff; }
 .ghost-ui-source { margin: 0; padding: 12px; max-height: 480px; overflow: auto; border: 1px solid var(--ghost-line); border-radius: 8px; background: var(--ghost-inset); font-size: 12px; line-height: 1.6; white-space: pre; }
 .ghost-interactive :is(.ghost-ui-scroll, .ghost-ui-source, input[type="radio"]):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 3px; }

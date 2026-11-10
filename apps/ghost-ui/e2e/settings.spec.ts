@@ -88,7 +88,7 @@ test.describe('Ghost model route', () => {
       } else await route.continue();
     });
     await page.getByRole('button', { name: '1번 아래로', exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('검증용 저장 실패');
+    await expect(page.getByRole('region', { name: 'Ghost 설정' }).getByRole('status')).toContainText('검증용 저장 실패');
     expect((await storedGhost(page, ghostId)).fallbacks.map(ref => ref.model)).toEqual(['Beta', 'Gamma']);
     await expect(page.getByRole('button', { name: /^1번 대체 모델 선택:/ })).toContainText('Beta');
     await expect(page.getByRole('button', { name: '1번 아래로', exact: true })).toBeEnabled();

@@ -42,7 +42,7 @@ body :is([data-slot="select-trigger"], [data-slot="checkbox"])[aria-invalid="tru
 .ghost-form-field > label { font-weight: 500; }
 .ghost-form-field p { margin: 0; font-size: var(--text-caption); overflow-wrap: anywhere; }
 .ghost-form-field-help { color: var(--ghost-ink2); }
-.ghost-form-field-error { color: var(--ghost-danger); }
+.ghost-form-field-error { color: var(--ghost-danger-ink); }
 
 /* Text entry keeps a stable surface. Actions retain visible keyboard focus. */
 body :is(input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), textarea, [contenteditable="true"]):focus {

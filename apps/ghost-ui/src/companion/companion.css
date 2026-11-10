@@ -67,7 +67,7 @@
     background: var(--ghost-raised);
     box-shadow: var(--ghost-shadow-raised);
     color: var(--ghost-ink);
-    font-size: 11px;
+    font-size: var(--text-micro);
     font-weight: 500;
     line-height: 1.45;
     overflow-wrap: anywhere;
@@ -96,7 +96,7 @@
     border-radius: 6px;
     background: var(--ghost-surface);
     color: var(--ghost-danger-ink);
-    font-size: 10px;
+    font-size: var(--text-micro);
   }
   .desktop-avatar-settings { display: grid; gap: 24px; }
   .desktop-avatar-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; font-size: 14px; font-weight: 500; }

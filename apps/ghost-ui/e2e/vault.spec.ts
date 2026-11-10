@@ -83,6 +83,36 @@ test('the handoff completion button answers the question normally', async ({ pag
   await expect.poll(() => commands[0]).toMatchObject({ type: 'decision.resolve', outcome: 'answer', answer: '다 했어요' });
 });
 
+test('a browser approval requires two deliberate presses', async ({ page }) => {
+  const { baseUrl, defaultGhostId } = readRunState();
+  const decisionId = 'test-browser-approval';
+  const commands: CommandBody['command'][] = [];
+  await page.clock.install();
+  await page.route('**/api/state', async route => {
+    const response = await route.fetch();
+    const state = await response.json();
+    const ghost = state.ghosts.find((item: { id: string }) => item.id === defaultGhostId);
+    await route.fulfill({ response, json: { ...state, decisions: [{
+      id: decisionId, kind: 'approve_effect', ghostId: ghost.id, conversationId: ghost.directConversationId,
+      workId: null, effectId: null, state: 'pending', title: '브라우저 동작 승인', detail: '', options: [],
+      proposal: { url: 'https://example.test', element: { role: 'button', name: '제출' } },
+      answer: null, createdAt: Date.now(), resolvedAt: null,
+    }] } });
+  });
+  await page.route('**/api/commands', async route => {
+    commands.push((route.request().postDataJSON() as CommandBody).command);
+    await route.fulfill({ json: { ok: true } });
+  });
+  await page.goto(`${baseUrl}/#/inbox?decision=${decisionId}`);
+  await page.getByRole('button', { name: '승인', exact: true }).dblclick();
+  const confirm = page.getByRole('button', { name: '한 번 더 눌러 실행 승인' });
+  await expect(confirm).toBeVisible();
+  expect(commands).toEqual([]);
+  await page.clock.fastForward(450);
+  await confirm.click();
+  await expect.poll(() => commands).toEqual([{ type: 'decision.resolve', outcome: 'approve', decisionId }]);
+});
+
 test('editing an item keeps stored secrets out of the body and shows them as 저장됨', async ({ page }) => {
   const { baseUrl, researchGhostId, scribeGhostId } = readRunState();
   await mockVaultApi(page);

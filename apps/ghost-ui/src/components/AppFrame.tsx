@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { BriefcaseBusiness, Home, Inbox, Menu, PanelsTopLeft, Search, Settings } from 'lucide-react';
 import { CommandPalette, Dialog, DialogContent, DialogTitle, TitleBar, type CommandItem } from '../ui'
 import { routeLabels } from '../uiText';
+import { shortcut } from '../ui/keys';
 
 /**
  * The window: a quiet sidebar on the page tone, the destination on an inset sheet,
@@ -28,8 +29,8 @@ export function AppFrame({ desktop, macOSInset, location, island, sidebar, fill,
   children: ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const search = <button type="button" className="shell-search" aria-label="명령 검색" title="명령 검색 · ⌘K" onClick={() => onPaletteOpenChange(true)}>
-    <Search aria-hidden="true"/><span className="shell-search__label">검색</span><kbd>⌘K</kbd>
+  const search = <button type="button" className="shell-search" aria-label="명령 검색" title={`명령 검색 · ${shortcut('K')}`} onClick={() => onPaletteOpenChange(true)}>
+    <Search aria-hidden="true"/><span className="shell-search__label">검색</span><kbd>{shortcut('K')}</kbd>
   </button>;
   const destinations = [
     { id: 'home', path: '/', label: routeLabels.home, icon: Home },
@@ -67,6 +68,6 @@ export function AppFrame({ desktop, macOSInset, location, island, sidebar, fill,
       </DialogContent>
     </Dialog>}
     <CommandPalette items={commands} open={paletteOpen} onOpenChange={onPaletteOpenChange}
-      strings={{ ariaLabel: '명령', searchPlaceholder: 'Ghost, 화면, 프로젝트 검색…', emptyTitle: '일치하는 항목이 없습니다', emptyHint: '다른 이름이나 단어로 검색해 주세요.', closeLabel: '닫기' }}/>
+      strings={{ ariaLabel: '명령', searchPlaceholder: 'Ghost, 화면, 맡긴 일, 확인할 일 검색…', emptyTitle: '일치하는 항목이 없습니다', emptyHint: '다른 이름이나 단어로 검색해 주세요.', closeLabel: '닫기' }}/>
   </div>;
 }
