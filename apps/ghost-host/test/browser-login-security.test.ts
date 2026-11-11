@@ -123,15 +123,11 @@ chromeTest("closing a native window without a successful submit never saves a pa
   const ref={ghostId:"native-close",conversationId:"native-close"};
   const item=vault.saveLogin(ref.ghostId,{origin:"https://example.com",username:"owner",password:"existing-real-password"});
   const browser=new AgentBrowser({executable:executable!,chrome},root,(session,login)=>{const stored=vault.saveLogin(session.ghostId,login);saved.push(stored.id);return stored.id;});
-  let native:BrowserCdp|undefined,stop:(()=>void)|undefined;
+  let native:FixtureChannel|undefined,stop:(()=>void)|undefined;
   try {
     await browser.run(ref,["open","https://example.com/"]); await browser.handoff(ref,"https://example.com/");
     await browser.run(ref,["eval",fixture]);
-    const endpoint=await browser.run(ref,["get","cdp-url"]);
-    if (!endpoint.data || typeof endpoint.data!=="object" || !("cdpUrl" in endpoint.data) || typeof endpoint.data.cdpUrl!=="string") throw new Error("Missing test endpoint");
-    native=await BrowserCdp.connect(endpoint.data.cdpUrl);
-    const closed=Promise.withResolvers<void>();
-    native.onDisconnect(()=>closed.resolve());
+    native=await fixtureChannel(browser,ref);
     const key=async(key:string)=>{await browser.input(ref,{type:"key",event:"down",key,code:key});await browser.input(ref,{type:"key",event:"up",key,code:key});};
     await key("Tab"); await browser.input(ref,{type:"text",text:"owner"});
     await key("Tab"); await browser.input(ref,{type:"text",text:"partial-not-a-completed-password"});
@@ -142,13 +138,13 @@ chromeTest("closing a native window without a successful submit never saves a pa
       if (closing && !browser.sessions().find(session=>session.conversationId===ref.conversationId)?.headed && (event.type==="frame" || event.type==="end")) resumed.resolve();
     });
     closing=true;
-    await native.request("Browser.close").catch(error=>{expect(error).toMatchObject({code:"unavailable"});});
-    await closed.promise;
+    // Close the observed window, not the entire browser/observer transport.
+    expect(await native.cdp.request("Target.closeTarget",{targetId:native.targetId})).toMatchObject({success:true});
     await resumed.promise; // Actual window-close/resume event, not a guessed timer delay.
     expect(saved).toEqual([]);
     expect(vault.reveal(ref.ghostId,item.id,"password")).toBe("existing-real-password");
     expect(vault.history(item.id)).toHaveLength(1);
-  } finally {stop?.();native?.close();await browser.shutdown();vault.close();}
+  } finally {stop?.();native?.cdp.close();await browser.shutdown();vault.close();}
 },90_000);
 
 for (const lane of ["api","native"] as const) for (const scenario of [
