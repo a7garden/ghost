@@ -13,6 +13,7 @@ import { BrowserLiveView } from './BrowserLiveView';
 import { BrowserPaneContext } from './BrowserPaneContext';
 import { GhostDesignEditor } from './GhostDesign';
 import { ThreadPanel } from './ThreadPanel';
+import { GhostAgenda } from './GhostAgenda';
 import { useConversationFeed } from './conversationFeed';
 import { conversationStarters } from './conversationSuggestions';
 import { profileSummary } from './profileSummary';
@@ -158,6 +159,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
             onOpenWork={openThread} onOpenConversation={id => navigate(`/ghosts/${encodeURIComponent(ghost.id)}${id === ghost.directConversationId ? '' : `?conversation=${encodeURIComponent(id)}`}`)}
             onOpenAll={() => navigate(`/work?ghost=${encodeURIComponent(ghost.id)}`)}/>
         </div>
+        <GhostAgenda ghost={ghost} state={state} navigate={navigate}/>
       </>}
       composer={<>
         <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>

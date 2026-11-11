@@ -37,7 +37,7 @@ Respect reduced motion: rings, sheens and streaming carets stop.
 | Destination | Primary purpose |
 | --- | --- |
 | 홈 | Hand-off, decisions, live and recent Work |
-| 확인할 일 | Every pending decision, host notifications, settled decisions |
+| 확인할 일 | Every decision waiting on the owner as a triage list (recommended answer, hand to the main, put off), what the main is deciding, folded notifications and settled decisions |
 | 맡긴 일 | Delegation trees by state and assignee; detail with lifecycle, decisions, result, delegation map and effects |
 | Conversation | Continuous transcript, tool trails, anchored composer, scoped model choice |
 | 프로젝트 | Document spaces and pages |

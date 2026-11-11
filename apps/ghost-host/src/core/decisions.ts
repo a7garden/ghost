@@ -298,9 +298,37 @@ export class Decisions {
     return true;
   }
 
-  /** The main may decide this one for the owner, not only comment on it. */
+  /**
+   * The main may decide this one for the owner, not only comment on it. The owner handing it over overrides a
+   * per-Ghost owner-only setting for that one decision, never reversibility.
+   */
   private delegable(decision: Decision): boolean {
-    return this.mainReviews(decision) && this.automatic(decision) && this.reversible(decision);
+    return this.mainReviews(decision) && this.reversible(decision) && (this.automatic(decision) || this.handedOver(decision));
+  }
+
+  private handedOver(decision: Decision): boolean {
+    return typeof reviewOf(decision.proposal)?.delegatedAt === "number";
+  }
+
+  /**
+   * The owner hands one decision to the main Ghost to settle now (2026-11-11), so a quick pass through
+   * 확인할 일 need not stop on it. Only what the main could settle anyway: reversible, another Ghost's,
+   * delegation not turned off. Must run inside a ledger transaction; the wake follows the commit.
+   */
+  delegate(decisionId: string): Decision {
+    const decision = this.ledger.decision(decisionId);
+    if (decision.state !== "pending") throw conflict(`decision is already ${decision.state}`);
+    const main = this.ledger.defaultGhost();
+    if (!main || main.state !== "active") throw conflict("there is no active main Ghost to hand this to");
+    if (main.id === decision.ghostId) throw conflict("the main Ghost cannot settle its own requests");
+    if (!this.mainReviews(decision)) throw conflict("handing decisions to the main Ghost is turned off, or this one is the owner's alone");
+    if (!this.reversible(decision)) throw conflict("only reversible decisions can be handed to the main Ghost");
+    if (this.handedOver(decision)) return decision;
+    const review: DecisionReview = { expiresAt: null, ...reviewOf(decision.proposal), delegatedAt: Date.now() };
+    const handed: Decision = { ...decision, proposal: { ...decision.proposal, review } };
+    this.ledger.putDecision(handed);
+    this.ledger.afterCommit(() => void this.askMainToSettle(handed).catch((error) => this.core.log("delegated decision wake failed", String(error))));
+    return handed;
   }
 
   /** The main Ghost decides for the owner, or leaves its view on the card. Only the main's tool calls this. */
@@ -310,7 +338,10 @@ export class Decisions {
     if (decision.ghostId === mainId) throw conflict("the main Ghost cannot settle its own requests");
     if (!this.mainReviews(decision)) throw conflict("the owner decides this one themselves");
     if (choice.outcome !== "leave" && !this.delegable(decision)) throw conflict("only the owner can settle this decision; leave your view with outcome leave");
-    const review: DecisionReview = { expiresAt: null, ...reviewOf(decision.proposal), mainNote: choice.note.slice(0, 1000) };
+    const { delegatedAt, ...prior } = reviewOf(decision.proposal) ?? { expiresAt: null };
+    // Leaving a handed-over decision gives it back: it returns to the owner's queue with the main's note.
+    const kept = choice.outcome !== "leave" && delegatedAt !== undefined ? { delegatedAt } : {};
+    const review: DecisionReview = { ...prior, ...kept, mainNote: choice.note.slice(0, 1000) };
     const noted: Decision = { ...decision, proposal: { ...decision.proposal, review } };
     this.ledger.tx(() => this.ledger.putDecision(noted));
     if (choice.outcome === "leave") return "Left for the owner with your note on the card.";
@@ -340,7 +371,9 @@ export class Decisions {
         decision = fresh;
       }
       try {
-        await this.askMain(decision);
+        // A hand-over whose wake was lost (crash after commit) is retried with the same request id.
+        if (this.handedOver(decision)) await this.askMainToSettle(decision);
+        else await this.askMain(decision);
       } catch (error) {
         this.core.log(`decision ${decision.id} main review wake failed`, String(error));
       }
@@ -376,6 +409,24 @@ export class Decisions {
         : `Check it against what you know (the owner's earlier words, the recipient, the amount, the files, the result against its brief). If there is something the owner should know to decide — a mismatch, a risk, a confirmation that it matches — call decision_settle with outcome "leave" and one or two sentences in the owner's language, ending with what you recommend. Then reply only [quiet].`,
     ].filter(Boolean);
     await this.core.engine.submit(main.directConversationId, { text: lines.join("\n\n"), origin: "schedule", requestId: `decision-review:${decision.id}` });
+  }
+
+  /** Wake the main to settle a decision the owner handed over; it leaves it back only when it truly cannot judge. */
+  private async askMainToSettle(decision: Decision) {
+    const main = this.ledger.defaultGhost();
+    const current = this.ledger.decision(decision.id);
+    if (!main || current.state !== "pending" || !this.handedOver(current)) return;
+    const asker = this.ledger.ghost(current.ghostId).name;
+    const review = reviewOf(current.proposal);
+    const lines = [
+      `[Decision handed over] The owner handed ${asker}'s decision to you to settle now. It is reversible.`,
+      `Decision ${current.id}: ${current.title}`,
+      current.detail.slice(0, 4000),
+      current.options.length ? `Options: ${current.options.join(" | ")}` : "",
+      review?.answer ? `${asker} recommends: ${review.answer}` : "",
+      `Decide it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. Use outcome "leave" only if you cannot judge it at all; that gives it back to the owner with your note. Then reply only [quiet].`,
+    ].filter(Boolean);
+    await this.core.engine.submit(main.directConversationId, { text: lines.join("\n\n"), origin: "schedule", requestId: `decision-delegate:${current.id}` });
   }
 
   /** The vault write is a journaled effect: a crash mid-write becomes an unknown the owner reconciles, never a second write. */

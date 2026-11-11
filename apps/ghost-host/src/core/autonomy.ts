@@ -66,6 +66,7 @@ const localDay = (at: number) => new Date(at).toLocaleDateString("en-CA");
 const stamp = (at: number) =>
   new Date(at).toLocaleString("en-CA", { weekday: "short", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 const spread = (ghostId: string) => Number.parseInt(digestOf(ghostId).slice(0, 8), 16) % FIRST_SPREAD;
+const isMain = (ghost: Ghost) => ghost.isDefault && ghost.state === "active" && ghost.deletedAt === null;
 const live = (work: Work) => !["done", "failed", "cancelled"].includes(work.state);
 
 /**
@@ -123,6 +124,33 @@ export class Autonomy {
   /** The owner-visible plans of every listed Ghost. */
   view(): AutonomyPlan[] {
     return this.ghosts().map((ghost) => this.public(this.load(ghost.id)));
+  }
+
+  /** Whether the owner left this Ghost's self-directed drive on. */
+  enabled(ghostId: string): boolean {
+    return this.load(ghostId).enabled;
+  }
+
+  /**
+   * Whether this Ghost is offered plan_next at all: the active main Ghost plans teammates even with its own
+   * drive off; any other Ghost only while its own drive is on. The tool grant and the prompt both ask here,
+   * so they cannot drift from `authorize`.
+   */
+  offersPlanning(ghost: Ghost): boolean {
+    // 2026.11.11 : 메인이라도 자기 구동이 꺼지고 구동이 켜진 동료도 없으면 plan_next 는 어느 대상이든 거절된다.
+    // 그때 도구를 주면 첫 호출이 거절되는 막다른 길이 메인에게만 남는다.
+    return this.enabled(ghost.id) || this.plansTeam(ghost) && this.teammatesOn(ghost) > 0;
+  }
+
+  /** Active teammates whose drive is on — the only ones plan_next can target for the main Ghost. */
+  teammatesOn(ghost: Ghost): number {
+    return this.core.ledger.ghosts()
+      .filter((item) => item.id !== ghost.id && item.deletedAt === null && item.state === "active" && this.enabled(item.id)).length;
+  }
+
+  /** Whether this Ghost plans its teammates' looks: the active main Ghost only. */
+  plansTeam(ghost: Ghost): boolean {
+    return isMain(ghost);
   }
 
   setEnabled(ghostId: string, enabled: boolean): AutonomyPlan {
@@ -203,7 +231,7 @@ export class Autonomy {
     const caller = this.core.ledger.ghost(callerId);
     const target = this.core.ledger.ghost(targetId);
     if (target.id !== caller.id) {
-      if (!caller.isDefault || caller.state !== "active" || caller.deletedAt !== null) throw forbidden("only the main Ghost plans another Ghost's next look");
+      if (!isMain(caller)) throw forbidden("only the main Ghost plans another Ghost's next look");
       if (target.isDefault) throw forbidden("the main Ghost plans its own time");
     }
     if (target.deletedAt !== null || target.state !== "active") throw conflict(`${target.name} is not active`);

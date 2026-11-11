@@ -16,6 +16,7 @@ import { usePreferences } from './pets/preferences';
 import { HostProvider, useHost } from './host/context';
 import { useHostState } from './host/store';
 import { liveWorks, pendingDecisions, visibleGhosts } from './features/ghostState';
+import { waitingDecisions } from './components/WaitingLine';
 import { decisionHeading } from './features/decisionText';
 import { isMac } from './ui/keys';
 import { hostStatus } from './features/hostStatus';
@@ -161,7 +162,7 @@ function Shell() {
   const go = (target: string) => () => navigate(target);
   const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
   // Searchable by title: what waits on the owner opens in 확인할 일, live Work opens its own page.
-  const decisionItems: CommandItem[] = state ? pendingDecisions(state).sort((a, b) => a.createdAt - b.createdAt).map(decision => ({
+  const decisionItems: CommandItem[] = state ? waitingDecisions(state).map(decision => ({
     id: `decision:${decision.id}`, label: decisionHeading(decision, state), group: uiTerms.inbox,
     description: ghostName(decision.ghostId), keywords: [ghostName(decision.ghostId)],
     onSelect: go(`/inbox?decision=${encodeURIComponent(decision.id)}`),
@@ -247,7 +248,7 @@ function Shell() {
           {runtimeDown && state && section !== 'home' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate}/>}
-            {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost}/>}
+            {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost} openWorkspace={() => navigate('/workspace')}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}

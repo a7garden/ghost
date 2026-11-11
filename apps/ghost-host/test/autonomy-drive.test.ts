@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Core } from "../src/core/core.ts";
 import { DAILY_WAKES, repositoryHead } from "../src/core/autonomy.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
+import { createToolSet } from "../src/tools/index.ts";
 import { FakeEngine, MemoryArtifacts, MemorySecrets, noSandbox, tempDir } from "./support.ts";
 
 const MINUTE = 60_000;
@@ -283,4 +284,34 @@ test("after a restart, self-directed turns that are still running keep their slo
   f.setBusy(f.mate.id, false);
   await f.core.autonomy.tick(now + 11 * MINUTE);
   expect(f.wakes(third.id)).toHaveLength(1);
+});
+
+test("a Ghost whose drive is off is never told to plan_next, and the main Ghost keeps plan_next only while someone can be planned", () => {
+  const f = fixture();
+  const tools = createToolSet({ core: f.core, sandbox: noSandbox as never, memory: null, documents: null, skills: null });
+  const direct = (ghostId: string) => f.ledger.conversation(f.ledger.ghost(ghostId).directConversationId);
+  expect(tools.instructionsFor(direct(f.mate.id), f.ledger.ghost(f.mate.id), null)).toContain("call plan_next once");
+
+  f.core.autonomy.setEnabled(f.mate.id, false);
+  const mate = tools.instructionsFor(direct(f.mate.id), f.ledger.ghost(f.mate.id), null);
+  expect(mate).not.toContain("call plan_next once");
+  expect(mate).toContain("You have no plan_next");
+  const main = tools.instructionsFor(direct(f.main.id), f.ledger.ghost(f.main.id), null);
+  expect(main).toContain("call plan_next once");
+  expect(main).toContain("each wake shows the team's plans");
+  // 꺼진 동료 이름은 싣지 않는다 — 동료를 켜고 끌 때마다 메인의 프롬프트 캐시가 깨진다.
+  expect(main).not.toContain("Mate");
+
+  // 메인도 꺼지고 구동이 켜진 동료도 없으면 plan_next 는 어디에도 쓸 수 없다: 도구도 약속도 없다.
+  f.core.autonomy.setEnabled(f.main.id, false);
+  const idle = tools.instructionsFor(direct(f.main.id), f.ledger.ghost(f.main.id), null);
+  expect(f.core.autonomy.offersPlanning(f.ledger.ghost(f.main.id))).toBe(false);
+  expect(idle).toContain("You have no plan_next");
+  expect(idle).not.toContain("each wake shows the team's plans");
+
+  f.core.autonomy.setEnabled(f.mate.id, true);
+  const planner = tools.instructionsFor(direct(f.main.id), f.ledger.ghost(f.main.id), null);
+  expect(f.core.autonomy.offersPlanning(f.ledger.ghost(f.main.id))).toBe(true);
+  expect(planner).toContain("never for yourself");
+  expect(planner).not.toContain("each wake shows the team's plans");
 });

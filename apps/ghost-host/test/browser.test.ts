@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { BROWSER_TOOLS, VaultItem, parse } from "@ghost/contract";
@@ -31,8 +31,24 @@ function snapshotFixture(role: string, name: string) {
     ] },
   };
 }
+/**
+ * Windows cannot run a shebang script, so one compiled launcher per test process imports the fake beside it.
+ * 2026.11.11 : Mac 전용이던 가짜 실행 파일을 Windows 에서도 돌도록 했다 — 이 PC 에서도 브라우저 시험을 돌린다.
+ */
+let windowsLauncher: string | null = null;
+function launcher() {
+  if (windowsLauncher) return windowsLauncher;
+  const dir = tempDir();
+  writeFileSync(join(dir, "launcher.ts"), `import { dirname, join } from "node:path";
+await import(join(dirname(process.execPath), "fake-browser.mjs"));
+`);
+  const built = Bun.spawnSync([process.execPath, "build", "--compile", join(dir, "launcher.ts"), "--outfile", join(dir, "launcher.exe")], { stdout: "ignore", stderr: "pipe" });
+  if (built.exitCode !== 0) throw new Error(`launcher build failed: ${built.stderr}`);
+  return windowsLauncher = join(dir, "launcher.exe");
+}
 function fakeExecutable(root: string) {
-  const path = join(root, "fake-browser");
+  const windows = process.platform === "win32";
+  const path = join(root, windows ? "fake-browser.mjs" : "fake-browser");
   writeFileSync(path, `#!${process.execPath}
 import { appendFileSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, truncateSync } from "node:fs";
 const root = ${JSON.stringify(root)};
@@ -87,7 +103,9 @@ if (command[0] === "upload" || command[0] === "download") {
 process.stdout.write(JSON.stringify({ success: true, data, error: null }));
 `);
   chmodSync(path, 0o700);
-  return path;
+  if (!windows) return path;
+  copyFileSync(launcher(), join(root, "fake-browser.exe"));
+  return join(root, "fake-browser.exe");
 }
 interface Recorded { argv: string[]; env: { HOME: string; PATH: string; OWNER_SECRET?: string; keyLength: number } }
 function records(root: string): Recorded[] {
@@ -518,10 +536,12 @@ describe("browser tools", () => {
       for (const [name, args] of [["browser_open", { url: "https://example.com/" }], ["browser_snapshot", { interactive: true, selector: "main" }], ["browser_read", { ref: "@e1" }], ["browser_scroll", { direction: "down" }], ["browser_navigate", { action: "back" }], ["browser_tabs", { action: "list" }], ["browser_tabs", { action: "switch", index: 0 }], ["browser_wait", { text: "ready" }]] as const) expect((await f.call(name, args)).isError).toBeFalsy();
       expect(f.ledger.db.query("SELECT count(*) AS n FROM effects").get()).toEqual({ n: 0 });
       const screenshot = await f.call("browser_screenshot", { full_page: true }); expect(screenshot.content?.[0]?.type).toBe("image");
+      await f.call("browser_snapshot");
       for (const [name, args] of [["browser_click", { ref: "@e1" }], ["browser_fill", { ref: "@e1", text: "hello" }], ["browser_type", { ref: "@e1", text: "there" }], ["browser_press", { key: "Enter" }], ["browser_select", { ref: "@e1", values: ["a", "b"] }], ["browser_check", { ref: "@e1", checked: false }], ["browser_tabs", { action: "new", url: "https://example.com/" }], ["browser_tabs", { action: "close", index: 0 }]] as const) {
         expect((await f.call(name, args)).isError).toBeFalsy();
       }
       expect(f.ledger.db.query("SELECT count(*) AS n FROM effects WHERE state = 'done'").get()).toEqual({ n: 8 });
+      await f.call("browser_snapshot");
       await f.call("browser_click", { ref: "@e1" }, "pi-browser", "replay");
       const before = commands(f.root).length;
       await f.call("browser_click", { ref: "@e1" }, "pi-browser", "replay"); expect(commands(f.root)).toHaveLength(before);
@@ -544,6 +564,7 @@ describe("browser tools", () => {
       return original(session, argv, options);
     });
     try {
+      await f.call("browser_snapshot");
       await f.call("browser_click", { ref: "@e1" }, "pi-browser", "effect-proof");
       expect(f.ledger.effectByCall(f.direct.id, "effect-proof")?.state).toBe("done");
     } finally { spy.mockRestore(); await f.browser.shutdown(); }
@@ -608,6 +629,7 @@ describe("browser tools", () => {
   test("proposed click runs after approval and refuses changed URL or expired proposal", async () => {
     const f = fixture();
     try {
+      await f.call("browser_snapshot");
       await f.call("browser_propose", { ref: "@e1", title: "Submit", reason: "Send this" });
       let decision = f.ledger.pendingDecisions()[0]!;
       expect(commands(f.root).some((a) => a[0] === "click")).toBe(false);
@@ -724,6 +746,7 @@ describe("browser tools", () => {
   test("approved proposals re-read role/name and refused approved fills are denied, not unknown", async () => {
     const f = fixture();
     try {
+      await f.call("browser_snapshot");
       await f.call("browser_propose", { ref: "@e1", title: "Proceed", reason: "Reviewed action" });
       const proposal = f.ledger.pendingDecisions()[0]!;
       expect(proposal.proposal?.element).toEqual({ role: "link", name: "More information" });

@@ -14,7 +14,8 @@ import { useHost } from '../host/context';
 import { browserHandoffProposal, decisionChip, decisionHeading, emptySecureForm, goalProposal, handoffDoneAnswer,
   secureFormBody, secureFormProposal, type SecureFormValues } from './decisionText';
 import { goalError } from './goals/goalError';
-import { toneFor } from './ghostState';
+import { pendingDecisions, toneFor } from './ghostState';
+import { canHandOver, deferDecision, ownerOrder, useLater } from './decisionQueue';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { isMac, modKey } from '../ui/keys';
@@ -544,8 +545,8 @@ function activityConfigOf(value: Record<string, unknown>): ActivityConfig | null
 export function chatDecisions(state: State, ghostId: string, conversationId: string | null): Decision[] {
   const roots = new Set(conversationId ? state.works.filter(work => work.originConversationId === conversationId && !work.parentId).map(work => work.id) : []);
   const threads = new Set(state.works.filter(work => roots.has(work.rootId) || roots.has(work.id)).map(work => work.id));
-  return state.decisions
-    .filter(decision => decision.state === 'pending' && (decision.ghostId === ghostId || (decision.workId !== null && threads.has(decision.workId))))
+  return pendingDecisions(state)
+    .filter(decision => decision.ghostId === ghostId || (decision.workId !== null && threads.has(decision.workId)))
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
@@ -563,10 +564,15 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
   decisions?: Decision[];
   onOpenWork?(workId: string): void;
 }) {
-  const pending = decisions ?? state.decisions.filter(decision => decision.state === 'pending').sort((a, b) => a.createdAt - b.createdAt);
+  const { client } = useHost();
+  const later = useLater();
+  // 미룬 것은 이 기기에서 맨 뒤로 — 넘기고 나면 같은 자리에 다음 결정이 올라온다.
+  const pending = ownerOrder(decisions ?? pendingDecisions(state), later);
   const [index, setIndex] = useState(() => Math.max(0, pending.findIndex(decision => decision.id === focusId)));
   const [focusNext, setFocusNext] = useState(false);
-  const [settled, setSettled] = useState<{ id: string; kind: Decision['kind']; outcome: 'approve' | 'deny' | 'answer' } | null>(null);
+  const [error, setError] = useState('');
+  /** What the owner just did; `stays` when the decision still waits (deferred), so it still counts. */
+  const [settled, setSettled] = useState<{ id: string; text: string; stays?: boolean } | null>(null);
   const focusPosition = pending.findIndex(decision => decision.id === focusId);
   useEffect(() => { if (focusPosition >= 0) setIndex(focusPosition); }, [focusId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -576,10 +582,24 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
   }, [settled]);
   // The deck stays mounted while its acknowledgement shows, so the last resolution is still announced.
   if (!pending.length && !settled) return null;
-  const rest = settled ? pending.filter(decision => decision.id !== settled.id).length : 0;
-  const ack = settled ? `${resolvedText(settled.kind, settled.outcome)} · ${rest ? `다음 확인 ${rest}건` : '남은 확인 없음'}` : '';
+  const rest = settled ? pending.filter(decision => settled.stays || decision.id !== settled.id).length : 0;
+  const ack = settled ? `${settled.text} · ${rest ? `다음 확인 ${rest}건` : '남은 확인 없음'}` : '';
   const at = Math.min(index, Math.max(0, pending.length - 1));
   const current = pending[at] as Decision | undefined;
+  const canLater = !!current && pending.length > 1 && pending.indexOf(current) < pending.length - 1;
+  const deferCurrent = () => {
+    if (!current || !canLater) return;
+    deferDecision(current.id); setSettled({ id: current.id, text: '나중에 보도록 뒤로 보냈습니다', stays: true }); setFocusNext(true);
+  };
+  const handOverCurrent = () => {
+    if (!current) return;
+    const id = current.id;
+    setError('');
+    void client.send({ type: 'decision.delegate', decisionId: id })
+      .then(() => setSettled({ id, text: '메인 Ghost에게 맡겼습니다' }))
+      .catch(e => setError(e instanceof Error ? e.message : '메인 Ghost에게 맡기지 못했습니다.'));
+    setFocusNext(true);
+  };
   const ghostName = state.ghosts.find(ghost => ghost.id === current?.ghostId)?.name ?? 'Ghost';
   const workTitle = current?.workId ? state.works.find(work => work.id === current.workId)?.title : undefined;
   const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
@@ -589,6 +609,8 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
     // Only the card itself or the deck's own controls page; a focused preview, media or scroll box keeps its arrows.
     const target = event.target as Element;
     if (!(target.matches('.decision') || target.closest('.deck__head, .deck__index'))) return;
+    // L: 나중에 (자리로 읽어 한글 자판 ㅣ 에서도 된다).
+    if (event.code === 'KeyL' && !event.repeat) { event.preventDefault(); deferCurrent(); return; }
     const step = event.key === 'ArrowLeft' || event.key === '[' ? -1 : event.key === 'ArrowRight' || event.key === ']' ? 1 : 0;
     const next = at + step;
     if (!step || next < 0 || next >= pending.length) return;
@@ -598,6 +620,10 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
     {/* Docked, a single card speaks for itself; the head appears only to browse several. */}
     {current && (!docked || pending.length > 1) && <header className="deck__head">
       <h2 className="section-title">확인 필요<span className="count">{pending.length}</span></h2>
+      <div className="deck__quick">
+        {canHandOver(current, state) && <button type="button" title="메인 Ghost가 대신 정합니다. 되돌릴 수 있는 결정만 맡길 수 있습니다." onClick={handOverCurrent}>메인에게 맡기기</button>}
+        {canLater && <button type="button" title="나중에 (L)" aria-keyshortcuts="L" onClick={deferCurrent}>나중에</button>}
+      </div>
       {pending.length > 1 && <div className="deck__nav">
         <span className="tabular" aria-live="polite">{at + 1} / {pending.length}</span>
         <button type="button" aria-label="이전 항목" title="이전 항목 (←)" aria-keyshortcuts="ArrowLeft" disabled={at === 0} onClick={() => setIndex(at - 1)}><ChevronLeft size={15}/></button>
@@ -615,9 +641,10 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
       <div className="deck__top" key={current.id}>
           <DecisionCard decision={current} ghostName={ghostName} workTitle={workTitle} autoFocus={focusNext || current.id === focusId}
             onOpenWork={onOpenWork ?? (id => navigate(`/work/${encodeURIComponent(id)}`))}
-            onResolved={outcome => { setSettled({ id: current.id, kind: current.kind, outcome }); setFocusNext(true); }}/>
+            onResolved={outcome => { setSettled({ id: current.id, text: resolvedText(current.kind, outcome) }); setFocusNext(true); }}/>
       </div>
     </div>}
+    {error && <InlineError>{error}</InlineError>}
     {/* Always in the same place, so a screen reader hears each change; empty, it takes no room. */}
     <p className="deck__ack" role="status" aria-live="polite">{ack}</p>
   </section>;

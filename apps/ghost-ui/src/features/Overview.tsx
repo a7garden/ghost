@@ -11,6 +11,7 @@ import { useNow } from './time';
 import { uiTerms } from '../uiText';
 import { useHost } from '../host/context';
 import { NotificationRow } from '../components/NotificationRow';
+import { WaitingLine } from '../components/WaitingLine';
 import { notificationRoute } from './notificationRoute';
 
 const RECENT_MS = 3 * 86_400_000;
@@ -55,6 +56,8 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
       </span>
       <ChevronRight size={18} aria-hidden="true"/>
     </button>}
+    {/* 휴대폰: 답할 것이 있으면 맨 위에 한 줄씩 — 판단이 동작(맡기기)보다 먼저다. */}
+    <WaitingLine state={state} now={now} navigate={navigate} className="min-[56rem]:hidden"/>
     <HandoffComposer ghosts={ghosts} navigate={navigate}/>
     {messages.length > 0 && <section className="home__band" aria-labelledby="home-messages">
       <header className="home__band-head"><h2 id="home-messages" className="section-title">새 대화</h2></header>
@@ -69,7 +72,8 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
             .catch(reason => setError(reason instanceof Error ? reason.message : '읽음 표시를 저장하지 못했습니다.'));
         }}/>)}</ul>
     </section>}
-    <DecisionDeck state={state} navigate={navigate}/>
+    {/* 넓은 화면은 홈에서 바로 답한다. 휴대폰은 위의 기다림 줄이 「확인할 일」로 잇는다. */}
+    <div className="hidden min-[56rem]:contents"><DecisionDeck state={state} navigate={navigate}/></div>
     {roots.length > 0 && <section className="home__band" aria-labelledby="home-live">
       <header className="home__band-head">
         <h2 id="home-live" className="section-title">진행 중<span className="count">{live.length}</span></h2>
@@ -79,6 +83,8 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
       {roots.length > LIVE_LANES && <button type="button" className="link-quiet justify-self-start" aria-label={`진행 중인 일 ${roots.length - LIVE_LANES}개 더 보기`}
         onClick={() => navigate('/work')}>+{roots.length - LIVE_LANES}<ArrowRight size={13} aria-hidden="true"/></button>}
     </section>}
+    {/* 휴대폰에는 「맡긴 일」 탭이 없다 — 진행 중인 일이 없어도 목록으로 가는 길을 남긴다. */}
+    {!roots.length && <button type="button" className="link-quiet justify-self-start min-[56rem]:hidden" onClick={() => navigate('/work')}>{uiTerms.work} 전체<ArrowRight size={13} aria-hidden="true"/></button>}
     {recent.length > 0 && <section className="home__band" aria-labelledby="home-recent">
       <header className="home__band-head"><h2 id="home-recent" className="section-title">최근 끝난 일</h2></header>
       <div className="lanes">{recent.map(work => <WorkLane key={work.id} work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'} needsOwner={false} now={now}

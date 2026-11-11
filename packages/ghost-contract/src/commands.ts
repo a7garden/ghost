@@ -76,6 +76,8 @@ export const Command = Type.Union([
     outcome: Type.Union([Type.Literal("approve"), Type.Literal("deny"), Type.Literal("answer")]),
     answer: Type.Optional(Text(8192)),
   }),
+  /** The owner hands a reversible decision to the main Ghost to settle now, instead of answering it (2026-11-11). */
+  command("decision.delegate", { decisionId: Id }),
 
   // Ghosts
   command("ghost.create", {
@@ -186,7 +188,7 @@ export const Command = Type.Union([
   command("avatar.delete", { avatarId: Id }),
 
   // Settings and providers
-  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy) }),
+  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy) }),
   command("provider.upsert", {
     id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
     kind: ProviderKind,

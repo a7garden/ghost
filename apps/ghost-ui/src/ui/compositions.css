@@ -215,6 +215,10 @@
 .ghost-settings-row__label { display: block; color: var(--ghost-ink); font-size: var(--text-ui); font-weight: 500; }
 .ghost-settings-row__description { margin: 3px 0 0; color: var(--ghost-ink2); font-size: var(--text-caption); }
 .ghost-settings-row__control { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: var(--ghost-layout-field-gap); }
+/* 설명 아래로 넓은 조작을 펼치는 줄 (목록 · 그리드). */
+.ghost-settings-row--stack { grid-template-columns: minmax(0, 1fr); row-gap: 10px; }
+.ghost-settings-row--stack > .ghost-settings-row__control { justify-content: stretch; }
+.ghost-settings-row--stack > .ghost-settings-row__control > * { flex: 1; min-width: 0; }
 @container ghost-settings (max-width: 700px) {
   .ghost-settings__layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .ghost-settings__navigation { padding: 12px; border-right: 0; border-bottom: 1px solid var(--ghost-line); }
@@ -286,24 +290,29 @@
 .ghost-composer__footer-slot { flex: 1; }
 .composer-confirmation { color: var(--ghost-signal-ink); font-size: var(--text-caption); font-weight: 500; animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .ghost-composer__footer-actions { justify-content: flex-end; }
-/* While the Ghost responds a light travels around the composer: a crisp comet on the edge and a soft glow
-   behind it, over a faint steady ring so the busy state reads even where the comet is not. */
-.ghost-composer[data-running] .ghost-composer__surface { box-shadow: 0 0 0 1px color-mix(in srgb, var(--ghost-signal) 22%, transparent), var(--shadow-raised); }
+/* While the Ghost responds two soft arcs circle the composer at an even pace, over a faint steady ring so the
+   busy state reads everywhere, and the glow behind them breathes.
+   2026.11.11 : 가속·감속 곡선 하나짜리 혜성이 울컥거리며 돌았다. 마주 보는 긴 꼬리 두 개를 일정 속도로 돌리고 빛은 숨 쉬듯 바꾼다. */
+.ghost-composer[data-running] .ghost-composer__surface { box-shadow: 0 0 0 1px color-mix(in srgb, var(--ghost-signal) 18%, transparent), var(--shadow-raised); }
 .ghost-composer[data-running] .ghost-composer__surface::before,
 .ghost-composer[data-running] .ghost-composer__surface::after {
   content: ''; position: absolute; inset: -1.5px; z-index: -1; border-radius: inherit; pointer-events: none;
   background: conic-gradient(from var(--composer-angle, 0deg),
-    transparent 0 52%, color-mix(in srgb, var(--ghost-signal) 35%, transparent) 70%, var(--ghost-signal) 86%,
-    color-mix(in srgb, var(--ghost-signal) 55%, white) 90%, transparent 96%);
-  animation: composer-orbit 2.8s cubic-bezier(.45, .05, .55, .95) infinite;
+    transparent 0%, color-mix(in srgb, var(--ghost-signal) 20%, transparent) 18%, color-mix(in srgb, var(--ghost-signal) 85%, transparent) 38%, transparent 50%,
+    color-mix(in srgb, var(--ghost-signal) 20%, transparent) 68%, color-mix(in srgb, var(--ghost-signal) 85%, transparent) 88%, transparent 100%);
+  animation: composer-orbit 4.2s linear infinite;
 }
 .ghost-composer[data-running] .ghost-composer__surface::before {
   padding: 1.5px;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
 }
-.ghost-composer[data-running] .ghost-composer__surface::after { inset: -2px; z-index: -2; filter: blur(8px); opacity: .35; }
+.ghost-composer[data-running] .ghost-composer__surface::after {
+  inset: -3px; z-index: -2; filter: blur(12px);
+  animation: composer-orbit 4.2s linear infinite, composer-breathe 2.4s ease-in-out infinite;
+}
 @keyframes composer-orbit { to { --composer-angle: 360deg; } }
+@keyframes composer-breathe { 0%, 100% { opacity: .18; } 50% { opacity: .42; } }
 @supports (corner-shape: superellipse(1.1)) { .ghost-composer__surface { corner-shape: superellipse(1.1); } }
 
 /* Conversation --------------------------------------------------------- */
@@ -411,7 +420,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .ghost-conversation-activity__chevron { transition: none; }
-  .ghost-composer[data-running] .ghost-composer__surface::before { animation: none; background: var(--ghost-signal); }
+  .ghost-composer[data-running] .ghost-composer__surface::before { animation: none; background: color-mix(in srgb, var(--ghost-signal) 70%, transparent); }
   .ghost-composer[data-running] .ghost-composer__surface::after { display: none; }
 }
 @media (forced-colors: active) {

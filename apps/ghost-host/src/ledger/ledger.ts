@@ -699,6 +699,13 @@ export class Ledger {
         decision.resolvedAt,
       );
     this.emit({ type: "decision", decision });
+    // 처리된 질문의 알림은 읽은 것이다. 답을 기다리는 동안 화면은 이 알림을 카드로 대신 보여 주므로,
+    // 그대로 두면 답한 뒤에 「새 소식」으로 다시 떠오른다(2026.11.11).
+    if (decision.state !== "pending") {
+      const unread = (this.db.query("SELECT * FROM notifications WHERE decision_id = ? AND read_at IS NULL").all(decision.id) as Row[]).map(toNotification);
+      const at = decision.resolvedAt ?? Date.now();
+      for (const notification of unread) this.putNotification({ ...notification, readAt: at });
+    }
   }
 
   // Effects
@@ -1002,6 +1009,8 @@ export class Ledger {
     return {
       defaultModel: this.setting<ModelRef | null>("defaultModel", null),
       reviewModel: this.setting<ModelRef | null>("reviewModel", null),
+      defaultFallbacks: this.setting<ModelRef[]>("defaultFallbacks", []),
+      noFallbackGhosts: this.setting<string[]>("noFallbackGhosts", []),
       memoryModel: this.setting<ModelRef | null>("memoryModel", null),
       providers: this.providers(),
       ownerLanguage: this.setting<string>("ownerLanguage", DEFAULT_OWNER_LANGUAGE),

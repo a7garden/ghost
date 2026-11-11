@@ -116,6 +116,10 @@ button.ghost-sheet__portrait:focus-visible { outline: 2px solid var(--ghost-ink3
 .model-route__actions button:hover:not(:disabled) { color: var(--ghost-ink); background: var(--ghost-hover); }
 .model-route__actions button:disabled { opacity: .3; cursor: default; }
 .model-route__actions svg { width: 14px; height: 14px; }
+.model-route__follow { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 8px -16px 0; padding: 12px 16px; border-top: 1px solid var(--ghost-line); color: var(--ghost-ink); font-size: var(--text-ui); cursor: pointer; }
+.model-route__follow > span { display: grid; min-width: 0; gap: 2px; }
+.model-route__follow small { color: var(--ghost-ink3); font-size: var(--text-caption); }
+.model-route__follow + .model-route__hint { margin-top: 0; }
 .model-route__hint { margin: 8px -16px 0; padding: 12px 16px; border-top: 1px solid var(--ghost-line); color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.6; }
 
 .model-menu { width: min(380px, calc(100vw - 32px)); padding: 6px; }
@@ -145,6 +149,17 @@ button.ghost-sheet__portrait:focus-visible { outline: 2px solid var(--ghost-ink3
   color: var(--ghost-ink); font: var(--text-body)/1.7 var(--font-sans); field-sizing: content;
 }
 .persona-note textarea::placeholder { color: var(--ghost-ink4); }
+.model-route__step[data-inherited] { opacity: .7; }
+.model-route__inherited { color: var(--ghost-ink2); font-size: var(--text-ui); }
+.persona-note__text { margin: 0; padding: 14px 16px 4px; color: var(--ghost-ink); font: var(--text-body)/1.7 var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; }
+.persona-note[data-reading] .persona-note__actions { align-items: center; justify-content: space-between; animation: none; }
+.persona-note__hint { min-width: 0; color: var(--ghost-ink3); font-size: var(--text-caption); }
+.persona-note__edit, .persona-note__cancel {
+  display: inline-flex; flex: none; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--ghost-line-strong); border-radius: var(--radius-pill);
+  color: var(--ghost-ink2); background: var(--ghost-surface); font: 600 var(--text-caption)/1 var(--font-sans); cursor: pointer;
+}
+.persona-note__edit:hover, .persona-note__cancel:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
+.persona-note__edit svg { width: 13px; height: 13px; }
 .persona-note__actions { display: flex; justify-content: flex-end; gap: 6px; padding: 0 10px 10px; animation: rise-in var(--duration-fast) var(--ease-enter) both; }
 .persona-note__revert { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: var(--radius-pill); color: var(--ghost-ink3); background: none; cursor: pointer; }
 .persona-note__revert:hover { color: var(--ghost-ink); background: var(--ghost-hover); }

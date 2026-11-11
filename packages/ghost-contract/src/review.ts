@@ -12,6 +12,8 @@ export type DecisionReview = {
   expiresAt: number | null;
   /** The main Ghost's view of it, in the owner's language, when it left the decision to the owner. */
   mainNote?: string;
+  /** When the owner handed it to the main Ghost to settle; cleared when the main leaves it back with a note. */
+  delegatedAt?: number;
   /** Set when someone other than the owner settled it. */
   resolvedBy?: "main" | "timeout";
 };

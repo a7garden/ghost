@@ -118,6 +118,7 @@ describe("checkout approvals", () => {
     const f = browserFixture();
     f.browser.url = "https://shop.example/checkout";
     f.browser.facts = { origin: "https://shop.example", checkout: true, signal: "url:/checkout", amount: "12300", currency: "KRW" };
+    await f.call("browser_snapshot");
     await f.call("browser_propose", { ref: "@e1", title: "주문", reason: "생수 주문" });
     let decision = f.ledger.pendingDecisions()[0]!;
     expect(decision.detail).toContain("상점: shop.example · 금액: 12,300원");

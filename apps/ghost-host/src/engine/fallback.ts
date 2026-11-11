@@ -2,7 +2,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry";
 import { defineDoc } from "@earendil-works/pi-durable";
-import type { Ghost, ModelRef } from "@ghost/contract";
+import type { Ghost, ModelRef, Settings } from "@ghost/contract";
 
 /** A restart must not continue the same exhausted generation twice. */
 export const FallbackDoc = defineDoc({
@@ -27,10 +27,21 @@ export function fallbackReason(message: AssistantMessage): string | null {
     : null;
 }
 
+/**
+ * A Ghost's own fallbacks, or the owner's default list when it has none and the owner did not turn fallback off for it.
+ * 2026.11.11 : 기본 대체 모델을 더했다. Ghost 마다 같은 목록을 되풀이해 적지 않도록, 자기 목록이 비었을 때만 따른다.
+ * 빈 목록이 늘 「기본을 따름」이면 한 공급자에 묶어 둔 Ghost 도 사용 한도에서 기본 대체 모델로 넘어가 대화가 다른 공급자로 간다 —
+ * 그래서 「대체 모델 없음」을 noFallbackGhosts 로 따로 고른다.
+ */
+export function fallbackListFor(ghost: Ghost, settings: Pick<Settings, "defaultFallbacks" | "noFallbackGhosts">): ModelRef[] {
+  if (ghost.fallbacks.length > 0) return ghost.fallbacks;
+  return settings.noFallbackGhosts?.includes(ghost.id) ? [] : (settings.defaultFallbacks ?? []);
+}
+
 /** The primary and duplicate entries cannot create a fallback cycle. */
-export function fallbackModels(ghost: Ghost, primary: ModelRef): ModelRef[] {
+export function fallbackModels(ghost: Ghost, primary: ModelRef, settings: Pick<Settings, "defaultFallbacks" | "noFallbackGhosts"> = {}): ModelRef[] {
   const seen = new Set([`${primary.provider}/${primary.model}`]);
-  return ghost.fallbacks.filter((model) => {
+  return fallbackListFor(ghost, settings).filter((model) => {
     const key = `${model.provider}/${model.model}`;
     if (seen.has(key)) return false;
     seen.add(key);

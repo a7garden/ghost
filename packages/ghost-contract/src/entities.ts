@@ -739,6 +739,10 @@ export const DEFAULT_OWNER_LANGUAGE = "ko";
 export const Settings = Type.Object({
   defaultModel: nullable(ModelRef),
   reviewModel: nullable(ModelRef),
+  /** Fallback models for every Ghost that has none of its own; empty means no fallback. */
+  defaultFallbacks: Type.Optional(FallbackList),
+  /** Ghosts the owner set to run without any fallback even when defaultFallbacks is set. */
+  noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })),
   /** Model for Host memory consolidation; null follows defaultModel. */
   memoryModel: Type.Optional(nullable(ModelRef)),
   providers: Type.Array(Provider, { maxItems: 64 }),

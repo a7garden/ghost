@@ -121,8 +121,16 @@ Feature-level compositions:
   `⌘↵` approves; 수정 요청, reconciliation and document rejection open a reason
   field first (`D`). Loss-speaking commands, browser commit clicks and protected
   card fills still require two deliberate presses within 4s.
-  Multiple requests have a named queue (a horizontal strip in chat, a side list
-  on wide 확인할 일). ←/→ browse; resolution leaves an acknowledgement.
+  Multiple requests have a named queue (a horizontal strip in chat and on home).
+  ←/→ browse, `L` puts the current one off; resolution leaves an acknowledgement.
+- **확인할 일 is a triage list** (2026-11-11), not the card deck: one row per decision
+  (title, Ghost · kind · age, the main's note) with its quick actions — the recommended
+  answer, 메인에게 (hand a reversible one to the main Ghost) and 나중에 (to the back,
+  on this device only). A row opens the full card in place; `?decision=` opens it.
+  추천대로 처리 settles every recommended, reversible decision after one checklist
+  confirmation; vault forms, browser handoffs and loss-speaking commands never join it.
+  What the main is deciding sits apart and leaves every pending count until it comes
+  back. 소식 and 처리한 결정 fold below.
   Chat docks the same component above the composer; long evidence scrolls separately
   from the title and answer controls. Automatic-settlement conditions stay beside the
   response. Exceptionally short windows can scroll the whole request; secure forms

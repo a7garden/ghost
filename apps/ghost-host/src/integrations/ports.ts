@@ -254,6 +254,8 @@ export interface BrowserPort {
   endHandoff(session: BrowserSessionRef): Promise<BrowserHandoffEnd>;
   /** Close the conversation's session; the Ghost's login state is saved. */
   close(session: BrowserSessionRef): Promise<void>;
+  /** Keep sessions alive and out of eviction while `held` says an owner approval or handoff still needs them. */
+  retainWhile?(held: (session: BrowserSessionRef) => boolean): void;
   /** Stop every session and the egress proxy (host shutdown). */
   shutdown(): Promise<void>;
 }

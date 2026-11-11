@@ -20,8 +20,14 @@ const DENIED_BUNDLES: Record<string, true> = {
   "dev.projectoxi.ghost.control": true,
   "com.apple.keychainaccess": true,
   "com.apple.Passwords": true,
+  // 2026.11.11 : Apple 것만 막혀 있었다. 흔히 쓰는 다른 비밀번호 관리 앱도 같은 까닭으로 막는다.
+  "com.1password.1password": true,
+  "com.agilebits.onepassword7": true,
+  "com.bitwarden.desktop": true,
+  "org.keepassxc.keepassxc": true,
+  "in.sinew.Enpass-Desktop": true,
 };
-const DENIED_NAMES = /^(?:ghost|ghost control|keychain access|키체인 접근|passwords|암호)$/i;
+const DENIED_NAMES = /^(?:ghost|ghost control|keychain access|키체인 접근|passwords|암호|1password(?: 7)?|bitwarden|keepassxc|enpass)$/i;
 // A conservative heuristic, not an authorization/security boundary (same words as the browser).
 const HIGH_IMPACT = /(?:^|[^\p{L}\p{N}])(?:pay|buy|purchase|order|checkout|delete|remove|send|transfer|submit|unsubscribe)(?=$|[^\p{L}\p{N}])|결제|구매|주문|삭제|송금|이체|전송|보내기|제출|탈퇴|해지/iu;
 const SECRET_ROLE = /password|secure.?text|protected/i;

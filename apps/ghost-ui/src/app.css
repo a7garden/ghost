@@ -112,9 +112,26 @@ body {
 .deck__nav button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: none; cursor: pointer; }
 .deck__nav button:hover:not(:disabled) { color: var(--ghost-ink); background: var(--ghost-hover); }
 .deck__nav button:disabled { opacity: .35; cursor: default; }
+.deck__quick { display: inline-flex; margin-left: auto; gap: 2px; }
+.deck__quick button { min-height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: none; font: inherit; font-size: var(--text-caption); cursor: pointer; }
+.deck__quick button:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
 .deck__body { display: grid; min-width: 0; gap: 12px; }
 .deck__top { min-width: 0; animation: rise-in var(--duration-base) var(--ease-enter) both; }
 .deck__ack { margin: 0; color: var(--ghost-ink2); font-size: var(--text-caption); }
+
+/* 기다림 줄 (휴대폰 홈) — 답할 것이 있나를 한 줄씩. 상자 없이 정렬과 간격으로 묶는다. */
+.waiting-line { display: grid; gap: 6px; }
+.waiting-line > h2 { padding-inline: 4px; }
+.waiting-line ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.waiting-line button { display: flex; width: 100%; min-height: 56px; align-items: center; gap: 12px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--ghost-line); background: none; color: var(--ghost-ink); text-align: left; font: inherit; cursor: pointer; }
+.waiting-line li:last-child button { border-bottom: 0; }
+.waiting-line button:active { background: var(--ghost-hover); }
+.waiting-line button > svg { width: 16px; height: 16px; flex: none; color: var(--ghost-ink3); }
+.waiting-line .dot-avatar { flex: none; }
+.waiting-line__copy { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.waiting-line__question { overflow: hidden; font-size: var(--text-bodyLg); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.waiting-line__meta { overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
+.waiting-line__rest { min-height: 44px !important; justify-content: flex-start; color: var(--ghost-ink2) !important; font-size: var(--text-ui) !important; }
 .deck__ack:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .deck__index { display: flex; min-width: 0; gap: 4px; margin: 0; padding: 0 0 4px; overflow-x: auto; list-style: none; }
 .deck__index li { flex: 0 0 auto; max-width: 240px; }
@@ -323,6 +340,41 @@ body {
 .feed__meta { display: flex; flex: none; align-items: center; gap: 8px; padding-top: 1px; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .feed__meta [data-state="approved"], .feed__meta [data-state="answered"] { color: var(--ghost-success-ink); }
 .feed__meta [data-state="denied"] { color: var(--ghost-danger-ink); }
+
+/* 확인할 일: 한 줄에 무엇 · 누가 · 추천과 빠른 처리. 줄을 누르면 카드가 그 자리에 펼쳐진다 (2026.11.11). */
+.queue { display: grid; gap: 1px; margin: 0; padding: 4px; list-style: none; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
+.queue[data-quiet] { background: none; box-shadow: none; padding: 0; }
+.queue__item { min-width: 0; border-radius: var(--radius-lg); }
+.queue__item[data-open] { background: var(--ghost-hover); }
+.queue__row { display: flex; min-width: 0; align-items: center; gap: 8px; padding-right: 8px; }
+.queue__main { display: flex; min-width: 0; flex: 1; align-items: flex-start; gap: 12px; padding: 10px 6px 10px 12px; border: 0; border-radius: var(--radius-lg); color: var(--ghost-ink); background: none; text-align: left; font: inherit; cursor: pointer; }
+.queue__item:not([data-open]) .queue__main:hover { background: var(--ghost-hover); }
+.queue__copy { display: grid; min-width: 0; gap: 2px; }
+.queue__title { overflow: hidden; font-size: var(--text-ui); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.queue__meta { color: var(--ghost-ink3); font-size: var(--text-caption); }
+.queue__note { overflow: hidden; color: var(--ghost-ink2); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
+.queue__actions { display: flex; flex: none; align-items: center; gap: 4px; }
+.queue__actions button { max-width: 180px; }
+.queue__actions button > span, .queue__actions button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue__card { padding: 0 8px 8px; }
+@media (max-width: 640px) {
+  .queue__row { flex-wrap: wrap; padding: 0 8px 8px 0; }
+  .queue__main { flex-basis: 100%; }
+  .queue__actions { flex-wrap: wrap; padding-left: 44px; }
+  .queue__title { white-space: normal; overflow-wrap: anywhere; }
+}
+.queue-batch { display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
+.queue-batch__note { margin: 0; color: var(--ghost-ink2); font-size: var(--text-caption); }
+.queue-batch__list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.queue-batch__list li { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.queue-batch__title { min-width: 0; flex: 1; overflow: hidden; font-size: var(--text-ui); text-overflow: ellipsis; white-space: nowrap; }
+.queue-batch__answer { flex: none; max-width: 40%; overflow: hidden; color: var(--ghost-ink2); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
+.queue-batch__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.queue-fold { display: grid; gap: 8px; }
+.queue-fold > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; }
+.queue-fold > summary::-webkit-details-marker { display: none; }
+.queue-fold > summary svg { width: 15px; height: 15px; color: var(--ghost-ink3); transition: transform var(--duration-base) var(--ease-enter); }
+.queue-fold[open] > summary svg { transform: rotate(180deg); }
 .feed__dot { position: absolute; top: 18px; left: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--ghost-signal); }
 .feed li:not([data-unread]) .feed__title { color: var(--ghost-ink2); font-weight: 500; }
 @media (max-width: 34rem) { .feed__meta > span { display: none; } }
@@ -347,6 +399,17 @@ body {
 .chat-threads:hover { color: var(--ghost-ink); box-shadow: var(--shadow-raised); }
 .chat-threads svg { width: 15px; height: 15px; }
 .chat-threads[data-live] > span { color: var(--ghost-signal-ink); }
+/* 예약은 스레드 버튼 바로 밑에 같은 꼴로 둔다 — 「이 Ghost 가 앞으로 할 일」이 「하고 있는 일」 옆에 있어야 한다. */
+.chat-agenda { top: 46px; }
+.agenda-note { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; padding: 6px 8px; border-radius: var(--radius-control); color: var(--ghost-ink2); background: var(--ghost-hover); font-size: var(--text-caption); }
+.agenda-note svg { width: 13px; height: 13px; flex: none; }
+.agenda-row { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 4px 6px 8px; border-radius: var(--radius-control); }
+.agenda-row:hover { background: var(--ghost-hover); }
+.agenda-row[data-paused] { opacity: .6; }
+.agenda-row__title { margin: 0; overflow: hidden; color: var(--ghost-ink); font-size: var(--text-ui); text-overflow: ellipsis; white-space: nowrap; }
+.agenda-row__meta { display: flex; flex-wrap: wrap; gap: 0 8px; margin: 2px 0 0; color: var(--ghost-ink3); font-size: var(--text-micro); }
+.agenda-row[data-kind="plan"] .agenda-row__title { color: var(--ghost-ink2); font-style: italic; }
+.agenda-row .shell-icon-button { flex: none; }
 .menu-heading { margin: 0; padding: 10px 8px 4px; color: var(--ghost-ink3); font-size: var(--text-micro); font-weight: 600; }
 
 .reasoning { min-width: 0; margin-bottom: 10px; color: var(--ghost-ink3); font-size: var(--text-caption); }
@@ -591,5 +654,7 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 
 }
 
-/* 퇴근 중에는 Ghost 가 스스로 일하지 않는다는 것이 한눈에 보이도록 원버튼을 주의 색으로. */
-.shell-search[data-duty="off"] { color: var(--ghost-warning); background: var(--ghost-warning-tint); }
+/* 근무 중에는 Ghost 가 스스로 일하고 있다는 것이 보이도록 원버튼에 색을 얹고, 퇴근하면 색을 빼 쉬는 상태로 둔다.
+   2026.11.11 : 퇴근을 주의 색으로 칠했더니 쉬는 쪽이 더 눈에 띄었다. 켜진 쪽에 색이 있어야 한다는 의견으로 뒤집었다. */
+.shell-search[data-duty="on"] { color: var(--ghost-success-ink); background: var(--ghost-success-tint); }
+.shell-search[data-duty="on"]:hover { background: color-mix(in srgb, var(--ghost-success) 18%, transparent); }

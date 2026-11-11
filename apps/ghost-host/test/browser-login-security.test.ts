@@ -242,6 +242,22 @@ for (const lane of ["api","native"] as const) for (const scenario of [
   } finally {native?.close();await browser.shutdown();vault.close();}
 },90_000);
 
+chromeTest("real Chrome API: an owner code typed into a box read as username keeps that tab's pixels private until its URL changes",async()=>{
+  const root=tempDir(),ref={ghostId:"owner-code-box",conversationId:"owner-code-box"};
+  const browser=new AgentBrowser({executable:executable!,chrome},root,()=>{});
+  try {
+    await browser.run(ref,["open","https://example.com/"]);
+    await browser.run(ref,["eval",`document.body.innerHTML='<form><input id=code type=tel autocomplete=off></form>'; "ready"`]);
+    expect((await browser.run(ref,["screenshot"])).ok).toBe(true);
+    await browser.input(ref,{type:"key",event:"down",key:"Tab",code:"Tab"});
+    await browser.input(ref,{type:"key",event:"up",key:"Tab",code:"Tab"});
+    await browser.input(ref,{type:"text",text:"4821"});
+    await expect(browser.run(ref,["screenshot"])).rejects.toMatchObject({code:"forbidden"});
+    await browser.run(ref,["eval",`history.pushState({},'','/after-code');"ready"`]);
+    expect((await browser.run(ref,["screenshot"])).ok).toBe(true);
+  } finally {await browser.shutdown();}
+},90_000);
+
 for (const context of ["iframe","closed-shadow"] as const) chromeTest(`real Chrome API: whole PAN paste stays private with ${context} focus missing from root metadata`,async()=>{
   const root=tempDir(),saved:unknown[]=[];
   const ref={ghostId:`detached-${context}`,conversationId:`detached-${context}`};

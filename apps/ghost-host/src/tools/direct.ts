@@ -56,7 +56,13 @@ export function createDirectTools(core: Core): Extension {
       try {
         const scope = requireAllowed(core, api, "work_create");
         // 퇴근 중에는 스스로 새 일을 시작하지 않는다. 소유자가 시킨 일은 막지 않는다.
-        if (args.initiative && !core.duty.onDuty()) throw forbidden("the owner is off duty: do not start new Work on your own until they are back. Record what you would do with plan_next instead.");
+        // 2026.11.11 : 「plan_next 로 남겨라」는 그 도구가 없는 Ghost(구동 꺼짐)에게는 막다른 안내였다.
+        if (args.initiative && !core.duty.onDuty()) {
+          // plan_next 는 직접 대화에서만, 그리고 그 Ghost 가 받았을 때만 쓸 수 있다. 아니면 막다른 안내가 된다.
+          const canPlan = scope.conversation.kind === "direct" && core.autonomy.enabled(scope.ghost.id);
+          const planning = canPlan ? "Record what you would do with plan_next instead." : "Tell the owner what you would do instead.";
+          throw forbidden(`the owner is off duty: do not start new Work on your own until they are back. ${planning}`);
+        }
         const ghostId = args.ghost_id ?? scope.ghost.id;
         const id = idFor(scope.conversation.id, api.callId);
         // Refused before the Work exists, so a stale milestone never leaves an unlinked Work behind; a replay finds its Work.

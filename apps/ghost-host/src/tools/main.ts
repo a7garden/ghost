@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import { ADAPTATION_MAX_CHARS, DESKTOP_TOOLS, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
+import { fallbackListFor } from "../engine/fallback.ts";
 import type { Core } from "../core/core.ts";
 import { conflict, forbidden, invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
@@ -9,7 +10,11 @@ import { errorResult, scopeOf, type Scope } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
-/** The target's full configuration, structured so the caller can inspect and edit it faithfully. */
+/**
+ * The target's full configuration, structured so the caller can inspect and edit it faithfully.
+ * `fallbacks` is the Ghost's own list; `fallbacksInUse` is what actually runs: its own list, else the owner's
+ * default list unless the owner chose no fallback for this Ghost.
+ */
 function renderGhost(core: Core, ghost: Ghost): string {
   return JSON.stringify(
     {
@@ -21,6 +26,7 @@ function renderGhost(core: Core, ghost: Ghost): string {
       tools: ghost.tools,
       hostExecution: ghost.hostExecution ?? false,
       fallbacks: ghost.fallbacks,
+      fallbacksInUse: fallbackListFor(ghost, core.ledger.settings()),
       skills: ghost.skills,
       persona: ghost.persona,
       notes: core.adaptations.get(ghost.id)?.notes ?? "",
@@ -216,7 +222,8 @@ export function createMainTools(core: Core): Extension {
   const decisionSettle = defineTool({
     name: "decision_settle",
     description:
-      "Act on another Ghost's decision that arrives as a [Decision review] message. A reversible one you may approve, deny or answer for the owner; on any one you may leave your view for the owner (outcome leave). " +
+      "Act on another Ghost's decision that arrives as a [Decision review] or [Decision handed over] message. A reversible one you may approve, deny or answer for the owner; on any one you may leave your view for the owner (outcome leave). " +
+      "A handed-over decision is one the owner asked you to settle: decide it, and leave it only if you cannot judge it at all. " +
       "Write note in the owner's language: what you decided or found and what you recommend, one or two sentences. Main Ghost only; the Host refuses to settle anything that is not reversible.",
     parameters: Type.Object({
       decision_id: Type.String({ minLength: 1, maxLength: 128 }),
