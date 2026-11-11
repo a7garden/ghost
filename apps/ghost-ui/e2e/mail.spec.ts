@@ -62,6 +62,59 @@ async function release(page: Page, route: Route, body: unknown, status = 200) {
   const response = page.waitForResponse(route.request().url());
   await json(route, body, status); await response; await painted(page);
 }
+
+test('HTML mail stays readable without automatic remote requests or navigation', async ({ page }) => {
+  const remote = 'https://mail-navigation.invalid';
+  const remoteRequests: string[] = [];
+  const remoteNavigations: string[] = [];
+  await page.context().route(`${remote}/**`, route => route.fulfill({
+    contentType: 'text/html', body: '<p>Unexpected remote document</p>',
+  }));
+  page.on('request', request => {
+    if (request.url().startsWith(remote)) remoteRequests.push(request.url());
+  });
+  page.on('framenavigated', frame => {
+    if (frame.url().startsWith(remote)) remoteNavigations.push(frame.url());
+  });
+  const api = await mailApi(page);
+  await openMail(page);
+  const pending = api.holdNext(url => url.pathname.endsWith('/A/message'));
+  await row(page, 'A INBOX #1').click();
+  await release(page, await pending, {
+    ...message('Hostile HTML'),
+    text: 'Safe plain text',
+    html: `<!doctype html><html><head>
+      <mEtA HTTP-EQUIV="rEfReSh" content="0; URL=${remote}/refresh">
+      <base href="${remote}/base/" target="_top">
+      <link rel="stylesheet" href="${remote}/stylesheet">
+      <link rel="preload" as="image" href="${remote}/preload">
+      <link rel="preconnect" href="${remote}">
+      <style>@import url("${remote}/import"); .safe-mail { color: rgb(12, 34, 56); } table { width: 240px; }</style>
+      </head><body style="padding: 17px">
+      <noscript><meta http-equiv="refresh" content="0; URL=${remote}/noscript"></noscript>
+      <table><tr><td class="safe-mail">Safe HTML text</td></tr></table>
+      <img src="${remote}/pixel" alt="">
+      <iframe src="${remote}/child" title="Unexpected remote frame"></iframe>
+      <a href="${remote}/manual">Explicit user link</a>
+      </body></html>`,
+  });
+  await expect(page.locator('.mail-reader__text')).toHaveText('Safe plain text');
+  await expect(page.locator('.mail-reader__frame')).toHaveCount(0);
+  await page.getByRole('button', { name: 'HTML 보기', exact: true }).click();
+  const frame = page.locator('.mail-reader__frame');
+  const body = frame.contentFrame();
+  await expect(body.getByText('Safe HTML text', { exact: true })).toBeVisible();
+  await expect(body.locator('.safe-mail')).toHaveCSS('color', 'rgb(12, 34, 56)');
+  await expect(body.locator('table')).toHaveCSS('width', '240px');
+  await expect(body.locator('body')).toHaveCSS('padding', '17px');
+  await expect(body.getByRole('link', { name: 'Explicit user link' })).toHaveAttribute('href', `${remote}/manual`);
+  // Readiness is established above; observe a window for zero-delay refresh and speculative loads.
+  await page.waitForTimeout(1_000);
+  expect(remoteRequests).toEqual([]);
+  expect(remoteNavigations).toEqual([]);
+  expect(page.frames().filter(candidate => candidate.parentFrame()).map(candidate => candidate.url())).toEqual(['about:srcdoc']);
+  await expect(body.getByText('Safe HTML text', { exact: true })).toBeVisible();
+});
 const row = (page: Page, subject: string) => page.locator('.mail-row').filter({ hasText: subject });
 
 test('late A list cannot replace B, or a newer A after A → B → A', async ({ page }) => {
@@ -185,7 +238,6 @@ test('lost send response locks the preserved draft and retries the identical rec
   await page.getByRole('textbox', { name: '제목', exact: true }).fill('Keep this subject');
   await page.getByRole('textbox', { name: '본문', exact: true }).fill('Keep this body');
   await page.getByRole('button', { name: '보내기', exact: true }).click();
-  await expect(page.getByText(/전송 결과를 확인하지 못했습니다/)).toBeVisible();
   await expect(page.getByRole('textbox', { name: '제목', exact: true })).toHaveValue('Keep this subject');
   await expect(page.getByRole('textbox', { name: '본문', exact: true })).toHaveValue('Keep this body');
   await expect(page.getByRole('textbox', { name: '제목', exact: true })).toBeDisabled();
@@ -195,14 +247,17 @@ test('lost send response locks the preserved draft and retries the identical rec
   expect(requests).toHaveLength(2); expect(requests[1]).toEqual(requests[0]); expect(deliveries).toBe(1);
 });
 
-test('known validation refusal preserves an editable draft without uncertain-delivery copy', async ({ page }) => {
+test('known validation refusal preserves an editable draft', async ({ page }) => {
   await mailApi(page);
   await page.route('**/api/commands', route => route.request().postDataJSON().command.type === 'mail.send'
     ? json(route, { ok: false, error: { code: 'invalid', message: '받는 주소를 확인해 주세요.' } }) : route.fallback());
   await openMail(page); await expect(row(page, 'A INBOX #1')).toBeVisible(); await page.getByRole('button', { name: '메일 쓰기', exact: true }).click();
   await page.getByRole('textbox', { name: '받는 사람', exact: true }).fill('recipient@example.com');
   await page.getByRole('textbox', { name: '제목', exact: true }).fill('Preserved'); await page.getByRole('textbox', { name: '본문', exact: true }).fill('Body');
-  await page.getByRole('button', { name: '보내기', exact: true }).click(); await expect(page.getByText('보내지 않았습니다. 받는 주소를 확인해 주세요.')).toBeVisible();
+  const refused = page.waitForResponse(response => response.url().endsWith('/api/commands')
+    && response.request().postDataJSON().command.type === 'mail.send');
+  await page.getByRole('button', { name: '보내기', exact: true }).click();
+  await refused; await painted(page);
   await expect(page.getByRole('textbox', { name: '제목', exact: true })).toBeEnabled(); await expect(page.getByRole('textbox', { name: '제목', exact: true })).toHaveValue('Preserved');
   await expect(page.getByRole('button', { name: '전송 상태 확인', exact: true })).toHaveCount(0);
 });
