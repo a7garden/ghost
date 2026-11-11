@@ -38,6 +38,9 @@ describe('vaultWriteBody', () => {
     expect(vaultWriteBody({ ...base, kind: 'card', cardNumber: '4242', cardExpiry: '12/28' }, 'create')).toEqual({ error: '카드 번호와 유효기간, CVC, 이름을 모두 입력해 주세요.' });
     expect(vaultWriteBody({ ...base, kind: 'contact' }, 'create')).toEqual({ error: '한 항목 이상 입력해 주세요.' });
     expect(vaultWriteBody({ ...base, kind: 'secret' }, 'create')).toEqual({ error: '값을 입력해 주세요.' });
+    expect(vaultWriteBody({ ...base, kind: 'api' }, 'create')).toEqual({ error: 'https://로 시작하는 주소를 입력해 주세요.' });
+    expect(vaultWriteBody({ ...base, kind: 'api', origin: 'http://openapi.example.com', value: 'k' }, 'create')).toEqual({ error: 'https://로 시작하는 주소를 입력해 주세요.' });
+    expect(vaultWriteBody({ ...base, kind: 'api', origin: 'https://openapi.example.com' }, 'create')).toEqual({ error: '값을 입력해 주세요.' });
   });
 
   it('creates a login with trimmed text and a verbatim password', () => {
@@ -107,6 +110,26 @@ describe('vaultWriteBody', () => {
     expect('body' in body && body.body).toEqual({ kind: 'secret', title: '키', hints: '', ghostIds: [], value: ' raw value ' });
     expect('body' in body && body.body.origin).toBeUndefined();
   });
+
+  it('creates an API key with the origin and an optional client id, keeping the key verbatim', () => {
+    const body = vaultWriteBody({ ...emptyVaultForm, title: ' 토스 ', kind: 'api', origin: ' https://openapi.example.com ',
+      username: ' client ', value: ' raw key ', hints: ' 조회용 ', ghostIds: ['g2'] }, 'create');
+    expect(body).toEqual({ body: {
+      kind: 'api', title: '토스', origin: 'https://openapi.example.com', username: 'client',
+      value: ' raw key ', hints: '조회용', ghostIds: ['g2'],
+    } });
+    const anonymous = vaultWriteBody({ ...emptyVaultForm, title: '토스', kind: 'api', origin: 'https://openapi.example.com', value: 'k' }, 'create');
+    expect('body' in anonymous && anonymous.body.username).toBeUndefined();
+  });
+
+  it('drops an empty API key on edit and lets a cleared client id travel', () => {
+    const form = vaultFormFromItem(item({ kind: 'api', title: '토스 키', origin: 'https://openapi.example.com', username: 'client' }));
+    const body = vaultWriteBody({ ...form, value: '', username: '', hints: '새 메모' }, 'edit');
+    expect('body' in body && body.body).toEqual({
+      kind: 'api', title: '토스 키', origin: 'https://openapi.example.com', username: '', hints: '새 메모', ghostIds: ['g1', 'g2'],
+    });
+    expect('body' in body && body.body.value).toBeUndefined();
+  });
 });
 
 describe('generatePassword', () => {
@@ -157,6 +180,10 @@ describe('vaultRowDetail and vaultGrantsLabel', () => {
     expect(vaultRowDetail(item({ kind: 'contact', origin: null, username: null,
       contact: { name: '홍길동', address: '서울시 강남구', addressDetail: '101동 1203호', postalCode: '06236' } })))
       .toBe('홍길동 · 서울시 강남구 · 101동 1203호 · 06236');
+    expect(vaultRowDetail(item({ kind: 'api', origin: 'https://openapi.example.com', username: 'client' })))
+      .toBe('https://openapi.example.com · client');
+    expect(vaultRowDetail(item({ kind: 'api', origin: 'https://openapi.example.com', username: null })))
+      .toBe('https://openapi.example.com');
   });
 
   it('names the granted Ghosts and the one-time expiry', () => {

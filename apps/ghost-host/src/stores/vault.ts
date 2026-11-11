@@ -18,10 +18,11 @@ export interface VaultInput {
 type Stored = { metadata: string; version: number };
 type SecretRow = { field: VaultField; version: number; sealed: Uint8Array };
 const INPUT_KEYS: Record<string, true> = { id: true, kind: true, title: true, origin: true, extraOrigins: true, username: true, password: true, totp: true, card: true, contact: true, value: true, hints: true, ghostIds: true };
-const KIND_FIELDS: Record<VaultItem["kind"], readonly VaultField[]> = { login: ["username", "password", "totp"], card: ["card_number", "card_expiry", "card_cvc", "card_name"], contact: [], secret: ["value"] };
+const KIND_FIELDS: Record<VaultItem["kind"], readonly VaultField[]> = { login: ["username", "password", "totp"], card: ["card_number", "card_expiry", "card_cvc", "card_name"], contact: [], secret: ["value"], api: ["username", "value"] };
 export const GHOST_VAULT_ITEM_LIMIT = 200;
 
-/** Values never leave this store except through the host-only VaultPort.reveal fill boundary.
+/** Values never leave this store except through the host-only VaultPort.reveal fill boundary and, for `api` items,
+ * apiCredential, which only Host integrations call.
  * Metadata is plain; every secret revision is independently AEAD-bound to item, field and revision.
  */
 export class Vault implements VaultPort {
@@ -111,6 +112,8 @@ export class Vault implements VaultPort {
   reveal(ghostId: string, itemId: string, field: VaultField, at?: number): string {
     return this.storage(() => {
       const item = this.itemFor(ghostId, itemId);
+      // An API credential belongs to a Host integration; no page ever receives it.
+      if (item.kind === "api") throw forbidden("API credentials are used only by Host integrations");
       if (!KIND_FIELDS[item.kind].includes(field)) throw invalid("field does not belong to vault item kind");
       if (field === "username") return item.username ?? "";
       const value = this.field(itemId, field);
@@ -125,7 +128,7 @@ export class Vault implements VaultPort {
     if (previous && input.id !== undefined && input.id !== previous.id) throw invalid("vault item id cannot change");
     const kind = previous?.kind ?? input.kind;
     if (!kind || !Object.hasOwn(KIND_FIELDS, kind)) throw invalid("invalid vault item kind");
-    if ((kind !== "login" && ["username", "password", "totp"].some((key) => key in input)) || (kind !== "card" && "card" in input) || (kind !== "contact" && "contact" in input) || (kind !== "secret" && "value" in input)) throw invalid("fields do not belong to vault item kind");
+    if ((kind !== "login" && ["password", "totp"].some((key) => key in input)) || (kind !== "login" && kind !== "api" && "username" in input) || (kind !== "card" && "card" in input) || (kind !== "contact" && "contact" in input) || (kind !== "secret" && kind !== "api" && "value" in input)) throw invalid("fields do not belong to vault item kind");
     const secrets: Partial<Record<VaultField, string>> = {};
     if (input.password !== undefined) { validatePassword(input.password); secrets.password = input.password; }
     if (input.totp !== undefined) { validateTotp(input.totp); secrets.totp = input.totp; }
@@ -138,6 +141,7 @@ export class Vault implements VaultPort {
     const rawOrigin = input.origin === undefined ? previous?.origin ?? null : input.origin;
     const origin = rawOrigin === null ? null : normalizeOrigin(rawOrigin);
     if (kind === "login" && !origin) throw invalid("login requires an HTTPS origin");
+    if (kind === "api" && !origin) throw invalid("API credential requires an HTTPS origin");
     // 2026-11-10: sites whose login form lives on another host (login.coupang.com, nid.naver.com) need more exact
     // origins. Never widen to "same site": any other subdomain page of that site would then receive the password.
     if (input.extraOrigins !== undefined && (!Array.isArray(input.extraOrigins) || input.extraOrigins.length > 8 || input.extraOrigins.some((value) => typeof value !== "string"))) throw invalid("invalid vault extra origins");
@@ -147,7 +151,7 @@ export class Vault implements VaultPort {
     const item: VaultItem = {
       id: previous?.id ?? input.id ?? randomUUID(), kind, title: input.title ?? previous?.title ?? "", origin,
       ...(extraOrigins?.length ? { extraOrigins } : {}),
-      username: kind === "login" ? input.username === undefined ? previous?.username ?? "" : input.username : null,
+      username: kind === "login" || kind === "api" ? input.username === undefined ? previous?.username ?? "" : input.username : null,
       cardLast4: input.card ? input.card.number.replace(/[ -]/g, "").slice(-4) : previous?.cardLast4 ?? null,
       cardExpiry: input.card?.expiry ?? previous?.cardExpiry ?? null,
       contact: input.contact === undefined ? previous?.contact ?? null : input.contact,
@@ -156,7 +160,7 @@ export class Vault implements VaultPort {
       expiresAt: expiresAt ?? previous?.expiresAt ?? null, createdAt: previous?.createdAt ?? time, updatedAt: time,
     };
     if (!validate(ItemSchema, item) || !item.title.trim() || [item.id, item.title, item.username, item.hints, ...item.ghostIds].some((s) => s?.includes("\0")) || (item.contact && Object.entries(item.contact).some(([key, value]) => !["name", "phone", "email", "address", "addressDetail", "postalCode"].includes(key) || typeof value !== "string" || value.includes("\0")))) throw invalid("invalid vault item metadata");
-    if (!previous && ((kind === "login" && !item.hasPassword && !item.hasTotp) || (kind === "card" && !input.card) || (kind === "contact" && !item.contact) || (kind === "secret" && !input.value))) throw invalid("required vault fields are missing");
+    if (!previous && ((kind === "login" && !item.hasPassword && !item.hasTotp) || (kind === "card" && !input.card) || (kind === "contact" && !item.contact) || ((kind === "secret" || kind === "api") && !input.value))) throw invalid("required vault fields are missing");
     return { item, secrets };
   }
   private write(item: VaultItem, secrets: Partial<Record<VaultField, string>>, version: number) {
@@ -202,6 +206,20 @@ export class Vault implements VaultPort {
       this.row(id);
       return (this.db.query("SELECT version,metadata FROM versions WHERE item_id=? ORDER BY version").all(id) as { version: number; metadata: string }[])
         .map((row) => ({ version: row.version, item: JSON.parse(row.metadata) as VaultItem }));
+    });
+  }
+  /**
+   * Host integrations only: the one API credential granted to this Ghost for an exact origin. The secret goes to that
+   * service's own endpoint and never into a tool result, page or log.
+   */
+  apiCredential(ghostId: string, origin: string): { keyId: string; secret: string } {
+    return this.storage(() => {
+      const canonical = normalizeOrigin(origin);
+      const items = this.listFor(ghostId, { kind: "api", origin: canonical });
+      if (!items.length) throw forbidden(`no API key for ${canonical} is granted to this Ghost`);
+      if (items.length > 1) throw conflict(`more than one API key for ${canonical} is granted to this Ghost; the owner must keep exactly one`);
+      const item = items[0]!;
+      return { keyId: item.username ?? "", secret: this.field(item.id, "value") };
     });
   }
   remove(id: string) { return this.storage(() => { this.row(id); this.db.query("DELETE FROM items WHERE id=?").run(id); }); }

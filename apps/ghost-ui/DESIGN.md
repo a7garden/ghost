@@ -272,12 +272,28 @@ skipped reasons and links to surviving Work. Run timestamps expose the exact ins
 and self-check reasons remain visible. Pause/stop errors stay inside their open dialog.
 
 
-**연결 계정** keeps credentials one-way: the secret field is blank on every open, stored
-secrets never return to the screen, and a changed endpoint or account forces re-entry or
-explicit removal — only a name-only edit preserves the credential. 테스트 reports under
-its row; errors are distinct from an empty list.
-Failed saves keep the dialog and typed draft. SMTP 암시적 TLS distinguishes TLS at
-connect from mandatory STARTTLS; neither transport disables certificate verification.
+**연결 계정** starts with a searchable service list. Connected accounts use an icon grid;
+service identity stays above account name, address, authentication state and actions.
+Catalog icons are bundled SVGs from Simple Icons (CC0; license beside the assets), not
+remote favicon requests. The current catalog uses commit
+`1bb2f6e6ea50f920de8d2f3d273ae48564a5eaee`, Slack/Outlook use `11.15.0` and Yahoo uses
+`5.24.0`. Owner-defined HTTPS icons preserve their colors; artifact icons load through
+the authenticated client and release their object URLs on close.
+
+Mail setup asks for the address and app password; presets own the TLS server/port
+defaults. Protocol fields stay in advanced settings, including mandatory STARTTLS versus
+implicit TLS. OAuth services offer login separately from direct key entry and expose the
+first-time client-app prerequisite rather than pretending a catalog tile has a working
+OAuth application. Login and consent stay on the provider's page. Only a completed
+authentication probe says authentication was confirmed; stored credentials alone do not.
+
+Credentials remain one-way: every secret field opens blank, stored secrets never return
+to the screen, and changed authentication endpoints require re-entry or explicit removal.
+API Ghost-grant changes preserve authentication; pending requests still lose old authority.
+Failed saves keep the dialog and draft; unchanged retries preserve the command identity.
+Ghost-assisted setup enters the main Ghost's existing conversation, using browser handoff
+for login and secure capture/registration for issued keys. API grants name the Ghosts that
+can use each account; external API writes still require owner confirmation.
 
 Ghost 설정's 운영 group carries **PC 직접 실행**: an explicit owner grant whose warning
 states that shell reaches the whole Mac and network: the grant is not a jail or

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, DESKTOP_TOOLS, GHOST_TOOLS, HOST_TOOLS, MAIL_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, GHOST_TOOLS, HOST_TOOLS, MAIL_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
 import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -22,6 +22,7 @@ export const toolLabels: Record<GhostTool, string> = {
   memory_search: '기억 검색', memory_recall: '기억 불러오기', memory_retain: '기억 저장',
   document_spaces: '문서 공간', document_list: '문서 목록', document_read: '문서 읽기', document_propose: '문서 수정 제안',
   web_search: '웹 검색', web_read: '웹 읽기', reach: '외부 읽기', skill_read: '스킬 읽기',
+  connection_list: '연결 목록', connection_register: '연결 등록', connection_request: '연결 API 사용',
   host_status: 'Mac 상태', host_services: 'Mac 서비스', host_disk_scan: 'Mac 디스크 검색', host_disk_usage: 'Mac 디스크 사용량',
   host_list: 'Mac 파일 목록', host_read: 'Mac 파일 읽기', host_nodes: 'Tailscale 노드', host_command_propose: 'Mac 명령 제안', host_message_codes: '문자 인증번호 읽기',
   browser_open: '브라우저 열기', browser_snapshot: '브라우저 구조 읽기', browser_screenshot: '브라우저 캡처', browser_read: '브라우저 읽기',
@@ -35,6 +36,7 @@ export const toolLabels: Record<GhostTool, string> = {
   desktop_scroll: 'PC 스크롤', desktop_press: 'PC 키 누르기', desktop_launch: 'PC 앱 열기', desktop_focus: 'PC 창 앞으로',
   desktop_wait: 'PC 대기', desktop_pointer: 'PC 포인터 직접 조작', desktop_keys: 'PC 키보드 직접 입력', desktop_propose: 'PC 클릭 제안',
   mail_search: '메일 찾기', mail_read: '메일 읽기', mail_update: '메일 정리', mail_send: '메일 보내기',
+  toss_read: '토스증권 조회',
 };
 
 /** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. Exported for the coverage test. */
@@ -43,6 +45,7 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '협업', tools: ['delegate', 'ghost_list', 'publish_artifact'] },
   { title: '파일과 명령', tools: ['read', 'write', 'edit', 'bash'] },
   { title: '웹', tools: ['web_search', 'web_read', 'reach'] },
+  { title: '연결', tools: ['connection_list', 'connection_register', 'connection_request'] },
   { title: '브라우저', tools: [...BROWSER_TOOLS] },
   { title: '금고', tools: [...VAULT_TOOLS] },
   { title: '메일', tools: [...MAIL_TOOLS] },
@@ -53,6 +56,7 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '자동 활동', tools: ['activity_propose'] },
   { title: 'Mac', tools: [...HOST_TOOLS], privileged: true },
   { title: 'PC 조작', tools: [...DESKTOP_TOOLS], privileged: true },
+  { title: '자산', tools: [...FINANCE_TOOLS], privileged: true },
 ];
 /** 대화 종류에 따라 항상 쓰는 도구. 선택 목록에 없고 끌 수 없다. */
 const alwaysTools = ['소유자에게 묻기', '위임한 Ghost에게 묻기', '자식 일에 답하기', '일 완료 보고', '일 상태 보고', '결과물 읽기', '실행 기록 보기', '관측 근거 읽기', '검토 판정'];

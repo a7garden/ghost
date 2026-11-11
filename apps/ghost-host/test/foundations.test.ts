@@ -68,6 +68,7 @@ class MemoryBrowser implements BrowserPort {
       default: return { ok: true, data: {}, error: null };
     }
   }
+  async captureCredential(): Promise<string> { throw new Error("not used by checkout fixtures"); }
   async handoff(_session: BrowserSessionRef, url: string | null) { this.handoffs.push(url); }
   async endHandoff() { this.ends++; return { fallback: false }; }
   sessions() { return this.ref ? [{ ...this.ref, engine: "chrome" as const, headed: false }] : []; }

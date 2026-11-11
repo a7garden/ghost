@@ -1,16 +1,14 @@
-import { type Connection, type ConnectionConfig } from '@ghost/contract';
+import { connectionCredentialScope, type Command, type Connection, type ConnectionConfig } from '@ghost/contract';
+import { serviceForConnection, type ConnectionService } from './connection-services';
 
 export const connectionKindLabel: Record<ConnectionConfig['kind'], string> = {
-  github: 'GitHub', gitea: 'Gitea', mail: '메일',
+  github: 'GitHub', gitea: 'Gitea', mail: '메일', api: 'API',
 };
 
 /** Account metadata only; stored credentials are never part of the summary. */
 export function connectionSummary(connection: Connection): string {
   const config = connection.config;
-  if (config.kind === 'mail') {
-    return [`${config.host}:${config.port}`, config.username, config.mailbox,
-      config.smtpHost ? `SMTP ${config.smtpHost}` : null].filter(Boolean).join(' · ');
-  }
+  if (config.kind === 'mail') return config.username;
   return config.baseUrl;
 }
 
@@ -19,8 +17,16 @@ export interface ConnectionDraft {
   kind: ConnectionConfig['kind'];
   name: string;
   baseUrl: string;
+  serviceId: string;
+  iconUrl: string;
+  authHeader: string;
+  authPrefix: string;
+  testPath: string;
+  headers: string;
+  ghostIds: string[];
   host: string;
   port: string;
+  mailAuthType?: 'password' | 'oauth2';
   username: string;
   mailbox: string;
   smtpHost: string;
@@ -33,61 +39,38 @@ export interface ConnectionDraft {
 }
 
 export const emptyConnectionDraft = (kind: ConnectionConfig['kind']): ConnectionDraft => ({
-  kind, name: '', baseUrl: '', host: '', port: '993', username: '', mailbox: 'INBOX',
+  kind, name: '', serviceId: '', iconUrl: '', baseUrl: '', host: '', port: '993', username: '', mailbox: 'INBOX',
   smtpHost: '', smtpPort: '587', smtpSecure: false, credential: '', clearCredential: false,
+  authHeader: 'Authorization', authPrefix: 'Bearer', testPath: '', headers: '{}', ghostIds: [],
 });
+
+export function draftForService(service: ConnectionService): ConnectionDraft {
+  return {
+    ...emptyConnectionDraft(service.kind), serviceId: service.id, name: service.name,
+    baseUrl: service.baseUrl ?? '', testPath: service.testPath ?? '',
+    headers: JSON.stringify(service.headers ?? {}),
+    ...(service.mail ? { ...service.mail, smtpPort: String(service.mail.smtpPort) } : {}),
+  };
+}
 
 export function draftFromConnection(connection: Connection): ConnectionDraft {
   const config = connection.config;
   return {
     ...emptyConnectionDraft(config.kind),
     name: connection.name,
+    serviceId: connection.serviceId ?? serviceForConnection(connection)?.id ?? '',
+    iconUrl: connection.iconUrl ?? '',
     ...(config.kind === 'mail'
       ? { host: config.host, port: String(config.port), username: config.username, mailbox: config.mailbox, smtpHost: config.smtpHost ?? '', smtpPort: String(config.smtpPort), smtpSecure: config.smtpSecure }
       : { baseUrl: config.baseUrl }),
+    ...(config.kind === 'mail' && config.authType ? { mailAuthType: config.authType } : {}),
+    ...(config.kind === 'api' ? {
+      authHeader: config.authHeader, authPrefix: config.authPrefix, testPath: config.testPath,
+      headers: JSON.stringify(config.headers), ghostIds: [...config.ghostIds],
+    } : {}),
   };
 }
 
-/** One mail provider preset: the transports it needs and where its app password lives. */
-export interface MailPreset {
-  id: 'gmail' | 'icloud' | 'naver' | 'daum';
-  label: string;
-  host: string; port: number;
-  smtpHost: string; smtpPort: number; smtpSecure: boolean;
-  /** The account domain, so the username placeholder shows the mail address the server expects. */
-  domain: string;
-  /** The account's app-password page; '' when the provider has none (the copy says what to do instead). */
-  helpUrl: string;
-  helpText: string;
-  helpLinkLabel: string;
-}
-
-/**
- * The mail presets the dialog offers. Outlook is deliberately absent: Microsoft dropped
- * password-based IMAP for consumer accounts, so a preset would promise what cannot connect.
- */
-export const mailPresets: readonly MailPreset[] = [
-  { id: 'gmail', label: 'Gmail', host: 'imap.gmail.com', port: 993, smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpSecure: true, domain: 'gmail.com',
-    helpUrl: 'https://myaccount.google.com/apppasswords', helpText: 'Google 계정의 앱 비밀번호입니다. 2단계 인증이 켜진 계정이 필요합니다.', helpLinkLabel: '앱 비밀번호 만들기' },
-  { id: 'icloud', label: 'iCloud', host: 'imap.mail.me.com', port: 993, smtpHost: 'smtp.mail.me.com', smtpPort: 587, smtpSecure: false, domain: 'icloud.com',
-    helpUrl: 'https://account.apple.com/account/manage', helpText: 'Apple 계정의 앱 암호입니다.', helpLinkLabel: '앱 암호 관리' },
-  { id: 'naver', label: 'Naver', host: 'imap.naver.com', port: 993, smtpHost: 'smtp.naver.com', smtpPort: 465, smtpSecure: true, domain: 'naver.com',
-    helpUrl: '', helpText: 'Naver 메일 환경설정에서 IMAP/SMTP 사용을 켠 뒤 계정 비밀번호를 입력해 주세요.', helpLinkLabel: '' },
-  { id: 'daum', label: 'Daum', host: 'imap.daum.net', port: 993, smtpHost: 'smtp.daum.net', smtpPort: 465, smtpSecure: true, domain: 'daum.net',
-    helpUrl: '', helpText: 'Daum 메일 환경설정에서 IMAP/SMTP 사용을 켠 뒤 계정 비밀번호를 입력해 주세요.', helpLinkLabel: '' },
-];
-
-/** The preset a typed IMAP host belongs to, so the dialog can mark it and show its help. */
-export const mailPresetForHost = (host: string): MailPreset | null =>
-  mailPresets.find(preset => preset.host === host.trim().toLowerCase()) ?? null;
-
-/** A preset fills the transports only; the name, account and secret stay the owner's. Pure; tests pin it. */
-export function applyMailPreset(draft: ConnectionDraft, preset: MailPreset): ConnectionDraft {
-  return { ...draft,
-    host: preset.host, port: String(preset.port),
-    smtpHost: preset.smtpHost, smtpPort: String(preset.smtpPort), smtpSecure: preset.smtpSecure,
-  };
-}
 
 const intIn = (value: string, min: number, max: number, label: string): number | string => {
   const parsed = Number(value);
@@ -96,8 +79,13 @@ const intIn = (value: string, min: number, max: number, label: string): number |
 };
 
 export type BuiltConnection =
-  | { ok: true; command: { type: 'connection.upsert'; connectionId?: string; name: string; config: ConnectionConfig; credential?: string | null } }
+  | { ok: true; command: Extract<Command, { type: 'connection.upsert' }> }
   | { ok: false; error: string };
+
+const configJson = (config: ReturnType<typeof connectionCredentialScope>) => JSON.stringify(config, (_key, value: unknown) =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+    : value);
 
 /**
  * Form → connection.upsert command. A blank secret preserves credentials only when
@@ -129,17 +117,34 @@ export function buildConnectionCommand(draft: ConnectionDraft, existing: Connect
     config = {
       kind: 'mail', host, port, username, mailbox,
       smtpHost: smtpHost || null, smtpPort, smtpSecure: draft.smtpSecure,
+      ...(draft.mailAuthType ? { authType: draft.mailAuthType } : {}),
     };
   } else {
     const baseUrl = draft.baseUrl.trim();
     if (!baseUrl) return { ok: false, error: `API 주소를 입력해 주세요. (예: ${draft.kind === 'github' ? 'https://api.github.com' : 'https://git.example.com'})` };
     if (!/^https?:\/\//.test(baseUrl)) return { ok: false, error: 'API 주소는 http:// 또는 https://로 시작해야 합니다.' };
     if (baseUrl.length > 2048) return { ok: false, error: 'API 주소는 2,048자 이하여야 합니다.' };
-    config = { kind: draft.kind, baseUrl };
+    if (draft.kind === 'gitea' && (!existing || draft.baseUrl !== (existing.config.kind === 'mail' ? '' : existing.config.baseUrl))) {
+      try {
+        const url = new URL(baseUrl);
+        url.pathname = `${url.pathname.replace(/\/+$/, '').replace(/\/api\/v1$/, '')}/api/v1`;
+        config = { kind: 'gitea', baseUrl: url.href };
+      } catch { return { ok: false, error: '서버 주소를 확인해 주세요.' }; }
+    } else if (draft.kind === 'api') {
+      let headers: Record<string, string>;
+      try {
+        const parsed: unknown = JSON.parse(draft.headers);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.values(parsed).some(value => typeof value !== 'string')) throw new Error();
+        headers = parsed as Record<string, string>;
+      } catch { return { ok: false, error: '추가 헤더는 문자열 값의 JSON 객체로 입력해 주세요.' }; }
+      if (!draft.testPath.trim()) return { ok: false, error: '계정 확인 API 경로를 입력해 주세요.' };
+      config = { kind: 'api', baseUrl, authHeader: draft.authHeader.trim(), authPrefix: draft.authPrefix.trim(),
+        testPath: draft.testPath.trim(), headers, ghostIds: draft.ghostIds };
+    } else config = { kind: draft.kind, baseUrl };
   }
 
   const secret = draft.credential;
-  const configChanged = existing !== null && JSON.stringify(config) !== JSON.stringify(existing.config);
+  const configChanged = existing !== null && configJson(connectionCredentialScope(config)) !== configJson(connectionCredentialScope(existing.config));
   if (existing?.hasCredential && configChanged && !draft.clearCredential && !secret) {
     return { ok: false, error: '연결 정보가 바뀌었습니다. 새 자격 증명을 입력하거나 저장된 자격을 삭제해 주세요.' };
   }
@@ -147,6 +152,8 @@ export function buildConnectionCommand(draft: ConnectionDraft, existing: Connect
     type: 'connection.upsert',
     ...(existing ? { connectionId: existing.id } : {}),
     name, config,
+    ...(draft.serviceId ? { serviceId: draft.serviceId } : {}),
+    ...(draft.iconUrl ? { iconUrl: draft.iconUrl } : existing?.iconUrl ? { iconUrl: null } : {}),
     ...(draft.clearCredential && existing?.hasCredential ? { credential: null }
       : secret ? { credential: secret } : configChanged ? { credential: null } : {}),
   };

@@ -253,6 +253,8 @@ export interface BrowserPort {
   assertVaultFill?(session: BrowserSessionRef, field: VaultField, origin: string): void;
   /** One command in the conversation's session. Secret material may only travel through `stdin`. */
   run(session: BrowserSessionRef, argv: string[], options?: BrowserRunOptions): Promise<BrowserCommandResult>;
+  /** Host-only atomic issuer-field capture; protects the value from subsequent model output. */
+  captureCredential(session: BrowserSessionRef, input: { origin: string; ref?: string; selector?: string }): Promise<string>;
   /** Prepare secure Chrome owner interaction; headed defaults true for the explicit Mac-window action. */
   handoff(session: BrowserSessionRef, url: string | null, options?: { headed?: boolean }): Promise<void>;
   sessions(): BrowserSessionInfo[];

@@ -3,6 +3,7 @@ import type { Connection } from "@ghost/contract";
 import { ImapFlow, type ImapFlowOptions, type FetchMessageObject } from "imapflow";
 import PostalMime, { type Email } from "postal-mime";
 import MailComposer from "nodemailer/lib/mail-composer";
+import XOAuth2 from "nodemailer/lib/xoauth2";
 import { activitySmtp, type ActivitySmtpClient, type ActivitySmtpOptions } from "./activity-mail.ts";
 import type { SourceConnections } from "./activity-sources.ts";
 import { CommandError, invalid, notFound } from "../core/errors.ts";
@@ -101,7 +102,7 @@ export class MailService {
       const config = connection.config;
       if (config.kind !== "mail") throw invalid("메일 계정이 아닙니다.");
       let authority: { credential: string; authorize(): void };
-      try { authority = this.options.sources.mailAuthority(connection); }
+      try { authority = await this.options.sources.mailAuthority(connection); }
       catch { throw new CommandError("unavailable", "메일 계정이나 앱 비밀번호가 변경되었습니다. 계정을 다시 연결해 주세요."); }
       const authorize = () => {
         if (this.closed) throw new CommandError("unavailable", "메일 연결이 닫혔습니다.");
@@ -110,7 +111,7 @@ export class MailService {
       };
       const client = (this.options.imap ?? (options => new ImapFlow(options)))({
         host: config.host, port: config.port, secure: true, tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" },
-        auth: { user: config.username, pass: authority.credential }, logger: false, logRaw: false, disableAutoIdle: true, disableCompression: true,
+        auth: config.authType === "oauth2" ? { user: config.username, accessToken: authority.credential } : { user: config.username, pass: authority.credential }, logger: false, logRaw: false, disableAutoIdle: true, disableCompression: true,
         connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000,
         maxLiteralSize: MAX_RAW + 65536, maxResponseSize: MAX_RAW + 131072, maxLineLength: 65536, maxResponseTokens: 20000,
       });
@@ -247,7 +248,7 @@ export class MailService {
       }
       const messageId = `<${randomUUID()}@ghost.local>`;
       const message = { from: { name: "", address: from }, to: input.to.map(address => ({ name: "", address })), cc: input.cc?.map(address => ({ name: "", address })), bcc: input.bcc?.map(address => ({ name: "", address })), envelope: { from, to: [...input.to, ...(input.cc ?? []), ...(input.bcc ?? [])] }, subject: input.subject, text: input.text, messageId, ...(inReplyTo ? { inReplyTo, references } : {}), disableFileAccess: true, disableUrlAccess: true };
-      const smtp = (this.options.smtp ?? activitySmtp)({ host: config.smtpHost!, port: config.smtpPort, secure: config.smtpSecure, requireTLS: true, opportunisticTLS: false, tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" }, auth: { user: config.username, pass: credential }, connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000, dnsTimeout: 15_000, logger: false, debug: false, transactionLog: false, maxResponseSize: 65536 });
+      const smtp = (this.options.smtp ?? activitySmtp)({ host: config.smtpHost!, port: config.smtpPort, secure: config.smtpSecure, requireTLS: true, opportunisticTLS: false, tls: { rejectUnauthorized: true, minVersion: "TLSv1.2" }, auth: config.authType === "oauth2" ? { user: config.username, method: "XOAUTH2", oauth2: new XOAuth2({ user: config.username, accessToken: credential }) } : { user: config.username, pass: credential }, connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000, dnsTimeout: 15_000, logger: false, debug: false, transactionLog: false, maxResponseSize: 65536 });
       track(() => smtp.close());
       authorize();
       const result = await smtp.sendMail(message, authorize, () => { writeStarted = true; });

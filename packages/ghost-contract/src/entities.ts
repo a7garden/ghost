@@ -56,7 +56,7 @@ export const ExecutionTarget = Type.Union([
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTarget>;
 
-/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict), the fixed self_adapt/capability_request and the main-only ghost_create/ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
+/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict), the fixed self_adapt/capability_request and the main-only ghost_create/ghost_inspect/ghost_update are not selectable. Host and desktop tools reach the owner's Mac outside the sandbox; finance tools read brokerage accounts. Host, desktop, mail and finance tools are never granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
@@ -118,6 +118,9 @@ export const GhostTool = Type.Union([
   Type.Literal("vault_list"),
   Type.Literal("vault_request"),
   Type.Literal("vault_generate_login"),
+  Type.Literal("connection_list"),
+  Type.Literal("connection_register"),
+  Type.Literal("connection_request"),
   Type.Literal("desktop_apps"),
   Type.Literal("desktop_snapshot"),
   Type.Literal("desktop_screenshot"),
@@ -138,6 +141,7 @@ export const GhostTool = Type.Union([
   Type.Literal("mail_read"),
   Type.Literal("mail_update"),
   Type.Literal("mail_send"),
+  Type.Literal("toss_read"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 
@@ -203,6 +207,9 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "vault_list",
   "vault_request",
   "vault_generate_login",
+  "connection_list",
+  "connection_register",
+  "connection_request",
   "desktop_apps",
   "desktop_snapshot",
   "desktop_screenshot",
@@ -223,6 +230,7 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "mail_read",
   "mail_update",
   "mail_send",
+  "toss_read",
 ];
 
 /** Tools that observe or change the owner's Mac. Granted only explicitly, never by default. */
@@ -243,8 +251,15 @@ export const DESKTOP_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => 
 /** The owner's mail accounts: search, read, flag/move and approval-gated sending. */
 export const MAIL_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("mail_"));
 
-/** The allow-list a new Ghost gets when none is given: every selectable tool except host, PC control and mail tools. */
-export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool) && !MAIL_TOOLS.includes(tool));
+/**
+ * The owner's brokerage accounts, read-only: holdings, transactions and orders reach the Ghost's model provider.
+ * Granted only explicitly, never by default; each call also needs an API key the owner granted in the vault.
+ */
+export const FINANCE_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("toss_"));
+
+
+/** The allow-list a new Ghost gets when none is given: every selectable tool except host, PC control, mail and finance tools. */
+export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool) && !MAIL_TOOLS.includes(tool) && !FINANCE_TOOLS.includes(tool));
 
 /** A skill directory name under the configured skills root. */
 export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });
@@ -439,7 +454,11 @@ export const Decision = Type.Object({
 });
 export type Decision = Static<typeof Decision>;
 
-export const VaultItemKind = Type.Union([Type.Literal("login"), Type.Literal("card"), Type.Literal("contact"), Type.Literal("secret")]);
+/**
+ * `api` is a service credential (an optional client/key id in `username`, the secret in `value`) that only Host
+ * integrations use; it is never filled into a page.
+ */
+export const VaultItemKind = Type.Union([Type.Literal("login"), Type.Literal("card"), Type.Literal("contact"), Type.Literal("secret"), Type.Literal("api")]);
 export type VaultItemKind = Static<typeof VaultItemKind>;
 
 export const VaultContact = Type.Object({
@@ -462,7 +481,7 @@ export const VaultItem = Type.Object({
   id: Id,
   kind: VaultItemKind,
   title: Type.String({ minLength: 1, maxLength: 256 }),
-  /** Canonical https origin a login or secret belongs to. */
+  /** Canonical https origin a login, secret or API credential belongs to. */
   origin: nullable(Type.String({ maxLength: 512 })),
   /** More exact https origins where the same login is entered, such as a separate login host (`https://login.example.com`). */
   extraOrigins: Type.Optional(Type.Array(Type.String({ maxLength: 512 }), { maxItems: 8 })),

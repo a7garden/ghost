@@ -31,7 +31,7 @@ export function decisionChip(decision: Decision): string {
 /** The completion answer a browser handoff suggests; it goes through the ordinary answer path. */
 export const handoffDoneAnswer = '다 했어요';
 
-const vaultKinds: readonly VaultItemKind[] = ['login', 'card', 'contact', 'secret'];
+const vaultKinds: readonly VaultItemKind[] = ['login', 'card', 'contact', 'secret', 'api'];
 
 /** `proposal.secureForm` of a `question`: the owner answers through the vault, never in chat. Null otherwise. */
 export function secureFormProposal(decision: Decision): SecureFormRequest | null {
@@ -101,6 +101,13 @@ export function secureFormBody(request: SecureFormRequest, values: SecureFormVal
     };
     if (!Object.keys(contact).length) return { error: '한 항목 이상 입력해 주세요.' };
     return { body: { kind: request.kind, contact, save } };
+  }
+  if (request.kind === 'api') {
+    const username = trim(values.username);
+    if (!values.value) return { error: '값을 입력해 주세요.' };
+    const origin: Record<string, unknown> = request.origin ? {} : { origin: trim(values.origin) };
+    if (!request.origin && !origin.origin) return { error: 'https://로 시작하는 주소를 입력해 주세요.' };
+    return { body: { kind: request.kind, ...(username ? { username } : {}), value: values.value, ...origin, save } };
   }
   if (!values.value) return { error: '값을 입력해 주세요.' };
   return { body: { kind: request.kind, value: values.value, save } };

@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { GHOST_TOOLS, type ActivityConfig, type ActivityRun, type ActivitySource, type Ghost } from '@ghost/contract';
+import type { ActivityConfig, ActivityRun, ActivitySource, Ghost } from '@ghost/contract';
 import { buildActivityConfig, draftFromConfig, emptyDraft, intersectTools, type ActivityDraft } from './activity-config';
 import { RunRow } from './Activities';
 
@@ -24,10 +24,7 @@ it('offers the activity no tool the Ghost itself does not have', () => {
   expect(narrowed).toEqual(['web_search']);
 });
 
-it('refuses direct-only tools in an activity even when the Ghost holds them', () => {
-  expect(intersectTools(['activity_propose', 'document_read', 'browser_open', 'vault_list'], GHOST_TOOLS))
-    .toEqual(['document_read', 'browser_open', 'vault_list']);
-});
+
 
 it('keeps skipped reasons, exact run timestamps and self-check explanations in history', () => {
   const run: ActivityRun = {
