@@ -73,6 +73,8 @@
 /* Connections (연결 계정) -------------------------------------------------- */
 .connection-test { padding: 10px 16px; border-bottom: 1px solid var(--ghost-line); background: var(--ghost-hover); font-size: var(--text-caption); }
 .connection-test[data-phase="error"] { color: var(--ghost-danger-ink); }
+.connection-guide { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--radius-card); background: var(--ghost-hover); }
+.connection-guide ol { margin: 0; padding-left: 1.25em; color: var(--ghost-ink2); font-size: var(--text-caption); display: flex; flex-direction: column; gap: 2px; }
 .connection-clear { display: flex; align-items: center; gap: 8px; color: var(--ghost-ink2); font-size: var(--text-caption); cursor: pointer; }
 /* Ghost별 자동 승인 (승인과 언어) -------------------------------------------
    켜짐이 기본이라 조용히 두고, 「직접 승인」인 Ghost 만 주의 색 테두리로 드러낸다. */

@@ -1,4 +1,5 @@
 import { type Connection, type ConnectionConfig } from '@ghost/contract';
+import { defaultConnectionName, GITHUB_API, giteaApiUrl } from './connection-presets';
 
 export const connectionKindLabel: Record<ConnectionConfig['kind'], string> = {
   github: 'GitHub', gitea: 'Gitea', mail: '메일',
@@ -33,7 +34,7 @@ export interface ConnectionDraft {
 }
 
 export const emptyConnectionDraft = (kind: ConnectionConfig['kind']): ConnectionDraft => ({
-  kind, name: '', baseUrl: '', host: '', port: '993', username: '', mailbox: 'INBOX',
+  kind, name: '', baseUrl: kind === 'github' ? GITHUB_API : '', host: '', port: '993', username: '', mailbox: 'INBOX',
   smtpHost: '', smtpPort: '587', smtpSecure: false, credential: '', clearCredential: false,
 });
 
@@ -64,7 +65,8 @@ export type BuiltConnection =
  * disconnected; stored credentials must be retyped or explicitly removed.
  */
 export function buildConnectionCommand(draft: ConnectionDraft, existing: Connection | null): BuiltConnection {
-  const name = draft.name.trim();
+  // 이름은 비워 둬도 된다 — 계정 주소로 채운다. 매번 이름부터 지어야 하면 연결 한 번이 귀찮아진다.
+  const name = draft.name.trim() || defaultConnectionName(draft);
   if (!name) return { ok: false, error: '연결 이름을 입력해 주세요.' };
   if (name.length > 128) return { ok: false, error: '연결 이름은 128자 이하여야 합니다.' };
 
@@ -90,7 +92,7 @@ export function buildConnectionCommand(draft: ConnectionDraft, existing: Connect
       smtpHost: smtpHost || null, smtpPort, smtpSecure: draft.smtpSecure,
     };
   } else {
-    const baseUrl = draft.baseUrl.trim();
+    const baseUrl = draft.kind === 'gitea' ? giteaApiUrl(draft.baseUrl) : draft.baseUrl.trim();
     if (!baseUrl) return { ok: false, error: `API 주소를 입력해 주세요. (예: ${draft.kind === 'github' ? 'https://api.github.com' : 'https://git.example.com'})` };
     if (!/^https?:\/\//.test(baseUrl)) return { ok: false, error: 'API 주소는 http:// 또는 https://로 시작해야 합니다.' };
     if (baseUrl.length > 2048) return { ok: false, error: 'API 주소는 2,048자 이하여야 합니다.' };
