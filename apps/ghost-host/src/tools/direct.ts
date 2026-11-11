@@ -47,7 +47,11 @@ export function createDirectTools(core: Core): Extension {
       try {
         const scope = requireAllowed(core, api, "work_create");
         // 퇴근 중에는 스스로 새 일을 시작하지 않는다. 소유자가 시킨 일은 막지 않는다.
-        if (args.initiative && !core.duty.onDuty()) throw forbidden("the owner is off duty: do not start new Work on your own until they are back. Record what you would do with plan_next instead.");
+        // 2026.11.11 : 「plan_next 로 남겨라」는 그 도구가 없는 Ghost(구동 꺼짐)에게는 막다른 안내였다.
+        if (args.initiative && !core.duty.onDuty()) {
+          const planning = core.autonomy.enabled(scope.ghost.id) ? "Record what you would do with plan_next instead." : "Tell the owner what you would do instead.";
+          throw forbidden(`the owner is off duty: do not start new Work on your own until they are back. ${planning}`);
+        }
         const ghostId = args.ghost_id ?? scope.ghost.id;
         const work = core.works.createRoot({
           ghostId,

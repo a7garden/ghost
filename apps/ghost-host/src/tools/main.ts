@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import { FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
+import { fallbackListFor } from "../engine/fallback.ts";
 import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { errorResult, scopeOf, type Scope } from "./shared.ts";
@@ -9,7 +10,8 @@ import { errorResult, scopeOf, type Scope } from "./shared.ts";
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
 /** The target's full configuration, structured so the caller can inspect and edit it faithfully. */
-function renderGhost(ghost: Ghost): string {
+/** `fallbacks` is the Ghost's own list; `fallbacksInUse` is what actually runs, the owner's default list when it has none. */
+function renderGhost(core: Core, ghost: Ghost): string {
   return JSON.stringify(
     {
       id: ghost.id,
@@ -19,6 +21,7 @@ function renderGhost(ghost: Ghost): string {
       look: ghost.look,
       tools: ghost.tools,
       fallbacks: ghost.fallbacks,
+      fallbacksInUse: fallbackListFor(ghost, core.ledger.settings()),
       skills: ghost.skills,
       persona: ghost.persona,
       directConversationId: ghost.directConversationId,
@@ -59,7 +62,7 @@ export function createMainTools(core: Core): Extension {
     async execute(args, api) {
       try {
         const { target } = requireMain(core, api, args.ghost_id);
-        return text(renderGhost(target));
+        return text(renderGhost(core, target));
       } catch (error) {
         return errorResult(error);
       }
@@ -121,7 +124,7 @@ export function createMainTools(core: Core): Extension {
           }
           return updated;
         });
-        return text(`Updated.\n${renderGhost(next)}`);
+        return text(`Updated.\n${renderGhost(core, next)}`);
       } catch (error) {
         return errorResult(error);
       }

@@ -187,7 +187,7 @@ class HostEngine implements Engine {
           if (work?.activityId && (!activity || !activity.tools.some((name) => name === tool.name))) continue;
         }
         // 2026.11.11 : 자율 구동이 꺼진 Ghost 에 plan_next 를 주면 부르는 족족 거절된다. 메인은 동료 몫으로 남긴다.
-        if (tool.name === "plan_next" && !(ghost.isDefault && ghost.state === "active") && !this.core.autonomy.enabled(ghost.id)) continue;
+        if (tool.name === "plan_next" && !this.core.autonomy.offersPlanning(ghost)) continue;
         if (tool.name.startsWith("activity_") && tool.name !== "activity_propose" && (conversation.kind !== "work" || !work?.activityId)) continue;
         if (tool.name.startsWith("source_") && conversation.kind !== "review" && (!ghost.tools.includes("web_read") || (work?.toolScope && !work.toolScope.includes("web_read")))) continue;
         if ((tool.name === "activity_propose" || tool.name === "document_propose") && conversation.kind !== "direct") continue;

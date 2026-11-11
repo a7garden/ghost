@@ -145,6 +145,8 @@ button.ghost-sheet__portrait:focus-visible { outline: 2px solid var(--ghost-ink3
   color: var(--ghost-ink); font: var(--text-body)/1.7 var(--font-sans); field-sizing: content;
 }
 .persona-note textarea::placeholder { color: var(--ghost-ink4); }
+.model-route__step[data-inherited] { opacity: .7; }
+.model-route__inherited { color: var(--ghost-ink2); font-size: var(--text-ui); }
 .persona-note__text { margin: 0; padding: 14px 16px 4px; color: var(--ghost-ink); font: var(--text-body)/1.7 var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; }
 .persona-note[data-reading] .persona-note__actions { align-items: center; justify-content: space-between; animation: none; }
 .persona-note__hint { min-width: 0; color: var(--ghost-ink3); font-size: var(--text-caption); }

@@ -8,7 +8,7 @@ import { Modal } from '../components/Modal';
 import { ChatGptLoginDialog } from './ChatGptLogin';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from './ModelPicker';
 import { ProviderEditor } from './ProviderEditor';
-import { FallbackSteps, editFallbacks, type FallbackAction } from '../features/GhostSettings';
+import { FallbackSteps, editFallbacks, type FallbackAction } from '../features/fallbacks';
 import type { ProviderSave } from './ProviderEditor';
 
 export function ModelSettings() {
