@@ -303,10 +303,6 @@ function VaultItemDialog({ item, ghosts, onClose, onSave }: {
         {field('username', '클라이언트 ID', { autoComplete: 'off' })}
         {field('value', '비밀 키', { password: true, autoComplete: 'off', description: '저장한 뒤에는 다시 볼 수 없습니다.' })}
       </>}
-      {kind === 'api' && <>
-        {field('username', '클라이언트 ID', { autoComplete: 'off' })}
-        {field('value', '비밀 키', { password: true, autoComplete: 'off', description: '저장한 뒤에는 다시 볼 수 없습니다.' })}
-      </>}
       {kind === 'secret' && field('value', '값', { password: true, autoComplete: 'off', description: '저장한 뒤에는 다시 볼 수 없습니다.' })}
       <FormField label="메모" description="어떤 때 쓸지 Ghost에게 알려 주는 메모입니다.">
         {control => <Textarea {...control} value={form.hints} rows={2} maxLength={1024} disabled={saving}

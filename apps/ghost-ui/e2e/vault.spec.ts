@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import type { VaultItem } from '@ghost/contract';
 import { readRunState } from './run-state';
 import { mockStateDecisions, mockVaultApi, validateVaultWrite, visualSecureDecisionId, visualHandoffDecisionId } from './mocks';
 
@@ -201,6 +202,65 @@ test('creating a login demands its primary fields and stores the generated passw
   expect(posts[0]).not.toHaveProperty('value');
   expect(posts[0].ghostIds).toEqual([researchGhostId]);
   await expect(page.getByText('금고 항목을 저장했습니다.')).toBeVisible();
+});
+
+test('API credential type transition and metadata edits stay write-only against the real Host', async ({ page, request }) => {
+  const { baseUrl } = readRunState();
+  const title = `API edit ${crypto.randomUUID()}`;
+  const secret = `isolated-api-secret-${crypto.randomUUID()}`;
+  let createdId: string | null = null;
+  await page.goto(`${baseUrl}/#/settings?tab=vault`);
+  const token = await page.evaluate(() => window.__GHOST_TOKEN__);
+  const headers = { authorization: `Bearer ${token}` };
+  try {
+    await page.getByRole('button', { name: '새 항목', exact: true }).click();
+    const create = page.getByRole('dialog', { name: '새 금고 항목', exact: true });
+    await create.getByRole('textbox', { name: '항목 이름', exact: true }).fill(title);
+    await create.getByRole('textbox', { name: '사용자 이름', exact: true }).fill('discarded-login-user');
+    await create.getByLabel('비밀번호', { exact: true }).fill('discarded-login-password');
+    await create.getByRole('radiogroup', { name: '항목 종류', exact: true }).getByRole('radio', { name: 'API 키', exact: true }).click();
+    await create.getByRole('textbox', { name: '주소', exact: true }).fill('https://openapi.example.com');
+    await create.getByRole('textbox', { name: '클라이언트 ID', exact: true }).fill('client-before');
+    await create.getByLabel('비밀 키', { exact: true }).fill(secret);
+    const creation = page.waitForResponse(response => new URL(response.url()).pathname === '/api/vault/items' && response.request().method() === 'POST');
+    await create.getByRole('button', { name: '저장', exact: true }).click();
+    const createdResponse = await creation;
+    expect(createdResponse.status()).toBe(201);
+    const created = await createdResponse.json() as VaultItem;
+    createdId = created.id;
+    expect(created).toMatchObject({ kind: 'api', title, origin: 'https://openapi.example.com', username: 'client-before' });
+    expect(createdResponse.request().postDataJSON()).not.toHaveProperty('password');
+    expect(JSON.stringify(created)).not.toContain(secret);
+
+    const row = page.locator('.ghost-settings-row').filter({ has: page.getByText(title, { exact: true }) });
+    await row.getByRole('button', { name: '고치기', exact: true }).click();
+    const edit = page.getByRole('dialog', { name: '금고 항목 고치기', exact: true });
+    await expect(edit.getByRole('textbox', { name: '클라이언트 ID', exact: true })).toHaveValue('client-before');
+    await expect(edit.getByLabel('비밀 키', { exact: true })).toHaveValue('');
+    await edit.getByRole('textbox', { name: '클라이언트 ID', exact: true }).fill('');
+    await edit.getByRole('textbox', { name: '메모', exact: true }).fill('metadata-only edit');
+    const update = page.waitForResponse(response => new URL(response.url()).pathname === `/api/vault/items/${createdId}` && response.request().method() === 'PATCH');
+    await edit.getByRole('button', { name: '저장', exact: true }).click();
+    const updatedResponse = await update;
+    expect(updatedResponse.ok()).toBe(true);
+    expect(updatedResponse.request().postDataJSON()).not.toHaveProperty('value');
+    expect(updatedResponse.request().postDataJSON()).not.toHaveProperty('password');
+    await page.reload();
+    await row.getByRole('button', { name: '고치기', exact: true }).click();
+    await expect(edit.getByRole('textbox', { name: '클라이언트 ID', exact: true })).toHaveValue('');
+    await expect(edit.getByLabel('비밀 키', { exact: true })).toHaveValue('');
+    await expect(edit.getByRole('textbox', { name: '메모', exact: true })).toHaveValue('metadata-only edit');
+    const storedResponse = await request.get(`${baseUrl}/api/vault/items`, { headers });
+    expect(storedResponse.ok()).toBe(true);
+    const stored = await storedResponse.json() as { items: VaultItem[] };
+    expect(stored.items.find(item => item.id === createdId)).toMatchObject({ kind: 'api', username: '', hints: 'metadata-only edit' });
+    expect(JSON.stringify(stored)).not.toContain(secret);
+  } finally {
+    if (createdId) {
+      const removed = await request.delete(`${baseUrl}/api/vault/items/${encodeURIComponent(createdId)}`, { headers });
+      expect(removed.ok()).toBe(true);
+    }
+  }
 });
 
 test('CSV import posts the file text once and reports the counts', async ({ page }) => {
