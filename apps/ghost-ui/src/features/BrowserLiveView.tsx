@@ -224,13 +224,18 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   }, [conversationId]);
 
   const send = useCallback((input: BrowserInput): Promise<void> => {
+    // Do not queue owner gestures against a viewport whose matching JPEG has not decoded yet.
+    if (input.type !== 'viewport' && !dimsRef.current) {
+      setInputError('화면을 다시 연결하고 있어요. 새 화면에서 다시 입력해 주세요.');
+      return Promise.resolve();
+    }
     const generation = inputGenerationRef.current;
     const pending = (inputQueueRef.current ?? Promise.resolve()).then(async () => {
       if (generation !== inputGenerationRef.current || statusRef.current === 'ended') {
         if (input.type === 'viewport' && pendingViewportRef.current === input) pendingViewportRef.current = null;
         return;
       }
-      if (statusRef.current !== 'live') {
+      if (statusRef.current !== 'live' || input.type !== 'viewport' && !dimsRef.current) {
         if (input.type === 'viewport') pendingViewportRef.current = null;
         else setInputError('화면을 다시 연결하고 있어요. 새 화면에서 다시 입력해 주세요.');
         return;
@@ -446,7 +451,7 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     event.preventDefault();
     const field = touchFieldRef.current;
     const text = field?.value.slice(0, 2000) ?? '';
-    if (!field || !text) return;
+    if (!field || !text || statusRef.current !== 'live' || !dimsRef.current) return;
     field.value = '';
     void send({ type: 'text', text });
   };
@@ -460,17 +465,19 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
     });
   };
 
-  const busy = status === 'connecting' || status === 'reconnecting';
+  const ready = status === 'live' && dims !== null;
+  const displayStatus = status === 'live' && !ready ? 'connecting' : status;
+  const busy = displayStatus === 'connecting' || displayStatus === 'reconnecting';
   const label = pageOrigin || page?.title || (status === 'ended' ? '세션 종료' : '연결 중…');
-  const statusText = { connecting: '연결 중', live: '연결됨', reconnecting: '다시 연결', ended: '세션 종료' }[status];
+  const statusText = { connecting: '연결 중', live: '연결됨', reconnecting: '다시 연결', ended: '세션 종료' }[displayStatus];
 
   return <div className="browser-live" data-compact={compact || undefined} data-touch={touch || undefined}>
     <header className="browser-live__bar">
-      <span className="browser-live__state" data-state={status} title={statusText} aria-label={statusText} role="img"/>
+      <span className="browser-live__state" data-state={displayStatus} title={statusText} aria-label={statusText} role="img"/>
       <span className="browser-live__url" title={page?.url ?? undefined}>{label}</span>
-      <button type="button" className="browser-live__icon" aria-label="뒤로" title="뒤로" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'back' })}><ArrowLeft size={15}/></button>
-      <button type="button" className="browser-live__icon" aria-label="앞으로" title="앞으로" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'forward' })}><ArrowRight size={15}/></button>
-      <button type="button" className="browser-live__icon" aria-label="새로고침" title="새로고침" disabled={status !== 'live'} onClick={() => void send({ type: 'navigate', action: 'reload' })}><RotateCw size={15}/></button>
+      <button type="button" className="browser-live__icon" aria-label="뒤로" title="뒤로" disabled={!ready} onClick={() => void send({ type: 'navigate', action: 'back' })}><ArrowLeft size={15}/></button>
+      <button type="button" className="browser-live__icon" aria-label="앞으로" title="앞으로" disabled={!ready} onClick={() => void send({ type: 'navigate', action: 'forward' })}><ArrowRight size={15}/></button>
+      <button type="button" className="browser-live__icon" aria-label="새로고침" title="새로고침" disabled={!ready} onClick={() => void send({ type: 'navigate', action: 'reload' })}><RotateCw size={15}/></button>
       <button type="button" className="browser-live__mac" disabled={status === 'ended'} onClick={openWindow}>
         <Monitor size={13} aria-hidden="true"/>Mac 창으로 열기
       </button>
@@ -483,16 +490,17 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
         {status === 'ended' ? endReason || '브라우저 세션이 종료되었습니다.' : busy ? '화면을 연결하는 중…' : ''}
       </div>}
       {/* The keyboard lands here: printable text, Korean composition and paste go out as text. */}
-      {!touch && <textarea ref={fieldRef} className="browser-live__field" aria-label="브라우저에 입력" rows={1} maxLength={2000} disabled={status !== 'live'}
+      {!touch && <textarea ref={fieldRef} className="browser-live__field" aria-label="브라우저에 입력" rows={1} maxLength={2000} disabled={!ready}
         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
         onInput={onFieldInput} onCompositionEnd={onCompositionEnd} onPaste={onFieldPaste}/>}
     </div>
     {touch && <form className="browser-live__type" onSubmit={submitTouchText}>
+      {/* Keyboard viewport changes must not disable this focused draft field and dismiss the keyboard. */}
       <Input ref={touchFieldRef} aria-label="브라우저에 입력할 내용" placeholder="선택한 곳에 입력됩니다" maxLength={2000} disabled={status !== 'live'}
         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}/>
-      <button type="button" className="browser-live__icon" aria-label="Enter" title="Enter" disabled={status !== 'live'}
+      <button type="button" className="browser-live__icon" aria-label="Enter" title="Enter" disabled={!ready}
         onClick={() => void send({ type: 'key', event: 'down', key: 'Enter', code: 'Enter' }).then(() => send({ type: 'key', event: 'up', key: 'Enter', code: 'Enter' }))}><CornerDownLeft size={15}/></button>
-      <Button type="submit" size="icon" aria-label="글자 보내기" title="글자 보내기" className="rounded-pill" disabled={status !== 'live'}><Send/></Button>
+      <Button type="submit" size="icon" aria-label="글자 보내기" title="글자 보내기" className="rounded-pill" disabled={!ready}><Send/></Button>
     </form>}
     {inputError && <InlineError>{inputError}</InlineError>}
   </div>;
