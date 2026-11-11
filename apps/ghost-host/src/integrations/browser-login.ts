@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { CommandError } from "../core/errors.ts";
-import { BrowserCdp, type CdpEvent } from "./browser-cdp.ts";
+import { BrowserCdp, type CdpEvent, type CdpDisconnect } from "./browser-cdp.ts";
 import { chromeLoginScript } from "./login-capture-chrome-script.ts";
 import type { LoginCapture, LoginField, LoginPage, LoginEdit } from "./login-capture.ts";
 
@@ -32,6 +32,7 @@ interface PageAttachment {
 }
 export interface LoginObserver {
   privacyScope?: string;
+  readonly ended: boolean;
   snapshot(targetId?: string, point?: { x: number; y: number }): Promise<LoginPage | null>;
   updateMode?(): Promise<void>;
   selectAll?(targetId?: string): Promise<boolean>;
@@ -45,7 +46,8 @@ interface ChromeOptions {
   activity(): void;
   secret(page: LoginPage, kind: "password" | "sensitive"): void;
   privacy(page: LoginPage | null, scope: string, edit: LoginEdit | null): void;
-  windowClosed(): void;
+  windowClosed(observer: LoginObserver): void;
+  ended(observer: LoginObserver, reason: CdpDisconnect): void;
 }
 
 /** Chrome's real separate V8 world is the only source of native-window input payloads. */
@@ -58,13 +60,16 @@ export class ChromeLoginObserver implements LoginObserver {
   private readonly keys = new Set<{ key:string; resolve():void; reject(error:Error):void; timer:NodeJS.Timeout }>();
   private closed = false;
   private closedError?: CommandError;
+  get ended() { return this.closed; }
   private constructor(private readonly cdp: BrowserCdp, private readonly capture: LoginCapture, private readonly options: ChromeOptions) {
     cdp.onEvent(event => this.event(event));
     cdp.onDisconnect(reason => {
       if (this.closed) return;
       this.closed = true;
       this.closedError = new CommandError("unavailable",`Private Chrome observation ended (${reason.cause}; ${reason.stage}${reason.closeCode === undefined ? "" : `; ${reason.closeCode}`})`);
-      this.capture.clear(); this.pages.clear(); this.options.windowClosed();
+      for (const pending of this.keys) { clearTimeout(pending.timer); pending.reject(this.closedError); }
+      this.keys.clear();
+      this.capture.clear(); this.pages.clear(); this.options.ended(this,reason);
     });
   }
   static async start(endpoint: string, capture: LoginCapture, options: ChromeOptions) {
@@ -94,7 +99,7 @@ export class ChromeLoginObserver implements LoginObserver {
       const removed = this.pages.get(event.params.sessionId);
       this.pages.delete(event.params.sessionId);
       if (removed) this.capture.forgetTarget(removed.targetId);
-      if (removed && !removed.parent && ![...this.pages.values()].some(page=>!page.parent)) this.options.windowClosed();
+      if (removed && !removed.parent && ![...this.pages.values()].some(page=>!page.parent)) this.options.windowClosed(this);
       return;
     }
     const page = event.sessionId ? this.pages.get(event.sessionId) : undefined;
@@ -234,7 +239,7 @@ export class ChromeLoginObserver implements LoginObserver {
         await this.cdp.request("Runtime.evaluate",{expression:source,contextId:world.executionContextId,returnByValue:true},page.sessionId);
       }
       stage = "Runtime.evaluate (mode)";
-      await this.setMode(page);
+      await this.setMode(page,true);
     } catch {
       throw new CommandError("unavailable",`Private Chrome ${page.parent ? "child-frame" : "page"} capture setup failed (${stage})`);
     } finally { if (!resumeSent) await this.cdp.request("Runtime.runIfWaitingForDebugger",{},page.sessionId); }
@@ -263,19 +268,48 @@ export class ChromeLoginObserver implements LoginObserver {
     }
     return null;
   }
-  private async setMode(page: PageAttachment) {
-    if (this.closed) return;
+  private async setMode(page: PageAttachment, required = false) {
+    if (this.closed) {
+      if (required) throw this.closedError ?? new CommandError("unavailable","Private Chrome observation ended");
+      return;
+    }
     await Promise.all([...page.contexts].filter(([,frame])=>page.frames.has(frame)).map(async ([contextId,frame]) => {
       const initial = page.initialModes.get(contextId);
-      const result = await this.cdp.request("Runtime.evaluate",{expression:`(() => { const c = globalThis[${JSON.stringify(this.controller)}]; if (!c) return null; c.native(${this.options.nativeAllowed()},${this.options.ownerApiActive()},${initial?.native === true},${initial?.api === true}); return c.metadata(null); })()`,contextId,returnByValue:true},page.sessionId);
-      if (!page.parent && frame === page.frameId) { const meta = metadata(evaluation(result)); if (meta) this.page(page,meta); }
+      const native = this.options.nativeAllowed(), api = this.options.ownerApiActive();
+      const result = await this.cdp.request("Runtime.evaluate",{expression:`(() => { const c = globalThis[${JSON.stringify(this.controller)}]; if (!c) return null; return c.native(${native},${api},${initial?.native === true},${initial?.api === true}); })()`,contextId,returnByValue:true},page.sessionId);
+      if (this.closed) {
+        if (required) throw this.closedError ?? new CommandError("unavailable","Private Chrome observation ended");
+        return;
+      }
+      if (this.pages.get(page.sessionId) !== page || page.contexts.get(contextId) !== frame || !page.frames.has(frame)) return;
+      let value: unknown;
+      try { value = evaluation(result); }
+      catch (error) {
+        // A failed current controller is a lost observation capability, not a
+        // healthy channel to keep reusing. Recovery belongs to the next action.
+        if (required) this.cdp.close("controller-ack");
+        throw error;
+      }
+      // A context-created probe can precede its preload. It grants no readiness;
+      // setup/updateMode must later acknowledge every still-current controller.
+      if (!required && value === null) return;
+      if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 4
+        || !("version" in value) || value.version !== 1
+        || !("documentId" in value) || typeof value.documentId !== "string" || !value.documentId || value.documentId.length > 128
+        || !("allowed" in value) || value.allowed !== native || !("ownerApi" in value) || value.ownerApi !== api) {
+        if (required) this.cdp.close("controller-ack");
+        throw new CommandError("unavailable","Private Chrome input controller did not acknowledge its mode");
+      }
+      // The authenticated controller stamps document identity; URL/origin checks
+      // stay in snapshot/page observation and never gate about:blank bootstrap.
+      if (!page.parent && contextId === page.context) page.documentId = value.documentId;
     }));
   }
   async updateMode() {
     if (this.closed) throw this.closedError ?? new CommandError("unavailable","Private Chrome observation ended");
     // A child listener is part of the privacy boundary, not optional background
     // work. Surface a failed/paused attachment before any model or owner I/O.
-    await Promise.all([...this.pages.values()].map(async page => { await page.ready; await this.setMode(page); }));
+    await Promise.all([...this.pages.values()].map(async page => { await page.ready; await this.setMode(page,true); }));
   }
   async snapshot(targetId?: string, point?: {x:number;y:number}): Promise<LoginPage | null> {
     const page = await this.active(targetId);

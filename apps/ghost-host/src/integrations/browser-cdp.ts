@@ -2,7 +2,7 @@ import { CommandError } from "../core/errors.ts";
 
 export interface CdpEvent { method: string; params: Record<string, unknown>; sessionId?: string }
 export interface CdpDisconnect {
-  cause: "host-close" | "socket-close" | "socket-error" | "socket-not-open" | "protocol-nontext" | "protocol-oversized" | "protocol-json";
+  cause: "host-close" | "controller-ack" | "socket-close" | "socket-error" | "socket-not-open" | "protocol-nontext" | "protocol-oversized" | "protocol-json";
   stage: "host" | "receive" | "command" | "idle";
   closeCode?: number;
 }
@@ -68,7 +68,7 @@ export class BrowserCdp {
     if (this.terminalError) return;
     const reason: CdpDisconnect = {
       cause,
-      stage:cause === "host-close" ? "host" : cause.startsWith("protocol-") ? "receive" : this.pending.size ? "command" : "idle",
+      stage:cause === "host-close" ? "host" : cause === "controller-ack" ? "command" : cause.startsWith("protocol-") ? "receive" : this.pending.size ? "command" : "idle",
       ...(typeof closeCode === "number" && Number.isInteger(closeCode) && closeCode >= 1000 && closeCode <= 4999 ? {closeCode} : {}),
     };
     // Only fixed classifications/numeric protocol codes survive. Never retain or
@@ -79,5 +79,5 @@ export class BrowserCdp {
     for (const listener of this.disconnects) listener(reason);
     this.disconnects.clear();
   }
-  close() { this.fail("host-close"); this.socket.close(); }
+  close(cause: "host-close" | "controller-ack" = "host-close") { this.fail(cause); this.socket.close(); }
 }

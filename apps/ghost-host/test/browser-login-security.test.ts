@@ -4,6 +4,8 @@ import { AgentBrowser } from "../src/integrations/browser.ts";
 import { BrowserCdp, type CdpDisconnect } from "../src/integrations/browser-cdp.ts";
 import { createVault } from "../src/stores/vault.ts";
 import { tempDir } from "./support.ts";
+import type { LoginObserver } from "../src/integrations/browser-login.ts";
+import type { BrowserSessionRef, BrowserCommandResult } from "../src/integrations/ports.ts";
 
 const executable = process.env.GHOST_TEST_AGENT_BROWSER;
 const chrome = process.env.GHOST_TEST_CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -392,4 +394,226 @@ for (const lane of ["api","native"] as const) for (const context of ["iframe","c
     expect(saved).toEqual([]);
     expect(interceptionErrors).toEqual([]);
   }finally{native?.close();await browser.shutdown();}
+},90_000);
+
+interface ObserverFaultProbe extends LoginObserver {
+  cdp: BrowserCdp;
+  options: { ended(observer: LoginObserver, reason: CdpDisconnect): void };
+  pages: Map<string,{frameId:string;contexts:Map<number,string>}>;
+}
+interface FixtureChannel { cdp: BrowserCdp; sessionId: string }
+function observerFaultProbe(browser: AgentBrowser, conversationId: string) {
+  // Test-only fault seam into an in-process observer, never external page data.
+  const internal=browser as unknown as {sessionMap:Map<string,{loginObserver?:ObserverFaultProbe}>};
+  const observer=internal.sessionMap.get(conversationId)?.loginObserver;
+  if(!observer)throw new Error("Missing private observer for terminal-channel fixture");
+  return observer;
+}
+async function fixtureChannel(browser:AgentBrowser,ref:BrowserSessionRef){
+  const endpoint=await browser.run(ref,["get","cdp-url"]);
+  if(!endpoint.data || typeof endpoint.data!=="object" || !("cdpUrl" in endpoint.data) || typeof endpoint.data.cdpUrl!=="string")throw new Error("Missing fixture endpoint");
+  const cdp=await BrowserCdp.connect(endpoint.data.cdpUrl);
+  try{
+    const targets=await cdp.request("Target.getTargets");
+    if(!Array.isArray(targets.targetInfos))throw new Error("Missing fixture targets");
+    const target=targets.targetInfos.find((target:Record<string,unknown>)=>target.type==="page" && typeof target.url==="string" && target.url.startsWith("https://example.com/"));
+    if(!target || typeof target.targetId!=="string")throw new Error("Missing fixture target");
+    const attached=await cdp.request("Target.attachToTarget",{targetId:target.targetId,flatten:true});
+    if(typeof attached.sessionId!=="string")throw new Error("Missing fixture attachment");
+    return {cdp,sessionId:attached.sessionId};
+  }catch(error){cdp.close();throw error;}
+}
+const recoveryFixture=`document.body.innerHTML='<form id=login><input id=user autocomplete=username><input id=password type=password autocomplete=current-password><button>Submit</button></form><input id=aux type=password autocomplete=new-password><div id=private contenteditable=true></div>';document.querySelector('#login').onsubmit=e=>e.preventDefault();window.effects=0;"ready"`;
+async function apiFixtureLogin(browser:AgentBrowser,ref:BrowserSessionRef,password:string){
+  for(const [selector,text] of [["#user","owner@example.com"],["#password",password]] as const){
+    await browser.run(ref,["eval",`document.querySelector(${JSON.stringify(selector)}).focus();"focused"`]);
+    await browser.input(ref,{type:"text",text});
+  }
+  await browser.input(ref,{type:"key",event:"down",key:"Enter",code:"Enter"});
+  await browser.input(ref,{type:"key",event:"up",key:"Enter",code:"Enter"});
+}
+
+for(const trigger of ["model","owner"] as const) chromeTest(`real Chrome: terminal observer recovers on next ${trigger} action without replay, stale authority, or lost privacy`,async()=>{
+  const root=tempDir(),saved:unknown[]=[],ref={ghostId:`observer-recovery-${trigger}`,conversationId:`observer-recovery-${trigger}`};
+  const browser=new AgentBrowser({executable:executable!,chrome},root,(_session,login)=>{saved.push({...login});});
+  const pendingPassword="pending-owner-password",scopedSecret="scoped-owner-secret";
+  const initialCode=trigger==="owner" ? "67" : "679",expectedCode=initialCode+"5";
+  let channel:FixtureChannel|undefined;
+  try{
+    await browser.run(ref,["open","https://example.com/"]);
+    channel=await fixtureChannel(browser,ref);
+    await browser.run(ref,["eval",recoveryFixture]);
+    await apiFixtureLogin(browser,ref,pendingPassword);
+    if(trigger==="model"){
+      await browser.run(ref,["eval","document.querySelector('#aux').focus();'focused'"]);
+      await browser.input(ref,{type:"text",text:scopedSecret});
+    }
+    await browser.run(ref,["eval","document.querySelector('#private').focus();'focused'"]);
+    await browser.input(ref,{type:"text",text:initialCode});
+    expect(saved).toEqual([]);
+    const previous=observerFaultProbe(browser,ref.conversationId),request=previous.cdp.request.bind(previous.cdp);
+    let interrupted=false;
+    previous.cdp.request=(method,params={},sessionId)=>{
+      if(!interrupted && method==="Runtime.evaluate"){interrupted=true;previous.cdp.close();}
+      return request(method,params,sessionId);
+    };
+    await expect(browser.run(ref,["eval","window.effects += 1"])).rejects.toMatchObject({code:"unavailable"});
+    expect(previous.ended).toBe(true);
+    if(trigger==="owner")await browser.input(ref,{type:"text",text:"5"});
+    else expect((await browser.run(ref,["eval","window.effects"])).data).toMatchObject({result:0});
+    if(trigger==="model")await browser.input(ref,{type:"text",text:"5"});
+    const actual=await channel.cdp.request("Runtime.evaluate",{expression:`window.effects === 0 && document.querySelector('#private').textContent === ${JSON.stringify(expectedCode)}`,returnByValue:true},channel.sessionId);
+    expect(actual).toMatchObject({result:{value:true}});
+    expect((await browser.run(ref,["eval","window.effects"])).data).toMatchObject({result:0});
+    const echoKey=trigger==="model" ? scopedSecret : pendingPassword;
+    const echo=JSON.stringify((await browser.run(ref,["eval",`({[${JSON.stringify(echoKey)}]:${JSON.stringify(pendingPassword)},code:document.querySelector('#private').textContent})`])).data);
+    for(const secret of [echoKey,pendingPassword,expectedCode])expect(echo).not.toContain(secret);
+    expect(echo).toContain("[redacted]");
+    await browser.run(ref,["eval","history.pushState({},'','/after-recovered-private');'ready'"]);
+    await expect(browser.run(ref,["screenshot"])).rejects.toMatchObject({code:"forbidden"});
+    await browser.run(ref,["eval","document.querySelector('#login').remove();'completed'"]);
+    await browser.run(ref,["get","url"]);
+    expect(saved).toEqual([]);
+    // Fresh owner bytes still establish a real login after recovery.
+    await browser.run(ref,["eval",recoveryFixture+";document.querySelector('#login').onsubmit=e=>{e.preventDefault();document.querySelector('#login').remove();};'ready'"]);
+    await browser.run(ref,["eval","document.querySelector('#user').focus();'focused'"]);
+    await browser.input(ref,{type:"text",text:"owner@example.com"});
+    await browser.run(ref,["eval","document.querySelector('#password').focus();'focused'"]);
+    await browser.input(ref,{type:"text",text:"fresh-owned-password"});
+    previous.options.ended(previous,{cause:"socket-close",stage:"idle"}); // A late old callback must not revoke the replacement.
+    await browser.input(ref,{type:"key",event:"down",key:"Enter",code:"Enter"});
+    await browser.input(ref,{type:"key",event:"up",key:"Enter",code:"Enter"});
+    await browser.run(ref,["get","url"]);
+    expect(saved).toEqual([{origin:"https://example.com",username:"owner@example.com",password:"fresh-owned-password"}]);
+    await expect(browser.run(ref,["screenshot"])).rejects.toMatchObject({code:"forbidden"});
+  }finally{channel?.cdp.close();await browser.shutdown();}
+},90_000);
+
+chromeTest("real Chrome: a native capture gap resets to a blank private page without reading or blessing unseen bytes",async()=>{
+  const root=tempDir(),saved:unknown[]=[],ref={ghostId:"native-capture-gap",conversationId:"native-capture-gap"};
+  const browser=new AgentBrowser({executable:executable!,chrome},root,(_session,login)=>{saved.push({...login});});
+  let channel:FixtureChannel|undefined;
+  const originalKey=`ghost-${ref.ghostId}`,identities:{key:string;closed:boolean}[]=[];
+  let repairing=false,oldClosed=false;
+  // Observe restore identity only; never record CLI args, URLs or input values.
+  const runtime=browser as unknown as {invokeCli(session:{ref:BrowserSessionRef;privateRestoreKey?:string},argv:string[],options?:{stdin?:string;timeoutMs?:number;batch?:boolean}):Promise<BrowserCommandResult>};
+  const invoke=runtime.invokeCli.bind(runtime);
+  runtime.invokeCli=async(session,argv,options)=>{
+    const key=session.privateRestoreKey ?? `ghost-${session.ref.ghostId}`;
+    if(repairing)identities.push({key,closed:oldClosed});
+    const result=await invoke(session,argv,options);
+    if(repairing && argv[0]==="close" && key===originalKey && result.ok)oldClosed=true;
+    return result;
+  };
+  try{
+    await browser.run(ref,["open","https://example.com/"]);await browser.handoff(ref,"https://example.com/");
+    channel=await fixtureChannel(browser,ref);
+    await browser.run(ref,["eval",recoveryFixture]);await apiFixtureLogin(browser,ref,"pending-native-password");
+    await browser.run(ref,["eval","document.querySelector('#aux').focus();'focused'"]);
+    await browser.input(ref,{type:"text",text:"native-scoped-secret"});
+    await browser.run(ref,["eval","document.querySelector('#password').oninput=e=>{localStorage.setItem('native-gap-record',e.target.value);document.cookie='native-gap-record='+encodeURIComponent(e.target.value)+';path=/;SameSite=Lax';};'ready'"]);
+    const previous=observerFaultProbe(browser,ref.conversationId);
+    repairing=true;
+    previous.cdp.close();
+    expect(previous.ended).toBe(true);
+    await channel.cdp.request("Runtime.evaluate",{expression:"document.querySelector('#password').focus()",returnByValue:true},channel.sessionId);
+    await channel.cdp.request("Input.insertText",{text:"unobserved-native-bytes"},channel.sessionId);
+    const unseen=await channel.cdp.request("Runtime.evaluate",{expression:"document.querySelector('#password').value.includes('unobserved-native-bytes')",returnByValue:true},channel.sessionId);
+    expect(unseen).toMatchObject({result:{value:true}});
+    expect(await channel.cdp.request("Runtime.evaluate",{expression:"localStorage.getItem('native-gap-record').includes('unobserved-native-bytes') && document.cookie.includes('native-gap-record=')",returnByValue:true},channel.sessionId)).toMatchObject({result:{value:true}});
+    // A viewport-only UI event is not consent to tear down a typing native window.
+    await expect(browser.input(ref,{type:"viewport",width:400,height:500})).rejects.toMatchObject({code:"unavailable"});
+    expect(browser.sessions().find(session=>session.conversationId===ref.conversationId)?.headed).toBe(true);
+    expect(await channel.cdp.request("Runtime.evaluate",{expression:"document.querySelector('#password').value.includes('unobserved-native-bytes')",returnByValue:true},channel.sessionId)).toMatchObject({result:{value:true}});
+    await expect(browser.run(ref,["eval","window.effects += 1"])).rejects.toMatchObject({code:"conflict"});
+    expect(browser.sessions().find(session=>session.conversationId===ref.conversationId)?.headed).toBe(false);
+    expect((await browser.run(ref,["eval","location.href"])).data).toMatchObject({result:"about:blank"});
+    const text=JSON.stringify((await browser.run(ref,["get","text","body"])).data);
+    expect(text).not.toContain("unobserved-native-bytes");expect(saved).toEqual([]);
+    const retained=JSON.stringify((await browser.run(ref,["eval","'native-scoped-secret'"])).data);
+    expect(retained).not.toContain("native-scoped-secret");expect(retained).toContain("[redacted]");
+    await expect(browser.run(ref,["screenshot"])).rejects.toMatchObject({code:"forbidden"});
+    await browser.run(ref,["open","https://example.com/"]);
+    expect((await browser.run(ref,["eval","localStorage.getItem('native-gap-record') === null && !document.cookie.includes('native-gap-record=')"])).data).toMatchObject({result:true});
+    // Later handoffs/restores must keep the isolated identity, not return to the
+    // affected runtime's saved cookie/localStorage file.
+    await browser.handoff(ref,"https://example.com/");await browser.endHandoff(ref);
+    expect((await browser.run(ref,["eval","localStorage.getItem('native-gap-record') === null && !document.cookie.includes('native-gap-record=')"])).data).toMatchObject({result:true});
+    const afterHandoff=JSON.stringify((await browser.run(ref,["eval","'native-scoped-secret'"])).data);
+    expect(afterHandoff).not.toContain("native-scoped-secret");
+    await expect(browser.run(ref,["screenshot"])).rejects.toMatchObject({code:"forbidden"});
+    expect(saved).toEqual([]);
+    await browser.run(ref,["eval",recoveryFixture+";document.querySelector('#login').onsubmit=e=>{e.preventDefault();document.querySelector('#login').remove();};'ready'"]);
+    await apiFixtureLogin(browser,ref,"fresh-native-gap-password");
+    await browser.run(ref,["get","url"]);
+    expect(saved).toEqual([{origin:"https://example.com",username:"owner@example.com",password:"fresh-native-gap-password"}]);
+    const fresh=identities.filter(identity=>identity.key!==originalKey);
+    expect(fresh.length).toBeGreaterThan(0);
+    expect(fresh.every(identity=>identity.closed)).toBe(true);
+    expect(new Set(fresh.map(identity=>identity.key)).size).toBe(1);
+    expect(identities.slice(identities.findIndex(identity=>identity.key!==originalKey)).every(identity=>identity.key===fresh[0]!.key)).toBe(true);
+  }finally{channel?.cdp.close();await browser.shutdown();}
+},90_000);
+
+for(const failure of ["missing","exception"] as const) chromeTest(`real Chrome: ${failure} current child mode acknowledgement prevents effects and safely recovers`,async()=>{
+  const root=tempDir(),ref={ghostId:`child-mode-${failure}`,conversationId:`child-mode-${failure}`};
+  const browser=new AgentBrowser({executable:executable!,chrome},root);
+  let channel:FixtureChannel|undefined;
+  try{
+    await browser.run(ref,["open","https://example.com/"]);
+    channel=await fixtureChannel(browser,ref);
+    // Owner API initializes the observer even when login saving is not configured.
+    await browser.input(ref,{type:"key",event:"down",key:"Escape",code:"Escape"});
+    await browser.input(ref,{type:"key",event:"up",key:"Escape",code:"Escape"});
+    await browser.run(ref,["eval","window.effects=0;window.childLoaded=Promise.withResolvers();const frame=document.createElement('iframe');frame.onload=()=>window.childLoaded.resolve(true);frame.srcdoc='<input>';document.body.replaceChildren(frame);'ready'"]);
+    const observer=observerFaultProbe(browser,ref.conversationId);
+    await channel.cdp.request("Runtime.evaluate",{expression:"window.childLoaded.promise",awaitPromise:true,returnByValue:true},channel.sessionId);
+    await browser.run(ref,["get","url"]);
+    const page=[...observer.pages.values()].find(page=>[...page.contexts.values()].some(frame=>frame!==page.frameId));
+    const child=page && [...page.contexts].find(([,frame])=>frame!==page.frameId)?.[0];
+    if(child===undefined)throw new Error("Missing actual child isolated context");
+    const request=observer.cdp.request.bind(observer.cdp);
+    observer.cdp.request=(method,params={},sessionId)=>{
+      if(method==="Runtime.evaluate" && params.contextId===child && typeof params.expression==="string" && params.expression.includes("c.native("))return Promise.resolve(failure==="missing" ? {result:{value:null}} : {exceptionDetails:{text:"Synthetic child mode fault"},result:{value:null}});
+      return request(method,params,sessionId);
+    };
+    await expect(browser.run(ref,["eval","window.effects += 1"])).rejects.toMatchObject({code:"unavailable"});
+    expect(observer.ended).toBe(true);
+    expect(await channel.cdp.request("Runtime.evaluate",{expression:"window.effects === 0",returnByValue:true},channel.sessionId)).toMatchObject({result:{value:true}});
+    await expect(browser.run(ref,["get","url"])).rejects.toMatchObject({code:"conflict"});
+    expect((await browser.run(ref,["eval","location.href"])).data).toMatchObject({result:"about:blank"});
+  }finally{channel?.cdp.close();await browser.shutdown();}
+},90_000);
+
+chromeTest("real Chrome: receive-cap terminal state escapes the old document without replay or permanent poisoning",async()=>{
+  const root=tempDir(),ref={ghostId:"observer-receive-cap",conversationId:"observer-receive-cap"};
+  const browser=new AgentBrowser({executable:executable!,chrome},root);
+  let channel:FixtureChannel|undefined;
+  try{
+    await browser.run(ref,["open","https://example.com/"]);
+    channel=await fixtureChannel(browser,ref);
+    await browser.input(ref,{type:"key",event:"down",key:"Escape",code:"Escape"});
+    await browser.input(ref,{type:"key",event:"up",key:"Escape",code:"Escape"});
+    await browser.run(ref,["eval","window.effects=0;'ready'"]);
+    const observer=observerFaultProbe(browser,ref.conversationId),request=observer.cdp.request.bind(observer.cdp);
+    const terminal=Promise.withResolvers<CdpDisconnect>();
+    observer.cdp.onDisconnect(reason=>terminal.resolve(reason));
+    let oversized=false;
+    observer.cdp.request=(method,params={},sessionId)=>{
+      if(!oversized && method==="Runtime.evaluate"){
+        oversized=true;
+        // A real renderer response crosses the credential channel's unchanged
+        // cap. Never log or return that response through a test assertion.
+        return request(method,{...params,expression:"'x'.repeat(1024*1024+1)"},sessionId);
+      }
+      return request(method,params,sessionId);
+    };
+    await expect(browser.run(ref,["eval","window.effects += 1"])).rejects.toMatchObject({code:"unavailable"});
+    expect(await terminal.promise).toEqual({cause:"protocol-oversized",stage:"receive"});
+    expect(await channel.cdp.request("Runtime.evaluate",{expression:"window.effects === 0",returnByValue:true},channel.sessionId)).toMatchObject({result:{value:true}});
+    await expect(browser.run(ref,["open","https://example.com/"])).rejects.toMatchObject({code:"conflict"});
+    expect((await browser.run(ref,["eval","location.href"])).data).toMatchObject({result:"about:blank"});
+    await browser.run(ref,["open","https://example.com/"]);
+    expect((await browser.run(ref,["get","url"])).ok).toBe(true);
+  }finally{channel?.cdp.close();await browser.shutdown();}
 },90_000);
