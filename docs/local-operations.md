@@ -23,8 +23,8 @@
 
 ### 브라우저·메일·문자 연결
 
-- 대화의 **브라우저 화면**은 Mac·iPhone에서 같은 세션을 표시한다. **Mac 창으로 열기**는 Chrome 창을 연다. Obscura에서 넘어갈 때는 쿠키를 옮기며, 이후 그 세션은 Chrome을 유지한다. CAPTCHA·패스키는 소유자가 직접 처리한다.
-- **메일 → 메일 계정 연결**에서 Gmail·iCloud·Naver·Daum 프리셋 또는 직접 IMAP/SMTP 서버를 설정한다. IMAP은 TLS, SMTP는 465 암시적 TLS 또는 587 STARTTLS를 쓴다. Gmail·iCloud는 제공자가 발급한 앱 비밀번호가 필요하다. 주 계정 비밀번호나 임의 OAuth 클라이언트로 우회하지 않는다.
+- 대화의 **브라우저 화면**은 Mac·iPhone에서 같은 세션을 표시한다. Obscura 화면에서 처음 조작하면 안전한 Chrome으로 전환하고 그 첫 입력은 재생하지 않는다. 새 화면에서 다시 선택한다. `browser_handoff`는 전환 후 질문을 띄운다. **Mac 창으로 열기**는 실제 Chrome 창이며, CAPTCHA·패스키는 소유자가 처리한다. Obscura에서 쿠키·URL·화면 크기만 옮기고 DOM·localStorage는 옮기지 않는다.
+- **메일 → 메일 계정 연결**에서 공용 연결 설정을 연다. Gmail·iCloud·Naver·Daum 프리셋이나 직접 IMAP/SMTP, 등록한 Outlook OAuth2를 지원한다. IMAP은 TLS, SMTP는 465 암시적 TLS 또는 587 STARTTLS다. Gmail·iCloud는 제공자 앱 비밀번호가 필요하다. 기존 Google OAuth 연결은 계정 식별·Drive용이지 Gmail 메일 권한이 아니다. 주 계정 비밀번호나 임의 OAuth 클라이언트로 우회하지 않는다.
 - 메일 쓰기·답장·전달은 소유자가 앱에서 직접 보낸다. Ghost의 메일 도구는 별도 허용이며, `mail_send`는 수신인·제목·본문 전체 승인 뒤 전송한다. 전송 결과가 불명확하면 같은 요청의 상태만 확인하고 새 요청으로 재발송하지 않는다. 전송 뒤 목록을 다시 읽으며, **메일 새로고침**으로 이후 도착한 메일을 확인할 수 있다.
 - `host_message_codes`는 Mac 도구 허용에 더해 실행 중인 Host의 **전체 디스크 접근 권한**이 필요하다. iPhone의 SMS를 받으려면 같은 Apple 계정의 Mac으로 **문자 메시지 전달**을 켠다. Messages DB는 읽기 전용이며, 권한을 우회하거나 DB/WAL을 따로 복사해 읽지 않는다.
 - 카드·이름·전화·주소·상세주소·우편번호는 **금고**에 저장한다. 카드 채우기는 사이트·금액·끝 네 자리·입력 항목을 묶어서 승인하고, 구매 버튼은 별도로 승인한다. 새 연락처 필드 보존을 위해 저장 지문에 `/browser-vault-2`를 넣으므로 이전 지문으로의 자동 롤백은 하지 않는다.
@@ -51,7 +51,7 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.3-80bf347`(GitHub Release `v2.4.3`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.6-189b707`(GitHub Release `v2.4.6`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -66,6 +66,7 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
 - 실제 Chrome에서 `browser_fill_card` → 소유자 승인 → 번호·월·연도·CVC·소유자명 채우기를 확인했다. 승인 전에는 모든 입력란이 비었고 구매 버튼은 누르지 않았다. 카드 번호는 승인·효과 원장과 SQLite 평문에 없었다. 연락처는 앱에서 생성·Ghost 허용·다시 열기를 거쳐 이름·전화·주소·상세주소·우편번호가 보존됐다.
 - 실제 TLS IMAP/SMTP 시험 서버에서 한글 본문·첨부·읽음/안읽음·보관·휴지통·보낸편지함 사본을 확인했다. 앱에서 답장의 제목을 고치고 숨은참조를 넣어 한 번 전송했으며, 받은 메일과 보낸편지함에서 그 제목을 확인했다. 전송 뒤 목록 새로고침과 별도 **메일 새로고침**을 제공한다. 시험 CA는 시험 프로세스에만 전달했고 전역 신뢰 설정은 바꾸지 않았다.
 - 실제 메일 도구 경로에서도 읽기는 Seen을 바꾸지 않았고, 전체 본문·숨은참조가 담긴 승인 전에는 SMTP 전송이 없었다. 승인 뒤 실제 도착과 완료 효과를 확인했고, 승인 전 메일 도구를 철회하면 전송이 거부됐다. 모델은 호출하지 않은 격리 Core에서 도구·승인·원장·실제 서버를 연결한 검증이다.
+- 실제 Chrome에서 전화 크기 UI의 Tab·일반 텍스트·비밀번호·Enter로 로그인 폼을 완료하고, 정확한 origin·사용자명·`hasPassword`만 있는 금고 메타데이터를 확인했다. Chrome 자체 CSS viewport JPEG는 530×480 → 356×700 → 980×520 크기를 독립 디코더로 확인했다. 1920×1200의 1 MiB 초과 JPEG도 전달됐고 정적 화면 4초에 2프레임으로 캡처 피드백 반복이 없었다. 실제 Google·iCloud 계정 연결이나 실제 CAPTCHA 통과를 검증한 것은 아니다.
 - Messages는 macOS가 실제 DB 접근을 거부해 실제 문자 수신을 검증하지 못했다. 코드 추출은 NSArchiver 한글/영문 fixture·라이브 WAL·일반 SMS 제외 검사로 확인했다. 전체 디스크 접근과 iPhone 문자 전달은 소유자 설정이 필요하다.
 
 ### 팀 생성·환경 적응·도구 실패 수정 — 2026-11-10

@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { openScreen, screenshot, type Screen } from './visual';
 import { mockIPhone, mockRichConversation } from './iphone-fixtures';
+import { readRunState } from './run-state';
 
 const screens: Screen[] = [
   { name: 'home', route: () => '/', waits: () => ['진행 중', '최근 끝난 일'] },
@@ -248,3 +249,114 @@ for (const theme of ['light', 'dark'] as const) {
     });
   });
 }
+
+test('live browser preserves the focused touch draft until matching viewport pixels decode', async ({ page }) => {
+  const { conversationA, defaultGhostId } = readRunState();
+  const inputs: { type: string; width?: number; height?: number; text?: string }[] = [];
+  let windowRequests = 0;
+  await openScreen(page, {
+    name: 'live browser touch readiness', route: () => `/ghosts/${defaultGhostId}`, waits: () => [],
+    prepare: async page => {
+      await page.route('**/api/state', async route => {
+        const response = await route.fetch();
+        const state = await response.json();
+        state.ghosts = state.ghosts.map((ghost: { id: string; tools: string[] }) => ghost.id === defaultGhostId
+          ? { ...ghost, tools: [...ghost.tools, 'browser_snapshot'] } : ghost);
+        await route.fulfill({ response, json: state });
+      });
+      await page.route('**/api/browser/sessions', route => route.fulfill({ json: { ok: true, sessions: [{
+        conversationId: conversationA, ghostId: defaultGhostId, engine: 'chrome', headed: false, handoffDecisionId: null,
+      }] } }));
+      await page.route('**/api/browser/sessions/*/input', async route => {
+        inputs.push(route.request().postDataJSON());
+        await route.fulfill({ json: { ok: true } });
+      });
+      await page.route('**/api/browser/sessions/*/window', async route => {
+        windowRequests++;
+        await route.fulfill({ json: { ok: true } });
+      });
+      // Route.fulfill buffers response bodies. Keep NDJSON open so the test, not reconnect timing,
+      // releases each real JPEG through the production stream parser and image decoder.
+      await page.addInitScript(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+          const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+          if (!/^\/api\/browser\/sessions\/[^/]+\/live$/.test(url.pathname)) return originalFetch(input, init);
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              Object.assign(window, { __releaseBrowserFrame(width: number, height: number) {
+                const canvas = document.createElement('canvas');
+                canvas.width = width; canvas.height = height;
+                const context = canvas.getContext('2d')!;
+                context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
+                context.fillStyle = '#246'; context.fillRect(0, 0, width / 2, height);
+                controller.enqueue(new TextEncoder().encode(`${JSON.stringify({
+                  type: 'frame', width, height, data: canvas.toDataURL('image/jpeg').split(',')[1],
+                })}\n`));
+              } });
+              init?.signal?.addEventListener('abort', () => controller.close(), { once: true });
+            },
+          });
+          return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'application/x-ndjson' } }));
+        };
+      });
+    },
+  }, 'light');
+  await page.getByRole('button', { name: '브라우저 화면', exact: true }).tap();
+  const live = page.locator('.browser-live');
+  const screen = live.locator('.browser-live__screen');
+  const field = live.getByRole('textbox', { name: '브라우저에 입력할 내용', exact: true });
+  const send = live.getByRole('button', { name: '글자 보내기', exact: true });
+  const macWindow = live.getByRole('button', { name: 'Mac 창으로 열기', exact: true });
+  const releaseFrame = async (size: { width: number; height: number }) => {
+    await page.evaluate(({ width, height }) => {
+      const release = (window as typeof window & { __releaseBrowserFrame: (width: number, height: number) => void }).__releaseBrowserFrame;
+      release(width, height);
+    }, size);
+  };
+  await expect.poll(() => page.evaluate(() => '__releaseBrowserFrame' in window)).toBe(true);
+  const initial = await screen.evaluate(element => ({ width: element.clientWidth, height: element.clientHeight }));
+  await releaseFrame(initial);
+  await expect(send).toBeEnabled();
+  const draft = '계속 입력한 초안';
+  await field.fill(draft);
+  await expect(field).toBeFocused();
+
+  // The app sizes its phone shell from visualViewport, just as an iPhone keyboard does.
+  await page.evaluate(() => {
+    Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 500 });
+    window.visualViewport!.dispatchEvent(new Event('resize'));
+  });
+  await expect.poll(() => inputs.filter(input => input.type === 'viewport' && input.height !== initial.height).length).toBe(1);
+  const pending = inputs.find(input => input.type === 'viewport' && input.height !== initial.height)!;
+  await expect(field).toBeEnabled();
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue(draft);
+  await expect(send).toBeDisabled();
+  await expect(live.getByRole('button', { name: 'Enter', exact: true })).toBeDisabled();
+  await expect(macWindow).toBeEnabled();
+  await field.press('Enter');
+  await send.dispatchEvent('click');
+  // Also exercise implicit form submission rather than relying only on disabled-button behavior.
+  await live.locator('form').evaluate(form => (form as HTMLFormElement).requestSubmit());
+  await expect(field).toHaveValue(draft);
+  await expect(field).toBeFocused();
+  expect(inputs.filter(input => input.type === 'text')).toEqual([]);
+
+  await releaseFrame({ width: pending.width!, height: pending.height! });
+  await expect(live.locator('.browser-live__placeholder')).toHaveCount(0);
+  await expect(send).toBeEnabled();
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue(draft);
+  expect(await live.locator('canvas').evaluate(canvas => {
+    const pixels = canvas.getContext('2d')!;
+    return { width: canvas.width, height: canvas.height,
+      left: pixels.getImageData(1, 1, 1, 1).data[0],
+      right: pixels.getImageData(canvas.width - 2, 1, 1, 1).data[0] };
+  })).toMatchObject({ width: pending.width, height: pending.height, right: 255 });
+  await send.tap();
+  await expect.poll(() => inputs.filter(input => input.type === 'text')).toEqual([{ type: 'text', text: draft }]);
+  await expect(field).toHaveValue('');
+  await macWindow.tap();
+  await expect.poll(() => windowRequests).toBe(1);
+});
