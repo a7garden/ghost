@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, type Server, type TLSSocket } from "node:tls";
+import { createServer as createTcpServer, type Server, type Socket } from "node:net";
+import { createSecureContext, createServer, TLSSocket } from "node:tls";
 import type { Connection } from "@ghost/contract";
 import { ImapFlow } from "imapflow";
 import { SourceConnections } from "../src/integrations/activity-sources.ts";
@@ -157,4 +158,154 @@ test("production IMAPS and SMTPS reject an untrusted certificate before account 
     expect(fixture.smtpCommands).toHaveLength(0);
     expect(fixture.sent).toHaveLength(0);
   } finally { await sources.close(); await trustedImapOnly.close(); fixture.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+type StartTlsMode = "upgrade" | "unavailable" | "refused" | "broken";
+
+async function startTlsFixture(mode: StartTlsMode = "upgrade") {
+  const sockets = new Set<Socket>();
+  const commands: { verb: string; encrypted: boolean; protocol: string | null }[] = [];
+  const sent: string[] = [];
+  const secureContext = createSecureContext({ key, cert, minVersion: "TLSv1.2" });
+  let connections = 0;
+  const track = (socket: Socket) => {
+    sockets.add(socket);
+    socket.on("error", () => {});
+    socket.on("close", () => sockets.delete(socket));
+  };
+  const server = createTcpServer(socket => {
+    connections++;
+    track(socket);
+    socket.write("220 localhost STARTTLS fixture\r\n");
+    const parse = (transport: Socket, encrypted: boolean) => {
+      let buffer = "";
+      let data = false;
+      const receive = (chunk: Buffer) => {
+        buffer += chunk.toString();
+        for (;;) {
+          if (data) {
+            const end = buffer.indexOf("\r\n.\r\n");
+            if (end < 0) break;
+            sent.push(buffer.slice(0, end));
+            buffer = buffer.slice(end + 5);
+            data = false;
+            transport.write("250 2.0.0 accepted local STARTTLS fixture\r\n");
+            continue;
+          }
+          const end = buffer.indexOf("\r\n");
+          if (end < 0) break;
+          const line = buffer.slice(0, end);
+          buffer = buffer.slice(end + 2);
+          const verb = line.split(" ", 1)[0]!.toUpperCase();
+          // Keep only command names, never credential-bearing AUTH arguments.
+          commands.push({ verb, encrypted, protocol: transport instanceof TLSSocket ? transport.getProtocol() : null });
+          if (verb === "EHLO") {
+            transport.write(!encrypted && mode !== "unavailable"
+              ? "250-localhost\r\n250-STARTTLS\r\n250 AUTH PLAIN\r\n"
+              : "250-localhost\r\n250 AUTH PLAIN\r\n");
+          } else if (verb === "STARTTLS" && !encrypted) {
+            if (mode === "unavailable" || mode === "refused") {
+              transport.write("454 4.7.0 TLS unavailable\r\n");
+              continue;
+            }
+            transport.removeListener("data", receive);
+            transport.write("220 2.0.0 Ready to start TLS\r\n");
+            if (mode === "broken") {
+              transport.end();
+            } else {
+              const upgraded = new TLSSocket(transport, { isServer: true, secureContext });
+              track(upgraded);
+              parse(upgraded, true);
+            }
+            return;
+          } else if (verb === "AUTH") {
+            const auth = Buffer.from(line.slice("AUTH PLAIN ".length), "base64").toString();
+            transport.write(encrypted && auth === `\0owner@example.com\0${PASSWORD}`
+              ? "235 2.7.0 authenticated\r\n"
+              : "535 5.7.8 denied\r\n");
+          } else if (/^(MAIL FROM|RCPT TO):/i.test(line)) {
+            transport.write("250 2.1.0 accepted\r\n");
+          } else if (verb === "DATA") {
+            data = true;
+            transport.write("354 End with dot\r\n");
+          } else if (verb === "QUIT") {
+            transport.end("221 goodbye\r\n");
+          } else {
+            transport.write("500 unsupported fixture command\r\n");
+          }
+        }
+      };
+      transport.on("data", receive);
+    };
+    parse(socket, false);
+  });
+  const port = await listen(server);
+  return {
+    port, commands, sent,
+    get connections() { return connections; },
+    async close() {
+      for (const socket of sockets) socket.destroy();
+      const closed = Promise.withResolvers<void>();
+      server.close(() => closed.resolve());
+      await closed.promise;
+    },
+  };
+}
+
+function startTlsClient(port: number, trust: "fixture" | "untrusted" | "wrong-host" = "fixture") {
+  return activitySmtp({
+    host: "127.0.0.1", port, secure: false, requireTLS: true, opportunisticTLS: false,
+    tls: {
+      rejectUnauthorized: true, minVersion: "TLSv1.2",
+      ...(trust !== "untrusted" ? { ca: cert } : {}),
+      ...(trust === "wrong-host" ? { servername: "wrong-host.invalid" } : {}),
+    },
+    connectionTimeout: 2000, greetingTimeout: 2000, socketTimeout: 2000,
+    auth: { user: "owner@example.com", pass: PASSWORD },
+  });
+}
+
+const startTlsMessage = {
+  from: "owner@example.com", to: "recipient@example.com",
+  subject: "Verified STARTTLS delivery", text: "One approved encrypted message.",
+};
+
+test("real STARTTLS verifies TLS, authenticates only after upgrade, and sends DATA exactly once", async () => {
+  const fixture = await startTlsFixture();
+  const client = startTlsClient(fixture.port);
+  const effects: string[] = [];
+  try {
+    expect(await client.sendMail(startTlsMessage, () => effects.push("authorize"), () => effects.push("write")))
+      .toEqual({ accepted: ["recipient@example.com"], rejected: [] });
+    expect(fixture.connections).toBe(1);
+    expect(fixture.commands.map(command => command.verb)).toEqual(["EHLO", "STARTTLS", "EHLO", "AUTH", "MAIL", "RCPT", "DATA"]);
+    expect(fixture.commands.slice(0, 2).every(command => !command.encrypted && command.protocol === null)).toBe(true);
+    expect(fixture.commands.slice(2).every(command => command.encrypted && /^TLSv1\.[23]$/.test(command.protocol ?? ""))).toBe(true);
+    expect(effects).toEqual(["authorize", "authorize", "write"]);
+    expect(fixture.sent).toHaveLength(1);
+    expect(fixture.sent[0]).toContain("To: recipient@example.com");
+    expect(fixture.sent[0]).toContain("One approved encrypted message.");
+  } finally { client.close(); await fixture.close(); }
+});
+
+for (const scenario of [
+  { name: "unadvertised and unavailable TLS", mode: "unavailable", trust: "fixture" },
+  { name: "refused STARTTLS", mode: "refused", trust: "fixture" },
+  { name: "failed TLS handshake", mode: "broken", trust: "fixture" },
+  { name: "untrusted certificate", mode: "upgrade", trust: "untrusted" },
+  { name: "certificate hostname mismatch", mode: "upgrade", trust: "wrong-host" },
+] as const) test(`real STARTTLS refuses ${scenario.name} without AUTH or DATA`, async () => {
+  const fixture = await startTlsFixture(scenario.mode);
+  const client = startTlsClient(fixture.port, scenario.trust);
+  let authorizations = 0;
+  let writes = 0;
+  try {
+    await expect(client.sendMail(startTlsMessage, () => authorizations++, () => writes++)).rejects.toThrow();
+    expect(fixture.connections).toBe(1);
+    expect(fixture.commands.map(command => command.verb)).toEqual(["EHLO", "STARTTLS"]);
+    expect(fixture.commands.every(command => !command.encrypted)).toBe(true);
+    expect(fixture.sent).toHaveLength(0);
+    expect(authorizations).toBe(0);
+    expect(writes).toBe(0);
+  } finally { client.close(); await fixture.close(); }
 });

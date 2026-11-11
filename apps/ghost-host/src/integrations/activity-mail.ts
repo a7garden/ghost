@@ -23,7 +23,8 @@ export function activitySmtp(options: ActivitySmtpOptions): ActivitySmtpClient {
     const connected = Promise.withResolvers<void>();
     connection.connect(error => error ? connected.reject(error) : connected.resolve());
     await Promise.race([connected.promise, failure.promise]);
-    if (!connection.secureConnection) throw new Error("SMTP TLS is required");
+    // secureConnection is the initial mode; secure also reflects a completed STARTTLS upgrade.
+    if (!connection.secure) throw new Error("SMTP TLS is required");
     const authenticated = Promise.withResolvers<void>();
     connection.login(options.auth, error => error ? authenticated.reject(error) : authenticated.resolve());
     await Promise.race([authenticated.promise, failure.promise]);

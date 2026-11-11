@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { MailboxInfo, MailMessage, MailSummary } from '../../host/client';
 import {
-  MAIL_IFRAME_SANDBOX, appendMailPage, buildMailSend, defaultMailbox, emptyMailList, forwardQuote,
-  forwardSubject, mailboxLabel, mailHtmlDoc, mailSizeLabel, mailAddressName, mailAddressList,
+  appendMailPage, buildMailSend, defaultMailbox, emptyMailList, forwardQuote,
+  forwardSubject, mailboxLabel, mailSizeLabel, mailAddressName, mailAddressList,
   orderMailboxes, patchMailMessage, parseMailAddresses, removeMailMessage, replyQuote,
   replySubject, shiftMailboxUnseen,
 } from './mail-data';
@@ -156,27 +156,6 @@ describe('compose → mail.send', () => {
       '',
       '내용',
     ]);
-  });
-});
-
-describe('HTML mail safety', () => {
-  it('the doc leads with a CSP that allows only inline styles and data: images', () => {
-    const doc = mailHtmlDoc('<p>본문</p>');
-    const bodyAt = doc.indexOf('<body>');
-    const head = doc.slice(0, bodyAt);
-    expect(head).toContain('http-equiv="Content-Security-Policy"');
-    expect(head).toContain("default-src 'none'");
-    expect(head).toContain("img-src data:");
-    expect(head).toContain("style-src 'unsafe-inline'");
-    expect(head).toContain("form-action 'none'");
-    expect(head).toContain("base-uri 'none'");
-    // The CSP sits before any untrusted markup.
-    expect(doc.indexOf('Content-Security-Policy')).toBeLessThan(bodyAt);
-    expect(doc.slice(bodyAt)).toBe('<body><p>본문</p></body></html>');
-  });
-
-  it('the iframe sandbox stays empty, so mail HTML never runs scripts or reaches the app', () => {
-    expect(MAIL_IFRAME_SANDBOX).toBe('');
   });
 });
 

@@ -1,3 +1,4 @@
+import createDOMPurify from 'dompurify';
 import type { MailAddr, MailboxInfo, MailMessage, MailSendCommand, MailSummary } from '../../host/client';
 
 /** Special-use mailboxes lead in the fixed reading order; everything else follows by name. */
@@ -83,17 +84,26 @@ export function parseMailAddresses(value: string): string[] {
   return value.split(/[\s,;]+/).map(token => token.trim()).filter(Boolean);
 }
 
-/** The iframe stays fully sandboxed: no scripts, forms, same-origin access or navigation. */
+/** No scripts, forms, same-origin access, popups or top-level navigation. */
 export const MAIL_IFRAME_SANDBOX = '';
 
 /**
- * The srcdoc for one HTML mail. The CSP sits before any untrusted markup and allows
- * inline styles and data: images only — no scripts, no remote loads, no form action,
- * no base override; the empty sandbox keeps the frame from reaching this app. Pure; tests pin it.
+ * Preserve authored mail styles and links inside an opaque, CSP-protected frame.
+ * Navigation metadata must be removed too: CSP does not stop a frame refreshing itself.
  */
 export function mailHtmlDoc(html: string): string {
-  const csp = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body>${html}</body></html>`;
+  const root = createDOMPurify(window).sanitize(html, {
+    WHOLE_DOCUMENT: true,
+    RETURN_DOM: true,
+    FORBID_TAGS: ['meta', 'base', 'link'],
+  }) as HTMLElement;
+  const policy = root.ownerDocument.createElement('meta');
+  policy.httpEquiv = 'Content-Security-Policy';
+  policy.content = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
+  const charset = root.ownerDocument.createElement('meta');
+  charset.setAttribute('charset', 'utf-8');
+  root.ownerDocument.head.prepend(policy, charset);
+  return `<!doctype html>${root.outerHTML}`;
 }
 
 const headerDate = (at: number) =>
