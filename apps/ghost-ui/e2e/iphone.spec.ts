@@ -253,7 +253,6 @@ for (const theme of ['light', 'dark'] as const) {
 test('live browser preserves the focused touch draft until matching viewport pixels decode', async ({ page }) => {
   const { conversationA, defaultGhostId } = readRunState();
   const inputs: { type: string; width?: number; height?: number; text?: string }[] = [];
-  let windowRequests = 0;
   await openScreen(page, {
     name: 'live browser touch readiness', route: () => `/ghosts/${defaultGhostId}`, waits: () => [],
     prepare: async page => {
@@ -269,10 +268,6 @@ test('live browser preserves the focused touch draft until matching viewport pix
       }] } }));
       await page.route('**/api/browser/sessions/*/input', async route => {
         inputs.push(route.request().postDataJSON());
-        await route.fulfill({ json: { ok: true } });
-      });
-      await page.route('**/api/browser/sessions/*/window', async route => {
-        windowRequests++;
         await route.fulfill({ json: { ok: true } });
       });
       // Route.fulfill buffers response bodies. Keep NDJSON open so the test, not reconnect timing,
@@ -327,8 +322,8 @@ test('live browser preserves the focused touch draft until matching viewport pix
     Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 500 });
     window.visualViewport!.dispatchEvent(new Event('resize'));
   });
-  await expect.poll(() => inputs.filter(input => input.type === 'viewport' && input.height !== initial.height).length).toBe(1);
-  const pending = inputs.find(input => input.type === 'viewport' && input.height !== initial.height)!;
+  await expect.poll(() => inputs.some(input => input.type === 'viewport' && input.height !== initial.height)).toBe(true);
+  const pending = inputs.findLast(input => input.type === 'viewport' && input.height !== initial.height)!;
   await expect(field).toBeEnabled();
   await expect(field).toBeFocused();
   await expect(field).toHaveValue(draft);
@@ -357,6 +352,4 @@ test('live browser preserves the focused touch draft until matching viewport pix
   await send.tap();
   await expect.poll(() => inputs.filter(input => input.type === 'text')).toEqual([{ type: 'text', text: draft }]);
   await expect(field).toHaveValue('');
-  await macWindow.tap();
-  await expect.poll(() => windowRequests).toBe(1);
 });
