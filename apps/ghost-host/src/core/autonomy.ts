@@ -156,9 +156,9 @@ export class Autonomy {
   }
 
   /**
-   * A new owner goal pulls the current main's next look forward. The plan write is the whole signal:
-   * `wake()` still applies duty, the daily budget, busy conversations and the concurrency cap, and a
-   * pending wake keeps its identity. A wake prepared before the goal existed does not carry it; the
+   * A new owner goal pulls the current main's next look forward. Like a team change, the plan write is the
+   * whole signal: `wake()` still applies duty, the daily budget, busy conversations and the concurrency cap,
+   * and a pending wake keeps its identity. A wake prepared before the goal existed does not carry it; the
    * revision bump keeps a due follow-up after that wake instead of the day-long fallback.
    */
   goalsChanged(): void {

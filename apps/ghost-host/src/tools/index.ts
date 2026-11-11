@@ -5,6 +5,7 @@ import type { Core } from "../core/core.ts";
 import { describeWork } from "../core/works.ts";
 import { modelInputOf } from "../engine/models.ts";
 import type { DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort, DesktopPort } from "../integrations/ports.ts";
+import type { TossPort } from "../integrations/toss.ts";
 import type { MemoryStore } from "../stores/memory.ts";
 import type { MemoryEngine } from "../memory/types.ts";
 import type { TossPort } from "../integrations/toss.ts";

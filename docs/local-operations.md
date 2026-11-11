@@ -61,6 +61,37 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
 
+### 토스증권 조회·금고 API 키 — 2026-11-11
+
+- [v2.4.6](https://github.com/a7garden/ghost/releases/tag/v2.4.6), 소스 `189b707`(브랜치 `toss-assets-246`). 운영 2.4.5(`15a0428`) 위에 금고 `api` 종류와 `toss_read`만 더했다. `main`에는 같은 네 커밋을 옮겼다. 설계는 [에이전트 능력](agent-capabilities.md#decisions)의 Service API keys·Toss Securities.
+- 소유자 결정: API 자격증명은 Host `secrets/`가 아니라 금고를 확장해 Ghost별 부여·보안 양식·암호화 이력·백업을 그대로 쓴다. `api` 값은 페이지에 채우지 않고 Host 통합만 읽는다. 토스 키는 주문도 가능하므로 클라이언트가 읽기 GET 경로 허용 목록만 보낸다.
+- 검토: UI(GLM 작성)는 Opus 검토, Host(Claude 작성)는 GLM 검토 뒤 소유자가 승인한 예비 한도로 Codex(`openai-codex/gpt-6.1-sol`, 실제 응답 메타데이터) 검토. Codex의 P1(삭제 후 같은 id로 다시 만든 항목이 이전 토큰을 재사용)·P2(오래된 자격으로 재발급)는 토큰을 클라이언트 ID와 비밀 다이제스트에 묶고 사용 직전마다 금고를 다시 읽도록 고쳤다. GLM P3 두 건, Opus P3 한 건도 반영했다. 세션의 `retry.usageReservePct`는 소유자 승인으로 이 세션에서만 0으로 낮췄다.
+- 검증: 릴리스 Host 825 통과·10 생략, UI 189, Rust, 계약·Host·UI 타입·빌드·Developer ID·업데이터 서명·매니페스트·묶음 검증. `main` 통합본 Host 910 통과·10 생략, UI 189. 실제 토스 서버에 무효 자격을 보내 `invalid_client` 401이 「키 거절」 안내로 바뀌는 것을 확인했다. 공증은 기존 방식대로 생략했다.
+- 운영 자체 업데이트 완료: `lastResult: installed`, `2.4.5-15a0428` → `2.4.6-189b707`, 백업 `~/.local/share/ghost/backups/pre-2.4.6-189b707-1794350718346/`. health 2.4.6·runtime ready, PID 18566의 단일 62062 리스너·운영 루트·설치 실행 파일 `codesign --verify --strict` 확인. Ghost 28·대화 213·맡긴 일 156·기기 1·Space 9의 기존 ID와 금고 항목 209개를 보존했다.
+- 운영 UI(Host 제공 화면)에서 설정 › Ghost의 **자산 0/1 · 토스증권 조회**(잠금 표시)와 금고 › 새 항목의 **API 키**(주소·클라이언트 ID·비밀 키)를 열어 확인했고 저장하지 않았다. 콘솔 오류 없음. Mac 앱 창의 네이티브 확인은 하지 않았다.
+- 전용 Ghost **자산**(`01a1c7a6-d0b4-70ee-a1b6-7c0ec77205ae`, 기본 모델, 도구 `toss_read`·`vault_list`·`vault_request`·`web_search`·`web_read`, PC 실행 없음)을 만들었다. 설치 모델이 「계좌 목록 조회」 요청에 `toss_read`를 호출해 키 없음 거절을 받고 `vault_request`로 `https://openapi.tossinvest.com`용 `api` 보안 양식을 소유자에게 올린 것을 확인했다. 실제 계좌 응답은 소유자의 키 발급·허용 IP(현재 공인 IP `175.118.51.5`) 등록·보안 양식 입력 뒤에 확인한다.
+- 저장 형식 지문은 바뀌지 않았다(`api`는 금고 메타데이터의 새 종류). 2.4.5로 돌아가면 예전 Host는 `api` 항목을 알지 못해 그 항목의 사용만 실패한다.
+
+### 서비스 선택형 연결·Ghost 연결 지원 — 2026-11-11
+
+- [v2.4.5](https://github.com/a7garden/ghost/releases/tag/v2.4.5), 소스 `15a0428`(브랜치 `release/service-connections-20261111-v244`). 운영 2.4.4(`ab57e70`)의 목표 기능을 보존하고 연결 변경만 옮겼다. `main`의 기억·협업·네이티브 미수용 후보는 포함하지 않는다. 후속 릴리스도 현재 운영 기능을 보존해야 한다.
+- 서비스 목록·계정 아이콘 그리드·메일 자동 서버 설정·직접 API 연결·메인 Ghost에게 연결 맡기기를 제공한다. OAuth 앱이 없는 Google·Outlook·X·Notion·Slack은 최초 앱 등록과 소유자 로그인/동의가 필요하다. 운영의 다섯 서비스는 아직 앱 미등록이며 실제 제공자 OAuth 로그인 수용으로 세지 않는다.
+- 발급 키는 Host가 발급처의 단일 입력 필드에서 캡처해 브라우저 출력에서 가린 뒤 소유자 승인으로 저장·인증 확인한다. 금고 참조도 지원한다. API 권한은 Ghost별로 부여하고 외부 쓰기는 확인한다(Slack GET RPC 포함). 자동 활동은 계정을 새로 등록하지 못한다.
+- mini Gitea의 `garden` 계정을 직접 연결했다. 토큰은 `read:repository,read:issue,read:user`만 허용하며 Host 비밀 저장소 밖에 남기지 않았다. 설치된 Host의 실제 인증 검사와 운영 UI의 「인증 확인됨」을 확인했다. 메인의 연결 목록·등록·API 요청 도구 3개를 소유자 API로 허용했고 기존 브라우저·금고 권한은 유지했다.
+- 검증: 릴리스 Host 813 통과·10 생략, UI 185, Rust 21, 계약·Host·UI 타입·빌드·Developer ID·업데이터 서명·매니페스트·묶음 검증. 연결 e2e 5개, 실제 Chrome의 캡처 원점·필드 선택·텍스트 가림·스크린샷 차단·재캡처 검증이 통과했다. 메일/Notion 인증과 도움 요청의 모델 실행은 e2e에서 실물 수용하지 않았다. 공증은 기존 배포 방식대로 생략했다.
+- 실제 응답 메타데이터가 `anthropic/claude-opus-5-5`인 독립 검토 두 건에서 OAuth/원본 계정과 모델 도구/UI 경계를 검토했다. 토큰 갱신의 소스 서명 키 보존, Google 시크릿, 즉시 인증 폐기, Slack 읽기 분류, 캡처 후 가림과 handoff 보존, 권한만 수정할 때 인증 유지, 인증 검사 큐 교착/경쟁을 교정했다. 도구 목록을 복제한 UI 검사는 삭제했다.
+- 운영 자체 업데이트 완료: `lastResult: installed`, `2.4.4-ab57e70` → `2.4.5-15a0428`, 백업 `~/.local/share/ghost/backups/pre-2.4.5-15a0428-1794349760056/`. health 2.4.5·runtime ready, PID 6603의 단일 62062 리스너·운영 루트·설치 실행 파일 서명을 확인했다. Ghost 28·대화 213·맡긴 일 156·기기 1·Space 9·연결 2의 기존 ID를 모두 보존했다.
+- 운영에서 제공하는 연결 화면의 목록·아이콘·실제 Gitea 인증을 확인했다. 격리 브라우저에서는 데스크톱과 390px 메일/Google 추가 화면을 확인했다. Mac 앱 0.2.2는 실행 중이지만 현재 Space에 접근 가능한 창이 없어 새로고침·네이티브 상호작용은 확인하지 못했고 강제로 앞으로 가져오지 않았다. 실물 iPhone 검수와 구분한다. 시험 Host와 브라우저는 종료했다.
+- 저장 형식 지문에 `connections-2`를 더했다. 예전 Host가 새 API/도구 메타데이터를 읽지 못하므로 2.4.4로 자동 롤백하지 않는다. 데이터·자격 복원은 별도 소유자 승인 대상이다.
+
+### 팀 목표·이정표 — 2026-11-11
+
+- [v2.4.4](https://github.com/a7garden/ghost/releases/tag/v2.4.4), 소스 `ab57e70`(브랜치 `release/goals-20261111`). 운영 2.4.3(`80bf347`) 위에 `main`의 목표 기능 `91b51f8`·`c407db1`만 옮긴 교정본이다. 배포 보류 중인 2.5.0 기억·2.6.0 협업 후보는 포함하지 않는다. 설계는 [팀 목표](architecture.md#team-goals). 저장은 `settings`의 `goals` 키 하나라 원장 저장 형식 지문은 그대로다.
+- 함께 고친 기존 결함: 커밋 이벤트보다 after-commit 작업이 먼저 실행돼, 그 작업이 쓴 이벤트가 먼저 나가면 seq 순서 SSE가 앞선 변경을 버렸다(새 목표가 화면에 바로 안 뜨던 원인). 커밋 이벤트를 먼저 내보낸다. 수정 전 실패·수정 후 통과 회귀 검사를 넣었다.
+- 검사: 릴리스 실행 Host 767 통과·9 생략, UI 182, Rust 21, 계약·Host·UI 타입, Developer ID·매니페스트·묶음 검증. 목표 e2e 8개(데스크톱·iPhone). 격리 Host·실제 브라우저에서 목표 추가·종료 확인, 이벤트로 즉시 반영, 3개 상한을 확인했다. Host 변경은 Codex(`gpt-6.1-sol`) 독립 검토의 P2 4건(Work·연결 원자성, 재실행 시 일시정지 목표 연결, 지키는 선 잘림, 준비된 깨우기 중 새 목표 신호 유실)을 고쳤다. UI 검토는 실제 GLM이 맡아 지적 1건(접근성 이름)만 반영했고 강한 타 공급자 검토로 세지 않는다(UI는 R1).
+- 운영 Host 자체 업데이트: `lastResult: installed`, `2.4.3-80bf347` → `2.4.4-ab57e70`, 백업 `backups/pre-2.4.4-ab57e70-*`. health 2.4.4·runtime ready, Ghost 28·대화 213·맡긴 일 156·기기 1·Space 9의 기존 ID 보존, 제공 UI 번들에 목표 화면 포함, `#/goals` 빈 상태를 확인했다. 설치된 Mac 앱은 실행 중이지만 창이 현재 Space에서 보이지 않아 네이티브 창 확인은 하지 못했다.
+- 병행 릴리스 브랜치 `release/browser-vault-20261111`(2.5.1)에는 목표가 없다. 그 릴리스를 게시하기 전에 `release/goals-20261111`을 합쳐야 목표 화면이 사라지지 않는다(저장된 목표는 남는다).
+
 ### PC 조작 내장·키보드 안전 경계 — 2026-11-11
 
 - [v2.4.3](https://github.com/a7garden/ghost/releases/tag/v2.4.3), 소스 `80bf347`. 배포된 `5b14f11`에서 만든 교정본이며 미수용 2.5.0 기억·네이티브 후보는 포함하지 않는다. `main` 통합 `3d129e3`은 후보의 2.5.0 버전을 보존했고 GitHub·Gitea 일반 푸시를 마쳤다.
