@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { Check } from "@ghost/contract";
+import { Check, type Work } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
@@ -58,7 +58,9 @@ async function runShell(env: ExecutionEnv, command: string, timeout: number | un
   if (!result.ok) {
     if (result.error.code === "shell_unavailable" || result.error.code === "spawn_error") throw new NoEffect(`the command did not run: ${result.error.message}`);
     if (result.error.code === "timeout" || result.error.code === "aborted") {
-      const note = result.error.code === "timeout" ? `[timed out after ${timeout} seconds]` : "[aborted]";
+      const note = result.error.code === "timeout"
+        ? (timeout === undefined ? `[timed out: ${result.error.message}]` : `[timed out after ${timeout} seconds]`)
+        : "[aborted]";
       return shellRecord({ exitCode: 124, stdout, stderr: `${stderr}\n${note}`.trim() });
     }
     throw result.error;
@@ -218,6 +220,20 @@ async function unchangedMeansNoEffect(root: string, path: string, perform: () =>
   }
 }
 
+/**
+ * The directory this call's relative paths resolve against. For Host worktree Works the environment
+ * actually runs at the Work's own checkout, not the recorded `work.execution.cwd`, so the root comes
+ * from the call's environment (`absolutePath(".")` resolves and re-authorizes against its real cwd);
+ * container and legacy Works keep the staging workspace. Missing environment fails closed.
+ */
+async function executionRoot(work: Work, sandbox: SandboxEnvFactory, api: ToolExecutionApi, context: Context): Promise<string> {
+  if (work.execution?.kind !== "host") return realpathSync(sandbox.workspacePath(work));
+  if (!api.env) throw new Error("no execution environment for this Host Work; refusing to touch files");
+  const resolved = await api.env.absolutePath(".", context);
+  if (!resolved.ok) throw new NoEffect(`the Work's execution directory is unavailable: ${resolved.error.message}`);
+  return realpathSync(resolved.value);
+}
+
 export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extension {
   const write = createWriteTool();
   const edit = createEditTool();
@@ -248,7 +264,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "write", input: args, summary: `write ${args.path}` },
           async () => {
-            await unchangedMeansNoEffect(scope.work.execution?.kind === "host" ? realpathSync(scope.work.execution.cwd) : sandbox.workspacePath(scope.work), args.path, async () => {
+            await unchangedMeansNoEffect(await executionRoot(scope.work, sandbox, api, context), args.path, async () => {
               fresh = await write.execute(args, api, context);
             });
             return `Wrote ${Buffer.byteLength(args.content)} bytes to ${args.path}.`;
@@ -271,7 +287,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "edit", input: args, summary: `edit ${args.path}` },
           async () => {
-            await unchangedMeansNoEffect(scope.work.execution?.kind === "host" ? realpathSync(scope.work.execution.cwd) : sandbox.workspacePath(scope.work), args.path, async () => {
+            await unchangedMeansNoEffect(await executionRoot(scope.work, sandbox, api, context), args.path, async () => {
               fresh = await edit.execute(args, api, context);
             });
             return `Edited ${args.path} (${args.edits.length} block(s)).`;
@@ -342,7 +358,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
       media_type: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "Defaults to application/octet-stream" })),
     }),
     replay: "unsafe",
-    async execute(args, api) {
+    async execute(args, api, context) {
       try {
         const scope = requireWork(requireAllowed(core, api, "publish_artifact"));
         const name = args.name ?? basename(args.path);
@@ -355,7 +371,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
             summary: `publish ${args.path} as ${name}`,
           },
           async (): Promise<string> => {
-            const base = realpathSync(scope.work.execution?.kind === "host" ? scope.work.execution.cwd : sandbox.workspacePath(scope.work));
+            const base = await executionRoot(scope.work, sandbox, api, context);
             const containerWork = scope.work.execution?.kind !== "host";
             let path: string;
             try {

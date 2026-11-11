@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, closeSync, existsSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ArtifactRef, Conversation, Ghost, UiBlock, Work } from "@ghost/contract";
@@ -13,11 +13,12 @@ import { sha256 } from "../src/core/ids.ts";
 import { parseShellResult } from "../src/core/verify.ts";
 import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
+import { createSandbox } from "../src/sandbox/index.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import { splitQuestion } from "../src/tools/shared.ts";
 import { MAX_ARTIFACT_BYTES } from "../src/tools/work.ts";
 import type { ToolSet } from "../src/tools/types.ts";
-import { harness, tempDir, type FakeEngine } from "./support.ts";
+import { harness, MemoryArtifacts, tempDir, type FakeEngine } from "./support.ts";
 import { createDocuments } from "../src/integrations/documents.ts";
 
 /** Artifact bytes in a temp directory. */
@@ -564,6 +565,67 @@ describe("tools", () => {
     expect(missingMessage).toContain("no file at inputs/report.md");
     expect(missingMessage).toContain("report.txt");
     expect(s.ledger.artifactsForWork(work.id)).toHaveLength(0);
+  });
+
+  test("a Host worktree Work writes, classifies and publishes against its own checkout, not the recorded cwd", async () => {
+    const s = setup();
+    // The recorded execution cwd is a real repository; the Work's checkout is the worktree under `state`.
+    const repo = join(s.root, "repo");
+    mkdirSync(repo);
+    const git = (...args: string[]) => { const run = Bun.spawnSync(["git", "-C", repo, ...args], { stdout: "pipe", stderr: "pipe" }); if (run.exitCode !== 0) throw new Error(run.stderr.toString()); return run.stdout.toString().trim(); };
+    git("init", "-q");
+    git("config", "user.email", "work@example.com");
+    git("config", "user.name", "Work");
+    writeFileSync(join(repo, "report.txt"), "repo bytes");
+    git("add", ".");
+    git("commit", "-qm", "seed");
+    // Same relative path, different kind: the recorded cwd holds a directory where the checkout gets a file.
+    mkdirSync(join(repo, "notes.md"));
+
+    const { work, conversation, pi } = await runningWork(s);
+    s.ledger.tx(() => {
+      s.ledger.putGhost({ ...s.ghost, hostExecution: true, updatedAt: Date.now() });
+      s.ledger.putWork({ ...s.ledger.work(work.id), execution: { kind: "host", cwd: repo, worktree: true } });
+    });
+    const sandbox = createSandbox(
+      { root: join(s.root, "state"), host: "127.0.0.1", port: 0, publicOrigin: null, uiDir: null, sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null },
+      new MemoryArtifacts(),
+    );
+    try {
+      const env = await sandbox.envFor(s.ledger.work(work.id));
+      expect(env.cwd).not.toBe(realpathSync(repo)); // the environment runs at the Work's own checkout
+      const worktree = realpathSync(env.cwd);
+
+      const written = await call(toolOf(s, conversation, s.ghost, "write"), { path: "report.txt", content: "worktree bytes" }, apiOf(pi, "wt-write", env));
+      expect(written.isError).toBeFalsy();
+      expect(readFileSync(join(worktree, "report.txt"), "utf8")).toBe("worktree bytes");
+      expect(readFileSync(join(repo, "report.txt"), "utf8")).toBe("repo bytes");
+
+      const staged = await call(toolOf(s, conversation, s.ghost, "write"), { path: "notes.md", content: "checkout only" }, apiOf(pi, "wt-stage", env));
+      expect(staged.isError).toBeFalsy();
+      expect(statSync(join(repo, "notes.md")).isDirectory()).toBe(true);
+
+      // A refused edit classifies against the checkout: a recorded-cwd check would have found no
+      // comparable file and left the outcome unknown instead of a clean refusal.
+      const refused = await call(toolOf(s, conversation, s.ghost, "edit"), { path: "notes.md", edits: [{ oldText: "text that is not there", newText: "x" }] }, apiOf(pi, "wt-edit", env));
+      expect(refused.isError).toBe(true);
+      const editEffects = s.ledger.effectsForWork(work.id).filter((effect) => effect.tool === "edit");
+      expect(editEffects).toHaveLength(1);
+      expect(editEffects[0]!.state).toBe("denied");
+      expect(readFileSync(join(worktree, "notes.md"), "utf8")).toBe("checkout only");
+
+      // Publishing attaches the checkout's bytes, never the recorded cwd's same-named bytes.
+      const published = await call(toolOf(s, conversation, s.ghost, "publish_artifact"), { path: "report.txt" }, apiOf(pi, "wt-publish", env));
+      expect(published.isError).toBeFalsy();
+      const refs = s.ledger.artifactsForWork(work.id);
+      expect(refs).toHaveLength(1);
+      expect(refs[0]!.digest).toBe(sha256("worktree bytes"));
+      expect(new TextDecoder().decode(await s.core.artifacts.read(refs[0]!.digest))).toBe("worktree bytes");
+    } finally {
+      await sandbox.close();
+      s.core.stop();
+      s.ledger.close();
+    }
   });
 
   test("a replayed work_create call finds the Work it already created", async () => {

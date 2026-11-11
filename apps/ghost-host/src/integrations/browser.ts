@@ -421,7 +421,23 @@ export class AgentBrowser implements BrowserPort {
       }
       if (argv[0] !== "close") try { this.checkBudget(session); }
       catch { await this.stopDownloads(session); throw new CommandError("unavailable", "Browser download limit exceeded; session closed"); }
-      if (timedOut || exceeded || exit !== 0) throw new CommandError("unavailable", timedOut ? "Browser command deadline exceeded; outcome may be unknown" : "Browser command failed; outcome may be unknown");
+      if (timedOut || exceeded) throw new CommandError("unavailable", timedOut ? "Browser command deadline exceeded; outcome may be unknown" : "Browser command output limit exceeded; outcome may be unknown");
+      if (exit !== 0) {
+        // CLI errors may echo selectors, page values or credentials. Recognize only
+        // fixed categories; never forward raw stdout/stderr, even for ordinary reads.
+        if (options?.stdin === undefined && !options?.batch) {
+          let failure: unknown;
+          try { failure = JSON.parse(out); } catch {}
+          const reason = failure && typeof failure === "object" && "error" in failure ? failure.error : null;
+          if (typeof reason === "string") {
+            if (/^Selector '[\s\S]*' did not match any element$/.test(reason) || reason.startsWith("Element not found:"))
+              throw new CommandError("not_found", "Browser selector matched no element; take a fresh snapshot and choose an existing selector");
+            if (/^Element ref [\s\S]+ is stale/.test(reason) || /^Element is detached(?:$|[:.])/.test(reason))
+              throw new CommandError("conflict", "Browser element is stale or detached; take a fresh snapshot before the next action");
+          }
+        }
+        throw new CommandError("unavailable", `Browser command failed (exit ${exit}); outcome may be unknown`);
+      }
       let parsed: { success?: boolean; data?: unknown };
       try { parsed = JSON.parse(out); } catch { throw new CommandError("unavailable", "Browser returned an invalid response"); }
       // An owner-input batch reports success only; its results may echo what the owner typed.

@@ -57,6 +57,14 @@ const i = argv.indexOf("--json");
 const command = argv.slice(i + 1);
 appendFileSync(root + "/calls", JSON.stringify({ argv, env: { HOME: process.env.HOME, PATH: process.env.PATH, OWNER_SECRET: process.env.OWNER_SECRET, keyLength: process.env.AGENT_BROWSER_ENCRYPTION_KEY?.length } }) + "\\n");
 let data = {};
+if (existsSync(root + "/command-failure")) {
+  const failure = JSON.parse(readFileSync(root + "/command-failure", "utf8"));
+  if (command[0] === failure.command) {
+    process.stderr.write(failure.stderr ?? "");
+    process.stdout.write(JSON.stringify({ success: false, data: null, error: failure.error }));
+    process.exit(1);
+  }
+}
 if (command[0] === "stream") data = { port: Number(readFileSync(root + "/stream-port", "utf8")) };
 if (command[0] === "batch") { await Bun.stdin.text(); process.stdout.write(JSON.stringify([{ error: null }])); process.exit(0); }
 if (command[0] === "hang") { writeFileSync(root + "/child-pid", String(process.pid)); setInterval(() => {}, 10000); await new Promise(() => {}); }
@@ -194,6 +202,20 @@ describe("isolated browser port", () => {
       expect(lines.every(({ argv }) => argv[argv.indexOf("--restore") + 1] === "ghost-same")).toBe(true);
     } finally { await browser.shutdown(); }
   });
+  test("CLI selector failures preserve the failure category without exposing the selector or stderr", async () => {
+    const root = tempDir(); const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
+    try {
+      writeFileSync(join(root, "command-failure"), JSON.stringify({ command: "snapshot", error: `Selector '${SECRET}' did not match any element`, stderr: SECRET }));
+      let failure: unknown;
+      try { await browser.run(session, ["snapshot", "-s", SECRET]); } catch (error) { failure = error; }
+      expect(failure).toMatchObject({ code: "not_found" });
+      expect(String(failure)).not.toContain(SECRET);
+      writeFileSync(join(root, "command-failure"), JSON.stringify({ command: "snapshot", error: SECRET, stderr: SECRET }));
+      try { await browser.run(session, ["snapshot"]); } catch (error) { failure = error; }
+      expect(failure).toMatchObject({ code: "unavailable" });
+      expect(String(failure)).not.toContain(SECRET);
+    } finally { await browser.shutdown(); }
+  });
   test("stdin responses cannot echo secret data or raw errors", async () => {
     const root = tempDir(); const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
     try {
@@ -201,22 +223,23 @@ describe("isolated browser port", () => {
       expect(result).toEqual({ ok: true, data: { status: "filled" }, error: null });
       expect(JSON.stringify(records(root))).not.toContain(SECRET);
       writeFileSync(join(root, "fail-secret"), "1");
-      let message = "";
+      let failure: unknown;
       try { await browser.run(session, ["eval", "--stdin"], { stdin: SECRET }); }
-      catch (error) { message = String(error); }
-      expect(message).toContain("Browser command failed"); expect(message).not.toContain(SECRET);
+      catch (error) { failure = error; }
+      expect(failure).toMatchObject({ code: "unavailable" });
+      expect(String(failure)).not.toContain(SECRET);
     } finally { await browser.shutdown(); }
   });
   test("child deadlines and output caps stop failed commands without forwarding their output", async () => {
     const root = tempDir(); const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
     try {
       // A real child-process deadline must exercise OS signal delivery, not a fake JS clock.
-      await expect(browser.run(session, ["hang"], { timeoutMs: 100 })).rejects.toThrow("deadline exceeded");
+      await expect(browser.run(session, ["hang"], { timeoutMs: 100 })).rejects.toMatchObject({ code: "unavailable" });
       if (existsSync(join(root, "child-pid"))) {
         const pid = Number(readFileSync(join(root, "child-pid"), "utf8"));
         expect(() => process.kill(pid, 0)).toThrow();
       }
-      await expect(browser.run(session, ["flood"])).rejects.toThrow("Browser command failed");
+      await expect(browser.run(session, ["flood"])).rejects.toMatchObject({ code: "unavailable" });
     } finally { await browser.shutdown(); }
   });
   test("commands serialize within a session while another conversation remains independent", async () => {
