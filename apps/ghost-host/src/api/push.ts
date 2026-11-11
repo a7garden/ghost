@@ -12,6 +12,7 @@ const TICK_MS = 5_000;
 const JWT_TTL_S = 1_800;
 const EXPIRATION_S = 7 * 24 * 3_600;
 const SEND_DEADLINE_MS = 15_000;
+const PAYLOAD_LIMIT_BYTES = 4_096;
 const HEX_TOKEN = /^[0-9a-f]{32,128}$/;
 
 /** APNs needs the raw 64-byte r||s signature; Node emits DER. */
@@ -39,11 +40,29 @@ function providerJWT(key: string, keyId: string, teamId: string, issuedAt: numbe
   return `${signingInput}.${Buffer.from(signature).toString("base64url")}`;
 }
 
-/** The wake-up payload carries the notification id and a short phrase; no work content. */
-const payload = (notification: Notification) => ({
-  aps: { alert: { title: notification.title, body: notification.body }, sound: "default" },
-  notification_id: notification.id,
-});
+/** Bound only the APNs preview; the full, unread notification stays in the ledger. */
+function payload(notification: Notification): string {
+  const value = {
+    aps: { alert: { title: notification.title, body: notification.body }, sound: "default" },
+    notification_id: notification.id,
+  };
+  const full = JSON.stringify(value);
+  if (Buffer.byteLength(full, "utf8") <= PAYLOAD_LIMIT_BYTES) return full;
+
+  // Contract-sized title/id always fit, even fully JSON-escaped. Search body codepoints
+  // only, measuring the entire serialized envelope so escapes and UTF-8 both count.
+  const points = Array.from(notification.body);
+  let low = 0;
+  let high = points.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    value.aps.alert.body = points.slice(0, middle).join("");
+    if (Buffer.byteLength(JSON.stringify(value), "utf8") <= PAYLOAD_LIMIT_BYTES) low = middle;
+    else high = middle - 1;
+  }
+  value.aps.alert.body = points.slice(0, low).join("");
+  return JSON.stringify(value);
+}
 
 /** A device's mute preferences drop its own pushes only: muted kinds and muted Ghosts; a null ghostId has no Ghost to mute. */
 export function shouldPush(notification: Notification, alerts: DeviceAlerts): boolean {
@@ -139,10 +158,14 @@ function sendAlert(
 }
 
 /**
- * Every 5 s, sends each unpushed notification to all push targets, then marks it pushed.
- * A 410 clears that device's token; transport failures are logged, never repeated automatically.
+ * Every 5 s, sends each unpushed notification to the push targets it postdates, then marks it
+ * pushed. A receiver created after a notification — its `activatedAt` cutoff — never receives
+ * that backlog: the notification stays unread in the owner's inbox but is marked pushed so a
+ * stale registration cannot replay it later. A 410 clears that device's token; transport
+ * failures are logged, never repeated automatically. Ticks never overlap: while one fanout is
+ * in flight, the next timer tick is a no-op, so a slow send cannot be duplicated.
  */
-export function startPush(core: Core, config: Config): { stop(): void } | null {
+export function startPush(core: Core, config: Config, send: typeof sendAlert = sendAlert): { stop(): void; tick(): Promise<void> } | null {
   const apns = config.apns;
   if (apns === null) return null;
   const key = readFileSync(apns.keyPath, "utf8");
@@ -153,27 +176,41 @@ export function startPush(core: Core, config: Config): { stop(): void } | null {
     return cached.token;
   };
 
-  const tick = async () => {
-    const notifications = core.ledger.unpushedNotifications();
-    if (notifications.length === 0) return;
-    const targets = core.ledger.pushTargets();
-    if (targets.length === 0) return;
-    for (const notification of notifications) {
-      const jwt = tokenFor();
-      for (const receiver of targets) {
-        if (!shouldPush(notification, receiver.alerts)) continue;
-        try {
-          const outcome = await sendAlert(APNS_HOSTS[receiver.environment], jwt, apns.topic, receiver.token, JSON.stringify(payload(notification)));
-          if (outcome.status === 410) {
-            core.ledger.tx(() => core.ledger.setPushToken(receiver.deviceId, null, null));
-          } else if (outcome.status < 200 || outcome.status >= 300) {
-            core.log(`push ${notification.id} rejected by ${receiver.deviceId}`, outcome);
+  let inFlight = false;
+  const tick = async (): Promise<void> => {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const notifications = core.ledger.unpushedNotifications();
+      if (notifications.length === 0) return;
+      const targets = core.ledger.pushTargets();
+      if (targets.length === 0) return;
+      for (const notification of notifications) {
+        const jwt = tokenFor();
+        const body = payload(notification);
+        for (const target of targets) {
+          // A preceding send yielded: registration, revocation, and preferences may have changed.
+          const receiver = core.ledger.pushTargets(target.deviceId)[0];
+          if (!receiver || notification.createdAt < receiver.activatedAt) continue;
+          if (!shouldPush(notification, receiver.alerts)) continue;
+          try {
+            const outcome = await send(APNS_HOSTS[receiver.environment], jwt, apns.topic, receiver.token, body);
+            if (outcome.status === 410) {
+              const current = core.ledger.pushTargets(receiver.deviceId)[0];
+              if (current?.token === receiver.token && current.environment === receiver.environment) {
+                core.ledger.tx(() => core.ledger.setPushToken(receiver.deviceId, null, null));
+              }
+            } else if (outcome.status < 200 || outcome.status >= 300) {
+              core.log(`push ${notification.id} rejected by ${receiver.deviceId}`, outcome);
+            }
+          } catch (failure) {
+            core.log(`push ${notification.id} to ${receiver.deviceId} failed`, failure);
           }
-        } catch (failure) {
-          core.log(`push ${notification.id} to ${receiver.deviceId} failed`, failure);
         }
+        core.ledger.markPushed(notification.id, Date.now());
       }
-      core.ledger.markPushed(notification.id, Date.now());
+    } finally {
+      inFlight = false;
     }
   };
 
@@ -185,5 +222,6 @@ export function startPush(core: Core, config: Config): { stop(): void } | null {
     stop: () => {
       clearInterval(timer);
     },
+    tick,
   };
 }

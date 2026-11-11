@@ -899,13 +899,25 @@ export class Ledger {
     return this.setting<DeviceAlerts | null>(`device.alerts:${id}`, null) ?? { mutedKinds: [], mutedGhostIds: [] };
   }
 
-  pushTargets(): { deviceId: string; token: string; environment: "sandbox" | "production"; alerts: DeviceAlerts }[] {
-    return (this.db.query("SELECT id, push_token, push_environment FROM devices WHERE revoked_at IS NULL AND push_token IS NOT NULL").all() as Row[]).map(
+  /**
+   * Devices with an active APNs token; the push tick's receivers. `activatedAt` is the delivery
+   * cutoff: a receiver only hears notifications created after it. Installations that registered
+   * before cutoff tracking shipped have no stored value and fall back to 0, so their already
+   * queued notifications still deliver — suppressing them would silently discard pushes those
+   * devices opted into, and new activations since tracking shipped record a real cutoff.
+   */
+  pushTargets(deviceId?: string): { deviceId: string; token: string; environment: "sandbox" | "production"; alerts: DeviceAlerts; activatedAt: number }[] {
+    const query = this.db.query(
+      "SELECT id, push_token, push_environment FROM devices WHERE revoked_at IS NULL AND push_token IS NOT NULL" + (deviceId === undefined ? "" : " AND id = ?"),
+    );
+    const rows = (deviceId === undefined ? query.all() : query.all(deviceId)) as Row[];
+    return rows.map(
       (row) => ({
         deviceId: String(row.id),
         token: String(row.push_token),
         environment: row.push_environment === "production" ? "production" : "sandbox",
         alerts: this.deviceAlerts(String(row.id)),
+        activatedAt: this.setting<number>(`device.push.since:${String(row.id)}`, 0),
       }),
     );
   }
@@ -927,8 +939,19 @@ export class Ledger {
     this.db.query("UPDATE devices SET last_seen_at = ? WHERE id = ?").run(at, id);
   }
 
-  setPushToken(id: string, token: string | null, environment: "sandbox" | "production" | null) {
+  setPushToken(id: string, token: string | null, environment: "sandbox" | "production" | null, at: number = Date.now()) {
+    const needsCutoff = token !== null && this.setting<number | null>(`device.push.since:${id}`, null) === null;
+    const previous = needsCutoff ? this.db.query("SELECT push_token FROM devices WHERE id = ?").get(id) as Row | null : null;
     this.db.query("UPDATE devices SET push_token = ?, push_environment = ? WHERE id = ?").run(token, environment, id);
+    if (token === null) {
+      // Clearing the token (a 410 or an explicit clear) ends that activation: the next
+      // registration starts a fresh cutoff and will not inherit this device's history.
+      this.db.query("DELETE FROM settings WHERE key = ?").run(`device.push.since:${id}`);
+    } else if (previous?.push_token === null) {
+      // Only a transition from no token starts activation. Legacy active tokens without a
+      // cutoff retain their existing eligibility, including when the app re-registers.
+      this.putSetting(`device.push.since:${id}`, at);
+    }
     this.emit({ type: "device", device: this.device(id) });
   }
 
@@ -940,6 +963,7 @@ export class Ledger {
   revokeDevice(id: string, at: number) {
     this.db.query("UPDATE devices SET revoked_at = ?, push_token = NULL WHERE id = ?").run(at, id);
     this.db.query("DELETE FROM settings WHERE key = ?").run(`device.alerts:${id}`);
+    this.db.query("DELETE FROM settings WHERE key = ?").run(`device.push.since:${id}`);
     this.emit({ type: "device.removed", id });
   }
 

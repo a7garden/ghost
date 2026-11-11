@@ -184,20 +184,20 @@ run("codesign", ["--verify", "--deep", "--strict", join(bundle, "Ghost.app")]);
 
 // ── iPhone app ─────────────────────────────────────────────────────────────
 // Development-signed so it installs over the air on the team's registered devices.
-// The automatic profile has no push capability, so the push entitlement is left out.
+// The archive signs with the project's App/Ghost.entitlements, so the paid team's
+// automatic development profile must carry the Push Notifications capability.
 step("ios");
 const teamId = /\(([A-Z0-9]{10})\)$/.exec(identity)?.[1];
 if (!teamId) throw new Error(`no team ID in signing identity ${identity}`);
 const iosWork = join(out, "ios");
 mkdirSync(iosWork, { recursive: true });
 const plist = (body: string) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>${body}</dict></plist>\n`;
-writeFileSync(join(iosWork, "entitlements.plist"), plist(""));
 writeFileSync(join(iosWork, "export.plist"), plist(`<key>method</key><string>debugging</string><key>teamID</key><string>${teamId}</string><key>signingStyle</key><string>automatic</string><key>thinning</key><string>&lt;none&gt;</string>`));
 const iosArchive = join(iosWork, "Ghost.xcarchive");
 run("xcodebuild", [
   "-quiet", "-project", "apps/ghost-ios/Ghost.xcodeproj", "-scheme", "Ghost", "-configuration", "Release",
   "-destination", "generic/platform=iOS", "-archivePath", iosArchive, "-derivedDataPath", join(iosWork, "DerivedData"),
-  `DEVELOPMENT_TEAM=${teamId}`, `CODE_SIGN_ENTITLEMENTS=${join(iosWork, "entitlements.plist")}`, "-allowProvisioningUpdates", "archive",
+  `DEVELOPMENT_TEAM=${teamId}`, "-allowProvisioningUpdates", "archive",
 ]);
 run("xcodebuild", ["-quiet", "-exportArchive", "-archivePath", iosArchive, "-exportOptionsPlist", join(iosWork, "export.plist"), "-exportPath", iosWork, "-allowProvisioningUpdates"]);
 const ipa = join(out, "Ghost.ipa");
@@ -209,8 +209,22 @@ const infoValue = (key: string) => run("plutil", ["-extract", key, "raw", join(i
 const ios = { version: infoValue("CFBundleShortVersionString"), build: Number(infoValue("CFBundleVersion")), bundleId: infoValue("CFBundleIdentifier") };
 if (!Number.isSafeInteger(ios.build) || ios.build < 1) throw new Error(`iPhone build number is not an integer: ${infoValue("CFBundleVersion")}`);
 run("codesign", ["--verify", "--deep", "--strict", iosApp]);
+// Export re-signs the archive, so read the push entitlement back out of the IPA
+// itself: the codesigned entitlements and the embedded profile must both grant
+// aps-environment=development, or sandbox pushes would never reach the app.
+const entitlementValue = (label: string, path: string, key: string) => {
+  const found = spawnSync("plutil", ["-extract", key, "raw", path], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  if (found.status !== 0) throw new Error(`${label} carries no aps-environment; the debugging export needs development`);
+  return found.stdout.trim();
+};
+const signedEntitlements = join(iosWork, "signed-entitlements.plist");
+writeFileSync(signedEntitlements, run("codesign", ["--display", "--entitlements", ":-", iosApp], { capture: true }));
+const signedAps = entitlementValue("the exported IPA's codesigned entitlements", signedEntitlements, "aps-environment");
+if (signedAps !== "development") throw new Error(`the exported IPA is codesigned with aps-environment=${signedAps}, not development; the signing profile must carry Push Notifications`);
 const profilePlist = join(iosWork, "profile.plist");
 writeFileSync(profilePlist, run("security", ["cms", "-D", "-i", join(iosApp, "embedded.mobileprovision")], { capture: true }));
+const profileAps = entitlementValue("the exported IPA's embedded provisioning profile", profilePlist, "Entitlements.aps-environment");
+if (profileAps !== "development") throw new Error(`the embedded provisioning profile grants aps-environment=${profileAps}, not development`);
 const profileExpires = Date.parse(run("plutil", ["-extract", "ExpirationDate", "raw", profilePlist], { capture: true }));
 if (!(profileExpires > Date.now())) throw new Error("the iPhone provisioning profile has expired; refresh signing in Xcode");
 rmSync(iosWork, { recursive: true, force: true });

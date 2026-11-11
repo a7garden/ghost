@@ -16,6 +16,14 @@
 **/.build/
 **/DerivedData/
 **/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+**/*.xcarchive/
+*.p12
+*.p8
+*.cer
+*.cert
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
 
 # Generated web bundles and local design-tool traces
 /apps/*/dist/

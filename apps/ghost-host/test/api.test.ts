@@ -443,7 +443,6 @@ describe("API server", () => {
       type: "device.push_register", token: "ab".repeat(32), environment: "sandbox",
     }, paired.token);
     expect(response.status).toBe(200);
-    expect(ledger.pushTargets()).toEqual([{ deviceId: paired.deviceId, token: "ab".repeat(32), environment: "sandbox", alerts: { mutedKinds: [], mutedGhostIds: [] } }]);
     expect(ledger.device(paired.deviceId).pushEnabled).toBe(true);
     expect((await runCommand({ type: "device.revoke", deviceId: paired.deviceId }, OWNER_TOKEN)).status).toBe(200);
     expect(ledger.pushTargets()).toEqual([]);

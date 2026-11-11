@@ -14,7 +14,7 @@
 
 1. 해당 변경의 테스트·타입 검사·실행 검증과 필요한 독립 검토를 마치고 `main`에 커밋한다. 검증되지 않은 편집을 감시해 즉시 설치하는 watcher는 만들지 않는다.
 2. `apps/ghost-host/package.json`의 `version`을 올린다. 네이티브 셸(`apps/ghost-desktop/src-tauri`)이 바뀐 때만 `tauri.conf.json`·`Cargo.toml` 버전도 올리고, iPhone 네이티브(`apps/ghost-ios`)가 바뀐 때만 `project.yml`·`project.pbxproj`의 `CURRENT_PROJECT_VERSION`을 올린다. 커밋한다.
-3. 깨끗한 작업 트리에서 `bun scripts/release.ts --publish`. 검사(Host·계약 타입, Host·UI 테스트, 셸 `cargo test`)를 통과해야 빌드한다. Developer ID로 `ghost`와 `Ghost.app`에 서명하고, iPhone 앱은 팀 개발 프로필로 서명한 `Ghost.ipa`로 만든다(등록된 기기만 설치, push 권한 없음). `~/.tauri/ghost.key`로 셸 번들과 `ghost-release.json`에 서명해 `v<version>` 태그와 Release를 올린다. 키를 잃으면 설치된 Host와 앱이 더는 업데이트를 받지 못한다.
+3. 깨끗한 작업 트리에서 `bun scripts/release.ts --publish`. 검사(Host·계약 타입, Host·UI 테스트, 셸 `cargo test`)를 통과해야 빌드한다. Developer ID로 `ghost`와 `Ghost.app`에 서명하고, iPhone 앱은 유료 팀 개발 프로필로 서명한 `Ghost.ipa`로 만든다(등록된 기기만 설치). 내보낸 IPA의 서명과 내장 프로필 양쪽에 `aps-environment=development`가 있어야 하며, 없으면 릴리스를 중단한다. `~/.tauri/ghost.key`로 셸 번들과 `ghost-release.json`에 서명해 `v<version>` 태그와 Release를 올린다. 키를 잃으면 설치된 Host와 앱이 더는 업데이트를 받지 못한다.
 4. 설치는 Ghost 앱의 설정 › 업데이트 「설치」 또는 Owner API(`host.json`의 토큰)로 `POST /api/update/check` 뒤 `POST /api/update/install {"version"}`. Host가 받은 묶음의 해시·파일·`ghost version`을 확인해 `releases/<version>-<commit>`에 두고, 진행 중 대화·실행이 없을 때 `backups/pre-<version>-<commit>-<ms>/`에 백업한 뒤 `current`를 원자 교체하고 정상 종료한다. launchd가 새 릴리스를 띄운다. 유휴가 오지 않으면 `waiting`에 머문다. 끊지 말고 차단 사유로 보고하고, 필요하면 `POST /api/update/cancel`.
 5. `GET /api/update`의 `lastResult`가 `installed`인지, health 버전·준비 상태·기존 Ghost·대화·맡긴 일 보존을 Owner API로 확인한다. 운영 루트에는 `ghost doctor`를 실행하지 않는다. **설치된 Ghost 앱**에서 바뀐 화면을 실제로 연다. 셸 버전을 올린 릴리스는 같은 화면의 「앱 업데이트」로 앱을 바꾸고 다시 연 뒤 확인한다. iPhone 빌드를 올린 릴리스는 iPhone 앱의 「앱 업데이트」(이전 셸이면 Mac 설정 › 업데이트 › iPhone 앱의 QR 코드)로 설치하고, 설치 확인은 iPhone에서 소유자가 누른다.
 6. 새 Host가 세 번 연속 뜨지 못하면 launcher가 저장 형식 지문이 같은 경우에만 이전 릴리스로 되돌리고 `rolled_back`을 남긴다. 지문이 다르면 `failed`로 남기고 되돌리지 않는다. 데이터 복원·파괴적 마이그레이션·secrets 복원은 별도 승인이 필요하다. 수동으로 되돌릴 때는 `current`를 이전 릴리스로 바꾸고 `launchctl kickstart -k gui/$(id -u)/com.a7.ghost`. 버전·백업·검증 결과를 이 문서에 기록한다.
@@ -53,7 +53,7 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.7.0-f2871d2`(GitHub Release `v2.7.0`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.7.2-f615c74`(GitHub Release `v2.7.2`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`, Obscura), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 기억 `memory.db`(Host 내장), 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.4(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -61,6 +61,13 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
+
+### 노란 표시 기준 수정과 2.7.2 운영 반영 — 2026-11-11
+
+- `ghostPresence`에서 최근 24시간의 실패 이력을 현재 `attention`으로 바꾸던 분기를 지웠다. 노란 띠·초상 테두리는 지금 답할 결정이나 실제 차단 상태에만 남기며, 종료된 실패와 하위 작업은 기존 맡긴 일·알림 이력에 보존한다. 승인 답변 뒤 표시가 해제되고 실제 차단 표시는 유지되는 사이드바 회귀 검사 10개가 통과했다.
+- [v2.7.2](https://github.com/a7garden/ghost/releases/tag/v2.7.2), 소스 `f615c74`. 2.7.1의 worktree 산출물 기준 경로·브라우저 오류 분류 수정도 포함한다. Host 1,048 통과·8 생략, UI 230, 셸 Rust 28, 계약·Host·UI 타입과 전체 빌드·Developer ID·업데이터 서명·매니페스트·묶음 검증을 통과했다. 셸 0.2.4와 iPhone 빌드는 그대로이며 공증은 기존 방식대로 생략했다. 산출물은 정본 `dist/release/2.7.2/`에 보존했다.
+- 기존 2.7.1 대기는 실제 모델 작업 때문이었고 busy 표시는 정상 해제됐다. 대화·작업을 끊지 않고 이전 설치 요청만 취소한 뒤 유휴 상태에서 2.7.2를 요청했다. `lastResult: installed`(`2.7.0-f2871d2` → `2.7.2-f615c74`), 백업 `~/.local/share/ghost/backups/pre-2.7.2-f615c74-1794406836274/`, health 2.7.2·runtime ready를 확인했다. PID 45296의 단일 62062 리스너·운영 DB 루트·실행 파일 경로·서명과 기존 Ghost·대화·맡긴 일·Space·기기·연결 ID 보존을 확인했다.
+- Host 제공 UI와 설치된 Mac 앱의 실제 접근성 트리에서 리서치·문서 작가·밸런스·사용량·Mac 관리가 불필요한 확인 표시 없이 보이는 것을 확인했다. 실제 확인 요청이 있는 메인만 노란 표시를 유지했다. 브라우저 오류는 없었으며, 앱 창을 강제로 앞으로 가져오거나 포인터·키보드를 사용하지 않았다.
 
 ### 도구 실패 원인 조사 — 2026-11-11
 
@@ -71,6 +78,16 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
 - 확인할 일이 없는 Ghost의 노란 띠는 `ghostPresence`가 최근 24시간의 실패한 맡긴 일(하위 작업 포함)을 실제 결정 대기와 같은 `attention`으로 분류해서 생겼다. 설치 UI와 운영 상태를 대조했으며, 이번 조사에서 UI 표시 기준은 바꾸지 않았다. 네이티브 Ghost 창은 현재 Space에서 접근되지 않아 Host 제공 UI에서 확인했다.
 - [v2.7.1](https://github.com/a7garden/ghost/releases/tag/v2.7.1)(`a8a6122`)을 `main`에 통합하고 Gitea·GitHub에 일반 푸시했다. Host 1,048 통과·8 생략, UI 229, 셸 Rust 28, 계약·Host·UI 타입과 전체 릴리스 빌드·Developer ID 서명·업데이터 서명·해시·묶음 검증을 통과했다. 두 변경의 강한 독립 검토는 최종 응답 메타데이터가 Codex Sol인 검토에서 P0–P2가 없었다. 셸 0.2.4·iPhone 빌드는 유지하며 공증은 기존 릴리스 방식대로 생략했다. 검증한 배포 산출물은 정본 `dist/release/2.7.1/`에 보존했다.
 - 운영 PID 78864의 실행 파일·단일 62062 리스너·운영 DB 루트를 재확인한 뒤 Host 자체 업데이트를 요청했다. 서명 검증된 `releases/2.7.1-a8a6122/` 스테이징과 해당 바이너리의 버전·서명을 확인했으나, 마지막 Owner API 관측은 `waiting`이었다. 기획의 direct/work·디자이너 work·기억 관리 work가 busy라 중단하지 않았다. 현재 버전·`lastResult`는 여전히 2.7.0 설치 결과이며, 2.7.1 적용·재시작 뒤 준비 상태·상태 보존·설치 앱 확인은 미완료다.
+
+### iPhone 푸시 알림 — 2026-11-11, Apple 팀 활성화 차단
+
+- 소유자의 멤버십 갱신 결제 뒤 푸시 권한을 포함하는 iPhone 빌드 10·Host 2.8.0을 준비했다. 릴리스는 프로젝트의 `Ghost.entitlements`를 그대로 사용하고, 내보낸 IPA의 서명·내장 프로필 양쪽에서 `aps-environment=development`를 확인한다. 권한을 빼서 서명하는 우회는 제거했다.
+- 검증: Swift 패키지 29개 검사, iOS Release 시뮬레이터 빌드, 알림 탭 이동·셸 이벤트 UI 검사 6개, 릴리스 스크립트 Bun 구문 빌드를 통과했다. 서명·발송 상태 전이·페이로드 크기 제한은 작성자와 다른 공급자인 실제 Anthropic의 독립 검토에서 지적이 없었다. GLM으로 대체된 별도 검토는 강한 독립 수용으로 세지 않았다.
+- Host 알림 검사 57개·423개 단언과 타입 검사를 통과했다. 새 APNs 등록 시점 이전의 누적 알림(관측 시 805개)은 푸시로 보내지 않고 받은 알림에는 남긴다. 앱 재실행·토큰 교체는 등록 시점을 유지하고, 토큰 삭제·기기 해제는 지운다. 느린 발송의 중복 tick, 발송 중 철회·토큰 교체, 이전 토큰의 지연된 410 응답을 격리된 전송 경계로 확인했다.
+- [Apple의 4096바이트 제한](https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/CreatingtheNotificationPayload.html)에 맞춰 JSON 이스케이프·UTF-8 바이트를 계산해 긴 알림 미리보기만 줄인다. 한글·이모지·제어 문자·정확한 경계에서 검사했으며, 제목·알림 ID·받은 알림 원문·읽지 않음 상태는 보존한다.
+- 실기기 archive(`-allowProvisioningUpdates`, 팀 W5SAS95CBV)는 Apple이 팀을 `Personal Team`으로 취급해 실패했다. 기존 프로필에 Push Notifications·`aps-environment`가 없으며 새 푸시 프로필 생성도 거부됐다. Apple 키 포털도 “The selected team does not have a program membership that is eligible for this feature”로 거부했다. 결제 완료와 개발자 팀 활성화를 구분한다.
+- 결제 완료 화면의 Apple Developer 복귀 흐름으로 세션을 갱신하고 Safari 재로그인을 열어 소유자에게 인계했다. APNs 키 발급·운영 `apns` 설정·릴리스 게시·새 iPhone 설치·닫힌 앱 수신은 아직 완료하지 않았다. 이 작업에서는 운영 Host나 iPhone 앱을 교체하거나 운영 대화·작업을 끊지 않았다.
+- 활성화 후 APNs 키는 저장소 밖의 Host `secrets/`에 0600으로 보관하고, `config.json.apns`에 `teamId`·`keyId`·절대 `keyPath`·`topic: "io.a7garden.ghost"`를 설정한다. 그 뒤 푸시 프로필로 archive/export → 릴리스 게시 → Host 자체 업데이트 → iPhone 설치 → 앱을 닫은 상태의 실제 승인·완료 알림과 탭 이동을 확인한다.
 
 ### GitHub `main` 병합과 2.7.0 설치 — 2026-11-11
 
