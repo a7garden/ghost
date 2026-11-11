@@ -401,7 +401,7 @@ interface ObserverFaultProbe extends LoginObserver {
   options: { ended(observer: LoginObserver, reason: CdpDisconnect): void };
   pages: Map<string,{frameId:string;contexts:Map<number,string>}>;
 }
-interface FixtureChannel { cdp: BrowserCdp; sessionId: string }
+interface FixtureChannel { cdp: BrowserCdp; sessionId: string; targetId: string }
 function observerFaultProbe(browser: AgentBrowser, conversationId: string) {
   // Test-only fault seam into an in-process observer, never external page data.
   const internal=browser as unknown as {sessionMap:Map<string,{loginObserver?:ObserverFaultProbe}>};
@@ -420,7 +420,7 @@ async function fixtureChannel(browser:AgentBrowser,ref:BrowserSessionRef){
     if(!target || typeof target.targetId!=="string")throw new Error("Missing fixture target");
     const attached=await cdp.request("Target.attachToTarget",{targetId:target.targetId,flatten:true});
     if(typeof attached.sessionId!=="string")throw new Error("Missing fixture attachment");
-    return {cdp,sessionId:attached.sessionId};
+    return {cdp,sessionId:attached.sessionId,targetId:target.targetId};
   }catch(error){cdp.close();throw error;}
 }
 const recoveryFixture=`document.body.innerHTML='<form id=login><input id=user autocomplete=username><input id=password type=password autocomplete=current-password><button>Submit</button></form><input id=aux type=password autocomplete=new-password><div id=private contenteditable=true></div>';document.querySelector('#login').onsubmit=e=>e.preventDefault();window.effects=0;"ready"`;
@@ -489,22 +489,25 @@ for(const trigger of ["model","owner"] as const) chromeTest(`real Chrome: termin
   }finally{channel?.cdp.close();await browser.shutdown();}
 },90_000);
 
-chromeTest("real Chrome: a native capture gap resets to a blank private page without reading or blessing unseen bytes",async()=>{
-  const root=tempDir(),saved:unknown[]=[],ref={ghostId:"native-capture-gap",conversationId:"native-capture-gap"};
+for(const closeWindow of [false,true]) chromeTest(`real Chrome: a native capture gap ${closeWindow ? "defers closed-window recovery" : "resets to a blank private page"} without reading or blessing unseen bytes`,async()=>{
+  const suffix=closeWindow ? "window-close" : "explicit";
+  const root=tempDir(),saved:unknown[]=[],ref={ghostId:`native-capture-gap-${suffix}`,conversationId:`native-capture-gap-${suffix}`};
   const browser=new AgentBrowser({executable:executable!,chrome},root,(_session,login)=>{saved.push({...login});});
-  let channel:FixtureChannel|undefined;
-  const originalKey=`ghost-${ref.ghostId}`,identities:{key:string;closed:boolean}[]=[];
+  let channel:FixtureChannel|undefined,stopLive:(()=>void)|undefined;
+  const originalKey=`ghost-${ref.ghostId}`,identities:{key:string;closed:boolean;action:"open"|"close"|"other"}[]=[];
   let repairing=false,oldClosed=false;
-  // Observe restore identity only; never record CLI args, URLs or input values.
-  const runtime=browser as unknown as {invokeCli(session:{ref:BrowserSessionRef;privateRestoreKey?:string},argv:string[],options?:{stdin?:string;timeoutMs?:number;batch?:boolean}):Promise<BrowserCommandResult>};
+  // Observe identity and fixed command kinds only, never URLs or input values.
+  const runtime=browser as unknown as {invokeCli(session:{ref:BrowserSessionRef;privateRestoreKey?:string},argv:string[],options?:{stdin?:string;timeoutMs?:number;batch?:boolean}):Promise<BrowserCommandResult>;resumeClosedWindow(session:unknown):Promise<void>};
   const invoke=runtime.invokeCli.bind(runtime);
   runtime.invokeCli=async(session,argv,options)=>{
     const key=session.privateRestoreKey ?? `ghost-${session.ref.ghostId}`;
-    if(repairing)identities.push({key,closed:oldClosed});
+    if(repairing)identities.push({key,closed:oldClosed,action:argv[0]==="open" ? "open" : argv[0]==="close" ? "close" : "other"});
     const result=await invoke(session,argv,options);
     if(repairing && argv[0]==="close" && key===originalKey && result.ok)oldClosed=true;
     return result;
   };
+  const closedTabs=Promise.withResolvers<void>(),resume=runtime.resumeClosedWindow.bind(runtime);
+  if(closeWindow)runtime.resumeClosedWindow=async session=>{await resume(session);closedTabs.resolve();};
   try{
     await browser.run(ref,["open","https://example.com/"]);await browser.handoff(ref,"https://example.com/");
     channel=await fixtureChannel(browser,ref);
@@ -513,6 +516,11 @@ chromeTest("real Chrome: a native capture gap resets to a blank private page wit
     await browser.input(ref,{type:"text",text:"native-scoped-secret"});
     await browser.run(ref,["eval","document.querySelector('#password').oninput=e=>{localStorage.setItem('native-gap-record',e.target.value);document.cookie='native-gap-record='+encodeURIComponent(e.target.value)+';path=/;SameSite=Lax';};'ready'"]);
     const previous=observerFaultProbe(browser,ref.conversationId);
+    if(closeWindow){
+      const page=Promise.withResolvers<void>();
+      stopLive=await browser.live(ref,{maxFps:8},event=>{if(event.type==="page")page.resolve();});
+      await page.promise;
+    }
     repairing=true;
     previous.cdp.close();
     expect(previous.ended).toBe(true);
@@ -525,6 +533,16 @@ chromeTest("real Chrome: a native capture gap resets to a blank private page wit
     await expect(browser.input(ref,{type:"viewport",width:400,height:500})).rejects.toMatchObject({code:"unavailable"});
     expect(browser.sessions().find(session=>session.conversationId===ref.conversationId)?.headed).toBe(true);
     expect(await channel.cdp.request("Runtime.evaluate",{expression:"document.querySelector('#password').value.includes('unobserved-native-bytes')",returnByValue:true},channel.sessionId)).toMatchObject({result:{value:true}});
+    if(closeWindow){
+      // The ended observer cannot emit windowClosed; this real tabs[] event
+      // reaches the stream's background resume path and its completion barrier.
+      expect(await channel.cdp.request("Target.closeTarget",{targetId:channel.targetId})).toMatchObject({success:true});
+      await closedTabs.promise;
+      runtime.resumeClosedWindow=resume;
+      expect(identities.some(identity=>identity.action==="open" || identity.action==="close")).toBe(false);
+      expect(identities.every(identity=>identity.key===originalKey)).toBe(true);
+      expect(browser.sessions().find(session=>session.conversationId===ref.conversationId)?.headed).toBe(true);
+    }
     await expect(browser.run(ref,["eval","window.effects += 1"])).rejects.toMatchObject({code:"conflict"});
     expect(browser.sessions().find(session=>session.conversationId===ref.conversationId)?.headed).toBe(false);
     expect((await browser.run(ref,["eval","location.href"])).data).toMatchObject({result:"about:blank"});
@@ -552,7 +570,7 @@ chromeTest("real Chrome: a native capture gap resets to a blank private page wit
     expect(fresh.every(identity=>identity.closed)).toBe(true);
     expect(new Set(fresh.map(identity=>identity.key)).size).toBe(1);
     expect(identities.slice(identities.findIndex(identity=>identity.key!==originalKey)).every(identity=>identity.key===fresh[0]!.key)).toBe(true);
-  }finally{channel?.cdp.close();await browser.shutdown();}
+  }finally{runtime.resumeClosedWindow=resume;stopLive?.();channel?.cdp.close();await browser.shutdown();}
 },90_000);
 
 for(const failure of ["missing","exception"] as const) chromeTest(`real Chrome: ${failure} current child mode acknowledgement prevents effects and safely recovers`,async()=>{
