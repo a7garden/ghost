@@ -278,3 +278,65 @@ describe("approvals that do not wait forever", () => {
     expect(t.engine.to(t.main.directConversationId).some((item) => item.requestId === `decision-review:${decision.id}`)).toBe(false);
   });
 });
+
+describe("handing a decision to the main Ghost", () => {
+  const handOver = (t: Awaited<ReturnType<typeof team>>, id: string) => t.ledger.tx(() => t.core.decisions.delegate(id));
+
+  test("the owner hands a reversible question over; the main is woken once and settles it for them", async () => {
+    const t = await team();
+    // Owner-only for this Ghost: the main could only comment, until the owner hands this one over.
+    t.ledger.putSetting("approvals", { autoMinutes: 30, delegate: "reversible", ghosts: { [t.mate.id]: "owner" } });
+    const decision = t.ask("A");
+    handOver(t, decision.id);
+    handOver(t, decision.id);
+    await tick();
+    const wakes = t.engine.to(t.main.directConversationId).filter((item) => item.requestId === `decision-delegate:${decision.id}`);
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]!.text).toContain("handed");
+    expect(typeof reviewOf(t.ledger.decision(decision.id).proposal)?.delegatedAt).toBe("number");
+
+    await t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "answer", answer: "A", note: "추천대로 A 로 답했습니다." });
+    const settled = t.ledger.decision(decision.id);
+    expect(settled.state).toBe("answered");
+    expect(reviewOf(settled.proposal)?.resolvedBy).toBe("main");
+  });
+
+  test("a main that cannot judge gives it back to the owner's queue with its note", async () => {
+    const t = await team();
+    const decision = t.ask("B");
+    handOver(t, decision.id);
+    await t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "leave", note: "직접 보셔야 합니다." });
+    const back = reviewOf(t.ledger.decision(decision.id).proposal);
+    expect(back?.delegatedAt).toBeUndefined();
+    expect(back?.mainNote).toBe("직접 보셔야 합니다.");
+  });
+
+  test("what only the owner may settle cannot be handed over", async () => {
+    const t = await team();
+    const destructive = t.command("삭제: 파일이 영구 제거될 수 있습니다.");
+    expect(() => handOver(t, destructive.id)).toThrow("reversible");
+    const unrecommended = t.ask(undefined, "free");
+    expect(() => handOver(t, unrecommended.id)).toThrow("reversible");
+    const own = t.core.decisions.ask(t.main.directConversationId, "제 질문", "", ["A"], "own", { review: { recommend: "answer", answer: "A", expiresAt: null } });
+    expect(() => handOver(t, own.id)).toThrow("own requests");
+    t.ledger.putSetting("approvals", { autoMinutes: 30, delegate: "none" });
+    const off = t.ask("A", "off");
+    expect(() => handOver(t, off.id)).toThrow("turned off");
+  });
+
+  test("a lost hand-over wake is retried by the clock with the same request id", async () => {
+    const t = await team();
+    const submit = t.engine.submit.bind(t.engine);
+    let fail = true;
+    t.engine.submit = async (conversationId, submission) => {
+      if (fail && submission.requestId.startsWith("decision-delegate:")) throw new Error("admission unavailable");
+      return submit(conversationId, submission);
+    };
+    const decision = t.ask("A");
+    handOver(t, decision.id);
+    await tick();
+    fail = false;
+    await t.core.decisions.settleExpired();
+    expect(t.engine.to(t.main.directConversationId).filter((item) => item.requestId === `decision-delegate:${decision.id}`)).toHaveLength(1);
+  });
+});

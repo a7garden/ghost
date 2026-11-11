@@ -321,6 +321,10 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       core.works.resume(command.workId);
       return {};
 
+    case "decision.delegate":
+      core.decisions.delegate(command.decisionId);
+      return {};
+
     case "message.send":
     case "message.cancel":
     case "decision.resolve":

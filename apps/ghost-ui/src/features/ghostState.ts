@@ -1,5 +1,5 @@
-import type { Ghost, State, Work } from '@ghost/contract';
-import { TERMINAL_WORK_STATES } from '@ghost/contract';
+import type { Decision, Ghost, State, Work } from '@ghost/contract';
+import { reviewOf, TERMINAL_WORK_STATES } from '@ghost/contract';
 import { decisionHeading } from './decisionText';
 
 export type Tone = 'mint' | 'peach' | 'lilac' | 'sky';
@@ -30,7 +30,14 @@ export function liveWorks(state: State): Work[] {
   return state.works.filter(liveWork).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export const pendingDecisions = (state: State) => state.decisions.filter(decision => decision.state === 'pending');
+/**
+ * 주인이 메인 Ghost에게 넘겨, 메인이 판단 중인 결정. 메인이 못 정하면 Host가 표시를 지워 주인에게 돌아온다.
+ * 2026.11.11 : 「맡기기」가 생겨 기다리는 결정 가운데 주인이 답할 차례가 아닌 것이 생겼다.
+ */
+export const handedOver = (decision: Decision) => decision.state === 'pending' && typeof reviewOf(decision.proposal)?.delegatedAt === 'number';
+
+/** 주인이 답할 차례인 결정 — 배지 · 홈 · 펫 · 확인할 일이 모두 이것을 센다. 메인에게 맡긴 것은 빠진다. */
+export const pendingDecisions = (state: State) => state.decisions.filter(decision => decision.state === 'pending' && !handedOver(decision));
 
 /** What one Ghost is doing right now, in the owner's words; no line when idle. */
 export interface Presence {

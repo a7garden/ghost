@@ -222,7 +222,8 @@ export function createMainTools(core: Core): Extension {
   const decisionSettle = defineTool({
     name: "decision_settle",
     description:
-      "Act on another Ghost's decision that arrives as a [Decision review] message. A reversible one you may approve, deny or answer for the owner; on any one you may leave your view for the owner (outcome leave). " +
+      "Act on another Ghost's decision that arrives as a [Decision review] or [Decision handed over] message. A reversible one you may approve, deny or answer for the owner; on any one you may leave your view for the owner (outcome leave). " +
+      "A handed-over decision is one the owner asked you to settle: decide it, and leave it only if you cannot judge it at all. " +
       "Write note in the owner's language: what you decided or found and what you recommend, one or two sentences. Main Ghost only; the Host refuses to settle anything that is not reversible.",
     parameters: Type.Object({
       decision_id: Type.String({ minLength: 1, maxLength: 128 }),

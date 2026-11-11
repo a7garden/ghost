@@ -76,6 +76,8 @@ export const Command = Type.Union([
     outcome: Type.Union([Type.Literal("approve"), Type.Literal("deny"), Type.Literal("answer")]),
     answer: Type.Optional(Text(8192)),
   }),
+  /** The owner hands a reversible decision to the main Ghost to settle now, instead of answering it (2026-11-11). */
+  command("decision.delegate", { decisionId: Id }),
 
   // Ghosts
   command("ghost.create", {
