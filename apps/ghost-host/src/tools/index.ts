@@ -28,7 +28,7 @@ import { createWorkTools } from "./work.ts";
 import { createHostTools } from "./host.ts";
 import { ADAPT_INSTRUCTIONS, createSelfTools } from "./self.ts";
 import { activityTools } from "./activities.ts";
-import { AUTONOMY_DRIVE, DRIVE_OFF, MAIN_DRIVE, MAIN_DRIVE_OFF, createAutonomyTools, drivesOff } from "./autonomy.ts";
+import { AUTONOMY_DRIVE, DRIVE_OFF, MAIN_DRIVE, MAIN_DRIVE_OFF, TEAM_DRIVE_NOTE, createAutonomyTools } from "./autonomy.ts";
 import { GOALS_INSTRUCTIONS, createGoalTools } from "./goals.ts";
 
 /**
@@ -249,18 +249,17 @@ export function createToolSet(deps: {
   };
 }
 
-/** The self-directed drive as this Ghost has it now: on or off, and for the main Ghost which teammates are off. */
+/** The self-directed drive as this Ghost has it now, and for the main Ghost whether it plans teammates. */
 function driveInstructions(core: Core, ghost: Ghost): string {
   const on = core.autonomy.enabled(ghost.id);
-  // 누가 동료를 계획하는지는 Autonomy 한 곳에서 정한다 — 도구 부여 · 거절 · 이 글이 따로 놀지 않도록.
+  // 누가 plan_next 를 받는지는 Autonomy 한 곳에서 정한다 — 도구 부여 · 거절 · 이 글이 따로 놀지 않도록.
   const main = core.autonomy.plansTeam(ghost);
-  const own = on ? `${AUTONOMY_DRIVE}\nYour own next look is plan_next.` : main ? MAIN_DRIVE_OFF : DRIVE_OFF;
+  const plans = main && core.autonomy.offersPlanning(ghost);
+  const own = on ? `${AUTONOMY_DRIVE}\nYour own next look is plan_next.` : plans ? MAIN_DRIVE_OFF : DRIVE_OFF;
   if (!main) return own;
-  const off = core.ledger.ghosts()
-    .filter((item) => item.id !== ghost.id && item.deletedAt === null && item.state === "active" && !core.autonomy.enabled(item.id))
-    .map((item) => item.name);
+  // MAIN_DRIVE 는 「깨어날 때마다」를 약속하므로 메인 구동이 켜져 있을 때만 싣는다.
   // 각 덩어리는 다른 지시와 같이 빈 줄로 나눈다 — 한 문단으로 붙으면 구획이 흐려진다.
-  return [own, MAIN_INSTRUCTIONS, MAIN_DRIVE, GOALS_INSTRUCTIONS, drivesOff(off)].filter(Boolean).join("\n\n");
+  return [own, MAIN_INSTRUCTIONS, on ? MAIN_DRIVE : "", GOALS_INSTRUCTIONS, plans ? TEAM_DRIVE_NOTE : ""].filter(Boolean).join("\n\n");
 }
 
 /** The exact preface every skills section opens with, above any skill body. */

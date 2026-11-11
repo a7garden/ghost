@@ -11,6 +11,11 @@
 .conversations__list button:hover { background: var(--ghost-hover); }
 .conversations__list button > :not(.conversations__name) { flex: none; }
 .conversations__list button > svg { color: var(--ghost-ink3); }
+.conversations__workspace { display: flex; width: 100%; min-height: 56px; align-items: center; gap: 12px; margin-top: 16px; padding: 8px 6px; border: 0; border-top: 1px solid var(--ghost-line); background: transparent; color: var(--ghost-ink); text-align: left; cursor: pointer; }
+.conversations__workspace:hover { background: var(--ghost-hover); }
+.conversations__workspace > svg { flex: none; color: var(--ghost-ink3); }
+.conversations__workspace > span { display: grid; flex: 1; min-width: 0; gap: 2px; font-weight: 500; }
+.conversations__workspace small { color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 400; }
 .conversations__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
 .this-device { display: flex; min-width: 0; flex-direction: column; gap: 28px; }
 .this-device > header { display: grid; gap: 6px; }

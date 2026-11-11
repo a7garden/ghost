@@ -10,8 +10,11 @@ import { errorResult, scopeOf, type Scope } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
-/** The target's full configuration, structured so the caller can inspect and edit it faithfully. */
-/** `fallbacks` is the Ghost's own list; `fallbacksInUse` is what actually runs, the owner's default list when it has none. */
+/**
+ * The target's full configuration, structured so the caller can inspect and edit it faithfully.
+ * `fallbacks` is the Ghost's own list; `fallbacksInUse` is what actually runs: its own list, else the owner's
+ * default list unless the owner chose no fallback for this Ghost.
+ */
 function renderGhost(core: Core, ghost: Ghost): string {
   return JSON.stringify(
     {

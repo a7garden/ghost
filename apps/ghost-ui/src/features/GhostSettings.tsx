@@ -256,9 +256,15 @@ function ModelRoute({ ghost, save }: { ghost: Ghost; save(command: Command): Pro
   };
   const act = (action: FallbackAction) => void commit(fallbacksCommand(ghost.id, ghost.fallbacks, action));
   // 자기 목록이 없으면 기본 대체 모델을 따른다. 실제로 쓰이는 것만 보인다 — 먼저 쓰는 모델과 같은 것은 런타임이 건너뛴다.
-  const inherited = ghost.fallbacks.length === 0
+  // 소유자가 이 Ghost 를 「대체 모델 없음」으로 두면 기본 목록도 따르지 않는다(한 공급자에 묶어 둘 Ghost 용).
+  const optedOut = state?.settings.noFallbackGhosts ?? [];
+  const follows = !optedOut.includes(ghost.id);
+  const defaults = ghost.fallbacks.length === 0
     ? (state?.settings.defaultFallbacks ?? []).filter(ref => !primary || ref.provider !== primary.provider || ref.model !== primary.model)
     : [];
+  const inherited = follows ? defaults : [];
+  const setFollows = (on: boolean) => void commit({ type: 'settings.update',
+    noFallbackGhosts: on ? optedOut.filter(id => id !== ghost.id) : [...optedOut.filter(id => id !== ghost.id), ghost.id] });
   return <div className="model-route" aria-busy={pending}>
     <ol className="model-route__steps" aria-label="모델 사용 순서">
       <li className="model-route__step" data-primary>
@@ -277,6 +283,10 @@ function ModelRoute({ ghost, save }: { ghost: Ghost; save(command: Command): Pro
       </li>)}
       <FallbackSteps fallbacks={ghost.fallbacks} primary={primary ?? null} pending={pending} onAction={act}/>
     </ol>
+    {defaults.length > 0 && <label className="model-route__follow">
+      <span>기본 대체 모델 따르기<small>{follows ? '끄면 이 Ghost는 대체 모델 없이 한 모델만 씁니다.' : '이 Ghost는 대체 모델 없이 한 모델만 씁니다.'}</small></span>
+      <Switch checked={follows} disabled={pending} onCheckedChange={setFollows} aria-label="기본 대체 모델 따르기"/>
+    </label>}
     <p className="model-route__hint">{inherited.length
       ? '기본 대체 모델을 따릅니다. 여기서 추가하면 이 Ghost만의 목록이 되어 기본 대체 모델 대신 씁니다.'
       : '연결 오류·사용 한도에 걸리면 다음 모델로 이어갑니다.'}</p>
@@ -375,7 +385,7 @@ function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: str
   if (!editing) return <div className="persona-note" data-reading>
     <p className="persona-note__text">{persona}</p>
     <div className="persona-note__actions">
-      <span className="persona-note__hint">기본 지시 뒤에 이 Ghost만의 역할로 붙습니다.</span>
+      <span className="persona-note__hint">기본 지시 앞에 이 Ghost만의 역할로 붙습니다.</span>
       <button type="button" className="persona-note__edit" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>역할 편집</button>
     </div>
   </div>;
