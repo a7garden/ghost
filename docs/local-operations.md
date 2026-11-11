@@ -70,6 +70,7 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
 - 운영 `config.json`을 `backups/pre-2.7.0-config-1794401726.json`(0600)에 두고 `memory` 키만 지운 뒤 [v2.7.0](https://github.com/a7garden/ghost/releases/tag/v2.7.0)을 Owner API로 설치했다. `lastResult: installed`(`2.5.1-d8a1c8e` → `2.7.0-f2871d2`), Host 백업 `backups/pre-2.7.0-f2871d2-1794401747291/`, health 2.7.0·runtime ready, 단일 62062 리스너(PID 78864)·`codesign --verify --strict` 통과. Ghost 29·대화 307·Space 9·기기 1·연결 2의 ID와 맡긴 일 목록을 보존했다. 저장 형식이 바뀌었으므로 자동 롤백 대상은 아니다.
 - 기억 이관: 설치 뒤 Oxibrain을 `admin export`로 내보내 원장의 완료된 `memory_retain` 효과 124개와 episode ID로 모두 대조했다(앞선 스냅숏 58개는 원문 동일). 작성 Ghost별 18개 파일 `/team/<ghostId>/oxibrain.md`로 Owner API에 쓰고, 메인 Ghost에서 18개 모두 보이며 124개 원문이 빠짐없음을 확인했다. `~/.oxi/brain`·기억 관리 Ghost는 지우지 않았다.
 - 제공 UI(데스크톱·390px)에서 확인할 일 한 줄 목록과 「나중에」, 휴대폰 하단 탭 셋·위쪽 설정 버튼을 확인했다. 설치 앱은 이미 0.2.4이며, 띄웠지만 창이 현재 Space에서 잡히지 않아 네이티브 창 확인은 하지 못했다.
+- iPhone: `v2.7.0`의 `Ghost.ipa`(0.1.0 (9), SHA-256 `8490b2fc…`)를 페어링된 등록 iPhone 14에 `xcrun devicectl device install app`으로 설치했다(같은 빌드 위 재설치, 앱 데이터 유지). 실행 직후 Host의 기기 `iPhone` `lastSeenAt`이 갱신되어 2.7.0에 연결됨을 확인했다.
 
 ### 브라우저·금고·메일·문자 — 2026-11-11 (설치 대기)
 
