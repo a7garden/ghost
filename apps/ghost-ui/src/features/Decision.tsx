@@ -512,6 +512,15 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
     const timer = setTimeout(() => setSettled(null), 2400);
     return () => clearTimeout(timer);
   }, [settled]);
+  // 휴대폰에서 목록은 가로 한 줄이다. 다음 질문으로 넘어가면 그 칩을 가로로만 끌어와 보인다 — 세로로는 화면을 움직이지 않는다.
+  const rail = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const list = rail.current, chip = list?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!list || !chip || list.scrollWidth <= list.clientWidth) return;
+    const left = chip.getBoundingClientRect().left - list.getBoundingClientRect().left + list.scrollLeft, right = left + chip.offsetWidth;
+    if (left < list.scrollLeft) list.scrollLeft = left - 8;
+    else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth + 8;
+  }, [index, pending.length]);
   // The deck stays mounted while its acknowledgement shows, so the last resolution is still announced.
   if (!pending.length && !settled) return null;
   const rest = settled ? pending.filter(decision => decision.id !== settled.id).length : 0;
@@ -544,9 +553,10 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
       </div>}
     </header>}
     {current && <div className="deck__body">
-      {overview && pending.length > 1 && <ol className="deck__index" aria-label="확인 필요 목록">{pending.map((decision, position) => <li key={decision.id}>
+      {overview && pending.length > 1 && <ol ref={rail} className="deck__index" aria-label="확인 필요 목록">{pending.map((decision, position) => <li key={decision.id}>
         <button type="button" aria-current={position === at || undefined} onClick={() => setIndex(position)}>
           <DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={18}/>
+          <span className="deck__index-who" aria-hidden="true">{names.get(decision.ghostId) ?? 'Ghost'}</span>
           <span className="deck__index-copy"><span>{decisionHeading(decision, state)}</span>
             <small>{names.get(decision.ghostId) ?? 'Ghost'} · {decisionChip(decision)}</small></span>
         </button>
