@@ -150,9 +150,13 @@ chromeTest("closing a native window without a successful submit never saves a pa
 },90_000);
 
 for (const lane of ["api","native"] as const) for (const scenario of [
-  {name:"card",html:'<input id=first autocomplete="section-payment BILLING CC-NUMBER"><input id=second type=password autocomplete="cc-csc">',first:"4242424242424242",second:"679",formatted:"4242 4242 4242 4242"},
-  {name:"otp",html:'<input id=first type=email autocomplete=username><input id=second type=password autocomplete="section-auth ONE-TIME-CODE">',first:"owner@example.com",second:"123456",formatted:"owner@example.com"},
-]) chromeTest(`real Chrome ${lane}: ${scenario.name} is redaction-only, never a saved login or a model screenshot`,async()=>{
+  {name:"card",html:'<input id=first autocomplete="section-payment BILLING CC-NUMBER"><input id=second type=password autocomplete="cc-csc">',first:"4242424242424242",second:"679",formatted:"4242 4242 4242 4242",third:null,genuine:false},
+  {name:"otp",html:'<input id=first type=email autocomplete=username><input id=second type=password autocomplete="section-auth ONE-TIME-CODE">',first:"owner@example.com",second:"123456",formatted:"owner@example.com",third:null,genuine:false},
+  {name:"card-unhinted",html:'<input id=first autocomplete=off><input id=second type=password autocomplete=off>',first:"4242424242424242",second:"679",formatted:"4242 4242 4242 4242",third:null,genuine:false},
+  {name:"card-number-unhinted",html:'<input id=first type=number autocomplete=off><input id=second type=password autocomplete=off>',first:"4242424242424242",second:"679",formatted:"4242 4242 4242 4242",third:null,genuine:false},
+  {name:"otp-unhinted",html:'<input id=first type=email autocomplete=off><input id=second type=password autocomplete=off>',first:"owner@example.com",second:"123456",formatted:"owner@example.com",third:null,genuine:false},
+  {name:"login-with-unhinted-otp",html:'<input id=first type=email autocomplete=off><input id=second type=password autocomplete=off><input id=third type=password autocomplete=off>',first:"owner@example.com",second:"real-owner-password-7389",formatted:"owner@example.com",third:"123456",genuine:true},
+]) chromeTest(`real Chrome ${lane}: ${scenario.name} never saves PAN/OTP as login credentials`,async()=>{
   const root=tempDir(),vault=createVault(root),saved:string[]=[];
   const ref={ghostId:`sensitive-${lane}-${scenario.name}`,conversationId:`sensitive-${lane}-${scenario.name}`};
   const item=vault.saveLogin(ref.ghostId,{origin:"https://example.com",username:"owner@example.com",password:"existing-real-password"});
@@ -180,8 +184,9 @@ for (const lane of ["api","native"] as const) for (const scenario of [
         await browser.input(ref,{type:"key",event:"down",key,code:key});
         await browser.input(ref,{type:"key",event:"up",key,code:key});
       } else {
-        await native!.request("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,text:key==="Enter"?"\r":undefined,windowsVirtualKeyCode:key==="Enter"?13:9},sid);
-        await native!.request("Input.dispatchKeyEvent",{type:"keyUp",key,code:key,windowsVirtualKeyCode:key==="Enter"?13:9},sid);
+        const keyCode = key==="Enter"?13:key==="Backspace"?8:9;
+        await native!.request("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,text:key==="Enter"?"\r":undefined,windowsVirtualKeyCode:keyCode},sid);
+        await native!.request("Input.dispatchKeyEvent",{type:"keyUp",key,code:key,windowsVirtualKeyCode:keyCode},sid);
       }
     };
     const type=async(value:string)=>{
@@ -193,31 +198,67 @@ for (const lane of ["api","native"] as const) for (const scenario of [
     };
     await press("Tab"); await type(scenario.first);
     const first=JSON.stringify((await browser.run(ref,["eval","document.querySelector('#first').value"])).data);
-    if (scenario.name === "card") {
+    if (scenario.name.startsWith("card")) {
       expect(first).not.toContain(scenario.first);
       expect(first).toContain("[redacted]");
       await expect(browser.run(ref,["screenshot"])).rejects.toThrow("Screenshots are disabled");
+      await press("Backspace"); // Previously entered PANs remain private after later owner edits.
     }
     await press("Tab"); await type(scenario.second);
     const second=JSON.stringify((await browser.run(ref,["eval","document.querySelector('#second').value"])).data);
     expect(second).not.toContain(scenario.second);
     expect(second).toContain("[redacted]");
     await expect(browser.run(ref,["screenshot"])).rejects.toThrow("Screenshots are disabled");
+    if (scenario.third) {
+      await press("Tab"); await type(scenario.third);
+      const third=JSON.stringify((await browser.run(ref,["eval","document.querySelector('#third').value"])).data);
+      expect(third).not.toContain(scenario.third); expect(third).toContain("[redacted]");
+    }
     await press("Enter");
     await browser.endHandoff(ref);
-    expect(saved).toEqual([]);
-    expect(vault.history(item.id)).toHaveLength(1);
-    expect(vault.reveal(ref.ghostId,item.id,"password")).toBe("existing-real-password");
+    expect(saved).toEqual(scenario.genuine ? [item.id] : []);
+    expect(vault.history(item.id)).toHaveLength(scenario.genuine ? 2 : 1);
+    expect(vault.reveal(ref.ghostId,item.id,"password")).toBe(scenario.genuine ? scenario.second : "existing-real-password");
     // A page can echo submitted data in a receipt. Both raw and regrouped PANs remain protected.
-    const echo=[scenario.first,scenario.formatted,scenario.second].join(" | ");
+    const echo=[scenario.first,scenario.formatted,scenario.formatted.replaceAll(" ","-"),scenario.formatted.replaceAll(" ","%20"),scenario.formatted.replaceAll(" ","+"),scenario.second,...(scenario.third ? [scenario.third] : [])].join(" | ");
     await browser.run(ref,["eval",`document.body.textContent=${JSON.stringify(echo)};history.pushState({},'','/after-sensitive-input');"ready"`]);
     const receipt=JSON.stringify((await browser.run(ref,["get","text","body"])).data);
     expect(receipt).not.toContain(scenario.second);
-    if (scenario.name === "card") {
+    if (scenario.third) expect(receipt).not.toContain(scenario.third);
+    if (scenario.name.startsWith("card")) {
       expect(receipt).not.toContain(scenario.first);
       expect(receipt).not.toContain(scenario.formatted);
     }
     expect(receipt).toContain("[redacted]");
     await expect(browser.run(ref,["screenshot"])).rejects.toThrow("Screenshots are disabled");
   } finally {native?.close();await browser.shutdown();vault.close();}
+},90_000);
+
+for (const context of ["iframe","closed-shadow"] as const) chromeTest(`real Chrome API: whole PAN paste stays private with ${context} focus missing from root metadata`,async()=>{
+  const root=tempDir(),saved:unknown[]=[];
+  const ref={ghostId:`detached-${context}`,conversationId:`detached-${context}`};
+  const browser=new AgentBrowser({executable:executable!,chrome},root,(_session,login)=>{saved.push({...login});});
+  const pan="4242424242424242";
+  try {
+    await browser.run(ref,["open","https://example.com/"]);
+    const prepare = context === "iframe"
+      ? `document.body.innerHTML='<iframe id=frame></iframe>';const child=document.querySelector('iframe').contentDocument;child.body.innerHTML='<input autocomplete=off>';window.pciField=child.querySelector('input');window.pciField.focus();"ready"`
+      : `document.body.innerHTML='<div id=host></div>';const shadow=document.querySelector('#host').attachShadow({mode:'closed'});shadow.innerHTML='<input autocomplete=off>';window.pciField=shadow.querySelector('input');window.pciField.focus();"ready"`;
+    await browser.run(ref,["eval",prepare]);
+    await browser.input(ref,{type:"text",text:pan});
+    expect((await browser.run(ref,["eval","window.pciField.value.length"])).data).toMatchObject({result:16});
+    const value=JSON.stringify((await browser.run(ref,["eval","window.pciField.value"])).data);
+    expect(value).not.toContain(pan); expect(value).toContain("[redacted]");
+    await expect(browser.run(ref,["screenshot"])).rejects.toThrow("Screenshots are disabled");
+    await browser.handoff(ref,"https://example.com/");
+    await browser.endHandoff(ref);
+    await browser.run(ref,["eval",`document.body.textContent=${JSON.stringify(pan+" | 4242-4242-4242-4242 | 4242%204242%204242%204242")};history.pushState({},'','/after-detached-payment');"ready"`]);
+    const receipt=JSON.stringify((await browser.run(ref,["get","text","body"])).data);
+    expect(receipt).not.toContain(pan);
+    expect(receipt).not.toContain("4242-4242-4242-4242");
+    expect(receipt).not.toContain("4242%204242%204242%204242");
+    expect(receipt).toContain("[redacted]");
+    await expect(browser.run(ref,["screenshot"])).rejects.toThrow("Screenshots are disabled");
+    expect(saved).toEqual([]);
+  } finally {await browser.shutdown();}
 },90_000);

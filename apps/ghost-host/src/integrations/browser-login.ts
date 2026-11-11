@@ -109,6 +109,11 @@ export class ChromeLoginObserver implements LoginObserver {
     if (!observed || message.ownerApi === true || !this.options.isCurrent()) return; // API edits are recorded once, from Host-accepted bytes.
     // The isolated flag is stamped before event delivery. Mode changes are acknowledged before model I/O.
     const allowed = message.allowed === true;
+    if (message.type === "privacy" && typeof message.text === "string" && message.text.length <= 65536 && !message.text.includes("\0")) {
+      const descriptor = metadata({fields:[message.field],focused:null,clicked:null})?.fields[0];
+      if (this.capture.protectPan(observed,message.text,descriptor?.form) && allowed) this.options.activity();
+      return;
+    }
     if (allowed && (message.type === "activity" || message.type === "submit")) this.options.activity();
     if (message.type === "submit" && allowed && typeof message.form === "string") this.capture.submit(observed,message.form);
     if (message.type !== "edit") return;

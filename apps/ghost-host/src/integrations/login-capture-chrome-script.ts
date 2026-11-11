@@ -8,17 +8,21 @@ export function chromeLoginScript(controller: string, binding: string) {
     let key = null, paste = null, pending = null, composition = null;
     const id = e => { if (!e) return "document"; let value = ids.get(e); if (!value) { value = "n" + ++serial; ids.set(e,value); } return value; };
     const field = e => {
-      if (!(e instanceof HTMLInputElement || e instanceof HTMLButtonElement)) return null;
-      const type = e.type, input = e instanceof HTMLInputElement;
+      const input = e instanceof HTMLInputElement, textarea = typeof HTMLTextAreaElement !== "undefined" && e instanceof HTMLTextAreaElement;
+      if (!(input || textarea || e instanceof HTMLButtonElement)) return null;
+      const type = e.type, editable = input || textarea;
       const autocomplete = (e.getAttribute("autocomplete") || "").trim().toLowerCase().split(/\\s+/);
-      const sensitive = autocomplete.some(token => token.startsWith("cc-") || token === "one-time-code" || token === "new-password");
-      const selection = selections.get(e), length = input ? e.value.length : 0;
-      return { id:id(e), form:id(e.form), kind:e.disabled || e.readOnly ? "other" : input && sensitive ? "sensitive" : input && type === "password" ? "password" : type === "submit" ? "submit" : input && ["text","email","tel"].includes(type) ? "username" : "other",
-        length, start:input ? Number.isInteger(e.selectionStart) ? e.selectionStart : selection?.start ?? length : null, end:input ? Number.isInteger(e.selectionEnd) ? e.selectionEnd : selection?.end ?? length : null,
+      const labels = [...(e.labels || [])].slice(0,8).map(label => (label.textContent || "").slice(0,256));
+      const referenced = (e.getAttribute("aria-labelledby") || "").trim().split(/\\s+/).slice(0,8).map(name => (document.getElementById?.(name)?.textContent || "").slice(0,256));
+      const hints = [e.name,e.id,e.getAttribute("aria-label"),...labels,...referenced].map(value => (value || "").slice(0,256)).join(" ").replace(/([a-z0-9])([A-Z])/g,"$1 $2").toLowerCase().replace(/[_-]+/g," ");
+      const sensitive = autocomplete.some(token => token.startsWith("cc-") || token === "one-time-code" || token === "new-password") || /\\b(?:pan|cc ?(?:num(?:ber)?|no|csc|cvv|cvc|exp(?:iry|iration)?|name)|(?:credit|debit) card|card ?(?:num(?:ber)?|no|security code|verification (?:code|value)|cvc|cvv|csc|expiry|expiration|exp)|card ?holder(?: name)?|name on card|cvv2?|cvc2?|csc|otp|one time (?:code|password|passcode)|verification code|security code|sms code|auth(?:entication)? code|pin)\\b|카드\\s*(?:번호|유효|만료|보안)|인증\\s*(?:번호|코드)|일회용\\s*(?:비밀번호|코드)/.test(hints);
+      const selection = selections.get(e), length = editable ? e.value.length : 0;
+      return { id:id(e), form:id(e.form), kind:e.disabled || e.readOnly ? "other" : editable && sensitive ? "sensitive" : input && type === "password" ? "password" : type === "submit" ? "submit" : input && ["text","email","tel"].includes(type) ? "username" : "other",
+        length, start:editable ? Number.isInteger(e.selectionStart) ? e.selectionStart : selection?.start ?? length : null, end:editable ? Number.isInteger(e.selectionEnd) ? e.selectionEnd : selection?.end ?? length : null,
         score:(autocomplete.some(token => token === "username" || token === "email") ? 100 : 0) + (type === "email" ? 40 : 0) + (/user|login|email|account|아이디/i.test(e.name + " " + e.id) ? 30 : 0) };
     };
     const metadata = point => {
-      const fields = [...document.querySelectorAll("input,button")].slice(0,512).map(field).filter(Boolean);
+      const fields = [...document.querySelectorAll("input,button,textarea")].slice(0,512).map(field).filter(Boolean);
       const active = field(document.activeElement);
       const hit = point ? document.elementFromPoint(point.x,point.y) : null;
       const clicked = field(hit?.closest("button,input[type=submit]") || hit);
@@ -46,12 +50,14 @@ export function chromeLoginScript(controller: string, binding: string) {
       if (!e.isTrusted) return;
       const value = e.clipboardData?.getData("text/plain");
       paste = typeof value === "string" ? {element:e.target,text:value} : null;
+      if (typeof value === "string" && value.length <= 65536) emit({type:"privacy",text:value,field:field(e.target)});
     }, true);
     window.addEventListener("compositionstart", e => {
       if (e.isTrusted) composition = {element:e.target,field:field(e.target)};
     }, true);
     window.addEventListener("compositionend", e => {
       if (!e.isTrusted || !composition || composition.element !== e.target) return;
+      if (typeof e.data === "string" && e.data.length <= 65536) emit({type:"privacy",text:e.data,field:field(e.target)});
       if (composition.field && typeof e.data === "string") emit({type:"edit",field:composition.field,edit:{type:"insert",text:e.data}});
       else unknown(e.target);
       composition = null; pending = null; key = null;
@@ -59,7 +65,7 @@ export function chromeLoginScript(controller: string, binding: string) {
     window.addEventListener("beforeinput", e => {
       if (!e.isTrusted || composition) return;
       const target = field(e.target); pending = null;
-      if (!target || !["username","password","sensitive"].includes(target.kind)) return;
+      if (!target || target.kind === "submit") return;
       let edit = null;
       const sameKey = key && key.element === e.target && key.field?.kind === target.kind;
       if (e.inputType === "insertText" && sameKey && !(key.modifiers & 7) && typeof e.data === "string" && e.data === key.key) edit = {type:"insert",text:e.data};
