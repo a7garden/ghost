@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { Decision, Ghost, State } from '@ghost/contract';
+import type { Decision, Ghost, State, Work } from '@ghost/contract';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
 
 const ghost = (id: string, isDefault = false, overrides: Partial<Ghost> = {}): Ghost => ({
@@ -144,4 +144,24 @@ it('an expanded pool past eight rows grows its own filter, paused Ghosts dimmed'
   expect(html).toContain('aria-expanded="true"');
   expect(html).toContain('Ghost 찾기');
   expect(html).toContain('data-dimmed');
+});
+
+it('clears owner-attention rings after a decision is resolved even while failed root and child work remain in history', () => {
+  const failed: Work = {
+    id: 'failed-root', parentId: null, rootId: 'failed-root', ghostId: 'sage',
+    originConversationId: 'conv-sage', conversationId: null, title: 'Earlier failure', brief: 'Earlier work',
+    acceptance: { criteria: '', checks: [], reviewer: null }, state: 'failed', revision: 1, revisionsUsed: 0,
+    deadlineAt: null, result: null, verdict: null, reason: 'the deadline passed',
+    createdAt: 1, startedAt: 1, endedAt: Date.now(), updatedAt: Date.now(),
+  };
+  const history = state({ works: [failed, { ...failed, id: 'failed-child', parentId: failed.id, ghostId: 'milo' }] });
+  expect(render({ state: history, attentionCount: 0 })).not.toContain('data-presence="attention"');
+
+  const waiting = { ...history, decisions: [decision('d1', 'milo')] };
+  expect(render({ state: waiting, attentionCount: 1 }).match(/data-presence="attention"/g)).toHaveLength(1);
+  const answered = { ...waiting, decisions: [{ ...waiting.decisions[0], state: 'answered' as const, resolvedAt: Date.now() }] };
+  expect(render({ state: answered, attentionCount: 0 })).not.toContain('data-presence="attention"');
+
+  const blocked = { ...answered, works: [...answered.works, { ...failed, id: 'blocked-work', state: 'blocked' as const, endedAt: null }] };
+  expect(render({ state: blocked, attentionCount: 1 }).match(/data-presence="attention"/g)).toHaveLength(1);
 });

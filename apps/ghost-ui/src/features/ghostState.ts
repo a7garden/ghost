@@ -43,7 +43,7 @@ export const pendingDecisions = (state: State) => state.decisions.filter(decisio
 export interface Presence {
   state: DotState;
   line: string | null;
-  /** Which branch matched, for ordering: 0 decision · 1 blocked · 2 responding · 3 running · 4 recent failure · 5 idle. */
+  /** Which branch matched, for ordering: 0 decision · 1 blocked · 2 responding · 3 running · 5 idle. */
   rank: number;
 }
 
@@ -58,9 +58,5 @@ export function ghostPresence(ghost: Ghost, state: State): Presence {
   if (state.conversations.some(conversation => conversation.ghostId === ghost.id && conversation.kind === 'direct' && conversation.busy)) return { state: 'working', line: '응답 중', rank: 2 };
   const moving = works.find(work => work.state === 'running' || work.state === 'verifying') ?? works[0];
   if (moving) return { state: 'working', line: moving.title, rank: 3 };
-  // A failed root stays failed until resumed; it asks for a glance for a day, then the notification history keeps it.
-  const failed = state.works.filter(work => work.ghostId === ghost.id && work.state === 'failed' && Date.now() - work.updatedAt < 86_400_000)
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  if (failed) return { state: 'attention', line: failed.title, rank: 4 };
   return idlePresence;
 }
