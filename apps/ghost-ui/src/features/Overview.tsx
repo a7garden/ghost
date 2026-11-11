@@ -79,6 +79,8 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
       {roots.length > LIVE_LANES && <button type="button" className="link-quiet justify-self-start" aria-label={`진행 중인 일 ${roots.length - LIVE_LANES}개 더 보기`}
         onClick={() => navigate('/work')}>+{roots.length - LIVE_LANES}<ArrowRight size={13} aria-hidden="true"/></button>}
     </section>}
+    {/* 휴대폰에는 「맡긴 일」 탭이 없다 — 진행 중인 일이 없어도 목록으로 가는 길을 남긴다. */}
+    {!roots.length && <button type="button" className="link-quiet justify-self-start min-[56rem]:hidden" onClick={() => navigate('/work')}>{uiTerms.work} 전체<ArrowRight size={13} aria-hidden="true"/></button>}
     {recent.length > 0 && <section className="home__band" aria-labelledby="home-recent">
       <header className="home__band-head"><h2 id="home-recent" className="section-title">최근 끝난 일</h2></header>
       <div className="lanes">{recent.map(work => <WorkLane key={work.id} work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'} needsOwner={false} now={now}
