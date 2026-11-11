@@ -982,27 +982,43 @@ export class AgentBrowser implements BrowserPort {
     if (!session.headed || this.sessionMap.get(session.ref.conversationId) !== session) return;
     // A stream/window callback is not a fresh action. Preserve gap policy and
     // retired restore state until explicit recovery can isolate the runtime.
-    if (session.loginNeedsRecovery || session.loginObserver?.ended || session.loginRecovery) return;
-    let url = session.bridge?.page?.url ?? session.handoffUrl ?? "about:blank";
-    if (this.hasProtectedValue(session,url)) url = "about:blank";
-    session.headed = false; clearInterval(session.headedPoll);
-    session.promoting = true; session.ownerGeneration = (session.ownerGeneration ?? 0) + 1;
-    session.loginEpoch = (session.loginEpoch ?? 0) + 1; session.loginStarting = undefined;
-    session.login?.clear(); // Closing a window is never an assertion that a login succeeded.
-    this.disconnect(session,"engine_changed");
+    const blocked = () => this.stopping || this.sessionMap.get(session.ref.conversationId) !== session ||
+      session.loginNeedsRecovery || session.loginObserver?.ended || session.loginRecovery;
+    if (blocked()) return;
+    let prepared = false;
     try {
       await this.enqueueSession(session.ref,async current => {
-        if (current !== session) return;
+        if (current !== session || !session.headed || blocked()) return;
         await session.ownerBusy;
+        if (!session.headed || blocked()) return;
+        let url = session.bridge?.page?.url ?? session.handoffUrl ?? "about:blank";
+        if (this.hasProtectedValue(session,url)) url = "about:blank";
         if (url !== "about:blank") await assertFetchableUrl(url,"closed window URL");
+        // Keep native observation and its epoch live through every queue/URL
+        // await: a reopened native window can still receive genuine input.
+        // A terminal callback must quarantine that state, not be invalidated
+        // by this legacy path before it can record the gap.
+        if (!session.headed || blocked()) return;
+        session.headed = false; clearInterval(session.headedPoll);
+        session.promoting = true; session.ownerGeneration = (session.ownerGeneration ?? 0) + 1;
+        session.loginEpoch = (session.loginEpoch ?? 0) + 1; session.loginStarting = undefined;
+        session.login?.clear(); // Closing a window is never an assertion that a login succeeded.
+        prepared = true;
+        this.disconnect(session,"engine_changed");
+        if (blocked()) return;
         if (!(await this.invoke(session,["close"])).ok) throw new Error("Window close failed");
-        if (this.stopping || this.sessionMap.get(session.ref.conversationId) !== session) return;
+        if (blocked()) return;
         if (!(await this.invoke(session,["open",url])).ok) throw new Error("Window resume failed");
+        if (blocked()) return;
         if (session.ownerViewport && !(await this.invoke(session,["set","viewport",String(session.ownerViewport.width),String(session.ownerViewport.height)])).ok) throw new Error("Window viewport restore failed");
       });
     } catch {
-      this.disconnect(session,"window_closed"); this.clearFiles(session); this.sessionMap.delete(session.ref.conversationId);
-    } finally { session.promoting = false; }
+      // Do not turn an observed gap into a destructive Session reset merely
+      // because an already-pending window/URL operation also failed.
+      if (!blocked()) {
+        this.disconnect(session,"window_closed"); this.clearFiles(session); this.sessionMap.delete(session.ref.conversationId);
+      }
+    } finally { if (prepared) session.promoting = false; }
   }
   private connect(session: Session): Promise<WebSocket> {
     if (session.promoting) return Promise.reject(new CommandError("conflict","브라우저를 전환하고 있어요. 새 화면을 기다려 주세요"));
