@@ -10,7 +10,7 @@ import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
 import { assertFetchableUrl } from "./netguard.ts";
 import { startObscura, type ObscuraProcess } from "./obscura.ts";
 import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
-import { LoginCapture, type LoginEdit, type LoginPage } from "./login-capture.ts";
+import { LoginCapture, isPanLike, isNumericCode, type LoginEdit, type LoginPage } from "./login-capture.ts";
 import { ChromeLoginObserver, type LoginObserver } from "./browser-login.ts";
 import { ChromeViewportFrames } from "./browser-frames.ts";
 
@@ -551,6 +551,8 @@ export class AgentBrowser implements BrowserPort {
           } catch { throw new KnownOutcome("Download could not be saved: existing destination or workspace symlink"); }
         }
       } finally { if (staged) rmSync(staged, { force: true }); }
+      // Native owner input may arrive while the screenshot command is already in flight.
+      if (argv[0] === "screenshot" && session.screenshotsBlocked) throw new CommandError("forbidden","Screenshots are disabled after a card or secret-value fill; close the browser session to reset");
       if (argv[0] === "close" && result.ok) { this.disconnect(session, "closed"); this.clearFiles(session); this.sessionMap.delete(ref.conversationId); }
       else if (result.ok) this.requestChromeFrame(session);
       if (!session.secrets.length || options?.stdin !== undefined || argv[0] === "screenshot") return result;
@@ -609,6 +611,21 @@ export class AgentBrowser implements BrowserPort {
     session.secrets.push(entry);
     if (scope) (session.ownerRedactions ??= new Map()).set(scope,entry);
   }
+  private protectOwnerValue(session: Session, value: string, scope?: string, sensitive = false) {
+    if (isPanLike(value)) {
+      this.protectValue(session,value,"card_number");
+      const pattern = new RegExp(value.replace(/\D/g,"").split("").join("(?:[\\s+-]|%(?:20|0[9a-dA-D]|2[dDbB]))*"),"g");
+      for (const entry of session.secrets) if (entry.cardPattern && entry.variants.includes(value)) entry.cardPattern = pattern;
+      // Keep complete PANs ahead of previously typed prefixes when masking receipt text.
+      session.secrets.sort((a,b)=>(b.cardPattern?.source.length ?? 0)-(a.cardPattern?.source.length ?? 0));
+    } else {
+      if (sensitive) session.screenshotsBlocked = true;
+      this.registerSecret(session,value,scope,sensitive);
+    }
+  }
+  private hasProtectedValue(session: Session, value: string) {
+    return session.secrets.some(secret => secret.variants.some(variant => variant && value.includes(variant)) || !!secret.cardPattern && value.search(secret.cardPattern) >= 0);
+  }
   private async withModelCapture<T>(session: Session, perform: () => Promise<T>): Promise<T> {
     session.modelCaptureDepth = (session.modelCaptureDepth ?? 0) + 1;
     try { await session.loginObserver?.updateMode?.(); return await perform(); }
@@ -631,7 +648,7 @@ export class AgentBrowser implements BrowserPort {
       if (epoch !== (session.loginEpoch ?? 0)) return;
       const id = await this.onLogin!(session.ref, login);
       if (id) session.notice = `${session.notice ?? ""}\nThe owner's login was saved to vault item ${id}. Use browser_fill_secret for this login.`.trim();
-    }, (value,scope,sensitive) => { if (epoch === (session.loginEpoch ?? 0)) this.registerSecret(session,value,scope,sensitive); }, password => session.modelPasswords?.has(password) === true);
+    }, (value,scope,sensitive) => { if (epoch === (session.loginEpoch ?? 0)) this.protectOwnerValue(session,value,scope,sensitive); }, password => session.modelPasswords?.has(password) === true);
     const result = await this.invokeCli(session,["get","cdp-url"]);
     if (!result.ok || !result.data || typeof result.data !== "object" || !("cdpUrl" in result.data) || typeof result.data.cdpUrl !== "string") throw new CommandError("unavailable","Trusted Chrome input capture is unavailable");
     const observer = await ChromeLoginObserver.start(result.data.cdpUrl,capture,{
@@ -736,7 +753,7 @@ export class AgentBrowser implements BrowserPort {
   private async resumeClosedWindow(session: Session) {
     if (!session.headed || this.sessionMap.get(session.ref.conversationId) !== session) return;
     let url = session.bridge?.page?.url ?? session.handoffUrl ?? "about:blank";
-    if (session.secrets.some(secret => secret.variants.some(value => value && url.includes(value)))) url = "about:blank";
+    if (this.hasProtectedValue(session,url)) url = "about:blank";
     session.headed = false; clearInterval(session.headedPoll);
     session.promoting = true; session.ownerGeneration = (session.ownerGeneration ?? 0) + 1;
     session.loginEpoch = (session.loginEpoch ?? 0) + 1; session.loginStarting = undefined;
@@ -891,6 +908,9 @@ export class AgentBrowser implements BrowserPort {
         this.ownerActivity(session);
         session.captureArmed = true;
         session.ownerCaptureDepth = (session.ownerCaptureDepth ?? 0) + 1;
+        const inserted = input.type === "text" ? input.text : input.type === "key" && input.event === "down" ? input.text : undefined;
+        // Owner bytes are private even when an iframe/shadow focus has no top-level descriptor.
+        if (inserted && isPanLike(inserted)) this.protectOwnerValue(session,inserted,undefined,true);
         try {
           await this.ensureLogin(session);
           await session.loginObserver?.updateMode?.();
@@ -900,7 +920,10 @@ export class AgentBrowser implements BrowserPort {
           const focused = before?.fields.find(field => field.id === before.focused);
           const clicked = before?.fields.find(field => field.id === before.clicked);
           if (before && (input.type === "key" && input.event === "down" && input.key === "Enter" || clicked?.kind === "submit")) session.login?.submit(before,(clicked?.kind === "submit" ? clicked : focused)?.form ?? "");
-          const inserted = input.type === "text" ? input.text : input.type === "key" && input.event === "down" ? input.text : undefined;
+          if (inserted && !focused) {
+            if (isPanLike(inserted)) session.login?.protectPan(before,inserted);
+            else if (isNumericCode(inserted)) this.protectOwnerValue(session,inserted,undefined,true);
+          }
           let edit: LoginEdit | null = inserted !== undefined ? {type:"insert",text:inserted} : null;
           if (input.type === "key" && input.event === "down" && (input.key === "Backspace" || input.key === "Delete")) edit = (input.modifiers ?? 0)&7 ? {type:"unknown"} : {type:input.key === "Backspace" ? "backspace" : "delete"};
           if (before && focused && edit) {
@@ -959,7 +982,7 @@ export class AgentBrowser implements BrowserPort {
           url = raw;
         }
         if (url !== "about:blank") await assertFetchableUrl(url,"takeover page URL");
-        if (session.secrets.some(secret => secret.variants.some(value => value && url!.includes(value)))) throw new CommandError("forbidden","Cannot reopen a URL containing a protected value");
+        if (this.hasProtectedValue(session,url)) throw new CommandError("forbidden","Cannot reopen a URL containing a protected value");
         if (session.engine === "obscura") {
           const exported = await this.invoke(session, ["cookies", "get"]);
           if (!exported.ok) throw new CommandError("unavailable", "Could not migrate browser cookies");
@@ -1007,6 +1030,7 @@ export class AgentBrowser implements BrowserPort {
           const current = await this.invoke(session, ["get", "url"]);
           const url = typeof current.data === "string" ? current.data : current.data && typeof current.data === "object" && "url" in current.data ? current.data.url : null;
           if (!current.ok || typeof url !== "string") throw new Error("No headed page URL");
+          if (this.hasProtectedValue(session,url)) throw new Error("Protected handoff URL");
           if (url !== "about:blank") await assertFetchableUrl(url, "handoff page URL");
           session.handoffUrl = url;
           session.handoffFallback = false;
