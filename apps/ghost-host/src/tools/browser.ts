@@ -115,11 +115,24 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     observations.set(scope.conversation.id, { refs, lastTargetRef: lastTargetRef && refs.has(lastTargetRef) ? lastTargetRef : null });
     return refs;
   }
+  /**
+   * The element the model saw under `ref` in this page's latest snapshot. A ref it never saw is refused instead of
+   * re-snapshotting: after a navigation a fresh snapshot would silently bind an old `@e12` to whatever the new page
+   * numbers e12. With `refresh` the live element must still have the role and name the model saw.
+   * 2026.11.11 : 이동 뒤 지난 페이지의 ref 가 새 페이지의 다른 요소에 묶여 눌리던 것을 막는다.
+   */
   async function identity(scope: Scope, ref: string, refresh: boolean) {
     const key = ref.replace(/^@/, "");
-    let refs = observations.get(scope.conversation.id)?.refs;
-    if (refresh || !refs?.has(key)) refs = observe(scope, await command(scope, ["snapshot", "-i"]));
-    const found = refs.get(key);
+    const seen = observations.get(scope.conversation.id)?.refs.get(key);
+    if (!seen) throw new NoEffect("That element ref is not from this page's latest browser_snapshot; take a fresh snapshot");
+    if (!refresh) return seen;
+    const found = await liveIdentity(scope, key);
+    if (found.role !== seen.role || found.name !== seen.name) throw new NoEffect("The element ref changed since the last browser_snapshot; take a fresh snapshot");
+    return found;
+  }
+  /** The element now under `ref`, from a fresh snapshot. Callers compare it with an identity they already hold. */
+  async function liveIdentity(scope: Scope, ref: string) {
+    const found = observe(scope, await command(scope, ["snapshot", "-i"])).get(ref.replace(/^@/, ""));
     if (!found) throw new NoEffect("The element ref is no longer available; take a fresh snapshot");
     return found;
   }
@@ -231,21 +244,34 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     }
     return "Secret filled";
   }
+  /**
+   * Everything before the approved click or fill only reads. A failure there means nothing happened, so it settles
+   * as denied instead of `unknown`. 2026.11.11 : 클릭 전 확인 단계의 실패가 「결과 모름」으로 남던 것을 바로잡는다.
+   */
+  async function beforeApprovedAction<T>(what: string, check: () => Promise<T>): Promise<T> {
+    try { return await check(); }
+    catch (error) {
+      if (error instanceof NoEffect) throw error;
+      throw new NoEffect(`${error instanceof Error ? error.message : String(error)}; ${what} was not performed`);
+    }
+  }
   core.effects.onApproved("browser_propose", async (effect) => {
     const input = approvedInput(effect);
     const scope = approvedScope(effect);
-    await ready(scope);
-    if (await currentUrl(scope) !== input.url) throw new NoEffect("The page URL changed; click was not performed");
-    let element: ElementIdentity;
-    try { element = await identity(scope, input.ref, true); }
-    catch { throw new NoEffect("The proposed element changed; click was not performed"); }
-    if (!input.element || element.role !== input.element.role || element.name !== input.element.name) throw new NoEffect("The proposed element changed; click was not performed");
-    // The owner approved a merchant and a total: re-read both from the live page right before the click.
-    if (input.page) {
-      const now = await pageFacts(scope);
-      if (now.origin !== input.page.origin) throw new NoEffect("The page's site changed after approval; click was not performed");
-      if (now.amount !== input.page.amount || now.currency !== input.page.currency) throw new NoEffect(`The page total changed after approval (approved ${formatAmount(input.page) ?? "none"}, now ${formatAmount(now) ?? "none"}); click was not performed — propose again`);
-    }
+    await beforeApprovedAction("click", async () => {
+      await ready(scope);
+      if (await currentUrl(scope) !== input.url) throw new NoEffect("The page URL changed; click was not performed");
+      let element: ElementIdentity;
+      try { element = await liveIdentity(scope, input.ref); }
+      catch { throw new NoEffect("The proposed element changed; click was not performed"); }
+      if (!input.element || element.role !== input.element.role || element.name !== input.element.name) throw new NoEffect("The proposed element changed; click was not performed");
+      // The owner approved a merchant and a total: re-read both from the live page right before the click.
+      if (input.page) {
+        const now = await pageFacts(scope);
+        if (now.origin !== input.page.origin) throw new NoEffect("The page's site changed after approval; click was not performed");
+        if (now.amount !== input.page.amount || now.currency !== input.page.currency) throw new NoEffect(`The page total changed after approval (approved ${formatAmount(input.page) ?? "none"}, now ${formatAmount(now) ?? "none"}); click was not performed — propose again`);
+      }
+    });
     await command(scope, ["click", input.ref]);
     return "Approved click performed";
   });
@@ -253,9 +279,14 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     const input = approvedInput(effect);
     if (!input.item_id || !input.field || !APPROVAL_FIELDS.includes(input.field)) throw new NoEffect("Invalid secret fill approval");
     const scope = approvedScope(effect);
-    await ready(scope);
+    await beforeApprovedAction("fill", () => ready(scope));
     return fillSecret(scope, { ...input, item_id: input.item_id, field: input.field }, true);
   });
+  // A pending approval or handoff keeps its session alive for the day the owner has to answer.
+  const RETAINED_TOOLS = ["browser_propose", "browser_fill_secret"];
+  browser.retainWhile?.((ref) => core.ledger.db.query(`SELECT 1 FROM decisions d WHERE d.conversation_id = ? AND d.state = 'pending' AND d.created_at > ?
+    AND (json_type(d.proposal, '$.browserHandoff') = 'object' OR d.effect_id IN (SELECT id FROM effects WHERE conversation_id = d.conversation_id AND tool IN (${RETAINED_TOOLS.map(() => "?").join(", ")}))) LIMIT 1`)
+    .get(ref.conversationId, Date.now() - DAY, ...RETAINED_TOOLS) !== null);
   function tool<T extends TSchema>(name: GhostTool, parameters: T, mutation: boolean, perform: (args: Static<T>, scope: Scope, api: ToolExecutionApi) => Promise<ToolExecutionResult>) {
     return defineTool({
       name, parameters, description: `${name.replaceAll("_", " ")}. ${BROWSER_INSTRUCTIONS}` +

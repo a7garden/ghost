@@ -1,6 +1,6 @@
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, linkSync, unlinkSync, readFileSync, writeFileSync, statSync, lstatSync, readdirSync, rmSync, realpathSync, openSync, closeSync, fstatSync, readSync, constants as FS } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Config } from "../config.ts";
 import { CommandError } from "../core/errors.ts";
@@ -35,7 +35,8 @@ interface Session {
   handoffFallback: boolean;
   secrets: { variants: string[]; cardPattern?: RegExp }[];
   screenshotsBlocked: boolean;
-  passwordScreenshots: Map<string, string>;
+  /** Tabs whose screenshots stay refused until their URL changes: a password fill or the owner's live-view text. */
+  lockedTabs: Map<string, string>;
   active: boolean;
 }
 
@@ -62,6 +63,9 @@ export class AgentBrowser implements BrowserPort {
   private stopping = false;
   private initialized = false;
   private shutdownPromise: Promise<void> | null = null;
+  /** Sessions an owner approval or handoff still depends on; see `retainWhile`. */
+  private held: (ref: BrowserSessionRef) => boolean = () => false;
+  private keepalive: ReturnType<typeof setInterval> | null = null;
   constructor(private readonly config: NonNullable<Config["browser"]>, private readonly root: string) {
     const base = join(resolve(root), "browser");
     this.home = join(base, "home");
@@ -75,7 +79,8 @@ export class AgentBrowser implements BrowserPort {
     const rootHash = createHash("sha256").update(resolve(root)).digest("hex");
     this.namespace = `g${rootHash.slice(0, 12)}`;
     // macOS sockaddr_un permits only 103 path bytes; sockets are ephemeral, not login state.
-    this.socketDir = `/tmp/ghost-browser-${rootHash.slice(0, 16)}`;
+    // Windows has neither /tmp nor POSIX ownership bits; it only hosts development and tests.
+    this.socketDir = join(process.platform === "win32" ? tmpdir() : "/tmp", `ghost-browser-${rootHash.slice(0, 16)}`);
     this.ensureSocketDir();
     const keyPath = join(base, "key");
     const temporaryKey = `${keyPath}.${randomUUID()}`;
@@ -92,7 +97,8 @@ export class AgentBrowser implements BrowserPort {
     try { mkdirSync(this.socketDir, { mode: 0o700 }); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
     const socketDir = lstatSync(this.socketDir);
-    if (!socketDir.isDirectory() || socketDir.isSymbolicLink() || socketDir.uid !== process.getuid?.() || (socketDir.mode & 0o077) !== 0) throw new Error("Unsafe browser socket directory");
+    if (!socketDir.isDirectory() || socketDir.isSymbolicLink()) throw new Error("Unsafe browser socket directory");
+    if (process.platform !== "win32" && (socketDir.uid !== process.getuid?.() || (socketDir.mode & 0o077) !== 0)) throw new Error("Unsafe browser socket directory");
   }
   private enqueue<T>(perform: () => Promise<T>): Promise<T> {
     const next = this.queue.then(perform);
@@ -101,16 +107,21 @@ export class AgentBrowser implements BrowserPort {
   }
   private enqueueSession<T>(ref: BrowserSessionRef, perform: (session: Session) => Promise<T>): Promise<T> {
     if (this.stopping) return Promise.reject(new CommandError("unavailable", "Browser is shutting down"));
-    const previous = this.sessionQueues.get(ref.conversationId) ?? Promise.resolve();
-    const next = previous.then(async () => {
+    return this.chain(ref, async () => {
       const session = await this.enqueue(() => this.admit(ref));
       try { return await perform(session); }
-      finally {
-        session.active = false;
-        this.available.resolve();
-        this.available = Promise.withResolvers<void>();
-      }
+      finally { this.release(session); }
     });
+  }
+  private release(session: Session) {
+    session.active = false;
+    this.available.resolve();
+    this.available = Promise.withResolvers<void>();
+  }
+  /** One conversation's commands run in order; independent conversations run concurrently. */
+  private chain<T>(ref: BrowserSessionRef, perform: () => Promise<T>): Promise<T> {
+    const previous = this.sessionQueues.get(ref.conversationId) ?? Promise.resolve();
+    const next = previous.then(perform);
     const settled = next.catch(() => {});
     this.sessionQueues.set(ref.conversationId, settled);
     void settled.then(() => {
@@ -223,7 +234,7 @@ export class AgentBrowser implements BrowserPort {
         catch (error) { session.engine = undefined; throw error; }
         session.secrets = [];
         session.screenshotsBlocked = false;
-        session.passwordScreenshots.clear();
+        session.lockedTabs.clear();
       }
     }
     try { return await this.invokeCli(session, argv, options); }
@@ -237,7 +248,7 @@ export class AgentBrowser implements BrowserPort {
           const idle = setTimeout(() => {
             if (this.sessions.get(session.ref.conversationId) !== session) return;
             void this.enqueueSession(session.ref, async (current) => {
-              if (current === session && session.obscuraIdle === idle) await this.invoke(session, ["close"]);
+              if (current === session && session.obscuraIdle === idle && !this.isHeld(session)) await this.invoke(session, ["close"]);
             }).catch(() => {});
           }, (this.config.idleTimeoutMinutes ?? 10) * 60_000);
           session.obscuraIdle = idle.unref();
@@ -346,7 +357,7 @@ export class AgentBrowser implements BrowserPort {
     if (!this.initialized) {
       // A crashed host may leave daemons pointing at its now-dead proxy. This private namespace
       // belongs to this root only; close those daemons before restoring any new session.
-      const orphan: Session = { ref, headed: false, handoffUrl: null, handoffFallback: false, secrets: [], screenshotsBlocked: false, passwordScreenshots: new Map(), active: false };
+      const orphan: Session = { ref, headed: false, handoffUrl: null, handoffFallback: false, secrets: [], screenshotsBlocked: false, lockedTabs: new Map(), active: false };
       if (!(await this.invoke(orphan, ["close", "--all"])).ok) throw new CommandError("unavailable", "Could not close interrupted browser sessions");
       this.initialized = true;
       for (const name of ["downloads", "staging"]) rmSync(join(this.root, "browser", name), { recursive: true, force: true });
@@ -354,19 +365,52 @@ export class AgentBrowser implements BrowserPort {
     const existing = this.sessions.get(ref.conversationId);
     if (existing && existing.ref.ghostId !== ref.ghostId) throw new CommandError("forbidden", "Browser session owner changed");
     while (!existing && this.sessions.size >= MAX_SESSIONS) {
-      const idle = [...this.sessions].find(([, session]) => !session.active);
-      if (!idle) { await this.available.promise; continue; }
+      const idle = [...this.sessions].find(([, session]) => !session.active && !this.isHeld(session));
+      if (!idle) {
+        if ([...this.sessions.values()].some((session) => session.active)) { await this.available.promise; continue; }
+        throw new CommandError("unavailable", "Every browser session is waiting for the owner's approval or handoff; wait for an answer or close a browser session");
+      }
       const [id, victim] = idle;
       const closed = await this.invoke(victim, ["close"]);
       if (!closed.ok) throw new CommandError("unavailable", "Browser session eviction failed");
       this.clearFiles(victim);
       this.sessions.delete(id);
     }
-    const session: Session = existing ?? { ref, headed: false, handoffUrl: null, handoffFallback: false, secrets: [], screenshotsBlocked: false, passwordScreenshots: new Map(), active: false };
+    const session: Session = existing ?? { ref, headed: false, handoffUrl: null, handoffFallback: false, secrets: [], screenshotsBlocked: false, lockedTabs: new Map(), active: false };
     session.active = true;
     this.sessions.delete(ref.conversationId);
     this.sessions.set(ref.conversationId, session);
     return session;
+  }
+  /**
+   * An owner approval answers within a day, but agent-browser and Obscura close a session after `idleTimeoutMinutes`
+   * and admission evicts idle sessions. A held session is never evicted and is touched before its idle timeout, so the
+   * approved click or fill still finds the page the owner saw.
+   * 2026.11.11 : 승인 · 인계를 기다리는 세션이 10분 유휴 종료 · 축출로 사라져 승인해도 「URL 이 바뀜」으로 거절되던 것을 막는다.
+   */
+  retainWhile(held: (ref: BrowserSessionRef) => boolean) {
+    this.held = held;
+    if (this.keepalive) return;
+    const every = Math.max(30_000, Math.min(5 * 60_000, (this.config.idleTimeoutMinutes ?? 10) * 30_000));
+    this.keepalive = setInterval(() => this.touchHeld(), every);
+    this.keepalive.unref?.();
+  }
+  /** Reset the idle timers of every held session that is not running a command. */
+  touchHeld() {
+    if (this.stopping) return Promise.resolve();
+    return Promise.allSettled([...this.sessions.values()].filter((session) => !session.active && this.isHeld(session)).map((session) => this.touch(session))).then(() => {});
+  }
+  private isHeld(session: Session) {
+    try { return this.held(session.ref); } catch { return false; }
+  }
+  /** A read that resets both idle timers; it never admits a session that was closed meanwhile. */
+  private touch(session: Session) {
+    return this.chain(session.ref, async () => {
+      if (this.stopping || this.sessions.get(session.ref.conversationId) !== session || session.active) return;
+      session.active = true;
+      try { await this.invoke(session, ["get", "url"]); }
+      finally { this.release(session); }
+    });
   }
   assertVaultFill(ref: BrowserSessionRef, field: VaultField, origin: string) {
     if (this.sessions.get(ref.conversationId)?.engine === "obscura" &&
@@ -375,16 +419,36 @@ export class AgentBrowser implements BrowserPort {
     }
   }
   private protectValue(session: Session, value: string, field: VaultField): void {
-    if (value && !session.secrets.some(entry => entry.variants.includes(value) && (field !== "card_number" || entry.cardPattern !== undefined))) {
+    // A username is an identifier, not a secret: redacting it also hid every URL that carries it, so `currentUrl`
+    // refused all later proposals and fills. 2026.11.11 : 아이디는 가리지 않는다.
+    if (field !== "username") this.redactLater(session, value, field === "card_number");
+    if (field.startsWith("card_") || field === "value") session.screenshotsBlocked = true;
+  }
+  private redactLater(session: Session, value: string, digitsOnly: boolean): void {
+    if (value && !session.secrets.some(entry => entry.variants.includes(value) && (!digitsOnly || entry.cardPattern !== undefined))) {
       const json = JSON.stringify(value).slice(1, -1);
       const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
       let encoded = value;
       try { encoded = encodeURIComponent(value); } catch {}
       const variants = [...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), json])].sort((a, b) => b.length - a.length);
-      const digits = field === "card_number" ? value.replace(/\D/g, "") : "";
+      const digits = digitsOnly ? value.replace(/\D/g, "") : "";
       session.secrets.push({ variants, ...(digits ? { cardPattern: new RegExp(digits.split("").join("[\\s-]*"), "g") } : {}) });
     }
-    if (field.startsWith("card_") || field === "value") session.screenshotsBlocked = true;
+  }
+  /**
+   * The Ghost continues on the page the owner left, so what the owner typed there (a card number, a PASS code, an ID
+   * number) would reach the model through snapshots, reads and screenshots. It is redacted like a filled secret and
+   * that tab's screenshots stay refused until its URL changes.
+   * 2026.11.11 : 실시간 보기로 소유자가 넣은 글이 인계 뒤 모델에 그대로 보이던 것을 막는다.
+   */
+  private async protectOwnerInput(session: Session, text: string) {
+    const value = text.trim();
+    // Shorter input is a keystroke-sized edit; redacting it would blank ordinary words across every page.
+    if (value.length >= 4) this.redactLater(session, value, value.replace(/\D/g, "").length >= 8);
+    let tab: { id: string; url: string } | null = null;
+    try { tab = this.activeTab((await this.invoke(session, ["tab", "list"])).data); } catch {}
+    if (tab) session.lockedTabs.set(tab.id, tab.url);
+    else session.screenshotsBlocked = true;
   }
   captureCredential(ref: BrowserSessionRef, input: { origin: string; ref?: string; selector?: string }): Promise<string> {
     return this.enqueueSession(ref, async session => {
@@ -421,15 +485,15 @@ export class AgentBrowser implements BrowserPort {
         if (field === "password") {
           const tab = this.activeTab((await this.invoke(session, ["tab", "list"])).data);
           if (!tab) throw new CommandError("forbidden", "Secret fill refused (not_password_field)");
-          session.passwordScreenshots.set(tab.id, tab.url);
+          session.lockedTabs.set(tab.id, tab.url);
         }
       }
       if (argv[0] === "screenshot") {
         if (session.screenshotsBlocked) throw new CommandError("forbidden", "Screenshots are disabled after a card or secret-value fill; close the browser session to reset");
-        if (session.passwordScreenshots.size) {
+        if (session.lockedTabs.size) {
           const tab = this.activeTab((await this.invoke(session, ["tab", "list"])).data);
-          if (!tab || session.passwordScreenshots.get(tab.id) === tab.url) throw new CommandError("forbidden", "Screenshots are disabled after a password fill until that tab's URL changes");
-          if (tab) session.passwordScreenshots.delete(tab.id);
+          if (!tab || session.lockedTabs.get(tab.id) === tab.url) throw new CommandError("forbidden", "Screenshots are disabled after a password fill or the owner's typing until that tab's URL changes");
+          if (tab) session.lockedTabs.delete(tab.id);
         }
       }
       let staged: string | null = null;
@@ -495,7 +559,7 @@ export class AgentBrowser implements BrowserPort {
     return this.enqueueSession(ref, async (session) => {
       if (session.engine === "obscura") throw new CommandError("unavailable", "Obscura handoff uses the live view in Ghost");
       if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser state");
-      session.passwordScreenshots.clear();
+      session.lockedTabs.clear();
       this.clearFiles(session);
       session.headed = true;
       session.handoffUrl = url ?? "about:blank";
@@ -539,7 +603,9 @@ export class AgentBrowser implements BrowserPort {
         case "text":
           // The owner may type a password here: it travels over stdin (a one-command batch), never in argv,
           // which also keeps text such as "--json" from being read as an agent-browser flag.
-          await run(["batch", "--bail", "--omit-command"], { stdin: JSON.stringify([["keyboard", "inserttext", input.text]]), batch: true });
+          try { await run(["batch", "--bail", "--omit-command"], { stdin: JSON.stringify([["keyboard", "inserttext", input.text]]), batch: true }); }
+          // Even a failed batch may have typed part of the text.
+          finally { await this.protectOwnerInput(session, input.text); }
           return;
         case "key": await run(["press", input.key]); return;
         case "scroll": await run(["scroll", input.dy < 0 ? "up" : "down", String(Math.min(10_000, Math.max(1, Math.round(Math.abs(input.dy)))))]); return;
@@ -566,7 +632,7 @@ export class AgentBrowser implements BrowserPort {
         }
         if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser handoff state");
         session.headed = false;
-        session.passwordScreenshots.clear();
+        session.lockedTabs.clear();
         this.clearFiles(session);
       }
       // Retain the captured URL on this session: a failed reopen can be explicitly retried.
@@ -584,6 +650,7 @@ export class AgentBrowser implements BrowserPort {
   shutdown() {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.stopping = true;
+    if (this.keepalive) { clearInterval(this.keepalive); this.keepalive = null; }
     this.shutdownPromise = Promise.allSettled([...this.sessionQueues.values()]).then(() => this.enqueue(async () => {
       let failure: unknown;
       for (const [id, session] of this.sessions) {
