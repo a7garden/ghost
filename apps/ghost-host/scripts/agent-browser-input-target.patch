@@ -1,0 +1,792 @@
+# Ghost patch against vercel-labs/agent-browser v0.41.2 (d52a5e90c372ec4710c69adc3837ac14bbd852aa).
+# Source archive SHA-256: d210044290de66829e8170e0eef690c510c249e0719113f53df4ed239714bfa3
+# Fail-closed native input targets and producer-owned snapshot structure attribution.
+--- a/cli/src/native/element.rs
++++ b/cli/src/native/element.rs
+@@ -413,7 +413,15 @@
+             })),
+             Some(session_id),
+         )
+-        .await?;
++        .await;
++    let _ = client
++        .send_command(
++            "Runtime.releaseObject",
++            Some(serde_json::json!({ "objectId": owner_object_id })),
++            Some(session_id),
++        )
++        .await;
++    let result = result?;
+     result
+         .get("result")
+         .and_then(|r| r.get("objectId"))
+@@ -761,6 +769,9 @@
+             .object
+             .object_id
+             .ok_or_else(|| format!("No objectId for ref {}", ref_id))?;
++        if is_detached(client, effective_session_id, &object_id).await {
++            return Err(format!("Element ref {ref_id} is stale"));
++        }
+         return Ok((object_id, effective_session_id.to_string()));
+     }
+ 
+@@ -783,11 +794,17 @@
+                 .result
+                 .object_id
+                 .ok_or_else(|| format!("Element not found: {}", selector_or_ref))?;
++            if is_detached(client, frame_session, &object_id).await {
++                return Err(format!("Element is detached: {}", selector_or_ref));
++            }
+             return Ok((object_id, frame_session.clone()));
+         }
+         let object_id =
+             resolve_object_in_same_process_frame(client, session_id, &frame_id, selector_or_ref)
+                 .await?;
++        if is_detached(client, session_id, &object_id).await {
++            return Err(format!("Element is detached: {}", selector_or_ref));
++        }
+         return Ok((object_id, session_id.to_string()));
+     }
+ 
+@@ -808,6 +825,9 @@
+         .result
+         .object_id
+         .ok_or_else(|| format!("Element not found: {}", selector_or_ref))?;
++    if is_detached(client, session_id, &object_id).await {
++        return Err(format!("Element is detached: {}", selector_or_ref));
++    }
+     Ok((object_id, session_id.to_string()))
+ }
+ 
+@@ -826,7 +846,8 @@
+             Some(session_id),
+         )
+         .await;
+-    let detached = matches!(result, Ok(r) if r.result.value == Some(Value::Bool(false)));
++    let detached = !matches!(result, Ok(r) if r.exception_details.is_none()
++        && r.result.value == Some(Value::Bool(true)));
+     if detached {
+         let _ = client
+             .send_command(
+--- a/cli/src/native/interaction.rs
++++ b/cli/src/native/interaction.rs
+@@ -152,57 +152,105 @@
+     Ok((x + offset.0, y + offset.1))
+ }
+ 
+-pub async fn fill(
+-    client: &CdpClient,
+-    session_id: &str,
+-    ref_map: &RefMap,
+-    selector_or_ref: &str,
+-    value: &str,
+-    iframe_sessions: &HashMap<String, String>,
+-) -> Result<(), String> {
+-    let (object_id, effective_session_id) = resolve_element_object_id(
+-        client,
+-        session_id,
+-        ref_map,
+-        selector_or_ref,
+-        iframe_sessions,
+-    )
+-    .await?;
+-
+-    // Focus the element
+-    client
+-        .send_command_typed::<_, Value>(
++/// Focus/clear and verify the same connected target before page-level keyboard input.
++/// Walk outward through shadow roots and same-origin frame owners. Do not use
++/// document.hasFocus(): background CDP input must not require OS window focus.
++/// Cross-origin ancestors are inaccessible here; this is not a page-focus lock.
++async fn prepare_input_target(
++    client: &CdpClient,
++    session_id: &str,
++    object_id: String,
++    clear: bool,
++    change: bool,
++) -> Result<(), String> {
++    let result: Result<EvaluateResult, String> = client
++        .send_command_typed(
+             "Runtime.callFunctionOn",
+             &CallFunctionOnParams {
+-                function_declaration: "function() { this.focus(); }".to_string(),
++                function_declaration: r#"function(clear, change) {
++                    const ownsFocus = () => {
++                        if (!this.isConnected) return false;
++                        let node = this;
++                        while (node) {
++                            const root = node.getRootNode();
++                            const active = root.activeElement;
++                            if (active !== node && !(node.isContentEditable && active &&
++                                (node.contains(active) ||
++                                 (active.isContentEditable && active.contains(node))))) return false;
++                            node = root.host || (root.defaultView && root.defaultView.frameElement);
++                        }
++                        return true;
++                    };
++                    if (!this.isConnected) return false;
++                    let focusTarget = this;
++                    if (this.isContentEditable) {
++                        while (focusTarget.parentElement && focusTarget.parentElement.isContentEditable)
++                            focusTarget = focusTarget.parentElement;
++                    }
++                    focusTarget.focus();
++                    if (!ownsFocus()) return false;
++                    if (clear) {
++                        if (typeof this.select === 'function') this.select();
++                        if (!ownsFocus()) return false;
++                        if (this.isContentEditable) this.textContent = '';
++                        else this.value = '';
++                        this.dispatchEvent(new Event('input', { bubbles: true }));
++                        if (change) this.dispatchEvent(new Event('change', { bubbles: true }));
++                    }
++                    if (!ownsFocus()) return false;
++                    if (this.isContentEditable && (clear || focusTarget !== this)) {
++                        const range = this.ownerDocument.createRange();
++                        range.selectNodeContents(this);
++                        range.collapse(false);
++                        const selection = this.ownerDocument.getSelection();
++                        selection.removeAllRanges();
++                        selection.addRange(range);
++                    }
++                    return ownsFocus();
++                }"#.to_string(),
+                 object_id: Some(object_id.clone()),
+-                arguments: None,
++                arguments: Some(vec![
++                    CallArgument { value: Some(Value::Bool(clear)), object_id: None },
++                    CallArgument { value: Some(Value::Bool(change)), object_id: None },
++                ]),
+                 return_by_value: Some(true),
+                 await_promise: Some(false),
+             },
+-            Some(&effective_session_id),
+-        )
+-        .await?;
+-
+-    // Select all + delete to clear
+-    client
+-        .send_command_typed::<_, Value>(
+-            "Runtime.callFunctionOn",
+-            &CallFunctionOnParams {
+-                function_declaration: r#"function() {
+-                    this.select && this.select();
+-                    this.value = '';
+-                    this.dispatchEvent(new Event('input', { bubbles: true }));
+-                }"#
+-                .to_string(),
+-                object_id: Some(object_id),
+-                arguments: None,
+-                return_by_value: Some(true),
+-                await_promise: Some(false),
+-            },
+-            Some(&effective_session_id),
+-        )
+-        .await?;
++            Some(session_id),
++        )
++        .await;
++    // Release on both success and failure; do not retain detached form nodes.
++    let _ = client
++        .send_command(
++            "Runtime.releaseObject",
++            Some(serde_json::json!({ "objectId": object_id })),
++            Some(session_id),
++        )
++        .await;
++    match result {
++        Ok(r) if r.exception_details.is_none() && r.result.value == Some(Value::Bool(true)) => Ok(()),
++        _ => Err("Input target is detached or did not retain focus; no text inserted".to_string()),
++    }
++}
++
++pub async fn fill(
++    client: &CdpClient,
++    session_id: &str,
++    ref_map: &RefMap,
++    selector_or_ref: &str,
++    value: &str,
++    iframe_sessions: &HashMap<String, String>,
++) -> Result<(), String> {
++    let (object_id, effective_session_id) = resolve_element_object_id(
++        client,
++        session_id,
++        ref_map,
++        selector_or_ref,
++        iframe_sessions,
++    )
++    .await?;
++
++    prepare_input_target(client, &effective_session_id, object_id, true, false).await?;
+ 
+     // Insert text (keyboard input dispatched at page level, use parent session_id)
+     client
+@@ -238,41 +286,7 @@
+     )
+     .await?;
+ 
+-    // Focus
+-    client
+-        .send_command_typed::<_, Value>(
+-            "Runtime.callFunctionOn",
+-            &CallFunctionOnParams {
+-                function_declaration: "function() { this.focus(); }".to_string(),
+-                object_id: Some(object_id.clone()),
+-                arguments: None,
+-                return_by_value: Some(true),
+-                await_promise: Some(false),
+-            },
+-            Some(&effective_session_id),
+-        )
+-        .await?;
+-
+-    if clear {
+-        client
+-            .send_command_typed::<_, Value>(
+-                "Runtime.callFunctionOn",
+-                &CallFunctionOnParams {
+-                    function_declaration: r#"function() {
+-                        this.select && this.select();
+-                        this.value = '';
+-                        this.dispatchEvent(new Event('input', { bubbles: true }));
+-                    }"#
+-                    .to_string(),
+-                    object_id: Some(object_id),
+-                    arguments: None,
+-                    return_by_value: Some(true),
+-                    await_promise: Some(false),
+-                },
+-                Some(&effective_session_id),
+-            )
+-            .await?;
+-    }
++    prepare_input_target(client, &effective_session_id, object_id, clear, false).await?;
+ 
+     type_text_into_active_context(client, session_id, text, delay_ms).await
+ }
+@@ -735,21 +749,7 @@
+     )
+     .await?;
+ 
+-    client
+-        .send_command_typed::<_, Value>(
+-            "Runtime.callFunctionOn",
+-            &CallFunctionOnParams {
+-                function_declaration: "function() { this.focus(); }".to_string(),
+-                object_id: Some(object_id),
+-                arguments: None,
+-                return_by_value: Some(true),
+-                await_promise: Some(false),
+-            },
+-            Some(&effective_session_id),
+-        )
+-        .await?;
+-
+-    Ok(())
++    prepare_input_target(client, &effective_session_id, object_id, false, false).await
+ }
+ 
+ pub async fn clear(
+@@ -768,27 +768,7 @@
+     )
+     .await?;
+ 
+-    client
+-        .send_command_typed::<_, Value>(
+-            "Runtime.callFunctionOn",
+-            &CallFunctionOnParams {
+-                function_declaration: r#"function() {
+-                    this.focus();
+-                    this.value = '';
+-                    this.dispatchEvent(new Event('input', { bubbles: true }));
+-                    this.dispatchEvent(new Event('change', { bubbles: true }));
+-                }"#
+-                .to_string(),
+-                object_id: Some(object_id),
+-                arguments: None,
+-                return_by_value: Some(true),
+-                await_promise: Some(false),
+-            },
+-            Some(&effective_session_id),
+-        )
+-        .await?;
+-
+-    Ok(())
++    prepare_input_target(client, &effective_session_id, object_id, true, true).await
+ }
+ 
+ pub async fn select_all(
+--- a/cli/src/native/snapshot.rs
++++ b/cli/src/native/snapshot.rs
+@@ -186,6 +186,92 @@
+     pub urls: bool,
+ }
+ 
++#[derive(Clone, Copy, serde::Serialize)]
++struct SnapshotSpan {
++    start: usize,
++    end: usize,
++}
++
++/// Renderer-owned ranges use byte offsets internally so trimming, indentation
++/// and compaction can copy text and its provenance together without reparsing it.
++#[derive(Default)]
++pub struct SnapshotText {
++    pub text: String,
++    spans: Vec<SnapshotSpan>,
++}
++
++impl SnapshotText {
++    fn push(&mut self, text: &str, structural: bool) {
++        let start = self.text.len();
++        self.text.push_str(text);
++        if structural && self.text.len() > start {
++            if let Some(last) = self.spans.last_mut() {
++                if last.end == start {
++                    last.end = self.text.len();
++                    return;
++                }
++            }
++            self.spans.push(SnapshotSpan { start, end: self.text.len() });
++        }
++    }
++
++    fn append_range(&mut self, source: &Self, start: usize, end: usize, cursor: &mut usize) {
++        let base = self.text.len();
++        self.push(&source.text[start..end], false);
++        while let Some(span) = source.spans.get(*cursor) {
++            if span.start >= end {
++                break;
++            }
++            if span.end > start {
++                self.spans.push(SnapshotSpan {
++                    start: base + span.start.max(start) - start,
++                    end: base + span.end.min(end) - start,
++                });
++            }
++            if span.end > end {
++                break;
++            }
++            *cursor += 1;
++        }
++    }
++
++    fn append_indented(&mut self, source: &Self, prefix: &str) {
++        let mut offset = 0;
++        let mut cursor = 0;
++        for line in source.text.lines() {
++            self.push(prefix, true);
++            self.append_range(source, offset, offset + line.len(), &mut cursor);
++            self.push("\n", true);
++            offset += line.len();
++            if source.text.as_bytes().get(offset) == Some(&b'\r') { offset += 1; }
++            if source.text.as_bytes().get(offset) == Some(&b'\n') { offset += 1; }
++        }
++    }
++
++    fn trimmed(self) -> Self {
++        let start = self.text.len() - self.text.trim_start().len();
++        let end = self.text.trim_end().len().max(start);
++        let mut output = Self::default();
++        output.append_range(&self, start, end, &mut 0);
++        output
++    }
++
++    pub fn attribution(&self) -> Value {
++        // One forward pass converts disjoint byte ranges to JS UTF-16 offsets.
++        let mut spans = Vec::with_capacity(self.spans.len());
++        let mut byte_offset = 0;
++        let mut utf16_offset = 0;
++        for span in &self.spans {
++            utf16_offset += self.text[byte_offset..span.start].encode_utf16().count();
++            let start = utf16_offset;
++            utf16_offset += self.text[span.start..span.end].encode_utf16().count();
++            spans.push(SnapshotSpan { start, end: utf16_offset });
++            byte_offset = span.end;
++        }
++        serde_json::json!({ "version": 1, "spans": spans })
++    }
++}
++
+ struct TreeNode {
+     role: String,
+     name: String,
+@@ -323,7 +409,7 @@
+     ref_map: &mut RefMap,
+     frame_id: Option<&str>,
+     iframe_sessions: &HashMap<String, String>,
+-) -> Result<String, String> {
++) -> Result<SnapshotText, String> {
+     client
+         .send_command_no_params("DOM.enable", Some(session_id))
+         .await?;
+@@ -633,17 +719,12 @@
+         }
+     }
+ 
+-    let mut output = String::new();
+-    for &root_idx in &effective_roots {
+-        render_tree(&tree_nodes, root_idx, 0, &mut output, options);
+-    }
+-
+     // Recurse into child iframes: for each Iframe node with a backend_node_id,
+     // resolve the child frame ID and take a snapshot of its content.
+     // We only recurse from the main frame (frame_id == None) to avoid
+     // unbounded depth; nested iframes within iframes are not expanded.
++    let mut iframe_snapshots = HashMap::new();
+     if frame_id.is_none() {
+-        let mut iframe_snapshots: Vec<(String, String)> = Vec::new(); // (ref_id, child_snapshot)
+         for node in tree_nodes.iter() {
+             if node.role != "Iframe" || !node.has_ref {
+                 continue;
+@@ -665,61 +746,33 @@
+                 ))
+                 .await
+                 {
+-                    if !child_text.is_empty()
+-                        && child_text != "(empty page)"
+-                        && child_text != "(no interactive elements)"
++                    if !child_text.text.is_empty()
++                        && child_text.text != "(empty page)"
++                        && child_text.text != "(no interactive elements)"
+                     {
+-                        iframe_snapshots.push((ref_id.to_string(), child_text));
++                        iframe_snapshots.insert(ref_id.to_string(), child_text);
+                     }
+                 }
+             }
+         }
+ 
+-        // Insert each child snapshot after its Iframe line in the output
+-        for (ref_id, child_text) in iframe_snapshots {
+-            let marker = format!("[ref={}]", ref_id);
+-            if let Some(pos) = output.find(&marker) {
+-                // Find the end of the Iframe line
+-                let line_end = output[pos..]
+-                    .find('\n')
+-                    .map(|i| pos + i)
+-                    .unwrap_or(output.len());
+-                // Determine the indent of the Iframe line
+-                let line_start = output[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+-                let iframe_line = &output[line_start..line_end];
+-                let iframe_indent = iframe_line.len() - iframe_line.trim_start().len();
+-                let child_indent = iframe_indent + 2; // one level deeper
+-                let prefix = " ".repeat(child_indent);
+-
+-                let indented_child: String = child_text
+-                    .lines()
+-                    .map(|line| format!("{}{}\n", prefix, line))
+-                    .collect();
+-
+-                // Ensure there's a newline to insert after
+-                if line_end == output.len() {
+-                    output.push('\n');
+-                    output.push_str(&indented_child);
+-                } else {
+-                    output.insert_str(line_end + 1, &indented_child);
+-                }
+-            }
+-        }
++    }
++    let mut output = SnapshotText::default();
++    for &root_idx in &effective_roots {
++        render_tree(&tree_nodes, root_idx, 0, &mut output, options, &iframe_snapshots);
+     }
+ 
+     if options.compact {
+-        output = compact_tree(&output, options.interactive);
+-    }
+-
+-    let trimmed = output.trim().to_string();
+-
+-    if trimmed.is_empty() {
+-        if options.interactive {
+-            return Ok("(no interactive elements)".to_string());
+-        }
+-        return Ok("(empty page)".to_string());
+-    }
+-
++        output = compact_snapshot(&output, options.interactive);
++    }
++
++    let mut trimmed = output.trimmed();
++    if trimmed.text.is_empty() {
++        trimmed.push(
++            if options.interactive { "(no interactive elements)" } else { "(empty page)" },
++            true,
++        );
++    }
+     Ok(trimmed)
+ }
+ 
+@@ -1223,8 +1276,9 @@
+     nodes: &[TreeNode],
+     idx: usize,
+     indent: usize,
+-    output: &mut String,
++    output: &mut SnapshotText,
+     options: &SnapshotOptions,
++    iframe_snapshots: &HashMap<String, SnapshotText>,
+ ) {
+     let node = &nodes[idx];
+ 
+@@ -1235,7 +1289,7 @@
+     {
+         // Ignored node -- still render children
+         for &child in &node.children {
+-            render_tree(nodes, child, indent, output, options);
++            render_tree(nodes, child, indent, output, options, iframe_snapshots);
+         }
+         return;
+     }
+@@ -1251,7 +1305,7 @@
+     // Skip root WebArea wrapper
+     if role == "RootWebArea" || role == "WebArea" {
+         for &child in &node.children {
+-            render_tree(nodes, child, indent, output, options);
++            render_tree(nodes, child, indent, output, options, iframe_snapshots);
+         }
+         return;
+     }
+@@ -1259,13 +1313,13 @@
+     if options.interactive && !node.has_ref {
+         // In interactive mode, skip non-interactive but render children
+         for &child in &node.children {
+-            render_tree(nodes, child, indent, output, options);
++            render_tree(nodes, child, indent, output, options, iframe_snapshots);
+         }
+         return;
+     }
+ 
+     let prefix = "  ".repeat(indent);
+-    let mut line = format!("{}- {}", prefix, role);
++    output.push(&format!("{}- {}", prefix, role), true);
+ 
+     // Use ARIA name if available, only fall back to cursor-interactive textContent in interactive mode since their visible text in child nodes is filtered out
+     let unescaped_display_name = if !node.name.is_empty() {
+@@ -1283,7 +1337,7 @@
+         if let Ok(display_name) =
+             serde_json::to_string(&normalize_snapshot_name(unescaped_display_name))
+         {
+-            line.push_str(&format!(" {}", display_name));
++            output.push(&format!(" {}", display_name), false);
+         }
+     }
+ 
+@@ -1319,43 +1373,49 @@
+         attrs.push(format!("ref={}", ref_id));
+     }
+ 
+-    if let Some(ref url) = node.url {
+-        attrs.push(format!("url={}", url));
+-    }
+-
+-    if !attrs.is_empty() {
+-        line.push_str(&format!(" [{}]", attrs.join(", ")));
++    if !attrs.is_empty() || node.url.is_some() {
++        output.push(" [", true);
++        output.push(&attrs.join(", "), true);
++        if let Some(url) = &node.url {
++            if !attrs.is_empty() { output.push(", ", true); }
++            output.push("url=", true);
++            output.push(url, false);
++        }
++        output.push("]", true);
+     }
+ 
+     // Add cursor-interactive kind & hints
+     if let Some(ref cursor_info) = node.cursor_info {
+-        line.push_str(&format!(
++        output.push(&format!(
+             " {} [{}]",
+             cursor_info.kind,
+             cursor_info.hints.join(", ")
+-        ));
++        ), false);
+     }
+ 
+     // Value
+     if let Some(ref val) = node.value_text {
+         if !val.is_empty() && val != &node.name {
+-            line.push_str(&format!(": {}", val));
+-        }
+-    }
+-
+-    output.push_str(&line);
+-    output.push('\n');
++            output.push(": ", true);
++            output.push(val, false);
++        }
++    }
++
++    output.push("\n", true);
++    if let Some(child) = node.ref_id.as_ref().and_then(|id| iframe_snapshots.get(id)) {
++        output.append_indented(child, &" ".repeat(indent * 2 + 2));
++    }
+ 
+     for &child in &node.children {
+-        render_tree(nodes, child, indent + 1, output, options);
++        render_tree(nodes, child, indent + 1, output, options, iframe_snapshots);
+     }
+ }
+ 
+ /// Retain matching content and its direct ancestor chain, including visible text in noninteractive snapshots.
+-fn compact_tree(tree: &str, interactive: bool) -> String {
+-    let lines: Vec<&str> = tree.lines().collect();
++fn compact_snapshot(tree: &SnapshotText, interactive: bool) -> SnapshotText {
++    let lines: Vec<&str> = tree.text.lines().collect();
+     if lines.is_empty() {
+-        return String::new();
++        return SnapshotText::default();
+     }
+ 
+     let mut keep = vec![false; lines.len()];
+@@ -1378,18 +1438,29 @@
+         }
+     }
+ 
+-    let result: Vec<&str> = lines
+-        .iter()
+-        .enumerate()
+-        .filter(|(i, _)| keep[*i])
+-        .map(|(_, line)| *line)
+-        .collect();
+-
+-    let output = result.join("\n");
+-    if output.trim().is_empty() && interactive {
+-        return "(no interactive elements)".to_string();
++    let mut output = SnapshotText::default();
++    let mut offset = 0;
++    let mut cursor = 0;
++    let mut first = true;
++    for (index, line) in lines.iter().enumerate() {
++        if keep[index] {
++            if !first { output.push("\n", true); }
++            first = false;
++            output.append_range(tree, offset, offset + line.len(), &mut cursor);
++        }
++        offset += line.len();
++        if tree.text.as_bytes().get(offset) == Some(&b'\r') { offset += 1; }
++        if tree.text.as_bytes().get(offset) == Some(&b'\n') { offset += 1; }
++    }
++    if output.text.trim().is_empty() && interactive {
++        return SnapshotText { text: "(no interactive elements)".to_string(), spans: Vec::new() };
+     }
+     output
++}
++
++#[cfg(test)]
++fn compact_tree(tree: &str, interactive: bool) -> String {
++    compact_snapshot(&SnapshotText { text: tree.to_string(), spans: Vec::new() }, interactive).text
+ }
+ 
+ fn count_indent(line: &str) -> usize {
+@@ -1781,4 +1852,48 @@
+ 
+         assert_eq!(nodes[0].role, "LabelText"); // unchanged
+     }
+-}
++
++    #[test]
++    fn snapshot_attribution_excludes_page_lookalikes_and_uses_utf16() {
++        let mut node = make_node("textbox", "😀 ref=e12", Some(1));
++        node.has_ref = true;
++        node.ref_id = Some("e12".to_string());
++        node.url = Some("https://example.com/ref=e12".to_string());
++        node.value_text = Some("raw\n- textbox [ref=e12]".to_string());
++        let mut output = SnapshotText::default();
++        render_tree(&[node], 0, 0, &mut output, &SnapshotOptions::default(), &HashMap::new());
++        let output = output.trimmed();
++        let attribution = output.attribution();
++        let spans = attribution["spans"].as_array().unwrap();
++        let protected: Vec<bool> = output.text.match_indices("ref=e12").map(|(offset, marker)| {
++            let start = output.text[..offset].encode_utf16().count() as u64;
++            let end = start + marker.len() as u64;
++            spans.iter().any(|span| span["start"].as_u64().unwrap() <= start
++                && span["end"].as_u64().unwrap() >= end)
++        }).collect();
++        assert_eq!(protected, vec![false, true, false, false]);
++        assert!(output.text.contains(": raw\n- textbox [ref=e12]"));
++    }
++
++    #[test]
++    fn snapshot_attribution_survives_frame_indentation_and_compaction() {
++        let mut child = make_node("textbox", "😀", Some(2));
++        child.has_ref = true;
++        child.ref_id = Some("e12".to_string());
++        child.value_text = Some("fake ref=e12".to_string());
++        let mut child_text = SnapshotText::default();
++        render_tree(&[child], 0, 0, &mut child_text, &SnapshotOptions::default(), &HashMap::new());
++        let mut frame = make_node("Iframe", "", Some(1));
++        frame.has_ref = true;
++        frame.ref_id = Some("e1".to_string());
++        let frames = HashMap::from([("e1".to_string(), child_text.trimmed())]);
++        let mut output = SnapshotText::default();
++        render_tree(&[frame], 0, 0, &mut output, &SnapshotOptions::default(), &frames);
++        let output = compact_snapshot(&output, true).trimmed();
++        assert_eq!(output.text, "- Iframe [ref=e1]\n  - textbox \"😀\" [ref=e12]: fake ref=e12");
++        let protected: Vec<bool> = output.text.match_indices("ref=e12").map(|(offset, marker)| {
++            output.spans.iter().any(|span| span.start <= offset && span.end >= offset + marker.len())
++        }).collect();
++        assert_eq!(protected, vec![true, false]);
++    }
++}
+--- a/cli/src/native/actions.rs
++++ b/cli/src/native/actions.rs
+@@ -6162,7 +6162,7 @@
+ 
+     let previous_refs = state.ref_map.ref_ids();
+     state.ref_map.begin_snapshot();
+-    let tree = snapshot::take_snapshot(
++    let rendered = snapshot::take_snapshot(
+         &mgr.client,
+         &session_id,
+         &options,
+@@ -6171,6 +6171,8 @@
+         &state.iframe_sessions,
+     )
+     .await?;
++    let snapshot_attribution = rendered.attribution();
++    let tree = rendered.text;
+ 
+     let url = mgr.get_url().await.unwrap_or_default();
+ 
+@@ -6200,7 +6202,7 @@
+ 
+     if !cmd.get("delta").and_then(Value::as_bool).unwrap_or(false) {
+         return Ok(
+-            json!({ "snapshot": tree, "origin": url, "refs": refs, "removedRefs": removed_refs }),
++            json!({ "snapshot": tree, "snapshotAttribution": snapshot_attribution, "origin": url, "refs": refs, "removedRefs": removed_refs }),
+         );
+     }
+ 
+@@ -7728,7 +7730,7 @@
+ 
+     let result = diff::diff_snapshots(
+         &diff::snapshot_comparison_text(&baseline_text),
+-        &diff::snapshot_comparison_text(&current),
++        &diff::snapshot_comparison_text(&current.text),
+     );
+     state.ref_map = current_ref_map;
+     Ok(json!({
+@@ -7793,16 +7795,16 @@
+     .await?;
+ 
+     let result = diff::diff_text(
+-        &diff::snapshot_comparison_text(&snap1),
+-        &diff::snapshot_comparison_text(&snap2),
++        &diff::snapshot_comparison_text(&snap1.text),
++        &diff::snapshot_comparison_text(&snap2.text),
+     );
+     state.ref_map = snap2_ref_map;
+     Ok(json!({
+         "diff": result,
+         "url1": url1,
+         "url2": url2,
+-        "snapshot1": snap1,
+-        "snapshot2": snap2,
++        "snapshot1": snap1.text,
++        "snapshot2": snap2.text,
+     }))
+ }
+ 

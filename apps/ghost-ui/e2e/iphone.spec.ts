@@ -250,9 +250,10 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
-test('live browser preserves the focused touch draft until matching viewport pixels decode', async ({ page }) => {
+test('live browser preserves the focused touch draft until matching viewport pixels decode and recovers after rejected input', async ({ page }) => {
   const { conversationA, defaultGhostId } = readRunState();
   const inputs: { type: string; width?: number; height?: number; text?: string }[] = [];
+  let rejectNavigation = true;
   await openScreen(page, {
     name: 'live browser touch readiness', route: () => `/ghosts/${defaultGhostId}`, waits: () => [],
     prepare: async page => {
@@ -267,16 +268,22 @@ test('live browser preserves the focused touch draft until matching viewport pix
         conversationId: conversationA, ghostId: defaultGhostId, engine: 'chrome', headed: false, handoffDecisionId: null,
       }] } }));
       await page.route('**/api/browser/sessions/*/input', async route => {
-        inputs.push(route.request().postDataJSON());
-        await route.fulfill({ json: { ok: true } });
+        const input = route.request().postDataJSON();
+        inputs.push(input);
+        if (input.type === 'navigate' && rejectNavigation) {
+          rejectNavigation = false;
+          await route.fulfill({ status: 409, json: { error: { code: 'conflict', message: 'The browser runtime changed.' } } });
+        } else await route.fulfill({ json: { ok: true } });
       });
       // Route.fulfill buffers response bodies. Keep NDJSON open so the test, not reconnect timing,
       // releases each real JPEG through the production stream parser and image decoder.
       await page.addInitScript(() => {
         const originalFetch = window.fetch.bind(window);
+        let streams = 0;
         window.fetch = (input, init) => {
           const url = new URL(input instanceof Request ? input.url : String(input), location.href);
           if (!/^\/api\/browser\/sessions\/[^/]+\/live$/.test(url.pathname)) return originalFetch(input, init);
+          Object.assign(window, { __browserStreamCount: ++streams });
           const body = new ReadableStream<Uint8Array>({
             start(controller) {
               Object.assign(window, { __releaseBrowserFrame(width: number, height: number) {
@@ -349,6 +356,29 @@ test('live browser preserves the focused touch draft until matching viewport pix
       left: pixels.getImageData(1, 1, 1, 1).data[0],
       right: pixels.getImageData(canvas.width - 2, 1, 1, 1).data[0] };
   })).toMatchObject({ width: pending.width, height: pending.height, right: 255 });
+  // A late promotion/input rejection revokes readiness even if this stream already painted.
+  // No new damage is forthcoming: only a fresh subscription can recover the invalidated frame.
+  await live.getByRole('button', { name: '뒤로', exact: true }).dispatchEvent('click');
+  await expect.poll(() => page.evaluate(() =>
+    '__browserStreamCount' in window ? window.__browserStreamCount : 0)).toBe(2);
+  await expect(field).toBeEnabled();
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue(draft);
+  await expect(send).toBeDisabled();
+  await expect(macWindow).toBeEnabled();
+  await expect(live.locator('.browser-live__placeholder')).toBeVisible();
+  expect(inputs.filter(input => input.type === 'navigate')).toHaveLength(1);
+  expect(inputs.filter(input => input.type === 'text')).toEqual([]);
+  const recovered = await screen.evaluate(element => ({
+    width: Math.max(320, Math.min(2560, element.clientWidth)),
+    height: Math.max(240, Math.min(1600, element.clientHeight)),
+  }));
+  await releaseFrame(recovered);
+  await expect(live.locator('.browser-live__placeholder')).toHaveCount(0);
+  await expect(send).toBeEnabled();
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue(draft);
+  expect(inputs.filter(input => input.type === 'navigate')).toHaveLength(1);
   await send.tap();
   await expect.poll(() => inputs.filter(input => input.type === 'text')).toEqual([{ type: 'text', text: draft }]);
   await expect(field).toHaveValue('');

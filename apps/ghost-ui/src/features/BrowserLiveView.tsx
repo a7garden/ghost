@@ -250,12 +250,14 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
         dimsRef.current = null;
         setDims(null);
         inputGenerationRef.current++;
+        abortRef.current?.abort();
         setInputError(caught instanceof Error && caught.message ? caught.message : '입력을 전달하지 못했습니다.');
+        scheduleReconnect(); // Recover the revoked frame, never replay the rejected owner input.
       }
     });
     inputQueueRef.current = pending;
     return pending;
-  }, [client, conversationId]);
+  }, [client, conversationId, scheduleReconnect]);
 
   useEffect(() => {
     const screen = screenRef.current;
@@ -495,8 +497,8 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
         onInput={onFieldInput} onCompositionEnd={onCompositionEnd} onPaste={onFieldPaste}/>}
     </div>
     {touch && <form className="browser-live__type" onSubmit={submitTouchText}>
-      {/* Keyboard viewport changes must not disable this focused draft field and dismiss the keyboard. */}
-      <Input ref={touchFieldRef} aria-label="브라우저에 입력할 내용" placeholder="선택한 곳에 입력됩니다" maxLength={2000} disabled={status !== 'live'}
+      {/* Keep this local draft focused across keyboard resizing and renderer reconnection; sending still needs ready pixels. */}
+      <Input ref={touchFieldRef} aria-label="브라우저에 입력할 내용" placeholder="선택한 곳에 입력됩니다" maxLength={2000} disabled={status === 'ended'}
         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}/>
       <button type="button" className="browser-live__icon" aria-label="Enter" title="Enter" disabled={!ready}
         onClick={() => void send({ type: 'key', event: 'down', key: 'Enter', code: 'Enter' }).then(() => send({ type: 'key', event: 'up', key: 'Enter', code: 'Enter' }))}><CornerDownLeft size={15}/></button>

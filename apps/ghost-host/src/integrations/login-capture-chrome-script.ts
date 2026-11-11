@@ -1,13 +1,17 @@
-/** Runs only in Chrome's real isolated world, installed before any page script. No DOM value is exported. */
+/** Chrome isolated-world capture; new documents use a preload. No DOM value is exported. */
 export function chromeLoginScript(controller: string, binding: string) {
   return `(() => { "use strict";
-    if (window.top !== window || globalThis[${JSON.stringify(controller)}]) return;
+    if (globalThis[${JSON.stringify(controller)}]) return;
+    const privacyOnly = window.top !== window;
     const send = globalThis[${JSON.stringify(binding)}];
     const ids = new WeakMap(), selections = new WeakMap(); let serial = 0, nativeAllowed = false, ownerApi = false;
+    let modeKnown = false, deferredBytes = 0, deferredOverflow = false, deferredScope = null;
+    const deferredPrivacy = [];
     const documentToken = Array.from(crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16)).join("-");
     let key = null, paste = null, pending = null, composition = null;
     const id = e => { if (!e) return "document"; let value = ids.get(e); if (!value) { value = "n" + ++serial; ids.set(e,value); } return value; };
     const field = e => {
+      if (privacyOnly) return null;
       const input = e instanceof HTMLInputElement, textarea = typeof HTMLTextAreaElement !== "undefined" && e instanceof HTMLTextAreaElement;
       if (!(input || textarea || e instanceof HTMLButtonElement)) return null;
       const type = e.type, editable = input || textarea;
@@ -22,18 +26,34 @@ export function chromeLoginScript(controller: string, binding: string) {
         score:(autocomplete.some(token => token === "username" || token === "email") ? 100 : 0) + (type === "email" ? 40 : 0) + (/user|login|email|account|아이디/i.test(e.name + " " + e.id) ? 30 : 0) };
     };
     const metadata = point => {
-      const fields = [...document.querySelectorAll("input,button,textarea")].slice(0,512).map(field).filter(Boolean);
+      const fields = privacyOnly ? [] : [...document.querySelectorAll("input,button,textarea")].slice(0,512).map(field).filter(Boolean);
       const active = field(document.activeElement);
       const hit = point ? document.elementFromPoint(point.x,point.y) : null;
       const clicked = field(hit?.closest("button,input[type=submit]") || hit);
-      return { documentId:documentToken, url:location.href, origin:location.origin, fields, focused:active?.id || null, clicked:clicked?.id || null };
+      return { documentId:documentToken, url:location.href, origin:location.origin, fields, focused:active?.id || null, clicked:clicked?.id || null, privacyFocus:id(document.activeElement) };
     };
-    const emit = payload => { try { send(JSON.stringify({ ...payload, meta:metadata(null), allowed:nativeAllowed, ownerApi })); } catch {} };
+    const publish = (payload, allowed, api) => { try { send(JSON.stringify({ ...payload, meta:metadata(null), allowed, ownerApi:api })); } catch {} };
+    const emit = payload => {
+      if (!modeKnown && (payload.type === "privacy-edit" || payload.type === "privacy-boundary")) {
+        // A resumed child may accept genuine input before its first mode ack.
+        // Only privacy events wait here: never login-authority edits/DOM values.
+        const length = typeof payload.edit?.text === "string" ? payload.edit.text.length : 0;
+        if (payload.scope) deferredScope = payload.scope;
+        if (deferredPrivacy.length < 128 && deferredBytes + length <= 4096) { deferredPrivacy.push(payload); deferredBytes += length; }
+        else deferredOverflow = true;
+        return;
+      }
+      publish(payload,nativeAllowed,ownerApi);
+    };
+    const boundary = () => emit({type:"privacy-boundary"});
+    const privateEdit = (e, edit) => emit({type:"privacy-edit",scope:id(e),edit});
+    window.addEventListener("focusin", e => { if (e.isTrusted) boundary(); }, true);
     const unknown = e => { const target = field(e); if (target) emit({type:"edit",field:target,edit:{type:"unknown"}}); };
     window.addEventListener("keydown", e => {
       if (!e.isTrusted) return;
       key = { element:e.target, field:field(e.target), key:e.key, modifiers:(e.altKey?1:0)|(e.ctrlKey?2:0)|(e.metaKey?4:0)|(e.shiftKey?8:0) };
       emit({type:"activity",key:e.key});
+      if (/^(?:Tab|Enter|Escape|Arrow.*|Home|End|PageUp|PageDown)$/.test(e.key) || (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") boundary();
       if (key.field && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") selections.set(e.target,{start:0,end:key.field.length});
       else if (e.target instanceof HTMLInputElement && e.target.selectionStart === null && /^(Arrow|Home|End)/.test(e.key)) unknown(e.target);
       if (e.key === "Enter" && key.field) emit({type:"submit",form:key.field.form});
@@ -42,7 +62,8 @@ export function chromeLoginScript(controller: string, binding: string) {
     window.addEventListener("pointerdown", e => {
       if (!e.isTrusted) return;
       emit({type:"activity"});
-      if (e.target instanceof HTMLInputElement && e.target.selectionStart === null && e.target.value.length) unknown(e.target);
+      boundary();
+      if (!privacyOnly && e.target instanceof HTMLInputElement && e.target.selectionStart === null && e.target.value.length) unknown(e.target);
       const target = field(e.target?.closest?.("button,input[type=submit]"));
       if (target?.kind === "submit") emit({type:"submit",form:target.form});
     }, true);
@@ -53,39 +74,56 @@ export function chromeLoginScript(controller: string, binding: string) {
       if (typeof value === "string" && value.length <= 65536) emit({type:"privacy",text:value,field:field(e.target)});
     }, true);
     window.addEventListener("compositionstart", e => {
-      if (e.isTrusted) composition = {element:e.target,field:field(e.target)};
+      if (e.isTrusted) { composition = {element:e.target,field:field(e.target)}; if (!composition.field) privateEdit(e.target,{type:"unknown"}); }
     }, true);
     window.addEventListener("compositionend", e => {
       if (!e.isTrusted || !composition || composition.element !== e.target) return;
       if (typeof e.data === "string" && e.data.length <= 65536) emit({type:"privacy",text:e.data,field:field(e.target)});
       if (composition.field && typeof e.data === "string") emit({type:"edit",field:composition.field,edit:{type:"insert",text:e.data}});
-      else unknown(e.target);
+      else if (typeof e.data === "string") privateEdit(e.target,{type:"insert",text:e.data});
       composition = null; pending = null; key = null;
     }, true);
     window.addEventListener("beforeinput", e => {
       if (!e.isTrusted || composition) return;
       const target = field(e.target); pending = null;
-      if (!target || target.kind === "submit") return;
+      if (target?.kind === "submit") return;
       let edit = null;
-      const sameKey = key && key.element === e.target && key.field?.kind === target.kind;
+      const sameKey = key && key.element === e.target && key.field?.kind === target?.kind;
       if (e.inputType === "insertText" && sameKey && !(key.modifiers & 7) && typeof e.data === "string" && e.data === key.key) edit = {type:"insert",text:e.data};
       else if (e.inputType === "insertFromPaste" && paste?.element === e.target && (e.data === null || e.data === paste.text)) edit = {type:"insert",text:paste.text};
+      else if (!target && e.inputType === "insertText" && typeof e.data === "string") edit = {type:"insert",text:e.data};
       // Browser-managed replacement may carry real input data; a null data payload is NOT a DOM-value fallback.
       else if (e.inputType === "insertReplacementText" && typeof e.data === "string") edit = {type:"insert",text:e.data};
       else if (e.inputType === "deleteContentBackward" && sameKey && key.key === "Backspace" && !(key.modifiers & 7)) edit = {type:"backspace"};
       else if (e.inputType === "deleteContentForward" && sameKey && key.key === "Delete" && !(key.modifiers & 7)) edit = {type:"delete"};
       pending = {element:e.target,field:target,edit:edit || {type:"unknown"}};
+      // Privacy is registered before the browser mutates an undescribed field.
+      // The bytes are trusted input/clipboard/composition data, never a DOM value.
+      if (!target) privateEdit(e.target,pending.edit);
     }, true);
     window.addEventListener("input", e => {
       if (!e.isTrusted || composition) return;
       const action = pending; pending = null; paste = null; key = null;
       selections.delete(e.target);
-      if (action?.element === e.target) emit({type:"edit",field:action.field,edit:action.edit});
-      else unknown(e.target);
+      if (action?.element === e.target) { if (action.field) emit({type:"edit",field:action.field,edit:action.edit}); }
+      else if (field(e.target)) unknown(e.target);
+      else privateEdit(e.target,{type:"unknown"});
     }, true);
     Object.defineProperty(globalThis, ${JSON.stringify(controller)}, { configurable:false, writable:false, value:Object.freeze({
       metadata,
-      native(value, api) { nativeAllowed = value === true; ownerApi = api === true; key = paste = pending = composition = null; },
+      native(value, api, initialNative, initialApi) {
+        if (!modeKnown) {
+          modeKnown = true;
+          // The Host stamps creation-time mode from this validated execution
+          // context, not whichever mode happens to apply when its ack arrives.
+          if (initialNative === true && initialApi !== true) {
+            for (const payload of deferredPrivacy) publish(payload,true,false);
+            if (deferredOverflow) publish({type:"privacy-edit",scope:deferredScope || id(document.activeElement),edit:{type:"unknown"}},true,false);
+          }
+          deferredPrivacy.length = 0; deferredBytes = 0; deferredOverflow = false; deferredScope = null;
+        }
+        nativeAllowed = value === true; ownerApi = api === true; key = paste = pending = composition = null;
+      },
       selectAll() {
         const e = document.activeElement;
         if (!e || e.disabled) return false;
