@@ -22,10 +22,6 @@ import { verifyMinisign } from "../apps/ghost-host/src/update/signature.ts";
 const repoRoot = resolve(dirname(new URL(import.meta.url).pathname), "..");
 const publish = process.argv.includes("--publish");
 
-const AGENT_BROWSER = {
-  version: "0.41.2",
-  sha256: "19680f06cf87d0095c318a2e80bea6b71523d95d3b651cd18d81885cd182477a",
-};
 
 function run(command: string, args: string[], options: { cwd?: string; env?: Record<string, string>; capture?: boolean } = {}): string {
   const result = spawnSync(command, args, {
@@ -148,11 +144,11 @@ step("ui");
 run("bun", ["run", "build"], { cwd: join(repoRoot, "apps/ghost-ui") });
 cpSync(join(repoRoot, "apps/ghost-ui/dist"), join(stage, "ui"), { recursive: true });
 
-step(`agent-browser ${AGENT_BROWSER.version}`);
+step("agent-browser 0.41.2 + connected-target/focus patch");
 const browser = join(stage, "agent-browser");
-run("curl", ["-fsSL", "--retry", "3", "-o", browser, `https://github.com/vercel-labs/agent-browser/releases/download/v${AGENT_BROWSER.version}/agent-browser-darwin-arm64`]);
-if (sha256(browser) !== AGENT_BROWSER.sha256) throw new Error("agent-browser checksum mismatch");
-chmodSync(browser, 0o755);
+run("bash", ["apps/ghost-host/scripts/stage-agent-browser.sh", stage]);
+run("codesign", ["--force", "--sign", identity, "--timestamp", "--identifier", "dev.projectoxi.ghost.agent-browser", browser]);
+run("codesign", ["--verify", "--strict", browser]);
 
 step("obscura");
 run("sh", ["apps/ghost-host/scripts/stage-obscura.sh", stage]);

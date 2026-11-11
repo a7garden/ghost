@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { AgentBrowser } from "../src/integrations/browser.ts";
 import { serveBrowser } from "../src/api/browser.ts";
 import { createVault } from "../src/stores/vault.ts";
+import type { LoginPage } from "../src/integrations/login-capture.ts";
 import { harness, tempDir } from "./support.ts";
 
 const ref = { ghostId: "live-ghost", conversationId: "live-conversation" };
@@ -47,6 +48,13 @@ test("one upstream serves four clients, bypasses a long Ghost read and isolates 
   writeFileSync(executable, `#!${process.execPath}\nconst args=process.argv.slice(process.argv.indexOf('--json')+1); if(args[0]==='hold') await fetch(args[1]); if(args[0]==='reload') await fetch('http://127.0.0.1:${upstream.port}/reload'); const data=args[0]==='stream'?{port:${upstream.port}}:args[0]==='get'&&args[1]==='cdp-url'?{cdpUrl:'ws://127.0.0.1:${upstream.port}/devtools/browser/live'}:{};process.stdout.write(JSON.stringify({success:true,data,error:null}));\n`);
   chmodSync(executable, 0o700);
   const browser = new AgentBrowser({ executable }, root);
+  type ObserverSession = { loginObserver?: { snapshot: () => Promise<LoginPage>; close: () => void } };
+  (browser as unknown as { ensureLogin(session: ObserverSession): Promise<void> }).ensureLogin = async session => {
+    session.loginObserver ??= {
+      snapshot: async () => ({ targetId: "fixture-tab", documentId: `fixture-${pageVersion}`, url: "https://example.com/", origin: "https://example.com", fields: [], focused: null, clicked: null }),
+      close: () => {},
+    };
+  };
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<Response>();
   const hold = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() { entered.resolve(); return release.promise; } });
   const stops: (() => void)[] = [];
@@ -101,6 +109,93 @@ test("one upstream serves four clients, bypasses a long Ghost read and isolates 
     expect(browser.sessions()).toEqual([]);
   } finally { release.resolve(new Response("released")); for (const stop of stops) stop(); await browser.shutdown(); await upstream.stop(true); await hold.stop(true); }
 });
+
+test("deferred owner metadata capture republishes fresh pixels after damage arrived while busy", async () => {
+  const root = tempDir();
+  const deferred = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const first = Promise.withResolvers<void>(), fresh = Promise.withResolvers<{ type: "frame"; width: number; height: number; data: string }>();
+  let version = 0, snapshots = 0, connections = 0;
+  let peer: Bun.ServerWebSocket<{ cdp: boolean }> | undefined;
+  const jpeg = (revision: number) => {
+    const image = Buffer.from([0xff,0xd8,0xff,0xc0,0,11,8,2,88,3,32,1,1,0x11,0,0xff,0xd9]);
+    image[14] = revision;
+    return image.toString("base64");
+  };
+  const upstream = Bun.serve<{ cdp: boolean }>({
+    hostname: "127.0.0.1", port: 0,
+    fetch(request, server) {
+      if (server.upgrade(request, { data: { cdp: new URL(request.url).pathname.startsWith("/devtools/browser") } })) return;
+      return new Response("upgrade", { status: 400 });
+    },
+    websocket: {
+      open(ws) {
+        if (ws.data.cdp) return;
+        peer = ws; connections++;
+        ws.send(JSON.stringify({ type: "status", viewportWidth: 800, viewportHeight: 600 }));
+        ws.send(JSON.stringify({ type: "tabs", tabs: [{ active: true, targetId: "fixture-tab", url: "https://example.com/", title: "Example" }] }));
+        ws.send(JSON.stringify({ type: "frame", data: "AAAA" }));
+      },
+      message(ws, message) {
+        if (!ws.data.cdp) return;
+        const command = JSON.parse(String(message));
+        let result: Record<string, unknown> = {};
+        if (command.method === "Target.attachToTarget") result = { sessionId: "fixture-session" };
+        else if (command.method === "Page.getLayoutMetrics") result = { cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 800, clientHeight: 600 } };
+        else if (command.method === "Page.captureScreenshot") result = { data: jpeg(version) };
+        ws.send(JSON.stringify({ id: command.id, result }));
+      },
+    },
+  });
+  const executable = join(root, "fake-browser");
+  writeFileSync(executable, `#!${process.execPath}\nconst args=process.argv.slice(process.argv.indexOf('--json')+1);const data=args[0]==='stream'?{port:${upstream.port}}:args[0]==='get'&&args[1]==='cdp-url'?{cdpUrl:'ws://127.0.0.1:${upstream.port}/devtools/browser/deferred'}:{};process.stdout.write(JSON.stringify({success:true,data,error:null}));\n`);
+  chmodSync(executable, 0o700);
+  const browser = new AgentBrowser({ executable }, root);
+  type ObserverSession = { loginObserver?: { snapshot: () => Promise<LoginPage>; close: () => void } };
+  // Private test seams replace only credential metadata and observe the real upstream transport.
+  const fixtureBrowser = browser as unknown as {
+    ensureLogin(session: ObserverSession): Promise<void>;
+    sessionMap: Map<string, { bridge?: { socket?: WebSocket } }>;
+  };
+  fixtureBrowser.ensureLogin = async session => {
+    session.loginObserver ??= {
+      snapshot: async () => {
+        if (++snapshots === 3) { deferred.resolve(); await release.promise; }
+        return { targetId: "fixture-tab", documentId: "fixture-document", url: "https://example.com/", origin: "https://example.com", fields: [], focused: null, clicked: null };
+      },
+      close: () => {},
+    };
+  };
+  let stop: (() => void) | undefined;
+  try {
+    await browser.run(ref, ["open", "https://example.com/"]);
+    stop = await browser.live(ref, { maxFps: 15 }, event => {
+      if (event.type !== "frame") return;
+      first.resolve();
+      if (event.data === jpeg(1)) fresh.resolve(event);
+    });
+    await first.promise;
+    await browser.input(ref, { type: "key", event: "down", key: "Tab", code: "Tab" });
+    await deferred.promise;
+    // Observe actual socket delivery as the barrier, not a sleep or a private scheduling assertion.
+    const socket = fixtureBrowser.sessionMap.get(ref.conversationId)!.bridge!.socket!;
+    const damageHandled = Promise.withResolvers<void>();
+    const onDamage = (event: MessageEvent) => {
+      if (JSON.parse(String(event.data)).data !== "AAAB") return;
+      socket.removeEventListener("message", onDamage);
+      damageHandled.resolve();
+    };
+    socket.addEventListener("message", onDamage);
+    version = 1;
+    peer!.send(JSON.stringify({ type: "frame", data: "AAAB" }));
+    await damageHandled.promise;
+    release.resolve();
+    // There is no subsequent daemon damage, owner input, subscriber, or reconnect to rescue this frame.
+    expect(await fresh.promise).toEqual({ type: "frame", width: 800, height: 600, data: jpeg(1) });
+    expect(connections).toBe(1);
+  } finally {
+    release.resolve(); stop?.(); await browser.shutdown(); await upstream.stop(true);
+  }
+}, 10_000);
 
 const executable = process.env.GHOST_TEST_AGENT_BROWSER;
 const chrome = process.env.GHOST_TEST_CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";

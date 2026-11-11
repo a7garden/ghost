@@ -10,7 +10,7 @@ import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
 import { assertFetchableUrl } from "./netguard.ts";
 import { startObscura, type ObscuraProcess } from "./obscura.ts";
 import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
-import { LoginCapture, isPanLike, isNumericCode, type LoginEdit, type LoginPage } from "./login-capture.ts";
+import { LoginCapture, UnknownOwnerText, isPanLike, type LoginEdit, type LoginPage } from "./login-capture.ts";
 import { ChromeLoginObserver, type LoginObserver } from "./browser-login.ts";
 import { ChromeViewportFrames } from "./browser-frames.ts";
 
@@ -74,6 +74,10 @@ interface Session {
   notice?: string;
   login?: LoginCapture;
   captureArmed?: boolean;
+  unknownOwnerText?: UnknownOwnerText;
+  unknownNumericDigits?: Set<string>;
+  unknownNumericPage?: string;
+  unknownDigitCount?: number;
   modelPasswords?: Set<string>;
   loginObserver?: LoginObserver;
   loginBootstrapping?: boolean;
@@ -260,6 +264,7 @@ export class AgentBrowser implements BrowserPort {
     } finally { closeSync(fd); }
   }
   private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
+    if (["open","back","forward","reload","close"].includes(argv[0]!) || argv[0] === "tab" && argv[1] !== "list") session.unknownOwnerText?.reset();
     if (session.bridge && ["open", "back", "forward", "reload", "close"].includes(argv[0]!)) {
       session.bridge.frame = undefined; session.bridge.damage = undefined; session.bridge.renderer?.invalidate();
     }
@@ -278,6 +283,8 @@ export class AgentBrowser implements BrowserPort {
         try { session.obscura = await startObscura(expand(executable), proxy.url, this.root); }
         catch (error) { session.engine = undefined; throw error; }
         session.secrets = [];
+        session.unknownNumericDigits?.clear();
+        session.unknownNumericPage = undefined; session.unknownDigitCount = 0;
         session.screenshotsBlocked = false;
         session.passwordScreenshots.clear();
       }
@@ -287,7 +294,7 @@ export class AgentBrowser implements BrowserPort {
       session.loginStarting = undefined;
       session.loginObserver?.close(); session.loginObserver = undefined; session.login?.clear(); session.login = undefined;
       session.secrets = session.secrets.filter(entry => !entry.ownerScope); session.ownerRedactions?.clear();
-    } else if (!obscura && this.onLogin && !session.loginObserver && !session.loginBootstrapping) {
+    } else if (!obscura && (this.onLogin || session.headed || session.captureArmed) && !session.loginObserver && !session.loginBootstrapping) {
       // Install Chrome's isolated preload on a blank document before any site's own scripts run.
       // --restore and the network init still apply to this bootstrap just as to the real navigation.
       session.loginBootstrapping = true;
@@ -483,7 +490,12 @@ export class AgentBrowser implements BrowserPort {
     })));
   }
   run(ref: BrowserSessionRef, argv: string[], options?: BrowserRunOptions) {
-    return this.enqueueSession(ref, async (session) => this.withModelCapture(session, async () => {
+    return this.enqueueSession(ref, async (session) => {
+      // This decision is already authoritative and needs no live Chrome state.
+      // In particular, do not consult a closing/failed observer before denying
+      // pixels that remain private across navigation and browser replacement.
+      if (argv[0] === "screenshot" && session.screenshotsBlocked) throw new CommandError("forbidden","Screenshots are disabled after a card or secret-value fill; close the browser session to reset");
+      return this.withModelCapture(session, async () => {
       if (session.captureArmed && !session.secretGate) {
         await session.ownerBusy;
         await this.capture(session);
@@ -555,13 +567,44 @@ export class AgentBrowser implements BrowserPort {
       if (argv[0] === "screenshot" && session.screenshotsBlocked) throw new CommandError("forbidden","Screenshots are disabled after a card or secret-value fill; close the browser session to reset");
       if (argv[0] === "close" && result.ok) { this.disconnect(session, "closed"); this.clearFiles(session); this.sessionMap.delete(ref.conversationId); }
       else if (result.ok) this.requestChromeFrame(session);
-      if (!session.secrets.length || options?.stdin !== undefined || argv[0] === "screenshot") return result;
-      const redactText = (text: string) => {
-        for (const secret of session.secrets) {
-          for (const variant of secret.variants) text = text.replaceAll(variant, "[redacted]");
-          if (secret.cardPattern) text = text.replace(secret.cardPattern, "[redacted]");
+      if ((!session.secrets.length && !session.unknownNumericDigits?.size) || options?.stdin !== undefined || argv[0] === "screenshot") return result;
+      const redactText = (text: string, protocol?: readonly {start:number;end:number}[]) => {
+        let mask: Uint8Array | undefined;
+        const mark = (current: Uint8Array | undefined, start: number, end: number) => {
+          if (protocol) {
+            let low=0, high=protocol.length;
+            while (low<high) { const middle=(low+high)>>>1; if (protocol[middle]!.start<=start) low=middle+1; else high=middle; }
+            const span=protocol[low-1];
+            if (span && end<=span.end) return current;
+          }
+          const next=current ?? new Uint8Array(text.length);
+          next.fill(1,start,end); return next;
+        };
+        // Unknown editors supply no trustworthy cursor/value metadata. A code can
+        // be assembled from old and new fragments, never one inserted packet.
+        // Keep this bounded privacy-only mask out of URL/operation authority checks.
+        if (session.unknownNumericDigits?.size) for (const match of text.matchAll(/\d(?:[\d\s-]*\d)?/g)) {
+          const digits = match[0].replace(/\D/g,"");
+          for (const digit of session.unknownNumericDigits) if (digits.includes(digit)) { mask=mark(mask,match.index,match.index+match[0].length); break; }
         }
-        return text;
+        // Match every secret against the original string. Replacement markers and protocol tokens
+        // must never split a secret match or become input to another redaction pass.
+        for (const secret of session.secrets) {
+          for (const variant of secret.variants) if (variant) {
+            for (let start = text.indexOf(variant); start >= 0; start = text.indexOf(variant,start+1)) mask=mark(mask,start,start+variant.length);
+          }
+          if (secret.cardPattern) for (const match of text.matchAll(secret.cardPattern)) mask=mark(mask,match.index,match.index+match[0].length);
+        }
+        if (!mask) return text;
+        let output = "";
+        for (let start=0;start<text.length;) {
+          const hidden = mask[start] === 1;
+          let end = start+1;
+          while (end<text.length && (mask[end] === 1) === hidden) end++;
+          output += hidden ? "[redacted]" : text.slice(start,end);
+          start = end;
+        }
+        return output;
       };
       const redact = (value: unknown): unknown => {
         if (typeof value === "string") return redactText(value);
@@ -574,8 +617,43 @@ export class AgentBrowser implements BrowserPort {
         if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, child]) => [redactText(key), redact(child)]));
         return value;
       };
-      return { ok: result.ok, data: redact(result.data), error: result.error === null ? null : redactText(result.error) };
-    }));
+      let data: unknown;
+      const native = result.data;
+      if (command[0] === "snapshot" && result.ok) {
+        const mismatch = () => new CommandError("unavailable","Browser snapshot attribution is missing or invalid; update the Host browser build");
+        if (!native || typeof native !== "object" || !("snapshot" in native) || typeof native.snapshot !== "string" || !("refs" in native) || !native.refs || typeof native.refs !== "object" || Array.isArray(native.refs) || !("snapshotAttribution" in native)) throw mismatch();
+        const tree=native.snapshot, attribution=native.snapshotAttribution, nativeRefs=native.refs;
+        if (!attribution || typeof attribution !== "object" || !("version" in attribution) || attribution.version !== 1 || !("spans" in attribution) || !Array.isArray(attribution.spans)) throw mismatch();
+        const spans=attribution.spans;
+        const boundary = (position: number) => !(tree.charCodeAt(position-1)>=0xD800 && tree.charCodeAt(position-1)<=0xDBFF && tree.charCodeAt(position)>=0xDC00 && tree.charCodeAt(position)<=0xDFFF);
+        let previousEnd=0;
+        if (!spans.every((span: unknown): span is {start:number;end:number} => {
+          if (!span || typeof span !== "object" || !("start" in span) || typeof span.start !== "number" || !("end" in span) || typeof span.end !== "number" || !Number.isSafeInteger(span.start) || !Number.isSafeInteger(span.end) || span.start<previousEnd || span.end<=span.start || span.end>tree.length || !boundary(span.start) || !boundary(span.end)) return false;
+          previousEnd=span.end; return true;
+        })) throw mismatch();
+        const refs: Record<string,{role:string;name:string}> = {};
+        for (const [id,entry] of Object.entries(nativeRefs)) {
+          if (!/^e[0-9]{1,30}$/.test(id) || !entry || typeof entry !== "object" || Object.keys(entry).some(key=>key !== "role" && key !== "name") || !("role" in entry) || typeof entry.role !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(entry.role) || !("name" in entry) || typeof entry.name !== "string") throw mismatch();
+          refs[id]={role:entry.role,name:redactText(entry.name)};
+        }
+        if (Object.keys(refs).length && !spans.length && tree.length) throw mismatch();
+        const entries: [string,unknown][] = [];
+        for (const [key,value] of Object.entries(native)) {
+          // Attribution is consumed here: its offsets would be stale after secret replacement.
+          if (key === "snapshotAttribution") continue;
+          if (key === "snapshot") entries.push([key,redactText(tree,spans)]);
+          else if (key === "refs") entries.push([key,refs]);
+          else if (key === "removedRefs") {
+            if (!Array.isArray(value) || !value.every(ref=>typeof ref === "string" && /^@?e[0-9]{1,30}$/.test(ref))) throw mismatch();
+            entries.push([key,value]);
+          } else if (key === "origin") entries.push([key,redact(value)]);
+          else entries.push([redactText(key),redact(value)]);
+        }
+        data=Object.fromEntries(entries);
+      } else data=redact(result.data);
+      return {ok:result.ok,data,error:result.error === null ? null : redactText(result.error)};
+      });
+    });
   }
   sessions() { return [...this.sessionMap.values()].map((s) => ({ ...s.ref, engine: s.engine ?? "chrome" as const, headed: s.headed })); }
   private existing(ref: BrowserSessionRef) {
@@ -623,6 +701,34 @@ export class AgentBrowser implements BrowserPort {
       this.registerSecret(session,value,scope,sensitive);
     }
   }
+  private protectUnknownInput(session: Session, page: LoginPage | null, scope: string, edit: LoginEdit | null) {
+    const trail = session.unknownOwnerText ??= new UnknownOwnerText();
+    if (!page || !edit) { trail.reset(); return; }
+    // A screenshot can expose even the first byte, before PAN/code recognition.
+    session.passwordScreenshots.set(page.targetId,page.url);
+    const document = JSON.stringify([page.targetId,page.documentId]);
+    if (session.unknownNumericPage !== document) { session.unknownNumericPage = document; session.unknownDigitCount = 0; }
+    if (edit.type === "insert") {
+      // A bounded digit set also protects short numeric fields and cursor edits,
+      // without turning single digits into URL/operation authority.
+      const digits = session.unknownNumericDigits ??= new Set<string>();
+      for (const digit of edit.text.matchAll(/\d/g)) { digits.add(digit[0]); session.unknownDigitCount = Math.min(3,(session.unknownDigitCount ?? 0)+1); }
+      // Resetting a trail must not make a code assembled across edits or separate
+      // unknown boxes photographable on a later receipt/navigation.
+      if (session.unknownDigitCount === 3) session.screenshotsBlocked = true;
+    } else if (edit.type === "unknown") {
+      // Missing/oversized event data is not a DOM-value fallback. Protect all
+      // numeric renderings and pixels, without inventing any credential bytes.
+      const digits = session.unknownNumericDigits ??= new Set<string>();
+      for (const digit of "0123456789") digits.add(digit);
+      session.screenshotsBlocked = true;
+    }
+    for (const value of trail.edit(JSON.stringify([page.targetId,page.documentId,page.url,scope]),edit)) {
+      if (isPanLike(value)) {
+        if (!session.login?.protectPan(page,value)) this.protectOwnerValue(session,value,undefined,true);
+      } else this.protectOwnerValue(session,value,undefined,true);
+    }
+  }
   private hasProtectedValue(session: Session, value: string) {
     return session.secrets.some(secret => secret.variants.some(variant => variant && value.includes(variant)) || !!secret.cardPattern && value.search(secret.cardPattern) >= 0);
   }
@@ -636,7 +742,7 @@ export class AgentBrowser implements BrowserPort {
     if (!session.notice?.includes(activity)) session.notice = `${session.notice ?? ""}\n${activity}`.trim();
   }
   private async ensureLogin(session: Session) {
-    if (!this.onLogin || session.engine === "obscura" || session.loginObserver) return;
+    if (session.engine === "obscura" || session.loginObserver) return;
     if (session.loginStarting) return session.loginStarting;
     const starting = this.startLogin(session);
     session.loginStarting = starting;
@@ -646,7 +752,7 @@ export class AgentBrowser implements BrowserPort {
     const epoch = session.loginEpoch ?? 0;
     const capture = session.login ??= new LoginCapture(async (login) => {
       if (epoch !== (session.loginEpoch ?? 0)) return;
-      const id = await this.onLogin!(session.ref, login);
+      const id = await this.onLogin?.(session.ref, login);
       if (id) session.notice = `${session.notice ?? ""}\nThe owner's login was saved to vault item ${id}. Use browser_fill_secret for this login.`.trim();
     }, (value,scope,sensitive) => { if (epoch === (session.loginEpoch ?? 0)) this.protectOwnerValue(session,value,scope,sensitive); }, password => session.modelPasswords?.has(password) === true);
     const result = await this.invokeCli(session,["get","cdp-url"]);
@@ -657,13 +763,14 @@ export class AgentBrowser implements BrowserPort {
       ownerApiActive: () => epoch === (session.loginEpoch ?? 0) && !!session.ownerCaptureDepth,
       activity: () => { if (epoch === (session.loginEpoch ?? 0)) { session.captureArmed = true; this.ownerActivity(session); } },
       secret: (page,kind) => { if (epoch === (session.loginEpoch ?? 0)) { if (kind === "sensitive") session.screenshotsBlocked = true; else session.passwordScreenshots.set(page.targetId,page.url); } },
+      privacy: (page,scope,edit) => { if (epoch === (session.loginEpoch ?? 0)) this.protectUnknownInput(session,page,scope,edit); },
       windowClosed: () => { if (epoch === (session.loginEpoch ?? 0) && session.headed) void this.resumeClosedWindow(session).catch(() => {}); },
     });
     if (epoch !== (session.loginEpoch ?? 0) || this.stopping) { observer.close(); throw new CommandError("unavailable","Browser input session changed"); }
     session.loginObserver = observer;
   }
   private async capture(session: Session, finished = false) {
-    if (!this.onLogin || !session.captureArmed && !finished) return;
+    if (!session.captureArmed && (!finished || !session.loginObserver)) return;
     let page: LoginPage | null = null;
     try {
       await this.ensureLogin(session);
@@ -677,10 +784,17 @@ export class AgentBrowser implements BrowserPort {
     clearTimeout(session.captureTimer);
     session.captureTimer = setTimeout(() => {
       session.ownerQueue = (session.ownerQueue ?? Promise.resolve()).then(async () => {
-        while (session.secretGate) await session.secretGate;
-        if (this.sessionMap.get(session.ref.conversationId) !== session) return;
-        session.ownerBusy = this.capture(session);
-        try { await session.ownerBusy; } finally { session.ownerBusy = undefined; }
+        while (session.secretGate || session.ownerBusy) await (session.secretGate ?? session.ownerBusy);
+        if (this.stopping || this.sessionMap.get(session.ref.conversationId) !== session || session.promoting) return;
+        const capture = this.capture(session);
+        session.ownerBusy = capture;
+        try { await capture; } finally {
+          if (session.ownerBusy === capture) {
+            session.ownerBusy = undefined;
+            // Damage and in-flight JPEGs may have been discarded while metadata capture owned the page.
+            this.requestChromeFrame(session);
+          }
+        }
       }).catch(() => {});
     }, 450).unref();
   }
@@ -748,6 +862,9 @@ export class AgentBrowser implements BrowserPort {
       session.login?.clear(); session.login = undefined; session.secrets = []; session.notice = undefined;
       session.modelPasswords?.clear(); session.captureArmed = false;
       session.ownerRedactions?.clear();
+      session.unknownOwnerText?.reset();
+      session.unknownNumericDigits?.clear();
+      session.unknownNumericPage = undefined; session.unknownDigitCount = 0;
     }
   }
   private async resumeClosedWindow(session: Session) {
@@ -916,16 +1033,15 @@ export class AgentBrowser implements BrowserPort {
           await session.loginObserver?.updateMode?.();
           const observes = input.type === "text" || input.type === "key" && input.event === "down" || input.type === "mouse" && input.event === "down";
           const before = observes && session.loginObserver ? await session.loginObserver.snapshot(session.bridge?.targetId,input.type === "mouse" ? {x:input.x,y:input.y} : undefined) : null;
-          if (this.onLogin && observes && !before) throw new CommandError("unavailable","Trusted browser input metadata is unavailable");
+          if (observes && !before) throw new CommandError("unavailable","Trusted browser input metadata is unavailable");
           const focused = before?.fields.find(field => field.id === before.focused);
           const clicked = before?.fields.find(field => field.id === before.clicked);
           if (before && (input.type === "key" && input.event === "down" && input.key === "Enter" || clicked?.kind === "submit")) session.login?.submit(before,(clicked?.kind === "submit" ? clicked : focused)?.form ?? "");
-          if (inserted && !focused) {
-            if (isPanLike(inserted)) session.login?.protectPan(before,inserted);
-            else if (isNumericCode(inserted)) this.protectOwnerValue(session,inserted,undefined,true);
-          }
+          if (input.type === "navigate" || input.type === "mouse" && input.event === "down" || input.type === "key" && input.event === "down" && (/^(?:Tab|Enter|Escape|Arrow.*|Home|End|PageUp|PageDown)$/.test(input.key) || ((input.modifiers ?? 0)&6) !== 0)) session.unknownOwnerText?.reset();
           let edit: LoginEdit | null = inserted !== undefined ? {type:"insert",text:inserted} : null;
           if (input.type === "key" && input.event === "down" && (input.key === "Backspace" || input.key === "Delete")) edit = (input.modifiers ?? 0)&7 ? {type:"unknown"} : {type:input.key === "Backspace" ? "backspace" : "delete"};
+          if (before && !focused && edit) this.protectUnknownInput(session,before,session.loginObserver?.privacyScope ?? "unknown",edit);
+          else if (focused) session.unknownOwnerText?.reset();
           if (before && focused && edit) {
             session.login?.edit(before,focused,edit);
             if (focused.kind === "sensitive") session.screenshotsBlocked = true;

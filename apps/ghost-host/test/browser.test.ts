@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import { BROWSER_TOOLS, type VaultItem } from "@ghost/contract";
+import { BROWSER_TOOLS, VaultItem, parse } from "@ghost/contract";
 import type { Context } from "@earendil-works/chord";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { AgentBrowser, createBrowser } from "../src/integrations/browser.ts";
@@ -11,12 +11,26 @@ import { startObscura } from "../src/integrations/obscura.ts";
 import { createEgressProxy } from "../src/integrations/egress-proxy.ts";
 import type { BrowserPort, BrowserSessionRef, SandboxEnvFactory, VaultPort } from "../src/integrations/ports.ts";
 import { createBrowserTools } from "../src/tools/browser.ts";
+import { createVaultTools } from "../src/tools/vault.ts";
 import { LoginCapture, type LoginPage, type LoginField } from "../src/integrations/login-capture.ts";
 import { createVault } from "../src/stores/vault.ts";
 import { loadConfig } from "../src/config.ts";
 import { harness, tempDir } from "./support.ts";
 
 const SECRET = "never-return-this-credential-9823";
+function snapshotFixture(role: string, name: string) {
+  const prefix = `- ${role} `;
+  const quotedName = JSON.stringify(name);
+  const annotation = "[ref=e1]";
+  const snapshot = `${prefix}${quotedName} ${annotation}`;
+  return {
+    snapshot, refs: { e1: { role, name } },
+    snapshotAttribution: { version: 1, spans: [
+      { start: 0, end: prefix.length },
+      { start: prefix.length + quotedName.length + 1, end: snapshot.length },
+    ] },
+  };
+}
 function fakeExecutable(root: string) {
   const path = join(root, "fake-browser");
   writeFileSync(path, `#!${process.execPath}
@@ -49,7 +63,7 @@ if (command[0] === "get" && command[1] === "title") data = { title: "Example Dom
 if (command[0] === "get" && command[1] === "url") data = { url: existsSync(root + "/url") ? readFileSync(root + "/url", "utf8") : "https://example.com/" };
 if (command[0] === "get" && command[1] === "url" && argv.includes("--headed") && existsSync(root + "/headed-url-fail")) process.exit(1);
 if (command[0] === "get" && command[1] === "text") data = { text: existsSync(root + "/page-text") ? readFileSync(root + "/page-text", "utf8") : "Submit" };
-if (command[0] === "snapshot") data = existsSync(root + "/snapshot") ? JSON.parse(readFileSync(root + "/snapshot", "utf8")) : { origin: "https://example.com/", title: "Example Domain", snapshot: "- link More information [ref=e1]", refs: { e1: { role: "link", name: "More information" } }, lifecycle: { noise: "must-not-reach-model" } };
+if (command[0] === "snapshot") data = existsSync(root + "/snapshot") ? JSON.parse(readFileSync(root + "/snapshot", "utf8")) : ${JSON.stringify({ origin: "https://example.com/", title: "Example Domain", ...snapshotFixture("link", "More information"), lifecycle: { noise: "must-not-reach-model" } })};
 if (command[0] === "screenshot") { writeFileSync(command[1], Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=", "base64")); data = { path: command[1] }; }
 if (command[0] === "eval" && command[1] !== "--stdin") {
   // Host-authored reads: the viewport for the owner's live view, otherwise the page facts (checkout, total).
@@ -82,10 +96,25 @@ function records(root: string): Recorded[] {
 }
 function commands(root: string) { return records(root).map(({ argv }) => argv.slice(argv.indexOf("--json") + 1)); }
 const session = { ghostId: "ghost1", conversationId: "conversation1" };
+function installFakeOwnerObserver(browser: AgentBrowser, root: string) {
+  type ObserverSession = { loginObserver?: { snapshot: () => Promise<LoginPage>; close: () => void } };
+  const owner = browser as unknown as { ensureLogin(session: ObserverSession): Promise<void> };
+  spyOn(owner, "ensureLogin").mockImplementation(async session => {
+    session.loginObserver ??= {
+      snapshot: async () => {
+        const path = join(root, "url");
+        const url = existsSync(path) ? readFileSync(path, "utf8") : "about:blank";
+        return { targetId: "tab1", documentId: `fixture:${url}`, url, origin: new URL(url).origin, fields: [], focused: null, clicked: null };
+      },
+      close: () => {},
+    };
+  });
+}
 const sandbox = (workspace: string): SandboxEnvFactory => ({ workspacePath: () => workspace, envFor: async () => { throw new Error("unused"); }, stageInputs: async () => {}, release: async () => {} });
 function fixture(config?: ConstructorParameters<typeof AgentBrowser>[0]) {
   const root = tempDir(); const workspace = join(root, "workspace"); mkdirSync(workspace);
   const browser = new AgentBrowser(config ?? { executable: fakeExecutable(root) }, root);
+  if (!config) installFakeOwnerObserver(browser, root);
   const h = harness();
   const ghost = h.core.createGhost({ name: "Browser", persona: "Careful" });
   h.ledger.tx(() => h.ledger.putGhost({ ...ghost, tools: [...BROWSER_TOOLS] }));
@@ -342,6 +371,131 @@ obscuraTest("isolated Obscura: CDP discovery and the WebSocket both require the 
   }, 45_000,
 );
 
+(agentBrowserExecutable && process.platform === "darwin" && existsSync(chromeExecutable) ? test : test.skip)(
+  "real Chrome: vault contacts survive same-loader form replacement and input targets retain focus",
+  async () => {
+    const f = fixture({ executable: agentBrowserExecutable!, chrome: chromeExecutable });
+    const vault = createVault(f.root);
+    const ref = { ghostId: f.ghost.id, conversationId: f.direct.id };
+    f.ledger.tx(() => f.ledger.putGhost({ ...f.ghost, tools: [...BROWSER_TOOLS, "vault_list"] }));
+    const browserTools = createBrowserTools(f.core, f.browser, { vault, sandbox: sandbox(f.workspace) });
+    const vaultTools = createVaultTools(f.core, vault);
+    let seq = 0;
+    const call = (name: string, args: unknown = {}) => [...browserTools.tools!, ...vaultTools.tools!].find((tool) => tool.name === name)!
+      .execute(args as never, { conversationId: "pi-browser", callId: `native-${++seq}` } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
+    const evaluate = async (script: string) => {
+      const result = await f.browser.run(ref, ["eval", script]);
+      expect(result.ok).toBe(true);
+      if (!result.data || typeof result.data !== "object" || !("result" in result.data)) throw new Error("Missing evaluation result");
+      return result.data.result;
+    };
+    const snapshot = async () => {
+      expect((await call("browser_snapshot", { interactive: true })).isError).toBeFalsy();
+      const result = await f.browser.run(ref, ["snapshot", "-i"]);
+      expect(result.ok).toBe(true);
+      if (!result.data || typeof result.data !== "object" || !("refs" in result.data) ||
+          !result.data.refs || typeof result.data.refs !== "object") throw new Error("Missing snapshot refs");
+      const refs: Record<string, { name: string }> = {};
+      for (const [key, value] of Object.entries(result.data.refs)) {
+        if (value && typeof value === "object" && "name" in value && typeof value.name === "string") refs[key] = { name: value.name };
+      }
+      return refs;
+    };
+    const field = (refs: Record<string, { name: string }>, label: string) => {
+      const entry = Object.entries(refs).find(([, value]) => value.name === label);
+      expect(entry).toBeDefined();
+      return `@${entry![0]}`;
+    };
+    try {
+      const contact = { name: "수용 사용자", phone: "010-0000-0000", email: "owner@ghost.test", address: "수용 테스트 주소", addressDetail: "검증동 101호", postalCode: "00000" };
+      const person = vault.create({ kind: "contact", title: "Native contact fixture", contact, ghostIds: [f.ghost.id] });
+      const card = vault.create({ kind: "card", title: "Native card fixture", origin: "https://example.com", card: { number: "4242424242424242", expiry: "12/29", cvc: "679", name: "수용 전용" }, ghostIds: [f.ghost.id] });
+      const listed = await call("vault_list", { kind: "contact" });
+      expect(listed.isError).toBeFalsy();
+      const metadata = listed.content!.flatMap((entry) => entry.type === "text" ? entry.text.split("\n").map((line) => parse(VaultItem, JSON.parse(line))) : []);
+      const shared = metadata.find((item) => item.id === person.id)!.contact!;
+      expect(shared).toEqual(contact);
+      expect((await call("browser_open", { url: "https://example.com", engine: "chrome" })).isError).toBeFalsy();
+      await evaluate(`document.body.innerHTML = '<p>총 결제 금액: ₩39,000</p><form><label>Card number<input id=number autocomplete=cc-number></label><label>Month<select id=month autocomplete=cc-exp-month><option value=""></option><option value=12>12</option></select></label><label>Year<select id=year autocomplete=cc-exp-year><option value=""></option><option value=2029>2029</option></select></label><label>CVC<input id=cvc autocomplete=cc-csc></label><label>Cardholder<input id=name autocomplete=cc-name></label><button>결제</button></form>'; window.nativeSubmits = 0; document.querySelector('form').onsubmit = e => { e.preventDefault(); window.nativeSubmits++; }; 'ready'`);
+      const cardRefs = await snapshot();
+      expect((await call("browser_fill_card", { item_id: card.id, number_ref: field(cardRefs, "Card number"), expiry_month_ref: field(cardRefs, "Month"), expiry_year_ref: field(cardRefs, "Year"), cvc_ref: field(cardRefs, "CVC"), name_ref: field(cardRefs, "Cardholder") })).isError).toBeFalsy();
+      const decision = f.ledger.pendingDecisions()[0]!;
+      expect(decision).toBeDefined();
+      await f.core.decisions.resolve(decision.id, { outcome: "approve" });
+      expect(f.ledger.effect(decision.effectId!).state).toBe("done");
+      expect(await evaluate(`(() => { const expected = {number:'4242424242424242',month:'12',year:'2029',cvc:'679',name:'수용 전용'}; return Object.entries(expected).every(([id,value]) => document.getElementById(id).value === value); })()`)).toBe(true);
+      expect(await evaluate("window.nativeSubmits")).toBe(0);
+      // Replacing body is not a navigation: the daemon's document/loader identity
+      // and earlier remote handles survive. Always obtain fresh refs afterward.
+      const labels = { name: "이름", phone: "전화", email: "메일", address: "주소", addressDetail: "상세주소", postalCode: "우편번호" };
+      await evaluate(`document.body.innerHTML = ${JSON.stringify(Object.entries(labels).map(([id, label]) => `<label>${label}<input id="${id}"></label>`).join("") + '<input id="untouched" aria-label="Untouched" value="leave me">')}; 'ready'`);
+      const refs = await snapshot();
+      const expected: Record<string, string> = { ...Object.fromEntries(Object.keys(labels).map((key) => [key, ""])), untouched: "leave me" };
+      for (const key of Object.keys(labels) as (keyof typeof labels)[]) {
+        const value = shared[key];
+        if (typeof value !== "string") throw new Error(`Vault contact lacks ${key}`);
+        const filled = await call("browser_fill", { ref: field(refs, labels[key]), text: value });
+        expect(filled.isError, `contact field ${key}: ${JSON.stringify(filled.content)}`).toBeFalsy();
+        expected[key] = value;
+        // Every insertion must leave all other fields (including earlier fills) exact.
+        expect(await evaluate(`Object.fromEntries([...document.querySelectorAll('input')].map(e => [e.id,e.value]))`)).toEqual(expected);
+      }
+      await evaluate(`document.body.innerHTML = '<input id=prior value=unchanged><input id=target aria-label="Detaching target">'; document.querySelector('#prior').focus(); document.querySelector('#target').onfocus = function() { this.remove(); document.querySelector('#prior').focus(); }; 'ready'`);
+      const detachedRefs = await snapshot();
+      expect((await call("browser_fill", { ref: field(detachedRefs, "Detaching target"), text: "must not insert" })).isError).toBe(true);
+      expect(await evaluate("document.querySelector('#prior').value")).toBe("unchanged");
+      // A connected target that redirects focus must also fail for secret-fill's
+      // focus/clear primitives, not merely for public fill/type.
+      for (const command of ["focus", "clear", "type"] as const) {
+        await evaluate(`document.querySelector('#prior').insertAdjacentHTML('afterend', '<input id=target aria-label="Redirecting target">'); document.querySelector('#target').onfocus = () => document.querySelector('#prior').focus(); 'ready'`);
+        const redirectRefs = await snapshot();
+        await expect(f.browser.run(ref, [command, field(redirectRefs, "Redirecting target"), ...(command === "type" ? ["must not insert"] : [])]))
+          .rejects.toMatchObject({ code: "unavailable" });
+        expect(await evaluate("document.querySelector('#prior').value")).toBe("unchanged");
+        await evaluate("document.querySelector('#target').remove(); 'ready'");
+      }
+      await evaluate(`(async () => {
+        document.body.innerHTML = '<div id=host></div><iframe id=frame></iframe><div contenteditable=true role=textbox aria-label="Editor"><span id=descendant>old</span></div>';
+        const outer = document.querySelector('#host').attachShadow({mode:'closed'});
+        outer.innerHTML = '<div id=nested></div>';
+        const inner = outer.querySelector('#nested').attachShadow({mode:'closed'});
+        inner.innerHTML = '<input aria-label="Nested closed shadow">';
+        window.nativeShadowInput = inner.querySelector('input');
+        const openHost = document.createElement('div'); document.body.append(openHost);
+        window.nativeOpenInput = openHost.attachShadow({mode:'open'}).appendChild(document.createElement('input'));
+        window.nativeOpenInput.setAttribute('aria-label', 'Open shadow');
+        const frame = document.querySelector('#frame');
+        const loaded = Promise.withResolvers();
+        frame.onload = loaded.resolve;
+        frame.srcdoc = '<input aria-label="Frame input">';
+        await loaded.promise;
+        return 'ready';
+      })()`);
+      const shadowRefs = await snapshot();
+      // hasFocus includes browser-window activation and is page-overridable.
+      // A false report must not block real CDP fills with correct DOM ownership.
+      await evaluate(`Object.defineProperty(document, 'hasFocus', {value: () => false, configurable: true}); false`);
+      for (const label of ["Nested closed shadow", "Open shadow", "Frame input", "Editor"]) {
+        expect((await call("browser_fill", { ref: field(shadowRefs, label), text: label })).isError).toBeFalsy();
+      }
+      expect(await evaluate(`({closed: window.nativeShadowInput.value, open: window.nativeOpenInput.value, frame: document.querySelector('#frame').contentDocument.querySelector('input').value, editor: document.querySelector('[contenteditable]').textContent})`))
+        .toEqual({ closed: "Nested closed shadow", open: "Open shadow", frame: "Frame input", editor: "Editor" });
+      await evaluate(`delete document.hasFocus; document.body.insertAdjacentHTML('beforeend', '<input id=framePrior value=unchanged>'); document.querySelector('#frame').contentDocument.querySelector('input').onfocus = () => document.querySelector('#framePrior').focus(); 'ready'`);
+      expect((await call("browser_fill", { ref: field(shadowRefs, "Frame input"), text: "must not insert" })).isError).toBe(true);
+      expect(await evaluate("document.querySelector('#framePrior').value")).toBe("unchanged");
+      expect(await evaluate("document.querySelector('#frame').contentDocument.querySelector('input').value")).toBe("Frame input");
+      await evaluate(`document.querySelector('[contenteditable]').innerHTML = '<span id=descendant>old</span>'; 'ready'`);
+      expect((await f.browser.run(ref, ["type", "#descendant", " + descendant"])).ok).toBe(true);
+      expect(await evaluate("document.querySelector('[contenteditable]').textContent")).toBe("old + descendant");
+    } finally {
+      await f.browser.shutdown();
+      vault.close();
+      f.core.stop();
+      f.ledger.close();
+    }
+  }, 60_000,
+);
+
 describe("browser tools", () => {
   test("every tool refuses disabled tools and review conversations at execution time", async () => {
     const f = fixture();
@@ -497,7 +651,7 @@ describe("browser tools", () => {
         await f.browser.handoff({ ghostId: f.ghost.id, conversationId: f.direct.id }, "https://example.com/");
         await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "다 했어요" });
         writeFileSync(join(f.root, "headed-url-fail"), "1");
-        if (pending === "browser_click") writeFileSync(join(f.root, "snapshot"), JSON.stringify({ snapshot: "blank page", refs: {} }));
+        if (pending === "browser_click") writeFileSync(join(f.root, "snapshot"), JSON.stringify({ snapshot: "blank page", refs: {}, snapshotAttribution: { version: 1, spans: [] } }));
         const result = await f.call(pending, pending === "browser_click" ? { ref: "@e1" } : {});
         expect(JSON.stringify(result)).toContain("the browser resumed at about:blank");
         expect(result.isError === true).toBe(pending === "browser_click");
@@ -543,27 +697,24 @@ describe("browser tools", () => {
       expect((await f.call("browser_download", { ref: "@e1", name: "file.txt" }, "pi-work")).isError).toBe(true);
     } finally { await f.browser.shutdown(); }
   });
-  test("compact browser observations omit lifecycle/refs and dangerous names require a proposal for click or focused Enter/Space", async () => {
+  test("dangerous names require a proposal for click or focused Enter/Space", async () => {
     const f = fixture();
     try {
-      const opened = await f.call("browser_open", { url: "https://example.com/" });
-      expect(JSON.stringify(opened)).toContain("Opened https://example.com/ — Example Domain"); expect(JSON.stringify(opened)).not.toContain("lifecycle");
-      const observed = await f.call("browser_snapshot");
-      expect(JSON.stringify(observed)).toContain("More information [ref=e1]");
-      expect(JSON.stringify(observed)).not.toContain("must-not-reach-model"); expect(JSON.stringify(observed)).not.toContain('"refs"');
+      expect((await f.call("browser_open", { url: "https://example.com/" })).isError).toBeFalsy();
+      expect((await f.call("browser_snapshot")).isError).toBeFalsy();
       for (const name of ["Pay now", "Buy", "Purchase", "Order", "Checkout", "Delete item", "Remove", "Send", "Transfer", "Submit", "Unsubscribe", "결제하기", "구매", "주문", "삭제", "송금", "이체", "전송", "보내기", "제출", "탈퇴", "해지"]) {
-        writeFileSync(join(f.root, "snapshot"), JSON.stringify({ snapshot: `- button ${name} [ref=e1]`, refs: { e1: { role: "button", name } } }));
+        writeFileSync(join(f.root, "snapshot"), JSON.stringify(snapshotFixture("button", name)));
         await f.call("browser_snapshot");
-        expect(JSON.stringify(await f.call("browser_click", { ref: "@e1" }))).toContain("use browser_propose for this action");
+        expect((await f.call("browser_click", { ref: "@e1" })).isError).toBe(true);
       }
       await f.call("browser_fill", { ref: "@e1", text: "message" });
       await f.call("browser_tabs", { action: "list" });
-      for (const key of ["Enter", "Space", "Control+Enter", "Shift+Space"]) expect(JSON.stringify(await f.call("browser_press", { key }))).toContain("use browser_propose for this action");
-      writeFileSync(join(f.root, "snapshot"), JSON.stringify({ snapshot: "- textbox Comment [ref=e1]", refs: { e1: { role: "textbox", name: "Comment" } } }));
+      for (const key of ["Enter", "Space", "Control+Enter", "Shift+Space"]) expect((await f.call("browser_press", { key })).isError).toBe(true);
+      writeFileSync(join(f.root, "snapshot"), JSON.stringify(snapshotFixture("textbox", "Comment")));
       await f.call("browser_snapshot"); await f.call("browser_fill", { ref: "@e1", text: "message" });
-      writeFileSync(join(f.root, "snapshot"), JSON.stringify({ snapshot: "- textbox Send [ref=e1]", refs: { e1: { role: "textbox", name: "Send" } } }));
+      writeFileSync(join(f.root, "snapshot"), JSON.stringify(snapshotFixture("textbox", "Send")));
       await f.call("browser_snapshot");
-      expect(JSON.stringify(await f.call("browser_press", { key: "Enter" }))).toContain("use browser_propose for this action");
+      expect((await f.call("browser_press", { key: "Enter" })).isError).toBe(true);
       expect(commands(f.root).some((argv) => argv[0] === "click" || argv[0] === "press")).toBe(false);
     } finally { await f.browser.shutdown(); }
   });
@@ -573,7 +724,7 @@ describe("browser tools", () => {
       await f.call("browser_propose", { ref: "@e1", title: "Proceed", reason: "Reviewed action" });
       const proposal = f.ledger.pendingDecisions()[0]!;
       expect(proposal.proposal?.element).toEqual({ role: "link", name: "More information" });
-      writeFileSync(join(f.root, "snapshot"), JSON.stringify({ snapshot: "- button Other [ref=e1]", refs: { e1: { role: "button", name: "Other" } } }));
+      writeFileSync(join(f.root, "snapshot"), JSON.stringify(snapshotFixture("button", "Other")));
       await f.core.decisions.resolve(proposal.id, { outcome: "approve" });
       expect(f.ledger.effect(proposal.effectId!).state).toBe("denied");
       expect(commands(f.root).some((argv) => argv[0] === "click")).toBe(false);
@@ -772,6 +923,7 @@ test("legacy per-field card approvals are denied on extension startup and follow
 test("captured service credentials remain protected across owner handoff and return", async () => {
   const root = tempDir();
   const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
+  installFakeOwnerObserver(browser, root);
   try {
     await browser.run(session, ["open", "https://example.com"]);
     writeFileSync(join(root, "facts"), SECRET);

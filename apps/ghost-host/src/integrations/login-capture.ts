@@ -25,6 +25,32 @@ export function isNumericCode(value: string): boolean {
   return digits >= 3 && digits <= 8;
 }
 
+/** Bounded owner-byte trail, not a field value and never a source of login authority.
+ * Cursor/selection changes discard the trail; already registered secrets stay private.
+ */
+export class UnknownOwnerText {
+  static readonly limit = 4096;
+  private scope = "";
+  private text = "";
+  reset() { this.scope = this.text = ""; }
+  edit(scope: string, edit: LoginEdit): readonly string[] {
+    if (scope !== this.scope) { this.reset(); this.scope = scope; }
+    if (edit.type !== "insert") { this.text = ""; return []; }
+    const incoming = this.text + edit.text;
+    this.text = incoming.slice(-UnknownOwnerText.limit);
+    // Scan the accepted packet before bounding the retained trail: a large mixed
+    // paste must not hide a PAN near its beginning. Long runs retain a private
+    // suffix rather than letting overflow disable recognition.
+    const values: string[] = [];
+    for (const match of incoming.matchAll(/\d(?:[\d\s-]*\d)?/g)) {
+      const value = match[0], digits = value.replace(/\D/g,"");
+      if (isPanLike(value) || isNumericCode(value)) values.push(value);
+      else if (digits.length > 19) values.push(digits.slice(-19));
+    }
+    return values;
+  }
+}
+
 /** Only owner input supplies credential bytes. Page observations can establish completion, never values. */
 export class LoginCapture {
   private readonly fields = new Map<string, TypedField>();
