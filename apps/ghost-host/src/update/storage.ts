@@ -58,15 +58,39 @@ export function readCredential(root: string, log: UpdateLog): string | null {
   } catch (error) { log("업데이트 인증 정보를 읽지 못했습니다.", error); return null; }
 }
 
+/**
+ * The Host runs from a signed app bundle inside each release. macOS privacy (TCC) remembers a bare
+ * executable by its path, which changes every release, but a bundle by its identifier and team, so a
+ * grant the owner gives once survives updates. `releases/<name>/ghost` is a shell shim that execs
+ * the bundle executable; launchers, the CLI link and older updaters keep using that path.
+ */
+export const HOST_BUNDLE = "Ghost Host.app";
+export const HOST_EXECUTABLE = `${HOST_BUNDLE}/Contents/MacOS/ghost`;
+
+/** The release directory holding `executable` when it is a release's Host bundle executable. */
+export function releaseDirectoryOf(executable: string): string | null {
+  const suffix = `/${HOST_EXECUTABLE}`;
+  return executable.endsWith(suffix) ? executable.slice(0, -suffix.length) : null;
+}
+
 export interface ReleaseLayout { base: string; name: string; directory: string }
 export function detectLayout(execPath = process.execPath): ReleaseLayout | null {
   try {
-    const executable = realpathSync(execPath);
-    const directory = dirname(executable), releases = dirname(directory), base = dirname(releases), name = basename(directory);
-    if (basename(executable) !== "ghost" || basename(releases) !== "releases" || !RELEASE_NAME.test(name) || name === "." || name === "..") return null;
+    const directory = releaseDirectoryOf(realpathSync(execPath));
+    if (!directory) return null;
+    const releases = dirname(directory), base = dirname(releases), name = basename(directory);
+    if (basename(releases) !== "releases" || !RELEASE_NAME.test(name) || name === "." || name === "..") return null;
     if (!lstatSync(join(base, "current")).isSymbolicLink() || realpathSync(join(base, "current")) !== directory) return null;
     return { base, name, directory };
   } catch { return null; }
+}
+
+const LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+/** System Settings lists the Host's privacy grants through Launch Services, so the running release registers its bundle. */
+export async function registerHostBundle(layout: ReleaseLayout): Promise<void> {
+  const child = Bun.spawn([LSREGISTER, "-f", join(layout.directory, HOST_BUNDLE)], { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  if (code !== 0) throw new Error(`lsregister exited ${code}: ${stderr.slice(0, 300)}`);
 }
 
 export function readPending(root: string): { previous: string; rollback: boolean; target: string } | null {

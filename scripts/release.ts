@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 // The same checks an installed Host runs before it installs a release.
 import { validateTarball, verifyReleaseDirectory } from "../apps/ghost-host/src/update/archive.ts";
+import { HOST_BUNDLE, HOST_EXECUTABLE } from "../apps/ghost-host/src/update/storage.ts";
 import { parseManifest } from "../apps/ghost-host/src/update/github.ts";
 import { verifyMinisign } from "../apps/ghost-host/src/update/signature.ts";
 
@@ -38,6 +39,7 @@ function run(command: string, args: string[], options: { cwd?: string; env?: Rec
 const step = (title: string) => console.log(`\n▸ ${title}`);
 const sha256 = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
 const readJson = (path: string) => JSON.parse(readFileSync(join(repoRoot, path), "utf8"));
+const plist = (body: string) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>${body}</dict></plist>\n`;
 
 function filesUnder(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
@@ -126,16 +128,35 @@ run("cargo", ["test", "--manifest-path", "src-tauri/Cargo.toml"], { cwd: join(re
 
 // ── Host payload ───────────────────────────────────────────────────────────
 step("host");
-const host = join(stage, "ghost");
+// macOS privacy remembers this bundle by identifier and team, so the owner's grants survive updates.
+const hostBundle = join(stage, HOST_BUNDLE);
+const hostBinary = join(stage, HOST_EXECUTABLE);
+for (const directory of ["Contents/MacOS", "Contents/Resources"]) mkdirSync(join(hostBundle, directory), { recursive: true });
 run("bun", [
-  "build", "apps/ghost-host/src/main.ts", "--compile", "--outfile", host,
+  "build", "apps/ghost-host/src/main.ts", "--compile", "--outfile", hostBinary,
   "--define", `GHOST_RELEASE_REPOSITORY=${JSON.stringify(repository)}`,
   "--define", `GHOST_RELEASE_COMMIT=${JSON.stringify(commit)}`,
   "--define", `GHOST_RELEASE_PUBKEY=${JSON.stringify(pubkey)}`,
 ]);
-chmodSync(host, 0o755);
-run("codesign", ["--force", "--sign", identity, "--timestamp", "--identifier", "dev.projectoxi.ghost.host", host]);
-run("codesign", ["--verify", "--strict", host]);
+chmodSync(hostBinary, 0o755);
+cpSync(join(repoRoot, "apps/ghost-desktop/src-tauri/icons/icon.icns"), join(hostBundle, "Contents/Resources/Ghost.icns"));
+writeFileSync(join(hostBundle, "Contents/Info.plist"), plist([
+  "<key>CFBundleIdentifier</key><string>dev.projectoxi.ghost.host</string>",
+  "<key>CFBundleName</key><string>Ghost Host</string>",
+  "<key>CFBundleDisplayName</key><string>Ghost Host</string>",
+  "<key>CFBundleExecutable</key><string>ghost</string>",
+  "<key>CFBundleIconFile</key><string>Ghost</string>",
+  "<key>CFBundlePackageType</key><string>APPL</string>",
+  `<key>CFBundleShortVersionString</key><string>${version}</string>`,
+  `<key>CFBundleVersion</key><string>${version}</string>`,
+  "<key>LSMinimumSystemVersion</key><string>14.0</string>",
+  "<key>LSUIElement</key><true/>",
+].join("")));
+run("codesign", ["--force", "--sign", identity, "--timestamp", hostBundle]);
+run("codesign", ["--verify", "--strict", hostBundle]);
+// Launchers, the CLI link and installed updaters run `releases/<name>/ghost`; it execs the bundle executable.
+const host = join(stage, "ghost");
+writeFileSync(host, `#!/bin/sh\nexec "$(dirname "$(/usr/bin/readlink -f "$0")")/${HOST_EXECUTABLE}" "$@"\n`, { mode: 0o755 });
 // Build probes must not read the installed Host's configuration or credentials.
 const reported = JSON.parse(run(host, ["version"], { capture: true, env: { GHOST_ROOT: join(out, "version-check") } })) as { version: string; commit: string; storage: string };
 if (reported.version !== version || reported.commit !== commit) throw new Error(`built host reports ${reported.version}/${reported.commit}`);
@@ -168,7 +189,7 @@ const hostAsset = `ghost-${version}-darwin-arm64.tar.gz`;
 const hostArchive = join(out, hostAsset);
 // ustar with explicit top-level names: no pax/xattr records and no "./" root entry,
 // which the Host's archive check refuses.
-const payloadNames = ["ghost", "ui", "agent-browser", "obscura", "OBSCURA-LICENSE", "Ghost Control.app", "agent-desktop", "agent-desktop-macos-helper", "AGENT-DESKTOP-LICENSE", "geist", "release.json"];
+const payloadNames = ["ghost", HOST_BUNDLE, "ui", "agent-browser", "obscura", "OBSCURA-LICENSE", "Ghost Control.app", "agent-desktop", "agent-desktop-macos-helper", "AGENT-DESKTOP-LICENSE", "geist", "release.json"];
 const extra = readdirSync(stage).filter(name => !payloadNames.includes(name));
 if (extra.length > 0) throw new Error(`unexpected payload entries: ${extra.join(", ")}`);
 run("tar", ["--format", "ustar", "--no-mac-metadata", "--no-xattrs", "-czf", hostArchive, "-C", stage, ...payloadNames], { env: { COPYFILE_DISABLE: "1" } });
@@ -191,7 +212,6 @@ const teamId = /\(([A-Z0-9]{10})\)$/.exec(identity)?.[1];
 if (!teamId) throw new Error(`no team ID in signing identity ${identity}`);
 const iosWork = join(out, "ios");
 mkdirSync(iosWork, { recursive: true });
-const plist = (body: string) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>${body}</dict></plist>\n`;
 writeFileSync(join(iosWork, "export.plist"), plist(`<key>method</key><string>debugging</string><key>teamID</key><string>${teamId}</string><key>signingStyle</key><string>automatic</string><key>thinning</key><string>&lt;none&gt;</string>`));
 const iosArchive = join(iosWork, "Ghost.xcarchive");
 run("xcodebuild", [
@@ -264,8 +284,9 @@ rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage);
 run("/usr/bin/tar", ["-xzf", hostArchive, "-C", stage, "--no-same-owner"]);
 verifyReleaseDirectory(stage, parsed);
-// The owner's macOS grant follows this bundle's signature; it must survive the archive round trip.
-run("codesign", ["--verify", "--strict", join(stage, "Ghost Control.app")]);
+// The owner's macOS grants follow these bundles' signatures; they must survive the archive round trip.
+for (const bundle of [HOST_BUNDLE, "Ghost Control.app"]) run("codesign", ["--verify", "--strict", join(stage, bundle)]);
+run(join(stage, "ghost"), ["version"], { capture: true, env: { GHOST_ROOT: join(out, "version-check") } });
 rmSync(stage, { recursive: true, force: true });
 
 const assets = [hostArchive, join(out, "Ghost.app.tar.gz"), join(out, "Ghost.app.tar.gz.sig"), ipa, manifestPath, `${manifestPath}.sig`];

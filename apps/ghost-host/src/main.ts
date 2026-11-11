@@ -6,6 +6,7 @@ import { backup } from "./backup.ts";
 import { loadConfig } from "./config.ts";
 import { runImport } from "./import/index.ts";
 import { buildIdentity } from "./update/identity.ts";
+import { execResponsible } from "./integrations/responsible.ts";
 import { installService } from "./update/service.ts";
 
 const USAGE = `ghost — one process for every Ghost
@@ -27,6 +28,9 @@ function option(args: string[], name: string): string | undefined {
 
 async function main(argv: string[]) {
   const [command, ...args] = argv;
+  // Internal: a launcher the Host writes for programs that must answer to macOS privacy themselves.
+  // Runs before configuration, since it replaces this process with the program.
+  if (command === "exec-responsible" && args[0]) execResponsible(args[0], args.slice(1));
   const config = loadConfig(process.env, option(args, "--root"));
 
   switch (command) {

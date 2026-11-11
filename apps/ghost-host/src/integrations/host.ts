@@ -21,6 +21,7 @@ import type {
 import { assertFetchableUrl } from "./netguard.ts";
 import { NoEffect } from "../core/effects.ts";
 import { readVerificationCodes, type ReadVerificationCodesInput } from "./messages.ts";
+import { PRIVACY_GUARDED_HOME } from "../sandbox/privacy-guard.ts";
 
 const GB = 1_073_741_824;
 const PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin";
@@ -206,11 +207,6 @@ const privateLibraryDirectories = [
   "Application Support/Firefox", "Application Support/Thunderbird", "Application Support/AddressBook",
   "Application Support/CallHistoryDB", "Application Support/com.apple.TCC",
 ];
-/**
- * macOS privacy (TCC) guards these for a background process: touching them from the Host asks for
- * consent and blocks its event loop until someone answers, and every release is a new identity.
- */
-const privacyGuardedHomeDirectories = ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music"];
 const privateNames: Record<string, true> = {
   private: true,
   finance: true,
@@ -562,7 +558,7 @@ export class MacHost implements HostPort {
   private homePrivatePaths(): string[] {
     const paths = [this.home, realpathSync(this.home)].flatMap((home) => [
       ...homeDotDirectories.map((name) => join(home, name)),
-      ...privacyGuardedHomeDirectories.map((name) => join(home, name)),
+      ...PRIVACY_GUARDED_HOME.map((name) => join(home, name)),
       ...privateLibraryDirectories.map((name) => join(home, "Library", name)),
       join(home, ".local/share/keyrings"),
     ]);

@@ -1,9 +1,9 @@
 // Ghost Control: the macOS privacy identity for Ghost's PC control.
 //
-// macOS grants Accessibility and Screen Recording to the *responsible* process. The Host runs from a
-// LaunchAgent with a binary whose path changes every release, so a grant given to it would not survive an
-// update. This signed bundle (dev.projectoxi.ghost.control) disclaims responsibility on start, so macOS
-// attributes everything it and its children do to this bundle; the owner grants it once. It runs only the
+// macOS grants Accessibility and Screen Recording to the *responsible* process. Granted to the Host, they
+// would cover every command it runs. This signed bundle (dev.projectoxi.ghost.control) disclaims
+// responsibility on start, so macOS attributes everything it and its children do to this bundle alone; the
+// owner grants it once. It runs only the
 // two executables it was started with (agent-desktop and Geist) on behalf of the Host, one request at a time,
 // over newline-delimited JSON on stdin/stdout.
 import ApplicationServices

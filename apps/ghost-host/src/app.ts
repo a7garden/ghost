@@ -29,6 +29,7 @@ import { settingsView } from "./core/commands.ts";
 import { SourceConnections } from "./integrations/activity-sources.ts";
 import { SourceStore } from "./stores/sources.ts";
 import { hostIsIdle, Updater } from "./update/index.ts";
+import { detectLayout, registerHostBundle } from "./update/storage.ts";
 import { MailService } from "./integrations/mail.ts";
 
 export interface App {
@@ -220,6 +221,8 @@ export async function serve(config: Config) {
   try {
     try { updater = new Updater({ root: config.root, publicOrigin: config.publicOrigin, idle: () => hostIsIdle(app.core) && !app.memoryDreams.isBusy(), log }); }
     catch (error) { log("업데이트를 시작하지 못했습니다.", error); }
+    const layout = detectLayout();
+    if (layout) registerHostBundle(layout).catch((error: unknown) => log("Ghost Host 번들을 시스템에 등록하지 못했습니다.", error));
     if (app.ledger.ghosts().length === 0) app.core.createGhost({ name: "Ghost", persona: "", isDefault: true });
     await app.core.start();
     const catalogChanged = () => app.ledger.tx(() => app.ledger.emit({ type: "settings", settings: settingsView(app.core) }));

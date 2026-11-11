@@ -14,6 +14,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { ensureTempRoot, killTree, WorkspaceEnv } from "./workspace-env.ts";
 import { repositoryOf } from "./worktree.ts";
+import { privacyGuardedCommand } from "./privacy-guard.ts";
 
 /** Both delivered output and spill storage are bounded; exceeding this fails and kills the command. */
 export const HOST_OUTPUT_LIMIT = 16 * 1024 * 1024;
@@ -67,6 +68,8 @@ interface HostEnvOptions {
 /**
  * Intentionally unrestricted PC filesystem and shell, not a sandbox. The SDK supplies real file
  * semantics (including absolute paths and symlinks); only mutations and exec are serialized.
+ * Commands that name or walk macOS privacy-guarded folders are refused before they start: unattended,
+ * they would only hang on a consent prompt at the Mac.
  * The separate confined workspace remains the artifact/delegation/output staging location.
  */
 export class HostExecutionEnv extends NodeExecutionEnv {
@@ -289,6 +292,11 @@ export class HostExecutionEnv extends NodeExecutionEnv {
   private async run(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context, stamp: string | undefined): Promise<Result<ShellExecResult, ExecutionError>> {
     const cwd = await this.absolutePath(options?.cwd ?? this.cwd, context);
     if (!cwd.ok) return err(new ExecutionError("spawn_error", cwd.error.message, cwd.error));
+    const refusal = privacyGuardedCommand(
+      typeof command === "string" ? command : command.map((word) => `'${word.replaceAll("'", "'\\''")}'`).join(" "),
+      { home: homedir(), cwd: cwd.value },
+    );
+    if (refusal) return err(new ExecutionError("spawn_error", refusal));
     const argv = typeof command === "string" ? ["/bin/bash", "--noprofile", "--norc", "-c", command] : command;
     if (argv.length === 0) return err(new ExecutionError("spawn_error", "Empty argv: no program to run"));
     const signal = context.abortSignal!;

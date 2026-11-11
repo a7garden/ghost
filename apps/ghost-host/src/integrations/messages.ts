@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { CommandError } from "../core/errors.ts";
 import type { MessageVerificationCode } from "./ports.ts";
+import { HOST_BUNDLE, releaseDirectoryOf } from "../update/storage.ts";
 
 /** Seconds between the Unix epoch and Apple's 2001-01-01 epoch used by Messages `date`. */
 const APPLE_EPOCH_OFFSET = 978_307_200;
@@ -25,10 +26,16 @@ export interface ReadVerificationCodesInput {
   now?: number;
 }
 
+/** What the owner grants Full Disk Access to: the release's Host bundle, or the bare executable in development. */
+const privacyIdentity = () => {
+  const release = releaseDirectoryOf(process.execPath);
+  return release ? join(release, HOST_BUNDLE) : process.execPath;
+};
+
 const fullDiskAccessError = () =>
   new CommandError(
     "unavailable",
-    `Messages needs Full Disk Access for ${process.execPath}: System Settings › Privacy & Security › Full Disk Access, then restart Ghost`,
+    `Messages needs Full Disk Access for ${privacyIdentity()}: System Settings › Privacy & Security › Full Disk Access, then restart Ghost`,
   );
 
 const messageOf = (error: unknown) =>
@@ -199,7 +206,7 @@ const withMessagesDatabase = <T>(dbPath: string, run: (db: Database) => T): T =>
   } catch (error) {
     throw new CommandError(
       "unavailable",
-      `SQLite could not open Messages for ${process.execPath} (${messageOf(error)}). Check Full Disk Access in System Settings › Privacy & Security › Full Disk Access; if access is already enabled, close and reopen Messages, then restart Ghost.`,
+      `SQLite could not open Messages for ${privacyIdentity()} (${messageOf(error)}). Check Full Disk Access in System Settings › Privacy & Security › Full Disk Access; if access is already enabled, close and reopen Messages, then restart Ghost.`,
     );
   }
   try {
@@ -208,7 +215,7 @@ const withMessagesDatabase = <T>(dbPath: string, run: (db: Database) => T): T =>
     if (error instanceof CommandError) throw error;
     throw new CommandError(
       "unavailable",
-      `SQLite could not read Messages for ${process.execPath} (${messageOf(error)}). Check Full Disk Access in System Settings › Privacy & Security › Full Disk Access; if access is already enabled, close and reopen Messages, then restart Ghost.`,
+      `SQLite could not read Messages for ${privacyIdentity()} (${messageOf(error)}). Check Full Disk Access in System Settings › Privacy & Security › Full Disk Access; if access is already enabled, close and reopen Messages, then restart Ghost.`,
     );
   } finally {
     db.close();

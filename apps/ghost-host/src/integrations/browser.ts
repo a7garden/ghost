@@ -13,6 +13,7 @@ import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
 import { LoginCapture, UnknownOwnerText, isPanLike, type LoginEdit, type LoginPage } from "./login-capture.ts";
 import { ChromeLoginObserver, type LoginObserver } from "./browser-login.ts";
 import { ChromeViewportFrames } from "./browser-frames.ts";
+import { responsibleLauncher } from "./responsible.ts";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const CAP = 512 * 1024;
@@ -113,6 +114,7 @@ export class AgentBrowser implements BrowserPort {
   private readonly home: string;
   private readonly configPath: string;
   private readonly initPath: string;
+  private readonly chrome: string;
   private readonly namespace: string;
   private readonly socketDir: string;
   private readonly key: string;
@@ -138,6 +140,8 @@ export class AgentBrowser implements BrowserPort {
     writeFileSync(this.configPath, "{}", { mode: 0o600 });
     this.initPath = join(base, "network-init.js");
     writeFileSync(this.initPath, NETWORK_INIT, { mode: 0o600 });
+    // Chrome answers to macOS privacy itself; under the Host its updater looked like Ghost modifying apps.
+    this.chrome = responsibleLauncher(base, "chrome-launch", expand(this.config.chrome ?? CHROME));
     const rootHash = createHash("sha256").update(resolve(root)).digest("hex");
     this.namespace = `g${rootHash.slice(0, 12)}`;
     // macOS sockaddr_un permits only 103 path bytes; sockets are ephemeral, not login state.
@@ -364,7 +368,7 @@ export class AgentBrowser implements BrowserPort {
     const connection = session.engine === "obscura"
       ? (argv[0] !== "close" && session.obscura ? ["--cdp", session.obscura.websocket] : [])
       : ["--restore", session.privateRestoreKey ?? `ghost-${session.ref.ghostId}`,
-      "--executable-path", expand(this.config.chrome ?? CHROME),
+      "--executable-path", this.chrome,
       "--init-script", this.initPath,
       "--args", `--proxy-server=${proxy.url},--proxy-bypass-list=<-loopback>,--force-webrtc-ip-handling-policy=disable_non_proxied_udp`,
       ...(session.headed ? ["--headed"] : [])];

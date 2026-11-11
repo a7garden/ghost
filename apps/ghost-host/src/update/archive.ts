@@ -3,6 +3,7 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { gunzip } from "node:zlib";
 import type { ReleaseManifest } from "./github.ts";
+import { HOST_EXECUTABLE } from "./storage.ts";
 import { promisify } from "node:util";
 
 export const sha256 = (data: Uint8Array): string => createHash("sha256").update(data).digest("hex");
@@ -69,7 +70,8 @@ export function verifyReleaseDirectory(directory: string, manifest: ReleaseManif
     }
   };
   visit("");
-  if (expected.size || !lstatSync(join(directory, "ghost")).isFile() || !(lstatSync(join(directory, "ghost")).mode & 0o111)) throw new Error("릴리스 파일이 누락되었습니다.");
+  const executable = (path: string) => { const entry = lstatSync(join(directory, path)); return entry.isFile() && (entry.mode & 0o111) !== 0; };
+  if (expected.size || !executable("ghost") || !executable(HOST_EXECUTABLE)) throw new Error("릴리스 파일이 누락되었습니다.");
 }
 
 export async function runReleaseCommand(command: string[], signal?: AbortSignal, timeout = 30_000): Promise<string> {

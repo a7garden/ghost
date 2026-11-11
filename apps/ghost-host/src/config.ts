@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { releaseDirectoryOf } from "./update/storage.ts";
 
 /** Everything the process reads at startup. Nothing else reads the environment. */
 export interface Config {
@@ -33,7 +34,7 @@ export interface Config {
   browser: null | { executable: string; chrome?: string; idleTimeoutMinutes?: number; obscura?: { executable: string; loginOrigins?: string[] } };
   /**
    * PC control: the signed Ghost Control bundle (the macOS privacy identity) and the two runtimes it runs.
-   * A release finds its own copies beside the `ghost` executable; `"desktop": null` turns it off.
+   * A release finds its own copies beside its Host bundle; `"desktop": null` turns it off.
    */
   desktop?: null | DesktopConfig;
 }
@@ -47,9 +48,9 @@ export interface DesktopConfig {
 
 const expandHome = (path: string) => path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 
-/** The copies a release ships next to its `ghost` executable, when all three are there. */
+/** The copies a release ships beside its Host bundle, when all three are there. */
 function bundledDesktop(executable: string): DesktopConfig | null {
-  const dir = dirname(executable);
+  const dir = releaseDirectoryOf(executable) ?? dirname(executable);
   const found = { control: join(dir, "Ghost Control.app"), agentDesktop: join(dir, "agent-desktop"), geist: join(dir, "geist") };
   return existsSync(join(found.control, "Contents/MacOS/ghost-control")) && existsSync(found.agentDesktop) && existsSync(found.geist) ? found : null;
 }

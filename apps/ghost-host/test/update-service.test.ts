@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { updateFixture } from "./fixtures/update-helper.ts";
 import { installService, launcherScript } from "../src/update/service.ts";
-import { atomicWrite } from "../src/update/storage.ts";
+import { atomicWrite, HOST_EXECUTABLE } from "../src/update/storage.ts";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -21,10 +21,11 @@ async function run(script: string) {
 test.each([true, false])("launcher records outcome after four starts, rollback=%s", async (rollback) => {
   const f = await fixture();
   const next = "2.2.0-new123", previous = f.oldName;
-  mkdirSync(join(f.base, "releases", next));
+  mkdirSync(dirname(join(f.base, "releases", next, HOST_EXECUTABLE)), { recursive: true });
   writeFileSync(join(f.base, "releases", next, "ghost"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  writeFileSync(join(f.base, "releases", next, HOST_EXECUTABLE), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
   rmSync(join(f.base, "current")); symlinkSync(`releases/${next}`, join(f.base, "current"));
-  const { launcher } = await installService({ root: f.root, home: join(f.temp, "home"), execPath: join(f.base, "releases", next, "ghost"), noLoad: true, launchctl: async () => { throw new Error("launchctl must not run"); } });
+  const { launcher } = await installService({ root: f.root, home: join(f.temp, "home"), execPath: join(f.base, "releases", next, HOST_EXECUTABLE), noLoad: true, launchctl: async () => { throw new Error("launchctl must not run"); } });
   atomicWrite(join(f.root, "update", "pending"), `${previous} ${rollback ? "yes" : "no"} ${next}\n`);
   for (let i = 0; i < 4; i++) {
     expect((await run(launcher)).code).toBe(1);
@@ -51,7 +52,7 @@ test("service writes escaped paths, plist and CLI link; launchctl uses argument 
     if (args[0] === "print") return { code: unloading-- > 0 ? 0 : 113, stderr: "" };
     return { code: bootstraps++ === 0 ? 5 : 0, stderr: "Bootstrap failed: 5: Input/output error" };
   };
-  const result = await installService({ root, home, execPath: join(f.old, "ghost"), uid: 501, launchctl, sleep: async () => {} });
+  const result = await installService({ root, home, execPath: join(f.old, HOST_EXECUTABLE), uid: 501, launchctl, sleep: async () => {} });
   const print = ["print", "gui/501/com.a7.ghost"], bootstrap = ["bootstrap", "gui/501", result.plist];
   expect(calls).toEqual([["bootout", "gui/501/com.a7.ghost"], print, print, print, bootstrap, bootstrap]);
   expect(readlinkSync(result.link)).toBe(join(f.base, "current", "ghost"));
@@ -69,7 +70,7 @@ test("service never overwrites a real CLI executable", async () => {
   const f = await fixture(), home = join(f.temp, "home");
   mkdirSync(join(home, ".local", "bin"), { recursive: true });
   const path = join(home, ".local", "bin", "ghost"); writeFileSync(path, "owner binary");
-  await expect(installService({ root: f.root, home, execPath: join(f.old, "ghost"), noLoad: true })).rejects.toThrow("not a symlink");
+  await expect(installService({ root: f.root, home, execPath: join(f.old, HOST_EXECUTABLE), noLoad: true })).rejects.toThrow("not a symlink");
   expect(readFileSync(path, "utf8")).toBe("owner binary");
 });
 
