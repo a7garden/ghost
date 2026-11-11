@@ -210,7 +210,7 @@ function Shell() {
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
     { id: 'activities', label: uiTerms.activities, icon: Repeat2, content: <Activities navigate={navigate}/> },
-    { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections/> },
+    { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections navigate={navigate}/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
@@ -250,7 +250,7 @@ function Shell() {
             {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
-            {section === 'mail' && <MailView/>}
+            {section === 'mail' && <MailView navigate={navigate}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>

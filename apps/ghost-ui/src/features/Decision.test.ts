@@ -252,4 +252,21 @@ describe('secureFormBody', () => {
       .toEqual({ body: { kind: 'secret', value: ' raw value ', save: false } });
     expect(secureFormBody(secret, emptySecureForm, true)).toEqual({ error: '값을 입력해 주세요.' });
   });
+
+  it('builds an api answer with an optional client id and a verbatim key', () => {
+    const api = { kind: 'api' as const, origin: 'https://openapi.tossinvest.com', title: '토스증권 열기', reason: '자산을 조회합니다.' };
+    expect(secureFormBody(api, { ...emptySecureForm, username: ' client ', value: ' raw key ' }, true))
+      .toEqual({ body: { kind: 'api', username: 'client', value: ' raw key ', save: true } });
+    expect(secureFormBody(api, { ...emptySecureForm, value: 'k' }, false))
+      .toEqual({ body: { kind: 'api', value: 'k', save: false } });
+    expect(secureFormBody(api, { ...emptySecureForm, username: 'a' }, true)).toEqual({ error: '값을 입력해 주세요.' });
+  });
+
+  it('carries a typed api origin only when the request has none', () => {
+    const noOrigin = { kind: 'api' as const, origin: null, title: '토스증권 열기', reason: '자산을 조회합니다.' };
+    expect(secureFormBody(noOrigin, { ...emptySecureForm, origin: ' https://openapi.example.com ', value: 'k' }, true))
+      .toEqual({ body: { kind: 'api', value: 'k', origin: 'https://openapi.example.com', save: true } });
+    expect(secureFormBody(noOrigin, { ...emptySecureForm, origin: ' ', value: 'k' }, true))
+      .toEqual({ error: 'https://로 시작하는 주소를 입력해 주세요.' });
+  });
 });

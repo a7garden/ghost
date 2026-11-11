@@ -4,7 +4,6 @@ import { Button, EmptyState, InlineError, Skeleton } from '../../ui';
 import type { MailAccounts, MailboxInfo, MailMessage, MailSummary } from '../../host/client';
 import { useHost } from '../../host/context';
 import { relativeTime, useNow } from '../time';
-import { ConnectionDialog } from '../Connections';
 import { MailCompose, type ComposeSeed } from './MailCompose';
 import { MailReader, type MailReaderAction } from './MailReader';
 import {
@@ -28,7 +27,7 @@ function subscribeMailWidth(listener: () => void) {
  * Below 56rem the panes stack: account and mailbox become selects above the list, and an open
  * message takes the whole sheet with a back button (iPhone).
  */
-export function MailView() {
+export function MailView({ navigate }: { navigate(path: string): void }) {
   const { client } = useHost();
   const compact = useSyncExternalStore(subscribeMailWidth, () => matchMedia(compactQuery).matches, () => false);
   const now = useNow();
@@ -50,7 +49,6 @@ export function MailView() {
   const [busy, setBusy] = useState('');
   const [actionError, setActionError] = useState('');
   const [compose, setCompose] = useState<ComposeSeed | null>(null);
-  const [adding, setAdding] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scope = useMemo(() => ({ accountId, mailboxPath, query }), [accountId, mailboxPath, query]);
   const currentScope = useRef(scope);
@@ -261,12 +259,8 @@ export function MailView() {
     </div>;
   }
   if (!accounts.length) {
-    return <>
-      <EmptyState className="mail mail--single" icon={<MailX aria-hidden="true"/>} title="메일 계정 없음"
-        action={<Button type="button" onClick={() => setAdding(true)}>메일 계정 연결</Button>}/>
-      {adding && <ConnectionDialog existing={null} initialKind="mail" onClose={() => setAdding(false)}
-        onSave={async command => { await client.send(command); setAdding(false); void reloadAccounts(true); }}/>}
-    </>;
+    return <EmptyState className="mail mail--single" icon={<MailX aria-hidden="true"/>} title="메일 계정 없음"
+      action={<Button type="button" onClick={() => navigate('/settings?tab=connections')}>메일 계정 연결</Button>}/>;
   }
 
   const switchAccount = (id: string) => { resetScope(); setMailboxPath(''); setAccountId(id); };

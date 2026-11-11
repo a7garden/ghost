@@ -13,6 +13,7 @@ import { createBrowser } from "./integrations/browser.ts";
 import { createDesktop } from "./integrations/desktop.ts";
 import { createReach } from "./integrations/reach.ts";
 import { createSkills } from "./integrations/skills.ts";
+import { createToss } from "./integrations/toss.ts";
 import { Ledger } from "./ledger/ledger.ts";
 import { createSandbox, type SandboxService } from "./sandbox/index.ts";
 import { FsArtifactStore } from "./stores/artifacts.ts";
@@ -157,7 +158,7 @@ export async function openApp(config: Config): Promise<App> {
     } }));
     const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
-    const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, reach: createReach(config), browser, vault, desktop, mail });
+    const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, reach: createReach(config), browser, vault, desktop, mail, toss: createToss() });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
     core.attach(engine);

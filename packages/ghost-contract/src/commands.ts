@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { ActivityConfig, ConnectionConfig } from "./autonomy.ts";
+import { ActivityConfig, ConnectionConfig, ConnectionIconUrl } from "./autonomy.ts";
 import { DutyHours } from "./duty.ts";
 import {
   ADAPTATION_MAX_CHARS,
@@ -83,7 +83,7 @@ export const Command = Type.Union([
     persona: Type.String({ maxLength: 8192 }),
     model: Type.Optional(nullable(ModelRef)),
     look: Type.Optional(Look),
-    /** Omit for the default set (every selectable tool except host and desktop tools); [] disables every optional tool. */
+    /** Omit for the default set (every selectable tool except host, desktop and finance tools); [] disables every optional tool. */
     tools: Type.Optional(GhostToolList),
     fallbacks: Type.Optional(FallbackList),
     skills: Type.Optional(SkillList),
@@ -132,6 +132,9 @@ export const Command = Type.Union([
   // Owner-approved standing delegations and account-scoped connections.
   command("connection.upsert", {
     connectionId: Type.Optional(Id), name: Text(128), config: ConnectionConfig,
+    /** Catalog metadata saved with the connection; omit to preserve the previous values. */
+    serviceId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    iconUrl: Type.Optional(nullable(ConnectionIconUrl)),
     /** Omit to preserve; null removes the stored credential. Never returned to clients. */
     credential: Type.Optional(nullable(Text(8192))),
   }),

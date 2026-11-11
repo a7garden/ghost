@@ -74,6 +74,9 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   vault_list: ["direct", "work"],
   vault_request: ["direct", "work"],
   vault_generate_login: ["direct", "work"],
+  connection_list: ["direct", "work"],
+  connection_register: ["direct", "work"],
+  connection_request: ["direct", "work"],
   desktop_apps: ["direct", "work"],
   desktop_snapshot: ["direct", "work"],
   desktop_screenshot: ["direct", "work"],
@@ -94,6 +97,7 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   mail_read: ["direct", "work"],
   mail_update: ["direct", "work"],
   mail_send: ["direct", "work"],
+  toss_read: ["direct", "work"],
 };
 
 /**

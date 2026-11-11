@@ -238,19 +238,15 @@ test('closing a pending read invalidates it before the same UID is opened again'
   expect(api.updates).toHaveLength(1);
 });
 
-test('mail empty-state connects mail directly while generic Settings add still defaults to GitHub', async ({ page }) => {
+test('mail empty-state opens the shared account setup with service-specific mail and custom server options', async ({ page }) => {
   await page.route('**/api/mail/accounts', route => json(route, { accounts: [] }));
   await openMail(page);
   await page.getByRole('button', { name: '메일 계정 연결', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: '연결 추가', exact: true });
-  await expect(dialog.getByRole('radio', { name: '메일', exact: true })).toBeChecked();
-  await expect(dialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toBeVisible();
-  await expect(dialog.getByRole('textbox', { name: 'SMTP 서버', exact: true })).toBeVisible();
-  await expect(dialog.getByRole('textbox', { name: 'API 주소', exact: true })).toHaveCount(0);
-  await dialog.getByRole('button', { name: '닫기', exact: true }).last().click();
-  await page.evaluate(() => { location.hash = '/settings?tab=connections'; });
-  await page.getByRole('button', { name: '연결 추가', exact: true }).click();
-  await expect(dialog.getByRole('radio', { name: 'GitHub', exact: true })).toBeChecked();
-  await expect(dialog.getByRole('textbox', { name: 'API 주소', exact: true })).toHaveAttribute('placeholder', 'https://api.github.com');
-  await expect(dialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(/#\/settings\?tab=connections$/);
+  await page.getByRole('button', { name: 'Gmail', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Gmail 연결', exact: true });
+  await expect(dialog.getByRole('textbox', { name: '메일 주소', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: '고급 설정', exact: true }).click();
+  await expect(dialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveValue('imap.gmail.com');
+  await expect(dialog.getByRole('textbox', { name: 'SMTP 서버', exact: true })).toHaveValue('smtp.gmail.com');
 });

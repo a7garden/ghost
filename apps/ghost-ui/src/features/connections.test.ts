@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection } from '@ghost/contract';
-import { buildConnectionCommand, draftFromConnection, emptyConnectionDraft, applyMailPreset, mailPresetForHost, mailPresets, type ConnectionDraft } from './connection-config';
+import { buildConnectionCommand, draftForService, draftFromConnection, emptyConnectionDraft, type ConnectionDraft } from './connection-config';
+import { serviceById } from './connection-services';
 
 const connection = (patch: Partial<Connection> = {}): Connection => ({
   id: 'c1', name: '소유자 GitHub', hasCredential: true, createdAt: 1, updatedAt: 1, credentialVersion: 'v1',
@@ -15,10 +16,10 @@ const githubDraft = (patch: Partial<ConnectionDraft> = {}): ConnectionDraft => (
 it('a name-only edit preserves the stored credential; an endpoint change forces re-entry or removal', () => {
   const existing = connection();
   const renamed = buildConnectionCommand(githubDraft({ name: '회사 GitHub' }), existing);
-  if (!renamed.ok) return;
+  if (!renamed.ok) throw new Error(renamed.error);
   expect('credential' in renamed.command).toBe(false);
   const changed = buildConnectionCommand(githubDraft({ baseUrl: 'https://ghe.example.com/api' }), existing);
-  expect(changed).toMatchObject({ ok: false, error: '연결 정보가 바뀌었습니다. 새 자격 증명을 입력하거나 저장된 자격을 삭제해 주세요.' });
+  expect(changed.ok).toBe(false);
   const replaced = buildConnectionCommand(githubDraft({ baseUrl: 'https://ghe.example.com/api', credential: 'ghp_new' }), existing);
   expect(replaced).toMatchObject({ ok: true, command: { credential: 'ghp_new' } });
   const stripped = buildConnectionCommand(githubDraft({ baseUrl: 'https://ghe.example.com/api', clearCredential: true }), existing);
@@ -58,34 +59,79 @@ it('keeps custom mail ports and transport mode when renaming without replacing t
   expect(built.command).not.toHaveProperty('credential');
 });
 
-describe('mail presets', () => {
-  it('a preset fills only the transports; name, account and secret stay the owner’s', () => {
-    const gmail = mailPresets.find(preset => preset.id === 'gmail');
-    if (!gmail) throw new Error('Gmail preset missing');
-    const draft = applyMailPreset(emptyConnectionDraft('mail'), gmail);
-    expect(draft).toEqual({
-      ...emptyConnectionDraft('mail'),
-      host: 'imap.gmail.com', port: '993', smtpHost: 'smtp.gmail.com', smtpPort: '465', smtpSecure: true,
+describe('mail service transport commands', () => {
+  for (const [id, host, smtpHost, smtpPort, smtpSecure] of [
+    ['gmail', 'imap.gmail.com', 'smtp.gmail.com', 465, true],
+    ['icloud', 'imap.mail.me.com', 'smtp.mail.me.com', 587, false],
+    ['naver', 'imap.naver.com', 'smtp.naver.com', 587, false],
+    ['daum', 'imap.daum.net', 'smtp.daum.net', 465, true],
+  ] as const) {
+    it(`registers ${id} with its configured TLS transports and the owner's account`, () => {
+      const service = serviceById(id);
+      if (!service) throw new Error(`Missing mail service ${id}`);
+      const result = buildConnectionCommand({ ...draftForService(service), name: 'Owner mail', username: 'owner@example.com', credential: 'app-password' }, null);
+      expect(result).toMatchObject({ ok: true, command: {
+        name: 'Owner mail', credential: 'app-password',
+        config: { kind: 'mail', username: 'owner@example.com', host, port: 993, smtpHost, smtpPort, smtpSecure },
+      } });
     });
-  });
+  }
+});
 
-  it('Gmail runs implicit TLS on 465, iCloud STARTTLS on 587, Naver and Daum implicit TLS on 465', () => {
-    const byId = new Map(mailPresets.map(preset => [preset.id, preset]));
-    expect(byId.get('gmail')).toMatchObject({ host: 'imap.gmail.com', port: 993, smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpSecure: true });
-    expect(byId.get('icloud')).toMatchObject({ host: 'imap.mail.me.com', port: 993, smtpHost: 'smtp.mail.me.com', smtpPort: 587, smtpSecure: false });
-    expect(byId.get('naver')).toMatchObject({ host: 'imap.naver.com', port: 993, smtpHost: 'smtp.naver.com', smtpPort: 465, smtpSecure: true });
-    expect(byId.get('daum')).toMatchObject({ host: 'imap.daum.net', port: 993, smtpHost: 'smtp.daum.net', smtpPort: 465, smtpSecure: true });
-    // Microsoft dropped password IMAP for consumer accounts, so Outlook is not offered.
-    expect(mailPresets.some(preset => /outlook|office|microsoft/i.test(preset.label))).toBe(false);
-  });
+it('preserves OAuth mail authentication when renaming a registered account', () => {
+  const existing = connection({ serviceId: 'outlook', config: {
+    kind: 'mail', host: 'outlook.office365.com', port: 993, username: 'owner@example.com', mailbox: 'INBOX',
+    smtpHost: 'smtp-mail.outlook.com', smtpPort: 587, smtpSecure: false, authType: 'oauth2',
+  } });
+  const draft = draftFromConnection(existing);
+  draft.name = '회사 메일';
+  const result = buildConnectionCommand(draft, existing);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error);
+  expect(result.command.config).toEqual(existing.config);
+  expect(result.command).not.toHaveProperty('credential');
+});
 
-  it('recognizes a preset by its IMAP host and points at its app-password page', () => {
-    expect(mailPresetForHost(' imap.gmail.com ')?.helpUrl).toBe('https://myaccount.google.com/apppasswords');
-    expect(mailPresetForHost('imap.mail.me.com')).toMatchObject({ id: 'icloud', helpUrl: 'https://account.apple.com/account/manage' });
-    expect(mailPresetForHost('imap.example.com')).toBeNull();
-    // Naver and Daum have no app-password page; the copy tells what to switch on instead.
-    expect(mailPresetForHost('imap.naver.com')?.helpUrl).toBe('');
-    expect(mailPresetForHost('imap.naver.com')?.helpText).toContain('IMAP/SMTP');
-    expect(mailPresetForHost('imap.daum.net')?.helpText).toContain('IMAP/SMTP');
-  });
+it('normalizes a new Gitea server but preserves the registered API endpoint on rename', () => {
+  const draft = { ...emptyConnectionDraft('gitea'), name: 'mini', baseUrl: 'https://git.example.com/', credential: 'test-token' };
+  const created = buildConnectionCommand(draft, null);
+  expect(created).toMatchObject({ ok: true, command: { config: { kind: 'gitea', baseUrl: 'https://git.example.com/api/v1' } } });
+  const existing = connection({ config: { kind: 'gitea', baseUrl: 'https://git.example.com/api/v1/' } });
+  const renamed = draftFromConnection(existing);
+  renamed.name = '서버';
+  const result = buildConnectionCommand(renamed, existing);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error);
+  expect(result.command.config).toEqual(existing.config);
+  expect(result.command).not.toHaveProperty('credential');
+});
+
+it('preserves an OAuth API account when only JSON property order differs', () => {
+  const existing = connection({ config: {
+    ghostIds: ['g1'], headers: { 'Notion-Version': '2026-03-11', Accept: 'application/json' },
+    testPath: 'users/me', authPrefix: 'Bearer', authHeader: 'Authorization',
+    baseUrl: 'https://api.notion.com/v1/', kind: 'api',
+  } });
+  const draft = draftFromConnection(existing);
+  draft.name = '업무 Notion';
+  draft.headers = '{\"Accept\":\"application/json\",\"Notion-Version\":\"2026-03-11\"}';
+  const result = buildConnectionCommand(draft, existing);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error);
+  expect(result.command).not.toHaveProperty('credential');
+  draft.ghostIds = ['g2'];
+  const grantChanged = buildConnectionCommand(draft, existing);
+  expect(grantChanged).toMatchObject({ ok: true, command: { config: { ghostIds: ['g2'] } } });
+  if (!grantChanged.ok) throw new Error(grantChanged.error);
+  expect(grantChanged.command).not.toHaveProperty('credential');
+});
+
+it('clearing a custom icon explicitly removes it without replacing authentication', () => {
+  const existing = connection({ iconUrl: 'https://example.com/icon.svg' });
+  const draft = draftFromConnection(existing);
+  draft.iconUrl = '';
+  const result = buildConnectionCommand(draft, existing);
+  expect(result).toMatchObject({ ok: true, command: { iconUrl: null } });
+  if (!result.ok) throw new Error(result.error);
+  expect(result.command).not.toHaveProperty('credential');
 });

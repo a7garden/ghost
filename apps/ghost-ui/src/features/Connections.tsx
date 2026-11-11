@@ -1,221 +1,224 @@
-import { Fragment, useState } from 'react';
-import { KeyRound, Pencil, PlugZap, Plus, Trash2 } from 'lucide-react';
-import { Badge, Button, Checkbox, FormField, InlineError, Input, SegmentedControl, SettingsGroup, SettingsRow, Switch } from '../ui';
-import { type Command, type Connection, type ConnectionConfig } from '@ghost/contract';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, ChevronDown, Globe2, Mail, Pencil, PlugZap, Search, Sparkles, Trash2 } from 'lucide-react';
+import { Button, Checkbox, FormField, InlineError, Input, Switch, Textarea } from '../ui';
+import type { Command, Connection, Ghost } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { Modal } from '../components/Modal';
 import { uiTerms } from '../uiText';
-import { buildConnectionCommand, type ConnectionDraft, connectionKindLabel, connectionSummary, draftFromConnection, applyMailPreset, emptyConnectionDraft, mailPresetForHost, mailPresets } from './connection-config';
+import { buildConnectionCommand, type ConnectionDraft, connectionSummary, draftForService, draftFromConnection } from './connection-config';
+import { connectionServices, connectionSetupPrompt, serviceById, serviceForConnection, type ConnectionService } from './connection-services';
+import { ExternalAnchor } from '../components/ExternalAnchor';
+import { ConnectionOAuthPanel, supportsConnectionOAuth } from './ConnectionOAuthPanel';
 
 type TestState = { phase: 'testing' } | { phase: 'ok'; summary: string } | { phase: 'error'; message: string };
 
-/** 설정 → 연결 계정: GitHub·Gitea 토큰과 메일 계정. 자격 증명은 호스트의 비밀 저장소에만 있고 이 화면으로 다시 오지 않습니다. */
-export function Connections() {
+function ServiceIcon({ service, iconUrl }: { service?: ConnectionService; iconUrl?: string }) {
+  const { client } = useHost();
+  const [localIcon, setLocalIcon] = useState<{ path: string; url: string } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+    const digest = /^\/api\/artifacts\/([a-f0-9]{64})$/.exec(iconUrl ?? '')?.[1];
+    if (!digest) return;
+    let disposed = false;
+    let objectUrl: string | undefined;
+    void client.artifactUrl(digest).then(url => {
+      objectUrl = url;
+      if (disposed) URL.revokeObjectURL(url);
+      else setLocalIcon({ path: iconUrl!, url });
+    }).catch(() => { if (!disposed) setFailed(true); });
+    return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [client, iconUrl]);
+  const source = iconUrl?.startsWith('/api/artifacts/')
+    ? localIcon?.path === iconUrl ? localIcon.url : undefined
+    : iconUrl || (service?.icon ? `/service-icons/${service.icon}.svg` : undefined);
+  return <span className="service-icon" aria-hidden="true">
+    {source && !failed ? <img src={source} alt="" data-catalog={!iconUrl || undefined} referrerPolicy="no-referrer" onError={() => setFailed(true)}/>
+      : service?.kind === 'mail' ? <Mail size={24}/> : <Globe2 size={24}/>}
+  </span>;
+}
+
+export function Connections({ navigate }: { navigate(path: string): void }) {
   const { store, client } = useHost();
   const { state } = useHostState(store);
   const [pending, setPending] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [selected, setSelected] = useState<ConnectionService | null>(null);
   const [editing, setEditing] = useState<Connection | null>(null);
   const [removing, setRemoving] = useState<Connection | null>(null);
   const [tests, setTests] = useState<Record<string, TestState>>({});
-
+  const [query, setQuery] = useState('');
   const connections = (state?.connections ?? []).slice().sort((a, b) => a.createdAt - b.createdAt);
+  const setupRequest = useRef<{ text: string; id: string } | null>(null);
+  const available = connectionServices.filter(service => `${service.name} ${service.id}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const main = state?.ghosts.find(ghost => ghost.isDefault && ghost.state === 'active');
 
-  const act = async (label: string, work: () => Promise<unknown>, done: string) => {
-    setPending(label); setError(''); setNotice('');
-    try { await work(); setNotice(done); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); }
-    finally { setPending(''); }
-  };
-
-  const test = async (connection: Connection) => {
-    setPending('test'); setError(''); setNotice('');
-    setTests(prev => ({ ...prev, [connection.id]: { phase: 'testing' } }));
+  const test = async (id: string) => {
+    setTests(prev => ({ ...prev, [id]: { phase: 'testing' } }));
     try {
-      const result = await client.send<{ summary?: unknown }>({ type: 'connection.test', connectionId: connection.id });
-      const summary = typeof result?.summary === 'string' && result.summary ? result.summary : '연결에 성공했습니다.';
-      setTests(prev => ({ ...prev, [connection.id]: { phase: 'ok', summary } }));
+      const result = await client.send<{ summary: string }>({ type: 'connection.test', connectionId: id });
+      setTests(prev => ({ ...prev, [id]: { phase: 'ok', summary: result.summary } }));
     } catch (reason) {
-      setTests(prev => ({ ...prev, [connection.id]: { phase: 'error', message: reason instanceof Error ? reason.message : '연결을 확인하지 못했습니다.' } }));
-    } finally { setPending(''); }
+      setTests(prev => ({ ...prev, [id]: { phase: 'error', message: reason instanceof Error ? reason.message : '인증을 확인하지 못했습니다.' } }));
+    }
   };
-
-  const save = async (command: Command, done: string) => {
-    setPending('save'); setError(''); setNotice('');
-    try {
-      await client.send(command);
-      setNotice(done);
-      setCreating(false); setEditing(null);
-    } finally { setPending(''); }
+  const save = async (command: Command, requestId: string) => {
+    const result = await client.send<{ connectionId: string }>(command, requestId);
+    setSelected(null); setEditing(null);
+    setNotice('');
+    await test(result.connectionId);
+  };
+  const assist = async (service: ConnectionService, detail: string) => {
+    if (!main) throw new Error('먼저 활성 메인 Ghost를 설정해 주세요.');
+    // A failed admission retains this request identity so retry cannot send the setup twice.
+    const text = connectionSetupPrompt(service, detail);
+    if (setupRequest.current?.text !== text) setupRequest.current = { text, id: crypto.randomUUID() };
+    await client.send({ type: 'message.send', conversationId: main.directConversationId, text }, setupRequest.current.id);
+    navigate(`/ghosts/${main.id}`);
   };
 
   return <section className="flex min-w-0 flex-col gap-6" aria-label={uiTerms.connections}>
     <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">{uiTerms.connections}</h2>
-      <Button type="button" disabled={!state} onClick={() => { setError(''); setCreating(true); }}><Plus size={15}/>연결 추가</Button>
+      <Button variant="outline" type="button" disabled={!main} onClick={() => setSelected(serviceById('custom-api')!)}><Sparkles size={15}/>Ghost에게 연결 맡기기</Button>
     </div>
-    <p className="m-0 -mt-2 text-caption text-ink-2">활동이 메일과 PR을 살피려면 여기 계정이 필요합니다. 자격 증명은 저장된 뒤에는 표시되지 않습니다.</p>
-    {connections.length
-      ? <SettingsGroup title={<span className="sr-only">{uiTerms.connections}</span>}>{connections.map(connection => {
-        const testState = tests[connection.id];
-        return <Fragment key={connection.id}>
-          <SettingsRow
-            label={<span className="flex min-w-0 flex-col gap-1.5">
-              <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <Badge variant="outline">{connectionKindLabel[connection.config.kind]}</Badge>
-                {connection.hasCredential
-                  ? <Badge variant="success"><KeyRound size={10} aria-hidden="true"/>자격 저장됨</Badge>
-                  : <Badge variant="warning">자격 없음</Badge>}
-              </span>
-              <span className="text-ui font-medium text-ink [overflow-wrap:anywhere]">{connection.name}</span>
-              <span className="text-caption font-normal text-ink-3 [overflow-wrap:anywhere]">{connectionSummary(connection)}</span>
-            </span>}
-            description={`바뀜 · ${updatedLabel(connection.updatedAt)}`}>
-            <span className="flex items-center gap-1">
-              <Button variant="ghost" size="sm" type="button" disabled={pending !== ''} aria-label={`${connection.name} 연결 테스트`}
-                onClick={() => void test(connection)}>
-                <PlugZap size={14}/>테스트
-              </Button>
-              <Button variant="ghost" size="icon" type="button" aria-label={`${connection.name} 편집`} disabled={pending !== ''}
-                onClick={() => { setError(''); setEditing(connection); }}><Pencil size={15}/></Button>
-              <Button variant="ghost" size="icon" type="button" aria-label={`${connection.name} 삭제`} disabled={pending !== ''}
-                onClick={() => { setError(''); setRemoving(connection); }}><Trash2 size={15}/></Button>
-            </span>
-          </SettingsRow>
-          {testState && <div className="connection-test" data-phase={testState.phase} role="status">
-            {testState.phase === 'testing' && <p className="m-0">연결을 확인하는 중…</p>}
-            {testState.phase === 'ok' && <p className="m-0 text-success">{testState.summary}</p>}
-            {testState.phase === 'error' && <p className="m-0">{testState.message}</p>}
-          </div>}
-        </Fragment>;
-      })}</SettingsGroup>
-      : state && <div className="calm"><PlugZap size={16} aria-hidden="true"/><p>연결 계정 없음. GitHub·Gitea 토큰이나 메일 계정을 연결하면 활동에서 쓸 수 있습니다.</p></div>}
     {error && <InlineError>{error}</InlineError>}
-    {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
-
-    {(creating || editing) && <ConnectionDialog existing={editing} onClose={() => { setCreating(false); setEditing(null); }}
-      onSave={save}/>}
-    {removing && <Modal title="연결 삭제" onClose={() => pending === '' && setRemoving(null)}>
-      <p className="m-0">이 연결을 삭제할까요? 이 연결을 쓰던 활동은 새 항목을 살피지 못하고, 저장된 자격도 함께 지워집니다.</p>
-      {error && <div className="mt-3"><InlineError>{error}</InlineError></div>}
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="outline" type="button" disabled={pending !== ''} onClick={() => setRemoving(null)}>취소</Button>
-        <Button variant="destructive" type="button" disabled={pending !== ''}
-          onClick={() => void act('delete', async () => { await client.send({ type: 'connection.delete', connectionId: removing.id }); setRemoving(null); }, '연결을 삭제했습니다.')}>삭제</Button>
+    {notice && <p className="m-0 text-caption text-ink-2" role="status">{notice}</p>}
+    {connections.length > 0 && <ul className="connection-grid" aria-label="등록한 계정">
+      {connections.map(connection => {
+        const service = serviceForConnection(connection);
+        const status = tests[connection.id];
+        return <li key={connection.id} className="connection-tile">
+          <ServiceIcon service={service} iconUrl={connection.iconUrl}/>
+          <div className="connection-tile__identity"><h3>{connection.name}</h3><p>{connectionSummary(connection)}</p></div>
+          <p className="connection-tile__status" data-phase={status?.phase} role="status">
+            {status?.phase === 'testing' ? '인증 확인 중…' : status?.phase === 'ok' ? '인증 확인됨' : status?.phase === 'error' ? status.message : connection.hasCredential ? '인증 정보 저장됨' : '인증 정보 필요'}
+          </p>
+          <div className="connection-tile__actions">
+            <Button variant="ghost" size="sm" type="button" disabled={status?.phase === 'testing'} aria-label={`${connection.name} 연결 테스트`} onClick={() => void test(connection.id)}><PlugZap size={14}/>확인</Button>
+            <Button variant="ghost" size="icon" type="button" aria-label={`${connection.name} 편집`} onClick={() => { setError(''); setEditing(connection); }}><Pencil size={15}/></Button>
+            <Button variant="ghost" size="icon" type="button" aria-label={`${connection.name} 삭제`} onClick={() => { setError(''); setRemoving(connection); }}><Trash2 size={15}/></Button>
+          </div>
+        </li>;
+      })}
+    </ul>}
+    <section className="connection-catalog" aria-label="서비스 연결">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="m-0 text-ui font-medium">서비스 연결</h3>
+        <label className="connection-search"><Search size={15} aria-hidden="true"/><Input aria-label="서비스 검색" placeholder="서비스 검색" value={query} onChange={event => setQuery(event.target.value)}/></label>
       </div>
+      {(['서비스', '메일', '직접 연결'] as const).map(group => {
+        const services = available.filter(service => service.group === group);
+        return services.length > 0 && <div key={group} className="connection-catalog__group">
+          {group !== '서비스' && <h4>{group}</h4>}
+          <ul>{services.map(service => <li key={service.id}>
+            <button type="button" disabled={!state} onClick={() => setSelected(service)} className="service-choice">
+              <ServiceIcon service={service}/><span>{service.name}</span><ArrowUpRight size={14} className="service-choice__arrow" aria-hidden="true"/>
+            </button>
+          </li>)}</ul>
+        </div>;
+      })}
+      {available.length === 0 && <div className="flex flex-col items-start gap-3"><p className="m-0 text-ink-2">일치하는 서비스가 없습니다.</p><Button variant="outline" onClick={() => setSelected(serviceById('custom-api')!)}>다른 서비스 연결</Button></div>}
+    </section>
+    {(selected || editing) && <ConnectionDialog key={editing?.id ?? selected?.id} existing={editing} service={selected ?? serviceForConnection(editing!) ?? serviceById(editing!.config.kind === 'mail' ? 'custom-mail' : 'custom-api')!}
+      ghosts={state?.ghosts.filter(ghost => ghost.state === 'active') ?? []} canAssist={Boolean(main)} onAssist={assist}
+      onClose={() => { setSelected(null); setEditing(null); }} onSave={save}/>}
+    {removing && <Modal title="연결 삭제" onClose={() => pending === '' && setRemoving(null)}>
+      <p className="m-0">{removing.name} 연결과 저장된 인증 정보를 삭제할까요? 이 연결을 쓰는 자동 활동과 API 접근도 중단됩니다.</p>
+      {error && <InlineError>{error}</InlineError>}
+      <div className="mt-4 flex justify-end gap-2"><Button variant="outline" disabled={pending !== ''} onClick={() => setRemoving(null)}>취소</Button>
+        <Button variant="destructive" disabled={pending !== ''} onClick={async () => {
+          setPending('delete'); setError('');
+          try { await client.send({ type: 'connection.delete', connectionId: removing.id }); setRemoving(null); setNotice('연결을 삭제했습니다.'); }
+          catch (reason) { setError(reason instanceof Error ? reason.message : '연결을 삭제하지 못했습니다.'); }
+          finally { setPending(''); }
+        }}>삭제</Button></div>
     </Modal>}
   </section>;
 }
 
-/** Updated-at line: absolute, since credentials' freshness matters more than a relative guess. */
-const updatedLabel = (at: number) =>
-  new Date(at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-/** 연결 만들기/편집. The secret field starts blank every time and never echoes a stored value. */
-export function ConnectionDialog({ existing, initialKind = 'github', onClose, onSave }: {
-  existing: Connection | null;
-  initialKind?: ConnectionConfig['kind'];
-  onClose(): void;
-  onSave(command: Command, done: string): Promise<void>;
+function ConnectionDialog({ existing, service, ghosts, canAssist, onAssist, onClose, onSave }: {
+  existing: Connection | null; service: ConnectionService; ghosts: Ghost[]; canAssist: boolean;
+  onAssist(service: ConnectionService, detail: string): Promise<void>; onClose(): void; onSave(command: Command, requestId: string): Promise<void>;
 }) {
-  const kinds = Object.keys(connectionKindLabel) as ConnectionConfig['kind'][];
-  const [draft, setDraft] = useState(() => existing ? draftFromConnection(existing) : emptyConnectionDraft(initialKind));
+  const [draft, setDraft] = useState(() => existing ? draftFromConnection(existing) : draftForService(service));
   const [error, setError] = useState(''), [saving, setSaving] = useState(false);
-  const set = (patch: Partial<ConnectionDraft>) => setDraft(prev => ({ ...prev, ...patch }));
+  const [advanced, setAdvanced] = useState(service.group === '직접 연결');
+  const saveRequest = useRef<string | undefined>(undefined);
+  const [manual, setManual] = useState(Boolean(existing) || !supportsConnectionOAuth(service.id));
+  const set = (patch: Partial<ConnectionDraft>) => { saveRequest.current = undefined; setDraft(prev => ({ ...prev, ...patch })); };
   const mail = draft.kind === 'mail';
-  const preset = mail ? mailPresetForHost(draft.host) : null;
-
+  const api = draft.kind === 'api';
+  const oauthOnly = service.id === 'outlook';
   const save = async () => {
     if (saving) return;
     const built = buildConnectionCommand(draft, existing);
     if (!built.ok) { setError(built.error); return; }
+    if (!existing && !draft.credential.trim()) { setError(`${service.credentialLabel}를 입력하거나 Ghost에게 연결을 맡겨 주세요.`); return; }
     setSaving(true); setError('');
-    try { await onSave(built.command, existing ? '연결을 저장했습니다.' : '연결을 만들었습니다.'); }
+    try { await onSave(built.command, saveRequest.current ??= crypto.randomUUID()); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '연결을 저장하지 못했습니다.'); setSaving(false); }
   };
-
-  return <Modal title={existing ? '연결 편집' : '연결 추가'} onClose={() => { if (!saving) onClose(); }} className="sm:max-w-[560px]">
-    <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
-      {existing && <p className="activity-warn activity-warn--calm">연결 정보나 자격을 바꾸면 이 계정을 쓰는 활동의 진행 중인 실행이 취소됩니다.</p>}
-      <SegmentedControl aria-label="연결 종류" value={draft.kind}
-        onValueChange={value => set({ kind: value as ConnectionConfig['kind'] })}
-        options={kinds.map(kind => ({ value: kind, label: connectionKindLabel[kind], disabled: saving }))}/>
-      <FormField label="이름" required>
-        {control => <Input {...control} value={draft.name} maxLength={128} required disabled={saving} placeholder="예: 소유자 GitHub"
-          onChange={event => set({ name: event.target.value })}/>}
-      </FormField>
-      {mail
-        ? <>
-          {!existing && <div className="connection-presets" role="group" aria-label="메일 서비스 선택">
-            {mailPresets.map(item => <Button key={item.id} variant="outline" size="sm" type="button" disabled={saving}
-              aria-pressed={draft.host === item.host && draft.port === String(item.port)}
-              onClick={() => set(applyMailPreset(draft, item))}>{item.label}</Button>)}
-          </div>}
-          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_120px]">
-            <FormField label="IMAP 서버" required>
-              {control => <Input {...control} value={draft.host} maxLength={253} required disabled={saving} placeholder="imap.example.com" autoComplete="off"
-                onChange={event => set({ host: event.target.value })}/>}
-            </FormField>
-            <FormField label="포트">
-              {control => <Input {...control} type="number" min={1} max={65535} step={1} value={draft.port} disabled={saving}
-                onChange={event => set({ port: event.target.value })}/>}
-            </FormField>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="사용자 이름" required>
-              {control => <Input {...control} value={draft.username} maxLength={320} required disabled={saving} autoComplete="off"
-                placeholder={preset ? `이름@${preset.domain}` : 'owner@example.com'}
-                onChange={event => set({ username: event.target.value })}/>}
-            </FormField>
-            <FormField label="메일함">
-              {control => <Input {...control} value={draft.mailbox} maxLength={256} disabled={saving} autoComplete="off"
-                onChange={event => set({ mailbox: event.target.value })}/>}
-            </FormField>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_120px]">
-            <FormField label="SMTP 서버" description="메일 회신을 보낼 때만 필요합니다. 비워 두면 이 계정으로 회신 쓰기가 불가능합니다.">
-              {control => <Input {...control} value={draft.smtpHost} maxLength={253} disabled={saving} placeholder="smtp.example.com" autoComplete="off"
-                onChange={event => set({ smtpHost: event.target.value })}/>}
-            </FormField>
-            <FormField label="SMTP 포트">
-              {control => <Input {...control} type="number" min={1} max={65535} step={1} value={draft.smtpPort} disabled={saving}
-                onChange={event => set({ smtpPort: event.target.value })}/>}
-            </FormField>
-          </div>
-          <label className="activity-check">
-            <span className="activity-check__copy"><span>SMTP 암시적 TLS</span><small>켜면 연결부터 TLS, 끄면 STARTTLS로 전환합니다. 두 방식 모두 인증서를 확인합니다.</small></span>
-            <Switch checked={draft.smtpSecure} disabled={saving} onCheckedChange={smtpSecure => set({ smtpSecure })} aria-label="SMTP 암시적 TLS"/>
-          </label>
-        </>
-        : <FormField label="API 주소" required>
-          {control => <Input {...control} value={draft.baseUrl} maxLength={2048} required disabled={saving} inputMode="url"
-            placeholder={draft.kind === 'github' ? 'https://api.github.com' : 'https://git.example.com'}
-            onChange={event => set({ baseUrl: event.target.value })}/>}
-        </FormField>}
-
-      <FormField label={mail ? '앱 비밀번호' : '접근 토큰'}
-        description={existing?.hasCredential
-          ? '저장된 자격이 있습니다. 비워 두면 이름만 바꾼 저장에서 그대로 유지됩니다. 연결 정보를 바꾸면 다시 입력해야 합니다.'
-          : mail && preset ? preset.helpText
-            : `${connectionKindLabel[draft.kind]} 계정의 자격 증명입니다. 저장 후에는 다시 표시되지 않습니다.`}>
-        {control => <Input {...control} type="password" value={draft.credential} autoComplete="new-password" disabled={saving}
-          placeholder={existing?.hasCredential ? '••••••••' : undefined}
-          onChange={event => set({ credential: event.target.value, clearCredential: false })}/>}
-      </FormField>
-      {mail && preset?.helpUrl && <p className="connection-help">
-        <a href={preset.helpUrl} target="_blank" rel="noreferrer">{preset.helpLinkLabel}</a>
-      </p>}
-      {existing?.hasCredential && <label className="connection-clear">
-        <Checkbox checked={draft.clearCredential} disabled={saving}
-          onCheckedChange={clearCredential => set({ clearCredential: clearCredential === true })}/>
-        <span>저장된 자격 삭제</span>
-      </label>}
-
+  return <Modal title={existing ? `${existing.name} 편집` : `${service.name} 연결`} onClose={() => { if (!saving) onClose(); }} className="sm:max-w-[560px]">
+    <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); if (manual) void save(); }}>
+      <div className="flex items-start gap-3"><ServiceIcon service={service}/><p className="m-0 text-ui text-ink-2">{service.requirement}</p></div>
+      {!existing && <>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" variant={draft.credential ? 'outline' : 'default'} disabled={saving || !canAssist} onClick={async () => {
+            setSaving(true); setError('');
+            try { await onAssist(service, draft.username || draft.baseUrl || draft.name); }
+            catch (reason) { setError(reason instanceof Error ? reason.message : '연결 요청을 보내지 못했습니다.'); setSaving(false); }
+          }}><Sparkles size={15}/>Ghost에게 연결 맡기기</Button>
+          {service.setupUrl && <ExternalAnchor href={service.setupUrl} target="_blank" rel="noopener noreferrer" className="text-caption text-ink-2 underline underline-offset-4">{mail && service.id !== 'outlook' ? '앱 비밀번호 발급' : '인증 설정 열기'}<ArrowUpRight className="ml-1 inline" size={12}/></ExternalAnchor>}
+        </div>
+      </>}
+      {existing && <p className="activity-warn activity-warn--calm">서버·계정·접근 권한을 바꾸면 기존 인증을 다시 입력해야 하며, 관련 활동의 진행 중인 실행이 중단됩니다.</p>}
+      {!existing && supportsConnectionOAuth(service.id) && <>
+        <div className="flex gap-2" role="group" aria-label="인증 방법">
+          <Button type="button" size="sm" variant={!manual ? 'default' : 'outline'} onClick={() => setManual(false)} aria-pressed={!manual}>로그인</Button>
+          {!oauthOnly && <Button type="button" size="sm" variant={manual ? 'default' : 'outline'} onClick={() => setManual(true)} aria-pressed={manual}>키로 직접 연결</Button>}
+        </div>
+        {!manual && <ConnectionOAuthPanel service={service} ghosts={ghosts} onConnected={onClose}/>}
+      </>}
+      {manual && <>
+        <FormField label="이름" required>{control => <Input {...control} value={draft.name} maxLength={128} required disabled={saving} onChange={event => set({ name: event.target.value })}/>}</FormField>
+        {mail ? <FormField label="메일 주소" required>{control => <Input {...control} type="email" value={draft.username} maxLength={320} required disabled={saving} autoComplete="username" placeholder="name@example.com" onChange={event => set({ username: event.target.value, ...(existing ? {} : { name: `${service.name} · ${event.target.value}` }) })}/>}</FormField>
+          : (service.id === 'gitea' || service.id === 'custom-api' || advanced) && <FormField label={service.id === 'gitea' ? '서버 주소' : 'API 주소'} required>{control => <Input {...control} value={draft.baseUrl} maxLength={2048} required disabled={saving} inputMode="url" placeholder="https://example.com" onChange={event => set({ baseUrl: event.target.value })}/>}</FormField>}
+        <FormField label={draft.mailAuthType === 'oauth2' ? 'OAuth 액세스 토큰' : service.credentialLabel} description={existing?.hasCredential ? '비워 두면 기존 인증을 유지합니다. 서버·계정을 바꾸면 다시 입력해 주세요.' : '인증 정보는 Host에만 저장되며 대화에 전달되지 않습니다.'}>
+          {control => <Input {...control} type="password" value={draft.credential} autoComplete="new-password" disabled={saving} onChange={event => set({ credential: event.target.value, clearCredential: false })}/>}</FormField>
+        {api && <fieldset className="connection-grants"><legend>사용할 Ghost</legend>
+          <p className="m-0 text-caption text-ink-2">선택한 Ghost만 이 계정의 API를 사용합니다. 외부 쓰기는 별도 확인을 받습니다.</p>
+          {ghosts.map(ghost => <label key={ghost.id} className="flex items-center gap-2 text-ui"><Checkbox checked={draft.ghostIds.includes(ghost.id)} disabled={saving} onCheckedChange={checked => set({ ghostIds: checked ? [...draft.ghostIds, ghost.id] : draft.ghostIds.filter(id => id !== ghost.id) })}/>{ghost.name}</label>)}
+        </fieldset>}
+        <button type="button" className="connection-advanced" aria-expanded={advanced} disabled={saving} onClick={() => setAdvanced(!advanced)}>고급 설정<ChevronDown size={14} className={advanced ? 'rotate-180' : ''}/></button>
+        {advanced && <div className="flex flex-col gap-4">
+          {mail && <>
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_100px]">
+              <FormField label="IMAP 서버" required>{control => <Input {...control} value={draft.host} required disabled={saving} onChange={event => set({ host: event.target.value })}/>}</FormField>
+              <FormField label="IMAP 포트">{control => <Input {...control} type="number" min={1} max={65535} value={draft.port} disabled={saving} onChange={event => set({ port: event.target.value })}/>}</FormField>
+            </div>
+            <FormField label="메일함">{control => <Input {...control} value={draft.mailbox} disabled={saving} onChange={event => set({ mailbox: event.target.value })}/>}</FormField>
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_100px]">
+              <FormField label="SMTP 서버">{control => <Input {...control} value={draft.smtpHost} disabled={saving} onChange={event => set({ smtpHost: event.target.value })}/>}</FormField>
+              <FormField label="SMTP 포트">{control => <Input {...control} type="number" min={1} max={65535} value={draft.smtpPort} disabled={saving} onChange={event => set({ smtpPort: event.target.value })}/>}</FormField>
+            </div>
+            <label className="activity-check"><span className="activity-check__copy"><span>SMTP 암시적 TLS</span><small>끄면 STARTTLS로 연결합니다. 두 방식 모두 인증서를 확인합니다.</small></span><Switch aria-label="SMTP 암시적 TLS" checked={draft.smtpSecure} disabled={saving} onCheckedChange={smtpSecure => set({ smtpSecure })}/></label>
+          </>}
+          {api && <>
+            <FormField label="계정 확인 API 경로" required>{control => <Input {...control} value={draft.testPath} placeholder="users/me" disabled={saving} onChange={event => set({ testPath: event.target.value })}/>}</FormField>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label="인증 헤더">{control => <Input {...control} value={draft.authHeader} disabled={saving} onChange={event => set({ authHeader: event.target.value })}/>}</FormField>
+              <FormField label="인증 접두어">{control => <Input {...control} value={draft.authPrefix} disabled={saving} onChange={event => set({ authPrefix: event.target.value })}/>}</FormField>
+            </div>
+            <FormField label="추가 헤더 (JSON)" description="비밀 값은 위 인증 정보에만 입력해 주세요.">{control => <Textarea {...control} value={draft.headers} disabled={saving} onChange={event => set({ headers: event.target.value })}/>}</FormField>
+          </>}
+          <FormField label="서비스 아이콘 주소" description="HTTPS 이미지 주소. 비워 두면 기본 서비스 아이콘을 사용합니다.">{control => <Input {...control} value={draft.iconUrl} inputMode="url" disabled={saving} onChange={event => set({ iconUrl: event.target.value })}/>}</FormField>
+        </div>}
+        {existing?.hasCredential && <label className="connection-clear"><Checkbox checked={draft.clearCredential} disabled={saving} onCheckedChange={checked => set({ clearCredential: checked === true })}/><span>저장된 인증 정보 삭제</span></label>}
+      </>}
       {error && <InlineError>{error}</InlineError>}
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" type="button" disabled={saving} onClick={onClose}>취소</Button>
-        <Button type="submit" disabled={saving}>{saving ? '저장하는 중…' : existing ? '저장' : '연결 추가'}</Button>
+      <div className="flex justify-end gap-2"><Button variant="outline" type="button" disabled={saving} onClick={onClose}>취소</Button>
+        {manual && <Button type="submit" disabled={saving}>{saving ? '처리 중…' : existing ? '저장' : '연결'}</Button>}
       </div>
     </form>
   </Modal>;

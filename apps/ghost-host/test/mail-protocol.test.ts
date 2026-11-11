@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { createServer, type Server, type TLSSocket } from "node:tls";
 import { rmSync } from "node:fs";
 import type { Connection } from "@ghost/contract";
+import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { ImapFlow } from "imapflow";
 import { SourceConnections } from "../src/integrations/activity-sources.ts";
 import { activitySmtp } from "../src/integrations/activity-mail.ts";
@@ -10,6 +12,7 @@ import { NoEffect } from "../src/core/effects.ts";
 import { Access } from "../src/core/access.ts";
 import { execute } from "../src/core/commands.ts";
 import { serveMail } from "../src/api/mail.ts";
+import { createMailTools } from "../src/tools/mail.ts";
 import { cert, key } from "./fixtures/activity-tls.ts";
 import { harness, tempDir } from "./support.ts";
 
@@ -22,13 +25,13 @@ async function listen(server: Server) {
   if (!address || typeof address === "string") throw new Error("missing fixture port");
   return address.port;
 }
-async function fixture(gmail = false, commonNames = false, noFolders = false, hooks: { beforeConnect?: () => Promise<void>; beforeData?: () => void; afterAcceptance?: () => void } = {}) {
-  const sockets = new Set<TLSSocket>(), commands: string[] = [], sent: string[] = [], appended: string[] = [];
+async function fixture(gmail = false, commonNames = false, noFolders = false, hooks: { oauth2?: boolean; beforeConnect?: () => Promise<void>; beforeData?: () => void; afterAcceptance?: () => void } = {}) {
+  const sockets = new Set<TLSSocket>(), commands: string[] = [], smtpCommands: string[] = [], sent: string[] = [], appended: string[] = [];
   const identity = { uidValidity: 7 };
   const track = (socket: TLSSocket) => { sockets.add(socket); socket.on("error", () => {}); socket.on("close", () => sockets.delete(socket)); };
   const imap = createServer({ key, cert }, socket => {
     track(socket);
-    const capabilities = `IMAP4rev1 AUTH=PLAIN SASL-IR MOVE UIDPLUS${gmail ? " X-GM-EXT-1" : ""}`;
+    const capabilities = `IMAP4rev1 AUTH=${hooks.oauth2 ? "XOAUTH2" : "PLAIN"} SASL-IR MOVE UIDPLUS${gmail ? " X-GM-EXT-1" : ""}`;
     socket.write(`* OK [CAPABILITY ${capabilities}] ready\r\n`);
     let buffer = Buffer.alloc(0), literal = 0, appendTag = "", authTag = "";
     socket.on("data", chunk => {
@@ -44,8 +47,8 @@ async function fixture(gmail = false, commonNames = false, noFolders = false, ho
         if (authTag) { socket.write(`${authTag} OK authenticated\r\n`); authTag = ""; continue; }
         commands.push(line); const tag = line.split(" ")[0]!;
         if (/ CAPABILITY$/i.test(line)) socket.write(`* CAPABILITY ${capabilities}\r\n${tag} OK capability\r\n`);
-        else if (/ AUTHENTICATE PLAIN$/i.test(line)) { authTag = tag; socket.write("+ \r\n"); }
-        else if (/ AUTHENTICATE PLAIN /i.test(line)) socket.write(`${tag} OK authenticated\r\n`);
+        else if (/ AUTHENTICATE (?:PLAIN|XOAUTH2)$/i.test(line)) { authTag = tag; socket.write("+ \r\n"); }
+        else if (/ AUTHENTICATE (?:PLAIN|XOAUTH2) /i.test(line)) socket.write(`${tag} OK authenticated\r\n`);
         else if (/ LIST "" ""$/i.test(line)) socket.write(`* LIST (\\Noselect) "/" ""\r\n${tag} OK list\r\n`);
         else if (/ (LIST|LSUB) /i.test(line)) {
           const op = / LSUB /i.test(line) ? "LSUB" : "LIST";
@@ -77,8 +80,9 @@ async function fixture(gmail = false, commonNames = false, noFolders = false, ho
       for (;;) {
         if (data) { const end = buffer.indexOf("\r\n.\r\n"); if (end < 0) return; sent.push(buffer.slice(0, end)); buffer = buffer.slice(end + 5); data = false; socket.write("250 accepted\r\n"); hooks.afterAcceptance?.(); continue; }
         const end = buffer.indexOf("\r\n"); if (end < 0) return; const line = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-        if (/^EHLO /i.test(line)) socket.write("250-localhost\r\n250 AUTH PLAIN\r\n");
-        else if (/^AUTH PLAIN /i.test(line)) socket.write("235 authenticated\r\n");
+        smtpCommands.push(line);
+        if (/^EHLO /i.test(line)) socket.write(`250-localhost\r\n250 AUTH ${hooks.oauth2 ? "XOAUTH2" : "PLAIN"}\r\n`);
+        else if (/^AUTH (?:PLAIN|XOAUTH2) /i.test(line)) socket.write("235 authenticated\r\n");
         else if (/^(MAIL FROM|RCPT TO):/i.test(line)) socket.write("250 accepted\r\n");
         else if (line === "DATA") { hooks.beforeData?.(); data = true; socket.write("354 continue\r\n"); }
         else if (line === "QUIT") socket.end("221 bye\r\n");
@@ -88,17 +92,78 @@ async function fixture(gmail = false, commonNames = false, noFolders = false, ho
   });
   smtp.on("tlsClientError", () => {});
   const root = tempDir(), imapPort = await listen(imap), smtpPort = await listen(smtp);
-  const connection: Connection = { id: "mail-account", name: "Fixture", hasCredential: true, credentialVersion: "v1", createdAt: 1, updatedAt: 1, config: { kind: "mail", host: "127.0.0.1", port: imapPort, username: "owner@example.com", mailbox: "INBOX", smtpHost: "127.0.0.1", smtpPort, smtpSecure: true } };
-  const sources = new SourceConnections({ root, currentConnection: () => connection });
+  const connection: Connection = { id: "mail-account", name: "Fixture", hasCredential: true, credentialVersion: "v1", createdAt: 1, updatedAt: 1, config: { kind: "mail", host: "127.0.0.1", port: imapPort, username: "owner@example.com", mailbox: "INBOX", smtpHost: "127.0.0.1", smtpPort, smtpSecure: true, ...(hooks.oauth2 ? { authType: "oauth2" as const } : {}) } };
+  let currentConnection = connection;
+  const sources = new SourceConnections({ root, currentConnection: () => currentConnection });
   await sources.setCredential(connection.id, "fixture-app-password", "v1");
-  const mail = new MailService({ connections: () => [connection], sources, imap: options => {
+  const mail = new MailService({ connections: () => [currentConnection], sources, imap: options => {
     const client = new ImapFlow({ ...options, tls: { ...options.tls, ca: cert } });
     const connect = client.connect.bind(client);
     client.connect = async () => { await hooks.beforeConnect?.(); await connect(); };
     return client;
   }, smtp: options => activitySmtp({ ...options, tls: { ...options.tls, ca: cert } }) });
-  return { mail, commands, sent, appended, identity, async close() { await mail.close(); await sources.close(); for (const socket of sockets) socket.destroy(); imap.close(); smtp.close(); rmSync(root, { recursive: true, force: true }); } };
+  return { mail, sources, connection, replaceConnection(next: Connection) { currentConnection = next; }, commands, smtpCommands, sent, appended, identity, async close() { await mail.close(); await sources.close(); for (const socket of sockets) socket.destroy(); imap.close(); smtp.close(); rmSync(root, { recursive: true, force: true }); } };
 }
+
+test("mail client refreshes OAuth credentials before IMAP and SMTP and never attempts password authentication", async () => {
+  const f = await fixture(true, false, false, { oauth2: true });
+  const h = harness();
+  const ghost = h.core.createGhost({ name: "OAuth mail", isDefault: true, tools: ["mail_send"] });
+  h.ledger.setPiConversationId(ghost.directConversationId, "oauth-mail");
+  const extension = createMailTools(h.core, f.mail);
+  let refreshes = 0;
+  f.sources.setOAuthRefresher(async connection => {
+    await f.sources.rotateCredential(connection.id, `refreshed-access-${++refreshes}`, connection.credentialVersion!);
+  });
+  try {
+    await f.mail.mailboxes("Fixture");
+    const tool = extension.tools!.find(tool => tool.name === "mail_send")!;
+    const result = await tool.execute({ account: "Fixture", to: ["to@example.com"], subject: "OAuth delivery", text: "Body" } as never,
+      { conversationId: "oauth-mail", callId: "oauth-send" } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
+    expect(result.isError).toBeFalsy();
+    const decision = h.ledger.pendingDecisions()[0]!;
+    f.replaceConnection({ ...f.connection, updatedAt: Date.now() });
+    await h.core.decisions.resolve(decision.id, { outcome: "approve" });
+    expect(h.ledger.effect(decision.effectId!).state).toBe("done");
+    expect(refreshes).toBe(2);
+    const imapAuth = f.commands.filter(line => line.includes(" AUTHENTICATE XOAUTH2 "));
+    expect(imapAuth).toHaveLength(2);
+    expect(Buffer.from(imapAuth[0]!.split(" ").at(-1)!, "base64").toString()).toContain("auth=Bearer refreshed-access-1");
+    expect(Buffer.from(imapAuth[1]!.split(" ").at(-1)!, "base64").toString()).toContain("auth=Bearer refreshed-access-2");
+    const smtpAuth = f.smtpCommands.find(line => line.startsWith("AUTH XOAUTH2 "));
+    expect(smtpAuth).toBeDefined();
+    expect(Buffer.from(smtpAuth!.split(" ").at(-1)!, "base64").toString()).toContain("auth=Bearer refreshed-access-2");
+    expect(f.commands.some(line => / AUTHENTICATE PLAIN | LOGIN /i.test(line))).toBe(false);
+    expect(f.smtpCommands.some(line => /^AUTH (?:PLAIN|LOGIN) /i.test(line))).toBe(false);
+    expect(f.sent).toHaveLength(1);
+  } finally { await f.close(); h.core.stop(); await h.core.idle(); h.ledger.close(); }
+});
+
+test("mail client refuses a failed OAuth refresh before opening a transport", async () => {
+  const f = await fixture(true, false, false, { oauth2: true });
+  f.sources.setOAuthRefresher(async () => { throw new Error("revoked"); });
+  try {
+    await expect(f.mail.mailboxes("Fixture")).rejects.toMatchObject({ code: "unavailable" });
+    expect(f.commands).toEqual([]);
+    expect(f.smtpCommands).toEqual([]);
+  } finally { await f.close(); }
+});
+
+for (const change of ["revoke", "replace", "identity"] as const) test(`OAuth mail ${change} still refuses an approved transport before SMTP DATA`, async () => {
+  const hooks: { oauth2: boolean; beforeData?: () => void } = { oauth2: true };
+  const f = await fixture(true, false, false, hooks);
+  hooks.beforeData = () => {
+    const row = f.connection;
+    if (row.config.kind !== "mail") throw new Error("mail fixture required");
+    f.replaceConnection(change === "revoke" ? { ...row, hasCredential: false }
+      : change === "replace" ? { ...row, credentialVersion: "replacement-epoch" }
+      : { ...row, config: { ...row.config, username: "other@example.com" } });
+  };
+  try {
+    await expect(f.mail.send("Fixture", { to: ["to@example.com"], subject: "Approved", text: "Must not leave" })).rejects.toBeInstanceOf(NoEffect);
+    expect(f.sent).toHaveLength(0);
+  } finally { await f.close(); }
+});
 
 test("IMAPS lists special-use and status, paginates newest UID first, searches and reads only with PEEK", async () => {
   const f = await fixture(true);

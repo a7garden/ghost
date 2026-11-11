@@ -29,6 +29,7 @@ import type { Config } from "../config.ts";
 import type { BrowserPort, DocumentsPort, SkillsPort } from "../integrations/ports.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
+import { ConnectionOAuth } from "./connection-oauth.ts";
 import { Access } from "../core/access.ts";
 import { execute, hashSecret } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
@@ -122,6 +123,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   } catch {
     core.log("invalid publicOrigin; only loopback hosts are accepted", publicOrigin);
   }
+  const connectionOAuth = new ConnectionOAuth(core, { root: config.root, publicOrigin });
+  core.activitySources?.setOAuthRefresher?.(connection => connectionOAuth.refresh(connection));
 
   function failure(caught: unknown): Response {
     if (caught instanceof CommandError) return error(caught.code, caught.message, HTTP_STATUS[caught.code]);
@@ -426,6 +429,10 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     if (pathname === "/api/pairing/claim" && request.method === "POST") {
       return claimPairing(request, peer === null ? "unknown" : peer.address);
     }
+    if (pathname === "/api/connection-oauth/callback") {
+      try { return await connectionOAuth.handle(request, url, null) ?? error("not_found", "not found", 404); }
+      catch { return error("unavailable", "service login could not be completed", 503); }
+    }
     if (!pathname.startsWith("/api/")) {
       try {
         return await serveUi(request, url, injectToken);
@@ -436,6 +443,10 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
 
     const access = authenticate(request);
     if (access === null) return error("forbidden", "missing or invalid bearer token", 401);
+    if (pathname.startsWith("/api/connection-oauth/")) {
+      try { return await connectionOAuth.handle(request, url, access) ?? error("not_found", "not found", 404); }
+      catch (caught) { return failure(caught); }
+    }
     if (pathname === "/api/update" || pathname.startsWith("/api/update/")) {
       try { return await serveUpdate(request, url, updater); } catch (caught) { return failure(caught); }
     }
@@ -538,6 +549,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     port: server.port!, // a TCP listener always reports its bound port
     stop: async () => {
       oauth.close();
+      connectionOAuth.close();
+      core.activitySources?.setOAuthRefresher?.(null);
       server.stop(true);
     },
   };
