@@ -218,12 +218,15 @@ export function createToolSet(deps: {
 /** The self-directed drive as this Ghost has it now: on or off, and for the main Ghost which teammates are off. */
 function driveInstructions(core: Core, ghost: Ghost): string {
   const on = core.autonomy.enabled(ghost.id);
-  const own = on ? `${AUTONOMY_DRIVE}\nYour own next look is plan_next.` : DRIVE_OFF;
-  if (!ghost.isDefault || ghost.state !== "active") return own;
+  // 누가 동료를 계획하는지는 Autonomy 한 곳에서 정한다 — 도구 부여 · 거절 · 이 글이 따로 놀지 않도록.
+  const main = core.autonomy.plansTeam(ghost);
+  const own = on ? `${AUTONOMY_DRIVE}\nYour own next look is plan_next.` : main ? MAIN_DRIVE_OFF : DRIVE_OFF;
+  if (!main) return own;
   const off = core.ledger.ghosts()
     .filter((item) => item.id !== ghost.id && item.deletedAt === null && item.state === "active" && !core.autonomy.enabled(item.id))
     .map((item) => item.name);
-  return [on ? own : MAIN_DRIVE_OFF, MAIN_INSTRUCTIONS, MAIN_DRIVE, drivesOff(off)].filter(Boolean).join("\n");
+  // 각 덩어리는 다른 지시와 같이 빈 줄로 나눈다 — 한 문단으로 붙으면 구획이 흐려진다.
+  return [own, MAIN_INSTRUCTIONS, MAIN_DRIVE, drivesOff(off)].filter(Boolean).join("\n\n");
 }
 
 /** The exact preface every skills section opens with, above any skill body. */

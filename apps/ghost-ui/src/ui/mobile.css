@@ -56,10 +56,11 @@
   .work-board .ghost-filter button:hover::before { background: var(--ghost-hover); }
   .work-board .ghost-filter button[aria-pressed="true"]::before { background: var(--ghost-surface); box-shadow: var(--shadow-btn); }
   .shell-sidebar { display: none; }
-  .compact-dock { display: grid; flex: none; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding: 7px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--ghost-page); border-top: 1px solid var(--ghost-line); }
+  .compact-dock { display: grid; flex: none; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 7px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--ghost-page); border-top: 1px solid var(--ghost-line); }
   .compact-dock[data-hidden], &[data-keyboard="open"] .compact-dock, .shell:has(.cm-editor) .compact-dock { display: none; }
-  .compact-dock button { display: flex; min-height: 49px; align-items: center; justify-content: center; flex-direction: column; gap: 5px; border: 0; border-radius: 13px; background: none; color: var(--ghost-ink3); font-size: 10px; font-weight: 500; cursor: pointer; }
+  .compact-dock button { display: flex; min-height: 49px; align-items: center; justify-content: center; flex-direction: column; gap: 5px; border: 0; border-radius: 13px; background: none; color: var(--ghost-ink3); font-size: 11px; font-weight: 500; cursor: pointer; }
   .compact-dock button[aria-current] { color: var(--ghost-ink); background: var(--ghost-hover); }
+  .ghost-titlebar .shell-icon-button[aria-current] { color: var(--ghost-ink); background: var(--ghost-hover); }
   .compact-dock__icon { position: relative; }
   .compact-dock__badge { position: absolute; left: 15px; top: -5px; min-width: 15px; padding: 2px 4px; border-radius: 10px; background: var(--ghost-amber); color: var(--ghost-canvas); font-size: 9px; line-height: 1.1; }
   .workspace-page { display: flex; min-height: 0; flex-direction: column; padding: 4px 18px 16px; }

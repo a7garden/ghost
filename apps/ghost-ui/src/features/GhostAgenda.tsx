@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, Clock3, Moon, Pause, Play } from 'lucide-react';
 import type { Ghost, State } from '@ghost/contract';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { useHost } from '../host/context';
 import { specLabel } from './Schedules';
 import { uiTerms } from '../uiText';
@@ -41,14 +41,16 @@ export function GhostAgenda({ ghost, state, navigate }: { ghost: Ghost; state: S
   const { client } = useHost();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState('');
+  const [error, setError] = useState('');
   const items = ghostAgenda(state, ghost.id);
   const waiting = items.filter(item => !item.paused && item.kind !== 'plan').length;
   const plan = state.autonomy?.find(item => item.ghostId === ghost.id);
   const offDuty = state.duty ? !state.duty.onDuty : false;
   const go = (path: string) => () => { setOpen(false); navigate(path); };
   const toggle = async (scheduleId: string, paused: boolean) => {
-    setPending(scheduleId);
+    setPending(scheduleId); setError('');
     try { await client.send({ type: 'schedule.update', scheduleId, paused }); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : '예약을 바꾸지 못했습니다.'); }
     finally { setPending(''); }
   };
   return <Popover open={open} onOpenChange={setOpen}>
@@ -60,6 +62,7 @@ export function GhostAgenda({ ghost, state, navigate }: { ghost: Ghost; state: S
     </PopoverTrigger>
     <PopoverContent side="bottom" align="end" aria-label={`${ghost.name} 예약`} className="grid w-80 gap-0.5 p-1.5">
       {offDuty && <p className="agenda-note"><Moon aria-hidden="true"/>퇴근 중이라 출근할 때까지 실행하지 않습니다.</p>}
+      {error && <InlineError className="mb-1">{error}</InlineError>}
       <div className="max-h-[60dvh] overflow-y-auto">
         {items.map(item => <div key={item.id} className="agenda-row" data-paused={item.paused || undefined} data-kind={item.kind}>
           <div className="min-w-0 flex-1">

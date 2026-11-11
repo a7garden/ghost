@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { BriefcaseBusiness, Home, Inbox, Menu, PanelsTopLeft, Search, Settings } from 'lucide-react';
+import { Home, Inbox, Menu, MessageCircle, Search, Settings } from 'lucide-react';
 import { CommandPalette, Dialog, DialogContent, DialogTitle, TitleBar, type CommandItem } from '../ui'
 import { routeLabels } from '../uiText';
 import { shortcut } from '../ui/keys';
@@ -34,14 +34,16 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
   const search = <button type="button" className="shell-search" aria-label="명령 검색" title={`명령 검색 · ${shortcut('K')}`} onClick={() => onPaletteOpenChange(true)}>
     <Search aria-hidden="true"/><span className="shell-search__label">검색</span><kbd>{shortcut('K')}</kbd>
   </button>;
+  // 2026.11.11 : 탭 다섯 개(홈 · 확인할 일 · 맡긴 일 · 작업실 · 설정)가 많다는 의견으로 셋으로 줄였다.
+  // 맡긴 일은 홈의 「진행 중」 · 「맡긴 일 전체」에서, 설정은 위쪽 톱니에서 연다. 하위 화면은 자기 갈래의 탭을 켠다.
   const destinations = [
-    { id: 'home', path: '/', label: routeLabels.home, icon: Home },
-    { id: 'inbox', path: '/inbox', label: routeLabels.inbox, icon: Inbox },
-    { id: 'work', path: '/work', label: routeLabels.work, icon: BriefcaseBusiness },
-    { id: 'workspace', path: '/workspace', label: '작업실', icon: PanelsTopLeft },
-    { id: 'settings', path: '/settings', label: routeLabels.settings, icon: Settings },
+    { id: 'home', path: '/', label: routeLabels.home, icon: Home, sections: ['home', 'work'] },
+    { id: 'workspace', path: '/workspace', label: '대화', icon: MessageCircle, sections: ['workspace', 'ghosts', 'spaces'] },
+    { id: 'inbox', path: '/inbox', label: routeLabels.inbox, icon: Inbox, sections: ['inbox'] },
   ];
-  const right = <span className="flex items-center gap-2">{duty}{search}</span>;
+  const settings = !desktop && <button type="button" className="shell-icon-button min-[56rem]:hidden" aria-label={routeLabels.settings} title={routeLabels.settings}
+    aria-current={section === 'settings' ? 'page' : undefined} onClick={() => navigate('/settings')}><Settings aria-hidden="true"/></button>;
+  const right = <span className="flex items-center gap-2">{duty}{search}{settings}</span>;
   const left = <>{desktop && <button type="button" className="shell-icon-button min-[56rem]:hidden" aria-label="전체 메뉴" onClick={() => setMenuOpen(true)}><Menu aria-hidden="true"/></button>}{location}</>;
   return <div className="shell" data-fill={fill || undefined}>
     {desktop
@@ -58,7 +60,7 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
       </main>
     </div>
     {!desktop && <nav className="compact-dock" aria-label="주요 화면" data-hidden={hideDock || undefined}>
-      {destinations.map(item => <button key={item.id} type="button" aria-current={section === item.id ? 'page' : undefined} onClick={() => navigate(item.path)}>
+      {destinations.map(item => <button key={item.id} type="button" aria-current={item.sections.includes(section) ? 'page' : undefined} onClick={() => navigate(item.path)}>
         <span className="compact-dock__icon"><item.icon size={21} aria-hidden="true"/>{item.id === 'inbox' && attentionCount > 0 && <span className="compact-dock__badge">{attentionCount}<span className="sr-only">개 확인 요청</span></span>}</span>
         <span>{item.label}</span>
       </button>)}

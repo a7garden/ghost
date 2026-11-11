@@ -62,6 +62,7 @@ const localDay = (at: number) => new Date(at).toLocaleDateString("en-CA");
 const stamp = (at: number) =>
   new Date(at).toLocaleString("en-CA", { weekday: "short", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 const spread = (ghostId: string) => Number.parseInt(digestOf(ghostId).slice(0, 8), 16) % FIRST_SPREAD;
+const isMain = (ghost: Ghost) => ghost.isDefault && ghost.state === "active" && ghost.deletedAt === null;
 const live = (work: Work) => !["done", "failed", "cancelled"].includes(work.state);
 
 /**
@@ -126,6 +127,20 @@ export class Autonomy {
     return this.load(ghostId).enabled;
   }
 
+  /**
+   * Whether this Ghost is offered plan_next at all: the active main Ghost plans teammates even with its own
+   * drive off; any other Ghost only while its own drive is on. The tool grant and the prompt both ask here,
+   * so they cannot drift from `authorize`.
+   */
+  offersPlanning(ghost: Ghost): boolean {
+    return this.plansTeam(ghost) || this.enabled(ghost.id);
+  }
+
+  /** Whether this Ghost plans its teammates' looks: the active main Ghost only. */
+  plansTeam(ghost: Ghost): boolean {
+    return isMain(ghost);
+  }
+
   setEnabled(ghostId: string, enabled: boolean): AutonomyPlan {
     const ghost = this.core.ledger.ghost(ghostId);
     if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
@@ -166,7 +181,7 @@ export class Autonomy {
     const caller = this.core.ledger.ghost(callerId);
     const target = this.core.ledger.ghost(targetId);
     if (target.id !== caller.id) {
-      if (!caller.isDefault || caller.state !== "active" || caller.deletedAt !== null) throw forbidden("only the main Ghost plans another Ghost's next look");
+      if (!isMain(caller)) throw forbidden("only the main Ghost plans another Ghost's next look");
       if (target.isDefault) throw forbidden("the main Ghost plans its own time");
     }
     if (target.deletedAt !== null || target.state !== "active") throw conflict(`${target.name} is not active`);
