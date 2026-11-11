@@ -48,12 +48,12 @@ Geist worker의 IPC는 실행 파일 identity를 기준으로 나뉘므로 Host�
 PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원장 → 서명 헬퍼 → agent-desktop/Geist 경로로 한글 값 채우기, 체크박스 변경, 화면 JPEG와 좌표 클릭 결과를 재관찰했다. Geist의 실제 키보드 한글 입력도 확인했다. 격리 Host가 제공하는 설정 화면에서 **PC 조작 16/16**과 **PC 직접 실행** 저장을 Owner API로 확인했다. PC 검사 20개·100개 단언과 타입 검사를 통과했다. 독립 검토의 출력 파이프 정리 제한·종료 단축키 일관성·다른 Space 창 거부를 반영했다. 물리 클릭은 전달 성공만으로 앱 반영을 단정하지 않는다. 시험 창은 첫 클릭이 활성화만 한 경우가 있어, 명시적 창 포커스 뒤 새 화면에서 클릭하고 결과를 확인했다.
 
 
-## 현재 설치 (2026-11-11)
+## 현재 설치 (2026-11-12)
 
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.7.2-f615c74`(GitHub Release `v2.7.2`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`(셸 shim) → `Ghost Host.app/Contents/MacOS/ghost`, `current` → `releases/2.8.1-6ce871a`(GitHub Release `v2.8.1`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`, Obscura), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 기억 `memory.db`(Host 내장), 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.4(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -61,6 +61,14 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
+
+### macOS 권한 중복 요청 수정과 2.8.1 운영 반영 — 2026-11-12
+
+- 원인: Host가 번들 없는 실행 파일 `releases/<버전>/ghost`여서 TCC가 경로(`identifier_type=Path`)로 기억했다. 업데이트마다 새 앱으로 취급돼 같은 권한을 다시 묻고, 시스템 설정 「앱 관리」에 릴리스마다 `ghost` 줄이 늘었다(7줄). 「앱 관리」 요청은 Host가 띄운 Chrome의 GoogleUpdater였고, 「문서」·사진·전체 디스크 요청은 Ghost 셸 명령이었다. `ls -d ~/Documents/Workspace/Projects/*`는 응답 없는 동의 창 앞에서 2시간 멈췄고, `find / …`도 같은 요청을 일으켰다. 등록된 문서 공간은 모두 `~/Workspace/Projects` 아래라 원인이 아니었다.
+- 수정: Host를 `Ghost Host.app`(`dev.projectoxi.ghost.host`, Developer ID)으로 감싸고, `releases/<name>/ghost`는 번들 실행 파일을 exec하는 셸 shim으로 바꿨다. 같은 서명 번들을 서로 다른 경로 두 곳에서 launchd로 띄운 실험에서 TCC 주체는 둘 다 번들 ID였고, 맨 실행 파일은 경로였다. 실행 중인 Host는 자기 번들을 Launch Services에 등록한다. Chrome은 `exec-responsible`(책임 프로세스 disclaim)로 시작해 자기 자신이 책임 프로세스가 된다. 컴파일한 시험 번들에서 example.com을 연 Chrome의 responsible pid가 Chrome 자신이었다. 무인 셸 명령은 보호 폴더 경로를 쓰거나 `/`·`/Users`·홈·`~/Library`를 재귀로 훑으면 실행 전에 거부한다.
+- 검증: Host 1,073 통과·46 생략, UI 230, 셸 Rust 28, 계약·Host·UI 타입, 전체 빌드·Developer ID·업데이터 서명·매니페스트·묶음 왕복 검증(두 번들 서명 포함). 운영 중인 2.7.2와 같은 업데이터 코드(`main` 3b1ce04)가 새 묶음의 tar 검사·파일 검증·shim 경유 `ghost version`을 통과했다. 독립 Codex 검토의 가드 누락 3건(`rg --files /`, `env -i find /`, `cp -r ~`)을 고쳤다.
+- 배포: [v2.8.1](https://github.com/a7garden/ghost/releases/tag/v2.8.1), 소스 `6ce871a`. 셸 0.2.4와 iPhone 빌드는 그대로다. 대기 중이던 2.8.0 설치 요청을 취소하고 이를 포함하는 2.8.1로 바꿔 요청했다. 실행 중인 맡긴 일 때문에 08:15부터 08:33까지 `waiting`이었고 끊지 않았다. `lastResult: installed`(`2.7.2-f615c74` → `2.8.1-6ce871a`), 백업 `~/.local/share/ghost/backups/pre-2.8.1-6ce871a-1794439981537/`, health 2.8.1·runtime ready. PID 97271의 단일 62062 리스너가 `releases/2.8.1-6ce871a/Ghost Host.app/Contents/MacOS/ghost`로 운영 원장을 연다. 번들 서명·Launch Services 등록·`browser/chrome-launch`를 확인했다. Ghost·대화·Space·기기·연결 ID 누락은 없다. 상태 창에서 빠진 맡긴 일 8개는 원장에 있음을 확인했다.
+- 소유자 몫: 이후 macOS는 `Ghost Host`에 대해 권한마다 한 번만 묻고, 그 답은 업데이트 뒤에도 유지된다. 시스템 설정의 기존 `ghost` 줄은 지난 릴리스 경로를 가리키므로 `−`로 지워도 된다.
 
 ### 노란 표시 기준 수정과 2.7.2 운영 반영 — 2026-11-11
 
