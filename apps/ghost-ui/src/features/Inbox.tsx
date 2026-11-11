@@ -34,7 +34,10 @@ export function InboxView({ state, navigate, focusDecisionId }: {
   const settled = state.decisions.filter(decision => decision.state !== 'pending')
     .sort((a, b) => (b.resolvedAt ?? b.createdAt) - (a.resolvedAt ?? a.createdAt));
   const shownSettled = allSettled ? settled : settled.slice(0, SETTLED_PREVIEW);
-  const notifications = [...state.notifications].sort((a, b) => b.createdAt - a.createdAt);
+  // 아직 답을 기다리는 질문의 알림은 위 카드가 이미 말한다 — 같은 질문을 소식에 또 쌓지 않는다.
+  const pendingIds = new Set(pending.map(decision => decision.id));
+  const notifications = state.notifications.filter(item => !item.decisionId || !pendingIds.has(item.decisionId))
+    .sort((a, b) => b.createdAt - a.createdAt);
   const unread = notifications.filter(item => !item.readAt);
   const shownNotifications = notifications.slice(0, notificationLimit);
   const moreNotifications = notifications.length - shownNotifications.length;

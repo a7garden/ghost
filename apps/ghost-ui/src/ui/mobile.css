@@ -61,6 +61,8 @@
   .compact-dock button { display: flex; min-height: 49px; align-items: center; justify-content: center; flex-direction: column; gap: 5px; border: 0; border-radius: 13px; background: none; color: var(--ghost-ink3); font-size: 11px; font-weight: 500; cursor: pointer; }
   .compact-dock button[aria-current] { color: var(--ghost-ink); background: var(--ghost-hover); }
   .ghost-titlebar .shell-icon-button[aria-current] { color: var(--ghost-ink); background: var(--ghost-hover); }
+  /* 위쪽 바의 버튼은 채움 없이 둔다 — 색은 「근무 중」 하나만 말한다 (강조는 하나). */
+  .ghost-titlebar .shell-search:not([data-duty="on"]) { background: none; color: var(--ghost-ink2); }
   .compact-dock__icon { position: relative; }
   .compact-dock__badge { position: absolute; left: 15px; top: -5px; min-width: 15px; padding: 2px 4px; border-radius: 10px; background: var(--ghost-amber); color: var(--ghost-canvas); font-size: 9px; line-height: 1.1; }
   .workspace-page { display: flex; min-height: 0; flex-direction: column; padding: 4px 18px 16px; }
