@@ -270,6 +270,7 @@ export class AgentBrowser implements BrowserPort {
     } finally { closeSync(fd); }
   }
   private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
+    if (argv[0] !== "close" && (session.loginObserver?.ended || session.loginNeedsRecovery)) throw new CommandError("unavailable","Trusted browser observation ended; take a new explicit action to reconnect");
     if (["open","back","forward","reload","close"].includes(argv[0]!) || argv[0] === "tab" && argv[1] !== "list") session.unknownOwnerText?.reset();
     if (session.bridge && ["open", "back", "forward", "reload", "close"].includes(argv[0]!)) {
       session.bridge.frame = undefined; session.bridge.damage = undefined; session.bridge.renderer?.invalidate();
@@ -313,6 +314,7 @@ export class AgentBrowser implements BrowserPort {
         await this.ensureLogin(session);
       } finally { session.loginBootstrapping = false; }
     }
+    // An awaited bootstrap may itself lose observation before the real command.
     if (argv[0] !== "close" && (session.loginObserver?.ended || session.loginNeedsRecovery)) throw new CommandError("unavailable","Trusted browser observation ended; take a new explicit action to reconnect");
     try { return await this.invokeCli(session, argv, options); }
     finally {
@@ -978,6 +980,9 @@ export class AgentBrowser implements BrowserPort {
   }
   private async resumeClosedWindow(session: Session) {
     if (!session.headed || this.sessionMap.get(session.ref.conversationId) !== session) return;
+    // A stream/window callback is not a fresh action. Preserve gap policy and
+    // retired restore state until explicit recovery can isolate the runtime.
+    if (session.loginNeedsRecovery || session.loginObserver?.ended || session.loginRecovery) return;
     let url = session.bridge?.page?.url ?? session.handoffUrl ?? "about:blank";
     if (this.hasProtectedValue(session,url)) url = "about:blank";
     session.headed = false; clearInterval(session.headedPoll);
