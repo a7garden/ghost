@@ -53,20 +53,23 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.6-189b707`(GitHub Release `v2.4.6`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
-| 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.7.0-f2871d2`(GitHub Release `v2.7.0`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`, Obscura), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 기억 `memory.db`(Host 내장), 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
-| Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
+| Mac 앱 | `~/Applications/Ghost.app` 0.2.4(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent, `dev.garden.macfra.agent`(2026-11-08 Ghost `Mac 관리`로 이전, disabled) |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
-Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
 
-### GitHub `main` 병합과 2.7.0 회수 — 2026-11-11
+### GitHub `main` 병합과 2.7.0 설치 — 2026-11-11
 
 - 로컬 `main`(`ce1d4a5`)과 GitHub `main`(`30c0637`)의 갈라짐을 병합 커밋 `f2871d2`로 합쳐 Gitea·GitHub `main`에 일반 푸시했다. 충돌 9개 파일 가운데 브라우저는 로컬의 소유자 입력 관찰을 기준으로 승인 대기 세션 유지·지난 ref 거부·승인 전 확인 실패의 거절 처리·아이디 비가림을 옮겼다. `protectOwnerInput`은 쓰지 않고, 알려진 필드에 소유자가 입력하면 URL이 바뀔 때까지 그 탭 캡처를 막는다(실제 Chrome 회귀 검사). 휴대폰 하단 탭은 셋을 유지하고 메일은 명령 검색으로 연다.
 - 검사: Host 1046 통과·8 생략(실제 Chrome·Obscura 포함), UI 229, 계약·Host·UI 타입. 브라우저 병합은 Codex 독립 검토에서 P0–P2가 없었고 P3(분류기가 놓친 코드 칸)를 위 탭 잠금으로 반영했다.
-- `v2.7.0`(`f2871d2`, 셸 0.2.4)을 게시했으나 운영 설치가 실행 검증에서 `config.json: unknown key memory`로 멈췄다. `main`에는 배포 보류 중인 2.5.0 내장 기억·2.6.0 협업 후보와 수용 차단이 남은 셸 변경이 들어 있으므로 Release를 Draft로 되돌렸다(태그 `v2.7.0`은 남음). Latest는 다시 `v2.5.1`이고 운영은 2.5.1(PID 54825, 62062, 운영 루트)로 그대로다. 대화·작업·설정은 바꾸지 않았다.
+- 소유자 지시(「고치고 운영에 올려」)로 배포 보류 중이던 2.5.0 내장 기억·2.6.0 협업과 셸 변경을 포함한 `main`을 그대로 올렸다. 첫 설치는 실행 검증에서 `config.json: unknown key memory`로 멈췄다. 운영 원장 사본으로 버전 7→9 이관과 Ghost·대화·맡긴 일·효과·결정·기기·Space ID 보존, `integrity_check` ok를 먼저 확인했다.
+- 운영 `config.json`을 `backups/pre-2.7.0-config-1794401726.json`(0600)에 두고 `memory` 키만 지운 뒤 [v2.7.0](https://github.com/a7garden/ghost/releases/tag/v2.7.0)을 Owner API로 설치했다. `lastResult: installed`(`2.5.1-d8a1c8e` → `2.7.0-f2871d2`), Host 백업 `backups/pre-2.7.0-f2871d2-1794401747291/`, health 2.7.0·runtime ready, 단일 62062 리스너(PID 78864)·`codesign --verify --strict` 통과. Ghost 29·대화 307·Space 9·기기 1·연결 2의 ID와 맡긴 일 목록을 보존했다. 저장 형식이 바뀌었으므로 자동 롤백 대상은 아니다.
+- 기억 이관: 설치 뒤 Oxibrain을 `admin export`로 내보내 원장의 완료된 `memory_retain` 효과 124개와 episode ID로 모두 대조했다(앞선 스냅숏 58개는 원문 동일). 작성 Ghost별 18개 파일 `/team/<ghostId>/oxibrain.md`로 Owner API에 쓰고, 메인 Ghost에서 18개 모두 보이며 124개 원문이 빠짐없음을 확인했다. `~/.oxi/brain`·기억 관리 Ghost는 지우지 않았다.
+- 제공 UI(데스크톱·390px)에서 확인할 일 한 줄 목록과 「나중에」, 휴대폰 하단 탭 셋·위쪽 설정 버튼을 확인했다. 설치 앱은 이미 0.2.4이며, 띄웠지만 창이 현재 Space에서 잡히지 않아 네이티브 창 확인은 하지 못했다.
 
 ### 브라우저·금고·메일·문자 — 2026-11-11 (설치 대기)
 
