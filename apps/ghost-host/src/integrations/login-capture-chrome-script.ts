@@ -123,6 +123,8 @@ export function chromeLoginScript(controller: string, binding: string) {
           deferredPrivacy.length = 0; deferredBytes = 0; deferredOverflow = false; deferredScope = null;
         }
         nativeAllowed = value === true; ownerApi = api === true; key = paste = pending = composition = null;
+        // Control readiness is independent of URL/DOM credential observation.
+        return {version:1,documentId:documentToken,allowed:nativeAllowed,ownerApi};
       },
       selectAll() {
         const e = document.activeElement;

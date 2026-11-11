@@ -97,16 +97,19 @@ function records(root: string): Recorded[] {
 function commands(root: string) { return records(root).map(({ argv }) => argv.slice(argv.indexOf("--json") + 1)); }
 const session = { ghostId: "ghost1", conversationId: "conversation1" };
 function installFakeOwnerObserver(browser: AgentBrowser, root: string) {
-  type ObserverSession = { loginObserver?: { snapshot: () => Promise<LoginPage>; close: () => void } };
+  type ObserverSession = { loginObserver?: { readonly ended: boolean; snapshot: () => Promise<LoginPage>; close: () => void } };
   const owner = browser as unknown as { ensureLogin(session: ObserverSession): Promise<void> };
   spyOn(owner, "ensureLogin").mockImplementation(async session => {
-    session.loginObserver ??= {
+    if (session.loginObserver) return;
+    let ended = false;
+    session.loginObserver = {
+      get ended() { return ended; },
       snapshot: async () => {
         const path = join(root, "url");
         const url = existsSync(path) ? readFileSync(path, "utf8") : "about:blank";
         return { targetId: "tab1", documentId: `fixture:${url}`, url, origin: new URL(url).origin, fields: [], focused: null, clicked: null };
       },
-      close: () => {},
+      close: () => { ended = true; },
     };
   });
 }

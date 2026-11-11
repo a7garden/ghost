@@ -120,6 +120,19 @@ test("unknown owner text is bounded and scoped; edit boundaries never supply cre
   expect(values).toContain("4532015112830366");
 });
 
+test("isolated control readiness acknowledges exact modes without requiring a credential-ready DOM or origin",()=>{
+  const {context,emitted}=isolatedField("text","off");
+  context.location.href="about:blank";context.location.origin="null";
+  Object.defineProperty(context.document,"querySelectorAll",{value(){throw new Error("Control bootstrap read credential metadata");}});
+  Object.defineProperty(context.document,"activeElement",{get(){throw new Error("Control bootstrap read focus metadata");}});
+  const ack=runInNewContext("controller.native(true,false,false,false)",context);
+  expect(ack).toMatchObject({version:1,allowed:true,ownerApi:false});
+  expect(typeof ack.documentId).toBe("string");
+  expect(Object.keys(ack).sort()).toEqual(["allowed","documentId","ownerApi","version"]);
+  expect(runInNewContext("controller.native(false,true)",context)).toMatchObject({version:1,documentId:ack.documentId,allowed:false,ownerApi:true});
+  expect(emitted).toEqual([]);
+});
+
 test("child-frame listener emits byte-only privacy edits, never descriptors or DOM values", () => {
   const {input,listeners,emitted,context} = isolatedField("password","current-password",true);
   Object.defineProperty(input,"value",{get(){throw new Error("Child privacy listener read a DOM value");}});
@@ -407,10 +420,12 @@ test("sticky screenshot permission is denied before observer I/O; unrelated comm
     // Unit-test seam: inspect the in-process session, not external protocol data.
     const internal=browser as unknown as {sessionMap:Map<string,{loginObserver?:LoginObserver}>};
     const session=internal.sessionMap.get(ref.conversationId)!;
+    let closed=false;
     session.loginObserver={
+      get ended(){return closed;},
       snapshot:async()=>null,
-      updateMode:async()=>{modeCalls++;throw new CommandError("unavailable","Test observer is terminal");},
-      close(){},
+      updateMode:async()=>{modeCalls++;throw new CommandError("unavailable","Test observer mode acknowledgement failed");},
+      close(){closed=true;},
     };
     await expect(browser.run(ref,["screenshot"])).rejects.toMatchObject({code:"forbidden"});
     expect(modeCalls).toBe(0);

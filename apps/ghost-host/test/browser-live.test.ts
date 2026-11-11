@@ -48,11 +48,14 @@ test("one upstream serves four clients, bypasses a long Ghost read and isolates 
   writeFileSync(executable, `#!${process.execPath}\nconst args=process.argv.slice(process.argv.indexOf('--json')+1); if(args[0]==='hold') await fetch(args[1]); if(args[0]==='reload') await fetch('http://127.0.0.1:${upstream.port}/reload'); const data=args[0]==='stream'?{port:${upstream.port}}:args[0]==='get'&&args[1]==='cdp-url'?{cdpUrl:'ws://127.0.0.1:${upstream.port}/devtools/browser/live'}:{};process.stdout.write(JSON.stringify({success:true,data,error:null}));\n`);
   chmodSync(executable, 0o700);
   const browser = new AgentBrowser({ executable }, root);
-  type ObserverSession = { loginObserver?: { snapshot: () => Promise<LoginPage>; close: () => void } };
+  type ObserverSession = { loginObserver?: { readonly ended: boolean; snapshot: () => Promise<LoginPage>; close: () => void } };
   (browser as unknown as { ensureLogin(session: ObserverSession): Promise<void> }).ensureLogin = async session => {
-    session.loginObserver ??= {
+    if (session.loginObserver) return;
+    let ended = false;
+    session.loginObserver = {
+      get ended() { return ended; },
       snapshot: async () => ({ targetId: "fixture-tab", documentId: `fixture-${pageVersion}`, url: "https://example.com/", origin: "https://example.com", fields: [], focused: null, clicked: null }),
-      close: () => {},
+      close: () => { ended = true; },
     };
   };
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<Response>();
@@ -150,19 +153,22 @@ test("deferred owner metadata capture republishes fresh pixels after damage arri
   writeFileSync(executable, `#!${process.execPath}\nconst args=process.argv.slice(process.argv.indexOf('--json')+1);const data=args[0]==='stream'?{port:${upstream.port}}:args[0]==='get'&&args[1]==='cdp-url'?{cdpUrl:'ws://127.0.0.1:${upstream.port}/devtools/browser/deferred'}:{};process.stdout.write(JSON.stringify({success:true,data,error:null}));\n`);
   chmodSync(executable, 0o700);
   const browser = new AgentBrowser({ executable }, root);
-  type ObserverSession = { loginObserver?: { snapshot: () => Promise<LoginPage>; close: () => void } };
+  type ObserverSession = { loginObserver?: { readonly ended: boolean; snapshot: () => Promise<LoginPage>; close: () => void } };
   // Private test seams replace only credential metadata and observe the real upstream transport.
   const fixtureBrowser = browser as unknown as {
     ensureLogin(session: ObserverSession): Promise<void>;
     sessionMap: Map<string, { bridge?: { socket?: WebSocket } }>;
   };
   fixtureBrowser.ensureLogin = async session => {
-    session.loginObserver ??= {
+    if (session.loginObserver) return;
+    let ended = false;
+    session.loginObserver = {
+      get ended() { return ended; },
       snapshot: async () => {
         if (++snapshots === 3) { deferred.resolve(); await release.promise; }
         return { targetId: "fixture-tab", documentId: "fixture-document", url: "https://example.com/", origin: "https://example.com", fields: [], focused: null, clicked: null };
       },
-      close: () => {},
+      close: () => { ended = true; },
     };
   };
   let stop: (() => void) | undefined;

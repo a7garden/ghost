@@ -80,6 +80,12 @@ interface Session {
   unknownDigitCount?: number;
   modelPasswords?: Set<string>;
   loginObserver?: LoginObserver;
+  loginNeedsRecovery?: "headless" | "native";
+  loginResetPage?: boolean;
+  loginRecovery?: Promise<void>;
+  // Recovery isolation lasts for this Host Session, including later handoffs.
+  // Explicit close/newSession is the existing reset boundary; old saved state is retained.
+  privateRestoreKey?: string;
   loginBootstrapping?: boolean;
   loginStarting?: Promise<void>;
   loginEpoch?: number;
@@ -290,10 +296,14 @@ export class AgentBrowser implements BrowserPort {
       }
     }
     if (argv[0] === "close") {
+      session.loginResetPage = false;
+      session.loginNeedsRecovery = undefined;
       session.loginEpoch = (session.loginEpoch ?? 0) + 1;
       session.loginStarting = undefined;
       session.loginObserver?.close(); session.loginObserver = undefined; session.login?.clear(); session.login = undefined;
-      session.secrets = session.secrets.filter(entry => !entry.ownerScope); session.ownerRedactions?.clear();
+      // Closing a runtime for handoff is not the end of its Host privacy session.
+      for (const entry of session.secrets) entry.ownerScope = undefined;
+      session.ownerRedactions?.clear();
     } else if (!obscura && (this.onLogin || session.headed || session.captureArmed) && !session.loginObserver && !session.loginBootstrapping) {
       // Install Chrome's isolated preload on a blank document before any site's own scripts run.
       // --restore and the network init still apply to this bootstrap just as to the real navigation.
@@ -303,6 +313,7 @@ export class AgentBrowser implements BrowserPort {
         await this.ensureLogin(session);
       } finally { session.loginBootstrapping = false; }
     }
+    if (argv[0] !== "close" && (session.loginObserver?.ended || session.loginNeedsRecovery)) throw new CommandError("unavailable","Trusted browser observation ended; take a new explicit action to reconnect");
     try { return await this.invokeCli(session, argv, options); }
     finally {
       if (obscura && session.obscura) {
@@ -339,7 +350,7 @@ export class AgentBrowser implements BrowserPort {
     // outbound sockets to the Host proxy, including requests outside HTTP.
     const connection = session.engine === "obscura"
       ? (argv[0] !== "close" && session.obscura ? ["--cdp", session.obscura.websocket] : [])
-      : ["--restore", `ghost-${session.ref.ghostId}`,
+      : ["--restore", session.privateRestoreKey ?? `ghost-${session.ref.ghostId}`,
       "--executable-path", expand(this.config.chrome ?? CHROME),
       "--init-script", this.initPath,
       "--args", `--proxy-server=${proxy.url},--proxy-bypass-list=<-loopback>,--force-webrtc-ip-handling-policy=disable_non_proxied_udp`,
@@ -707,7 +718,11 @@ export class AgentBrowser implements BrowserPort {
     // A screenshot can expose even the first byte, before PAN/code recognition.
     session.passwordScreenshots.set(page.targetId,page.url);
     const document = JSON.stringify([page.targetId,page.documentId]);
-    if (session.unknownNumericPage !== document) { session.unknownNumericPage = document; session.unknownDigitCount = 0; }
+    if (session.unknownNumericPage !== document) {
+      const previousDocument = session.unknownNumericPage;
+      session.unknownNumericPage = document;
+      if (previousDocument !== undefined) session.unknownDigitCount = 0;
+    }
     if (edit.type === "insert") {
       // A bounded digit set also protects short numeric fields and cursor edits,
       // without turning single digits into URL/operation authority.
@@ -732,7 +747,76 @@ export class AgentBrowser implements BrowserPort {
   private hasProtectedValue(session: Session, value: string) {
     return session.secrets.some(secret => secret.variants.some(variant => variant && value.includes(variant)) || !!secret.cardPattern && value.search(secret.cardPattern) >= 0);
   }
+  private protectNativeGap(session: Session) {
+    session.screenshotsBlocked = true;
+    const digits = session.unknownNumericDigits ??= new Set<string>();
+    for (const digit of "0123456789") digits.add(digit);
+  }
+  private async recoverLogin(session: Session) {
+    if (session.loginRecovery) { await session.loginRecovery; return; }
+    const previous = session.loginObserver;
+    const mode = session.loginNeedsRecovery ?? (previous?.ended ? session.headed ? "native" : "headless" : undefined);
+    if (!mode) return;
+    const recovery = (async () => {
+      // Wait for earlier owner work to settle; its original caller still gets
+      // its failure. Do not replay it or let that prior failure poison this action.
+      await session.ownerBusy?.catch(() => {});
+      if (session.loginObserver !== previous) return;
+      session.loginNeedsRecovery = mode;
+      const resetPage = mode === "native" || session.loginResetPage === true;
+      clearTimeout(session.captureTimer);
+      session.loginEpoch = (session.loginEpoch ?? 0)+1;
+      session.loginStarting = undefined;
+      session.loginObserver = undefined;
+      session.login?.clear(); session.login = undefined;
+      session.unknownOwnerText?.reset();
+      // A new isolated world changes its document token, not necessarily the DOM.
+      // Carry the privacy-only digit count into its first observed document.
+      session.unknownNumericPage = undefined;
+      previous?.close();
+      session.loginBootstrapping = true;
+      try {
+        if (resetPage) {
+          // Native gaps may contain unseen bytes; an unobservable headless page
+          // may immediately kill another observer. Neither document is reused.
+          clearInterval(session.headedPoll);
+          session.promoting = true; session.ownerGeneration = (session.ownerGeneration ?? 0)+1;
+          if (mode === "native") this.protectNativeGap(session);
+          this.disconnect(session,"engine_changed");
+          // Keep the recovery marker intact through teardown. The native helper
+          // awaits actual process reap before a fresh restore identity is selected.
+          if (!(await this.invokeCli(session,["close"])).ok) throw new CommandError("unavailable","Could not close the unobservable browser");
+          session.headed = false; session.handoffUrl = null; session.handoffFallback = true;
+          // Retain the old saved state, but never reload its possibly unseen
+          // cookies/localStorage into this recovered session's private runtime.
+          session.privateRestoreKey = `private-${randomUUID()}`;
+          if (!(await this.invokeCli(session,["open","about:blank"])).ok) throw new CommandError("unavailable","Could not initialize a private browser after capture ended");
+        } else {
+          // Non-mutating native bootstrap retains an existing page, or starts a
+          // blank browser if its daemon/browser exited. No failed action replays.
+          if (!(await this.invokeCli(session,["tab","list"])).ok) throw new CommandError("unavailable","Could not reinitialize private browser observation");
+        }
+        await this.startLogin(session);
+        session.loginNeedsRecovery = undefined;
+        session.loginResetPage = false;
+      } catch (error) {
+        // Do not retry this action. A subsequent explicit action can reset a
+        // document that could not support a fresh isolated observer in place.
+        session.loginResetPage = true;
+        throw error;
+      } finally {
+        session.loginBootstrapping = false;
+        if (resetPage) session.promoting = false;
+      }
+      const notice = resetPage ? "Private input capture ended. The browser was reset to a blank page with separate saved state; earlier saved state was retained. Take a fresh snapshot before continuing." : "Private input capture reconnected. Earlier login ownership was discarded; take a fresh snapshot before continuing.";
+      session.notice = `${session.notice ?? ""}\n${notice}`.trim();
+      if (resetPage) throw new CommandError("conflict","Private input capture ended; the browser was reset. Use the fresh page rather than replaying input");
+    })();
+    session.loginRecovery = recovery;
+    try { await recovery; } finally { if (session.loginRecovery === recovery) session.loginRecovery = undefined; }
+  }
   private async withModelCapture<T>(session: Session, perform: () => Promise<T>): Promise<T> {
+    await this.recoverLogin(session);
     session.modelCaptureDepth = (session.modelCaptureDepth ?? 0) + 1;
     try { await session.loginObserver?.updateMode?.(); return await perform(); }
     finally { session.modelCaptureDepth = (session.modelCaptureDepth ?? 1) - 1; await session.loginObserver?.updateMode?.(); }
@@ -742,11 +826,23 @@ export class AgentBrowser implements BrowserPort {
     if (!session.notice?.includes(activity)) session.notice = `${session.notice ?? ""}\n${activity}`.trim();
   }
   private async ensureLogin(session: Session) {
+    if (session.loginNeedsRecovery || session.loginObserver?.ended) throw new CommandError("unavailable","Private browser observation needs a new explicit action");
     if (session.engine === "obscura" || session.loginObserver) return;
     if (session.loginStarting) return session.loginStarting;
     const starting = this.startLogin(session);
     session.loginStarting = starting;
-    try { await starting; } finally { if (session.loginStarting === starting) session.loginStarting = undefined; }
+    try { await starting; }
+    catch (error) {
+      // A failed initial install can also leave a visible native window without
+      // observation. Only the next explicit action may recover that gap.
+      if (session.loginStarting === starting && !session.loginObserver && this.sessionMap.get(session.ref.conversationId) === session) {
+        session.login?.clear(); session.loginEpoch = (session.loginEpoch ?? 0)+1;
+        session.loginNeedsRecovery = session.headed ? "native" : "headless";
+        session.loginResetPage = true;
+        if (session.headed) this.protectNativeGap(session);
+      }
+      throw error;
+    } finally { if (session.loginStarting === starting) session.loginStarting = undefined; }
   }
   private async startLogin(session: Session) {
     const epoch = session.loginEpoch ?? 0;
@@ -764,12 +860,23 @@ export class AgentBrowser implements BrowserPort {
       activity: () => { if (epoch === (session.loginEpoch ?? 0)) { session.captureArmed = true; this.ownerActivity(session); } },
       secret: (page,kind) => { if (epoch === (session.loginEpoch ?? 0)) { if (kind === "sensitive") session.screenshotsBlocked = true; else session.passwordScreenshots.set(page.targetId,page.url); } },
       privacy: (page,scope,edit) => { if (epoch === (session.loginEpoch ?? 0)) this.protectUnknownInput(session,page,scope,edit); },
-      windowClosed: () => { if (epoch === (session.loginEpoch ?? 0) && session.headed) void this.resumeClosedWindow(session).catch(() => {}); },
+      ended: (observer,reason) => {
+        if (epoch !== (session.loginEpoch ?? 0) || session.loginObserver !== observer) return;
+        session.login?.clear(); session.loginStarting = undefined;
+        session.loginEpoch = (session.loginEpoch ?? 0)+1;
+        session.loginNeedsRecovery = session.headed ? "native" : "headless";
+        session.loginResetPage = reason.cause === "controller-ack" || reason.cause.startsWith("protocol-");
+        if (session.headed) this.protectNativeGap(session);
+      },
+      windowClosed: observer => { if (epoch === (session.loginEpoch ?? 0) && session.loginObserver === observer && session.headed) void this.resumeClosedWindow(session).catch(() => {}); },
     });
-    if (epoch !== (session.loginEpoch ?? 0) || this.stopping) { observer.close(); throw new CommandError("unavailable","Browser input session changed"); }
+    if (epoch !== (session.loginEpoch ?? 0) || this.sessionMap.get(session.ref.conversationId) !== session || observer.ended || this.stopping) { observer.close(); throw new CommandError("unavailable","Browser input session changed"); }
     session.loginObserver = observer;
   }
   private async capture(session: Session, finished = false) {
+    // A timer/poll is not a fresh owner/model action and cannot re-establish
+    // authority after a gap. Explicit entry points perform recovery separately.
+    if (session.loginNeedsRecovery || session.loginObserver?.ended) return;
     if (!session.captureArmed && (!finished || !session.loginObserver)) return;
     let page: LoginPage | null = null;
     try {
@@ -858,6 +965,8 @@ export class AgentBrowser implements BrowserPort {
     if (reason && reason !== "engine_changed") {
       clearTimeout(session.captureTimer); clearInterval(session.headedPoll);
       session.loginEpoch = (session.loginEpoch ?? 0) + 1; session.loginStarting = undefined;
+      session.loginNeedsRecovery = undefined;
+      session.loginResetPage = false;
       session.loginObserver?.close(); session.loginObserver = undefined;
       session.login?.clear(); session.login = undefined; session.secrets = []; session.notice = undefined;
       session.modelPasswords?.clear(); session.captureArmed = false;
@@ -1005,6 +1114,8 @@ export class AgentBrowser implements BrowserPort {
       while (session.secretGate) await session.secretGate;
       this.existing(ref);
       if (session.promoting || generation !== (session.ownerGeneration ?? 0)) throw new CommandError("conflict","브라우저가 바뀌었어요. 새 화면에서 다시 선택해 주세요");
+      if (input.type !== "viewport") await this.recoverLogin(session);
+      if (this.sessionMap.get(ref.conversationId) !== session || generation !== (session.ownerGeneration ?? 0)) throw new CommandError("conflict","Browser input session changed; use the fresh page");
       if (input.type === "viewport") {
         session.bridge?.renderer?.invalidate();
         session.ownerBusy = this.invoke(session,["set","viewport",String(input.width),String(input.height)]).then(result => {
@@ -1083,6 +1194,7 @@ export class AgentBrowser implements BrowserPort {
   handoff(ref: BrowserSessionRef, url: string | null, options: { headed?: boolean } = {}) {
     this.existing(ref);
     return this.enqueueSession(ref, async (session) => {
+      await this.recoverLogin(session);
       const headed = options.headed !== false;
       if (headed ? session.headed : session.engine === "chrome") return;
       session.promoting = true;
@@ -1135,9 +1247,11 @@ export class AgentBrowser implements BrowserPort {
   }
   endHandoff(ref: BrowserSessionRef) {
     return this.enqueueSession(ref, async (session) => {
+      await this.recoverLogin(session);
       clearTimeout(session.captureTimer); clearInterval(session.headedPoll);
       await session.ownerBusy;
       await this.capture(session, true);
+      if (session.loginNeedsRecovery || session.loginObserver?.ended) throw new CommandError("unavailable","Private browser observation ended during handoff completion");
       // A live-view handoff never left headless mode: the Ghost continues on the page the owner left. A session
       // lost to a host restart is new and empty either way, so there is nothing to reopen.
       if (!session.headed && session.handoffUrl === null) return { fallback: false };
