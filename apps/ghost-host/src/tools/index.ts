@@ -8,7 +8,6 @@ import type { DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort,
 import type { TossPort } from "../integrations/toss.ts";
 import type { MemoryStore } from "../stores/memory.ts";
 import type { MemoryEngine } from "../memory/types.ts";
-import type { TossPort } from "../integrations/toss.ts";
 import type { Vault } from "../stores/vault.ts";
 import { BROWSER_INSTRUCTIONS, createBrowserTools } from "./browser.ts";
 import { createDesktopTools, DESKTOP_INSTRUCTIONS } from "./desktop.ts";
