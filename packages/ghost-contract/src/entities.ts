@@ -631,6 +631,8 @@ export const DEFAULT_OWNER_LANGUAGE = "ko";
 export const Settings = Type.Object({
   defaultModel: nullable(ModelRef),
   reviewModel: nullable(ModelRef),
+  /** Fallback models for every Ghost that has none of its own; empty means no fallback. */
+  defaultFallbacks: Type.Optional(FallbackList),
   providers: Type.Array(Provider, { maxItems: 64 }),
   ownerLanguage: Type.Optional(OwnerLanguage),
   approvals: Type.Optional(ApprovalPolicy),

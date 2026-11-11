@@ -434,6 +434,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
     case "settings.update":
       ledger.tx(() => {
         if (command.defaultModel !== undefined) ledger.putSetting("defaultModel", command.defaultModel);
+        if (command.defaultFallbacks !== undefined) ledger.putSetting("defaultFallbacks", command.defaultFallbacks);
         if (command.reviewModel !== undefined) ledger.putSetting("reviewModel", command.reviewModel);
         if (command.ownerLanguage !== undefined) ledger.putSetting("ownerLanguage", command.ownerLanguage);
         if (command.approvals !== undefined) ledger.putSetting("approvals", command.approvals);

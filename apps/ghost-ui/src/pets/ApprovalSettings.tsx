@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Check } from 'lucide-react';
+import { Check, Crown } from 'lucide-react';
 import { DEFAULT_APPROVAL_POLICY, DEFAULT_OWNER_LANGUAGE, type ApprovalPolicy } from '@ghost/contract';
 import { InlineError, SelectField, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
+import { DotAvatar } from '../components/DotAvatar';
+import { toneFor } from '../features/ghostState';
 
 /** Languages offered for what Ghosts write to the owner; Ghosts still think in whatever language suits them. */
 export const ownerLanguages: readonly { value: string; label: string }[] = [
@@ -44,6 +46,7 @@ export function ApprovalSettings() {
       .catch(reason => setError(reason instanceof Error ? reason.message : '설정을 저장하지 못했습니다.'))
       .finally(() => setPending(false));
   };
+  const manual = ghosts.filter(ghost => policy.ghosts?.[ghost.id] === 'owner').length;
   const languageOptions = ownerLanguages.some(option => option.value === language) ? ownerLanguages : [...ownerLanguages, { value: language, label: language }];
 
   return <section className="grid gap-6">
@@ -66,12 +69,21 @@ export function ApprovalSettings() {
       </SettingsRow>
     </SettingsGroup>
 
-    {ghosts.length > 0 && <SettingsGroup title="Ghost별 자동 승인" description="끄면 그 Ghost의 요청은 추천안만 보여 주고 늘 직접 승인할 때까지 기다립니다.">
-      {ghosts.map(ghost => <SettingsRow key={ghost.id} label={ghost.name} htmlFor={`auto-${ghost.id}`}
-        description={ghost.isDefault ? '메인 Ghost의 요청은 메인이 스스로 승인하지 않습니다. 자동 진행 시간만 적용됩니다.' : undefined}>
-        <Switch id={`auto-${ghost.id}`} checked={policy.ghosts?.[ghost.id] !== 'owner'} disabled={pending || !settings}
-          onCheckedChange={checked => save({ approvals: withGhostRule(policy, ghost.id, checked) }, `${ghost.name}: ${checked ? '자동 승인 켬' : '늘 직접 승인'}`)}/>
-      </SettingsRow>)}
+    {/* 2026.11.11 : Ghost 마다 한 줄씩 쌓던 스위치 목록이 Ghost 가 늘면 끝없이 길어졌다. 초상 타일 그리드로 한눈에 보고 눌러 바꾼다. */}
+    {ghosts.length > 0 && <SettingsGroup title="Ghost별 자동 승인"
+      description={`눌러서 바꿉니다. 「직접 승인」인 Ghost의 요청은 추천안만 보여 주고 직접 승인할 때까지 기다립니다. 메인 Ghost의 요청은 메인이 스스로 승인하지 않고 자동 진행 시간만 적용됩니다.${manual ? ` · ${ghosts.length}명 중 ${manual}명 직접 승인` : ''}`}>
+      <div className="approval-grid" role="group" aria-label="Ghost별 자동 승인">
+        {ghosts.map(ghost => {
+          const automatic = policy.ghosts?.[ghost.id] !== 'owner';
+          return <button key={ghost.id} type="button" className="approval-tile" aria-pressed={automatic} disabled={pending || !settings}
+            aria-label={`${ghost.name}: ${automatic ? '자동 승인' : '직접 승인'}`}
+            onClick={() => save({ approvals: withGhostRule(policy, ghost.id, !automatic) }, `${ghost.name}: ${automatic ? '늘 직접 승인' : '자동 승인 켬'}`)}>
+            <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={36}/>
+            <span className="approval-tile__name">{ghost.isDefault && <Crown aria-hidden="true"/>}{ghost.name}</span>
+            <span className="approval-tile__mode">{automatic ? '자동 승인' : '직접 승인'}</span>
+          </button>;
+        })}
+      </div>
     </SettingsGroup>}
 
     {error && <InlineError>{error}</InlineError>}

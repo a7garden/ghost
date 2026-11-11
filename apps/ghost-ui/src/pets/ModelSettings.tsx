@@ -8,6 +8,7 @@ import { Modal } from '../components/Modal';
 import { ChatGptLoginDialog } from './ChatGptLogin';
 import { NO_MODEL, modelFromKey, modelSelectOptions } from './ModelPicker';
 import { ProviderEditor } from './ProviderEditor';
+import { FallbackSteps, editFallbacks, type FallbackAction } from '../features/GhostSettings';
 import type { ProviderSave } from './ProviderEditor';
 
 export function ModelSettings() {
@@ -46,6 +47,9 @@ export function ModelSettings() {
     if (!settings?.defaultModel) return;
     void run('thinking', () => client.send({ type: 'settings.update', defaultModel: { ...settings.defaultModel!, thinking } }), '생각 수준을 저장했습니다.');
   };
+  // 대체 모델을 따로 두지 않은 Ghost 가 따르는 목록. Ghost 에 자기 목록이 있으면 그쪽이 이긴다.
+  const fallbackCommand = (action: FallbackAction) =>
+    void run('fallbacks', () => client.send({ type: 'settings.update', defaultFallbacks: editFallbacks(settings?.defaultFallbacks ?? [], action) }), '기본 대체 모델을 저장했습니다.');
   const saveProvider = async ({ draft, apiKey, login: startLogin }: ProviderSave) => {
     await client.send({ type: 'provider.upsert', id: draft.id, kind: draft.kind, name: draft.name, baseUrl: draft.baseUrl, models: draft.models,
       ...(apiKey === undefined ? {} : { apiKey }),
@@ -90,6 +94,13 @@ export function ModelSettings() {
         <SegmentedControl aria-label="생각 수준" value={settings.defaultModel.thinking ?? 'off'} onValueChange={thinkingCommand}
           options={(['off', 'low', 'medium', 'high'] as const).map(value => ({ value, label: { off: '끔', low: '낮음', medium: '중간', high: '높음' }[value], disabled: pending !== '' }))}/>
       </SettingsRow>}
+      <SettingsRow className="ghost-settings-row--stack" label="기본 대체 모델" description="연결 오류·사용 한도에 걸리면 차례로 이어갑니다. 대체 모델을 따로 정한 Ghost는 자기 목록을 씁니다.">
+        <div className="model-route" aria-busy={pending === 'fallbacks'}>
+          <ol className="model-route__steps" aria-label="기본 대체 모델 순서">
+            <FallbackSteps fallbacks={settings?.defaultFallbacks ?? []} primary={settings?.defaultModel ?? null} pending={pending !== '' || !settings} onAction={fallbackCommand}/>
+          </ol>
+        </div>
+      </SettingsRow>
       <SettingsRow label="검토 모델" description="맡긴 일의 결과를 판정할 때 씁니다.">
         <SelectField label="검토 모델" className="w-[240px] max-w-full" value={settings?.reviewModel ? `${settings.reviewModel.provider}/${settings.reviewModel.model}` : NO_MODEL}
           disabled={pending !== '' || !settings} onValueChange={key => roleCommand('reviewModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>

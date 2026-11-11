@@ -13,6 +13,20 @@ When nothing deserves the owner's attention, that reply is only ${QUIET_REPLY}. 
 
 export const MAIN_DRIVE = `As main, each wake shows the team's plans. Keep the team moving: hand a teammate Work with work_create, or plan its next look with plan_next and its ghost_id.`;
 
+/**
+ * 2026.11.11 : 자율 구동을 끈 Ghost 에도 「끝내기 전에 plan_next 를 부른다」가 그대로 들어가, 일을 시작할 때마다
+ * 첫 도구 호출이 「the owner switched off …」로 거절됐다. 꺼진 Ghost 에는 이 글을 대신 주고 plan_next 도 빼낸다.
+ */
+export const DRIVE_OFF = `The owner switched off your self-directed drive: you act only when the owner writes or a Work or schedule wakes you. You have no plan_next; do not plan your own next look.`;
+
+/** 메인은 자기 구동이 꺼져도 동료의 다음 확인을 정할 수 있어 plan_next 를 유지한다 — 그래서 자기 몫은 글로 막는다. */
+export const MAIN_DRIVE_OFF = `The owner switched off your own self-directed drive: you act only when the owner writes or a Work or schedule wakes you. Use plan_next only with a teammate's ghost_id, never for yourself.`;
+
+/** Teammates whose drive is off, so the main Ghost hands them Work instead of planning their look. */
+export function drivesOff(names: readonly string[]): string {
+  return names.length ? `Self-directed drive is off for ${names.join(", ")}: never plan_next for them; hand them Work with work_create when needed.` : "";
+}
+
 /** Fixed in direct conversations: a Ghost's own appointment with itself, kept by the Host. */
 export function createAutonomyTools(core: Core): Extension {
   return defineExtension({

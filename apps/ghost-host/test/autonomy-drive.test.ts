@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Core } from "../src/core/core.ts";
 import { DAILY_WAKES, repositoryHead } from "../src/core/autonomy.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
+import { createToolSet } from "../src/tools/index.ts";
 import { FakeEngine, MemoryArtifacts, MemorySecrets, noSandbox, tempDir } from "./support.ts";
 
 const MINUTE = 60_000;
@@ -230,4 +231,22 @@ test("after a restart, self-directed turns that are still running keep their slo
   f.setBusy(f.mate.id, false);
   await f.core.autonomy.tick(now + 11 * MINUTE);
   expect(f.wakes(third.id)).toHaveLength(1);
+});
+
+test("a Ghost whose drive is off is never told to plan_next, and the main Ghost learns which teammates are off", () => {
+  const f = fixture();
+  const tools = createToolSet({ core: f.core, sandbox: noSandbox as never, memory: null, documents: null, skills: null });
+  const direct = (ghostId: string) => f.ledger.conversation(f.ledger.ghost(ghostId).directConversationId);
+  expect(tools.instructionsFor(direct(f.mate.id), f.ledger.ghost(f.mate.id), null)).toContain("call plan_next once");
+
+  f.core.autonomy.setEnabled(f.mate.id, false);
+  const mate = tools.instructionsFor(direct(f.mate.id), f.ledger.ghost(f.mate.id), null);
+  expect(mate).not.toContain("call plan_next once");
+  expect(mate).toContain("You have no plan_next");
+  const main = tools.instructionsFor(direct(f.main.id), f.ledger.ghost(f.main.id), null);
+  expect(main).toContain("call plan_next once");
+  expect(main).toContain("Self-directed drive is off for Mate");
+
+  f.core.autonomy.setEnabled(f.main.id, false);
+  expect(tools.instructionsFor(direct(f.main.id), f.ledger.ghost(f.main.id), null)).toContain("never for yourself");
 });
