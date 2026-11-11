@@ -325,6 +325,17 @@ body {
 .chat-threads:hover { color: var(--ghost-ink); box-shadow: var(--shadow-raised); }
 .chat-threads svg { width: 15px; height: 15px; }
 .chat-threads[data-live] > span { color: var(--ghost-signal-ink); }
+/* 예약은 스레드 버튼 바로 밑에 같은 꼴로 둔다 — 「이 Ghost 가 앞으로 할 일」이 「하고 있는 일」 옆에 있어야 한다. */
+.chat-agenda { top: 46px; }
+.agenda-note { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; padding: 6px 8px; border-radius: var(--radius-control); color: var(--ghost-ink2); background: var(--ghost-hover); font-size: var(--text-caption); }
+.agenda-note svg { width: 13px; height: 13px; flex: none; }
+.agenda-row { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 4px 6px 8px; border-radius: var(--radius-control); }
+.agenda-row:hover { background: var(--ghost-hover); }
+.agenda-row[data-paused] { opacity: .6; }
+.agenda-row__title { margin: 0; overflow: hidden; color: var(--ghost-ink); font-size: var(--text-ui); text-overflow: ellipsis; white-space: nowrap; }
+.agenda-row__meta { display: flex; flex-wrap: wrap; gap: 0 8px; margin: 2px 0 0; color: var(--ghost-ink3); font-size: var(--text-micro); }
+.agenda-row[data-kind="plan"] .agenda-row__title { color: var(--ghost-ink2); font-style: italic; }
+.agenda-row .shell-icon-button { flex: none; }
 .menu-heading { margin: 0; padding: 10px 8px 4px; color: var(--ghost-ink3); font-size: var(--text-micro); font-weight: 600; }
 
 .reasoning { min-width: 0; margin-bottom: 10px; color: var(--ghost-ink3); font-size: var(--text-caption); }
@@ -569,5 +580,7 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 
 }
 
-/* 퇴근 중에는 Ghost 가 스스로 일하지 않는다는 것이 한눈에 보이도록 원버튼을 주의 색으로. */
-.shell-search[data-duty="off"] { color: var(--ghost-warning); background: var(--ghost-warning-tint); }
+/* 근무 중에는 Ghost 가 스스로 일하고 있다는 것이 보이도록 원버튼에 색을 얹고, 퇴근하면 색을 빼 쉬는 상태로 둔다.
+   2026.11.11 : 퇴근을 주의 색으로 칠했더니 쉬는 쪽이 더 눈에 띄었다. 켜진 쪽에 색이 있어야 한다는 의견으로 뒤집었다. */
+.shell-search[data-duty="on"] { color: var(--ghost-success-ink); background: var(--ghost-success-tint); }
+.shell-search[data-duty="on"]:hover { background: color-mix(in srgb, var(--ghost-success) 18%, transparent); }

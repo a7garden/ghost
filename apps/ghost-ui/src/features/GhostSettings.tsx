@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Pencil, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
 import { BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
 import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
@@ -252,7 +252,7 @@ function ModelRoute({ ghost, save }: { ghost: Ghost; save(command: Command): Pro
     finally { inFlight.current = false; setPending(false); }
   };
   const act = (action: FallbackAction) => void commit(fallbacksCommand(ghost.id, ghost.fallbacks, action));
-  const used = [primary, ...ghost.fallbacks].filter((ref): ref is ModelRef => !!ref);
+  const inherited = ghost.fallbacks.length === 0 ? state?.settings.defaultFallbacks ?? [] : [];
   return <div className="model-route" aria-busy={pending}>
     <ol className="model-route__steps" aria-label="모델 사용 순서">
       <li className="model-route__step" data-primary>
@@ -262,27 +262,51 @@ function ModelRoute({ ghost, save }: { ghost: Ghost; save(command: Command): Pro
           <ModelChoice label="기본 모델 선택" value={ghost.model} excluded={ghost.fallbacks} disabled={pending} onChange={model => void commit({ type: 'ghost.update', ghostId: ghost.id, model })}/>
         </div>
       </li>
-      {ghost.fallbacks.map((fallback, index) => <li key={`${fallback.provider}/${fallback.model}:${index}`} className="model-route__step">
-        <span className="model-route__node" aria-hidden="true">{index + 1}</span>
-        <div className="model-route__choice">
-          <span className="model-route__label">대체 {index + 1}</span>
-          <ModelChoice label={`${index + 1}번 대체 모델 선택`} value={fallback} inherit={false} disabled={pending}
-            excluded={used.filter(ref => ref.provider !== fallback.provider || ref.model !== fallback.model)}
-            onChange={model => model && act({ kind: 'replace', index, model })}/>
-        </div>
-        <div className="model-route__actions" role="group" aria-label={`대체 ${index + 1} 순서와 삭제`}>
-          <button type="button" aria-label={`${index + 1}번 위로`} title="앞으로" disabled={pending || index === 0} onClick={() => act({ kind: 'move', index, delta: -1 })}><ArrowUp aria-hidden="true"/></button>
-          <button type="button" aria-label={`${index + 1}번 아래로`} title="뒤로" disabled={pending || index === ghost.fallbacks.length - 1} onClick={() => act({ kind: 'move', index, delta: 1 })}><ArrowDown aria-hidden="true"/></button>
-          <button type="button" aria-label={`${index + 1}번 대체 모델 지우기`} title="삭제" disabled={pending} onClick={() => act({ kind: 'remove', index })}><X aria-hidden="true"/></button>
-        </div>
-      </li>)}
-      {ghost.fallbacks.length < MAX_FALLBACKS && <li className="model-route__step" data-add>
-        <span className="model-route__node" aria-hidden="true"><Plus/></span>
-        <ModelChoice add value={null} excluded={used} disabled={pending} onChange={model => model && act({ kind: 'add', model })}/>
-      </li>}
+      <FallbackSteps fallbacks={ghost.fallbacks} primary={primary ?? null} pending={pending} onAction={act}/>
     </ol>
-    <p className="model-route__hint">연결 오류·사용 한도에 걸리면 다음 모델로 이어갑니다.</p>
+    <p className="model-route__hint">{inherited.length
+      ? <>대체 모델을 따로 두지 않아 기본 대체 모델({inherited.map(ref => modelName(state?.settings, ref)).join(' → ')})로 이어갑니다.</>
+      : '연결 오류·사용 한도에 걸리면 다음 모델로 이어갑니다.'}</p>
   </div>;
+}
+
+/** A model's display name from the settings, falling back to its id. */
+function modelName(settings: { providers: readonly { id: string; models: readonly { id: string; name?: string }[] }[] } | undefined, ref: ModelRef): string {
+  const model = settings?.providers.find(item => item.id === ref.provider)?.models.find(item => item.id === ref.model);
+  return model?.name || ref.model;
+}
+
+/**
+ * The ordered fallback steps and the add step, shared by a Ghost's route and the owner's default list.
+ * 2026.11.11 : 기본 대체 모델을 설정에 더하면서 Ghost 설정의 목록을 떼어 냈다 — 두 곳이 같은 손놀림이어야 한다.
+ */
+export function FallbackSteps({ fallbacks, primary, pending, onAction }: {
+  fallbacks: readonly ModelRef[];
+  primary: ModelRef | null;
+  pending: boolean;
+  onAction(action: FallbackAction): void;
+}) {
+  const used = [primary, ...fallbacks].filter((ref): ref is ModelRef => !!ref);
+  return <>
+    {fallbacks.map((fallback, index) => <li key={`${fallback.provider}/${fallback.model}:${index}`} className="model-route__step">
+      <span className="model-route__node" aria-hidden="true">{index + 1}</span>
+      <div className="model-route__choice">
+        <span className="model-route__label">대체 {index + 1}</span>
+        <ModelChoice label={`${index + 1}번 대체 모델 선택`} value={fallback} inherit={false} disabled={pending}
+          excluded={used.filter(ref => ref.provider !== fallback.provider || ref.model !== fallback.model)}
+          onChange={model => model && onAction({ kind: 'replace', index, model })}/>
+      </div>
+      <div className="model-route__actions" role="group" aria-label={`대체 ${index + 1} 순서와 삭제`}>
+        <button type="button" aria-label={`${index + 1}번 위로`} title="앞으로" disabled={pending || index === 0} onClick={() => onAction({ kind: 'move', index, delta: -1 })}><ArrowUp aria-hidden="true"/></button>
+        <button type="button" aria-label={`${index + 1}번 아래로`} title="뒤로" disabled={pending || index === fallbacks.length - 1} onClick={() => onAction({ kind: 'move', index, delta: 1 })}><ArrowDown aria-hidden="true"/></button>
+        <button type="button" aria-label={`${index + 1}번 대체 모델 지우기`} title="삭제" disabled={pending} onClick={() => onAction({ kind: 'remove', index })}><X aria-hidden="true"/></button>
+      </div>
+    </li>)}
+    {fallbacks.length < MAX_FALLBACKS && <li className="model-route__step" data-add>
+      <span className="model-route__node" aria-hidden="true"><Plus/></span>
+      <ModelChoice add value={null} excluded={used} disabled={pending} onChange={model => model && onAction({ kind: 'add', model })}/>
+    </li>}
+  </>;
 }
 
 /** 스킬 catalog가 없거나 비어 있으면 패널 자체를 숨긴다. */
@@ -421,20 +445,41 @@ function ModelChoice({ value, onChange, add = false, inherit = true, excluded = 
   </Popover>;
 }
 
-/** Role instructions as a note: it grows with its text and a save chip appears only when it changed. */
+/**
+ * Role instructions read as text first; 「역할 편집」 opens the note for editing, and saving or cancelling closes it.
+ * 2026.11.11 : 늘 열린 입력칸이라 설정을 훑다가 실수로 고치기 쉬웠다. 읽기가 기본이고 편집은 고르는 일로 바꿨다.
+ * 이 글은 Host 가 정한 기본 지시 앞에 붙는 Ghost 의 몫이다 — 기본 지시를 갈아 끼우지 않는다.
+ */
 function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: string): Promise<boolean> }) {
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(persona);
   const area = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { const node = area.current; if (!node) return; node.style.height = 'auto'; node.style.height = `${node.scrollHeight}px`; }, [draft]);
+  useEffect(() => { const node = area.current; if (!node) return; node.style.height = 'auto'; node.style.height = `${node.scrollHeight}px`; }, [draft, editing]);
+  useEffect(() => { if (editing) area.current?.focus(); }, [editing]);
   const changed = draft !== persona;
-  const commit = () => { if (changed && draft.trim()) void onSave(draft); };
+  const cancel = () => { setDraft(persona); setEditing(false); };
+  const commit = async () => {
+    if (!changed) { setEditing(false); return; }
+    if (draft.trim() && await onSave(draft)) setEditing(false);
+  };
+  if (!editing) return <div className="persona-note" data-reading>
+    <p className="persona-note__text">{persona}</p>
+    <div className="persona-note__actions">
+      <span className="persona-note__hint">기본 지시 뒤에 이 Ghost만의 역할로 붙습니다.</span>
+      <button type="button" className="persona-note__edit" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>역할 편집</button>
+    </div>
+  </div>;
   return <div className="persona-note" data-changed={changed || undefined}>
     <textarea ref={area} aria-label={uiTerms.roleInstructions} value={draft} maxLength={8192} rows={3} onChange={event => setDraft(event.target.value)}
-      onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); commit(); } }}/>
-    {changed && <div className="persona-note__actions">
-      <button type="button" className="persona-note__revert" onClick={() => setDraft(persona)} aria-label="되돌리기"><RotateCcw aria-hidden="true"/></button>
-      <button type="button" className="persona-note__save" disabled={!draft.trim()} onClick={commit}>저장</button>
-    </div>}
+      onKeyDown={event => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); void commit(); }
+        if (event.key === 'Escape') { event.preventDefault(); cancel(); }
+      }}/>
+    <div className="persona-note__actions">
+      {changed && <button type="button" className="persona-note__revert" onClick={() => setDraft(persona)} aria-label="되돌리기" title="되돌리기"><RotateCcw aria-hidden="true"/></button>}
+      <button type="button" className="persona-note__cancel" onClick={cancel}>취소</button>
+      <button type="button" className="persona-note__save" disabled={!draft.trim()} onClick={() => void commit()}>저장</button>
+    </div>
   </div>;
 }
 

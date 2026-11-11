@@ -121,6 +121,11 @@ export class Autonomy {
     return this.ghosts().map((ghost) => this.public(this.load(ghost.id)));
   }
 
+  /** Whether the owner left this Ghost's self-directed drive on. */
+  enabled(ghostId: string): boolean {
+    return this.load(ghostId).enabled;
+  }
+
   setEnabled(ghostId: string, enabled: boolean): AutonomyPlan {
     const ghost = this.core.ledger.ghost(ghostId);
     if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);

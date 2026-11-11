@@ -314,3 +314,29 @@ test("a fallback exception still reports the conversation idle", async () => {
     await f.close();
   }
 });
+
+test("a Ghost without its own fallbacks follows the owner's default fallback list", async () => {
+  const f = await fixture([]);
+  try {
+    f.ledger.tx(() => f.ledger.putSetting("defaultFallbacks", [backup]));
+    f.providers[0]!.setResponses([error("429 rate limit"), error("429 rate limit")]);
+    f.providers[1]!.setResponses([fauxAssistantMessage("default backup answer")]);
+    await f.send();
+    const page = await f.engine.page(f.ghost.directConversationId, null, 50);
+    expect(page.messages.at(-1)?.text).toBe("default backup answer");
+  } finally { await f.close(); }
+});
+
+test("a Ghost's own fallbacks replace the default list instead of adding to it", async () => {
+  const third = { provider: "third", model: "third-1" };
+  const f = await fixture([third]);
+  try {
+    f.ledger.tx(() => f.ledger.putSetting("defaultFallbacks", [backup]));
+    f.providers[0]!.setResponses([error("429 rate limit"), error("429 rate limit")]);
+    f.providers[2]!.setResponses([fauxAssistantMessage("own backup answer")]);
+    await f.send();
+    const page = await f.engine.page(f.ghost.directConversationId, null, 50);
+    expect(page.messages.at(-1)?.text).toBe("own backup answer");
+    expect(f.providers[1]!.getPendingResponseCount()).toBe(0);
+  } finally { await f.close(); }
+});

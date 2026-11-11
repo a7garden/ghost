@@ -966,6 +966,7 @@ export class Ledger {
     return {
       defaultModel: this.setting<ModelRef | null>("defaultModel", null),
       reviewModel: this.setting<ModelRef | null>("reviewModel", null),
+      defaultFallbacks: this.setting<ModelRef[]>("defaultFallbacks", []),
       providers: this.providers(),
       ownerLanguage: this.setting<string>("ownerLanguage", DEFAULT_OWNER_LANGUAGE),
       approvals: { ...DEFAULT_APPROVAL_POLICY, ...this.setting<Partial<ApprovalPolicy>>("approvals", {}) },

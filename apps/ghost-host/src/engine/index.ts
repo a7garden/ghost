@@ -35,7 +35,7 @@ import type { ToolSet } from "../tools/types.ts";
 import { liveFrom, renderUserContent, sameLive, toMessage, type UserMeta } from "./messages.ts";
 import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
-import { FallbackDoc, fallbackModels, fallbackReason } from "./fallback.ts";
+import { FallbackDoc, fallbackListFor, fallbackModels, fallbackReason } from "./fallback.ts";
 import { digestOf } from "../core/ids.ts";
 import { projectContext, splitProjectBrief, QUIET_REPLY as QUIET } from "@ghost/contract";
 
@@ -186,6 +186,8 @@ class HostEngine implements Engine {
           if (work?.toolScope && !work.toolScope.some((name) => name === tool.name)) continue;
           if (work?.activityId && (!activity || !activity.tools.some((name) => name === tool.name))) continue;
         }
+        // 2026.11.11 : 자율 구동이 꺼진 Ghost 에 plan_next 를 주면 부르는 족족 거절된다. 메인은 동료 몫으로 남긴다.
+        if (tool.name === "plan_next" && !(ghost.isDefault && ghost.state === "active") && !this.core.autonomy.enabled(ghost.id)) continue;
         if (tool.name.startsWith("activity_") && tool.name !== "activity_propose" && (conversation.kind !== "work" || !work?.activityId)) continue;
         if (tool.name.startsWith("source_") && conversation.kind !== "review" && (!ghost.tools.includes("web_read") || (work?.toolScope && !work.toolScope.includes("web_read")))) continue;
         if ((tool.name === "activity_propose" || tool.name === "document_propose") && conversation.kind !== "direct") continue;
@@ -262,7 +264,7 @@ class HostEngine implements Engine {
     let serving = model;
     if (!this.core.secrets.has(provider.id)) {
       const next = this.allowsFallback(settings, conversation, work)
-        ? fallbackModels(ghost, model).find((candidate) => this.available(candidate, settings))
+        ? fallbackModels(ghost, model, settings).find((candidate) => this.available(candidate, settings))
         : undefined;
       if (!next) throw new CommandError("unavailable", `provider ${provider.id} has no credential`);
       this.logFallback(state, model, next, `provider ${provider.id} has no credential`);
@@ -587,7 +589,7 @@ class HostEngine implements Engine {
     const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
     if (!this.allowsFallback(settings, conversation, work)) return false;
     const primary = this.resolveModel(settings, conversation, ghost, work);
-    if (!primary || ghost.fallbacks.length === 0) return false;
+    if (!primary || fallbackListFor(ghost, settings).length === 0) return false;
     const switched = await state.pi.commit(async (tx) => {
       const live = await tx.doc(LiveDoc, state.piId);
       if (state.aborted || live.run) return null; // Pi's own retry or another input is still running.
@@ -599,7 +601,7 @@ class HostEngine implements Engine {
       if (!message || reason === null) return null;
       const fallback = await tx.doc(FallbackDoc, state.piId);
       if (fallback.lastError >= tail.id) return null;
-      const candidates = fallbackModels(ghost, primary);
+      const candidates = fallbackModels(ghost, primary, settings);
       const failedIndex = candidates.findIndex((candidate) => candidate.provider === message.provider && candidate.model === message.model);
       const next = candidates.slice(failedIndex + 1).find((candidate) => this.available(candidate, settings));
       fallback.lastError = tail.id;

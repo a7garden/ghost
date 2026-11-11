@@ -21,7 +21,7 @@ import type { ToolSet } from "./types.ts";
 import { createWorkTools } from "./work.ts";
 import { createHostTools } from "./host.ts";
 import { activityTools } from "./activities.ts";
-import { AUTONOMY_DRIVE, MAIN_DRIVE, createAutonomyTools } from "./autonomy.ts";
+import { AUTONOMY_DRIVE, DRIVE_OFF, MAIN_DRIVE, MAIN_DRIVE_OFF, createAutonomyTools, drivesOff } from "./autonomy.ts";
 
 /**
  * How a Ghost speaks to the owner. Briefs between Ghosts stay exact; what a person reads is a
@@ -69,10 +69,8 @@ Create a Work (work_create) when the owner hands over a task, or on your own ini
 work_list and work_inspect show progress; work_update edits a live Work; work_cancel stops one.
 ask_owner asks the owner a question when a decision is theirs; the answer arrives as a message.
 ${AUTONOMY}
-schedule_create wakes this conversation once at a given time or on an interval, for reminders the owner asks for; your own next look is plan_next. schedule_list and schedule_cancel manage schedules.
+schedule_create wakes this conversation once at a given time or on an interval, for reminders the owner asks for. schedule_list and schedule_cancel manage schedules.
 ghost_list shows the active Ghosts; hand a task to a better-fit Ghost with work_create and its ghost_id.
-
-${AUTONOMY_DRIVE}
 
 ${OWNER_VOICE}
 
@@ -188,7 +186,7 @@ export function createToolSet(deps: {
     instructionsFor(conversation: Conversation, ghost: Ghost, work: Work | null): string {
       switch (conversation.kind) {
         case "direct":
-          return [DIRECT_INSTRUCTIONS, ownerLanguageRule(language()), ghost.isDefault && ghost.state === "active" ? `${MAIN_INSTRUCTIONS}\n${MAIN_DRIVE}` : "", ...capabilityInstructions(ghost), skillsInstructions(deps.skills, ghost)]
+          return [DIRECT_INSTRUCTIONS, driveInstructions(deps.core, ghost), ownerLanguageRule(language()), ...capabilityInstructions(ghost), skillsInstructions(deps.skills, ghost)]
             .filter(Boolean)
             .join("\n\n");
         case "work":
@@ -215,6 +213,17 @@ export function createToolSet(deps: {
       }
     },
   };
+}
+
+/** The self-directed drive as this Ghost has it now: on or off, and for the main Ghost which teammates are off. */
+function driveInstructions(core: Core, ghost: Ghost): string {
+  const on = core.autonomy.enabled(ghost.id);
+  const own = on ? `${AUTONOMY_DRIVE}\nYour own next look is plan_next.` : DRIVE_OFF;
+  if (!ghost.isDefault || ghost.state !== "active") return own;
+  const off = core.ledger.ghosts()
+    .filter((item) => item.id !== ghost.id && item.deletedAt === null && item.state === "active" && !core.autonomy.enabled(item.id))
+    .map((item) => item.name);
+  return [on ? own : MAIN_DRIVE_OFF, MAIN_INSTRUCTIONS, MAIN_DRIVE, drivesOff(off)].filter(Boolean).join("\n");
 }
 
 /** The exact preface every skills section opens with, above any skill body. */
