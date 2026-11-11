@@ -1,4 +1,5 @@
 import { randomBytes, createHash, randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { chmodSync, mkdirSync, linkSync, unlinkSync, readFileSync, writeFileSync, statSync, lstatSync, readdirSync, rmSync, realpathSync, openSync, closeSync, fstatSync, readSync, constants as FS } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -773,15 +774,34 @@ export class AgentBrowser implements BrowserPort {
     const bridge = session.bridge ??= { subscribers: new Set(), width: 0, height: 0 };
     if (bridge.subscribers.size >= 4) throw new CommandError("conflict", "At most four live clients may watch a browser session");
     let lastFrame = Number.NEGATIVE_INFINITY, receivedFrame = false;
+    let pendingFrame: Extract<BrowserLiveEvent,{type:"frame"}> | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+    let pageUrl = bridge.page?.url, targetId = bridge.targetId;
+    const stop = () => { clearTimeout(timer); timer = undefined; pendingFrame = undefined; bridge.subscribers.delete(subscriber); };
     const subscriber = (event: BrowserLiveEvent) => {
-      if (event.type === "frame") { const now = performance.now(); if (now - lastFrame < 1000 / options.maxFps) return; lastFrame = now; receivedFrame = true; }
+      if (event.type === "frame") {
+        const now = performance.now(), delay = 1000 / options.maxFps - (now - lastFrame);
+        if (delay > 0) {
+          pendingFrame = event;
+          timer ??= setTimeout(() => {
+            timer = undefined;
+            const latest = pendingFrame; pendingFrame = undefined;
+            if (latest) try { subscriber(latest); } catch { stop(); }
+          },Math.ceil(delay)).unref();
+          return;
+        }
+        clearTimeout(timer); timer = undefined; pendingFrame = undefined;
+        lastFrame = now; receivedFrame = true;
+      } else if (event.type === "end" || event.type === "page" && (event.url !== pageUrl || bridge.targetId !== targetId)) {
+        clearTimeout(timer); timer = undefined; pendingFrame = undefined;
+      }
+      if (event.type === "page") { pageUrl = event.url; targetId = bridge.targetId; }
       sink(event);
     };
     bridge.subscribers.add(subscriber);
-    try { await this.connect(session); } catch (error) { bridge.subscribers.delete(subscriber); throw error; }
-    if (bridge.page) sink(bridge.page);
+    try { await this.connect(session); } catch (error) { stop(); throw error; }
+    if (bridge.page) subscriber(bridge.page);
     if (bridge.frame && !receivedFrame) subscriber(bridge.frame);
-    return () => { bridge.subscribers.delete(subscriber); };
+    return stop;
   }
   input(ref: BrowserSessionRef, input: BrowserLiveInput): Promise<void> {
     const session = this.existing(ref), generation = session.ownerGeneration ?? 0;
@@ -791,10 +811,18 @@ export class AgentBrowser implements BrowserPort {
       this.existing(ref);
       if (session.promoting || generation !== (session.ownerGeneration ?? 0)) throw new CommandError("conflict","브라우저가 바뀌었어요. 새 화면에서 다시 선택해 주세요");
       if (input.type === "viewport") {
-        session.ownerBusy = this.invoke(session,["set","viewport",String(input.width),String(input.height)]).then(result => {
+        session.ownerBusy = this.invoke(session,["set","viewport",String(input.width),String(input.height)]).then(async result => {
           if (!result.ok) throw new CommandError("unavailable","Browser viewport could not resize");
           session.ownerViewport = { width: input.width, height: input.height };
-          if (session.bridge) session.bridge.frame = undefined;
+          const bridge = session.bridge;
+          if (bridge && session.engine === "chrome") {
+            // The pinned daemon can lose the only resize frame on a static page; a fresh viewer restarts it.
+            const connecting = bridge.connecting;
+            const closed = bridge.socket && bridge.socket.readyState !== WebSocket.CLOSED ? once(bridge.socket,"close",{signal:AbortSignal.timeout(5000)}) : Promise.resolve();
+            this.disconnect(session);
+            await Promise.all([closed,connecting?.catch(() => {})]);
+            if (session.bridge === bridge && bridge.subscribers.size) await this.connect(session);
+          } else if (bridge) bridge.frame = undefined;
           session.notice = `${session.notice ?? ""}\nThe owner resized the browser. Cached refs and observations were discarded; take a fresh browser_snapshot before acting.`.trim();
         });
         try { await session.ownerBusy; } finally { session.ownerBusy = undefined; }

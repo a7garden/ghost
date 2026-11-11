@@ -70,7 +70,7 @@ test("owned card/OTP bytes stay redacted but cannot create or overwrite a login,
     capture.clear();
   }
   const fields = [field("user","username"),field("password","password"),field("otp","sensitive")];
-  const values = ["owner@example.com","genuine-owner-password","654321"];
+  const values = ["owner@example.com","genuine-owner-password","654321"] as const;
   const page = {...base,fields};
   fields.forEach((field,index)=>capture.edit(page,field,{type:"insert",text:values[index]!}));
   const populated = {...page,fields:fields.map((field,index)=>({...field,length:values[index]!.length,start:values[index]!.length,end:values[index]!.length}))};

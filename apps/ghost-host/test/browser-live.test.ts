@@ -160,3 +160,28 @@ chromeTest("real Chrome: NDJSON, owner click/Korean text, successful and failed 
   } catch (error) { throw new Error(`Real Chrome failed during ${phase}`, { cause: error }); }
   finally { abort.abort(); await browser.shutdown(); vault.close(); h.core.stop(); h.ledger.close(); }
 }, 90_000);
+
+chromeTest("real Chrome: one live viewer receives correctly sized JPEGs after growing and shrinking the owner viewport", async () => {
+  const browser = new AgentBrowser({ executable: executable!, chrome }, tempDir());
+  const session = { ghostId: "live-resize", conversationId: "live-resize" };
+  type Frame = { data: string; width: number; height: number };
+  let next = { width: 0, height: 0, frame: Promise.withResolvers<Frame>() };
+  let stop: (() => void) | undefined;
+  try {
+    expect((await browser.run(session, ["open", "https://example.com/"])).ok).toBe(true);
+    for (const [width,height] of [[530,480],[356,700],[980,520]] as const) {
+      next = { width, height, frame: Promise.withResolvers<Frame>() };
+      await browser.input(session, { type: "viewport", width, height });
+      stop ??= await browser.live(session, { maxFps: 8 }, event => {
+        if (event.type === "frame" && event.width === next.width && event.height === next.height) next.frame.resolve(event);
+        if (event.type === "end") next.frame.reject(new Error("Resizing terminated the live viewer"));
+      });
+      const timeout = setTimeout(() => next.frame.reject(new Error(`No ${width}x${height} frame after resize`)), 10000);
+      let frame: Frame;
+      try { frame = await next.frame.promise; } finally { clearTimeout(timeout); }
+      const decoded = await browser.run(session, ["eval", `(async()=>{const blob=await(await fetch("data:image/jpeg;base64,${frame.data}")).blob();const image=await createImageBitmap(blob);const size=[image.width,image.height];image.close();return size})()`]);
+      expect(decoded.ok).toBe(true);
+      expect(decoded.data).toMatchObject({ result: [width,height] });
+    }
+  } finally { stop?.(); await browser.shutdown(); }
+}, 90_000);
