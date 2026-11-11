@@ -62,6 +62,16 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
 
+### 브라우저·금고·메일·문자 — 2026-11-11 (설치 대기)
+
+- [v2.5.1](https://github.com/a7garden/ghost/releases/tag/v2.5.1), 소스 `d8a1c8e`(`release/browser-vault-20261111`). 운영 2.4.6의 목표·연결·OAuth·Toss를 보존한 별도 릴리스다. 셸 0.2.2·iPhone 0.1.0 (9)는 바꾸지 않았다. Developer ID·업데이터 서명·매니페스트·묶음 검증을 통과했으며 공증은 하지 않았다.
+- 릴리스 검사: 계약·Host·UI 타입, Host 948 통과·11 생략, UI 220 통과, 셸 Rust 21 통과. 통합 `main`은 Host 1025 통과·11 생략과 UI 220 통과 뒤 마지막 브라우저 델타의 타입·실제 전송 복구 검사 9개·117개 단언을 다시 통과했다. 독립 검토의 SMTP STARTTLS·HTML 메일·네이티브 필드·비공개 관찰 손실 지적을 수정했고, 마지막 창 종료 델타의 실제 Anthropic 응답 6/6을 확인한 읽기 전용 검토에서 P0–P2가 없었다.
+- Host가 검증·스테이징한 `releases/2.5.1-d8a1c8e/`의 실제 `obscura`와 패치된 `agent-browser`를 별도 임시 상태로 실행한 `browser.test.ts`는 34 통과·421개 단언이었다. 운영 `current`나 상태 루트로 두 번째 Host를 띄우지 않았다.
+- 구현 통합점 `5dd3491`은 로컬 `main`과 mini Gitea `main`에 반영했다. GitHub `main`은 병행 변경 `30c0637`로 일반 푸시가 거부되어 자동 병합·강제 푸시하지 않았다. 검증한 통합본은 GitHub `browser-vault-integrated-20261111`, 배포본은 `release/browser-vault-20261111`에 보존했다.
+- 운영 PID 18566의 실행 경로·62062 리스너·운영 DB 루트를 확인하고 Owner API로 설치를 요청했다. 설치 전 busy 대화가 6개였으며, 다운로드·묶음 검증 후 180초 관찰 구간은 `waiting`으로 끝났다. 그때 운영은 **2.4.6**, `lastResult`도 기존 2.4.6 설치 결과였다. 대화·작업을 끊거나 수동 재시작하지 않았다.
+- 다음 Host 시작용으로 운영 `config.json`의 기존 `browser` 설정을 보존하며 `obscura.executable`을 `~/.local/share/ghost/current/obscura`의 절대 경로, `loginOrigins`를 빈 배열로 추가했다. 설치 전 보존 비교 기준은 Ghost 29·대화 282·목록에 노출된 맡긴 일 200·기기 1·Space 9·연결 2·목표 0이며, ID 목록은 로컬 `/tmp/ghost-mailtest/production-before.json`(0600)에만 두었다.
+- 설치 완료·health/runtime ready·ID 보존·새 제공 UI 자산은 아직 수용하지 않았다. Host가 유휴가 되어 자체 적용한 뒤 Owner API로 확인해야 한다. Mac 콘솔은 `DESKTOP_LOCKED`로 네이티브 화면 확인이 막혀 있고 잠금을 우회하지 않았다. 실제 제공자 메일 로그인·실제 CAPTCHA·물리 iPhone·권한 승인 후 실제 인증문자는 별도 소유자 입력/권한이 필요하다.
+
 ### 토스증권 조회·금고 API 키 — 2026-11-11
 
 - [v2.4.6](https://github.com/a7garden/ghost/releases/tag/v2.4.6), 소스 `189b707`(브랜치 `toss-assets-246`). 운영 2.4.5(`15a0428`) 위에 금고 `api` 종류와 `toss_read`만 더했다. `main`에는 같은 네 커밋을 옮겼다. 설계는 [에이전트 능력](agent-capabilities.md#decisions)의 Service API keys·Toss Securities.
