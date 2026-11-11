@@ -14,9 +14,9 @@ export class BrowserCdp {
   private readonly pending = new Map<number, Pending>();
   private readonly listeners = new Set<(event: CdpEvent) => void>();
   private readonly disconnects = new Set<() => void>();
-  private constructor(private readonly socket: WebSocket) {
+  private constructor(private readonly socket: WebSocket, maxMessageLength: number) {
     socket.onmessage = (message) => {
-      if (typeof message.data !== "string" || message.data.length > 1024 * 1024) { this.close(); return; }
+      if (typeof message.data !== "string" || message.data.length > maxMessageLength) { this.close(); return; }
       let value: Record<string, unknown>;
       try { value = JSON.parse(message.data); } catch { this.close(); return; }
       if (!value || typeof value !== "object") return;
@@ -34,14 +34,14 @@ export class BrowserCdp {
     socket.onclose = () => this.fail();
     socket.onerror = () => this.fail();
   }
-  static async connect(endpoint: string): Promise<BrowserCdp> {
+  static async connect(endpoint: string, options?: { imageResponses?: boolean }): Promise<BrowserCdp> {
     let url: URL;
     try { url = new URL(endpoint); } catch { throw new CommandError("unavailable", "Invalid private browser endpoint"); }
     if (url.protocol !== "ws:" || url.hostname !== "127.0.0.1" || !url.port || !/^\/devtools\/browser(?:\/[A-Za-z0-9-]+)?$/.test(url.pathname) || url.username || url.password || url.search || url.hash) throw new CommandError("unavailable", "Invalid private browser endpoint");
     const socket = new WebSocket(url.href);
     const ready = Promise.withResolvers<BrowserCdp>();
     const timer = setTimeout(() => { socket.close(); ready.reject(new CommandError("unavailable", "Private browser connection timed out")); }, 5000);
-    socket.onopen = () => { clearTimeout(timer); ready.resolve(new BrowserCdp(socket)); };
+    socket.onopen = () => { clearTimeout(timer); ready.resolve(new BrowserCdp(socket, options?.imageResponses ? 12 * 1024 * 1024 : 1024 * 1024)); };
     socket.onerror = socket.onclose = () => { clearTimeout(timer); ready.reject(new CommandError("unavailable", "Private browser connection failed")); };
     return ready.promise;
   }

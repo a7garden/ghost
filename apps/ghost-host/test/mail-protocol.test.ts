@@ -108,7 +108,7 @@ async function fixture(gmail = false, commonNames = false, noFolders = false, ho
 test("mail client refreshes OAuth credentials before IMAP and SMTP and never attempts password authentication", async () => {
   const f = await fixture(true, false, false, { oauth2: true });
   const h = harness();
-  const ghost = h.core.createGhost({ name: "OAuth mail", isDefault: true, tools: ["mail_send"] });
+  const ghost = h.core.createGhost({ name: "OAuth mail", persona: "메일 인증 수용 테스트", isDefault: true, tools: ["mail_send"] });
   h.ledger.setPiConversationId(ghost.directConversationId, "oauth-mail");
   const extension = createMailTools(h.core, f.mail);
   let refreshes = 0;

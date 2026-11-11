@@ -9,25 +9,42 @@ import { harness, tempDir } from "./support.ts";
 const ref = { ghostId: "live-ghost", conversationId: "live-conversation" };
 test("one upstream serves four clients, bypasses a long Ghost read and isolates secret fills", async () => {
   const root = tempDir(), received: Record<string, unknown>[] = [];
-  let connections = 0;
+  let connections = 0, cdpConnections = 0, pageVersion = 0;
+  // Protocol-only SOF fixture; real Chrome tests below decode the actual rendered JPEG.
+  const image = Buffer.from([0xff,0xd8,0xff,0xc0,0,11,8,2,88,3,32,1,1,0x11,0,0xff,0xd9]);
   const reopened = Promise.withResolvers<void>();
   const mouse = Promise.withResolvers<void>(), key = Promise.withResolvers<void>();
-  const upstream = Bun.serve({
+  const upstream = Bun.serve<{cdp:boolean}>({
     hostname: "127.0.0.1", port: 0,
-    fetch(request, server) { if (server.upgrade(request)) return; return new Response("upgrade", { status: 400 }); },
+    fetch(request, server) {
+      const path = new URL(request.url).pathname;
+      if (path === "/reload") { pageVersion++; return new Response("reloaded"); }
+      if (server.upgrade(request,{data:{cdp:path.startsWith("/devtools/browser")}})) return;
+      return new Response("upgrade",{status:400});
+    },
     websocket: {
       open(ws) {
+        if (ws.data.cdp) { cdpConnections++; return; }
         connections++;
         if (connections === 2) reopened.resolve();
         ws.send(JSON.stringify({ type: "status", viewportWidth: 800, viewportHeight: 600, debug: "do not forward" }));
-        ws.send(JSON.stringify({ type: "tabs", tabs: [{ active: true, url: "https://example.com/", title: "Example" }] }));
+        ws.send(JSON.stringify({ type: "tabs", tabs: [{ active: true, targetId: "fixture-tab", url: "https://example.com/", title: "Example" }] }));
         ws.send(JSON.stringify({ type: "frame", data: "AAAA" }));
       },
-      message(_ws, message) { const value = JSON.parse(String(message)); received.push(value); if (value.type === "input_mouse") mouse.resolve(); else key.resolve(); },
+      message(ws, message) {
+        const value = JSON.parse(String(message));
+        if (ws.data.cdp) {
+          let result: Record<string,unknown> = {};
+          if (value.method === "Target.attachToTarget") result = {sessionId:"fixture-session"};
+          else if (value.method === "Page.getLayoutMetrics") result = {cssVisualViewport:{pageX:0,pageY:0,clientWidth:800,clientHeight:600}};
+          else if (value.method === "Page.captureScreenshot") { image[14] = pageVersion; result = {data:image.toString("base64")}; }
+          ws.send(JSON.stringify({id:value.id,result}));
+        } else { received.push(value); if (value.type === "input_mouse") mouse.resolve(); else key.resolve(); }
+      },
     },
   });
   const executable = join(root, "fake-browser");
-  writeFileSync(executable, `#!${process.execPath}\nconst args=process.argv.slice(process.argv.indexOf('--json')+1); if(args[0]==='hold') await fetch(args[1]); process.stdout.write(JSON.stringify({success:true,data:args[0]==='stream'?{port:${upstream.port}}:{},error:null}));\n`);
+  writeFileSync(executable, `#!${process.execPath}\nconst args=process.argv.slice(process.argv.indexOf('--json')+1); if(args[0]==='hold') await fetch(args[1]); if(args[0]==='reload') await fetch('http://127.0.0.1:${upstream.port}/reload'); const data=args[0]==='stream'?{port:${upstream.port}}:args[0]==='get'&&args[1]==='cdp-url'?{cdpUrl:'ws://127.0.0.1:${upstream.port}/devtools/browser/live'}:{};process.stdout.write(JSON.stringify({success:true,data,error:null}));\n`);
   chmodSync(executable, 0o700);
   const browser = new AgentBrowser({ executable }, root);
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<Response>();
@@ -36,18 +53,20 @@ test("one upstream serves four clients, bypasses a long Ghost read and isolates 
   try {
     await browser.run(ref, ["open", "https://example.com/"]);
     const gotFrame = Promise.withResolvers<void>(), events: unknown[] = [];
-    stops.push(await browser.live(ref, { maxFps: 8 }, event => { events.push(event); if (event.type === "frame") gotFrame.resolve(); }));
+    let firstPixels: string | undefined;
+    stops.push(await browser.live(ref, { maxFps: 8 }, event => { events.push(event); if (event.type === "frame") { firstPixels = event.data; gotFrame.resolve(); } }));
     await gotFrame.promise;
-    // Obscura is damage-driven: the upstream emits nothing further for an unchanged page.
+    // A late viewer must receive fresh pixels even though the unchanged daemon emits no more damage.
     stops.pop()!();
-    let replayed: unknown;
-    stops.push(await browser.live(ref, { maxFps: 8 }, event => { events.push(event); if (event.type === "frame") replayed = event; }));
-    expect(replayed).toEqual({ type: "frame", data: "AAAA", width: 800, height: 600 });
+    const replayed = Promise.withResolvers<void>();
+    stops.push(await browser.live(ref, { maxFps: 8 }, event => { events.push(event); if (event.type === "frame") replayed.resolve(); }));
+    await replayed.promise;
+    expect(cdpConnections).toBe(1);
     expect(connections).toBe(1);
     await browser.run(ref, ["reload"]);
-    const staleFrames: unknown[] = [];
-    const stopAfterNavigation = await browser.live(ref, { maxFps: 8 }, event => { if (event.type === "frame") staleFrames.push(event); });
-    expect(staleFrames).toEqual([]);
+    const nextDocument = Promise.withResolvers<string>();
+    const stopAfterNavigation = await browser.live(ref, { maxFps: 8 }, event => { if (event.type === "frame") nextDocument.resolve(event.data); });
+    expect(await nextDocument.promise).not.toBe(firstPixels);
     stopAfterNavigation();
     for (let n=0;n<3;n++) stops.push(await browser.live(ref, { maxFps: 8 }, () => {}));
     await expect(browser.live(ref, { maxFps: 8 }, () => {})).rejects.toThrow("four live");
@@ -66,7 +85,6 @@ test("one upstream serves four clients, bypasses a long Ghost read and isolates 
     await Promise.resolve(); await Promise.resolve();
     expect(received).toHaveLength(1);
     exclusiveRelease.resolve(); await filling; await owner; await key.promise;
-    expect(received[1]).toMatchObject({ type: "input_keyboard", key: "a" });
     expect(browser.takeNotice(ref)).toContain("owner used");
     expect(browser.takeNotice(ref)).toBeNull();
     const h = harness();

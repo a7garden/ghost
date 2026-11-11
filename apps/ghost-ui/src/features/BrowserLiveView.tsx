@@ -120,6 +120,12 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
       if (token !== frameTokenRef.current || canvasRef.current !== canvas) return;
       const pending = pendingViewportRef.current;
       if (pending && (pending.width !== width || pending.height !== height)) return;
+      if (image.naturalWidth !== width || image.naturalHeight !== height) {
+        dimsRef.current = null;
+        setDims(null);
+        setInputError('브라우저 화면 크기가 맞지 않아요. Mac 창으로 열어 주세요.');
+        return;
+      }
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       canvas.getContext('2d')?.drawImage(image, 0, 0);
       const dims = dimsRef.current;

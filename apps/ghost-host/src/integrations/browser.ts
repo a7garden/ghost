@@ -1,5 +1,4 @@
 import { randomBytes, createHash, randomUUID } from "node:crypto";
-import { once } from "node:events";
 import { chmodSync, mkdirSync, linkSync, unlinkSync, readFileSync, writeFileSync, statSync, lstatSync, readdirSync, rmSync, realpathSync, openSync, closeSync, fstatSync, readSync, constants as FS } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -13,6 +12,7 @@ import { startObscura, type ObscuraProcess } from "./obscura.ts";
 import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
 import { LoginCapture, type LoginEdit, type LoginPage } from "./login-capture.ts";
 import { ChromeLoginObserver, type LoginObserver } from "./browser-login.ts";
+import { ChromeViewportFrames } from "./browser-frames.ts";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const CAP = 512 * 1024;
@@ -46,7 +46,10 @@ const SELECT_ALL_SCRIPT = `(() => { try {
 interface LiveBridge {
   socket?: WebSocket;
   connecting?: Promise<WebSocket>;
-  subscribers: Set<(event: BrowserLiveEvent) => void>;
+  subscribers: Map<(event: BrowserLiveEvent) => void, number>;
+  maxFps: number;
+  renderer?: ChromeViewportFrames;
+  damage?: string;
   width: number; height: number; page?: Extract<BrowserLiveEvent, { type: "page" }>;
   frame?: Extract<BrowserLiveEvent, { type: "frame" }>;
   targetId?: string;
@@ -257,7 +260,9 @@ export class AgentBrowser implements BrowserPort {
     } finally { closeSync(fd); }
   }
   private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
-    if (session.bridge && ["open", "back", "forward", "reload", "close"].includes(argv[0]!)) session.bridge.frame = undefined;
+    if (session.bridge && ["open", "back", "forward", "reload", "close"].includes(argv[0]!)) {
+      session.bridge.frame = undefined; session.bridge.damage = undefined; session.bridge.renderer?.invalidate();
+    }
     const obscura = session.engine === "obscura";
     if (obscura) {
       clearTimeout(session.obscuraIdle);
@@ -547,6 +552,7 @@ export class AgentBrowser implements BrowserPort {
         }
       } finally { if (staged) rmSync(staged, { force: true }); }
       if (argv[0] === "close" && result.ok) { this.disconnect(session, "closed"); this.clearFiles(session); this.sessionMap.delete(ref.conversationId); }
+      else if (result.ok) this.requestChromeFrame(session);
       if (!session.secrets.length || options?.stdin !== undefined || argv[0] === "screenshot") return result;
       const redactText = (text: string) => {
         for (const secret of session.secrets) {
@@ -661,15 +667,61 @@ export class AgentBrowser implements BrowserPort {
       }).catch(() => {});
     }, 450).unref();
   }
+  private dropLiveViewer(bridge: LiveBridge, subscriber: (event: BrowserLiveEvent) => void) {
+    const fps = bridge.subscribers.get(subscriber);
+    if (!bridge.subscribers.delete(subscriber)) return;
+    if (fps === bridge.maxFps) {
+      bridge.maxFps = 0;
+      for (const value of bridge.subscribers.values()) bridge.maxFps = Math.max(bridge.maxFps,value);
+    }
+    if (!bridge.maxFps && bridge.renderer) { bridge.renderer.invalidate(); bridge.frame = undefined; }
+  }
+  private endLiveViewers(bridge: LiveBridge, reason: string) {
+    bridge.frame = undefined; bridge.renderer?.invalidate();
+    for (const sink of bridge.subscribers.keys()) {
+      try { sink({type:"end",reason}); } catch { /* A closed owner stream cannot abort the remaining viewers. */ }
+    }
+    bridge.subscribers.clear(); bridge.maxFps = 0;
+  }
+  private requestChromeFrame(session: Session) {
+    const bridge = session.bridge;
+    if (session.engine === "obscura" || !bridge?.targetId || !bridge.maxFps || session.ownerBusy || session.promoting || bridge.socket?.readyState !== WebSocket.OPEN) return;
+    if (!bridge.renderer) {
+      const current = (): boolean => !this.stopping && this.sessionMap.get(session.ref.conversationId) === session && session.bridge === bridge && bridge.renderer === created && bridge.subscribers.size > 0 && !session.ownerBusy && !session.promoting && bridge.socket?.readyState === WebSocket.OPEN;
+      const created: ChromeViewportFrames = new ChromeViewportFrames({
+        isCurrent: current,
+        getCdpUrl: async () => {
+          if (!current()) throw new CommandError("unavailable","Browser frame session changed");
+          const endpoint = await this.invoke(session,["get","cdp-url"],{timeoutMs:5000});
+          if (!current() || !endpoint.ok || !endpoint.data || typeof endpoint.data !== "object" || !("cdpUrl" in endpoint.data) || typeof endpoint.data.cdpUrl !== "string") throw new CommandError("unavailable","Private browser frames are unavailable");
+          return endpoint.data.cdpUrl;
+        },
+        onFrame: frame => {
+          if (!current()) return;
+          bridge.frame = frame; bridge.width = frame.width; bridge.height = frame.height;
+          for (const sink of bridge.subscribers.keys()) {
+            try { sink(frame); } catch { this.dropLiveViewer(bridge,sink); }
+          }
+        },
+        onError: () => {
+          if (!current()) return;
+          bridge.renderer = undefined; created.close();
+          this.endLiveViewers(bridge,"renderer_changed");
+        },
+      });
+      bridge.renderer = created;
+    }
+    bridge.renderer.request({targetId:bridge.targetId,viewport:session.ownerViewport,maxFps:bridge.maxFps});
+  }
   private disconnect(session: Session, reason?: string) {
     const bridge = session.bridge;
     if (bridge) {
       clearTimeout(bridge.retry);
+      const renderer = bridge.renderer; bridge.renderer = undefined; renderer?.close(); bridge.damage = undefined;
       bridge.frame = undefined; bridge.targetId = undefined;
       const socket = bridge.socket; bridge.socket = undefined; socket?.close();
       if (reason) {
-        for (const sink of bridge.subscribers) sink({ type: "end", reason });
-        bridge.subscribers.clear(); session.bridge = undefined;
+        this.endLiveViewers(bridge,reason); session.bridge = undefined;
       }
     }
     if (reason && reason !== "engine_changed") {
@@ -706,7 +758,7 @@ export class AgentBrowser implements BrowserPort {
   }
   private connect(session: Session): Promise<WebSocket> {
     if (session.promoting) return Promise.reject(new CommandError("conflict","브라우저를 전환하고 있어요. 새 화면을 기다려 주세요"));
-    const bridge = session.bridge ??= { subscribers: new Set(), width: 0, height: 0 };
+    const bridge: LiveBridge = session.bridge ??= { subscribers: new Map(), maxFps: 0, width: 0, height: 0 };
     if (bridge.connecting) return bridge.connecting;
     if (bridge.socket?.readyState === WebSocket.OPEN) return Promise.resolve(bridge.socket);
     bridge.frame = undefined;
@@ -740,22 +792,29 @@ export class AgentBrowser implements BrowserPort {
             if (tab && typeof tab.url === "string" && typeof tab.title === "string") {
               const targetId = typeof tab.targetId === "string" ? tab.targetId.slice(0,128) : undefined;
               const url = tab.url.slice(0,8192);
-              if (bridge.page && bridge.page.url !== url || bridge.targetId !== undefined && bridge.targetId !== targetId) bridge.frame = undefined;
+              const changed = bridge.page?.url !== url || bridge.targetId !== targetId;
+              if (changed) { bridge.frame = undefined; bridge.damage = undefined; bridge.renderer?.invalidate(); }
               bridge.targetId = targetId;
               bridge.page = { type: "page", url, title: tab.title.slice(0,512) };
-              for (const sink of bridge.subscribers) sink(bridge.page);
+              for (const sink of bridge.subscribers.keys()) sink(bridge.page);
+              if (changed) this.requestChromeFrame(session);
             }
           } else if (event.type === "frame" && typeof event.data === "string" && event.data.length > 0 && event.data.length <= Math.ceil(8 * 1024 * 1024 * 4 / 3) && /^[A-Za-z0-9+/]*={0,2}$/.test(event.data) && bridge.width && bridge.height) {
-            // Damage-driven engines may remain static between viewers: retain exactly one bounded frame.
-            bridge.frame = { type: "frame", data: event.data, width: bridge.width, height: bridge.height };
-            for (const sink of bridge.subscribers) sink(bridge.frame);
+            if (session.engine !== "obscura") {
+              if (!bridge.subscribers.size) { bridge.damage = undefined; bridge.frame = undefined; }
+              else if (event.data !== bridge.damage) { bridge.damage = event.data; this.requestChromeFrame(session); }
+            } else {
+              // Obscura is damage-driven: retain exactly one bounded native frame for late viewers.
+              bridge.frame = { type: "frame", data: event.data, width: bridge.width, height: bridge.height };
+              for (const sink of bridge.subscribers.keys()) sink(bridge.frame);
+            }
           }
         } catch { /* Malformed upstream messages are never observations. */ }
       };
       socket.onclose = () => {
         clearTimeout(timeout); reject(new CommandError("unavailable", "Browser stream closed"));
         if (bridge.socket !== socket) return;
-        bridge.frame = undefined;
+        bridge.damage = undefined; this.endLiveViewers(bridge,"renderer_changed");
         bridge.socket = undefined; this.retryStream(session);
       };
       return await promise;
@@ -771,12 +830,12 @@ export class AgentBrowser implements BrowserPort {
   async live(ref: BrowserSessionRef, options: { maxFps: number }, sink: (event: BrowserLiveEvent) => void) {
     const session = this.existing(ref);
     if (session.promoting) throw new CommandError("conflict","브라우저를 전환하고 있어요. 새 화면을 기다려 주세요");
-    const bridge = session.bridge ??= { subscribers: new Set(), width: 0, height: 0 };
+    const bridge: LiveBridge = session.bridge ??= { subscribers: new Map(), maxFps: 0, width: 0, height: 0 };
     if (bridge.subscribers.size >= 4) throw new CommandError("conflict", "At most four live clients may watch a browser session");
     let lastFrame = Number.NEGATIVE_INFINITY, receivedFrame = false;
     let pendingFrame: Extract<BrowserLiveEvent,{type:"frame"}> | undefined, timer: ReturnType<typeof setTimeout> | undefined;
     let pageUrl = bridge.page?.url, targetId = bridge.targetId;
-    const stop = () => { clearTimeout(timer); timer = undefined; pendingFrame = undefined; bridge.subscribers.delete(subscriber); };
+    const stop = () => { clearTimeout(timer); timer = undefined; pendingFrame = undefined; this.dropLiveViewer(bridge,subscriber); };
     const subscriber = (event: BrowserLiveEvent) => {
       if (event.type === "frame") {
         const now = performance.now(), delay = 1000 / options.maxFps - (now - lastFrame);
@@ -797,10 +856,12 @@ export class AgentBrowser implements BrowserPort {
       if (event.type === "page") { pageUrl = event.url; targetId = bridge.targetId; }
       sink(event);
     };
-    bridge.subscribers.add(subscriber);
+    bridge.subscribers.set(subscriber,options.maxFps);
+    bridge.maxFps = Math.max(bridge.maxFps,options.maxFps);
     try { await this.connect(session); } catch (error) { stop(); throw error; }
     if (bridge.page) subscriber(bridge.page);
     if (bridge.frame && !receivedFrame) subscriber(bridge.frame);
+    this.requestChromeFrame(session);
     return stop;
   }
   input(ref: BrowserSessionRef, input: BrowserLiveInput): Promise<void> {
@@ -811,21 +872,15 @@ export class AgentBrowser implements BrowserPort {
       this.existing(ref);
       if (session.promoting || generation !== (session.ownerGeneration ?? 0)) throw new CommandError("conflict","브라우저가 바뀌었어요. 새 화면에서 다시 선택해 주세요");
       if (input.type === "viewport") {
-        session.ownerBusy = this.invoke(session,["set","viewport",String(input.width),String(input.height)]).then(async result => {
+        session.bridge?.renderer?.invalidate();
+        session.ownerBusy = this.invoke(session,["set","viewport",String(input.width),String(input.height)]).then(result => {
           if (!result.ok) throw new CommandError("unavailable","Browser viewport could not resize");
           session.ownerViewport = { width: input.width, height: input.height };
-          const bridge = session.bridge;
-          if (bridge && session.engine === "chrome") {
-            // The pinned daemon can lose the only resize frame on a static page; a fresh viewer restarts it.
-            const connecting = bridge.connecting;
-            const closed = bridge.socket && bridge.socket.readyState !== WebSocket.CLOSED ? once(bridge.socket,"close",{signal:AbortSignal.timeout(5000)}) : Promise.resolve();
-            this.disconnect(session);
-            await Promise.all([closed,connecting?.catch(() => {})]);
-            if (session.bridge === bridge && bridge.subscribers.size) await this.connect(session);
-          } else if (bridge) bridge.frame = undefined;
+          if (session.bridge) { session.bridge.frame = undefined; session.bridge.damage = undefined; }
           session.notice = `${session.notice ?? ""}\nThe owner resized the browser. Cached refs and observations were discarded; take a fresh browser_snapshot before acting.`.trim();
         });
         try { await session.ownerBusy; } finally { session.ownerBusy = undefined; }
+        this.requestChromeFrame(session);
         return;
       }
       if (session.engine === "obscura") {
@@ -882,6 +937,7 @@ export class AgentBrowser implements BrowserPort {
       };
       session.ownerBusy = perform();
       try { await session.ownerBusy; } finally { session.ownerBusy = undefined; }
+      this.requestChromeFrame(session);
     });
     session.ownerQueue = next.catch(() => {}); return next;
   }
