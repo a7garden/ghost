@@ -28,6 +28,12 @@ test.each([
   ["cat ~/Desktop/todo.txt", `${home}/Documents/legacy-project`],
   ["ls ../other-project", `${home}/Documents/legacy-project`],
   ["fd -H config /", project],
+  ["rg --files /", project],
+  ["env -i find /", project],
+  ["nice -n 5 find / -name x", project],
+  ["cp -r ~ /tmp/x", project],
+  ["rsync -a ~/ /Volumes/backup/", project],
+  ["tar czf home.tgz ~", project],
 ])("refuses %s", (command, cwd) => {
   expect(check(command, cwd)).toContain("macOS privacy");
 });
@@ -48,6 +54,9 @@ test.each([
   ["echo 'find / -name x'", project],
   // The owner chose this working directory; it stays usable.
   ["ls src && cat README.md", `${home}/Documents/legacy-project`],
+  ["rg --files ~/Workspace/Projects", project],
+  ["cp -r src /tmp/out && rsync -a ./ build/", project],
+  ["tar xzf release.tar.gz", project],
 ])("allows %s", (command, cwd) => {
   expect(check(command, cwd)).toBeNull();
 });

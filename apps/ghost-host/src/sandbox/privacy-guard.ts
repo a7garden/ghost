@@ -13,9 +13,12 @@ const PRIVACY_GUARDED_LIBRARY = [
 ];
 const table = (...names: string[]): Record<string, true> => Object.fromEntries(names.map((name) => [name, true]));
 /** Programs that walk a directory tree. */
-const SCANNERS = table("find", "gfind", "du", "tree", "fd", "fdfind", "rg", "ag", "ack");
-/** Scanners only with a recursive flag. */
-const RECURSIVE_WITH_FLAG = table("grep", "egrep", "fgrep", "ggrep", "ls");
+const SCANNERS = table("find", "gfind", "du", "tree", "fd", "fdfind", "rg", "ag", "ack", "ditto", "tar");
+/** Programs that walk a tree only with a recursive flag, and that flag. */
+const RECURSIVE_FLAG: Record<string, RegExp> = {
+  grep: /^-[A-Za-z]*[rR]/, egrep: /^-[A-Za-z]*[rR]/, fgrep: /^-[A-Za-z]*[rR]/, ggrep: /^-[A-Za-z]*[rR]/,
+  ls: /^-[A-Za-z]*R/, zip: /^-[A-Za-z]*r/, cp: /^-[A-Za-z]*[rRa]/, rsync: /^-[A-Za-z]*[rRa]/,
+};
 /** Scanners whose first operand is a pattern, not a path. */
 const PATTERN_FIRST = table("rg", "ag", "ack", "grep", "egrep", "fgrep", "ggrep");
 /** Words that run the following word as the command. */
@@ -70,12 +73,20 @@ export function privacyGuardedCommand(script: string, options: { home: string; c
     return path.length > 1 ? path.replace(/\/+$/, "") : path;
   };
   for (const command of simpleCommands(script)) {
-    let index = 0;
-    while (index < command.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(command[index]!) || Object.hasOwn(PREFIXES, basename(command[index]!)))) index++;
+    let index = 0, prefixed = false;
+    while (index < command.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(command[index]!) || Object.hasOwn(PREFIXES, basename(command[index]!)))) {
+      prefixed ||= Object.hasOwn(PREFIXES, basename(command[index]!));
+      index++;
+    }
+    // A prefix's own options (`env -i`, `nice -n 5`) come before the program it runs.
+    if (prefixed) {
+      const walker = command.findIndex((word, at) => at >= index && (Object.hasOwn(SCANNERS, basename(word)) || Object.hasOwn(RECURSIVE_FLAG, basename(word))));
+      if (walker >= 0) index = walker;
+    }
     const program = command[index] === undefined ? "" : basename(command[index]!);
     const words = command.slice(index + 1);
     let operands = words.filter((word) => !word.startsWith("-"));
-    if (Object.hasOwn(PATTERN_FIRST, program) && !words.some((word) => /^-[ef]$|^--(?:regexp|file)(?:=|$)/.test(word))) operands = operands.slice(1);
+    if (Object.hasOwn(PATTERN_FIRST, program) && !words.some((word) => /^-[ef]$|^--(?:regexp|file|files)(?:=|$)/.test(word))) operands = operands.slice(1);
     const paths = operands.map(resolvePath).filter((path): path is string => path !== null);
     // Every word is checked, so `cat ~/Documents/a` and `VAR=~/Downloads` are refused alike.
     for (const word of command) {
@@ -84,7 +95,7 @@ export function privacyGuardedCommand(script: string, options: { home: string; c
       if (hit) return `${hit} is protected by macOS privacy, and an unattended command there waits on a consent prompt at the Mac. Work in project folders such as ~/Workspace/Projects, or ask the owner to move the files there.`;
     }
     const recursive = Object.hasOwn(SCANNERS, program)
-      || (Object.hasOwn(RECURSIVE_WITH_FLAG, program) && words.some((word) => word === "--recursive" || (program === "ls" ? /^-[A-Za-z]*R/ : /^-[A-Za-z]*[rR]/).test(word)));
+      || (Object.hasOwn(RECURSIVE_FLAG, program) && words.some((word) => word === "--recursive" || word === "--archive" || RECURSIVE_FLAG[program]!.test(word)));
     if (recursive) {
       const roots = paths.length ? paths : [cwd];
       const root = roots.find((path) => broad.has(path));
