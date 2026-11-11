@@ -39,6 +39,8 @@ export function InboxView({ state, navigate, focusDecisionId }: {
   const notifications = state.notifications.filter(item => !item.decisionId || !pendingIds.has(item.decisionId))
     .sort((a, b) => b.createdAt - a.createdAt);
   const unread = notifications.filter(item => !item.readAt);
+  // 「모두 읽음」은 카드가 대신 보여 준 질문의 알림까지 읽음으로 한다 — 숨긴 것만 남으면 답한 뒤 새 소식으로 되살아난다.
+  const unreadAll = state.notifications.filter(item => !item.readAt);
   const shownNotifications = notifications.slice(0, notificationLimit);
   const moreNotifications = notifications.length - shownNotifications.length;
   const focusedSettled = focusDecisionId ? state.decisions.find(decision => decision.id === focusDecisionId && decision.state !== 'pending') : undefined;
@@ -60,7 +62,7 @@ export function InboxView({ state, navigate, focusDecisionId }: {
     {notifications.length > 0 && <section className="grid gap-2" aria-labelledby="inbox-notifications">
       <header className="flex items-center justify-between gap-2">
         <h2 id="inbox-notifications" className="section-title">소식{unread.length > 0 && <span className="count">새 소식 {unread.length}</span>}</h2>
-        {unread.length > 0 && <Button variant="ghost" size="sm" onClick={() => markRead(unread.map(item => item.id))}>모두 읽음 표시</Button>}
+        {unread.length > 0 && <Button variant="ghost" size="sm" onClick={() => markRead(unreadAll.map(item => item.id))}>모두 읽음 표시</Button>}
       </header>
       <ul className="feed">{shownNotifications.map(item => {
         const navigable = Boolean(item.workId || item.decisionId || item.conversationId);

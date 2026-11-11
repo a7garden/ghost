@@ -137,7 +137,15 @@ export class Autonomy {
    * so they cannot drift from `authorize`.
    */
   offersPlanning(ghost: Ghost): boolean {
-    return this.plansTeam(ghost) || this.enabled(ghost.id);
+    // 2026.11.11 : 메인이라도 자기 구동이 꺼지고 구동이 켜진 동료도 없으면 plan_next 는 어느 대상이든 거절된다.
+    // 그때 도구를 주면 첫 호출이 거절되는 막다른 길이 메인에게만 남는다.
+    return this.enabled(ghost.id) || this.plansTeam(ghost) && this.teammatesOn(ghost) > 0;
+  }
+
+  /** Active teammates whose drive is on — the only ones plan_next can target for the main Ghost. */
+  teammatesOn(ghost: Ghost): number {
+    return this.core.ledger.ghosts()
+      .filter((item) => item.id !== ghost.id && item.deletedAt === null && item.state === "active" && this.enabled(item.id)).length;
   }
 
   /** Whether this Ghost plans its teammates' looks: the active main Ghost only. */

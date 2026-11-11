@@ -10,7 +10,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import type { ModelRef } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
 import { createEngine } from "../src/engine/index.ts";
-import { fallbackReason } from "../src/engine/fallback.ts";
+import { fallbackListFor, fallbackReason } from "../src/engine/fallback.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { WorkspaceEnv } from "../src/sandbox/workspace-env.ts";
 import { MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
@@ -313,6 +313,14 @@ test("a fallback exception still reports the conversation idle", async () => {
     stop();
     await f.close();
   }
+});
+
+test("an owner-chosen no-fallback Ghost ignores the default list; its own list still wins", () => {
+  const ghost = { id: "g1", fallbacks: [] as ModelRef[] } as never as Parameters<typeof fallbackListFor>[0];
+  const third = { provider: "third", model: "third-1" };
+  expect(fallbackListFor(ghost, { defaultFallbacks: [backup] })).toEqual([backup]);
+  expect(fallbackListFor(ghost, { defaultFallbacks: [backup], noFallbackGhosts: ["g1"] })).toEqual([]);
+  expect(fallbackListFor({ ...ghost, fallbacks: [third] }, { defaultFallbacks: [backup], noFallbackGhosts: ["g1"] })).toEqual([third]);
 });
 
 test("a Ghost without its own fallbacks follows the owner's default fallback list", async () => {

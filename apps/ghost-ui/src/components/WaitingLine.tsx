@@ -1,7 +1,7 @@
 import { ArrowRight } from 'lucide-react';
 import type { Decision, State } from '@ghost/contract';
 import { DotAvatar } from './DotAvatar';
-import { toneFor } from '../features/ghostState';
+import { pendingDecisions, toneFor } from '../features/ghostState';
 import { decisionChip, decisionHeading } from '../features/decisionText';
 import { relativeTime } from '../features/time';
 
@@ -10,7 +10,8 @@ const SHOWN = 3;
 
 /** Pending decisions, oldest first: the one that has waited longest leads. Pure; tests pin it. */
 export function waitingDecisions(state: State): Decision[] {
-  return state.decisions.filter(decision => decision.state === 'pending').sort((a, b) => a.createdAt - b.createdAt);
+  // 무엇이 「답을 기다림」인지는 pendingDecisions 한 곳이 정한다 — 홈 줄과 탭 배지가 어긋나지 않게.
+  return [...pendingDecisions(state)].sort((a, b) => a.createdAt - b.createdAt);
 }
 
 /**

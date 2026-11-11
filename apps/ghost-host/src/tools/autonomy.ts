@@ -23,10 +23,11 @@ export const DRIVE_OFF = `The owner switched off your self-directed drive: you a
 /** 메인은 자기 구동이 꺼져도 동료의 다음 확인을 정할 수 있어 plan_next 를 유지한다 — 그래서 자기 몫은 글로 막는다. */
 export const MAIN_DRIVE_OFF = `The owner switched off your own self-directed drive: you act only when the owner writes or a Work or schedule wakes you. Use plan_next only with a teammate's ghost_id, never for yourself.`;
 
-/** Teammates whose drive is off, so the main Ghost hands them Work instead of planning their look. */
-export function drivesOff(names: readonly string[]): string {
-  return names.length ? `Self-directed drive is off for ${names.join(", ")}: never plan_next for them; hand them Work with work_create when needed.` : "";
-}
+/**
+ * 동료 구동이 꺼진 경우의 안내. 이름을 싣지 않는다 — 2026.11.11 : 꺼진 동료 이름을 넣었더니 동료 구동을 켜고 끄거나
+ * 이름을 바꿀 때마다 메인의 시스템 지시가 바뀌어 프롬프트 캐시가 깨졌다. 누가 꺼졌는지는 plan_next 의 거절이 알린다.
+ */
+export const TEAM_DRIVE_NOTE = `The owner can switch off a teammate's drive; plan_next refuses such a teammate. Hand that teammate Work with work_create instead.`;
 
 /** Fixed in direct conversations: a Ghost's own appointment with itself, kept by the Host. */
 export function createAutonomyTools(core: Core): Extension {
