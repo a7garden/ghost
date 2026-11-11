@@ -15,7 +15,7 @@ export interface BeginEffect {
 }
 
 /** Host-only API journals; these names are not model tools or tool exclusion scopes. */
-const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete", "connection.upsert", "connection.delete"] as const;
+const COMMAND_EFFECT_TOOLS = ["message.cancel", "sandbox.control", "document.save", "provider.upsert", "provider.delete", "connection.upsert", "connection.delete", "connection.oauth"] as const;
 export type CommandEffectTool = typeof COMMAND_EFFECT_TOOLS[number];
 
 export interface BeginCommandEffect extends Omit<BeginEffect, "tool" | "callId"> {
@@ -27,8 +27,8 @@ export interface BeginCommandEffect extends Omit<BeginEffect, "tool" | "callId">
 export type EffectStart = { kind: "run"; effect: Effect } | { kind: "replay"; effect: Effect };
 
 /**
- * Journal of external side effects. `pending` is committed before I/O and becomes
- * `done` after; a `pending` row found at startup becomes `unknown` and blocks the Work.
+ * `pending` is committed before I/O and becomes `done` after; restart reconciles
+ * interrupted executions while preserving unexecuted owner-approval proposals.
  */
 /**
  * 2026-11-10 owner decision: an uncertain outcome goes back to the Ghost, which can look at files, the shell,
@@ -37,7 +37,9 @@ export type EffectStart = { kind: "run"; effect: Effect } | { kind: "replay"; ef
  */
 const OWNER_CONFIRMS: Record<string, { title: string; check: string }> = {
   activity_action: { title: "메일 답장이나 PR 댓글이 실제로 보내졌나요?", check: "보낸편지함이나 PR 댓글에서 확인해 주세요." },
+  connection_request: { title: "서비스에 요청한 변경이 실제로 처리됐나요?", check: "해당 서비스의 기록에서 확인해 주세요. 같은 요청을 다시 보내지는 않습니다." },
   browser_propose: { title: "브라우저에서 누르려던 버튼이 실제로 눌렸나요?", check: "주문 · 결제 내역이나 해당 사이트에서 확인해 주세요." },
+  desktop_propose: { title: "PC에서 누르려던 버튼이 실제로 눌렸나요?", check: "해당 앱 화면에서 확인해 주세요." },
 };
 
 export class Effects {
@@ -73,14 +75,11 @@ export class Effects {
         throw conflict(`the outcome of call ${input.callId} is ${existing.state}; it will not run again`);
       }
       if (scope === "tool") {
-        const blocking = this.unresolvedInConversation(input.conversationId)[0];
+        const blocking = this.unresolvedInConversation(input.conversationId).find((effect) => !this.awaitingApproval(effect));
         if (blocking) {
           const name = `effect ${blocking.tool} (${blocking.callId}) is unresolved`;
           if (blocking.state === "unknown") throw conflict(`${name}; nothing else runs until the owner reconciles it`);
-          const awaitingOwner = this.ledger.pendingDecisions({ effectId: blocking.id }).some((decision) => decision.kind === "approve_effect");
-          throw conflict(awaitingOwner
-            ? `${name}: it waits for the owner's approval; nothing else that changes the outside world runs here until the owner decides`
-            : `${name}: it is still running; try again after it finishes`);
+          throw conflict(`${name}: it is still running; continue with read-only steps until its result arrives`);
         }
       }
       const conversation = this.ledger.conversation(input.conversationId);
@@ -211,16 +210,22 @@ export class Effects {
     return this.ledger.effectsForWork(workId).filter((effect) => effect.state === "pending" || effect.state === "unknown");
   }
 
+  /** An unexecuted proposal is optional, not an in-flight external change. */
+  awaitingApproval(effect: Effect): boolean {
+    return effect.state === "pending" && this.ledger.pendingDecisions({ effectId: effect.id })
+      .some((decision) => decision.kind === "approve_effect");
+  }
+
   private unresolvedInConversation(conversationId: string): Effect[] {
     return [...this.ledger.effectsInState("unknown"), ...this.ledger.effectsInState("pending")].filter(
       (effect) => effect.conversationId === conversationId && !(COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool),
     );
   }
 
-  /** At startup no effect can still be running: every `pending` becomes `unknown`. */
+  /** At startup executing effects are interrupted; unexecuted proposals retain their approvals. */
   recoverInterrupted() {
     for (const effect of this.ledger.effectsInState("pending")) {
-      if (this.approved.has(effect.tool) && this.ledger.pendingDecisions({ effectId: effect.id }).length > 0) continue;
+      if (this.awaitingApproval(effect)) continue;
       this.unknown(effect.id, "the host stopped while this effect was running");
     }
   }

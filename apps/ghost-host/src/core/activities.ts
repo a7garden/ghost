@@ -10,7 +10,7 @@ import { isTerminal } from "./works.ts";
 
 const DAY = 86_400_000;
 export const MAX_ACTIVITY_WORK_ITEMS = 16;
-const DRY_TOOLS: Partial<Record<GhostTool, true>> = { read: true, web_search: true, web_read: true, memory_search: true, memory_recall: true, skill_read: true, delegate: true, host_status: true, host_services: true, host_disk_scan: true, host_disk_usage: true, host_list: true, host_read: true, host_nodes: true };
+const DRY_TOOLS: Partial<Record<GhostTool, true>> = { read: true, web_search: true, web_read: true, skill_read: true, delegate: true, host_status: true, host_services: true, host_disk_scan: true, host_disk_usage: true, host_list: true, host_read: true, host_nodes: true, toss_read: true };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 2048);
 const FAILURE_PAUSE = "Repeated activity failures";
 
@@ -80,7 +80,8 @@ export class Activities {
     if (config.source.kind !== "schedule") {
       const connection = this.ledger.connection(config.source.connectionId);
       if (!connection.hasCredential || !this.sourcePort().credentialPresent(connection.id)) throw conflict("source connection credential is missing or being replaced");
-      if ((config.source.kind === "mail") !== (connection.config.kind === "mail")) throw invalid("source and connection kinds do not match");
+      if (config.source.kind === "mail" && connection.config.kind !== "mail") throw invalid("mail activities need an IMAP mail connection");
+      if (config.source.kind === "pull_request" && connection.config.kind !== "github" && connection.config.kind !== "gitea") throw invalid("pull request activities need a GitHub or Gitea connection");
     }
   }
 
@@ -417,7 +418,7 @@ export class Activities {
     const ghost = this.ledger.ghost(work.ghostId);
     if (ghost.deletedAt !== null || ghost.state !== "active") throw forbidden("the executing Ghost is no longer active");
     if (work.execution?.kind === "host" && !ghost.hostExecution) throw forbidden("unrestricted PC execution grant was revoked");
-    if (toolName && !toolName.startsWith("activity_") && toolName !== "complete" && toolName !== "ask_owner" && toolName !== "ask_parent" && toolName !== "answer_child" && toolName !== "work_status") {
+    if (toolName && !toolName.startsWith("activity_") && toolName !== "complete" && toolName !== "ask_owner" && toolName !== "ask_parent" && toolName !== "ask_peer" && toolName !== "answer_question" && toolName !== "work_status") {
       const tool = toolName as GhostTool;
       if (!activity.tools.includes(tool) || !ghost.tools.includes(tool) || !work.toolScope?.includes(tool)) throw forbidden(`${toolName} is outside this activity's current scope`);
       if (run.dryRun && !DRY_TOOLS[tool]) throw forbidden(`${toolName} is disabled in dry runs`);

@@ -53,7 +53,7 @@ function fixture(path = ":memory:", source = new Source(), seed = true) {
   const core = new Core({ ledger, artifacts: new MemoryArtifacts(), sandbox: noSandbox, secrets: new MemorySecrets(), activitySources: source, log: () => {} });
   const engine = new FakeEngine();
   core.attach(engine);
-  const tools: GhostTool[] = ["read", "write", "edit", "bash", "memory_retain", "delegate", "activity_propose"];
+  const tools: GhostTool[] = ["read", "write", "edit", "bash", "delegate", "activity_propose"];
   const ghost = seed ? core.createGhost({ name: "Watcher", persona: "Observe only the approved source.", model: { provider: "test", model: "test-model" }, tools }) : ledger.ghosts()[0]!;
   const connection: Connection = seed ? { id: crypto.randomUUID(), name: "Account A", config: { kind: "github", baseUrl: "https://api.github.com" }, hasCredential: true, credentialVersion: crypto.randomUUID(), createdAt: 1, updatedAt: 1 } : ledger.connections()[0]!;
   if (seed) ledger.tx(() => ledger.putConnection(connection));
@@ -201,7 +201,7 @@ describe("durable activity admission", () => {
     expect(f.ledger.work(run.workId!).toolScope).toEqual(["read", "delegate"]);
     expect(() => f.activities.authorize(run.workId!, "bash")).toThrow();
     expect(() => f.activities.authorize(run.workId!, "write")).toThrow();
-    expect(() => f.activities.authorize(run.workId!, "memory_retain")).toThrow();
+    expect(() => f.activities.authorize(run.workId!, "edit")).toThrow();
     expect(() => f.activities.requestNextCheck(run.workId!, Date.now() + 120_000, "check again")).toThrow("disabled");
     await expect(f.activities.action(run.workId!, "send", { kind: "pr_comment", body: "hello" })).rejects.toThrow("dry runs");
     const read = await f.activities.read(run.workId!);

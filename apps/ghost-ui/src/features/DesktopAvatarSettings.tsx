@@ -53,7 +53,7 @@ export default function DesktopAvatarSettings() {
           <SegmentedControl<CompanionSize> aria-label="크기" value={preferences.size} onValueChange={size => void update({ size })}
             options={[{ value: 's', label: '작게', disabled: saving }, { value: 'm', label: '보통', disabled: saving }, { value: 'l', label: '크게', disabled: saving }]}/>
         </div>
-        <div className="desktop-avatar-bubble-control"><label htmlFor="desktop-avatar-bubble">상태 말풍선</label>
+        <div className="desktop-avatar-bubble-control"><label htmlFor="desktop-avatar-bubble">일 표시</label>
           <Switch id="desktop-avatar-bubble" checked={preferences.bubble} disabled={saving} onCheckedChange={bubble => void update({ bubble })}/>
         </div>
         <Button variant="outline" className="desktop-avatar-reset" disabled={saving} onClick={() => {

@@ -10,8 +10,8 @@ import {
 } from '@ghost/contract';
 import { fromLocalInput, intervalLabel, toLocalInput } from './Schedules';
 
-/** A new activity starts on the contract defaults: read-only tools, deny writes, ten runs a day at most. */
-export const DEFAULT_ACTIVITY_TOOLS: readonly GhostTool[] = ['read', 'web_search', 'web_read', 'memory_search'];
+/** A new activity starts on the contract defaults: read-only tools, deny writes, ten runs a day at most. Memory search is intrinsic to every Ghost conversation, not an activity grant. */
+export const DEFAULT_ACTIVITY_TOOLS: readonly GhostTool[] = ['read', 'web_search', 'web_read'];
 export const DEFAULT_POLICY: ActivityPolicy = {
   maxRunsPerDay: 10,
   maxConcurrent: 1,
@@ -23,23 +23,23 @@ export const DEFAULT_POLICY: ActivityPolicy = {
 };
 
 /**
- * Tools a Work conversation never receives. Optional Work capabilities include browser
- * and vault; direct conversations alone get activity/document proposals and Work creation.
+ * Capabilities outside an Activity's standing delegation. Browser and vault remain
+ * available; account registration needs an ordinary owner-confirmed conversation.
  */
-const DENIED_IN_WORK: Partial<Record<GhostTool, true>> = {
+const DENIED_IN_ACTIVITY: Partial<Record<GhostTool, true>> = {
   work_create: true, work_list: true, work_inspect: true, work_update: true, work_cancel: true,
   schedule_create: true, schedule_list: true, schedule_cancel: true, ghost_list: true, activity_propose: true,
-  document_propose: true,
+  document_propose: true, connection_register: true,
 };
 
 /** Tools the form may offer, in contract order, kept inside the Ghost's own grants. Pure. */
 export function intersectTools(requested: readonly GhostTool[], allowed: readonly GhostTool[]): GhostTool[] {
-  return [...new Set(requested)].filter(tool => allowed.includes(tool) && !DENIED_IN_WORK[tool]);
+  return [...new Set(requested)].filter(tool => allowed.includes(tool) && !DENIED_IN_ACTIVITY[tool]);
 }
 
-/** The chip options an activity may show: the Ghost's grants minus what a Work run cannot use. */
+/** The chip options an activity may show, kept inside its standing delegation. */
 export function activityToolChoices(tools: readonly GhostTool[]): GhostTool[] {
-  return tools.filter(tool => !DENIED_IN_WORK[tool]);
+  return tools.filter(tool => !DENIED_IN_ACTIVITY[tool]);
 }
 
 export const sourceKindLabel: Record<ActivitySource['kind'], string> = { schedule: '일정', pull_request: 'PR', mail: '메일' };

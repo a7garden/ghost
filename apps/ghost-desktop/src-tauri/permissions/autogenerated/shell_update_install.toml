@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shell-update-install"
+description = "Enables the shell_update_install command without any pre-configured scope."
+commands.allow = ["shell_update_install"]
+
+[[permission]]
+identifier = "deny-shell-update-install"
+description = "Denies the shell_update_install command without any pre-configured scope."
+commands.deny = ["shell_update_install"]

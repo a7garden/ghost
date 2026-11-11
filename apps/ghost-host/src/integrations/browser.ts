@@ -5,9 +5,10 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Config } from "../config.ts";
 import { CommandError } from "../core/errors.ts";
 import { NoEffect, KnownOutcome } from "../core/effects.ts";
-import type { BrowserCommandResult, BrowserControl, BrowserFrame, BrowserPort, BrowserRunOptions, BrowserSessionRef } from "./ports.ts";
+import type { BrowserCommandResult, BrowserControl, BrowserFrame, BrowserPort, BrowserRunOptions, BrowserSessionRef, VaultField } from "./ports.ts";
 import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
 import { assertFetchableUrl } from "./netguard.ts";
+import { startObscura, type ObscuraProcess } from "./obscura.ts";
 import { confineDirChain, readFileNoFollow } from "../sandbox/workspace-env.ts";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -26,6 +27,9 @@ const expand = (path: string) => path.startsWith("~/") ? join(homedir(), path.sl
 const nameFor = (id: string) => `ghost-${createHash("sha256").update(id).digest("hex").slice(0, 24)}`;
 interface Session {
   ref: BrowserSessionRef;
+  engine?: BrowserRunOptions["engine"];
+  obscura?: ObscuraProcess;
+  obscuraIdle?: ReturnType<typeof setTimeout>;
   headed: boolean;
   handoffUrl: string | null;
   handoffFallback: boolean;
@@ -42,6 +46,7 @@ export function createBrowser(config: Config, deps: { root: string }): BrowserPo
 
 /** A private HOME/config/key and namespace prevent owner plugins and sessions from entering Ghost. */
 export class AgentBrowser implements BrowserPort {
+  get supportsObscura() { return this.config.obscura !== undefined; }
   private readonly home: string;
   private readonly configPath: string;
   private readonly initPath: string;
@@ -202,6 +207,45 @@ export class AgentBrowser implements BrowserPort {
     } finally { closeSync(fd); }
   }
   private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
+    const obscura = session.engine === "obscura";
+    if (obscura) {
+      clearTimeout(session.obscuraIdle);
+      session.obscuraIdle = undefined;
+      if (argv[0] !== "close" && !session.obscura?.running()) {
+        if (argv[0] !== "open") throw new NoEffect("The Obscura session ended. Open the page again before continuing.");
+        // An engine can die independently of the agent-browser daemon. Discard
+        // that connection before supplying a new listener and bearer token.
+        if (!(await this.invoke(session, ["close"])).ok) throw new NoEffect("Could not clear the previous Obscura connection");
+        const executable = this.config.obscura?.executable;
+        if (!executable) throw new NoEffect("Obscura is not configured");
+        const proxy = await (this.proxy ??= createEgressProxy());
+        try { session.obscura = await startObscura(expand(executable), proxy.url); }
+        catch (error) { session.engine = undefined; throw error; }
+        session.secrets = [];
+        session.screenshotsBlocked = false;
+        session.passwordScreenshots.clear();
+      }
+    }
+    try { return await this.invokeCli(session, argv, options); }
+    finally {
+      if (obscura && session.obscura) {
+        const process = session.obscura;
+        if (argv[0] === "close") {
+          await process.stop();
+          session.obscura = undefined;
+        } else {
+          const idle = setTimeout(() => {
+            if (this.sessions.get(session.ref.conversationId) !== session) return;
+            void this.enqueueSession(session.ref, async (current) => {
+              if (current === session && session.obscuraIdle === idle) await this.invoke(session, ["close"]);
+            }).catch(() => {});
+          }, (this.config.idleTimeoutMinutes ?? 10) * 60_000);
+          session.obscuraIdle = idle.unref();
+        }
+      }
+    }
+  }
+  private async invokeCli(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
     const proxy = await (this.proxy ??= createEgressProxy());
     const name = nameFor(session.ref.conversationId);
     const download = join(this.root, "browser", "downloads", name);
@@ -210,17 +254,24 @@ export class AgentBrowser implements BrowserPort {
     catch { await this.stopDownloads(session); throw new CommandError("unavailable", "Browser download limit exceeded; session closed"); }
     const screenshot = argv[0] === "screenshot" ? join(download, `${randomUUID()}.${argv.includes("jpeg") ? "jpg" : "png"}`) : null;
     const command = screenshot ? ["screenshot", screenshot, ...argv.slice(1)] : argv;
-    const args = [expand(this.config.executable), "--session", name, "--namespace", this.namespace,
-      "--restore", `ghost-${session.ref.ghostId}`, "--config", this.configPath,
+    // Chromium needs the WebRTC init script; Obscura's OS policy limits all
+    // outbound sockets to the Host proxy, including requests outside HTTP.
+    const connection = session.engine === "obscura"
+      ? (argv[0] !== "close" && session.obscura ? ["--cdp", session.obscura.websocket] : [])
+      : ["--restore", `ghost-${session.ref.ghostId}`,
       "--executable-path", expand(this.config.chrome ?? CHROME),
       "--init-script", this.initPath,
       "--args", `--proxy-server=${proxy.url},--proxy-bypass-list=<-loopback>,--force-webrtc-ip-handling-policy=disable_non_proxied_udp`,
+      ...(session.headed ? ["--headed"] : [])];
+    const args = [expand(this.config.executable), "--session", name, "--namespace", this.namespace,
+      "--config", this.configPath, ...connection,
       "--content-boundaries", "--max-output", "48000", "--idle-timeout", `${this.config.idleTimeoutMinutes ?? 10}m`,
-      "--download-path", download, "--screenshot-dir", download, ...(session.headed ? ["--headed"] : []), "--json", ...command];
+      "--download-path", download, "--screenshot-dir", download, "--json", ...command];
     // /tmp is swept by macOS; the socket directory may vanish while the host keeps running.
     this.ensureSocketDir();
     const env = { HOME: this.home, PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", TMPDIR: process.env.TMPDIR ?? "/tmp",
-      AGENT_BROWSER_ENCRYPTION_KEY: this.key, AGENT_BROWSER_NO_VERSION_CHECK: "1", AGENT_BROWSER_SOCKET_DIR: this.socketDir };
+      AGENT_BROWSER_ENCRYPTION_KEY: this.key, AGENT_BROWSER_NO_VERSION_CHECK: "1", AGENT_BROWSER_SOCKET_DIR: this.socketDir,
+      ...(session.engine === "obscura" && session.obscura ? { AGENT_BROWSER_CDP_HEADERS: JSON.stringify(session.obscura.headers) } : {}) };
     let child: Bun.Subprocess<"pipe", "pipe", "pipe">;
     try { child = Bun.spawn(args, { cwd: this.home, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" }); }
     catch { throw new CommandError("unavailable", "Browser executable could not start"); }
@@ -317,20 +368,56 @@ export class AgentBrowser implements BrowserPort {
     this.sessions.set(ref.conversationId, session);
     return session;
   }
+  assertVaultFill(ref: BrowserSessionRef, field: VaultField, origin: string) {
+    if (this.sessions.get(ref.conversationId)?.engine === "obscura" &&
+      (!["username", "password", "totp"].includes(field) || !this.config.obscura?.loginOrigins?.includes(origin))) {
+      throw new NoEffect("Vault login is unavailable on this Obscura site");
+    }
+  }
+  private protectValue(session: Session, value: string, field: VaultField): void {
+    if (value && !session.secrets.some(entry => entry.variants.includes(value) && (field !== "card_number" || entry.cardPattern !== undefined))) {
+      const json = JSON.stringify(value).slice(1, -1);
+      const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+      let encoded = value;
+      try { encoded = encodeURIComponent(value); } catch {}
+      const variants = [...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), json])].sort((a, b) => b.length - a.length);
+      const digits = field === "card_number" ? value.replace(/\D/g, "") : "";
+      session.secrets.push({ variants, ...(digits ? { cardPattern: new RegExp(digits.split("").join("[\\s-]*"), "g") } : {}) });
+    }
+    if (field.startsWith("card_") || field === "value") session.screenshotsBlocked = true;
+  }
+  captureCredential(ref: BrowserSessionRef, input: { origin: string; ref?: string; selector?: string }): Promise<string> {
+    return this.enqueueSession(ref, async session => {
+      if ((input.ref === undefined) === (input.selector === undefined)) throw new NoEffect("Choose exactly one credential input");
+      let origin: URL;
+      try { origin = new URL(input.origin); } catch { throw new NoEffect("Choose an exact HTTPS issuer origin"); }
+      if (origin.protocol !== "https:" || origin.origin !== input.origin) throw new NoEffect("Choose an exact HTTPS issuer origin");
+      session.engine ??= "chrome";
+      this.assertVaultFill(ref, "value", input.origin);
+      if (input.ref !== undefined && !(await this.invoke(session, ["focus", input.ref])).ok) throw new NoEffect("The credential field changed");
+      const selection = input.selector === undefined ? "const e = document.activeElement;" : `const fields = document.querySelectorAll(${JSON.stringify(input.selector)}); if (fields.length !== 1) return null; const e = fields[0];`;
+      const script = `(() => { if (window.top !== window || location.origin !== ${JSON.stringify(input.origin)}) return null; ${selection} return e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement ? e.value : null; })()`;
+      // invoke bypasses model-output redaction; only this Host-only method receives the value.
+      const result = await this.invoke(session, ["eval", script]);
+      const data = result.data;
+      const value = result.ok && data && typeof data === "object" && "result" in data && typeof data.result === "string" ? data.result.trim() : "";
+      if (!value || value.length > 16384 || /[\r\n\0]/.test(value)) throw new NoEffect("The issuer origin or credential field changed");
+      this.protectValue(session, value, "value");
+      return value;
+    });
+  }
   run(ref: BrowserSessionRef, argv: string[], options?: BrowserRunOptions) {
     return this.enqueueSession(ref, async (session) => {
+      if (options?.engine) {
+        if (argv[0] !== "open" || session.engine && session.engine !== options.engine) throw new NoEffect("Close the browser session before choosing a different engine");
+        if (options.engine === "obscura" && !this.supportsObscura) throw new NoEffect("Obscura is not configured");
+      }
+      session.engine ??= options?.engine ?? "chrome";
+      if (session.engine === "obscura" && options?.transfer) throw new NoEffect("Obscura file transfers are unavailable");
       if (options?.sensitive) {
         const { value, field } = options.sensitive;
-        if (value && !session.secrets.some((entry) => entry.variants.includes(value) && (field !== "card_number" || entry.cardPattern !== undefined))) {
-          const json = JSON.stringify(value).slice(1, -1);
-          const html = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
-          let encoded = value;
-          try { encoded = encodeURIComponent(value); } catch {}
-          const variants = [...new Set([value, encoded, encoded.replaceAll("%20", "+"), html, html.replaceAll("&#39;", "&#x27;"), json])].sort((a, b) => b.length - a.length);
-          const digits = field === "card_number" ? value.replace(/\D/g, "") : "";
-          session.secrets.push({ variants, ...(digits ? { cardPattern: new RegExp(digits.split("").join("[\\s-]*"), "g") } : {}) });
-        }
-        if (field.startsWith("card_") || field === "value") session.screenshotsBlocked = true;
+        this.assertVaultFill(ref, field, options.sensitive.origin);
+        this.protectValue(session, value, field);
         if (field === "password") {
           const tab = this.activeTab((await this.invoke(session, ["tab", "list"])).data);
           if (!tab) throw new CommandError("forbidden", "Secret fill refused (not_password_field)");
@@ -406,9 +493,8 @@ export class AgentBrowser implements BrowserPort {
   }
   handoff(ref: BrowserSessionRef, url: string | null) {
     return this.enqueueSession(ref, async (session) => {
+      if (session.engine === "obscura") throw new CommandError("unavailable", "Obscura handoff uses the live view in Ghost");
       if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser state");
-      session.secrets = [];
-      session.screenshotsBlocked = false;
       session.passwordScreenshots.clear();
       this.clearFiles(session);
       session.headed = true;
@@ -428,7 +514,8 @@ export class AgentBrowser implements BrowserPort {
       if (!page.ok || !width || !height) throw new CommandError("unavailable", "The browser page could not be read");
       const shot = await this.invoke(session, ["screenshot", "--screenshot-format", "jpeg", "--screenshot-quality", "60"]);
       if (!shot.ok || !shot.data || typeof shot.data !== "object" || !("image" in shot.data) || typeof shot.data.image !== "string") throw new CommandError("unavailable", "The browser screenshot failed");
-      return { image: shot.data.image, mediaType: "image/jpeg", width, height, url: typeof info.url === "string" ? info.url.slice(0, 2048) : "", title: typeof info.title === "string" ? info.title.slice(0, 256) : "" };
+      return { image: shot.data.image, mediaType: "image/jpeg", width, height, url: typeof info.url === "string" ? info.url.slice(0, 2048) : "", title: typeof info.title === "string" ? info.title.slice(0, 256) : "",
+        ...(session.engine === "obscura" ? { windowAvailable: false } : {}) };
     });
   }
   control(ref: BrowserSessionRef, input: BrowserControl): Promise<void> {
@@ -479,8 +566,6 @@ export class AgentBrowser implements BrowserPort {
         }
         if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser handoff state");
         session.headed = false;
-        session.secrets = [];
-        session.screenshotsBlocked = false;
         session.passwordScreenshots.clear();
         this.clearFiles(session);
       }

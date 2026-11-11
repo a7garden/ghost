@@ -7,6 +7,7 @@ import { desktopInvoke } from '../host/desktop';
 import { ghostPresence } from '../features/ghostState';
 import { CompanionAvatar, companionGhost } from './Avatar';
 import { readCompanionPreferences, saveCompanionPreferences, useCompanionPreferences } from './preferences';
+import { companionActivity, WorkShelf } from './WorkShelf';
 import './companion.css';
 
 const systemDark = matchMedia('(prefers-color-scheme: dark)');
@@ -48,7 +49,7 @@ function measureAnchor(root: HTMLElement) {
       bounds.push(svgPaintBounds(element, Number.parseFloat(style.strokeWidth) / 2));
     }
   }
-  for (const element of root.querySelectorAll('.companion-bubble, .companion-attention')) {
+  for (const element of root.querySelectorAll('.companion-summary, .companion-attention')) {
     if (element.getClientRects().length) bounds.push(element.getBoundingClientRect());
   }
   const left = Math.max(0, Math.min(...bounds.map(bound => bound.left)));
@@ -71,10 +72,25 @@ function Companion() {
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
   const [sized, setSized] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const dragging = useRef(false);
+  const resizeQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cluster = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
   const latestReport = useRef<Promise<void>>(Promise.resolve());
   const ghost = companionGhost(state, preferences.ghostId);
   const presence = ghost && state ? ghostPresence(ghost, state) : null;
+  const activity = ghost && state ? companionActivity(ghost, state) : null;
+  const canExpand = preferences.bubble && Boolean(activity?.summary);
+  const open = expanded && canExpand;
+  const clearHover = () => clearTimeout(hoverTimer.current);
+  const closeShelf = () => {
+    clearHover();
+    setExpanded(false);
+  };
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
   const report = useCallback((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)), []);
   const reportAnchor = useCallback(() => {
     if (!root.current?.querySelector('.ghost-character')) return Promise.resolve();
@@ -98,11 +114,12 @@ function Companion() {
     return () => { disposed = true; window.removeEventListener('ghost-companion-hide', hide); };
   }, []);
 
-  useEffect(() => {
-    if (!ready || !state) return;
+  useLayoutEffect(() => {
+    if (!ready || !state || dragActive) return;
     let disposed = false;
     setSized(false);
-    void desktopInvoke('companion_resize', { size: preferences.size })
+    resizeQueue.current = resizeQueue.current.catch(() => {}).then(() => desktopInvoke('companion_resize', { size: preferences.size, expanded: open }));
+    void resizeQueue.current
       .then(() => {
         const { promise, resolve } = Promise.withResolvers<void>();
         requestAnimationFrame(() => resolve());
@@ -117,7 +134,7 @@ function Companion() {
       })
       .catch(report);
     return () => { disposed = true; };
-  }, [ready, Boolean(state), preferences.size, preferences.enabled, reportAnchor, report]);
+  }, [ready, Boolean(state), preferences.size, preferences.enabled, open, dragActive, reportAnchor, report]);
 
   useLayoutEffect(() => {
     if (!ready || !sized || !ghost || !root.current) return;
@@ -131,7 +148,7 @@ function Companion() {
       });
     };
     const observer = new ResizeObserver(schedule);
-    for (const element of root.current.querySelectorAll('.companion-avatar, .ghost-character, .companion-bubble')) {
+    for (const element of root.current.querySelectorAll('.companion-avatar, .ghost-character, .companion-summary')) {
       observer.observe(element);
     }
     observer.observe(root.current);
@@ -145,7 +162,7 @@ function Companion() {
       window.removeEventListener('resize', schedule);
     };
   }, [ready, sized, ghost?.id, ghost?.look.shape, ghost?.look.face, ghost?.look.mark,
-    preferences.size, preferences.bubble, presence?.state, presence?.line, reportAnchor, report]);
+    preferences.size, preferences.bubble, presence?.state, presence?.line, activity?.summary, open, reportAnchor, report]);
 
   const selectOverlayGhost = () => {
     if (!ghost) return true;
@@ -155,25 +172,64 @@ function Companion() {
     } catch (reason) { report(reason); return false; }
   };
   const openChat = () => {
-    if (selectOverlayGhost()) void Promise.resolve().then(reportAnchor).then(() => desktopInvoke('toggle_overlay')).catch(report);
+    closeShelf();
+    resizeQueue.current = resizeQueue.current.catch(() => {}).then(() => desktopInvoke('companion_resize', { size: preferences.size, expanded: false }));
+    if (selectOverlayGhost()) void resizeQueue.current
+      .then(() => {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        requestAnimationFrame(() => resolve());
+        return promise;
+      }).then(reportAnchor).then(() => desktopInvoke('toggle_overlay')).catch(report);
   };
   const status = error || storageError || hostError;
   return <main ref={root} className="companion-window" aria-label="데스크톱 Ghost">
-    {ghost && state && <button type="button" className="companion-hit" aria-label={`${ghost.name} 대화 열기`} title={status || `${ghost.name} · 클릭하여 대화 · 끌어서 이동`}
+    {ghost && state && <div ref={cluster} className="companion-cluster" data-expanded={open && sized}
+      onPointerEnter={event => {
+        if (event.pointerType === 'touch' || !canExpand || dragging.current) return;
+        clearHover();
+        hoverTimer.current = setTimeout(() => setExpanded(true), 180);
+      }}
+      onPointerLeave={() => {
+        clearHover();
+        if (dragging.current) return;
+        hoverTimer.current = setTimeout(() => {
+          if (!cluster.current?.contains(document.activeElement)) setExpanded(false);
+        }, 220);
+      }}
+      onFocus={clearHover}
+      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) closeShelf(); }}
+      onKeyDown={event => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeShelf();
+          cluster.current?.querySelector<HTMLButtonElement>('.companion-summary')?.focus();
+        }
+      }}>
+      {canExpand && <button type="button" className="companion-summary" data-attention={presence?.state === 'attention'}
+        aria-expanded={open && sized} aria-controls="companion-work" aria-label={`${activity?.summary} 펼치기`}
+        onClick={() => { clearHover(); setExpanded(value => !value); }}>{activity?.summary}</button>}
+      {open && sized && <WorkShelf ghost={ghost} state={state} onOpen={route => {
+        closeShelf();
+        void desktopInvoke('focus_main', { route }).catch(report);
+      }}/>}
+      <button type="button" className="companion-hit" aria-label={`${ghost.name} 대화 열기`} title={status || `${ghost.name} · 클릭하여 대화 · 끌어서 이동`}
       onMouseDown={event => {
         if (event.button !== 0) return;
         event.preventDefault();
-        void desktopInvoke<boolean>('companion_drag').then(moved => {
+        clearHover();
+        dragging.current = true;
+        setDragActive(true);
+        void resizeQueue.current.catch(() => {}).then(() => desktopInvoke<boolean>('companion_drag')).then(moved => {
           if (!moved) openChat();
-        }).catch(report);
+        }).catch(report).finally(() => { dragging.current = false; setDragActive(false); });
       }}
       onClick={event => { if (event.detail === 0) openChat(); }}
       onContextMenu={event => {
         event.preventDefault();
         if (selectOverlayGhost()) void Promise.resolve().then(reportAnchor).then(() => desktopInvoke('companion_menu')).catch(report);
       }}>
-      <CompanionAvatar ghost={ghost} state={state} preferences={preferences}/>
-    </button>}
+      <CompanionAvatar ghost={ghost} state={state} preferences={preferences} showSummary={false}/>
+    </button></div>}
     {status && <span className="companion-error" role="status" title={status}>연결 확인</span>}
   </main>;
 }

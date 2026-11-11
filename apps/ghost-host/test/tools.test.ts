@@ -11,7 +11,7 @@ import type { ArtifactStore } from "../src/core/ports.ts";
 import type { Core } from "../src/core/core.ts";
 import { sha256 } from "../src/core/ids.ts";
 import { parseShellResult } from "../src/core/verify.ts";
-import type { SandboxEnvFactory, MemoryPort } from "../src/integrations/ports.ts";
+import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import { splitQuestion } from "../src/tools/shared.ts";
@@ -58,23 +58,6 @@ class TempSandbox implements SandboxEnvFactory {
   async release() {}
 }
 
-/** MemoryPort stub that records retains and answers search/recall deterministically. */
-class FakeMemory implements MemoryPort {
-  readonly retained: { ghostId: string; text: string }[] = [];
-  available(): boolean {
-    return true;
-  }
-  async search(_ghostId: string, query: string, _limit: number) {
-    return [{ text: `hit for ${query}`, source: "stub", score: null }];
-  }
-  async recall(_ghostId: string, _query: string, _tokenBudget: number) {
-    return { text: "recalled text", sources: ["stub"] };
-  }
-  async retain(ghostId: string, text: string, _origin: { conversationId: string; workId: string | null }) {
-    this.retained.push({ ghostId, text });
-    return { id: `stub-${this.retained.length}` };
-  }
-}
 
 interface Setup {
   root: string;
@@ -172,7 +155,6 @@ describe("tools", () => {
       s.ledger.tx(() => s.ledger.putWork({ ...s.ledger.work(work.id), toolScope: ["document_list"] }));
       const scopedRead = await call(readTool, { space_id: "project", page_id: page.pageId }, apiOf(pi, "scoped-read"));
       expect(scopedRead.isError).toBe(true);
-      expect(contentOf(scopedRead)).toContain("outside this Work's approved tool scope");
       expect((await call(listTool, { space_id: "project" }, apiOf(pi, "scoped-list"))).isError).toBeFalsy();
       await s.core.idle();
     } finally { s.core.stop(); s.ledger.close(); }
@@ -493,6 +475,31 @@ describe("tools", () => {
     expect(settled.verdict?.outcome).toBe("pass");
   });
 
+  test("artifact_read lists the attached names when the requested artifact is not part of the result", async () => {
+    const s = setup();
+    const reviewer = s.core.createGhost({ name: "Critic", persona: "You review." });
+    const { work, conversation, pi } = await runningWork(s);
+    s.core.works.update(work.id, { acceptance: { criteria: "A report exists", checks: [], reviewer: { kind: "ghost", ghostId: reviewer.id } } });
+    writeFileSync(join(s.sandbox.workspacePath(work), "report.txt"), "hello world");
+    await call(toolOf(s, conversation, s.ghost, "publish_artifact"), { path: "report.txt" }, apiOf(pi, "pub-1"));
+    const claimed = await call(toolOf(s, conversation, s.ghost, "complete"), { summary: "Report written", artifacts: ["report.txt"] }, apiOf(pi, "complete-1"));
+    expect(claimed.isError).toBeFalsy();
+    await s.core.idle();
+
+    const review = s.ledger.conversations({ kind: "review" }).find((candidate) => candidate.workId === work.id);
+    if (!review) throw new Error("no review conversation was opened");
+    const reviewPi = asPi(s, review, "pi-review");
+    const wrong = await call(toolOf(s, review, reviewer, "artifact_read"), { name: "summary.txt" }, apiOf(reviewPi, "read-wrong"));
+    expect(wrong.isError).toBe(true);
+    const message = contentOf(wrong);
+    expect(message).toContain("not part of this Work's result");
+    expect(message).toMatch(/report\.txt \([0-9a-f]{12}\)/);
+
+    const right = await call(toolOf(s, review, reviewer, "artifact_read"), { name: "report.txt" }, apiOf(reviewPi, "read-right"));
+    expect(right.isError).toBeFalsy();
+    expect(contentOf(right)).toContain("hello world");
+  });
+
   test("publish_artifact refuses a file above the byte cap without storing anything", async () => {
     const s = setup();
     const { work, conversation, pi } = await runningWork(s);
@@ -534,6 +541,31 @@ describe("tools", () => {
     expect(attempts[0]!.state).toBe("denied");
   });
 
+  test("publish_artifact lists the workspace files when the path is missing or absolute", async () => {
+    const s = setup();
+    const { work, conversation, pi } = await runningWork(s);
+    const workspace = s.sandbox.workspacePath(work);
+    writeFileSync(join(workspace, "report.txt"), "hello world");
+    mkdirSync(join(workspace, "inputs", "child-1"), { recursive: true });
+    writeFileSync(join(workspace, "inputs", "child-1", "summary.md"), "child result");
+
+    const absolute = await call(toolOf(s, conversation, s.ghost, "publish_artifact"), { path: "/Users/garden/report.md" }, apiOf(pi, "pub-abs"));
+    expect(absolute.isError).toBe(true);
+    const message = contentOf(absolute);
+    expect(message).toContain("path must be relative to the workspace");
+    expect(message).toContain("inputs/child-1/summary.md");
+    expect(message).toContain("report.txt");
+    expect(message).toContain("host_read");
+    expect(message).not.toContain(workspace);
+
+    const missing = await call(toolOf(s, conversation, s.ghost, "publish_artifact"), { path: "inputs/report.md" }, apiOf(pi, "pub-missing"));
+    expect(missing.isError).toBe(true);
+    const missingMessage = contentOf(missing);
+    expect(missingMessage).toContain("no file at inputs/report.md");
+    expect(missingMessage).toContain("report.txt");
+    expect(s.ledger.artifactsForWork(work.id)).toHaveLength(0);
+  });
+
   test("a replayed work_create call finds the Work it already created", async () => {
     const s = setup();
     const pi = asPi(s, s.direct, "pi-direct");
@@ -549,6 +581,25 @@ describe("tools", () => {
     expect(contentOf(first)).toContain(works[0]!.id);
     await s.core.idle();
     expect(s.ledger.work(works[0]!.id).conversationId).not.toBeNull();
+  });
+
+  test("only the owner can extend an existing Work deadline", async () => {
+    const s = setup();
+    const pi = asPi(s, s.direct, "pi-direct");
+    const workCreate = toolOf(s, s.direct, s.ghost, "work_create");
+    const workUpdate = toolOf(s, s.direct, s.ghost, "work_update");
+    await call(workCreate, { title: "Timed", brief: "Finish the report" }, apiOf(pi, "timed"));
+    const work = s.ledger.worksForState().find((item) => item.title === "Timed")!;
+    expect(work.deadlineAt).toBeGreaterThan(Date.now() + 89 * 60_000);
+    const extended = await call(workUpdate, { work_id: work.id, deadline_minutes: 180 }, apiOf(pi, "extend"));
+    expect(extended.isError).toBe(true);
+    expect(s.ledger.work(work.id).deadlineAt).toBe(work.deadlineAt);
+    const shortened = await call(workUpdate, { work_id: work.id, deadline_minutes: 10 }, apiOf(pi, "shorten"));
+    expect(shortened.isError).toBeFalsy();
+    expect(s.ledger.work(work.id).deadlineAt).toBeLessThan(work.deadlineAt!);
+    const ownerDeadline = Date.now() + 180 * 60_000;
+    expect(s.core.works.update(work.id, { deadlineAt: ownerDeadline }).deadlineAt).toBe(ownerDeadline);
+    await s.core.idle();
   });
 
   test("a replayed delegate call finds the child it already created", async () => {

@@ -329,9 +329,10 @@ describe("API command crash atomicity", () => {
       const { core, ledger, engine } = harness();
       const ghost = core.createGhost({ name: "Owner", persona: "" });
       const conversationId = ghost.directConversationId;
-      const writer = core.effects.begin({ conversationId, callId: "running-write", tool: "memory_retain", input: { text: "Durable memory" }, summary: "Retain memory" }).effect;
+      // An outside write (a sent reply) stays unknown; writes the Ghost can inspect are handed back as uncertain.
+      const writer = core.effects.begin({ conversationId, callId: "running-write", tool: "activity_action", input: { text: "Reply" }, summary: "Send reply" }).effect;
       if (state === "unknown") core.effects.unknown(writer.id, "interrupted write");
-      const competing = { conversationId, callId: "competing-write", tool: "memory_retain", input: { text: "Other memory" }, summary: "Other memory" };
+      const competing = { conversationId, callId: "competing-write", tool: "write", input: { text: "Other memory" }, summary: "Other memory" };
       expect(() => core.effects.begin(competing)).toThrow("unresolved");
       const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "message.cancel", conversationId } };
       await execute(core, new Access(owner), request, context);
@@ -351,7 +352,7 @@ describe("API command crash atomicity", () => {
     const { core, ledger, engine } = harness();
     const ghost = core.createGhost({ name: "Owner", persona: "" });
     const conversationId = ghost.directConversationId;
-    core.effects.begin({ conversationId, callId: "running-write", tool: "memory_retain", input: { text: "Memory" }, summary: "Retain memory" });
+    core.effects.begin({ conversationId, callId: "running-write", tool: "write", input: { text: "Memory" }, summary: "Retain memory" });
     const abort = engine.abort.bind(engine);
     engine.abort = async (id) => {
       await abort(id);
@@ -394,10 +395,10 @@ describe("API command crash atomicity", () => {
         ledger.putSpace({ id: "owner-docs", name: "Docs", path: vault, createdAt: Date.now() });
       });
       secrets.put("revoked-provider", "must-be-revoked");
-      core.effects.onApproved("host_command_propose", async () => { throw new Error("approval must not execute"); });
+      core.effects.onApproved("browser_propose", async () => { throw new Error("approval must not execute"); });
       const approval = core.effects.propose({
-        conversationId, callId: "waiting-host-command", tool: "host_command_propose", input: { command: "owner-reviewed command" },
-        summary: "Waiting for owner approval", title: "Run?", detail: "Owner review required", proposal: { command: "owner-reviewed command" },
+        conversationId, callId: "waiting-browser-click", tool: "browser_propose", input: { command: "owner-reviewed click" },
+        summary: "Waiting for owner approval", title: "Click?", detail: "Owner review required", proposal: { command: "owner-reviewed click" },
       });
       if (state === "unknown") core.effects.unknown(approval.id, "uncertain previous host command");
       const originalEffect = ledger.effect(approval.id);
@@ -416,7 +417,9 @@ describe("API command crash atomicity", () => {
       expect(readFileSync(sandboxActions, "utf8")).toBe("reset\n");
       expect(ledger.effect(approval.id)).toEqual(originalEffect);
       expect(ledger.pendingDecisions({ effectId: approval.id })).toEqual(originalDecisions);
-      expect(() => core.effects.begin({ conversationId, callId: "competing-model-write", tool: "memory_retain", input: {}, summary: "Must stay excluded" })).toThrow("unresolved");
+      const beginWrite = () => core.effects.begin({ conversationId, callId: "competing-model-write", tool: "write", input: {}, summary: "Independent write" });
+      if (state === "unknown") expect(beginWrite).toThrow("unresolved");
+      else expect(beginWrite().kind).toBe("run");
       await core.idle();
       core.stop();
       ledger.close();
@@ -433,11 +436,11 @@ describe("API command crash atomicity", () => {
       expect(() => core.effects.beginCommand(input)).toThrow(state);
       expect(() => core.effects.beginCommand({ ...input, input: { body: "Changed" } })).toThrow("different input");
       expect(() => core.effects.beginCommand({ ...input, tool: "sandbox.control" })).toThrow("different tool");
-      expect(core.effects.begin({ conversationId, callId: "independent-model-write", tool: "memory_retain", input: {}, summary: "Independent tool write" }).kind).toBe("run");
-      expect(() => core.effects.begin({ conversationId, callId: "competing-model-write", tool: "memory_retain", input: {}, summary: "Still excluded" })).toThrow("unresolved");
+      expect(core.effects.begin({ conversationId, callId: "independent-model-write", tool: "write", input: {}, summary: "Independent tool write" }).kind).toBe("run");
+      expect(() => core.effects.begin({ conversationId, callId: "competing-model-write", tool: "write", input: {}, summary: "Still excluded" })).toThrow("unresolved");
       expect(core.effects.beginCommand({ ...input, requestId: crypto.randomUUID() }).kind).toBe("run");
       expect(() => core.effects.begin({ conversationId, callId: "model-controlled-name", tool: "provider.delete", input: {}, summary: "Not a model tool" })).toThrow("command admission");
-      expect(() => core.effects.beginCommand({ ...input, requestId: crypto.randomUUID(), tool: "memory_retain" as never })).toThrow("unknown API effect tool");
+      expect(() => core.effects.beginCommand({ ...input, requestId: crypto.randomUUID(), tool: "write" as never })).toThrow("unknown API effect tool");
       expect(ledger.effect(command.id).state).toBe(state);
       if (state === "unknown") expect(ledger.pendingDecisions({ effectId: command.id }).some((decision) => decision.kind === "reconcile_effect")).toBe(true);
       await core.idle();

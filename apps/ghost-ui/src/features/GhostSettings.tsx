@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Crown, Lock, MessageCircle, Pencil, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { BROWSER_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
-import { InlineError, SettingsGroup, SettingsRow, Switch } from '../ui';
+import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Pencil, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
+import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, GHOST_TOOLS, HOST_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
 import { GhostDesignEditor } from './GhostDesign';
+import { GhostMemory } from './GhostMemory';
 import { toneFor } from './ghostState';
+import { relativeTime, useNow } from './time';
+import { usableProviders } from '../pets/ModelPicker';
 import { uiTerms } from '../uiText';
 import './ghost-settings.css';
 import { blurTouchSearchOnEnter } from '../ui/adaptive';
@@ -20,9 +23,9 @@ export const toolLabels: Record<GhostTool, string> = {
   schedule_create: '반복 만들기', schedule_list: '반복 보기', schedule_cancel: '반복 취소',
   ghost_list: 'Ghost 목록', activity_propose: '활동 제안', read: '파일 읽기', write: '파일 쓰기', edit: '파일 고치기', bash: '명령 실행',
   publish_artifact: '결과물 공유', delegate: '다른 Ghost에게 맡기기',
-  memory_search: '기억 검색', memory_recall: '기억 불러오기', memory_retain: '기억 저장',
   document_spaces: '문서 공간', document_list: '문서 목록', document_read: '문서 읽기', document_propose: '문서 수정 제안',
   web_search: '웹 검색', web_read: '웹 읽기', reach: '외부 읽기', skill_read: '스킬 읽기',
+  connection_list: '연결 목록', connection_register: '연결 등록', connection_request: '연결 API 사용',
   host_status: 'Mac 상태', host_services: 'Mac 서비스', host_disk_scan: 'Mac 디스크 검색', host_disk_usage: 'Mac 디스크 사용량',
   host_list: 'Mac 파일 목록', host_read: 'Mac 파일 읽기', host_nodes: 'Tailscale 노드', host_command_propose: 'Mac 명령 제안',
   browser_open: '브라우저 열기', browser_snapshot: '브라우저 구조 읽기', browser_screenshot: '브라우저 캡처', browser_read: '브라우저 읽기',
@@ -31,6 +34,11 @@ export const toolLabels: Record<GhostTool, string> = {
   browser_tabs: '브라우저 탭', browser_wait: '브라우저 대기', browser_upload: '브라우저 올리기', browser_download: '브라우저 내려받기',
   browser_propose: '브라우저 클릭 제안', browser_handoff: '브라우저 넘겨주기', browser_fill_secret: '브라우저 금고 채우기', browser_close: '브라우저 닫기',
   vault_list: '금고 목록', vault_request: '금고 저장 요청', vault_generate_login: '금고 로그인 만들기',
+  desktop_apps: 'PC 앱 목록', desktop_snapshot: 'PC 화면 구조 읽기', desktop_screenshot: 'PC 화면 캡처', desktop_click: 'PC 클릭',
+  desktop_fill: 'PC 값 채우기', desktop_type: 'PC 입력', desktop_select: 'PC 선택', desktop_check: 'PC 체크',
+  desktop_scroll: 'PC 스크롤', desktop_press: 'PC 키 누르기', desktop_launch: 'PC 앱 열기', desktop_focus: 'PC 창 앞으로',
+  desktop_wait: 'PC 대기', desktop_pointer: 'PC 포인터 직접 조작', desktop_keys: 'PC 키보드 직접 입력', desktop_propose: 'PC 클릭 제안',
+  toss_read: '토스증권 조회',
 };
 
 /** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. Exported for the coverage test. */
@@ -39,22 +47,24 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '협업', tools: ['delegate', 'ghost_list', 'publish_artifact'] },
   { title: '파일과 명령', tools: ['read', 'write', 'edit', 'bash'] },
   { title: '웹', tools: ['web_search', 'web_read', 'reach'] },
+  { title: '연결', tools: ['connection_list', 'connection_register', 'connection_request'] },
   { title: '브라우저', tools: [...BROWSER_TOOLS] },
   { title: '금고', tools: [...VAULT_TOOLS] },
   { title: '스킬', tools: ['skill_read'] },
-  { title: '기억', tools: ['memory_search', 'memory_recall', 'memory_retain'] },
   { title: '문서', tools: ['document_spaces', 'document_list', 'document_read', 'document_propose'] },
   { title: '반복 작업', tools: ['schedule_create', 'schedule_list', 'schedule_cancel'] },
   { title: '자동 활동', tools: ['activity_propose'] },
   { title: 'Mac', tools: [...HOST_TOOLS], privileged: true },
+  { title: 'PC 조작', tools: [...DESKTOP_TOOLS], privileged: true },
+  { title: '자산', tools: [...FINANCE_TOOLS], privileged: true },
 ];
 /** 대화 종류에 따라 항상 쓰는 도구. 선택 목록에 없고 끌 수 없다. */
 const alwaysTools = ['소유자에게 묻기', '위임한 Ghost에게 묻기', '자식 일에 답하기', '일 완료 보고', '일 상태 보고', '결과물 읽기', '실행 기록 보기', '관측 근거 읽기', '검토 판정'];
 const states: { value: GhostState; label: string }[] = [{ value: 'active', label: '활성' }, { value: 'paused', label: '일시정지' }, { value: 'retired', label: '은퇴' }];
 
 /**
- * Ghost 설정: 위쪽 초상 줄에서 Ghost를 고르고, 아래에서 그 Ghost의 이름·메인 지정·상태·모델·역할·도구·샌드박스를 고친다.
- * 모습은 초상을 눌러 여는 꾸미기가 맡는다. 모든 변경은 ghost.update · ghost.set_default · sandbox.control로 바로 저장된다.
+ * Ghost 설정: 위쪽 초상 줄에서 Ghost를 고르고, 아래에서 그 Ghost의 이름·메인 지정·상태·모델·역할·환경 적응·도구·샌드박스를 고친다.
+ * 모습은 초상을 눌러 여는 꾸미기가 맡는다. 모든 변경은 ghost.update · ghost.adapt · ghost.set_default · sandbox.control로 바로 저장된다.
  */
 /** The settings roster: deleted Ghosts leave it, the main Ghost leads, then oldest first. Pure; tests pin it. */
 export function settingsRoster(ghosts: readonly Ghost[]): Ghost[] {
@@ -153,6 +163,12 @@ function planLine(plan: AutonomyPlan | undefined): ReactNode {
   return <>다음 <time dateTime={new Date(plan.nextAt).toISOString()}>{at}</time>{plan.intent ? ` · ${plan.intent}` : ''}</>;
 }
 
+/** Who last wrote a Ghost's 환경 적응 notes, when, and why. Pure; tests pin it. */
+export function adaptationLine(adaptation: Adaptation, now: number): string {
+  const by = { self: '스스로', main: '메인', owner: '소유자' }[adaptation.by];
+  return [by, relativeTime(adaptation.updatedAt, now), adaptation.reason].filter(Boolean).join(' · ');
+}
+
 /** One Ghost's sheet; exported for tests. */
 export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) {
   const { store } = useHost();
@@ -164,6 +180,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
   const sandbox = state?.sandboxes.find(item => item.ghostId === ghost.id);
   const plan = state?.autonomy?.find(item => item.ghostId === ghost.id);
+  const adaptation = state?.adaptations?.find(item => item.ghostId === ghost.id);
   const update = (patch: Partial<Pick<Ghost, 'name' | 'persona' | 'state' | 'tools' | 'fallbacks' | 'skills' | 'hostExecution'>> & { model?: ModelRef | null }) =>
     save({ type: 'ghost.update', ghostId: ghost.id, ...patch });
   useEffect(() => {
@@ -189,8 +206,12 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
 
     <Panel title="모델"><ModelRoute ghost={ghost} save={save}/></Panel>
     <Panel title={uiTerms.roleInstructions}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
+    <Panel title="환경 적응">
+      <AdaptationNote key={adaptation?.notes ?? ''} adaptation={adaptation} onSave={notes => save({ type: 'ghost.adapt', ghostId: ghost.id, notes })}/>
+    </Panel>
     <SkillsPanel catalog={catalog} skills={ghost.skills} onChange={skills => void update({ skills })}/>
     <Panel title="도구"><CapabilityBoard tools={ghost.tools} onChange={tools => void update({ tools })}/></Panel>
+    <Panel title="기억"><GhostMemory ghost={ghost}/></Panel>
     <Panel title="운영">
       <SettingsRow label="상태" description={ghost.isDefault ? '메인 Ghost는 활성 상태를 유지합니다.' : undefined}>
         {ghost.isDefault ? <span className="ghost-sheet__locked"><Lock aria-hidden="true"/>활성</span>
@@ -369,6 +390,27 @@ function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: str
       <button type="button" className="persona-note__cancel" onClick={cancel}>취소</button>
       <button type="button" className="persona-note__save" disabled={!draft.trim()} onClick={() => void commit()}>저장</button>
     </div>
+  </div>;
+}
+
+/** 환경 적응 notes: the role editor's note, a quiet line about the last change, and 되돌리기 back to the previous notes. */
+function AdaptationNote({ adaptation, onSave }: { adaptation: Adaptation | undefined; onSave(notes: string): Promise<boolean> }) {
+  const notes = adaptation?.notes ?? '';
+  const previous = adaptation?.previous ?? null;
+  const [draft, setDraft] = useState(notes);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const now = useNow();
+  useEffect(() => { const node = area.current; if (!node) return; node.style.height = 'auto'; node.style.height = `${node.scrollHeight}px`; }, [draft]);
+  const changed = draft !== notes;
+  const commit = () => { if (changed) void onSave(draft); };
+  return <div className="persona-note" data-changed={changed || undefined}>
+    <textarea ref={area} aria-label="환경 적응" value={draft} maxLength={ADAPTATION_MAX_CHARS} rows={3} placeholder="이 Mac에서 배운 사용법과 습관" onChange={event => setDraft(event.target.value)}
+      onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); commit(); } }}/>
+    {adaptation && <p className="adaptation-note__meta">{adaptationLine(adaptation, now)}</p>}
+    {(changed || previous !== null) && <div className="persona-note__actions">
+      {previous !== null && <button type="button" className="adaptation-note__revert" onClick={() => void onSave(previous)}>되돌리기</button>}
+      {changed && <button type="button" className="persona-note__save" onClick={commit}>저장</button>}
+    </div>}
   </div>;
 }
 

@@ -71,10 +71,38 @@
 .activity-run__open:hover { color: var(--ghost-ink); }
 
 /* Connections (연결 계정) -------------------------------------------------- */
-.connection-test { padding: 10px 16px; border-bottom: 1px solid var(--ghost-line); background: var(--ghost-hover); font-size: var(--text-caption); }
-.connection-test[data-phase="error"] { color: var(--ghost-danger-ink); }
-.connection-guide { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--radius-card); background: var(--ghost-hover); }
-.connection-guide ol { margin: 0; padding-left: 1.25em; color: var(--ghost-ink2); font-size: var(--text-caption); display: flex; flex-direction: column; gap: 2px; }
+.connection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
+.connection-tile { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 12px; padding: 20px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-btn); }
+.service-icon { display: inline-flex; flex: none; width: 40px; height: 40px; align-items: center; justify-content: center; color: var(--ghost-ink2); }
+.service-icon img { width: 28px; height: 28px; object-fit: contain; }
+.dark .service-icon img[data-catalog] { filter: invert(1); }
+.connection-tile__identity { display: grid; min-width: 0; gap: 4px; }
+.connection-tile__identity h3 { margin: 0; font-size: var(--text-ui); font-weight: 550; overflow-wrap: anywhere; }
+.connection-tile__identity p { margin: 0; color: var(--ghost-ink2); font-size: var(--text-caption); overflow-wrap: anywhere; }
+.connection-tile__status { margin: 0; font-size: var(--text-caption); color: var(--ghost-ink3); overflow-wrap: anywhere; }
+.connection-tile__status[data-phase="error"] { color: var(--ghost-danger-ink); }
+.connection-tile__status[data-phase="ok"] { color: var(--ghost-success-ink); }
+.connection-tile__actions { display: flex; align-items: center; gap: 2px; margin-top: auto; padding-top: 4px; }
+.connection-catalog { display: grid; gap: 24px; }
+.connection-catalog__group { display: grid; gap: 10px; }
+.connection-catalog__group h4 { margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 450; }
+.connection-catalog__group ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
+.service-choice { display: flex; align-items: center; width: 100%; gap: 12px; min-height: 64px; padding: 10px 8px; border: 0; border-radius: var(--radius-card); background: none; color: var(--ghost-ink); text-align: left; font-size: var(--text-ui); cursor: pointer; }
+.service-choice:hover { background: var(--ghost-hover); }
+.service-choice:focus-visible, .connection-advanced:focus-visible { outline: 2px solid var(--ghost-ink2); outline-offset: 2px; }
+.service-choice:disabled { opacity: .5; cursor: not-allowed; }
+.service-choice span:not(.service-icon) { min-width: 0; overflow-wrap: anywhere; }
+.service-choice__arrow { margin-left: auto; flex: none; color: var(--ghost-ink3); }
+.connection-search { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--ghost-ink3); }
+.connection-search input { max-width: 180px; }
+.connection-advanced { display: flex; width: fit-content; align-items: center; gap: 6px; padding: 4px 0; border: 0; background: none; color: var(--ghost-ink2); font-size: var(--text-caption); cursor: pointer; }
+.connection-grants { display: grid; gap: 10px; padding: 0; border: 0; }
+.connection-grants legend { margin-bottom: 8px; font-size: var(--text-ui); font-weight: 500; }
+@media (max-width: 420px) {
+  .connection-catalog__group ul { column-gap: 4px; }
+  .service-choice { gap: 6px; padding-inline: 4px; }
+  .service-choice .service-icon { width: 32px; }
+}
 .connection-clear { display: flex; align-items: center; gap: 8px; color: var(--ghost-ink2); font-size: var(--text-caption); cursor: pointer; }
 /* Ghost별 자동 승인 (승인과 언어) -------------------------------------------
    켜짐이 기본이라 조용히 두고, 「직접 승인」인 Ghost 만 주의 색 테두리로 드러낸다. */

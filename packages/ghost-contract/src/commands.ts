@@ -1,7 +1,8 @@
 import { Type, type Static } from "typebox";
-import { ActivityConfig, ConnectionConfig } from "./autonomy.ts";
+import { ActivityConfig, ConnectionConfig, ConnectionIconUrl } from "./autonomy.ts";
 import { DutyHours } from "./duty.ts";
 import {
+  ADAPTATION_MAX_CHARS,
   ApprovalPolicy,
   OwnerLanguage,
   Acceptance,
@@ -21,6 +22,7 @@ import {
   DeviceAlerts,
   nullable,
 } from "./entities.ts";
+import { GOAL_SIGNAL_MAX, GOAL_TEXT_MAX, GOAL_TITLE_MAX, GoalState } from "./goals.ts";
 
 const command = <K extends string, P extends Parameters<typeof Type.Object>[0]>(type: K, properties: P) =>
   Type.Object({ type: Type.Literal(type), ...properties }, { additionalProperties: false });
@@ -81,7 +83,7 @@ export const Command = Type.Union([
     persona: Type.String({ maxLength: 8192 }),
     model: Type.Optional(nullable(ModelRef)),
     look: Type.Optional(Look),
-    /** Omit for the default set (every selectable tool except host tools); [] disables every optional tool. */
+    /** Omit for the default set (every selectable tool except host, desktop and finance tools); [] disables every optional tool. */
     tools: Type.Optional(GhostToolList),
     fallbacks: Type.Optional(FallbackList),
     skills: Type.Optional(SkillList),
@@ -102,6 +104,8 @@ export const Command = Type.Union([
   /** Remove a retired Ghost from every list. Past Works keep it as their assignee. */
   command("ghost.delete", { ghostId: Id }),
   command("ghost.set_default", { ghostId: Id }),
+  /** Edit or clear (empty notes) what a Ghost learned about this environment. */
+  command("ghost.adapt", { ghostId: Id, notes: Type.String({ maxLength: ADAPTATION_MAX_CHARS }) }),
   command("sandbox.control", { ghostId: Id, action: Type.Union([Type.Literal("stop"), Type.Literal("reset")]) }),
 
   // Schedules
@@ -128,6 +132,9 @@ export const Command = Type.Union([
   // Owner-approved standing delegations and account-scoped connections.
   command("connection.upsert", {
     connectionId: Type.Optional(Id), name: Text(128), config: ConnectionConfig,
+    /** Catalog metadata saved with the connection; omit to preserve the previous values. */
+    serviceId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    iconUrl: Type.Optional(nullable(ConnectionIconUrl)),
     /** Omit to preserve; null removes the stored credential. Never returned to clients. */
     credential: Type.Optional(nullable(Text(8192))),
   }),
@@ -164,7 +171,7 @@ export const Command = Type.Union([
   command("avatar.delete", { avatarId: Id }),
 
   // Settings and providers
-  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), reviewModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy) }),
+  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy) }),
   command("provider.upsert", {
     id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
     kind: ProviderKind,
@@ -190,6 +197,29 @@ export const Command = Type.Union([
 
   // Notifications
   command("notification.read", { notificationIds: Type.Array(Id, { minItems: 1, maxItems: 500 }) }),
+
+  // Goals: long-term team directions and the milestone line under each
+  command("goal.create", {
+    title: Text(GOAL_TITLE_MAX),
+    why: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+    boundaries: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+    signal: Type.Optional(Type.String({ maxLength: GOAL_SIGNAL_MAX })),
+  }),
+  /** Edit, pause, resume or close. Closing drops its open milestones. */
+  command("goal.update", {
+    goalId: Id,
+    title: Type.Optional(Text(GOAL_TITLE_MAX)),
+    why: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+    boundaries: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+    signal: Type.Optional(Type.String({ maxLength: GOAL_SIGNAL_MAX })),
+    state: Type.Optional(GoalState),
+  }),
+  /** The owner settles a milestone: done needs no linked Work from the owner; dropped keeps the reason. */
+  command("milestone.update", {
+    milestoneId: Id,
+    state: Type.Union([Type.Literal("done"), Type.Literal("dropped")]),
+    outcome: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
+  }),
 ]);
 export type Command = Static<typeof Command>;
 export type CommandType = Command["type"];

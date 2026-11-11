@@ -42,6 +42,10 @@ interface Stored extends AutonomyPlan {
   /** Wakes ever submitted; part of each request id, so a repeated situation still wakes. */
   wakes: number;
   pending: PendingWake | null;
+  /** When the last prepared wake prompt was built. Admission time proves nothing about what it observed. */
+  observed: number | null;
+  /** Monotonic ledger boundary of the prepared prompt, including equal/backward wall-clock changes. */
+  observedSeq: number | null;
 }
 
 export interface PlanInput {
@@ -148,6 +152,44 @@ export class Autonomy {
   }
 
   /**
+   * A teammate Work outcome or blocker pulls the current main's next look forward. The plan write is the
+   * whole durable signal: `wake()` stays the only admission path, so duty, the daily budget, busy
+   * conversations and the concurrency cap still gate the model turn, and an owner-disabled drive or a
+   * pending wake keeps its identity. A change that lands between a prompt's preparation and its
+   * admission must not vanish under the fallback: the revision bump makes the admission keep a due
+   * follow-up instead of installing the day-long fallback, and `observed` keeps the next prompt's
+   * evidence window honest. Evidence the prepared prompt already saw changes nothing.
+   */
+  async teamChanged(work: Work): Promise<void> {
+    const main = this.core.ledger.defaultGhost();
+    if (!main || main.state !== "active" || main.deletedAt !== null) return;
+    const now = Date.now();
+    const changeSeq = this.core.ledger.workChangeSeq(work.id);
+    this.update(main.id, (stored) => {
+      if (!stored.enabled) return stored;
+      if (stored.observedSeq !== null && changeSeq !== null) {
+        if (changeSeq <= stored.observedSeq) return stored;
+      } else if (work.updatedAt < (stored.observed ?? 0)) return stored;
+      return { ...stored, nextAt: Math.min(stored.nextAt ?? now, now) };
+    });
+    void this.tick().catch((error) => this.core.log(`team change from ${work.id} failed to admit ${main.name}'s look`, error));
+  }
+
+  /**
+   * A new owner goal pulls the current main's next look forward. Like a team change, the plan write is the
+   * whole signal: `wake()` still applies duty, the daily budget, busy conversations and the concurrency cap,
+   * and a pending wake keeps its identity. A wake prepared before the goal existed does not carry it; the
+   * revision bump keeps a due follow-up after that wake instead of the day-long fallback.
+   */
+  goalsChanged(): void {
+    const main = this.core.ledger.defaultGhost();
+    if (!main || main.state !== "active" || main.deletedAt !== null) return;
+    const now = Date.now();
+    this.update(main.id, (stored) => (stored.enabled ? { ...stored, nextAt: Math.min(stored.nextAt ?? now, now) } : stored));
+    void this.tick().catch((error) => this.core.log(`a new goal failed to admit ${main.name}'s look`, error));
+  }
+
+  /**
    * Record when a Ghost looks again. `by` is the caller: the Ghost itself, or the main Ghost planning a
    * teammate. Watched Spaces start from their current position, so only later changes wake early.
    */
@@ -197,7 +239,7 @@ export class Autonomy {
     const stored = this.core.ledger.setting<Partial<Stored> | null>(key(ghostId), null);
     return {
       ghostId, enabled: true, nextAt: null, intent: "", setBy: "host", watch: [], lastWakeAt: null, wakesToday: 0,
-      day: "", heads: {}, revision: 0, wakes: 0, pending: null,
+      day: "", heads: {}, revision: 0, wakes: 0, pending: null, observed: null, observedSeq: null,
       ...stored,
     };
   }
@@ -281,6 +323,7 @@ export class Autonomy {
       }
       if (busy(ghost)) continue;
       if (this.awake.size >= MAX_CONCURRENT) break;
+      const observedSeq = ledger.seq();
       const text = await this.prompt(ghost, plan, due, moved, now);
       const seen = { ...plan.heads };
       for (const item of moved) seen[item.space.id] = item.to;
@@ -289,7 +332,8 @@ export class Autonomy {
       this.update(ghost.id, (stored) => {
         if (stored.revision !== plan.revision || !stored.enabled || stored.pending) return stored;
         pending = { requestId: `autonomy:${ghost.id}:${stored.wakes + 1}:${now}`, text, at: now, heads: seen, revision: stored.revision + 1 };
-        return { ...stored, pending };
+        // Capture before prompt I/O. A later ledger change remains unobserved even on the same clock tick.
+        return { ...stored, pending, observed: now, observedSeq };
       });
       if (pending) await this.submit(ghost, pending, now);
     }
@@ -336,22 +380,37 @@ export class Autonomy {
     const lines = [`${AUTONOMOUS_WAKE} ${stamp(now)}`];
     lines.push(plan.intent ? `Plan (set by ${planner}): ${plan.intent}` : "Plan: none yet. This is your first self-directed wake: look at your role and the owner's projects and decide what is worth doing.");
     if (!due) lines.push(`Trigger: a project you watch changed (${moved.map((item) => item.space.name).join(", ")}).`);
-    const since = plan.lastWakeAt ?? now - DAY;
-    lines.push("", `Since ${plan.lastWakeAt === null ? "yesterday" : stamp(plan.lastWakeAt)}:`);
-    const settled = ledger
-      .worksSettledSince(since)
-      .filter((work) => work.parentId === null && (ghost.isDefault || work.ghostId === ghost.id || ledger.findConversation(work.originConversationId ?? "")?.ghostId === ghost.id))
-      .slice(0, 12);
-    for (const work of settled) lines.push(`- Work "${work.title}" (${names.get(work.ghostId) ?? "?"}) ${work.state}`);
+    // Admission time proves nothing about what the prepared prompt observed; `observed` is when it was built.
+    const since = plan.observed ?? plan.lastWakeAt ?? now - DAY;
+    const sinceLabel = plan.observed === null && plan.lastWakeAt === null ? "yesterday" : stamp(since);
+    lines.push("", `Since ${sinceLabel}:`);
+    const settled = ledger.settledRootsSince(since, plan.observedSeq, ghost.isDefault ? null : ghost.id);
+    if (settled.count > 0) {
+      // Ids, state and failure reasons travel so the main can work_inspect the exact task.
+      lines.push(`${ghost.isDefault ? "Team" : "Your"} settled Work: ${settled.count}`);
+      for (const work of settled.works) {
+        const reason = work.reason ? ` — ${work.reason.split("\n", 1)[0]!.slice(0, 200)}` : "";
+        lines.push(`- "${work.title}" (${work.id}) — ${names.get(work.ghostId) ?? "?"} — ${work.state}${reason}`);
+      }
+      if (settled.count > settled.works.length) lines.push(`+${settled.count - settled.works.length} more: work_list shows all, work_inspect takes a row's id`);
+    }
     for (const item of moved) {
       const subjects = item.from ? await this.commits(item.space.path, item.from, item.to).catch(() => []) : [];
       lines.push(`- Project ${item.space.name}: ${subjects.length ? subjects.slice(0, 8).join(" · ") : "new commits"}`);
     }
     const pending = ledger.decisionsForState().filter((decision) => decision.state === "pending");
     if (pending.length) lines.push(`- ${pending.length} decision(s) waiting for the owner`);
-    if (settled.length === 0 && moved.length === 0 && pending.length === 0) lines.push("- nothing new reached the Host");
+    if (settled.count === 0 && moved.length === 0 && pending.length === 0) lines.push("- nothing new reached the Host");
+    // Every Ghost sees the team's directions and boundaries; ids let it link Work to an active milestone.
+    const goals = this.core.goals.context();
+    if (goals) lines.push("", goals);
     const mine = ledger.worksInState("queued", "running", "waiting", "verifying", "blocked").filter((work) => work.ghostId === ghost.id && live(work));
     if (mine.length) lines.push("", "Your live Work:", ...mine.slice(0, 8).map((work) => `- "${work.title}" ${work.state}`));
+    // The main connects the team: its wake also carries every live teammate Work and blocker, bounded; everyone else stays scoped to their own Work.
+    if (ghost.isDefault) {
+      const team = this.core.team.context();
+      if (team) lines.push("", team);
+    }
     if (plan.watch.length) {
       const spaces = new Map(ledger.spaces().map((space) => [space.id, space.name]));
       lines.push("", `Watching: ${plan.watch.map((id) => spaces.get(id) ?? id).join(", ")}`);

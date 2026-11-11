@@ -1,11 +1,10 @@
 {
   "name": "@ghost/desktop",
-  "version": "0.1.0",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "scripts": {
-    "prepare": "node scripts/prepare.mjs",
-    "build": "npm run prepare && tauri build --debug --bundles app -- --offline",
+    "build": "tauri build --bundles app",
     "check": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --offline --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "test": "cargo test --offline --manifest-path src-tauri/Cargo.toml",
     "ios:preview": "node scripts/ios-package-preview.mjs"

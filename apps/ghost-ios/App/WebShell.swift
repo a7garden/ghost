@@ -194,6 +194,11 @@ private struct ShellWebView: UIViewRepresentable {
         case .notificationsSettings:
             if let url = URL(string: UIApplication.openNotificationSettingsURLString) { await UIApplication.shared.open(url) }
             return ([:], nil)
+        case .appInstall(let requested):
+            guard let url = Shell.installURL(requested.absoluteString, origin: connection.origin) else {
+                return (nil, "unsupported request")
+            }
+            return (["opened": await UIApplication.shared.open(url)], nil)
         case .theme(let dark):
             scheme = dark ? .dark : .light
             return ([:], nil)

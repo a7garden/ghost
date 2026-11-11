@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shell-version"
+description = "Enables the shell_version command without any pre-configured scope."
+commands.allow = ["shell_version"]
+
+[[permission]]
+identifier = "deny-shell-version"
+description = "Denies the shell_version command without any pre-configured scope."
+commands.deny = ["shell_version"]

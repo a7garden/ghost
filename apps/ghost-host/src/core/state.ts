@@ -3,7 +3,8 @@ import type { Access } from "./access.ts";
 import { settingsView } from "./commands.ts";
 import type { Core } from "./core.ts";
 
-export const HOST_VERSION = "2.0.0";
+export { HOST_VERSION } from "../update/identity.ts";
+import { HOST_VERSION } from "../update/identity.ts";
 
 /** The snapshot every authenticated principal starts from; a device sees exactly what the owner sees. */
 export function snapshot(core: Core, access: Access): State {
@@ -30,7 +31,10 @@ export function snapshot(core: Core, access: Access): State {
     activityRuns: ledger.activityRuns(),
     connections: ledger.connections().map((connection) => ({ ...connection, hasCredential: core.activitySources?.credentialPresent(connection.id) ?? false })),
     autonomy: core.autonomy.view(),
+    adaptations: core.adaptations.view(),
     duty: core.duty.view(),
+    goals: core.goals.goals(),
+    milestones: core.goals.milestones(),
   };
 }
 

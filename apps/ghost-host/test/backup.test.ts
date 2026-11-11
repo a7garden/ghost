@@ -8,6 +8,7 @@ import { loadConfig } from "../src/config.ts";
 import { sha256 } from "../src/core/ids.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { tempDir } from "./support.ts";
+import { MemoryStore } from "../src/stores/memory.ts";
 
 // Real OS-process file handshakes cannot be advanced with this process's fake timers.
 async function until(path: string, limitMs = 10_000): Promise<void> {
@@ -70,11 +71,18 @@ describe("ghost backup", () => {
     const app = await openApp(loadConfig({}, root));
     try {
       app.ledger.tx(() => app.ledger.putSpace({ id: "s1", name: "Notes", path: "/Users/someone/Notes", createdAt: 1 }));
+      const ghost = app.core.createGhost({ name: "Memory owner", persona: "" });
+      const saved = app.memory.write({ ghostId: ghost.id, path: "/me/decision.md", content: "회차 목표 시간: 2~3시간", expectedHash: null, actor: "owner", operationId: "backup-note", reason: "Owner decision" })!;
       const dir = join(tempDir(), "snapshot");
       const manifest = backup(root, dir);
       expect(manifest.complete).toBe(true);
       expect(manifest.external_spaces).toEqual([{ path: "/Users/someone/Notes" }]);
       for (const file of manifest.files) expect(sha256(readFileSync(join(dir, file.path)))).toBe(file.sha256);
+      const memoryCopy = new MemoryStore(dir);
+      try {
+        expect(memoryCopy.read(ghost.id, saved.path)?.content).toBe("회차 목표 시간: 2~3시간");
+        expect(memoryCopy.revisions(ghost.id, saved.path)[0]?.content).toBe("회차 목표 시간: 2~3시간");
+      } finally { memoryCopy.close(); }
     } finally {
       await app.close();
     }

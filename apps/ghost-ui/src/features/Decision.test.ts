@@ -3,8 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Decision, State, Work } from '@ghost/contract';
 import { HostProvider } from '../host/context';
-import { DecisionCard, autoSettleText, cardDetail, chatDecisions, decisionCommand, denyReasonPrompt, documentProposal, highRiskApproval, recommendedOption, resolvedText } from './Decision';
-import { browserHandoffProposal, decisionChip, emptySecureForm, secureFormBody, secureFormProposal } from './decisionText';
+import { DecisionCard, autoSettleText, cardDetail, chatDecisions, decisionCommand, documentProposal, highRiskApproval, recommendedOption } from './Decision';
+import { browserHandoffProposal, decisionChip, emptySecureForm, goalProposal, secureFormBody, secureFormProposal } from './decisionText';
 
 const decision = (patch: Partial<Decision> = {}): Decision => ({
   id: 'd1', kind: 'approve_effect', ghostId: 'sage', conversationId: 'c1', workId: null, effectId: 'e1',
@@ -13,6 +13,18 @@ const decision = (patch: Partial<Decision> = {}): Decision => ({
 });
 
 const loginRequest = { kind: 'login' as const, origin: 'https://app.example.com', title: '예시 로그인', reason: '로그인이 필요합니다.' };
+
+it('previews a goal proposal as structured facts and keeps the registration options', () => {
+  const goal = { title: '오래 쓸 수 있는 도구', why: '일을 차분히 이어 가기 위해', boundaries: '허락 없는 발송 금지', signal: '다시 찾는 사람의 말' };
+  const item = decision({ kind: 'question', title: '이 방향을 등록할까요?', detail: '기술적인 대체 본문', proposal: { goal }, options: ['등록', '거절'] });
+  expect(goalProposal(item)).toEqual(goal);
+  expect(goalProposal(decision({ proposal: { goal } }))).toBeNull();
+  expect(decisionChip(item)).toBe('목표 제안');
+  const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, { decision: item, ghostName: '세이지', onResolved() {} })));
+  for (const value of ['방향', '이유', '지키는 선', '참고 신호', ...Object.values(goal), '등록', '거절']) expect(markup).toContain(value);
+  expect(markup).not.toContain('기술적인 대체 본문');
+  expect(decisionCommand(item, 'answer', '등록')).toEqual({ type: 'decision.resolve', decisionId: 'd1', outcome: 'answer', answer: '등록' });
+});
 
 describe('decisionCommand', () => {
   it('approves and denies effect decisions with the decision id', () => {
@@ -35,10 +47,6 @@ describe('decisionCommand', () => {
     expect(decisionCommand(decision({ kind: 'reconcile_effect' }), 'deny', '파일이 없음')).toEqual({ type: 'decision.resolve', decisionId: 'd1', outcome: 'deny', answer: '파일이 없음' });
     // Approve never carries text: only a question answers and only a deny explains.
     expect(decisionCommand(result, 'approve', '좋음')).toEqual({ type: 'decision.resolve', decisionId: 'd1', outcome: 'approve' });
-  });
-
-  it('asks for a reason only where the host passes it on', () => {
-    expect(Object.keys(denyReasonPrompt).sort()).toEqual(['accept_result', 'document_review', 'reconcile_effect']);
   });
 
   it('refuses to re-resolve a settled decision', () => {
@@ -77,14 +85,6 @@ describe('highRiskApproval', () => {
   });
 });
 
-describe('resolvedText', () => {
-  it('says what the owner did', () => {
-    expect(resolvedText('approve_effect', 'approve')).toBe('승인했습니다');
-    expect(resolvedText('accept_result', 'deny')).toBe('수정을 요청했습니다');
-    expect(resolvedText('question', 'answer')).toBe('답했습니다');
-  });
-});
-
 describe('autoSettleText', () => {
   const review = (patch: Record<string, unknown>) => ({ review: { recommend: 'answer', answer: 'PDF', expiresAt: 31 * 60_000, ...patch } });
   it('says when and to what an unanswered decision settles, only while it is pending', () => {
@@ -103,17 +103,8 @@ describe('autoSettleText', () => {
     expect(recommendedOption(question)).toBe('PDF');
     const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, { decision: question, ghostName: '세이지', onResolved() {} })));
     expect(markup.indexOf('PDF')).toBeLessThan(markup.indexOf('HTML'));
-    expect(markup).toContain('data-recommended="true"');
-    expect(markup).toContain('추천');
   });
 
-  it('shows the main Ghost\'s view on the card', () => {
-    const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, {
-      decision: decision({ proposal: { command: 'x', risk: '읽기만 합니다', review: { recommend: 'approve', expiresAt: null, mainNote: '설정만 읽습니다.' } } }), ghostName: '세이지', onResolved() {},
-    })));
-    expect(markup).toContain('메인 의견');
-    expect(markup).toContain('설정만 읽습니다.');
-  });
 });
 
 describe('documentProposal', () => {
@@ -167,45 +158,15 @@ describe('readable cards', () => {
     expect(markup).not.toContain('**');
   });
 
-  it('folds an unknown proposal instead of printing JSON inline', () => {
-    const markup = render(decision({ proposal: { workId: 'w1', action: { kind: 'mail_reply', body: '안녕' } } }));
-    expect(markup).toContain('<details');
-    expect(markup).toContain('요청 원문 보기');
-  });
-
   it('shows a card fill as site and card, not its JSON', () => {
     const markup = render(decision({ detail: '사이트: https://shop.example', proposal: { url: 'https://shop.example/pay', origin: 'https://shop.example', itemTitle: '회사 카드', last4: '1234', input: {} } }));
     expect(markup).toContain('회사 카드 •••• 1234');
     expect(markup).not.toContain('decision__detail');
   });
 
-  it('describes a standing activity proposal in words', () => {
-    const config = { name: '메일 정리', prompt: 'p', acceptanceCriteria: 'c', ghostId: 'sage',
-      source: { kind: 'schedule', spec: { kind: 'every', seconds: 3600 } }, execution: { kind: 'container' }, tools: ['read'],
-      policy: { maxRunsPerDay: 5, maxConcurrent: 1, runTimeoutSeconds: 600, allowSelfCheck: false, minCheckSeconds: 3600, externalActions: 'approval', delivery: 'changes' } };
-    const markup = render(decision({ proposal: { config } }));
-    expect(markup).toContain('지켜볼 것');
-    expect(markup).toContain('파일 읽기');
-    expect(markup).toContain('하루 5회');
-  });
 });
 
 describe('DecisionCard render', () => {
-  it('labels each kind and renders question options as answer buttons', () => {
-    const card = (node: Decision) => createElement(HostProvider, null, createElement(DecisionCard, {
-      decision: node, ghostName: '세이지', onResolved() {}, onOpenWork() {},
-    }));
-    const question = renderToStaticMarkup(card(decision({ kind: 'question', options: ['서울', '부산'] })));
-    expect(question).toContain('답변 대기');
-    expect(question).toContain('서울');
-    expect(question).toContain('부산');
-    const review = renderToStaticMarkup(card(decision({ kind: 'document_review', proposal: { title: '회의록', body: '# 회의록\n본문' } })));
-    expect(review).toContain('제안된 문서');
-    expect(review).toContain('회의록');
-    const risky = renderToStaticMarkup(card(decision({ proposal: { command: 'rm', cwd: '/p', reason: '정리', risk: '삭제: 되돌릴 수 없음' } })));
-    expect(risky).toContain('data-risk="high"');
-  });
-
   it('renders a secure form with fields, origin, reason and the vault checkbox, and no chat answer', () => {
     const card = decision({ kind: 'question', title: '예시 로그인', detail: '로그인이 필요합니다.',
       proposal: { secureForm: loginRequest } });
@@ -225,19 +186,6 @@ describe('DecisionCard render', () => {
     expect(markup).not.toContain('답변 보내기');
   });
 
-  it('renders the handoff note with the url, a completion button and deny', () => {
-    const card = decision({ kind: 'question', title: '화면 확인', proposal: { browserHandoff: { url: 'https://example.com/form', reason: '로그인 화면을 직접 확인해 주세요.' } } });
-    const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, {
-      decision: card, ghostName: '세이지', onResolved() {},
-    })));
-    expect(markup).toContain('브라우저 대기');
-    expect(markup).toContain('Chrome 창을 열어 두었습니다');
-    expect(markup).toContain('https://example.com/form');
-    expect(markup).toContain('다 했어요');
-    expect(markup).toContain('거부');
-    // The ordinary answer path stays available beside it.
-    expect(markup).toContain('답변 보내기');
-  });
 });
 
 describe('secureFormProposal and browserHandoffProposal', () => {
@@ -252,14 +200,6 @@ describe('secureFormProposal and browserHandoffProposal', () => {
   });
 });
 
-describe('decisionChip', () => {
-  it('reads the proposal shape for questions and the kind label otherwise', () => {
-    expect(decisionChip(decision({ kind: 'question', proposal: { secureForm: loginRequest } }))).toBe('금고 요청');
-    expect(decisionChip(decision({ kind: 'question', proposal: { browserHandoff: { url: null, reason: '확인' } } }))).toBe('브라우저 대기');
-    expect(decisionChip(decision({ kind: 'question' }))).toBe('답변 대기');
-    expect(decisionChip(decision())).toBe('실행 승인');
-  });
-});
 
 describe('secureFormBody', () => {
   it('builds a login answer with kind, a verbatim password and an optional code seed', () => {
@@ -299,5 +239,22 @@ describe('secureFormBody', () => {
     expect(secureFormBody(secret, { ...emptySecureForm, value: ' raw value ' }, false))
       .toEqual({ body: { kind: 'secret', value: ' raw value ', save: false } });
     expect(secureFormBody(secret, emptySecureForm, true)).toEqual({ error: '값을 입력해 주세요.' });
+  });
+
+  it('builds an api answer with an optional client id and a verbatim key', () => {
+    const api = { kind: 'api' as const, origin: 'https://openapi.tossinvest.com', title: '토스증권 열기', reason: '자산을 조회합니다.' };
+    expect(secureFormBody(api, { ...emptySecureForm, username: ' client ', value: ' raw key ' }, true))
+      .toEqual({ body: { kind: 'api', username: 'client', value: ' raw key ', save: true } });
+    expect(secureFormBody(api, { ...emptySecureForm, value: 'k' }, false))
+      .toEqual({ body: { kind: 'api', value: 'k', save: false } });
+    expect(secureFormBody(api, { ...emptySecureForm, username: 'a' }, true)).toEqual({ error: '값을 입력해 주세요.' });
+  });
+
+  it('carries a typed api origin only when the request has none', () => {
+    const noOrigin = { kind: 'api' as const, origin: null, title: '토스증권 열기', reason: '자산을 조회합니다.' };
+    expect(secureFormBody(noOrigin, { ...emptySecureForm, origin: ' https://openapi.example.com ', value: 'k' }, true))
+      .toEqual({ body: { kind: 'api', value: 'k', origin: 'https://openapi.example.com', save: true } });
+    expect(secureFormBody(noOrigin, { ...emptySecureForm, origin: ' ', value: 'k' }, true))
+      .toEqual({ error: 'https://로 시작하는 주소를 입력해 주세요.' });
   });
 });

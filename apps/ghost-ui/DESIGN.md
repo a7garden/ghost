@@ -81,6 +81,11 @@ Built for supervising agents instead of reusing generic cards and badges
   delegated children hanging on a branch line.
 - **ActivityIsland** — the workspace pulse in the title bar: faces of active Ghosts and
   amber/blue counts; silent when nothing moves; opens into every live item.
+- **Companion work shelf** — the desktop pet carries a short count, not a clipped Work title.
+  Hover or press unfolds one roster above it: owner decisions first, then all its live Works,
+  each with a wrapping title and a quiet state. Rows open their actual destination in the main
+  window. The native frame grows only while open, restores its collapsed position at screen
+  edges, and never resizes mid-drag. The pet remains the chat/drag target, separate from the rows.
 - **OutcomeLine** — a Work coming back where its thread card branched off: a return hook
   in the state color, a state-tinted pill (glyph, title, 완료/실패) that opens the thread, the
   files as chips and a failure's reason. Report and 위임 결과 wakes render as this line.
@@ -90,12 +95,14 @@ Built for supervising agents instead of reusing generic cards and badges
 - **RefMark** — an id or digest a Ghost wrote into prose (`src/components/refs.ts` finds
   them outside code blocks and links) shows what it points at: a Work's state glyph that opens
   it, a Ghost's face, a file icon, else a quiet #. The value itself is behind a Peek.
-- **ScrollRail** (`src/ui/scroll-rail.tsx`) — a scrollbar drawn as a map of what it scrolls:
-  a hairline thumb and ticks for every `data-rail` element inside — in the conversation the
-  owner's turns, thread cards and outcomes, in the sidebar Ghosts that are working or need the
-  owner — in their state color. Hover names a tick, click jumps, drag scrubs. It shows with
-  the pointer or the owner's own scrolling, never for auto-follow; touch keeps native
-  scrolling. Other scroll areas use trackless pills that appear with the pointer.
+- **ScrollRail** (`src/ui/scroll-rail.tsx`) — the app's only scrollbar, drawn as a map of what
+  it scrolls: a hairline thumb and ticks for every `data-rail` element inside — in the
+  conversation the owner's turns, thread cards and outcomes, in the sidebar Ghosts that are
+  working or need the owner — in their state color. Hover names a tick, click jumps, drag
+  scrubs, wheel over it scrolls. It shows with the pointer or the owner's own scrolling, never
+  for auto-follow. Native scrollbars are hidden on fine pointers; `ScrollRails`, mounted once
+  per window, puts a bare rail (vertical or horizontal) on every other scroller under the
+  pointer or just scrolled. Touch keeps the platform's own indicator.
 
 Feature-level compositions:
 
@@ -103,20 +110,24 @@ Feature-level compositions:
   composer. 맡기기 unfolds 완료 기준 and 기한 in place and sends `work.create`; nothing
   becomes a 맡긴 일 unless the owner chose it. Like the conversation composer it has the
   + menu bottom-left (files) and the model beside send.
-- **Decision deck** (home, 확인할 일, conversations): pending decisions stacked oldest-first,
-  the top one fully actionable. A card waiting on the owner carries an amber hairline around its
-  whole edge, never a stripe on one side. Questions answer with numbered tiles (digit keys) or free text;
-  approvals show the exact request; results arrive as a receipt with files and the
-  completion criteria (`⌘↵` approves). 수정 요청 on a result, an effect to reconcile or a
-  document review opens a reason field first (`D`), and the reason reaches the Ghost. An
-  approval for a command whose risk speaks of loss, a browser commit click or a protected card
-  fill arms on the first press and approves on a second within 4s.
-  ←/→ page the deck; a resolved card leaves a short spoken and visible acknowledgement.
-  확인할 일 lists every pending item beside the stack.
-  A conversation docks its own above the composer: every pending decision of its Ghost (what
-  the sidebar row announces) and those of threads begun there; a single card drops the deck
-  head and a long card scrolls inside under its pinned answer buttons; the card takes only what a short window
-  leaves after the transcript and composer. Work detail and the thread panel resolve their own in place.
+- **Decision queue** (home, 확인할 일, conversations): one question or consequence,
+  its evidence, then a separate response area. No decorative stack, nested panels,
+  amber ring or recommendation pills. The pending kind remains visible in the
+  metadata; full-width answer rows keep option text, recommendation and action
+  together. Digit keys answer in displayed order. Free text stays visible for an
+  open question, and unfolds under 직접 답하기 when choices already answer it.
+  Approvals keep the exact command, location and stated risk visible; results
+  show their summary, files and completion criteria without a second card.
+  `⌘↵` approves; 수정 요청, reconciliation and document rejection open a reason
+  field first (`D`). Loss-speaking commands, browser commit clicks and protected
+  card fills still require two deliberate presses within 4s.
+  Multiple requests have a named queue (a horizontal strip in chat, a side list
+  on wide 확인할 일). ←/→ browse; resolution leaves an acknowledgement.
+  Chat docks the same component above the composer; long evidence scrolls separately
+  from the title and answer controls. Automatic-settlement conditions stay beside the
+  response. Exceptionally short windows can scroll the whole request; secure forms
+  pin their action row inside the evidence scroller. Work detail and thread panels
+  use the same component in place. Secure inputs still submit only to the vault route.
 - **Work cancellation** (`src/components/ConfirmDialog.tsx`): the dialog states the consequence,
   names the action on the confirmation button and shows a failed cancellation in place.
 - **Tool trail** (conversations): consecutive tool results fold into one line of chips;
@@ -266,12 +277,28 @@ skipped reasons and links to surviving Work. Run timestamps expose the exact ins
 and self-check reasons remain visible. Pause/stop errors stay inside their open dialog.
 
 
-**연결 계정** keeps credentials one-way: the secret field is blank on every open, stored
-secrets never return to the screen, and a changed endpoint or account forces re-entry or
-explicit removal — only a name-only edit preserves the credential. 테스트 reports under
-its row; errors are distinct from an empty list.
-Failed saves keep the dialog and typed draft. SMTP 암시적 TLS distinguishes TLS at
-connect from mandatory STARTTLS; neither transport disables certificate verification.
+**연결 계정** starts with a searchable service list. Connected accounts use an icon grid;
+service identity stays above account name, address, authentication state and actions.
+Catalog icons are bundled SVGs from Simple Icons (CC0; license beside the assets), not
+remote favicon requests. The current catalog uses commit
+`1bb2f6e6ea50f920de8d2f3d273ae48564a5eaee`, Slack/Outlook use `11.15.0` and Yahoo uses
+`5.24.0`. Owner-defined HTTPS icons preserve their colors; artifact icons load through
+the authenticated client and release their object URLs on close.
+
+Mail setup asks for the address and app password; presets own the TLS server/port
+defaults. Protocol fields stay in advanced settings, including mandatory STARTTLS versus
+implicit TLS. OAuth services offer login separately from direct key entry and expose the
+first-time client-app prerequisite rather than pretending a catalog tile has a working
+OAuth application. Login and consent stay on the provider's page. Only a completed
+authentication probe says authentication was confirmed; stored credentials alone do not.
+
+Credentials remain one-way: every secret field opens blank, stored secrets never return
+to the screen, and changed authentication endpoints require re-entry or explicit removal.
+API Ghost-grant changes preserve authentication; pending requests still lose old authority.
+Failed saves keep the dialog and draft; unchanged retries preserve the command identity.
+Ghost-assisted setup enters the main Ghost's existing conversation, using browser handoff
+for login and secure capture/registration for issued keys. API grants name the Ghosts that
+can use each account; external API writes still require owner confirmation.
 
 Ghost 설정's 운영 group carries **PC 직접 실행**: an explicit owner grant whose warning
 states that shell reaches the whole Mac and network: the grant is not a jail or
@@ -290,9 +317,9 @@ out of baselines without changing runtime paths or product rendering.
 ## Interactive responses
 
 `present_ui` is a direct-conversation response format, available even when optional
-action tools are disabled. Valid `ghost-ui/1` tool results render inline in web/Mac
+action tools are disabled. Valid `ghost-ui/1` tool results render inline in web/Mac/iPhone
 chat; malformed, unknown-version and failed results retain the ordinary readable
-tool disclosure. iOS and the chat overlay retain text-only answers.
+tool disclosure. The chat overlay retains text-only answers.
 
 The model chooses ordinary Markdown or text, bar/line charts, comparisons, choices,
 forms and static HTML. Charts offer chart/data views rather than duplicating data.
@@ -300,6 +327,21 @@ Native controls own user interaction. Choice replies contain only visible labels
 and descriptions; forms submit their displayed fields. Neither is an approval or
 a privileged command, and messages sent during a run remain ordinary follow-ups.
 
+Choices use one aligned list of native radio rows rather than separate boxes.
+The option label and description share an edge; selection, submit and delivery
+feedback stay together. Forms keep familiar labeled controls without a nested
+panel. Selecting a radio never sends on its own: the explicit submit, retry identity,
+editing state and read-only boundary are unchanged.
+
+Block choice is guided in the host prompt (`INTERACTIVE_INSTRUCTIONS`, direct
+conversations only): prefer a suitable block over long prose when it reduces reading,
+comparison or input effort; pick from the content, not as decoration — charts
+for quantitative trends and scale, comparisons for tradeoffs, choices for decisions
+that are conversational preferences, priorities or next steps, forms for several
+related inputs at once, HTML only for authored layout and static previews. A simple
+answer stays plain text; a widget never restates what the prose said, asks what the
+Ghost's tools can look up, duplicates an ask_owner question or an approval flow, or
+invents a question just to have something to render.
 Form values, selection and delivery state are tab-scoped in `sessionStorage`,
 keyed by conversation, immutable tool message and block identity. Refresh/reconnect
 keeps this state in the same tab; it is not a cross-device or browser-restart draft
@@ -310,3 +352,16 @@ HTML uses an explicit static-tag/attribute allow-list, an opaque sandboxed ifram
 and a resource-blocking CSP. Scripts, links, metadata refresh, forms, nested frames,
 SVG/MathML and remote assets are not supported. Source view is escaped text.
 There is no postMessage bridge, arbitrary JavaScript or direct Host access.
+
+## Goals
+
+목표 is a long-term team direction, never a quota or percentage. The owner writes it or
+answers the main Ghost's 목표 제안 with 등록 / 거절 in the existing decision deck.
+Each direction leads its own section; 이유, 지키는 선 and 참고 신호 stay quiet beneath it.
+The 이정표 line reads past → now → next → later, horizontal with a ScrollRail on desktop
+and upright on compact screens. Two active steps fork and rejoin: stacked in one desktop
+column, side by side on separate lanes of the same row on compact screens.
+Every state has its own shape; signal blue appears only for a linked Work actually running
+or verifying. Selecting a step opens evidence and owner settlement inline, without a modal.
+Paused directions stay visible, closed ones fold below; closing names its irreversible
+consequence before dropping open steps. There are at most three open directions.

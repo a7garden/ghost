@@ -67,16 +67,18 @@ for (const theme of ['light', 'dark'] as const) {
           await capture(page, 'ghost-design-dialog', theme, info.project.name);
           await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
         }
-        const trigger = { schedules: '반복 작업 예약', activities: '활동 만들기', connections: '연결 추가' }[tab];
+        const trigger = { schedules: '반복 작업 예약', activities: '활동 만들기' }[tab];
         if (trigger) {
           if (tab === 'schedules') await page.clock.setFixedTime(new Date('2026-11-09T09:00:00.000Z'));
           await page.getByRole('button', { name: trigger, exact: true }).click();
           await expect(page.getByRole('dialog')).toBeVisible();
           await capture(page, `${tab}-dialog`, theme, info.project.name);
-          if (tab === 'connections') {
-            await page.getByRole('radio', { name: '메일', exact: true }).click();
-            await capture(page, 'connection-mail-dialog', theme, info.project.name);
-          }
+          await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
+        }
+        if (tab === 'connections') {
+          await page.getByRole('button', { name: 'iCloud', exact: true }).click();
+          await expect(page.getByRole('dialog')).toBeVisible();
+          await capture(page, 'connection-mail-dialog', theme, info.project.name);
           await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
         }
       });
@@ -89,7 +91,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.getByRole('dialog').locator('.cm-editor')).toBeVisible();
       await capture(page, 'document-editor', theme, info.project.name);
       await page.getByRole('dialog').getByRole('button', { name: '닫기', exact: true }).last().click();
-      await page.locator('.shell-search').click();
+      await page.getByRole('button', { name: '명령 검색', exact: true }).click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await capture(page, 'command-palette', theme, info.project.name);
     });

@@ -58,6 +58,11 @@ export function useAvatarSpeaking(ghostId: string) {
   }, [speech, source, ghostId]);
 }
 
+/** The owner's avatar animation preference. */
+export function useAvatarMotion() {
+  return useContext(Context).animate;
+}
+
 /** Pet sprite row for a Ghost: busy conversation, a pending decision, or idle. Pure; exported for tests. */
 export function ghostPetState(ghost: Ghost | undefined, state: State | null | undefined): PetState {
   if (!ghost) return 'idle';

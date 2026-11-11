@@ -1,7 +1,9 @@
 import { Type, type Static } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import { Duty } from "./duty.ts";
+import { Goal, Milestone } from "./goals.ts";
 import {
+  Adaptation,
   ArtifactRef,
   AutonomyPlan,
   Avatar,
@@ -20,6 +22,7 @@ import {
   SkillName,
   Settings,
   Space,
+  Sha256,
   Timestamp,
   Work,
   nullable,
@@ -71,8 +74,13 @@ export const State = Type.Object({
   activityRuns: Type.Optional(Type.Array(ActivityRun)),
   connections: Type.Optional(Type.Array(Connection)),
   autonomy: Type.Optional(Type.Array(AutonomyPlan)),
+  /** What each Ghost learned about this environment; only Ghosts with notes appear. */
+  adaptations: Type.Optional(Type.Array(Adaptation)),
   /** 근무 상태. 이 기능 이전의 Host 는 보내지 않는다. */
   duty: Type.Optional(Duty),
+  /** Team goals with every milestone; the Host before goals sends neither. */
+  goals: Type.Optional(Type.Array(Goal)),
+  milestones: Type.Optional(Type.Array(Milestone)),
 });
 export type State = Static<typeof State>;
 
@@ -149,3 +157,58 @@ export const PageView = Type.Object({
   hash: Type.String(),
 });
 export type PageView = Static<typeof PageView>;
+
+/** GET /api/update. The Host's own release update; the owner starts every install. */
+export const UpdateStatus = Type.Object({
+  /** A release build running from `<base>/releases/<name>/ghost` with `<base>/current` pointing at it, started by the `ghost service install` launcher. */
+  enabled: Type.Boolean(),
+  disabledReason: Type.Union([Type.Null(), Type.Literal("development"), Type.Literal("layout"), Type.Literal("service")]),
+  hasCredential: Type.Boolean(),
+  current: Type.Object({ version: Type.String(), commit: Type.String() }),
+  autoCheck: Type.Boolean(),
+  phase: Type.Union([
+    Type.Literal("idle"),
+    Type.Literal("checking"),
+    Type.Literal("downloading"),
+    Type.Literal("waiting"),
+    Type.Literal("installing"),
+    Type.Literal("error"),
+  ]),
+  /** The newest verified release, only when it is newer than the running Host. */
+  latest: nullable(Type.Object({ version: Type.String(), commit: Type.String(), notes: Type.String(), publishedAt: Type.String() })),
+  /** The desktop shell offered by the newest verified release; the shell compares it with its own version. */
+  shell: nullable(Type.Object({ version: Type.String(), notes: Type.String() })),
+  /** The iPhone shell offered by the newest verified release; the app compares its native build number. */
+  ios: nullable(Type.Object({ version: Type.String(), build: Type.Integer({ minimum: 1 }), notes: Type.String() })),
+  checkedAt: nullable(Timestamp),
+  nextCheckAt: nullable(Timestamp),
+  error: nullable(Type.String()),
+  lastResult: nullable(
+    Type.Object({
+      outcome: Type.Union([Type.Literal("installed"), Type.Literal("rolled_back"), Type.Literal("failed")]),
+      from: Type.String(),
+      to: Type.String(),
+      at: Timestamp,
+    }),
+  ),
+});
+export type UpdateStatus = Static<typeof UpdateStatus>;
+
+/** PUT /api/memory/:ghostId. One owner edit; a replay of the same requestId is the same edit. */
+export const MemoryWriteRequest = Type.Object({
+  /** Virtual memory path, e.g. /me/topic.md, /team/<ghostId>/topic.md or /owner.md. */
+  path: Type.String({ minLength: 1, maxLength: 256 }),
+  content: Type.String({ maxLength: 32 * 1024 }),
+  /** Exact hash of the version being replaced; null creates a new file only. */
+  expectedHash: nullable(Sha256),
+  requestId: Id,
+});
+export type MemoryWriteRequest = Static<typeof MemoryWriteRequest>;
+
+/** DELETE /api/memory/:ghostId. Deletes keep every revision. */
+export const MemoryDeleteRequest = Type.Object({
+  path: Type.String({ minLength: 1, maxLength: 256 }),
+  expectedHash: Sha256,
+  requestId: Id,
+});
+export type MemoryDeleteRequest = Static<typeof MemoryDeleteRequest>;

@@ -1,5 +1,6 @@
 import { Shuffle } from 'lucide-react';
 import type { Look, LookFace, LookMark, LookShape } from '@ghost/contract';
+import { useAvatarMotion } from './AvatarProvider';
 import { GhostCharacter } from './GhostCharacter';
 import { GHOST_PALETTE, defaultBodyColor } from './appearance';
 
@@ -38,6 +39,7 @@ export function LookEditor({ ghostId, look, disabled, onChange }: { ghostId: str
   const face = look.face ?? 'bars';
   const mark = look.mark ?? 'none';
   const fallback = defaultBodyColor(ghostId);
+  const animate = useAvatarMotion();
   const colorName = body ? GHOST_PALETTE.find(item => item.color === body)?.name ?? '직접 고른 색' : '자동';
   const signature = `${body}|${shape}|${face}|${mark}`;
   return <div className="look-editor"><div className="look-editor__layout">
@@ -45,7 +47,7 @@ export function LookEditor({ ghostId, look, disabled, onChange }: { ghostId: str
       <div className="look-editor__stage">
         {/* Remounting on each change replays the pop; the inner layer floats. */}
         <div key={signature} className="look-editor__figure">
-          <div className="look-editor__float"><GhostCharacter size={136} color={body} fallback={fallback} shape={shape} face={face} mark={mark} animate={false}/></div>
+          <div className="look-editor__float"><GhostCharacter size={136} color={body} fallback={fallback} shape={shape} face={face} mark={mark} animate={animate}/></div>
         </div>
       </div>
       <button type="button" className="look-editor__shuffle" disabled={disabled} onClick={() => onChange(shuffled(look))}>

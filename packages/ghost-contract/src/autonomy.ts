@@ -1,27 +1,75 @@
 import { Type, type Static } from "typebox";
 import { ExecutionTarget, GhostToolList, Id, ScheduleSpec, Timestamp, WorkState, nullable } from "./entities.ts";
 
-/** Owner-configured endpoints. Credentials live only in the Host's secret store. */
-export const ConnectionConfig = Type.Union([
+/** Catalog icon of a service: an HTTPS URL or a local artifact path served by this Host. */
+export const ConnectionIconUrl = Type.String({
+  maxLength: 2048,
+  pattern: "^(https://\\S+|/api/artifacts/[a-f0-9]{64})$",
+});
+
+/** How a stored credential authenticates a mail account; absence is the legacy password login. */
+export const MailAuthType = Type.Union([Type.Literal("password"), Type.Literal("oauth2")]);
+
+/** Owner-configured IMAP (and optional SMTP) mail endpoint; the credential is an app password or an OAuth2 access token. */
+export const MailConnectionConfig = Type.Object({
+  kind: Type.Literal("mail"),
+  host: Type.String({ minLength: 1, maxLength: 253 }),
+  port: Type.Integer({ minimum: 1, maximum: 65535 }),
+  username: Type.String({ minLength: 1, maxLength: 320 }),
+  mailbox: Type.String({ minLength: 1, maxLength: 256 }),
+  smtpHost: nullable(Type.String({ minLength: 1, maxLength: 253 })),
+  smtpPort: Type.Integer({ minimum: 1, maximum: 65535 }),
+  smtpSecure: Type.Boolean(),
+  /** Legacy rows without this field authenticate with the stored password/app password. */
+  authType: Type.Optional(MailAuthType),
+});
+export type MailConnectionConfig = Static<typeof MailConnectionConfig>;
+
+/**
+ * Owner-configured API endpoints. Every field is required so the owner's UI sends the exact
+ * configuration; credentials live only in the Host's secret store and the credential header
+ * value is secret while static headers stay metadata.
+ */
+export const ApiConnectionConfig = Type.Object({
+  kind: Type.Literal("api"),
+  baseUrl: Type.String({ minLength: 1, maxLength: 2048 }),
+  /** Header that carries the credential (an API key belongs here, never in static headers). */
+  authHeader: Type.String({ minLength: 1, maxLength: 128 }),
+  /** Prefix before the credential in the auth header; an empty string sends the raw secret. */
+  authPrefix: Type.String({ maxLength: 128 }),
+  /** Relative identity endpoint used by connection.test (GET, path only). */
+  testPath: Type.String({ minLength: 1, maxLength: 512 }),
+  /** Static request headers, such as `Notion-Version`; credential-bearing header names are rejected. */
+  headers: Type.Record(Type.String({ minLength: 1, maxLength: 128 }), Type.String({ maxLength: 1024 })),
+  /** Ghosts allowed authenticated REST use through connection_request. */
+  ghostIds: Type.Array(Id, { maxItems: 256, uniqueItems: true }),
+});
+export type ApiConnectionConfig = Static<typeof ApiConnectionConfig>;
+
+export const GitConnectionConfig = Type.Union([
   Type.Object({ kind: Type.Literal("github"), baseUrl: Type.String({ minLength: 1, maxLength: 2048 }) }),
   Type.Object({ kind: Type.Literal("gitea"), baseUrl: Type.String({ minLength: 1, maxLength: 2048 }) }),
-  Type.Object({
-    kind: Type.Literal("mail"),
-    host: Type.String({ minLength: 1, maxLength: 253 }),
-    port: Type.Integer({ minimum: 1, maximum: 65535 }),
-    username: Type.String({ minLength: 1, maxLength: 320 }),
-    mailbox: Type.String({ minLength: 1, maxLength: 256 }),
-    smtpHost: nullable(Type.String({ minLength: 1, maxLength: 253 })),
-    smtpPort: Type.Integer({ minimum: 1, maximum: 65535 }),
-    smtpSecure: Type.Boolean(),
-  }),
 ]);
+
+/** Owner-configured endpoints. Credentials live only in the Host's secret store. */
+export const ConnectionConfig = Type.Union([GitConnectionConfig, ApiConnectionConfig, MailConnectionConfig]);
 export type ConnectionConfig = Static<typeof ConnectionConfig>;
+
+/** API grants change who may use an account, not the account's authentication identity. */
+export function connectionCredentialScope(config: ConnectionConfig) {
+  if (config.kind !== "api") return config;
+  const { ghostIds: _grants, ...authentication } = config;
+  return authentication;
+}
 
 export const Connection = Type.Object({
   id: Id,
   name: Type.String({ minLength: 1, maxLength: 128 }),
   config: ConnectionConfig,
+  /** Catalog id of a built-in service preset (`github`, `gmail`, `custom-api`, …); absent for owner-defined connections. */
+  serviceId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  /** Card icon from the service catalog; absent for owner-defined connections. */
+  iconUrl: Type.Optional(ConnectionIconUrl),
   credentialVersion: nullable(Id),
   hasCredential: Type.Boolean(),
   createdAt: Timestamp,

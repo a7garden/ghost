@@ -29,9 +29,10 @@ import { Ledger } from "../src/ledger/ledger.ts";
 import { FsArtifactStore } from "../src/stores/artifacts.ts";
 import { FileSecrets } from "../src/stores/secrets.ts";
 import { ProviderCatalog as HostProviderCatalog } from "../src/integrations/provider-catalog.ts";
+import { HOST_VERSION } from "../src/update/identity.ts";
 
 const OWNER_TOKEN = "owner-test-token";
-const VERSION = "2.0.0";
+const VERSION = HOST_VERSION;
 
 class FakeEngine implements Engine {
   readonly opened: ConversationSetup[] = [];
@@ -104,7 +105,6 @@ const config: Config = {
   publicOrigin: "http://127.0.0.1",
   uiDir,
   sandbox: { kind: "local" },
-  memory: null,
   voice: null,
   apns: null,
   skills: null,

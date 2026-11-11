@@ -3,16 +3,23 @@ import type {
   ApiError,
   ArtifactRef,
   Command,
+  ConnectionOAuthView,
+  ConnectionOAuthClientInput,
+  ConnectionOAuthStart,
   CommandResponse,
   ConversationPage,
   LedgerEvent,
   LiveEvent,
+  MemoryFile,
+  MemoryRevision,
+  MemoryView,
   OAuthStatus,
   PageSummary,
   ProviderPreset,
   PageView,
   SkillCatalog,
   State,
+  UpdateStatus,
   VaultContact,
   VaultItem,
   VaultItemKind,
@@ -57,7 +64,7 @@ export type VaultItemWrite = {
 };
 
 /** One live-view frame of a browser handoff (see the host's `/api/browser/handoffs/:id/frame`). */
-export type BrowserFrame = { image: string; mediaType: 'image/jpeg'; width: number; height: number; url: string; title: string };
+export type BrowserFrame = { image: string; mediaType: 'image/jpeg'; width: number; height: number; url: string; title: string; windowAvailable?: boolean };
 
 /** One owner input into a handoff browser. */
 export type BrowserControl =
@@ -103,6 +110,44 @@ export class HostClient {
     return this.json('/api/skills');
   }
 
+  /** The host's own release update state. */
+  update(): Promise<UpdateStatus> {
+    return this.json('/api/update');
+  }
+  /** Short-lived link for installing the offered iPhone app. */
+  iosUpdateLink(): Promise<{ install: string; page: string }> {
+    return this.json('/api/update/ios/link', { method: 'POST' });
+  }
+
+
+  /** Ask the host to check GitHub for a newer release; resolves after the check finishes. */
+  checkUpdate(): Promise<UpdateStatus> {
+    return this.json('/api/update/check', { method: 'POST' });
+  }
+
+  /** Start installing `version` in the background (202); refused while another phase is active. */
+  installUpdate(version: string): Promise<UpdateStatus> {
+    return this.json('/api/update/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version }),
+    });
+  }
+
+  /** Cancel a download or a waiting install; refused during installing. */
+  cancelUpdate(): Promise<UpdateStatus> {
+    return this.json('/api/update/cancel', { method: 'POST' });
+  }
+
+  /** Switch auto-checking or replace (`token`) / remove (`token: null`) the stored GitHub token. */
+  updateSettings(patch: { autoCheck?: boolean; token?: string | null }): Promise<UpdateStatus> {
+    return this.json('/api/update/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+  }
+
   conversation(id: string, before?: string | null, limit = 50): Promise<ConversationPage> {
     const query = new URLSearchParams({ limit: String(limit) });
     if (before) query.set('before', before);
@@ -111,6 +156,42 @@ export class HostClient {
 
   work(id: string): Promise<WorkDetail> {
     return this.json(`/api/works/${encodeURIComponent(id)}`);
+  }
+
+  /** One Ghost's Host memory: the visible files and recent consolidation runs. */
+  memory(ghostId: string): Promise<MemoryView> {
+    return this.json(`/api/memory/${encodeURIComponent(ghostId)}`);
+  }
+
+  /** Every kept version of one memory file, deletes included. */
+  memoryRevisions(ghostId: string, path: string): Promise<MemoryRevision[]> {
+    return this.json(`/api/memory/${encodeURIComponent(ghostId)}/revisions?path=${encodeURIComponent(path)}`);
+  }
+
+  /**
+   * Create or replace one memory file. `expectedHash` must match the stored version,
+   * so an edit that raced another writer is refused instead of overwriting it.
+   */
+  memoryWrite(ghostId: string, input: { path: string; content: string; expectedHash: string | null; requestId?: string }): Promise<MemoryFile | null> {
+    return this.json(`/api/memory/${encodeURIComponent(ghostId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: crypto.randomUUID(), ...input }),
+    });
+  }
+
+  /** Delete one memory file at its exact version; every revision is kept. */
+  async memoryDelete(ghostId: string, path: string, expectedHash: string): Promise<void> {
+    await this.json(`/api/memory/${encodeURIComponent(ghostId)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, expectedHash, requestId: crypto.randomUUID() }),
+    });
+  }
+
+  /** Ask the Host to consolidate this Ghost's memory at the next idle moment. */
+  async memoryDream(ghostId: string): Promise<void> {
+    await this.json(`/api/memory/${encodeURIComponent(ghostId)}/dream`, { method: 'POST' });
   }
 
   /** Document summaries of one space, newest edit last; `query` filters by title (owner only). */
@@ -158,6 +239,26 @@ export class HostClient {
   /** Cancel a pending device-code login (owner only). */
   cancelOAuth(providerId: string): Promise<OAuthStatus> {
     return this.json(`/api/providers/${encodeURIComponent(providerId)}/oauth`, { method: 'DELETE' });
+  }
+
+  connectionOAuth(serviceId: string): Promise<ConnectionOAuthView> {
+    return this.json(`/api/connection-oauth/${encodeURIComponent(serviceId)}`);
+  }
+
+  configureConnectionOAuth(serviceId: string, input: ConnectionOAuthClientInput): Promise<ConnectionOAuthView> {
+    return this.json(`/api/connection-oauth/${encodeURIComponent(serviceId)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+  }
+
+  startConnectionOAuth(serviceId: string, input: ConnectionOAuthStart): Promise<ConnectionOAuthView> {
+    return this.json(`/api/connection-oauth/${encodeURIComponent(serviceId)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+  }
+
+  cancelConnectionOAuth(serviceId: string): Promise<ConnectionOAuthView> {
+    return this.json(`/api/connection-oauth/${encodeURIComponent(serviceId)}`, { method: 'DELETE' });
   }
 
   /** The owner's vault metadata; one-time items that expired are already gone. Values are never returned. */

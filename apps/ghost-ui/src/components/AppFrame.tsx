@@ -37,8 +37,8 @@ export function AppFrame({ desktop, macOSInset, location, island, duty, sidebar,
   // 2026.11.11 : 탭 다섯 개(홈 · 확인할 일 · 맡긴 일 · 작업실 · 설정)가 많다는 의견으로 셋으로 줄였다.
   // 맡긴 일은 홈의 「진행 중」 · 「맡긴 일 전체」에서, 설정은 위쪽 톱니에서 연다. 하위 화면은 자기 갈래의 탭을 켠다.
   const destinations = [
-    { id: 'home', path: '/', label: routeLabels.home, icon: Home, sections: ['home', 'work'] },
-    { id: 'workspace', path: '/workspace', label: '대화', icon: MessageCircle, sections: ['workspace', 'ghosts', 'spaces'] },
+    { id: 'home', path: '/', label: routeLabels.home, icon: Home, sections: ['home', 'work', 'goals'] },
+    { id: 'conversations', path: '/conversations', label: routeLabels.conversations, icon: MessageCircle, sections: ['conversations', 'workspace', 'ghosts', 'spaces'] },
     { id: 'inbox', path: '/inbox', label: routeLabels.inbox, icon: Inbox, sections: ['inbox'] },
   ];
   const settings = !desktop && <button type="button" className="shell-icon-button min-[56rem]:hidden" aria-label={routeLabels.settings} title={routeLabels.settings}

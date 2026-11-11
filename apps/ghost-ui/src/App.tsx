@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, Repeat2, Server, Smartphone, Users } from 'lucide-react';
+import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Server, Smartphone, Users } from 'lucide-react';
 import { DutySwitch } from './components/DutySwitch';
 import { DutySettings } from './features/DutySettings';
-import { Banner, Button, EmptyState, Skeleton, type CommandItem } from './ui';
+import { Banner, Button, EmptyState, ScrollRails, Skeleton, type CommandItem } from './ui';
 import type { Ghost, State } from '@ghost/contract';
 import { AppFrame } from './components/AppFrame';
 import { TitleNav } from './components/TitleNav';
@@ -21,7 +21,9 @@ import { isMac } from './ui/keys';
 import { hostStatus } from './features/hostStatus';
 import { Overview } from './features/Overview';
 import { GhostChat } from './features/GhostChat';
+import { Conversations } from './features/Conversations';
 import { WorkView } from './features/WorkViews';
+import { Goals } from './features/goals/Goals';
 import { WorkDetail } from './features/WorkDetail';
 import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
@@ -32,6 +34,9 @@ import { Schedules } from './features/Schedules';
 import { Activities } from './features/Activities';
 import { Connections } from './features/Connections';
 import { SpacesView } from './features/SpacesView';
+import { UpdatePrompt } from './features/UpdatePrompt';
+import { UpdateSettings } from './features/UpdateSettings';
+import { useUpdate } from './features/update/useUpdate';
 import { routeLabels, uiTerms } from './uiText';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { installWindowDrag } from './host/windowDrag';
@@ -55,11 +60,12 @@ if (desktopShell) {
 const currentRoute = () => location.hash.replace(/^#/, '').replace(/^\/dots\//, '/ghosts/') || '/';
 
 export function App() {
-  return <HostProvider><Shell/></HostProvider>;
+  return <HostProvider><Shell/><ScrollRails/></HostProvider>;
 }
 
 function Shell() {
   const { store, client } = useHost();
+  const update = useUpdate(client);
   const { state, connection, error } = useHostState(store);
   const { preferences, resolvedTheme, updatePreferences, storageError } = usePreferences();
   useVisibleViewport();
@@ -172,6 +178,7 @@ function Shell() {
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
+    { id: 'goals', label: uiTerms.goals, group: '이동', onSelect: go('/goals') },
     { id: 'spaces', label: routeLabels.spaces, group: '이동', onSelect: go('/spaces') },
     ...visibleGhosts(ghosts).map(ghost => ({ id: `ghost:${ghost.id}`, label: ghost.name, description: ghost.isDefault ? '메인 Ghost' : undefined, group: 'Ghost', onSelect: () => switchGhost(ghost.id) })),
     ...state.spaces.map(space => ({ id: `space:${space.id}`, label: space.name, group: '프로젝트', onSelect: () => navigate(`/spaces/${space.id}`) })),
@@ -185,6 +192,7 @@ function Shell() {
     { id: 'activities', label: uiTerms.activities, group: '설정', onSelect: go('/settings?tab=activities') },
     { id: 'connections', label: uiTerms.connections, group: '설정', onSelect: go('/settings?tab=connections') },
     { id: 'host', label: routeLabels.host, group: '설정', onSelect: go('/settings?tab=host') },
+    { id: 'update', label: '업데이트', group: '설정', onSelect: go('/settings?tab=update') },
     { id: 'settings', label: uiTerms.settings, group: '설정', onSelect: go('/settings') },
   ] : [];
 
@@ -200,8 +208,9 @@ function Shell() {
     { id: 'devices', label: '기기', icon: Smartphone, content: <MobilePairing/> },
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
     { id: 'activities', label: uiTerms.activities, icon: Repeat2, content: <Activities navigate={navigate}/> },
-    { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections/> },
+    { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections navigate={navigate}/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
+    { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
       {desktopError && <Banner variant="warning" className="mb-4">{desktopError}</Banner>}
       <DesktopAvatarSettings/>
@@ -209,7 +218,7 @@ function Shell() {
   ];
 
   const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>;
-  const knownSections: Record<string, true> = { home: true, ghosts: true, spaces: true, inbox: true, work: true, settings: true, workspace: true };
+  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, spaces: true, inbox: true, work: true, goals: true, settings: true, workspace: true };
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
@@ -224,7 +233,7 @@ function Shell() {
           hideDock={section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
             compactBack={section === 'settings' && params.has('tab') ? '/settings'
-              : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/workspace'
+              : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/conversations'
               : section === 'work' && path.split('/')[2] ? '/work'
               : section === 'spaces' && selectedSpace ? '/workspace' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
@@ -232,11 +241,14 @@ function Shell() {
           duty={state && <DutySwitch state={state}/>}
           sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
           {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>{error}</Banner>}
+          <UpdatePrompt monitor={update} navigate={navigate}/>
           {runtimeDown && state && section !== 'home' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate}/>}
+            {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
+            {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
               : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')} createRequested={params.get('new') === '1'} onCreateClosed={clearCreateRequest}/>)}

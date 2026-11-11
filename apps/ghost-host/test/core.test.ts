@@ -11,7 +11,7 @@ import { snapshot } from "../src/core/state.ts";
 import { MAX_REVISIONS } from "../src/core/works.ts";
 import { FakeEngine, MemorySecrets, harness, noSandbox, tempDir } from "./support.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
-import { MIGRATIONS, MIGRATION_3_TOOLS } from "../src/ledger/schema.ts";
+import { MIGRATIONS } from "../src/ledger/schema.ts";
 import type { Submission } from "../src/core/ports.ts";
 
 const owner = { kind: "owner" } as const satisfies Principal;
@@ -204,6 +204,105 @@ describe("delegation", () => {
 });
 
 describe("effects", () => {
+  test("reconciliation and explicit resume ignore unexecuted approval proposals", async () => {
+    const { core, ledger, ghost } = setup();
+    try {
+      const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
+      await core.idle();
+      const conversationId = ledger.work(work.id).conversationId!;
+      core.effects.onApproved("host_command_propose", async () => "approved");
+      const proposal = core.effects.propose({
+        conversationId, callId: "optional", tool: "host_command_propose", input: {}, summary: "optional",
+        title: "optional", detail: "", proposal: {},
+      });
+      const uncertain = core.effects.begin({ conversationId, callId: "uncertain", tool: "activity_action", input: {}, summary: "uncertain" });
+      core.effects.unknown(uncertain.effect.id, "lost reply");
+      expect(ledger.work(work.id).state).toBe("blocked");
+      expect(() => core.works.resume(work.id)).toThrow("unknown effect");
+      const decision = ledger.pendingDecisions({ effectId: uncertain.effect.id })[0]!;
+      await core.decisions.resolve(decision.id, { outcome: "deny" });
+      await core.idle();
+      expect(ledger.work(work.id).state).toBe("running");
+      expect(ledger.effect(proposal.id).state).toBe("pending");
+      expect(ledger.pendingDecisions({ effectId: proposal.id })).toHaveLength(1);
+      core.works.block(work.id, "resumable test block");
+      expect(core.works.resume(work.id).state).toBe("running");
+      expect(ledger.effect(proposal.id).state).toBe("pending");
+      await core.idle();
+    } finally { ledger.close(); }
+  });
+
+  test("approval-pending proposals allow later writes and survive recovery", async () => {
+    const { core, ledger, ghost } = setup();
+    try {
+      const conversationId = ghost.directConversationId;
+      core.effects.onApproved("host_command_propose", async () => "approved");
+      const proposal = core.effects.propose({
+        conversationId, callId: "proposal", tool: "host_command_propose", input: {}, summary: "Optional change",
+        title: "Optional change", detail: "", proposal: {},
+      });
+      expect(await core.effects.run({
+        conversationId, callId: "write", tool: "write", input: {}, summary: "write",
+      }, async () => "written")).toBe("written");
+      core.effects.recoverInterrupted();
+      expect(ledger.effect(proposal.id).state).toBe("pending");
+      expect(ledger.pendingDecisions({ effectId: proposal.id })[0]?.kind).toBe("approve_effect");
+      const running = core.effects.begin({ conversationId, callId: "running", tool: "bash", input: {}, summary: "running" });
+      expect(() => core.effects.begin({ conversationId, callId: "after-running", tool: "write", input: {}, summary: "write" })).toThrow("still running");
+      core.effects.finish(running.effect.id, "done");
+      const uncertain = core.effects.begin({ conversationId, callId: "uncertain", tool: "activity_action", input: {}, summary: "uncertain" });
+      core.effects.unknown(uncertain.effect.id, "lost reply");
+      expect(() => core.effects.begin({ conversationId, callId: "after-unknown", tool: "write", input: {}, summary: "write" })).toThrow("owner reconciles");
+    } finally { ledger.close(); }
+  });
+
+  test("complete withdraws optional proposals atomically without executing them", async () => {
+    const { core, ledger, ghost } = setup();
+    try {
+      const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
+      await core.idle();
+      const conversationId = ledger.work(work.id).conversationId!;
+      let executions = 0;
+      core.effects.onApproved("host_command_propose", async () => { executions++; return "executed"; });
+      for (const callId of ["proposal-1", "proposal-2"]) core.effects.propose({
+        conversationId, callId, tool: "host_command_propose", input: {}, summary: "optional",
+        title: "optional", detail: "", proposal: {},
+      });
+      const proposals = core.effects.unresolved(work.id);
+      const decisions = ledger.pendingDecisions({ workId: work.id });
+      expect(core.works.complete(work.id, { summary: "Done without optional changes", artifacts: [] }).state).toBe("verifying");
+      expect(executions).toBe(0);
+      for (const proposal of proposals) {
+        expect(ledger.effect(proposal.id)).toMatchObject({ state: "denied", result: "withdrawn: the Work completed without it" });
+        expect(ledger.decision(decisions.find((decision) => decision.effectId === proposal.id)!.id).state).toBe("cancelled");
+        await core.effects.resolveApproval(proposal.id, true);
+      }
+      expect(executions).toBe(0);
+      await core.idle();
+    } finally { ledger.close(); }
+  });
+
+  test("complete refuses unknown or executing effects without withdrawing proposals", async () => {
+    const { core, ledger, ghost } = setup();
+    try {
+      const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
+      await core.idle();
+      const conversationId = ledger.work(work.id).conversationId!;
+      core.effects.onApproved("host_command_propose", async () => "executed");
+      const proposal = core.effects.propose({
+        conversationId, callId: "optional", tool: "host_command_propose", input: {}, summary: "optional",
+        title: "optional", detail: "", proposal: {},
+      });
+      const running = core.effects.begin({ conversationId, callId: "running", tool: "activity_action", input: {}, summary: "running" });
+      expect(() => core.works.complete(work.id, { summary: "done", artifacts: [] })).toThrow("unresolved");
+      ledger.tx(() => ledger.putEffect({ ...running.effect, state: "unknown" }));
+      expect(() => core.works.complete(work.id, { summary: "done", artifacts: [] })).toThrow("unresolved");
+      expect(ledger.effect(proposal.id).state).toBe("pending");
+      expect(ledger.pendingDecisions({ effectId: proposal.id })).toHaveLength(1);
+      expect(ledger.work(work.id).state).toBe("running");
+    } finally { ledger.close(); }
+  });
+
   test("a replayed call returns its recorded result without running again", async () => {
     const { core, ledger, ghost } = setup();
     const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
@@ -521,14 +620,18 @@ describe("commands and access", () => {
     expect(engine.aborted).not.toContain(ledger.work(reader.id).conversationId!);
   });
 
-  test("migrating a ledger from before tool allow-lists grants every established Ghost the full set", async () => {
+  test("migration preserves established action authority while removing obsolete memory permissions", async () => {
     const path = join(tempDir(), "ghost-settings.db");
     const ghostId = historicalGhosts(path, 2, ["G", "H"])[0]!;
 
     const second = harness(path);
-    // Established Ghosts get the tool list as it stood at migration 3; later tools stay opt-in.
-    expect(second.ledger.ghost(ghostId).tools).toEqual([...MIGRATION_3_TOOLS]);
-    expect(second.ledger.ghosts().every((item) => item.tools.length === MIGRATION_3_TOOLS.length)).toBe(true);
+    for (const established of second.ledger.ghosts()) {
+      expect(established.tools).toContain("read");
+      expect(established.tools).toContain("bash");
+      expect(established.tools).toContain("document_read");
+      expect(established.tools.some((name: string) => name.startsWith("memory_"))).toBe(false);
+      expect(established.tools).not.toContain("host_read");
+    }
     // The migrated allow-list is an ordinary editable allow-list.
     const helper = second.ledger.ghosts().find((item) => item.name === "H")!;
     second.ledger.tx(() => second.ledger.putGhost({ ...helper, tools: ["read"], updatedAt: Date.now() }));

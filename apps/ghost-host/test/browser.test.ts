@@ -6,6 +6,9 @@ import { BROWSER_TOOLS, type VaultItem } from "@ghost/contract";
 import type { Context } from "@earendil-works/chord";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { AgentBrowser, createBrowser } from "../src/integrations/browser.ts";
+import { serveBrowser } from "../src/api/browser.ts";
+import { startObscura } from "../src/integrations/obscura.ts";
+import { createEgressProxy } from "../src/integrations/egress-proxy.ts";
 import type { BrowserPort, BrowserSessionRef, SandboxEnvFactory, VaultPort } from "../src/integrations/ports.ts";
 import { createBrowserTools } from "../src/tools/browser.ts";
 import { loadConfig } from "../src/config.ts";
@@ -76,9 +79,9 @@ function records(root: string): Recorded[] {
 function commands(root: string) { return records(root).map(({ argv }) => argv.slice(argv.indexOf("--json") + 1)); }
 const session = { ghostId: "ghost1", conversationId: "conversation1" };
 const sandbox = (workspace: string): SandboxEnvFactory => ({ workspacePath: () => workspace, envFor: async () => { throw new Error("unused"); }, stageInputs: async () => {}, release: async () => {} });
-function fixture() {
+function fixture(config?: ConstructorParameters<typeof AgentBrowser>[0]) {
   const root = tempDir(); const workspace = join(root, "workspace"); mkdirSync(workspace);
-  const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
+  const browser = new AgentBrowser(config ?? { executable: fakeExecutable(root) }, root);
   const h = harness();
   const ghost = h.core.createGhost({ name: "Browser", persona: "Careful" });
   h.ledger.tx(() => h.ledger.putGhost({ ...ghost, tools: [...BROWSER_TOOLS] }));
@@ -97,6 +100,17 @@ function fixture() {
 }
 
 describe("isolated browser port", () => {
+  test("Obscura config accepts exact HTTPS origins only", () => {
+    const root = tempDir();
+    const config = { browser: { executable: "/test/agent-browser", obscura: { executable: "/test/obscura", loginOrigins: ["https://example.com"] } } };
+    writeFileSync(join(root, "config.json"), JSON.stringify(config));
+    expect(loadConfig({}, root).browser).toEqual(config.browser);
+    for (const origin of ["http://example.com", "https://example.com/", "https://user@example.com", "https://example.com/login", "https://*.example.com"]) {
+      config.browser.obscura.loginOrigins = [origin];
+      writeFileSync(join(root, "config.json"), JSON.stringify(config));
+      expect(() => loadConfig({}, root)).toThrow("invalid Obscura");
+    }
+  });
   test("config, private HOME, encrypted key, namespace, restore and proxy flags are host-owned", async () => {
     const root = tempDir();
     expect(createBrowser(loadConfig({}, root), { root })).toBeNull();
@@ -234,6 +248,85 @@ describe("isolated browser port", () => {
   });
 });
 
+const obscuraExecutable = process.env.GHOST_TEST_OBSCURA;
+const agentBrowserExecutable = process.env.GHOST_TEST_AGENT_BROWSER;
+const obscuraTest = obscuraExecutable && agentBrowserExecutable && process.platform === "darwin" ? test : test.skip;
+obscuraTest("isolated Obscura: CDP discovery and the WebSocket both require the token", async () => {
+  const proxy = await createEgressProxy();
+  try {
+    const engine = await startObscura(obscuraExecutable!, proxy.url);
+    try {
+      expect((await fetch(`${engine.endpoint}/json/list`)).status).toBe(401);
+      const socket = new WebSocket(engine.websocket);
+      try {
+        const refused = await new Promise<boolean>((resolve) => {
+          socket.addEventListener("open", () => resolve(false), { once: true });
+          socket.addEventListener("error", () => resolve(true), { once: true });
+        });
+        expect(refused).toBe(true);
+      } finally { socket.close(); }
+    } finally { await engine.stop(); }
+  } finally { await proxy.close(); }
+}, 10_000);
+
+obscuraTest(
+  "isolated Obscura: tool open, vault restrictions and input, private network refusal and live handoff",
+  async () => {
+    const f = fixture({ executable: agentBrowserExecutable!, chrome: "/unused/chrome",
+      obscura: { executable: obscuraExecutable!, loginOrigins: ["https://example.com"] } });
+    const ref = { ghostId: f.ghost.id, conversationId: f.direct.id };
+    let localHits = 0;
+    const local = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() { localHits++; return new Response("fixture"); } });
+    try {
+      expect((await f.call("browser_open", { url: "https://example.com", engine: "obscura" })).isError).toBeFalsy();
+      await expect(f.browser.run(ref, ["open", "https://example.com"], { engine: "chrome" })).rejects.toThrow("Close the browser session");
+      const blocked = await f.browser.run(ref, ["eval", `fetch("http://127.0.0.1:${local.port}/").then(()=>"unsafe").catch(()=>"blocked")`]);
+      expect(blocked.data).toMatchObject({ result: "blocked" }); expect(localHits).toBe(0);
+      expect(() => f.browser.assertVaultFill(ref, "password", "https://www.iana.org")).toThrow("unavailable");
+      expect(() => f.browser.assertVaultFill(ref, "card_number", "https://example.com")).toThrow("unavailable");
+      expect((await f.browser.run(ref, ["eval", `document.body.insertAdjacentHTML("afterbegin", '<label for="probe">Probe password</label><input type="password" id="probe">'); "ready"`])).ok).toBe(true);
+      const snapshot = await f.browser.run(ref, ["snapshot", "-i"]);
+      const refs = (snapshot.data as { refs: Record<string, { name: string }> }).refs;
+      const field = Object.entries(refs).find(([, entry]) => entry.name === "Probe password")?.[0];
+      expect(field).toBeDefined();
+      const fill = await f.call("browser_fill_secret", { ref: `@${field}`, item_id: f.item.id, field: "password" });
+      expect(fill.isError).toBeFalsy();
+      expect(JSON.stringify([fill, f.ledger.db.query("SELECT * FROM effects").all()])).not.toContain(SECRET);
+      expect((await f.browser.run(ref, ["eval", 'document.querySelector("#probe").value'])).data).toMatchObject({ result: "[redacted]" });
+      await expect(f.browser.run(ref, ["screenshot"])).rejects.toThrow("until that tab's URL changes");
+      expect((await f.browser.run(ref, ["eval", `document.body.insertAdjacentHTML("afterbegin", "<input id=owner style=position:fixed;left:20px;top:20px>"); "ready"`])).ok).toBe(true);
+      const position = await f.browser.run(ref, ["eval", `(() => { const r = document.querySelector("#owner").getBoundingClientRect(); return {x:(r.left+r.width/2)/(innerWidth-1),y:(r.top+r.height/2)/(innerHeight-1)}; })()`]);
+      expect((await f.call("browser_handoff", { reason: "Test owner input" })).isError).toBeFalsy();
+      const decision = f.ledger.pendingDecisions()[0]!;
+      expect((await f.call("browser_snapshot")).isError).toBe(true);
+      const handoff = (action: "frame" | "control" | "window", input?: object) => {
+        const url = new URL(`http://localhost/api/browser/handoffs/${decision.id}/${action}`);
+        return serveBrowser(new Request(url, action === "frame" ? {} : { method: "POST", body: JSON.stringify(input ?? {}) }), url, f.core, f.browser);
+      };
+      const response = await handoff("frame");
+      expect(response.status).toBe(200);
+      const frame = await response.json() as { image: string; windowAvailable: boolean };
+      expect(frame.windowAvailable).toBe(false);
+      expect(Buffer.from(frame.image, "base64").subarray(0, 3).toString("hex")).toBe("ffd8ff");
+      expect((await handoff("window")).status).toBe(503);
+      expect((await handoff("control", { type: "tap", ...(position.data as { result: { x: number; y: number } }).result })).ok).toBe(true);
+      expect((await handoff("control", { type: "text", text: "한글 test" })).ok).toBe(true);
+      await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "Done" });
+      expect((await f.call("browser_snapshot")).isError).toBeFalsy();
+      expect((await f.browser.run(ref, ["eval", 'document.querySelector("#owner").value'])).data).toMatchObject({ result: "한글 test" });
+      expect((await f.browser.run(ref, ["eval", 'localStorage.setItem("ephemeral", "yes"); "stored"'])).ok).toBe(true);
+      await f.browser.close(ref);
+      expect((await f.call("browser_open", { url: "https://example.com", engine: "obscura" })).isError).toBeFalsy();
+      expect((await f.browser.run(ref, ["eval", 'localStorage.getItem("ephemeral")'])).data).toMatchObject({ result: null });
+    } finally {
+      await f.browser.shutdown();
+      await local.stop(true);
+      f.core.stop();
+      f.ledger.close();
+    }
+  }, 45_000,
+);
+
 describe("browser tools", () => {
   test("every tool refuses disabled tools and review conversations at execution time", async () => {
     const f = fixture();
@@ -260,8 +353,12 @@ describe("browser tools", () => {
       await f.call("browser_click", { ref: "@e1" }, "pi-browser", "replay");
       const before = commands(f.root).length;
       await f.call("browser_click", { ref: "@e1" }, "pi-browser", "replay"); expect(commands(f.root)).toHaveLength(before);
-      expect((await f.call("browser_open", { url: "http://127.0.0.1" })).isError).toBe(true);
-      expect((await f.call("browser_tabs", { action: "new", url: "file:///etc/passwd" })).isError).toBe(true);
+      const localService = await f.call("browser_open", { url: "http://127.0.0.1" });
+      expect(localService.isError).toBe(true);
+      expect(JSON.stringify(localService)).toContain("local services are not reachable by design");
+      const localFile = await f.call("browser_tabs", { action: "new", url: "file:///etc/passwd" });
+      expect(localFile.isError).toBe(true);
+      expect(JSON.stringify(localFile)).toContain("host_read");
       const beforeInjection = records(f.root).length;
       for (const [name, args] of [["browser_fill", { ref: "@e1", text: "--config=/tmp/evil" }], ["browser_snapshot", { selector: "--auto-connect" }], ["browser_select", { ref: "@e1", values: ["--proxy-bypass=*"] }]] as const) expect((await f.call(name, args)).isError).toBe(true);
       expect(records(f.root)).toHaveLength(beforeInjection);
@@ -498,4 +595,21 @@ describe("browser tools", () => {
       expect(f.ledger.effectsInState("unknown")).toHaveLength(0);
     } finally { await f.browser.shutdown(); }
   });
+});
+
+test("captured service credentials remain protected across owner handoff and return", async () => {
+  const root = tempDir();
+  const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
+  try {
+    await browser.run(session, ["open", "https://example.com"]);
+    writeFileSync(join(root, "facts"), SECRET);
+    writeFileSync(join(root, "page-text"), SECRET);
+    expect(await browser.captureCredential(session, { origin: "https://example.com", selector: "#key" })).toBe(SECRET);
+    await browser.handoff(session, "https://example.com");
+    await expect(browser.run(session, ["screenshot"])).rejects.toThrow();
+    await browser.endHandoff(session);
+    expect((await browser.run(session, ["get", "text"])).data).toEqual({ text: "[redacted]" });
+    await expect(browser.run(session, ["screenshot"])).rejects.toThrow();
+    expect(await browser.captureCredential(session, { origin: "https://example.com", selector: "#key" })).toBe(SECRET);
+  } finally { await browser.shutdown(); }
 });

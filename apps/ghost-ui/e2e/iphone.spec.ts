@@ -10,9 +10,46 @@ const screens: Screen[] = [
   { name: 'settings', route: () => '/settings', waits: () => ['기기', '반복 작업'] },
   { name: 'devices', route: () => '/settings?tab=devices', waits: () => ['나의 iPhone', '확인 요청', '알림 허용'], prepare: mockIPhone },
 ];
+
+test('open and switch Ghost conversations from the mobile dock', async ({ page }) => {
+  await openScreen(page, { name: 'mobile conversations', route: () => '/', waits: () => [], prepare: mockIPhone }, 'light');
+  const dock = page.getByRole('navigation', { name: '주요 화면' });
+  const tab = dock.getByRole('button', { name: '대화', exact: true });
+  const back = page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true });
+  await expect(page.getByLabel('도우미에게 메시지', { exact: true })).toBeVisible();
+  await tab.tap();
+  await expect(tab).toHaveAttribute('aria-current', 'page');
+  const list = page.getByRole('region', { name: '대화', exact: true });
+  await expect(list.getByRole('button').first()).toHaveAccessibleName('도우미 메인');
+  await list.getByRole('button', { name: '도우미 메인' }).tap();
+  await expect(page.getByText('이번 주에 들어온 요청을 정리해서 우선순위를 알려 줘.')).toBeVisible();
+  await back.tap();
+
+  const search = list.getByRole('searchbox', { name: 'Ghost 찾기' });
+  await search.fill('연구');
+  await expect(list.getByRole('button')).toHaveCount(1);
+  await list.getByRole('button', { name: '연구원', exact: true }).tap();
+  await expect(page.getByRole('navigation', { name: '위치' }).getByText('연구원', { exact: true })).toBeVisible();
+  await expect(page.locator('#message-input')).toBeVisible();
+  await expect(page.getByText('이번 주에 들어온 요청을 정리해서 우선순위를 알려 줘.')).toHaveCount(0);
+  await back.tap();
+  await expect(tab).toHaveAttribute('aria-current', 'page');
+  await expect(list.getByRole('button', { name: '기록가', exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 320, height: 690 });
+  const hitWidths = await dock.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().width));
+  expect(hitWidths).toHaveLength(6);
+  expect(hitWidths.every(width => width >= 44)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test.describe(theme, () => {
     test.use({ colorScheme: theme });
+    test('conversation list', async ({ page }) => {
+      await openScreen(page, { name: 'conversations', route: () => '/conversations', waits: () => ['기록가'], prepare: mockIPhone }, theme);
+      await screenshot(page, `conversations-${theme}-iphone.png`);
+    });
     for (const screen of screens) test(screen.name, async ({ page }) => {
       await openScreen(page, screen, theme);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);

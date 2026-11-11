@@ -1,4 +1,4 @@
-import type { BrowserHandoff, Decision, DecisionKind, SecureFormRequest, State, VaultContact, VaultItemKind } from '@ghost/contract';
+import type { BrowserHandoff, Decision, DecisionKind, GoalProposal, SecureFormRequest, State, VaultContact, VaultItemKind } from '@ghost/contract';
 
 export const decisionLabel: Record<DecisionKind, string> = {
   approve_effect: '실행 승인', question: '답변 대기', accept_result: '결과 확인',
@@ -14,17 +14,24 @@ export function decisionHeading(decision: Decision, state: State): string {
 /** Chip text for the two question shapes that need more than a typed answer. */
 export const secureFormLabel = '금고 요청';
 export const browserHandoffLabel = '브라우저 대기';
+export const goalProposalLabel = '목표 제안';
+
+/** An owner-only goal proposal uses the ordinary question options. */
+export function goalProposal(decision: Decision): GoalProposal | null {
+  const goal = decision.kind === 'question' ? decision.proposal?.goal : undefined;
+  return goal !== null && typeof goal === 'object' && typeof (goal as GoalProposal).title === 'string' ? goal as GoalProposal : null;
+}
 
 /** The chip of one decision: a question reads its proposal shape, every other kind its own label. */
 export function decisionChip(decision: Decision): string {
   if (decision.kind !== 'question') return decisionLabel[decision.kind];
-  return secureFormProposal(decision) ? secureFormLabel : browserHandoffProposal(decision) ? browserHandoffLabel : decisionLabel.question;
+  return goalProposal(decision) ? goalProposalLabel : secureFormProposal(decision) ? secureFormLabel : browserHandoffProposal(decision) ? browserHandoffLabel : decisionLabel.question;
 }
 
 /** The completion answer a browser handoff suggests; it goes through the ordinary answer path. */
 export const handoffDoneAnswer = '다 했어요';
 
-const vaultKinds: readonly VaultItemKind[] = ['login', 'card', 'contact', 'secret'];
+const vaultKinds: readonly VaultItemKind[] = ['login', 'card', 'contact', 'secret', 'api'];
 
 /** `proposal.secureForm` of a `question`: the owner answers through the vault, never in chat. Null otherwise. */
 export function secureFormProposal(decision: Decision): SecureFormRequest | null {
@@ -90,6 +97,13 @@ export function secureFormBody(request: SecureFormRequest, values: SecureFormVal
     };
     if (!Object.keys(contact).length) return { error: '한 항목 이상 입력해 주세요.' };
     return { body: { kind: request.kind, contact, save } };
+  }
+  if (request.kind === 'api') {
+    const username = trim(values.username);
+    if (!values.value) return { error: '값을 입력해 주세요.' };
+    const origin: Record<string, unknown> = request.origin ? {} : { origin: trim(values.origin) };
+    if (!request.origin && !origin.origin) return { error: 'https://로 시작하는 주소를 입력해 주세요.' };
+    return { body: { kind: request.kind, ...(username ? { username } : {}), value: values.value, ...origin, save } };
   }
   if (!values.value) return { error: '값을 입력해 주세요.' };
   return { body: { kind: request.kind, value: values.value, save } };

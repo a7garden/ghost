@@ -4,37 +4,202 @@
 
 | 역할 | 진입점 |
 | --- | --- |
-| Host | `ghost serve` 한 프로세스. 상태 루트(`~/Library/Application Support/Ghost`)의 단일 writer이고 API·웹 UI·기기 연결을 같은 포트(기본 `127.0.0.1:62062`)에서 제공한다. |
-| Mac 앱 | `~/Applications/Ghost.app`. `~/.config/ghost/console.json`의 `host_mode: external`이면 상태 루트의 `host.json`을 읽어 실행 중인 Host에 붙는다. `managed`이면 앱에 들어 있는 Host를 직접 띄운다. |
+| Host | `ghost serve` 한 프로세스. 상태 루트(`~/Library/Application Support/Ghost`)의 단일 writer이고 API·웹 UI·기기 연결을 같은 포트(기본 `127.0.0.1:62062`)에서 제공한다. LaunchAgent `com.a7.ghost`가 `ghost service install`이 만든 `~/.local/share/ghost/bin/ghost-launch`로 띄운다. |
+| Mac 앱 | `~/Applications/Ghost.app`. 상태 루트의 `host.json`을 읽어 실행 중인 Host에 붙기만 한다. Host를 띄우거나 끄지 않는다. `~/.config/ghost/console.json`은 `root`만 읽는다. |
 | iPhone | 페어링한 기기가 Host의 공개 origin(`publicOrigin`, TLS 리버스 프록시)으로 직접 접속한다. 별도 Gateway는 없다. |
 
 ## 개발 변경의 자동 운영 반영
 
-소유자 상시 승인(2026-11-07): 검증한 Ghost 구현 변경은 별도 확인을 묻지 않고 같은 작업에서 운영 앱까지 반영한다. 빌드만 하거나 “운영 미반영” 상태로 개발 작업을 끝내지 않는다. 런타임에 영향 없는 문서 수정만 배포 대상에서 제외한다.
+소유자 상시 승인(2026-11-07): 검증한 Ghost 구현 변경은 별도 확인을 묻지 않고 같은 작업에서 운영 앱까지 반영한다. 빌드만 하거나 “운영 미반영” 상태로 개발 작업을 끝내지 않는다. 런타임에 영향 없는 문서 수정만 배포 대상에서 제외한다. 2026-11-10부터 반영은 GitHub Release와 Host 자체 업데이트로 한다.
 
-1. 해당 변경의 테스트·타입 검사·실행 검증과 필요한 독립 검토를 마치고 소스 커밋을 보존한다. 검증되지 않은 편집을 감시해 즉시 설치하는 watcher는 만들지 않는다.
-2. LaunchAgent, 실제 실행 파일, 포트 62062의 리스너, 열린 DB 경로와 상태 루트가 일치하는지 확인한다. 처리 중 대화·작업을 임의로 끊지 않고 유휴 시점에 전환한다. 유휴가 되지 않으면 검증한 릴리스를 준비한 채 차단 사유를 보고한다.
-3. 유휴 확인 후 **현재 운영 릴리스**의 `ghost backup <새 백업 디렉터리>`로 DB 무결성·manifest·시각을 확인한다. 금고 DB·키 포함 여부를 확인하고 `artifacts/`, `skills/`, `secrets/`(연결 계정 자격 포함), `config.json`, 앱 console 설정도 권한을 유지해 보관한다. 이전 릴리스는 삭제하지 않는다.
-4. `~/.local/share/ghost/releases/<날짜>-bun-<소스 커밋>/`에 검증한 `ghost`, `ui/`, 고정된 `agent-browser`를 설치하고 원본·사본 해시를 비교한다. 브라우저 CLI를 빠뜨리면 기존 config가 깨진다. 별도 임시 상태 루트·포트에서 설치 사본과 스키마 업그레이드도 실행한다.
-5. 유휴 상태를 다시 확인한 뒤 같은 디렉터리의 임시 심볼릭 링크를 `os.replace` 같은 원자적 rename으로 `current`에 교체한다. 실제 `readlink` 대상이 새 릴리스인지 확인한 후 LaunchAgent의 기존 Host를 `SIGTERM`으로 정상 종료해 재기동한다. 운영 루트에 두 번째 Host를 직접 띄우지 않는다.
-6. Owner API/health로 단일 리스너·실행 경로, 준비 상태와 기존 데이터 보존을 확인하고 **설치된 Ghost 앱**에서 바뀐 화면을 실제로 연다. 운영 루트에는 `ghost doctor`를 실행하지 않는다. Host/UI만 바뀌었으면 external 모드를 유지해 새 Host/UI를 사용하고, native shell 변경이 있을 때만 기존 서명·배포 검증을 거쳐 앱 번들을 교체한다.
-7. 검증 실패 시 저장 형식의 하위 호환성을 확인한 뒤 이전 릴리스 링크로 되돌려 정상 재기동한다. 새 릴리스가 인증 형식을 바꾸면 운영 검증 중 인증 정보를 저장하지 않는다. 저장 이후에는 이전 릴리스가 해당 인증을 읽지 못할 수 있으므로 별도 승인 없이 secrets를 복원하지 않고 보고한다. 데이터 복원·파괴적 마이그레이션도 별도 승인이 필요하다. 설치 경로·소스·백업·검증 결과를 이 문서에 기록한다.
+1. 해당 변경의 테스트·타입 검사·실행 검증과 필요한 독립 검토를 마치고 `main`에 커밋한다. 검증되지 않은 편집을 감시해 즉시 설치하는 watcher는 만들지 않는다.
+2. `apps/ghost-host/package.json`의 `version`을 올린다. 네이티브 셸(`apps/ghost-desktop/src-tauri`)이 바뀐 때만 `tauri.conf.json`·`Cargo.toml` 버전도 올리고, iPhone 네이티브(`apps/ghost-ios`)가 바뀐 때만 `project.yml`·`project.pbxproj`의 `CURRENT_PROJECT_VERSION`을 올린다. 커밋한다.
+3. 깨끗한 작업 트리에서 `bun scripts/release.ts --publish`. 검사(Host·계약 타입, Host·UI 테스트, 셸 `cargo test`)를 통과해야 빌드한다. Developer ID로 `ghost`와 `Ghost.app`에 서명하고, iPhone 앱은 팀 개발 프로필로 서명한 `Ghost.ipa`로 만든다(등록된 기기만 설치, push 권한 없음). `~/.tauri/ghost.key`로 셸 번들과 `ghost-release.json`에 서명해 `v<version>` 태그와 Release를 올린다. 키를 잃으면 설치된 Host와 앱이 더는 업데이트를 받지 못한다.
+4. 설치는 Ghost 앱의 설정 › 업데이트 「설치」 또는 Owner API(`host.json`의 토큰)로 `POST /api/update/check` 뒤 `POST /api/update/install {"version"}`. Host가 받은 묶음의 해시·파일·`ghost version`을 확인해 `releases/<version>-<commit>`에 두고, 진행 중 대화·실행이 없을 때 `backups/pre-<version>-<commit>-<ms>/`에 백업한 뒤 `current`를 원자 교체하고 정상 종료한다. launchd가 새 릴리스를 띄운다. 유휴가 오지 않으면 `waiting`에 머문다. 끊지 말고 차단 사유로 보고하고, 필요하면 `POST /api/update/cancel`.
+5. `GET /api/update`의 `lastResult`가 `installed`인지, health 버전·준비 상태·기존 Ghost·대화·맡긴 일 보존을 Owner API로 확인한다. 운영 루트에는 `ghost doctor`를 실행하지 않는다. **설치된 Ghost 앱**에서 바뀐 화면을 실제로 연다. 셸 버전을 올린 릴리스는 같은 화면의 「앱 업데이트」로 앱을 바꾸고 다시 연 뒤 확인한다. iPhone 빌드를 올린 릴리스는 iPhone 앱의 「앱 업데이트」(이전 셸이면 Mac 설정 › 업데이트 › iPhone 앱의 QR 코드)로 설치하고, 설치 확인은 iPhone에서 소유자가 누른다.
+6. 새 Host가 세 번 연속 뜨지 못하면 launcher가 저장 형식 지문이 같은 경우에만 이전 릴리스로 되돌리고 `rolled_back`을 남긴다. 지문이 다르면 `failed`로 남기고 되돌리지 않는다. 데이터 복원·파괴적 마이그레이션·secrets 복원은 별도 승인이 필요하다. 수동으로 되돌릴 때는 `current`를 이전 릴리스로 바꾸고 `launchctl kickstart -k gui/$(id -u)/com.a7.ghost`. 버전·백업·검증 결과를 이 문서에 기록한다.
 
-Git 원격 장애가 있어도 검증한 로컬 커밋의 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다.
+브랜치 푸시가 실패해도 Release를 올릴 수 있으면 운영 반영은 진행한다. 푸시 실패를 숨기거나 완료로 간주하지 않고 미전송 커밋과 원격 차단 사유를 따로 보고한다. GitHub에 Release를 올릴 수 없으면 `dist/release/<version>/`에 검증한 묶음을 보존하고 차단 사유를 보고한다.
 
-## 현재 설치 (2026-11-09)
+Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
+`"obscura": {"executable": "~/.local/share/ghost/current/obscura", "loginOrigins": []}`를
+추가한다. `loginOrigins`에는 검증한 로그인 주소의 정확한 HTTPS origin만 넣는다.
+운영 전에는 설치 사본의 절대 경로를 `GHOST_TEST_OBSCURA`와
+`GHOST_TEST_AGENT_BROWSER`에 넣어 `bun test apps/ghost-host/test/browser.test.ts`를 실행한다.
+
+PC 조작은 릴리스의 `Ghost Control.app`·`agent-desktop` 1.2.0·Geist 0.5.0을 자동 감지한다. 끄려면 `config.json`에 `"desktop": null`을 넣는다. 개발 사본은 `"desktop": {"control": "/절대경로/Ghost Control.app", "agentDesktop": "/절대경로/agent-desktop", "geist": "/절대경로/geist"}`로 지정한다. `stage-desktop.sh`는 Geist 저장소의 고정 커밋 `f6254cc`만 빌드하며 미커밋 편집은 포함하지 않는다(`GEIST_REPO`로 저장소 위치 지정).
+
+처음에는 설치된 `Ghost Control.app/Contents/MacOS/ghost-control permissions --request`를 실행하고 시스템 설정에서 **Ghost Control**의 손쉬운 사용과 화면 기록을 승인한다. 앱은 권한 확인 전에 LaunchServices에 등록된다. 등록이 없으면 macOS가 승인을 저장하고도 설정 목록에서 숨기는 `kLSApplicationNotFoundErr`가 발생한다. 같은 번들 ID·Developer ID로 다시 빌드한 사본과 별도 launchd 작업에서 두 권한이 유지되는 것을 확인했다. 테스트용 ad-hoc 빌드는 별도 번들 ID를 써서 운영 권한을 덮어쓰지 않는다.
+
+Ghost 설정에서 **PC 조작** 도구와 **PC 직접 실행**을 함께 허용해야 한다. 화면과 입력은 실제 로그인한 사용자의 앱에 적용된다. 구조 읽기·일반 입력은 agent-desktop의 접근성 조작, 캔버스·좌표 입력은 Geist의 전경 조작이다. `desktop_press`는 앱 대상 키 입력이며 의미 기반 전달을 보장하지 않는다. 다른 Space의 창을 강제로 앞으로 가져오지 않는다. 물리 입력은 사용자의 포인터·키보드를 공유한다. 비밀번호·카드 입력은 브라우저 금고 경로를 쓴다.
+
+Geist worker의 IPC는 실행 파일 identity를 기준으로 나뉘므로 Host마다 `<root>/desktop/runtime/geist-*`에 전용 실행 파일을 APFS clone으로 만든다. 정상 종료가 확인되면 해당 사본을 제거한다. 강제 종료나 정리 실패 뒤에는 복구를 위해 보존하고, 다음 헬퍼는 새 사본을 쓴다.
+
+PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원장 → 서명 헬퍼 → agent-desktop/Geist 경로로 한글 값 채우기, 체크박스 변경, 화면 JPEG와 좌표 클릭 결과를 재관찰했다. Geist의 실제 키보드 한글 입력도 확인했다. 격리 Host가 제공하는 설정 화면에서 **PC 조작 16/16**과 **PC 직접 실행** 저장을 Owner API로 확인했다. PC 검사 20개·100개 단언과 타입 검사를 통과했다. 독립 검토의 출력 파이프 정리 제한·종료 단축키 일관성·다른 Space 창 거부를 반영했다. 물리 클릭은 전달 성공만으로 앱 반영을 단정하지 않는다. 시험 창은 첫 클릭이 활성화만 한 경우가 있어, 명시적 창 포커스 뒤 새 화면에서 클릭하고 결과를 확인했다.
+
+
+## 현재 설치 (2026-11-11)
 
 | 항목 | 값 |
 | --- | --- |
-| LaunchAgent | `com.a7.ghost` → `~/Workspace/Projects/infra/scripts/ghost-run.sh` → `~/.local/bin/ghost serve` |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/20261110-bun-c572f91` (`main`, UI와 고정한 `agent-browser` 0.41.2도 같은 디렉터리) |
+| LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`, `current` → `releases/2.4.6-189b707`(GitHub Release `v2.4.6`, Developer ID 서명, `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 0.1.0 (9) 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, Oxibrain, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
-| Mac 앱 | `~/Applications/Ghost.app`(`338dd06` 셸: 실제 펫 그림 기준 대화창·가장자리 보정, 임시 서명), `console.json` = `{host_mode: external, root}`, 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
+| Mac 앱 | `~/Applications/Ghost.app` 0.2.2(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent, `dev.garden.macfra.agent`(2026-11-08 Ghost `Mac 관리`로 이전, disabled) |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이고, Oxibrain 기억은 `memory.spaces`의 `*` 항목(`pc-infra`)으로 모든 Ghost가 쓴다.
+
+### 토스증권 조회·금고 API 키 — 2026-11-11
+
+- [v2.4.6](https://github.com/a7garden/ghost/releases/tag/v2.4.6), 소스 `189b707`(브랜치 `toss-assets-246`). 운영 2.4.5(`15a0428`) 위에 금고 `api` 종류와 `toss_read`만 더했다. `main`에는 같은 네 커밋을 옮겼다. 설계는 [에이전트 능력](agent-capabilities.md#decisions)의 Service API keys·Toss Securities.
+- 소유자 결정: API 자격증명은 Host `secrets/`가 아니라 금고를 확장해 Ghost별 부여·보안 양식·암호화 이력·백업을 그대로 쓴다. `api` 값은 페이지에 채우지 않고 Host 통합만 읽는다. 토스 키는 주문도 가능하므로 클라이언트가 읽기 GET 경로 허용 목록만 보낸다.
+- 검토: UI(GLM 작성)는 Opus 검토, Host(Claude 작성)는 GLM 검토 뒤 소유자가 승인한 예비 한도로 Codex(`openai-codex/gpt-6.1-sol`, 실제 응답 메타데이터) 검토. Codex의 P1(삭제 후 같은 id로 다시 만든 항목이 이전 토큰을 재사용)·P2(오래된 자격으로 재발급)는 토큰을 클라이언트 ID와 비밀 다이제스트에 묶고 사용 직전마다 금고를 다시 읽도록 고쳤다. GLM P3 두 건, Opus P3 한 건도 반영했다. 세션의 `retry.usageReservePct`는 소유자 승인으로 이 세션에서만 0으로 낮췄다.
+- 검증: 릴리스 Host 825 통과·10 생략, UI 189, Rust, 계약·Host·UI 타입·빌드·Developer ID·업데이터 서명·매니페스트·묶음 검증. `main` 통합본 Host 910 통과·10 생략, UI 189. 실제 토스 서버에 무효 자격을 보내 `invalid_client` 401이 「키 거절」 안내로 바뀌는 것을 확인했다. 공증은 기존 방식대로 생략했다.
+- 운영 자체 업데이트 완료: `lastResult: installed`, `2.4.5-15a0428` → `2.4.6-189b707`, 백업 `~/.local/share/ghost/backups/pre-2.4.6-189b707-1794350718346/`. health 2.4.6·runtime ready, PID 18566의 단일 62062 리스너·운영 루트·설치 실행 파일 `codesign --verify --strict` 확인. Ghost 28·대화 213·맡긴 일 156·기기 1·Space 9의 기존 ID와 금고 항목 209개를 보존했다.
+- 운영 UI(Host 제공 화면)에서 설정 › Ghost의 **자산 0/1 · 토스증권 조회**(잠금 표시)와 금고 › 새 항목의 **API 키**(주소·클라이언트 ID·비밀 키)를 열어 확인했고 저장하지 않았다. 콘솔 오류 없음. Mac 앱 창의 네이티브 확인은 하지 않았다.
+- 전용 Ghost **자산**(`01a1c7a6-d0b4-70ee-a1b6-7c0ec77205ae`, 기본 모델, 도구 `toss_read`·`vault_list`·`vault_request`·`web_search`·`web_read`, PC 실행 없음)을 만들었다. 설치 모델이 「계좌 목록 조회」 요청에 `toss_read`를 호출해 키 없음 거절을 받고 `vault_request`로 `https://openapi.tossinvest.com`용 `api` 보안 양식을 소유자에게 올린 것을 확인했다. 실제 계좌 응답은 소유자의 키 발급·허용 IP(현재 공인 IP `175.118.51.5`) 등록·보안 양식 입력 뒤에 확인한다.
+- 저장 형식 지문은 바뀌지 않았다(`api`는 금고 메타데이터의 새 종류). 2.4.5로 돌아가면 예전 Host는 `api` 항목을 알지 못해 그 항목의 사용만 실패한다.
+
+### 서비스 선택형 연결·Ghost 연결 지원 — 2026-11-11
+
+- [v2.4.5](https://github.com/a7garden/ghost/releases/tag/v2.4.5), 소스 `15a0428`(브랜치 `release/service-connections-20261111-v244`). 운영 2.4.4(`ab57e70`)의 목표 기능을 보존하고 연결 변경만 옮겼다. `main`의 기억·협업·네이티브 미수용 후보는 포함하지 않는다. 후속 릴리스도 현재 운영 기능을 보존해야 한다.
+- 서비스 목록·계정 아이콘 그리드·메일 자동 서버 설정·직접 API 연결·메인 Ghost에게 연결 맡기기를 제공한다. OAuth 앱이 없는 Google·Outlook·X·Notion·Slack은 최초 앱 등록과 소유자 로그인/동의가 필요하다. 운영의 다섯 서비스는 아직 앱 미등록이며 실제 제공자 OAuth 로그인 수용으로 세지 않는다.
+- 발급 키는 Host가 발급처의 단일 입력 필드에서 캡처해 브라우저 출력에서 가린 뒤 소유자 승인으로 저장·인증 확인한다. 금고 참조도 지원한다. API 권한은 Ghost별로 부여하고 외부 쓰기는 확인한다(Slack GET RPC 포함). 자동 활동은 계정을 새로 등록하지 못한다.
+- mini Gitea의 `garden` 계정을 직접 연결했다. 토큰은 `read:repository,read:issue,read:user`만 허용하며 Host 비밀 저장소 밖에 남기지 않았다. 설치된 Host의 실제 인증 검사와 운영 UI의 「인증 확인됨」을 확인했다. 메인의 연결 목록·등록·API 요청 도구 3개를 소유자 API로 허용했고 기존 브라우저·금고 권한은 유지했다.
+- 검증: 릴리스 Host 813 통과·10 생략, UI 185, Rust 21, 계약·Host·UI 타입·빌드·Developer ID·업데이터 서명·매니페스트·묶음 검증. 연결 e2e 5개, 실제 Chrome의 캡처 원점·필드 선택·텍스트 가림·스크린샷 차단·재캡처 검증이 통과했다. 메일/Notion 인증과 도움 요청의 모델 실행은 e2e에서 실물 수용하지 않았다. 공증은 기존 배포 방식대로 생략했다.
+- 실제 응답 메타데이터가 `anthropic/claude-opus-5-5`인 독립 검토 두 건에서 OAuth/원본 계정과 모델 도구/UI 경계를 검토했다. 토큰 갱신의 소스 서명 키 보존, Google 시크릿, 즉시 인증 폐기, Slack 읽기 분류, 캡처 후 가림과 handoff 보존, 권한만 수정할 때 인증 유지, 인증 검사 큐 교착/경쟁을 교정했다. 도구 목록을 복제한 UI 검사는 삭제했다.
+- 운영 자체 업데이트 완료: `lastResult: installed`, `2.4.4-ab57e70` → `2.4.5-15a0428`, 백업 `~/.local/share/ghost/backups/pre-2.4.5-15a0428-1794349760056/`. health 2.4.5·runtime ready, PID 6603의 단일 62062 리스너·운영 루트·설치 실행 파일 서명을 확인했다. Ghost 28·대화 213·맡긴 일 156·기기 1·Space 9·연결 2의 기존 ID를 모두 보존했다.
+- 운영에서 제공하는 연결 화면의 목록·아이콘·실제 Gitea 인증을 확인했다. 격리 브라우저에서는 데스크톱과 390px 메일/Google 추가 화면을 확인했다. Mac 앱 0.2.2는 실행 중이지만 현재 Space에 접근 가능한 창이 없어 새로고침·네이티브 상호작용은 확인하지 못했고 강제로 앞으로 가져오지 않았다. 실물 iPhone 검수와 구분한다. 시험 Host와 브라우저는 종료했다.
+- 저장 형식 지문에 `connections-2`를 더했다. 예전 Host가 새 API/도구 메타데이터를 읽지 못하므로 2.4.4로 자동 롤백하지 않는다. 데이터·자격 복원은 별도 소유자 승인 대상이다.
+
+### 팀 목표·이정표 — 2026-11-11
+
+- [v2.4.4](https://github.com/a7garden/ghost/releases/tag/v2.4.4), 소스 `ab57e70`(브랜치 `release/goals-20261111`). 운영 2.4.3(`80bf347`) 위에 `main`의 목표 기능 `91b51f8`·`c407db1`만 옮긴 교정본이다. 배포 보류 중인 2.5.0 기억·2.6.0 협업 후보는 포함하지 않는다. 설계는 [팀 목표](architecture.md#team-goals). 저장은 `settings`의 `goals` 키 하나라 원장 저장 형식 지문은 그대로다.
+- 함께 고친 기존 결함: 커밋 이벤트보다 after-commit 작업이 먼저 실행돼, 그 작업이 쓴 이벤트가 먼저 나가면 seq 순서 SSE가 앞선 변경을 버렸다(새 목표가 화면에 바로 안 뜨던 원인). 커밋 이벤트를 먼저 내보낸다. 수정 전 실패·수정 후 통과 회귀 검사를 넣었다.
+- 검사: 릴리스 실행 Host 767 통과·9 생략, UI 182, Rust 21, 계약·Host·UI 타입, Developer ID·매니페스트·묶음 검증. 목표 e2e 8개(데스크톱·iPhone). 격리 Host·실제 브라우저에서 목표 추가·종료 확인, 이벤트로 즉시 반영, 3개 상한을 확인했다. Host 변경은 Codex(`gpt-6.1-sol`) 독립 검토의 P2 4건(Work·연결 원자성, 재실행 시 일시정지 목표 연결, 지키는 선 잘림, 준비된 깨우기 중 새 목표 신호 유실)을 고쳤다. UI 검토는 실제 GLM이 맡아 지적 1건(접근성 이름)만 반영했고 강한 타 공급자 검토로 세지 않는다(UI는 R1).
+- 운영 Host 자체 업데이트: `lastResult: installed`, `2.4.3-80bf347` → `2.4.4-ab57e70`, 백업 `backups/pre-2.4.4-ab57e70-*`. health 2.4.4·runtime ready, Ghost 28·대화 213·맡긴 일 156·기기 1·Space 9의 기존 ID 보존, 제공 UI 번들에 목표 화면 포함, `#/goals` 빈 상태를 확인했다. 설치된 Mac 앱은 실행 중이지만 창이 현재 Space에서 보이지 않아 네이티브 창 확인은 하지 못했다.
+- 병행 릴리스 브랜치 `release/browser-vault-20261111`(2.5.1)에는 목표가 없다. 그 릴리스를 게시하기 전에 `release/goals-20261111`을 합쳐야 목표 화면이 사라지지 않는다(저장된 목표는 남는다).
+
+### PC 조작 내장·키보드 안전 경계 — 2026-11-11
+
+- [v2.4.3](https://github.com/a7garden/ghost/releases/tag/v2.4.3), 소스 `80bf347`. 배포된 `5b14f11`에서 만든 교정본이며 미수용 2.5.0 기억·네이티브 후보는 포함하지 않는다. `main` 통합 `3d129e3`은 후보의 2.5.0 버전을 보존했고 GitHub·Gitea 일반 푸시를 마쳤다.
+- 실제 응답 메타데이터로 확인한 Codex의 부모 작성 헬퍼 검토와 Opus의 Codex 작성 도구·전송부 검토에서 나온 지적을 반영했다. 두 키보드 경로 모두 modifier 별칭·순서·중복과 무관하게 종료·로그아웃·잠금·강제 종료·휴지통 비우기를 거부한다. Geist에 필드 포커스 정보가 없어 보호 필드가 하나라도 관측되면 물리 키 입력을 막으며, 마지막 접근성 대상의 보호 여부도 확인한다. PC 22개·124개 단언, 계약·Host·UI 타입, 릴리스 Host 755 통과·9 생략, UI 176, Rust 21, 빌드·Developer ID·매니페스트·묶음 검증을 통과했다. 공증은 기존 방식대로 생략했다.
+- 운영 Host 자체 업데이트 완료: `lastResult: installed`, `2.4.1-5b14f11` → `2.4.3-80bf347`. health 2.4.3·runtime ready, Ghost 27·대화 212·맡긴 일 156·기기 1·Space 9의 기존 ID 보존을 Owner API로 확인했다. 설치된 서명 헬퍼의 손쉬운 사용·화면 기록은 모두 승인 상태다. 메인 Ghost의 **PC 조작 16개**와 **PC 직접 실행**을 켰고, 교정 중 잠시 끈 두 키보드 도구도 복구했다.
+- 격리 실제 창의 한글·체크·캡처·좌표 입력과 운영 제공 설정 UI의 16/16은 앞선 검증에서 확인했다. 설치 모델의 창 채우기와 네이티브 셸 상호작용은 macOS 잠금으로 확인하지 못했으며 잠금을 우회하거나 창을 강제로 앞으로 가져오지 않았다. MiniMax의 Token Plan 2056 제한은 별도 제공자 차단으로 기록한다.
+- 운영의 실제 Codex 모델이 무효 `screen_id`와 `meta+q`로 `desktop_keys`를 한 번 호출했고, 새 시스템 단축키 거절문과 `isError: true`를 반환했다. 실제 키 입력·캡처 없이 설치본의 교정 경로를 확인했다. 검증용 Ghost는 은퇴·삭제 표시했고 기록은 기존 계약대로 보존했다. 전역·다른 Ghost 모델 설정은 바꾸지 않았다.
+
+
+### 유기적 팀 협업 후보 — 2026-11-11, 배포 보류
+
+- Host 후보 2.6.0, 최종 빌드 소스 `5fb21be`, Mac 셸 0.2.4. 책임·수용은 기존 Work 트리를 유지하고, 같은 루트의 다른 Ghost끼리 `ask_peer`·`answer_question`으로 필요한 정보만 교환한다. `ask_parent`는 유지하고 `answer_child`는 제거했다. 원장 migration 9는 기존 질문의 수신자 열과 인덱스만 바꾸며 행·제출 표식을 보존한다. 논문 근거와 적용 한계는 [협업 설계](architecture.md#collaboration-structure-and-research)에 기록했다.
+- 현재 메인은 전체 팀의 진행 상황을 보고 안전한 일반 Work에 `work_steer`로 조언한다. 별도 팀 신호 모델 호출 대신 기존 Autonomy의 다음 관측을 앞당긴다. 이 새 경로는 활성화·근무·하루 12회·동시 2개 한도를 공유한다. 기존 요청자에게 돌아가는 결과 보고는 바꾸지 않았으며, 전역 토큰 예산을 새로 보장하는 구조는 아니다. 승인된 Activity·권한·마감·수용 조건·미해결 외부 효과를 메인의 조언으로 우회하지 못한다.
+- 격리 Host 2.6.0·원장 9·포트 62317에서 실제 Pi SDK 모델 5개 Ghost를 실행했다. 실제 assistant 기록은 `zai-coding/glm-5.3-flash`였다. 비메인 요청자 → 비메인 책임자 → 두 팀원 위임, 팀원 간 질의·응답·재개, 두 자식의 검토 통과, 최종 파일 재열기와 실제 응답 값 일치 후 루트 수용을 확인했다. 중간 질문의 메인 중계는 0회였고 요청자 결과와 메인의 한도 내 schedule 관측을 확인했다. 준비 완료 질문 하나는 부모의 무응답으로 취소·대체 진행됐으므로 완벽한 지시 준수나 성능 향상의 증거로 세지 않는다. 시험 Host·스크립트·상태 루트·정적 API 자격 사본은 제거했다.
+- 범위 검토에서 Git 변경 내역을 읽는 동안 들어온 결과가 프롬프트 준비와 제출 사이에 사라지는 P2 경합을 확인했다. 이미 due인 계획도 새 증거에 revision을 올리도록 고쳤다. 실제 commits 대기 지점의 회귀와 기존 제출 중 경합 검사를 포함해 관련 검사 29개·Host 타입 검사를 통과했다.
+- `bun scripts/release.ts` 최종 실행: Host 840 통과·9 생략, UI 176 통과, Rust 28 통과, 계약·Host·UI 타입과 Host/UI/Mac/iPhone 빌드, Developer ID·업데이트 서명·매니페스트·묶음 검증 통과. 공증은 기존 배포 방식대로 생략했다. 게시하지 않은 서명 후보는 정본 `dist/release/2.6.0/`에 보존한다.
+- 필수 R2 수용은 미완료다. 두 지정 검토의 실제 assistant 메타데이터가 모두 `zai/glm-5.3`이었으므로 강한 타 공급자 독립 검토로 세지 않았다. 검토 하나의 Codex 실행 자기 보고는 실제 기록과 달라 배제·도구 보고했다. 병합된 내장 기억·펫·타이틀바의 기존 검토 차단도 남아 있다. 예비 한도를 우회하지 않았으며 `--publish`·설치는 하지 않았다.
+- 마지막 읽기 전용 Owner API 관측은 운영 2.4.3이었다. 운영 설정의 구형 `memory` 키도 남아 있어 새 Host의 설정 계약으로 바꾸기 전에는 설치할 수 없다. 기억 후보에 기록한 백업·최신 메모 대조·이관 절차 역시 미실행이다. 이번 협업 작업에서 운영 대화·작업·설정·설치 앱을 변경하지 않았다.
+
+### Host 내장 기억 후보 — 2026-11-10, 배포 보류
+
+- 구현 소스 `7585ed5`, Host 후보 2.5.0. 저장·검색·대화 색인·유휴 정리를 Bun/TypeScript Host 안으로 옮겼다. Ghost별 개인/팀 namespace, 소유자 전용 프로필, 원문 인용 검증, CAS·이전 버전, 한국어 FTS, 편집 충돌 시 초안 보존을 포함한다. 기억은 내부 DB 레코드이며 PDC 문서 변환은 없다. Oxibrain CLI와 기억 관리 Ghost가 새 구현의 실행 경로에 없다.
+- Host 799 통과·9 생략, UI 176 통과, Rust 28 통과, 계약·Host·UI 타입 검사 통과. 실제 격리 UI에서 충돌 비교·명시적 덮어쓰기·이력, 한글 중첩 경로의 생성/재저장, 미저장 초안 보호와 390px 화면을 확인했다. 실제 SDK 모델의 격리 실행은 낡은 90분 메모를 소유자 정정 근거의 150분으로 고쳤고, 새 맡긴 일이 `memory_search`로 150분을 찾아 완료했다. 프로덕션 OAuth refresh 토큰을 복사하거나 회전시키지 않았다. MiniMax·Z.AI의 별도 시도는 실제 429로 실패했으며 성공으로 세지 않는다.
+- 이관 준비 시점의 Oxibrain 메모 58개는 완료된 기존 효과와 episode ID·입력 digest를 대조했다. 임시 새 저장소에서 58/58 원문 해시·바이트를 보존했고, 수동 정답을 정한 실자료 질의 10개의 top-3와 무관 질의 3개를 확인했다. 일반 성능 벤치마크나 다른 검색기의 우월성 증거는 아니다. 운영 원장 복사본은 버전 7→8 뒤 Ghost 26·대화 211·맡긴 일 156·효과 1,998·결정 160·자동 활동 9개의 모든 ID를 보존하고 구형 기억 권한을 제거했다. 운영 이관은 아직 하지 않았으며 설치 시 최신 완료 효과를 다시 대조해야 한다.
+- 필수 R2 수용은 미완료다. 실제 응답 메타데이터에서 저장소 검토는 GLM 긴급 대체, 정리기 검토는 작성자와 같은 Codex였다. Claude 작성 통합부의 Codex 검토만 타 공급자 조건을 충족했다. 강한 타 공급자 검토 재배정도 GLM으로 대체되었다. 예비 한도를 우회하거나 이를 독립 수용으로 간주하지 않는다. 병합된 펫·타이틀바 네이티브 변경의 기존 수용 차단도 함께 남아 있다.
+- `v2.5.0` 게시 시도는 이 차단을 확인한 뒤 게시 전에 중지했다. 운영은 Owner API `lastResult: installed`와 실제 프로세스·리스너·DB 경로로 확인한 2.4.1이다. 운영 설정의 Oxibrain 항목, 기존 기억 관리 Ghost, 원본 `~/.oxi/brain`은 건드리지 않았다. 앱 창은 다른 Space에서 접근 불가였으며 강제로 앞으로 가져오지 않았다. 수용 뒤 자체 업데이트 → 최신 메모 이관 → 구형 Ghost 은퇴/삭제 → 설치 UI 확인 순서로 마무리한다.
+- 로컬 `bun scripts/release.ts`는 소스 `7585ed5`의 전체 검사·Host/UI/Mac/iPhone 빌드·Developer ID·업데이트 서명·매니페스트·묶음 검증을 완료했다. 공증은 기존 배포 방식대로 생략했다. 게시하지 않은 서명 후보를 정본 `dist/release/2.5.0/`에 보존했다. 이관 스냅숏은 `~/.local/share/ghost/backups/host-memory-2.5.0/oxibrain-notes.json`(디렉터리 0700, 파일 0600)에 보관했고, 시험 Host·브라우저·OAuth 사본·임시 스크립트·원장 복사본은 정리했다.
+
+### 펫의 펼침 일 목록 — 2026-11-10
+
+- 잘리던 긴 말풍선 대신 건수만 남기고, 호버·클릭 시 확인할 일과 모든 진행 중인 맡긴 일을 펼친다. 긴 제목은 줄바꿈하고 많은 항목은 ScrollRail로 읽는다. 각 행은 실제 결정·맡긴 일 화면을 연다. 빈 상태에서는 표시를 숨긴다. 구현 `92bd43a`, Retina 배율 수정 `ade0a8e`, `main` 통합 `7f9c88c`; 병행 타이틀바 끌기 수정도 보존했다.
+- 전용 브라우저 검사 4개(작은 펫·긴 제목·18개 일·스크롤·항목 이동, 키보드·Escape·유휴, 결정 우선순위, 끌기 전 호버 타이머) 통과. 밝은/어두운 실제 화면을 검사했다. 네이티브 16개 검사 통과. 격리 앱 실행에서 저장 위치가 2450,1300 → 4900,2600으로 두 배가 되던 문제를 대상 모니터 배율의 Logical setter로 고쳤고, 재실행 후 2450,1300 보존을 확인했다. 네이티브 펫의 실제 호버 화면은 관측하지 못했다. 시험 앱·Host·모의 제공자·브라우저는 종료했다.
+- `624ef3c`의 로컬 후보 `dist/release/2.4.2/`는 Host 753 통과·9 생략, UI 176 통과, Rust 28 통과, 타입·빌드·Developer ID 서명·매니페스트·묶음 검증을 통과했다. 공증은 기존 방식대로 생략했다. 이 후보는 병행 타이틀바 수정 이전의 셸 0.2.3이므로, 같은 버전의 다른 릴리스를 대체하거나 운영에 직접 설치하지 않는다.
+- 배포 수용은 보류했다. 네이티브 작성자는 실제 Codex였고 지정 검토는 GLM, 강한 검토의 대체 실행은 같은 Codex여서 필요한 강한 타 공급자 독립 검토를 충족하지 못했다. 별도 새 컨텍스트의 `default` 검토는 잔여 지적이 없었으나 실제 제공자 메타데이터가 노출되지 않아 독립성 증거로 세지 않았다. UI의 Codex 검토에서 찾은 끌기·호버 경합은 수정하고 회귀 검사를 통과했다.
+- 마지막 Owner API 관측: 운영 health 2.3.0, 기존 2.4.1 업데이트가 `waiting`, `lastResult`는 2.3.0 설치 기록이다. 기존 요청을 취소하거나 진행 중 대화를 끊지 않았다. 이 작업에서는 Release를 게시하거나 운영 Host·설치 앱을 교체하지 않았다.
+
+### 확인·제안 UI 재구성 — 2026-11-10
+
+- 질문·근거·응답을 분리하고 중첩 상자·장식용 카드 겹침·추천 배지를 없앴다. 선택지는 행 전체로 답하고 직접 입력은 필요할 때 펼친다. 여러 요청은 제목이 보이는 대기열을 사용한다. 채팅의 긴 근거만 별도로 스크롤하며 자동 처리 조건은 응답 옆에 남긴다. 아주 짧은 창은 전체 요청도 스크롤할 수 있고 금고 입력은 전송 행을 고정한다. 채팅의 `present_ui` 선택 양식도 한 목록으로 묶되 명시적 전송·재시도 식별자·입력 보존을 유지했다.
+- 병행 `main`의 문서 읽기/원문 미리보기와 PC 조작 변경을 보존해 통합했다. UI 단위 176, Host 753 통과·9 생략, Rust 21, 타입·빌드 통과. 기능 8개 경로와 관련 시각 36개 조합을 확인하고 기준 이미지를 갱신했다. 통합 뒤 긴 근거·금고 전송·위험 요청 3개 및 문서 시각 4개를 재확인했다. `cross-reviewer`와 `deep-reviewer`의 확정 P0–P2 지적은 없었다. 1280×900·390×844·1024×640, 밝은/어두운 화면을 확인했다. 실제 iPhone 검수는 하지 않았다.
+- [v2.4.1](https://github.com/a7garden/ghost/releases/tag/v2.4.1), 소스 `5b14f11`, `main` 통합·GitHub 일반 푸시 완료. Developer ID 서명·매니페스트·묶음 검증을 통과했다. Mac 셸 0.2.2와 iPhone 0.1.0 (9)는 유지했고 공증은 기존 방식대로 생략했다. 준비 checkout에 복사된 미추적 `wt/`는 삭제하지 않고 작업 트리 보존 경로로 옮겼다.
+- 운영 반영은 **유휴 대기 중**이다. 대기하던 2.4.0을 취소하고 그 변경을 포함한 검증본 2.4.1로 교체 요청했다. Host가 `releases/2.4.1-5b14f11`을 받았고 실행 파일과 `Ghost Control.app`의 `codesign --verify --strict`가 통과했다. 60초 넘게 대화 1건이 실행 중이라 `phase: waiting`에 두었으며 중단하지 않았다. 관측 시 health·runtime은 여전히 2.3.0/ready, Ghost 26·대화 211·맡긴 일 156의 기존 id 누락은 없었다. `lastResult`는 이전 2.3.0 설치 기록이며 2.4.1 설치 완료가 아니다. 유휴 설치 뒤 `lastResult: installed`, 새 버전·상태 보존·설치 앱의 변경 UI 확인이 남는다.
+
+
+### 타이틀바 창 이동 수정 — 2026-11-10, 배포 보류
+
+- 소스 `89779c6`(통합·버전 `6733285`, Host 2.4.2·Mac 셸 0.2.4): 타이틀바의 비조작 자식 요소도 끌기 영역을 상속한다. 버튼·링크·입력·명시적 opt-out은 제외한다. macOS가 거절하던 합성 AppKit 누름 이벤트를 없애고, 기존 아바타의 포인터 추적을 메인 창·오버레이에서도 재사용한다. 아바타 위치 저장과 비-macOS 경로는 유지한다.
+- UI 타입·빌드, Tauri Playwright 2개, Rust fmt·빌드 통과. 별도 상태 루트·포트 62173의 실제 수정 셸에서 타이틀 글자를 끌어 창 좌표가 `(-1600, 690)` → `(-1592, 695)`로 바뀌었고, 검색 아이콘은 창을 옮기지 않고 명령 창을 열었다. Geist가 창 이동 자체를 `STALE_WINDOW`로 판정해 제스처를 중단하므로 전체 이동 거리 검증에는 제한이 있다(도구 문제 보고). 시험 셸·Host는 종료했다.
+- `main` 통합과 GitHub·Gitea 일반 푸시 완료. 독립 검토 두 번 모두 새 P0/P1/P2를 찾지 않았지만, 실제 응답 메타데이터는 `reviewer`가 GLM, `deep-reviewer`가 작성자와 같은 Codex였다. Claude 주간 사용 90%·예비 10% 유지 때문에 필수 다른 공급자의 강한 검토를 확보하지 못했다. R2 수용을 완료로 간주하지 않으며 GitHub 게시·운영 설치를 보류한다. 당시 운영은 Host 2.3.0·Mac 0.2.2이며, 메인의 busy 대화로 기존 2.4.1 업데이트도 `waiting`이다. 대화를 끊거나 예비 한도를 우회하지 않았다.
+- `bun scripts/release.ts` 로컬 릴리스 검사 완료: Host 753 통과·9 생략, UI 176 통과, Rust 28 통과, 계약·Host·UI 타입 검사와 빌드·Developer ID·업데이트 서명·묶음 검증 통과. 공증은 저장소의 기존 배포 방식과 같이 생략했다. 서명 묶음은 정본 `dist/release/2.4.2/`에 보존한다. `--publish` 실행은 필수 검토가 대체된 사실을 확인한 뒤 게시 전에 중단했으며, 실제 Release나 설치 완료를 주장하지 않는다.
+### 팀 생성·환경 적응·도구 실패 수정 — 2026-11-10
+
+- 운영 Pi 기록을 읽기 전용으로 분석한 시점의 오늘 도구 호출은 9,629건, 오류는 3,026건이었다. 승인 대기 효과가 같은 대화의 모든 쓰기를 막은 오류가 1,420건(22개 대화), 산출물 경로 추측이 648건, `host_read` 12KB 제한이 141건이었다. 오늘 생성된 맡긴 일은 완료 38·실패 42·취소 17개였고 실패 중 31개가 마감 초과였다. 하나의 Mac 읽기 작업은 `tail -n +61` 승인 때문에 샌드박스 쓰기를 965번 거절당했다. 별도로 일반 Markdown 문서의 본문이 빈 문자열로 반환되는 실제 버그를 확인했다.
+- 메인은 `ghost_create`로 역할에 맞는 Ghost를 만들고 팀원의 설정을 고친다. 각 Ghost는 `self_adapt`로 페르소나와 분리된 환경 메모를 유지하고, 부족한 도구·PC 실행은 `capability_request`로 요청한다. 메모는 설정의 **환경 적응**에서 편집·되돌리기 가능하다. Mac 권한은 시간이 지나도 자동 허용되지 않으며, 거절 문장을 허용으로 읽거나 답변 재전송이 소유자의 후속 철회를 되돌리지 않도록 회귀 검사를 넣었다.
+- 승인만 기다리는 제안은 다른 효과를 막지 않고, 완료할 때 사용하지 않은 제안은 철회한다. 읽기 명령의 정상 argv, 프로젝트 `data/` 같은 일반 경로, 큰 파일의 줄 페이지를 지원한다. 비밀·개인 경로·상태 루트·재귀 grep의 비밀 파일 제외는 유지한다. `tail -c` 바이트 조각 읽기는 비밀 탐지를 피해갈 수 있어 자동 실행하지 않는다. 문서 참조의 이름·경로 차이를 해석하고, 산출물·웹 오류에 실제 다음 경로를 제시한다.
+- 격리 상태 루트·포트 62287의 실제 GLM Flash: 메인이 `배포 확인` Ghost를 만들고 검사·메모 수정, 팀원의 권한 요청→메인 거절→재요청→소유자 허용→같은 대화의 `self_adapt` 성공을 확인했다. 실제 명령 실행은 하지 않았다. 같은 Host의 웹 UI에서 메모 저장→재로드 후 보존→되돌리기를 확인했다. 시험 Host·브라우저·자격 사본은 제거했다.
+- 독립 검토의 실제 응답 메타데이터: 메인·권한·환경 적응(Claude 작성)은 Codex, Host 가드·승인(Core, Codex 작성)은 Claude Sonnet이 조사하고 GLM이 최종 지적을 전달했으며 메인이 각 지적을 확인했다. 문서·오류 경로(GLM 작성)는 지정 역할 대신 실제로 실행된 Codex가 검토했다. 거절 해석·철회 뒤 재부여·다른 대화의 요청 대기 누락, 미해결 효과 대사 뒤 대기 고착, grep 구분자, 문서 ID 충돌·범위 밖 경로·다른 큰 파일의 영향 등 확정 지적을 고쳤다. 관련 Host 검사 194 통과·3 생략, UI 타입·빌드와 관련 단위 검사 17 통과, 팀 화면 8개 시각 검사와 관련 기준 이미지 12개 갱신을 확인했다.
+- 릴리스 검사: Host 733 통과·9 생략, UI 182 통과, Rust 21 통과, 타입·빌드·Developer ID 서명 및 매니페스트 검증 통과. 첫 패키징은 새 worktree의 Tauri CLI 부재로 멈춰 의존성을 설치했다. 재실행 때 드러난 기존 검사 비결정성(메인 Ghost의 무작위 첫 wake가 다른 Ghost의 제출 hook을 호출, 실제 launcher 자식 프로세스 4회에 5초 한도)을 격리·수정한 뒤 전체 검사를 통과했다. 네이티브 셸은 기존 0.2.2이며 공증은 기존 릴리스와 같이 생략했다.
+- 배포: [v2.3.0](https://github.com/a7garden/ghost/releases/tag/v2.3.0), 소스 `db54109`, `main` 통합·GitHub/Gitea 일반 푸시 완료. 유휴와 PID 86925·62062 리스너·운영 DB 루트를 확인한 뒤 Owner API 자체 업데이트로 2.2.1 → 2.3.0을 설치했다(81초, 백업 `backups/pre-2.3.0-db54109-1794318201083/`). `lastResult: installed`, 새 PID 3573, health 2.3.0·runtime ready, 설치 실행 파일의 `codesign --verify --strict` 통과. 설치 직전 Ghost 26·대화 207·맡긴 일 154와 모든 대기 결정 id를 보존했다. 결정 snapshot은 최근 100개 완료 항목과 대기를 합친 유한 목록이라, 해소된 요청 때문에 오래된 완료 항목 3개가 snapshot 밖으로 이동했다.
+- 설치된 Mac 앱을 비활성 실행했으나 관측한 창은 접근 직전 사라져 네이티브 입력 검증은 못 했다(강제 전면 이동 없음). 운영 Host가 제공하는 실제 설정 화면의 **역할 지시 → 환경 적응 → 스킬** 배치를 열어 확인했고 콘솔 오류가 없었다. 운영 설정을 검증용으로 저장하지 않았다. 되돌리기는 유휴에서 이전 `releases/2.2.1-4d63665`를 사용한다. 저장 형식은 동일하며 새 환경 메모 설정은 이전 Host가 무시한다.
+
+### ScrollRail 통일 — 2026-11-10
+
+- `v2.2.1`(`4d63665`)을 GitHub Release로 게시하고 Owner API 자체 업데이트로 2.2.0 → 2.2.1을 설치했다. `lastResult: installed`, health 2.2.1, runtime ready. Ghost 25·대화 206·맡긴 일 154의 기존 id를 모두 보존했다. 저장 형식과 Mac/iPhone 셸 버전은 바뀌지 않았다. Developer ID 서명 검증 통과, 공증은 기존과 같이 생략했다.
+- 마우스·트랙패드의 기본 스크롤바를 숨기고 기존 ScrollRail을 나머지 스크롤 영역에도 적용했다. 포인터·직접 스크롤에 위치 막대가 나타나고 자동 따라가기에는 깨우지 않는다. 가로/세로 끌기·휠, 검색 목록을 끌 때 닫히지 않음, 대화 레일 위 휠이 최신 메시지로 튕기지 않음을 확인했다. 터치는 시스템 표시를 유지한다.
+- 검사: Host 707 통과·9 생략, UI 179 통과, Rust 21 통과, 타입·빌드 통과. 전용 Playwright 2 통과, 다른 공급자 리뷰의 휠 의도 전달 누락 1건 수정. 전체 데스크톱 Playwright는 34 통과·76 실패: 확인한 실패에는 오래된 UI 스냅숏과 중복 `status` 선택자가 포함된다. 관련 없는 기준 이미지를 일괄 갱신하지 않았다.
+- 설치된 앱을 종료·재실행해 새 UI를 받게 했다. 새 창은 잠시 보였으나 실제 스크롤 검사 시 창이 없어 네이티브 입력 검증은 완료하지 못했다(강제 전면 이동 없음). 운영 Host가 제공하는 UI에서는 실제 휠 뒤 scrollTop 260, native gutter 0, ScrollRail active를 확인하고 화면을 검사했다.
+- 되돌리기: 유휴 상태에서 `current`를 `releases/2.2.0-873134c`로 바꿔 launchd를 재시작한다. 데이터·자격 복원은 필요 없다.
+
+### iPhone 앱 OTA 업데이트 — 2026-11-10
+
+- Release에 팀 개발 프로필(`iOS Team Provisioning Profile: io.a7garden.ghost`, 등록 기기 3대, 2027-11-04 만료)로 서명한 `Ghost.ipa`를 넣는다. Host가 15분 토큰으로 공개 origin에서 설치 페이지·OTA 매니페스트·sha256을 검증한 IPA를 준다. 빌드 9부터 iPhone 앱 안의 「앱 업데이트」로 설치하고, 그 전 셸(현재 iPhone의 빌드 8)은 Mac 설정 › 업데이트 › iPhone 앱의 QR 코드를 카메라로 찍어 Safari에서 「설치」한다.
+- 운영 Host는 Owner API로 2.1.2 → 2.2.0을 자체 업데이트했다(20초, 백업 `backups/pre-2.2.0-873134c-*`). 공개 origin `https://macstudio.tail1d0d8d.ts.net:8443`에서 링크 발급, `application/xml` 매니페스트, 매니페스트 sha256과 일치하는 IPA(328,355 bytes), CSP가 붙은 설치 페이지, 잘못된 토큰 404를 확인했다. Mac 앱에서 `0.1.0 (9)`와 QR 코드가 뜬다. iPhone에서의 실제 설치 확인(시스템 설치 창 탭)은 소유자가 해야 한다.
+- 알림: 앱은 서명 프로필의 `aps-environment`로 APNs 환경(sandbox/production)을 정한다. Xcode가 팀 W5SAS95CBV를 `Personal Team`(무료)으로 보고 Push 기능 추가를 거부하므로, OTA 빌드에는 push 권한이 없다. 멤버십을 확인하거나 갱신하고, APNs 키(`.p8`)를 만든 뒤 `config.json`에 `apns`를 넣어야 알림이 동작한다. 무료 팀으로 남으면 새로 발급하는 개발 프로필은 7일 뒤 만료된다.
+
+### GitHub Release 자체 업데이트 도입 — 2026-11-10
+
+- Host가 GitHub Release를 확인해 소유자가 「설치」를 누르면 스스로 교체한다. 앱은 Host의 루프백 경로로 셸 업데이트를 받는다. 셸의 managed 모드는 없앴다. 구조는 [architecture](architecture.md#releases-and-updates), 절차는 위 "개발 변경의 자동 운영 반영"을 따른다.
+- 서명: Host와 앱은 키체인의 Developer ID Application(W5SAS95CBV)으로 서명한다. 업데이트 매니페스트와 앱 묶음은 `~/.tauri/ghost.key`로 서명한다. 비밀번호 없는 키이며 공개 키는 `tauri.conf.json`과 Host 빌드에 박혀 있다. 이 키를 잃으면 설치된 Host·앱이 더는 업데이트를 받지 못하므로 별도 백업이 필요하다.
+- `v2.1.0` 전환은 손으로 했다(이전 Host에는 업데이트 기능이 없었다). 백업은 `backups/pre-2.1.0-9669474-1794313953000/`(`ghost-backup/2` complete, secrets·config·artifacts·console·이전 plist·이전 `Ghost.app`) 뒤 `current`를 원자 교체하고 `ghost service install`. 이때 `launchctl bootout`이 이전 Host의 종료를 기다리지 않아 bootstrap이 EIO로 실패했고, 서비스가 약 15초 내려가 있었다. 손으로 bootstrap해 복구했고, 2.1.1에서 언로드를 기다리고 bootstrap을 재시도하도록 고쳤다.
+- 자체 업데이트 검증: 격리 루트·포트에서 launcher 루프로 2.1.0 → 2.1.1을 받았다(받기·검증 11초, 재기동 3초, 60초 뒤 `installed`). 운영은 Owner API로 2.1.0 → 2.1.1을, 설치된 앱의 설정 › 업데이트 「설치」로 2.1.1 → 2.1.2를 받았다. 각각 백업 `backups/pre-2.1.1-03763ab-*`, `backups/pre-2.1.2-9fd86d8-*`가 남았다. 다운타임은 약 2초였고 Ghost 25·대화 206·맡긴 일 154를 보존했다.
+- 앱 0.2.0은 손으로 설치했다. 0.2.1·0.2.2는 앱 안의 「설치」로 받았다. 0.2.1은 재시작 뒤 Dock에서 다시 열기 전까지 창이 보이지 않았고, 0.2.2부터 LaunchServices로 다시 열어 창이 바로 뜬다.
+- 업데이트 토큰은 소유자의 `gh` 토큰(`repo`·`admin:org` 등 넓은 범위)을 넣었다. `a7garden/ghost` 내용 읽기만 허용한 fine-grained 토큰으로 바꾸려면 설정 › 업데이트 › GitHub 토큰에서 바꾼다.
+- 되돌릴 때는 `current`를 이전 릴리스로 바꾸고 `launchctl kickstart -k gui/$(id -u)/com.a7.ghost`. 2.1.x·2.2.0은 저장 형식 지문(`ledger-7/pi-durable-1.1.0/vault-1`)이 같다. 업데이트 기능 이전으로 돌아가려면 `releases/20261110-bun-a0b941e`와 백업한 plist(infra `ghost-run.sh`)를 복원한다.
+
+### 기본 Ghost 호버 반응·움직임 줄이기 운영 반영 — 2026-11-10
+
+- 마우스를 올리면 살짝 눌리고(세로 0.94–0.96) 눈을 0.72로 가늘게 뜨며 커서를 본다. 올려 둔 동안 2.6–5.2초마다 작게 흔들리고, 떠나면 튕긴 뒤 정면으로 돌아온다. 터치의 enter/leave는 무시한다. 둘러보기 간격을 늘리고 고개 돌릴 때의 출렁임을 줄였다. 0.25px 아래의 남은 움직임은 끝내서, 30px 24명 목록에서 동시에 움직이는 수가 평균 8.5에서 3.05로, 움직이는 프레임 비율이 36%에서 13%로 줄었다(`main` `f041ef0`, 릴리스 브랜치 `a0b941e`).
+- `releases/20261110-bun-a0b941e`: `ghost`·`agent-browser`는 `a7fd413`과 바이트가 같고 UI 95개 파일 해시가 일치한다. UI 테스트 146개·빌드, 실제 마우스 호버·동작 줄이기(전부 정지)·터치 무시를 브라우저에서 확인했다.
+- 백업 `backups/pre-20261110-bun-a0b941e-1794311271200/`(`ghost-backup/2`, complete, 금고 포함) 후 유휴에서 전환했다. PID 95868 → 4154, `provider minimax is ready`, 기존 Ghost·대화·맡긴 일·결정 식별자 보존, health·공개 origin 200, 제공 번들 해시 일치, Mac 앱 external 재실행(PID 4250). 운영 UI의 60px 초상이 호버 때 눈을 0.72로 가늘게 떴다. 데스크톱 아바타 창의 호버는 Ghost 창에 가려 확인하지 못했다.
+- 되돌릴 때는 `current`를 `releases/20261110-bun-a7fd413`으로 원자 교체하고 Host를 정상 재기동한다. 대기 중인 후보는 `f041ef0`도 포함해 다시 빌드한다.
+
+### 말랑한 기본 Ghost 운영 반영 — 2026-11-10
+
+- 몸에 감쇠가 약한 납작함 스프링을 더했다. 누르면 웅크렸다가 늘어나며 뛰고, 착지 뒤 몇 번 출렁인다. 고개를 돌리면 윗부분이 뒤따라 흔들리고, 56px 이상은 숨을 쉰다(`main` `b7707c2`, 릴리스 브랜치 `release/ghost-life-20261110`의 `a7fd413`).
+- `releases/20261110-bun-a7fd413`: `ghost`·`agent-browser`는 `3f5459a`(= `eeeeb02`)와 바이트가 같고 UI 95개 파일 해시가 일치한다. UI 테스트 146개·빌드, 별도 루트·포트에서 health와 누를 때 세로 배율 0.85–1.11을 확인했다.
+- 유휴에서 백업 `backups/pre-20261110-bun-a7fd413-1794310574754/`(`ghost-backup/2`, complete, 금고 포함) 후 전환했다. PID 93704 → 95868, `provider minimax is ready`, Ghost 25·대화 199·맡긴 일 149·결정 139 보존, health·공개 origin 200, 제공 번들 해시 일치, Mac 앱 external 재실행(PID 96029). 운영 UI의 60px 초상이 숨쉬기(0.98–1.01)로 움직였다.
+- 되돌릴 때는 `current`를 `releases/20261110-bun-3f5459a`로 원자 교체하고 Host를 정상 재기동한다. 저장 형식 변경은 없다. 대기 중인 후보는 `b7707c2`도 포함해 다시 빌드한다.
+
+### 기본 Ghost 생동감 운영 반영 — 2026-11-10
+
+- 기본 Ghost가 눈을 깜빡이고, 고개를 돌려 둘러보며 몸을 기울인다. 56px 이상은 가까운 포인터를 쳐다보고, 누르면 깡충 뛴다. 28px 미만, 애니메이션 끄기, 동작 줄이기에서는 정지한다(`main` `69a9641`).
+- 운영판 `eeeeb02`에 이 커밋만 얹은 `3f5459a`(브랜치 `release/ghost-life-20261110`)로 `releases/20261110-bun-3f5459a`를 만들었다. `ghost`·`agent-browser`는 `eeeeb02`와 바이트가 같고, UI 95개 파일 해시가 빌드 원본과 일치한다(`release.json`). UI 테스트 146개·빌드, 별도 루트·포트(62219)의 설치 사본에서 health와 움직이는 초상을 확인했다.
+- 대화 2건이 끝나 유휴가 된 뒤 백업 `backups/pre-20261110-bun-3f5459a-1794310261967/`(`ghost-backup/2`, complete, 원장·Pi·금고 DB와 key, artifacts·secrets·config·console 설정)을 만들고 전환했다. PID 57727 → 93704, 단일 리스너, `provider minimax is ready`, Ghost 25·대화 199·맡긴 일 149·결정 139 식별자 보존, health·공개 origin 200, 제공 번들 해시 일치. Mac 앱은 external 모드로 다시 실행했다(PID 93828). 운영 UI의 Ghost 설정에서 30px 이상 초상 24개가 모두 움직였다. 데스크톱 아바타는 Ghost 창 아래에 가려 있어 화면으로 보지 못했다.
+- 되돌릴 때는 유휴를 확인하고 `current`를 `releases/20261110-bun-eeeeb02`로 원자 교체한 뒤 Host를 정상 재기동한다. 저장 형식 변경은 없다. 대기 중인 Obscura(`90bc06b`)·모바일 대화 탭(`15d245e`) 후보에는 이 UI가 없으므로, 전환 전에 `69a9641`을 포함해 다시 빌드한다.
+
+### Obscura 릴리스 후보 — 2026-11-10
+
+- `releases/20261110-bun-90bc06b`에 Host, UI, `agent-browser` 0.41.2, 공식 Obscura 0.2.6 arm64 및 라이선스를 준비했다. `release.json`의 191개 파일 해시와 설치 사본을 별도 상태 루트·포트에서 확인했다.
+- 격리 CDP, 가짜 볼트 입력, 앱 내 인계와 한글 입력, 네트워크 및 파일 접근 제한을 확인했다. 브라우저 UI 검사 8개와 기존 Chrome 헤드리스 검사 3개를 통과했다. Host 전체 검사에서 남은 두 API 효과 경합 실패는 기존 `0166573`에서도 재현됐다.
+- 운영에 실행 중인 맡긴 일과 대화가 있어 전환을 대기한다. 이후 `current`는 `20261110-bun-3f5459a`(기본 Ghost 생동감)로 바뀌었으므로 이 후보는 `69a9641`을 포함해 다시 빌드해야 한다. 유휴 시점에 위 운영 절차로 백업하고 `browser.obscura`를 설정한 뒤 전환한다. 초기 `loginOrigins`는 비워 둔다.
+
+### 모바일 대화 탭 릴리스 대기 — 2026-11-10
+
+- 모바일 하단의 **대화**에서 메인과 각 Ghost를 찾아 바로 대화로 이동한다. 홈에서 메인에게 바로 메시지를 쓰는 흐름은 유지한다.
+- 현재 운영판 `c572f91`에 이번 UI만 얹은 `releases/20261110-bun-15d245e`를 준비했다(소스 브랜치 `release/mobile-conversations-20261110`). Host와 고정 브라우저 바이너리는 운영판과 바이트가 같고, UI 95개 파일의 해시를 검증했다. UI 테스트 146개, 관련 iPhone 브라우저 테스트 21개, 설치 후보의 별도 루트·포트에서 대화 열기와 뒤로 가기가 통과했다.
+- Owner API에서 맡긴 일 1건과 대화 1건이 계속 실행 중으로 표시됐다. 운영 링크는 `20261110-bun-c572f91`에 두었다. 전환은 유휴 확인과 백업 후 진행한다. 실제 iPhone은 연결되지 않아 기기 검수는 남았다.
 
 ### Ghost 스스로 일하기 운영 반영 — 2026-11-10
 
@@ -334,7 +499,15 @@ models.json   codex-models.json (자동 갱신 메타데이터 캐시)
 artifacts/sha256/…   skills/…   secrets/<provider>.json (0600)   sandboxes/<ghost>/<work>/workspace
 ```
 
-`config.json`은 `publicOrigin`, `uiDir`, `sandbox`(`local` 또는 `apple-container`), `memory`(Oxibrain; `spaces`는 Ghost id → space, `*`는 나머지 모든 Ghost), `apns`를 담는다. 환경 변수는 `GHOST_ROOT`, `GHOST_PORT`, `GHOST_HOST`, `GHOST_PUBLIC_ORIGIN`, `GHOST_UI_DIR`만 읽는다.
+`config.json`은 `publicOrigin`, `uiDir`, `sandbox`(`local` 또는 `apple-container`), `apns`와 선택 통합 설정을 담는다. 기억은 Host 내장 기능이며 `memory` 설정 키나 외부 실행 파일을 사용하지 않는다. 외부 Oxibrain 설정이 남은 기존 루트는 백업 후 해당 키를 제거하고 새 릴리스를 설치한다. 환경 변수는 `GHOST_ROOT`, `GHOST_PORT`, `GHOST_HOST`, `GHOST_PUBLIC_ORIGIN`, `GHOST_UI_DIR`만 읽는다.
+
+
+## 승인 대기와 반복 실행 (2026-11-10)
+
+- 맡긴 일 `c54a2f86`의 반복 모델 턴만 소유자 API로 중단했다. 원래 승인 요청과 작업을 보존한 채 `waiting`으로 전환됐다.
+- `main`의 `6cf135e`, `87b78e9`를 당시 운영판 `c572f91`에 적용해 `releases/20261110-bun-eeeeb02`를 만들었다. 승인 대기 작업의 다음 모델 호출을 막고, 결정 결과는 기존 제출 ID로 재개한다. 진전 없이 같은 결과가 이어진 도구 라운드는 8회에서 턴을 끝낸다. Ghost가 생성한 맡긴 일의 기본 기한은 90분이며 기존 기한 연장은 소유자 작업 수정에서 한다.
+- 배포 후보 Host 테스트 621개 통과, 6개 건너뜀, 타입 검사 및 격리된 루트에서 health·인증 API·UI 확인. 백업 `backups/pre-20261110-bun-eeeeb02-1794307084578/`의 원장·Pi·금고 DB 무결성을 검증했다. 전환 후 PID 16242 → 57727, 단일 리스너, 모델 준비, 기존 데이터 ID와 대상 작업의 승인 대기를 확인했다.
+- 설치된 Mac 앱의 external Host 프로브가 새 PID에 연결됐다. 브라우저에서 실제 작업 상세와 승인 대기를 확인했다. 현재 Mac 창의 접근성 상호작용은 확인할 수 없었다. 되돌릴 때는 유휴를 확인하고 `current`를 `releases/20261110-bun-c572f91`로 원자적으로 전환한 뒤 Host를 정상 재기동한다.
 
 ## 확인
 

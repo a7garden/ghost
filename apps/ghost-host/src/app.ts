@@ -7,10 +7,13 @@ import { Core } from "./core/core.ts";
 import type { Engine } from "./core/ports.ts";
 import { createEngine, EngineStartupCleanupError } from "./engine/index.ts";
 import { createDocuments } from "./integrations/documents.ts";
-import { createMemory } from "./integrations/memory.ts";
+import { MemoryStore } from "./stores/memory.ts";
+import { MemoryDreams } from "./memory/dreams.ts";
 import { createBrowser } from "./integrations/browser.ts";
+import { createDesktop } from "./integrations/desktop.ts";
 import { createReach } from "./integrations/reach.ts";
 import { createSkills } from "./integrations/skills.ts";
+import { createToss } from "./integrations/toss.ts";
 import { Ledger } from "./ledger/ledger.ts";
 import { createSandbox, type SandboxService } from "./sandbox/index.ts";
 import { FsArtifactStore } from "./stores/artifacts.ts";
@@ -18,13 +21,14 @@ import { FileSecrets } from "./stores/secrets.ts";
 import { createVault, type Vault } from "./stores/vault.ts";
 import { acquireRootLock } from "./state-lock.ts";
 import { createToolSet } from "./tools/index.ts";
-import type { BrowserPort, DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
+import type { BrowserPort, DesktopPort, DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
 import { MacHost } from "./integrations/host.ts";
 import { HostWatch } from "./core/hostwatch.ts";
 import { ProviderCatalog } from "./integrations/provider-catalog.ts";
 import { settingsView } from "./core/commands.ts";
 import { SourceConnections } from "./integrations/activity-sources.ts";
 import { SourceStore } from "./stores/sources.ts";
+import { hostIsIdle, Updater } from "./update/index.ts";
 
 export interface App {
   core: Core;
@@ -36,6 +40,8 @@ export interface App {
   vault: Vault;
   /** Host-side Chrome; the owner's handoff live view reaches it through the API. */
   browser: BrowserPort | null;
+  memory: MemoryStore;
+  memoryDreams: MemoryDreams;
   close(): Promise<void>;
 }
 
@@ -67,8 +73,11 @@ export async function openApp(config: Config): Promise<App> {
   let openedEngine: Engine | null = null;
   let openedVault: Vault | null = null;
   let openedBrowser: BrowserPort | null = null;
+  let openedDesktop: DesktopPort | null = null;
   let openedSources: SourceConnections | null = null;
   let openedSourceStore: SourceStore | null = null;
+  let openedMemory: MemoryStore | null = null;
+  let openedDreams: MemoryDreams | null = null;
   let unsafeEngine = false;
   let coreStopped = false;
   let coreDrained = false;
@@ -83,6 +92,7 @@ export async function openApp(config: Config): Promise<App> {
       attempt(async () => { await openedCatalog?.close(); }),
       attempt(async () => { await openedCore?.codexCatalog.close(); }),
     ]);
+    await attempt(async () => { await openedDreams?.close(); openedDreams = null; });
     if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
     await Promise.all([
       attempt(async () => { await openedSources?.close(); }),
@@ -102,10 +112,13 @@ export async function openApp(config: Config): Promise<App> {
     if (!unsafeEngine && !openedEngine && !openedSandbox && (!openedCore || (coreStopped && coreDrained))) {
       // No tool can run any more: end browser sessions (login state saved) and seal the vault.
       await attempt(async () => { await openedBrowser?.shutdown(); openedBrowser = null; });
+      // Stops Ghost Control and the Geist worker under it.
+      await attempt(async () => { await openedDesktop?.shutdown(); openedDesktop = null; });
       await attempt(() => { openedVault?.close(); openedVault = null; });
       await attempt(() => { openedSourceStore?.close(); openedSourceStore = null; });
-      // Chrome sessions still running keep ownership: close() can retry their shutdown.
-      if (!openedBrowser) {
+      await attempt(() => { openedMemory?.close(); openedMemory = null; });
+      // Live browser or desktop processes keep ownership: close() can retry their shutdown.
+      if (!openedBrowser && !openedDesktop) {
         await attempt(() => { openedLedger?.close(); openedLedger = null; });
         if (!openedLedger) await attempt(() => lock.close());
       }
@@ -134,8 +147,11 @@ export async function openApp(config: Config): Promise<App> {
     const host = config.mac ? new MacHost({ roots: config.mac.roots, stateRoot: config.root }) : null;
     const vault = (openedVault = createVault(config.root));
     const browser = (openedBrowser = createBrowser(config, { root: config.root }));
-    const tools = createToolSet({ core, sandbox, memory: createMemory(config), documents, skills, host, reach: createReach(config), browser, vault });
-    const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, log }));
+    const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
+    const memory = (openedMemory = new MemoryStore(config.root));
+    const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, reach: createReach(config), browser, vault, desktop, toss: createToss() });
+    const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
+    const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
     core.attach(engine);
     return {
       core,
@@ -146,6 +162,8 @@ export async function openApp(config: Config): Promise<App> {
       host,
       vault,
       browser,
+      memory,
+      memoryDreams,
       close,
     };
   } catch (error) {
@@ -175,11 +193,13 @@ export async function serve(config: Config) {
   let server: { port: number; stop(): Promise<void> } | null = null;
   let push: { stop(): void } | null = null;
   let hostWatch: HostWatch | null = null;
+  let updater: Updater | null = null;
   const closeServing = async () => {
     const errors: unknown[] = [];
     try { push?.stop(); push = null; } catch (error) { errors.push(error); }
     try { await hostWatch?.stop(); hostWatch = null; } catch (error) { errors.push(error); }
     try { await app.core.autonomy.stop(); } catch (error) { errors.push(error); }
+    try { await updater?.close(); } catch (error) { errors.push(error); }
     try { await server?.stop(); server = null; } catch (error) { errors.push(error); }
     // Do not release ownership while a server or watcher may still submit work.
     if (!push && !hostWatch && !server) {
@@ -188,13 +208,15 @@ export async function serve(config: Config) {
     if (errors.length) throw new AggregateError(errors, "failed to stop serving Ghost state root");
   };
   try {
+    try { updater = new Updater({ root: config.root, publicOrigin: config.publicOrigin, idle: () => hostIsIdle(app.core) && !app.memoryDreams.isBusy(), log }); }
+    catch (error) { log("업데이트를 시작하지 못했습니다.", error); }
     if (app.ledger.ghosts().length === 0) app.core.createGhost({ name: "Ghost", persona: "", isDefault: true });
     await app.core.start();
     const catalogChanged = () => app.ledger.tx(() => app.ledger.emit({ type: "settings", settings: settingsView(app.core) }));
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault, browser: app.browser });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, updater });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });
@@ -202,6 +224,8 @@ export async function serve(config: Config) {
     hostWatch = app.host && config.mac?.watch ? new HostWatch(app.core, app.host, config.mac.watch) : null;
     hostWatch?.start();
     app.core.autonomy.start();
+    app.memoryDreams.start();
+    updater?.start();
     log(`serving ${config.root} on http://${config.host}:${server.port}`);
   } catch (error) {
     try {

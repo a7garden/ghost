@@ -56,7 +56,7 @@ export const ExecutionTarget = Type.Union([
 ]);
 export type ExecutionTarget = Static<typeof ExecutionTarget>;
 
-/** Tools the owner may grant a Ghost, by name. Lifecycle tools (ask_owner, ask_parent, answer_child, complete, work_status, artifact_read, effect_list, verdict) and the main-only ghost_inspect/ghost_update are not selectable. Host tools read or change the owner's Mac outside the sandbox and are never granted by default. */
+/** Selectable Ghost grants. Lifecycle tools (including ask_parent/ask_peer/answer_question), self_adapt/capability_request, Host memory and main-only management/work_steer are fixed, not selectable. Host and desktop tools reach the owner's Mac outside the sandbox, and finance tools read the owner's brokerage accounts; none is granted by default. */
 export const GhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
@@ -74,9 +74,6 @@ export const GhostTool = Type.Union([
   Type.Literal("bash"),
   Type.Literal("publish_artifact"),
   Type.Literal("delegate"),
-  Type.Literal("memory_search"),
-  Type.Literal("memory_recall"),
-  Type.Literal("memory_retain"),
   Type.Literal("document_spaces"),
   Type.Literal("document_list"),
   Type.Literal("document_read"),
@@ -116,6 +113,26 @@ export const GhostTool = Type.Union([
   Type.Literal("vault_list"),
   Type.Literal("vault_request"),
   Type.Literal("vault_generate_login"),
+  Type.Literal("connection_list"),
+  Type.Literal("connection_register"),
+  Type.Literal("connection_request"),
+  Type.Literal("desktop_apps"),
+  Type.Literal("desktop_snapshot"),
+  Type.Literal("desktop_screenshot"),
+  Type.Literal("desktop_click"),
+  Type.Literal("desktop_fill"),
+  Type.Literal("desktop_type"),
+  Type.Literal("desktop_select"),
+  Type.Literal("desktop_check"),
+  Type.Literal("desktop_scroll"),
+  Type.Literal("desktop_press"),
+  Type.Literal("desktop_launch"),
+  Type.Literal("desktop_focus"),
+  Type.Literal("desktop_wait"),
+  Type.Literal("desktop_pointer"),
+  Type.Literal("desktop_keys"),
+  Type.Literal("desktop_propose"),
+  Type.Literal("toss_read"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 
@@ -137,9 +154,6 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "bash",
   "publish_artifact",
   "delegate",
-  "memory_search",
-  "memory_recall",
-  "memory_retain",
   "document_spaces",
   "document_list",
   "document_read",
@@ -179,6 +193,26 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "vault_list",
   "vault_request",
   "vault_generate_login",
+  "connection_list",
+  "connection_register",
+  "connection_request",
+  "desktop_apps",
+  "desktop_snapshot",
+  "desktop_screenshot",
+  "desktop_click",
+  "desktop_fill",
+  "desktop_type",
+  "desktop_select",
+  "desktop_check",
+  "desktop_scroll",
+  "desktop_press",
+  "desktop_launch",
+  "desktop_focus",
+  "desktop_wait",
+  "desktop_pointer",
+  "desktop_keys",
+  "desktop_propose",
+  "toss_read",
 ];
 
 /** Tools that observe or change the owner's Mac. Granted only explicitly, never by default. */
@@ -190,8 +224,20 @@ export const BROWSER_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => 
 /** Vault metadata and requests; secret values never reach a model. */
 export const VAULT_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("vault_"));
 
-/** The allow-list a new Ghost gets when none is given: every selectable tool except host tools. */
-export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool));
+/**
+ * PC control: the owner's apps through accessibility and real input. Granted only explicitly, and usable only by a
+ * Ghost the owner also allows PC 직접 실행, because driving the GUI reaches everything the owner's account can.
+ */
+export const DESKTOP_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("desktop_"));
+
+/**
+ * The owner's brokerage accounts, read-only: holdings, transactions and orders reach the Ghost's model provider.
+ * Granted only explicitly, never by default; each call also needs an API key the owner granted in the vault.
+ */
+export const FINANCE_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("toss_"));
+
+/** The allow-list a new Ghost gets when none is given: every selectable tool except host, PC control and finance tools. */
+export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool) && !FINANCE_TOOLS.includes(tool));
 
 /** A skill directory name under the configured skills root. */
 export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });
@@ -386,7 +432,11 @@ export const Decision = Type.Object({
 });
 export type Decision = Static<typeof Decision>;
 
-export const VaultItemKind = Type.Union([Type.Literal("login"), Type.Literal("card"), Type.Literal("contact"), Type.Literal("secret")]);
+/**
+ * `api` is a service credential (an optional client/key id in `username`, the secret in `value`) that only Host
+ * integrations use; it is never filled into a page.
+ */
+export const VaultItemKind = Type.Union([Type.Literal("login"), Type.Literal("card"), Type.Literal("contact"), Type.Literal("secret"), Type.Literal("api")]);
 export type VaultItemKind = Static<typeof VaultItemKind>;
 
 export const VaultContact = Type.Object({
@@ -405,7 +455,7 @@ export const VaultItem = Type.Object({
   id: Id,
   kind: VaultItemKind,
   title: Type.String({ minLength: 1, maxLength: 256 }),
-  /** Canonical https origin a login or secret belongs to. */
+  /** Canonical https origin a login, secret or API credential belongs to. */
   origin: nullable(Type.String({ maxLength: 512 })),
   /** More exact https origins where the same login is entered, such as a separate login host (`https://login.example.com`). */
   extraOrigins: Type.Optional(Type.Array(Type.String({ maxLength: 512 }), { maxItems: 8 })),
@@ -504,6 +554,44 @@ export type AutonomyPlan = Static<typeof AutonomyPlan>;
 export const QUIET_REPLY = "[quiet]";
 /** First line of the Host's self-directed wake. */
 export const AUTONOMOUS_WAKE = "[Autonomous wake]";
+
+/** Longest adaptation notes a Ghost keeps; they ride along in every direct and work instruction. */
+export const ADAPTATION_MAX_CHARS = 4000;
+
+/**
+ * What a Ghost learned about working in this owner's environment (owner decision 2026-11-10): paths, command
+ * forms, tools and habits that work here. The Ghost rewrites it itself, the main Ghost may correct a teammate's,
+ * and the owner may edit or clear it. It is kept apart from the persona, so a persona shared elsewhere stays
+ * portable while each installation adapts. Behavior only: tools and PC execution change through grants.
+ */
+export const Adaptation = Type.Object({
+  ghostId: Id,
+  notes: Type.String({ maxLength: ADAPTATION_MAX_CHARS }),
+  /** The notes before the last change, so the owner can put them back. */
+  previous: nullable(Type.String({ maxLength: ADAPTATION_MAX_CHARS })),
+  by: Type.Union([Type.Literal("self"), Type.Literal("main"), Type.Literal("owner")]),
+  /** Why the last change was made, in the owner's language. */
+  reason: Type.String({ maxLength: 500 }),
+  updatedAt: Timestamp,
+  revision: Type.Integer({ minimum: 0 }),
+});
+export type Adaptation = Static<typeof Adaptation>;
+
+/**
+ * `proposal.capability` of a `question` decision: a Ghost asks for tools or PC execution it lacks. The main
+ * Ghost may settle it for the owner; "허용" applies the grant before the answer reaches the Ghost.
+ */
+export const CapabilityRequest = Type.Object({
+  ghostId: Id,
+  tools: GhostToolList,
+  hostExecution: Type.Boolean(),
+  /** Committed with the grant, before answer delivery; recovery never re-grants after a later revocation. */
+  grantedAt: Type.Optional(Timestamp),
+});
+export type CapabilityRequest = Static<typeof CapabilityRequest>;
+/** The answer that grants a capability request; any other answer declines it. */
+export const CAPABILITY_GRANT = "허용";
+export const CAPABILITY_DECLINE = "거절";
 
 export const NotificationKind = Type.Union([
   Type.Literal("decision"),
@@ -633,6 +721,8 @@ export const Settings = Type.Object({
   reviewModel: nullable(ModelRef),
   /** Fallback models for every Ghost that has none of its own; empty means no fallback. */
   defaultFallbacks: Type.Optional(FallbackList),
+  /** Model for Host memory consolidation; null follows defaultModel. */
+  memoryModel: Type.Optional(nullable(ModelRef)),
   providers: Type.Array(Provider, { maxItems: 64 }),
   ownerLanguage: Type.Optional(OwnerLanguage),
   approvals: Type.Optional(ApprovalPolicy),

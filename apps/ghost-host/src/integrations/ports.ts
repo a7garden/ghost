@@ -13,21 +13,6 @@ export interface SandboxEnvFactory {
   release(work: Work): Promise<void>;
 }
 
-export interface MemoryHit {
-  text: string;
-  source: string;
-  score: number | null;
-}
-
-/** Oxibrain personal memory, scoped per Ghost. Implemented in src/integrations/memory.ts. */
-export interface MemoryPort {
-  /** True when the Ghost has a mapped memory space and the engine is reachable. */
-  available(ghostId: string): boolean;
-  search(ghostId: string, query: string, limit: number): Promise<MemoryHit[]>;
-  recall(ghostId: string, query: string, tokenBudget: number): Promise<{ text: string; sources: string[] }>;
-  /** Store untrusted source text; never a fact or preference by itself. */
-  retain(ghostId: string, text: string, origin: { conversationId: string; workId: string | null }): Promise<{ id: string }>;
-}
 
 export interface PageMeta {
   pageId: string;
@@ -151,7 +136,7 @@ export interface HostPort {
   diskScan(): Promise<unknown>;
   diskUsage(path: string): Promise<unknown>;
   list(path: string): Promise<unknown>;
-  read(path: string): Promise<unknown>;
+  read(path: string, offset?: number, limit?: number): Promise<unknown>;
   /** Runs an eligible inspection; null means the requested command did not run and needs approval. */
   inspect(input: HostCommand): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean } | null>;
   validateCommand(input: HostCommand): HostCommand;
@@ -205,7 +190,7 @@ export interface BrowserCommandResult {
 }
 
 /** One live-view frame: base64 JPEG of the viewport at CSS-pixel size `width`×`height`. */
-export interface BrowserFrame { image: string; mediaType: "image/jpeg"; width: number; height: number; url: string; title: string }
+export interface BrowserFrame { image: string; mediaType: "image/jpeg"; width: number; height: number; url: string; title: string; windowAvailable?: boolean }
 
 /** Tap coordinates are fractions of the frame (0–1), so any screen size maps onto the same viewport. */
 export type BrowserControl =
@@ -221,6 +206,8 @@ export interface BrowserHandoffEnd {
 }
 
 export interface BrowserRunOptions {
+  /** Selected only on the first open of a conversation session. */
+  engine?: "chrome" | "obscura";
   stdin?: string;
   timeoutMs?: number;
   /** Host-only ephemeral redaction registry. Never written to disk or passed in argv. */
@@ -230,12 +217,16 @@ export interface BrowserRunOptions {
 }
 
 /**
- * Host-side Chrome through the installed agent-browser CLI, behind the host's egress proxy (no loopback,
+ * Host-side browser through the installed agent-browser CLI, behind the host's egress proxy (no loopback,
  * private, link-local or tailnet destinations, including page-issued requests). Implemented in src/integrations/browser.ts.
  */
 export interface BrowserPort {
+  readonly supportsObscura?: boolean;
+  assertVaultFill?(session: BrowserSessionRef, field: VaultField, origin: string): void;
   /** One command in the conversation's session. Secret material may only travel through `stdin`. */
   run(session: BrowserSessionRef, argv: string[], options?: BrowserRunOptions): Promise<BrowserCommandResult>;
+  /** Host-only atomic issuer-field capture; protects the value from subsequent model output. */
+  captureCredential(session: BrowserSessionRef, input: { origin: string; ref?: string; selector?: string }): Promise<string>;
   /** Reopen the session in a visible window (same Ghost login state) at `url` so the owner can act. */
   handoff(session: BrowserSessionRef, url: string | null): Promise<void>;
   /** Owner live view during a handoff: the visible viewport as a JPEG, never shown to a model. */
@@ -247,5 +238,35 @@ export interface BrowserPort {
   /** Close the conversation's session; the Ghost's login state is saved. */
   close(session: BrowserSessionRef): Promise<void>;
   /** Stop every session and the egress proxy (host shutdown). */
+  shutdown(): Promise<void>;
+}
+
+/** One runtime reply. `delivered: false` only when the runtime reports the action certainly did not happen. */
+export interface DesktopResult {
+  ok: boolean;
+  data: unknown;
+  error: { code: string; message: string } | null;
+  delivered: boolean;
+}
+
+/** The Ghost Control identity's macOS permissions and diagnostic HID idle time (includes synthesized input). */
+export interface DesktopStatus {
+  accessibility: boolean;
+  screenRecording: boolean;
+  idleSeconds: number;
+}
+
+/**
+ * PC control through the signed Ghost Control helper, which owns the macOS privacy grant and runs agent-desktop
+ * (accessibility tree, semantic actions, apps and windows) and Geist (window image, physical input). One request
+ * at a time for the whole Host: there is one desktop. Implemented in src/integrations/desktop.ts.
+ */
+export interface DesktopPort {
+  /** `authorize` runs at queue dispatch, immediately before I/O; throwing prevents delivery. */
+  agentDesktop(argv: string[], options?: { stdin?: string; timeoutMs?: number; authorize?: () => void }): Promise<DesktopResult>;
+  geist(tool: string, args: Record<string, unknown>, options?: { timeoutMs?: number; authorize?: () => void }): Promise<DesktopResult>;
+  status(): Promise<DesktopStatus>;
+  /** A PNG window image as a JPEG no larger than `maxEdge` pixels on its long side, for model input. */
+  image(png: Uint8Array, maxEdge: number): Promise<{ data: string; mimeType: "image/jpeg"; width: number; height: number }>;
   shutdown(): Promise<void>;
 }

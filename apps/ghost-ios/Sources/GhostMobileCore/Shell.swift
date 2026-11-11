@@ -49,6 +49,27 @@ public enum Shell {
         return "\(scheme.lowercased())://\(bracketed.lowercased())\(port.map { ":\($0)" } ?? "")"
     }
 
+    /// Only the paired Host's exact HTTPS manifest endpoint may start an OTA install.
+    public static func installURL(_ raw: String, origin paired: URL) -> URL? {
+        guard raw.hasPrefix("itms-services://?"),
+              let install = URLComponents(string: raw),
+              install.scheme == "itms-services",
+              install.host?.isEmpty != false,
+              install.user == nil, install.password == nil, install.port == nil,
+              install.percentEncodedPath.isEmpty, install.fragment == nil,
+              let items = install.queryItems, items.count == 2,
+              items.first(where: { $0.name == "action" })?.value == "download-manifest",
+              let manifestText = items.first(where: { $0.name == "url" })?.value,
+              let manifest = URLComponents(string: manifestText),
+              manifest.scheme == "https",
+              manifest.user == nil, manifest.password == nil, manifest.fragment == nil,
+              manifest.percentEncodedPath == "/api/update/ios/manifest.plist",
+              let manifestURL = manifest.url,
+              origin(manifestURL) == origin(paired),
+              let url = URL(string: raw, encodingInvalidCharacters: false) else { return nil }
+        return url
+    }
+
     /// Whether a navigation stays inside the paired Host. Sandboxed previews
     /// (`about:srcdoc`, `about:blank`) and in-page `blob:`/`data:` documents are inert;
     /// anything else leaves the app.
@@ -91,6 +112,7 @@ public enum ShellRequest: Equatable, Sendable {
     case notificationsStatus
     case notificationsRequest
     case notificationsSettings
+    case appInstall(URL)
     case theme(dark: Bool)
     case haptic(HapticStyle)
     case disconnected
@@ -105,6 +127,10 @@ public enum ShellRequest: Equatable, Sendable {
         case "notifications.status": self = .notificationsStatus
         case "notifications.request": self = .notificationsRequest
         case "notifications.settings": self = .notificationsSettings
+        case "app.install":
+            guard let raw = body["url"] as? String,
+                  let url = URL(string: raw, encodingInvalidCharacters: false) else { return nil }
+            self = .appInstall(url)
         case "theme":
             guard let scheme = body["scheme"] as? String, scheme == "light" || scheme == "dark" else { return nil }
             self = .theme(dark: scheme == "dark")

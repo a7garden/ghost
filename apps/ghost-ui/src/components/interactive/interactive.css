@@ -26,17 +26,23 @@
 .ghost-ui-fields label { overflow-wrap: anywhere; }
 .ghost-ui-fields .ghost-form-field:has([data-slot="checkbox"]) { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; }
 .ghost-ui-fields .ghost-form-field > [data-slot="checkbox"] { order: -1; margin-top: 2px; }
-.ghost-ui-choices { display: grid; gap: 8px; margin: 0; padding: 0; min-width: 0; border: 0; }
-.ghost-ui-choice { display: flex; align-items: flex-start; gap: 10px; min-width: 0; min-height: 44px; padding: 12px; border: 1px solid var(--ghost-line-strong); border-radius: 8px; cursor: pointer; }
-.ghost-ui-choice:has(:checked) { border-color: var(--ghost-ink3); background: var(--ghost-hover); }
+/* Choices read as one quiet list: rows on hairlines inside a single frame,
+   with submit controls anchored in the same frame instead of floating after it. */
+.ghost-ui-input[data-kind="choices"] { gap: 0; border: 1px solid var(--ghost-line-strong); border-radius: 8px; overflow: hidden; }
+.ghost-ui-input[data-kind="choices"] .ghost-ui-input__actions { padding: 10px 12px; border-top: 1px solid var(--ghost-line); background: var(--ghost-inset); }
+.ghost-ui-choices { display: grid; margin: 0; padding: 0; min-width: 0; border: 0; }
+.ghost-ui-choice { display: flex; align-items: flex-start; gap: 10px; min-width: 0; min-height: 44px; padding: 12px; cursor: pointer; transition: background-color 150ms ease; }
+.ghost-ui-choice + .ghost-ui-choice { border-top: 1px solid var(--ghost-line); }
+.ghost-ui-choice:hover:not(:has(:checked)):not(:has(:disabled)) { background: var(--ghost-hover); }
+.ghost-ui-choice:has(:checked) { background: var(--ghost-hover2); }
 .ghost-ui-choice:has(:disabled) { cursor: default; }
-.ghost-ui-choice > input { margin: 4px 0 0; flex-shrink: 0; accent-color: var(--ghost-ink); }
+.ghost-ui-choice > input { flex-shrink: 0; width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--ghost-ink); }
 .ghost-ui-choice > span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
-.ghost-ui-choice__label { font-size: 14px; line-height: 1.5; font-weight: 500; }
-.ghost-ui-choice__description { font-size: 13px; line-height: 1.6; color: var(--ghost-ink2); white-space: pre-wrap; }
+.ghost-ui-choice__label { font-size: var(--text-body); line-height: 1.55; font-weight: 500; }
+.ghost-ui-choice__description { font-size: var(--text-ui); line-height: 1.5; color: var(--ghost-ink2); white-space: pre-wrap; }
 .ghost-ui-input__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .ghost-ui-input__actions button { min-height: 32px; height: auto; white-space: normal; overflow-wrap: anywhere; padding-block: 6px; max-width: 100%; }
-.ghost-ui-feedback { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.6; color: var(--ghost-ink2); overflow-wrap: anywhere; }
+.ghost-ui-feedback { flex-basis: 100%; margin: 0; font-size: var(--text-caption); line-height: 1.45; color: var(--ghost-ink2); overflow-wrap: anywhere; }
 .ghost-ui-feedback:empty { display: none; }
 .ghost-ui-feedback[role="alert"] { color: var(--ghost-danger-ink); }
 .ghost-ui-html { display: block; width: 100%; min-width: 0; height: 380px; resize: none; border: 1px solid var(--ghost-line-strong); border-radius: 8px; background: #fff; }

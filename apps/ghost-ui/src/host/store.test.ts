@@ -64,6 +64,24 @@ describe('applyEvent', () => {
     expect(state.decisions[0]).toMatchObject({ id: 'd1', state: 'pending' });
   });
 
+  it('upserts goals and milestones from snapshots without optional arrays', () => {
+    const goal = { id: 'g1', title: '방향', why: '', boundaries: '', signal: '', state: 'active' as const, proposedBy: null, createdAt: 1, updatedAt: 1, closedAt: null };
+    const milestone = { id: 'm1', goalId: 'g1', title: '첫걸음', hypothesis: '', exit: '', outcome: '', state: 'planned' as const, workIds: [], createdBy: 'sage', settledBy: null, createdAt: 1, startedAt: null, endedAt: null };
+    const initial = baseState();
+    let state = applyEvent(initial, { type: 'goal', goal });
+    state = applyEvent(state, { type: 'goal', goal: { ...goal, title: '새 방향', updatedAt: 2 } });
+    state = applyEvent(state, { type: 'goal', goal: { ...goal, id: 'g2' } });
+    state = applyEvent(state, { type: 'milestone', milestone });
+    state = applyEvent(state, { type: 'milestone', milestone: { ...milestone, state: 'active', startedAt: 2 } });
+    state = applyEvent(state, { type: 'milestone', milestone: { ...milestone, id: 'm2' } });
+    expect(state.goals?.map(item => item.id)).toEqual(['g1', 'g2']);
+    expect(state.goals?.[0].title).toBe('새 방향');
+    expect(state.milestones?.map(item => item.id)).toEqual(['m1', 'm2']);
+    expect(state.milestones?.[0]).toMatchObject({ state: 'active', startedAt: 2 });
+    expect(initial.goals).toBeUndefined();
+    expect(initial.milestones).toBeUndefined();
+  });
+
   it('replaces settings wholesale and swaps sandbox rows per ghost', () => {
     let state = applyEvent(baseState(), event({ type: 'settings', settings: { defaultModel: { provider: 'zai', model: 'glm-5.3' }, reviewModel: null, providers: [] } }));
     expect(state.settings.defaultModel).toEqual({ provider: 'zai', model: 'glm-5.3' });
@@ -71,6 +89,17 @@ describe('applyEvent', () => {
     state = applyEvent(state, event({ type: 'sandbox', sandbox: { ghostId: 'milo', state: 'stopped', detail: '' } }));
     state = applyEvent(state, event({ type: 'sandbox', sandbox: { ghostId: 'sage', state: 'error', detail: 'container lost' } }));
     expect(state.sandboxes.map(row => [row.ghostId, row.state])).toEqual([['milo', 'stopped'], ['sage', 'error']]);
+  });
+
+  it('swaps adaptation notes per ghost', () => {
+    const notes = { ghostId: 'sage', notes: '창작물은 ~/Works에 두고 bun으로 검증한다', previous: null, by: 'owner' as const, reason: '처음 기록', updatedAt: 1, revision: 0 };
+    let state = applyEvent(baseState(), event({ type: 'adaptation', adaptation: notes }));
+    expect(state.adaptations?.map(row => row.ghostId)).toEqual(['sage']);
+    state = applyEvent(state, event({ type: 'adaptation', adaptation: { ...notes, ghostId: 'milo', notes: '저장소는 pnpm으로', by: 'self' as const, reason: '', updatedAt: 2, revision: 1 } }));
+    expect(state.adaptations?.map(row => row.ghostId)).toEqual(['sage', 'milo']);
+    state = applyEvent(state, event({ type: 'adaptation', adaptation: { ...notes, notes: '경로가 바뀌어 다시 적는다', previous: notes.notes, by: 'self' as const, reason: '경로 바뀜', updatedAt: 3, revision: 2 } }));
+    expect(state.adaptations).toHaveLength(2);
+    expect(state.adaptations?.find(row => row.ghostId === 'sage')).toMatchObject({ notes: '경로가 바뀌어 다시 적는다', previous: notes.notes, updatedAt: 3 });
   });
 
   it('removes schedules, spaces, avatars and devices', () => {

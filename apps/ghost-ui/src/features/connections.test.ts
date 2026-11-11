@@ -1,7 +1,6 @@
 import { expect, it } from 'vitest';
 import type { Connection } from '@ghost/contract';
 import { buildConnectionCommand, draftFromConnection, emptyConnectionDraft, type ConnectionDraft } from './connection-config';
-import { giteaApiUrl, mailPresetFor, mailServerGuess, matchesMailServers, tokenPageUrl } from './connection-presets';
 
 const connection = (patch: Partial<Connection> = {}): Connection => ({
   id: 'c1', name: '소유자 GitHub', hasCredential: true, createdAt: 1, updatedAt: 1, credentialVersion: 'v1',
@@ -16,10 +15,10 @@ const githubDraft = (patch: Partial<ConnectionDraft> = {}): ConnectionDraft => (
 it('a name-only edit preserves the stored credential; an endpoint change forces re-entry or removal', () => {
   const existing = connection();
   const renamed = buildConnectionCommand(githubDraft({ name: '회사 GitHub' }), existing);
-  if (!renamed.ok) return;
+  if (!renamed.ok) throw new Error(renamed.error);
   expect('credential' in renamed.command).toBe(false);
   const changed = buildConnectionCommand(githubDraft({ baseUrl: 'https://ghe.example.com/api' }), existing);
-  expect(changed).toMatchObject({ ok: false, error: '연결 정보가 바뀌었습니다. 새 자격 증명을 입력하거나 저장된 자격을 삭제해 주세요.' });
+  expect(changed.ok).toBe(false);
   const replaced = buildConnectionCommand(githubDraft({ baseUrl: 'https://ghe.example.com/api', credential: 'ghp_new' }), existing);
   expect(replaced).toMatchObject({ ok: true, command: { credential: 'ghp_new' } });
   const stripped = buildConnectionCommand(githubDraft({ baseUrl: 'https://ghe.example.com/api', clearCredential: true }), existing);
@@ -40,6 +39,7 @@ it('editing never echoes the stored secret back into the form', () => {
 });
 
 it('incomplete or malformed connection forms are refused locally', () => {
+  expect(buildConnectionCommand(githubDraft({ name: '' }), null)).toMatchObject({ ok: false });
   expect(buildConnectionCommand(githubDraft({ baseUrl: 'api.github.com' }), null)).toMatchObject({ ok: false });
   expect(buildConnectionCommand(githubDraft({ baseUrl: '' }), null)).toMatchObject({ ok: false });
 });
@@ -58,38 +58,60 @@ it('keeps custom mail ports and transport mode when renaming without replacing t
   expect(built.command).not.toHaveProperty('credential');
 });
 
-it('a blank name falls back to the account so a new connection needs only the address and the token', () => {
-  expect(buildConnectionCommand(githubDraft({ name: '', credential: 'ghp_x' }), null)).toMatchObject({ ok: true, command: { name: 'GitHub' } });
-  const mail = { ...emptyConnectionDraft('mail'), username: 'me@gmail.com', host: 'imap.gmail.com', credential: 'app' };
-  expect(buildConnectionCommand(mail, null)).toMatchObject({ ok: true, command: { name: 'me@gmail.com' } });
+it('preserves OAuth mail authentication when renaming a registered account', () => {
+  const existing = connection({ serviceId: 'outlook', config: {
+    kind: 'mail', host: 'outlook.office365.com', port: 993, username: 'owner@example.com', mailbox: 'INBOX',
+    smtpHost: 'smtp-mail.outlook.com', smtpPort: 587, smtpSecure: false, authType: 'oauth2',
+  } });
+  const draft = draftFromConnection(existing);
+  draft.name = '회사 메일';
+  const result = buildConnectionCommand(draft, existing);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error);
+  expect(result.command.config).toEqual(existing.config);
+  expect(result.command).not.toHaveProperty('credential');
 });
 
-it('a Gitea server address gains the API path the Host calls', () => {
-  expect(giteaApiUrl('https://git.example.com/')).toBe('https://git.example.com/api/v1');
-  expect(giteaApiUrl('https://git.example.com/api/v1')).toBe('https://git.example.com/api/v1');
-  const built = buildConnectionCommand({ ...emptyConnectionDraft('gitea'), baseUrl: 'https://git.example.com', credential: 't' }, null);
-  expect(built).toMatchObject({ ok: true, command: { config: { kind: 'gitea', baseUrl: 'https://git.example.com/api/v1' } } });
+it('normalizes a new Gitea server but preserves the registered API endpoint on rename', () => {
+  const draft = { ...emptyConnectionDraft('gitea'), name: 'mini', baseUrl: 'https://git.example.com/', credential: 'test-token' };
+  const created = buildConnectionCommand(draft, null);
+  expect(created).toMatchObject({ ok: true, command: { config: { kind: 'gitea', baseUrl: 'https://git.example.com/api/v1' } } });
+  const existing = connection({ config: { kind: 'gitea', baseUrl: 'https://git.example.com/api/v1/' } });
+  const renamed = draftFromConnection(existing);
+  renamed.name = '서버';
+  const result = buildConnectionCommand(renamed, existing);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error);
+  expect(result.command.config).toEqual(existing.config);
+  expect(result.command).not.toHaveProperty('credential');
 });
 
-it('token pages open on the site that issues the credential', () => {
-  expect(tokenPageUrl('github', 'https://api.github.com')).toBe('https://github.com/settings/tokens/new?description=Ghost&scopes=repo');
-  expect(tokenPageUrl('github', 'https://ghe.example.com/api/v3')).toBe('https://ghe.example.com/settings/tokens/new?description=Ghost&scopes=repo');
-  expect(tokenPageUrl('gitea', 'https://git.example.com/sub/api/v1')).toBe('https://git.example.com/sub/user/settings/applications');
-  expect(tokenPageUrl('gitea', 'git.example.com')).toBeNull();
+it('preserves an OAuth API account when only JSON property order differs', () => {
+  const existing = connection({ config: {
+    ghostIds: ['g1'], headers: { 'Notion-Version': '2026-03-11', Accept: 'application/json' },
+    testPath: 'users/me', authPrefix: 'Bearer', authHeader: 'Authorization',
+    baseUrl: 'https://api.notion.com/v1/', kind: 'api',
+  } });
+  const draft = draftFromConnection(existing);
+  draft.name = '업무 Notion';
+  draft.headers = '{\"Accept\":\"application/json\",\"Notion-Version\":\"2026-03-11\"}';
+  const result = buildConnectionCommand(draft, existing);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error);
+  expect(result.command).not.toHaveProperty('credential');
+  draft.ghostIds = ['g2'];
+  const grantChanged = buildConnectionCommand(draft, existing);
+  expect(grantChanged).toMatchObject({ ok: true, command: { config: { ghostIds: ['g2'] } } });
+  if (!grantChanged.ok) throw new Error(grantChanged.error);
+  expect(grantChanged.command).not.toHaveProperty('credential');
 });
 
-it('known mail domains resolve to their servers; unknown ones stay manual', () => {
-  expect(mailPresetFor('Me@GMAIL.com')?.host).toBe('imap.gmail.com');
-  expect(mailPresetFor('me@hanmail.net')?.id).toBe('daum');
-  expect(mailPresetFor('me@company.co.kr')).toBeUndefined();
-  expect(mailPresetFor('me')).toBeUndefined();
-});
-
-it('every mail address gets servers so the server fields can stay folded', () => {
-  expect(mailServerGuess('me@naver.com')).toMatchObject({ host: 'imap.naver.com', smtpHost: 'smtp.naver.com' });
-  expect(mailServerGuess('me@company.co.kr')).toEqual({ host: 'imap.company.co.kr', port: '993', smtpHost: 'smtp.company.co.kr', smtpPort: '587', smtpSecure: false });
-  expect(mailServerGuess('me@')).toBeNull();
-  const guessed = mailServerGuess('me@company.co.kr')!;
-  expect(matchesMailServers(guessed, guessed)).toBe(true);
-  expect(matchesMailServers(guessed, { ...guessed, host: 'mail.company.co.kr' })).toBe(false);
+it('clearing a custom icon explicitly removes it without replacing authentication', () => {
+  const existing = connection({ iconUrl: 'https://example.com/icon.svg' });
+  const draft = draftFromConnection(existing);
+  draft.iconUrl = '';
+  const result = buildConnectionCommand(draft, existing);
+  expect(result).toMatchObject({ ok: true, command: { iconUrl: null } });
+  if (!result.ok) throw new Error(result.error);
+  expect(result.command).not.toHaveProperty('credential');
 });

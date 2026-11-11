@@ -5,6 +5,8 @@ import { openApp, serve } from "./app.ts";
 import { backup } from "./backup.ts";
 import { loadConfig } from "./config.ts";
 import { runImport } from "./import/index.ts";
+import { buildIdentity } from "./update/identity.ts";
+import { installService } from "./update/service.ts";
 
 const USAGE = `ghost — one process for every Ghost
 
@@ -13,6 +15,8 @@ const USAGE = `ghost — one process for every Ghost
                                    copy a pre-Bun state root into an empty state root
   ghost backup <dir>               consistent ledger.db + pi.db copies and backup.json, safe while serving
   ghost doctor                     check the state root and configuration
+  ghost version                    print release identity JSON
+  ghost service install [--no-load] install the Host launchd service
 
   --root <dir>                     override the state root`;
 
@@ -26,6 +30,15 @@ async function main(argv: string[]) {
   const config = loadConfig(process.env, option(args, "--root"));
 
   switch (command) {
+    case "version":
+      console.log(JSON.stringify(buildIdentity));
+      return;
+
+    case "service":
+      if (args[0] !== "install" || args.slice(1).some((arg, index, all) => arg !== "--no-load" && arg !== "--root" && all[index - 1] !== "--root")) throw new Error("ghost service install [--no-load] [--root <dir>]");
+      console.log(JSON.stringify(await installService({ root: config.root, noLoad: args.includes("--no-load") })));
+      return;
+
     case "serve":
       await serve(config);
       return;
@@ -57,7 +70,7 @@ async function main(argv: string[]) {
       try {
         const status = app.engine.status();
         const ghosts = app.ledger.ghosts();
-        console.log(JSON.stringify({ root: config.root, port: config.port, sandbox: config.sandbox.kind, memory: config.memory !== null, ghosts: ghosts.length, engine: status }, null, 2));
+        console.log(JSON.stringify({ root: config.root, port: config.port, sandbox: config.sandbox.kind, memory: "built-in", ghosts: ghosts.length, engine: status }, null, 2));
         if (!status.ready) process.exitCode = 1;
       } finally {
         await app.close();

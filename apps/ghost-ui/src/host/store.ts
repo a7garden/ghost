@@ -27,6 +27,10 @@ export function applyEvent(state: State, data: LedgerEventData): State {
       return { ...state, conversations: remove(state.conversations, data.id) };
     case 'work':
       return { ...state, works: upsert(state.works, data.work) };
+    case 'goal':
+      return { ...state, goals: upsert(state.goals ?? [], data.goal) };
+    case 'milestone':
+      return { ...state, milestones: upsert(state.milestones ?? [], data.milestone) };
     case 'decision':
       return { ...state, decisions: upsert(state.decisions, data.decision) };
     case 'effect':
@@ -66,6 +70,10 @@ export function applyEvent(state: State, data: LedgerEventData): State {
     case 'autonomy': {
       const others = (state.autonomy ?? []).filter((plan) => plan.ghostId !== data.plan.ghostId);
       return { ...state, autonomy: [...others, data.plan] };
+    }
+    case 'adaptation': {
+      const others = (state.adaptations ?? []).filter((item) => item.ghostId !== data.adaptation.ghostId);
+      return { ...state, adaptations: [...others, data.adaptation] };
     }
     case 'duty':
       return { ...state, duty: data.duty };
