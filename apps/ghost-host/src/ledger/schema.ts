@@ -291,4 +291,22 @@ export const MIGRATIONS: readonly string[] = [
   DROP INDEX work_questions_by_parent;
   CREATE INDEX work_questions_by_recipient ON work_questions(recipient_work_id, state);
   `,
+  /*
+   * 10: execution budget apart from the owner's due date. A live Ghost-set deadline becomes the same window
+   * of working time, counted from now; the deadline itself is cleared. The UI's date-time picker is the
+   * owner's only path and always lands on a whole minute, while a Ghost's "minutes from now" practically
+   * never does, so a whole-minute deadline stays as the owner's due date. Activity runs keep their
+   * owner-approved timeout as the due date and get a budget no shorter than it. Terminal rows keep the defaults.
+   */ `
+  ALTER TABLE works ADD COLUMN budget_minutes INTEGER NOT NULL DEFAULT 90;
+  ALTER TABLE works ADD COLUMN budget_used_ms INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE works ADD COLUMN budget_since INTEGER;
+  ALTER TABLE works ADD COLUMN budget_extended INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE works ADD COLUMN hold TEXT CHECK (hold IN ('quota','budget','repeat'));
+  UPDATE works SET budget_minutes = MAX(1, MIN(10080, CAST(ROUND((deadline_at - created_at) / 60000.0) AS INTEGER)))
+    WHERE state IN ('queued','running','waiting','verifying','blocked') AND deadline_at IS NOT NULL AND activity_id IS NOT NULL;
+  UPDATE works SET budget_minutes = MAX(1, MIN(10080, CAST(ROUND((deadline_at - created_at) / 60000.0) AS INTEGER))), deadline_at = NULL
+    WHERE state IN ('queued','running','waiting','verifying','blocked') AND deadline_at IS NOT NULL AND activity_id IS NULL AND deadline_at % 60000 <> 0;
+  UPDATE works SET budget_since = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE state = 'running';
+  `,
 ];

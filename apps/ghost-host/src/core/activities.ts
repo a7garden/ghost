@@ -9,7 +9,6 @@ import { firstRun } from "./schedules.ts";
 import { isTerminal } from "./works.ts";
 
 const DAY = 86_400_000;
-export const MAX_ACTIVITY_WORK_ITEMS = 16;
 const DRY_TOOLS: Partial<Record<GhostTool, true>> = { read: true, web_search: true, web_read: true, skill_read: true, delegate: true, host_status: true, host_services: true, host_disk_scan: true, host_disk_usage: true, host_list: true, host_read: true, host_nodes: true, toss_read: true };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 2048);
 const FAILURE_PAUSE = "Repeated activity failures";
@@ -422,7 +421,8 @@ export class Activities {
       const tool = toolName as GhostTool;
       if (!activity.tools.includes(tool) || !ghost.tools.includes(tool) || !work.toolScope?.includes(tool)) throw forbidden(`${toolName} is outside this activity's current scope`);
       if (run.dryRun && !DRY_TOOLS[tool]) throw forbidden(`${toolName} is disabled in dry runs`);
-      if (tool === "delegate" && this.workItems(root) >= MAX_ACTIVITY_WORK_ITEMS) throw conflict(`activity run is limited to ${MAX_ACTIVITY_WORK_ITEMS} Work items including descendants`);
+      const activityNodes = this.core.ledger.limits().activityNodes;
+      if (tool === "delegate" && this.workItems(root) >= activityNodes) throw conflict(`activity run is limited to ${activityNodes} Work items including descendants`);
     }
     return { activity, run, work };
   }

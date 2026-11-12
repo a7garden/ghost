@@ -14,7 +14,7 @@ import { idFor } from "../core/ids.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import { describeOutcome, describeWork } from "../core/works.ts";
 import { parseShellResult, type ShellResult } from "../core/verify.ts";
-import { askOwnerTool, errorResult, requireAllowed, requireWork, scopeOf } from "./shared.ts";
+import { askOwnerTool, errorResult, requireAllowed, requireWork, scopeOf, workDecideTool } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -418,7 +418,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
       reviewer_ghost_id: Type.Optional(
         Type.String({ minLength: 1, description: "Ghost that reviews the result; defaults to the Ghost that delegated" }),
       ),
-      deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Deadline in minutes from now; capped by this Work's own deadline" })),
+      budget_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Working minutes the child may spend before it pauses and asks you to extend once, split or stop it; defaults to 90" })),
     }),
     replay: "unsafe",
     async execute(args, api) {
@@ -433,7 +433,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
             checks: args.checks ?? [],
             reviewer: args.reviewer_ghost_id ? { kind: "ghost", ghostId: args.reviewer_ghost_id } : null,
           },
-          deadlineAt: args.deadline_minutes === undefined ? null : Date.now() + args.deadline_minutes * 60_000,
+          budgetMinutes: args.budget_minutes,
           id: idFor(scope.conversation.id, api.callId),
         });
         return text(`Delegated "${child.title}" (${child.id}) to ${core.ledger.ghost(child.ghostId).name}. Its result arrives here.`);
@@ -522,7 +522,8 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
         }
         const published = core.ledger.artifactsForWork(scope.work.id);
         const artifacts = args.artifacts.map((name) => {
-          const ref = published.find((candidate) => candidate.name === name);
+          // The newest publication of a name is the result file; an older one must not attach.
+          const ref = published.findLast((candidate) => candidate.name === name);
           if (!ref) throw invalid(`artifact ${name} was not published by this Work; call publish_artifact first`);
           return ref;
         });
@@ -578,6 +579,6 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
 
   return defineExtension({
     name: "ghost.work",
-    tools: [read, writeTool, editTool, bash, publishArtifact, delegate, complete, workStatus, askParent, askPeer, answerQuestion, askOwnerTool(core)],
+    tools: [read, writeTool, editTool, bash, publishArtifact, delegate, complete, workStatus, askParent, askPeer, answerQuestion, askOwnerTool(core), workDecideTool(core)],
   });
 }

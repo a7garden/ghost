@@ -645,20 +645,23 @@ describe("tools", () => {
     expect(s.ledger.work(works[0]!.id).conversationId).not.toBeNull();
   });
 
-  test("only the owner can extend an existing Work deadline", async () => {
+  test("the due date is the owner's alone; a Ghost names a budget and may only lower it", async () => {
     const s = setup();
     const pi = asPi(s, s.direct, "pi-direct");
     const workCreate = toolOf(s, s.direct, s.ghost, "work_create");
     const workUpdate = toolOf(s, s.direct, s.ghost, "work_update");
-    await call(workCreate, { title: "Timed", brief: "Finish the report" }, apiOf(pi, "timed"));
+    await call(workCreate, { title: "Timed", brief: "Finish the report", budget_minutes: 45 }, apiOf(pi, "timed"));
     const work = s.ledger.worksForState().find((item) => item.title === "Timed")!;
-    expect(work.deadlineAt).toBeGreaterThan(Date.now() + 89 * 60_000);
-    const extended = await call(workUpdate, { work_id: work.id, deadline_minutes: 180 }, apiOf(pi, "extend"));
-    expect(extended.isError).toBe(true);
-    expect(s.ledger.work(work.id).deadlineAt).toBe(work.deadlineAt);
-    const shortened = await call(workUpdate, { work_id: work.id, deadline_minutes: 10 }, apiOf(pi, "shorten"));
-    expect(shortened.isError).toBeFalsy();
-    expect(s.ledger.work(work.id).deadlineAt).toBeLessThan(work.deadlineAt!);
+    // A Ghost-created Work carries no due date, only its execution budget.
+    expect(work.deadlineAt).toBeNull();
+    expect(work.budgetMinutes).toBe(45);
+    const raised = await call(workUpdate, { work_id: work.id, budget_minutes: 180 }, apiOf(pi, "extend"));
+    expect(raised.isError).toBe(true);
+    expect(s.ledger.work(work.id).budgetMinutes).toBe(45);
+    const lowered = await call(workUpdate, { work_id: work.id, budget_minutes: 10 }, apiOf(pi, "shorten"));
+    expect(lowered.isError).toBeFalsy();
+    expect(s.ledger.work(work.id).budgetMinutes).toBe(10);
+    // The owner command path remains the only one that sets or extends a due date.
     const ownerDeadline = Date.now() + 180 * 60_000;
     expect(s.core.works.update(work.id, { deadlineAt: ownerDeadline }).deadlineAt).toBe(ownerDeadline);
     await s.core.idle();

@@ -40,8 +40,6 @@ function renderGhost(core: Core, ghost: Ghost): string {
   );
 }
 
-/** A main Ghost that keeps creating Ghosts is looping, not building a team. */
-const MAX_CREATED_PER_DAY = 10;
 
 /** Grants that open the owner's Mac; the owner hears about each one. */
 function macGrants(before: Pick<Ghost, "tools" | "hostExecution"> | null, tools: readonly string[] | undefined, hostExecution: boolean | undefined): string[] {
@@ -102,8 +100,9 @@ export function createMainTools(core: Core): Extension {
         const replayed = core.ledger.ghosts().find((ghost) => ghost.id === id);
         if (!replayed) {
           const since = Date.now() - 24 * 60 * 60_000;
-          if (core.ledger.ghosts().filter((ghost) => ghost.createdAt >= since).length >= MAX_CREATED_PER_DAY) {
-            throw conflict(`at most ${MAX_CREATED_PER_DAY} Ghosts are created a day; give the work to an existing Ghost or update one with ghost_update`);
+          const perDay = core.ledger.limits().ghostsPerDay;
+          if (core.ledger.ghosts().filter((ghost) => ghost.createdAt >= since).length >= perDay) {
+            throw conflict(`at most ${perDay} Ghosts are created a day; give the work to an existing Ghost or update one with ghost_update`);
           }
           if (core.ledger.ghosts().some((ghost) => ghost.deletedAt === null && ghost.name === args.name.trim())) throw conflict(`a Ghost named ${args.name.trim()} already exists; update it with ghost_update or choose another name`);
         }

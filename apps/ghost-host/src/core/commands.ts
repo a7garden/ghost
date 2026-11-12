@@ -320,6 +320,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         brief: projectContext((command.spaceIds ?? []).map(id => ledger.space(id))) + command.brief,
         acceptance: command.acceptance,
         deadlineAt: command.deadlineAt ?? null,
+        budgetMinutes: command.budgetMinutes,
         originConversationId: command.originConversationId ?? ghost.directConversationId,
         execution: command.execution,
       });
@@ -327,7 +328,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
     }
 
     case "work.update":
-      core.works.update(command.workId, { title: command.title, brief: command.brief, acceptance: command.acceptance, deadlineAt: command.deadlineAt });
+      core.works.update(command.workId, { title: command.title, brief: command.brief, acceptance: command.acceptance, deadlineAt: command.deadlineAt, budgetMinutes: command.budgetMinutes });
       return {};
 
     case "work.cancel":
@@ -483,6 +484,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         if (command.memoryModel !== undefined) ledger.putSetting("memoryModel", command.memoryModel);
         if (command.ownerLanguage !== undefined) ledger.putSetting("ownerLanguage", command.ownerLanguage);
         if (command.approvals !== undefined) ledger.putSetting("approvals", command.approvals);
+        if (command.limits !== undefined) ledger.putSetting("limits", { ...ledger.limits(), ...command.limits });
         ledger.emit({ type: "settings", settings: settingsView(core) });
       });
       for (const ghost of ledger.ghosts()) if (ghost.model === null) core.refreshGhost(ghost.id);

@@ -26,7 +26,7 @@ import {
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { GHOST_TOOLS, type Conversation as HostConversation, type Ghost, type Live, type LiveEvent, type Message, type ModelRef, type Settings, type Work } from "@ghost/contract";
+import { GHOST_TOOLS, type Conversation as HostConversation, type Ghost, type Live, type LiveEvent, type Message, type MessageOrigin, type ModelRef, type Settings, type Work } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { CommandError } from "../core/errors.ts";
 import type { ConversationSetup, Engine, Submission, TranscriptPage } from "../core/ports.ts";
@@ -35,7 +35,7 @@ import type { ToolSet } from "../tools/types.ts";
 import { liveFrom, renderUserContent, sameLive, toMessage, type UserMeta } from "./messages.ts";
 import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
-import { FallbackDoc, fallbackListFor, fallbackModels, fallbackReason } from "./fallback.ts";
+import { FallbackDoc, fallbackListFor, fallbackModels, fallbackReason, quotaHit } from "./fallback.ts";
 import { digestOf } from "../core/ids.ts";
 import { withClockStamp } from "../core/clock.ts";
 import { workGuard } from "./work-guard.ts";
@@ -77,6 +77,8 @@ interface ConversationState {
   originByEntry: Map<EntryId, OriginRecord>;
   /** The scheduled wake awaiting the Ghost's first words, if the last input was one. */
   initiative: string | null;
+  /** How the run's last committed assistant entry ended, reported once when the run goes idle. */
+  runEnd: { entryId: number; hit: { provider: string; reason: string; resumeAt: number | null } | null; serving: string | null } | null;
 }
 
 export interface EngineDeps {
@@ -140,7 +142,7 @@ class HostEngine implements Engine, MemoryEngine {
           if (!state || !conversation) return;
           const ghost = this.core.ledger.ghost(conversation.ghostId);
           const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
-          const model = this.resolveModel(this.core.ledger.settings(), conversation, ghost, work);
+          const model = this.servingModel(conversation, ghost, work);
           await state.pi.configure({
             model: model ? { provider: model.provider, modelId: model.model } : null,
             thinkingLevel: model?.thinking ?? "off",
@@ -250,6 +252,21 @@ class HostEngine implements Engine, MemoryEngine {
     return reviewer?.kind === "ghost" || (reviewer === null && settings.reviewModel === null);
   }
 
+  /** The conversation's whole model chain as provider ids: its model, then the fallbacks it may use. */
+  private modelChain(settings: Settings, conversation: HostConversation, ghost: Ghost, work: Work | null, primary: ModelRef): string[] {
+    const chain = this.allowsFallback(settings, conversation, work) ? fallbackModels(ghost, primary, settings) : [];
+    return [...new Set([primary, ...chain].map((model) => model.provider))];
+  }
+
+  /** The model to serve a turn with: the first of the chain whose provider is not waiting out a quota. */
+  private servingModel(conversation: HostConversation, ghost: Ghost, work: Work | null): ModelRef | null {
+    const settings = this.core.ledger.settings();
+    const primary = this.resolveModel(settings, conversation, ghost, work);
+    if (!primary) return null;
+    if (!this.allowsFallback(settings, conversation, work) || !this.core.quota.blocked(primary.provider)) return primary;
+    return fallbackModels(ghost, primary, settings).find((candidate) => this.available(candidate, settings) && !this.core.quota.blocked(candidate.provider)) ?? primary;
+  }
+
   private available(model: ModelRef, settings: Settings): boolean {
     const provider = settings.providers.find((item) => item.id === model.provider);
     return !!provider && this.core.secrets.has(provider.id) &&
@@ -271,6 +288,13 @@ class HostEngine implements Engine, MemoryEngine {
     if (!this.core.catalog.modelsFor(provider, this.core.secrets.credential(provider.id)?.type).some((info) => info.id === model.model)) {
       throw new CommandError("unavailable", `provider ${provider.id} has no model ${model.model}`);
     }
+    // R1: never submit into a quota the conversation's whole model chain is waiting out. The input is held
+    // in priority order and admitted, unchanged and under its own request id, when the quota recovers.
+    const chain = this.modelChain(settings, conversation, ghost, work, model);
+    if (!this.core.quota.admitting(conversationId, chain, submission.requestId)) {
+      this.core.quota.hold(conversationId, submission, chain, conversation.kind);
+      return;
+    }
     const state = await this.ensureState(conversationId);
     // A duplicate admission must not reset an in-flight fallback or start another run.
     const existing = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, submission.requestId), ctx);
@@ -280,13 +304,17 @@ class HostEngine implements Engine, MemoryEngine {
       : work ? splitProjectBrief(work.brief).spaces : [];
     const context = submission.origin === "owner" ? projectContext(spaces) : "";
     state.aborted = false;
+    state.runEnd = null;
     let serving = model;
-    if (!this.core.secrets.has(provider.id)) {
+    // A release probes the provider it was waiting on; every other turn skips a quota-blocked provider.
+    const quotaBlocked = !this.core.quota.releasing(conversationId, submission.requestId) && this.core.quota.blocked(model.provider);
+    if (!this.core.secrets.has(provider.id) || quotaBlocked) {
+      const why = this.core.secrets.has(provider.id) ? "the provider's quota is exhausted" : `provider ${provider.id} has no credential`;
       const next = this.allowsFallback(settings, conversation, work)
-        ? fallbackModels(ghost, model, settings).find((candidate) => this.available(candidate, settings))
+        ? fallbackModels(ghost, model, settings).find((candidate) => this.available(candidate, settings) && !this.core.quota.blocked(candidate.provider))
         : undefined;
-      if (!next) throw new CommandError("unavailable", `provider ${provider.id} has no credential`);
-      this.logFallback(state, model, next, `provider ${provider.id} has no credential`);
+      if (!next) throw new CommandError("unavailable", why);
+      this.logFallback(state, model, next, why);
       serving = next;
     }
     // A new turn always starts at the primary, not the previous turn's serving model.
@@ -519,6 +547,7 @@ class HostEngine implements Engine, MemoryEngine {
       probed: new Set(),
       originByEntry: new Map(),
       initiative: null,
+      runEnd: null,
     };
     this.states.set(hostId, state);
     this.byPiId.set(piId, state);
@@ -582,7 +611,7 @@ class HostEngine implements Engine, MemoryEngine {
         }
         const current = liveFrom(await this.liveState(state), state.hostId);
         if (current.running) return;
-        this.setBusy(state, false);
+        this.setBusy(state, false, this.reportRunEnd(state));
         if (!sameLive(state.live, current)) {
           state.live = current;
           this.emit(state, { type: "live", live: current });
@@ -595,6 +624,45 @@ class HostEngine implements Engine, MemoryEngine {
       state.live = live;
       this.emit(state, { type: "live", live });
     }
+  }
+
+  /**
+   * R1: classify a committed assistant entry as it arrives, so the idle transition stays synchronous.
+   * A generation that died on a provider quota is a condition to wait out, never the Ghost stopping.
+   */
+  private noteRunEnd(state: ConversationState, entry: EntryRecord): void {
+    if (entry.kind !== "pi.assistant") return;
+    const message = entry.model?.find((item): item is AssistantMessage => item.role === "assistant");
+    if (!message) return;
+    const hit = quotaHit(message);
+    state.runEnd = {
+      entryId: entry.id,
+      hit: hit ? { provider: message.provider, reason: hit.reason, resumeAt: hit.resumeAt } : null,
+      serving: message.stopReason === "error" ? null : message.provider,
+    };
+  }
+
+  /** Hand the classified end to quota exactly once per run, and say whether it was a quota end. */
+  private reportRunEnd(state: ConversationState): boolean {
+    const end = state.runEnd;
+    state.runEnd = null;
+    if (!end || state.aborted) return false;
+    const conversation = this.core.ledger.findConversation(state.hostId);
+    if (!conversation) return false;
+    const settings = this.core.ledger.settings();
+    const ghost = this.core.ledger.ghost(conversation.ghostId);
+    const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
+    const primary = this.resolveModel(settings, conversation, ghost, work);
+    if (!primary) return false;
+    this.core.quota.turnEnded(state.hostId, {
+      entryId: end.entryId,
+      // A resumed turn keeps its conversation's own place in the admission order.
+      origin: conversation.kind === "direct" ? "schedule" : "work",
+      providers: this.modelChain(settings, conversation, ghost, work, primary),
+      serving: end.serving,
+      hit: end.hit,
+    });
+    return end.hit !== null;
   }
 
   private logFallback(state: ConversationState, from: ModelRef, to: ModelRef, reason: string): void {
@@ -649,10 +717,10 @@ class HostEngine implements Engine, MemoryEngine {
   }
 
   /** Report a run's start or end to core, once per transition. */
-  private setBusy(state: ConversationState, busy: boolean): void {
+  private setBusy(state: ConversationState, busy: boolean, quotaEnded = false): void {
     if (state.busy === busy) return;
     state.busy = busy;
-    this.core.activity(state.hostId, busy, Date.now());
+    this.core.activity(state.hostId, busy, Date.now(), busy ? undefined : { quota: quotaEnded });
     if (!busy && state.initiative !== null) {
       const wake = state.initiative;
       state.initiative = null;
@@ -686,6 +754,7 @@ class HostEngine implements Engine, MemoryEngine {
     if (!message) return;
     this.emit(state, { type: "message", message });
     this.noteInitiative(state, message);
+    this.noteRunEnd(state, entry);
     if (this.memory && !this.closing) {
       this.memoryReady.delete(state.hostId);
       const conversation = this.core.ledger.findConversation(state.hostId);

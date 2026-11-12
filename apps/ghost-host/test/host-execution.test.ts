@@ -33,7 +33,7 @@ function fixture(kind: Config["sandbox"] = { kind: "local" }) {
   const work: Work = {
     id, rootId: id, parentId: null, ghostId: "ghost-pc", originConversationId: "direct-pc", conversationId: null,
     title: "PC execution", brief: "Operate on the actual PC project", acceptance: { criteria: "", checks: [], reviewer: null },
-    state: "running", revision: 1, revisionsUsed: 0, deadlineAt: null, result: null, verdict: null, reason: null,
+    state: "running", revision: 1, revisionsUsed: 0, deadlineAt: null, budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null, result: null, verdict: null, reason: null,
     createdAt: 0, startedAt: null, endedAt: null, updatedAt: 0, execution: { kind: "host", cwd },
   };
   const artifacts = new MemoryArtifacts();

@@ -8,7 +8,6 @@ import { Core } from "../src/core/core.ts";
 import { KnownOutcome } from "../src/core/effects.ts";
 import { digestOf } from "../src/core/ids.ts";
 import { snapshot } from "../src/core/state.ts";
-import { MAX_REVISIONS } from "../src/core/works.ts";
 import { FakeEngine, MemorySecrets, harness, noSandbox, tempDir } from "./support.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { MIGRATIONS } from "../src/ledger/schema.ts";
@@ -90,7 +89,7 @@ describe("root Work", () => {
     const { core, ledger, engine, ghost } = setup();
     const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
     await core.idle();
-    for (let round = 0; round <= MAX_REVISIONS; round++) {
+    for (let round = 0; round <= core.ledger.limits().revisions; round++) {
       core.works.complete(work.id, { summary: `try ${round}`, artifacts: [] });
       await core.idle();
       const [decision] = ledger.pendingDecisions({ workId: work.id });
@@ -99,7 +98,7 @@ describe("root Work", () => {
     }
     const failed = ledger.work(work.id);
     expect(failed.state).toBe("failed");
-    expect(engine.to(failed.conversationId!).filter((submission) => submission.origin === "verdict")).toHaveLength(MAX_REVISIONS);
+    expect(engine.to(failed.conversationId!).filter((submission) => submission.origin === "verdict")).toHaveLength(core.ledger.limits().revisions);
   });
 
   test("checks decide without the owner", async () => {
@@ -130,7 +129,7 @@ describe("root Work", () => {
     expect(() => core.works.complete(work.id, { summary: "s", artifacts: [foreign] })).toThrow();
   });
 
-  test("going idle without completing is nudged once, then fails", async () => {
+  test("going idle without completing is nudged twice, then fails", async () => {
     const { core, ledger, engine, ghost } = setup();
     const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
     await core.idle();
@@ -138,7 +137,12 @@ describe("root Work", () => {
     runSettles(core, conversationId);
     await core.idle();
     expect(ledger.work(work.id).state).toBe("running");
-    expect(engine.to(conversationId).some((submission) => submission.requestId.includes(":nudge:"))).toBe(true);
+    expect(engine.to(conversationId).some((submission) => submission.requestId.includes(":nudge:1"))).toBe(true);
+    runSettles(core, conversationId);
+    await core.idle();
+    // R4: a second idle nudge is allowed before the Work fails.
+    expect(ledger.work(work.id).state).toBe("running");
+    expect(engine.to(conversationId).some((submission) => submission.requestId.includes(":nudge:2"))).toBe(true);
     runSettles(core, conversationId);
     await core.idle();
     expect(ledger.work(work.id).state).toBe("failed");

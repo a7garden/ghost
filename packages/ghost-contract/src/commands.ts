@@ -4,6 +4,8 @@ import { DutyHours } from "./duty.ts";
 import {
   ADAPTATION_MAX_CHARS,
   ApprovalPolicy,
+  Limits,
+  MAX_WORK_BUDGET_MINUTES,
   OwnerLanguage,
   Acceptance,
   ArtifactRef,
@@ -28,6 +30,8 @@ const command = <K extends string, P extends Parameters<typeof Type.Object>[0]>(
   Type.Object({ type: Type.Literal(type), ...properties }, { additionalProperties: false });
 
 const Text = (max: number) => Type.String({ minLength: 1, maxLength: max });
+/** Working minutes a Work may spend before its origin is asked to extend, split or stop it. */
+const WorkBudget = Type.Integer({ minimum: 1, maximum: MAX_WORK_BUDGET_MINUTES });
 const DataUrl = Type.String({ pattern: "^data:image/(png|webp);base64,[A-Za-z0-9+/=]+$", maxLength: 8_000_000 });
 
 /** Every mutation a client can request. Reads are plain GET routes. */
@@ -55,6 +59,7 @@ export const Command = Type.Union([
     spaceIds: Type.Optional(Type.Array(Id, { maxItems: 8, uniqueItems: true })),
     acceptance: Type.Optional(Acceptance),
     deadlineAt: Type.Optional(nullable(Timestamp)),
+    budgetMinutes: Type.Optional(WorkBudget),
     execution: Type.Optional(ExecutionTarget),
     /** Direct conversation that receives the report; defaults to the Ghost's main direct conversation. */
     originConversationId: Type.Optional(Id),
@@ -65,6 +70,8 @@ export const Command = Type.Union([
     brief: Type.Optional(Text(32768)),
     acceptance: Type.Optional(Acceptance),
     deadlineAt: Type.Optional(nullable(Timestamp)),
+    /** Replaces the execution budget; a Work paused by its budget continues when the new one leaves room. */
+    budgetMinutes: Type.Optional(WorkBudget),
   }),
   command("work.cancel", { workId: Id }),
   /** Re-queue a failed or blocked root Work with its current brief. */
@@ -188,7 +195,7 @@ export const Command = Type.Union([
   command("avatar.delete", { avatarId: Id }),
 
   // Settings and providers
-  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy) }),
+  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy), limits: Type.Optional(Type.Partial(Limits)) }),
   command("provider.upsert", {
     id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
     kind: ProviderKind,

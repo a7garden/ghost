@@ -2,7 +2,7 @@ import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { DEFAULT_APPROVAL_POLICY, DEFAULT_OWNER_LANGUAGE, type ApprovalPolicy } from "@ghost/contract";
+import { DEFAULT_APPROVAL_POLICY, DEFAULT_LIMITS, DEFAULT_OWNER_LANGUAGE, type ApprovalPolicy, type Limits } from "@ghost/contract";
 import type {
   Acceptance,
   Activity,
@@ -509,13 +509,15 @@ export class Ledger {
       .query(
         `INSERT INTO works (id, parent_id, root_id, ghost_id, origin_conversation_id, conversation_id, title, brief, acceptance, state,
            revision, revisions_used, deadline_at, result, verdict, reason, created_at, started_at, ended_at, updated_at,
-           execution, activity_id, activity_run_id, tool_scope)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           execution, activity_id, activity_run_id, tool_scope, budget_minutes, budget_used_ms, budget_since, budget_extended, hold)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET conversation_id = excluded.conversation_id, title = excluded.title, brief = excluded.brief,
            acceptance = excluded.acceptance, state = excluded.state, revision = excluded.revision, revisions_used = excluded.revisions_used,
            deadline_at = excluded.deadline_at, result = excluded.result, verdict = excluded.verdict, reason = excluded.reason,
            started_at = excluded.started_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at,
-           execution = excluded.execution, activity_id = excluded.activity_id, activity_run_id = excluded.activity_run_id, tool_scope = excluded.tool_scope`,
+           execution = excluded.execution, activity_id = excluded.activity_id, activity_run_id = excluded.activity_run_id, tool_scope = excluded.tool_scope,
+           budget_minutes = excluded.budget_minutes, budget_used_ms = excluded.budget_used_ms, budget_since = excluded.budget_since,
+           budget_extended = excluded.budget_extended, hold = excluded.hold`,
       )
       .run(
         work.id,
@@ -539,6 +541,7 @@ export class Ledger {
         work.endedAt,
         work.updatedAt,
         json(work.execution), work.activityId ?? null, work.activityRunId ?? null, json(work.toolScope),
+        work.budgetMinutes, work.budgetUsedMs, work.budgetSince, work.budgetExtended ? 1 : 0, work.hold,
       );
     this.emit({ type: "work", work });
   }
@@ -756,12 +759,13 @@ export class Ledger {
 
   addArtifact(workId: string | null, ref: ArtifactRef) {
     this.db
-      .query("INSERT OR IGNORE INTO artifacts (digest, work_id, name, media_type, size, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      // Replacing re-dates a republished file, so the newest publication of a name is the last row.
+      .query("INSERT OR REPLACE INTO artifacts (digest, work_id, name, media_type, size, created_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(ref.digest, workId, ref.name, ref.mediaType, ref.size, Date.now());
   }
 
   artifactsForWork(workId: string): ArtifactRef[] {
-    return (this.db.query("SELECT digest, name, media_type, size FROM artifacts WHERE work_id = ? ORDER BY created_at").all(workId) as Row[]).map(
+    return (this.db.query("SELECT digest, name, media_type, size FROM artifacts WHERE work_id = ? ORDER BY created_at, rowid").all(workId) as Row[]).map(
       (row) => ({ digest: String(row.digest), name: String(row.name), mediaType: String(row.media_type), size: Number(row.size) }),
     );
   }
@@ -1044,7 +1048,13 @@ export class Ledger {
       providers: this.providers(),
       ownerLanguage: this.setting<string>("ownerLanguage", DEFAULT_OWNER_LANGUAGE),
       approvals: { ...DEFAULT_APPROVAL_POLICY, ...this.setting<Partial<ApprovalPolicy>>("approvals", {}) },
+      limits: this.limits(),
     };
+  }
+
+  /** The owner's bounds over the defaults, read at each use so an edit applies without a restart. */
+  limits(): Limits {
+    return { ...DEFAULT_LIMITS, ...this.setting<Partial<Limits>>("limits", {}) };
   }
 
   setting<T>(key: string, fallback: T): T {
@@ -1150,6 +1160,11 @@ function toWork(row: Row): Work {
     revision: Number(row.revision),
     revisionsUsed: Number(row.revisions_used),
     deadlineAt: row.deadline_at === null ? null : Number(row.deadline_at),
+    budgetMinutes: Number(row.budget_minutes),
+    budgetUsedMs: Number(row.budget_used_ms),
+    budgetSince: row.budget_since === null ? null : Number(row.budget_since),
+    budgetExtended: bool(row.budget_extended),
+    hold: row.hold === null ? null : (String(row.hold) as NonNullable<Work["hold"]>),
     result: parseNullable(row.result),
     verdict: parseNullable(row.verdict),
     reason: row.reason === null ? null : String(row.reason),

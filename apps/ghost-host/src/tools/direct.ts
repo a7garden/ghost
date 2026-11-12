@@ -6,9 +6,7 @@ import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
 import { workDetail } from "../core/state.ts";
-import { askOwnerTool, describeWorkLine, errorResult, firstLine, requireAllowed, requireOrigin, type Scope } from "./shared.ts";
-
-const DEFAULT_WORK_MINUTES = 90;
+import { askOwnerTool, describeWorkLine, errorResult, firstLine, requireAllowed, requireOrigin, workDecideTool, type Scope } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -46,7 +44,7 @@ export function createDirectTools(core: Core): Extension {
       brief: Type.String({ minLength: 1, maxLength: 32768, description: "What to do, with everything the assignee needs" }),
       criteria: Type.Optional(Type.String({ maxLength: 8192, description: "When the Work is done" })),
       ghost_id: Type.Optional(Type.String({ description: "Assignee Ghost; defaults to this Ghost" })),
-      deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Deadline in minutes from now, defaults to 90" })),
+      budget_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "Working minutes the Work may spend before it pauses and asks this conversation to extend once, split or stop it; defaults to 90" })),
       execution: Type.Optional(ExecutionTarget),
       initiative: Type.Optional(Type.Boolean({ description: "true when you start this Work on your own judgment, not an owner request: a Ghost then reviews the result instead of the owner" })),
       milestone_id: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "The active team-goal milestone this Work serves, from the goals in your wake; its goal's boundaries then bind the Work" })),
@@ -74,7 +72,8 @@ export function createDirectTools(core: Core): Extension {
             title: args.title,
             brief: args.brief,
             acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: args.initiative ? initiativeReviewer(core, scope.ghost, ghostId) : null },
-            deadlineAt: Date.now() + (args.deadline_minutes ?? DEFAULT_WORK_MINUTES) * 60_000,
+            deadlineAt: null,
+            budgetMinutes: args.budget_minutes,
             originConversationId: scope.conversation.id,
             execution: args.execution,
             id,
@@ -132,13 +131,13 @@ export function createDirectTools(core: Core): Extension {
 
   const workUpdate = defineTool({
     name: "work_update",
-    description: "Edit a Work created in this conversation: title, brief, done-criteria or shorten its deadline. Only the owner can extend an existing deadline.",
+    description: "Edit a Work created in this conversation: title, brief, done-criteria, or lower its execution budget. A budget is raised once, with work_decide on the paused Work; the due date is the owner's alone.",
     parameters: Type.Object({
       work_id: Type.String({ minLength: 1, description: "The Work's id" }),
       title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
       brief: Type.Optional(Type.String({ minLength: 1, maxLength: 32768 })),
       criteria: Type.Optional(Type.String({ maxLength: 8192, description: "Replaces the done-criteria; checks and reviewer are not editable here" })),
-      deadline_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "New deadline in minutes from now" })),
+      budget_minutes: Type.Optional(Type.Integer({ minimum: 1, description: "New execution budget in working minutes; only a lower value is accepted here" })),
     }),
     replay: "unsafe",
     async execute(args, api) {
@@ -146,15 +145,14 @@ export function createDirectTools(core: Core): Extension {
         const scope = requireAllowed(core, api, "work_update");
         const work = requireOrigin(core, scope, args.work_id);
         const acceptance = args.criteria === undefined ? undefined : { ...work.acceptance, criteria: args.criteria };
-        const deadlineAt = args.deadline_minutes === undefined ? undefined : Date.now() + args.deadline_minutes * 60_000;
-        if (deadlineAt !== undefined && work.deadlineAt !== null && deadlineAt > work.deadlineAt) {
-          throw forbidden("Only the owner can extend an existing Work deadline.");
+        if (args.budget_minutes !== undefined && args.budget_minutes > work.budgetMinutes) {
+          throw forbidden("a budget is extended once with work_decide on the paused Work; lower it here or split the Work");
         }
         const next = core.works.update(work.id, {
           title: args.title,
           brief: args.brief,
           acceptance,
-          deadlineAt,
+          budgetMinutes: args.budget_minutes,
         });
         return text(`Work "${next.title}" is now revision ${next.revision} (${next.state}).`);
       } catch (error) {
@@ -265,7 +263,7 @@ export function createDirectTools(core: Core): Extension {
 
   return defineExtension({
     name: "ghost.direct",
-    tools: [workCreate, workList, workInspect, workUpdate, workCancel, askOwnerTool(core), scheduleCreate, scheduleList, scheduleCancel, ghostList],
+    tools: [workCreate, workList, workInspect, workUpdate, workCancel, workDecideTool(core), askOwnerTool(core), scheduleCreate, scheduleList, scheduleCancel, ghostList],
   });
 }
 

@@ -179,6 +179,41 @@ export function splitQuestion(question: string): { title: string; detail: string
   return { title, detail: rest.join("\n").trim() };
 }
 
+/**
+ * The origin settles a Work the Host paused: `extend` grants one more execution budget (budget pause),
+ * `continue` clears a repeated-failure stop, `stop` cancels it. Splitting is stop plus new, smaller
+ * delegations, so it needs no action of its own. Only the conversation the Work came from may call it.
+ */
+export function workDecideTool(core: Core) {
+  return defineTool({
+    name: "work_decide",
+    description:
+      "Settle a Work paused by the Host: extend its execution budget once (action 'extend'), continue after a repeated tool failure was stopped (action 'continue'), or stop it (action 'stop'). " +
+      "Works report here when they settle; a paused Work waits for exactly this call. To split, stop it and delegate the remainder as smaller Works.",
+    parameters: Type.Object({
+      work_id: Type.String({ minLength: 1, maxLength: 128, description: "The paused Work's id" }),
+      action: Type.Union([Type.Literal("extend"), Type.Literal("continue"), Type.Literal("stop")]),
+      note: Type.Optional(Type.String({ maxLength: 2048, description: "One line of why, for the record and the stopped Work's reason" })),
+    }),
+    replay: "unsafe",
+    async execute(args, api) {
+      try {
+        const scope = scopeOf(core, api);
+        const work = core.ledger.work(args.work_id);
+        const root = work.rootId === work.id ? work : core.ledger.work(work.rootId);
+        if (root.originConversationId !== scope.conversation.id) throw forbidden("only the conversation this Work came from settles it");
+        const next = core.works.decide(work.id, args.action, args.note);
+        return {
+          content: [{ type: "text", text: `Work "${next.title}" is ${next.state}.` }],
+          ...(next.state === "cancelled" ? { control: { terminate: true } } : {}),
+        } satisfies ToolExecutionResult;
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  });
+}
+
 /** `ask_owner` behaves identically in direct and work conversations. */
 export function askOwnerTool(core: Core) {
   return defineTool({

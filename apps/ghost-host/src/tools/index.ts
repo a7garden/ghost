@@ -1,9 +1,11 @@
 import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
 import { BROWSER_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, HOST_TOOLS, MAIL_TOOLS } from "@ghost/contract";
-import type { Extension } from "@earendil-works/pi-durable";
+import type { Extension, ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord";
 import type { Core } from "../core/core.ts";
 import { CLOCK_INSTRUCTIONS } from "../core/clock.ts";
 import { describeWork } from "../core/works.ts";
+import { firstLine } from "./shared.ts";
 import { modelInputOf } from "../engine/models.ts";
 import type { DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort, DesktopPort } from "../integrations/ports.ts";
 import type { TossPort } from "../integrations/toss.ts";
@@ -127,6 +129,58 @@ function sequentialEffects(extension: Extension): Extension {
   return { ...extension, tools: extension.tools?.map((tool) => (tool.replay === "safe" ? tool : { ...tool, executionMode: "sequential" as const })) };
 }
 
+/** When the same refusal has repeated this many times, the tool result explains the constraint. */
+const REPEAT_EXPLAIN = 3;
+/** And at this many, the Work stops and its origin is told. */
+const REPEAT_BLOCK = 6;
+
+/** What a repeated refusal is usually asking for, said in terms of tools the caller already has. */
+function repeatHint(message: string): string {
+  if (/not visible here|Mac filesystem/i.test(message)) return "On this execution environment the Mac filesystem is out of reach: read Mac files with host_read or document_read, write the result with write, then publish it.";
+  if (/^no file at |path must be|is not a regular file|no longer exists/i.test(message)) return "List what actually exists (work_status shows published artifacts; bash can list the workspace), then address a path that is really there.";
+  if (/not enabled for|capability_request/i.test(message)) return "The tool is not granted here: ask once with capability_request and end the turn, or do the step another way.";
+  if (/^Work is /i.test(message)) return "The Work is not in a state that allows this call: wait for the message that changes it instead of retrying.";
+  if (/activity rule|only the owner changes/i.test(message)) return "The activity rule bounds the tools here: do the step with a tool it allows, or report it in complete.";
+  if (/deadline|due date/i.test(message)) return "The owner's due date governs this Work; it is not something a retry can move.";
+  return "Read the refusal as the constraint it names, then pick the tool that satisfies it or report the blocker in complete.";
+}
+
+/**
+ * R8: the same tool returning the same error class in one conversation. The third refusal appends an
+ * explanation of the constraint and the tool that fits it; the sixth stops the Work and tells its origin.
+ * Read-only and effectful tools both count.
+ */
+function repeatGuard(core: Core, extension: Extension): Extension {
+  return {
+    ...extension,
+    tools: extension.tools?.map((tool) => ({
+      ...tool,
+      async execute(args: Parameters<typeof tool.execute>[0], api: ToolExecutionApi, context: Context): Promise<ToolExecutionResult> {
+        const result = await tool.execute(args, api, context);
+        const conversation = core.ledger.conversationByPiId(String(api.conversationId));
+        const message = (result.content ?? []).map((part) => (part.type === "text" ? part.text : "")).join("\n").trim();
+        if (!conversation || !result.isError || message === "") return result;
+        const count = core.repeats.record(conversation.id, tool.name, message);
+        if (count === REPEAT_EXPLAIN) {
+          return {
+            ...result,
+            content: [{ type: "text", text: `${message}\n\n[Host] ${tool.name} refused exactly this way ${count} times: the constraint is real, and the same call will fail the same way again. ${repeatHint(message)}` }],
+          };
+        }
+        if (count >= REPEAT_BLOCK) {
+          if (conversation.workId) core.works.blockForRepeat(conversation.workId, `${tool.name} kept returning the same refusal (${firstLine(message)})`);
+          return {
+            content: [{ type: "text", text: `${message}\n\n[Host] ${tool.name} refused exactly this way ${count} times, so this Work is stopped and its origin has been told. Do not retry the call; end your turn.` }],
+            isError: true,
+            ...(conversation.workId ? { control: { terminate: true } } : {}),
+          };
+        }
+        return result;
+      },
+    })),
+  };
+}
+
 /** The model-facing capability of each conversation kind (src/tools/types.ts). */
 export function createToolSet(deps: {
   core: Core;
@@ -148,27 +202,29 @@ export function createToolSet(deps: {
   /** Read-only Toss Securities API (ghost.toss); needs the vault for its key, null leaves the tool out. */
   toss?: TossPort | null;
 }): ToolSet {
-  const direct = sequentialEffects(createDirectTools(deps.core));
+  /** Every tool gets the journal's round rule and the repeat guard, selectable or fixed alike. */
+  const harden = (extension: Extension): Extension => repeatGuard(deps.core, sequentialEffects(extension));
+  const direct = harden(createDirectTools(deps.core));
   const drive = createAutonomyTools(deps.core);
-  const activities = sequentialEffects(activityTools(deps.core));
-  const interactive = sequentialEffects(createInteractiveTools(deps.core));
-  const work = sequentialEffects(createWorkTools(deps.core, deps.sandbox));
-  const review = sequentialEffects(createReviewTools(deps.core));
-  const main = sequentialEffects(createMainTools(deps.core));
-  const goals = sequentialEffects(createGoalTools(deps.core));
-  const self = sequentialEffects(createSelfTools(deps.core));
+  const activities = harden(activityTools(deps.core));
+  const interactive = harden(createInteractiveTools(deps.core));
+  const work = harden(createWorkTools(deps.core, deps.sandbox));
+  const review = harden(createReviewTools(deps.core));
+  const main = harden(createMainTools(deps.core));
+  const goals = harden(createGoalTools(deps.core));
+  const self = harden(createSelfTools(deps.core));
   const memory = deps.memory === null ? null : createMemoryTools(deps.core, deps.memory, deps.memoryEngine);
-  const documents = deps.documents === null ? null : sequentialEffects(createDocumentsTools(deps.core, deps.documents));
-  const host = deps.host ? sequentialEffects(createHostTools(deps.core, deps.host)) : null;
-  const skills = deps.skills === null ? null : sequentialEffects(createSkillsTools(deps.core, deps.skills));
-  const web = deps.reach ? sequentialEffects(createWebTools(deps.core, deps.reach)) : null;
+  const documents = deps.documents === null ? null : harden(createDocumentsTools(deps.core, deps.documents));
+  const host = deps.host ? harden(createHostTools(deps.core, deps.host)) : null;
+  const skills = deps.skills === null ? null : harden(createSkillsTools(deps.core, deps.skills));
+  const web = deps.reach ? harden(createWebTools(deps.core, deps.reach)) : null;
   // Citation tools come with web_read; the engine hides them from a Ghost without it, never from a reviewer.
   const sources = deps.reach ? createSourceTools(deps.core) : null;
-  const browser = deps.browser ? sequentialEffects(createBrowserTools(deps.core, deps.browser, { vault: deps.vault ?? null, sandbox: deps.sandbox })) : null;
-  const vault = deps.vault ? sequentialEffects(createVaultTools(deps.core, deps.vault)) : null;
-  const connections = deps.core.activitySources ? sequentialEffects(createConnectionTools(deps.core, { sources: deps.core.activitySources, vault: deps.vault ?? null, browser: deps.browser ?? null })) : null;
-  const desktop = deps.desktop ? sequentialEffects(createDesktopTools(deps.core, deps.desktop)) : null;
-  const mail = deps.mail ? sequentialEffects(createMailTools(deps.core, deps.mail)) : null;
+  const browser = deps.browser ? harden(createBrowserTools(deps.core, deps.browser, { vault: deps.vault ?? null, sandbox: deps.sandbox })) : null;
+  const vault = deps.vault ? harden(createVaultTools(deps.core, deps.vault)) : null;
+  const connections = deps.core.activitySources ? harden(createConnectionTools(deps.core, { sources: deps.core.activitySources, vault: deps.vault ?? null, browser: deps.browser ?? null })) : null;
+  const desktop = deps.desktop ? harden(createDesktopTools(deps.core, deps.desktop)) : null;
+  const mail = deps.mail ? harden(createMailTools(deps.core, deps.mail)) : null;
   const toss = deps.toss && deps.vault ? createTossTools(deps.core, deps.vault, deps.toss) : null;
   const optional = [memory, documents, host, skills, web, sources, browser, vault, connections, desktop, mail, toss].filter((extension): extension is Extension => extension !== null);
   /** Guidance for an installed capability, only for a Ghost that holds one of its tools. */

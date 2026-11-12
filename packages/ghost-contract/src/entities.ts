@@ -352,6 +352,17 @@ export type WorkState = Static<typeof WorkState>;
 
 export const TERMINAL_WORK_STATES: readonly WorkState[] = ["done", "failed", "cancelled"];
 
+/**
+ * Why a live Work is held apart from its state: `quota` while it waits for a model provider's usage limit
+ * (state stays running), `budget` when its execution budget ran out and its origin decides, `repeat` when the
+ * same tool kept failing the same way (both blocked).
+ */
+export const WorkHold = Type.Union([Type.Literal("quota"), Type.Literal("budget"), Type.Literal("repeat")]);
+export type WorkHold = Static<typeof WorkHold>;
+/** Execution budget of a Work when its creator names none, in minutes of working time. */
+export const DEFAULT_WORK_BUDGET_MINUTES = 90;
+export const MAX_WORK_BUDGET_MINUTES = 7 * 24 * 60;
+
 export const WorkResult = Type.Object({
   summary: Type.String({ maxLength: 16384 }),
   artifacts: Type.Array(ArtifactRef, { maxItems: 64 }),
@@ -398,7 +409,17 @@ export const Work = Type.Object({
   state: WorkState,
   revision: Type.Integer({ minimum: 1 }),
   revisionsUsed: Type.Integer({ minimum: 0 }),
+  /** Due date the owner set; only the owner sets or extends it, and a Ghost never does. */
   deadlineAt: nullable(Timestamp),
+  /** Execution budget: working minutes, spent only while running and not held. */
+  budgetMinutes: Type.Integer({ minimum: 1, maximum: MAX_WORK_BUDGET_MINUTES }),
+  /** Working time spent before `budgetSince`. */
+  budgetUsedMs: Type.Integer({ minimum: 0 }),
+  /** Start of the span the budget is currently running; null while it is stopped. */
+  budgetSince: nullable(Timestamp),
+  /** The origin's one extension of the budget was used. */
+  budgetExtended: Type.Boolean(),
+  hold: nullable(WorkHold),
   result: nullable(WorkResult),
   verdict: nullable(Verdict),
   /** Human-readable reason for failed, blocked or cancelled. */
@@ -736,6 +757,46 @@ export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = { autoMinutes: 30, delega
 export const OwnerLanguage = Type.String({ minLength: 2, maxLength: 32, pattern: "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$" });
 export const DEFAULT_OWNER_LANGUAGE = "ko";
 
+/** Bounds that keep a team cheap and its trees finite. The owner edits them; the Host reads them at each use. */
+export const Limits = Type.Object({
+  /** Self-directed wakes per Ghost per day. */
+  dailyWakes: Type.Integer({ minimum: 0, maximum: 1000 }),
+  /** Self-directed runs at once across the team. */
+  concurrentWakes: Type.Integer({ minimum: 1, maximum: 64 }),
+  /** Work nodes per ordinary root, every state included. */
+  rootNodes: Type.Integer({ minimum: 1, maximum: 1024 }),
+  /** Work items per activity run, descendants included. */
+  activityNodes: Type.Integer({ minimum: 1, maximum: 1024 }),
+  /** Automatic `revise` verdicts before a Work fails. */
+  revisions: Type.Integer({ minimum: 0, maximum: 32 }),
+  /** Delegation depth below a root Work. */
+  depth: Type.Integer({ minimum: 1, maximum: 32 }),
+  /** Live children per parent Work. */
+  liveChildren: Type.Integer({ minimum: 1, maximum: 256 }),
+  /** Lifetime questions per Work, answered and cancelled ones included. */
+  workQuestions: Type.Integer({ minimum: 0, maximum: 1024 }),
+  /** Days the main Ghost waits after the owner declines a goal proposal. */
+  goalProposalCooldownDays: Type.Integer({ minimum: 0, maximum: 365 }),
+  /** Open (active or paused) goals at once. */
+  openGoals: Type.Integer({ minimum: 1, maximum: 64 }),
+  /** Ghosts the main Ghost may create in a day. */
+  ghostsPerDay: Type.Integer({ minimum: 0, maximum: 1000 }),
+});
+export type Limits = Static<typeof Limits>;
+export const DEFAULT_LIMITS: Limits = {
+  dailyWakes: 12,
+  concurrentWakes: 2,
+  rootNodes: 32,
+  activityNodes: 16,
+  revisions: 2,
+  depth: 4,
+  liveChildren: 8,
+  workQuestions: 16,
+  goalProposalCooldownDays: 3,
+  openGoals: 3,
+  ghostsPerDay: 10,
+};
+
 export const Settings = Type.Object({
   defaultModel: nullable(ModelRef),
   reviewModel: nullable(ModelRef),
@@ -748,6 +809,8 @@ export const Settings = Type.Object({
   providers: Type.Array(Provider, { maxItems: 64 }),
   ownerLanguage: Type.Optional(OwnerLanguage),
   approvals: Type.Optional(ApprovalPolicy),
+  /** The Host always fills every bound, from DEFAULT_LIMITS where the owner set none. */
+  limits: Type.Optional(Limits),
 });
 export type Settings = Static<typeof Settings>;
 

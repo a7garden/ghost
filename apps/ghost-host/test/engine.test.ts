@@ -888,8 +888,8 @@ test("a repeated permanent Work error stops model calls at the retry window", as
     const refusal = () => fauxAssistantMessage(fauxToolCall("test_failure", {}), { stopReason: "toolUse" });
     faux.setResponses(Array.from({ length: 9 }, refusal));
     const work = core.works.createRoot({ ghostId, title: "Retry", brief: "Run the tool", originConversationId: conversationId });
-    // A prior idle nudge was already used, so this idle boundary should settle the Work.
-    ledger.tx(() => ledger.setIdleNudges(work.id, 1));
+    // Two idle nudges are allowed now, so both are spent before this idle boundary settles the Work.
+    ledger.tx(() => ledger.setIdleNudges(work.id, 2));
     await core.idle();
     const workConversation = ledger.work(work.id).conversationId!;
     await core.nextActivity(workConversation, 1);

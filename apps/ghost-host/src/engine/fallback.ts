@@ -14,6 +14,46 @@ export const FallbackDoc = defineDoc({
   fork: "initial",
 });
 
+/** A provider quota the model itself reported: a condition to wait out, not a Ghost stopping. */
+export interface QuotaHit {
+  /** Shortened provider message, kept for the owner's status line. */
+  reason: string;
+  /** When the provider said it resets; null when it did not, so the Host probes with growing gaps. */
+  resumeAt: number | null;
+}
+
+/** R1: classify a generation error as a provider quota (usage limit, token plan, rate limit). */
+export function quotaHit(message: AssistantMessage, now = Date.now()): QuotaHit | null {
+  if (message.stopReason !== "error") return null;
+  const error = message.errorMessage ?? "";
+  if (!/(?:^|[^\d])429(?:[^\d]|$)|usage[_ .-]?limit|token[_ .-]?plan|rate[_ .-]?limit/i.test(error)) return null;
+  // Validation talk about budgets, tokens or quotas is a bad request, not an exhausted account.
+  if (/invalid[_ -]?request|bad request|budget_tokens|max_tokens|must be|unsupported|parameter/i.test(error)) return null;
+  return { reason: error.replaceAll(/\s+/g, " ").trim().slice(0, 300), resumeAt: parseResumeAt(error, now) };
+}
+
+/** When the provider's message says it resets: an ISO time (GLM names one in UTC+8), or a retry delay. */
+function parseResumeAt(error: string, now: number): number | null {
+  const iso = /(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)(Z|[+-]\d{2}:?\d{2})?/.exec(error);
+  if (iso) {
+    const stamp = Date.parse(`${iso[1]?.replace(" ", "T")}${iso[2]?.toUpperCase() === "Z" ? "Z" : iso[2] ?? "+08:00"}`);
+    if (Number.isFinite(stamp)) return bounded(stamp, now);
+  }
+  const retry = /(?:retry|try again)(?:\s+\w+)?\s+in\s+(\d{1,6})\s*(seconds?|sec|s|minutes?|min|m)\b/i.exec(error);
+  if (retry) {
+    const count = Number(retry[1]);
+    const seconds = /^m/i.test(retry[2] ?? "") ? count * 60 : count;
+    return bounded(now + seconds * 1000, now);
+  }
+  return null;
+}
+
+/** A resume time in the past is no information; one beyond a week is clipped to a week. */
+function bounded(at: number, now: number): number | null {
+  if (at <= now) return null;
+  return Math.min(at, now + 7 * 24 * 60 * 60_000);
+}
+
 export function fallbackReason(message: AssistantMessage): string | null {
   if (message.stopReason !== "error" || isContextOverflow(message)) return null;
   const error = message.errorMessage ?? "";
