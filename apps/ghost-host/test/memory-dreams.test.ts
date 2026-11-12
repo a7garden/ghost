@@ -29,7 +29,7 @@ function memoryFixture() {
   return { root, memory, source, message, snapshot, output, start, close };
 }
 
-test("a citation that does not match its source drops only its change, named in the report", () => {
+test("a citation that does not match its source rejects the proposal with its identity and retains the cursor", () => {
   const f = memoryFixture();
   try {
     const cases: [typeof f.source, string][] = [
@@ -37,33 +37,49 @@ test("a citation that does not match its source drops only its change, named in 
       [{ ...f.source, conversationId: "other" }, '- /me/architecture.md: message "owner-1" of conversation "other" is not in the immutable source snapshot'],
       [{ ...f.source, messageId: "other" }, '- /me/architecture.md: message "other" of conversation "conversation" is not in the immutable source snapshot'],
     ];
-    for (const [source, dropped] of cases) {
+    for (const [source, failure] of cases) {
       const proposal = JSON.parse(f.output);
       proposal.changes[0].sources = [source];
-      const read = readProposal(JSON.stringify(proposal), f.snapshot);
-      expect(read.changes).toEqual([]);
-      expect(read.report).toBe(`${proposal.report}\n\nDropped 1 change(s) whose citation did not match the source snapshot:\n${dropped}`);
+      expect(() => readProposal(JSON.stringify(proposal), f.snapshot)).toThrow(`Memory proposal rejected; no changes committed and cursor retained. ${failure.slice(2)}`);
     }
     expect(readProposal(f.output, f.snapshot).changes[0]?.sources).toEqual([f.source]);
   } finally { f.close(); }
 });
 
-test("a run with one misquoted change commits the rest and advances the cursor", () => {
+test("a run with one misquoted change commits nothing and retains its evidence window", () => {
   const f = memoryFixture();
   try {
     const good = { path: "/me/retained.md", content: "# Retained\nHost memory, kept.", sources: [f.source], reason: "Solid evidence" };
     const bad = { path: "/me/dropped.md", content: "# Dropped\nParaphrased.", sources: [{ ...f.source, quote: "글자가 아닌 인용" }], reason: "Inexact quote" };
     f.start("mixed");
-    commitProposal(f.memory, "mixed", f.snapshot, JSON.stringify({ changes: [good, bad], report: "Two proposals." }));
-    expect(f.memory.read("ghost", good.path)?.content).toContain("kept.");
+    expect(() => commitProposal(f.memory, "mixed", f.snapshot, JSON.stringify({ changes: [good, bad], report: "Two proposals." }))).toThrow("no changes committed and cursor retained");
+    expect(f.memory.read("ghost", good.path)).toBeNull();
     expect(f.memory.read("ghost", bad.path)).toBeNull();
-    expect(f.memory.dreamCursor("ghost")).toBe(f.snapshot.through);
-    const run = f.memory.runs("ghost")[0]!;
-    expect(run.state).toBe("done");
-    expect(run.error).toBeNull();
-    expect(run.report).toContain("Two proposals.");
-    expect(run.report).toContain('- /me/dropped.md: quote from message "owner-1" of conversation "conversation" does not occur in it');
+    expect(f.memory.read("ghost", "/me/MEMORY.md")).toBeNull();
+    expect(f.memory.dreamCursor("ghost")).toBe(f.snapshot.after);
   } finally { f.close(); }
+});
+
+test("a misquoted merge replacement cannot delete its source note or consume the evidence", () => {
+  for (const deletionFirst of [false, true]) {
+    const f = memoryFixture();
+    try {
+      const sourcePath = "/me/source.md";
+      const original = f.memory.write({ ghostId: "ghost", path: sourcePath, content: "# Retained knowledge\nRun conversations in Host.", expectedHash: null, actor: "owner", operationId: "seed-source", reason: "Existing knowledge" })!;
+      const snapshot = memorySnapshot(f.memory, "ghost", 0);
+      const replacement = { path: "/me/merged.md", content: "# Merged knowledge\nRun conversations in Host.", sources: [{ ...f.source, quote: "모든 대화는 Ghost에서" }], reason: "Merge the source note" };
+      const deletion = { path: sourcePath, content: null, sources: [f.source], reason: "Superseded by merged note" };
+      f.start("merge");
+      const changes = deletionFirst ? [deletion, replacement] : [replacement, deletion];
+      expect(() => commitProposal(f.memory, "merge", snapshot, JSON.stringify({ changes, report: "Merged source into replacement." }))).toThrow("no changes committed and cursor retained");
+      expect(f.memory.read("ghost", sourcePath)).toEqual(original);
+      expect(f.memory.revisions("ghost", sourcePath)).toHaveLength(1);
+      expect(f.memory.read("ghost", replacement.path)).toBeNull();
+      expect(f.memory.read("ghost", "/me/MEMORY.md")).toBeNull();
+      expect(f.memory.dreamCursor("ghost")).toBe(snapshot.after);
+      expect(memorySnapshot(f.memory, "ghost", f.memory.dreamCursor("ghost")).history).toEqual(snapshot.history);
+    } finally { f.close(); }
+  }
 });
 
 test("dream rejects profile, another team, traversal and model-authored index edits", () => {

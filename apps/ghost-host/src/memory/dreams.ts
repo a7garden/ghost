@@ -74,8 +74,8 @@ export function memorySnapshot(memory: MemoryStore, ghostId: string, after: numb
 
 /**
  * Existence of a quote is checked; this is provenance validation, not semantic entailment.
- * A malformed response fails the run. A change whose citation does not match its source is
- * dropped and named in the report, so one inexact quote does not discard and retry the window.
+ * Changes may depend on each other (for example, a merge followed by deletion), so a failed
+ * citation rejects the whole proposal and retains the cursor for recovery.
  */
 export function readProposal(output: string, snapshot: MemorySnapshot): Proposal {
   if (Buffer.byteLength(output) > MAX_OUTPUT) throw new Error("memory response exceeds the output limit");
@@ -84,8 +84,7 @@ export function readProposal(output: string, snapshot: MemorySnapshot): Proposal
   const proposal = value as Record<string, unknown>;
   if (!Array.isArray(proposal.changes) || proposal.changes.length > 8 || typeof proposal.report !== "string" || proposal.report.length > 2000) throw new Error("invalid memory proposal");
   const paths = new Set<string>();
-  const dropped: string[] = [];
-  const changes = proposal.changes.flatMap((raw: unknown): Change[] => {
+  const changes = proposal.changes.map((raw: unknown): Change => {
     if (!raw || typeof raw !== "object") throw new Error("invalid memory change");
     const change = raw as Record<string, unknown>;
     const path = change.path;
@@ -109,16 +108,12 @@ export function readProposal(output: string, snapshot: MemorySnapshot): Proposal
         : evidence.text.includes(source.quote) ? null
         : `quote from ${cited} does not occur in it (exact prefix ${quotedPrefix(evidence.text, source.quote)} of ${source.quote.length} characters)`;
       if (failure) {
-        dropped.push(`${path}: ${failure}`);
-        return [];
+        throw new Error(`Memory proposal rejected; no changes committed and cursor retained. ${path}: ${failure}`);
       }
     }
-    return [{ path, content: change.content as string | null, sources, reason: change.reason }];
+    return { path, content: change.content as string | null, sources, reason: change.reason };
   });
-  const report = dropped.length
-    ? `${proposal.report}\n\nDropped ${dropped.length} change(s) whose citation did not match the source snapshot:\n${dropped.map((line) => `- ${line}`).join("\n")}`
-    : proposal.report;
-  return { changes, report };
+  return { changes, report: proposal.report };
 }
 
 /** Length of the quote's longest leading part found in the source, without echoing either text. */
