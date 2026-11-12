@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { ADAPTATION_MAX_CHARS, DESKTOP_TOOLS, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
+import { ADAPTATION_MAX_CHARS, DESKTOP_TOOLS, DocRefs, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import { fallbackListFor } from "../engine/fallback.ts";
@@ -29,6 +29,7 @@ function renderGhost(core: Core, ghost: Ghost): string {
       fallbacks: ghost.fallbacks,
       fallbacksInUse: fallbackListFor(ghost, core.ledger.settings()),
       skills: ghost.skills,
+      attachments: ghost.attachments,
       persona: ghost.persona,
       notes: core.adaptations.get(ghost.id)?.notes ?? "",
       directConversationId: ghost.directConversationId,
@@ -88,6 +89,7 @@ export function createMainTools(core: Core): Extension {
       model: Type.Optional(nullable(ModelRef)),
       fallbacks: Type.Optional(FallbackList),
       skills: Type.Optional(SkillList),
+      attachments: Type.Optional(DocRefs),
       tools: Type.Optional(GhostToolList),
       look: Type.Optional(Look),
       host_execution: Type.Optional(Type.Boolean({ description: "Allow its Works to run directly on the owner's Mac; only when its role needs it" })),
@@ -117,6 +119,7 @@ export function createMainTools(core: Core): Extension {
             ...(args.tools ? { tools: args.tools } : {}),
             ...(args.fallbacks ? { fallbacks: args.fallbacks } : {}),
             ...(args.skills ? { skills: args.skills } : {}),
+            ...(args.attachments ? { attachments: args.attachments } : {}),
             hostExecution: args.host_execution ?? false,
           });
           core.notify({
@@ -171,6 +174,7 @@ export function createMainTools(core: Core): Extension {
       tools: Type.Optional(GhostToolList),
       fallbacks: Type.Optional(FallbackList),
       skills: Type.Optional(SkillList),
+      attachments: Type.Optional(DocRefs),
       host_execution: Type.Optional(Type.Boolean({ description: "Allow Works of this Ghost to run directly on the owner's Mac (files and shell under the owner's account)" })),
       self_directed: Type.Optional(Type.Boolean({ description: "Whether this Ghost wakes on its own plans (plan_next) without the owner writing" })),
     }),
@@ -192,6 +196,7 @@ export function createMainTools(core: Core): Extension {
             tools: args.tools,
             fallbacks: args.fallbacks,
             skills: args.skills,
+            attachments: args.attachments,
             hostExecution: args.host_execution,
           });
           if (args.self_directed !== undefined) core.autonomy.setEnabled(target.id, args.self_directed);
