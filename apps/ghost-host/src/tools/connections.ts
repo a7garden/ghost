@@ -10,6 +10,7 @@ import { assertFetchableUrl } from "../integrations/netguard.ts";
 import type { BrowserPort, BrowserSessionRef } from "../integrations/ports.ts";
 import type { Vault } from "../stores/vault.ts";
 import { errorResult, requireAllowed, type Scope } from "./shared.ts";
+import { policyRead } from "../core/policy-context.ts";
 
 export const CONNECTION_INSTRUCTIONS = "connection_list shows service metadata and granted API endpoints, never credentials. connection_request reads a granted API account with a base-relative path (users/me or /users/me); writes require owner approval and are never replayed. connection_register proposes API, GitHub/Gitea or mail setup using a granted vault item or browser credential field; never copy a key into tool arguments or chat. After generating a key, do not snapshot or screenshot the secret: register using a unique CSS selector for its input/textarea, or a previously known ref. Keep the issuer page open at credential_origin until approval. Host captures and redacts the credential without returning it to you. Use browser_handoff for login/SSO/2FA and vault_request if the issuer cannot expose its key in an input field. Verify API access with a read after registration; never claim authentication was checked just because registration succeeded.";
 const DAY = 86_400_000;
@@ -81,26 +82,6 @@ export function createConnectionTools(core: Core, deps: { sources: ActivitySourc
   const noActivitySetup = (scope: Scope) => {
     if (scope.work?.activityId) throw forbidden("Account setup is outside an automatic activity's standing delegation; ask the owner in a direct conversation");
   };
-  function checkRequest(scope: Scope, connection: Connection, expected?: string) {
-    if (connection.config.kind !== "api" || !connection.config.ghostIds.includes(scope.ghost.id)) throw forbidden("This API connection is not granted to this Ghost; the owner can grant it in connection settings");
-    if (expected && authorityOf(connection) !== expected) throw new NoEffect("The account endpoint, credential or grants changed since approval; nothing was sent. Propose again.");
-  }
-  const policy = (scope: Scope) => scope.work?.activityId ? core.ledger.activity(scope.work.activityId).policy : null;
-
-  core.effects.onApproved("connection_request", async effect => {
-    const input = approvedInput<WriteRequest>(effect);
-    const authorize = () => {
-      const scope = approvedScope(effect, "connection_request");
-      const current = core.ledger.findConnection(input.connectionId);
-      if (!current) throw new NoEffect("The connection was deleted; nothing was sent.");
-      try { checkRequest(scope, current, input.authority); }
-      catch { throw new NoEffect("The account authority or Ghost grant changed; nothing was sent. Propose again."); }
-      if (policy(scope)?.externalActions === "deny") throw new NoEffect("This activity denies external actions; nothing was sent.");
-    };
-    authorize();
-    const response = await apiRequest(core.ledger.connection(input.connectionId), { method: input.method, path: input.path, ...(input.body === null ? {} : { body: input.body }), authorize });
-    return responseText(response);
-  });
 
   core.effects.onApproved("connection_register", async effect => {
     const input = approvedInput<Registration>(effect);
@@ -174,32 +155,7 @@ export function createConnectionTools(core: Core, deps: { sources: ActivitySourc
         } catch (error) { return connectionError(error); }
       },
     }),
-    defineTool({
-      name: "connection_request", description: "Read a granted API account with a base-relative path. Read-only GET requests run immediately; Slack RPC writes, unknown Slack methods and other HTTP methods require owner approval of the exact URL and body. Headers and credentials cannot be overridden.",
-      parameters: Type.Object({ connection_id: Type.String({ minLength: 1, maxLength: 128 }), method: Type.Union([Type.Literal("GET"), Type.Literal("POST"), Type.Literal("PUT"), Type.Literal("PATCH"), Type.Literal("DELETE")]), path: Type.String({ minLength: 1, maxLength: 2048 }), body: Type.Optional(Type.String({ minLength: 1, maxLength: 16384 })), reason: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })) }), replay: "unsafe",
-      async execute(args, api) {
-        try {
-          const scope = requireAllowed(core, api, "connection_request");
-          const connection = core.ledger.connection(args.connection_id);
-          checkRequest(scope, connection);
-          if (connection.config.kind !== "api") throw invalid("Choose an API connection");
-          const url = connectionRequestUrl(connection.config, args.path);
-          if (args.method === "GET" && args.body !== undefined) throw invalid("GET requests take no body");
-          if (connectionRequestIsReadOnly(connection, args.method, args.path)) {
-            const authorize = () => checkRequest(requireAllowed(core, api, "connection_request"), core.ledger.connection(connection.id), authorityOf(connection));
-            const response = await apiRequest(connection, { method: "GET", path: args.path, authorize });
-            authorize();
-            return text(responseText(response));
-          }
-          if (policy(scope)?.externalActions === "deny") throw forbidden("This activity denies external actions");
-          const input: WriteRequest = { connectionId: connection.id, authority: authorityOf(connection), method: args.method, path: args.path, body: args.body ?? null };
-          const effect = core.effects.propose({ conversationId: scope.conversation.id, callId: api.callId, tool: "connection_request", input,
-            summary: `${args.method} ${url.href}`, title: `서비스 변경: ${connection.name}`,
-            detail: [`대상: ${url.href}`, `방법: ${args.method}`, ...(args.reason ? [args.reason] : []), "", args.body ?? "(본문 없음)", "", "승인하면 외부 서비스에 한 번 전송합니다. 취소나 되돌리기는 보장되지 않습니다."].join("\n"), proposal: { input } });
-          return text(`Write awaiting owner approval (${effect.id}); nothing was sent. End your turn or continue unrelated steps; do not retry the request.`);
-        } catch (error) { return connectionError(error); }
-      },
-    }),
+    createConnectionAlias(core, deps, "connection_request"),
     defineTool({
       name: "connection_register", description: "Propose API, GitHub/Gitea or mail connection setup for owner confirmation. The secret comes only from a granted vault item or a browser input field at an explicit HTTPS credential_origin. Never put a token in arguments. Existing endpoint/credential authority is locked until approval. New private endpoints must be configured by the owner in settings.",
       parameters: Type.Object({
@@ -250,4 +206,65 @@ export function createConnectionTools(core: Core, deps: { sources: ActivitySourc
       },
     }),
   ] });
+}
+
+/** Same transport and live grants for the generic tool and each open connection namespace. */
+export function createConnectionAlias(core: Core, deps: { sources: ActivitySourcePort | null; vault?: Vault | null; browser?: BrowserPort | null }, name: string, connectionId?: string) {
+  const authorize = (api: ToolExecutionApi, connection: Connection, expected: string) => {
+    const scope = requireAllowed(core, api, name);
+    const current = core.ledger.connection(connection.id);
+    if (current.config.kind !== "api" || !current.config.ghostIds.includes(scope.ghost.id)) throw forbidden("This API connection is not granted to this Ghost");
+    if (authorityOf(current) !== expected) throw new NoEffect("Connection authority changed; nothing was sent");
+    return scope;
+  };
+  const request = async (api: ToolExecutionApi, input: WriteRequest) => {
+    const connection = core.ledger.connection(input.connectionId);
+    const check = () => { authorize(api, connection, input.authority); };
+    check();
+    if (!deps.sources?.apiRequest) throw new NoEffect("Authenticated API requests are unavailable");
+    const response = await deps.sources.apiRequest(connection, { method: input.method, path: input.path, ...(input.body === null ? {} : { body: input.body }), authorize: check });
+    check();
+    return responseText(response);
+  };
+  core.effects.onApproved(name, async effect => {
+    const decision = core.ledger.decisionsAwaitingFollowUp().find(decision => decision.effectId === effect.id && decision.state === "approved");
+    const input = decision?.proposal?.input as WriteRequest | undefined;
+    if (!input || digestOf(input) !== effect.inputDigest || Date.now() - effect.createdAt >= DAY) throw new NoEffect("Approved connection input changed or expired");
+    const piId = core.ledger.piConversationId(effect.conversationId);
+    if (!piId) throw new NoEffect("Connection conversation is unavailable");
+    const api = { conversationId: piId } as unknown as ToolExecutionApi;
+    const scope = authorize(api, core.ledger.connection(input.connectionId), input.authority);
+    if (scope.conversation.kind === "subagent") throw new NoEffect("Subagents cannot change external services");
+    if (scope.work?.activityId && core.ledger.activity(scope.work.activityId).policy.externalActions === "deny") throw new NoEffect("This activity denies external actions");
+    return request(api, input);
+  });
+  return defineTool({
+    name, description: "Request this granted HTTP API using a base-relative path. Owner-marked read paths and ordinary GET reads run through read policy. Unknown operations are writes and require policy approval. Credentials and headers never enter model arguments.",
+    parameters: Type.Object({ ...(connectionId ? {} : { connection_id: Type.String({ minLength: 1, maxLength: 128 }) }), method: Type.Union([Type.Literal("GET"), Type.Literal("POST"), Type.Literal("PUT"), Type.Literal("PATCH"), Type.Literal("DELETE")]), path: Type.String({ minLength: 1, maxLength: 2048 }), body: Type.Optional(Type.String({ minLength: 1, maxLength: 16384 })), reason: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })) }), replay: "unsafe",
+    async execute(args, api) {
+      try {
+        const id = connectionId ?? (args as { connection_id?: string }).connection_id;
+        if (!id) throw invalid("Choose an API connection");
+        const connection = core.ledger.connection(id);
+        const authority = authorityOf(connection);
+        const scope = authorize(api, connection, authority);
+        if (connection.config.kind !== "api") throw invalid("Choose an API connection");
+        const url = connectionRequestUrl(connection.config, args.path);
+        if (args.method === "GET" && args.body !== undefined) throw invalid("GET requests take no body");
+        const read = connectionRequestIsReadOnly(connection, args.method, args.path);
+        if (scope.conversation.kind === "subagent" && !read) throw forbidden("Subagents can only read external services");
+        const input: WriteRequest = { connectionId: id, authority, method: args.method, path: args.path, body: args.body ?? null };
+        const classification = { target: { kind: "connection" as const, id }, access: read ? "read" as const : "write" as const, reversible: false, external: !read, amount: null };
+        if (read) {
+          policyRead(core, scope.conversation.id, { ...classification, tool: name });
+          return text(await request(api, input));
+        }
+        if (scope.work?.activityId && core.ledger.activity(scope.work.activityId).policy.externalActions === "deny") throw forbidden("This activity denies external actions");
+        const effect = await core.effects.propose({ conversationId: scope.conversation.id, callId: api.callId, tool: name, input, classification,
+          summary: `${args.method} ${url.href}`, title: `서비스 변경: ${connection.name}`,
+          detail: [`대상: ${url.href}`, `방법: ${args.method}`, ...(args.reason ? [args.reason] : []), "", args.body ?? "(본문 없음)", "", "승인하면 외부 서비스에 한 번 전송합니다. 취소나 되돌리기는 보장되지 않습니다."].join("\n"), proposal: { input } });
+        return text(effect.state === "done" ? effect.result ?? "Finished" : `Write recorded for policy approval (${effect.id}); do not repeat it.`);
+      } catch (error) { return connectionError(error); }
+    },
+  });
 }

@@ -31,6 +31,7 @@ import { SourceStore } from "./stores/sources.ts";
 import { hostIsIdle, Updater } from "./update/index.ts";
 import { detectLayout, registerHostBundle } from "./update/storage.ts";
 import { MailService } from "./integrations/mail.ts";
+import { createHostMcpClients, type McpClients } from "./integrations/mcp.ts";
 
 export interface App {
   core: Core;
@@ -79,6 +80,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedDesktop: DesktopPort | null = null;
   let openedSources: SourceConnections | null = null;
   let openedMail: MailService | null = null;
+  let openedMcp: McpClients | null = null;
   let openedSourceStore: SourceStore | null = null;
   let openedMemory: MemoryStore | null = null;
   let openedDreams: MemoryDreams | null = null;
@@ -100,6 +102,7 @@ export async function openApp(config: Config): Promise<App> {
     if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
     await Promise.all([
       attempt(async () => { await openedMail?.close(); }),
+      attempt(async () => { await openedMcp?.close(); openedMcp = null; }),
       attempt(async () => { await openedSources?.close(); }),
       attempt(async () => { await openedSandbox?.close(); openedSandbox = null; }),
     ]);
@@ -152,6 +155,7 @@ export async function openApp(config: Config): Promise<App> {
     const skills = createSkills(config);
     const host = config.mac ? new MacHost({ roots: config.mac.roots, stateRoot: config.root }) : null;
     const vault = (openedVault = createVault(config.root));
+    const mcp = (openedMcp = createHostMcpClients({ root: config.root, ledger, sources: openedSources, vault }));
     const browser = (openedBrowser = createBrowser(config, { root: config.root, onLogin(ref, login) {
       const item = vault.saveLogin(ref.ghostId, login);
       core.ledger.tx(() => core.notify({ id: `browser-login:${item.id}:${item.updatedAt}`, kind: "message", ghostId: ref.ghostId, conversationId: ref.conversationId, workId: null, decisionId: null, title: "로그인 정보를 금고에 저장했어요", body: `${item.origin} · ${item.username}` }));
@@ -159,7 +163,7 @@ export async function openApp(config: Config): Promise<App> {
     } }));
     const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
-    const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, reach: createReach(config), browser, vault, desktop, mail, toss: createToss() });
+    const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
     core.attach(engine);

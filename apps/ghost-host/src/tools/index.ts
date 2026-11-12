@@ -35,6 +35,9 @@ import { AUTONOMY_DRIVE, DRIVE_OFF, MAIN_DRIVE, MAIN_DRIVE_OFF, TEAM_DRIVE_NOTE,
 import type { MailService } from "../integrations/mail.ts";
 import { createMailTools, MAIL_INSTRUCTIONS } from "./mail.ts";
 import { GOALS_INSTRUCTIONS, createGoalTools } from "./goals.ts";
+import { DynamicCapabilities } from "./dynamic.ts";
+import type { McpPort } from "../integrations/mcp.ts";
+import { createConfigurationTools } from "./configuration.ts";
 
 /**
  * How a Ghost speaks to the owner. Briefs between Ghosts stay exact; what a person reads is a
@@ -201,6 +204,7 @@ export function createToolSet(deps: {
   mail?: MailService | null;
   /** Read-only Toss Securities API (ghost.toss); needs the vault for its key, null leaves the tool out. */
   toss?: TossPort | null;
+  mcp?: McpPort | null;
 }): ToolSet {
   /** Every tool gets the journal's round rule and the repeat guard, selectable or fixed alike. */
   const harden = (extension: Extension): Extension => repeatGuard(deps.core, sequentialEffects(extension));
@@ -226,6 +230,8 @@ export function createToolSet(deps: {
   const desktop = deps.desktop ? harden(createDesktopTools(deps.core, deps.desktop)) : null;
   const mail = deps.mail ? harden(createMailTools(deps.core, deps.mail)) : null;
   const toss = deps.toss && deps.vault ? createTossTools(deps.core, deps.vault, deps.toss) : null;
+  const dynamic = new DynamicCapabilities(deps.core, deps.mcp ?? null, { sources: deps.core.activitySources ?? null, vault: deps.vault ?? null, browser: deps.browser ?? null }, harden);
+  const configuration = harden(createConfigurationTools(deps.core));
   const optional = [memory, documents, host, skills, web, sources, browser, vault, connections, desktop, mail, toss].filter((extension): extension is Extension => extension !== null);
   /** Guidance for an installed capability, only for a Ghost that holds one of its tools. */
   const capabilityInstructions = (ghost: Ghost) =>
@@ -245,15 +251,17 @@ export function createToolSet(deps: {
   const language = () => deps.core.ledger.settings().ownerLanguage ?? "ko";
   return {
     all(): Extension[] {
-      return [direct, interactive, drive, activities, work, review, main, goals, self, ...optional];
+      return [direct, interactive, drive, activities, work, review, main, goals, self, configuration, dynamic.extension, ...optional];
     },
+    prepare: (conversation, ghost, work, extensions) => dynamic.prepare(conversation, ghost, work, extensions),
+    bindLoader: load => dynamic.bindLoader(load),
     extensionsFor(conversation: Conversation, ghost: Ghost, _work: Work | null): Extension[] {
       switch (conversation.kind) {
         case "wake":
         case "subagent":
           return [];
         case "direct": {
-          const selected = [direct, interactive, drive, activities, self];
+          const selected = [direct, interactive, drive, activities, self, configuration];
           if (memory) selected.push(memory);
           if (documents) selected.push(documents);
           if (host) selected.push(host);

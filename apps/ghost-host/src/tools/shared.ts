@@ -1,4 +1,4 @@
-import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
+import { matchesToolPatterns, type BuiltinGhostTool, type Conversation, type Ghost, type Work } from "@ghost/contract";
 import { Type } from "typebox";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
@@ -15,7 +15,13 @@ export interface Scope {
 }
 
 /** The conversation kinds each selectable tool runs in; `Record<GhostTool, …>` stays exhaustive over the contract list. */
-const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
+const TOOL_KINDS: Record<BuiltinGhostTool, readonly Conversation["kind"][]> = {
+  subagent_run: ["direct", "work"],
+  scope_create: ["direct"], scope_update: ["direct"], scope_attach: ["direct"], scope_delete: ["direct"],
+  slot_set: ["direct"], slot_delete: ["direct"], limits_set: ["direct"],
+  rule_create: ["direct"], rule_update: ["direct"], rule_delete: ["direct"],
+  mcp_create: ["direct"], mcp_update: ["direct"], mcp_delete: ["direct"],
+  config_revert: ["direct"], config_history: ["direct"], metrics_read: ["direct"],
   work_create: ["direct"],
   work_list: ["direct"],
   work_inspect: ["direct"],
@@ -105,11 +111,17 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
  * require conversation kind ∩ the Ghost's persisted allow-list. A call configured before a revocation
  * still passes through here before any effect, so revocation stops even in-flight stale calls.
  */
-export function requireAllowed(core: Core, api: ToolExecutionApi, name: GhostTool): Scope {
+export function requireAllowed(core: Core, api: ToolExecutionApi, name: string): Scope {
   const scope = scopeOf(core, api);
-  if (!TOOL_KINDS[name].includes(scope.conversation.kind)) throw forbidden(`${name} does not run in a ${scope.conversation.kind} conversation`);
-  if (!scope.ghost.tools.includes(name)) throw forbidden(`${name} is not enabled for ${scope.ghost.name}; if the goal needs it, ask once with capability_request (tools: ["${name}"]) and end your turn`);
-  if (scope.work?.toolScope && !scope.work.toolScope.includes(name)) throw forbidden(`${name} is outside this Work's activity rule, which only the owner changes; do the step with another tool or report it in complete`);
+  const kind = scope.conversation.kind === "wake" ? "direct" : scope.conversation.kind;
+  const kinds = TOOL_KINDS[name as BuiltinGhostTool] ?? (/^(mcp|conn)\./.test(name) ? ["direct", "work", "subagent"] : []);
+  if (kind === "subagent") {
+    if (!SUBAGENT_READ_TOOLS[name] && !name.startsWith("mcp.") && !name.startsWith("conn.")) throw forbidden(`${name} is not read-only`);
+    const selected = core.ledger.setting<string[]>(`subagent:tools:${scope.conversation.id}`, []);
+    if (!selected.includes(name)) throw forbidden(`${name} was not selected for this subagent`);
+  } else if (!kinds.includes(kind)) throw forbidden(`${name} does not run in a ${scope.conversation.kind} conversation`);
+  if (!matchesToolPatterns(scope.ghost.tools, name)) throw forbidden(`${name} is not enabled for ${scope.ghost.name}; if the goal needs it, ask once with capability_request (tools: ["${name}"]) and end your turn`);
+  if (scope.work?.toolScope && !matchesToolPatterns(scope.work.toolScope, name)) throw forbidden(`${name} is outside this Work's activity rule, which only the owner changes; do the step with another tool or report it in complete`);
   if (scope.work?.execution?.kind === "host" && ["read", "write", "edit", "bash", "publish_artifact"].includes(name) && !scope.ghost.hostExecution) throw forbidden("direct PC execution was revoked by the owner");
   if (scope.work && scope.ghost.state !== "active") throw forbidden("the executing Ghost is no longer active");
   if (scope.work && !["running", "waiting"].includes(scope.work.state)) throw forbidden(`Work is ${scope.work.state}`);
@@ -118,13 +130,22 @@ export function requireAllowed(core: Core, api: ToolExecutionApi, name: GhostToo
   return scope;
 }
 
+export const SUBAGENT_READ_TOOLS: Readonly<Record<string, true>> = Object.fromEntries(["web_search", "web_read", "reach", "document_scopes", "document_list", "document_read", "skill_read", "source_list", "source_check", "host_read", "host_list", "host_search", "host_status", "host_services", "host_disk_scan", "host_disk_usage", "host_nodes", "memory_search", "memory_read", "connection_list", "toss_read"].map(name => [name, true]));
+
 /** Resolve the calling conversation from the Pi conversation id the harness puts on every call. */
 export function scopeOf(core: Core, api: ToolExecutionApi): Scope {
   const conversation = core.ledger.conversationByPiId(String(api.conversationId));
   if (!conversation) throw notFound(`conversation ${api.conversationId} is not in the ledger`);
   const ghost = core.ledger.ghost(conversation.ghostId);
   if (ghost.deletedAt !== null) throw forbidden(`${ghost.name} was deleted`);
-  const work = conversation.workId ? core.ledger.work(conversation.workId) : null;
+  let work = conversation.workId ? core.ledger.work(conversation.workId) : null;
+  if (conversation.kind === "subagent") {
+    const parentId = core.ledger.setting<string | null>(`subagent:parent:${conversation.id}`, null);
+    if (!parentId || ghost.state !== "active") throw forbidden("Subagent authority is unavailable");
+    const parent = core.ledger.conversation(parentId);
+    if (parent.ghostId !== ghost.id || !["direct", "wake", "work"].includes(parent.kind)) throw forbidden("Subagent parent authority changed");
+    work = parent.workId ? core.ledger.work(parent.workId) : null;
+  }
   return { conversation, ghost, work };
 }
 

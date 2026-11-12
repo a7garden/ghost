@@ -62,7 +62,7 @@ export const ExecutionTarget = Type.Union([
 export type ExecutionTarget = Static<typeof ExecutionTarget>;
 
 /** Selectable Ghost grants. Lifecycle tools (including ask_parent/ask_peer/answer_question), self_adapt/capability_request, Host memory and main-only management/work_steer are fixed, not selectable. Host and desktop tools reach the owner's Mac outside the sandbox; finance tools read brokerage accounts. Host, desktop, mail and finance tools are never granted by default. */
-export const GhostTool = Type.Union([
+export const BuiltinGhostTool = Type.Union([
   Type.Literal("work_create"),
   Type.Literal("work_list"),
   Type.Literal("work_inspect"),
@@ -144,11 +144,40 @@ export const GhostTool = Type.Union([
   Type.Literal("mail_update"),
   Type.Literal("mail_send"),
   Type.Literal("toss_read"),
+  Type.Literal("subagent_run"),
+  Type.Literal("scope_create"),
+  Type.Literal("scope_update"),
+  Type.Literal("scope_attach"),
+  Type.Literal("scope_delete"),
+  Type.Literal("slot_set"),
+  Type.Literal("slot_delete"),
+  Type.Literal("limits_set"),
+  Type.Literal("rule_create"),
+  Type.Literal("rule_update"),
+  Type.Literal("rule_delete"),
+  Type.Literal("mcp_create"),
+  Type.Literal("mcp_update"),
+  Type.Literal("mcp_delete"),
+  Type.Literal("config_revert"),
+  Type.Literal("config_history"),
+  Type.Literal("metrics_read"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
+export type BuiltinGhostTool = Static<typeof BuiltinGhostTool>;
+/** Open namespace segments are encoded independently, so dots in a server tool cannot collide. */
+export const GhostTool = Type.Union([
+  BuiltinGhostTool,
+  Type.String({ minLength: 1, maxLength: 512, pattern: "^(?:mcp\\.[A-Za-z0-9_%~-]+\\.[A-Za-z0-9_%~-]+|conn\\.[A-Za-z0-9_%~-]+)$" }),
+]);
 
 /** Every selectable tool, in contract order. */
-export const GHOST_TOOLS: readonly GhostTool[] = [
+export const GHOST_TOOLS: readonly BuiltinGhostTool[] = [
+  "subagent_run",
+  "scope_create", "scope_update", "scope_attach", "scope_delete",
+  "slot_set", "slot_delete", "limits_set",
+  "rule_create", "rule_update", "rule_delete",
+  "mcp_create", "mcp_update", "mcp_delete",
+  "config_revert", "config_history", "metrics_read",
   "work_create",
   "work_list",
   "work_inspect",
@@ -267,8 +296,31 @@ export const SkillList = Type.Array(SkillName, { uniqueItems: true, maxItems: 16
 /** Models tried in order when the Ghost's model fails with a retryable, rate-limit or quota error. */
 export const FallbackList = Type.Array(ModelRef, { maxItems: 3 });
 
-/** An explicit allow-list: unknown names and duplicates are schema errors. */
-export const GhostToolList = Type.Array(GhostTool, { uniqueItems: true, maxItems: GHOST_TOOLS.length });
+/** Bounded glob syntax only: no regular expressions, character classes or recursive matching. */
+export const ToolPattern = Type.Union([
+  GhostTool,
+  Type.String({ minLength: 1, maxLength: 512, pattern: "^(?=[A-Za-z0-9_.%~*?-]*[?*])[A-Za-z0-9_.%~*?-]+$" }),
+]);
+export const GhostToolList = Type.Array(ToolPattern, { uniqueItems: true, maxItems: 1024 });
+
+/** Constant-space glob matching; both input and pattern have hard bounds. */
+export function matchToolPattern(pattern: string, name: string): boolean {
+  if (pattern.length > 512 || name.length > 512 || !/^[A-Za-z0-9_.%~*?-]+$/.test(pattern)) return false;
+  let input = 0, token = 0, star = -1, retry = 0;
+  while (input < name.length) {
+    if (pattern[token] === "?" || pattern[token] === name[input]) { input++; token++; }
+    else if (pattern[token] === "*") { star = token++; retry = input; }
+    else if (star >= 0) { token = star + 1; input = ++retry; }
+    else return false;
+  }
+  while (pattern[token] === "*") token++;
+  return token === pattern.length;
+}
+
+export function matchesToolPatterns(patterns: readonly string[], name: string): boolean {
+  for (let index = 0; index < Math.min(patterns.length, 1024); index++) if (matchToolPattern(patterns[index]!, name)) return true;
+  return false;
+}
 
 export const DocRef = Type.Union([
   Type.Object({ kind: Type.Literal("page"), scopeId: Id, locator: Type.String({ minLength: 1, maxLength: 4096 }) }),

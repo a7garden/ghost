@@ -5,6 +5,8 @@ import {
   connectionCredentialScope,
   ConnectionOAuthClientInput,
   ConnectionOAuthStart,
+  ConnectionOAuthMetadata,
+  validate,
   parse,
   type Command,
   type Connection,
@@ -17,6 +19,7 @@ import { execute } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
 import { CommandError, invalid } from "../core/errors.ts";
 import { digestOf } from "../core/ids.ts";
+import { validateConnectionConfig } from "../integrations/activity-sources.ts";
 
 export type ConnectionOAuthFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 export interface ConnectionOAuthDependencies {
@@ -65,6 +68,7 @@ interface ClientApp {
   /** Bumped on every content change; refresh bindings recorded under an older generation stop auto-refreshing. */
   generation: number;
   updatedAt: number;
+  provider?: ConnectionOAuthMetadata;
 }
 
 /** A persisted refresh token, bound to the connection row it may renew — never resurrected. */
@@ -191,12 +195,13 @@ const PROVIDERS: Record<ConnectionOAuthServiceId, ProviderSpec> = {
 };
 
 const isService = (value: unknown): value is ConnectionOAuthServiceId =>
-  value === "google" || value === "outlook" || value === "x" || value === "notion" || value === "slack";
+  typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value);
 
 const EMAIL = /^[^\s<>@,;:\r\n]+@[^\s<>@,;:\r\n]+$/;
 
 /** The fixed per-service connection row this login registers; the credential is the access token. */
-function connectionConfig(service: ConnectionOAuthServiceId, username: string, ghostIds: string[]): ConnectionConfig {
+function connectionConfig(service: ConnectionOAuthServiceId, username: string, ghostIds: string[], provider?: ConnectionOAuthMetadata): ConnectionConfig {
+  if (provider) return { ...provider.connection, ghostIds };
   switch (service) {
     case "google":
       return { kind: "api", baseUrl: "https://www.googleapis.com/", authHeader: "Authorization", authPrefix: "Bearer", testPath: "oauth2/v3/userinfo", headers: {}, ghostIds };
@@ -209,6 +214,14 @@ function connectionConfig(service: ConnectionOAuthServiceId, username: string, g
     case "outlook":
       return { kind: "mail", host: "outlook.office365.com", port: 993, username, mailbox: "INBOX", smtpHost: "smtp-mail.outlook.com", smtpPort: 587, smtpSecure: false, authType: "oauth2" };
   }
+  throw invalid("Configure OAuth provider metadata before connecting this service");
+}
+
+function providerSpec(service: string, client: ClientApp): ProviderSpec {
+  if (client.provider) return { ...client.provider, requiresUsername: false, ghostScoped: true };
+  const spec = PROVIDERS[service];
+  if (!spec) throw invalid("Configure OAuth provider metadata before connecting this service");
+  return spec;
 }
 
 /** Bounded token response reading; a parse or shape failure is a fixed login failure, never raw provider text. */
@@ -377,6 +390,7 @@ export class ConnectionOAuth {
       authorizationUrl: null,
       connectionId: connection?.id ?? null,
       message: null,
+      provider: client?.provider ?? null,
     };
     if (binding !== null && connection?.hasCredential && connection.credentialVersion === binding.credentialVersion && digestOf(connectionCredentialScope(connection.config)) === binding.configDigest) {
       if (client === null || client.generation !== binding.appGeneration) {
@@ -427,10 +441,18 @@ export class ConnectionOAuth {
     const clientSecret = input.clientSecret === undefined
       ? previous !== null && previous.clientId === input.clientId ? previous.clientSecret : null
       : input.clientSecret;
-    const changed = previous === null || previous.clientId !== input.clientId || (previous.clientSecret ?? null) !== (clientSecret ?? null);
+    const provider = input.provider ?? previous?.provider;
+    if (provider) {
+      for (const endpoint of [provider.authorize, provider.token]) {
+        let url: URL;
+        try { url = new URL(endpoint); } catch { throw invalid("OAuth endpoints must be HTTPS URLs"); }
+        if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw invalid("OAuth endpoints must be HTTPS URLs without credentials, queries or fragments");
+      }
+      validateConnectionConfig({ ...provider.connection, ghostIds: [] });
+    } else if (!PROVIDERS[service]) throw invalid("A new service needs OAuth provider metadata");
+    const changed = previous === null || previous.clientId !== input.clientId || (previous.clientSecret ?? null) !== (clientSecret ?? null) || digestOf(previous.provider ?? null) !== digestOf(provider ?? null);
     const generation = changed ? (previous?.generation ?? 0) + 1 : previous!.generation;
-    // Local-secret boundary: 0600 bytes via exclusive temp file + atomic rename; never a ledger row or effect.
-    this.writeJson(this.clientFile(service), { clientId: input.clientId, clientSecret, generation, updatedAt: this.now() } satisfies ClientApp);
+    this.writeJson(this.clientFile(service), { clientId: input.clientId, clientSecret, generation, updatedAt: this.now(), ...(provider ? { provider } : {}) } satisfies ClientApp);
     if (changed) {
       const attempt = this.attempts.get(service);
       if (attempt !== undefined && attempt.state === "pending") this.failAttempt(attempt, MESSAGE.clientChanged);
@@ -441,7 +463,7 @@ export class ConnectionOAuth {
   private async start(service: ConnectionOAuthServiceId, request: Request, access: Access): Promise<ConnectionOAuthView> {
     const client = this.loadClient(service);
     if (client === null) throw invalid(MESSAGE.clientRequired);
-    const spec = PROVIDERS[service];
+    const spec = providerSpec(service, client);
     const pending = this.attempts.get(service);
     // A running login is joined, not duplicated; only a settled attempt is replaced.
     if (pending !== undefined && pending.state === "pending") return this.view(service);
@@ -580,10 +602,10 @@ export class ConnectionOAuth {
       if (!active()) return;
       // The initiating principal must still exist after the awaited network round-trip.
       this.activeClient(attempt);
-      const spec = PROVIDERS[attempt.service];
+      const spec = providerSpec(attempt.service, client);
       if (spec.requiresRefreshToken && token.refreshToken === null) throw new LoginFailure(MESSAGE.noRefresh);
       const ghostIds = spec.ghostScoped ? attempt.start.ghostIds : [];
-      const config = connectionConfig(attempt.service, attempt.start.username ?? "", ghostIds);
+      const config = connectionConfig(attempt.service, attempt.start.username ?? "", ghostIds, client.provider);
       const connectionId = await this.register(attempt, config, token.accessToken);
       attempt.connectionId = connectionId;
       if (!active()) return;
@@ -640,7 +662,7 @@ export class ConnectionOAuth {
   }
 
   private async exchange(attempt: Attempt, client: ClientApp, code: string): Promise<TokenResult> {
-    const spec = PROVIDERS[attempt.service];
+    const spec = providerSpec(attempt.service, client);
     const form = new URLSearchParams({
       grant_type: "authorization_code",
       code,
@@ -780,7 +802,7 @@ export class ConnectionOAuth {
   private async refreshToken(connection: Connection, binding: RefreshBinding, client: ClientApp): Promise<void> {
     const stored = binding.refreshToken;
     if (stored === null) throw new CommandError("unavailable", MESSAGE.refreshFailed);
-    const spec = PROVIDERS[binding.serviceId];
+    const spec = providerSpec(binding.serviceId, client);
     const form = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: stored,
@@ -858,11 +880,13 @@ export class ConnectionOAuth {
     if (typeof clientId !== "string" || clientId.length === 0 || clientId.length > 256) return null;
     if (clientSecret !== null && (typeof clientSecret !== "string" || clientSecret.length === 0 || clientSecret.length > 512)) return null;
     if (typeof generation !== "number" || !Number.isSafeInteger(generation) || generation < 1) return null;
+    if (stored.provider !== undefined && !validate(ConnectionOAuthMetadata, stored.provider)) return null;
     return {
       clientId,
       clientSecret: clientSecret === null ? null : clientSecret,
       generation,
       updatedAt: typeof updatedAt === "number" ? updatedAt : 0,
+      ...(stored.provider === undefined ? {} : { provider: parse(ConnectionOAuthMetadata, stored.provider) }),
     };
   }
 

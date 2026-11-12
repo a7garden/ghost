@@ -7,6 +7,15 @@ import { ErrorCode, McpError, ToolListChangedNotificationSchema, type CallToolRe
 import type { McpServer } from "@ghost/contract";
 import { CommandError, forbidden, invalid, notFound } from "../core/errors.ts";
 import { HOST_VERSION } from "../update/identity.ts";
+import { chmodSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+import type { Ledger } from "../ledger/ledger.ts";
+import type { Vault } from "../stores/vault.ts";
+import type { SourceConnections } from "./activity-sources.ts";
+import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
+import { buildSeatbeltPolicy, seatbeltArgv } from "../sandbox/seatbelt.ts";
 
 /** Rewrites a stdio server's argv before launch, such as wrapping it in a sandbox. */
 export type CommandWrapper = (argv: string[]) => string[];
@@ -40,8 +49,8 @@ export interface McpCallResult {
 export interface McpPort {
   /** Every page of the server's tools; cached until the server announces a change. */
   listTools(serverId: string, signal?: AbortSignal): Promise<McpTool[]>;
-  callTool(serverId: string, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallResult>;
-  /** Last stderr of a stdio server, kept across restarts. Owner diagnostics only: may hold secrets, never show it to a model. */
+  callTool(serverId: string, name: string, args: Record<string, unknown>, signal?: AbortSignal, authorize?: () => void): Promise<McpCallResult>;
+  /** Stderr is discarded because a server may print credentials even before initialization. */
   stderrTail(serverId: string): string;
   close(): Promise<void>;
 }
@@ -84,7 +93,13 @@ export interface McpOptions {
   env?(server: McpServer): Promise<Record<string, string>>;
   /** Headers carrying the credential of an http server's connection. */
   authHeaders?(connectionId: string): Promise<Record<string, string>>;
-  wrapCommand?: CommandWrapper;
+  /** Host authority stamp, including connection credential epochs. */
+  authorityKey?(server: McpServer): string;
+  authorize?(server: McpServer): void;
+  wrapCommand?: (argv: string[], server: McpServer) => string[] | Promise<string[]>;
+  runtimeEnv?(server: McpServer): Record<string, string>;
+  workspace?(server: McpServer): string;
+  redact?(server: McpServer, value: string): string;
   /** Called when a server announces `notifications/tools/list_changed`. */
   onToolsChanged?(serverId: string): void;
   limits?: Partial<McpLimits>;
@@ -282,7 +297,7 @@ interface Entry {
 export class McpClients implements McpPort {
   private readonly limits: McpLimits;
   private readonly sessions = new Map<string, Entry>();
-  private readonly stderr = new Map<string, string>();
+  private readonly secretValues = new Map<string, string[]>();
   private shut = false;
 
   constructor(private readonly options: McpOptions) {
@@ -292,7 +307,10 @@ export class McpClients implements McpPort {
   async listTools(serverId: string, signal?: AbortSignal): Promise<McpTool[]> {
     const { server, session } = await this.session(serverId);
     const read = new Set(server.readTools);
-    const withAccess = (tools: RawTool[]) => tools.map((tool): McpTool => ({ ...tool, access: read.has(tool.name) ? "read" : "write" }));
+    const withAccess = (tools: RawTool[]) => {
+      this.assertCurrent(server);
+      return JSON.parse(this.redact(server, JSON.stringify(tools.map((tool): McpTool => ({ ...tool, access: read.has(tool.name) ? "read" : "write" }))))) as McpTool[];
+    };
     for (let attempt = 0; attempt < 3; attempt++) {
       if (session.tools) return withAccess(session.tools);
       const generation = session.generation;
@@ -310,23 +328,28 @@ export class McpClients implements McpPort {
     throw unavailable(`MCP server ${server.name} keeps changing its tool list`);
   }
 
-  async callTool(serverId: string, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallResult> {
+  async callTool(serverId: string, name: string, args: Record<string, unknown>, signal?: AbortSignal, authorize?: () => void): Promise<McpCallResult> {
     if (name.length === 0 || name.length > 128) throw invalid("MCP tool name must be 1 to 128 characters");
     const { server, session } = await this.session(serverId);
+    this.assertCurrent(server);
+    authorize?.();
     try {
       const result = await session.client.callTool({ name, arguments: args }, undefined, {
         timeout: this.limits.callMs,
         maxTotalTimeout: this.limits.callMs,
         ...(signal ? { signal } : {}),
       });
-      return boundResult(result as CallToolResult, this.limits);
+      this.assertCurrent(server);
+      authorize?.();
+      const bounded = boundResult(result as CallToolResult, this.limits);
+      return JSON.parse(this.redact(server, JSON.stringify(bounded))) as McpCallResult;
     } catch (error) {
       throw this.failure(server, session, error, `tool ${clip(name, 128)}`, this.limits.callMs, signal);
     }
   }
 
-  stderrTail(serverId: string): string {
-    return this.stderr.get(serverId) ?? "";
+  stderrTail(_serverId: string): string {
+    return "";
   }
 
   async close(): Promise<void> {
@@ -336,16 +359,42 @@ export class McpClients implements McpPort {
     await Promise.all(entries.map((entry) => entry.ready.then((session) => session.close(), () => undefined)));
   }
 
+  private key(server: McpServer): string {
+    return JSON.stringify([server, this.options.authorityKey?.(server)]);
+  }
+
+  private assertCurrent(server: McpServer): void {
+    const current = this.options.server(server.id);
+    if (!current?.enabled || this.key(current) !== this.key(server) || this.sessions.get(server.id)?.key !== this.key(current)) throw forbidden("MCP server authority changed");
+    this.options.authorize?.(current);
+  }
+
+  /** Drop revoked sessions immediately, including clients still connecting. */
+  invalidate(serverId: string): void {
+    const entry = this.sessions.get(serverId);
+    this.sessions.delete(serverId);
+    this.secretValues.delete(serverId);
+    if (entry) void entry.ready.then(session => session.close(), () => undefined);
+  }
+
+  private redact(server: McpServer, value: string): string {
+    const clean = (this.secretValues.get(server.id) ?? []).filter(Boolean).reduce((text, secret) =>
+      [secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret)].reduce((out, form) => out.split(form).join("[redacted]"), text), value);
+    return this.options.redact?.(server, clean) ?? clean;
+  }
+
   private async session(serverId: string): Promise<{ server: McpServer; session: Session }> {
     const server = this.options.server(serverId);
     if (!server) throw notFound(`MCP server ${serverId} is not registered`);
     if (!server.enabled) throw forbidden(`MCP server ${server.name} is disabled`);
-    const key = JSON.stringify(server.transport);
+    const key = this.key(server);
     for (let launches = 0; ; ) {
       if (this.shut) throw unavailable("MCP clients are shut down");
       const entry = this.sessions.get(serverId);
       if (entry?.key === key) {
         const session = await entry.ready;
+        this.assertCurrent(server);
+        if (this.sessions.get(serverId) !== entry) throw forbidden("MCP session was revoked");
         if (!session.closed) return { server, session };
         if (this.sessions.get(serverId) === entry) this.sessions.delete(serverId);
         continue;
@@ -393,24 +442,22 @@ export class McpClients implements McpPort {
 
   private async stdio(server: McpServer): Promise<Transport> {
     if (server.transport.kind !== "stdio") throw new Error("not a stdio server");
-    const { command, args, cwd } = server.transport;
-    const argv = (this.options.wrapCommand ?? identityCommand)([command, ...args]);
+    const { command, args } = server.transport;
+    const cwd = this.options.workspace?.(server) ?? server.transport.cwd;
+    const argv = await (this.options.wrapCommand ?? identityCommand)([command, ...args], server);
     const [program, ...rest] = argv;
     if (program === undefined || program === "" || argv.some((part) => part.includes("\0"))) throw invalid(`MCP server ${server.name} has an invalid command`);
     const env = await this.envFor(server);
     const transport = new StdioClientTransport({
       command: program,
       args: rest,
-      env,
+      env: { ...env, ...this.options.runtimeEnv?.(server) },
       ...(cwd === null ? {} : { cwd }),
       stderr: "pipe",
       maxBufferSize: this.limits.messageBytes,
     });
-    this.stderr.delete(server.id);
-    transport.stderr?.on("data", (chunk: Buffer | string) => {
-      const tail = (this.stderr.get(server.id) ?? "") + chunk.toString();
-      this.stderr.set(server.id, tail.length > this.limits.stderrChars ? tail.slice(-this.limits.stderrChars) : tail);
-    });
+    // Server stderr is never retained: it may contain credentials, even on startup failure.
+    transport.stderr?.on("data", () => undefined);
     return transport;
   }
 
@@ -425,6 +472,7 @@ export class McpClients implements McpPort {
       if (value.includes("\0")) throw invalid(`The value for ${name} contains a NUL byte`);
       env[name] = value;
     }
+    this.secretValues.set(server.id, Object.values(env));
     return env;
   }
 
@@ -436,10 +484,16 @@ export class McpClients implements McpPort {
     if (connectionId !== null) {
       if (!this.options.authHeaders) throw unavailable(`MCP server ${server.name} needs a connection, but no credential source is configured`);
       headers = await this.options.authHeaders(connectionId);
+      this.secretValues.set(server.id, Object.values(headers));
     }
     const transport: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(url, {
       requestInit: { headers },
-      fetch: boundedFetch(this.limits.messageBytes, () => void transport.close()),
+      fetch: async (input, init) => {
+        this.assertCurrent(server);
+        const result = await boundedFetch(this.limits.messageBytes, () => void transport.close())(input, { ...init, redirect: "error" });
+        this.assertCurrent(server);
+        return result;
+      },
     });
     return transport;
   }
@@ -470,10 +524,85 @@ export class McpClients implements McpPort {
     if (error instanceof McpError) {
       if (error.code === ErrorCode.RequestTimeout) return unavailable(`MCP server ${server.name} did not finish ${what} within ${Math.ceil(deadlineMs / 1000)} seconds`);
       if (error.code === ErrorCode.ConnectionClosed) return unavailable(`MCP server ${server.name} stopped during ${what}; it restarts on the next use`);
-      return invalid(`MCP server ${server.name} refused ${what}: ${clip(error.message, 1_000)}`);
+      return invalid(`MCP server ${server.name} refused ${what}`);
     }
     // A broken transport or a malformed answer: relaunch on the next use rather than trust this session.
     void session.close();
     return unavailable(`MCP server ${server.name} failed during ${what}`);
   }
+}
+
+/** Production wiring keeps secrets and the stdio sandbox outside every model-facing interface. */
+export function createHostMcpClients(deps: { root: string; ledger: Ledger; sources: SourceConnections; vault: Vault }): McpClients {
+  let proxy: EgressProxy | null = null;
+  let openingProxy: Promise<EgressProxy> | null = null;
+  const authorities = new Map<string, { headers: Record<string, string>; authorize(): void; redact(text: string): string }>();
+  const workspace = (server: McpServer) => {
+    const directory = join(deps.root, "mcp", createHash("sha256").update(server.id).digest("hex"));
+    for (const path of [join(deps.root, "mcp"), directory, join(directory, "tmp")]) {
+      mkdirSync(path, { recursive: true, mode: 0o700 });
+      if (lstatSync(path).isSymbolicLink() || !lstatSync(path).isDirectory()) throw forbidden("MCP workspace must be a private directory");
+      chmodSync(path, 0o700);
+    }
+    if (server.transport.kind === "stdio" && server.transport.cwd !== null && realpathSync(server.transport.cwd) !== realpathSync(directory)) throw forbidden("MCP servers run only in their private workspace; leave cwd unset");
+    return realpathSync(directory);
+  };
+  const clients = new McpClients({
+    server: id => deps.ledger.mcpServers().find(server => server.id === id) ?? null,
+    workspace,
+    authorityKey: server => JSON.stringify([
+      server.transport.kind === "http" && server.transport.connectionId !== null ? deps.ledger.findConnection(server.transport.connectionId) : null,
+      server.transport.kind === "stdio" ? deps.vault.list().filter(item => server.transport.kind === "stdio" && server.transport.env.some(name => item.title === `mcp.${server.id}.${name}`)) : [],
+    ]),
+    authorize: server => {
+      if (server.transport.kind !== "http" || server.transport.connectionId === null) return;
+      const connection = deps.ledger.connection(server.transport.connectionId);
+      if (connection.config.kind !== "api" || new URL(connection.config.baseUrl).origin !== new URL(server.transport.url).origin) throw forbidden("MCP credentials must belong to the server's origin");
+      authorities.get(connection.id)?.authorize();
+    },
+    authHeaders: async id => {
+      const authority = await deps.sources.mcpAuthority(deps.ledger.connection(id));
+      authorities.set(id, authority);
+      return authority.headers;
+    },
+    redact: (server, value) => server.transport.kind === "http" && server.transport.connectionId !== null ? authorities.get(server.transport.connectionId)?.redact(value) ?? value : value,
+    env: async server => {
+      if (server.transport.kind !== "stdio") return {};
+      const ghost = deps.ledger.ghosts().find(ghost => ghost.isDefault && ghost.deletedAt === null);
+      if (!ghost) throw unavailable("MCP secrets need an active default Ghost");
+      const values: Record<string, string> = {};
+      for (const name of server.transport.env) {
+        const items = deps.vault.listFor(ghost.id, { kind: "secret" }).filter(item => item.title === `mcp.${server.id}.${name}`);
+        if (items.length !== 1) throw unavailable(`MCP environment ${name} needs exactly one granted vault secret named mcp.${server.id}.${name}`);
+        values[name] = deps.vault.reveal(ghost.id, items[0]!.id, "value");
+      }
+      return values;
+    },
+    wrapCommand: async (argv, server) => {
+      if (!openingProxy) openingProxy = createEgressProxy();
+      proxy = await openingProxy;
+      const directory = workspace(server);
+      const policy = buildSeatbeltPolicy(homedir(), deps.root, { writeRoots: [directory], readRoots: [], proxyPort: Number(new URL(proxy.url).port) });
+      policy.toolchain = policy.toolchain.filter(path => !path.startsWith(`${homedir()}/`));
+      return seatbeltArgv(policy, argv);
+    },
+    runtimeEnv: server => {
+      const directory = workspace(server);
+      return { HOME: directory, TMPDIR: join(directory, "tmp"), PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", ...(proxy ? { HTTP_PROXY: proxy.url, HTTPS_PROXY: proxy.url, http_proxy: proxy.url, https_proxy: proxy.url, ALL_PROXY: proxy.url, all_proxy: proxy.url } : {}), NO_PROXY: "", no_proxy: "" };
+    },
+  });
+  const unsubscribe = deps.ledger.subscribe(event => {
+    if (event.type === "mcp_server") clients.invalidate(event.server.id);
+    else if (event.type === "mcp_server.removed") clients.invalidate(event.id);
+    else if (event.type === "connection" || event.type === "connection.removed") {
+      for (const server of deps.ledger.mcpServers()) if (server.transport.kind === "http") clients.invalidate(server.id);
+    }
+  });
+  const close = clients.close.bind(clients);
+  clients.close = async () => {
+    unsubscribe();
+    await close();
+    if (openingProxy) await openingProxy.then(value => value.close(), () => undefined);
+  };
+  return clients;
 }
