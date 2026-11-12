@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -306,12 +307,12 @@ test("direct context compacts with Pi and records a scoped operating state note"
 
 test("tool_search loads a dynamic MCP read into the running Pi conversation", async () => {
   let calls = 0;
-  const mcp: McpPort = {
+  const mcp: Pick<McpPort, "listTools" | "callTool" | "close"> = {
     async listTools() { return [{ name: "lookup", title: null, description: "Read lookup evidence", inputSchema: { type: "object", properties: {} }, access: "read", annotations: null }]; },
     async callTool(_server, _name, _args, _signal, authorize) { authorize?.(); calls++; return { content: [{ type: "text", text: "MCP_READ_EVIDENCE" }], isError: false, truncated: false }; },
-    stderrTail: () => "", async close() {},
+    async close() {},
   };
-  const f = await fixture(undefined, core => createToolSet({ core, sandbox, documents: null, memory: null, skills: null, mcp }));
+  const f = await fixture(undefined, core => createToolSet({ core, sandbox, documents: null, memory: null, skills: null, mcp: mcp as McpPort }));
   try {
     f.ledger.tx(() => {
       f.ledger.putSetting("toolSearchThreshold", 1);
@@ -322,7 +323,7 @@ test("tool_search loads a dynamic MCP read into the running Pi conversation", as
     let observed = false;
     f.faux.setResponses([
       fauxAssistantMessage(fauxToolCall("tool_search", { query: "lookup" }), { stopReason: "toolUse" }),
-      context => { offered = context.tools?.some(tool => tool.name === "mcp.fixture.lookup") ?? false; return fauxAssistantMessage(fauxToolCall("mcp.fixture.lookup", {}), { stopReason: "toolUse" }); },
+      context => { offered = getCurrentTools(context.messages).some(tool => tool.name === "mcp.fixture.lookup"); return fauxAssistantMessage(fauxToolCall("mcp.fixture.lookup", {}), { stopReason: "toolUse" }); },
       context => { observed = JSON.stringify(context.messages).includes("MCP_READ_EVIDENCE"); return fauxAssistantMessage("Dynamic read finished"); },
     ]);
     const done = message(f.engine, f.ghost.directConversationId, m => m.text === "Dynamic read finished");
@@ -493,7 +494,7 @@ test("wake-root Work keeps immutable tainted provenance and a separate owner rep
     const work = h.core.works.createRoot({ ghostId: ghost.id, title: "Carry source", brief: "Read", originConversationId: wake.id });
     await h.core.idle();
     expect(h.ledger.work(work.id).originConversationId).toBe(ghost.directConversationId);
-    expect(h.ledger.setting(`work:source:${work.id}`, null)).toBe(wake.id);
+    expect(h.ledger.setting<string | null>(`work:source:${work.id}`, null)).toBe(wake.id);
     expect(policyTaint(h.core, h.ledger.work(work.id).conversationId!)).toEqual({ untrustedInput: true, privateData: true });
   } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
 });
@@ -591,8 +592,8 @@ test("queued scope metadata cannot replace active tool context, including after 
     f.ledger.tx(() => { f.ledger.putScope(scope("A", f.ghost.id)); f.ledger.putScope(scope("B", f.ghost.id)); });
     f.faux.setResponses([
       fauxAssistantMessage(fauxToolCall("host_read", {}), { stopReason: "toolUse" }),
-      context => { systemScopes.push(context.systemPrompt ?? ""); return fauxAssistantMessage("A finished"); },
-      context => { systemScopes.push(context.systemPrompt ?? ""); return fauxAssistantMessage("B finished"); },
+      context => { systemScopes.push(getCurrentSystemPrompt(context.messages)); return fauxAssistantMessage("A finished"); },
+      context => { systemScopes.push(getCurrentSystemPrompt(context.messages)); return fauxAssistantMessage("B finished"); },
     ]);
     await f.engine.submit(f.ghost.directConversationId, { text: "Read A", origin: "owner", requestId: "turn-A", scopeId: "A", docAttachments: [{ kind: "skill", name: "A-skill" }] });
     await firstStarted.promise;

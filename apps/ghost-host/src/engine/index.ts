@@ -175,23 +175,23 @@ class HostEngine implements Engine, MemoryEngine {
       } }],
       hooks: [hook(GenerationTask, {
         afterResponse: async (message, api) => {
-          // A model can change during a tool round. Capture the actual response provider on
-          // the exact native receipt before Pi can settle it, not from the fallback's initial model.
           if (!(await this.harness.snapshot(FallbackReceiptsDoc, api.conversationId, ctx))) return;
+          const active = await this.harness.snapshot(LiveDoc, api.conversationId, ctx);
+          if (active?.run?.taskId !== api.taskId) return;
+          const inputs = await Promise.all(active.run.inputs.map(async (id) => (await this.harness.submission(id, ctx))?.status(ctx)));
           await this.harness.commit(async (tx) => {
             const live = await tx.doc(LiveDoc, api.conversationId);
             if (live.run?.taskId !== api.taskId) return;
-            const inputs = await Promise.all(live.run.inputs.map((id) => tx.submission(id)));
             const receipts = await tx.doc(FallbackReceiptsDoc, api.conversationId);
             for (const input of inputs) {
-              if (input?.type !== "input" || input.entry === undefined) continue;
+              if (input?.type !== "input" || input.entry === undefined || !live.run.inputs.includes(input.id)) continue;
               const receipt = receipts.byInput[String(input.entry)];
-              if (receipt?.requestId !== input.requestId) continue;
+              if (!receipt || receipt.requestId !== input.requestId) continue;
               receipt.response = { provider: message.provider, error: message.stopReason === "error" ? message.errorMessage ?? null : null, taskId: api.taskId };
             }
           }, ctx);
         },
-        beforeRequest: async (_request, api) => {
+        beforeRequest: async (_request, api): Promise<undefined> => {
           const host = this.core.ledger.conversationByPiId(String(api.conversationId));
           if (!host) throw new CommandError("forbidden", "the conversation has no host identity");
           if (host.kind === "wake" && !this.currentWake(host)) throw new CommandError("forbidden", "this wake was superseded");
@@ -431,12 +431,17 @@ class HostEngine implements Engine, MemoryEngine {
     if (ghost.state !== "active" || ghost.deletedAt !== null) throw new CommandError("unavailable", "the receiving Ghost is not active");
     const decision = options.decisionId ? this.core.ledger.findDecision(options.decisionId) : null;
     const sources = new Set([options.sourceConversationId, submission.sourceConversationId, ...(submission.sourceConversationIds ?? []), decision?.conversationId].filter((id): id is string => !!id));
+    const slotConfig = options.slot ? this.core.ledger.settings().slots?.[options.slot] : null;
+    if (options.slot && !slotConfig) throw new CommandError("unavailable", `review slot ${options.slot} is not configured`);
     this.core.ledger.tx(() => {
       if (!this.core.ledger.findConversation(id)) {
         this.core.ledger.putConversation(this.core.newConversation(ghost.id, "wake", null, "Background wake", id));
         this.core.ledger.putSetting(`wake:epoch:${id}`, this.core.ledger.setting(`owner:epoch:${ghost.id}`, 0));
         this.core.ledger.putSetting(`wake:owner:${id}`, ownerId);
-        if (options.slot) this.core.ledger.putSetting(`wake:slot:${id}`, options.slot);
+        if (options.slot && slotConfig) {
+          this.core.ledger.putSetting(`wake:slot:${id}`, options.slot);
+          this.core.ledger.putSetting(`wake:slot-config:${id}`, digestOf(slotConfig));
+        }
         if (options.decisionId) this.core.ledger.putSetting(`wake:decision:${id}`, options.decisionId);
         this.core.ledger.putSetting(`wake:sources:${id}`, [...sources]);
       }
