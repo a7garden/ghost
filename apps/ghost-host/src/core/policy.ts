@@ -193,7 +193,6 @@ const ROWS: readonly Row[] = [
   { id: "result", tool: "complete", when: { reversible: true }, decision: "review", main: true },
   { id: "document-write", tool: "document_write", when: { targetKind: "document_vault" }, decision: "allow" },
   { id: "outside-mac", tool: "*", when: { targetKind: "mac", access: "write", reversible: false }, decision: "owner" },
-  { id: "external", tool: "*", when: { external: true, access: "write" }, decision: "owner" },
   { id: "money", tool: "*", when: { amount: true }, decision: "owner" },
   { id: "rule-of-two", tool: "*", when: { access: "write", external: true, untrustedInput: true, privateData: true }, decision: "owner" },
 ];

@@ -7,6 +7,7 @@ import { CommandError, conflict, forbidden, invalid } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
 import { verifyChecks } from "./verify.ts";
 import { validateExecutionTarget } from "../sandbox/index.ts";
+import { classifyEffect, evaluateStoredPolicy } from "./policy-context.ts";
 
 /** Reminders sent when a work conversation stops without completing; a quota-ended turn never counts. */
 const MAX_IDLE_NUDGES = 2;
@@ -628,6 +629,17 @@ export class Works {
   applyVerdict(workId: string, verdict: Verdict) {
     const work = this.ledger.work(workId);
     if (work.state !== "verifying") return work;
+    if (verdict.outcome === "pass" && work.conversationId) {
+      const receipt = this.ledger.tx(() => evaluateStoredPolicy(this.core, work.conversationId!, {
+        ...classifyEffect(this.core, work.conversationId!, "complete", null),
+        reversible: !!work.result && work.acceptance.criteria.trim().length > 0,
+      }));
+      if (receipt.evaluation.decision === "deny") verdict = { ...verdict, outcome: "revise", reasons: receipt.evaluation.reason };
+      else if (verdict.source !== "owner" && receipt.evaluation.decision === "owner") {
+        this.ledger.tx(() => this.core.decisions.openAcceptance(work, receipt.evaluation.reason));
+        return work;
+      }
+    }
     const now = Date.now();
     let next: Work;
     if (verdict.outcome === "pass") {

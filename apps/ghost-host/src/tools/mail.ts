@@ -21,6 +21,7 @@ export function createMailTools(core: Core, mail: MailService): Extension {
     if (!input || digestOf(input) !== effect.inputDigest) throw new NoEffect("승인된 메일 내용이 올바르지 않습니다.");
     const authorize = () => {
       try {
+        core.effects.authorize(effect.conversationId, effect.callId);
         const piId = core.ledger.piConversationId(effect.conversationId);
         if (!piId) throw forbidden("메일 대화를 찾을 수 없습니다.");
         const scope = requireAllowed(core, { conversationId: piId } as unknown as ToolExecutionApi, "mail_send");
@@ -77,7 +78,7 @@ export function createMailTools(core: Core, mail: MailService): Extension {
         if (args.uids.length > 100) throw invalid("한 번에 100개의 메일까지 변경할 수 있습니다.");
         return text(await core.effects.run({ conversationId: scope.conversation.id, callId: api.callId, tool: "mail_update", input: args, summary: `메일 ${args.action} (${args.uids.length}개)` }, async () => {
           const authorize = () => {
-            try { requireAllowed(core, api, "mail_update"); }
+            try { requireAllowed(core, api, "mail_update"); core.effects.authorize(scope.conversation.id, api.callId); }
             catch { throw new NoEffect("메일 변경 권한이 취소되었습니다."); }
           };
           return JSON.stringify(await mail.update(args.account, args.mailbox, args.uids, args.action, args.target, authorize));

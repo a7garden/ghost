@@ -27,6 +27,9 @@ export function createHostTools(core: Core, host: HostPort): Extension {
     try {
       if (!decision?.proposal) throw new Error("missing approved command");
       command = decision.proposal.input as HostCommand;
+      const piId = core.ledger.piConversationId(effect.conversationId);
+      if (!piId) throw new Error("approved conversation is unavailable");
+      requireAllowed(core, { conversationId: piId } as Parameters<typeof requireAllowed>[1], "host_command_propose");
       if (digestOf(command) !== effect.inputDigest)
         throw new Error("approved command identity mismatch");
       const checked = host.validateCommand(command);
@@ -37,7 +40,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
         error instanceof Error ? error.message : String(error),
       );
     }
-    return JSON.stringify(await host.executeCommand(command));
+    return JSON.stringify(await host.executeCommand(command, () => core.effects.authorize(effect.conversationId, effect.callId)));
   });
   const noArg = (
     ["host_status", "host_services", "host_disk_scan", "host_nodes"] as const

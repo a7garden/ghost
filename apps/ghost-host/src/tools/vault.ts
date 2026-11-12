@@ -43,8 +43,12 @@ export function createVaultTools(core: Core, vault: Vault): Extension {
         async execute(args, api) {
           try {
             const scope = requireAllowed(core, api, "vault_generate_login");
-            const item = vault.generateLogin(scope.ghost.id, { ...args, origin: normalizeOrigin(args.origin) }, idFor(scope.conversation.id, api.callId));
-            return { content: [{ type: "text", text: JSON.stringify(item) }] };
+            const saved = await core.effects.run({ conversationId: scope.conversation.id, callId: api.callId, tool: "vault_generate_login", input: args, summary: "Generate login without revealing credentials" }, async () => {
+              requireAllowed(core, api, "vault_generate_login");
+              const item = vault.generateLogin(scope.ghost.id, { ...args, origin: normalizeOrigin(args.origin) }, idFor(scope.conversation.id, api.callId));
+              return JSON.stringify(item);
+            });
+            return { content: [{ type: "text", text: saved }] };
           } catch (error) { return errorResult(error); }
         },
       }),

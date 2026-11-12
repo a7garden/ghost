@@ -36,8 +36,11 @@ export function createSelfTools(core: Core): Extension {
       try {
         const scope = scopeOf(core, api);
         requireActive(scope, "self_adapt");
-        const saved = core.adaptations.set(scope.ghost.id, args.notes, "self", args.reason, scope.conversation.id);
-        return text(saved.notes ? `Saved (revision ${saved.revision}); your next conversations start from these notes.` : "Cleared your notes.");
+        return text(await core.effects.run({ conversationId: scope.conversation.id, callId: api.callId, tool: "self_adapt", input: args, summary: "Update adaptation notes" }, async () => {
+          requireActive(scopeOf(core, api), "self_adapt");
+          const saved = core.adaptations.set(scope.ghost.id, args.notes, "self", args.reason, scope.conversation.id);
+          return saved.notes ? `Saved (revision ${saved.revision}); your next conversations start from these notes.` : "Cleared your notes.";
+        }));
       } catch (error) {
         return errorResult(error);
       }

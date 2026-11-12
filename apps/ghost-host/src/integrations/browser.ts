@@ -284,7 +284,7 @@ export class AgentBrowser implements BrowserPort {
       throw error;
     } finally { closeSync(fd); }
   }
-  private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
+  private async invoke(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean; authorize?: () => void }): Promise<BrowserCommandResult> {
     if (argv[0] !== "close" && (session.loginObserver?.ended || session.loginNeedsRecovery)) throw new CommandError("unavailable","Trusted browser observation ended; take a new explicit action to reconnect");
     if (["open","back","forward","reload","close"].includes(argv[0]!) || argv[0] === "tab" && argv[1] !== "list") session.unknownOwnerText?.reset();
     if (session.bridge && ["open", "back", "forward", "reload", "close"].includes(argv[0]!)) {
@@ -354,7 +354,7 @@ export class AgentBrowser implements BrowserPort {
       }
     }
   }
-  private async invokeCli(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean }): Promise<BrowserCommandResult> {
+  private async invokeCli(session: Session, argv: string[], options?: { stdin?: string; timeoutMs?: number; batch?: boolean; authorize?: () => void }): Promise<BrowserCommandResult> {
     const proxy = await (this.proxy ??= createEgressProxy());
     const name = nameFor(session.ref.conversationId);
     const download = join(this.root, "browser", "downloads", name);
@@ -382,6 +382,7 @@ export class AgentBrowser implements BrowserPort {
       AGENT_BROWSER_ENCRYPTION_KEY: this.key, AGENT_BROWSER_NO_VERSION_CHECK: "1", AGENT_BROWSER_SOCKET_DIR: this.socketDir,
       ...(session.engine === "obscura" && session.obscura ? { AGENT_BROWSER_CDP_HEADERS: JSON.stringify(session.obscura.headers) } : {}) };
     let child: Bun.Subprocess<"pipe", "pipe", "pipe">;
+    options?.authorize?.();
     try { child = Bun.spawn(args, { cwd: this.home, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" }); }
     catch { throw new CommandError("unavailable", "Browser executable could not start"); }
     let exceeded = false;
@@ -572,6 +573,8 @@ export class AgentBrowser implements BrowserPort {
   }
   run(ref: BrowserSessionRef, argv: string[], options?: BrowserRunOptions) {
     return this.enqueueSession(ref, async (session) => {
+      if ((["click", "fill", "type", "press", "select", "check", "uncheck", "upload", "download"].includes(argv[0]!) || options?.sensitive) && !options?.authorize) throw new NoEffect("Browser mutation requires live Host authorization");
+      options?.authorize?.();
       // This decision is already authoritative and needs no live Chrome state.
       // In particular, do not consult a closing/failed observer before denying
       // pixels that remain private across navigation and browser replacement.
@@ -640,6 +643,7 @@ export class AgentBrowser implements BrowserPort {
             const transfer = options?.transfer;
             if (!transfer || transfer.kind !== "download") throw new Error("Missing destination");
             destination = this.workspace(transfer.workspace, `downloads/${transfer.name}`, true);
+            options?.authorize?.();
             this.commitDownload(destination, staged);
           } catch { throw new KnownOutcome("Download could not be saved: existing destination or workspace symlink"); }
         }

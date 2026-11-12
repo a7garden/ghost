@@ -42,12 +42,14 @@ export interface HostRun {
   home: string;
   /** Host-internal only; never supplied by a tool caller. */
   inspection?: boolean;
+  authorize?: () => void;
 }
 export type HostRunner = (input: HostRun) => Promise<HostOutput>;
 
 /** No shell, inherited credentials or surviving background descendants. Captures a shared byte budget. */
 export const runHostCommand: HostRunner = async (input) => {
   let child: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  input.authorize?.();
   try {
     child = Bun.spawn([input.program, ...input.args], {
       cwd: input.cwd,
@@ -535,6 +537,7 @@ export class MacHost implements HostPort {
     maxBytes = 24_000,
     cwd = this.home,
     inspection = false,
+    authorize?: () => void,
   ) {
     return this.runner({
       program,
@@ -544,6 +547,7 @@ export class MacHost implements HostPort {
       cwd,
       home: this.home,
       inspection,
+      authorize,
     });
   }
   private statePaths(): string[] {
@@ -1260,8 +1264,9 @@ export class MacHost implements HostPort {
     }
     return this.runCommand(checked, shape, deadline);
   }
-  async executeCommand(input: HostCommand) {
+  async executeCommand(input: HostCommand, authorize?: () => void) {
     let checked: HostCommand;
+    if (!authorize) throw new NoEffect("Host mutation requires live Host authorization");
     try {
       checked = this.validateCommand(input);
       if (checked.cwd !== input.cwd || checked.program !== input.program)
@@ -1271,9 +1276,9 @@ export class MacHost implements HostPort {
         error instanceof Error ? error.message : String(error),
       );
     }
-    return this.runCommand(checked, null);
+    return this.runCommand(checked, null, Date.now() + 90_000, authorize);
   }
-  private async runCommand(checked: HostCommand, inspection: InspectionShape | null, deadline = Date.now() + 90_000) {
+  private async runCommand(checked: HostCommand, inspection: InspectionShape | null, deadline = Date.now() + 90_000, authorize?: () => void) {
     let args = checked.args;
     if (inspection) {
       args = [...args];
@@ -1349,6 +1354,7 @@ export class MacHost implements HostPort {
       24_000,
       checked.cwd,
       inspection !== null,
+      authorize,
     );
     return {
       exitCode: result.exitCode,

@@ -2,6 +2,7 @@ import { TERMINAL_WORK_STATES, type Effect } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { CommandError, conflict } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
+import { classifyEffect, evaluateStoredPolicy, type ObservedEffect, type PolicyReceipt } from "./policy-context.ts";
 
 const MAX_RESULT = 16_384;
 
@@ -12,6 +13,7 @@ export interface BeginEffect {
   /** Hashed for identity; a retry of the same call must carry the same input. */
   input: unknown;
   summary: string;
+  classification?: ObservedEffect;
 }
 
 /** Host-only API journals; these names are not model tools or tool exclusion scopes. */
@@ -46,6 +48,7 @@ const OWNER_CONFIRMS: Record<string, { title: string; check: string }> = {
 export class Effects {
   /** Executors run by the host after the owner approves an effect (browser mutations). */
   private readonly approved = new Map<string, (effect: Effect) => Promise<string>>();
+  private readonly waiting = new Map<string, () => Promise<string>>();
 
   constructor(private readonly core: Core) {}
 
@@ -97,6 +100,16 @@ export class Effects {
         createdAt: Date.now(),
         endedAt: null,
       };
+      if (scope === "tool") {
+        const classification = classifyEffect(this.core, input.conversationId, input.tool, input.input, input.classification);
+        if (classification.access !== "write") throw new CommandError("invalid", "reads must use unjournaled policyRead admission");
+        const receipt = evaluateStoredPolicy(this.core, input.conversationId, classification, undefined, true);
+        this.ledger.putSetting(`policy:effect:${effect.id}`, receipt);
+        if (receipt.evaluation.decision === "deny") {
+          this.ledger.putEffect({ ...effect, state: "denied", result: receipt.evaluation.reason, endedAt: Date.now() });
+          return { kind: "replay", effect: this.ledger.effect(effect.id) };
+        }
+      }
       this.ledger.putEffect(effect);
       return { kind: "run", effect };
     });
@@ -118,7 +131,7 @@ export class Effects {
     // 2026-11-10: the owner was asked "did write happen?" and the Work waited on it. A change the Ghost can
     // look at itself is recorded as uncertain and handed back to it; it never runs again on its own.
     if (current.state === "pending" && this.selfCheckable(current)) {
-      return this.settle(effectId, "done", `Outcome uncertain (${reason}). Check the result yourself before relying on it; if it did not happen, do it again as a new step.`);
+      return this.settle(effectId, "done", `Outcome uncertain (${reason}). Inspect the result before relying on it. This call will never execute again.`);
     }
     const effect = this.settle(effectId, "unknown", reason);
     this.escalate(effect);
@@ -127,7 +140,9 @@ export class Effects {
 
   /** Everything a Ghost can look at itself: no owner reconciliation. */
   selfCheckable(effect: Effect): boolean {
-    return !(effect.tool in OWNER_CONFIRMS) && !(COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool);
+    const receipt = this.ledger.setting<PolicyReceipt | null>(`policy:effect:${effect.id}`, null);
+    if (receipt) return !receipt.classification.external && receipt.classification.reversible;
+    return !(effect.tool in OWNER_CONFIRMS) && !(COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool) && ["write", "edit", "publish_artifact", "document_write"].includes(effect.tool);
   }
 
   /**
@@ -163,7 +178,16 @@ export class Effects {
    * without running again; a throw that may have left an effect marks it unknown.
    */
   async run(input: BeginEffect, perform: () => Promise<string>): Promise<string> {
-    return this.perform(this.begin(input), perform);
+    const start = this.begin(input);
+    if (start.kind === "run") {
+      const receipt = this.recheck(start.effect);
+      if (receipt.evaluation.decision !== "allow") {
+        this.waiting.set(start.effect.id, perform);
+        this.openApproval(start.effect, input.summary, receipt.evaluation.reason, { input: input.input });
+        throw conflict(`Policy approval required (${start.effect.id}); nothing was performed. ${receipt.evaluation.reason}`);
+      }
+    }
+    return this.perform(start, perform);
   }
 
   /** Journal an owner command without making it compete with Ghost tool mutations. */
@@ -190,6 +214,7 @@ export class Effects {
       return start.effect.result ?? "";
     }
     try {
+      if (!(COMMAND_EFFECT_TOOLS as readonly string[]).includes(start.effect.tool)) this.authorize(start.effect.conversationId, start.effect.callId);
       const result = await perform();
       this.finish(start.effect.id, result);
       return result;
@@ -275,21 +300,54 @@ export class Effects {
     if (!this.approved.has(input.tool)) throw new Error(`no approval executor for ${input.tool}`);
     const start = this.begin(input);
     if (start.kind === "replay") return start.effect;
-    const conversation = this.ledger.conversation(input.conversationId);
-    this.ledger.tx(() =>
-      this.core.decisions.open({
-        kind: "approve_effect",
-        ghostId: conversation.ghostId,
-        conversationId: conversation.id,
-        workId: conversation.workId,
-        effectId: start.effect.id,
-        title: input.title,
-        detail: input.detail,
-        options: [],
-        proposal: input.proposal,
-      }),
-    );
+    this.openApproval(start.effect, input.title, input.detail, input.proposal);
     return start.effect;
+  }
+
+  private openApproval(effect: Effect, title: string, detail: string, proposal: Record<string, unknown>) {
+    const conversation = this.ledger.conversation(effect.conversationId);
+    this.ledger.tx(() => this.core.decisions.open({
+      kind: "approve_effect", ghostId: conversation.ghostId, conversationId: conversation.id,
+      workId: conversation.workId, effectId: effect.id, title, detail, options: [], proposal,
+    }));
+  }
+
+  /** Live rules and accumulated taint are checked again immediately before adapter I/O. */
+  recheck(effect: Effect): PolicyReceipt {
+    return this.ledger.tx(() => {
+      const prior = this.ledger.setting<PolicyReceipt | null>(`policy:effect:${effect.id}`, null);
+      const receipt = evaluateStoredPolicy(this.core, effect.conversationId, prior?.classification ?? classifyEffect(this.core, effect.conversationId, effect.tool, null), prior ?? undefined, true);
+      this.ledger.putSetting(`policy:effect:${effect.id}`, receipt);
+      return receipt;
+    });
+  }
+
+  /** Adapter dispatch hook: call again after queue/network waits, immediately before the mutation. */
+  authorize(conversationId: string, callId: string): void {
+    const effect = this.ledger.effectByCall(conversationId, callId);
+    if (!effect || effect.state !== "pending") throw new NoEffect("There is no executable pending effect");
+    this.assertAuthority(effect);
+    const receipt = this.recheck(effect);
+    if (receipt.evaluation.decision === "allow") return;
+    const decision = this.ledger.decisionsAwaitingFollowUp().find((entry) => entry.effectId === effect.id && entry.kind === "approve_effect" && entry.state === "approved");
+    const authorization = decision?.proposal?.policy as PolicyReceipt | undefined;
+    if (receipt.evaluation.decision === "deny" || !authorization || receipt.rulesDigest !== authorization.rulesDigest || JSON.stringify(receipt.classification) !== JSON.stringify(authorization.classification)) throw new NoEffect("Live policy does not authorize this action. " + receipt.evaluation.reason);
+  }
+
+  private assertAuthority(effect: Effect): void {
+    const conversation = this.ledger.conversation(effect.conversationId);
+    const ghost = this.ledger.ghost(conversation.ghostId);
+    const work = effect.workId ? this.ledger.work(effect.workId) : null;
+    if (ghost.state !== "active" || ghost.deletedAt !== null) throw new NoEffect("The executing Ghost is no longer active");
+    if (conversation.kind === "review" || conversation.kind === "subagent") throw new NoEffect("Read-only conversations cannot execute effects");
+    const tool = effect.tool === "document_write" ? "document_propose" : effect.tool;
+    const internal = ["self_adapt", "activity_action"].includes(tool);
+    const matches = (pattern: string) => new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`).test(tool);
+    if (!internal && !ghost.tools.some(matches)) throw new NoEffect("The tool grant was revoked; nothing was performed");
+    if (work?.toolScope && !internal && !work.toolScope.some(matches)) throw new NoEffect("This Work no longer permits the tool");
+    if ((tool.startsWith("desktop_") || work?.execution?.kind === "host" && ["write", "edit", "bash", "publish_artifact"].includes(tool)) && !ghost.hostExecution) throw new NoEffect("PC execution was revoked");
+    if (work && (!["running", "waiting", "verifying"].includes(work.state) || work.deadlineAt !== null && work.deadlineAt <= Date.now())) throw new NoEffect("The Work no longer permits execution");
+    if (work?.activityId) this.core.activities.authorize(work.id, tool);
   }
 
   /** Owner resolved an `approve_effect` decision. */
@@ -306,12 +364,14 @@ export class Effects {
       result = "The owner denied this action; it was not performed.";
       this.deny(effect.id, result);
     } else {
-      const execute = this.approved.get(effect.tool);
+      const retained = this.waiting.get(effect.id);
+      const execute = retained ? async (_effect: Effect) => retained() : this.approved.get(effect.tool);
       if (!execute) {
         result = `No executor for ${effect.tool}; nothing was performed.`;
         this.deny(effect.id, result);
       } else {
         try {
+          this.authorize(effect.conversationId, effect.callId);
           result = await execute(effect);
           this.finish(effect.id, result);
         } catch (error) {
@@ -326,6 +386,7 @@ export class Effects {
         }
       }
     }
+    this.waiting.delete(effect.id);
     await this.notifyResolved(effect, result);
   }
 

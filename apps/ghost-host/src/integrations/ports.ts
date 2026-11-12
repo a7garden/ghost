@@ -156,7 +156,7 @@ export interface HostPort {
   /** Runs an eligible inspection; null means the requested command did not run and needs approval. */
   inspect(input: HostCommand): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean } | null>;
   validateCommand(input: HostCommand): HostCommand;
-  executeCommand(input: HostCommand): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
+  executeCommand(input: HostCommand, authorize?: () => void): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
 }
 
 /** The owner's skill folders, read-only. Implemented in src/integrations/skills.ts. */
@@ -228,6 +228,8 @@ export interface BrowserRunOptions {
   engine?: "chrome" | "obscura";
   stdin?: string;
   timeoutMs?: number;
+  /** Rechecked after adapter waits, immediately before dispatch. */
+  authorize?: () => void;
   /** Host-only ephemeral redaction registry. Never written to disk or passed in argv. */
   sensitive?: { value: string; field: VaultField; origin: string };
   /** Workspace paths never reach Chrome; the adapter stages/copies with no-follow semantics. */

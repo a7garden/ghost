@@ -31,7 +31,6 @@ const DENIED_NAMES = /^(?:ghost|ghost control|keychain access|키체인 접근|p
 // A conservative heuristic, not an authorization/security boundary (same words as the browser).
 const HIGH_IMPACT = /(?:^|[^\p{L}\p{N}])(?:pay|buy|purchase|order|checkout|delete|remove|send|transfer|submit|unsubscribe)(?=$|[^\p{L}\p{N}])|결제|구매|주문|삭제|송금|이체|전송|보내기|제출|탈퇴|해지/iu;
 const SECRET_ROLE = /password|secure.?text|protected/i;
-const SUBMIT_KEY = /(?:^|\+)(?:enter|return|space)$/i;
 
 const ref = Type.String({ pattern: "^@[a-z0-9]{2,40}:e[0-9]{1,6}$", maxLength: 64, description: "A ref from desktop_snapshot, e.g. @s8f3k2p9:e5" });
 const appName = Type.String({ minLength: 1, maxLength: 200, description: "Display name or bundle ID from desktop_apps" });
@@ -117,7 +116,11 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
   /** A queued refusal is certainly not delivered; Effects must not classify it as uncertain. */
   function dispatch(api: ToolExecutionApi, name: GhostTool, extra?: (scope: Scope) => void) {
     return () => {
-      try { const scope = authorize(api, name); extra?.(scope); }
+      try {
+        const scope = authorize(api, name);
+        extra?.(scope);
+        if (core.ledger.effectByCall(scope.conversation.id, api.callId)?.state === "pending") core.effects.authorize(scope.conversation.id, api.callId);
+      }
       catch (error) { throw new NoEffect(error instanceof Error ? error.message : String(error)); }
     };
   }
@@ -200,14 +203,18 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
     snapshots.set(id, snapshot);
     for (const id of snapshots.keys()) { if (snapshots.size <= 256) break; snapshots.delete(id); }
   }
-  function guard(element: Element) {
-    if (HIGH_IMPACT.test(element.name)) throw new NoEffect(`"${element.name.slice(0, 200)}" looks like sending, paying or deleting: use desktop_propose so the owner decides`);
-  }
   function writable(element: Element) {
     if (element.secret) throw new NoEffect("Protected or password fields are outside PC control");
   }
   async function mutate(scope: Scope, api: ToolExecutionApi, name: GhostTool, input: unknown, perform: () => Promise<string>) {
-    return text(await core.effects.run({ conversationId: scope.conversation.id, callId: api.callId, tool: name, input, summary: name }, perform));
+    const args = record(input);
+    const target = typeof args.ref === "string" ? owned(scope, args.ref) : null;
+    const knownLocal = ["desktop_scroll", "desktop_focus", "desktop_launch"].includes(name);
+    const irreversible = target ? HIGH_IMPACT.test(target.element.name) : !knownLocal;
+    return text(await core.effects.run({
+      conversationId: scope.conversation.id, callId: api.callId, tool: name, input, summary: name,
+      classification: { target: { kind: "mac", id: target?.snapshot.app.bundleId ?? target?.snapshot.app.name ?? null }, access: "write", reversible: !irreversible, external: irreversible, amount: null },
+    }, perform));
   }
   async function physical(scope: Scope, id: string, validate?: (screen: Screen) => void): Promise<Screen> {
     const ownedId = key(scope, id);
@@ -276,7 +283,7 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
           const scope = authorize(api, name);
           // Replay uses the original tool args, without requiring a now-consumed ref or screen.
           const prior = mutation ? core.ledger.effectByCall(scope.conversation.id, api.callId) : null;
-          if (prior?.state === "done" || prior?.state === "denied") return await mutate(scope, api, name, args, async () => { throw new NoEffect("already settled"); });
+          if (prior?.state === "done" || prior?.state === "denied") return text(await core.effects.run({ conversationId: scope.conversation.id, callId: api.callId, tool: name, input: args, summary: name }, async () => { throw new NoEffect("already settled"); }));
           if (prior && name === "desktop_propose") {
             if (prior.tool !== name || prior.inputDigest !== digestOf(args)) throw invalid(`call ${api.callId} was recorded with different input`);
             if (prior.state !== "pending") throw invalid(`the outcome of call ${api.callId} is ${prior.state}; it will not run again`);
@@ -363,7 +370,6 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
     }),
     tool("desktop_click", "Press an element by ref in the background (accessibility action; the owner's pointer does not move).", Type.Object({ ref }), true, async (a, s, api) => {
       const { snapshot, element } = owned(s, a.ref);
-      guard(element);
       return mutate(s, api, "desktop_click", a, async () => {
         const done = acted(await axAction(s, api, "desktop_click", snapshot.app, ["click", a.ref], undefined, a.ref), "Clicked");
         lastTarget.set(targetKey(s, snapshot.app), element);
@@ -413,7 +419,7 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
       refuseSystemShortcut(a.keys);
       const app = await resolveApp(a.app, a.window_id);
       const target = lastTarget.get(targetKey(s, app));
-      if (target) { writable(target); if (SUBMIT_KEY.test(a.keys)) guard(target); }
+      if (target) writable(target);
       return mutate(s, api, "desktop_press", a, async () => acted(await axAction(s, api, "desktop_press", app, ["press", a.keys, "--app", app.name, ...(a.window_id ? ["--window-id", a.window_id] : [])]), "Key sent"));
     }),
     tool("desktop_launch", "Open an app by display name or bundle ID and wait for its window.", Type.Object({ app: appName }), true, async (a, s, api) => {
@@ -468,7 +474,6 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
         if (a.action !== "scroll" && a.action !== "drag") {
           const hit = labelAt(screen, point);
           if (hit?.secret) throw new NoEffect("Protected or password fields are outside PC control");
-          if (hit && HIGH_IMPACT.test(hit.label)) throw new NoEffect(`"${hit.label.slice(0, 200)}" looks like sending, paying or deleting: take a desktop_snapshot and use desktop_propose`);
         }
       });
       const from = toWindow(screen, a.x, a.y), modifier = a.modifiers?.replaceAll("cmd", "super");
@@ -488,7 +493,7 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
       if (a.text && (a.text.includes("\0") || Buffer.byteLength(a.text, "utf8") > 16_384)) throw invalid("text must be UTF-8 without NUL, at most 16,384 bytes");
       const screen = await physical(s, a.screen_id, (screen) => { if (screen.protectedFields) throw new NoEffect("Protected or password fields are outside PC control"); });
       const target = lastTarget.get(targetKey(s, screen.app));
-      if (target) { writable(target); if (a.key && SUBMIT_KEY.test(a.key)) guard(target); }
+      if (target) writable(target);
       const base = { app: screen.target, snapshot_id: screen.snapshotId, headed: true };
       return mutate(s, api, "desktop_keys", a, async () => acted(await geistAction(s, api, "desktop_keys", screen, a.key ? "press_key" : "type_text", a.key ? { ...base, key: a.key.replaceAll("cmd", "super") } : { ...base, text: a.text! }), a.key ? "Key delivered" : "Text typed"));
     }),
