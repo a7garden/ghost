@@ -12,8 +12,6 @@ import { Id, Timestamp, nullable } from "./entities.ts";
 export const GOAL_TITLE_MAX = 200;
 export const GOAL_TEXT_MAX = 2000;
 export const GOAL_SIGNAL_MAX = 500;
-/** Open (active or paused) goals at once; more directions dilute each other. */
-export const MAX_OPEN_GOALS = 3;
 /** Milestones running at once under one goal. */
 export const MAX_ACTIVE_MILESTONES = 2;
 /** Planned milestones waiting under one goal: plan the next few, not the whole road. */

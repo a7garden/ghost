@@ -6,7 +6,6 @@ import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { Core } from "../src/core/core.ts";
 import type { ActivitySourceExclusion, ActivitySourcePort } from "../src/integrations/activity-sources.ts";
-import { MAX_ACTIVITY_WORK_ITEMS } from "../src/core/activities.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { MIGRATIONS } from "../src/ledger/schema.ts";
 import { activityTools } from "../src/tools/activities.ts";
@@ -731,7 +730,7 @@ describe("activity authority and delivery", () => {
     expect(child.toolScope).toEqual(["read", "delegate"]);
     expect(f.activities.authorize(child.id, "read").run.id).toBe(run.id);
     expect(() => f.activities.authorize(child.id, "bash")).toThrow("scope");
-    for (let index = 0; index < MAX_ACTIVITY_WORK_ITEMS - 9; index++) f.core.works.delegate(child.id, { ghostId: f.ghost.id, title: `Grandchild ${index}`, brief: "Read only.", toolScope: ["read"] });
+    for (let index = 0; index < f.core.ledger.limits().activityNodes - 9; index++) f.core.works.delegate(child.id, { ghostId: f.ghost.id, title: `Grandchild ${index}`, brief: "Read only.", toolScope: ["read"] });
     expect(() => f.core.works.delegate(child.id, { ghostId: f.ghost.id, title: "Overflow", brief: "Must refuse.", toolScope: ["read"] })).toThrow("16");
     expect(f.ledger.activityRuns(activity.id)).toHaveLength(1);
     expect(f.activities.authorize(child.id, "read").run.id).toBe(run.id);

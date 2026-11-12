@@ -55,10 +55,16 @@ export interface Engine extends Partial<MemoryEngine> {
   close(): Promise<void>;
 }
 
+/** How the engine says a run ended. */
+export interface RunEnd {
+  /** True when the last model error was a provider quota: a condition to wait out, not a Ghost stopping. */
+  quota: boolean;
+}
+
 /** What the engine reports back to core. */
 export interface EngineEvents {
   /** A conversation started or finished a run. `idle` fires after the run settled and its outputs are committed. */
-  activity(conversationId: string, busy: boolean, at: number): void;
+  activity(conversationId: string, busy: boolean, at: number, ended?: RunEnd): void;
 }
 
 /** Content-addressed bytes under `artifacts/sha256/`. */

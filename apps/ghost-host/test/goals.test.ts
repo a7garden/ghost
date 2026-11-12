@@ -68,7 +68,7 @@ describe("goal proposals", () => {
     await t.core.decisions.resolve(decision.id, { outcome: "answer", answer: "등록하지 마세요" });
     expect(t.core.goals.goals()).toEqual([]);
     expect(t.engine.to(t.mainDirect.id).at(-1)?.text).toContain("not adopted");
-    expect(textOf(await propose({ ...proposal, title: "다른 방향" }, "p2"))).toContain("three days");
+    expect(textOf(await propose({ ...proposal, title: "다른 방향" }, "p2"))).toContain("for 3 days");
   });
 
   test("goal tools stay with the current main", () => {

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Core } from "../src/core/core.ts";
-import { DAILY_WAKES, repositoryHead } from "../src/core/autonomy.ts";
+import { repositoryHead } from "../src/core/autonomy.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import { FakeEngine, MemoryArtifacts, MemorySecrets, noSandbox, tempDir } from "./support.ts";
@@ -157,15 +157,15 @@ test("a watched project's new commits wake a Ghost early with what changed, at m
 test("a Ghost wakes at most the daily limit; the next due plan moves to tomorrow", async () => {
   const f = fixture();
   let now = day(1);
-  for (let index = 0; index < DAILY_WAKES; index++) {
+  for (let index = 0; index < f.core.ledger.limits().dailyWakes; index++) {
     await f.core.autonomy.plan(f.mate, f.mate.id, { at: now + 10 * MINUTE, intent: `look ${index}` }, now);
     now += 10 * MINUTE;
     await f.core.autonomy.tick(now);
   }
-  expect(f.wakes(f.mate.id)).toHaveLength(DAILY_WAKES);
+  expect(f.wakes(f.mate.id)).toHaveLength(f.core.ledger.limits().dailyWakes);
   await f.core.autonomy.plan(f.mate, f.mate.id, { at: now + 10 * MINUTE, intent: "one more" }, now);
   await f.core.autonomy.tick(now + 10 * MINUTE);
-  expect(f.wakes(f.mate.id)).toHaveLength(DAILY_WAKES);
+  expect(f.wakes(f.mate.id)).toHaveLength(f.core.ledger.limits().dailyWakes);
   expect(f.plan(f.mate.id).nextAt!).toBeGreaterThanOrEqual(day(24));
 });
 

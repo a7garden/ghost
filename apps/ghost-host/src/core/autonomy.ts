@@ -12,9 +12,6 @@ const DAY = 24 * HOUR;
 /** The nearest and farthest a plan may look ahead. */
 export const PLAN_MIN_MINUTES = 10;
 export const PLAN_MAX_MINUTES = 14 * 24 * 60;
-/** Bounds that keep a self-directed team cheap: per Ghost per day, at once across the team. */
-export const DAILY_WAKES = 12;
-const MAX_CONCURRENT = 2;
 /** A watched project change wakes a Ghost early, but not more often than this. */
 const WATCH_GAP = HOUR;
 /** A wake that ends without a new plan looks again after this. */
@@ -301,7 +298,7 @@ export class Autonomy {
       if (!plan.enabled) continue;
       if (plan.pending) {
         // Admitted or not before a crash: the same request id lets Pi tell.
-        if (busy(ghost) || this.awake.size >= MAX_CONCURRENT) continue;
+        if (busy(ghost) || this.awake.size >= this.core.ledger.limits().concurrentWakes) continue;
         await this.submit(ghost, plan.pending, now);
         continue;
       }
@@ -321,7 +318,7 @@ export class Autonomy {
       const due = now >= plan.nextAt;
       const early = !due && moved.length > 0 && (plan.lastWakeAt === null || now - plan.lastWakeAt >= WATCH_GAP);
       if (!due && !early) continue;
-      if (wakesToday >= DAILY_WAKES) {
+      if (wakesToday >= this.core.ledger.limits().dailyWakes) {
         if (due) {
           const tomorrow = new Date(now);
           tomorrow.setHours(24, 0, 0, 0);
@@ -330,7 +327,7 @@ export class Autonomy {
         continue;
       }
       if (busy(ghost)) continue;
-      if (this.awake.size >= MAX_CONCURRENT) break;
+      if (this.awake.size >= this.core.ledger.limits().concurrentWakes) break;
       const observedSeq = ledger.seq();
       const text = await this.prompt(ghost, plan, due, moved, now);
       const seen = { ...plan.heads };

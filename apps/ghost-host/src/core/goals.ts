@@ -2,7 +2,6 @@ import {
   GOAL_ADOPT,
   MAX_ACTIVE_MILESTONES,
   MAX_MILESTONE_WORKS,
-  MAX_OPEN_GOALS,
   MAX_PLANNED_MILESTONES,
   type Decision,
   type Ghost,
@@ -19,8 +18,6 @@ import { newId } from "./ids.ts";
 /** Persisted in `settings` (`goals`): no ledger migration, so a release rollback keeps its storage fingerprint. */
 const KEY = "goals";
 const DAY = 24 * 60 * 60_000;
-/** After the owner declines a proposal, the main waits this long before proposing another. */
-export const PROPOSAL_COOLDOWN = 3 * DAY;
 /** Ended milestones each goal shows in a wake: enough to avoid repeating a dropped path, not a history dump. */
 const RECENT_ENDED = 3;
 
@@ -115,7 +112,8 @@ export class Goals {
   private newGoal(stored: Stored, input: GoalText, proposedBy: string | null, id: string): Goal {
     const title = clean(input.title);
     if (!title) throw invalid("a goal needs a direction");
-    if (stored.goals.filter(open).length >= MAX_OPEN_GOALS) throw conflict(`at most ${MAX_OPEN_GOALS} goals can be open at once; close one first`);
+    const openGoals = this.ledger.limits().openGoals;
+    if (stored.goals.filter(open).length >= openGoals) throw conflict(`at most ${openGoals} goals can be open at once; close one first`);
     const now = Date.now();
     return { id, title, why: clean(input.why), boundaries: clean(input.boundaries), signal: clean(input.signal), state: "active", proposedBy, createdAt: now, updatedAt: now, closedAt: null };
   }
@@ -162,11 +160,13 @@ export class Goals {
     const stored = this.load();
     const title = clean(input.title);
     if (!title) throw invalid("a goal needs a direction");
-    if (stored.goals.filter(open).length >= MAX_OPEN_GOALS) throw conflict(`the owner already has ${MAX_OPEN_GOALS} open goals; propose only after one closes`);
+    const openGoals = this.ledger.limits().openGoals;
+    if (stored.goals.filter(open).length >= openGoals) throw conflict(`the owner already has ${openGoals} open goals; propose only after one closes`);
     if (stored.goals.some((goal) => open(goal) && goal.title === title)) throw conflict("this goal is already open");
     if (this.ledger.pendingDecisions().some((decision) => decision.proposal?.goal)) throw conflict("a goal proposal is already waiting for the owner");
-    if (stored.declinedAt !== null && Date.now() - stored.declinedAt < PROPOSAL_COOLDOWN) {
-      throw conflict(`the owner declined a goal proposal on ${new Date(stored.declinedAt).toISOString()}; do not propose another for three days`);
+    const cooldown = this.ledger.limits().goalProposalCooldownDays * DAY;
+    if (stored.declinedAt !== null && Date.now() - stored.declinedAt < cooldown) {
+      throw conflict(`the owner declined a goal proposal on ${new Date(stored.declinedAt).toISOString()}; do not propose another for ${this.ledger.limits().goalProposalCooldownDays} days`);
     }
     const proposal: GoalProposal = { title, why: clean(input.why), boundaries: clean(input.boundaries), signal: clean(input.signal) };
     const detail = [

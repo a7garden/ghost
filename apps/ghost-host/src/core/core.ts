@@ -5,9 +5,10 @@ import { Effects } from "./effects.ts";
 import { conflict, invalid } from "./errors.ts";
 import { idFor, newId } from "./ids.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
-import type { ArtifactStore, Engine, EngineEvents, SandboxControl, Secrets } from "./ports.ts";
+import type { ArtifactStore, Engine, EngineEvents, RunEnd, SandboxControl, Secrets } from "./ports.ts";
 import { Schedules } from "./schedules.ts";
 import { isTerminal, Works } from "./works.ts";
+import { Quota, Repeats } from "./budget.ts";
 import { ProviderCatalog } from "../integrations/provider-catalog.ts";
 import { CodexCatalog } from "../integrations/codex-catalog.ts";
 import { Activities } from "./activities.ts";
@@ -59,6 +60,9 @@ export class Core implements EngineEvents {
   readonly goals: Goals;
   /** 출근 · 퇴근. 퇴근 중에는 Ghost 가 스스로 새 일을 시작하지 않는다. */
   readonly duty: DutyClock;
+  /** Provider quota waits and deferred admissions (R1), and the repeat guard's counters (R8). */
+  readonly quota: Quota;
+  readonly repeats: Repeats;
   readonly activitySources: ActivitySourcePort | null;
   readonly sources: SourceStore | null;
   readonly log: (message: string, detail?: unknown) => void;
@@ -91,6 +95,8 @@ export class Core implements EngineEvents {
     this.team = new Team(this);
     this.goals = new Goals(this);
     this.duty = new DutyClock(this);
+    this.quota = new Quota(this);
+    this.repeats = new Repeats();
     // 출근하면 퇴근 중에 때가 된 예약 · 활동 규칙 · 자율 깨우기를 바로 돌린다. 퇴근하면 예약 타이머를 다시 맞춘다.
     this.duty.onChange((onDuty) => {
       this.schedules.refresh();
@@ -185,6 +191,7 @@ export class Core implements EngineEvents {
     await this.decisions.recover();
     for (const work of this.ledger.worksInState("queued", "running", "waiting", "verifying")) this.works.kick(work.id);
     this.works.recover();
+    this.quota.start();
     this.engine.resume();
     this.schedules.start();
     this.decisions.start();
@@ -193,6 +200,7 @@ export class Core implements EngineEvents {
 
   stop() {
     this.unsubscribeLedgerEvents();
+    this.quota.stop();
     this.duty.stop();
     this.schedules.stop();
     this.activities.stop();
@@ -201,11 +209,16 @@ export class Core implements EngineEvents {
 
   // Engine events
 
-  activity(conversationId: string, busy: boolean, at: number) {
+  activity(conversationId: string, busy: boolean, at: number, ended?: RunEnd) {
     const conversation = this.ledger.findConversation(conversationId);
     if (!conversation) return;
     this.ledger.tx(() => this.ledger.putConversation({ ...conversation, busy, lastActivityAt: at }));
     if (busy) return;
+    // A quota-ended turn is not the Ghost stopping: no nudge, no failure, and a review does not fall back to the owner.
+    if (ended?.quota) {
+      if (conversation.kind === "work" && conversation.workId) this.works.holdForQuota(conversation.workId, true);
+      return;
+    }
     if (conversation.kind === "work" && conversation.workId) this.works.onIdle(conversation.workId);
     if (conversation.kind === "review" && conversation.workId) this.works.onReviewIdle(conversation.workId);
   }

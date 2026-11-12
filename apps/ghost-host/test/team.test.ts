@@ -7,7 +7,6 @@ import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-d
 import type { Context } from "@earendil-works/chord";
 import { execute } from "../src/core/commands.ts";
 import { Access } from "../src/core/access.ts";
-import { DAILY_WAKES } from "../src/core/autonomy.ts";
 import type { Core } from "../src/core/core.ts";
 import { idFor } from "../src/core/ids.ts";
 import type { ConversationSetup } from "../src/core/ports.ts";
@@ -245,7 +244,7 @@ describe("a settled teammate Work reaches the main through the autonomous wake",
   test("the daily budget still bounds the pulled look", async () => {
     const f = team();
     const now = Date.now();
-    f.ledger.putSetting(`autonomy:${f.main.id}`, { day: new Date(now).toLocaleDateString("en-CA"), wakesToday: DAILY_WAKES, nextAt: now - MINUTE });
+    f.ledger.putSetting(`autonomy:${f.main.id}`, { day: new Date(now).toLocaleDateString("en-CA"), wakesToday: f.core.ledger.limits().dailyWakes, nextAt: now - MINUTE });
     const work = await peerWork(f, f.aliceDirect, f.bob);
     f.core.works.fail(work.id, "stale credentials");
     await f.core.idle();

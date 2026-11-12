@@ -135,7 +135,7 @@ describe("parent-first questions", () => {
     expect(content(refused)).toContain("only a work conversation");
   });
 
-  test("pending questions prevent completion and idle failure, but deadlines still expire", async () => {
+  test("pending questions prevent completion and idle failure, and a due date never fails a waiting Work", async () => {
     const s = await setup();
     s.core.works.askParent(s.child.id, "Q", "q");
     expect(() => s.core.works.complete(s.child.id, { summary: "done", artifacts: [] })).toThrow("question to the parent is pending");
@@ -146,11 +146,20 @@ describe("parent-first questions", () => {
     await s.core.idle();
     expect(s.ledger.work(s.child.id).state).toBe("waiting");
     expect(s.ledger.idleNudges(s.child.id)).toBe(0);
+    // R3: the owner's due date no longer fails a Work that is waiting on an answer.
     s.core.works.update(s.child.id, { deadlineAt: 1 });
     s.core.works.expire(Date.now());
     await s.core.idle();
+    expect(s.ledger.work(s.child.id).state).toBe("waiting");
+    expect(s.ledger.findWorkQuestion("q")?.state).toBe("pending");
+    // The owner's due date still fails a Work that is working.
+    s.core.works.answerQuestion(s.parent.id, "q", "A");
+    await s.core.idle();
+    expect(s.ledger.work(s.child.id).state).toBe("running");
+    s.core.works.expire(Date.now());
+    await s.core.idle();
     expect(s.ledger.work(s.child.id).state).toBe("failed");
-    expect(s.ledger.findWorkQuestion("q")?.state).toBe("cancelled");
+    expect(s.ledger.findWorkQuestion("q")?.state).toBe("answered");
   });
 
   test("restart retries questions and answers admitted before delivery markers exactly once", async () => {
@@ -196,7 +205,7 @@ describe("parent-first questions", () => {
     expect(engine.to(s.child.conversationId!).filter((entry) => entry.requestId === "work-question:q:answer")).toHaveLength(1);
   });
 
-  test("idle parents get one counted reminder, then release unanswered children instead of hanging", async () => {
+  test("idle parents get two counted reminders, then release unanswered children instead of hanging", async () => {
     const s = await setup();
     s.core.works.askParent(s.child.id, "Need a format", "idle-q");
     s.core.works.onIdle(s.child.id);
@@ -206,6 +215,10 @@ describe("parent-first questions", () => {
     expect(s.ledger.work(s.parent.id).state).toBe("running");
     expect(s.ledger.findWorkQuestion("idle-q")?.nudgeCount).toBe(1);
     const reminder = s.engine.to(s.parent.conversationId!).find((entry) => entry.requestId === `work:${s.parent.id}:qnudge:1`);
+    s.core.works.onIdle(s.parent.id);
+    await s.core.idle();
+    expect(s.ledger.findWorkQuestion("idle-q")?.nudgeCount).toBe(2);
+    expect(s.engine.to(s.parent.conversationId!).some((entry) => entry.requestId === `work:${s.parent.id}:qnudge:2`)).toBe(true);
     s.core.works.onIdle(s.parent.id);
     await s.core.idle();
     expect(s.ledger.findWorkQuestion("idle-q")?.state).toBe("cancelled");
@@ -332,6 +345,9 @@ describe("parent-first questions", () => {
     engine.crashOn = "work-question:cancel-notice:cancelled";
     s.core.works.onIdle(s.parent.id);
     await s.core.idle();
+    s.core.works.onIdle(s.parent.id);
+    await s.core.idle();
+    // Two reminders are allowed now, so the third idle is the one that cancels.
     s.core.works.onIdle(s.parent.id);
     await s.core.idle();
     expect(s.ledger.findWorkQuestion("cancel-notice")?.cancellationSubmittedAt).toBeNull();
@@ -632,8 +648,9 @@ describe("peer questions", () => {
     }
   });
 
-  test("a cancellation notice rechecks the requester after open instead of reviving cancelled or expired Work", async () => {
-    for (const boundary of ["cancelled", "expired", "inactive"] as const) {
+  test("a cancellation notice rechecks the requester after open instead of reviving cancelled Work", async () => {
+    // An expired-but-waiting requester now receives its notice: a due date no longer ends a waiting Work (R3).
+    for (const boundary of ["cancelled", "inactive"] as const) {
       const s = await setupWithSibling([]);
       s.core.works.askPeer(s.child.id, s.sibling.id, "Q", "stale-notice");
       s.core.works.onIdle(s.child.id);
@@ -642,10 +659,7 @@ describe("peer questions", () => {
       s.core.works.cancel(s.sibling.id);
       await held.opening;
       if (boundary === "cancelled") s.core.works.cancel(s.child.id);
-      else s.ledger.tx(() => {
-        if (boundary === "expired") s.ledger.putWork({ ...s.ledger.work(s.child.id), deadlineAt: 1 });
-        else s.ledger.putGhost({ ...s.childGhost, state: "retired" });
-      });
+      else s.ledger.tx(() => s.ledger.putGhost({ ...s.childGhost, state: "retired" }));
       held.release();
       await s.core.idle();
       expect(s.engine.to(s.child.conversationId!).some((entry) => entry.requestId === "work-question:stale-notice:cancelled")).toBe(false);
@@ -753,6 +767,9 @@ describe("peer questions", () => {
     expect(s.ledger.work(s.sibling.id).state).toBe("running");
     expect(s.ledger.findWorkQuestion("peer-nudge")?.nudgeCount).toBe(1);
     const reminder = s.engine.to(s.sibling.conversationId!).find((entry) => entry.requestId === `work:${s.sibling.id}:qnudge:1`);
+    s.core.works.onIdle(s.sibling.id);
+    await s.core.idle();
+    expect(s.ledger.findWorkQuestion("peer-nudge")?.nudgeCount).toBe(2);
     s.core.works.onIdle(s.sibling.id);
     await s.core.idle();
     expect(s.ledger.findWorkQuestion("peer-nudge")?.state).toBe("cancelled");
@@ -1157,8 +1174,11 @@ describe("collaboration migration 6 and autonomy migration 7", () => {
     try {
 
       for (const row of ledger.db.query("SELECT * FROM works ORDER BY id").all()) {
-        const { execution, activity_id, activity_run_id, tool_scope, ...preserved } = row as Record<string, unknown>;
+        const { execution, activity_id, activity_run_id, tool_scope, budget_minutes, budget_used_ms, budget_since, budget_extended, hold, ...preserved } = row as Record<string, unknown>;
         expect([execution, activity_id, activity_run_id, tool_scope]).toEqual([null, null, null, null]);
+        expect([budget_minutes, budget_used_ms, budget_extended, hold]).toEqual([90, 0, 0, null]);
+        // Migration 10 starts the clock only for rows still running.
+        expect(budget_since === null || Number.isFinite(budget_since)).toBe(true);
         expect(oldWorks).toContainEqual(preserved);
       }
       // The recipient migration renames its column without losing values or delivery markers.
@@ -1201,8 +1221,9 @@ describe("collaboration migration 6 and autonomy migration 7", () => {
     let rows: unknown[] = [];
     try {
       db.transaction(() => {
-        for (const migration of MIGRATIONS.slice(0, MIGRATIONS.length - 1)) db.exec(migration);
-        db.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+        // The schema of the release before the recipient rename: migrations 1 through 8.
+        for (const migration of MIGRATIONS.slice(0, 8)) db.exec(migration);
+        db.exec("PRAGMA user_version = 8");
         db.query(`INSERT INTO ghosts (id,name,persona,look,is_default,state,direct_conversation_id,created_at,updated_at)
           VALUES ('g','G','','{}',1,'active','c',1,1)`).run();
         db.query(`INSERT INTO conversations (id,ghost_id,kind,title,created_at,last_activity_at) VALUES ('c','g','direct','D',1,1)`).run();

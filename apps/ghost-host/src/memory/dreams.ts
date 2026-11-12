@@ -238,6 +238,8 @@ export class MemoryDreams {
       if (!due) continue;
       const model = core.ledger.settings().memoryModel ?? core.ledger.settings().defaultModel;
       if (!model) continue;
+      // Memory consolidation is the lowest admission priority: it waits out a provider quota instead of probing it.
+      if (core.quota.blocked(model.provider)) continue;
       const snapshot = memorySnapshot(memory, ghost.id, after, interrupted?.through);
       if (!snapshot.history.length) continue;
       const through = snapshot.through;

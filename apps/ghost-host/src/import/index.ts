@@ -20,6 +20,7 @@ import {
   parse,
   type ArtifactRef,
   type ModelRef,
+  DEFAULT_WORK_BUDGET_MINUTES,
 } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { sha256 } from "../core/ids.ts";
@@ -818,6 +819,11 @@ export async function runImport(opts: {
         revision: 1,
         revisionsUsed: 0,
         deadlineAt: null,
+        budgetMinutes: DEFAULT_WORK_BUDGET_MINUTES,
+        budgetUsedMs: 0,
+        budgetSince: null,
+        budgetExtended: false,
+        hold: null,
         result: resultRecord ? { summary: resultRecord.summary, artifacts: refs } : null,
         verdict: accepted ? { outcome: "pass", source: "owner", reasons: "accepted by the owner before import", at: now } : null,
         reason: state === "failed" ? "imported unfinished" : state === "cancelled" ? (legacyWork.blocker ?? "cancelled before import") : null,

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
-import { GOAL_SIGNAL_MAX, GOAL_TEXT_MAX, GOAL_TITLE_MAX, MAX_OPEN_GOALS, type Goal, type State } from '@ghost/contract';
+import { DEFAULT_LIMITS, GOAL_SIGNAL_MAX, GOAL_TEXT_MAX, GOAL_TITLE_MAX, type Goal, type State } from '@ghost/contract';
 import { Button, FormField, InlineError, Input, Page, PageHeader, Textarea } from '../../ui';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Modal } from '../../components/Modal';
@@ -18,9 +18,10 @@ export function Goals({ state, navigate }: { state: State; navigate(path: string
   const open = goals.filter(goal => goal.state !== 'closed').sort((a, b) => Number(a.state === 'paused') - Number(b.state === 'paused') || a.createdAt - b.createdAt);
   const closed = goals.filter(goal => goal.state === 'closed').sort((a, b) => (b.closedAt ?? b.updatedAt) - (a.closedAt ?? a.updatedAt));
   const proposals = state.decisions.filter(decision => decision.state === 'pending' && goalProposal(decision)).sort((a, b) => a.createdAt - b.createdAt);
-  const atCap = open.length >= MAX_OPEN_GOALS;
+  const openGoals = state.settings.limits?.openGoals ?? DEFAULT_LIMITS.openGoals;
+  const atCap = open.length >= openGoals;
   const addAction = <div className="goals-add"><Button disabled={atCap} aria-describedby={atCap ? 'goal-cap-reason' : undefined} onClick={() => setEditing('new')}><Plus/>목표 추가</Button>
-    {atCap && <span id="goal-cap-reason">진행 중이거나 일시정지한 목표는 {MAX_OPEN_GOALS}개까지 둘 수 있습니다.</span>}</div>;
+    {atCap && <span id="goal-cap-reason">진행 중이거나 일시정지한 목표는 {openGoals}개까지 둘 수 있습니다.</span>}</div>;
   return <Page className="goals-page">
     <PageHeader title={uiTerms.goals} actions={addAction}/>
     {proposals.length > 0 && <DecisionDeck state={state} navigate={navigate} decisions={proposals}/>}
@@ -32,7 +33,7 @@ export function Goals({ state, navigate }: { state: State; navigate(path: string
         <GoalSection goal={goal} state={state}/>
       </details>)}
     </details>}
-    {editing && <GoalForm goal={editing === 'new' ? null : editing} atCap={atCap} onClose={() => setEditing(null)}/>}
+    {editing && <GoalForm goal={editing === 'new' ? null : editing} atCap={atCap} openGoals={openGoals} onClose={() => setEditing(null)}/>}
   </Page>;
 }
 
@@ -71,7 +72,7 @@ function GoalSection({ goal, state, onEdit }: { goal: Goal; state: State; onEdit
   </section>;
 }
 
-function GoalForm({ goal, atCap, onClose }: { goal: Goal | null; atCap: boolean; onClose(): void }) {
+function GoalForm({ goal, atCap, openGoals, onClose }: { goal: Goal | null; atCap: boolean; openGoals: number; onClose(): void }) {
   const { client } = useHost();
   const [title, setTitle] = useState(goal?.title ?? '');
   const [why, setWhy] = useState(goal?.why ?? '');
@@ -96,7 +97,7 @@ function GoalForm({ goal, atCap, onClose }: { goal: Goal | null; atCap: boolean;
       <FormField label="지키는 선">{control => <Textarea {...control} rows={2} maxLength={GOAL_TEXT_MAX} value={boundaries} disabled={busy} onChange={event => setBoundaries(event.target.value)}/>}</FormField>
       <FormField label="참고 신호">{control => <Textarea {...control} rows={2} maxLength={GOAL_SIGNAL_MAX} value={signal} disabled={busy} onChange={event => setSignal(event.target.value)}/>}</FormField>
       {error && <InlineError>{error}</InlineError>}
-      {!goal && atCap && <p className="goal-form__cap">진행 중이거나 일시정지한 목표는 {MAX_OPEN_GOALS}개까지 둘 수 있습니다.</p>}
+      {!goal && atCap && <p className="goal-form__cap">진행 중이거나 일시정지한 목표는 {openGoals}개까지 둘 수 있습니다.</p>}
       <Button type="submit" className="justify-self-end" disabled={busy || (!goal && atCap)}>{busy ? '저장 중…' : goal ? '저장' : '목표 추가'}</Button>
     </form>
   </Modal>;
