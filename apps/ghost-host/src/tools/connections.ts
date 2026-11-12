@@ -231,7 +231,7 @@ export function createConnectionAlias(core: Core, deps: { sources: ActivitySourc
     const check = () => {
       try {
         const scope = authorize(api, connection, input.authority);
-        if (read) policyRead(core, scope.conversation.id, { tool: name, target: { kind: "connection", id: connection.id }, access: "read", reversible: false, external: false, amount: null }, api.callId);
+        if (read) policyRead(core, scope.conversation.id, { tool: name, target: { kind: "connection", id: connection.id }, access: "read", reversible: false, external: false, amount: null }, api);
         else core.effects.authorize(scope.conversation.id, api.callId);
       } catch (error) {
         if (dispatched && !read) throw new Error("The request was dispatched before authority changed; inspect the service outcome before retrying.");
@@ -258,7 +258,7 @@ export function createConnectionAlias(core: Core, deps: { sources: ActivitySourc
     if (digestOf(input) !== effect.inputDigest || Date.now() - effect.createdAt >= DAY) throw new NoEffect("Approved connection input changed or expired");
     const piId = core.ledger.piConversationId(effect.conversationId);
     if (!piId) throw new NoEffect("Connection conversation is unavailable");
-    const api = { conversationId: piId, callId: effect.callId } as unknown as ToolExecutionApi;
+    const api = { conversationId: piId, taskId: `effect:${effect.id}`, callId: effect.callId } as unknown as ToolExecutionApi;
     const connection = core.ledger.findConnection(input.connectionId);
     if (!connection) throw new NoEffect("The connection was deleted; nothing was sent");
     const scope = authorize(api, connection, input.authority);
@@ -284,7 +284,7 @@ export function createConnectionAlias(core: Core, deps: { sources: ActivitySourc
         const input: WriteRequest = { connectionId: id, authority, method: args.method, path: args.path, body: args.body ?? null };
         const classification = { target: { kind: "connection" as const, id }, access: read ? "read" as const : "write" as const, reversible: false, external: !read, amount: null };
         if (read) {
-          policyRead(core, scope.conversation.id, { ...classification, tool: name }, api.callId);
+          policyRead(core, scope.conversation.id, { ...classification, tool: name }, api);
           return text(await request(api, input));
         }
         if (scope.work?.activityId && core.ledger.activity(scope.work.activityId).policy.externalActions === "deny") throw forbidden("This activity denies external actions");

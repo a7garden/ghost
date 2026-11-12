@@ -121,7 +121,7 @@ export class DynamicCapabilities {
       if (digestOf(input) !== effect.inputDigest || mcpToolName(input.serverId, input.tool) !== name) throw new NoEffect("Approved MCP input changed");
       const piId = this.core.ledger.piConversationId(effect.conversationId);
       if (!piId) throw new NoEffect("MCP conversation is unavailable");
-      const api = { conversationId: piId, callId: effect.callId } as unknown as ToolExecutionApi;
+      const api = { conversationId: piId, taskId: `effect:${effect.id}`, callId: effect.callId } as unknown as ToolExecutionApi;
       const authorize = () => { const scope = this.authorize(api, name, input); this.core.effects.authorize(scope.conversation.id, effect.callId); };
       authorize();
       return responseText(await this.call(input, authorize));
@@ -150,7 +150,7 @@ export class DynamicCapabilities {
           if (access === "read") {
             const authorize = () => {
               const current = this.authorize(api, name, input);
-              policyRead(this.core, current.conversation.id, { ...classification, tool: name }, api.callId);
+              policyRead(this.core, current.conversation.id, { ...classification, tool: name }, api);
             };
             authorize();
             const result = await this.call(input, authorize);
