@@ -88,9 +88,9 @@ describe("Ghosts adapt to this environment", () => {
     const saved = t.core.adaptations.get(t.mate.id)!;
     expect(saved).toMatchObject({ by: "self", revision: 2, previous: "Docs live under docs/ in each Scope." });
     expect(t.ledger.ghost(t.mate.id).persona).toBe("You research.");
-    expect(await t.tools.contextFor(t.mateDirect, t.ledger.ghost(t.mate.id), null)).toContain("read large files with host_read offset");
+    expect(await t.tools.contextFor!(t.mateDirect, t.ledger.ghost(t.mate.id), null)).toContain("read large files with host_read offset");
     // Another Ghost's context does not carry them.
-    expect(await t.tools.contextFor(t.mainDirect, t.ledger.ghost(t.main.id), null)).not.toContain("host_read offset");
+    expect(await t.tools.contextFor!(t.mainDirect, t.ledger.ghost(t.main.id), null)).not.toContain("host_read offset");
     // The same notes again change nothing.
     await adapt({ notes: "Docs live under docs/; read large files with host_read offset.", reason: "again" }, "a3");
     expect(t.core.adaptations.get(t.mate.id)!.revision).toBe(2);
@@ -103,7 +103,7 @@ describe("Ghosts adapt to this environment", () => {
     expect(t.core.adaptations.get(t.mate.id)).toMatchObject({ by: "main" });
     t.core.adaptations.set(t.mate.id, "", "owner", "");
     expect(t.core.adaptations.get(t.mate.id)).toMatchObject({ notes: "", by: "owner" });
-    expect(await t.tools.contextFor(t.mateDirect, t.ledger.ghost(t.mate.id), null)).not.toContain("What you learned");
+    expect(await t.tools.contextFor!(t.mateDirect, t.ledger.ghost(t.mate.id), null)).not.toContain("What you learned");
   });
 });
 
