@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
-import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, GenerationTask, hook, type Extension } from "@earendil-works/pi-durable";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Message, Scope } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
-import { idFor } from "../src/core/ids.ts";
+import { digestOf, idFor } from "../src/core/ids.ts";
 import type { Engine } from "../src/core/ports.ts";
 import { attachmentLayer } from "../src/engine/attachments.ts";
 import { createEngine } from "../src/engine/index.ts";
@@ -50,11 +50,11 @@ async function fixture(extra?: (core: Core) => Extension[], factory?: (core: Cor
   const secrets = new MemorySecrets();
   const core = new Core({ ledger, secrets, artifacts: new MemoryArtifacts(), sandbox: noSandbox, log() {} });
   ledger.tx(() => {
-    ledger.putProvider({ id: "faux", kind: "openai_compatible", name: "Faux", baseUrl: null, models: [{ id: "faux-1", name: "Faux" }] });
+    ledger.putProvider({ id: "faux", kind: "openai_compatible", name: "Faux", baseUrl: null, models: [{ id: "faux-1", name: "Faux" }, { id: "faux-2", name: "Alternate Faux" }] });
     ledger.putSetting("defaultModel", { provider: "faux", model: "faux-1" });
   });
   secrets.put("faux", "fixture-key");
-  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }] });
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }, { id: "faux-2", name: "Alternate Faux" }] });
   const models = createModels();
   models.setProvider(faux.provider);
   let reads = 0;
@@ -677,4 +677,51 @@ test("model review still refuses missing review execution, a producer conversati
       expect(h.ledger.pendingDecisions({ workId: work.id }).some(decision => decision.kind === "accept_result")).toBe(true);
     } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
   }
+});
+
+test("review proof follows the prepared request, not a restored phase agent or slot", async () => {
+  let f: Awaited<ReturnType<typeof fixture>>;
+  let rounds = 0, requests = 0;
+  const slotA = { model: { provider: "faux", model: "faux-1" }, fallbacks: [] };
+  const slotB = { model: { provider: "faux", model: "faux-2" }, fallbacks: [] };
+  f = await fixture(core => [defineExtension({
+    name: "fixture.review-model-shift",
+    hooks: [hook(GenerationTask, {
+      async afterTools(_entry, _results, api) {
+        if (++rounds !== 1) return;
+        const conversation = core.ledger.conversationByPiId(String(api.conversationId))!;
+        core.ledger.tx(() => core.ledger.putSetting("slots", { reviewer: slotB }));
+        await f.engine.open({ conversation, ghost: core.ledger.ghost(conversation.ghostId), work: null });
+        core.ledger.tx(() => core.ledger.putSetting("slots", { reviewer: slotA }));
+      },
+      async beforeRequest(_request, api) {
+        if (++requests !== 2) return;
+        // B has already been prepared. Restoring A changes the live agent, not this request.
+        const conversation = core.ledger.conversationByPiId(String(api.conversationId))!;
+        await f.engine.open({ conversation, ghost: core.ledger.ghost(conversation.ghostId), work: null });
+      },
+    })],
+  })]);
+  try {
+    f.ledger.tx(() => f.ledger.putSetting("slots", { reviewer: slotA }));
+    f.faux.setResponses([
+      fauxAssistantMessage({ ...fauxToolCall("host_read", {}), id: "prepared-a" }, { stopReason: "toolUse" }),
+      fauxAssistantMessage({ ...fauxToolCall("host_read", {}), id: "prepared-b" }, { stopReason: "toolUse" }),
+      fauxAssistantMessage("Review proof complete"),
+    ]);
+    const wakeId = idFor(f.ghost.directConversationId, "wake:checkpoint-proof");
+    const done = message(f.engine, wakeId, entry => entry.text === "Review proof complete");
+    await f.engine.wake!(f.ghost.id, { text: "Read review evidence", origin: "schedule", requestId: "checkpoint-proof" }, { slot: "reviewer", decisionId: "bound-review" });
+    await done;
+    const good = f.ledger.setting<Record<string, unknown>>(`policy:review-response:${wakeId}:prepared-a`, {});
+    expect(good.provider).toBe("faux"); expect(good.model).toBe("faux-1");
+    expect(good.thinking).toBe("off"); expect(good.slotDigest).toBe(digestOf(slotA));
+    expect(good.invalid).toBeUndefined();
+    const conflicting = f.ledger.setting<Record<string, unknown>>(`policy:review-response:${wakeId}:prepared-b`, {});
+    expect(conflicting.model).toBe("faux-2");
+    expect(conflicting.slotDigest).toBe(digestOf(slotA));
+    expect(conflicting.invalid).toBe("Prepared request does not belong to the admitted reviewer slot");
+    expect(typeof conflicting.generationTaskId).toBe("string");
+    expect(typeof conflicting.messageDigest).toBe("string");
+  } finally { await f.close(); }
 });

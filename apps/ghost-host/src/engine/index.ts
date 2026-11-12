@@ -59,6 +59,17 @@ const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
 const ORIGIN_REPAIR = "history-origins-after-placement-order";
 const DECISION_READ_TOOLS: Readonly<Record<string, true>> = { work_list: true, work_inspect: true, evidence_read: true, artifact_read: true, effect_list: true };
 
+type ReviewRequestProof = {
+  generationTaskId: string;
+  attempt?: number;
+  cutoff?: string;
+  provider?: string;
+  model?: string;
+  thinking?: string;
+  slotDigest?: string;
+  invalid?: string;
+};
+
 /** One host conversation and everything the engine tracks about it. */
 interface ConversationState {
   hostId: string;
@@ -175,6 +186,7 @@ class HostEngine implements Engine, MemoryEngine {
       } }],
       hooks: [hook(GenerationTask, {
         afterResponse: async (message, api) => {
+          await this.recordReviewResponse(message, api);
           if (!(await this.harness.snapshot(FallbackReceiptsDoc, api.conversationId, ctx))) return;
           const active = await this.harness.snapshot(LiveDoc, api.conversationId, ctx);
           if (active?.run?.taskId !== api.taskId) return;
@@ -197,6 +209,7 @@ class HostEngine implements Engine, MemoryEngine {
           if (host.kind === "wake" && !this.currentWake(host)) throw new CommandError("forbidden", "this wake was superseded");
           const state = await this.ensureState(host.id);
           await this.activateInputContext(state);
+          await this.recordReviewRequest(api);
         },
         // Reset before Pi admits a queued next turn, not after its request is prepared.
         onYield: async (_answer, api): Promise<undefined> => {
@@ -1341,6 +1354,71 @@ class HostEngine implements Engine, MemoryEngine {
     return dreamInPi(this.harness, input, signal);
   }
 
+  /** Agent configuration may change after prepare; only the generation checkpoint proves what was requested. */
+  private async reviewCheckpoint(api: Pick<ToolExecutionApi, "conversationId" | "taskId">) {
+    return this.harness.commit(async (tx) => {
+      const task = await tx.task(api.taskId);
+      if (!task || task.kind !== GenerationTask.definition.name || task.version !== GenerationTask.definition.version || task.conversationId !== api.conversationId || task.state.status === "terminal" || task.state.status === "completing") return null;
+      const checkpoint = task.state.checkpoint;
+      if (!checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint) || (checkpoint.phase !== "request" && checkpoint.phase !== "poll") || typeof checkpoint.attempt !== "number" || (typeof checkpoint.cutoff !== "number" && typeof checkpoint.cutoff !== "string")) return null;
+      const model = checkpoint.model;
+      if (!model || typeof model !== "object" || Array.isArray(model) || typeof model.provider !== "string" || typeof model.modelId !== "string") return null;
+      if (checkpoint.phase === "request" && typeof checkpoint.thinkingLevel !== "string") return null;
+      return { phase: checkpoint.phase, attempt: checkpoint.attempt, cutoff: String(checkpoint.cutoff), provider: model.provider, model: model.modelId, ...(checkpoint.phase === "request" ? { thinking: checkpoint.thinkingLevel as string } : {}) };
+    }, ctx);
+  }
+
+  private reviewWake(api: Pick<ToolExecutionApi, "conversationId">) {
+    const host = this.core.ledger.conversationByPiId(String(api.conversationId));
+    if (host?.kind !== "wake" || !this.core.ledger.setting<string | null>(`wake:decision:${host.id}`, null)) return null;
+    const slot = this.core.ledger.setting<string | null>(`wake:slot:${host.id}`, null);
+    return slot ? { host, slot } : null;
+  }
+
+  private putReviewProof(key: string, proof: ReviewRequestProof & { messageDigest?: string }): void {
+    this.core.ledger.tx(() => {
+      const previous = this.core.ledger.setting<(ReviewRequestProof & { messageDigest?: string }) | null>(key, null);
+      // Neither a replay nor a slot edit can turn conflicting evidence into an authorized review.
+      this.core.ledger.putSetting(key, previous && digestOf(previous) !== digestOf(proof)
+        ? { ...previous, invalid: previous.invalid ?? "Conflicting generation review proof" }
+        : proof);
+    });
+  }
+
+  private async recordReviewRequest(api: Pick<ToolExecutionApi, "conversationId" | "taskId">): Promise<void> {
+    const binding = this.reviewWake(api);
+    if (!binding) return;
+    const checkpoint = await this.reviewCheckpoint(api);
+    if (!checkpoint || checkpoint.phase !== "request") throw new CommandError("forbidden", "Reviewer request checkpoint is unavailable");
+    const { phase: _phase, ...request } = checkpoint;
+    const slot = this.core.ledger.settings().slots?.[binding.slot];
+    const admitted = this.core.ledger.setting<string | null>(`wake:slot-config:${binding.host.id}`, null);
+    const invalid = !slot || !admitted || digestOf(slot) !== admitted
+      ? "Reviewer slot changed after wake admission"
+      : ![slot.model, ...slot.fallbacks].some(model => model.provider === request.provider && model.model === request.model && (model.thinking ?? "off") === request.thinking)
+        ? "Prepared request does not belong to the admitted reviewer slot"
+        : null;
+    this.putReviewProof(`policy:review-request:${binding.host.id}:${api.taskId}:${request.attempt}:${request.cutoff}`, {
+      generationTaskId: String(api.taskId), ...request, ...(admitted ? { slotDigest: admitted } : {}), ...(invalid ? { invalid } : {}),
+    });
+  }
+
+  private async recordReviewResponse(message: AssistantMessage, api: Pick<ToolExecutionApi, "conversationId" | "taskId">): Promise<void> {
+    const binding = this.reviewWake(api);
+    if (!binding) return;
+    const calls = message.content.filter(content => content.type === "toolCall");
+    if (!calls.length) return;
+    const checkpoint = await this.reviewCheckpoint(api);
+    const saved = checkpoint ? this.core.ledger.setting<ReviewRequestProof | null>(`policy:review-request:${binding.host.id}:${api.taskId}:${checkpoint.attempt}:${checkpoint.cutoff}`, null) : null;
+    const proof: ReviewRequestProof = saved ? { ...saved } : { generationTaskId: String(api.taskId), invalid: "No durable reviewer request checkpoint" };
+    if (!checkpoint || checkpoint.provider !== proof.provider || checkpoint.model !== proof.model || (checkpoint.phase === "request" && checkpoint.thinking !== proof.thinking)) proof.invalid ??= "Response checkpoint conflicts with its request";
+    if (message.provider !== proof.provider || message.model !== proof.model) proof.invalid ??= "Response model differs from its request checkpoint";
+    const slot = this.core.ledger.settings().slots?.[binding.slot];
+    const admitted = this.core.ledger.setting<string | null>(`wake:slot-config:${binding.host.id}`, null);
+    if (!slot || !admitted || digestOf(slot) !== admitted || proof.slotDigest !== admitted) proof.invalid ??= "Reviewer slot changed after wake admission";
+    for (const call of calls) this.putReviewProof(`policy:review-response:${binding.host.id}:${call.id}`, { ...proof, messageDigest: digestOf(message) });
+  }
+
   // Models
 
   private rebuildModels(): void {
@@ -1436,3 +1514,4 @@ export async function createEngine(deps: EngineDeps): Promise<Engine & MemoryEng
     throw error;
   }
 }
+
