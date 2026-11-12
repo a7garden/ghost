@@ -720,3 +720,50 @@ test("an owner authentication probe can renew OAuth without re-entering its own 
   expect(sources.credentials.get(row.id)?.value).toBe(ACCESS2);
   expect(requests).toHaveLength(2);
 });
+
+test("owner metadata connects and refreshes an unknown OAuth API without a provider-specific Host path", async () => {
+  const tokenUrl = "https://calendar.example/token";
+  let exchanges = 0;
+  const routes = new Map<string, Route>([[tokenUrl, init => {
+    const body = JSON_BODY(init);
+    expect(body.client_id).toBe(CLIENT_ID);
+    if (++exchanges === 1) {
+      expect(body.code_verifier).toBeString();
+      expect(body.grant_type).toBe("authorization_code");
+      return Response.json({ access_token: ACCESS, refresh_token: REFRESH, expires_in: 3600 });
+    }
+    expect(body.grant_type).toBe("refresh_token");
+    expect(body.refresh_token).toBe(REFRESH);
+    return Response.json({ access_token: ACCESS2, refresh_token: REFRESH2, expires_in: 3600 });
+  }]]);
+  const s = setup({ routes });
+  const provider = {
+    authorize: "https://calendar.example/authorize", token: tokenUrl, scope: "events.read events.write",
+    body: "json", clientAuth: "secret-body", requiresSecret: false, requiresRefreshToken: true,
+    authorizationParams: { access_type: "offline" },
+    connection: { kind: "api", baseUrl: "https://calendar.example/api/", authHeader: "Authorization", authPrefix: "Bearer", testPath: "users/me", headers: {}, readPaths: [{ method: "POST", path: "/events/search" }] },
+  };
+  expect((await jsonRequest(s.manager, "PUT", "calendar", s.owner, { clientId: CLIENT_ID, provider })).status).toBe(200);
+  const started = await startLogin(s.manager, "calendar", s.owner, { name: "Calendar", ghostIds: [s.ghost.id] });
+  const authorize = new URL(String(started.body.authorizationUrl));
+  expect(authorize.origin).toBe("https://calendar.example");
+  expect(authorize.searchParams.get("code_challenge_method")).toBe("S256");
+  expect(authorize.searchParams.get("access_type")).toBe("offline");
+  await runCallback(s.manager, callbackUrl(started, { code: "owner-code" }));
+  const connected = await settled(s.manager, "calendar", s.owner);
+  expect(connected.body.state).toBe("connected");
+  const connection = s.ledger.connection(requireId(connected.body.connectionId));
+  expect(connection.config).toMatchObject({ ...provider.connection, ghostIds: [s.ghost.id] });
+  expect(JSON.stringify(connected.body)).not.toContain(ACCESS);
+  s.tick(3500);
+  await s.manager.refresh(connection);
+  expect(s.sources.credentials.get(connection.id)?.value).toBe(ACCESS2);
+});
+
+test("generic OAuth metadata cannot overwrite state or PKCE parameters", async () => {
+  const s = setup();
+  await expect(jsonRequest(s.manager, "PUT", "custom", s.owner, {
+    clientId: CLIENT_ID,
+    provider: { authorize: "https://example.com/authorize", token: "https://example.com/token", scope: null, body: "form", clientAuth: "secret-body", requiresSecret: false, requiresRefreshToken: false, authorizationParams: { state: "predictable" }, connection: { kind: "api", baseUrl: "https://example.com/api", authHeader: "Authorization", authPrefix: "Bearer", testPath: "me", headers: {} } },
+  })).rejects.toThrow("cannot override");
+});

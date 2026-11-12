@@ -318,6 +318,7 @@ export class ConnectionOAuth {
     const service = match[1]!;
     if (!isService(service)) return error("not_found", "not found", 404);
     if (!access) return error("forbidden", "missing or invalid bearer token", 401);
+    if (request.method !== "PUT" && !PROVIDERS[service] && this.loadClient(service) === null) return error("not_found", "not found", 404);
     try {
       if (request.method === "GET") return jsonView(this.view(service));
       if (request.method === "PUT") return jsonView(await this.configure(service, request));
@@ -443,6 +444,7 @@ export class ConnectionOAuth {
       : input.clientSecret;
     const provider = input.provider ?? previous?.provider;
     if (provider) {
+      if (["response_type", "client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "scope"].some(key => Object.hasOwn(provider.authorizationParams ?? {}, key))) throw invalid("OAuth authorization parameters cannot override PKCE, identity, state or scope");
       for (const endpoint of [provider.authorize, provider.token]) {
         let url: URL;
         try { url = new URL(endpoint); } catch { throw invalid("OAuth endpoints must be HTTPS URLs"); }
@@ -496,10 +498,11 @@ export class ConnectionOAuth {
     const state = randomBytes(32).toString("base64url");
     const verifier = randomBytes(32).toString("base64url");
     const challenge = createHash("sha256").update(verifier).digest("base64url");
-    const scope = service !== "google" || input.googleDrive !== true
+    const scope = client.provider || service !== "google" || input.googleDrive !== true
       ? spec.scope
       : `${spec.scope} https://www.googleapis.com/auth/drive.readonly`;
     const params = new URLSearchParams({
+      ...client.provider?.authorizationParams,
       response_type: "code",
       client_id: client.clientId,
       redirect_uri: this.redirectUri,
@@ -507,8 +510,8 @@ export class ConnectionOAuth {
       code_challenge: challenge,
       code_challenge_method: "S256",
       ...(scope === null ? {} : { scope }),
-      ...(service === "google" ? { access_type: "offline", prompt: "consent" } : {}),
-      ...(service === "notion" ? { owner: "user" } : {}),
+      ...(!client.provider && service === "google" ? { access_type: "offline", prompt: "consent" } : {}),
+      ...(!client.provider && service === "notion" ? { owner: "user" } : {}),
     });
     const principal = access.principal.kind === "owner"
       ? ({ kind: "owner" } as const)
@@ -674,7 +677,7 @@ export class ConnectionOAuth {
     headers.set("content-type", spec.body === "form" ? "application/x-www-form-urlencoded" : "application/json");
     this.clientAuth(spec, client, headers, form);
     const body = spec.body === "json"
-      ? JSON.stringify({ grant_type: "authorization_code", code, redirect_uri: this.redirectUri })
+      ? JSON.stringify(client.provider ? Object.fromEntries(form) : { grant_type: "authorization_code", code, redirect_uri: this.redirectUri })
       : form.toString();
     const ghost = this.core.ledger.defaultGhost();
     if (!ghost) throw new LoginFailure(MESSAGE.registerFailed);
@@ -818,7 +821,7 @@ export class ConnectionOAuth {
       throw new CommandError("unavailable", MESSAGE.refreshFailed);
     }
     const body = spec.body === "json"
-      ? JSON.stringify({ grant_type: "refresh_token", refresh_token: stored })
+      ? JSON.stringify(client.provider ? Object.fromEntries(form) : { grant_type: "refresh_token", refresh_token: stored })
       : form.toString();
     let payload: unknown;
     if (this.closed) throw new CommandError("unavailable", MESSAGE.closed);

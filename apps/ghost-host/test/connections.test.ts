@@ -438,3 +438,35 @@ test("tool revocation while OAuth refresh waits prevents the subsequent external
     expect(s.ledger.effect(decision.effectId!).state).toBe("denied");
   } finally { release.resolve(); s.close(); }
 });
+
+test("owner-marked POST reads keep their method and body without opening a write decision", async () => {
+  const s = setup();
+  try {
+    const marked: Connection = { ...s.connection, config: { ...API_CONFIG, ghostIds: [s.ghost.id], readPaths: [{ method: "POST", path: "/query" }] } };
+    s.ledger.tx(() => s.ledger.putConnection(marked));
+    const request = toolOf(s, s.ledger.conversation(s.ghost.directConversationId), s.ghost, "connection_request");
+    const result = await call(request, { connection_id: marked.id, method: "POST", path: "/query", body: "{\"query\":\"owned\"}" }, apiOf(s.pi, "read-post"));
+    expect(result.isError).toBeFalsy();
+    expect(s.requests).toMatchObject([{ path: "/v1/query", method: "POST" }]);
+    expect(s.ledger.pendingDecisions()).toHaveLength(0);
+    expect(s.ledger.effectsInState("done")).toHaveLength(0);
+  } finally { s.close(); }
+});
+
+test("connection namespace grants invoke the generic API without the generic-tool grant", async () => {
+  const s = setup();
+  try {
+    const ghost = { ...s.ghost, tools: ["conn.notion"] };
+    s.ledger.tx(() => s.ledger.putGhost(ghost));
+    const conversation = s.ledger.conversation(ghost.directConversationId);
+    const catalog = (await s.tools.prepare!(conversation, ghost, null, s.tools.extensionsFor(conversation, ghost, null))).flatMap(extension => extension.tools ?? []);
+    const request = catalog.find(tool => tool.name === "conn.notion")!;
+    const result = await call(request, { method: "GET", path: "/echo" }, apiOf(s.pi, "alias-read"));
+    expect(result.isError).toBeFalsy();
+    expect(contentOf(result)).toContain("[redacted]");
+    expect(contentOf(result)).not.toContain(TOKEN);
+    const revoked = { ...s.connection, config: { ...API_CONFIG, ghostIds: [] } };
+    s.ledger.tx(() => s.ledger.putConnection(revoked));
+    expect((await call(request, { method: "GET", path: "/users/me" }, apiOf(s.pi, "alias-revoked"))).isError).toBe(true);
+  } finally { s.close(); }
+});

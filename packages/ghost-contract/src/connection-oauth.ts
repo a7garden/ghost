@@ -14,6 +14,7 @@ export const ConnectionOAuthMetadata = Type.Object({
   clientAuth: Type.Union([Type.Literal("secret-body"), Type.Literal("basic"), Type.Literal("secret-basic")]),
   requiresSecret: Type.Boolean(),
   requiresRefreshToken: Type.Boolean(),
+  authorizationParams: Type.Optional(Type.Record(Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_]{0,63}$" }), Type.String({ maxLength: 512 }), { maxProperties: 32 })),
   connection: Type.Omit(ApiConnectionConfig, ["ghostIds"]),
 });
 export type ConnectionOAuthMetadata = Static<typeof ConnectionOAuthMetadata>;

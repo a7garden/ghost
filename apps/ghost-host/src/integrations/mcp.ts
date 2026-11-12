@@ -7,7 +7,7 @@ import { ErrorCode, McpError, ToolListChangedNotificationSchema, type CallToolRe
 import type { McpServer } from "@ghost/contract";
 import { CommandError, forbidden, invalid, notFound } from "../core/errors.ts";
 import { HOST_VERSION } from "../update/identity.ts";
-import { chmodSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
+import { chmodSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -16,6 +16,8 @@ import type { Vault } from "../stores/vault.ts";
 import type { SourceConnections } from "./activity-sources.ts";
 import { createEgressProxy, type EgressProxy } from "./egress-proxy.ts";
 import { buildSeatbeltPolicy, seatbeltArgv } from "../sandbox/seatbelt.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { confineDirChain } from "../sandbox/workspace-env.ts";
 
 /** Rewrites a stdio server's argv before launch, such as wrapping it in a sandbox. */
 export type CommandWrapper = (argv: string[]) => string[];
@@ -298,6 +300,7 @@ export class McpClients implements McpPort {
   private readonly limits: McpLimits;
   private readonly sessions = new Map<string, Entry>();
   private readonly secretValues = new Map<string, string[]>();
+  private readonly callAuthority = new AsyncLocalStorage<() => void>();
   private shut = false;
 
   constructor(private readonly options: McpOptions) {
@@ -334,11 +337,11 @@ export class McpClients implements McpPort {
     this.assertCurrent(server);
     authorize?.();
     try {
-      const result = await session.client.callTool({ name, arguments: args }, undefined, {
+      const result = await this.callAuthority.run(authorize ?? (() => undefined), () => session.client.callTool({ name, arguments: args }, undefined, {
         timeout: this.limits.callMs,
         maxTotalTimeout: this.limits.callMs,
         ...(signal ? { signal } : {}),
-      });
+      }));
       this.assertCurrent(server);
       authorize?.();
       const bounded = boundResult(result as CallToolResult, this.limits);
@@ -357,6 +360,7 @@ export class McpClients implements McpPort {
     const entries = [...this.sessions.values()];
     this.sessions.clear();
     await Promise.all(entries.map((entry) => entry.ready.then((session) => session.close(), () => undefined)));
+    this.secretValues.clear();
   }
 
   private key(server: McpServer): string {
@@ -489,9 +493,15 @@ export class McpClients implements McpPort {
     const transport: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(url, {
       requestInit: { headers },
       fetch: async (input, init) => {
+        const currentHeaders = connectionId === null ? {} : await this.options.authHeaders!(connectionId);
+        const requestHeaders = new Headers(init?.headers);
+        for (const [name, value] of Object.entries(currentHeaders)) requestHeaders.set(name, value);
+        this.secretValues.set(server.id, [...new Set([...(this.secretValues.get(server.id) ?? []), ...Object.values(currentHeaders)])]);
         this.assertCurrent(server);
-        const result = await boundedFetch(this.limits.messageBytes, () => void transport.close())(input, { ...init, redirect: "error" });
+        this.callAuthority.getStore()?.();
+        const result = await boundedFetch(this.limits.messageBytes, () => void transport.close())(input, { ...init, headers: requestHeaders, redirect: "error" });
         this.assertCurrent(server);
+        this.callAuthority.getStore()?.();
         return result;
       },
     });
@@ -538,12 +548,9 @@ export function createHostMcpClients(deps: { root: string; ledger: Ledger; sourc
   let openingProxy: Promise<EgressProxy> | null = null;
   const authorities = new Map<string, { headers: Record<string, string>; authorize(): void; redact(text: string): string }>();
   const workspace = (server: McpServer) => {
-    const directory = join(deps.root, "mcp", createHash("sha256").update(server.id).digest("hex"));
-    for (const path of [join(deps.root, "mcp"), directory, join(directory, "tmp")]) {
-      mkdirSync(path, { recursive: true, mode: 0o700 });
-      if (lstatSync(path).isSymbolicLink() || !lstatSync(path).isDirectory()) throw forbidden("MCP workspace must be a private directory");
-      chmodSync(path, 0o700);
-    }
+    const directory = confineDirChain(deps.root, ["mcp", createHash("sha256").update(server.id).digest("hex")], true);
+    confineDirChain(directory, ["tmp"], true);
+    chmodSync(directory, 0o700);
     if (server.transport.kind === "stdio" && server.transport.cwd !== null && realpathSync(server.transport.cwd) !== realpathSync(directory)) throw forbidden("MCP servers run only in their private workspace; leave cwd unset");
     return realpathSync(directory);
   };
@@ -582,9 +589,13 @@ export function createHostMcpClients(deps: { root: string; ledger: Ledger; sourc
       if (!openingProxy) openingProxy = createEgressProxy();
       proxy = await openingProxy;
       const directory = workspace(server);
-      const policy = buildSeatbeltPolicy(homedir(), deps.root, { writeRoots: [directory], readRoots: [], proxyPort: Number(new URL(proxy.url).port) });
+      const program = Bun.which(argv[0]!, { PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" });
+      if (!program) throw invalid("MCP server executable is unavailable");
+      const executable = realpathSync(program);
+      const policy = buildSeatbeltPolicy(homedir(), deps.root, { writeRoots: [directory], readRoots: [executable], proxyPort: Number(new URL(proxy.url).port) });
       policy.toolchain = policy.toolchain.filter(path => !path.startsWith(`${homedir()}/`));
-      return seatbeltArgv(policy, argv);
+      policy.tempRoots = [];
+      return seatbeltArgv(policy, [executable, ...argv.slice(1)]);
     },
     runtimeEnv: server => {
       const directory = workspace(server);
@@ -592,9 +603,9 @@ export function createHostMcpClients(deps: { root: string; ledger: Ledger; sourc
     },
   });
   const unsubscribe = deps.ledger.subscribe(event => {
-    if (event.type === "mcp_server") clients.invalidate(event.server.id);
-    else if (event.type === "mcp_server.removed") clients.invalidate(event.id);
-    else if (event.type === "connection" || event.type === "connection.removed") {
+    if (event.data.type === "mcp_server") clients.invalidate(event.data.server.id);
+    else if (event.data.type === "mcp_server.removed") clients.invalidate(event.data.id);
+    else if (event.data.type === "connection" || event.data.type === "connection.removed") {
       for (const server of deps.ledger.mcpServers()) if (server.transport.kind === "http") clients.invalidate(server.id);
     }
   });
@@ -603,6 +614,7 @@ export function createHostMcpClients(deps: { root: string; ledger: Ledger; sourc
     unsubscribe();
     await close();
     if (openingProxy) await openingProxy.then(value => value.close(), () => undefined);
+    authorities.clear();
   };
   return clients;
 }

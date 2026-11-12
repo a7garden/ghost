@@ -219,7 +219,11 @@ export function createConnectionAlias(core: Core, deps: { sources: ActivitySourc
   };
   const request = async (api: ToolExecutionApi, input: WriteRequest) => {
     const connection = core.ledger.connection(input.connectionId);
-    const check = () => { authorize(api, connection, input.authority); };
+    const check = () => {
+      const scope = authorize(api, connection, input.authority);
+      if (connectionRequestIsReadOnly(connection, input.method, input.path)) policyRead(core, scope.conversation.id, { tool: name, target: { kind: "connection", id: connection.id }, access: "read", reversible: false, external: false, amount: null });
+      else core.effects.authorize(scope.conversation.id, api.callId);
+    };
     check();
     if (!deps.sources?.apiRequest) throw new NoEffect("Authenticated API requests are unavailable");
     const response = await deps.sources.apiRequest(connection, { method: input.method, path: input.path, ...(input.body === null ? {} : { body: input.body }), authorize: check });
@@ -232,7 +236,7 @@ export function createConnectionAlias(core: Core, deps: { sources: ActivitySourc
     if (!input || digestOf(input) !== effect.inputDigest || Date.now() - effect.createdAt >= DAY) throw new NoEffect("Approved connection input changed or expired");
     const piId = core.ledger.piConversationId(effect.conversationId);
     if (!piId) throw new NoEffect("Connection conversation is unavailable");
-    const api = { conversationId: piId } as unknown as ToolExecutionApi;
+    const api = { conversationId: piId, callId: effect.callId } as unknown as ToolExecutionApi;
     const scope = authorize(api, core.ledger.connection(input.connectionId), input.authority);
     if (scope.conversation.kind === "subagent") throw new NoEffect("Subagents cannot change external services");
     if (scope.work?.activityId && core.ledger.activity(scope.work.activityId).policy.externalActions === "deny") throw new NoEffect("This activity denies external actions");
@@ -240,10 +244,10 @@ export function createConnectionAlias(core: Core, deps: { sources: ActivitySourc
   });
   return defineTool({
     name, description: "Request this granted HTTP API using a base-relative path. Owner-marked read paths and ordinary GET reads run through read policy. Unknown operations are writes and require policy approval. Credentials and headers never enter model arguments.",
-    parameters: Type.Object({ ...(connectionId ? {} : { connection_id: Type.String({ minLength: 1, maxLength: 128 }) }), method: Type.Union([Type.Literal("GET"), Type.Literal("POST"), Type.Literal("PUT"), Type.Literal("PATCH"), Type.Literal("DELETE")]), path: Type.String({ minLength: 1, maxLength: 2048 }), body: Type.Optional(Type.String({ minLength: 1, maxLength: 16384 })), reason: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })) }), replay: "unsafe",
+    parameters: Type.Object({ connection_id: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), method: Type.Union([Type.Literal("GET"), Type.Literal("POST"), Type.Literal("PUT"), Type.Literal("PATCH"), Type.Literal("DELETE")]), path: Type.String({ minLength: 1, maxLength: 2048 }), body: Type.Optional(Type.String({ minLength: 1, maxLength: 16384 })), reason: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })) }), replay: "unsafe",
     async execute(args, api) {
       try {
-        const id = connectionId ?? (args as { connection_id?: string }).connection_id;
+        const id = connectionId ?? args.connection_id;
         if (!id) throw invalid("Choose an API connection");
         const connection = core.ledger.connection(id);
         const authority = authorityOf(connection);

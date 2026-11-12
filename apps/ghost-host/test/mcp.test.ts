@@ -72,7 +72,7 @@ test("a crashed server fails the running call without its stderr and relaunches 
   const crash = await mcp.callTool("fake", "crash", {}).then(() => null, (error: Error) => error);
   expect(crash?.message).toContain("stopped during tool crash");
   expect(crash?.message).not.toContain("SECRET-STDERR-TOKEN");
-  expect(mcp.stderrTail("fake")).toContain("SECRET-STDERR-TOKEN");
+  expect(mcp.stderrTail("fake")).toBe("");
   const after = textOf(await mcp.callTool("fake", "pid", {}));
   expect(after).not.toBe(before);
 });
@@ -111,7 +111,7 @@ test("launches through the command wrapper with only the listed secrets", async 
     env: async () => values,
   });
   expect(JSON.parse(textOf(await mcp.callTool("fake", "argv", {})))).toEqual(["--wrapped"]);
-  expect(textOf(await mcp.callTool("fake", "env", {}))).toBe("s3cret unset");
+  expect(textOf(await mcp.callTool("fake", "env", {}))).toBe("[redacted] unset");
 
   values = {};
   const missing = clients(() => config(stdio({ env: ["FAKE_SECRET"] }), { id: "missing" }), { env: async () => values });
@@ -124,7 +124,7 @@ test("refuses unknown and disabled servers and reconnects when the transport cha
   await expect(mcp.listTools("other")).rejects.toThrow("not registered");
   const before = textOf(await mcp.callTool("fake", "pid", {}));
   server = { ...server, readTools: [] };
-  expect(textOf(await mcp.callTool("fake", "pid", {}))).toBe(before);
+  expect(textOf(await mcp.callTool("fake", "pid", {}))).not.toBe(before);
   expect((await mcp.listTools("fake")).every((tool) => tool.access === "write")).toBe(true);
   server = { ...server, transport: stdio({ args: [FIXTURE, "5"] }) };
   expect(textOf(await mcp.callTool("fake", "pid", {}))).not.toBe(before);

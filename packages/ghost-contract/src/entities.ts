@@ -161,6 +161,11 @@ export const BuiltinGhostTool = Type.Union([
   Type.Literal("config_revert"),
   Type.Literal("config_history"),
   Type.Literal("metrics_read"),
+  Type.Literal("rule_propose"),
+  Type.Literal("goal_list"),
+  Type.Literal("goal_propose"),
+  Type.Literal("milestone_plan"),
+  Type.Literal("milestone_update"),
 ]);
 export type GhostTool = Static<typeof GhostTool>;
 export type BuiltinGhostTool = Static<typeof BuiltinGhostTool>;
@@ -178,6 +183,7 @@ export const GHOST_TOOLS: readonly BuiltinGhostTool[] = [
   "rule_create", "rule_update", "rule_delete",
   "mcp_create", "mcp_update", "mcp_delete",
   "config_revert", "config_history", "metrics_read",
+  "rule_propose", "goal_list", "goal_propose", "milestone_plan", "milestone_update",
   "work_create",
   "work_list",
   "work_inspect",
@@ -304,7 +310,7 @@ export const ToolPattern = Type.Union([
 export const GhostToolList = Type.Array(ToolPattern, { uniqueItems: true, maxItems: 1024 });
 
 /** Constant-space glob matching; both input and pattern have hard bounds. */
-export function matchToolPattern(pattern: string, name: string): boolean {
+export function matchToolPattern(pattern: string, name: string, prefix = false): boolean {
   if (pattern.length > 512 || name.length > 512 || !/^[A-Za-z0-9_.%~*?-]+$/.test(pattern)) return false;
   let input = 0, token = 0, star = -1, retry = 0;
   while (input < name.length) {
@@ -313,6 +319,7 @@ export function matchToolPattern(pattern: string, name: string): boolean {
     else if (star >= 0) { token = star + 1; input = ++retry; }
     else return false;
   }
+  if (prefix) return true;
   while (pattern[token] === "*") token++;
   return token === pattern.length;
 }

@@ -1,5 +1,6 @@
 import type { Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 
 /** Builds the Pi execution environment of a work conversation. Implemented in src/sandbox. */
 export interface SandboxEnvFactory {

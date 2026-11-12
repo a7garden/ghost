@@ -22,6 +22,7 @@ const TOOL_KINDS: Record<BuiltinGhostTool, readonly Conversation["kind"][]> = {
   rule_create: ["direct"], rule_update: ["direct"], rule_delete: ["direct"],
   mcp_create: ["direct"], mcp_update: ["direct"], mcp_delete: ["direct"],
   config_revert: ["direct"], config_history: ["direct"], metrics_read: ["direct"],
+  rule_propose: ["direct"], goal_list: ["direct"], goal_propose: ["direct"], milestone_plan: ["direct"], milestone_update: ["direct"],
   work_create: ["direct"],
   work_list: ["direct"],
   work_inspect: ["direct"],
@@ -111,7 +112,7 @@ const TOOL_KINDS: Record<BuiltinGhostTool, readonly Conversation["kind"][]> = {
  * require conversation kind ∩ the Ghost's persisted allow-list. A call configured before a revocation
  * still passes through here before any effect, so revocation stops even in-flight stale calls.
  */
-export function requireAllowed(core: Core, api: ToolExecutionApi, name: string): Scope {
+export function requireAllowed(core: Core, api: Pick<ToolExecutionApi, "conversationId">, name: string): Scope {
   const scope = scopeOf(core, api);
   const kind = scope.conversation.kind === "wake" ? "direct" : scope.conversation.kind;
   const kinds = TOOL_KINDS[name as BuiltinGhostTool] ?? (/^(mcp|conn)\./.test(name) ? ["direct", "work", "subagent"] : []);
@@ -133,7 +134,7 @@ export function requireAllowed(core: Core, api: ToolExecutionApi, name: string):
 export const SUBAGENT_READ_TOOLS: Readonly<Record<string, true>> = Object.fromEntries(["web_search", "web_read", "reach", "document_scopes", "document_list", "document_read", "skill_read", "source_list", "source_check", "host_read", "host_list", "host_search", "host_status", "host_services", "host_disk_scan", "host_disk_usage", "host_nodes", "memory_search", "memory_read", "connection_list", "toss_read"].map(name => [name, true]));
 
 /** Resolve the calling conversation from the Pi conversation id the harness puts on every call. */
-export function scopeOf(core: Core, api: ToolExecutionApi): Scope {
+export function scopeOf(core: Core, api: Pick<ToolExecutionApi, "conversationId">): Scope {
   const conversation = core.ledger.conversationByPiId(String(api.conversationId));
   if (!conversation) throw notFound(`conversation ${api.conversationId} is not in the ledger`);
   const ghost = core.ledger.ghost(conversation.ghostId);

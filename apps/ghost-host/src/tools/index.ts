@@ -261,7 +261,7 @@ export function createToolSet(deps: {
         case "subagent":
           return [];
         case "direct": {
-          const selected = [direct, interactive, drive, activities, self, configuration];
+          const selected = [direct, interactive, drive, activities, self, configuration, goals];
           if (memory) selected.push(memory);
           if (documents) selected.push(documents);
           if (host) selected.push(host);
@@ -275,7 +275,7 @@ export function createToolSet(deps: {
           if (mail) selected.push(mail);
           if (toss) selected.push(toss);
           // Main-only management: resolved again at every execution, so a stale main keeps nothing.
-          if (ghost.isDefault && ghost.state === "active") selected.push(main, goals);
+          if (ghost.isDefault && ghost.state === "active") selected.push(main);
           return selected;
         }
         case "work": {
