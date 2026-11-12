@@ -1,3 +1,6 @@
+import { PolicyRule } from "./policy.ts";
+import { McpServer } from "./mcp.ts";
+import { ConfigRevision } from "./entities.ts";
 import { Type, type Static, type TLiteral, type TSchema } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import { Duty } from "./duty.ts";
@@ -17,7 +20,7 @@ import {
   Sandbox,
   Schedule,
   Settings,
-  Space,
+  Scope,
   Timestamp,
   Work,
 } from "./entities.ts";
@@ -33,6 +36,11 @@ const removed = <K extends string>(type: K) => Type.Object({ type: Type.Literal(
  * keeps state by upserting by id. Persisted with a seq; replayable after reconnect.
  */
 export const LedgerEventData = Type.Union([
+  upsert("policy_rule", "rule", PolicyRule),
+  removed("policy_rule.removed"),
+  upsert("mcp_server", "server", McpServer),
+  removed("mcp_server.removed"),
+  upsert("config_revision", "revision", ConfigRevision),
   upsert("ghost", "ghost", Ghost),
   upsert("conversation", "conversation", Conversation),
   removed("conversation.removed"),
@@ -42,8 +50,8 @@ export const LedgerEventData = Type.Union([
   upsert("notification", "notification", Notification),
   upsert("schedule", "schedule", Schedule),
   removed("schedule.removed"),
-  upsert("space", "space", Space),
-  removed("space.removed"),
+  upsert("scope", "scope", Scope),
+  removed("scope.removed"),
   upsert("avatar", "avatar", Avatar),
   removed("avatar.removed"),
   upsert("device", "device", Device),

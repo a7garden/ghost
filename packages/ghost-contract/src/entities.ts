@@ -79,7 +79,7 @@ export const GhostTool = Type.Union([
   Type.Literal("bash"),
   Type.Literal("publish_artifact"),
   Type.Literal("delegate"),
-  Type.Literal("document_spaces"),
+  Type.Literal("document_scopes"),
   Type.Literal("document_list"),
   Type.Literal("document_read"),
   Type.Literal("document_propose"),
@@ -165,7 +165,7 @@ export const GHOST_TOOLS: readonly GhostTool[] = [
   "bash",
   "publish_artifact",
   "delegate",
-  "document_spaces",
+  "document_scopes",
   "document_list",
   "document_read",
   "document_propose",
@@ -270,7 +270,18 @@ export const FallbackList = Type.Array(ModelRef, { maxItems: 3 });
 /** An explicit allow-list: unknown names and duplicates are schema errors. */
 export const GhostToolList = Type.Array(GhostTool, { uniqueItems: true, maxItems: GHOST_TOOLS.length });
 
+export const DocRef = Type.Union([
+  Type.Object({ kind: Type.Literal("page"), scopeId: Id, locator: Type.String({ minLength: 1, maxLength: 4096 }) }),
+  Type.Object({ kind: Type.Literal("skill"), name: SkillName }),
+]);
+export type DocRef = Static<typeof DocRef>;
+export const DocRefs = Type.Array(DocRef, { maxItems: 32 });
+export const SlotName = Type.String({ pattern: "^[a-z][a-z0-9-]{0,31}$" });
+export const ModelSlot = Type.Object({ model: ModelRef, fallbacks: FallbackList });
+export type ModelSlot = Static<typeof ModelSlot>;
+
 export const Ghost = Type.Object({
+  attachments: DocRefs,
   id: Id,
   name: Type.String({ minLength: 1, maxLength: 128 }),
   persona: Type.String({ maxLength: 8192 }),
@@ -294,7 +305,7 @@ export const Ghost = Type.Object({
 });
 export type Ghost = Static<typeof Ghost>;
 
-export const ConversationKind = Type.Union([Type.Literal("direct"), Type.Literal("work"), Type.Literal("review")]);
+export const ConversationKind = Type.Union([Type.Literal("direct"), Type.Literal("work"), Type.Literal("review"), Type.Literal("wake"), Type.Literal("subagent")]);
 export type ConversationKind = Static<typeof ConversationKind>;
 
 export const Conversation = Type.Object({
@@ -392,6 +403,11 @@ export const Verdict = Type.Object({
 export type Verdict = Static<typeof Verdict>;
 
 export const Work = Type.Object({
+  scopeId: nullable(Id),
+  attachments: DocRefs,
+  slot: nullable(SlotName),
+  retry: nullable(Type.Object({ slot: SlotName })),
+  scopeReferences: Type.Optional(Type.Array(Type.Object({ id: Id, name: Type.String() }))),
   id: Id,
   parentId: nullable(Id),
   rootId: Id,
@@ -582,7 +598,7 @@ export type Schedule = Static<typeof Schedule>;
 
 /**
  * A Ghost's self-directed drive: the Host wakes its direct conversation at the time the Ghost (or the
- * main Ghost) planned, or earlier when a watched project Space changes. The owner can switch it off.
+ * main Ghost) planned, or earlier when a watched project Scope changes. The owner can switch it off.
  */
 export const AutonomyPlan = Type.Object({
   ghostId: Id,
@@ -678,13 +694,7 @@ export const Device = Type.Object({
 });
 export type Device = Static<typeof Device>;
 
-export const Space = Type.Object({
-  id: Id,
-  name: Type.String({ minLength: 1, maxLength: 128 }),
-  path: Type.String({ minLength: 1, maxLength: 4096 }),
-  createdAt: Timestamp,
-});
-export type Space = Static<typeof Space>;
+
 
 export const Avatar = Type.Object({
   id: Id,
@@ -802,7 +812,24 @@ export const DEFAULT_LIMITS: Limits = {
   ghostsPerDay: 10,
 };
 
+export const Scope = Type.Object({
+  id: Id,
+  name: Type.String({ minLength: 1, maxLength: 128 }),
+  ghostId: nullable(Id),
+  paths: Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { maxItems: 32, uniqueItems: true }),
+  vaultPath: nullable(Type.String({ minLength: 1, maxLength: 4096 })),
+  state: Type.Union([Type.Literal("active"), Type.Literal("paused")]),
+  attachments: DocRefs,
+  limits: Type.Partial(Limits),
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+});
+export type Scope = Static<typeof Scope>;
+
 export const Settings = Type.Object({
+  toolSearchThreshold: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
+  slots: Type.Optional(Type.Record(SlotName, ModelSlot)),
+  defaultSlot: Type.Optional(nullable(SlotName)),
   defaultModel: nullable(ModelRef),
   reviewModel: nullable(ModelRef),
   /** Fallback models for every Ghost that has none of its own; empty means no fallback. */
@@ -885,7 +912,9 @@ export const Message = Type.Object({
   tool: nullable(Type.Object({ callId: Type.String(), name: Type.String(), isError: Type.Boolean() })),
   attachments: Type.Array(ArtifactRef),
   /** Project references captured at submission, independent of later renames/deletion. */
-  spaces: Type.Optional(Type.Array(Type.Object({ id: Id, name: Type.String() }), { maxItems: 8 })),
+  scopes: Type.Optional(Type.Array(Type.Object({ id: Id, name: Type.String() }), { maxItems: 8 })),
+  scopeId: Type.Optional(nullable(Id)),
+  docAttachments: Type.Optional(DocRefs),
   createdAt: Timestamp,
 });
 export type Message = Static<typeof Message>;
@@ -907,3 +936,15 @@ export const Live = Type.Object({
   tools: Type.Array(LiveTool),
 });
 export type Live = Static<typeof Live>;
+
+export const ConfigRevision = Type.Object({
+  id: Id,
+  entity: Type.Union([Type.Literal("scope"), Type.Literal("ghost"), Type.Literal("rule"), Type.Literal("slot"), Type.Literal("mcp"), Type.Literal("activity"), Type.Literal("limits")]),
+  entityId: nullable(Type.String()),
+  before: Type.Unknown(),
+  after: Type.Unknown(),
+  actor: Type.Object({ kind: Type.Union([Type.Literal("owner"), Type.Literal("device"), Type.Literal("ghost")]), id: nullable(Id) }),
+  reason: Type.String(),
+  at: Timestamp,
+});
+export type ConfigRevision = Static<typeof ConfigRevision>;

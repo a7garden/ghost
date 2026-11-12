@@ -32,6 +32,7 @@ export type MailConnectionConfig = Static<typeof MailConnectionConfig>;
  */
 export const ApiConnectionConfig = Type.Object({
   kind: Type.Literal("api"),
+  readPaths: Type.Optional(Type.Array(Type.Object({ method: Type.Union([Type.Literal("GET"), Type.Literal("POST"), Type.Literal("PUT"), Type.Literal("PATCH"), Type.Literal("DELETE")]), path: Type.String({ minLength: 1, maxLength: 2048, pattern: "^/[^?#\\\\\\s]*$" }) }), { maxItems: 128 })),
   baseUrl: Type.String({ minLength: 1, maxLength: 2048 }),
   /** Header that carries the credential (an API key belongs here, never in static headers). */
   authHeader: Type.String({ minLength: 1, maxLength: 128 }),
@@ -79,6 +80,8 @@ export type Connection = Static<typeof Connection>;
 
 export const ActivitySource = Type.Union([
   Type.Object({ kind: Type.Literal("schedule"), spec: ScheduleSpec }),
+  Type.Object({ kind: Type.Literal("commit"), scopeId: Id }),
+  Type.Object({ kind: Type.Literal("poll"), connectionId: Id, path: Type.String({ minLength: 1, maxLength: 4096 }), itemsPointer: Type.String({ maxLength: 4096 }), idPointer: Type.String({ maxLength: 4096 }), pollSeconds: Type.Integer({ minimum: 60, maximum: 86400 }) }),
   Type.Object({
     kind: Type.Literal("pull_request"), connectionId: Id,
     repository: Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", maxLength: 256 }),
@@ -110,6 +113,7 @@ export type ActivityPolicy = Static<typeof ActivityPolicy>;
 
 /** Saving this configuration is an explicit standing delegation, not inferred from casual chat. */
 export const ActivityConfig = Type.Object({
+  scopeId: Type.Optional(nullable(Id)),
   ghostId: Id,
   name: Type.String({ minLength: 1, maxLength: 128 }),
   prompt: Type.String({ minLength: 1, maxLength: 8192 }),
@@ -123,6 +127,7 @@ export type ActivityConfig = Static<typeof ActivityConfig>;
 
 export const Activity = Type.Object({
   ...ActivityConfig.properties,
+  scopeId: nullable(Id),
   id: Id,
   revision: Type.Integer({ minimum: 1 }),
   paused: Type.Boolean(),

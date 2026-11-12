@@ -23,6 +23,7 @@ export const GoalState = Type.Union([Type.Literal("active"), Type.Literal("pause
 export type GoalState = Static<typeof GoalState>;
 
 export const Goal = Type.Object({
+  scopeId: nullable(Id),
   id: Id,
   /** The direction, in the owner's words. */
   title: Type.String({ minLength: 1, maxLength: GOAL_TITLE_MAX }),
@@ -45,6 +46,7 @@ export const MilestoneState = Type.Union([Type.Literal("planned"), Type.Literal(
 export type MilestoneState = Static<typeof MilestoneState>;
 
 export const Milestone = Type.Object({
+  scopeId: nullable(Id),
   id: Id,
   goalId: Id,
   title: Type.String({ minLength: 1, maxLength: GOAL_TITLE_MAX }),
@@ -69,6 +71,7 @@ export type Milestone = Static<typeof Milestone>;
 
 /** `proposal.goal` of a `question` decision the main Ghost opens; only the owner settles it. */
 export const GoalProposal = Type.Object({
+  scopeId: Type.Optional(nullable(Id)),
   title: Type.String({ minLength: 1, maxLength: GOAL_TITLE_MAX }),
   why: Type.String({ maxLength: GOAL_TEXT_MAX }),
   boundaries: Type.String({ maxLength: GOAL_TEXT_MAX }),

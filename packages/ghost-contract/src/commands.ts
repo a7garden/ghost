@@ -1,10 +1,13 @@
 import { Type, type Static } from "typebox";
 import { ActivityConfig, ConnectionConfig, ConnectionIconUrl } from "./autonomy.ts";
+import { PolicyRule } from "./policy.ts";
+import { McpServer } from "./mcp.ts";
 import { DutyHours } from "./duty.ts";
 import {
   ADAPTATION_MAX_CHARS,
   ApprovalPolicy,
   Limits,
+  DocRef, DocRefs, ModelSlot, SlotName, Scope,
   MAX_WORK_BUDGET_MINUTES,
   OwnerLanguage,
   Acceptance,
@@ -40,8 +43,8 @@ export const Command = Type.Union([
   command("message.send", {
     conversationId: Id,
     text: Text(32768),
-    attachments: Type.Optional(Type.Array(ArtifactRef, { maxItems: 16 })),
-    spaceIds: Type.Optional(Type.Array(Id, { maxItems: 8, uniqueItems: true })),
+    attachments: Type.Optional(Type.Array(Type.Union([ArtifactRef, DocRef]), { maxItems: 32 })),
+    scopeId: Type.Optional(nullable(Id)),
   }),
   command("message.cancel", { conversationId: Id }),
   command("conversation.create", { ghostId: Id, title: Type.Optional(Text(256)) }),
@@ -56,7 +59,10 @@ export const Command = Type.Union([
     ghostId: Id,
     title: Text(256),
     brief: Text(32768),
-    spaceIds: Type.Optional(Type.Array(Id, { maxItems: 8, uniqueItems: true })),
+    scopeId: Type.Optional(nullable(Id)),
+    attachments: Type.Optional(DocRefs),
+    slot: Type.Optional(nullable(SlotName)),
+    retry: Type.Optional(nullable(Type.Object({ slot: SlotName }))),
     acceptance: Type.Optional(Acceptance),
     deadlineAt: Type.Optional(nullable(Timestamp)),
     budgetMinutes: Type.Optional(WorkBudget),
@@ -97,6 +103,7 @@ export const Command = Type.Union([
     fallbacks: Type.Optional(FallbackList),
     skills: Type.Optional(SkillList),
     hostExecution: Type.Optional(Type.Boolean()),
+    attachments: Type.Optional(DocRefs),
   }),
   command("ghost.update", {
     ghostId: Id,
@@ -109,6 +116,7 @@ export const Command = Type.Union([
     fallbacks: Type.Optional(FallbackList),
     skills: Type.Optional(SkillList),
     hostExecution: Type.Optional(Type.Boolean()),
+    attachments: Type.Optional(DocRefs),
   }),
   /** Remove a retired Ghost from every list. Past Works keep it as their assignee. */
   command("ghost.delete", { ghostId: Id }),
@@ -172,18 +180,31 @@ export const Command = Type.Union([
   command("activity.stop_all", { ghostId: Type.Optional(Id) }),
 
   // Documents
-  command("space.create", { name: Text(128), path: Text(4096) }),
-  command("space.update", { spaceId: Id, name: Type.Optional(Text(128)) }),
-  command("space.delete", { spaceId: Id }),
+  command("scope.create", { ...Type.Omit(Scope, ["id", "createdAt", "updatedAt", "ghostId", "vaultPath", "state", "attachments", "limits"]).properties,
+    ghostId: Type.Optional(nullable(Id)), vaultPath: Type.Optional(nullable(Text(4096))), state: Type.Optional(Scope.properties.state), attachments: Type.Optional(DocRefs), limits: Type.Optional(Type.Partial(Limits)) }),
+  command("scope.update", { scopeId: Id, ...Type.Partial(Type.Omit(Scope, ["id", "createdAt", "updatedAt"])).properties }),
+  command("scope.attach", { scopeId: Id, attachments: DocRefs }),
+  command("scope.delete", { scopeId: Id }),
   /** Owner writes a page: new when `pageId` is null, otherwise an edit guarded by `expectedHash`. */
   command("document.save", {
-    spaceId: Id,
+    scopeId: Id,
     pageId: nullable(Type.String({ minLength: 1, maxLength: 256 })),
     expectedHash: nullable(Type.String({ minLength: 1, maxLength: 128 })),
     title: Text(512),
     body: Type.String({ maxLength: 1_048_576 }),
     profile: Type.Optional(Type.Union([Type.Literal("pdc-markdown/1"), Type.Literal("pdc-html/1")])),
   }),
+
+  command("slot.set", { name: SlotName, ...ModelSlot.properties }),
+  command("slot.delete", { name: SlotName }),
+  command("limits.set", { scopeId: Type.Optional(nullable(Id)), limits: Type.Partial(Limits) }),
+  command("rule.create", { ...Type.Omit(PolicyRule, ["id", "revision", "createdBy"]).properties }),
+  command("rule.update", { ruleId: Id, ...Type.Partial(Type.Omit(PolicyRule, ["id", "revision", "createdBy"])).properties, scopeId: Type.Optional(nullable(PolicyRule.properties.scopeId)), ghostId: Type.Optional(nullable(PolicyRule.properties.ghostId)), triggerId: Type.Optional(nullable(PolicyRule.properties.triggerId)), reviewer: Type.Optional(nullable(PolicyRule.properties.reviewer)), maxPerDay: Type.Optional(nullable(PolicyRule.properties.maxPerDay)), maxAmount: Type.Optional(nullable(PolicyRule.properties.maxAmount)), autoResolve: Type.Optional(nullable(PolicyRule.properties.autoResolve)) }),
+  command("rule.delete", { ruleId: Id }),
+  command("mcp.create", { ...Type.Omit(McpServer, ["id", "createdAt", "updatedAt"]).properties }),
+  command("mcp.update", { serverId: Id, ...Type.Partial(Type.Omit(McpServer, ["id", "createdAt", "updatedAt"])).properties }),
+  command("mcp.delete", { serverId: Id }),
+  command("config.revert", { revisionId: Id }),
 
   // Avatars
   command("avatar.create", {
@@ -195,7 +216,7 @@ export const Command = Type.Union([
   command("avatar.delete", { avatarId: Id }),
 
   // Settings and providers
-  command("settings.update", { defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy), limits: Type.Optional(Type.Partial(Limits)) }),
+  command("settings.update", { toolSearchThreshold: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })), defaultSlot: Type.Optional(nullable(SlotName)), defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy), limits: Type.Optional(Type.Partial(Limits)) }),
   command("provider.upsert", {
     id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
     kind: ProviderKind,
@@ -224,6 +245,7 @@ export const Command = Type.Union([
 
   // Goals: long-term team directions and the milestone line under each
   command("goal.create", {
+    scopeId: Type.Optional(nullable(Id)),
     title: Text(GOAL_TITLE_MAX),
     why: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),
     boundaries: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX })),

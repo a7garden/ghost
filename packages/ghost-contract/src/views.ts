@@ -1,3 +1,6 @@
+import { PolicyRule } from "./policy.ts";
+import { McpServer } from "./mcp.ts";
+import { ConfigRevision } from "./entities.ts";
 import { Type, type Static } from "typebox";
 import { Activity, ActivityRun, Connection } from "./autonomy.ts";
 import { Duty } from "./duty.ts";
@@ -21,7 +24,7 @@ import {
   Schedule,
   SkillName,
   Settings,
-  Space,
+  Scope,
   Sha256,
   Timestamp,
   Work,
@@ -65,7 +68,10 @@ export const State = Type.Object({
   decisions: Type.Array(Decision),
   notifications: Type.Array(Notification),
   schedules: Type.Array(Schedule),
-  spaces: Type.Array(Space),
+  scopes: Type.Array(Scope),
+  policyRules: Type.Array(PolicyRule),
+  mcpServers: Type.Array(McpServer),
+  configRevisions: Type.Array(ConfigRevision),
   avatars: Type.Array(Avatar),
   settings: Settings,
   devices: Type.Array(Device),
@@ -136,7 +142,7 @@ export const SkillCatalog = Type.Object({
 });
 export type SkillCatalog = Static<typeof SkillCatalog>;
 
-/** GET /api/spaces/:id/pages?query= */
+/** GET /api/scopes/:id/pages?query= */
 export const PageSummary = Type.Object({
   pageId: Type.String(),
   locator: Type.String(),
@@ -146,7 +152,7 @@ export const PageSummary = Type.Object({
 });
 export type PageSummary = Static<typeof PageSummary>;
 
-/** GET /api/spaces/:id/pages/:pageId */
+/** GET /api/scopes/:id/pages/:pageId */
 export const PageView = Type.Object({
   pageId: Type.String(),
   locator: Type.String(),
