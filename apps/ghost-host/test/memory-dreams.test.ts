@@ -2,9 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, spyOn, test } from "bun:test";
-import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai";
+import { Type, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
+import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type { Message } from "@ghost/contract";
 import { createEngine } from "../src/engine/index.ts";
 import { MemoryStore } from "../src/stores/memory.ts";
@@ -30,10 +31,15 @@ function memoryFixture() {
 test("dream citations require exact conversation, message and quote, without claiming entailment", () => {
   const f = memoryFixture();
   try {
-    for (const source of [{ ...f.source, quote: "Fabricated" }, { ...f.source, conversationId: "other" }, { ...f.source, messageId: "other" }]) {
+    const cases: [typeof f.source, string][] = [
+      [{ ...f.source, quote: "모든 대화는 Ghost에서" }, 'memory quote for message "owner-1" of conversation "conversation" for /me/architecture.md does not occur in the immutable source snapshot (exact prefix 7 of 14 characters)'],
+      [{ ...f.source, conversationId: "other" }, 'memory source message "owner-1" of conversation "other" for /me/architecture.md is not in the immutable source snapshot'],
+      [{ ...f.source, messageId: "other" }, 'memory source message "other" of conversation "conversation" for /me/architecture.md is not in the immutable source snapshot'],
+    ];
+    for (const [source, error] of cases) {
       const proposal = JSON.parse(f.output);
       proposal.changes[0].sources = [source];
-      expect(() => readProposal(JSON.stringify(proposal), f.snapshot)).toThrow();
+      expect(() => readProposal(JSON.stringify(proposal), f.snapshot)).toThrow(error);
     }
     expect(readProposal(f.output, f.snapshot).changes[0]?.sources).toEqual([f.source]);
   } finally { f.close(); }
@@ -329,6 +335,58 @@ test("historical catch-up crosses bounded Pi pages and checkpoints without a mod
     expect(f.memory.checkpoint(ghost.directConversationId)).toBe(checkpoint);
     expect(f.memory.history(ghost.id, 0, 1000)).toHaveLength(205);
   } finally { await indexing.close(); h.core.stop(); await h.core.idle(); h.ledger.close(); f.close(); }
+});
+
+test("a queued input is published and indexed with its origin, so catch-up advances past it", async () => {
+  const f = memoryFixture();
+  const h = harness();
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }] });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const began = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  faux.setResponses([
+    async () => { began.resolve(); await release.promise; return fauxAssistantMessage(fauxToolCall("echo", { text: "look" }), { stopReason: "toolUse" }); },
+    () => fauxAssistantMessage(fauxText("steered")),
+    () => fauxAssistantMessage(fauxText("followed")),
+  ]);
+  h.ledger.tx(() => {
+    h.ledger.putProvider({ id: "faux", kind: "openai_compatible", name: "Faux", baseUrl: null, models: [{ id: "faux-1", name: "Faux" }] });
+    h.ledger.putSetting("defaultModel", { provider: "faux", model: "faux-1" });
+  });
+  h.core.secrets.put("faux", "test-key");
+  const echo = defineExtension({ name: "memory.test", tools: [defineTool({ name: "echo", description: "Echo.", parameters: Type.Object({ text: Type.String() }), execute: async (args) => ({ content: [{ type: "text", text: args.text }] }) })] });
+  const logs: string[] = [];
+  const engine = await createEngine({
+    core: h.core, storagePath: join(f.root, "pi.db"), memory: f.memory, models, log: (message, detail) => logs.push(`${message} ${detail}`),
+    tools: { all: () => [echo], extensionsFor: () => [echo], instructionsFor: () => "" },
+    sandbox: { envFor: async () => { throw new Error("no sandbox"); }, workspacePath: () => "", stageInputs: async () => {}, release: async () => {} },
+  });
+  h.core.attach(engine);
+  const ghost = h.core.createGhost({ name: "Queued", persona: "" });
+  await h.core.idle();
+  const conversationId = ghost.directConversationId;
+  const published = new Map<string, Message>();
+  const followed = Promise.withResolvers<void>();
+  const stop = engine.watch(conversationId, (event) => {
+    if (event.type !== "message") return;
+    if (event.message.role === "user") published.set(event.message.text, event.message);
+    if (event.message.text === "followed") followed.resolve();
+  });
+  try {
+    await engine.submit(conversationId, { text: "start", origin: "owner", requestId: "r1" });
+    await began.promise;
+    // Placed at the next tool boundary; its publication probes the still-queued follow-up.
+    await engine.submit(conversationId, { text: "decision arrived", origin: "decision", requestId: "r2", steer: true });
+    await engine.submit(conversationId, { text: "scheduled wake", origin: "schedule", requestId: "r3" });
+    release.resolve();
+    await followed.promise;
+    await engine.catchUpMemory(ghost.id);
+    expect([...published.values()].map((message) => [message.text, message.origin])).toEqual([["start", "owner"], ["decision arrived", "decision"], ["scheduled wake", "schedule"]]);
+    expect(f.memory.history(ghost.id, 0, 100).filter((row) => row.role === "user").map((row) => [row.text, row.origin])).toEqual([["start", "owner"], ["decision arrived", "decision"], ["scheduled wake", "schedule"]]);
+    expect(engine.memoryStatus(ghost.id)).toEqual({ ready: true, pending: 0 });
+    expect(logs.filter((line) => line.startsWith("memory:"))).toEqual([]);
+  } finally { stop(); h.core.stop(); await h.core.idle(); await engine.close(); h.ledger.close(); f.close(); }
 });
 
 test("nested imported notes and own-team notes can be superseded/deleted with preserved revisions", () => {

@@ -283,18 +283,32 @@ export class MemoryStore {
         "SELECT * FROM memory_history WHERE ghost_id = ? AND conversation_id = ? AND message_id = ?",
       ).get(ghostId, message.conversationId, message.id);
       if (existing) {
-        if (existing.text !== message.text || existing.role !== message.role || existing.origin !== message.origin || existing.at !== message.createdAt) {
-          throw conflict("Indexed memory history is immutable");
+        if (existing.role !== message.role || existing.at !== message.createdAt) throw conflict("Indexed memory history is immutable");
+        if (existing.origin === message.origin && existing.text === message.text) return;
+        // A Pi entry is immutable, but its origin and visible text are Host metadata that the
+        // engine may resolve only after the entry was first read. Resolution is one-way: a read
+        // that has not resolved it yet carries no information about a resolved row.
+        if (message.origin === null) return;
+        if (existing.origin !== null) throw conflict("Indexed memory history is immutable");
+        this.db.query("UPDATE memory_history SET origin = ?, text = ? WHERE seq = ?").run(message.origin, message.text, existing.seq);
+        if (existing.text !== message.text) {
+          this.db.query("DELETE FROM memory_history_fts WHERE rowid IN (SELECT id FROM memory_history_chunks WHERE history_seq = ?)").run(existing.seq);
+          this.db.query("DELETE FROM memory_history_chunks WHERE history_seq = ?").run(existing.seq);
+          this.insertChunks(existing.seq, message.text);
         }
         return;
       }
       const result = this.db.query("INSERT INTO memory_history(ghost_id, conversation_id, message_id, role, origin, text, at) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .run(ghostId, message.conversationId, message.id, message.role, message.origin, message.text, message.createdAt);
-      for (const chunk of historyChunks(message.text)) {
-        const inserted = this.db.query("INSERT INTO memory_history_chunks(history_seq, text) VALUES (?, ?)").run(result.lastInsertRowid, chunk);
-        this.db.query("INSERT INTO memory_history_fts(rowid, terms) VALUES (?, ?)").run(inserted.lastInsertRowid, indexedTerms(chunk));
-      }
+      this.insertChunks(Number(result.lastInsertRowid), message.text);
     });
+  }
+
+  private insertChunks(seq: number, text: string): void {
+    for (const chunk of historyChunks(text)) {
+      const inserted = this.db.query("INSERT INTO memory_history_chunks(history_seq, text) VALUES (?, ?)").run(seq, chunk);
+      this.db.query("INSERT INTO memory_history_fts(rowid, terms) VALUES (?, ?)").run(inserted.lastInsertRowid, indexedTerms(chunk));
+    }
   }
 
   history(ghostId: string, after: number, limit: number): MemoryHistory[] {

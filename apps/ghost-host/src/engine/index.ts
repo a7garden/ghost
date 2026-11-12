@@ -155,12 +155,14 @@ class HostEngine implements Engine, MemoryEngine {
     });
     try {
       this.unsubscribeCommits = this.harness.subscribeCommits((publication) => {
+        // Pi lists a commit's entries before the submissions it placed. Learning a placement
+        // first lets a queued input's message carry its origin when published and indexed.
         for (const change of publication.changes) {
-          if (change.type === "submission") {
-            const state = this.byPiId.get(change.value.conversationId);
-            if (state) this.enqueue(state, () => this.noteSubmission(change.value));
-            continue;
-          }
+          if (change.type !== "submission") continue;
+          const state = this.byPiId.get(change.value.conversationId);
+          if (state) this.enqueue(state, () => this.noteSubmission(change.value));
+        }
+        for (const change of publication.changes) {
           if (change.type !== "entry") continue;
           const state = this.byPiId.get(change.value.conversationId);
           if (state) this.enqueue(state, () => this.publishEntry(state, change.value));

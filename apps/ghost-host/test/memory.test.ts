@@ -247,6 +247,30 @@ describe("Host memory store", () => {
     expect(() => store.write({ ...input, path: "/me/missing.md", operationId: "missing-source", sources: [{ ...source, messageId: "missing" }] })).toThrow("indexed history");
   });
 
+  test("a message indexed before its origin was resolved takes the resolved origin and visible text once", () => {
+    const { store } = fixture();
+    // Production shape: published with origin null, then re-read by catch-up with the recorded origin.
+    const wake = { ...message("wake", "아침 점검 시간입니다."), origin: null };
+    store.indexMessage("alpha", wake);
+    const seq = store.historySeq("alpha");
+    store.indexMessage("alpha", { ...wake, origin: "schedule" });
+    expect(store.history("alpha", 0, 10)).toEqual([{ seq, id: "wake", conversationId: "conversation-a", role: "user", origin: "schedule", text: wake.text, at: 1000 }]);
+    store.indexMessage("alpha", wake);
+    store.indexMessage("alpha", { ...wake, origin: "schedule" });
+    expect(store.history("alpha", 0, 10).map(row => row.origin)).toEqual(["schedule"]);
+    expect(() => store.indexMessage("alpha", { ...wake, origin: "owner" })).toThrow("immutable");
+    expect(() => store.indexMessage("alpha", { ...wake, origin: "schedule", text: "tampered" })).toThrow("immutable");
+    expect(() => store.indexMessage("alpha", { ...wake, origin: "schedule", createdAt: 2000 })).toThrow("immutable");
+
+    // An owner input's model text carries project context; its resolved visible text replaces it in search.
+    const owner = { ...message("owner", "projectbrief context\n\nvisible request"), origin: null };
+    store.indexMessage("alpha", owner);
+    store.indexMessage("alpha", { ...owner, origin: "owner", text: "visible request" });
+    expect(store.history("alpha", seq, 10).map(row => [row.origin, row.text])).toEqual([["owner", "visible request"]]);
+    expect(store.search("alpha", "projectbrief", 10, "history")).toEqual([]);
+    expect(store.search("alpha", "visible", 10, "history").map(hit => hit.messageId)).toEqual(["owner"]);
+  });
+
   test("injection is bounded labelled JSON data with no team or other private content", () => {
     const { store } = fixture();
     expect(store.injected("alpha")).toBe("");
