@@ -15,6 +15,7 @@ import { memoryPrompt } from "../src/memory/pi.ts";
 import type { MemoryEngine } from "../src/memory/types.ts";
 import { MEMORY_OUTPUT_BYTES, memoryModels } from "../src/memory/stream.ts";
 import { harness } from "./support.ts";
+import { idFor } from "../src/core/ids.ts";
 
 function memoryFixture() {
   const root = mkdtempSync(join(tmpdir(), "ghost-memory-dreams-"));
@@ -374,7 +375,7 @@ test("historical catch-up crosses bounded Pi pages and checkpoints without a mod
   } finally { await indexing.close(); h.core.stop(); await h.core.idle(); h.ledger.close(); f.close(); }
 });
 
-test("a queued input is published and indexed with its origin, so catch-up advances past it", async () => {
+test("queued inputs and a separate scheduled wake are published and indexed with their origins", async () => {
   const f = memoryFixture();
   const h = harness();
   const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }] });
@@ -386,6 +387,7 @@ test("a queued input is published and indexed with its origin, so catch-up advan
     async () => { began.resolve(); await release.promise; return fauxAssistantMessage(fauxToolCall("echo", { text: "look" }), { stopReason: "toolUse" }); },
     () => fauxAssistantMessage(fauxText("steered")),
     () => fauxAssistantMessage(fauxText("followed")),
+    () => fauxAssistantMessage(fauxText("woke")),
   ]);
   h.ledger.tx(() => {
     h.ledger.putProvider({ id: "faux", kind: "openai_compatible", name: "Faux", baseUrl: null, models: [{ id: "faux-1", name: "Faux" }] });
@@ -405,22 +407,34 @@ test("a queued input is published and indexed with its origin, so catch-up advan
   const conversationId = ghost.directConversationId;
   const published = new Map<string, Message>();
   const followed = Promise.withResolvers<void>();
+  const woke = Promise.withResolvers<void>();
   const stop = engine.watch(conversationId, (event) => {
     if (event.type !== "message") return;
     if (event.message.role === "user") published.set(event.message.text, event.message);
     if (event.message.text === "followed") followed.resolve();
+    if (event.message.text === "woke") woke.resolve();
   });
   try {
     await engine.submit(conversationId, { text: "start", origin: "owner", requestId: "r1" });
     await began.promise;
     // Placed at the next tool boundary; its publication probes the still-queued follow-up.
     await engine.submit(conversationId, { text: "decision arrived", origin: "decision", requestId: "r2", steer: true });
-    await engine.submit(conversationId, { text: "scheduled wake", origin: "schedule", requestId: "r3" });
+    await engine.submit(conversationId, { text: "owner follow-up", origin: "owner", requestId: "r3" });
     release.resolve();
     await followed.promise;
+    // A scheduled input to the direct conversation runs as its own wake conversation.
+    await engine.submit(conversationId, { text: "scheduled wake", origin: "schedule", requestId: "r4" });
+    await woke.promise;
     await engine.catchUpMemory(ghost.id);
-    expect([...published.values()].map((message) => [message.text, message.origin])).toEqual([["start", "owner"], ["decision arrived", "decision"], ["scheduled wake", "schedule"]]);
-    expect(f.memory.history(ghost.id, 0, 100).filter((row) => row.role === "user").map((row) => [row.text, row.origin])).toEqual([["start", "owner"], ["decision arrived", "decision"], ["scheduled wake", "schedule"]]);
+    const wakeId = idFor(conversationId, "wake:r4");
+    expect(h.ledger.conversation(wakeId).kind).toBe("wake");
+    expect([...published.values()].map((message) => [message.text, message.origin])).toEqual([["start", "owner"], ["decision arrived", "decision"], ["owner follow-up", "owner"]]);
+    expect(f.memory.history(ghost.id, 0, 100).filter((row) => row.role === "user").map((row) => [row.conversationId, row.text, row.origin])).toEqual([
+      [conversationId, "start", "owner"],
+      [conversationId, "decision arrived", "decision"],
+      [conversationId, "owner follow-up", "owner"],
+      [wakeId, "scheduled wake", "schedule"],
+    ]);
     expect(engine.memoryStatus(ghost.id)).toEqual({ ready: true, pending: 0 });
     expect(logs.filter((line) => line.startsWith("memory:"))).toEqual([]);
   } finally { stop(); h.core.stop(); await h.core.idle(); await engine.close(); h.ledger.close(); f.close(); }
@@ -450,15 +464,21 @@ test("a one-time repair recovers origins indexed before their checkpoint and the
     await engine.catchUpMemory(ghost.id);
   } finally { stop(); await engine.close(); }
   // The production failure shape: a recorded origin the first index never resolved, now behind its checkpoint.
-  const wake = f.memory.history(ghost.id, 0, 10).find(row => row.role === "user")!.id;
+  // The scheduled input lives in its wake conversation, so repair must resolve it there.
+  const wakeId = idFor(ghost.directConversationId, "wake:r1");
+  const row = f.memory.history(ghost.id, 0, 10).find(item => item.role === "user")!;
+  expect(row.conversationId).toBe(wakeId);
+  expect(f.memory.checkpoint(wakeId)).toBeGreaterThanOrEqual(Number(row.id));
+  const wake = row.id;
   const tamper = new Database(join(f.root, "memory.db"));
   tamper.exec("UPDATE memory_history SET origin = NULL WHERE message_id = " + JSON.stringify(wake));
   tamper.close();
-  expect(f.memory.unresolvedOrigins(ghost.id, ghost.directConversationId)).toEqual([wake]);
+  expect(f.memory.unresolvedOrigins(ghost.id, wakeId)).toEqual([wake]);
+  expect(f.memory.unresolvedOrigins(ghost.id, ghost.directConversationId)).toEqual([]);
   const repaired = await open();
   try {
     await repaired.catchUpMemory();
-    expect(f.memory.unresolvedOrigins(ghost.id, ghost.directConversationId)).toEqual([]);
+    expect(f.memory.unresolvedOrigins(ghost.id, wakeId)).toEqual([]);
     expect(f.memory.history(ghost.id, 0, 10).find(row => row.id === wake)?.origin).toBe("schedule");
     const again = new Database(join(f.root, "memory.db"));
     again.exec("UPDATE memory_history SET origin = NULL WHERE message_id = " + JSON.stringify(wake));
