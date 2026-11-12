@@ -54,8 +54,8 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`(셸 shim) → `Ghost Host.app/Contents/MacOS/ghost`, `current` → `releases/2.8.1-6ce871a`(GitHub Release `v2.8.1`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
-| 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`, Obscura), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 기억 `memory.db`(Host 내장), 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`(셸 shim) → `Ghost Host.app/Contents/MacOS/ghost`, `current` → `releases/2.9.0-9fa6afe`(GitHub Release `v2.9.0`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, `cloudflareAccess`(웹 origin, 아래), Apple container 샌드박스, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`, Obscura), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 기억 `memory.db`(Host 내장), 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | 웹 origin | `https://ghost.a7garden.com` → Cloudflare Access 앱 `Ghost`(팀 `dawn-hat-3ab7.cloudflareaccess.com`, 정책 `Ghost owner`, IdP `One-time PIN`) → 터널 `ghost`(`765d8841-…`) → `127.0.0.1:62062`. 커넥터 `~/Library/LaunchAgents/com.a7.ghost-cloudflare.plist`, 토큰·로그 `~/Library/Application Support/ghost-cloudflare/`(0700, 토큰 0600). 끄려면 `launchctl bootout gui/$UID/com.a7.ghost-cloudflare` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.4(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
@@ -63,6 +63,16 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
+
+### 웹 접속(ghost.a7garden.com)과 2.9.0 운영 반영 — 2026-11-12
+
+- 소유자 결정: 공개 주소지만 소유자만 쓴다. 로그인은 Cloudflare Access 이메일 인증코드, 허용 주소는 `a7garden@icloud.com` 하나.
+- Cloudflare(계정 `7b0997ef…`, 소유자 대시보드 세션으로 설정): IdP `One-time PIN` 추가, 재사용 정책 `Ghost owner`(email include), Access 앱 `Ghost`(`ghost.a7garden.com`, AUD `795d0d71…`, 세션 168h, 자동 IdP 이동, HttpOnly·SameSite=Lax 쿠키). 원격 관리 터널 `ghost`(`765d8841-e01e-43e0-8556-7ff60734a4a2`)의 ingress는 `ghost.a7garden.com` → `http://127.0.0.1:62062`, 나머지 404. DNS `ghost` CNAME(프록시)은 Access 앱을 만든 뒤에 추가했다. Mac Studio에 Homebrew `cloudflared` 2026.10.7을 설치하고 LaunchAgent `com.a7.ghost-cloudflare`로 띄운다.
+- Host: `cloudflareAccess`가 가리키는 Host 헤더의 요청은 UI·`/api/health`를 포함해 모두 Access JWT(RS256·AUD·발급자·만료·허용 이메일) 검증을 통과해야 하고, 통과하면 소유자다. 그 origin에는 소유자 토큰을 주입하지 않는다. UI는 Access 세션 만료 리디렉션을 받으면 페이지를 다시 읽어 로그인으로 간다.
+- 검사: Host `api`·`cloudflare-access` 44 통과, Host 타입, UI 232 통과·빌드. 독립 Codex 검토(교차 벤더) 지적 없음.
+- 배포: [v2.9.0](https://github.com/a7garden/ghost/releases/tag/v2.9.0), 소스 `9fa6afe`. 2.8.1은 모르는 설정 키를 거절하므로 먼저 키 없이 설치했다(실행 중 맡긴 일 때문에 09:32–10:39 `waiting`, 끊지 않음). 2.9.0 runtime ready·Ghost ID 보존을 확인한 뒤 `config.json`에 `cloudflareAccess`를 넣고(이전 값 `~/.local/share/ghost/backups/ghost-config-before-web-access-20261112.json`) busy 0에서 `launchctl kickstart -k`로 재기동했다(PID 68597 → 68811).
+- 운영 확인: 인증 없는 `/`·`/api/state`·`/api/health`는 Access 로그인으로 302. 엣지를 거치지 않고 같은 Host 헤더로 직접 보낸 요청은 JWT 없음·위조 모두 401. tailnet origin health 200. 소유자 코드로 실제 로그인한 검사 브라우저에서 홈 화면, `/api/state` principal `owner`·Ghost 31·runtime ready, 터널을 거친 이벤트 스트림 200, `__GHOST_TOKEN__` 미주입을 확인했다.
+- 되돌리기: 2.8.1로 돌릴 때는 먼저 `config.json`에서 `cloudflareAccess`를 지운다(백업 파일로 교체). 웹만 끄려면 `launchctl bootout gui/$UID/com.a7.ghost-cloudflare`, 공개 자체를 없애려면 Cloudflare에서 DNS `ghost`와 터널을 지운다.
 
 ### macOS 권한 중복 요청 수정과 2.8.1 운영 반영 — 2026-11-12
 
