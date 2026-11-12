@@ -1,4 +1,4 @@
-import { matchToolPattern, matchesToolPatterns, type BuiltinGhostTool, type Conversation, type Ghost, type Work } from "@ghost/contract";
+import { ContractError, matchToolPattern, matchesToolPatterns, type BuiltinGhostTool, type Conversation, type Ghost, type Work } from "@ghost/contract";
 import { Type } from "typebox";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
@@ -201,7 +201,7 @@ const errorText = (message: string): ToolExecutionResult => ({ content: [{ type:
 
 /** Map a refusal to an error result carrying its message. Unknown errors keep the harness's error path. */
 export function errorResult(error: unknown): ToolExecutionResult {
-  if (error instanceof CommandError || error instanceof NoEffect || error instanceof NotFound) return errorText(error.message);
+  if (error instanceof CommandError || error instanceof NoEffect || error instanceof NotFound || error instanceof ContractError) return errorText(error.message);
   throw error;
 }
 

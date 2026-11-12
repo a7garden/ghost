@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { ADAPTATION_MAX_CHARS, Command, DESKTOP_TOOLS, DocRefs, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, parse, type Ghost } from "@ghost/contract";
-import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { AssistantEntry, defineExtension, defineTool, type EntryId, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import { fallbackListFor } from "../engine/fallback.ts";
 import type { Core } from "../core/core.ts";
@@ -293,13 +293,25 @@ export function createMainTools(core: Core): Extension {
           const boundSlot = core.ledger.setting<string | null>(`wake:slot:${scope.conversation.id}`, null);
           const snapshot = core.ledger.setting<string | null>(`wake:slot-config:${scope.conversation.id}`, null);
           if (scope.conversation.kind !== "wake" || scope.conversation.model !== null || bound !== args.decision_id || boundSlot !== slotName || !slot || snapshot !== digestOf(slot)) throw forbidden("The configured reviewer slot is missing, changed or not bound to this wake; ask the owner to decide explicitly");
-          const agent = await api.agent(context);
+          const requesting = await api.commit(async (tx) => {
+            const task = await tx.task(api.taskId);
+            const input = task?.input;
+            if (!task || task.kind !== "pi.tool" || task.conversationId !== api.conversationId || task.owner === undefined || !input || typeof input !== "object" || Array.isArray(input) || input.callId !== api.callId || typeof input.assistant !== "number") throw forbidden("The reviewer tool has no durable calling assistant identity");
+            const entry = await tx.entry(AssistantEntry, input.assistant as EntryId);
+            const message = entry?.model?.find((item) => item.role === "assistant");
+            const call = message?.content.find((part) => part.type === "toolCall" && part.id === api.callId);
+            if (entry?.conversationId !== api.conversationId || !message || !call || call.type !== "toolCall" || call.name !== "decision_settle" || digestOf(call.arguments) !== digestOf(args)) throw forbidden("The settlement does not match its exact calling assistant entry");
+            return { generationTaskId: String(task.owner), messageDigest: digestOf(message), provider: message.provider, model: message.model };
+          }, context);
+          const proof = core.ledger.setting<{ generationTaskId: string; messageDigest: string; provider: string; model: string; thinking: string; slotDigest: string; invalid?: string } | null>(`policy:review-response:${scope.conversation.id}:${api.callId}`, null);
           const liveConversation = core.ledger.conversation(scope.conversation.id);
           const liveSlot = core.ledger.settings().slots?.[slotName];
           if (liveConversation.kind !== "wake" || liveConversation.model !== null
             || core.ledger.setting<string | null>(`wake:decision:${liveConversation.id}`, null) !== args.decision_id || core.ledger.setting<string | null>(`wake:slot:${liveConversation.id}`, null) !== slotName
             || !liveSlot || digestOf(liveSlot) !== snapshot || core.decisions.reviewer(core.ledger.decision(args.decision_id))?.slot !== slotName
-            || ![slot.model, ...(slot.fallbacks ?? [])].some((ref) => ref.provider === agent.model?.provider && ref.model === agent.model?.modelId && (ref.thinking ?? "off") === (agent.thinkingLevel ?? "off"))) throw forbidden("The actual reviewer execution does not match the unchanged slot; ask the owner to decide explicitly");
+            || !proof || proof.invalid || proof.generationTaskId !== requesting.generationTaskId || proof.messageDigest !== requesting.messageDigest
+            || proof.provider !== requesting.provider || proof.model !== requesting.model || proof.slotDigest !== snapshot
+            || ![slot.model, ...(slot.fallbacks ?? [])].some((ref) => ref.provider === requesting.provider && ref.model === requesting.model && (ref.thinking ?? "off") === proof.thinking)) throw forbidden("The requesting assistant does not have an immutable execution receipt for the unchanged reviewer slot; ask the owner to decide explicitly");
         }
         if (args.outcome === "answer" && !args.answer) throw invalid("answer is required to answer a question");
         return text(await core.decisions.settleForOwner(scope.ghost.id, args.decision_id, { outcome: args.outcome, answer: args.answer, note: args.note }));

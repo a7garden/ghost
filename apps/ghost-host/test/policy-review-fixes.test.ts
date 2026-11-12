@@ -170,7 +170,17 @@ function slotReview() {
   });
   const tool = createMainTools(h.core).tools!.find((entry) => entry.name === "decision_settle")!;
   let sequence = 0;
-  const invoke = (agent: () => Promise<unknown>) => tool.execute({ decision_id: decision.id, outcome: "leave", note: "Independent slot review" } as never, { conversationId: "slot-review-pi", callId: `slot-${++sequence}`, agent } as unknown as ToolExecutionApi, {} as Context);
+  const invoke = (actual: () => Promise<unknown>, agent = async () => ({ model: { provider: "provider", modelId: "model" }, thinkingLevel: "off" })) => {
+    const callId = `slot-${++sequence}`;
+    const args = { decision_id: decision.id, outcome: "leave", note: "Independent slot review" };
+    const commit = async (read: (tx: unknown) => Promise<unknown>) => {
+      const execution = await actual() as { model: { provider: string; modelId: string }; thinkingLevel: string };
+      const message = { role: "assistant", provider: execution.model.provider, model: execution.model.modelId, content: [{ type: "toolCall", id: callId, name: "decision_settle", arguments: args }] };
+      h.ledger.tx(() => h.ledger.putSetting(`policy:review-response:${wake.id}:${callId}`, { generationTaskId: "73", messageDigest: digestOf(message), provider: message.provider, model: message.model, thinking: execution.thinkingLevel, slotDigest: digestOf(slot) }));
+      return read({ task: async () => ({ kind: "pi.tool", conversationId: "slot-review-pi", owner: 73, input: { assistant: 75, callId } }), entry: async () => ({ kind: "pi.assistant", conversationId: "slot-review-pi", model: [message] }) });
+    };
+    return tool.execute(args as never, { conversationId: "slot-review-pi", taskId: 74, callId, agent, commit } as unknown as ToolExecutionApi, {} as Context);
+  };
   return { ...h, slot, decision, wake, invoke };
 }
 
@@ -206,6 +216,37 @@ test("a slot change during actual execution lookup revokes settlement before aud
   release.resolve({ model: { provider: "provider", modelId: "model" }, thinkingLevel: "off" });
   expect((await result).isError).toBe(true);
   expect(h.ledger.decision(h.decision.id).proposal!.reviewedBy).toBeUndefined();
+});
+
+test("restoring slot A cannot disguise a settlement generated under slot B as phase-agent A", async () => {
+  const h = slotReview();
+  const generatedUnderB = { model: { provider: "provider", modelId: "different-model" }, thinkingLevel: "high" };
+  h.ledger.tx(() => h.ledger.putSetting("slots", { careful: { model: { provider: "provider", model: "different-model", thinking: "high" }, fallbacks: [] } }));
+  h.ledger.tx(() => h.ledger.putSetting("slots", { careful: h.slot }));
+  const result = await h.invoke(async () => generatedUnderB, async () => ({ model: { provider: "provider", modelId: "model" }, thinkingLevel: "off" }));
+  expect(result.isError).toBe(true);
+  expect(h.ledger.decision(h.decision.id).proposal!.reviewedBy).toBeUndefined();
+});
+
+test("scheduled and awaited allow dispatch share a single effect execution", async () => {
+  const h = setup();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let calls = 0;
+  h.ledger.tx(() => {
+    for (const old of h.ledger.policyRules()) h.ledger.deletePolicyRule(old.id);
+    h.ledger.putPolicyRule(rule("explicit-allow", "allow"));
+  });
+  h.core.effects.onApproved("mail_send", async () => { calls++; entered.resolve(); await release.promise; return "sent"; });
+  const effect = h.core.effects.propose({ conversationId: h.main.directConversationId, callId: "single-flight", tool: "mail_send", input: {}, summary: "Send", title: "Allowed send", detail: "Explicit policy allowance", proposal: { input: {} } });
+  const first = h.core.effects.resolveApproval(effect.id, true);
+  const second = h.core.effects.resolveApproval(effect.id, true);
+  await entered.promise;
+  expect(calls).toBe(1);
+  release.resolve();
+  await Promise.all([first, second]);
+  expect(calls).toBe(1);
+  expect(h.ledger.effect(effect.id).state).toBe("done");
 });
 
 test("owner-only credential, handoff, capability and configuration floors never replace deny", () => {

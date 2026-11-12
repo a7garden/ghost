@@ -82,7 +82,7 @@ export function classifyEffect(core: Core, conversationId: string, tool: string,
   let facts: ObservedEffect = { target: { kind: "mac", id: null }, access: "write", reversible: false, external: true, amount: null };
   if (["write", "edit", "publish_artifact"].includes(tool)) facts = { ...facts, target: { kind: work?.execution?.kind === "host" ? "mac" : "workspace", id: work?.id ?? null }, external: false, reversible: true };
   // Workspace shell has public egress. It is not proof that an opaque command cannot send or spend.
-  if (tool === "bash" && work?.execution?.kind === "container") facts = { ...facts, target: { kind: "workspace", id: work.id }, external: false, reversible: true };
+  if (tool === "bash" && work && work.execution?.kind !== "host") facts = { ...facts, target: { kind: "workspace", id: work.id }, external: false, reversible: true };
   if (tool === "mail_send" || tool === "mail_update") facts = { ...facts, target: { kind: "mail_account", id: typeof args.account === "string" ? args.account : null }, external: tool === "mail_send", reversible: tool === "mail_update" };
   if (tool === "document_write" || tool === "document_propose") {
     const scopeId = args.scopeId ?? args.scope_id ?? args.spaceId ?? args.space_id;

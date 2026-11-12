@@ -1,4 +1,4 @@
-import { TERMINAL_WORK_STATES, type Effect } from "@ghost/contract";
+import { TERMINAL_WORK_STATES, matchesToolPatterns, type Effect } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { CommandError, conflict } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
@@ -49,6 +49,7 @@ export class Effects {
   /** Executors run by the host after the owner approves an effect (browser mutations). */
   private readonly approved = new Map<string, (effect: Effect) => Promise<string>>();
   private readonly waiting = new Map<string, () => Promise<string>>();
+  private readonly approvalExecutions = new Map<string, Promise<void>>();
 
   constructor(private readonly core: Core) {}
 
@@ -337,14 +338,19 @@ export class Effects {
 
   /** Adapter dispatch hook: call again after queue/network waits, immediately before the mutation. */
   authorize(conversationId: string, callId: string): void {
-    const effect = this.ledger.effectByCall(conversationId, callId);
-    if (!effect || effect.state !== "pending") throw new NoEffect("There is no executable pending effect");
-    this.assertAuthority(effect);
-    const receipt = this.recheck(effect);
-    if (receipt.evaluation.decision === "allow") return;
-    const decision = this.ledger.decisionsAwaitingFollowUp().find((entry) => entry.effectId === effect.id && entry.kind === "approve_effect" && entry.state === "approved");
-    const authorization = decision?.proposal?.policy as PolicyReceipt | undefined;
-    if (receipt.evaluation.decision === "deny" || !authorization || receipt.rulesDigest !== authorization.rulesDigest || JSON.stringify(receipt.classification) !== JSON.stringify(authorization.classification)) throw new NoEffect("Live policy does not authorize this action. " + receipt.evaluation.reason);
+    try {
+      const effect = this.ledger.effectByCall(conversationId, callId);
+      if (!effect || effect.state !== "pending") throw new NoEffect("There is no executable pending effect");
+      this.assertAuthority(effect);
+      const receipt = this.recheck(effect);
+      if (receipt.evaluation.decision === "allow") return;
+      const decision = this.ledger.decisionsAwaitingFollowUp().find((entry) => entry.effectId === effect.id && entry.kind === "approve_effect" && entry.state === "approved");
+      const authorization = decision?.proposal?.policy as PolicyReceipt | undefined;
+      if (receipt.evaluation.decision === "deny" || !authorization || receipt.rulesDigest !== authorization.rulesDigest || JSON.stringify(receipt.classification) !== JSON.stringify(authorization.classification)) throw new NoEffect("Live policy does not authorize this action. " + receipt.evaluation.reason);
+    } catch (error) {
+      if (error instanceof NoEffect) throw error;
+      throw new NoEffect(error instanceof Error ? error.message : String(error));
+    }
   }
 
   private assertAuthority(effect: Effect): void {
@@ -359,16 +365,28 @@ export class Effects {
     const managedGhost = tool === "ghost_create" || tool === "ghost_update";
     if (managedGhost && (!ghost.isDefault || !["direct", "wake"].includes(conversation.kind))) throw new NoEffect("The main Ghost's configuration authority was revoked");
     const internal = managedGhost || ["self_adapt", "activity_action"].includes(tool);
-    const matches = (pattern: string) => new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`).test(tool);
-    if (!internal && !ghost.tools.some(matches)) throw new NoEffect("The tool grant was revoked; nothing was performed");
-    if (work?.toolScope && !internal && !work.toolScope.some(matches)) throw new NoEffect("This Work no longer permits the tool");
+    if (!internal && !matchesToolPatterns(ghost.tools, tool)) throw new NoEffect("The tool grant was revoked; nothing was performed");
+    const ancestors = new Set<string>();
+    for (let boundary = work; boundary; boundary = boundary.parentId ? this.ledger.work(boundary.parentId) : null) {
+      if (ancestors.has(boundary.id)) throw new NoEffect("Work permission ancestry contains a cycle");
+      ancestors.add(boundary.id);
+      if (boundary.toolScope && !internal && !matchesToolPatterns(boundary.toolScope, tool)) throw new NoEffect("This Work or its ancestor no longer permits the tool");
+      if (boundary.activityId) this.core.activities.authorize(boundary.id, tool);
+    }
     if ((tool.startsWith("desktop_") || work?.execution?.kind === "host" && ["write", "edit", "bash", "publish_artifact"].includes(tool)) && !ghost.hostExecution) throw new NoEffect("PC execution was revoked");
     if (work && (!["running", "waiting", "verifying"].includes(work.state) || work.deadlineAt !== null && work.deadlineAt <= Date.now())) throw new NoEffect("The Work no longer permits execution");
-    if (work?.activityId) this.core.activities.authorize(work.id, tool);
   }
 
   /** Owner resolved an `approve_effect` decision. */
-  async resolveApproval(effectId: string, approved: boolean) {
+  resolveApproval(effectId: string, approved: boolean): Promise<void> {
+    const active = this.approvalExecutions.get(effectId);
+    if (active) return active;
+    const execution = Promise.resolve().then(() => this.executeApproval(effectId, approved)).finally(() => this.approvalExecutions.delete(effectId));
+    this.approvalExecutions.set(effectId, execution);
+    return execution;
+  }
+
+  private async executeApproval(effectId: string, approved: boolean) {
     const effect = this.ledger.effect(effectId);
     if (effect.state === "unknown") return;
     if (effect.state !== "pending") {
@@ -392,7 +410,10 @@ export class Effects {
           result = await execute(effect);
           this.finish(effect.id, result);
         } catch (error) {
-          if (error instanceof NoEffect) {
+          if (error instanceof KnownOutcome) {
+            result = error.message;
+            this.finish(effect.id, result);
+          } else if (error instanceof NoEffect) {
             result = error.message;
             this.deny(effect.id, result);
           } else {
