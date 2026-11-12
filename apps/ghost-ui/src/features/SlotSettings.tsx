@@ -43,8 +43,12 @@ function SlotEditor({ name: original, slot, onClose }: { name: string | null; sl
   const save = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError('');
     try {
-      const primary = modelFromKey(state?.settings, model);
-      const alternatives = fallbacks.map(value => modelFromKey(state?.settings, value));
+      const resolve = (key: string) => {
+        const stored = slot ? [slot.model, ...slot.fallbacks].find(item => `${item.provider}/${item.model}` === key) : undefined;
+        return stored ?? modelFromKey(state?.settings, key);
+      };
+      const primary = resolve(model);
+      const alternatives = fallbacks.map(resolve);
       if (!primary || alternatives.some(value => !value)) throw new Error('모델을 선택하세요.');
       if (new Set([model, ...fallbacks]).size !== fallbacks.length + 1) throw new Error('대체 모델은 서로 달라야 합니다.');
       if (original === null && state?.settings.slots?.[name]) throw new Error('이미 등록된 자리 이름입니다.');

@@ -115,3 +115,25 @@ it('accepts whole-second durations but refuses contract limit violations and sub
     { sourceKind: 'mail' as const, connectionId: 'c1', pollMinutes: '1440.1' },
   ]) expect(buildActivityConfig(draft(patch), ghost())).toMatchObject({ ok: false });
 });
+
+it.each<ActivitySource>([
+  { kind: 'commit', scopeId: 'project-a' },
+  { kind: 'poll', connectionId: 'api-a', path: '/items', itemsPointer: '/data/entries', idPointer: '/id', pollSeconds: 91 },
+])('preserves generic source cursors and scope when changing the activity name: $kind', source => {
+  const base = buildActivityConfig(draft({ scopeId: 'project-a' }), ghost());
+  if (!base.ok) throw new Error(base.error);
+  const config: ActivityConfig = { ...base.config, source };
+  const edited = { ...draftFromConfig(config), name: 'Changed name' };
+  expect(buildActivityConfig(edited, ghost())).toEqual({ ok: true, config: { ...config, name: 'Changed name' } });
+});
+
+it('validates JSON pointers and requires a commit scope before saving', () => {
+  expect(buildActivityConfig(draft({ sourceKind: 'commit' }), ghost())).toMatchObject({ ok: false });
+  expect(buildActivityConfig(draft({ sourceKind: 'poll', connectionId: 'api', pollPath: '/items', itemsPointer: 'items' }), ghost())).toMatchObject({ ok: false });
+  expect(buildActivityConfig(draft({ sourceKind: 'poll', connectionId: 'api', pollPath: '/items', itemsPointer: '/escaped~1key', idPointer: '/id' }), ghost())).toMatchObject({ ok: true });
+});
+
+it('keeps a stored container execution environment when renaming', () => {
+  const built = buildActivityConfig(draft({ executionKind: 'container' }), ghost());
+  expect(built).toMatchObject({ ok: true, config: { execution: { kind: 'container' } } });
+});
