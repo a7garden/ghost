@@ -6,7 +6,7 @@ import { WorkspaceSidebar } from './WorkspaceSidebar';
 
 const ghost = (id: string, isDefault = false, overrides: Partial<Ghost> = {}): Ghost => ({
   id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault, state: 'active',
-  tools: [], fallbacks: [], skills: [], deletedAt: null, directConversationId: `conv-${id}`, createdAt: 1, updatedAt: 1,
+  tools: [], fallbacks: [], skills: [], attachments: [], deletedAt: null, directConversationId: `conv-${id}`, createdAt: 1, updatedAt: 1,
   ...overrides,
 });
 
@@ -28,8 +28,8 @@ const state = (overrides: Partial<State> = {}): State => ({
   decisions: [],
   notifications: [],
   schedules: [],
-  spaces: [{ id: 'sp1', name: '메모', path: '/v', createdAt: 1 }],
-  avatars: [],
+  scopes: [{ id: 'sp1', name: '메모', paths: ['/v'], vaultPath: '/v', createdAt: 1 , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }],
+  policyRules: [], mcpServers: [], configRevisions: [], avatars: [],
   settings: { defaultModel: null, reviewModel: null, providers: [] },
   devices: [],
   sandboxes: [],
@@ -153,7 +153,7 @@ it('clears owner-attention rings after a decision is resolved even while failed 
     id: 'failed-root', parentId: null, rootId: 'failed-root', ghostId: 'sage',
     originConversationId: 'conv-sage', conversationId: null, title: 'Earlier failure', brief: 'Earlier work',
     acceptance: { criteria: '', checks: [], reviewer: null }, state: 'failed', revision: 1, revisionsUsed: 0,
-    deadlineAt: null, result: null, verdict: null, reason: 'the deadline passed',
+    deadlineAt: null, scopeId: null, attachments: [], slot: null, retry: null, budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null, result: null, verdict: null, reason: 'the deadline passed',
     createdAt: 1, startedAt: 1, endedAt: Date.now(), updatedAt: Date.now(),
   };
   const history = state({ works: [failed, { ...failed, id: 'failed-child', parentId: failed.id, ghostId: 'milo' }] });

@@ -18,7 +18,7 @@ type Mode = 'talk' | 'work';
  * Assigning unfolds the brief's completion criteria and deadline in place, so a request
  * becomes a 맡긴 일 without a separate form. Nothing is assigned unless the owner chose it.
  */
-export function HandoffComposer({ ghosts, navigate, initialSpaceIds = [], initialMode = 'talk' }: { ghosts: Ghost[]; navigate(path: string): void; initialSpaceIds?: string[]; initialMode?: Mode }) {
+export function HandoffComposer({ ghosts, navigate, initialScopeIds = [], initialMode = 'talk' }: { ghosts: Ghost[]; navigate(path: string): void; initialScopeIds?: string[]; initialMode?: Mode }) {
   const { client } = useHost();
   const roster = visibleGhosts(ghosts);
   const [text, setText] = useState('');
@@ -35,7 +35,7 @@ export function HandoffComposer({ ghosts, navigate, initialSpaceIds = [], initia
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments();
   const target = roster.find(ghost => ghost.id === ghostId) ?? roster[0];
-  const projects = useProjectMentions(text, setText, inputRef, initialSpaceIds, sending);
+  const projects = useProjectMentions(text, setText, inputRef, initialScopeIds, sending);
 
   const send = async (value: string) => {
     if (!target || sending) return;
@@ -45,13 +45,13 @@ export function HandoffComposer({ ghosts, navigate, initialSpaceIds = [], initia
       if (mode === 'work') {
         const title = value.split(/\n/, 1)[0].slice(0, 256);
         const created = await client.send<{ workId: string }>({
-          type: 'work.create', ghostId: target.id, title, brief: value, spaceIds: projects.spaceIds,
+          type: 'work.create', ghostId: target.id, title, brief: value, scopeId: projects.scopeIds[0] ?? null,
           ...(criteria.trim() ? { acceptance: { criteria: criteria.trim(), checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}),
         });
         navigate(`/work/${encodeURIComponent(created.workId)}`);
       } else {
-        await client.send({ type: 'message.send', conversationId: target.directConversationId, text: value, spaceIds: projects.spaceIds, ...(attachments.refs.length ? { attachments: attachments.refs } : {}) });
+        await client.send({ type: 'message.send', conversationId: target.directConversationId, text: value, scopeId: projects.scopeIds[0] ?? null, ...(attachments.refs.length ? { attachments: attachments.refs } : {}) });
         attachments.clear();
         navigate(`/ghosts/${encodeURIComponent(target.id)}`);
       }

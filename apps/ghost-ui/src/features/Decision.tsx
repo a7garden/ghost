@@ -22,7 +22,7 @@ import { uiTerms } from '../uiText';
 import { isMac, modKey } from '../ui/keys';
 import { BrowserPaneContext } from './BrowserPaneContext';
 
-type DocumentProposal = { spaceId?: string; space_id?: string; title?: string; body?: string; profile?: string; pageId?: string | null; page_id?: string | null };
+type DocumentProposal = { scopeId?: string; scope_id?: string; title?: string; body?: string; profile?: string; pageId?: string | null; page_id?: string | null };
 
 /** The proposal payload of a document decision, in either spelling the ledger has used. */
 export function documentProposal(decision: Decision): DocumentProposal | null {

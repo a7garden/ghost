@@ -6,7 +6,7 @@ export const toolLabels: Record<GhostTool, string> = {
   schedule_create: '반복 만들기', schedule_list: '반복 보기', schedule_cancel: '반복 취소',
   ghost_list: 'Ghost 목록', activity_propose: '활동 제안', read: '파일 읽기', write: '파일 쓰기', edit: '파일 고치기', bash: '명령 실행',
   publish_artifact: '결과물 공유', delegate: '다른 Ghost에게 맡기기',
-  document_spaces: '문서 공간', document_list: '문서 목록', document_read: '문서 읽기', document_propose: '문서 수정 제안',
+  document_scopes: '문서 공간', document_list: '문서 목록', document_read: '문서 읽기', document_propose: '문서 수정 제안',
   web_search: '웹 검색', web_read: '웹 읽기', reach: '외부 읽기', skill_read: '스킬 읽기',
   connection_list: '연결 목록', connection_register: '연결 등록', connection_request: '연결 API 사용',
   host_status: 'Mac 상태', host_services: 'Mac 서비스', host_disk_scan: 'Mac 디스크 검색', host_disk_usage: 'Mac 디스크 사용량',

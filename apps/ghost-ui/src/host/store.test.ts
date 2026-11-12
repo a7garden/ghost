@@ -15,8 +15,8 @@ const baseState = (): State => ({
   decisions: [],
   notifications: [],
   schedules: [],
-  spaces: [],
-  avatars: [],
+  scopes: [],
+  policyRules: [], mcpServers: [], configRevisions: [], avatars: [],
   settings: { defaultModel: null, reviewModel: null, providers: [] },
   devices: [],
   sandboxes: [],
@@ -24,7 +24,7 @@ const baseState = (): State => ({
 
 const ghost = (id: string, patch: Partial<Ghost> = {}): Ghost => ({
   id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault: false, state: 'active',
-  tools: [], fallbacks: [], skills: [], deletedAt: null,
+  tools: [], fallbacks: [], skills: [], attachments: [], deletedAt: null,
   directConversationId: `conv-${id}`, createdAt: 1, updatedAt: 1, ...patch,
 });
 
@@ -55,7 +55,7 @@ describe('applyEvent', () => {
     const work = {
       id: 'w1', parentId: null, rootId: 'w1', ghostId: 'sage', originConversationId: 'c1', conversationId: null,
       title: '조사', brief: '조사해 줘', acceptance: { criteria: '', checks: [], reviewer: null }, state: 'queued' as const,
-      revision: 1, revisionsUsed: 0, deadlineAt: null, result: null, verdict: null, reason: null,
+      revision: 1, revisionsUsed: 0, deadlineAt: null, scopeId: null, attachments: [], slot: null, retry: null, budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null, result: null, verdict: null, reason: null,
       createdAt: 1, startedAt: null, endedAt: null, updatedAt: 1,
     };
     let state = applyEvent(baseState(), event({ type: 'work', work }));
@@ -104,10 +104,10 @@ describe('applyEvent', () => {
     expect(state.adaptations?.find(row => row.ghostId === 'sage')).toMatchObject({ notes: '경로가 바뀌어 다시 적는다', previous: notes.notes, updatedAt: 3 });
   });
 
-  it('removes schedules, spaces, avatars and devices', () => {
-    let state = applyEvent(baseState(), event({ type: 'space', space: { id: 'sp1', name: '메모', path: '/v', createdAt: 1 } }));
-    state = applyEvent(state, event({ type: 'space.removed', id: 'sp1' }));
-    expect(state.spaces).toEqual([]);
+  it('removes schedules, scopes, avatars and devices', () => {
+    let state = applyEvent(baseState(), event({ type: 'scope', scope: { id: 'sp1', name: '메모', paths: ['/v'], vaultPath: '/v', createdAt: 1 , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 } }));
+    state = applyEvent(state, event({ type: 'scope.removed', id: 'sp1' }));
+    expect(state.scopes).toEqual([]);
     state = applyEvent(state, event({ type: 'device', device: { id: 'dev1', name: 'iPhone', pushEnabled: true, alerts: { mutedKinds: [], mutedGhostIds: [] }, createdAt: 1, lastSeenAt: null } }));
     state = applyEvent(state, event({ type: 'device.removed', id: 'dev1' }));
     expect(state.devices).toEqual([]);

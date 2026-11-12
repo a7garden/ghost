@@ -70,7 +70,7 @@ function projectOptions() {
   const token = projectMentionQuery(inputEl.value, inputEl.selectionStart);
   const key = `${inputEl.value}:${inputEl.selectionStart}`;
   const matches = token && key !== projectDismissed && projectIds.length < 8
-    ? (state?.spaces ?? []).filter(space => !projectIds.includes(space.id) && space.name.toLocaleLowerCase().includes(token.query)).slice(0, 8) : [];
+    ? (state?.scopes ?? []).filter(space => !projectIds.includes(space.id) && space.name.toLocaleLowerCase().includes(token.query)).slice(0, 8) : [];
   return { token, matches };
 }
 
@@ -86,7 +86,7 @@ function chooseProject(id: string) {
 function renderProjects() {
   projectIds = currentProjectIds(state, projectIds);
   chipsRoot.render(createElement(ProjectChips, {
-    spaces: (state?.spaces ?? []).filter(space => projectIds.includes(space.id)),
+    scopes: (state?.scopes ?? []).filter(space => projectIds.includes(space.id)),
     onRemove: id => { projectIds = projectIds.filter(item => item !== id); renderProjects(); },
   }));
   const { matches } = projectOptions();
@@ -139,7 +139,7 @@ function render() {
       if (message.origin && message.origin !== 'owner') {
         const wake = describeWake(message.origin, message.text);
         rows.push(`<li class="row event">${escapeHtml(wake.label)} · ${escapeHtml(wake.line)}</li>`);
-      } else rows.push(`<li class="row user"><div>${escapeHtml(message.text)}${(message.spaces ?? []).map(space => `<span class="project-chip">${escapeHtml(space.name)}</span>`).join('')}</div></li>`);
+      } else rows.push(`<li class="row user"><div>${escapeHtml(message.text)}${(message.scopes ?? []).map(space => `<span class="project-chip">${escapeHtml(space.name)}</span>`).join('')}</div></li>`);
     } else if (message.role === 'assistant' && message.text.trim() && message.text.trim() !== QUIET_REPLY) {
       rows.push(`<li class="row ghost"><div>${escapeHtml(message.text)}</div></li>`);
     }
@@ -212,7 +212,7 @@ async function send() {
   sendError = '';
   updateControls();
   try {
-    await client.send({ type: 'message.send', conversationId: destination, text, spaceIds: currentProjectIds(state, projectIds) });
+    await client.send({ type: 'message.send', conversationId: destination, text, scopeId: currentProjectIds(state, projectIds)[0] ?? null });
     if (destination === conversationId) {
       inputEl.value = '';
       projectIds = []; renderProjects();

@@ -3,7 +3,7 @@ import { cn } from '../../ui';
 
 /**
  * Hold-to-confirm button: the action fires when the hold outlasts `duration`;
- * releasing early resets it. Pointer and keyboard both hold (Space/Enter down
+ * releasing early resets it. Pointer and keyboard both hold (Scope/Enter down
  * starts the fill, up cancels), so keyboard users take the same path. Assistive tech
  * that only sends a click (detail 0) gets a second step instead: the first click arms
  * "한 번 더 눌러 …" for a few seconds and a second click completes.
@@ -23,7 +23,7 @@ export function HoldButton({ label, holdingLabel, duration = 1200, disabled, cla
   const frame = useRef(0);
   const startedAt = useRef(0);
   const armTimer = useRef(0);
-  // A Space/Enter hold also ends in a click with detail 0; that click is not an AT activation.
+  // A Scope/Enter hold also ends in a click with detail 0; that click is not an AT activation.
   const keyHeld = useRef(false);
 
   const stop = () => {
@@ -72,7 +72,7 @@ export function HoldButton({ label, holdingLabel, duration = 1200, disabled, cla
     onKeyUp={event => {
       if (!isHoldKey(event.key)) return;
       event.preventDefault(); cancel();
-      // The Space activation click, if the engine still sends one, arrives in this same task.
+      // The Scope activation click, if the engine still sends one, arrives in this same task.
       window.setTimeout(() => { keyHeld.current = false; }, 0);
     }}
     onClick={activate}

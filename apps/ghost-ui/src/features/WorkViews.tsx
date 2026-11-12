@@ -135,7 +135,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
     void (async () => {
       try {
         const created = await client.send<{ workId: string }>({
-          type: 'work.create', ghostId, title, brief, spaceIds: projects.spaceIds,
+          type: 'work.create', ghostId, title, brief, scopeId: projects.scopeIds[0] ?? null,
           ...(criteria ? { acceptance: { criteria, checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}),
           execution: target,

@@ -53,7 +53,7 @@ export function Activities({ navigate }: { navigate(path: string): void }) {
   const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? id;
   const connectionOf = (activity: Activity): Connection | undefined => {
     const source = activity.source;
-    return source.kind === 'schedule' ? undefined : connections.find(item => item.id === source.connectionId);
+    return 'connectionId' in source ? connections.find(item => item.id === source.connectionId) : undefined;
   };
 
   return <section className="flex min-w-0 flex-col gap-6" aria-label={uiTerms.activities}>

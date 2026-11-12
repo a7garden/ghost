@@ -19,7 +19,7 @@ const snapshotState = (patch: Partial<State> = {}): State => ({
   seq: 7,
   principal: { kind: 'owner' },
   runtime: { ready: true, detail: '', version: '0.0.0' },
-  ghosts: [], conversations: [], works: [], decisions: [], notifications: [], schedules: [], spaces: [], avatars: [],
+  ghosts: [], conversations: [], works: [], decisions: [], notifications: [], schedules: [], scopes: [], policyRules: [], mcpServers: [], configRevisions: [], avatars: [],
   settings: { defaultModel: null, reviewModel: null, providers: [] },
   devices: [], sandboxes: [],
   ...patch,

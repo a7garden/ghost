@@ -7,7 +7,7 @@ import { RunRow } from './Activities';
 
 const ghost = (patch: Partial<Ghost> = {}): Ghost => ({
   id: 'g1', name: '연구원', persona: '', look: { avatarId: null }, model: null, isDefault: false, state: 'active',
-  tools: ['read', 'web_search', 'web_read', 'document_read', 'bash', 'write'], fallbacks: [], skills: [],
+  tools: ['read', 'web_search', 'web_read', 'document_read', 'bash', 'write'], fallbacks: [], skills: [], attachments: [],
   deletedAt: null, directConversationId: 'conv-g1', createdAt: 1, updatedAt: 1, ...patch,
 });
 

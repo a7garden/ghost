@@ -15,7 +15,7 @@ const kindLabels: Record<VaultItemKind, string> = { login: '로그인', card: '�
 export type VaultForm = {
   kind: VaultItemKind;
   title: string; origin: string; username: string; password: string; totp: string;
-  /** More exact login addresses, separated by commas or spaces; `hadExtraOrigins` lets an edit clear them. */
+  /** More exact login addresses, separated by commas or scopes; `hadExtraOrigins` lets an edit clear them. */
   extraOrigins: string; hadExtraOrigins: boolean;
   cardNumber: string; cardExpiry: string; cardCvc: string; cardName: string;
   contactName: string; contactPhone: string; contactEmail: string; contactAddress: string;
@@ -53,7 +53,7 @@ export function toggleGhostGrant(ghostIds: readonly string[], ghostId: string, o
 /**
  * The wire body for one vault write, built only from the selected kind's fields —
  * the host rejects fields of other kinds. Text fields trim; passwords and secret
- * values stay verbatim (spaces can be part of a secret). Empty secret fields drop
+ * values stay verbatim (scopes can be part of a secret). Empty secret fields drop
  * out, so an edit leaves them unchanged; the card travels only as a whole
  * replacement. A cleared login or api username and a cleared contact travel explicitly.
  * Pure; tests pin it.

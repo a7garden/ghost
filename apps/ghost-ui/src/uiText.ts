@@ -22,6 +22,6 @@ export const routeLabels = {
   work: uiTerms.work,
   mail: '메일',
   host: '호스트',
-  spaces: '프로젝트',
+  scopes: '프로젝트',
   ghosts: 'Ghost',
 } as const;

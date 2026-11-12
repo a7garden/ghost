@@ -68,9 +68,9 @@ export function crumbsFor(route: string, state: State | null): Crumb[] {
       }));
       return crumbs;
     }
-    case 'spaces': {
-      const space = id ? state?.spaces.find(item => item.id === id) : undefined;
-      return space ? [{ label: routeLabels.spaces, path: '/spaces' }, { label: space.name, path: null }] : [{ label: routeLabels.spaces, path: null }];
+    case 'scopes': {
+      const space = id ? state?.scopes.find(item => item.id === id) : undefined;
+      return space ? [{ label: routeLabels.scopes, path: '/scopes' }, { label: space.name, path: null }] : [{ label: routeLabels.scopes, path: null }];
     }
     case 'settings': {
       const tab = params.get('tab');

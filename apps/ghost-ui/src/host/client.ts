@@ -275,16 +275,16 @@ export class HostClient {
   }
 
   /** Document summaries of one space, newest edit last; `query` filters by title (owner only). */
-  pages(spaceId: string, query?: string): Promise<PageSummary[]> {
+  pages(scopeId: string, query?: string): Promise<PageSummary[]> {
     const params = new URLSearchParams();
     if (query) params.set('query', query);
     const suffix = params.size ? `?${params}` : '';
-    return this.json(`/api/spaces/${encodeURIComponent(spaceId)}/pages${suffix}`);
+    return this.json(`/api/scopes/${encodeURIComponent(scopeId)}/pages${suffix}`);
   }
 
   /** One page's body and content hash, for editing and conflict detection (owner only). */
-  page(spaceId: string, pageId: string): Promise<PageView> {
-    return this.json(`/api/spaces/${encodeURIComponent(spaceId)}/pages/${encodeURIComponent(pageId)}`);
+  page(scopeId: string, pageId: string): Promise<PageView> {
+    return this.json(`/api/scopes/${encodeURIComponent(scopeId)}/pages/${encodeURIComponent(pageId)}`);
   }
 
   /** Send a command. Retrying the same call reuses its request id, so it never runs twice. */

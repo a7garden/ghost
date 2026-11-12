@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, ty
 import { ChevronRight, Pencil, Play, Square } from 'lucide-react';
 import { Button, Page, InlineError, Input, Textarea, FormField } from '../ui'
 import type { Effect, Message, State, Verdict, Work, WorkDetail as WorkDetailData } from '@ghost/contract';
-import { TERMINAL_WORK_STATES, splitProjectBrief } from '@ghost/contract';
+import { TERMINAL_WORK_STATES } from '@ghost/contract';
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph, type GlyphState } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
@@ -80,7 +80,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   if (!detail) return <Page><div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">읽는 중</span></div></Page>;
 
   const { work, children, effects, artifacts, ancestors, decisions } = detail;
-  const brief = splitProjectBrief(work.brief);
+  const brief = { text: work.brief, scopes: work.scopeReferences ?? [] };
   const pending = decisions.filter(decision => decision.state === 'pending');
   const live = !TERMINAL_WORK_STATES.includes(work.state);
   const needsOwner = pending.length > 0;
@@ -133,7 +133,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
 
         <section className="work-section" aria-labelledby="work-brief">
           <h2 id="work-brief" className="section-title">할 일</h2>
-          <ProjectChips spaces={brief.spaces}/>
+          <ProjectChips scopes={brief.scopes}/>
           <div className="work-brief"><MessageBody text={brief.text}/></div>
           {/* Only the Mac is worth naming: there the Ghost acts with the owner's own access. */}
           {work.execution?.kind === 'host' && <div className="work-criteria"><span>실행 환경</span><p>{executionLabel.host} · {work.execution.cwd}</p></div>}
@@ -317,7 +317,7 @@ function EditWorkModal({ work, onClose, onSaved }: { work: Work; onClose(): void
   const { client } = useHost();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const currentBrief = splitProjectBrief(work.brief);
+  const currentBrief = { text: work.brief, scopes: work.scopeReferences ?? [] };
   const submit = (data: FormData) => {
     setBusy(true); setError('');
     void (async () => {
@@ -342,7 +342,7 @@ function EditWorkModal({ work, onClose, onSaved }: { work: Work; onClose(): void
   return <Modal title="맡긴 일 수정" onClose={() => { if (!busy) onClose(); }}>
     <form className="grid gap-4" onSubmit={e => { e.preventDefault(); submit(new FormData(e.currentTarget)); }}>
       <FormField label="제목">{control => <Input {...control} name="title" defaultValue={work.title} maxLength={256}/>}</FormField>
-      <ProjectChips spaces={currentBrief.spaces}/>
+      <ProjectChips scopes={currentBrief.scopes}/>
       <FormField label="할 일">{control => <Textarea {...control} name="brief" defaultValue={currentBrief.text} rows={6} maxLength={32768}/>}</FormField>
       <FormField label="기한">{control => <Input {...control} type="datetime-local" name="deadline" defaultValue={deadlineValue}/>}</FormField>
       <p className="m-0 text-caption text-ink-2">저장하면 작업 대화에 변경 사항이 전달됩니다.</p>

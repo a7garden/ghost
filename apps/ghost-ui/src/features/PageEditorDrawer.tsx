@@ -12,8 +12,8 @@ const MAX_BODY_BYTES = 1_048_576;
 const EMPTY_DRAFT = { title: '', body: '', profile: 'pdc-markdown/1' as EditableProfile };
 
 /** One page in a drawer: legacy profiles read-only, edits guarded by the content hash. */
-export function PageEditorDrawer({ spaceId, pageId, onClose, onSaved }: {
-  spaceId: string;
+export function PageEditorDrawer({ scopeId, pageId, onClose, onSaved }: {
+  scopeId: string;
   /** null creates a new page. */
   pageId: string | null;
   onClose(): void;
@@ -32,7 +32,7 @@ export function PageEditorDrawer({ spaceId, pageId, onClose, onSaved }: {
   const [htmlView, setHtmlView] = useState<'preview' | 'source'>('preview');
   const load = (targetId: string) => {
     setLoading(true); setLoadError('');
-    client.page(spaceId, targetId).then(page => {
+    client.page(scopeId, targetId).then(page => {
       setView(page);
       setDraft({ title: page.title, body: page.body, profile: isEditableProfile(page.profile) ? page.profile : 'pdc-markdown/1' });
       setHash(page.hash);
@@ -40,7 +40,7 @@ export function PageEditorDrawer({ spaceId, pageId, onClose, onSaved }: {
       setError('');
     }).catch(reason => setLoadError(reason instanceof Error ? reason.message : '문서를 불러오지 못했습니다.')).finally(() => setLoading(false));
   };
-  useEffect(() => { if (pageId !== null) load(pageId); }, [pageId, spaceId]);
+  useEffect(() => { if (pageId !== null) load(pageId); }, [pageId, scopeId]);
   const editable = view === null ? true : isEditableProfile(view.profile);
   const dirty = !view || draft.title !== view.title || draft.body !== view.body || (isEditableProfile(view.profile) && draft.profile !== view.profile);
   const save = async () => {
@@ -51,7 +51,7 @@ export function PageEditorDrawer({ spaceId, pageId, onClose, onSaved }: {
     try {
       const result = await client.send<{ pageId: string; hash: string }>({
         type: 'document.save',
-        spaceId,
+        scopeId,
         pageId: view?.pageId ?? null,
         expectedHash: view ? hash : null,
         title: draft.title.trim(),

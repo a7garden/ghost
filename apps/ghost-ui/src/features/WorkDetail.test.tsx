@@ -57,7 +57,7 @@ const NOW = Date.UTC(2026, 10, 12, 9);
 const work = (patch: Partial<Work> = {}): Work => ({
   id: 'w1', parentId: null, rootId: 'w1', ghostId: 'sage', originConversationId: 'c1', conversationId: 'cw',
   title: '리서치 보고서', brief: '조사해 줘', acceptance: { criteria: '세 문단 요약과 출처 목록', checks: [], reviewer: null }, state: 'running',
-  revision: 1, revisionsUsed: 0, deadlineAt: null, result: null, verdict: null, reason: null,
+  revision: 1, revisionsUsed: 0, deadlineAt: null, scopeId: null, attachments: [], slot: null, retry: null, budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null, result: null, verdict: null, reason: null,
   createdAt: NOW - 3_600_000, startedAt: NOW - 3_600_000, endedAt: null, updatedAt: NOW, ...patch,
 });
 const header = (target: Work, patch: { pending?: number; criteria?: string; link?: string } = {}) => renderToStaticMarkup(createElement(WorkHeader, {

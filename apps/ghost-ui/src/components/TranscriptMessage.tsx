@@ -173,7 +173,7 @@ export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReu
     return <MessageMenu text={message.text} onReuse={onReuse}>
       <ConversationMessage role="user" label={speaker(message)} data-rail="owner" data-rail-label={message.text.replace(/\s+/g, ' ').trim().slice(0, 80)} data-delivered={delivered || undefined}>
         <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</div>
-        <ProjectChips spaces={message.spaces ?? []}/>
+        <ProjectChips scopes={message.scopes ?? []}/>
         <Attachments message={message}/>
       </ConversationMessage>
     </MessageMenu>;

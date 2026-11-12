@@ -20,6 +20,6 @@ export function pickConversation(state: State, ghost: Ghost, wanted?: string): s
 }
 
 /** Keep visible chips and outgoing references in sync when a project is removed. */
-export function currentProjectIds(state: Pick<State, 'spaces'> | null, ids: readonly string[]): string[] {
-  return ids.filter(id => state?.spaces.some(space => space.id === id));
+export function currentProjectIds(state: Pick<State, 'scopes'> | null, ids: readonly string[]): string[] {
+  return ids.filter(id => state?.scopes.some(space => space.id === id));
 }

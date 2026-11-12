@@ -2,17 +2,17 @@ import { expect, it } from 'vitest';
 import type { Ghost, State, Work } from '@ghost/contract';
 import { crumbsFor } from './crumbs';
 
-const ghost: Ghost = { id: 'g1', name: '메인', persona: '', look: { avatarId: null }, model: null, isDefault: true, state: 'active', tools: [], directConversationId: 'c-main', createdAt: 1, updatedAt: 1 };
+const ghost: Ghost = { id: 'g1', name: '메인', persona: '', look: { avatarId: null }, model: null, isDefault: true, state: 'active', tools: [], fallbacks: [], skills: [], attachments: [], deletedAt: null, directConversationId: 'c-main', createdAt: 1, updatedAt: 1 };
 const work = (id: string, title: string, parentId: string | null): Work => ({
   id, parentId, rootId: 'w-root', ghostId: 'g1', originConversationId: 'c-main', conversationId: null, title, brief: 'b',
-  acceptance: { criteria: '', checks: [] }, state: 'running', revision: 1, revisionsUsed: 0, deadlineAt: null, result: null, verdict: null, reason: null,
+  acceptance: { criteria: '', checks: [], reviewer: null }, state: 'running', revision: 1, revisionsUsed: 0, deadlineAt: null, scopeId: null, attachments: [], slot: null, retry: null, budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null, result: null, verdict: null, reason: null,
   createdAt: 1, startedAt: null, endedAt: null, updatedAt: 1,
 });
 const state = {
   ghosts: [ghost],
   conversations: [{ id: 'c-old', ghostId: 'g1', kind: 'direct', workId: null, title: '', model: null, busy: false, createdAt: 1, lastActivityAt: 1 }],
   works: [work('w-root', '상자 만들기', null), work('w-child', '스크립트', 'w-root')],
-  spaces: [],
+  scopes: [],
 } as unknown as State;
 
 it('trails an open thread through the threads it was delegated from, each step reopening that thread', () => {

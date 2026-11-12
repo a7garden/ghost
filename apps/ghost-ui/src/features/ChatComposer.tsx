@@ -37,7 +37,7 @@ const whenLabel = (at: number) => new Date(at).toLocaleString('ko-KR', { month: 
  * Typing `/` at the start offers the same actions by keyboard; `@` hands the message to a Ghost as a 맡긴 일
  * that reports back here.
  */
-export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, returnedFiles, setReturnedFiles, inputRef, onPost, onStop, onError, initialSpaceIds = [], initialMode = 'talk' }: {
+export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, returnedFiles, setReturnedFiles, inputRef, onPost, onStop, onError, initialScopeIds = [], initialMode = 'talk' }: {
   ghost: Ghost;
   conversationId: string | null;
   running: boolean;
@@ -53,7 +53,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   onPost(command: MessageSend): void;
   onStop(): void;
   onError(message: string): void;
-  initialSpaceIds?: string[];
+  initialScopeIds?: string[];
   initialMode?: 'talk' | 'work';
 }) {
   const { client, store } = useHost();
@@ -73,7 +73,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const suggestId = useId();
-  const projects = useProjectMentions(draft, setDraft, inputRef, initialSpaceIds, sending || mode === 'later');
+  const projects = useProjectMentions(draft, setDraft, inputRef, initialScopeIds, sending || mode === 'later');
 
   const focus = () => inputRef.current?.focus();
   // Criteria and deadline survive mode switches; only a successful send clears them.
@@ -90,7 +90,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
     onError(''); setConfirmation('');
     if (mode === 'talk') {
       const refs = [...returnedFiles, ...attachments.refs];
-      onPost({ type: 'message.send', conversationId, text, spaceIds: projects.spaceIds, ...(refs.length ? { attachments: refs } : {}) });
+      onPost({ type: 'message.send', conversationId, text, scopeId: projects.scopeIds[0] ?? null, ...(refs.length ? { attachments: refs } : {}) });
       attachments.clear(); setReturnedFiles([]);
       setDraft('');
       projects.clear();
@@ -99,7 +99,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
     setSending(true);
     try {
       if (mode === 'work') {
-        await client.send({ type: 'work.create', ghostId: assignee?.id ?? ghost.id, title: text.split(/\n/, 1)[0].slice(0, 256), brief: text, spaceIds: projects.spaceIds, originConversationId: conversationId,
+        await client.send({ type: 'work.create', ghostId: assignee?.id ?? ghost.id, title: text.split(/\n/, 1)[0].slice(0, 256), brief: text, scopeId: projects.scopeIds[0] ?? null, originConversationId: conversationId,
           ...(criteria.trim() ? { acceptance: { criteria: criteria.trim(), checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}) });
         switchMode('talk');
@@ -127,7 +127,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const actions: PlusAction[] = [
     { id: 'files', icon: <Paperclip/>, label: '사진·파일 첨부', disabled: mode !== 'talk', reason: '맡기기·예약 메시지에는 파일을 붙일 수 없습니다 · 대화로 보내세요', onSelect: () => fileInput.current?.click() },
     { id: 'work', icon: <BriefcaseBusiness/>, label: '일로 맡기기', disabled: hasFiles || mode === 'work', reason: hasFiles ? '파일이 붙은 메시지는 일로 맡길 수 없습니다 · 대화로 보내세요' : undefined, onSelect: () => switchMode('work') },
-    { id: 'later', icon: <Clock3/>, label: '나중에 보내기', disabled: hasFiles || mode === 'later' || projects.spaceIds.length > 0, reason: hasFiles ? '파일이 붙은 메시지는 예약할 수 없습니다 · 바로 보내세요' : projects.spaceIds.length > 0 ? '프로젝트를 연결한 메시지는 예약할 수 없습니다 · 바로 보내세요' : undefined, onSelect: () => switchMode('later') },
+    { id: 'later', icon: <Clock3/>, label: '나중에 보내기', disabled: hasFiles || mode === 'later' || projects.scopeIds.length > 0, reason: hasFiles ? '파일이 붙은 메시지는 예약할 수 없습니다 · 바로 보내세요' : projects.scopeIds.length > 0 ? '프로젝트를 연결한 메시지는 예약할 수 없습니다 · 바로 보내세요' : undefined, onSelect: () => switchMode('later') },
   ];
   // The first line becomes the Work title; the host keeps 256 characters of it.
   const titleCut = mode === 'work' && draft.split(/\n/, 1)[0].length > 256;

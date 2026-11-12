@@ -30,7 +30,7 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '금고', tools: [...VAULT_TOOLS] },
   { title: '메일', tools: [...MAIL_TOOLS] },
   { title: '스킬', tools: ['skill_read'] },
-  { title: '문서', tools: ['document_spaces', 'document_list', 'document_read', 'document_propose'] },
+  { title: '문서', tools: ['document_scopes', 'document_list', 'document_read', 'document_propose'] },
   { title: '반복 작업', tools: ['schedule_create', 'schedule_list', 'schedule_cancel'] },
   { title: '자동 활동', tools: ['activity_propose'] },
   { title: 'Mac', tools: [...HOST_TOOLS], privileged: true },

@@ -35,7 +35,7 @@ import { MailView } from './features/mail/MailView';
 import { Schedules } from './features/Schedules';
 import { Activities } from './features/Activities';
 import { Connections } from './features/Connections';
-import { SpacesView } from './features/SpacesView';
+import { ScopesView } from './features/ScopesView';
 import { UpdatePrompt } from './features/UpdatePrompt';
 import { UpdateSettings } from './features/UpdateSettings';
 import { useUpdate } from './features/update/useUpdate';
@@ -173,7 +173,7 @@ function Shell() {
   const routeConversationId = params.get('conversation');
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
-  const selectedSpace = section === 'spaces' ? path.split('/')[2] : undefined;
+  const selectedScope = section === 'scopes' ? path.split('/')[2] : undefined;
   const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail';
 
   const go = (target: string) => () => navigate(target);
@@ -193,15 +193,15 @@ function Shell() {
   const commandItems: CommandItem[] = state ? [
     { id: 'new-work', label: '일 맡기기', group: '실행', onSelect: go('/work?new=1') },
     { id: 'new-ghost', label: '새 Ghost', group: '실행', onSelect: go('/settings?tab=team&new=1') },
-    { id: 'new-space', label: '새 프로젝트', group: '실행', onSelect: go('/spaces?new=1') },
+    { id: 'new-space', label: '새 프로젝트', group: '실행', onSelect: go('/scopes?new=1') },
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
     { id: 'mail', label: '메일', group: '이동', onSelect: go('/mail') },
     { id: 'goals', label: uiTerms.goals, group: '이동', onSelect: go('/goals') },
-    { id: 'spaces', label: routeLabels.spaces, group: '이동', onSelect: go('/spaces') },
+    { id: 'scopes', label: routeLabels.scopes, group: '이동', onSelect: go('/scopes') },
     ...visibleGhosts(ghosts).map(ghost => ({ id: `ghost:${ghost.id}`, label: ghost.name, description: ghost.isDefault ? '메인 Ghost' : undefined, group: 'Ghost', onSelect: () => switchGhost(ghost.id) })),
-    ...state.spaces.map(space => ({ id: `space:${space.id}`, label: space.name, group: '프로젝트', onSelect: () => navigate(`/spaces/${space.id}`) })),
+    ...state.scopes.map(space => ({ id: `space:${space.id}`, label: space.name, group: '프로젝트', onSelect: () => navigate(`/scopes/${space.id}`) })),
     ...decisionItems,
     ...workItems,
     { id: 'team', label: uiTerms.ghostSettings, group: '설정', onSelect: go('/settings?tab=team') },
@@ -238,11 +238,11 @@ function Shell() {
   ];
 
   const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>;
-  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, spaces: true, inbox: true, work: true, mail: true, goals: true, settings: true, workspace: true };
+  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, scopes: true, inbox: true, work: true, mail: true, goals: true, settings: true, workspace: true };
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
-    selectedSpace={params.has('new') ? undefined : selectedSpace} attentionCount={attentionCount}
+    selectedScope={params.has('new') ? undefined : selectedScope} attentionCount={attentionCount}
     status={status} navigate={navigate} openGhost={switchGhost}/>;
 
   return <div className="ghost-root">
@@ -255,7 +255,7 @@ function Shell() {
             compactBack={section === 'settings' && params.has('tab') ? '/settings'
               : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/conversations'
               : section === 'work' && path.split('/')[2] ? '/work'
-              : section === 'spaces' && selectedSpace ? '/workspace' : undefined}
+              : section === 'scopes' && selectedScope ? '/workspace' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
           duty={state && <DutySwitch state={state}/>}
@@ -281,12 +281,12 @@ function Shell() {
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>
               : <WorkView state={state} navigate={navigate} filterGhostId={params.get('ghost')} createRequested={params.get('new') === '1'} onCreateClosed={clearCreateRequest}/>)}
             {section === 'ghosts' && (openGhost
-              ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}:${params.get('space') ?? ''}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} threadId={params.get('thread')} navigate={navigate} initialSpaceIds={params.getAll('space').slice(0, 8)}/>
+              ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}:${params.get('scope') ?? ''}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} threadId={params.get('thread')} navigate={navigate} initialScopeIds={params.getAll('scope').slice(0, 8)}/>
               : ghostNotFound)}
-            {section === 'spaces' && <SpacesView key={`${selectedSpace ?? 'empty'}:${params.get('new') ?? ''}`} selectedSpace={selectedSpace} navigate={navigate}
-              onSelectSpace={id => navigate(`/spaces/${id}`)} createRequested={params.get('new') === '1'}
+            {section === 'scopes' && <ScopesView key={`${selectedScope ?? 'empty'}:${params.get('new') ?? ''}`} selectedScope={selectedScope} navigate={navigate}
+              onSelectScope={id => navigate(`/scopes/${id}`)} createRequested={params.get('new') === '1'}
               onCreateClosed={() => {
-                const next = path.startsWith('/spaces/') ? path : '/spaces';
+                const next = path.startsWith('/scopes/') ? path : '/scopes';
                 history.replaceState(history.state, '', `#${next}`);
                 setRoute(next);
               }}/>}

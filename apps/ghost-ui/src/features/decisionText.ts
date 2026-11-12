@@ -83,7 +83,7 @@ const trim = (value: string) => value.trim();
 /**
  * The exact body a secure-form submit posts to `/api/vault/requests/:decisionId`:
  * `kind` (the host rejects a mismatch), the item fields of that kind, and `save`.
- * Passwords and secret values stay verbatim (spaces can be part of a secret);
+ * Passwords and secret values stay verbatim (scopes can be part of a secret);
  * every other field is trimmed. A login without a requested origin carries the
  * typed `origin`. Pure; tests pin it.
  */

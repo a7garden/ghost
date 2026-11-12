@@ -4,7 +4,7 @@ import { currentProjectIds, pickConversation, pickGhost } from './target';
 
 const ghost = (id: string, isDefault = false, directId = `direct-${id}`): Ghost => ({
   id, name: id, persona: '', look: { avatarId: null }, model: null, isDefault, state: 'active',
-  tools: [], fallbacks: [], skills: [], deletedAt: null,
+  tools: [], fallbacks: [], skills: [], attachments: [], deletedAt: null,
   directConversationId: directId, createdAt: 1, updatedAt: 1,
 });
 
@@ -17,7 +17,7 @@ const state = (): State => ({
     { id: 'extra', ghostId: 'sage', kind: 'direct', workId: null, title: '이전 대화', model: null, busy: false, createdAt: 1, lastActivityAt: 2 },
     { id: 'work-conv', ghostId: 'sage', kind: 'work', workId: 'w1', title: '작업 대화', model: null, busy: false, createdAt: 1, lastActivityAt: 3 },
   ],
-  works: [], decisions: [], notifications: [], schedules: [], spaces: [], avatars: [],
+  works: [], decisions: [], notifications: [], schedules: [], scopes: [], policyRules: [], mcpServers: [], configRevisions: [], avatars: [],
   settings: { defaultModel: null, reviewModel: null, providers: [] }, devices: [], sandboxes: [],
 });
 
@@ -44,10 +44,10 @@ describe('pickConversation', () => {
 
 it('prunes deleted projects from both the composer selection and outgoing references', () => {
   const snapshot = state();
-  snapshot.spaces = ['first', 'second'].map(id => ({ id, name: id, path: `/tmp/${id}`, createdAt: 1 }));
+  snapshot.scopes = ['first', 'second'].map(id => ({ id, name: id, path: `/tmp/${id}`, createdAt: 1 }));
   let selected = ['second', 'first'];
   expect(currentProjectIds(snapshot, selected)).toEqual(['second', 'first']);
-  snapshot.spaces = snapshot.spaces.filter(space => space.id !== 'second');
+  snapshot.scopes = snapshot.scopes.filter(space => space.id !== 'second');
   selected = currentProjectIds(snapshot, selected);
   expect(selected).toEqual(['first']);
   expect(currentProjectIds(snapshot, ['second', 'first'])).toEqual(selected);

@@ -13,10 +13,10 @@ import './OutgoingMessage.css';
  * replaced by it. Sending shows only when it takes a moment; the waiting note sits once, on the last
  * waiting row.
  */
-export function OutgoingMessage({ label, text, spaces, attachments, state, note, onRetry, onDiscard }: {
+export function OutgoingMessage({ label, text, scopes, attachments, state, note, onRetry, onDiscard }: {
   label: string;
   text: string;
-  spaces: readonly { id: string; name: string }[];
+  scopes: readonly { id: string; name: string }[];
   attachments: readonly ArtifactRef[];
   state: OutboxState;
   /** This row carries the queue's note. */
@@ -33,7 +33,7 @@ export function OutgoingMessage({ label, text, spaces, attachments, state, note,
   </>;
   return <ConversationMessage role="user" label={label} className="outgoing" data-state={state} aria-busy={state === 'sending' || undefined} actions={status}>
     <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
-    <ProjectChips spaces={spaces}/>
+    <ProjectChips scopes={scopes}/>
     {attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-2">
       {attachments.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}
     </div>}

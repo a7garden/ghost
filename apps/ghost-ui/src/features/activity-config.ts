@@ -163,7 +163,7 @@ export function draftFromConfig(config: ActivityConfig): ActivityDraft {
     draft.scheduleSpec = source.spec;
     if (source.spec.kind === 'at') draft.scheduleAt = toLocalInput(source.spec.at);
     else draft.everyMinutes = String(source.spec.seconds / 60);
-  } else {
+  } else if (source.kind === "pull_request" || source.kind === "mail") {
     draft.connectionId = source.connectionId;
     draft.pollMinutes = String(source.pollSeconds / 60);
     draft.includeExisting = source.includeExisting;

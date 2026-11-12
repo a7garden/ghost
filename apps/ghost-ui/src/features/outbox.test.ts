@@ -3,7 +3,7 @@ import type { Message } from '@ghost/contract';
 import { begin, claims, confirm, discard, loadOutbox, nextAttempts, OUTBOX_KEY, release, retry, rowsFor, saveOutbox, settle, submit, type MessageSend, type Outbox } from './outbox';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const send = (text: string, conversationId = 'c1', extra: Partial<MessageSend> = {}): MessageSend => ({ type: 'message.send', conversationId, text, spaceIds: [], ...extra });
+const send = (text: string, conversationId = 'c1', extra: Partial<MessageSend> = {}): MessageSend => ({ type: 'message.send', conversationId, text, scopeId: null, ...extra });
 const message = (patch: Partial<Message>): Message => ({
   id: 'm1', conversationId: 'c1', role: 'user', origin: 'owner', text: '', toolCalls: [], tool: null, attachments: [], createdAt: 0, ...patch,
 });
@@ -146,12 +146,12 @@ describe('outbox', () => {
 
   it('hands a discarded message back whole and drops its row; a message on its way cannot be taken back', () => {
     const files = [{ digest: 'b'.repeat(64), name: 'a.png', mediaType: 'image/png', size: 3 }];
-    let box = submit([], { requestId: id(1), command: send('되돌릴 글', 'c1', { attachments: files, spaceIds: ['s1'] }), now: 1, live: false, transcript: [] });
+    let box = submit([], { requestId: id(1), command: send('되돌릴 글', 'c1', { attachments: files, scopeId: 's1' }), now: 1, live: false, transcript: [] });
     box = post(box, 2, 'going', { conversationId: 'c2' });
 
     expect(discard(box, id(2)).command).toBeNull();
     const result = discard(box, id(1));
-    expect(result.command).toEqual(send('되돌릴 글', 'c1', { attachments: files, spaceIds: ['s1'] }));
+    expect(result.command).toEqual(send('되돌릴 글', 'c1', { attachments: files, scopeId: 's1' }));
     expect(state(result.box)).toEqual(['going:sending']);
   });
 });

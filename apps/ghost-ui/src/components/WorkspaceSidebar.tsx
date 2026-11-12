@@ -23,20 +23,20 @@ const SEARCH_LIMIT = 8;
  * fading out at the bottom while more follows. The rail beside it marks Ghosts that are
  * working or need the owner, so a long roster still shows where to look.
  */
-export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, attentionCount, status, navigate, openGhost }: {
+export function WorkspaceSidebar({ state, section, openGhostId, selectedScope, attentionCount, status, navigate, openGhost }: {
   state: State | null;
   section: string;
   /** Ghost whose conversation is on screen; null on workspace pages. */
   openGhostId: string | null;
   /** Project on screen; null while the create form is open. */
-  selectedSpace?: string;
+  selectedScope?: string;
   attentionCount: number;
   status: HostStatus;
   navigate(path: string): void;
   openGhost(id: string): void;
 }) {
   const hostStatusId = useId();
-  const spaces = state?.spaces ?? [];
+  const scopes = state?.scopes ?? [];
   const live = state ? liveWorks(state).length : 0;
   const hostTrouble = status.state !== 'connected' && !status.quiet;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -133,8 +133,8 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
             {filteredPool.map(ghost => row(ghost, true))}
           </NavigationGroup>}
           <NavigationGroup label="프로젝트"
-            action={<button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/spaces?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>}>
-            {spaces.map(space => <NavigationItem key={space.id} current={section === 'spaces' && space.id === selectedSpace} onClick={() => navigate(`/spaces/${space.id}`)}>
+            action={<button type="button" aria-label="새 프로젝트" title="새 프로젝트" onClick={() => navigate('/scopes?new=1')} className="sidebar-group-action"><Plus size={14} aria-hidden="true"/></button>}>
+            {scopes.map(space => <NavigationItem key={space.id} current={section === 'scopes' && space.id === selectedScope} onClick={() => navigate(`/scopes/${space.id}`)}>
               <Folder/><span className="truncate">{space.name}</span>
             </NavigationItem>)}
           </NavigationGroup>

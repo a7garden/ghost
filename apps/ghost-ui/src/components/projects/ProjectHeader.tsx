@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { pathCrumb } from '../../features/spacePages';
 import { relativeTime } from '../../features/time';
-import type { Space } from '@ghost/contract';
+import type { Scope } from '@ghost/contract';
 
 /**
  * The project header as a place: the name renames inline, the folder sits
@@ -10,7 +10,7 @@ import type { Space } from '@ghost/contract';
  * count and this session's last edit.
  */
 export function ProjectHeader({ space, total, lastEditAt, now, disabled, onRename }: {
-  space: Space;
+  space: Scope;
   /** Document count when the unfiltered list is loaded. */
   total: number;
   /** Timestamp noted when a page was saved from this session, if any. */
@@ -41,7 +41,7 @@ export function ProjectHeader({ space, total, lastEditAt, now, disabled, onRenam
       setError(reason instanceof Error ? reason.message : '이름을 바꾸지 못했습니다.');
     }
   };
-  const crumb = pathCrumb(space.path);
+  const crumb = pathCrumb((space.vaultPath ?? space.paths[0] ?? ""));
 
   return <header className="place">
     <div className="place__title">
@@ -62,7 +62,7 @@ export function ProjectHeader({ space, total, lastEditAt, now, disabled, onRenam
       </button>}
     </div>
     {error && <p className="place__error" role="alert">{error}</p>}
-    <span className="place__crumb" title={space.path} aria-label={`폴더 ${space.path}`}>
+    <span className="place__crumb" title={(space.vaultPath ?? space.paths[0] ?? "")} aria-label={`폴더 ${(space.vaultPath ?? space.paths[0] ?? "")}`}>
       {crumb.leading && <span className="place__crumb-seg">{crumb.leading}</span>}
       {crumb.leading && <span className="place__crumb-gap" aria-hidden="true">…</span>}
       {crumb.trailing.map(segment => <span className="place__crumb-seg" key={segment}>{segment}</span>)}

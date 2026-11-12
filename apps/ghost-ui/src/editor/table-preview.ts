@@ -248,7 +248,7 @@ class TablePreviewWidget extends WidgetType {
 
     const table = document.createElement('table');
     table.tabIndex = 0;
-    table.setAttribute('aria-keyshortcuts', 'Enter Space');
+    table.setAttribute('aria-keyshortcuts', 'Enter Scope');
     if (this.label) table.setAttribute('aria-label', this.label);
     else if (fallbackLabel) table.setAttribute('aria-label', fallbackLabel);
     const head = document.createElement('thead');

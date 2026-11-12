@@ -68,7 +68,7 @@ function useBrowserSession(conversationId: string | null, enabled: boolean): Bro
  * the work it takes on branches off as threads (맡긴 일), shown where they started and
  * gathered behind the thread button. Older direct conversations stay readable there.
  */
-export function GhostChat({ ghost, state, conversationId, threadId, navigate, initialSpaceIds = [] }: {
+export function GhostChat({ ghost, state, conversationId, threadId, navigate, initialScopeIds = [] }: {
   ghost: Ghost;
   state: State;
   /** The conversation on screen; null when this Ghost has none yet. */
@@ -76,7 +76,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   /** A thread opened beside the conversation (`?thread=`). */
   threadId: string | null;
   navigate(path: string): void;
-  initialSpaceIds?: string[];
+  initialScopeIds?: string[];
 }) {
   const { client } = useHost();
   const touch = useTouch();
@@ -178,7 +178,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
           <DecisionDeck state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread} docked/>
         </BrowserPaneContext.Provider>
         <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft}
-          returnedFiles={returnedFiles} setReturnedFiles={setReturnedFiles} inputRef={inputRef} initialSpaceIds={initialSpaceIds}
+          returnedFiles={returnedFiles} setReturnedFiles={setReturnedFiles} inputRef={inputRef} initialScopeIds={initialScopeIds}
           onPost={command => { setFollowKey(key => key + 1); outbox.post(command); }} onStop={stop} onError={setError}/>
       </>}
       footer={<>
@@ -201,8 +201,8 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
           await client.send({ type: 'message.send', conversationId: message.conversationId, text }, requestId);
         } : undefined}/>
       {outbox.rows.map(({ entry, note }) => <OutgoingMessage key={entry.requestId} label="나" text={entry.command.text}
-        spaces={(entry.command.spaceIds ?? []).flatMap(id => state.spaces.filter(space => space.id === id))}
-        attachments={entry.command.attachments ?? []} state={entry.state} note={note}
+        scopes={(entry.command.scopeId ? [entry.command.scopeId] : []).flatMap(id => state.scopes.filter(space => space.id === id))}
+        attachments={(entry.command.attachments ?? []).filter(ref => "digest" in ref)} state={entry.state} note={note}
         onRetry={() => outbox.retry(entry.requestId)} onDiscard={() => takeBack(entry.requestId)}/>)}
       {live && <LiveReply live={live} ghostId={ghost.id} ghostName={ghost.name}/>}
     </Conversation>

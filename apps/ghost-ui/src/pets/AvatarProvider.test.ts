@@ -5,7 +5,7 @@ import { spriteVersionOf } from './sprites';
 
 const ghost = (id: string) => ({
   id, name: 'Sage', persona: '', look: { avatarId: null }, model: null, isDefault: true, state: 'active' as const,
-  tools: [], fallbacks: [], skills: [], deletedAt: null,
+  tools: [], fallbacks: [], skills: [], attachments: [], deletedAt: null,
   directConversationId: `${id}-direct`, createdAt: 1, updatedAt: 1,
 });
 
@@ -19,8 +19,8 @@ const state = (partial: Partial<Pick<State, 'conversations' | 'decisions'>> = {}
   decisions: partial.decisions ?? [],
   notifications: [],
   schedules: [],
-  spaces: [],
-  avatars: [],
+  scopes: [],
+  policyRules: [], mcpServers: [], configRevisions: [], avatars: [],
   settings: { defaultModel: null, reviewModel: null, providers: [] },
   devices: [],
   sandboxes: [],

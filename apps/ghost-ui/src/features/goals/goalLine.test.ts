@@ -5,13 +5,13 @@ import { goalError } from './goalError';
 import { HostError } from '../../host/client';
 
 const milestone = (id: string, patch: Partial<Milestone> = {}): Milestone => ({
-  id, goalId: 'g1', title: id, hypothesis: '', exit: '', outcome: '', state: 'planned', workIds: [],
+  id, scopeId: null, goalId: 'g1', title: id, hypothesis: '', exit: '', outcome: '', state: 'planned', workIds: [],
   createdBy: 'sage', settledBy: null, createdAt: 1, startedAt: null, endedAt: null, ...patch,
 });
 const work = (id: string, state: Work['state']): Work => ({
   id, state, parentId: null, rootId: id, ghostId: 'sage', originConversationId: 'c1', conversationId: null,
   title: id, brief: '', acceptance: { criteria: '', checks: [], reviewer: null }, revision: 1, revisionsUsed: 0,
-  deadlineAt: null, result: null, verdict: null, reason: null, createdAt: 1, updatedAt: 1, startedAt: null, endedAt: null,
+  deadlineAt: null, scopeId: null, attachments: [], slot: null, retry: null, budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null, result: null, verdict: null, reason: null, createdAt: 1, updatedAt: 1, startedAt: null, endedAt: null,
 });
 
 describe('goalLine', () => {

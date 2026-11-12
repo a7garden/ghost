@@ -28,6 +28,10 @@ const remove = <T extends Keyed>(items: T[], id: string) => items.filter((item) 
 /** Apply one ledger change to a snapshot. Pure; exported for tests. */
 export function applyEvent(state: State, data: LedgerEventData): State {
   switch (data.type) {
+    case 'ghost.removed':
+      return { ...state, ghosts: remove(state.ghosts, data.id) };
+    case 'activity.removed':
+      return { ...state, activities: remove(state.activities ?? [], data.id) };
     case 'ghost':
       return { ...state, ghosts: upsert(state.ghosts, data.ghost) };
     case 'conversation':
@@ -50,10 +54,20 @@ export function applyEvent(state: State, data: LedgerEventData): State {
       return { ...state, schedules: upsert(state.schedules, data.schedule) };
     case 'schedule.removed':
       return { ...state, schedules: remove(state.schedules, data.id) };
-    case 'space':
-      return { ...state, spaces: upsert(state.spaces, data.space) };
-    case 'space.removed':
-      return { ...state, spaces: remove(state.spaces, data.id) };
+    case 'policy_rule':
+      return { ...state, policyRules: upsert(state.policyRules, data.rule) };
+    case 'policy_rule.removed':
+      return { ...state, policyRules: remove(state.policyRules, data.id) };
+    case 'mcp_server':
+      return { ...state, mcpServers: upsert(state.mcpServers, data.server) };
+    case 'mcp_server.removed':
+      return { ...state, mcpServers: remove(state.mcpServers, data.id) };
+    case 'config_revision':
+      return { ...state, configRevisions: upsert(state.configRevisions, data.revision) };
+    case 'scope':
+      return { ...state, scopes: upsert(state.scopes, data.scope) };
+    case 'scope.removed':
+      return { ...state, scopes: remove(state.scopes, data.id) };
     case 'avatar':
       return { ...state, avatars: upsert(state.avatars, data.avatar) };
     case 'avatar.removed':

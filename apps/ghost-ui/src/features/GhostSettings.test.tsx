@@ -5,7 +5,7 @@ import { toolLabels } from './toolLabels';
 
 const ghost = (patch: Partial<Ghost> = {}): Ghost => ({
   id: 'g1', name: '연구원', persona: '', look: { avatarId: null }, model: null, isDefault: false, state: 'retired',
-  tools: [], fallbacks: [], skills: [], deletedAt: null,
+  tools: [], fallbacks: [], skills: [], attachments: [], deletedAt: null,
   directConversationId: 'conv-g1', createdAt: 1, updatedAt: 1, ...patch,
 });
 const model = (id: string) => ({ provider: 'p', model: id });
