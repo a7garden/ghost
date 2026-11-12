@@ -5,7 +5,7 @@ import type { Core } from "../core/core.ts";
 import { digestOf } from "../core/ids.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { NoEffect } from "../core/effects.ts";
-import { policyRead } from "../core/policy-context.ts";
+import { markPolicyRead, policyRead } from "../core/policy-context.ts";
 import type { McpPort, McpTool, McpCallResult } from "../integrations/mcp.ts";
 import { createConnectionAlias } from "./connections.ts";
 import { errorResult, requireAllowed, scopeOf, workAllowsTool } from "./shared.ts";
@@ -78,6 +78,7 @@ export class DynamicCapabilities {
         if (!ghost.tools.some(pattern => matchToolPattern(pattern, prefix, true)) || !workAllowsTool(this.core, work, prefix, true)) continue;
         if (!this.connectionGranted(server, ghost.id)) continue;
         const tools = await this.mcp.listTools(server.id);
+        markPolicyRead(this.core, conversation.id, { untrustedInput: true, privateData: server.transport.kind === "http" ? server.transport.connectionId !== null : server.transport.env.length > 0 });
         for (const tool of tools) {
           const name = mcpToolName(server.id, tool.name);
           if (name.length > 256 || !allowed(name) || conversation.kind === "subagent" && !server.readTools.includes(tool.name)) continue;
