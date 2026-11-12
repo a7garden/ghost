@@ -259,10 +259,14 @@ describe("isolated browser port", () => {
   });
   test("session redaction covers card grouping; card screenshots remain locked across origins until close", async () => {
     const root = tempDir(); const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
+    let granted = true;
+    const authorize = () => { if (!granted) throw new Error("Owner browser grant was revoked"); };
     const card = "4111 1111 1111 1111";
     try {
       const script = `window.top !== window; location.origin !== ''; Object.getOwnPropertyDescriptor; ${card}`;
-      await browser.run(session, ["eval", "--stdin"], { stdin: script, sensitive: { value: card, field: "card_number", origin: "https://example.com" } });
+      await browser.run(session, ["eval", "--stdin"], { authorize, stdin: script, sensitive: { value: card, field: "card_number", origin: "https://example.com" } });
+      granted = false;
+      await expect(browser.run(session, ["eval", "--stdin"], { authorize, stdin: script, sensitive: { value: card, field: "card_number", origin: "https://example.com" } })).rejects.toThrow("Owner browser grant was revoked");
       writeFileSync(join(root, "page-text"), "4111111111111111 / 4111-1111-1111-1111 / 4111 1111 1111 1111");
       const page = await browser.run(session, ["get", "text"]);
       expect(JSON.stringify(page.data)).not.toContain("4111"); expect(JSON.stringify(page.data)).toContain("[redacted]");
@@ -279,16 +283,20 @@ describe("isolated browser port", () => {
     const root = tempDir(); const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
     const value = 'p a<&"\\\n';
     const forms = [value, encodeURIComponent(value), encodeURIComponent(value).replaceAll("%20", "+"), 'p a&lt;&amp;&quot;\\\n', JSON.stringify(value).slice(1, -1)];
+    const granted = { active: true };
+    const authorize = () => { if (!granted.active) throw new Error("Owner browser grant was revoked"); };
     try {
-      await browser.run(session, ["eval", "--stdin"], { stdin: "window.top !== window; location.origin !== ''; Object.getOwnPropertyDescriptor", sensitive: { value, field: "value", origin: "https://example.com" } });
+      await browser.run(session, ["eval", "--stdin"], { authorize, stdin: "window.top !== window; location.origin !== ''; Object.getOwnPropertyDescriptor", sensitive: { value, field: "value", origin: "https://example.com" } });
       writeFileSync(join(root, "page-text"), forms.join(" | "));
       expect((await browser.run(session, ["get", "text"])).data).toEqual({ text: forms.map(() => "[redacted]").join(" | ") });
     } finally { await browser.shutdown(); }
   });
   test("password screenshot lock is scoped to its stable tab identity and clears only after its URL changes", async () => {
     const root = tempDir(); const browser = new AgentBrowser({ executable: fakeExecutable(root) }, root);
+    const granted = { active: true };
+    const authorize = () => { if (!granted.active) throw new Error("Owner browser grant was revoked"); };
     try {
-      await browser.run(session, ["eval", "--stdin"], { stdin: "window.top !== window; location.origin !== ''; Object.getOwnPropertyDescriptor", sensitive: { value: SECRET, field: "password", origin: "https://example.com" } });
+      await browser.run(session, ["eval", "--stdin"], { authorize, stdin: "window.top !== window; location.origin !== ''; Object.getOwnPropertyDescriptor", sensitive: { value: SECRET, field: "password", origin: "https://example.com" } });
       await expect(browser.run(session, ["screenshot"])).rejects.toThrow("until that tab's URL changes");
       writeFileSync(join(root, "tab-id"), "other-tab");
       expect((await browser.run(session, ["screenshot"])).ok).toBe(true);
@@ -745,7 +753,7 @@ describe("browser tools", () => {
       expect((await f.call("browser_download", { ref: "@e1", name: "file.txt" }, "pi-work")).isError).toBe(true);
     } finally { await f.browser.shutdown(); }
   });
-  test("dangerous names require a proposal for click or focused Enter/Scope", async () => {
+  test("dangerous names require a proposal for click or focused Enter/Space keys", async () => {
     const f = fixture();
     try {
       expect((await f.call("browser_open", { url: "https://example.com/" })).isError).toBeFalsy();
@@ -757,7 +765,9 @@ describe("browser tools", () => {
       }
       await f.call("browser_fill", { ref: "@e1", text: "message" });
       await f.call("browser_tabs", { action: "list" });
-      for (const key of ["Enter", "Scope", "Control+Enter", "Shift+Scope"]) expect((await f.call("browser_press", { key })).isError).toBe(true);
+      for (const key of ["Enter", "Space", "Control+Enter", "Shift+Space"]) {
+        expect((await f.call("browser_press", { key })).isError).toBe(true);
+      }
       writeFileSync(join(f.root, "snapshot"), JSON.stringify(snapshotFixture("textbox", "Comment")));
       await f.call("browser_snapshot"); await f.call("browser_fill", { ref: "@e1", text: "message" });
       writeFileSync(join(f.root, "snapshot"), JSON.stringify(snapshotFixture("textbox", "Send")));

@@ -341,9 +341,11 @@ test("native snapshot refs survive arbitrary short secrets without exempting eva
   writeFileSync(executable,`#!${process.execPath}\nimport {readFileSync} from "node:fs";const args=process.argv.slice(process.argv.indexOf("--json")+1);if(args[0]==="eval"&&args[1]==="--stdin"){await Bun.stdin.text();process.stdout.write(JSON.stringify({success:true,data:{result:"filled"}}));}else{const data=args[0]==="snapshot"||args[0]==="eval"?JSON.parse(readFileSync(${JSON.stringify(payload)},"utf8")):{};process.stdout.write(JSON.stringify({success:true,data}));}\n`);
   chmodSync(executable,0o700);
   const browser=new AgentBrowser({executable},root), ref={ghostId:"redaction",conversationId:"redaction"};
+  const granted = { active: true };
+  const authorize = () => { if (!granted.active) throw new Error("Owner browser grant was revoked"); };
   try {
     await browser.run(ref,["open","https://example.com/"]);
-    for (const value of ["12","2029","679","box","refs","role","BEFORE[ref=e12]AFTER",'"Cross" [ref=e31]']) await browser.run(ref,["eval","--stdin"],{stdin:"fixed Host secret fill",sensitive:{field:"value",value,origin:"https://example.com"}});
+    for (const value of ["12","2029","679","box","refs","role","BEFORE[ref=e12]AFTER",'"Cross" [ref=e31]']) await browser.run(ref,["eval","--stdin"],{authorize,stdin:"fixed Host secret fill",sensitive:{field:"value",value,origin:"https://example.com"}});
     let tree="";
     const spans: {start:number;end:number}[] = [];
     const append = (value:string,structure=false) => {const start=tree.length;tree+=value;if(structure)spans.push({start,end:tree.length});};
@@ -414,9 +416,11 @@ test("sticky screenshot permission is denied before observer I/O; unrelated comm
   chmodSync(executable,0o700);
   const ref={ghostId:"sticky-permission",conversationId:"sticky-permission"},browser=new AgentBrowser({executable},root);
   let modeCalls=0;
+  const granted = { active: true };
+  const authorize = () => { if (!granted.active) throw new Error("Owner browser grant was revoked"); };
   try {
     await browser.run(ref,["open","https://example.com/"]);
-    await browser.run(ref,["eval","--stdin"],{stdin:"fixed Host fill",sensitive:{field:"value",value:"679",origin:"https://example.com"}});
+    await browser.run(ref,["eval","--stdin"],{authorize,stdin:"fixed Host fill",sensitive:{field:"value",value:"679",origin:"https://example.com"}});
     // Unit-test seam: inspect the in-process session, not external protocol data.
     const internal=browser as unknown as {sessionMap:Map<string,{loginObserver?:LoginObserver}>};
     const session=internal.sessionMap.get(ref.conversationId)!;
