@@ -296,7 +296,7 @@ export function createMainTools(core: Core): Extension {
           const agent = await api.agent(context);
           const liveConversation = core.ledger.conversation(scope.conversation.id);
           const liveSlot = core.ledger.settings().slots?.[slotName];
-          if (liveConversation.deletedAt || liveConversation.kind !== "wake" || liveConversation.model !== null
+          if (liveConversation.kind !== "wake" || liveConversation.model !== null
             || core.ledger.setting<string | null>(`wake:decision:${liveConversation.id}`, null) !== args.decision_id || core.ledger.setting<string | null>(`wake:slot:${liveConversation.id}`, null) !== slotName
             || !liveSlot || digestOf(liveSlot) !== snapshot || core.decisions.reviewer(core.ledger.decision(args.decision_id))?.slot !== slotName
             || ![slot.model, ...(slot.fallbacks ?? [])].some((ref) => ref.provider === agent.model?.provider && ref.model === agent.model?.modelId && (ref.thinking ?? "off") === (agent.thinkingLevel ?? "off"))) throw forbidden("The actual reviewer execution does not match the unchanged slot; ask the owner to decide explicitly");
