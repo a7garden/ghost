@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import type { EntryRecord } from "@earendil-works/pi-durable";
+import type { ConversationId, EntryId, EntryRecord } from "@earendil-works/pi-durable";
 import { toMessage } from "../src/engine/messages.ts";
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
@@ -287,7 +287,7 @@ test("scoped goals and milestones persist attribution and never leak another sco
   ledger.tx(() => ledger.putScope({ id: "s", name: "S", ghostId: null, paths: [], vaultPath: null, state: "active", attachments: [], limits: {}, createdAt: 1, updatedAt: 1 }));
   core.goals.create({ title: "Global", boundaries: "No spending" });
   const goal = core.goals.create({ scopeId: "s", title: "Scope only", boundaries: "No publishing" });
-  const milestone = core.goals.plan(ghost, goal.id, { title: "Next", exit: "Evidence" }, "ms");
+  const milestone = core.goals.plan(ghost, goal.id, { title: "Next", hypothesis: "A scoped step should advance the project", exit: "Evidence" }, "ms");
   expect(milestone.scopeId).toBe("s"); expect(core.goals.goals("s")).toEqual([goal]);
   expect(core.goals.context()).not.toContain("Scope only"); expect(core.goals.context("s")).toContain("Scope only");
 });
@@ -317,7 +317,7 @@ test("slot deletion and creation reverts reject default and live reviewer refere
   await send({ type: "rule.delete", ruleId });
   await send({ type: "slot.delete", name: "reviewer" });
   await send({ type: "config.revert", revisionId: ledger.configRevisions("slot", "reviewer").at(-1)!.id });
-  expect(ledger.settings().slots!.reviewer.model.model).toBe("one");
+  expect(ledger.settings().slots?.reviewer?.model.model).toBe("one");
 });
 
 test("Ghost and activity owner mutations are revisioned and reversible without discarding history", async () => {
@@ -356,7 +356,12 @@ test("a failed revision write rolls back configuration, events and the API recei
 
 
 test("legacy message origins preserve multiple saved space ids and exact visible text", () => {
-  const entry = { id: "message", kind: "pi.user", model: [{ role: "user", content: "Old model-only project prefix\nVisible owner text", timestamp: 1 }] } as EntryRecord;
+  const entry: EntryRecord = {
+    id: 1 as EntryId,
+    conversationId: 1 as ConversationId,
+    kind: "pi.user",
+    model: [{ role: "user", content: "Old model-only project prefix\nVisible owner text", timestamp: 1 }],
+  };
   const references = [{ id: "deleted-first", name: "First" }, { id: "deleted-second", name: "Second" }];
   const projected = toMessage(entry, "conversation", { origin: "owner", attachments: [], spaces: references, text: "Visible owner text" });
   expect(projected?.text).toBe("Visible owner text");
