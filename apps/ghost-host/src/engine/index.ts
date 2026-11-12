@@ -136,6 +136,7 @@ class HostEngine implements Engine, MemoryEngine {
   private readonly memoryReady = new Set<string>();
   private metricCatchup: Promise<void> | null = null;
   private memoryRepair: Promise<void> | null = null;
+  private readonly toolLoads = new Map<number, Promise<void>>();
   private closing = false;
 
   constructor(deps: EngineDeps, harness: Harness, ownedModels: MutableModels | null, private readonly registry: Registry, private readonly guardExtension: Extension) {
@@ -145,15 +146,22 @@ class HostEngine implements Engine, MemoryEngine {
     this.memory = deps.memory;
     this.harness = harness;
     this.ownedModels = ownedModels;
-    this.tools.bindLoader?.(async (piId, tools) => {
-      const state = this.byPiId.get(piId);
-      if (!state) throw new CommandError("not_found", "the tool-loading conversation is unavailable");
-      const loaded = defineExtension({ name: `ghost.loaded.${digestOf(tools).slice(0, 24)}`, tools });
-      this.registry.install(loaded);
-      const agent = await state.pi.agent(ctx);
-      const selected = new Map(agent.tools.map((tool) => [tool.name, tool]));
-      for (const tool of tools) selected.set(tool.name, tool);
-      await state.pi.configure({ extensions: [...agent.extensions, loaded], tools: [...selected.values()] }, ctx);
+    this.tools.bindLoader?.((piId, tools) => {
+      const loading = (this.toolLoads.get(piId) ?? Promise.resolve()).catch(() => {}).then(async () => {
+        if (this.closing) throw new CommandError("unavailable", "the engine is closing");
+        const state = this.byPiId.get(piId);
+        if (!state) throw new CommandError("not_found", "the tool-loading conversation is unavailable");
+        const loaded = defineExtension({ name: `ghost.loaded.${digestOf(tools).slice(0, 24)}`, tools });
+        this.registry.install(loaded);
+        const agent = await state.pi.agent(ctx);
+        const selected = new Map(agent.tools.map((tool) => [tool.name, tool]));
+        const extensions = new Map(agent.extensions.map((extension) => [extension.name, extension]));
+        for (const tool of tools) selected.set(tool.name, tool);
+        extensions.set(loaded.name, loaded);
+        await state.pi.configure({ extensions: [...extensions.values()], tools: [...selected.values()] }, ctx);
+      });
+      this.toolLoads.set(piId, loading);
+      return loading.finally(() => { if (this.toolLoads.get(piId) === loading) this.toolLoads.delete(piId); });
     });
     this.fallbackExtension = defineExtension({
       name: "ghost.model-fallback",
@@ -771,7 +779,7 @@ class HostEngine implements Engine, MemoryEngine {
   async close(): Promise<void> {
     this.closing = true;
     await Promise.allSettled(this.core.ledger.conversations().filter((host) => host.kind === "subagent").map(async (host) => (await this.stateFor(host.id))?.pi.abort(ctx)));
-    await Promise.allSettled([...this.memoryCatchups.values(), this.memoryRepair, this.metricCatchup]);
+    await Promise.allSettled([...this.memoryCatchups.values(), this.memoryRepair, this.metricCatchup, ...this.toolLoads.values()]);
     this.unsubscribeLedger();
     this.unsubscribeCommits();
     await Promise.allSettled([...this.states.values()].map((state) => state.dispatch));
