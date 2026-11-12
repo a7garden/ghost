@@ -639,3 +639,42 @@ test("quota restart discards an epoch-superseded wake and only its provider prob
     expect(() => h.core.quota.cancel(ghost.directConversationId)).toThrow();
   } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
 });
+
+test("explicit model review can settle in a separate read-only conversation owned by the producer Ghost", async () => {
+  const h = harness();
+  try {
+    const ghost = h.core.createGhost({ name: "Only Ghost", persona: "" });
+    const model = { provider: "review", model: "independent" };
+    const work = h.core.works.createRoot({ ghostId: ghost.id, title: "Model reviewed", brief: "Read", originConversationId: ghost.directConversationId, acceptance: { criteria: "Cite evidence", checks: [], reviewer: { kind: "model", model } } });
+    await h.core.idle();
+    const producer = h.ledger.work(work.id).conversationId;
+    h.core.works.complete(work.id, { summary: "Evidence", artifacts: [] });
+    await h.core.idle();
+    const review = h.ledger.conversations({ kind: "review" }).find(conversation => conversation.workId === work.id)!;
+    expect(review.ghostId).toBe(ghost.id);
+    expect(review.id).not.toBe(producer);
+    expect(h.engine.opened.find(setup => setup.conversation.id === review.id)?.work?.acceptance.reviewer).toEqual({ kind: "model", model });
+    h.core.works.applyVerdict(work.id, { outcome: "pass", source: "review", reasons: "Verified evidence", at: Date.now() });
+    expect(h.ledger.work(work.id).state).toBe("done");
+    expect(h.ledger.pendingDecisions({ workId: work.id })).toHaveLength(0);
+  } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
+});
+
+test("model review still refuses missing review execution, a producer conversation, or a conflicting model override", async () => {
+  for (const defect of ["missing", "producer", "override"] as const) {
+    const h = harness();
+    try {
+      const ghost = h.core.createGhost({ name: "Only Ghost", persona: "" });
+      const work = h.core.works.createRoot({ ghostId: ghost.id, title: "Bound review", brief: "Read", originConversationId: ghost.directConversationId, acceptance: { criteria: "Cite evidence", checks: [], reviewer: defect === "missing" ? null : { kind: "model", model: { provider: "review", model: "independent" } } } });
+      await h.core.idle();
+      h.core.works.complete(work.id, { summary: "Evidence", artifacts: [] });
+      await h.core.idle();
+      const review = h.ledger.conversations({ kind: "review" }).find(conversation => conversation.workId === work.id);
+      if (defect === "producer") h.ledger.tx(() => h.ledger.putWork({ ...h.ledger.work(work.id), conversationId: review!.id }));
+      if (defect === "override") h.ledger.tx(() => h.ledger.putConversation({ ...review!, model: { provider: "other", model: "unbound" } }));
+      h.core.works.applyVerdict(work.id, { outcome: "pass", source: "review", reasons: "Unproven", at: Date.now() });
+      expect(h.ledger.work(work.id).state).toBe("verifying");
+      expect(h.ledger.pendingDecisions({ workId: work.id }).some(decision => decision.kind === "accept_result")).toBe(true);
+    } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
+  }
+});

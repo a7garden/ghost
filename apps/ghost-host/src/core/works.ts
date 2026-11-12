@@ -645,7 +645,12 @@ export class Works {
     if (work.state !== "verifying") return work;
     if (verdict.outcome === "pass" && verdict.source === "review") {
       const reviewer = this.ledger.conversations({ kind: "review" }).find((conversation) => conversation.workId === work.id);
-      if (!reviewer || reviewer.ghostId === work.ghostId) {
+      const model = work.acceptance.reviewer?.kind === "model" ? work.acceptance.reviewer.model : null;
+      const explicitModelReview = model !== null && !!reviewer && (reviewer.model === null || (
+        reviewer.model.provider === model.provider && reviewer.model.model === model.model
+        && (reviewer.model.thinking ?? "off") === (model.thinking ?? "off")
+      ));
+      if (!reviewer || reviewer.id === work.conversationId || (reviewer.ghostId === work.ghostId && !explicitModelReview)) {
         this.ledger.tx(() => this.core.decisions.openAcceptance(work, "An independent reviewer or the owner must verify this result; a Ghost cannot accept its own work."));
         return work;
       }
