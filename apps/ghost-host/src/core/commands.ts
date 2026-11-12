@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { connectionCredentialScope, FallbackList, GhostToolList, SkillList, validate, type Command, type CommandRequest, type Connection, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef } from "@ghost/contract";
 import type { Access } from "./access.ts";
 import type { Core } from "./core.ts";
@@ -7,7 +8,7 @@ import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId, sha256 } from "./ids.ts";
 import { supportsAutomaticModels } from "../integrations/provider-catalog.ts";
 import { validateConnectionConfig } from "../integrations/activity-sources.ts";
-import { configurationCommand, reviseConfiguration, checkConfiguration, checkAttachments } from "./configuration.ts";
+import { configurationCommand, reviseConfiguration, checkConfiguration, checkAttachments, connectionMetadata } from "./configuration.ts";
 import type { MailService } from "../integrations/mail.ts";
 
 export interface CommandContext {
@@ -159,6 +160,7 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
                 hasCredential: previous?.hasCredential ?? false, credentialVersion: previous?.credentialVersion ?? null,
                 createdAt: previous?.createdAt ?? now, updatedAt: now,
               });
+              auditConnection(core, principal, command.type, previous, ledger.connection(connectionId));
               const result = { connectionId };
               ledger.putRequest(requestId, principal, digest, result);
               return result;
@@ -185,6 +187,8 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
             hasCredential: false, credentialVersion, createdAt: previous?.createdAt ?? now, updatedAt: now,
           };
           ledger.putConnection(connection);
+          if (command.type === "connection.upsert") auditConnection(core, principal,
+            `connection.upsert: credential ${credential === null ? "revocation" : "replacement"} requested`, previous, connection, true);
           core.activities.invalidateConnection(connectionId);
           return { start, connection };
         });
@@ -194,7 +198,10 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
           await sources.setCredential(connectionId, credential, credentialVersion);
           context.authorize?.();
           return ledger.tx(() => {
-            if (command.type === "connection.delete") ledger.deleteConnection(connectionId);
+            if (command.type === "connection.delete") {
+              ledger.deleteConnection(connectionId);
+              auditConnection(core, principal, command.type, staged.connection, null);
+            }
             else ledger.putConnection({ ...staged.connection!, hasCredential: credential !== null, updatedAt: Date.now() });
             const result = command.type === "connection.delete" ? {} : { connectionId };
             core.effects.finish(staged.start.effect.id, `api-result:${JSON.stringify(result)}`);
@@ -274,6 +281,17 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
     default:
       throw new Error(`synchronous command ${command.type} entered the async dispatcher`);
   }
+}
+
+function auditConnection(core: Core, principal: string, reason: string, before: Connection | null, after: Connection | null, force = false) {
+  const previous = connectionMetadata(before);
+  const next = connectionMetadata(after);
+  if (!force && isDeepStrictEqual(previous, next)) return;
+  core.ledger.putConfigRevision({
+    id: newId(), entity: "connection", entityId: (after ?? before)!.id, before: previous, after: next,
+    actor: principal === "owner" ? { kind: "owner", id: null } : { kind: "device", id: principal.slice("device:".length) },
+    reason, at: Date.now(),
+  });
 }
 
 /** Reuse the domain effect journal: pending/unknown writes never run a second time. */

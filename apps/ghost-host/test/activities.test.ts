@@ -2,6 +2,9 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import type { ActivityAction, ActivityConfig, ActivityRun, ActivitySource, ActivitySourceItem, Connection, GhostTool } from "@ghost/contract";
+import type { CommandRequest } from "@ghost/contract";
+import { Access } from "../src/core/access.ts";
+import { execute } from "../src/core/commands.ts";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { Core } from "../src/core/core.ts";
@@ -77,6 +80,70 @@ async function manual(core: Core, activityId: string, options: { dryRun?: boolea
   if (!run) throw new Error("manual admission returned no persisted run");
   return run;
 }
+
+describe("connection configuration revisions", () => {
+  test("metadata, credential intents and deletion audit once without leaking authentication state", async () => {
+    const f = fixture();
+    const context = { publicOrigin: "http://localhost", documents: null };
+    let credentialWrites = 0;
+    f.source.setCredential = async (_id, value) => { credentialWrites++; f.source.credential = value !== null; };
+    const owner = new Access({ kind: "owner" });
+    const device = new Access({ kind: "device", deviceId: "paired-device", name: "Paired" });
+    const send = (command: CommandRequest["command"], access = owner, requestId = crypto.randomUUID()) => execute(f.core, access, { requestId, command }, context);
+    const created = await send({ type: "connection.upsert", name: "New account", config: f.connection.config, credential: "new-private-credential" });
+    const creation = f.ledger.configRevisions("connection", String(created.connectionId));
+    expect(creation).toHaveLength(1);
+    expect(creation[0]).toMatchObject({ before: null, after: { name: "New account" }, actor: { kind: "owner", id: null } });
+    expect(credentialWrites).toBe(1);
+    await send({ type: "connection.upsert", connectionId: f.connection.id, name: "Renamed", config: f.connection.config }, device);
+    expect(f.ledger.configRevisions("connection", f.connection.id)[0]).toMatchObject({
+      before: { name: "Account A" }, after: { name: "Renamed" }, actor: { kind: "device", id: "paired-device" },
+    });
+    expect(credentialWrites).toBe(1);
+    await send({ type: "connection.upsert", connectionId: f.connection.id, name: "Updated account", config: f.connection.config, credential: "first-private-credential" });
+    const rotationId = crypto.randomUUID();
+    const rotation: CommandRequest["command"] = { type: "connection.upsert", connectionId: f.connection.id, name: "Updated account", config: f.connection.config, credential: "second-private-credential" };
+    await send(rotation, owner, rotationId);
+    await send(rotation, owner, rotationId);
+    const rows = f.ledger.configRevisions("connection", f.connection.id);
+    expect(rows).toHaveLength(3);
+    expect(rows[2]!.before).toEqual(rows[2]!.after);
+    expect(rows[2]!.reason).toContain("credential replacement requested");
+    expect(credentialWrites).toBe(3);
+    const deletionId = crypto.randomUUID();
+    await send({ type: "connection.delete", connectionId: f.connection.id }, owner, deletionId);
+    await send({ type: "connection.delete", connectionId: f.connection.id }, owner, deletionId);
+    const revisions = f.ledger.configRevisions("connection", f.connection.id);
+    expect(revisions).toHaveLength(4);
+    expect(revisions[3]).toMatchObject({ before: { name: "Updated account" }, after: null, reason: "connection.delete" });
+    expect(credentialWrites).toBe(4);
+    expect(f.ledger.findConnection(f.connection.id)).toBeNull();
+    const serialized = JSON.stringify([...creation, ...revisions]);
+    for (const secret of ["new-private-credential", "first-private-credential", "second-private-credential", "hasCredential", "credentialVersion", "updatedAt"]) expect(serialized).not.toContain(secret);
+  });
+
+  for (const credential of [undefined, "blocked-private-credential"]) test(`revision faults roll back ${credential === undefined ? "metadata" : "credential staging"} before secret I/O`, async () => {
+    const f = fixture();
+    let credentialWrites = 0;
+    f.source.setCredential = async (_id, value) => { credentialWrites++; f.source.credential = value !== null; };
+    const before = f.ledger.connection(f.connection.id), seq = f.ledger.seq();
+    const save = f.ledger.putConfigRevision.bind(f.ledger);
+    f.ledger.putConfigRevision = () => { throw new Error("revision persistence unavailable"); };
+    const requestId = crypto.randomUUID();
+    const command: CommandRequest["command"] = { type: "connection.upsert", connectionId: f.connection.id, name: "Audited change", config: f.connection.config, ...(credential === undefined ? {} : { credential }) };
+    const send = () => execute(f.core, new Access({ kind: "owner" }), { requestId, command }, { publicOrigin: "http://localhost", documents: null });
+    await expect(send()).rejects.toThrow("revision persistence unavailable");
+    f.ledger.putConfigRevision = save;
+    expect(f.ledger.connection(f.connection.id)).toEqual(before);
+    expect(f.ledger.seq()).toBe(seq);
+    expect(f.ledger.configRevisions("connection", f.connection.id)).toHaveLength(0);
+    expect(credentialWrites).toBe(0);
+    await send();
+    expect(f.ledger.connection(f.connection.id).name).toBe("Audited change");
+    expect(f.ledger.configRevisions("connection", f.connection.id)).toHaveLength(1);
+    expect(credentialWrites).toBe(credential === undefined ? 0 : 1);
+  });
+});
 
 describe("durable activity admission", () => {
   test("activity admission and delegated children retain scope and its goal boundaries", async () => {
