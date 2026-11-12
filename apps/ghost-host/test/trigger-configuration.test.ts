@@ -125,7 +125,12 @@ test("commit triggers watch every scope repository directly from Git metadata", 
     writeFileSync(join(path, ".git", "refs", "heads", "main"), `${next}\n`);
     writeFileSync(join(path, ".git", "logs", "HEAD"), `${"0".repeat(40)} ${old} Owner <owner@example.com> 1 +0000\tcommit: initial\n${old} ${next} Owner <owner@example.com> ${Math.floor(now / 1000) + 1} +0000\tcommit: changed\n`);
   }
-  await f.core.activities.tickSources(now + 60_001); await f.core.idle();
+  // The baseline poll schedules the next one from when it finished, so tick at the persisted due time.
+  const due = f.ledger.activity(activity.id).nextAt!;
+  expect(due).toBeGreaterThanOrEqual(now + 60_000);
+  await f.core.activities.tickSources(due - 1);
+  expect(f.ledger.activityRuns(activity.id).filter((run) => run.workId)).toHaveLength(0);
+  await f.core.activities.tickSources(due); await f.core.idle();
   const runs = f.ledger.activityRuns(activity.id).filter((run) => run.workId);
   expect(runs).toHaveLength(2);
   expect(new Set(runs.map((run) => run.sourceItem!.target.path))).toEqual(new Set(paths));
