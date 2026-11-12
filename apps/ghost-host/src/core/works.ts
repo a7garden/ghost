@@ -706,7 +706,8 @@ export class Works {
     }
     this.ledger.tx(() => {
       this.put(next);
-      if (next.state === "running") this.ledger.appendReviseHistory(work.id, verdict);
+      // Exhausted revisions stay in the lesson history; a slot retry of a failed verdict is recorded as a revision too.
+      if (verdict.outcome === "revise" || next.state === "running") this.ledger.appendReviseHistory(work.id, verdict);
       this.core.decisions.cancelFor(work.id, "accept_result");
       if (next.state === "running") {
         this.ledger.setIdleNudges(work.id, 0);

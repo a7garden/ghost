@@ -12,6 +12,7 @@ import { Access } from "../src/core/access.ts";
 import { execute, settingsView } from "../src/core/commands.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import { CommandError } from "../src/core/errors.ts";
+import { idFor } from "../src/core/ids.ts";
 import { createEngine } from "../src/engine/index.ts";
 import { cutAttachmentBlock, liveFrom, renderUserContent, sameLive } from "../src/engine/messages.ts";
 import { applyProviders, buildModels } from "../src/engine/models.ts";
@@ -480,7 +481,8 @@ test("an origin survives a restart of the engine", async () => {
   const { core, engine, ledger, root, conversationId, faux } = await fixture();
   faux.setResponses([fauxAssistantMessage(fauxText("hello there"))]);
   const answered = nextMessage(engine, conversationId, "assistant");
-  await engine.submit(conversationId, { text: "hi", origin: "schedule", requestId: "r1" });
+  // Scheduled and report inputs now run in fresh wake conversations; a decision answer still lands here.
+  await engine.submit(conversationId, { text: "hi", origin: "decision", requestId: "r1" });
   await answered;
   await engine.close();
 
@@ -498,13 +500,13 @@ test("an origin survives a restart of the engine", async () => {
   core.attach(reopened);
   const page = await reopened.page(conversationId, null, 50);
   const user = page.messages.find((message) => message.role === "user");
-  expect(user?.origin).toBe("schedule");
+  expect(user?.origin).toBe("decision");
   expect(user?.text).toBe("hi");
   await reopened.close();
   ledger.close();
 });
 
-test("a Ghost's final reply to a scheduled wake speaks first; owner turns, narration before tools and a quiet ending do not", async () => {
+test("a Ghost's final reply to a scheduled wake speaks first from a fresh wake; owner turns, narration before tools and a quiet ending do not", async () => {
   const { core, engine, ledger, ghostId, conversationId, faux } = await fixture();
   faux.setResponses([
     fauxAssistantMessage(fauxText("hello there")),
@@ -514,7 +516,9 @@ test("a Ghost's final reply to a scheduled wake speaks first; owner turns, narra
   ]);
   const spoken = () => ledger.notificationsForState().filter((item) => item.kind === "message");
   const run = async (text: string, origin: "owner" | "schedule", requestId: string) => {
-    const settled = core.nextActivity(conversationId, core.activityCount(conversationId) + 1);
+    // A scheduled input runs in its own wake conversation; only its final reply may reach this thread.
+    const runner = origin === "schedule" ? idFor(conversationId, `wake:${requestId}`) : conversationId;
+    const settled = core.nextActivity(runner, core.activityCount(runner) + 1);
     await engine.submit(conversationId, { text, origin, requestId });
     await settled;
   };
@@ -530,6 +534,8 @@ test("a Ghost's final reply to a scheduled wake speaks first; owner turns, narra
   stop();
   expect(spoken()).toHaveLength(1);
   expect(spoken()[0]).toMatchObject({ ghostId, conversationId, workId: null, body: "아침 제안", readAt: null });
+  const owner = await engine.page(conversationId, null, 50);
+  expect(owner.messages.map((message) => message.text)).toEqual(["hi", "hello there", "## 아침 제안\n\n오늘 고를 만한 일을 세 가지 골랐어요."]);
   await engine.close();
   ledger.close();
 });

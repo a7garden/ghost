@@ -410,9 +410,10 @@ function delegationRoster(core: Core, ghost: Ghost, installed: { web: boolean; h
       installed.toss && FINANCE_TOOLS.some((tool) => peer.tools.includes(tool)) ? "toss" : "",
     ].filter(Boolean);
     const persona = peer.persona.trim();
-    return [`- ${peer.name} (ghost_id ${peer.id})`, persona && `— ${persona.split("\n")[0]}`, tags.length > 0 && `[${tags.join(" ")}]`]
+    const identity = peer.id === ghost.id ? `ghost_id ${peer.id}; yourself, as a separate fresh-context Work` : `ghost_id ${peer.id}`;
+    return [`- ${peer.name} (${identity})`, persona && `— ${persona.split("\n")[0]}`, tags.length > 0 && `[${tags.join(" ")}]`]
       .filter(Boolean)
       .join(" ");
   });
-  return `Ghosts you can delegate to (including your own identity in a separate, fresh-context Work):\n${rows.join("\n")}`;
+  return `Ghosts you can delegate to:\n${rows.join("\n")}`;
 }

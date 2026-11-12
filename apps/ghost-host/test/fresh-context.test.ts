@@ -426,7 +426,7 @@ test("live helper kind authorization denies stale Work mutation and recursive he
       h.ledger.putSetting(`subagent:parent:${child.id}`, ghost.directConversationId);
       h.ledger.putSetting(`subagent:tools:${child.id}`, ["work_create", "subagent_run"]);
     });
-    const api = { conversationId: 101, callId: "stale" } as unknown as ToolExecutionApi;
+    const api = { conversationId: 101, taskId: 1001, callId: "stale" } as unknown as ToolExecutionApi;
     const stale = createDirectTools(h.core).tools!.find(tool => tool.name === "work_create")!;
     const denied = await stale.execute({ ghost_id: ghost.id, title: "Forbidden", brief: "No" }, api, BACKGROUND_CONTEXT);
     expect(denied.isError).toBe(true);
@@ -447,7 +447,7 @@ test("wildcard child capability cannot erase a narrower ancestor Work boundary",
     await h.core.idle();
     const conversationId = h.ledger.work(child.id).conversationId!;
     h.ledger.tx(() => h.ledger.setPiConversationId(conversationId, "202"));
-    const api = { conversationId: 202 } as unknown as ToolExecutionApi;
+    const api = { conversationId: 202, taskId: 2002, callId: "wildcard-read" } as unknown as ToolExecutionApi;
     expect(requireAllowed(h.core, api, "host_read").work?.id).toBe(child.id);
     expect(() => requireAllowed(h.core, api, "write")).toThrow();
     h.ledger.tx(() => h.ledger.putWork({ ...h.ledger.work(parent.id), toolScope: ["delegate"] }));
@@ -463,7 +463,7 @@ test("wake Work management requires a trusted origin and the exact current scope
     const wake = h.core.newConversation(ghost.id, "wake", null, "Scoped wake");
     h.ledger.tx(() => { h.ledger.putConversation(wake); h.ledger.setPiConversationId(wake.id, "303"); });
     const list = createDirectTools(h.core).tools!.find(tool => tool.name === "work_list")!;
-    const api = { conversationId: 303 } as unknown as ToolExecutionApi;
+    const api = { conversationId: 303, taskId: 3003, callId: "wake-list" } as unknown as ToolExecutionApi;
     expect((await list.execute({}, api, BACKGROUND_CONTEXT)).isError).toBe(true);
     h.ledger.tx(() => {
       h.ledger.putSetting(`wake:owner:${wake.id}`, ghost.directConversationId);
@@ -532,7 +532,7 @@ test("plan_next accepts only a current trusted self-directed wake", async () => 
       h.ledger.putSetting(`wake:epoch:${wake.id}`, 0);
       h.ledger.putSetting(`context:${wake.id}`, { scopeId: null, docAttachments: [] });
     });
-    const api = { conversationId: 404 } as unknown as ToolExecutionApi;
+    const api = { conversationId: 404, taskId: 4004, callId: "wake-plan" } as unknown as ToolExecutionApi;
     const plan = createAutonomyTools(h.core).tools![0]!;
     expect((await plan.execute({ after_minutes: 20, intent: "Inspect updates" }, api, BACKGROUND_CONTEXT)).isError).toBeFalsy();
     h.ledger.tx(() => h.ledger.putSetting(`wake:decision:${wake.id}`, "bound-decision"));
@@ -552,7 +552,7 @@ test("work_create without a milestone inherits the active selected scope", async
       h.ledger.putSetting(`context:${ghost.directConversationId}`, { scopeId: "selected", docAttachments: [] });
     });
     const create = createDirectTools(h.core).tools!.find(tool => tool.name === "work_create")!;
-    const result = await create.execute({ title: "Keep scope", brief: "Read" }, { conversationId: 505, callId: "create-scoped" } as unknown as ToolExecutionApi, BACKGROUND_CONTEXT);
+    const result = await create.execute({ title: "Keep scope", brief: "Read" }, { conversationId: 505, taskId: 5005, callId: "create-scoped" } as unknown as ToolExecutionApi, BACKGROUND_CONTEXT);
     expect(result.isError).toBeFalsy();
     expect(h.ledger.worksForState()[0]?.scopeId).toBe("selected");
   } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
