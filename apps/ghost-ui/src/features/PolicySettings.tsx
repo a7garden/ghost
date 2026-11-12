@@ -46,7 +46,7 @@ function RuleEditor({ rule, scopeId: initialScope, onClose }: { rule: PolicyRule
   const [tool, setTool] = useState(rule?.tool ?? '*');
   const [when, setWhen] = useState<PolicyConditions>(rule?.when ?? {});
   const [decision, setDecision] = useState<PolicyDecision>(rule?.decision ?? 'owner');
-  const [reviewer, setReviewer] = useState(rule?.reviewer?.kind ?? 'none');
+  const [reviewer, setReviewer] = useState<string>(rule?.reviewer?.kind ?? 'none');
   const [reviewerGhost, setReviewerGhost] = useState(rule?.reviewer?.kind === 'ghost' ? rule.reviewer.ghostId : '');
   const [reviewerSlot, setReviewerSlot] = useState(rule?.reviewer?.kind === 'slot' ? rule.reviewer.slot : '');
   const [daily, setDaily] = useState(rule?.maxPerDay?.toString() ?? '');
@@ -87,7 +87,7 @@ function RuleEditor({ rule, scopeId: initialScope, onClose }: { rule: PolicyRule
         <div className="infra-columns"><TextField label="자동 처리까지 (분, 비우면 사용 안 함)" type="number" min={1} max={1440} value={minutes} onChange={setMinutes}/><Choice label="자동 처리" value={answer} onChange={value => setAnswer(value as 'approve' | 'recommended')} options={[{ value: 'approve', label: '승인' }, { value: 'recommended', label: '추천안' }]}/></div>
       </>}
       <TextField label="하루 횟수 한도 (비우면 없음)" type="number" min={1} value={daily} onChange={setDaily}/>
-      <div className="infra-columns"><TextField label="금액 한도 (비우면 없음)" type="number" min={0} value={amount} onChange={setAmount}/><TextField label="통화" value={currency} onChange={setCurrency} pattern="[A-Z]{3}" maxLength={3}/></div>
+      <div className="infra-columns"><TextField label="금액 한도 (비우면 없음)" type="number" min={0} step="any" value={amount} onChange={setAmount}/><TextField label="통화" value={currency} onChange={setCurrency} pattern="[A-Z]{3}" maxLength={3}/></div>
     </fieldset>
     {error && <InlineError>{error}</InlineError>}<EditorActions busy={busy} onCancel={onClose}/>
   </form>;

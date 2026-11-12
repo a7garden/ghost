@@ -10,6 +10,8 @@ import { ComposerPlus } from './composer/ComposerPlus';
 import { AttachmentTray, useAttachments } from './composer/attachments';
 import { blurTouchSearchOnEnter } from '../ui/adaptive';
 import { useProjectMentions } from './composer/ProjectMentions';
+import { useHostState } from '../host/store';
+import { WorkModelFields } from '../features/WorkModelFields';
 
 type Mode = 'talk' | 'work';
 
@@ -19,11 +21,13 @@ type Mode = 'talk' | 'work';
  * becomes a 맡긴 일 without a separate form. Nothing is assigned unless the owner chose it.
  */
 export function HandoffComposer({ ghosts, navigate, initialScopeIds = [], initialMode = 'talk' }: { ghosts: Ghost[]; navigate(path: string): void; initialScopeIds?: string[]; initialMode?: Mode }) {
-  const { client } = useHost();
+  const { client, store } = useHost();
+  const { state } = useHostState(store);
   const roster = visibleGhosts(ghosts);
   const [text, setText] = useState('');
   const [criteria, setCriteria] = useState('');
   const [deadline, setDeadline] = useState('');
+  const [slot, setSlot] = useState(''), [retrySlot, setRetrySlot] = useState('');
   const [mode, setMode] = useState<Mode>(initialMode);
   const [ghostId, setGhostId] = useState<string>();
   const [sending, setSending] = useState(false);
@@ -34,8 +38,11 @@ export function HandoffComposer({ ghosts, navigate, initialScopeIds = [], initia
   const modeButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments();
-  const target = roster.find(ghost => ghost.id === ghostId) ?? roster[0];
   const projects = useProjectMentions(text, setText, inputRef, initialScopeIds, sending);
+  const scope = state?.scopes.find(item => item.id === projects.scopeIds[0]);
+  const target = roster.find(ghost => ghost.id === ghostId)
+    ?? roster.find(ghost => ghost.id === scope?.ghostId)
+    ?? roster.find(ghost => ghost.isDefault) ?? roster[0];
 
   const send = async (value: string) => {
     if (!target || sending) return;
@@ -46,6 +53,7 @@ export function HandoffComposer({ ghosts, navigate, initialScopeIds = [], initia
         const title = value.split(/\n/, 1)[0].slice(0, 256);
         const created = await client.send<{ workId: string }>({
           type: 'work.create', ghostId: target.id, title, brief: value, scopeId: projects.scopeIds[0] ?? null,
+          slot: slot || null, retry: retrySlot ? { slot: retrySlot } : null,
           ...(criteria.trim() ? { acceptance: { criteria: criteria.trim(), checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}),
         });
@@ -111,6 +119,7 @@ export function HandoffComposer({ ghosts, navigate, initialScopeIds = [], initia
           <span>기한</span>
           <input type="datetime-local" value={deadline} onChange={event => setDeadline(event.target.value)} disabled={sending}/>
         </label>
+        <WorkModelFields slot={slot} retrySlot={retrySlot} onSlot={setSlot} onRetry={setRetrySlot}/>
       </div>}
       leading={<ComposerPlus disabled={sending} onBlocked={setBlocked} actions={[
         { id: 'files', icon: <Paperclip/>, label: '사진·파일 첨부', disabled: assigning, reason: filesBlocked, onSelect: () => fileInput.current?.click() },

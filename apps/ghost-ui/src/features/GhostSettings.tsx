@@ -16,13 +16,15 @@ import './ghost-settings.css';
 import { blurTouchSearchOnEnter } from '../ui/adaptive';
 import { FallbackSteps, ModelChoice, editFallbacks, modelName, type FallbackAction } from './fallbacks';
 import { toolLabels } from './toolLabels';
+import { PatternGrants } from './PatternGrants';
+import { GhostAttachments } from './GhostAttachments';
 
 export { MAX_FALLBACKS, editFallbacks, type FallbackAction } from './fallbacks';
 
 /** 용도별 묶음. contract의 GHOST_TOOLS를 따르고 여기 없는 새 도구는 기타로 내려간다. Exported for the coverage test. */
 export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; privileged?: boolean }[] = [
   { title: '맡긴 일', tools: ['work_create', 'work_list', 'work_inspect', 'work_update', 'work_cancel'] },
-  { title: '협업', tools: ['delegate', 'ghost_list', 'publish_artifact'] },
+  { title: '협업', tools: ['delegate', 'ghost_list', 'publish_artifact', 'subagent_run'] },
   { title: '파일과 명령', tools: ['read', 'write', 'edit', 'bash'] },
   { title: '웹', tools: ['web_search', 'web_read', 'reach'] },
   { title: '연결', tools: ['connection_list', 'connection_register', 'connection_request'] },
@@ -33,6 +35,7 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '문서', tools: ['document_scopes', 'document_list', 'document_read', 'document_propose'] },
   { title: '반복 작업', tools: ['schedule_create', 'schedule_list', 'schedule_cancel'] },
   { title: '자동 활동', tools: ['activity_propose'] },
+  { title: '구성', tools: ['scope_create', 'scope_update', 'scope_attach', 'scope_delete', 'slot_set', 'slot_delete', 'limits_set', 'rule_create', 'rule_update', 'rule_delete', 'mcp_create', 'mcp_update', 'mcp_delete', 'config_revert', 'config_history', 'metrics_read'] },
   { title: 'Mac', tools: [...HOST_TOOLS], privileged: true },
   { title: 'PC 조작', tools: [...DESKTOP_TOOLS], privileged: true },
   { title: '자산', tools: [...FINANCE_TOOLS], privileged: true },
@@ -190,6 +193,8 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
     </Panel>
     <SkillsPanel catalog={catalog} skills={ghost.skills} onChange={skills => void update({ skills })}/>
     <Panel title="도구"><CapabilityBoard tools={ghost.tools} onChange={tools => void update({ tools })}/></Panel>
+    <Panel title="추가 도구"><PatternGrants key={JSON.stringify(ghost.tools)} tools={ghost.tools} onSave={tools => update({ tools })}/></Panel>
+    <Panel title="붙임"><GhostAttachments key={JSON.stringify(ghost.attachments)} ghost={ghost}/></Panel>
     <Panel title="기억"><GhostMemory ghost={ghost}/></Panel>
     <Panel title="운영">
       <SettingsRow label="상태" description={ghost.isDefault ? '메인 Ghost는 활성 상태를 유지합니다.' : undefined}>
@@ -409,7 +414,7 @@ function CapabilityBoard({ tools, onChange }: { tools: readonly GhostTool[]; onC
   const [shown, setShown] = useState<readonly GhostTool[]>(tools);
   useEffect(() => setShown(tools), [tools]);
   const set = (changes: readonly GhostTool[], on: boolean) => {
-    const next = GHOST_TOOLS.filter(tool => changes.includes(tool) ? on : shown.includes(tool));
+    const next = [...new Set([...shown, ...changes])].filter(tool => changes.includes(tool) ? on : shown.includes(tool));
     setShown(next);
     onChange(next);
   };

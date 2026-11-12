@@ -33,7 +33,7 @@ export function useProjectMentions(text: string, setText: (value: string) => voi
   useEffect(() => { setIds(initialKey ? initialKey.split('\0').slice(0, 1) : []); }, [initialKey]);
   const token = !disabled && ids.length < 1 ? projectMentionQuery(text, caret) : null;
   const matches = token && dismissed !== `${text}:${caret}`
-    ? scopes.filter(space => !ids.includes(space.id) && space.name.toLocaleLowerCase().includes(token.query)).slice(0, 1) : [];
+    ? scopes.filter(space => !ids.includes(space.id) && space.name.toLocaleLowerCase().includes(token.query)).slice(0, 8) : [];
   const current = Math.min(active, Math.max(0, matches.length - 1));
   const choose = (scopeId: string) => {
     if (!token) return;
@@ -53,7 +53,7 @@ export function useProjectMentions(text: string, setText: (value: string) => voi
   const selected = ids.flatMap(scopeId => { const space = scopes.find(item => item.id === scopeId); return space ? [space] : []; });
   return {
     scopeIds: selected.map(space => space.id),
-    clear: () => setIds([]),
+    clear: () => setIds([...initialScopeIds].slice(0, 1)),
     onChange: (value: string) => { setText(value); setCaret(inputRef.current?.selectionStart ?? value.length); setActive(0); setDismissed(''); },
     onSelect: (event: SyntheticEvent<HTMLTextAreaElement>) => setCaret(event.currentTarget.selectionStart),
     onKeyDown,

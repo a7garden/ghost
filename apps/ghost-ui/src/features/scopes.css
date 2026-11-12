@@ -65,29 +65,6 @@
 .doc__profile { flex: none; padding: 2px 7px; border-radius: 6px; color: var(--ghost-ink3); background: var(--ghost-inset); font: 500 10.5px/1.5 var(--font-mono); }
 .doc__profile[data-legacy] { background: none; box-shadow: inset 0 0 0 1px var(--ghost-line-strong); }
 
-/* Creation canvas ------------------------------------------------------------ */
-.pcreate { display: grid; gap: 22px; padding-top: 4px; }
-.pcreate__target { display: grid; min-height: 150px; width: 100%; justify-items: center; align-content: center; gap: 10px; padding: 20px; border: 0; border-radius: var(--radius-xl); color: var(--ghost-ink2); background: var(--ghost-surface); box-shadow: var(--shadow-card); font: inherit; cursor: pointer; transition: box-shadow var(--duration-fast) ease, background-color var(--duration-fast) ease; }
-.pcreate__target:hover:not(:disabled), .pcreate__target[data-dragging] { background: var(--ghost-hover); box-shadow: var(--shadow-raised); }
-.pcreate__target:disabled { cursor: default; }
-.pcreate__target svg { width: 22px; height: 22px; color: var(--ghost-ink3); }
-.pcreate__target svg[data-spin] { animation: ghost-spin 1s linear infinite; }
-.pcreate__target > span { font: 600 var(--text-ui)/1 var(--font-sans); }
-.pcreate__chosen { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 9px 10px 9px 14px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
-.pcreate__chosen > svg { flex: none; width: 16px; height: 16px; color: var(--ghost-ink3); }
-.pcreate__chosen .place__crumb { min-width: 0; flex: 1; background: none; padding-inline: 0; }
-.pcreate__rechoose { flex: none; padding: 5px 9px; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink3); background: none; font: 500 var(--text-caption)/1 var(--font-sans); cursor: pointer; transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease; }
-.pcreate__rechoose:hover:not(:disabled) { color: var(--ghost-ink); background: var(--ghost-hover); }
-.pcreate__fields { display: grid; gap: 16px; }
-.pcreate__field { display: grid; min-width: 0; gap: 7px; }
-.pcreate__field > label, .pcreate__label { padding-inline: 4px; color: var(--ghost-ink3); font-size: var(--text-micro); font-weight: 600; }
-.pcreate__path > input { display: block; width: 100%; min-width: 0; padding: 9px 12px; border: 0; border-radius: var(--radius-control); color: var(--ghost-ink); background: var(--ghost-inset); font: 500 var(--text-ui)/1.4 var(--font-mono); outline: none; transition: background-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease; }
-.pcreate__path > input::placeholder { color: var(--ghost-ink4); }
-.pcreate__path > input:focus { background: var(--ghost-hover2); outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
-.pcreate__name > input { display: block; width: 100%; min-width: 0; height: 42px; padding: 0 12px; border: 0; border-radius: var(--radius-control); color: var(--ghost-ink); background: var(--ghost-hover); font: 600 var(--text-bodyLg)/1 var(--font-sans); outline: none; transition: background-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease; }
-.pcreate__name > input:focus { background: var(--ghost-hover2); outline: 2px solid var(--ghost-ink3); outline-offset: -2px; }
-.pcreate__invalid { margin: 0; color: var(--ghost-danger-ink); font-size: var(--text-caption); }
-.pcreate__actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Delete strip ---------------------------------------------------------------- */
 .place-end { margin-top: 4px; padding-top: 18px; border-top: 1px dashed var(--ghost-line-strong); }

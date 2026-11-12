@@ -12,6 +12,7 @@ import { useHostState } from '../host/store';
 import { toneFor } from './ghostState';
 import { useProjectMentions } from '../components/composer/ProjectMentions';
 import type { MessageSend } from './outbox';
+import { WorkModelFields } from './WorkModelFields';
 
 /** Words each `/` command also answers to, so `/파일` and `/work` find the same action. */
 const commandWords: Record<string, string[]> = {
@@ -65,6 +66,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const [assignee, setAssignee] = useState<Ghost | null>(null);
   const [criteria, setCriteria] = useState('');
   const [deadline, setDeadline] = useState('');
+  const [slot, setSlot] = useState(''), [retrySlot, setRetrySlot] = useState('');
   const [laterAt, setLaterAt] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   const [confirmation, setConfirmation] = useState('');
@@ -100,6 +102,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
     try {
       if (mode === 'work') {
         await client.send({ type: 'work.create', ghostId: assignee?.id ?? ghost.id, title: text.split(/\n/, 1)[0].slice(0, 256), brief: text, scopeId: projects.scopeIds[0] ?? null, originConversationId: conversationId,
+          slot: slot || null, retry: retrySlot ? { slot: retrySlot } : null,
           ...(criteria.trim() ? { acceptance: { criteria: criteria.trim(), checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}) });
         switchMode('talk');
@@ -189,6 +192,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
           <input value={criteria} onChange={event => setCriteria(event.target.value)} maxLength={8192} disabled={sending} placeholder="무엇이 되면 끝난 것인지"/></label>
         <label className="composer-field" style={{ flexGrow: 0 }}><span>기한</span>
           <input type="datetime-local" value={deadline} onChange={event => setDeadline(event.target.value)} disabled={sending}/></label>
+        <fieldset disabled={sending} className="border-0 p-0 m-0 min-w-0 basis-full"><WorkModelFields slot={slot} retrySlot={retrySlot} onSlot={setSlot} onRetry={setRetrySlot}/></fieldset>
       </div> : mode === 'later' ? <div className="composer-fields">
         <div className="when-chips" role="group" aria-label="보낼 시각">
           {whenPresets.map(preset => { const at = preset.at(new Date()).getTime(); return <button key={preset.id} type="button" className="when-chip"

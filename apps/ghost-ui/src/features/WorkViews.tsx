@@ -12,6 +12,9 @@ import { useNow } from './time';
 import { useHost } from '../host/context';
 import { useCompact } from '../ui/adaptive';
 import { useProjectMentions } from '../components/composer/ProjectMentions';
+import { WorkModelFields } from './WorkModelFields';
+import { DocAttachments } from './DocAttachments';
+import type { DocRef } from '@ghost/contract';
 
 type WorkTab = 'active' | 'finished';
 
@@ -108,6 +111,8 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
   const [ghostId, setGhostId] = useState(defaultGhostId ?? ghosts[0]?.id ?? '');
   const [execution, setExecution] = useState<'workspace' | 'container' | 'host'>('workspace');
   const [cwd, setCwd] = useState('');
+  const [slot, setSlot] = useState(''), [retrySlot, setRetrySlot] = useState('');
+  const [docAttachments, setDocAttachments] = useState<DocRef[]>([]);
   const [briefText, setBriefText] = useState('');
   const briefRef = useRef<HTMLTextAreaElement>(null);
   const projects = useProjectMentions(briefText, setBriefText, briefRef, [], busy);
@@ -124,7 +129,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
     const criteria = String(data.get('criteria') ?? '').trim();
     const deadline = String(data.get('deadline'));
     if (!title || !brief || !ghostId) return;
-    let target: ExecutionTarget = { kind: 'workspace' };
+    let target: ExecutionTarget = { kind: execution === 'container' ? 'container' : 'workspace' };
     if (execution === 'host') {
       const path = cwd.trim();
       if (!path.startsWith('/')) { setError('작업 폴더는 /로 시작하는 전체 경로여야 합니다.'); return; }
@@ -136,6 +141,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
       try {
         const created = await client.send<{ workId: string }>({
           type: 'work.create', ghostId, title, brief, scopeId: projects.scopeIds[0] ?? null,
+          slot: slot || null, retry: retrySlot ? { slot: retrySlot } : null, attachments: docAttachments,
           ...(criteria ? { acceptance: { criteria, checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}),
           execution: target,
@@ -170,6 +176,8 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
       <FormField label="기한" description="비워 두면 기한 없이 진행합니다.">
         {control => <Input {...control} type="datetime-local" name="deadline"/>}
       </FormField>
+      <WorkModelFields slot={slot} retrySlot={retrySlot} onSlot={setSlot} onRetry={setRetrySlot}/>
+      <details><summary>문서 붙임</summary><div className="pt-4"><DocAttachments value={docAttachments} onChange={setDocAttachments} scopeId={projects.scopeIds[0]}/></div></details>
       <FormField label="실행 환경" description={selected
         ? hostAllowed ? undefined : '이 Ghost는 PC 직접 실행이 허용되지 않았습니다. Ghost 설정의 운영에서 허용할 수 있습니다.'
         : undefined}>

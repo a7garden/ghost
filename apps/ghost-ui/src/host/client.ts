@@ -14,6 +14,8 @@ import type {
   MemoryFile,
   MemoryRevision,
   MemoryView,
+  MetricsView,
+  MetricsFilter,
   OAuthStatus,
   PageSummary,
   ProviderPreset,
@@ -183,6 +185,15 @@ export class HostClient {
 
   state(): Promise<State> {
     return this.json('/api/state');
+  }
+
+  metrics(filter: MetricsFilter = {}): Promise<MetricsView> {
+    const query = new URLSearchParams();
+    if (filter.scopeId !== undefined) query.set('scopeId', filter.scopeId ?? '');
+    if (filter.ghostId) query.set('ghostId', filter.ghostId);
+    if (filter.slot) query.set('slot', filter.slot);
+    if (filter.ruleId) query.set('ruleId', filter.ruleId);
+    return this.json(`/api/metrics${query.size ? `?${query}` : ''}`);
   }
 
   /** Skills a Ghost may be given (owner only); 404 or empty when no skill root is configured. */

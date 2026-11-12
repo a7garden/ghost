@@ -7,6 +7,7 @@ export interface Crumb { label: string; path: string | null }
 const settingsTabs: Record<string, string> = {
   team: 'Ghost', models: '모델', vault: '금고', devices: '기기', schedules: uiTerms.schedules,
   activities: uiTerms.activities, connections: uiTerms.connections,
+  slots: '모델 자리', limits: '한도', mcp: 'MCP 서버', rules: '정책 규칙', history: '구성 기록', metrics: '계측',
   host: routeLabels.host, desktop: '데스크톱 아바타', appearance: '화면',
 };
 

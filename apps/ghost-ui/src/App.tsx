@@ -48,6 +48,12 @@ import { onShellEvent, ready, shell, shellCall, type ShellEvent } from './host/s
 import { useVisibleViewport } from './host/viewport';
 import { notificationRoute } from './features/notificationRoute';
 import { useCompact } from './ui/adaptive';
+import { SlotSettings } from './features/SlotSettings';
+import { LimitSettings } from './features/LimitSettings';
+import { McpSettings } from './features/McpSettings';
+import { PolicySettings } from './features/PolicySettings';
+import { ConfigHistory } from './features/ConfigHistory';
+import { ScopeMetrics } from './features/ScopeMetrics';
 import './ui/mobile.css';
 
 // Tauri 웹뷰는 모든 내비게이션에 __TAURI_INTERNALS__를 주입한다. 데스크톱 창에서만 끌 수 있는 타이틀바를 그린다.
@@ -173,7 +179,7 @@ function Shell() {
   const routeConversationId = params.get('conversation');
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
-  const selectedScope = section === 'scopes' ? path.split('/')[2] : undefined;
+  const selectedScope = section === 'scopes' && path.split('/')[2] ? decodeURIComponent(path.split('/')[2]!) : undefined;
   const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail';
 
   const go = (target: string) => () => navigate(target);
@@ -211,6 +217,7 @@ function Shell() {
     { id: 'schedules', label: uiTerms.schedules, group: '설정', onSelect: go('/settings?tab=schedules') },
     { id: 'activities', label: uiTerms.activities, group: '설정', onSelect: go('/settings?tab=activities') },
     { id: 'connections', label: uiTerms.connections, group: '설정', onSelect: go('/settings?tab=connections') },
+    ...[{ id: 'slots', label: '모델 자리' }, { id: 'limits', label: '한도' }, { id: 'mcp', label: 'MCP 서버' }, { id: 'rules', label: '정책 규칙' }, { id: 'history', label: '구성 기록' }, { id: 'metrics', label: '계측' }].map(item => ({ ...item, group: '설정', onSelect: go(`/settings?tab=${item.id}`) })),
     { id: 'host', label: routeLabels.host, group: '설정', onSelect: go('/settings?tab=host') },
     { id: 'update', label: '업데이트', group: '설정', onSelect: go('/settings?tab=update') },
     { id: 'settings', label: uiTerms.settings, group: '설정', onSelect: go('/settings') },
@@ -229,6 +236,12 @@ function Shell() {
     { id: 'schedules', label: uiTerms.schedules, icon: Clock3, content: <Schedules/> },
     { id: 'activities', label: uiTerms.activities, icon: Repeat2, content: <Activities navigate={navigate}/> },
     { id: 'connections', label: uiTerms.connections, icon: PlugZap, content: <Connections navigate={navigate}/> },
+    { id: 'slots', label: '모델 자리', icon: Server, content: <SlotSettings/> },
+    { id: 'limits', label: '한도', icon: Clock3, content: <LimitSettings/> },
+    { id: 'mcp', label: 'MCP 서버', icon: PlugZap, content: <McpSettings/> },
+    { id: 'rules', label: '정책 규칙', icon: CircleAlert, content: <PolicySettings/> },
+    { id: 'history', label: '구성 기록', icon: RefreshCw, content: <ConfigHistory/> },
+    { id: 'metrics', label: '계측', icon: Server, content: <ScopeMetrics/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
@@ -284,7 +297,8 @@ function Shell() {
               ? <GhostChat key={`${openGhost.id}:${routeConversationId ?? openGhost.directConversationId ?? 'new'}:${params.get('scope') ?? ''}`} ghost={openGhost} state={state} conversationId={routeConversationId ?? openGhost.directConversationId} threadId={params.get('thread')} navigate={navigate} initialScopeIds={params.getAll('scope').slice(0, 8)}/>
               : ghostNotFound)}
             {section === 'scopes' && <ScopesView key={`${selectedScope ?? 'empty'}:${params.get('new') ?? ''}`} selectedScope={selectedScope} navigate={navigate}
-              onSelectScope={id => navigate(`/scopes/${id}`)} createRequested={params.get('new') === '1'}
+              section={params.get('view') ?? 'documents'} onSectionChange={view => navigate(`/scopes/${encodeURIComponent(selectedScope!)}?view=${view}`)}
+              onSelectScope={id => navigate(id ? `/scopes/${encodeURIComponent(id)}` : '/scopes')} createRequested={params.get('new') === '1'}
               onCreateClosed={() => {
                 const next = path.startsWith('/scopes/') ? path : '/scopes';
                 history.replaceState(history.state, '', `#${next}`);

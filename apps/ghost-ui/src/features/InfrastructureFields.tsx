@@ -4,7 +4,7 @@ import './infrastructure.css';
 
 export function TextField({ label, value, onChange, multiline = false, required = false, ...props }: {
   label: string; value: string; onChange(value: string): void; multiline?: boolean; required?: boolean;
-  type?: string; min?: number; max?: number; maxLength?: number; pattern?: string; placeholder?: string;
+  type?: string; min?: number; max?: number; step?: string; maxLength?: number; pattern?: string; placeholder?: string;
 }) {
   return <FormField label={label} required={required}>{control => multiline
     ? <Textarea {...control} value={value} onChange={event => onChange(event.target.value)} rows={3} maxLength={props.maxLength} placeholder={props.placeholder}/>

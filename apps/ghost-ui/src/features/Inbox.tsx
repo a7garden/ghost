@@ -13,6 +13,8 @@ import { canHandOver, deferDecision, handedOver, ownerOrder, pruneLater, recomme
 import { pendingDecisions, toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { notificationRoute } from './notificationRoute';
+import { groupDecisionsByScope } from './scopeState';
+import './infrastructure.css';
 
 const SETTLED_PREVIEW = 8;
 const NOTIFICATION_PAGE = 20;
@@ -139,14 +141,14 @@ export function InboxView({ state, navigate, focusDecisionId }: {
     <section className="grid gap-2" aria-labelledby="queue-now">
       <h2 id="queue-now" className="section-title">확인 필요{waiting.length > 0 && <span className="count">{waiting.length}</span>}</h2>
       {upNow.length > 0
-        ? <ul className="queue">{upNow.map(decision => row(decision, 'now'))}</ul>
+        ? groupDecisionsByScope(upNow, state).map(group => <section className="infra-scope-group" key={group.id ?? 'global'} aria-label={`${group.name} 확인할 일`}><h3>{group.name}</h3><ul className="queue">{group.decisions.map(decision => row(decision, 'now'))}</ul></section>)
         : <div className="calm"><CheckCheck aria-hidden="true"/><p>{deferred.length ? '지금 볼 항목 없음 · 미뤄 둔 것만 남았습니다' : '확인이 필요한 항목 없음'}</p></div>}
       <p className="deck__ack" role="status" aria-live="polite">{ack}</p>
     </section>
 
     {deferred.length > 0 && <section className="grid gap-2" aria-labelledby="queue-later">
       <h2 id="queue-later" className="section-title">나중에<span className="count">{deferred.length}</span></h2>
-      <ul className="queue" data-quiet>{deferred.map(decision => row(decision, 'later'))}</ul>
+      {groupDecisionsByScope(deferred, state).map(group => <section className="infra-scope-group" key={group.id ?? 'global'} aria-label={`${group.name} 나중에`}><h3>{group.name}</h3><ul className="queue" data-quiet>{group.decisions.map(decision => row(decision, 'later'))}</ul></section>)}
     </section>}
 
     {withMain.length > 0 && <section className="grid gap-2" aria-labelledby="queue-main">

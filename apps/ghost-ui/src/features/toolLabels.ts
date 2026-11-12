@@ -1,11 +1,9 @@
-import type { GhostTool } from '@ghost/contract';
-
 /** The owner's name for every Ghost tool: 설정 → Ghost grants, activity tools and tool trails all read it. */
-export const toolLabels: Record<GhostTool, string> = {
+export const toolLabels: Record<string, string> = {
   work_create: '일 만들기', work_list: '일 목록', work_inspect: '일 자세히', work_update: '일 고치기', work_cancel: '일 취소',
   schedule_create: '반복 만들기', schedule_list: '반복 보기', schedule_cancel: '반복 취소',
   ghost_list: 'Ghost 목록', activity_propose: '활동 제안', read: '파일 읽기', write: '파일 쓰기', edit: '파일 고치기', bash: '명령 실행',
-  publish_artifact: '결과물 공유', delegate: '다른 Ghost에게 맡기기',
+  publish_artifact: '결과물 공유', delegate: '다른 Ghost에게 맡기기', subagent_run: '읽기 전용 도우미',
   document_scopes: '문서 공간', document_list: '문서 목록', document_read: '문서 읽기', document_propose: '문서 수정 제안',
   web_search: '웹 검색', web_read: '웹 읽기', reach: '외부 읽기', skill_read: '스킬 읽기',
   connection_list: '연결 목록', connection_register: '연결 등록', connection_request: '연결 API 사용',
@@ -23,4 +21,9 @@ export const toolLabels: Record<GhostTool, string> = {
   desktop_wait: 'PC 대기', desktop_pointer: 'PC 포인터 직접 조작', desktop_keys: 'PC 키보드 직접 입력', desktop_propose: 'PC 클릭 제안',
   mail_search: '메일 찾기', mail_read: '메일 읽기', mail_update: '메일 정리', mail_send: '메일 보내기',
   toss_read: '토스증권 조회',
+  scope_create: '프로젝트 만들기', scope_update: '프로젝트 고치기', scope_attach: '프로젝트 붙임', scope_delete: '프로젝트 삭제',
+  slot_set: '모델 자리 설정', slot_delete: '모델 자리 삭제', limits_set: '한도 설정',
+  rule_create: '규칙 만들기', rule_update: '규칙 고치기', rule_delete: '규칙 삭제',
+  mcp_create: 'MCP 서버 추가', mcp_update: 'MCP 서버 고치기', mcp_delete: 'MCP 서버 삭제',
+  config_revert: '구성 되돌리기', config_history: '구성 기록', metrics_read: '계측 읽기',
 };

@@ -41,7 +41,8 @@ export function ProjectHeader({ space, total, lastEditAt, now, disabled, onRenam
       setError(reason instanceof Error ? reason.message : '이름을 바꾸지 못했습니다.');
     }
   };
-  const crumb = pathCrumb((space.vaultPath ?? space.paths[0] ?? ""));
+  const path = space.vaultPath ?? space.paths[0];
+  const crumb = pathCrumb(path ?? '');
 
   return <header className="place">
     <div className="place__title">
@@ -62,13 +63,13 @@ export function ProjectHeader({ space, total, lastEditAt, now, disabled, onRenam
       </button>}
     </div>
     {error && <p className="place__error" role="alert">{error}</p>}
-    <span className="place__crumb" title={(space.vaultPath ?? space.paths[0] ?? "")} aria-label={`폴더 ${(space.vaultPath ?? space.paths[0] ?? "")}`}>
+    {path && <span className="place__crumb" title={path} aria-label={`폴더 ${path}`}>
       {crumb.leading && <span className="place__crumb-seg">{crumb.leading}</span>}
       {crumb.leading && <span className="place__crumb-gap" aria-hidden="true">…</span>}
       {crumb.trailing.map(segment => <span className="place__crumb-seg" key={segment}>{segment}</span>)}
-    </span>
+    </span>}
     <p className="place__meta">
-      <span>문서 <span className="tabular">{total}</span></span>
+      {space.vaultPath && <span>문서 <span className="tabular">{total}</span></span>}
       {lastEditAt !== null && <span aria-label="마지막 편집">마지막 편집 <time dateTime={new Date(lastEditAt).toISOString()}>{relativeTime(lastEditAt, now)}</time></span>}
     </p>
   </header>;
