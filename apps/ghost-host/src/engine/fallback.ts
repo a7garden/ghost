@@ -15,7 +15,7 @@ export const FallbackDoc = defineDoc({
 });
 
 /** An internal Pi input receipt follows every generation handoff without adding a transcript input. */
-export const FallbackReceiptsDoc = defineDoc<{ byInput: Record<string, { errorId: number; requestId: string; provider: string }> }>({
+export const FallbackReceiptsDoc = defineDoc<{ byInput: Record<string, { errorId: number; requestId: string; response?: { provider: string; error: string | null; taskId: number } }> }>({
   kind: "ghost.fallback-receipts",
   version: 1,
   scope: "conversation",

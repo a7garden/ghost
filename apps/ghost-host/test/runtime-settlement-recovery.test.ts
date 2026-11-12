@@ -40,7 +40,7 @@ test("recovery never attributes an older quota error to an aborted or unrelated 
     const failedPrimary = await tx.appendEntry(AssistantEntry, conversation.id, { model: [{ ...fauxAssistantMessage("", { stopReason: "error", errorMessage: detail }), provider: "p", model: "p-1" }] });
     await tx.createSubmission({ type: "input", conversationId: conversation.id, requestId: "aborted-fallback", entry: cancelled.id, status: "unanswered", reason: "model_error", detail });
     await tx.createSubmission({ type: "input", conversationId: conversation.id, requestId: "aborted-fallback-receipt", entry: cancelled.id, status: "unanswered", reason: "aborted" });
-    receipts.byInput[String(cancelled.id)] = { errorId: failedPrimary.id, requestId: "aborted-fallback-receipt", provider: "p" };
+    receipts.byInput[String(cancelled.id)] = { errorId: failedPrimary.id, requestId: "aborted-fallback-receipt" };
     return oldError.id;
   }, ctx);
   await pi.close(ctx);

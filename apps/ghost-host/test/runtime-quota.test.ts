@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { Type, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
+import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
+import type { ToolSet } from "../src/tools/types.ts";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { ModelRef } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
@@ -42,7 +44,7 @@ class WatchingCore extends Core {
 }
 
 /** One provider, no fallbacks and the real Work tools: a single 429 exhausts the whole chain. */
-async function fixture() {
+async function fixture(extra?: Extension) {
   const root = mkdtempSync(join(tmpdir(), "ghost-quota-"));
   const ledger = new Ledger(join(root, "ledger.db"));
   const secrets = new MemorySecrets();
@@ -62,12 +64,17 @@ async function fixture() {
     release: async () => {},
   };
   const tools = createToolSet({ core, sandbox, memory: null, documents: null, skills: null });
+  const activeTools: ToolSet = extra ? {
+    all: () => [...tools.all(), extra],
+    extensionsFor: (conversation, ghost, work) => [...tools.extensionsFor(conversation, ghost, work), extra],
+    instructionsFor: tools.instructionsFor.bind(tools),
+  } : tools;
   const engine = await createEngine({
     core,
     storagePath: join(root, "pi.db"),
     models,
     sandbox,
-    tools,
+    tools: activeTools,
     harnessSettings: { retry: { maxRetries: 1, baseDelayMs: 1 }, compaction: { enabled: false } },
     log: () => {},
   });
@@ -356,3 +363,68 @@ for (const result of ["answered", "quota"] as const) {
     } finally { release.resolve(); await f.close(); }
   });
 }
+
+test("quota recovery charges the actual successor provider after the owner changes models during a tool round", async () => {
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const gate = defineExtension({ name: "ghost.model-change-test", tools: [defineTool({
+    name: "pause_for_model_change", description: "Wait at the deterministic owner model-change boundary.", parameters: Type.Object({}), replay: "safe",
+    execute: async () => {
+      started.resolve();
+      await release.promise;
+      return { content: [{ type: "text", text: "Owner model change completed." }] };
+    },
+  })] });
+  const f = await fixture(gate);
+  try {
+    const backup = fauxProvider({ provider: "backup", models: [{ id: "backup-1", name: "Backup" }] });
+    const target = fauxProvider({ provider: "owner-target", models: [{ id: "target-1", name: "Owner target" }] });
+    f.models.setProvider(backup.provider);
+    f.models.setProvider(target.provider);
+    f.secrets.put("backup", "backup-key");
+    f.secrets.put("owner-target", "target-key");
+    f.ledger.tx(() => {
+      f.ledger.putProvider({ id: "backup", kind: "openai_compatible", name: "Backup", baseUrl: null, models: [{ id: "backup-1", name: "Backup" }] });
+      f.ledger.putProvider({ id: "owner-target", kind: "openai_compatible", name: "Owner target", baseUrl: null, models: [{ id: "target-1", name: "Owner target" }] });
+      f.ledger.putSetting("defaultFallbacks", [{ provider: "backup", model: "backup-1" }]);
+    });
+    const error = () => fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 Token Plan usage limit reached" });
+    f.faux.setResponses([error(), error()]);
+    backup.setResponses([fauxAssistantMessage(fauxToolCall("pause_for_model_change", {}), { stopReason: "toolUse" })]);
+    target.setResponses([error(), error()]);
+    const id = f.ghost.directConversationId;
+    const requestId = `quota-resume:${id}:1`;
+    const ended = f.core.settled(id);
+    await f.engine.submit(id, { requestId, text: "continue the original turn", origin: "owner" });
+    await started.promise;
+    f.ledger.tx(() => f.ledger.putConversation({ ...f.ledger.conversation(id), model: { provider: "owner-target", model: "target-1" } }));
+    await f.core.openConversation(id);
+    release.resolve();
+    await ended;
+    expect(await f.engine.submissionRecovery!(id, requestId)).toMatchObject({ status: "unanswered", hit: { provider: "owner-target" } });
+
+    // Restore the pre-acknowledgment Host journal: F must not absorb Q's quota or allow an immediate retry on Q.
+    f.ledger.putSetting("quota", {
+      entries: { backup: { reason: "earlier F quota", resumeAt: 1, failures: 1, probingBy: id } },
+      records: [{ conversationId: id, attempts: 1, entryId: 0, origin: "owner", priority: 0, providers: ["backup", "owner-target"], queue: [
+        { requestId, text: "continue the original turn", origin: "owner" },
+        { requestId: "next-owner-input", text: "next", origin: "owner" },
+      ], releasing: requestId, updatedAt: 1 }],
+    });
+    const delivery = Object.assign(new FakeEngine(), {
+      submissionRecovery: f.engine.submissionRecovery!.bind(f.engine),
+      quotaProviders: f.engine.quotaProviders!.bind(f.engine),
+    });
+    delivery.submissions.set(requestId, { conversationId: id, submission: { requestId, text: "continue the original turn", origin: "owner" } });
+    f.core.attach(delivery);
+    await f.core.quota.start();
+    f.core.quota.tick();
+    await f.core.idle();
+    const stored = f.ledger.setting<QuotaSetting>("quota", {});
+    expect(stored.entries!.backup).toMatchObject({ reason: "earlier F quota", failures: 1 });
+    expect(stored.entries!["owner-target"]).toMatchObject({ failures: 1, reason: "429 Token Plan usage limit reached" });
+    expect(stored.entries!["owner-target"]!.resumeAt).toBeGreaterThan(Date.now());
+    expect(stored.records![0]!.releasing).toBeNull();
+    expect(delivery.to(id).map((input) => input.requestId)).toEqual([requestId]);
+  } finally { release.resolve(); await f.close(); }
+});

@@ -137,6 +137,23 @@ class HostEngine implements Engine, MemoryEngine {
     this.fallbackExtension = defineExtension({
       name: "ghost.model-fallback",
       hooks: [hook(GenerationTask, {
+        afterResponse: async (message, api) => {
+          // A model can change during a tool round. Capture the actual response provider on
+          // the exact native receipt before Pi can settle it, not from the fallback's initial model.
+          if (!(await this.harness.snapshot(FallbackReceiptsDoc, api.conversationId, ctx))) return;
+          await this.harness.commit(async (tx) => {
+            const live = await tx.doc(LiveDoc, api.conversationId);
+            if (live.run?.taskId !== api.taskId) return;
+            const inputs = await Promise.all(live.run.inputs.map((id) => tx.submission(id)));
+            const receipts = await tx.doc(FallbackReceiptsDoc, api.conversationId);
+            for (const input of inputs) {
+              if (input?.type !== "input" || input.entry === undefined) continue;
+              const receipt = receipts.byInput[String(input.entry)];
+              if (receipt?.requestId !== input.requestId) continue;
+              receipt.response = { provider: message.provider, error: message.stopReason === "error" ? message.errorMessage ?? null : null, taskId: api.taskId };
+            }
+          }, ctx);
+        },
         // Reset before Pi admits a queued next turn, not after its request is prepared.
         onYield: async (_answer, api): Promise<undefined> => {
           const state = this.byPiId.get(api.conversationId);
@@ -388,7 +405,24 @@ class HostEngine implements Engine, MemoryEngine {
       // The native receipt follows postTools handoffs and settles only at the run's final boundary.
       // Its own model_error is authoritative; an aborted/reset successor must never revive the primary error.
       const hit = receipt.reason === "model_error" && typeof receipt.detail === "string" ? quotaError(receipt.detail) : null;
-      return { status: "unanswered", entryId: receipt.id, serving: null, hit: hit ? { provider: fallback.provider, ...hit } : null };
+      let provider = fallback.response && fallback.response.error === receipt.detail ? fallback.response.provider : null;
+      if (hit && provider === null) {
+        // Receipts persisted before response evidence was recorded can still resolve the actual
+        // provider from their own bounded error segment. Never fall back to a configured model.
+        let after = (fallback.errorId + 1) as EntryId;
+        for (;;) {
+          const scan = await state.pi.entries({ minEntryId: after, order: "ascending" }, 100, undefined, ctx);
+          let boundary = false;
+          for (const entry of scan.items) {
+            if (entry.kind === "pi.user") { boundary = true; break; }
+            const message = entry.model?.find((item): item is AssistantMessage => item.role === "assistant");
+            if (message?.stopReason === "error" && message.errorMessage === receipt.detail) provider = message.provider;
+          }
+          if (boundary || scan.items.length < 100) break;
+          after = (scan.items.at(-1)!.id + 1) as EntryId;
+        }
+      }
+      return { status: "unanswered", entryId: receipt.id, serving: null, hit: hit && provider !== null ? { provider, ...hit } : null };
     }
     let after = record.entry;
     let matched: EntryRecord | undefined;
@@ -790,7 +824,7 @@ class HostEngine implements Engine, MemoryEngine {
       // boundary. No transcript input or completed tool effect is replayed.
       const requestId = `ghost-fallback:${tail.id}`;
       const receipt = await tx.createSubmission({ type: "input", conversationId: state.piId, requestId, status: "placed", entry: input.id });
-      receipts.byInput[String(input.id)] = { errorId: tail.id, requestId, provider: next.provider };
+      receipts.byInput[String(input.id)] = { errorId: tail.id, requestId };
       const taskId = await tx.createTask(GenerationTask, {}, { conversationId: state.piId, ownership: { kind: "conversation" } });
       live.run = { taskId, inputs: [receipt.id] };
       return { from: { provider: message.provider, model: message.model }, next, reason };
