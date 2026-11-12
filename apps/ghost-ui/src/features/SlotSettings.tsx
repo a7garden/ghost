@@ -57,7 +57,7 @@ function SlotEditor({ name: original, slot, onClose }: { name: string | null; sl
   };
   return <form className="infra-form" onSubmit={event => void save(event)} aria-label={original ? '모델 자리 편집' : '모델 자리 추가'}>
     <fieldset disabled={busy} className="infra-form border-0 p-0 m-0">
-      {original ? <p>{original}</p> : <TextField label="자리 이름" required value={name} onChange={setName} pattern="[a-z][a-z0-9-]{0,31}" maxLength={32}/>}
+      {original ? <p>{original}</p> : <TextField label="자리 이름" required value={name} onChange={setName} pattern={'[a-z][a-z0-9\\-]{0,31}'} maxLength={32}/>}
       <Choice label="모델" required value={model} onChange={setModel} options={[{ value: '', label: '선택' }, ...options]}/>
       {fallbacks.map((value, index) => <div className="infra-form" key={index}>
         <Choice label={`대체 모델 ${index + 1}`} value={value} onChange={next => setFallbacks(items => items.map((item, at) => at === index ? next : item))} required options={[{ value: '', label: '선택' }, ...options]}/>
