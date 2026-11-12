@@ -40,3 +40,6 @@
 # Isolated lifetime implementation state and dirty-source recovery copies
 /.lifetime-canary/
 /.lifetime-recovery/
+
+# CI checks out the private Geist mirror inside the workspace (release.yml)
+/geist/

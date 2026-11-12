@@ -1,0 +1,225 @@
+name: Release
+
+# Tag-driven release. Push tag v<x.y.z> → build on a macOS runner → upload every
+# asset to a draft Release → publish it as latest. Installed Hosts need no change:
+# their update check already reads
+# https://api.github.com/repos/a7garden/ghost/releases/latest, verifies
+# ghost-release.json against the baked-in minisign public key, downloads the host
+# tarball, waits for idle and installs (apps/ghost-host/src/update/).
+#
+# Publishing from the Mac (`bun scripts/release.ts --publish`) keeps working: the
+# guard step skips this workflow when the Release already exists.
+#
+# The iPhone IPA is NOT built here: TestFlight uploads live in the gated
+# ios-testflight job below (Apple 개발자 팀 활성화가 확인된 후 켠다).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mac-release:
+    # Same build + checks + signing + publish as the Mac flow
+    # (bun scripts/release.ts --publish), minus the iPhone IPA (GHOST_SKIP_IOS=1).
+    runs-on: macos-latest
+    timeout-minutes: 180
+    steps:
+      - id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          draft="$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)"
+          case "$draft" in
+            false)
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "Release $tag already exists (published from the Mac); skipping."
+              ;;
+            true)
+              # Machine-created, never-published draft: replace it with a CI build.
+              gh release delete "$tag" --yes --cleanup-tag=false
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              echo "Unpublished draft for $tag removed; building fresh release."
+              ;;
+            *)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.exists != 'true'
+        with:
+          fetch-depth: 0  # release.ts checks the tag's commit is on a pushed branch
+
+      # Geist is built from a pinned commit of the owner's repository
+      # (apps/ghost-host/scripts/stage-desktop.sh reads GEIST_REPO). The source
+      # lives on the private mini Gitea, unreachable from runners, so CI checks
+      # out the GitHub mirror a7garden/geist (docs/release-workflow-design.md).
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.exists != 'true'
+        with:
+          repository: a7garden/geist
+          token: ${{ secrets.GEIST_MIRROR_PAT }}
+          path: geist
+          fetch-depth: 0
+
+      - name: geist 미러 사전 확인 (pinned commit 존재 여부)
+        if: steps.guard.outputs.exists != 'true'
+        run: |
+          test -d geist/.git || {
+            echo "::error::GEIST_MIRROR_PAT 시크릿이 없거나 a7garden/geist 미러에 접근할 수 없습니다. docs/release-workflow-design.md의 '소유자가 할 일'을 참고하세요."
+            exit 1
+          }
+          git -C geist cat-file -e 'f6254ccf80f6ad68c29e29daee17260431267c37^{commit}' || {
+            echo "::error::geist 미러에 pinned commit f6254cc가 없습니다. 미러를 갱신하세요."
+            exit 1
+          }
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.guard.outputs.exists != 'true'
+        with:
+          bun-version: "1.4.2"  # packageManager in package.json
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.exists != 'true'
+        with:
+          node-version: "24"  # stage-agent-browser.sh requires Node >= 24
+
+      - name: corepack 활성화 (agent-browser 빌드가 pnpm 11.1.3을 요구)
+        if: steps.guard.outputs.exists != 'true'
+        run: corepack enable
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.guard.outputs.exists != 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.guard.outputs.exists != 'true'
+
+      - name: Developer ID 인증서 임시 키체인에 가져오기
+        if: steps.guard.outputs.exists != 'true'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          cert="$RUNNER_TEMP/ghost-developer-id.p12"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$cert"
+          keychain="$RUNNER_TEMP/ghost-release.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security default-keychain -s "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security import "$cert" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain"
+          security find-identity -v -p codesigning "$keychain"
+
+      - name: 업데이터 키 준비 (minisign)
+        if: steps.guard.outputs.exists != 'true'
+        env:
+          GHOST_UPDATER_KEY: ${{ secrets.GHOST_UPDATER_KEY }}
+        run: |
+          mkdir -p ~/.tauri
+          printf '%s' "$GHOST_UPDATER_KEY" > ~/.tauri/ghost.key
+          chmod 600 ~/.tauri/ghost.key
+          # release.ts checks this .pub against tauri.conf.json plugins.updater.pubkey;
+          # both come from the same config so the baked-in public key stays consistent.
+          jq -r '.plugins.updater.pubkey' apps/ghost-desktop/src-tauri/tauri.conf.json > ~/.tauri/ghost.key.pub
+
+      - name: 의존성 설치
+        if: steps.guard.outputs.exists != 'true'
+        run: |
+          bun install --frozen-lockfile
+          for dir in apps/ghost-host apps/ghost-ui apps/ghost-desktop; do
+            (
+              cd "$dir"
+              if [ -f bun.lock ]; then bun install --frozen-lockfile; else bun install; fi
+            )
+          done
+
+      - name: 빌드·검사·서명·Release 게시 (scripts/release.ts 재사용)
+        if: steps.guard.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHOST_SIGNING_IDENTITY: ${{ vars.GHOST_SIGNING_IDENTITY }}
+          GEIST_REPO: ${{ github.workspace }}/geist
+          GHOST_SKIP_IOS: "1"  # iPhone IPA는 ios-testflight 잡이 담당 (팀 활성화 후)
+          GHOST_UPDATER_KEY_PASSWORD: ${{ secrets.GHOST_UPDATER_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.GHOST_UPDATER_KEY_PASSWORD }}
+        run: bun scripts/release.ts --publish
+
+  ios-testflight:
+    # Apple 개발자 팀 활성화가 확인되면 저장소 변수 IOS_TESTFLIGHT_ENABLED="true"로 켠다.
+    # 현재는 Personal Team이라 TestFlight 업로드가 불가능하므로(docs/local-operations.md),
+    # 이 잡은 기본적으로 스킵되며 맥 릴리스는 이 잡과 무관하게 진행된다(needs 방향: mac → ios).
+    needs: mac-release
+    if: ${{ always() && needs.mac-release.result == 'success' && vars.IOS_TESTFLIGHT_ENABLED == 'true' }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      TEAM_ID: ${{ vars.IOS_TEAM_ID || 'W5SAS95CBV' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: App Store Connect API 키 준비
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+        run: |
+          mkdir -p "$HOME/private_keys"
+          echo "$ASC_API_KEY_P8" | base64 --decode > "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+          chmod 600 "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+
+      # ASC는 같은 build number(CFBundleVersion) 재업로드를 거부한다: ios 네이티브가
+      # 바뀐 릴리스는 project.yml·project.pbxproj의 CURRENT_PROJECT_VERSION을 먼저
+      # 올려야 한다(docs/local-operations.md 버전 올림 규칙과 동일).
+      - name: 아카이브 (App Store Connect 업로드용 자동 서명)
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER: ${{ secrets.ASC_API_KEY_ISSUER }}
+        run: |
+          key="$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+          xcodebuild -quiet -project apps/ghost-ios/Ghost.xcodeproj -scheme Ghost \
+            -configuration Release -destination "generic/platform=iOS" \
+            -archivePath build/Ghost.xcarchive -derivedDataPath build/DerivedData \
+            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            -allowProvisioningUpdates -authenticationKeyPath "$key" \
+            -authenticationKeyID "$ASC_API_KEY_ID" -authenticationKeyIssuer "$ASC_API_KEY_ISSUER" \
+            archive
+
+      - name: IPA export (app-store-connect 방식)
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER: ${{ secrets.ASC_API_KEY_ISSUER }}
+        run: |
+          key="$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+            echo '<plist version="1.0"><dict>'
+            echo '  <key>method</key><string>app-store-connect</string>'
+            echo "  <key>teamID</key><string>${TEAM_ID}</string>"
+            echo '  <key>signingStyle</key><string>automatic</string>'
+            echo '  <key>uploadSymbols</key><true/>'
+            echo '</dict></plist>'
+          } > build/export.plist
+          plutil -lint build/export.plist
+          xcodebuild -quiet -exportArchive -archivePath build/Ghost.xcarchive \
+            -exportOptionsPlist build/export.plist -exportPath build \
+            -allowProvisioningUpdates -authenticationKeyPath "$key" \
+            -authenticationKeyID "$ASC_API_KEY_ID" -authenticationKeyIssuer "$ASC_API_KEY_ISSUER"
+
+      - name: TestFlight 업로드
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER: ${{ secrets.ASC_API_KEY_ISSUER }}
+        run: |
+          # 참고: 실행 러너의 Xcode에서 altool 업로드가 제거된 경우
+          # `xcrun altool` 대신 Transporter CLI 또는 fastlane pilot upload로 교체한다.
+          # (팀 활성화 시점에 러너 Xcode 버전을 확인할 것)
+          xcrun altool --upload-app --type ios -f build/Ghost.ipa \
+            --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_KEY_ISSUER"
