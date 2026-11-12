@@ -341,6 +341,9 @@ export const MIGRATIONS: readonly string[] = [
   CREATE INDEX conversations_by_ghost ON conversations(ghost_id, kind);
   CREATE UNIQUE INDEX conversations_one_work ON conversations(work_id, kind) WHERE work_id IS NOT NULL AND kind IN ('work','review');
   UPDATE activities SET data = json_set(data, '$.scopeId', NULL);
+  UPDATE activities SET data = json_set(data, '$.tools', json(
+    (SELECT json_group_array(CASE value WHEN 'document_spaces' THEN 'document_scopes' ELSE value END) FROM json_each(activities.data, '$.tools'))
+  ));
   UPDATE ghosts SET tools = replace(tools, '"document_spaces"', '"document_scopes"');
   UPDATE works SET tool_scope = replace(tool_scope, '"document_spaces"', '"document_scopes"') WHERE tool_scope IS NOT NULL;
   `,

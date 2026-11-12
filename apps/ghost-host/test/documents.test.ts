@@ -75,6 +75,36 @@ function documentDecision(ghostId: string, conversationId: string, proposal: Rec
 }
 
 describe("documents", () => {
+  for (const spelling of ["camel", "snake"] as const) test(`applies a durable legacy ${spelling} space proposal without rewriting its approval`, async () => {
+    const { documents, ledger, core, ghost } = setup();
+    try {
+      const page = await documents.readPage("space-1", { locator: "note.md" });
+      const proposal = Object.freeze({
+        ...(spelling === "camel"
+          ? { spaceId: "space-1", pageId: page.pageId, expectedHash: page.hash }
+          : { space_id: "space-1", page_id: page.pageId, expected_hash: page.hash }),
+        title: "Garden notes", body: "Approved before the scope migration.", profile: "pdc-markdown/1",
+      });
+      const decision = { ...documentDecision(ghost.id, ghost.directConversationId, proposal), effectId: "legacy-document-effect" };
+      const original = JSON.stringify(proposal);
+      const digest = sha256(original);
+      ledger.tx(() => {
+        ledger.putEffect({
+          id: decision.effectId, conversationId: ghost.directConversationId, workId: null, callId: `legacy-${spelling}`,
+          tool: "document_propose", summary: "Legacy document approval", inputDigest: digest,
+          state: "pending", result: null, createdAt: 1, endedAt: null,
+        });
+        ledger.putDecision(decision);
+      });
+      const apply: (decision: Decision, authorize: () => void) => Promise<string> = documents.apply.bind(documents);
+      await expect(apply(decision, () => {})).resolves.toContain("note.md");
+      expect((await documents.readPage("space-1", { locator: "note.md" })).body).toBe("Approved before the scope migration.\n");
+      expect(JSON.stringify(decision.proposal)).toBe(original);
+      expect(ledger.decision(decision.id).proposal).toEqual(proposal);
+      expect(ledger.effect(decision.effectId).inputDigest).toBe(digest);
+    } finally { core.stop(); await core.idle(); ledger.close(); }
+  });
+
   test("lists and reads a markdown page", async () => {
     const { documents, ghost, core } = setup();
     const another = core.createGhost({ name: "Another", persona: "" });

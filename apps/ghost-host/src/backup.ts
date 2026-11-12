@@ -165,7 +165,11 @@ export function backup(root: string, dir: string, now = Date.now()): BackupManif
     const ledger = new Database(join(dir, "ledger.db"), { readonly: true });
     let scopes: BackupManifest["external_spaces"];
     try {
-      scopes = (ledger.query("SELECT DISTINCT json_extract(data, '$.vaultPath') AS path FROM scopes WHERE json_extract(data, '$.vaultPath') IS NOT NULL ORDER BY path").all() as { path: string }[]).map(({ path }) => ({ path }));
+      const scoped = ledger.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scopes'").get() !== null;
+      const paths = scoped
+        ? "SELECT DISTINCT json_extract(data, '$.vaultPath') AS path FROM scopes WHERE json_extract(data, '$.vaultPath') IS NOT NULL ORDER BY path"
+        : "SELECT path FROM spaces ORDER BY path";
+      scopes = (ledger.query(paths).all() as { path: string }[]).map(({ path }) => ({ path }));
     } finally {
       ledger.close();
     }

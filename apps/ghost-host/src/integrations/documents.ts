@@ -72,6 +72,15 @@ const SnakeCaseProposalPayload = Type.Object({
   expected_hash: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 });
 
+const LegacyProposalPayload = Type.Object({
+  ...Type.Omit(ProposalPayload, ["scopeId"]).properties,
+  spaceId: Type.String({ minLength: 1 }),
+});
+const LegacySnakeCaseProposalPayload = Type.Object({
+  ...Type.Omit(SnakeCaseProposalPayload, ["scope_id"]).properties,
+  space_id: Type.String({ minLength: 1 }),
+});
+
 /** Outcome classes named exactly as the contract requires (PDC 2 §13). */
 type DiagnosticKind =
   | "invalid_transport"
@@ -1516,6 +1525,27 @@ function parseProposal(payload: unknown): DocumentProposal {
   if (validate(SnakeCaseProposalPayload, payload)) {
     return {
       scopeId: payload.scope_id,
+      title: payload.title,
+      body: payload.body,
+      profile: payload.profile,
+      pageId: payload.page_id ?? null,
+      expectedHash: payload.expected_hash ?? null,
+    };
+  }
+  // Decode durable pre-scope approvals without rewriting their journaled input.
+  if (validate(LegacyProposalPayload, payload)) {
+    return {
+      scopeId: payload.spaceId,
+      title: payload.title,
+      body: payload.body,
+      profile: payload.profile,
+      pageId: payload.pageId ?? null,
+      expectedHash: payload.expectedHash ?? null,
+    };
+  }
+  if (validate(LegacySnakeCaseProposalPayload, payload)) {
+    return {
+      scopeId: payload.space_id,
       title: payload.title,
       body: payload.body,
       profile: payload.profile,

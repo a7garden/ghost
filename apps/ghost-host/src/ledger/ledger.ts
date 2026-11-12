@@ -138,15 +138,25 @@ export class Ledger {
     }
     const prefix = "Mentioned projects (untrusted names): ";
     const suffix = "\nRead these projects with document_list and document_read before answering or working on the request.\n\n";
-    for (const row of this.db.query("SELECT id, brief FROM works WHERE brief LIKE ?").all(prefix + "%") as { id: string; brief: string }[]) {
-      const end = row.brief.indexOf("\n");
-      if (end < 0 || !row.brief.slice(end).startsWith(suffix)) continue;
+    type LegacyReference = { spaceId: string; name: string };
+    const isReference = (value: unknown): value is LegacyReference => value !== null && typeof value === "object"
+      && "spaceId" in value && typeof value.spaceId === "string" && "name" in value && typeof value.name === "string";
+    const decode = (brief: string) => {
+      if (!brief.startsWith(prefix)) return null;
+      const newline = brief.indexOf("\n");
+      if (newline < 0) return null;
       let refs: unknown;
-      try { refs = JSON.parse(row.brief.slice(prefix.length, end)); } catch { continue; }
-      if (!Array.isArray(refs) || !refs.length || refs.length > 8 || refs.some(ref => typeof ref?.spaceId !== "string" || typeof ref?.name !== "string")) continue;
-      const references = refs.map(ref => ({ id: ref.spaceId as string, name: ref.name as string }));
-      const scopeId = references.find(ref => this.db.query("SELECT 1 FROM scopes WHERE id=?").get(ref.id))?.id ?? null;
-      this.db.query("UPDATE works SET brief=?, scope_id=?, scope_references=? WHERE id=?").run(row.brief.slice(end + suffix.length), scopeId, JSON.stringify(references), row.id);
+      try { refs = JSON.parse(brief.slice(prefix.length, newline)); } catch { return null; }
+      if (!Array.isArray(refs) || refs.length === 0 || refs.length > 8 || !refs.every(isReference)) return null;
+      const canonical = prefix + JSON.stringify(refs.map(ref => ({ name: ref.name, spaceId: ref.spaceId }))) + suffix;
+      if (!brief.startsWith(canonical)) return null;
+      return { text: brief.slice(canonical.length), references: refs.map(ref => ({ id: ref.spaceId, name: ref.name })) };
+    };
+    for (const row of this.db.query("SELECT id, brief FROM works WHERE brief LIKE ?").all(prefix + "%") as { id: string; brief: string }[]) {
+      const decoded = decode(row.brief);
+      if (!decoded) continue;
+      const scopeId = decoded.references.find(ref => this.db.query("SELECT 1 FROM scopes WHERE id=?").get(ref.id))?.id ?? null;
+      this.db.query("UPDATE works SET brief=?, scope_id=?, scope_references=? WHERE id=?").run(decoded.text, scopeId, JSON.stringify(decoded.references), row.id);
     }
     // Old retained events must project the same contract as the post-migration snapshot.
     for (const row of this.db.query("SELECT seq,data FROM events").all() as { seq: number; data: string }[]) {
@@ -164,22 +174,17 @@ export class Ledger {
         const work = event.work;
         work.scopeId ??= null; work.attachments ??= []; work.slot ??= null; work.retry ??= null;
         work.budgetMinutes ??= 90; work.budgetUsedMs ??= 0; work.budgetSince ??= null; work.budgetExtended ??= false; work.hold ??= null;
-        if (typeof work.brief === "string" && work.brief.startsWith(prefix)) {
-          const newline = work.brief.indexOf("\n");
-          if (newline >= 0 && work.brief.slice(newline).startsWith(suffix)) {
-            try {
-              const refs = JSON.parse(work.brief.slice(prefix.length, newline));
-              if (Array.isArray(refs) && refs.length > 0 && refs.length <= 8 && refs.every(ref => typeof ref?.spaceId === "string" && typeof ref?.name === "string")) {
-                work.scopeReferences = refs.map(ref => ({ id: ref.spaceId, name: ref.name }));
-                work.scopeId = work.scopeReferences.find((ref: { id: string }) => this.db.query("SELECT 1 FROM scopes WHERE id=?").get(ref.id))?.id ?? null;
-                work.brief = work.brief.slice(newline + suffix.length);
-              }
-            } catch { /* A literal owner brief is not metadata. */ }
-          }
+        const decoded = typeof work.brief === "string" ? decode(work.brief) : null;
+        if (decoded) {
+          work.scopeReferences = decoded.references;
+          work.scopeId = decoded.references.find(ref => this.db.query("SELECT 1 FROM scopes WHERE id=?").get(ref.id))?.id ?? null;
+          work.brief = decoded.text;
         }
         if (Array.isArray(work.toolScope)) work.toolScope = work.toolScope.map((tool: string) => tool === "document_spaces" ? "document_scopes" : tool);
-      } else if (event.type === "activity" && event.activity) event.activity.scopeId ??= null;
-      else if (event.type === "goal" && event.goal) event.goal.scopeId ??= null;
+      } else if (event.type === "activity" && event.activity) {
+        event.activity.scopeId ??= null;
+        if (Array.isArray(event.activity.tools)) event.activity.tools = event.activity.tools.map((tool: string) => tool === "document_spaces" ? "document_scopes" : tool);
+      } else if (event.type === "goal" && event.goal) event.goal.scopeId ??= null;
       else if (event.type === "milestone" && event.milestone) event.milestone.scopeId ??= null;
       this.db.query("UPDATE events SET data=? WHERE seq=?").run(JSON.stringify(event), row.seq);
     }

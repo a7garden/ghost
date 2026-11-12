@@ -40,6 +40,23 @@ function oldLedger(path: string) {
   const prefix = 'Mentioned projects (untrusted names): [{"name":"First","spaceId":"old-one"},{"name":"Second","spaceId":"old-two"}]\nRead these projects with document_list and document_read before answering or working on the request.\n\n';
   db.query("UPDATE works SET brief=? WHERE id='w'").run(prefix + "Visible owner text\nKeep this line");
   db.query("INSERT INTO events(at,data) VALUES (?,?)").run(1, JSON.stringify({ type: "space", space: { id: "old-one", name: "First", path: "/tmp", createdAt: 1 } }));
+  const activity = {
+    id: "old-activity", ghostId: "g", name: "Read old documents", prompt: "Read the vault", acceptanceCriteria: "Report observations",
+    source: { kind: "schedule", spec: { kind: "every", seconds: 3600, startAt: 1 } }, execution: { kind: "container" },
+    tools: ["document_spaces", "document_read"],
+    policy: { maxRunsPerDay: 1, maxConcurrent: 1, runTimeoutSeconds: 60, allowSelfCheck: false, minCheckSeconds: 60, externalActions: "deny", delivery: "changes" },
+    revision: 1, paused: true, pauseReason: "Owner paused", nextAt: 3600001, cursor: null, lastCheckedAt: null,
+    lastError: null, failureCount: 0, deletedAt: null, createdAt: 1, updatedAt: 1,
+  };
+  db.query("INSERT INTO activities(id,data) VALUES (?,?)").run(activity.id, JSON.stringify(activity));
+  db.query("INSERT INTO events(at,data) VALUES (?,?)").run(2, JSON.stringify({ type: "activity", activity }));
+  db.query("UPDATE works SET tool_scope=? WHERE id='w'").run(JSON.stringify(activity.tools));
+  db.query("INSERT INTO events(at,data) VALUES (?,?)").run(3, JSON.stringify({ type: "work", work: {
+    id: "w", parentId: null, rootId: "w", ghostId: "g", originConversationId: "direct", conversationId: "work",
+    title: "Work", brief: prefix + "Visible owner text\nKeep this line", acceptance: { criteria: "", checks: [], reviewer: null },
+    state: "running", revision: 1, revisionsUsed: 0, deadlineAt: null, result: null, verdict: null, reason: null,
+    toolScope: activity.tools, createdAt: 1, startedAt: 1, endedAt: null, updatedAt: 1,
+  } }));
   db.close();
 }
 
@@ -66,6 +83,13 @@ test("migration preserves old scope ids, every conversation, foreign keys, index
   expect(ledger.piConversationId("work")).toBe("pi-work");
   expect(ledger.eventsAfter(0)?.[0]?.data).toEqual({ type: "scope", scope: ledger.scope("old-one") });
   expect(ledger.work("w")).toMatchObject({ brief: "Visible owner text\nKeep this line", scopeId: "old-one", attachments: [], slot: null, retry: null, scopeReferences: [{ id: "old-one", name: "First" }, { id: "old-two", name: "Second" }] });
+  expect(ledger.ghost("g").tools).toContain("document_scopes");
+  expect(ledger.ghost("g").tools).not.toContain("document_spaces");
+  expect(ledger.activity("old-activity")).toMatchObject({ scopeId: null, tools: ["document_scopes", "document_read"], paused: true, pauseReason: "Owner paused" });
+  expect(ledger.work("w").toolScope).toEqual(["document_scopes", "document_read"]);
+  const events = ledger.eventsAfter(0)!;
+  expect(events.map(event => event.data)).toContainEqual(expect.objectContaining({ type: "activity", activity: expect.objectContaining({ scopeId: null, tools: ["document_scopes", "document_read"] }) }));
+  expect(events.map(event => event.data)).toContainEqual(expect.objectContaining({ type: "work", work: expect.objectContaining({ brief: "Visible owner text\nKeep this line", scopeId: "old-one", toolScope: ["document_scopes", "document_read"] }) }));
   expect(ledger.db.query("PRAGMA foreign_key_check").all()).toEqual([]);
   expect(ledger.db.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
   expect(ledger.db.query("SELECT name FROM sqlite_master WHERE name='custom_conversations_title'").get()).not.toBeNull();
@@ -74,6 +98,31 @@ test("migration preserves old scope ids, every conversation, foreign keys, index
   const before = ledger.work("w"); ledger.close(); ledger = new Ledger(path);
   expect(ledger.work("w")).toEqual(before);
   ledger.close();
+});
+
+test("migration never strips owner text that only resembles the exact legacy prefix encoding", () => {
+  const root = tempDir(); cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const suffix = "\nRead these projects with document_list and document_read before answering or working on the request.\n\n";
+  const encodings = [
+    '[{"spaceId":"old-one","name":"First"}]',
+    '[{ "name": "First", "spaceId": "old-one" }]',
+    '[{"name":"First","spaceId":"old-one","ownerText":true}]',
+    '[{"name":"\\u0046irst","spaceId":"old-one"}]',
+  ];
+  for (const [index, encoding] of encodings.entries()) {
+    const path = join(root, `literal-${index}.db`);
+    oldLedger(path);
+    const brief = `Mentioned projects (untrusted names): ${encoding}${suffix}This entire message is owner-authored.`;
+    const old = new Database(path);
+    old.query("UPDATE works SET brief=? WHERE id='w'").run(brief);
+    old.query("UPDATE events SET data=json_set(data,'$.work.brief',?) WHERE json_extract(data,'$.type')='work'").run(brief);
+    old.close();
+    const ledger = new Ledger(path);
+    try {
+      expect(ledger.work("w")).toMatchObject({ brief, scopeId: null, scopeReferences: [] });
+      expect(ledger.eventsAfter(0)!.map(event => event.data)).toContainEqual(expect.objectContaining({ type: "work", work: expect.objectContaining({ brief, scopeId: null }) }));
+    } finally { ledger.close(); }
+  }
 });
 
 test("fresh wake and subagent conversations use deterministic request identities without a one-per-Work restriction", () => {

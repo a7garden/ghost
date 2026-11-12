@@ -7,6 +7,7 @@ import { BACKUP_FORMAT, backup, type BackupManifest } from "../src/backup.ts";
 import { loadConfig } from "../src/config.ts";
 import { sha256 } from "../src/core/ids.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
+import { MIGRATIONS } from "../src/ledger/schema.ts";
 import { tempDir } from "./support.ts";
 import { MemoryStore } from "../src/stores/memory.ts";
 
@@ -21,6 +22,29 @@ async function until(path: string, limitMs = 10_000): Promise<void> {
 }
 
 describe("ghost backup", () => {
+  test("backs up a pre-scope ledger without migrating either source or copy", () => {
+    const root = tempDir();
+    const ledger = new Database(join(root, "ledger.db"));
+    const pi = new Database(join(root, "pi.db"));
+    try {
+      for (const migration of MIGRATIONS.slice(0, 10)) ledger.exec(migration);
+      ledger.exec("PRAGMA user_version=10");
+      ledger.query("INSERT INTO spaces(id,name,path,grants,created_at) VALUES (?,?,?,?,?)").run("saved-space", "Old vault", "/Users/someone/Old notes", "[]", 1);
+      pi.exec("CREATE TABLE retained (value TEXT); INSERT INTO retained VALUES ('Pi history')");
+      const dir = join(tempDir(), "snapshot");
+      const manifest = backup(root, dir);
+      expect(manifest.external_spaces).toEqual([{ path: "/Users/someone/Old notes" }]);
+      const copy = new Database(join(dir, "ledger.db"), { readonly: true });
+      try {
+        for (const db of [ledger, copy]) {
+          expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 10 });
+          expect(db.query("SELECT id,path FROM spaces").all()).toEqual([{ id: "saved-space", path: "/Users/someone/Old notes" }]);
+          expect(db.query("SELECT 1 FROM sqlite_master WHERE name='scopes'").get()).toBeNull();
+        }
+      } finally { copy.close(); }
+    } finally { pi.close(); ledger.close(); }
+  });
+
   test("copies both open databases and lists external scopes", () => {
     const root = tempDir();
     const ledger = new Ledger(join(root, "ledger.db"));
