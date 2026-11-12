@@ -1,3 +1,5 @@
+import { clearSnapshots } from './snapshotCache';
+
 export type ShellInfo = Readonly<{ platform: 'ios'; version: string; deviceId: string }>;
 export type PermissionStatus = 'allowed' | 'denied' | 'undetermined';
 export type ShellEvent = { type: 'notification.open'; notificationId: string } | { type: 'resume' };
@@ -38,6 +40,8 @@ export async function shellCall<R extends ShellRequest>(request: R): Promise<Rep
   const bridge = typeof window !== 'undefined' ? window.webkit?.messageHandlers?.ghostShell : undefined;
   if (!shell || !bridge) throw new Error('iPhone 앱에서 사용할 수 있습니다.');
   if (!isShellRequest(request)) throw new Error('지원하지 않는 앱 요청입니다.');
+  // The phone forgets this Host next: its cached snapshot goes first.
+  if (request.type === 'disconnected' || request.type === 'revoked') clearSnapshots();
   return await bridge.postMessage(request) as Reply<R>;
 }
 export function onShellEvent(handler: (event: ShellEvent) => void): () => void {

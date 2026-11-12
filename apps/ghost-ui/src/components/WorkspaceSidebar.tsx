@@ -38,7 +38,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
   const hostStatusId = useId();
   const spaces = state?.spaces ?? [];
   const live = state ? liveWorks(state).length : 0;
-  const hostTrouble = status.state !== 'connected';
+  const hostTrouble = status.state !== 'connected' && !status.quiet;
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollEdges(scrollRef);
   // Opening a Ghost from elsewhere (a card, search) brings its row into view.
@@ -146,7 +146,7 @@ export function WorkspaceSidebar({ state, section, openGhostId, selectedSpace, a
       <NavigationItem className="w-full" current={section === 'settings'} aria-describedby={hostTrouble ? hostStatusId : undefined}
         onClick={() => navigate(hostTrouble ? '/settings?tab=host' : '/settings')}>
         <Settings2/><span className="flex-1">설정</span>
-        {hostTrouble && <span className="sidebar-count" data-tone="danger" id={hostStatusId}>{status.label}</span>}
+        {hostTrouble && <span className="sidebar-count" data-tone={status.state === 'offline' ? 'danger' : 'amber'} id={hostStatusId}>{status.label}</span>}
       </NavigationItem>
     </div>
   </>;

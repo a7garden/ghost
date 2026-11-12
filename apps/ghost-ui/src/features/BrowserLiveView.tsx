@@ -471,7 +471,7 @@ export function BrowserLiveView({ conversationId, compact = false }: { conversat
   const displayStatus = status === 'live' && !ready ? 'connecting' : status;
   const busy = displayStatus === 'connecting' || displayStatus === 'reconnecting';
   const label = pageOrigin || page?.title || (status === 'ended' ? '세션 종료' : '연결 중…');
-  const statusText = { connecting: '연결 중', live: '연결됨', reconnecting: '다시 연결', ended: '세션 종료' }[displayStatus];
+  const statusText = { connecting: '연결 중', live: '연결됨', reconnecting: '재연결 중…', ended: '세션 종료' }[displayStatus];
 
   return <div className="browser-live" data-compact={compact || undefined} data-touch={touch || undefined}>
     <header className="browser-live__bar">

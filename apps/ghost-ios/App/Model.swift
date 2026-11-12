@@ -115,6 +115,7 @@ import GhostMobileCore
         connection = nil
         outbox = []
         pendingPushToken = nil
+        ShellController.forgetPageData()
     }
 
     // MARK: Page events

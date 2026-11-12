@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Ghost, LedgerEventData, State } from '@ghost/contract';
 import { applyEvent, HostStore } from './store';
 import { HostClient, type StreamHandlers } from './client';
+import { SnapshotCache } from './snapshotCache';
+import { hostStatus } from '../features/hostStatus';
 
 const baseState = (): State => ({
   seq: 7,
@@ -193,4 +195,139 @@ it('updates runtime readiness after provider settings change without a page relo
     expect(state.settings.defaultModel).toEqual({ provider: 'zai', model: 'glm-5.3' });
     expect(client.snapshotKept).toBe(true);
   } finally { unsubscribe(); store.stop(); }
+});
+
+const noCache = null;
+
+/** Resolves once the store reaches a snapshot matching `done`. */
+function until(store: HostStore, done: (snapshot: ReturnType<HostStore['get']>) => boolean) {
+  return new Promise<void>((resolve) => {
+    if (done(store.get())) { resolve(); return; }
+    const unsubscribe = store.subscribe(() => { if (done(store.get())) { unsubscribe(); resolve(); } });
+  });
+}
+
+const hold = (signal: AbortSignal) => new Promise<void>((resolve) => {
+  if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true });
+});
+
+describe('coming back and reconnecting', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('resume keeps the screen and reopens the stream from the current seq at once', async () => {
+    class DroppingClient extends HostClient {
+      reads = 0;
+      afters: number[] = [];
+      override async state() { this.reads++; return baseState(); }
+      override async stream(after: number, _conversations: string[], _handlers: StreamHandlers, signal: AbortSignal) {
+        this.afters.push(after);
+        if (this.afters.length === 1) throw new Error('Load failed');
+        await hold(signal);
+      }
+    }
+    const client = new DroppingClient();
+    const store = new HostStore(client, noCache);
+    store.start();
+    try {
+      await until(store, s => s.connection === 'offline');
+      const droppedAt = store.get().offlineSince!;
+      expect(droppedAt).toEqual(expect.any(Number));
+      store.resume();
+      expect(store.get().state).not.toBeNull();
+      expect(store.get().offlineSince).toBeGreaterThanOrEqual(droppedAt);
+      await until(store, s => s.connection === 'live');
+      expect(store.get()).toMatchObject({ offlineSince: null, error: null });
+      expect(store.get().state).not.toBeNull();
+      expect(client.afters).toEqual([7, 7]);
+      expect(client.reads).toBe(1);
+    } finally { store.stop(); }
+  });
+
+  it('refresh rereads the snapshot without blanking the screen', async () => {
+    class CountingClient extends HostClient {
+      reads = 0;
+      override async state() { this.reads++; return { ...baseState(), seq: 7 + this.reads }; }
+      override async stream(_after: number, _conversations: string[], _handlers: StreamHandlers, signal: AbortSignal) { await hold(signal); }
+    }
+    const client = new CountingClient();
+    const store = new HostStore(client, noCache);
+    const blanks: number[] = [];
+    store.start();
+    try {
+      await until(store, s => s.connection === 'live');
+      store.subscribe(() => { if (!store.get().state) blanks.push(Date.now()); });
+      store.refresh();
+      await until(store, s => s.state?.seq === 9);
+      expect(blanks).toEqual([]);
+    } finally { store.stop(); }
+  });
+
+  it('wakes the screen when the silent and confirm windows end', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    class DownClient extends HostClient {
+      override async state() { return baseState(); }
+      override async stream(): Promise<void> { throw new Error('Load failed'); }
+    }
+    const store = new HostStore(new DownClient(), noCache);
+    const seen: string[] = [];
+    store.subscribe(() => {
+      const { connection, state, offlineSince } = store.get();
+      const status = hostStatus(connection, Boolean(state), offlineSince, Date.now());
+      seen.push(status.quiet ? 'quiet' : status.label);
+    });
+    store.start();
+    try {
+      await vi.advanceTimersByTimeAsync(4_100);
+      expect(seen.at(-1)).toBe('재연결 중…');
+      await vi.advanceTimersByTimeAsync(17_000);
+      expect(seen.at(-1)).toBe('연결 끊김');
+    } finally { store.stop(); }
+  });
+});
+
+describe('snapshot cache', () => {
+  class MemoryStorage {
+    readonly items = new Map<string, string>();
+    get length() { return this.items.size; }
+    key(index: number) { return [...this.items.keys()][index] ?? null; }
+    getItem(key: string) { return this.items.get(key) ?? null; }
+    setItem(key: string, value: string) { this.items.set(key, value); }
+    removeItem(key: string) { this.items.delete(key); }
+  }
+
+  it('draws the cached snapshot on the first read, then replaces it with a fresh one before streaming', async () => {
+    const cache = new SnapshotCache(new MemoryStorage(), 'k');
+    cache.write({ ...baseState(), seq: 3, ghosts: [ghost('cached')] });
+    const fresh = { ...baseState(), seq: 11, ghosts: [ghost('fresh')] };
+    const afters: number[] = [];
+    class FreshClient extends HostClient {
+      override async state() { return fresh; }
+      override async stream(after: number, _conversations: string[], _handlers: StreamHandlers, signal: AbortSignal) { afters.push(after); await hold(signal); }
+    }
+    const store = new HostStore(new FreshClient(), cache);
+    expect(store.get()).toMatchObject({ connection: 'connecting', state: { seq: 3, ghosts: [{ id: 'cached' }] } });
+    store.start();
+    try {
+      await until(store, s => s.connection === 'live');
+      expect(store.get().state).toEqual(fresh);
+      expect(afters).toEqual([11]);
+    } finally { store.stop(); }
+    expect(cache.read()).toEqual(fresh);
+  });
+
+  it('keeps the cached screen while the Host is unreachable', async () => {
+    const cache = new SnapshotCache(new MemoryStorage(), 'k');
+    cache.write(baseState());
+    class DownClient extends HostClient {
+      override async state(): Promise<State> { throw new Error('Load failed'); }
+    }
+    const store = new HostStore(new DownClient(), cache);
+    store.start();
+    try {
+      await until(store, s => s.connection === 'offline');
+      const { connection, state, offlineSince } = store.get();
+      expect(state).toEqual(baseState());
+      expect(hostStatus(connection, Boolean(state), offlineSince, offlineSince!)).toMatchObject({ state: 'reconnecting', quiet: true });
+    } finally { store.stop(); }
+  });
 });

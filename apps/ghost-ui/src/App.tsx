@@ -68,7 +68,7 @@ export function App() {
 function Shell() {
   const { store, client } = useHost();
   const update = useUpdate(client);
-  const { state, connection, error } = useHostState(store);
+  const { state, connection, offlineSince } = useHostState(store);
   const { preferences, resolvedTheme, updatePreferences, storageError } = usePreferences();
   useVisibleViewport();
   const compact = useCompact();
@@ -107,6 +107,7 @@ function Shell() {
   const navigate = (path: string) => { resetScroll(); if (currentRoute() !== path) historyNav.push(`#${path}`); setRoute(path); };
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  const shellEvents = useRef<(event: ShellEvent) => void>(() => {});
   useEffect(() => {
     if (!shell) return;
     const queued = new Set<string>();
@@ -122,15 +123,31 @@ function Shell() {
         if (destination) navigateRef.current(destination);
       }
     };
-    const handle = (event: ShellEvent) => {
-      if (event.type === 'resume') store.refresh();
+    // Coming back keeps the screen: the stream reopens from the current seq.
+    shellEvents.current = (event: ShellEvent) => {
+      if (event.type === 'resume') store.resume();
       else { queued.add(event.notificationId); drain(); }
     };
-    const unsubscribe = onShellEvent(handle);
+    const unsubscribe = onShellEvent(event => shellEvents.current(event));
     const unsubscribeStore = store.subscribe(drain);
-    void ready(handle).catch(reason => console.error('Ghost 셸을 준비하지 못했습니다.', reason));
     return () => { unsubscribe(); unsubscribeStore(); };
   }, [store, client]);
+  // The shell lifts its loading view on `ready`: send it after the first frame that draws real
+  // content (the cached or fresh snapshot) or the failure to get any. The timer covers a
+  // webview that holds animation frames while the shell still hides it.
+  const drawn = Boolean(state) || connection === 'offline';
+  const readySent = useRef(false);
+  useEffect(() => {
+    if (!shell || !drawn || readySent.current) return;
+    const send = () => {
+      if (readySent.current) return;
+      readySent.current = true;
+      void ready(event => shellEvents.current(event)).catch(reason => console.error('Ghost 셸을 준비하지 못했습니다.', reason));
+    };
+    const frame = requestAnimationFrame(send);
+    const timer = setTimeout(send, 100);
+    return () => { cancelAnimationFrame(frame); clearTimeout(timer); };
+  }, [drawn]);
   useEffect(() => {
     if (shell) void shellCall({ type: 'theme', scheme: resolvedTheme }).catch(() => {});
   }, [resolvedTheme]);
@@ -148,7 +165,7 @@ function Shell() {
   const ghosts = state?.ghosts ?? [];
   const defaultGhost = ghosts.find(ghost => ghost.isDefault) ?? null;
   const attentionCount = state ? pendingDecisions(state).length : 0;
-  const status = hostStatus(connection, Boolean(state));
+  const status = hostStatus(connection, Boolean(state), offlineSince, Date.now());
 
   // Ghost pages: the ghost on screen and the conversation on screen.
   const ghostSegment = section === 'ghosts' ? path.split('/')[2] : null;
@@ -243,10 +260,17 @@ function Shell() {
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
           duty={state && <DutySwitch state={state}/>}
           sidebar={sidebar} fill={ownsGeometry} commands={commandItems} paletteOpen={paletteOpen} onPaletteOpenChange={setPaletteOpen}>
-          {error && <Banner variant="danger" className="mb-4" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>{error}</Banner>}
+          {/* Connection banners stay in view while the sheet scrolls (`.connection-banner`). */}
+          {(status.state === 'offline' || (compact && status.state === 'reconnecting' && !status.quiet)) && <div className="connection-banner">
+            {status.state === 'offline' ? <Banner variant="danger" action={<Button variant="outline" onClick={() => store.refresh()}>다시 연결</Button>}>
+              {state ? '호스트와 연결이 끊겼습니다.' : '호스트에 연결할 수 없습니다.'}
+            </Banner>
+              /* iPhone has no sidebar badge: the banner slot carries 재연결 중… once the silent window ends. */
+              : <Banner variant="warning">{status.label}</Banner>}
+          </div>}
           <UpdatePrompt monitor={update} navigate={navigate}/>
           {runtimeDown && state && section !== 'home' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
-          {!state ? <div className="grid gap-3 p-8" aria-busy={!error}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
+          {!state ? <div className="grid gap-3 p-8" aria-busy={status.state !== 'offline'}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate}/>}
             {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost} openWorkspace={() => navigate('/workspace')}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}

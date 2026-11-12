@@ -85,10 +85,12 @@ it('marks the open Ghost while any of its conversations is on screen', () => {
   expect(current.slice(0, current.indexOf('</button>'))).toContain('sage');
 });
 
-it('shows host trouble on the settings entry only when the host is not connected', () => {
-  expect(render()).not.toContain('연결 필요');
-  const html = render({ status: { state: 'offline', label: '연결 필요' } });
-  expect(html).toContain('연결 필요');
+it('shows host trouble on the settings entry only once it is announced, toned by severity', () => {
+  expect(render()).not.toContain('연결됨');
+  expect(render({ status: { state: 'connecting', label: '연결 확인 중', quiet: true } })).not.toContain('연결 확인 중');
+  expect(render({ status: { state: 'reconnecting', label: '재연결 중…', quiet: true } })).not.toContain('재연결 중…');
+  expect(render({ status: { state: 'reconnecting', label: '재연결 중…' } })).toMatch(/data-tone="amber"[^>]*>재연결 중…/);
+  expect(render({ status: { state: 'offline', label: '연결 끊김' } })).toMatch(/data-tone="danger"[^>]*>연결 끊김/);
 });
 
 it('never renders retired or deleted Ghosts', () => {

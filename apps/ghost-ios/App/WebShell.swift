@@ -40,7 +40,7 @@ struct WebShellView: View {
         .task { await renewPush() }
         .onChange(of: scenePhase) {
             guard scenePhase == .active else { return }
-            if controller.phase == .unreachable { controller.retry() } else { model.enqueue(.resume) }
+            if controller.phase == .unreachable { controller.retryIfReachable() } else { model.enqueue(.resume) }
             Task { await renewPush() }
         }
         .confirmationDialog("이 iPhone에서 연결을 지울까요?", isPresented: $confirmingForget, titleVisibility: .visible) {
@@ -116,6 +116,9 @@ private struct ShellWebView: UIViewRepresentable {
     @ObservationIgnored private let model: GhostModel
     @ObservationIgnored private let connection: Connection
     @ObservationIgnored private var pageReady = false
+    /// Counts page loads, so a late fallback never reveals a newer load.
+    @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private var probing = false
     @ObservationIgnored private var downloads: [ObjectIdentifier: URL] = [:]
 
     init(model: GhostModel, connection: Connection) {
@@ -151,6 +154,38 @@ private struct ShellWebView: UIViewRepresentable {
         load()
     }
 
+    /// Returning to an unreachable Host: reload (and show the loading view) only once its
+    /// origin answers, so a still-absent Host keeps this screen instead of flashing.
+    func retryIfReachable() {
+        guard !probing else { return }
+        probing = true
+        let origin = connection.origin
+        Task {
+            let reachable = await Self.answers(origin)
+            probing = false
+            if reachable && phase == .unreachable { retry() }
+        }
+    }
+
+    /// Any HTTP answer under 500 within two seconds: the same line `decidePolicyFor` draws.
+    private nonisolated static func answers(_ origin: URL) async -> Bool {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 2
+        configuration.timeoutIntervalForResource = 2
+        configuration.waitsForConnectivity = false
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+        var request = URLRequest(url: routeURL(origin, path: "/"), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 2)
+        request.httpMethod = "HEAD"
+        guard let (_, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else { return false }
+        return http.statusCode < 500
+    }
+
+    /// The page caches the Host's last snapshot in its web storage; forgetting the Host forgets it.
+    static func forgetPageData() {
+        Task { await WKWebsiteDataStore.default().removeData(ofTypes: [WKWebsiteDataTypeLocalStorage], modifiedSince: .distantPast) }
+    }
+
     /// Delivers queued native events once the page has said it is ready.
     func flush() {
         guard pageReady else { return }
@@ -161,6 +196,7 @@ private struct ShellWebView: UIViewRepresentable {
 
     private func load() {
         pageReady = false
+        loadGeneration += 1
         var url = routeURL(connection.origin, path: "/")
         #if DEBUG
         if let route = MobileUIFixture.shellRoute, let routed = URL(string: "#" + route, relativeTo: url)?.absoluteURL { url = routed }
@@ -185,7 +221,9 @@ private struct ShellWebView: UIViewRepresentable {
         guard let request = ShellRequest(body: message.body) else { return (nil, "unsupported request") }
         switch request {
         case .ready:
+            // The page sends this after its first real frame: lift the loading view then, not at didFinish.
             pageReady = true
+            if phase == .loading { phase = .ready }
             return (["events": model.drainOutbox().map(\.payload)], nil)
         case .notificationsStatus:
             return (["status": await AppDelegate.coordinator.status()], nil)
@@ -263,8 +301,15 @@ extension ShellController: WKNavigationDelegate {
         pageReady = false
     }
 
+    /// A Ghost page lifts the loading view itself (`ready`); a page that never says so (a login
+    /// or error page) is shown after a short wait.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        phase = .ready
+        guard phase == .loading, !pageReady else { return }
+        let generation = loadGeneration
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if phase == .loading && loadGeneration == generation { phase = .ready }
+        }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
