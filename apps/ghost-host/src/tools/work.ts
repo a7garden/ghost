@@ -323,7 +323,13 @@ async function inAdmittedScope(core: Core, env: ExecutionEnv | undefined, conver
   };
   const target = live();
   if (!(env instanceof HostExecutionEnv)) throw new NoEffect("The Host PC environment is unavailable; nothing was written");
-  const scoped = env.scopedTo(target.root, () => { live(); });
+  let scoped: ExecutionEnv;
+  try {
+    scoped = env.scopedTo(target.root, () => { live(); });
+  } catch (error) {
+    // Preparing the confined view touches no file: a failure here is a known non-effect, never an uncertain outcome.
+    throw new NoEffect(`The Scope-path environment could not be prepared; nothing was written: ${error instanceof Error ? error.message : String(error)}`);
+  }
   await unchangedMeansNoEffect(target.root, relative(target.root, target.host), () => perform(scoped, target.host));
   return true;
 }

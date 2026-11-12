@@ -528,11 +528,17 @@ test("a resumed attempt never revives approvals or receipts from an earlier atte
 });
 
 /** A Host Work whose cwd is the Work's Scope path, with the real Host filesystem environment. */
-async function scopedHostWork() {
+async function scopedHostWork(options: { stagingAlias?: boolean } = {}) {
   const h = setup();
   const scopeDir = realpathSync(tempDir());
   const outside = realpathSync(tempDir());
-  const staging = realpathSync(tempDir());
+  let staging = realpathSync(tempDir());
+  if (options.stagingAlias) {
+    // A state root reached through a symlink, like /var -> /private/var on macOS.
+    const alias = join(realpathSync(tempDir()), "state-alias");
+    symlinkSync(staging, alias);
+    staging = alias;
+  }
   h.ledger.tx(() => {
     h.ledger.putGhost({ ...h.ledger.ghost(h.ghost.id), hostExecution: true, tools: [...h.ghost.tools, "write", "edit"] });
     h.ledger.putScope({ id: "scope-1", name: "Project", paths: [scopeDir], vaultPath: null, createdAt: 1, ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 });
@@ -552,7 +558,7 @@ async function scopedHostWork() {
     const decision = h.ledger.pendingDecisions({ effectId: h.ledger.effectByCall(conversationId, callId)!.id })[0]!;
     await h.core.decisions.resolve(decision.id, { outcome: "approve" });
   };
-  return { ...h, scopeDir, outside, work, conversationId, write, receipt, approve, mutations };
+  return { ...h, scopeDir, outside, work, conversationId, write, receipt, approve, mutations, env };
 }
 
 test("a Host write the Host proves inside the Work's Scope is a Scope-path write and runs at once", async () => {
@@ -715,4 +721,19 @@ test("the confined writer itself refuses a file with another hard link", async (
   expect((await env.writeFile(join(root, "alias.txt"), "x", {} as Context)).ok).toBe(false);
   expect((await env.truncateFile(join(root, "alias.txt"), 0, {} as Context)).ok).toBe(false);
   expect(readFileSync(join(outside, "owner.txt"), "utf8")).toBe("owner bytes");
+});
+
+test("a Scope-path write works when the Host state root is reached through a symlink", async () => {
+  const s = await scopedHostWork({ stagingAlias: true });
+  expect((await s.write("aliased.txt", "through the alias", "aliased")).isError).toBeFalsy();
+  expect(readFileSync(join(s.scopeDir, "aliased.txt"), "utf8")).toBe("through the alias");
+  expect(s.ledger.effect(s.ledger.effectByCall(s.conversationId, "aliased")!.id).state).toBe("done");
+});
+
+test("a failure preparing the confined Scope view is a known non-effect, never an uncertain one", async () => {
+  const s = await scopedHostWork();
+  s.env.scopedTo = () => { throw new Error("cannot prepare the confined view"); };
+  expect((await s.write("never.txt", "x", "setup-failure")).isError).toBe(true);
+  expect(existsSync(join(s.scopeDir, "never.txt"))).toBe(false);
+  expect(s.ledger.effect(s.ledger.effectByCall(s.conversationId, "setup-failure")!.id).state).toBe("denied");
 });

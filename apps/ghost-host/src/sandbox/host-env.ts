@@ -135,7 +135,9 @@ export class HostExecutionEnv extends NodeExecutionEnv {
     const real = realpathSync(root);
     const boundary: SeatbeltPolicy = { home: homedir(), stateRoot: real, writeRoots: [real], readRoots: [], viewRoots: [], tempRoots: [], git: null, proxyPort: null, secrets: [], privacy: [], toolchain: [] };
     const authorize = this.options.authorize;
-    return new HostExecutionEnv({ ...this.options, boundary, authorize: () => { recheck(); return authorize?.() ?? "scoped"; } }, { stopped: this.stopped, pending: this.pending, children: this.children });
+    // The staging root is passed in its canonical spelling: a state root behind a symlink (/var on macOS) would
+    // otherwise read as a redirected staging root under a boundary. Staging keeps its own confinement.
+    return new HostExecutionEnv({ ...this.options, workspace: this.staging.hostRoot, boundary, authorize: () => { recheck(); return authorize?.() ?? "scoped"; } }, { stopped: this.stopped, pending: this.pending, children: this.children });
   }
 
   /** A caller path in this environment's spelling, resolved to the real path the boundary sees. */
