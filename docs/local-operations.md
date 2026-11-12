@@ -54,7 +54,7 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`(셸 shim) → `Ghost Host.app/Contents/MacOS/ghost`, `current` → `releases/2.9.0-9fa6afe`(GitHub Release `v2.9.0`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`(셸 shim) → `Ghost Host.app/Contents/MacOS/ghost`, `current` → `releases/2.10.0-c79e585`(GitHub Release `v2.10.0`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 빌드 11 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, `cloudflareAccess`(웹 origin, 아래), Apple container 샌드박스, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`, Obscura), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 기억 `memory.db`(Host 내장), 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | 웹 origin | `https://ghost.a7garden.com` → Cloudflare Access 앱 `Ghost`(팀 `dawn-hat-3ab7.cloudflareaccess.com`, 정책 `Ghost owner`, IdP `One-time PIN`) → 터널 `ghost`(`765d8841-…`) → `127.0.0.1:62062`. 커넥터 `~/Library/LaunchAgents/com.a7.ghost-cloudflare.plist`, 토큰·로그 `~/Library/Application Support/ghost-cloudflare/`(0700, 토큰 0600). 끄려면 `launchctl bootout gui/$UID/com.a7.ghost-cloudflare` |
@@ -63,6 +63,16 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
+
+### 오늘 변경 통합·디자인 반영과 2.10.0 운영 반영 — 2026-11-12
+
+- 통합: `main`에 없던 오늘 변경을 검토 후 합쳤다. em dash 금지 지침(`d6965b1`), 결과 수락 메인 settle·백업 busy 상한·테스트 한도(`main-settles-accept-result`), 태그 기반 릴리스 워크플로(`20e1ef6`), Mac 관리 Ghost가 만든 현재 시각 주입 패치(`wt/ghost-clock/clock.patch`, 미적용 상태였음 → transcript에서 스탬프를 떼는 방식으로 고쳐 적용)와 소유자 승인된 11-11 홈 화면 지시 1~5(정본 checkout의 미커밋 변경)다.
+- 검토로 고친 것: 워크플로 guard가 저장소 없이 `gh`를 불러 언제나 「없음」으로 판단하고 드래프트를 지워 Mac 게시를 깨뜨릴 수 있었고, 태그로 시작한 CI는 release.ts의 「태그가 없어야 함」 가드에서 항상 실패했다(guard는 Release가 있으면 무조건 건너뛰고, CI는 `GHOST_RELEASE_TAG_PUSHED=1`로 태그가 이 커밋을 가리키는지만 본다). 결과 수락에 추천 승인이 붙어 「추천대로 처리」로 일괄 수락될 수 있었다(UI에서 제외). 메인의 수정 요청 사유가 담당 Ghost에 전달되지 않았다(verdict에 note 포함). 완료 기준 없는 결과도 메인이 처리할 수 있었다(기준 필요).
+- 디자인(디자이너 Ghost의 소유자 승인 명세 4편을 bespoke-ui로 다듬어 구현): 결정 카드 1편(결과 확인은 메인 요약 본문 + 「전문 보기」, 종류 표시가 카드의 유일한 색, 급한 카드 우선), 2편(접힌 행 「마감 N분」·스와이프/`L`로 나중에, 대화 선택지·폼을 데이터 모양별 형태로, 보낸 메시지 즉시 표시·오프라인 큐·「다시 보내기 · 버리기」, 모바일 상단바·도크 본문색), 재연결 UX(4초 무표시 → 재연결 중… → 20초 뒤 연결 끊김, 복귀 시 화면 유지, 기기별 스냅숏 캐시, iOS 셸 프로브·첫 실제 프레임 뒤 로딩 해제), 작업 대화(판단 → 근거 → 행동 상태 바, 모바일 sticky, 가로 스크롤 제거, 소유자 턴 좌측 선). 푸시 Ghost 초상화(2편 §4.2)는 새 iOS 확장 타깃이 필요해 소유자 결정으로 다음 릴리스로 미뤘다.
+- 검사: Host 1,090 통과·46 생략, UI 293, Host·계약·UI 타입, 릴리스 스크립트의 셸 Rust 검사·전체 빌드·Developer ID·업데이터 서명·IPA `aps-environment=development`·묶음 왕복 검증. 격리 Host(시드 데이터)에서 390px·1280px, 라이트·다크로 홈·확인할 일·결과 카드·작업 페이지(sticky 바, 긴 URL·도구 이름 줄바꿈, 시트 가로 넘침 0)·호스트 강제 종료 시 2초 무표시/7초 재연결 중…/23초 연결 끊김·오프라인 두 메시지 대기 후 재기동 시 순서대로 전송을 확인했다.
+- 독립 검토: 작업자는 Claude(Codex 할당이 Claude로 대체됨)와 GLM이었다. Claude 작성분은 cross-reviewer(실제 GLM-5.3로 대체 실행, 지적만 생성하는 비상 검토)로, GLM 작성분은 Claude Opus deep-reviewer로, Codex/MiniMax 작성 브랜치는 Claude Sonnet과 GLM 검토로 봤다. 지적(선택지 화살표 키 즉시 전송, 같은 값 재선택 시 새 requestId, iOS 단일 숫자 필드 제출 불가, 네트워크 실패 행 영구 대기, 같은 문구 재전송 실패 은폐, 연결 배너가 sticky 작업 바 버튼을 가림 등)은 메인이 코드로 확인한 뒤 모두 고쳤다.
+- 배포: [v2.10.0](https://github.com/a7garden/ghost/releases/tag/v2.10.0), 소스 `c79e585`, `main` GitHub·Gitea 일반 푸시. 운영 PID 68811의 단일 62062 리스너·`releases/2.9.0-9fa6afe`·busy 0을 확인하고 Owner API로 설치했다. `lastResult: installed`(`2.9.0-9fa6afe` → `2.10.0-c79e585`), 백업 `backups/pre-2.10.0-c79e585-1794466903543/`, health 2.10.0·runtime ready, 새 PID 18079가 `releases/2.10.0-c79e585/Ghost Host.app`으로 운영 루트를 연다. Ghost 31·대화 401·맡긴 일 200·기기 1·Space 9의 ID 누락 없음. 제공 UI 자산에 새 규칙이 실린 것을 확인했다. 셸 0.2.4는 그대로, iPhone은 빌드 11.
+- 남은 확인: 설치된 Ghost.app 창은 다른 Space에 있어(`visible: false`) 앞으로 끌어오지 않았고 새 화면을 앱 안에서 직접 보지 못했다. iPhone 빌드 11 설치(iPhone 앱 「앱 업데이트」)와 실기기 복귀·VoiceOver 확인은 소유자 몫이다. 정본 checkout(`em-dash-ban-20261112` 브랜치)의 11-11 홈 변경 미커밋 사본은 같은 내용이 `main`에 들어갔지만 소유자 작업 트리라 그대로 두었다. 운영 로그의 `Indexed memory history is immutable`(약 5천 건)은 이번 변경 전부터 있던 기억 색인 충돌로, 이번 범위 밖이다.
 
 ### 웹 접속(ghost.a7garden.com)과 2.9.0 운영 반영 — 2026-11-12
 
