@@ -1,16 +1,17 @@
 import { useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { BriefcaseBusiness, Clock3, Paperclip, Square, X } from 'lucide-react';
-import type { Ghost } from '@ghost/contract';
+import type { ArtifactRef, Ghost } from '@ghost/contract';
 import { Composer } from '../ui';
 import { ComposerPlus, type PlusAction } from '../components/composer/ComposerPlus';
 import { ComposerSuggest, type Suggestion } from '../components/composer/ComposerSuggest';
-import { AttachmentTray, useAttachments } from '../components/composer/attachments';
+import { AttachmentTray, useAttachments, type PendingAttachment } from '../components/composer/attachments';
 import { DotAvatar } from '../components/DotAvatar';
 import { ModelPicker } from '../pets/ModelPicker';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { toneFor } from './ghostState';
 import { useProjectMentions } from '../components/composer/ProjectMentions';
+import type { MessageSend } from './outbox';
 
 /** Words each `/` command also answers to, so `/파일` and `/work` find the same action. */
 const commandWords: Record<string, string[]> = {
@@ -36,7 +37,7 @@ const whenLabel = (at: number) => new Date(at).toLocaleString('ko-KR', { month: 
  * Typing `/` at the start offers the same actions by keyboard; `@` hands the message to a Ghost as a 맡긴 일
  * that reports back here.
  */
-export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, inputRef, onSent, onStop, onError, initialSpaceIds = [], initialMode = 'talk' }: {
+export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, returnedFiles, setReturnedFiles, inputRef, onPost, onStop, onError, initialSpaceIds = [], initialMode = 'talk' }: {
   ghost: Ghost;
   conversationId: string | null;
   running: boolean;
@@ -44,8 +45,12 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   busy: boolean;
   draft: string;
   setDraft(value: string): void;
+  /** Files of a message the owner took back from the conversation; already uploaded, so they ride along as they are. */
+  returnedFiles: readonly ArtifactRef[];
+  setReturnedFiles(files: ArtifactRef[]): void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
-  onSent(): void;
+  /** A message joins the conversation at once; its row carries sending, waiting and failure. */
+  onPost(command: MessageSend): void;
   onStop(): void;
   onError(message: string): void;
   initialSpaceIds?: string[];
@@ -80,31 +85,42 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const send = async (text: string) => {
     if (!conversationId || sending) return;
     if (mode === 'talk' && attachments.uploading) { onError('첨부를 올리는 중입니다. 끝나면 보내 주세요.'); return; }
+    if (mode === 'talk' && attachments.items.some(item => item.status === 'failed')) { onError('올리지 못한 첨부가 있습니다. 빼거나 다시 붙여 주세요.'); return; }
     if (mode === 'later' && (!laterAt || laterAt <= Date.now())) { onError('보낼 시각을 지금 이후로 골라 주세요.'); return; }
-    setSending(true); onError(''); setConfirmation('');
+    onError(''); setConfirmation('');
+    if (mode === 'talk') {
+      const refs = [...returnedFiles, ...attachments.refs];
+      onPost({ type: 'message.send', conversationId, text, spaceIds: projects.spaceIds, ...(refs.length ? { attachments: refs } : {}) });
+      attachments.clear(); setReturnedFiles([]);
+      setDraft('');
+      projects.clear();
+      return;
+    }
+    setSending(true);
     try {
       if (mode === 'work') {
         await client.send({ type: 'work.create', ghostId: assignee?.id ?? ghost.id, title: text.split(/\n/, 1)[0].slice(0, 256), brief: text, spaceIds: projects.spaceIds, originConversationId: conversationId,
           ...(criteria.trim() ? { acceptance: { criteria: criteria.trim(), checks: [], reviewer: null } } : {}),
           ...(deadline ? { deadlineAt: new Date(deadline).getTime() } : {}) });
         switchMode('talk');
-      } else if (mode === 'later' && laterAt) {
+      } else if (laterAt) {
         await client.send({ type: 'schedule.create', ghostId: ghost.id, conversationId, prompt: text, spec: { kind: 'at', at: laterAt } });
         setConfirmation(`${whenLabel(laterAt)}에 보냅니다`);
         setTimeout(() => setConfirmation(''), 4000);
         switchMode('talk');
-      } else {
-        onSent();
-        await client.send({ type: 'message.send', conversationId, text, spaceIds: projects.spaceIds, ...(attachments.refs.length ? { attachments: attachments.refs } : {}) });
-        attachments.clear();
       }
       setDraft('');
       projects.clear();
     } catch (reason) { onError(reason instanceof Error ? reason.message : '보내지 못했습니다.'); }
     finally { setSending(false); }
   };
+  const returnedItems: PendingAttachment[] = returnedFiles.map(ref => ({ id: `returned:${ref.digest}`, name: ref.name, size: ref.size, type: ref.mediaType, status: 'ready', ref }));
+  const removeFile = (id: string) => {
+    if (id.startsWith('returned:')) setReturnedFiles(returnedFiles.filter(ref => `returned:${ref.digest}` !== id));
+    else attachments.remove(id);
+  };
 
-  const hasFiles = attachments.items.length > 0;
+  const hasFiles = attachments.items.length + returnedFiles.length > 0;
   const handedTo = assignee && assignee.id !== ghost.id ? assignee : null;
   const placeholder = !conversationId ? '열린 대화가 없어 보낼 수 없습니다' : mode === 'work' ? `${handedTo ? `${handedTo.name}에게 ` : ''}맡길 일을 적어 주세요. 첫 줄이 제목이 됩니다.` : mode === 'later' ? '나중에 보낼 메시지' : running ? '응답 중에도 덧붙일 수 있습니다' : `${ghost.name}에게 메시지`;
   // work.create and schedule.create carry text only; files ride on message.send alone.
@@ -167,7 +183,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
           <button type="button" className="composer-mode__close" aria-label="일반 메시지로" onClick={() => switchMode('talk')}><X size={11} aria-hidden="true"/></button>
         </span>
       </div>}
-      tray={<>{projects.chips}<AttachmentTray items={attachments.items} onRemove={attachments.remove}/></>}
+      tray={<>{projects.chips}<AttachmentTray items={[...returnedItems, ...attachments.items]} onRemove={removeFile}/></>}
       extension={mode === 'work' ? <div className="composer-fields">
         <label className="composer-field"><span>완료 기준</span>
           <input value={criteria} onChange={event => setCriteria(event.target.value)} maxLength={8192} disabled={sending} placeholder="무엇이 되면 끝난 것인지"/></label>

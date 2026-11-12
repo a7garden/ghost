@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, CircleAlert, GitBranch, Monitor, X } from 'lucide-react';
 import { Button, Conversation, Popover, PopoverContent, PopoverTrigger } from '../ui'
-import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
+import { TERMINAL_WORK_STATES, type ArtifactRef, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
 import { OpenWorkProvider, StateGlyph, ThreadCard, workGlyph } from '../components/agent';
 import { LiveReply, Transcript, type TranscriptExtra } from '../components/TranscriptMessage';
+import { OutgoingMessage } from '../components/OutgoingMessage';
 import { quoteForReply } from '../components/MessageMenu';
 import { ChatComposer } from './ChatComposer';
 import { DecisionDeck, chatDecisions } from './Decision';
@@ -15,6 +16,7 @@ import { GhostDesignEditor } from './GhostDesign';
 import { ThreadPanel } from './ThreadPanel';
 import { GhostAgenda } from './GhostAgenda';
 import { useConversationFeed } from './conversationFeed';
+import { useOutbox } from './outbox';
 import { conversationStarters } from './conversationSuggestions';
 import { profileSummary } from './profileSummary';
 import { ghostPresence } from './ghostState';
@@ -84,8 +86,18 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   const { feed: page, loading, olderLoading, loadOlder, error, setError } = useConversationFeed(conversationId);
   const [draft, setDraft] = useState('');
+  const [returnedFiles, setReturnedFiles] = useState<ArtifactRef[]>([]);
   const [followKey, setFollowKey] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const outbox = useOutbox(conversationId, page.messages);
+  // 버리기 takes the message back into the composer, ahead of anything typed since.
+  const takeBack = (requestId: string) => {
+    const command = outbox.discard(requestId);
+    if (!command) return;
+    setDraft(current => current.trim() ? `${command.text}\n\n${current}` : command.text);
+    setReturnedFiles(files => [...files, ...(command.attachments ?? []).filter(ref => !files.some(file => file.digest === ref.digest))]);
+    inputRef.current?.focus();
+  };
   useEffect(() => { if (!touch) inputRef.current?.focus(); }, [conversationId, touch]);
 
   const run = async (fn: () => Promise<unknown>) => { setError(''); try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : '요청을 처리하지 못했습니다.'); } };
@@ -100,7 +112,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   const panelClosing = !threadId && panelId !== null;
 
   const live = page.live;
-  const hasContent = page.messages.length > 0 || Boolean(live?.running);
+  const hasContent = page.messages.length > 0 || outbox.rows.length > 0 || Boolean(live?.running);
   const speaker = (message: Message) => message.role === 'user' ? '나' : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : ghost.name;
   // The in-app browser shows only when the Ghost may drive one at all; the toggle follows the session.
   const browserCapable = ghost.tools.some(tool => tool.startsWith('browser_'));
@@ -139,7 +151,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
 
   return <OpenWorkProvider value={openThread}><div className="chat-layout" data-thread={threadId ? '' : undefined}>
     <Conversation label={`${ghost.name}와 대화`} transcriptLabel={uiTerms.conversationHistory} jumpToLatestLabel="최신 메시지"
-      scrollKey={`${page.messages.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
+      scrollKey={`${page.messages.length}:${outbox.rows.length}:${live?.running ? 1 : 0}:${live?.partial ? 1 : 0}`} followKey={followKey}
       overlay={<>
         <div className="chat-float">
           <GhostProfile ghostID={ghost.id} name={ghost.name} summary={profileSummary(ghost.persona)} presence={ghostPresence(ghost, state).state}
@@ -165,8 +177,9 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         <BrowserPaneContext.Provider value={conversationId ? { conversationId, open: () => setBrowserOpen(true) } : null}>
           <DecisionDeck state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread} docked/>
         </BrowserPaneContext.Provider>
-        <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft} inputRef={inputRef} initialSpaceIds={initialSpaceIds}
-          onSent={() => setFollowKey(key => key + 1)} onStop={stop} onError={setError}/>
+        <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft}
+          returnedFiles={returnedFiles} setReturnedFiles={setReturnedFiles} inputRef={inputRef} initialSpaceIds={initialSpaceIds}
+          onPost={command => { setFollowKey(key => key + 1); outbox.post(command); }} onStop={stop} onError={setError}/>
       </>}
       footer={<>
         {error && <div className="chat-error" role="alert"><CircleAlert size={15} aria-hidden="true"/><span>{error}</span><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label="오류 메시지 닫기" onClick={() => setError('')}><X size={14}/></Button></div>}
@@ -181,12 +194,16 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
       {conversationId && page.before && <div className="grid justify-items-center">
         <button type="button" className="link-quiet" disabled={olderLoading} onClick={loadOlder}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
       </div>}
-      <Transcript messages={page.messages} speaker={speaker} extras={extras}
+      <Transcript messages={page.messages} speaker={speaker} extras={extras} delivered={outbox.delivered}
         onQuote={text => { setDraft(current => `${current.trim() ? `${current.trimEnd()}\n\n` : ''}${quoteForReply(text)}`); inputRef.current?.focus(); }}
         onReuse={text => { setDraft(text); inputRef.current?.focus(); }}
         onUiSubmit={message => message.conversationId === conversationId ? async (text, requestId) => {
           await client.send({ type: 'message.send', conversationId: message.conversationId, text }, requestId);
         } : undefined}/>
+      {outbox.rows.map(({ entry, note }) => <OutgoingMessage key={entry.requestId} label="나" text={entry.command.text}
+        spaces={(entry.command.spaceIds ?? []).flatMap(id => state.spaces.filter(space => space.id === id))}
+        attachments={entry.command.attachments ?? []} state={entry.state} note={note}
+        onRetry={() => outbox.retry(entry.requestId)} onDiscard={() => takeBack(entry.requestId)}/>)}
       {live && <LiveReply live={live} ghostId={ghost.id} ghostName={ghost.name}/>}
     </Conversation>
     {browserOpen && conversationId && <aside className="browser-pane" aria-label="브라우저 화면">
