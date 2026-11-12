@@ -150,6 +150,25 @@ async function approveRecordedEffect(core: Core, effectId: string) {
   if (decision) core.decisions.resolveState(decision.id, { outcome: "approve" });
   await core.effects.resolveApproval(effectId, true);
 }
+
+test("an approved source action survives title and budget edits but not brief or acceptance changes", async () => {
+  for (const change of ["title", "budget", "brief", "acceptance"] as const) {
+    const f = fixture();
+    const activity = f.activities.create({ ...f.config, policy: { ...f.config.policy, externalActions: "approval" } });
+    const run = await manual(f.core, activity.id);
+    await f.core.idle();
+    await f.activities.action(run.workId!, "comment", { kind: "pr_comment", body: "Reviewed." });
+    const decision = f.ledger.pendingDecisions({ workId: run.workId! }).find((entry) => entry.effectId)!;
+    if (change === "title") f.core.works.update(run.workId!, { title: "Renamed run" });
+    if (change === "budget") f.core.works.update(run.workId!, { budgetMinutes: 120 });
+    if (change === "brief") f.core.works.update(run.workId!, { brief: "Changed instructions" });
+    if (change === "acceptance") f.core.works.update(run.workId!, { acceptance: { criteria: "Different criteria", checks: [], reviewer: null } });
+    await approveRecordedEffect(f.core, decision.effectId!);
+    const kept = change === "title" || change === "budget";
+    expect(f.source.actions).toHaveLength(kept ? 1 : 0);
+    expect(f.ledger.effect(decision.effectId!).state).toBe(kept ? "done" : "denied");
+  }
+});
 describe("durable activity admission", () => {
   test("activity admission and delegated children retain scope and its goal boundaries", async () => {
     const f = fixture();

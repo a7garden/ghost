@@ -11,6 +11,7 @@ import { isTerminal } from "./works.ts";
 import { repositoryHead } from "./autonomy.ts";
 import { reviseConfiguration } from "./configuration.ts";
 import { activityRules } from "./policy.ts";
+import { workExecutionIdentity } from "./policy-context.ts";
 
 const DAY = 86_400_000;
 const DRY_TOOLS: Partial<Record<GhostTool, true>> = { read: true, web_search: true, web_read: true, skill_read: true, delegate: true, host_status: true, host_services: true, host_disk_scan: true, host_disk_usage: true, host_list: true, host_read: true, host_nodes: true, toss_read: true };
@@ -64,8 +65,13 @@ export class Activities {
       let bound: ActionAuthority;
       try {
         bound = this.actionAuthority(effect.workId, action);
-        const approved = { workId: proposal.workId, workRevision: proposal.workRevision, runId: proposal.runId, activityRevision: proposal.activityRevision, sourceItem: proposal.sourceItem, action: proposal.action };
-        if (digestOf(approved) !== effect.inputDigest || proposal.workRevision !== core.ledger.work(effect.workId).revision) throw forbidden("the approved action input or Work revision changed");
+        const work = core.ledger.work(effect.workId);
+        // Legacy pending approvals carry `workRevision` and keep its stricter check; new ones bind the execution identity and published artifacts.
+        const legacy = proposal.workIdentity === undefined;
+        const approved = legacy
+          ? { workId: proposal.workId, workRevision: proposal.workRevision, runId: proposal.runId, activityRevision: proposal.activityRevision, sourceItem: proposal.sourceItem, action: proposal.action }
+          : { workId: proposal.workId, workIdentity: proposal.workIdentity, runId: proposal.runId, activityRevision: proposal.activityRevision, sourceItem: proposal.sourceItem, action: proposal.action };
+        if (digestOf(approved) !== effect.inputDigest || (legacy ? proposal.workRevision !== work.revision : proposal.workIdentity !== this.workIdentity(work))) throw forbidden("the approved action input or Work changed");
         if (proposal.runId !== bound.run.id || proposal.activityRevision !== bound.activity.revision || digestOf(proposal.sourceItem) !== digestOf(bound.run.sourceItem)) throw forbidden("the source or approved activity revision changed");
       } catch (error) { throw new NoEffect(message(error)); }
       return (await this.sourcePort().act(bound.connection, bound.run.sourceItem!, action)).summary;
@@ -593,11 +599,15 @@ export class Activities {
     return { activity, run, connection };
   }
 
+  private workIdentity(work: Work): string {
+    return digestOf({ execution: workExecutionIdentity(work), artifacts: this.ledger.artifactsForWork(work.id).map((artifact) => artifact.digest).sort() });
+  }
+
   async action(workId: string, callId: string, action: ActivityAction): Promise<string> {
     const bound = this.actionAuthority(workId, action);
     const work = this.ledger.work(workId);
     if (!work.conversationId) throw conflict("the Work has no conversation");
-    const input = { workId, workRevision: work.revision, runId: bound.run.id, activityRevision: bound.activity.revision, sourceItem: bound.run.sourceItem, action };
+    const input = { workId, workIdentity: this.workIdentity(work), runId: bound.run.id, activityRevision: bound.activity.revision, sourceItem: bound.run.sourceItem, action };
     const effect = { conversationId: work.conversationId, callId, tool: "activity_action", input, summary: `${action.kind}: ${bound.run.sourceItem!.title}` };
     const item = bound.run.sourceItem!;
     let destination = item.target.replyTo ?? "";
