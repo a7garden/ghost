@@ -119,7 +119,7 @@ test("mail client refreshes OAuth credentials before IMAP and SMTP and never att
     await f.mail.mailboxes("Fixture");
     const tool = extension.tools!.find(tool => tool.name === "mail_send")!;
     const result = await tool.execute({ account: "Fixture", to: ["to@example.com"], subject: "OAuth delivery", text: "Body" } as never,
-      { conversationId: "oauth-mail", callId: "oauth-send" } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
+      { conversationId: "oauth-mail", taskId: "task:oauth-send", callId: "oauth-send" } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
     expect(result.isError).toBeFalsy();
     const decision = h.ledger.pendingDecisions()[0]!;
     f.replaceConnection({ ...f.connection, updatedAt: Date.now() });

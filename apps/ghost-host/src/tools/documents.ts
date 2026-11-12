@@ -112,7 +112,8 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
             proposal: { ...proposal },
           }),
         );
-        return text(`Document proposal ${decision.id}: ${decision.state}. ${(decision.proposal?.policy as { evaluation?: { reason?: string } } | undefined)?.evaluation?.reason ?? ""} A follow-up receipt reports the save outcome.`);
+        const status = decision.state === "pending" ? "pending, awaiting owner review (nothing is written until it is settled)" : decision.state;
+        return text(`Document proposal ${decision.id}: ${status}. ${(decision.proposal?.policy as { evaluation?: { reason?: string } } | undefined)?.evaluation?.reason ?? ""} A follow-up receipt reports the save outcome.`);
       } catch (error) {
         return errorResult(error);
       }

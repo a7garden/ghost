@@ -43,7 +43,7 @@ function setup(): Setup {
 }
 
 const apiOf = (piConversationId: string, callId: string): ToolExecutionApi =>
-  ({ conversationId: piConversationId, callId, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
+  ({ conversationId: piConversationId, taskId: `task:${callId}`, callId: callId, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
 
 const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;
 

@@ -19,7 +19,9 @@ function setApprovalRules(t: { core: Core }, policy: ApprovalPolicy) {
 async function team(path = ":memory:") {
   const h = harness(path);
   const main = h.core.createGhost({ name: "Main", persona: "" });
-  const mate = h.core.createGhost({ name: "Mate", persona: "" });
+  const created = h.core.createGhost({ name: "Mate", persona: "" });
+  const mate = { ...created, tools: [...created.tools, "host_command_propose" as const] };
+  h.ledger.tx(() => h.ledger.putGhost(mate));
   const work = h.core.works.createRoot({ ghostId: mate.id, title: "T", brief: "B", originConversationId: mate.directConversationId });
   await h.core.idle();
   const conversationId = h.ledger.work(work.id).conversationId!;

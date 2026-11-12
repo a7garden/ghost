@@ -17,7 +17,7 @@ function setup() {
   const extension = createMainTools(h.core);
   const invoke = (name: string, args: unknown, callId: string) => {
     const tool = extension.tools!.find((entry) => entry.name === name)!;
-    return tool.execute(args as never, { conversationId: "main-policy-pi", callId, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, {} as Context);
+    return tool.execute(args as never, { conversationId: "main-policy-pi", taskId: `task:${callId}`, callId: callId, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, {} as Context);
   };
   return { ...h, main, target, invoke };
 }

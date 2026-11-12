@@ -16,7 +16,7 @@ function fixture() {
   cleanups.push(() => { h.core.stop(); memory.close(); h.ledger.close(); rmSync(root, { recursive: true, force: true }); });
   const invoke = async (args: unknown, callId: string, name = "memory", pi = "101") => {
     const tool = tools.find(t => t.name === name)!;
-    return tool.execute(args as never, { conversationId: pi, callId } as unknown as ToolExecutionApi, {} as Context);
+    return tool.execute(args as never, { conversationId: pi, taskId: `task:${callId}`, callId: callId } as unknown as ToolExecutionApi, {} as Context);
   };
   return { ...h, memory, ghost, invoke };
 }

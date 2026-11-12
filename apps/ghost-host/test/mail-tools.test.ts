@@ -18,7 +18,7 @@ function fixture(tools: ("mail_send" | "mail_read" | "mail_update" | "mail_searc
   const send = spyOn(mail, "send").mockResolvedValue({ messageId: "<sent@example.com>", sentCopy: true });
   const extension = createMailTools(f.core, mail);
   const context = { abortSignal: undefined } as Context;
-  const api = { conversationId: 100, callId: "send-call" } as unknown as ToolExecutionApi;
+  const api = { conversationId: 100, taskId: "task:send-call", callId: "send-call" } as unknown as ToolExecutionApi;
   return { ...f, ghost, mail, send, extension, api, context, connections, async close() { send.mockRestore(); await mail.close(); f.core.stop(); await f.core.idle(); f.ledger.close(); } };
 }
 const message = { account: "account", to: ["recipient@example.com"], subject: "검토 요청", text: "본문 전체를 확인해 주세요." };

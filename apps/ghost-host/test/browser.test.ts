@@ -156,7 +156,7 @@ function fixture(config?: ConstructorParameters<typeof AgentBrowser>[0]) {
   let seq = 0;
   const call = (name: string, args: unknown = {}, pi = "pi-browser", callId = `call-${++seq}`) => {
     const tool = extension.tools!.find((t) => t.name === name)!;
-    return tool.execute(args as never, { conversationId: pi, callId } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
+    return tool.execute(args as never, { conversationId: pi, taskId: `task:${callId}`, callId: callId } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
   };
   return { ...h, root, workspace, browser, ghost, direct, item, call, extension, reveals: () => reveals };
 }
@@ -434,7 +434,7 @@ obscuraTest("isolated Obscura: CDP discovery and the WebSocket both require the 
     const vaultTools = createVaultTools(f.core, vault);
     let seq = 0;
     const call = (name: string, args: unknown = {}) => [...browserTools.tools!, ...vaultTools.tools!].find((tool) => tool.name === name)!
-      .execute(args as never, { conversationId: "pi-browser", callId: `native-${++seq}` } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
+      .execute(args as never, { conversationId: "pi-browser", taskId: `task:native-${++seq}`, callId: `native-${++seq}` } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
     const evaluate = async (script: string) => {
       const result = await f.browser.run(ref, ["eval", script]);
       expect(result.ok).toBe(true);

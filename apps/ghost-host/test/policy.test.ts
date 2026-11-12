@@ -141,7 +141,10 @@ const inRun = { triggerId: ACTIVITY };
 
 const CASES: Case[] = [
   // Work tools (tools/work.ts): journaled, no decision.
-  { behavior: "write/edit/bash in a container workspace", effect: effect("bash", "workspace", { id: "work-1" }), expected: { decision: "allow" } },
+  { behavior: "write/edit in a container workspace", effect: effect("write", "workspace", { id: "work-1", reversible: true }), expected: { decision: "allow" } },
+  { behavior: "bash in a container workspace reaches the egress proxy and still runs untainted", effect: effect("bash", "workspace", { id: "work-1", reversible: true, external: true }), expected: { decision: "allow" } },
+  { behavior: "workspace bash after private and untrusted reads needs the owner", effect: effect("bash", "workspace", { id: "work-1", reversible: true, external: true, taint: { untrustedInput: true, privateData: true } }), expected: { decision: "owner" } },
+  { behavior: "workspace bash in an activity that denies external actions is refused", effect: effect("bash", "workspace", { id: "work-1", reversible: true, external: true }), context: inRun, rules: activity("deny"), expected: { decision: "deny" } },
   { behavior: "bash on a host Work inside its authorized cwd", effect: effect("bash", "scope_path", { id: "/Users/o/project" }), expected: { decision: "allow" } },
   { behavior: "publish_artifact", effect: effect("publish_artifact", "workspace", { reversible: true }), expected: { decision: "allow" } },
   // Host-internal tools: work, schedule, Ghost management, memory, self_adapt.
@@ -210,8 +213,8 @@ const CASES: Case[] = [
   { behavior: "vault_request secure form: owner alone", effect: effect("vault_request", "host"), expected: { decision: "owner" } },
   { behavior: "goal_propose: owner alone", effect: effect("goal_propose", "host"), context: { ghostId: MAIN }, expected: { decision: "owner" } },
   // Result acceptance (core/works.ts verify(), core/decisions.ts reversible()).
-  { behavior: "result with report and criteria: main settles, never on silence", effect: effect("complete", "workspace", { reversible: true }), expected: { decision: "review", main: true } },
-  { behavior: "result without report or criteria: owner, main leaves a view", effect: effect("complete", "workspace"), expected: { decision: "owner", main: true } },
+  { behavior: "result with report and criteria: main settles, never on silence", effect: effect("complete", "host", { reversible: true }), expected: { decision: "review", main: true } },
+  { behavior: "result without report or criteria: owner, main leaves a view", effect: effect("complete", "host"), expected: { decision: "owner", main: true } },
   // Approval settings (Settings.approvals).
   { behavior: "delegation off: reversible Mac command waits for the owner, approves after 30 min", effect: effect("host_command_propose", "mac", { reversible: true }), rules: settings({ delegate: "none" }), expected: { decision: "owner", auto: "approve" } },
   { behavior: "delegation off: mail_send has no main view", effect: effect("mail_send", "mail_account", { external: true }), rules: settings({ delegate: "none" }), expected: { decision: "owner" } },

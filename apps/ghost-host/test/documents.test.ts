@@ -185,7 +185,7 @@ ${htmlBody}`;
         expect((await response.json() as { body: string }).body).toBe(body);
         const result = await read.execute(
           { scope_id: "space-1", page_id: page.pageId } as never,
-          { conversationId: "pi-document-read", callId: locator } as unknown as ToolExecutionApi,
+          { conversationId: "pi-document-read", taskId: `task:${locator}`, callId: locator } as unknown as ToolExecutionApi,
           {} as never,
         );
         expect(result.isError).toBeFalsy();

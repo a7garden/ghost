@@ -49,7 +49,7 @@ const content = (result: ToolExecutionResult) => (result.content ?? []).map((blo
 async function call(s: Harness, work: Work, name: string, args: unknown, callId = name) {
   const conversation = s.ledger.conversation(s.ledger.work(work.id).conversationId!);
   s.ledger.setPiConversationId(conversation.id, `pi-${conversation.id}`);
-  const api = { conversationId: `pi-${conversation.id}`, callId, output: () => {} } as unknown as ToolExecutionApi;
+  const api = { conversationId: `pi-${conversation.id}`, taskId: `task:${callId}`, callId: callId, output: () => {} } as unknown as ToolExecutionApi;
   return tool(createWorkTools(s.core, sandbox), name).execute(args as never, api, {} as Context);
 }
 async function setup(path = ":memory:", tools?: GhostTool[]) {

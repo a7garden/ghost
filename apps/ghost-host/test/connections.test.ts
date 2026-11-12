@@ -81,7 +81,7 @@ interface Setup {
 }
 
 const apiOf = (piConversationId: string, callId: string): ToolExecutionApi =>
-  ({ conversationId: piConversationId, callId, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
+  ({ conversationId: piConversationId, taskId: `task:${callId}`, callId: callId, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
 const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;
 async function call(tool: { execute: (args: never, api: ToolExecutionApi, context: Context) => Promise<ToolExecutionResult> }, args: unknown, api: ToolExecutionApi): Promise<ToolExecutionResult> {
   return tool.execute(args as never, api, testContext());

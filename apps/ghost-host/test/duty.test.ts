@@ -103,7 +103,7 @@ test("off duty, a Ghost cannot start new Work on its own, but owner-requested Wo
   const workCreate = tools.extensionsFor(conversation, ledger.ghost(ghost.id), null).flatMap((extension) => extension.tools ?? []).find((tool) => tool.name === "work_create")!;
   // 도구는 Pi 대화 id 로 Ghost 대화를 찾는다.
   ledger.setPiConversationId(conversation.id, "pi-direct");
-  const api = (callId: string) => ({ conversationId: "pi-direct", callId, env: undefined, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
+  const api = (callId: string) => ({ conversationId: "pi-direct", taskId: `task:${callId}`, callId: callId, env: undefined, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
   const context = { abortSignal: undefined, value: () => undefined, toString: () => "test" } as never;
   core.duty.switch(false);
   const refused = await workCreate.execute({ title: "Self-started", brief: "B", initiative: true } as never, api("c1"), context);

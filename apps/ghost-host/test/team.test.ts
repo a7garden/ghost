@@ -76,7 +76,7 @@ function team(path?: string): Fixture {
       .find((candidate) => candidate.name === name);
     if (!tool) throw new Error(`${name} is not offered to ${ghost.name}`);
     return (args: unknown, callId: string) =>
-      tool.execute(args as never, { conversationId: `pi-${ghost.name}`, callId, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, context());
+      tool.execute(args as never, { conversationId: `pi-${ghost.name}`, taskId: `task:${callId}`, callId: callId, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, context());
   };
   return { ...h, main, alice, bob, mainDirect: bind(main), aliceDirect: bind(alice), bobDirect: bind(bob), use };
 }
@@ -526,7 +526,7 @@ describe("work_steer", () => {
     const f = team();
     const work = await peerWork(f, f.aliceDirect, f.bob);
     expect(() => f.use(f.aliceDirect, "work_steer")).toThrow("not offered");
-    const api = { conversationId: `pi-${f.alice.name}`, callId: "s-peer", output: () => {} } as unknown as ToolExecutionApi;
+    const api = { conversationId: `pi-${f.alice.name}`, taskId: "task:s-peer", callId: "s-peer", output: () => {} } as unknown as ToolExecutionApi;
     const tools = createToolSet({ core: f.core, sandbox, memory: null, documents: null, skills: null });
     const steerTool = tools
       .all()

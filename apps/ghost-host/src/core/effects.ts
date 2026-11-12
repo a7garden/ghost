@@ -2,7 +2,7 @@ import { TERMINAL_WORK_STATES, matchesToolPatterns, type Effect } from "@ghost/c
 import type { Core } from "./core.ts";
 import { CommandError, conflict } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
-import { classifyEffect, evaluateStoredPolicy, type ObservedEffect, type PolicyReceipt } from "./policy-context.ts";
+import { classifyEffect, evaluateStoredPolicy, workExecutionIdentity, type ObservedEffect, type PolicyReceipt } from "./policy-context.ts";
 
 const MAX_RESULT = 16_384;
 
@@ -107,7 +107,7 @@ export class Effects {
         const receipt = evaluateStoredPolicy(this.core, input.conversationId, classification, undefined, true);
         if (effect.workId) {
           const work = this.ledger.work(effect.workId);
-          this.ledger.putSetting(`effect:work-binding:${effect.id}`, { revision: work.revision, attempt: work.revisionsUsed });
+          this.ledger.putSetting(`effect:work-binding:${effect.id}`, { identity: workExecutionIdentity(work) });
         }
         this.ledger.putSetting(`policy:effect:${effect.id}`, receipt);
         if (receipt.evaluation.decision === "deny") {
@@ -379,8 +379,8 @@ export class Effects {
     }
     if ((tool.startsWith("desktop_") || work?.execution?.kind === "host" && ["write", "edit", "bash", "publish_artifact"].includes(tool)) && !ghost.hostExecution) throw new NoEffect("PC execution was revoked");
     if (work && (!["running", "waiting", "verifying"].includes(work.state) || work.deadlineAt !== null && work.deadlineAt <= Date.now())) throw new NoEffect("The Work no longer permits execution");
-    const binding = this.ledger.setting<{ revision: number; attempt: number } | null>(`effect:work-binding:${effect.id}`, null);
-    if (work && (!binding || binding.revision !== work.revision || binding.attempt !== work.revisionsUsed)) throw new NoEffect("The Work revision changed; create a fresh proposal");
+    const binding = this.ledger.setting<{ identity: string } | null>(`effect:work-binding:${effect.id}`, null);
+    if (work && binding?.identity !== workExecutionIdentity(work)) throw new NoEffect("The Work's brief, acceptance, execution boundary or attempt changed; create a fresh proposal");
   }
 
   /** Owner resolved an `approve_effect` decision. */

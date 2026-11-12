@@ -96,7 +96,7 @@ function namesOf(setup: Setup, conversation: Conversation, ghost: Ghost): string
 
 // Stub of the harness's per-call API: only the fields these tools read.
 const apiOf = (piConversationId: string, callId: string, env: unknown = undefined): ToolExecutionApi =>
-  ({ conversationId: piConversationId, callId, env, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
+  ({ conversationId: piConversationId, taskId: `task:${callId}`, callId: callId, env, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
 
 // Stub of the invocation context; the tools only read `abortSignal`.
 const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;

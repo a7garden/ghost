@@ -4,7 +4,7 @@ import type { Core } from "./core.ts";
 import { NoEffect } from "./effects.ts";
 import { conflict, invalid } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
-import { classifyEffect, decisionTool, evaluateStoredPolicy, type PolicyReceipt } from "./policy-context.ts";
+import { classifyEffect, decisionTool, evaluateStoredPolicy, workExecutionIdentity, type PolicyReceipt } from "./policy-context.ts";
 
 export type OpenDecision = Omit<Decision, "id" | "state" | "answer" | "createdAt" | "resolvedAt">;
 
@@ -113,7 +113,7 @@ export class Decisions {
       title: `결과 확인: ${work.title}`.slice(0, 200),
       detail: [note, work.result?.summary].filter(Boolean).join("\n\n"),
       options: [],
-      proposal: work.result ? { result: work.result, criteria: work.acceptance.criteria, workRevision: work.revision, ...(policy ? { policy, acceptancePolicy: policy.classification, checksFingerprint: this.core.works.verifiedChecks(work)?.fingerprint ?? null } : {}) } : null,
+      proposal: work.result ? { result: work.result, criteria: work.acceptance.criteria, workIdentity: workExecutionIdentity(work), ...(policy ? { policy, acceptancePolicy: policy.classification, checksFingerprint: this.core.works.verifiedChecks(work)?.fingerprint ?? null } : {}) } : null,
     });
   }
 
@@ -344,7 +344,7 @@ export class Decisions {
     if (decision.kind === "accept_result" && decision.workId) {
       const work = this.ledger.work(decision.workId);
       const verified = this.core.works.verifiedChecks(work);
-      if (work.state !== "verifying" || proposal.workRevision !== undefined && proposal.workRevision !== work.revision
+      if (work.state !== "verifying" || proposal.workIdentity !== undefined && proposal.workIdentity !== workExecutionIdentity(work)
         || proposal.result && digestOf(proposal.result) !== digestOf(work.result)
         || acceptance?.target.kind === "workspace" && (!verified || verified.fingerprint !== proposal.checksFingerprint)) {
         receipt.evaluation = { ...receipt.evaluation, decision: "deny", decidedBy: [], reviewers: [], autoResolve: null, reason: "The Work revision or Host verification evidence changed while acceptance waited; fresh verification is required." };

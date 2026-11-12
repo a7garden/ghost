@@ -98,7 +98,7 @@ function browserFixture() {
   const extension = createBrowserTools(core, browser, { vault, sandbox });
   let seq = 0;
   const call = (name: string, args: unknown = {}) => extension.tools!.find((tool) => tool.name === name)!
-    .execute(args as never, { conversationId: "pi-shop", callId: `call-${++seq}` } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
+    .execute(args as never, { conversationId: "pi-shop", taskId: `task:call-${++seq}`, callId: `call-${++seq}` } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
   return { ledger, core, ghost, direct, browser, call };
 }
 

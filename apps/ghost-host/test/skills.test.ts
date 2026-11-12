@@ -195,7 +195,7 @@ class TempSandbox implements SandboxEnvFactory {
 }
 
 const apiOf = (piConversationId: string, callId: string): ToolExecutionApi =>
-  ({ conversationId: piConversationId, callId, env: undefined, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
+  ({ conversationId: piConversationId, taskId: `task:${callId}`, callId: callId, env: undefined, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
 
 function contentOf(result: ToolExecutionResult): string {
   return (result.content ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");

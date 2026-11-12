@@ -141,7 +141,7 @@ describe("delegate rules", () => {
 
 // Stub of the harness's per-call API, as in tools.test.ts.
 const apiOf = (piConversationId: string, callId: string): ToolExecutionApi =>
-  ({ conversationId: piConversationId, callId, env: undefined, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
+  ({ conversationId: piConversationId, taskId: `task:${callId}`, callId: callId, env: undefined, output: () => {}, outputWindow: undefined, diagnostic: () => {} }) as unknown as ToolExecutionApi;
 const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as unknown as Context;
 const contentOf = (result: ToolExecutionResult): string => (result.content ?? []).map((block) => (block.type === "text" ? block.text : "")).join("");
 const asPi = (s: Setup, conversation: Conversation, piId: string) => {

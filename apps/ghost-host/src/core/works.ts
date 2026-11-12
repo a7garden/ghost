@@ -8,8 +8,7 @@ import { digestOf, newId } from "./ids.ts";
 import { verifyChecks } from "./verify.ts";
 import { policyTaint } from "./policy-context.ts";
 import { validateExecutionTarget } from "../sandbox/index.ts";
-import { classifyEffect, evaluateStoredPolicy, type PolicyReceipt } from "./policy-context.ts";
-import { approvalRules } from "./policy.ts";
+import { classifyEffect, evaluateStoredPolicy, workExecutionIdentity, type PolicyReceipt } from "./policy-context.ts";
 
 /** Reminders sent when a work conversation stops without completing; a quota-ended turn never counts. */
 const MAX_IDLE_NUDGES = 2;
@@ -642,7 +641,7 @@ export class Works {
 
   private verificationFingerprint(work: Work): string {
     return digestOf({
-      revision: work.revision, attempt: work.revisionsUsed, acceptance: work.acceptance, result: work.result,
+      identity: workExecutionIdentity(work), result: work.result,
       artifacts: this.ledger.artifactsForWork(work.id),
       shells: this.ledger.effectsForWork(work.id).filter((effect) => effect.tool === "bash").map((effect) => ({ id: effect.id, state: effect.state, summary: effect.summary, result: effect.result })),
     });
@@ -658,7 +657,7 @@ export class Works {
     const work = this.ledger.work(workId);
     if (work.state !== "verifying") return work;
     const verified = this.verifiedChecks(work);
-    if (verdict.outcome === "pass" && verdict.source === "checks" && (!verified || work.parentId || work.acceptance.reviewer)) {
+    if (verdict.outcome === "pass" && verdict.source === "checks" && (!verified || work.parentId)) {
       this.ledger.tx(() => this.core.decisions.openAcceptance(work, "Acceptance requires successful Host-recorded checks on the current Work revision and all configured independent reviews."));
       return work;
     }
@@ -676,7 +675,7 @@ export class Works {
     }
     if (verdict.outcome === "pass" && work.conversationId) {
       const receipt = this.ledger.tx(() => {
-        const key = `policy:acceptance:${work.id}:${work.revision}:${work.revisionsUsed}`;
+        const key = `policy:acceptance:${work.id}:${workExecutionIdentity(work)}`;
         const prior = this.ledger.setting<PolicyReceipt | null>(key, null);
         const current = evaluateStoredPolicy(this.core, work.conversationId!, {
           ...classifyEffect(this.core, work.conversationId!, "complete", null),
@@ -686,11 +685,12 @@ export class Works {
         this.ledger.putSetting(key, current);
         return current;
       });
+      // A validated independent review already is the review an untouched install rule asks for; any owner-authored or
+      // edited review rule, every owner rule (including owner-only Ghost twins) and a rule-less default still need the owner.
+      const deciding = receipt.evaluation.decidedBy.map((id) => this.ledger.policyRule(id));
+      const reviewSatisfied = verdict.source === "review" && deciding.length > 0 && deciding.every((rule) => rule.decision === "review" && rule.createdBy.kind === "install" && rule.revision === 1);
       if (receipt.evaluation.decision === "deny") verdict = { ...verdict, outcome: "revise", reasons: receipt.evaluation.reason };
-      else if (verdict.source !== "owner" && (receipt.evaluation.decision === "owner" || receipt.evaluation.decision === "review" && receipt.evaluation.decidedBy.some((id) => {
-        const rule = this.ledger.policyRule(id);
-        return verdict.source !== "review" || digestOf(rule) !== digestOf(approvalRules(this.ledger.settings().approvals).find((entry) => entry.id === "result"));
-      }))) {
+      else if (verdict.source !== "owner" && (receipt.evaluation.decision === "owner" || receipt.evaluation.decision === "review") && !reviewSatisfied) {
         this.ledger.tx(() => this.core.decisions.openAcceptance(work, receipt.evaluation.reason, receipt));
         return work;
       }
@@ -1146,12 +1146,12 @@ export class Works {
       const commandsFresh = checks.every((check) => {
         if (check.kind !== "command_exit_zero" && check.kind !== "command_stdout") return true;
         const effect = this.ledger.effectsForWork(work.id).filter((entry) => entry.tool === "bash" && entry.state === "done" && entry.summary === check.command).at(-1);
-        const binding = effect ? this.ledger.setting<{ revision: number; attempt: number } | null>(`effect:work-binding:${effect.id}`, null) : null;
-        return binding?.revision === work.revision && binding.attempt === work.revisionsUsed;
+        const binding = effect ? this.ledger.setting<{ identity: string } | null>(`effect:work-binding:${effect.id}`, null) : null;
+        return binding?.identity === workExecutionIdentity(work);
       });
       if (outcome.pass && !commandsFresh) outcome = { pass: false, reasons: "Required commands have no execution receipt for the current Work revision and attempt." };
       this.ledger.tx(() => this.ledger.putSetting(`work:checks:${work.id}`, { ...outcome, fingerprint, count: checks.length, at: Date.now() }));
-      if (!outcome.pass || !work.parentId && !work.acceptance.reviewer) {
+      if (!outcome.pass || !work.parentId) {
         this.applyVerdict(work.id, { outcome: outcome.pass ? "pass" : "revise", source: "checks", reasons: outcome.reasons, at: Date.now() });
         return;
       }

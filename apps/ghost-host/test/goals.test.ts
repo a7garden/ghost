@@ -26,7 +26,7 @@ function team() {
     const tool = tools.extensionsFor(conversation, ghost, null).flatMap((extension) => extension.tools ?? []).find((candidate) => candidate.name === name);
     if (!tool) throw new Error(`${name} is not offered`);
     return (args: unknown, callId: string) =>
-      tool.execute(args as never, { conversationId: `pi-${ghost.name}`, callId, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, context());
+      tool.execute(args as never, { conversationId: `pi-${ghost.name}`, taskId: `task:${callId}`, callId: callId, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, context());
   };
   const finish = (workId: string) => h.ledger.tx(() => h.ledger.putWork({ ...h.ledger.work(workId), state: "done" }));
   return { ...h, tools, main, mate, mainDirect: bind(main), mateDirect: bind(mate), use, finish };

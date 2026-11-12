@@ -487,7 +487,7 @@ describe("activity authority and delivery", () => {
     const extension = activityTools(f.core);
     const propose = extension.tools!.find((tool) => tool.name === "activity_propose")!;
     f.ledger.setPiConversationId(f.ghost.directConversationId, "101");
-    const api = { conversationId: 101, callId: "propose-1" } as unknown as ToolExecutionApi;
+    const api = { conversationId: 101, taskId: "task:propose-1", callId: "propose-1" } as unknown as ToolExecutionApi;
     const args = { ...f.config, ghostId: crypto.randomUUID() };
     const result = await propose.execute(args as never, api, { abortSignal: undefined } as Context);
     expect(result.isError).toBeFalsy();
@@ -501,7 +501,7 @@ describe("activity authority and delivery", () => {
     await f.core.idle();
     const work = f.ledger.work(workRun.workId!);
     f.ledger.setPiConversationId(work.conversationId!, "102");
-    const workApi = { conversationId: 102, callId: "propose-2" } as unknown as ToolExecutionApi;
+    const workApi = { conversationId: 102, taskId: "task:propose-2", callId: "propose-2" } as unknown as ToolExecutionApi;
     const refused = await propose.execute(args as never, workApi, { abortSignal: undefined } as Context);
     expect(refused.isError).toBe(true);
   });
@@ -514,7 +514,7 @@ describe("activity authority and delivery", () => {
     const work = f.ledger.work(run.workId!);
     f.ledger.setPiConversationId(work.conversationId!, "103");
     const nextCheck = activityTools(f.core).tools!.find((tool) => tool.name === "activity_next_check")!;
-    const api = { conversationId: 103, callId: "relative-check" } as unknown as ToolExecutionApi;
+    const api = { conversationId: 103, taskId: "task:relative-check", callId: "relative-check" } as unknown as ToolExecutionApi;
     const context = { abortSignal: undefined } as Context;
     const start = Date.now();
     let clockAt = start;
