@@ -63,6 +63,7 @@ function fakeDesktop() {
         nodes: [
           { title: state.screenLabel, description: "", value: null, bounds: { x: 500, y: 350, width: 100, height: 40 } },
           ...(state.protectedScreen ? [{ role: "AXSecureTextField", title: "Password", value: null, bounds: { x: 200, y: 100, width: 100, height: 30 } }] : []),
+          { title: "Document body", description: "", value: null, bounds: { x: 100, y: 50, width: 800, height: 600 } },
         ],
       });
       return ok({});
@@ -90,7 +91,20 @@ function fixture() {
     return tool.execute(args as never, { conversationId: pi, callId } as unknown as ToolExecutionApi, { abortSignal } as Context);
   };
   const said = (result: ToolExecutionResult) => (result.content ?? []).map((part) => part.type === "text" ? part.text : "").join("\n");
-  return { ...h, ...desktop, ghost, call, said };
+  const ownerCall = async (name: string, args: unknown = {}, pi = "pi-desktop", callId = `owner-call-${++seq}`, abortSignal?: AbortSignal) => {
+    const proposed = await call(name, args, pi, callId, abortSignal);
+    const conversation = h.ledger.conversationByPiId(pi)!;
+    const effect = h.ledger.effectByCall(conversation.id, callId);
+    const decision = effect ? h.ledger.pendingDecisions({ effectId: effect.id })[0] : null;
+    if (!decision) return proposed;
+    await h.core.decisions.resolve(decision.id, { outcome: "approve" });
+    return call(name, args, pi, callId, abortSignal);
+  };
+  const focusBody = async () => {
+    await call("desktop_snapshot", { app: "TextEdit" });
+    expect((await ownerCall("desktop_click", { ref: "@sabc:e3" })).isError).toBeFalsy();
+  };
+  return { ...h, ...desktop, ghost, call, ownerCall, focusBody, said };
 }
 
 describe("PC control tools", () => {
@@ -115,14 +129,14 @@ describe("PC control tools", () => {
   test("refs act only in the conversation that observed them; sending goes to the owner", async () => {
     const f = fixture();
     expect(f.said(await f.call("desktop_snapshot", { app: "TextEdit" }))).toContain('button "Send" @sabc:e2');
-    expect(f.said(await f.call("desktop_click", { ref: "@sabc:e1" }))).toBe("Clicked");
-    expect(f.said(await f.call("desktop_click", { ref: "@sabc:e2" }))).toContain("desktop_propose");
+    expect(f.said(await f.ownerCall("desktop_click", { ref: "@sabc:e1" }))).toBe("Clicked");
+    expect(f.said(await f.call("desktop_click", { ref: "@sabc:e2" }))).toContain("desktop-click-irreversible");
     expect(f.said(await f.call("desktop_click", { ref: "@sabc:e1" }, "pi-other"))).toContain("not from a desktop_snapshot of this conversation");
-    await f.call("desktop_fill", { ref: "@sabc:e3", text: "--app Ghost" });
+    await f.ownerCall("desktop_fill", { ref: "@sabc:e3", text: "--app Ghost" });
     expect(f.calls.filter((c) => c.argv[0] === "click").map((c) => c.argv.slice(0, 2))).toEqual([["click", "@sabc:e1"]]);
     // Text travels on stdin, never as an argument agent-desktop could read as a flag.
     expect(f.calls.find((c) => c.argv[0] === "set-value")).toMatchObject({ stdin: "--app Ghost" });
-    expect(f.said(await f.call("desktop_press", { app: "TextEdit", keys: "return" }))).toBe("Key sent");
+    expect(f.said(await f.ownerCall("desktop_press", { app: "TextEdit", keys: "return" }))).toBe("Key sent");
   });
 
   test("physical input maps image pixels to window points and uses each screen once", async () => {
@@ -131,13 +145,13 @@ describe("PC control tools", () => {
     let lastScreenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
     expect(lastScreenshot.content?.some((part) => part.type === "image")).toBe(true);
     // The 400×300 image of an 800×600 window: image pixels are half a window point.
-    expect(f.said(await f.call("desktop_pointer", { screen_id: screenId(), action: "double_click", x: 10, y: 20, modifiers: "cmd" }))).toBe("Pointer double_click delivered");
+    expect(f.said(await f.ownerCall("desktop_pointer", { screen_id: screenId(), action: "double_click", x: 10, y: 20, modifiers: "cmd" }))).toBe("Pointer double_click delivered");
     expect(f.calls.filter((c) => c.argv[0] === "click").at(-1)!.args).toMatchObject({ app: "pid:10", headed: true, x: 20, y: 40, click_count: 2, key: "super" });
     expect(f.said(await f.call("desktop_pointer", { screen_id: screenId(), action: "click", x: 10, y: 20 }))).toContain("used or expired");
 
     lastScreenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
     // "Delete" spans window points 400–500 × 300–340, image pixels 200–250 × 150–170.
-    expect(f.said(await f.call("desktop_pointer", { screen_id: screenId(), action: "click", x: 210, y: 160 }))).toContain("desktop_propose");
+    expect(f.said(await f.call("desktop_pointer", { screen_id: screenId(), action: "click", x: 210, y: 160 }))).toContain("desktop-pointer-irreversible");
     lastScreenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
     expect((await f.call("desktop_keys", { screen_id: screenId(), key: "cmd+q" })).isError).toBe(true);
     expect(f.calls.filter((c) => c.runtime === "geist" && c.argv[0] !== "get_app_state")).toHaveLength(1);
@@ -200,7 +214,7 @@ describe("PC control tools", () => {
     await f.call("desktop_snapshot", { app: "TextEdit" });
     const revoke = () => f.ledger.tx(() => f.ledger.putGhost({ ...f.ledger.ghost(f.ghost.id), hostExecution: false }));
     f.state.beforeDispatch = (runtime, command) => { if (runtime === "agent-desktop" && command === "click") revoke(); };
-    expect(f.said(await f.call("desktop_click", { ref: "@sabc:e1" }, "pi-desktop", "revoked"))).toContain("PC 직접 실행");
+    expect(f.said(await f.ownerCall("desktop_click", { ref: "@sabc:e1" }, "pi-desktop", "revoked"))).toContain("PC 직접 실행");
     expect(f.ledger.effectByCall(f.ghost.directConversationId, "revoked")?.state).toBe("denied");
     expect(f.calls.some((c) => c.argv[0] === "click")).toBe(false);
     f.state.beforeDispatch = null;
@@ -240,7 +254,7 @@ describe("PC control tools", () => {
     const controller = new AbortController();
     await f.call("desktop_snapshot", { app: "TextEdit" });
     f.state.beforeDispatch = (runtime, command) => { if (runtime === "agent-desktop" && command === "click") controller.abort(); };
-    expect(f.said(await f.call("desktop_click", { ref: "@sabc:e1" }, "pi-desktop", "cancelled-click", controller.signal))).toContain("cancelled");
+    expect(f.said(await f.ownerCall("desktop_click", { ref: "@sabc:e1" }, "pi-desktop", "cancelled-click", controller.signal))).toContain("cancelled");
     expect(f.ledger.effectByCall(f.ghost.directConversationId, "cancelled-click")?.state).toBe("denied");
     expect(f.calls.some((c) => c.argv[0] === "click")).toBe(false);
   });
@@ -258,12 +272,13 @@ describe("PC control tools", () => {
 
   test("physical queued revocation cannot send input", async () => {
     const f = fixture();
+    await f.focusBody();
     const shot = await f.call("desktop_screenshot", { app: "TextEdit" });
     const id = /screen_id (\S+):/.exec(f.said(shot))![1]!;
     f.state.beforeDispatch = (runtime, command) => {
       if (runtime === "geist" && command === "type_text") f.ledger.tx(() => f.ledger.putGhost({ ...f.ledger.ghost(f.ghost.id), hostExecution: false }));
     };
-    expect(f.said(await f.call("desktop_keys", { screen_id: id, text: "Hello" }, "pi-desktop", "queued-keys"))).toContain("PC 직접 실행");
+    expect(f.said(await f.ownerCall("desktop_keys", { screen_id: id, text: "Hello" }, "pi-desktop", "queued-keys"))).toContain("PC 직접 실행");
     expect(f.ledger.effectByCall(f.ghost.directConversationId, "queued-keys")?.state).toBe("denied");
     expect(f.calls.some((c) => c.argv[0] === "type_text")).toBe(false);
   });
@@ -275,7 +290,7 @@ describe("PC control tools", () => {
     expect(f.calls.some((c) => c.argv[0] === "get_app_state")).toBe(false);
     const shot = await f.call("desktop_screenshot", { app: "TextEdit", window_id: "w-101" });
     const id = /screen_id (\S+):/.exec(f.said(shot))![1]!;
-    expect(f.said(await f.call("desktop_pointer", { screen_id: id, action: "click", x: 10, y: 20 }))).toBe("Pointer click delivered");
+    expect(f.said(await f.ownerCall("desktop_pointer", { screen_id: id, action: "click", x: 10, y: 20 }))).toBe("Pointer click delivered");
     expect(f.calls.filter((c) => c.runtime === "geist").every((c) => c.args?.app === "pid:12")).toBe(true);
   });
 
@@ -284,8 +299,8 @@ describe("PC control tools", () => {
     await f.call("desktop_snapshot", { app: "TextEdit" });
     f.state.tree = tree("Save");
     await f.call("desktop_snapshot", { app: "TextEdit" }, "pi-other");
-    expect(f.said(await f.call("desktop_click", { ref: "@sabc:e2" }))).toContain("desktop_propose");
-    expect(f.said(await f.call("desktop_click", { ref: "@sabc:e2" }, "pi-other"))).toBe("Clicked");
+    expect(f.said(await f.call("desktop_click", { ref: "@sabc:e2" }))).toContain("desktop-click-irreversible");
+    expect(f.said(await f.ownerCall("desktop_click", { ref: "@sabc:e2" }, "pi-other"))).toBe("Clicked");
     expect(f.calls.filter((c) => c.argv[0] === "click")).toHaveLength(1);
   });
 
@@ -297,7 +312,7 @@ describe("PC control tools", () => {
     expect(f.said(await f.call("desktop_pointer", args, "pi-other"))).toContain("used or expired");
     expect(f.said(await f.call("desktop_pointer", { ...args, to_x: 30 }))).toContain("Only drag");
     expect(f.said(await f.call("desktop_pointer", { ...args, x: 400 }))).toContain("outside the screenshot");
-    expect(f.said(await f.call("desktop_pointer", args, "pi-desktop", "pointer"))).toBe("Pointer click delivered");
+    expect(f.said(await f.ownerCall("desktop_pointer", args, "pi-desktop", "pointer"))).toBe("Pointer click delivered");
     expect(f.said(await f.call("desktop_pointer", args))).toContain("used or expired");
     expect(f.said(await f.call("desktop_pointer", args, "pi-desktop", "pointer"))).toBe("Pointer click delivered");
     expect(f.said(await f.call("desktop_pointer", { ...args, x: 11 }, "pi-desktop", "pointer"))).toContain("different input");
@@ -312,8 +327,8 @@ describe("PC control tools", () => {
   test("focus and launch never bring inaccessible or other-Scope windows forward", async () => {
     const f = fixture();
     f.state.windowVisible = false;
-    expect(f.said(await f.call("desktop_focus", { app: "TextEdit", window_id: "w-100" }))).toContain("another Scope");
-    expect(f.said(await f.call("desktop_launch", { app: "TextEdit" }))).toContain("another Scope");
+    expect(f.said(await f.call("desktop_focus", { app: "TextEdit", window_id: "w-100" }))).toContain("another Space");
+    expect(f.said(await f.call("desktop_launch", { app: "TextEdit" }))).toContain("another Space");
     f.state.windowVisible = true; f.state.windowAccessible = false;
     expect(f.said(await f.call("desktop_focus", { app: "TextEdit", window_id: "w-100" }))).toContain("inaccessible");
     expect(f.said(await f.call("desktop_launch", { app: "TextEdit" }))).toContain("inaccessible");
@@ -325,18 +340,19 @@ describe("PC control tools", () => {
   test("physical input refuses an invisible window before capture and after a captured window changes Scope", async () => {
     const f = fixture();
     f.state.windowVisible = false;
-    expect(f.said(await f.call("desktop_screenshot", { app: "TextEdit", window_id: "w-100" }))).toContain("another Scope");
+    expect(f.said(await f.call("desktop_screenshot", { app: "TextEdit", window_id: "w-100" }))).toContain("another Space");
     expect(f.calls.some((c) => c.runtime === "geist")).toBe(false);
     f.state.windowVisible = true;
     const capture = await f.call("desktop_screenshot", { app: "TextEdit", window_id: "w-100" });
     const screen_id = /screen_id (\S+):/.exec(f.said(capture))![1]!;
     f.state.windowVisible = false;
-    expect(f.said(await f.call("desktop_pointer", { screen_id, action: "click", x: 10, y: 10 }))).toContain("another Scope");
+    expect(f.said(await f.call("desktop_pointer", { screen_id, action: "click", x: 10, y: 10 }))).toContain("another Space");
     expect(f.calls.some((c) => c.runtime === "geist" && c.argv[0] === "click")).toBe(false);
   });
 
   test("both keyboard paths refuse system shortcuts across aliases, token order and duplicate modifiers", async () => {
     const f = fixture();
+    await f.focusBody();
     const shot = await f.call("desktop_screenshot", { app: "TextEdit" });
     const screen_id = /screen_id (\S+):/.exec(f.said(shot))![1]!;
     for (const keys of ["cmd+q", "shift+cmd+q", "cmd+alt+shift+q", "q+control+meta", "option+command+escape", "esc+alt+super", "cmd+shift+delete", "backspace+shift+meta", "CMD+CMD+Q"]) {
@@ -346,7 +362,7 @@ describe("PC control tools", () => {
     expect(f.calls.some((c) => c.argv[0] === "press" || c.argv[0] === "press_key")).toBe(false);
     // Refused shortcuts must not consume the screen or block ordinary keyboard use.
     expect((await f.call("desktop_keys", { screen_id, key: "Tab" })).isError).not.toBe(true);
-    expect((await f.call("desktop_press", { app: "TextEdit", keys: "cmd+s" })).isError).not.toBe(true);
+    expect((await f.ownerCall("desktop_press", { app: "TextEdit", keys: "cmd+s" })).isError).not.toBe(true);
     expect(f.calls.filter((c) => c.argv[0] === "press" || c.argv[0] === "press_key").map((c) => c.runtime === "geist" ? c.args?.key : c.argv[1])).toEqual(["Tab", "cmd+s"]);
   });
 
@@ -357,8 +373,9 @@ describe("PC control tools", () => {
     expect((await f.call("desktop_keys", { screen_id: /screen_id (\S+):/.exec(f.said(shot))![1]!, text: "Do not enter" })).isError).toBe(true);
     expect(f.calls.some((c) => c.argv[0] === "type_text")).toBe(false);
     f.state.protectedScreen = false;
+    await f.focusBody();
     const clean = await f.call("desktop_screenshot", { app: "TextEdit" });
-    expect((await f.call("desktop_keys", { screen_id: /screen_id (\S+):/.exec(f.said(clean))![1]!, text: "Draft" })).isError).not.toBe(true);
+    expect((await f.ownerCall("desktop_keys", { screen_id: /screen_id (\S+):/.exec(f.said(clean))![1]!, text: "Draft" })).isError).not.toBe(true);
     expect(f.calls.filter((c) => c.argv[0] === "type_text")).toHaveLength(1);
   });
 
@@ -366,7 +383,7 @@ describe("PC control tools", () => {
     const f = fixture();
     f.state.tree.children[2] = { ...f.state.tree.children[2]!, role: "securetextfield", name: "Password" };
     await f.call("desktop_snapshot", { app: "TextEdit" });
-    expect((await f.call("desktop_click", { ref: "@sabc:e3" })).isError).not.toBe(true);
+    expect((await f.ownerCall("desktop_click", { ref: "@sabc:e3" })).isError).not.toBe(true);
     const shot = await f.call("desktop_screenshot", { app: "TextEdit" });
     expect((await f.call("desktop_keys", { screen_id: /screen_id (\S+):/.exec(f.said(shot))![1]!, key: "Tab" })).isError).toBe(true);
     expect(f.calls.some((c) => c.argv[0] === "press_key")).toBe(false);

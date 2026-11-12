@@ -1,11 +1,19 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { reviewOf, type Ghost } from "@ghost/contract";
+import { reviewOf, type ApprovalPolicy, type Ghost } from "@ghost/contract";
 import { join } from "node:path";
 import type { Core } from "../src/core/core.ts";
 import { harness, tempDir } from "./support.ts";
+import { approvalRules } from "../src/core/policy.ts";
 
 const MINUTE = 60_000;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+function setApprovalRules(t: { core: Core }, policy: ApprovalPolicy) {
+  t.core.ledger.tx(() => {
+    t.core.ledger.putSetting("approvals", policy);
+    for (const rule of t.core.ledger.policyRules()) t.core.ledger.deletePolicyRule(rule.id);
+    for (const rule of approvalRules(policy)) t.core.ledger.putPolicyRule(rule);
+  });
+}
 
 /** A main Ghost and a teammate whose Work asks; the main is created first and so is the default. */
 async function team(path = ":memory:") {
@@ -17,10 +25,10 @@ async function team(path = ":memory:") {
   const conversationId = h.ledger.work(work.id).conversationId!;
   const ask = (recommended?: string, id = "q1") =>
     h.core.decisions.ask(conversationId, "어느 쪽으로 할까요?", "", ["A", "B"], id, recommended ? { review: { recommend: "answer", answer: recommended, expiresAt: null } } : null);
-  /** A Mac command approval; `risk` decides whether it is reversible. */
-  const command = (risk: string, callId = "c1") => {
+  /** Tests declare confinement as a Host observation, never infer it from the model's risk string. */
+  const command = (risk: string, callId = "c1", confined = false) => {
     h.core.effects.onApproved("host_command_propose", async () => "ran");
-    const effect = h.core.effects.propose({ conversationId, callId, tool: "host_command_propose", input: { callId }, summary: "cmd", title: "명령 실행", detail: "", proposal: { risk, command: "x", input: { callId } } });
+    const effect = h.core.effects.propose({ conversationId, callId, tool: "host_command_propose", input: { callId }, summary: "cmd", title: "명령 실행", detail: "", proposal: { risk, command: "x", input: { callId } }, ...(confined ? { classification: { target: { kind: "workspace" as const, id: work.id }, access: "write" as const, reversible: true, external: false, amount: null } } : {}) });
     return h.ledger.pendingDecisions({ effectId: effect.id })[0]!;
   };
   return { ...h, main, mate, work, conversationId, ask, command };
@@ -150,15 +158,15 @@ describe("approvals that do not wait forever", () => {
     t.ledger.tx(() => {
       t.ledger.putDecision({ ...edit, proposal: { ...edit.proposal, pageId: "existing", review: undefined } });
       t.ledger.putDecision({ ...optedOut, proposal: { ...optedOut.proposal, review: undefined } });
-      t.ledger.putSetting("approvals", { autoMinutes: 30, delegate: "reversible", ghosts: { [t.mate.id]: "owner" } });
+      setApprovalRules(t, { autoMinutes: 30, delegate: "reversible", ghosts: { [t.mate.id]: "owner" } });
     });
     let writes = 0;
     t.core.decisions.onDocumentApproved(async () => { writes++; return "Saved."; });
     await t.core.decisions.recover();
-    expect(t.ledger.decision(edit.id).state).toBe("pending");
-    expect(reviewOf(t.ledger.decision(edit.id).proposal)).toBeNull();
-    expect(t.ledger.decision(optedOut.id).state).toBe("pending");
-    expect(reviewOf(t.ledger.decision(optedOut.id).proposal)?.expiresAt).toBeNull();
+    expect(t.ledger.decision(edit.id).state).toBe("denied");
+    expect(t.ledger.decision(optedOut.id).state).toBe("denied");
+    expect(t.ledger.decisionsAwaitingFollowUp().some((decision) => decision.id === edit.id && decision.state === "approved")).toBe(false);
+    expect(t.ledger.decisionsAwaitingFollowUp().some((decision) => decision.id === optedOut.id && decision.state === "approved")).toBe(false);
     expect(writes).toBe(0);
   });
 
@@ -201,12 +209,12 @@ describe("approvals that do not wait forever", () => {
     expect(reviewOf(decision.proposal)).toBeNull();
     await t.core.decisions.settleExpired(decision.createdAt + 24 * 60 * MINUTE);
     expect(t.ledger.decision(decision.id).state).toBe("pending");
-    expect(() => t.core.decisions.resolveState(decision.id, { outcome: "answer", answer: "A" }, "timeout")).toThrow("only the owner");
+    expect(() => t.core.decisions.resolveState(decision.id, { outcome: "answer", answer: "A" }, "timeout")).toThrow("live policy does not permit automatic settlement");
   });
 
   test("the main Ghost is asked first and may settle a teammate's reversible request, telling the owner why", async () => {
     const t = await team();
-    const decision = t.command("설정 파일을 다시 읽습니다");
+    const decision = t.command("설정 파일을 다시 읽습니다", "c1", true);
     await tick();
     const wake = t.engine.to(t.main.directConversationId).find((item) => item.requestId === `decision-review:${decision.id}`);
     expect(wake?.origin).toBe("schedule");
@@ -233,14 +241,14 @@ describe("approvals that do not wait forever", () => {
     const t = await team();
     const decision = t.command("삭제: 파일이 영구 제거될 수 있습니다.");
     await tick();
-    expect(reviewOf(decision.proposal)).toBeNull();
+    expect(reviewOf(decision.proposal)?.expiresAt).toBeNull();
     const wake = t.engine.to(t.main.directConversationId).find((item) => item.requestId === `decision-review:${decision.id}`);
     expect(wake?.text).toContain("only the owner can make");
     await expect(t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "x" })).rejects.toThrow("only the owner");
 
     await t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "leave", note: "지우는 폴더가 빌드 결과물뿐입니다. 승인해도 됩니다." });
     const noted = t.ledger.decision(decision.id);
-    expect(reviewOf(noted.proposal)).toEqual({ expiresAt: null, mainNote: "지우는 폴더가 빌드 결과물뿐입니다. 승인해도 됩니다." });
+    expect(reviewOf(noted.proposal)).toMatchObject({ recommend: "approve", expiresAt: null, mainNote: "지우는 폴더가 빌드 결과물뿐입니다. 승인해도 됩니다." });
     await t.core.decisions.settleExpired(decision.createdAt + 24 * 60 * MINUTE);
     expect(t.ledger.decision(decision.id).state).toBe("pending");
     // The owner still approves it, and the note never changes what runs.
@@ -257,9 +265,9 @@ describe("approvals that do not wait forever", () => {
   test("a Ghost set to owner-only keeps every decision with the owner, even ones already waiting", async () => {
     const t = await team();
     const waiting = t.ask("A", "before");
-    t.ledger.putSetting("approvals", { autoMinutes: 30, delegate: "reversible", ghosts: { [t.mate.id]: "owner" } });
+    setApprovalRules(t, { autoMinutes: 30, delegate: "reversible", ghosts: { [t.mate.id]: "owner" } });
     await t.core.decisions.settleExpired(waiting.createdAt + 31 * MINUTE);
-    expect(t.ledger.decision(waiting.id).state).toBe("pending");
+    expect(t.ledger.decision(waiting.id).state).toBe("denied");
 
     const later = t.ask("A", "after");
     await tick();
@@ -271,7 +279,7 @@ describe("approvals that do not wait forever", () => {
 
   test("turning automation off keeps the recommendation but never settles", async () => {
     const t = await team();
-    t.ledger.putSetting("approvals", { autoMinutes: 0, delegate: "none" });
+    setApprovalRules(t, { autoMinutes: 0, delegate: "none" });
     const decision = t.ask("A");
     await tick();
     expect(reviewOf(decision.proposal)).toMatchObject({ answer: "A", expiresAt: null });
@@ -306,7 +314,7 @@ describe("accepting a result for the owner", () => {
     const done = t.ledger.work(work.id);
     expect(done.state).toBe("done");
     expect(done.verdict?.source).toBe("owner");
-    expect(done.verdict?.reasons).toContain("main Ghost");
+    expect(done.verdict?.reasons).toContain("Accepted by Main");
     expect(reviewOf(t.ledger.decision(decision.id).proposal)?.resolvedBy).toBe("main");
   });
 
@@ -326,7 +334,7 @@ describe("accepting a result for the owner", () => {
     await t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "deny", note: "보고서에 바꾼 파일 이름이 없습니다. 파일 이름을 넣어 다시 보고해 주세요." });
     await t.core.idle();
     const reasons = t.ledger.work(work.id).verdict?.reasons ?? "";
-    expect(reasons).toContain("main Ghost asked for changes");
+    expect(reasons).toContain("Main asked for changes");
     expect(reasons).toContain("파일 이름을 넣어 다시 보고해 주세요");
   });
 
@@ -380,7 +388,7 @@ describe("accepting a result for the owner", () => {
     const decision = t.ledger.pendingDecisions({ effectId: effect.id })[0]!;
     await tick();
     expect(t.engine.to(t.main.directConversationId).find((item) => item.requestId === `decision-review:${decision.id}`)).toBeUndefined();
-    await expect(t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "x" })).rejects.toThrow("the owner decides this one themselves");
+    await expect(t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "x" })).rejects.toThrow("not the live policy reviewer");
   });
 });
 
@@ -423,10 +431,10 @@ describe("handing a decision to the main Ghost", () => {
     const unrecommended = t.ask(undefined, "free");
     expect(() => handOver(t, unrecommended.id)).toThrow("reversible");
     const own = t.core.decisions.ask(t.main.directConversationId, "제 질문", "", ["A"], "own", { review: { recommend: "answer", answer: "A", expiresAt: null } });
-    expect(() => handOver(t, own.id)).toThrow("own requests");
-    t.ledger.putSetting("approvals", { autoMinutes: 30, delegate: "none" });
+    expect(() => handOver(t, own.id)).toThrow("no active main Ghost");
+    setApprovalRules(t, { autoMinutes: 30, delegate: "none" });
     const off = t.ask("A", "off");
-    expect(() => handOver(t, off.id)).toThrow("turned off");
+    expect(() => handOver(t, off.id)).toThrow("no active main Ghost");
   });
 
   test("a lost hand-over wake is retried by the clock with the same request id", async () => {
@@ -474,7 +482,7 @@ describe("one owner alert per decision", () => {
 
   test("a reversible request the main settles is one notice of its decision", async () => {
     const t = await team();
-    const decision = t.command("설정 파일을 다시 읽습니다");
+    const decision = t.command("설정 파일을 다시 읽습니다", "c1", true);
     await t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "읽기만 하는 명령이라 승인했습니다." });
     expect(alerts(t)).toEqual([`decision-main:${decision.id}`]);
   });

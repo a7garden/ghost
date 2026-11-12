@@ -1136,7 +1136,7 @@ describe("host command approval", () => {
       const decision = h.ledger.pendingDecisions()[0]!;
       expect(decision.kind).toBe("approve_effect");
       expect(h.ledger.effectByCall(conversation.id, "mutate")?.state).toBe("pending");
-      await h.core.effects.resolveApproval(decision.effectId!, true);
+      await h.core.decisions.resolve(decision.id, { outcome: "approve" });
       expect(calls).toHaveLength(2);
       expect(calls[1]!.inspection).toBe(false);
     } finally {
@@ -1176,7 +1176,7 @@ describe("host command approval", () => {
       reason: "Inspect explicitly",
     });
     expect(probes.executions).toBe(0);
-    await h.core.effects.resolveApproval(decision.effectId!, true);
+    await h.core.decisions.resolve(decision.id, { outcome: "approve" });
     expect(probes.executions).toBe(1);
     expect(h.ledger.effect(decision.effectId!).state).toBe("done");
     await invoke(command("/project"), api("expired"));

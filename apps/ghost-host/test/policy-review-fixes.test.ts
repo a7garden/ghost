@@ -174,10 +174,14 @@ function slotReview() {
     const callId = `slot-${++sequence}`;
     const args = { decision_id: decision.id, outcome: "leave", note: "Independent slot review" };
     const commit = async (read: (tx: unknown) => Promise<unknown>) => {
-      const execution = await actual() as { model: { provider: string; modelId: string }; thinkingLevel: string };
+      const execution = await actual() as { model: { provider: string; modelId: string }; thinkingLevel: string; invalid?: string };
       const message = { role: "assistant", provider: execution.model.provider, model: execution.model.modelId, content: [{ type: "toolCall", id: callId, name: "decision_settle", arguments: args }] };
-      h.ledger.tx(() => h.ledger.putSetting(`policy:review-response:${wake.id}:${callId}`, { generationTaskId: "73", messageDigest: digestOf(message), provider: message.provider, model: message.model, thinking: execution.thinkingLevel, slotDigest: digestOf(slot) }));
-      return read({ task: async () => ({ kind: "pi.tool", conversationId: "slot-review-pi", owner: 73, input: { assistant: 75, callId } }), entry: async () => ({ kind: "pi.assistant", conversationId: "slot-review-pi", model: [message] }) });
+      const request = { generationTaskId: "73", attempt: 1, cutoff: "70", provider: message.provider, model: message.model, thinking: execution.thinkingLevel, slotDigest: digestOf(slot), ...(execution.invalid ? { invalid: execution.invalid } : {}) };
+      h.ledger.tx(() => {
+        h.ledger.putSetting(`policy:review-request:${wake.id}:73:1:70`, request);
+        h.ledger.putSetting(`policy:review-response:${wake.id}:${callId}`, { ...request, messageDigest: digestOf(message) });
+      });
+      return read({ task: async (id: unknown) => id === 73 ? { kind: "pi.generation", conversationId: "slot-review-pi", state: { checkpoint: { phase: "tools", assistant: 75 } } } : { kind: "pi.tool", conversationId: "slot-review-pi", owner: 73, input: { assistant: 75, callId } }, entry: async () => ({ kind: "pi.assistant", conversationId: "slot-review-pi", model: [message] }) });
     };
     return tool.execute(args as never, { conversationId: "slot-review-pi", taskId: 74, callId, agent, commit } as unknown as ToolExecutionApi, {} as Context);
   };
@@ -215,6 +219,13 @@ test("a slot change during actual execution lookup revokes settlement before aud
   h.ledger.tx(() => h.ledger.putSetting("slots", { careful: { ...h.slot, model: { provider: "other", model: "other" } } }));
   release.resolve({ model: { provider: "provider", modelId: "model" }, thinkingLevel: "off" });
   expect((await result).isError).toBe(true);
+  expect(h.ledger.decision(h.decision.id).proposal!.reviewedBy).toBeUndefined();
+});
+
+test("an invalidated immutable response proof never settles even when its model matches", async () => {
+  const h = slotReview();
+  const result = await h.invoke(async () => ({ model: { provider: "provider", modelId: "model" }, thinkingLevel: "off", invalid: "Slot changed during generation" }));
+  expect(result.isError).toBe(true);
   expect(h.ledger.decision(h.decision.id).proposal!.reviewedBy).toBeUndefined();
 });
 

@@ -239,7 +239,9 @@ describe("effects", () => {
   test("approval-pending proposals allow later writes and survive recovery", async () => {
     const { core, ledger, ghost } = setup();
     try {
-      const conversationId = ghost.directConversationId;
+      const work = core.works.createRoot({ ghostId: ghost.id, title: "Pending and local", brief: "Keep independent steps", originConversationId: ghost.directConversationId });
+      await core.idle();
+      const conversationId = ledger.work(work.id).conversationId!;
       core.effects.onApproved("host_command_propose", async () => "approved");
       const proposal = core.effects.propose({
         conversationId, callId: "proposal", tool: "host_command_propose", input: {}, summary: "Optional change",

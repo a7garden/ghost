@@ -285,7 +285,10 @@ test("revocation after SMTP acceptance records an unknown effect, never a no-eff
   try {
     await expect(h.core.effects.run({
       conversationId: ghost.directConversationId, callId: "accepted-then-revoked", tool: "mail_send", input: {}, summary: "Send approved mail",
-    }, async () => JSON.stringify(await f.mail.send("Fixture", { to: ["to@example.com"], subject: "Accepted", text: "Body" }, { authorize })))).rejects.toMatchObject({ code: "unavailable" });
+    }, async () => JSON.stringify(await f.mail.send("Fixture", { to: ["to@example.com"], subject: "Accepted", text: "Body" }, { authorize })))).rejects.toThrow("approval required");
+    expect(f.sent).toHaveLength(0);
+    const decision = h.ledger.pendingDecisions()[0]!;
+    await h.core.decisions.resolve(decision.id, { outcome: "approve" });
     expect(f.sent).toHaveLength(1);
     expect(h.ledger.effectsInState("unknown")).toHaveLength(1);
     expect(h.ledger.effectsInState("denied")).toHaveLength(0);

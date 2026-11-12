@@ -102,7 +102,7 @@ export class Decisions {
   }
 
   /** Must run inside a ledger transaction. */
-  openAcceptance(work: Work, note: string | null) {
+  openAcceptance(work: Work, note: string | null, policy?: PolicyReceipt) {
     if (this.ledger.pendingDecisions({ workId: work.id }).some((decision) => decision.kind === "accept_result")) return;
     this.open({
       kind: "accept_result",
@@ -113,7 +113,7 @@ export class Decisions {
       title: `결과 확인: ${work.title}`.slice(0, 200),
       detail: [note, work.result?.summary].filter(Boolean).join("\n\n"),
       options: [],
-      proposal: work.result ? { result: work.result, criteria: work.acceptance.criteria } : null,
+      proposal: work.result ? { result: work.result, criteria: work.acceptance.criteria, workRevision: work.revision, ...(policy ? { policy, acceptancePolicy: policy.classification, checksFingerprint: this.core.works.verifiedChecks(work)?.fingerprint ?? null } : {}) } : null,
     });
   }
 
@@ -337,8 +337,19 @@ export class Decisions {
       const capability = proposal.capability as CapabilityRequest;
       classification = { ...classification, target: { kind: capability.hostExecution || capability.tools.some((name) => HOST_TOOLS.includes(name)) ? "mac" : "host", id: capability.ghostId }, reversible: true, external: false };
     }
+    const acceptance = decision.kind === "accept_result" ? proposal.acceptancePolicy as PolicyReceipt["classification"] | undefined : undefined;
+    if (acceptance) classification = { ...acceptance, tool, taint: classification.taint };
     const prior = proposal.policy as PolicyReceipt | undefined;
     const receipt = evaluateStoredPolicy(this.core, decision.conversationId, classification, prior, reserve);
+    if (decision.kind === "accept_result" && decision.workId) {
+      const work = this.ledger.work(decision.workId);
+      const verified = this.core.works.verifiedChecks(work);
+      if (work.state !== "verifying" || proposal.workRevision !== undefined && proposal.workRevision !== work.revision
+        || proposal.result && digestOf(proposal.result) !== digestOf(work.result)
+        || acceptance?.target.kind === "workspace" && (!verified || verified.fingerprint !== proposal.checksFingerprint)) {
+        receipt.evaluation = { ...receipt.evaluation, decision: "deny", decidedBy: [], reviewers: [], autoResolve: null, reason: "The Work revision or Host verification evidence changed while acceptance waited; fresh verification is required." };
+      }
+    }
     if (tool === "complete" && receipt.evaluation.decision === "allow") receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: [], autoResolve: null, reason: "Policy cannot accept an unverified completion claim. Checks, an independent reviewer or the owner must verify this result." };
     if (receipt.evaluation.decision !== "deny" && (proposal.forceOwner || proposal.secureForm || proposal.browserHandoff || proposal.capability)) receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: proposal.capability ? receipt.evaluation.reviewers : [], autoResolve: null, reason: "Owner authorization is required to widen configuration or provide credentials." };
     return receipt;
@@ -552,6 +563,16 @@ export class Decisions {
       if (reviewer?.slot) throw conflict(`Reviewer slot ${reviewer.slot} requires a configured wake engine; ask the owner to decide explicitly`);
       await this.core.engine.submit(main.directConversationId, submission);
     }
+    this.ledger.tx(() => {
+      const latest = this.ledger.decision(decision.id);
+      const liveReviewer = this.reviewer(latest);
+      if (latest.state === "pending" && latest.proposal?.policyReviewUnavailable && liveReviewer?.ghost.id === main.id && liveReviewer.slot === reviewer?.slot) {
+        const clean = { ...latest, proposal: { ...latest.proposal, policyReviewUnavailable: false } };
+        const live = this.evaluateDecision(clean);
+        const authorized = latest.proposal.policy as PolicyReceipt | undefined;
+        if (live && authorized?.rulesDigest === live.rulesDigest) this.ledger.putDecision(this.withReview(clean));
+      }
+    });
   }
 
   /** Wake the main to settle a decision the owner handed over; it leaves it back only when it truly cannot judge. */

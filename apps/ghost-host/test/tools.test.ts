@@ -597,18 +597,27 @@ describe("tools", () => {
       expect(env.cwd).not.toBe(realpathSync(repo)); // the environment runs at the Work's own checkout
       const worktree = realpathSync(env.cwd);
 
-      const written = await call(toolOf(s, conversation, s.ghost, "write"), { path: "report.txt", content: "worktree bytes" }, apiOf(pi, "wt-write", env));
+      const ownerExecutes = async (name: string, args: unknown, callId: string) => {
+        const tool = toolOf(s, conversation, s.ghost, name);
+        const api = apiOf(pi, callId, env);
+        expect((await call(tool, args, api)).isError).toBe(true);
+        const effect = s.ledger.effectByCall(conversation.id, callId)!;
+        const decision = s.ledger.pendingDecisions({ effectId: effect.id })[0]!;
+        await s.core.decisions.resolve(decision.id, { outcome: "approve" });
+        return call(tool, args, api);
+      };
+      const written = await ownerExecutes("write", { path: "report.txt", content: "worktree bytes" }, "wt-write");
       expect(written.isError).toBeFalsy();
       expect(readFileSync(join(worktree, "report.txt"), "utf8")).toBe("worktree bytes");
       expect(readFileSync(join(repo, "report.txt"), "utf8")).toBe("repo bytes");
 
-      const staged = await call(toolOf(s, conversation, s.ghost, "write"), { path: "notes.md", content: "checkout only" }, apiOf(pi, "wt-stage", env));
+      const staged = await ownerExecutes("write", { path: "notes.md", content: "checkout only" }, "wt-stage");
       expect(staged.isError).toBeFalsy();
       expect(statSync(join(repo, "notes.md")).isDirectory()).toBe(true);
 
       // A refused edit classifies against the checkout: a recorded-cwd check would have found no
       // comparable file and left the outcome unknown instead of a clean refusal.
-      const refused = await call(toolOf(s, conversation, s.ghost, "edit"), { path: "notes.md", edits: [{ oldText: "text that is not there", newText: "x" }] }, apiOf(pi, "wt-edit", env));
+      const refused = await ownerExecutes("edit", { path: "notes.md", edits: [{ oldText: "text that is not there", newText: "x" }] }, "wt-edit");
       expect(refused.isError).toBe(true);
       const editEffects = s.ledger.effectsForWork(work.id).filter((effect) => effect.tool === "edit");
       expect(editEffects).toHaveLength(1);
@@ -616,7 +625,7 @@ describe("tools", () => {
       expect(readFileSync(join(worktree, "notes.md"), "utf8")).toBe("checkout only");
 
       // Publishing attaches the checkout's bytes, never the recorded cwd's same-named bytes.
-      const published = await call(toolOf(s, conversation, s.ghost, "publish_artifact"), { path: "report.txt" }, apiOf(pi, "wt-publish", env));
+      const published = await ownerExecutes("publish_artifact", { path: "report.txt" }, "wt-publish");
       expect(published.isError).toBeFalsy();
       const refs = s.ledger.artifactsForWork(work.id);
       expect(refs).toHaveLength(1);
@@ -765,7 +774,7 @@ describe("tools", () => {
     const helper = s.core.createGhost({ name: "Helper", persona: "You help." });
     const pi = asPi(s, s.direct, "pi-direct");
     const update = toolOf(s, s.direct, s.ghost, "ghost_update");
-    const spoken = () => s.ledger.notificationsForState().filter((item) => item.kind === "message");
+    const spoken = () => s.ledger.notificationsForState().filter((item) => item.kind === "message" && item.title.includes("허용"));
 
     const renamed = await call(update, { ghost_id: helper.id, name: "Helper 2" }, apiOf(pi, "rename"));
     expect(renamed.isError).toBeFalsy();
@@ -773,6 +782,10 @@ describe("tools", () => {
 
     const granted = await call(update, { ghost_id: helper.id, host_execution: true, tools: [...helper.tools, "host_read"] }, apiOf(pi, "grant"));
     expect(granted.isError).toBeFalsy();
+    expect(s.ledger.ghost(helper.id).hostExecution).toBe(false);
+    expect(s.ledger.ghost(helper.id).tools).not.toContain("host_read");
+    const pending = s.ledger.pendingDecisions().find((decision) => decision.effectId === s.ledger.effectByCall(s.direct.id, "grant")?.id)!;
+    await s.core.decisions.resolve(pending.id, { outcome: "approve" });
     const after = s.ledger.ghost(helper.id);
     expect(after.hostExecution).toBe(true);
     expect(after.tools).toContain("host_read");

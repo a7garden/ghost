@@ -8,7 +8,8 @@ import { digestOf, newId } from "./ids.ts";
 import { verifyChecks } from "./verify.ts";
 import { policyTaint } from "./policy-context.ts";
 import { validateExecutionTarget } from "../sandbox/index.ts";
-import { classifyEffect, evaluateStoredPolicy } from "./policy-context.ts";
+import { classifyEffect, evaluateStoredPolicy, type PolicyReceipt } from "./policy-context.ts";
+import { approvalRules } from "./policy.ts";
 
 /** Reminders sent when a work conversation stops without completing; a quota-ended turn never counts. */
 const MAX_IDLE_NUDGES = 2;
@@ -639,10 +640,28 @@ export class Works {
     return next;
   }
 
+  private verificationFingerprint(work: Work): string {
+    return digestOf({
+      revision: work.revision, attempt: work.revisionsUsed, acceptance: work.acceptance, result: work.result,
+      artifacts: this.ledger.artifactsForWork(work.id),
+      shells: this.ledger.effectsForWork(work.id).filter((effect) => effect.tool === "bash").map((effect) => ({ id: effect.id, state: effect.state, summary: effect.summary, result: effect.result })),
+    });
+  }
+
+  verifiedChecks(work: Work) {
+    const receipt = this.ledger.setting<{ fingerprint: string; pass: boolean; count: number; at: number } | null>(`work:checks:${work.id}`, null);
+    return receipt?.pass && receipt.count > 0 && receipt.count === work.acceptance.checks.length && receipt.fingerprint === this.verificationFingerprint(work) ? receipt : null;
+  }
+
   /** A verdict from checks, a reviewer or the owner. */
   applyVerdict(workId: string, verdict: Verdict) {
     const work = this.ledger.work(workId);
     if (work.state !== "verifying") return work;
+    const verified = this.verifiedChecks(work);
+    if (verdict.outcome === "pass" && verdict.source === "checks" && (!verified || work.parentId || work.acceptance.reviewer)) {
+      this.ledger.tx(() => this.core.decisions.openAcceptance(work, "Acceptance requires successful Host-recorded checks on the current Work revision and all configured independent reviews."));
+      return work;
+    }
     if (verdict.outcome === "pass" && verdict.source === "review") {
       const reviewer = this.ledger.conversations({ kind: "review" }).find((conversation) => conversation.workId === work.id);
       const model = work.acceptance.reviewer?.kind === "model" ? work.acceptance.reviewer.model : null;
@@ -650,22 +669,29 @@ export class Works {
         reviewer.model.provider === model.provider && reviewer.model.model === model.model
         && (reviewer.model.thinking ?? "off") === (model.thinking ?? "off")
       ));
-      if (!reviewer || reviewer.id === work.conversationId || (reviewer.ghostId === work.ghostId && !explicitModelReview)) {
+      if (!reviewer || reviewer.id === work.conversationId || (reviewer.ghostId === work.ghostId && !explicitModelReview) || reviewer.ghostId !== this.reviewerGhost(work) || this.ledger.ghost(reviewer.ghostId).state !== "active" || work.acceptance.checks.length > 0 && !verified) {
         this.ledger.tx(() => this.core.decisions.openAcceptance(work, "An independent reviewer or the owner must verify this result; a Ghost cannot accept its own work."));
         return work;
       }
     }
     if (verdict.outcome === "pass" && work.conversationId) {
-      const receipt = this.ledger.tx(() => evaluateStoredPolicy(this.core, work.conversationId!, {
-        ...classifyEffect(this.core, work.conversationId!, "complete", null),
-        reversible: !!work.result && work.acceptance.criteria.trim().length > 0,
-      }));
+      const receipt = this.ledger.tx(() => {
+        const key = `policy:acceptance:${work.id}:${work.revision}:${work.revisionsUsed}`;
+        const prior = this.ledger.setting<PolicyReceipt | null>(key, null);
+        const current = evaluateStoredPolicy(this.core, work.conversationId!, {
+          ...classifyEffect(this.core, work.conversationId!, "complete", null),
+          ...(verified ? { target: { kind: "workspace" as const, id: work.id } } : {}),
+          reversible: !!verified || !!work.result && (work.acceptance.criteria.trim().length > 0 || verdict.source === "review"),
+        }, prior ?? undefined, true);
+        this.ledger.putSetting(key, current);
+        return current;
+      });
       if (receipt.evaluation.decision === "deny") verdict = { ...verdict, outcome: "revise", reasons: receipt.evaluation.reason };
       else if (verdict.source !== "owner" && (receipt.evaluation.decision === "owner" || receipt.evaluation.decision === "review" && receipt.evaluation.decidedBy.some((id) => {
         const rule = this.ledger.policyRule(id);
-        return rule.createdBy.kind !== "install" || rule.revision > 1;
+        return verdict.source !== "review" || digestOf(rule) !== digestOf(approvalRules(this.ledger.settings().approvals).find((entry) => entry.id === "result"));
       }))) {
-        this.ledger.tx(() => this.core.decisions.openAcceptance(work, receipt.evaluation.reason));
+        this.ledger.tx(() => this.core.decisions.openAcceptance(work, receipt.evaluation.reason, receipt));
         return work;
       }
     }
@@ -1109,8 +1135,22 @@ export class Works {
     }
     const checks = this.inheritedChecks(work);
     if (checks.length > 0) {
-      const outcome = await verifyChecks(this.core, work, checks);
-      if (!outcome.pass || !work.parentId) {
+      const fingerprint = this.verificationFingerprint(work);
+      let outcome = await verifyChecks(this.core, work, checks);
+      const current = this.ledger.work(work.id);
+      if (current.state !== "verifying" || this.verificationFingerprint(current) !== fingerprint) {
+        if (current.state === "verifying") this.ledger.tx(() => this.core.decisions.openAcceptance(current, "The Work revision or evidence changed while checks were running; fresh checks are required."));
+        return;
+      }
+      const commandsFresh = checks.every((check) => {
+        if (check.kind !== "command_exit_zero" && check.kind !== "command_stdout") return true;
+        const effect = this.ledger.effectsForWork(work.id).filter((entry) => entry.tool === "bash" && entry.state === "done" && entry.summary === check.command).at(-1);
+        const binding = effect ? this.ledger.setting<{ revision: number; attempt: number } | null>(`effect:work-binding:${effect.id}`, null) : null;
+        return binding?.revision === work.revision && binding.attempt === work.revisionsUsed;
+      });
+      if (outcome.pass && !commandsFresh) outcome = { pass: false, reasons: "Required commands have no execution receipt for the current Work revision and attempt." };
+      this.ledger.tx(() => this.ledger.putSetting(`work:checks:${work.id}`, { ...outcome, fingerprint, count: checks.length, at: Date.now() }));
+      if (!outcome.pass || !work.parentId && !work.acceptance.reviewer) {
         this.applyVerdict(work.id, { outcome: outcome.pass ? "pass" : "revise", source: "checks", reasons: outcome.reasons, at: Date.now() });
         return;
       }

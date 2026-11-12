@@ -190,7 +190,7 @@ const ROWS: readonly Row[] = [
   { id: "capability-mac", tool: "capability_request", when: { targetKind: "mac" }, decision: "review", main: true },
   { id: "question-recommended", tool: "ask_owner", when: { reversible: true }, decision: "review", main: true, auto: "recommended" },
   // A result is never accepted on silence (2026-11-12).
-  { id: "result", tool: "complete", when: { reversible: true }, decision: "review", main: true },
+  { id: "result", tool: "complete", when: { targetKind: "host", reversible: true }, decision: "review", main: true },
   { id: "document-write", tool: "document_write", when: { targetKind: "document_vault" }, decision: "allow" },
   { id: "outside-mac", tool: "*", when: { targetKind: "mac", access: "write", reversible: false }, decision: "owner" },
   { id: "browser-unknown-effect", tool: "browser_*", when: { targetKind: "browser_origin", reversible: false }, decision: "owner" },
@@ -221,7 +221,7 @@ export function approvalRules(approvals: ApprovalPolicy = DEFAULT_APPROVAL_POLIC
   const owned = Object.entries(approvals.ghosts ?? {}).filter(([, mode]) => mode === "owner").map(([ghostId]) => ghostId).sort();
   for (const ghostId of owned) {
     for (const row of ROWS) {
-      if (row.decision === "review") rules.push(ruleOf({ ...row, decision: "owner", auto: undefined }, approvals, { id: `${row.id}:${ghostId}`, ghostId }));
+      if (row.decision === "review") rules.push(ruleOf({ ...row, ...(row.id === "result" ? { when: { reversible: true } } : {}), decision: "owner", auto: undefined }, approvals, { id: `${row.id}:${ghostId}`, ghostId }));
     }
   }
   return rules;

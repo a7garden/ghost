@@ -297,19 +297,27 @@ export function createMainTools(core: Core): Extension {
             const task = await tx.task(api.taskId);
             const input = task?.input;
             if (!task || task.kind !== "pi.tool" || task.conversationId !== api.conversationId || task.owner === undefined || !input || typeof input !== "object" || Array.isArray(input) || input.callId !== api.callId || typeof input.assistant !== "number") throw forbidden("The reviewer tool has no durable calling assistant identity");
+            const generation = await tx.task(task.owner);
+            const checkpoint = generation?.state.checkpoint;
+            if (!generation || generation.kind !== "pi.generation" || generation.conversationId !== api.conversationId || generation.abortRequested || task.abortRequested || !checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint) || checkpoint.phase !== "tools" || checkpoint.assistant !== input.assistant) throw forbidden("The calling assistant is not bound to an active generation tool round");
             const entry = await tx.entry(AssistantEntry, input.assistant as EntryId);
             const message = entry?.model?.find((item) => item.role === "assistant");
             const call = message?.content.find((part) => part.type === "toolCall" && part.id === api.callId);
             if (entry?.conversationId !== api.conversationId || !message || !call || call.type !== "toolCall" || call.name !== "decision_settle" || digestOf(call.arguments) !== digestOf(args)) throw forbidden("The settlement does not match its exact calling assistant entry");
             return { generationTaskId: String(task.owner), messageDigest: digestOf(message), provider: message.provider, model: message.model };
           }, context);
-          const proof = core.ledger.setting<{ generationTaskId: string; messageDigest: string; provider: string; model: string; thinking: string; slotDigest: string; invalid?: string } | null>(`policy:review-response:${scope.conversation.id}:${api.callId}`, null);
+          type ExecutionProof = { generationTaskId: string; attempt: number; cutoff: string; messageDigest?: string; provider: string; model: string; thinking: string; slotDigest: string; invalid?: string };
+          const proof = core.ledger.setting<ExecutionProof | null>(`policy:review-response:${scope.conversation.id}:${api.callId}`, null);
+          const request = proof ? core.ledger.setting<ExecutionProof | null>(`policy:review-request:${scope.conversation.id}:${proof.generationTaskId}:${proof.attempt}:${proof.cutoff}`, null) : null;
           const liveConversation = core.ledger.conversation(scope.conversation.id);
           const liveSlot = core.ledger.settings().slots?.[slotName];
           if (liveConversation.kind !== "wake" || liveConversation.model !== null
             || core.ledger.setting<string | null>(`wake:decision:${liveConversation.id}`, null) !== args.decision_id || core.ledger.setting<string | null>(`wake:slot:${liveConversation.id}`, null) !== slotName
             || !liveSlot || digestOf(liveSlot) !== snapshot || core.decisions.reviewer(core.ledger.decision(args.decision_id))?.slot !== slotName
             || !proof || proof.invalid || proof.generationTaskId !== requesting.generationTaskId || proof.messageDigest !== requesting.messageDigest
+            || !request || request.invalid || !Number.isInteger(proof.attempt) || proof.attempt < 1 || typeof proof.cutoff !== "string"
+            || request.generationTaskId !== proof.generationTaskId || request.attempt !== proof.attempt || request.cutoff !== proof.cutoff || request.slotDigest !== snapshot
+            || request.provider !== proof.provider || request.model !== proof.model || request.thinking !== proof.thinking
             || proof.provider !== requesting.provider || proof.model !== requesting.model || proof.slotDigest !== snapshot
             || ![slot.model, ...(slot.fallbacks ?? [])].some((ref) => ref.provider === requesting.provider && ref.model === requesting.model && (ref.thinking ?? "off") === proof.thinking)) throw forbidden("The requesting assistant does not have an immutable execution receipt for the unchanged reviewer slot; ask the owner to decide explicitly");
         }
