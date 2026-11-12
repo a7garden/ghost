@@ -79,6 +79,33 @@ async function manual(core: Core, activityId: string, options: { dryRun?: boolea
 }
 
 describe("durable activity admission", () => {
+  test("activity admission and delegated children retain scope and its goal boundaries", async () => {
+    const f = fixture();
+    f.ledger.tx(() => {
+      for (const id of ["activity-scope", "other-scope"]) f.ledger.putScope({
+        id, name: id, ghostId: null, paths: [], vaultPath: null, state: "active", attachments: [], limits: {}, createdAt: 1, updatedAt: 1,
+      });
+    });
+    f.core.goals.create({ title: "Global boundary", boundaries: "Never spend money" });
+    f.core.goals.create({ scopeId: "activity-scope", title: "Project boundary", boundaries: "Never publish this project" });
+    f.core.goals.create({ scopeId: "other-scope", title: "Unrelated goal", boundaries: "Unrelated private boundary" });
+    const activity = f.activities.create({ ...f.config, scopeId: "activity-scope" });
+    const run = await manual(f.core, activity.id);
+    await f.core.idle();
+    const parent = f.ledger.work(run.workId!);
+    expect(parent.scopeId).toBe("activity-scope");
+    const teammate = f.core.createGhost({ name: "Scoped teammate", persona: "", tools: f.config.tools, model: f.ghost.model });
+    const child = f.core.works.delegate(parent.id, { ghostId: teammate.id, title: "Read a section", brief: "Read without publishing" });
+    await f.core.idle();
+    expect(f.ledger.work(child.id).scopeId).toBe("activity-scope");
+    for (const work of [parent, f.ledger.work(child.id)]) {
+      const instructions = f.core.goals.workInstructions(work);
+      expect(instructions).toContain("Never spend money");
+      expect(instructions).toContain("Never publish this project");
+      expect(instructions).not.toContain("Unrelated private boundary");
+    }
+  });
+
   test("one bound PR enrichment failure cannot undo other admissions or poison the source cursor", async () => {
     const f = fixture();
     f.source.items = [item("1"), item("2")];
