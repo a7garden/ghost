@@ -10,6 +10,8 @@ const VAULT_DB = join("vault", "vault.db");
 const VAULT_KEY = join("vault", "key");
 /** Maximum wait for the first store's in-flight writer; later guards fail fast. */
 const WRITER_LOCK_TIMEOUT_MS = 5_000;
+/** One SQLite busy wait inside the writer-lock deadline (bun:sqlite overshoots a single long pragma). */
+const BUSY_TIMEOUT_QUANTUM_MS = 250;
 
 /**
  * `<dir>/backup.json`. Written last, so a manifest on disk means every listed file is
@@ -89,13 +91,24 @@ export function backup(root: string, dir: string, now = Date.now()): BackupManif
       // Never wait for Pi while excluding ledger writers: an in-flight Pi
       // transaction may need the host event loop, itself stalled on a ledger write.
       const timeoutMs = guards.length === 1 ? WRITER_LOCK_TIMEOUT_MS : 0;
+      const started = Date.now();
       try {
-        guard.db.exec(`PRAGMA busy_timeout = ${timeoutMs}`);
-        guard.db.exec("BEGIN IMMEDIATE");
-        guard.acquired = true;
+        // bun:sqlite overshoots one long `busy_timeout` pragma (measured ~2.5× on bun 1.4.2:
+        // a 5s pragma returned after ~12.5s), so wait in short quanta under an explicit deadline.
+        guard.db.exec(`PRAGMA busy_timeout = ${timeoutMs === 0 ? 0 : BUSY_TIMEOUT_QUANTUM_MS}`);
+        for (;;) {
+          try {
+            guard.db.exec("BEGIN IMMEDIATE");
+            guard.acquired = true;
+            break;
+          } catch (error) {
+            const retryDetail = error instanceof Error ? error.message : String(error);
+            if (!/busy|locked/i.test(retryDetail) || Date.now() - started >= timeoutMs) throw error;
+          }
+        }
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        if (/busy|locked/i.test(detail)) throw new Error(`${name} was still busy after ${timeoutMs}ms; wrote no backup`, { cause: error });
+        if (/busy|locked/i.test(detail)) throw new Error(`${name} was still busy after ${Date.now() - started}ms; wrote no backup`, { cause: error });
         throw error;
       }
     }

@@ -406,7 +406,7 @@ test("native snapshot refs survive arbitrary short secrets without exempting eva
       await expect(browser.run(ref,["snapshot","-i"])).rejects.toMatchObject({code:"unavailable",message:"Browser snapshot attribution is missing or invalid; update the Host browser build"});
     }
   } finally {await browser.shutdown();}
-});
+}, 15_000); // long snapshot/eval matrix: >5s measured under load, over the 5s default.
 
 test("sticky screenshot permission is denied before observer I/O; unrelated commands still expose observer failure", async () => {
   const root=tempDir(),executable=join(root,"sticky-browser");

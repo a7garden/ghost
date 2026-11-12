@@ -169,15 +169,31 @@ export class Decisions {
         if (decision.state === "cancelled") break;
         await this.answerQuestion(decision);
         break;
-      case "accept_result":
+      case "accept_result": {
         if (!decision.workId || decision.state === "cancelled") break;
+        const by = reviewOf(decision.proposal)?.resolvedBy;
+        // 2026-11-12 owner decision: the verdict names who settled the result, not always the owner.
+        const base = decision.state === "approved"
+          ? by === "main"
+            ? "Accepted by the main Ghost for the owner after checking the report against the acceptance criteria."
+            : by === "timeout"
+              ? "Accepted after the owner's wait ran out."
+              : "Accepted by the owner."
+          : by === "main"
+            ? "The main Ghost asked for changes."
+            : by === "timeout"
+              ? "The Host asked for changes after the owner's wait ran out."
+              : "The owner asked for changes.";
+        const answer = decision.answer?.trim();
+        const reasons = by === "main" ? [base, answer].filter(Boolean).join(" ") : (answer ?? base);
         this.core.works.applyVerdict(decision.workId, {
           outcome: decision.state === "approved" ? "pass" : "revise",
           source: "owner",
-          reasons: decision.answer ?? (decision.state === "approved" ? "Accepted by the owner." : "The owner asked for changes."),
+          reasons,
           at: decision.resolvedAt ?? Date.now(),
         });
         break;
+      }
       case "approve_effect":
         if (decision.effectId && decision.state !== "cancelled") await this.core.effects.resolveApproval(decision.effectId, decision.state === "approved");
         break;
@@ -244,12 +260,17 @@ export class Decisions {
    * Reversible: a question with a recommended answer (never a vault form or browser handoff), a new document
    * page, a standing activity that cannot send on its own or touch the PC, and a Mac command whose stated risk
    * speaks of no loss. Sending, spending, card entry, deletion and overwrites always wait for the owner.
+   * 2026-11-12 owner decision: a result acceptance that carries the result report is reversible too, so the
+   * main Ghost may settle it for the owner after checking the report against the acceptance criteria.
    */
   reversible(decision: Decision): boolean {
     const proposal = decision.proposal;
     // A goal proposal never carries a recommendation: only the owner adopts a direction for the team.
     if (decision.kind === "question") return !!proposal && !proposal.secureForm && !proposal.browserHandoff && !proposal.goal && typeof reviewOf(proposal)?.answer === "string";
     if (decision.kind === "document_review") return !!proposal && !(proposal.pageId ?? proposal.page_id);
+    // 2026-11-12 owner decision: with the result report attached the main Ghost may accept the result for the
+    // owner; without a report it stays the owner's alone.
+    if (decision.kind === "accept_result") return !!proposal?.result;
     if (decision.kind !== "approve_effect" || !decision.effectId || !proposal) return false;
     const tool = this.ledger.effect(decision.effectId).tool;
     // Credential authority and external API writes are always the owner's decision, never an automatic one.
@@ -274,7 +295,8 @@ export class Decisions {
     // A request to open the owner's Mac (PC execution, host tools) never goes ahead on silence: the main or the owner decides it.
     const request = decision.proposal?.capability as CapabilityRequest | undefined;
     const opensMac = !!request && (request.hostExecution || request.tools.some((tool) => HOST_TOOLS.includes(tool)));
-    const expiresAt = autoMinutes > 0 && this.automatic(decision) && !opensMac ? decision.createdAt + autoMinutes * MINUTE : null;
+    // 2026-11-12 owner decision: a result is never accepted on silence; only the owner or the main Ghost settles it.
+    const expiresAt = autoMinutes > 0 && this.automatic(decision) && !(opensMac || decision.kind === "accept_result") ? decision.createdAt + autoMinutes * MINUTE : null;
     const prior = reviewOf(decision.proposal);
     const review: DecisionReview = decision.kind === "question" ? { ...prior, recommend: "answer", answer: prior!.answer, expiresAt } : { ...prior, recommend: "approve", expiresAt };
     return { ...decision, proposal: { ...decision.proposal, review } };
@@ -399,10 +421,14 @@ export class Decisions {
     const lines = [
       settle
         ? `[Decision review] ${asker} needs a decision the owner would normally make. It is reversible, so you may decide it for the owner.`
-        : `[Decision review] ${asker} needs a decision only the owner can make (it sends, spends, deletes, enters a card or accepts a result). You cannot settle it; look it over for the owner.`,
+        : `[Decision review] ${asker} needs a decision only the owner can make (it sends, spends, deletes or enters a card). You cannot settle it; look it over for the owner.`,
       `Decision ${decision.id}: ${decision.title}`,
       decision.detail.slice(0, 4000),
       decision.options.length ? `Options: ${decision.options.join(" | ")}` : "",
+      // 2026-11-12 owner decision: a result is settled for the owner only against the acceptance criteria.
+      decision.kind === "accept_result"
+        ? "This is a result acceptance: compare the attached report with the acceptance criteria and approve only what the criteria ask for."
+        : "",
       review?.answer ? `${asker} recommends: ${review.answer}` : "",
       settle
         ? `If it clearly serves what the owner wants, settle it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. If only the owner can judge, use outcome "leave" with your recommendation so they see it. Then reply only [quiet].`

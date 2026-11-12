@@ -79,7 +79,7 @@ describe("API command crash atomicity", () => {
           restarted.core.stop();
           restarted.ledger.close();
         }
-      });
+      }, 15_000); // child-process crash simulations: >5s measured under load, over the 5s default.
     }
   }
 

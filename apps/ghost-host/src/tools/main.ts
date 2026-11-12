@@ -219,12 +219,16 @@ export function createMainTools(core: Core): Extension {
 
   // 2026-11-10 owner decision: the main may settle another Ghost's reversible decisions for the owner.
   // The Host decides what is reversible (Decisions.reversible); sending, spending, card entry and deletion stay with the owner.
+  // 2026-11-12 owner decision: a result acceptance whose card carries the result report and the criteria is reversible;
+  // the main settles it only after checking the report against the criteria — sending, spending, card entry and
+  // deletion still stay with the owner.
   const decisionSettle = defineTool({
     name: "decision_settle",
     description:
       "Act on another Ghost's decision that arrives as a [Decision review] or [Decision handed over] message. A reversible one you may approve, deny or answer for the owner; on any one you may leave your view for the owner (outcome leave). " +
       "A handed-over decision is one the owner asked you to settle: decide it, and leave it only if you cannot judge it at all. " +
-      "Write note in the owner's language: what you decided or found and what you recommend, one or two sentences. Main Ghost only; the Host refuses to settle anything that is not reversible.",
+      "Write note in the owner's language: what you decided or found and what you recommend, one or two sentences. Main Ghost only; the Host refuses to settle anything that is not reversible. " +
+      "A result acceptance card may be approved only after you compare the attached report with the acceptance criteria; approve only what the criteria ask for.",
     parameters: Type.Object({
       decision_id: Type.String({ minLength: 1, maxLength: 128 }),
       outcome: Type.Union([Type.Literal("approve"), Type.Literal("deny"), Type.Literal("answer"), Type.Literal("leave")]),
