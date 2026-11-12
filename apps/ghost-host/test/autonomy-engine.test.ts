@@ -381,9 +381,22 @@ test("review evidence is the recorded read, not current PC bytes, and cannot esc
   } finally { await f.close(); }
 }, 25_000);
 
+/**
+ * The owner explicitly lets the worker change this PC outside any Scope. A narrower allow never outranks the installed
+ * outside-mac owner row, so the owner revises that row away and allows Mac targets for this Ghost only; Rule of Two,
+ * money and every other installed row still hold. Without this, PC writes and shell commands wait for the owner.
+ */
+function ownerAllowsPc(f: { ledger: Ledger; worker: { id: string } }) {
+  f.ledger.tx(() => {
+    f.ledger.deletePolicyRule("outside-mac");
+    f.ledger.putPolicyRule({ id: "owner-pc-worker", tool: "*", ghostId: f.worker.id, when: { targetKind: "mac" }, decision: "allow", revision: 1, createdBy: { kind: "owner" } });
+  });
+}
+
 for (const grant of ["hostExecution", "bash"] as const) {
   test(`live ${grant} revocation stops the real Pi command without erasing completed effects`, async () => {
     const f = await fixture();
+    ownerAllowsPc(f);
     let stop = () => {};
     let journalStop = () => {};
     let watchdog: NodeJS.Timeout | undefined;
@@ -446,6 +459,7 @@ for (const grant of ["hostExecution", "bash"] as const) {
 
 test("a failed Host Work resumes the same Pi conversation with working PC read, write and exec", async () => {
   const f = await fixture();
+  ownerAllowsPc(f);
   try {
     const before = "PC_BYTES_BEFORE_FAILURE_48d1";
     const changed = "PC_BYTES_CHANGED_AFTER_FAILURE_a912";

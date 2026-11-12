@@ -9,12 +9,17 @@ export type ObservedEffect = Omit<EffectClass, "tool" | "taint">;
 export type PolicyReceipt = { classification: EffectClass; evaluation: PolicyEvaluation; rulesDigest: string; scopeId: string | null; ghostId: string; day: string; reserved: string[]; positions: Record<string, number> };
 const cleanTaint: EffectTaint = { untrustedInput: false, privateData: false };
 
+/** Durable count of owner resumes; `revisionsUsed` restarts at 0 on resume, so it alone cannot tell attempts apart. */
+export const workEpochKey = (workId: string) => `work:attempt-epoch:${workId}`;
+
 /**
- * What evidence and approvals are bound to: the instructions, acceptance, execution boundary and attempt. Metadata-only
- * edits (title, deadline, budget) bump `revision` but must not invalidate checks or pending approvals.
+ * What evidence and approvals are bound to: the instructions, acceptance, execution boundary and attempt (revision
+ * count plus resume epoch). Metadata-only edits (title, deadline, budget) bump `revision` but must not invalidate
+ * checks or pending approvals. Epoch 0 is omitted so identities recorded before epochs existed still match.
  */
-export function workExecutionIdentity(work: Pick<Work, "brief" | "acceptance" | "execution" | "toolScope" | "scopeId" | "revisionsUsed">): string {
-  return digestOf({ brief: work.brief, acceptance: work.acceptance, execution: work.execution ?? null, toolScope: work.toolScope ?? null, scopeId: work.scopeId ?? null, attempt: work.revisionsUsed });
+export function workExecutionIdentity(ledger: { setting<T>(key: string, fallback: T): T }, work: Pick<Work, "id" | "brief" | "acceptance" | "execution" | "toolScope" | "scopeId" | "revisionsUsed">): string {
+  const epoch = ledger.setting<number>(workEpochKey(work.id), 0);
+  return digestOf({ brief: work.brief, acceptance: work.acceptance, execution: work.execution ?? null, toolScope: work.toolScope ?? null, scopeId: work.scopeId ?? null, attempt: work.revisionsUsed, ...(epoch ? { epoch } : {}) });
 }
 
 /** A helper inherits only its verified durable parent binding, never a model-supplied Work id. */
@@ -90,9 +95,13 @@ export function classifyEffect(core: Core, conversationId: string, tool: string,
   const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
   let facts: ObservedEffect = { target: { kind: "mac", id: null }, access: "write", reversible: false, external: true, amount: null };
   if (["write", "edit", "publish_artifact"].includes(tool)) facts = { ...facts, target: { kind: work?.execution?.kind === "host" ? "mac" : "workspace", id: work?.id ?? null }, external: false, reversible: true };
-  // The confined workspace keeps file changes contained, but its shell reaches the public egress proxy: an opaque
-  // command can send, so it stays external and Rule of Two / activity external-write rules apply to it.
-  if (tool === "bash" && work && work.execution?.kind !== "host") facts = { ...facts, target: { kind: "workspace", id: work.id }, external: true, reversible: true };
+  // File changes stay in the Work's workspace. A shell that reaches the egress proxy (or an unconfined local shell) can
+  // send, so it is external and Rule of Two / activity external-write rules apply; a network-none container cannot.
+  // Without the sandbox port, only an explicit workspace target is assumed networked (the default target is the container).
+  if (tool === "bash" && work && work.execution?.kind !== "host") {
+    const egress = core.sandbox.shellEgress ? core.sandbox.shellEgress(work) : work.execution?.kind === "workspace";
+    facts = { ...facts, target: { kind: "workspace", id: work.id }, external: egress, reversible: true };
+  }
   if (tool === "mail_send" || tool === "mail_update") facts = { ...facts, target: { kind: "mail_account", id: typeof args.account === "string" ? args.account : null }, external: tool === "mail_send", reversible: tool === "mail_update" };
   if (tool === "document_write" || tool === "document_propose") {
     const scopeId = args.scopeId ?? args.scope_id ?? args.spaceId ?? args.space_id;

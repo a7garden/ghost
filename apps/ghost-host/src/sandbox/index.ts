@@ -442,5 +442,7 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     if (egress !== null) await egress.then((proxy) => proxy.close()).catch(() => undefined);
   };
 
-  return { envFor, workspacePath, stageInputs, status, control, release, close, reviewEnvFor, validateExecution };
+  /** Mirrors envFor: only the Apple container (`--network none --no-dns`) is isolated; a container target without one refuses to run. */
+  const shellEgress = (work: Work): boolean => !(work.execution?.kind === "container" || work.execution === undefined && container !== null);
+  return { envFor, workspacePath, stageInputs, status, control, release, close, reviewEnvFor, validateExecution, shellEgress };
 }

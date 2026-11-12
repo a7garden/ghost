@@ -1,4 +1,4 @@
-import { TERMINAL_WORK_STATES, matchesToolPatterns, type Effect } from "@ghost/contract";
+import { GHOST_TOOLS, TERMINAL_WORK_STATES, matchesToolPatterns, type Effect } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { CommandError, conflict } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
@@ -107,7 +107,7 @@ export class Effects {
         const receipt = evaluateStoredPolicy(this.core, input.conversationId, classification, undefined, true);
         if (effect.workId) {
           const work = this.ledger.work(effect.workId);
-          this.ledger.putSetting(`effect:work-binding:${effect.id}`, { identity: workExecutionIdentity(work) });
+          this.ledger.putSetting(`effect:work-binding:${effect.id}`, { identity: workExecutionIdentity(this.ledger, work) });
         }
         this.ledger.putSetting(`policy:effect:${effect.id}`, receipt);
         if (receipt.evaluation.decision === "deny") {
@@ -369,7 +369,10 @@ export class Effects {
     const managedGhost = tool === "ghost_create" || tool === "ghost_update";
     if (managedGhost && (!ghost.isDefault || !["direct", "wake"].includes(conversation.kind))) throw new NoEffect("The main Ghost's configuration authority was revoked");
     const internal = managedGhost || ["self_adapt", "activity_action"].includes(tool);
-    if (!internal && !matchesToolPatterns(ghost.tools, tool)) throw new NoEffect("The tool grant was revoked; nothing was performed");
+    // Only a grantable tool (a Ghost tool or a connection/MCP tool) has a grant to revoke, as in evaluateStoredPolicy;
+    // Host-registered internal proposers are authorized by the rules and live checks below.
+    const selectable = (GHOST_TOOLS as readonly string[]).includes(tool) || /^(?:mcp|conn)\./.test(tool);
+    if (!internal && selectable && !matchesToolPatterns(ghost.tools, tool)) throw new NoEffect("The tool grant was revoked; nothing was performed");
     const ancestors = new Set<string>();
     for (let boundary = work; boundary; boundary = boundary.parentId ? this.ledger.work(boundary.parentId) : null) {
       if (ancestors.has(boundary.id)) throw new NoEffect("Work permission ancestry contains a cycle");
@@ -380,7 +383,7 @@ export class Effects {
     if ((tool.startsWith("desktop_") || work?.execution?.kind === "host" && ["write", "edit", "bash", "publish_artifact"].includes(tool)) && !ghost.hostExecution) throw new NoEffect("PC execution was revoked");
     if (work && (!["running", "waiting", "verifying"].includes(work.state) || work.deadlineAt !== null && work.deadlineAt <= Date.now())) throw new NoEffect("The Work no longer permits execution");
     const binding = this.ledger.setting<{ identity: string } | null>(`effect:work-binding:${effect.id}`, null);
-    if (work && binding?.identity !== workExecutionIdentity(work)) throw new NoEffect("The Work's brief, acceptance, execution boundary or attempt changed; create a fresh proposal");
+    if (work && binding?.identity !== workExecutionIdentity(this.ledger, work)) throw new NoEffect("The Work's brief, acceptance, execution boundary or attempt changed; create a fresh proposal");
   }
 
   /** Owner resolved an `approve_effect` decision. */

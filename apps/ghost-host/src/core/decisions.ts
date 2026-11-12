@@ -113,7 +113,7 @@ export class Decisions {
       title: `결과 확인: ${work.title}`.slice(0, 200),
       detail: [note, work.result?.summary].filter(Boolean).join("\n\n"),
       options: [],
-      proposal: work.result ? { result: work.result, criteria: work.acceptance.criteria, workIdentity: workExecutionIdentity(work), ...(policy ? { policy, acceptancePolicy: policy.classification, checksFingerprint: this.core.works.verifiedChecks(work)?.fingerprint ?? null } : {}) } : null,
+      proposal: work.result ? { result: work.result, criteria: work.acceptance.criteria, workIdentity: workExecutionIdentity(this.ledger, work), ...(policy ? { policy, acceptancePolicy: policy.classification, checksFingerprint: this.core.works.verifiedChecks(work)?.fingerprint ?? null } : {}) } : null,
     });
   }
 
@@ -344,7 +344,7 @@ export class Decisions {
     if (decision.kind === "accept_result" && decision.workId) {
       const work = this.ledger.work(decision.workId);
       const verified = this.core.works.verifiedChecks(work);
-      if (work.state !== "verifying" || proposal.workIdentity !== undefined && proposal.workIdentity !== workExecutionIdentity(work)
+      if (work.state !== "verifying" || proposal.workIdentity !== undefined && proposal.workIdentity !== workExecutionIdentity(this.ledger, work)
         || proposal.result && digestOf(proposal.result) !== digestOf(work.result)
         || acceptance?.target.kind === "workspace" && (!verified || verified.fingerprint !== proposal.checksFingerprint)) {
         receipt.evaluation = { ...receipt.evaluation, decision: "deny", decidedBy: [], reviewers: [], autoResolve: null, reason: "The Work revision or Host verification evidence changed while acceptance waited; fresh verification is required." };

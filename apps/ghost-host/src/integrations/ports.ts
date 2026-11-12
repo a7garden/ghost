@@ -16,6 +16,8 @@ export interface SandboxEnvFactory {
   reviewEnvFor?(work: Work, conversationId: string): ExecutionEnv;
   /** Admission-time validation of an execution target beyond its static shape. */
   validateExecution?(target: ExecutionTarget): void;
+  /** Whether this Work's shell reaches any network: the egress proxy or an unconfined local shell. A network-none container does not. */
+  shellEgress?(work: Work): boolean;
 }
 
 

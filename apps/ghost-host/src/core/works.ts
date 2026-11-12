@@ -8,7 +8,7 @@ import { digestOf, newId } from "./ids.ts";
 import { verifyChecks } from "./verify.ts";
 import { policyTaint } from "./policy-context.ts";
 import { validateExecutionTarget } from "../sandbox/index.ts";
-import { classifyEffect, evaluateStoredPolicy, workExecutionIdentity, type PolicyReceipt } from "./policy-context.ts";
+import { classifyEffect, evaluateStoredPolicy, workEpochKey, workExecutionIdentity, type PolicyReceipt } from "./policy-context.ts";
 
 /** Reminders sent when a work conversation stops without completing; a quota-ended turn never counts. */
 const MAX_IDLE_NUDGES = 2;
@@ -590,6 +590,8 @@ export class Works {
     this.core.repeats.reset(work.conversationId ?? work.id);
     this.ledger.tx(() => {
       this.put(next);
+      // A resumed attempt restarts revisionsUsed at 0; the epoch keeps its evidence and approvals apart from earlier ones.
+      this.ledger.putSetting(workEpochKey(work.id), this.ledger.setting<number>(workEpochKey(work.id), 0) + 1);
       this.ledger.setIdleNudges(work.id, 0);
       this.ledger.markReported(work.id, null);
     });
@@ -641,7 +643,7 @@ export class Works {
 
   private verificationFingerprint(work: Work): string {
     return digestOf({
-      identity: workExecutionIdentity(work), result: work.result,
+      identity: workExecutionIdentity(this.ledger, work), result: work.result,
       artifacts: this.ledger.artifactsForWork(work.id),
       shells: this.ledger.effectsForWork(work.id).filter((effect) => effect.tool === "bash").map((effect) => ({ id: effect.id, state: effect.state, summary: effect.summary, result: effect.result })),
     });
@@ -675,7 +677,7 @@ export class Works {
     }
     if (verdict.outcome === "pass" && work.conversationId) {
       const receipt = this.ledger.tx(() => {
-        const key = `policy:acceptance:${work.id}:${workExecutionIdentity(work)}`;
+        const key = `policy:acceptance:${work.id}:${workExecutionIdentity(this.ledger, work)}`;
         const prior = this.ledger.setting<PolicyReceipt | null>(key, null);
         const current = evaluateStoredPolicy(this.core, work.conversationId!, {
           ...classifyEffect(this.core, work.conversationId!, "complete", null),
@@ -1147,7 +1149,7 @@ export class Works {
         if (check.kind !== "command_exit_zero" && check.kind !== "command_stdout") return true;
         const effect = this.ledger.effectsForWork(work.id).filter((entry) => entry.tool === "bash" && entry.state === "done" && entry.summary === check.command).at(-1);
         const binding = effect ? this.ledger.setting<{ identity: string } | null>(`effect:work-binding:${effect.id}`, null) : null;
-        return binding?.identity === workExecutionIdentity(work);
+        return binding?.identity === workExecutionIdentity(this.ledger, work);
       });
       if (outcome.pass && !commandsFresh) outcome = { pass: false, reasons: "Required commands have no execution receipt for the current Work revision and attempt." };
       this.ledger.tx(() => this.ledger.putSetting(`work:checks:${work.id}`, { ...outcome, fingerprint, count: checks.length, at: Date.now() }));
