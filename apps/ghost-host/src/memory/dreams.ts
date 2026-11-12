@@ -96,12 +96,26 @@ export function readProposal(output: string, snapshot: MemorySnapshot): Proposal
       const source = rawSource as Record<string, unknown>;
       if (typeof source.conversationId !== "string" || typeof source.messageId !== "string" || typeof source.quote !== "string" || !source.quote.trim() || source.quote.length > 4000) throw new Error("invalid source identity or quote");
       const evidence = snapshot.history.find((row) => row.conversationId === source.conversationId && row.id === source.messageId);
-      if (!evidence || !evidence.text.includes(source.quote)) throw new Error("memory quote does not occur in the immutable source snapshot");
+      const cited = `message ${JSON.stringify(source.messageId.slice(0, 64))} of conversation ${JSON.stringify(source.conversationId.slice(0, 64))} for ${path}`;
+      if (!evidence) throw new Error(`memory source ${cited} is not in the immutable source snapshot`);
+      if (!evidence.text.includes(source.quote)) throw new Error(`memory quote for ${cited} does not occur in the immutable source snapshot (exact prefix ${quotedPrefix(evidence.text, source.quote)} of ${source.quote.length} characters)`);
       return { conversationId: source.conversationId, messageId: source.messageId, quote: source.quote };
     });
     return { path, content: change.content as string | null, sources, reason: change.reason };
   });
   return { changes, report: proposal.report };
+}
+
+/** Length of the quote's longest leading part found in the source, without echoing either text. */
+function quotedPrefix(text: string, quote: string): number {
+  let found = 0;
+  let missing = quote.length;
+  while (missing - found > 1) {
+    const middle = (found + missing) >>> 1;
+    if (text.includes(quote.slice(0, middle))) found = middle;
+    else missing = middle;
+  }
+  return found;
 }
 
 /** Deterministic navigation, not model-authored facts. Omission is always explicit. */
