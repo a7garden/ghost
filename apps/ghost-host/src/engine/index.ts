@@ -38,7 +38,7 @@ import type { ToolSet } from "../tools/types.ts";
 import { liveFrom, renderUserContent, sameLive, toMessage, type UserMeta } from "./messages.ts";
 import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
-import { FallbackDoc, FallbackReceiptsDoc, fallbackListFor, fallbackModels, fallbackReason, quotaError, quotaHit } from "./fallback.ts";
+import { FallbackDoc, FallbackReceiptsDoc, fallbackReason, quotaError, quotaHit } from "./fallback.ts";
 import { digestOf, idFor } from "../core/ids.ts";
 import { modelResolution, slotResolution } from "./resolution.ts";
 import { SUBAGENT_READ_TOOLS, requireAllowed, scopeOf } from "../tools/shared.ts";
@@ -521,7 +521,7 @@ class HostEngine implements Engine, MemoryEngine {
     const settings = this.core.ledger.settings();
     const model = this.resolveModel(settings, conversation, ghost, work);
     if (!model) return [];
-    const refs = [model, ...(this.allowsFallback(settings, conversation, work) ? fallbackModels(ghost, model, settings) : [])];
+    const refs = [model, ...this.resolution(settings, conversation, ghost, work).fallbacks];
     return [...new Set(refs.filter((candidate) => this.available(candidate, settings)).map((candidate) => candidate.provider))];
   }
 
