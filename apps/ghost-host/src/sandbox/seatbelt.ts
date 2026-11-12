@@ -306,7 +306,7 @@ export function seatbeltArgv(policy: SeatbeltPolicy, argv: string[]): string[] {
 
 /** Bounded tail of command output, kept to explain a sandbox refusal. */
 const TAIL_CHARS = 8_000;
-const EPERM_LINE = /(operation not permitted|errno\s*=\s*1\b|eperm|eacces|read-only file system|sandbox)/i;
+const EPERM_LINE = /(operation not permitted|permission denied|errno\s*=\s*1\b|\beperm\b|\beacces\b|read-only file system|(?:^|\s)sandbox(?:-exec)?:)/i;
 const PATH_IN_LINE = /(?:^|[\s"'`=(:;,])((?:\/|~\/)[^\s"'`):;,]*)/g;
 const NETWORK_FAILURE = /(could not resolve host|getaddrinfo|name or service not known|network is unreachable|enotfound|connection attempt refused|couldn't connect)/i;
 

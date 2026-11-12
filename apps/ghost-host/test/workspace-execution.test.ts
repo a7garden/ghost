@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
@@ -102,13 +102,27 @@ describe.skipIf(!darwin)("workspace execution boundary", () => {
     const state = await shell(env, `ls ${f.state}`);
     expect(state.exitCode).not.toBe(0);
     expect(state.stderr).toContain("sandbox:");
-    const ssh = await shell(env, "cat ~/.ssh/config");
+    // HOME is private inside the process; name the owner's real credential path explicitly.
+    const sshPath = join(homedir(), ".ssh", "config");
+    const ssh = await shell(env, `cat '${sshPath.replaceAll("'", "'\\''")}'`);
     expect(ssh.exitCode).not.toBe(0);
     expect(ssh.stderr).toContain("sandbox:");
     expect(ssh.stderr).toContain("secret");
     // In-process file operations agree with the kernel's answer.
     const read = await env.readTextFile(join(f.state, "ledger.db"), context);
     expect(read.ok).toBe(false);
+  });
+
+  test("a missing file in sandboxes is not reported as a sandbox refusal", async () => {
+    const f = fixture();
+    const work = f.work({ kind: "workspace" });
+    const env = await f.sandbox.envFor(work);
+    const missing = join(f.sandbox.workspacePath(work), "does-not-exist.txt");
+    const result = await shell(env, `cat '${missing}'`);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("No such file or directory");
+    expect(result.stderr).not.toContain("sandbox:");
+    expect(result.stderr).not.toContain("boundary");
   });
 
   test("denies direct network while the egress proxy is reachable through the environment", async () => {
