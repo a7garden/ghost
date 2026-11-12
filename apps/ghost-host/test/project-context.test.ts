@@ -403,7 +403,7 @@ test("result-policy upgrade replaces only the exact untouched installation row",
     });
     ledger.close();
     ledger = new Ledger(path);
-    const expected = item.migrate && item.saved ? { ...item.saved, when: { targetKind: "host", reversible: true } } : item.saved;
+    const expected = item.migrate && item.saved ? { ...item.saved, when: { targetKind: "host" as const, reversible: true } } : item.saved;
     expect(ledger.policyRules().find(rule => rule.id === original.id) ?? null).toEqual(expected);
     if (item.migrate && item.saved) {
       expect(ledger.policyRule(original.id).decision).toBe(item.saved.decision);

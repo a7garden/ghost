@@ -694,11 +694,12 @@ test("review proof follows the prepared request, not a restored phase agent or s
         await f.engine.open({ conversation, ghost: core.ledger.ghost(conversation.ghostId), work: null });
         core.ledger.tx(() => core.ledger.putSetting("slots", { reviewer: slotA }));
       },
-      async beforeRequest(_request, api) {
-        if (++requests !== 2) return;
+      async beforeRequest(_request, api): Promise<undefined> {
+        if (++requests !== 2) return undefined;
         // B has already been prepared. Restoring A changes the live agent, not this request.
         const conversation = core.ledger.conversationByPiId(String(api.conversationId))!;
         await f.engine.open({ conversation, ghost: core.ledger.ghost(conversation.ghostId), work: null });
+        return undefined;
       },
     })],
   })]);
