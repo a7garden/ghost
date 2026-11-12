@@ -556,7 +556,8 @@ describe("tools", () => {
     expect(message).toContain("path must be relative to the workspace");
     expect(message).toContain("inputs/child-1/summary.md");
     expect(message).toContain("report.txt");
-    expect(message).toContain("host_read");
+    // The default execution environment is the confined workspace, so the guidance names it.
+    expect(message).toContain("this Work's execution directory");
     expect(message).not.toContain(workspace);
 
     const missing = await call(toolOf(s, conversation, s.ghost, "publish_artifact"), { path: "inputs/report.md" }, apiOf(pi, "pub-missing"));

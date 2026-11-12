@@ -23,7 +23,7 @@ export interface CoreDeps {
   ledger: Ledger;
   artifacts: ArtifactStore;
   /** Sandbox control; `stageInputs` copies a settled child's artifacts into its parent's workspace; `release` frees a settled Work's container. */
-  sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release" | "workspacePath">>;
+  sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release" | "workspacePath" | "validateExecution">>;
   secrets: Secrets;
   catalog?: ProviderCatalog;
   codexCachePath?: string;
@@ -43,7 +43,7 @@ export interface CoreDeps {
 export class Core implements EngineEvents {
   readonly ledger: Ledger;
   readonly artifacts: ArtifactStore;
-  readonly sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release" | "workspacePath">>;
+  readonly sandbox: SandboxControl & Partial<Pick<SandboxEnvFactory, "stageInputs" | "release" | "workspacePath" | "validateExecution">>;
   readonly secrets: Secrets;
   readonly catalog: ProviderCatalog;
   readonly codexCatalog: CodexCatalog;

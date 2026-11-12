@@ -46,11 +46,16 @@ export const GhostState = Type.Union([Type.Literal("active"), Type.Literal("paus
 export type GhostState = Static<typeof GhostState>;
 
 /**
- * Host execution is unrestricted PC access, not filesystem confinement. With `worktree` the cwd must be
- * a git repository: the Host gives the Work its own worktree on branch `ghost/<work>` and runs there,
- * so the owner's checkout is never edited and Works on different worktrees run concurrently.
+ * Execution targets. `workspace` (the default for new Works) runs on the Mac inside a macOS
+ * Seatbelt boundary: writes stay in the Work's own directories, `cwd` (inside the configured read
+ * roots) points at project material and gets the Work its own git worktree and branch unless
+ * `worktree: false`, and the network only reaches the Host egress proxy. `host` is unrestricted
+ * PC access needing the owner's grant; with `worktree` the cwd must be a git repository and the
+ * Work runs in its own worktree on branch `ghost/<work>`, so the owner's checkout is never edited.
+ * `container` stays selectable for untrusted or Linux-only code.
  */
 export const ExecutionTarget = Type.Union([
+  Type.Object({ kind: Type.Literal("workspace"), cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), worktree: Type.Optional(Type.Boolean()) }),
   Type.Object({ kind: Type.Literal("container") }),
   Type.Object({ kind: Type.Literal("host"), cwd: Type.String({ minLength: 1, maxLength: 4096 }), worktree: Type.Optional(Type.Boolean()) }),
 ]);
@@ -385,7 +390,7 @@ export const Work = Type.Object({
   originConversationId: Id,
   /** The assignee's work conversation; null until the Work first runs. */
   conversationId: nullable(Id),
-  /** Omitted legacy Works use the configured sandbox, never implicit host execution. */
+  /** Where the Work runs; omitted legacy Works keep the configured sandbox default (never implicit host execution). */
   execution: Type.Optional(ExecutionTarget),
   activityId: Type.Optional(Id),
   activityRunId: Type.Optional(Id),

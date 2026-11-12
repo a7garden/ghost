@@ -74,7 +74,7 @@ export const externalActionsLabel: Record<ActivityPolicy['externalActions'], str
   deny: '거부', approval: '승인 후 실행', allow: '허용',
 };
 export const deliveryLabel: Record<ActivityPolicy['delivery'], string> = { changes: '바뀔 때만', always: '항상' };
-export const executionLabel: Record<ExecutionTarget['kind'], string> = { container: '컨테이너', host: '이 Mac' };
+export const executionLabel: Record<ExecutionTarget['kind'], string> = { workspace: '작업 공간', container: '컨테이너', host: '이 Mac' };
 
 /** One glanceable line about a policy's limits, for the run-history header. Pure; tests pin it. */
 export function policySummary(policy: ActivityPolicy): string {
@@ -138,7 +138,7 @@ export const emptyDraft = (ghost: Ghost | null): ActivityDraft => ({
   connectionId: '', pollMinutes: '5', includeExisting: false,
   repository: '', baseBranch: '', labels: '', includeDrafts: false,
   sender: '', subjectContains: '', unreadOnly: true,
-  executionKind: 'container', hostCwd: '',
+  executionKind: 'workspace', hostCwd: '',
   tools: intersectTools(DEFAULT_ACTIVITY_TOOLS, ghost?.tools ?? []),
   maxRunsPerDay: String(DEFAULT_POLICY.maxRunsPerDay), maxConcurrent: String(DEFAULT_POLICY.maxConcurrent),
   runTimeoutMinutes: '10', allowSelfCheck: false, minCheckMinutes: '15',
@@ -277,7 +277,7 @@ export function buildActivityConfig(draft: ActivityDraft, ghost: Ghost | undefin
     if (cwd.length > 4096) return { ok: false, error: '작업 폴더 경로는 4,096자 이하여야 합니다.' };
     execution = { kind: 'host', cwd };
   } else {
-    execution = { kind: 'container' };
+    execution = { kind: 'workspace' };
   }
 
   const maxRunsPerDay = intIn(draft.maxRunsPerDay, 1, 1000, '하루 최대 실행');
