@@ -445,3 +445,58 @@ describe("handing a decision to the main Ghost", () => {
     expect(t.engine.to(t.main.directConversationId).filter((item) => item.requestId === `decision-delegate:${decision.id}`)).toHaveLength(1);
   });
 });
+
+describe("one owner alert per decision", () => {
+  const alerts = (t: Awaited<ReturnType<typeof team>>) => t.ledger.notificationsForState().map((item) => item.id).sort();
+
+  test("a result the main checks and accepts reaches the owner once, as the finished Work", async () => {
+    const t = await team();
+    const work = t.core.works.createRoot({
+      ghostId: t.mate.id, title: "R", brief: "B",
+      acceptance: { criteria: "The report names the changed file.", checks: [], reviewer: null },
+      originConversationId: t.mate.directConversationId,
+    });
+    await t.core.idle();
+    t.core.works.complete(work.id, { summary: "Wrote a file.", artifacts: [] });
+    await t.core.idle();
+    const first = t.ledger.pendingDecisions({ workId: work.id })[0]!;
+    await t.core.decisions.settleForOwner(t.main.id, first.id, { outcome: "deny", note: "파일 이름을 넣어 주세요." });
+    await t.core.idle();
+    t.core.works.complete(work.id, { summary: "Wrote a.txt.", artifacts: [] });
+    await t.core.idle();
+    const second = t.ledger.pendingDecisions({ workId: work.id })[0]!;
+    await t.core.decisions.settleForOwner(t.main.id, second.id, { outcome: "approve", note: "기준을 충족합니다." });
+    await t.core.idle();
+
+    expect(t.ledger.work(work.id).state).toBe("done");
+    expect(alerts(t)).toEqual([`work:${work.id}:done:${t.ledger.work(work.id).revision}`]);
+  });
+
+  test("a reversible request the main settles is one notice of its decision", async () => {
+    const t = await team();
+    const decision = t.command("설정 파일을 다시 읽습니다");
+    await t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "읽기만 하는 명령이라 승인했습니다." });
+    expect(alerts(t)).toEqual([`decision-main:${decision.id}`]);
+  });
+
+  test("the owner hears of a decision the main leaves to them or leaves waiting", async () => {
+    const t = await team();
+    const left = t.ask("B", "left");
+    const waiting = t.ask("A", "waiting");
+    expect(alerts(t)).toEqual([]);
+
+    await t.core.decisions.settleForOwner(t.main.id, left.id, { outcome: "leave", note: "직접 보셔야 합니다." });
+    expect(alerts(t)).toEqual([`decision:${left.id}`]);
+
+    await t.core.decisions.settleExpired(waiting.createdAt + 4 * MINUTE);
+    expect(alerts(t)).toEqual([`decision:${left.id}`]);
+    await t.core.decisions.settleExpired(waiting.createdAt + 5 * MINUTE);
+    expect(alerts(t)).toEqual([`decision:${left.id}`, `decision:${waiting.id}`].sort());
+  });
+
+  test("what only the owner may settle alerts them at once", async () => {
+    const t = await team();
+    const destructive = t.command("삭제: 파일이 영구 제거될 수 있습니다.");
+    expect(alerts(t)).toEqual([`decision:${destructive.id}`]);
+  });
+});

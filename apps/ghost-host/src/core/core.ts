@@ -314,11 +314,7 @@ export class Core implements EngineEvents {
 
   /** Insert a notification once; `id` is deterministic so repeats are ignored. */
   notify(notification: Omit<Notification, "createdAt" | "readAt">) {
-    try {
-      this.ledger.notification(notification.id);
-      return;
-    } catch {
-      this.ledger.putNotification({ ...notification, createdAt: Date.now(), readAt: null });
-    }
+    if (this.ledger.findNotification(notification.id)) return;
+    this.ledger.putNotification({ ...notification, createdAt: Date.now(), readAt: null });
   }
 }

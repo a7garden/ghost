@@ -842,9 +842,14 @@ export class Ledger {
   }
 
   notification(id: string): Notification {
+    const found = this.findNotification(id);
+    if (!found) throw new NotFound(`notification ${id}`);
+    return found;
+  }
+
+  findNotification(id: string): Notification | null {
     const row = this.db.query("SELECT * FROM notifications WHERE id = ?").get(id) as Row | null;
-    if (!row) throw new NotFound(`notification ${id}`);
-    return toNotification(row);
+    return row ? toNotification(row) : null;
   }
 
   unpushedNotifications(): Notification[] {

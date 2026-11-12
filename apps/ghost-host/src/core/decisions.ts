@@ -14,6 +14,9 @@ export type ResolvedBy = "owner" | "main" | "timeout";
 
 const MINUTE = 60_000;
 
+/** How long a decision the main may settle stays off the owner's devices before they hear of it anyway. */
+const MAIN_REVIEW_GRACE = 5 * MINUTE;
+
 /** Effect tools whose approval cards belong to the owner alone: no main settlement, no timeout recommendation. */
 const OWNER_ONLY_EFFECTS: Record<string, true> = { connection_request: true, connection_register: true };
 
@@ -69,6 +72,13 @@ export class Decisions {
     this.ledger.putDecision(decision);
     // The main Ghost looks first at another Ghost's decision; after the commit, never inside it.
     if (this.mainReviews(decision)) this.ledger.afterCommit(() => void this.askMain(decision).catch((error) => this.core.log("main review wake failed", String(error))));
+    // One the main may settle usually is within seconds; the owner hears of it only if it comes back to them or waits (settleExpired).
+    if (!this.delegable(decision)) this.notifyOwner(decision);
+    return decision;
+  }
+
+  /** The owner's alert for a decision. Its id is deterministic, so a repeat is ignored. Must run inside a ledger transaction. */
+  private notifyOwner(decision: Decision) {
     this.core.notify({
       id: `decision:${decision.id}`,
       kind: "decision",
@@ -79,7 +89,6 @@ export class Decisions {
       title: decision.title,
       body: decision.detail.slice(0, 500),
     });
-    return decision;
   }
 
   /** Must run inside a ledger transaction. */
@@ -384,13 +393,20 @@ export class Decisions {
     const kept = choice.outcome !== "leave" && delegatedAt !== undefined ? { delegatedAt } : {};
     const review: DecisionReview = { ...prior, ...kept, mainNote: choice.note.slice(0, NOTE_MAX) };
     const noted: Decision = { ...decision, proposal: { ...decision.proposal, review } };
-    this.ledger.tx(() => this.ledger.putDecision(noted));
+    this.ledger.tx(() => {
+      this.ledger.putDecision(noted);
+      // Left for the owner: now it is theirs, so they hear of it if they have not already.
+      if (choice.outcome === "leave") this.notifyOwner(noted);
+    });
     if (choice.outcome === "leave") return "Left for the owner with your note on the card.";
     await this.resolve(decisionId, { outcome: choice.outcome, ...(choice.answer ? { answer: choice.answer } : {}) }, "main");
-    this.ledger.tx(() => this.core.notify({
-      id: `decision-main:${decision.id}`, kind: "message", ghostId: mainId, conversationId: decision.conversationId, workId: decision.workId, decisionId: decision.id,
-      title: decision.title.slice(0, 256), body: choice.note.slice(0, NOTE_MAX),
-    }));
+    // One alert per decision: a result's own outcome (Work done or failed; a revision is not news yet) and a grant's notice already tell the owner.
+    if (decision.kind !== "accept_result" && !this.ledger.findNotification(`grant:decision:${decision.id}`)) {
+      this.ledger.tx(() => this.core.notify({
+        id: `decision-main:${decision.id}`, kind: "message", ghostId: mainId, conversationId: decision.conversationId, workId: decision.workId, decisionId: decision.id,
+        title: decision.title.slice(0, 256), body: choice.note.slice(0, NOTE_MAX),
+      }));
+    }
     return "Settled for the owner; they were told why.";
   }
 
@@ -417,6 +433,13 @@ export class Decisions {
         else await this.askMain(decision);
       } catch (error) {
         this.core.log(`decision ${decision.id} main review wake failed`, String(error));
+      }
+      // The owner hears of a decision the main has not settled in time; one they handed over is already theirs to watch.
+      if (now - decision.createdAt >= MAIN_REVIEW_GRACE || !this.delegable(decision)) {
+        this.ledger.tx(() => {
+          const current = this.ledger.decision(decision.id);
+          if (current.state === "pending" && !this.handedOver(current)) this.notifyOwner(current);
+        });
       }
       const review = reviewOf(decision.proposal);
       // Settings read now, not when the decision opened: turning automation off stops what is already waiting.
