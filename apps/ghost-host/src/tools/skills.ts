@@ -25,7 +25,9 @@ export function createSkillsTools(core: Core, skills: SkillsPort | null): Extens
     replay: "safe",
     async execute(args, api) {
       try {
-        const scope = args.name === "ghost-guide" ? scopeOf(core, api) : requireAllowed(core, api, "skill_read");
+        // The default Ghost reads the built-in guide without a grant; every Work and activity boundary still applies.
+        const resolved = scopeOf(core, api);
+        const scope = args.name === "ghost-guide" && resolved.ghost.isDefault && !resolved.work ? resolved : requireAllowed(core, api, "skill_read");
         if (scope.ghost.deletedAt !== null || scope.ghost.state !== "active") throw forbidden("Ghost is unavailable");
         if (args.name === "ghost-guide") {
           if (args.path !== undefined && args.path !== "SKILL.md") throw forbidden("The built-in ghost-guide contains only SKILL.md");

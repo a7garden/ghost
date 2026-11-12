@@ -663,6 +663,8 @@ describe("activity authority and delivery", () => {
     const activity = f.activities.create(f.config);
     const run = await manual(f.core, activity.id);
     await f.core.idle();
+    // The owner relaxed the Rule of Two for this installation; the activity allow rule then decides.
+    f.ledger.tx(() => { for (const rule of f.ledger.policyRules()) if (rule.id === "rule-of-two") f.ledger.deletePolicyRule(rule.id); });
     f.source.failAction = true;
     await expect(f.activities.action(run.workId!, "comment", { kind: "pr_comment", body: "Reviewed." })).rejects.toThrow("transport");
     await expect(f.activities.action(run.workId!, "comment", { kind: "pr_comment", body: "Reviewed." })).rejects.toThrow();
