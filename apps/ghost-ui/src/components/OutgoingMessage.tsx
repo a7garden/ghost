@@ -1,9 +1,11 @@
-import type { ArtifactRef } from '@ghost/contract';
+import type { DocRef } from '@ghost/contract';
 import { Clock3 } from 'lucide-react';
 import { ConversationMessage } from '../ui';
 import { ArtifactPreview } from './ArtifactPreview';
 import { ProjectChips } from './composer/ProjectMentions';
 import type { OutboxState } from '../features/outbox';
+import type { MessageAttachment } from '../features/composerRecovery';
+import { DocAttachmentTray } from './composer/DocAttachmentTray';
 import './OutgoingMessage.css';
 
 /**
@@ -17,7 +19,7 @@ export function OutgoingMessage({ label, text, scopes, attachments, state, note,
   label: string;
   text: string;
   scopes: readonly { id: string; name: string }[];
-  attachments: readonly ArtifactRef[];
+  attachments: readonly MessageAttachment[];
   state: OutboxState;
   /** This row carries the queue's note. */
   note: boolean;
@@ -34,8 +36,9 @@ export function OutgoingMessage({ label, text, scopes, attachments, state, note,
   return <ConversationMessage role="user" label={label} className="outgoing" data-state={state} aria-busy={state === 'sending' || undefined} actions={status}>
     <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
     <ProjectChips scopes={scopes}/>
+    <DocAttachmentTray refs={attachments.filter((ref): ref is DocRef => !('digest' in ref))} scopes={scopes}/>
     {attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-2">
-      {attachments.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}
+      {attachments.filter(ref => 'digest' in ref).map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}
     </div>}
   </ConversationMessage>;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, CircleAlert, GitBranch, Monitor, X } from 'lucide-react';
 import { Button, Conversation, Popover, PopoverContent, PopoverTrigger } from '../ui'
-import { TERMINAL_WORK_STATES, type ArtifactRef, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
+import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
 import { OpenWorkProvider, StateGlyph, ThreadCard, workGlyph } from '../components/agent';
@@ -25,6 +25,7 @@ import { uiTerms } from '../uiText';
 import { useHost } from '../host/context';
 import type { BrowserSession } from '../host/client';
 import { useTouch } from '../ui/adaptive';
+import { recoverMessage, type RecoveredMessage } from './composerRecovery';
 
 /** How often the conversation re-checks whether the Ghost's browser session is still there. */
 const SESSION_POLL_MS = 4000;
@@ -86,7 +87,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   const { feed: page, loading, olderLoading, loadOlder, error, setError } = useConversationFeed(conversationId);
   const [draft, setDraft] = useState('');
-  const [returnedFiles, setReturnedFiles] = useState<ArtifactRef[]>([]);
+  const [recoveredMessage, setRecoveredMessage] = useState<RecoveredMessage | null>(null);
   const [followKey, setFollowKey] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const outbox = useOutbox(conversationId, page.messages);
@@ -95,7 +96,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
     const command = outbox.discard(requestId);
     if (!command) return;
     setDraft(current => current.trim() ? `${command.text}\n\n${current}` : command.text);
-    setReturnedFiles(files => [...files, ...(command.attachments ?? []).filter(ref => !files.some(file => file.digest === ref.digest))]);
+    setRecoveredMessage(previous => recoverMessage(previous, command, requestId));
     inputRef.current?.focus();
   };
   useEffect(() => { if (!touch) inputRef.current?.focus(); }, [conversationId, touch]);
@@ -178,7 +179,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
           <DecisionDeck state={state} navigate={navigate} decisions={decisions} onOpenWork={openThread} docked/>
         </BrowserPaneContext.Provider>
         <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft}
-          returnedFiles={returnedFiles} setReturnedFiles={setReturnedFiles} inputRef={inputRef} initialScopeIds={initialScopeIds}
+          recoveredMessage={recoveredMessage} setRecoveredMessage={setRecoveredMessage} inputRef={inputRef} initialScopeIds={initialScopeIds}
           onPost={command => { setFollowKey(key => key + 1); outbox.post(command); }} onStop={stop} onError={setError}/>
       </>}
       footer={<>
@@ -202,7 +203,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         } : undefined}/>
       {outbox.rows.map(({ entry, note }) => <OutgoingMessage key={entry.requestId} label="나" text={entry.command.text}
         scopes={(entry.command.scopeId ? [entry.command.scopeId] : []).flatMap(id => state.scopes.filter(space => space.id === id))}
-        attachments={(entry.command.attachments ?? []).filter(ref => "digest" in ref)} state={entry.state} note={note}
+        attachments={entry.command.attachments ?? []} state={entry.state} note={note}
         onRetry={() => outbox.retry(entry.requestId)} onDiscard={() => takeBack(entry.requestId)}/>)}
       {live && <LiveReply live={live} ghostId={ghost.id} ghostName={ghost.name}/>}
     </Conversation>

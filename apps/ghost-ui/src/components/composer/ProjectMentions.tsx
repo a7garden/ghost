@@ -20,7 +20,7 @@ export function ProjectChips({ scopes, onRemove }: { scopes: readonly Project[];
 }
 
 /** Shared by direct chat, home and the project hand-off; the textarea keeps keyboard focus. */
-export function useProjectMentions(text: string, setText: (value: string) => void, inputRef: RefObject<HTMLTextAreaElement | null>, initialScopeIds: readonly string[] = [], disabled = false) {
+export function useProjectMentions(text: string, setText: (value: string) => void, inputRef: RefObject<HTMLTextAreaElement | null>, initialScopeIds: readonly string[] = [], disabled = false, selectionKey?: string) {
   const { store } = useHost();
   const { state } = useHostState(store);
   const scopes = state?.scopes ?? [];
@@ -30,7 +30,7 @@ export function useProjectMentions(text: string, setText: (value: string) => voi
   const [dismissed, setDismissed] = useState('');
   const id = useId();
   const initialKey = initialScopeIds.join('\0');
-  useEffect(() => { setIds(initialKey ? initialKey.split('\0').slice(0, 1) : []); }, [initialKey]);
+  useEffect(() => { setIds(initialKey ? initialKey.split('\0').slice(0, 1) : []); }, [initialKey, selectionKey]);
   const token = !disabled && ids.length < 1 ? projectMentionQuery(text, caret) : null;
   const matches = token && dismissed !== `${text}:${caret}`
     ? scopes.filter(space => !ids.includes(space.id) && space.name.toLocaleLowerCase().includes(token.query)).slice(0, 8) : [];
@@ -50,9 +50,9 @@ export function useProjectMentions(text: string, setText: (value: string) => voi
     } else if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); choose(matches[current].id); }
     else if (event.key === 'Escape') { event.preventDefault(); setDismissed(`${text}:${caret}`); }
   };
-  const selected = ids.flatMap(scopeId => { const space = scopes.find(item => item.id === scopeId); return space ? [space] : []; });
+  const selected = ids.map(scopeId => scopes.find(item => item.id === scopeId) ?? { id: scopeId, name: '삭제된 프로젝트' });
   return {
-    scopeIds: selected.map(space => space.id),
+    scopeIds: ids,
     clear: () => setIds([...initialScopeIds].slice(0, 1)),
     onChange: (value: string) => { setText(value); setCaret(inputRef.current?.selectionStart ?? value.length); setActive(0); setDismissed(''); },
     onSelect: (event: SyntheticEvent<HTMLTextAreaElement>) => setCaret(event.currentTarget.selectionStart),

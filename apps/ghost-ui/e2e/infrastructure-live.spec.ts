@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Command, State } from '@ghost/contract';
+import type { ArtifactRef, Command, PageSummary, State } from '@ghost/contract';
+import type { MessageSend, OutboxEntry } from '../src/features/outbox';
 
 /** No provider process, route interception, canned snapshot, or production root. */
 const test = base.extend<{}, { host: { baseUrl: string; root: string; vault: string } }>({
@@ -243,3 +244,54 @@ test('scope edits retain inherited global rules and generic trigger sources', as
   expect(saved?.scopeId).toBe(scopeId);
   expect(saved?.name).toBe('이름만 바꾼 폴링');
 });
+
+for (const originalScope of ['project', 'global'] as const) {
+  test(`discarded mixed attachments return to the composer and retain ${originalScope} attribution`, async ({ page, host }) => {
+    await page.goto(`${host.baseUrl}/#/scopes`);
+    const vault = join(host.root, `recovery-documents-${originalScope}`);
+    mkdirSync(vault);
+    const scopeId = String((await command(page, { type: 'scope.create', name: `회수 원본 ${originalScope}`, paths: [], vaultPath: vault })).scopeId);
+    const routeScopeId = String((await command(page, { type: 'scope.create', name: `현재 화면 ${originalScope}`, paths: [] })).scopeId);
+    await command(page, { type: 'document.save', scopeId, pageId: null, expectedHash: null, title: '회수 기준', body: '# 회수 기준\n\n원래 붙임을 보존한다.', profile: 'pdc-markdown/1' });
+    const pages: PageSummary[] = await page.evaluate(async scopeId => {
+      const response = await fetch(`/api/scopes/${encodeURIComponent(scopeId)}/pages`, { headers: { authorization: `Bearer ${window.__GHOST_TOKEN__}` } });
+      if (!response.ok) throw new Error(`pages: ${response.status}`);
+      return response.json();
+    }, scopeId);
+    const locator = pages.find(page => page.title === '회수 기준')!.locator;
+    const artifact: ArtifactRef = await page.evaluate(async () => {
+      const response = await fetch('/api/artifacts', { method: 'POST', headers: {
+        authorization: `Bearer ${window.__GHOST_TOKEN__}`, 'Content-Type': 'text/plain', 'X-Ghost-File-Name': 'recovered.txt',
+      }, body: 'Original attachment contents.' });
+      if (!response.ok) throw new Error(`artifact upload: ${response.status}`);
+      return response.json();
+    });
+    const receiver = (await snapshot(page)).ghosts.find(ghost => ghost.isDefault)!;
+    const original: MessageSend = { type: 'message.send', conversationId: receiver.directConversationId, text: '돌려받을 메시지',
+      scopeId: originalScope === 'project' ? scopeId : null,
+      attachments: [artifact, { kind: 'page', scopeId, locator }, { kind: 'skill', name: 'ghost-guide' }],
+    };
+    const entry: OutboxEntry = { requestId: crypto.randomUUID(), command: original, state: 'failed', auto: true,
+      createdAt: Date.now(), firstAttemptAt: null, skip: [], error: '회수 동작 검증용 보류 메시지',
+    };
+    await page.addInitScript(entry => localStorage.setItem('ghost:outbox', JSON.stringify([entry])), entry);
+    await page.goto(`${host.baseUrl}/?recovery=${originalScope}#/ghosts/${receiver.id}?scope=${routeScopeId}`);
+    await expect(page.locator('.outgoing').getByRole('button', { name: '버리기', exact: true })).toBeVisible();
+    const composer = page.getByLabel(`${receiver.name}에게 메시지`, { exact: true });
+    await composer.fill('작성 중인 글');
+    await page.locator('.outgoing').getByRole('button', { name: '버리기', exact: true }).click();
+    await expect(composer).toHaveValue('돌려받을 메시지\n\n작성 중인 글');
+    await expect(page.getByRole('button', { name: 'recovered.txt 빼기', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: `회수 원본 ${originalScope} · ${locator} 붙임 빼기`, exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '스킬 · ghost-guide 붙임 빼기', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: `현재 화면 ${originalScope} 프로젝트 빼기`, exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: `회수 원본 ${originalScope} 프로젝트 빼기`, exact: true })).toHaveCount(originalScope === 'project' ? 1 : 0);
+    const sending = page.waitForRequest(request => {
+      if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/commands') return false;
+      return request.postDataJSON()?.command?.type === 'message.send';
+    });
+    await page.getByRole('button', { name: '메시지 보내기', exact: true }).click();
+    const sent = (await sending).postDataJSON().command;
+    expect(sent).toEqual({ ...original, text: '돌려받을 메시지\n\n작성 중인 글' });
+  });
+}

@@ -1,6 +1,6 @@
-import { useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { BriefcaseBusiness, Clock3, Paperclip, Square, X } from 'lucide-react';
-import type { ArtifactRef, Ghost } from '@ghost/contract';
+import type { DocRef, Ghost } from '@ghost/contract';
 import { Composer } from '../ui';
 import { ComposerPlus, type PlusAction } from '../components/composer/ComposerPlus';
 import { ComposerSuggest, type Suggestion } from '../components/composer/ComposerSuggest';
@@ -13,6 +13,8 @@ import { toneFor } from './ghostState';
 import { useProjectMentions } from '../components/composer/ProjectMentions';
 import type { MessageSend } from './outbox';
 import { WorkModelFields } from './WorkModelFields';
+import { messageAttachmentKey, type RecoveredMessage } from './composerRecovery';
+import { DocAttachmentTray } from '../components/composer/DocAttachmentTray';
 
 /** Words each `/` command also answers to, so `/파일` and `/work` find the same action. */
 const commandWords: Record<string, string[]> = {
@@ -38,7 +40,7 @@ const whenLabel = (at: number) => new Date(at).toLocaleString('ko-KR', { month: 
  * Typing `/` at the start offers the same actions by keyboard; `@` hands the message to a Ghost as a 맡긴 일
  * that reports back here.
  */
-export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, returnedFiles, setReturnedFiles, inputRef, onPost, onStop, onError, initialScopeIds = [], initialMode = 'talk' }: {
+export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, recoveredMessage, setRecoveredMessage, inputRef, onPost, onStop, onError, initialScopeIds = [], initialMode = 'talk' }: {
   ghost: Ghost;
   conversationId: string | null;
   running: boolean;
@@ -46,9 +48,9 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   busy: boolean;
   draft: string;
   setDraft(value: string): void;
-  /** Files of a message the owner took back from the conversation; already uploaded, so they ride along as they are. */
-  returnedFiles: readonly ArtifactRef[];
-  setReturnedFiles(files: ArtifactRef[]): void;
+  /** Taking back an unsent message restores both attachment kinds and its original scope, including global. */
+  recoveredMessage: RecoveredMessage | null;
+  setRecoveredMessage(message: RecoveredMessage | null): void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   /** A message joins the conversation at once; its row carries sending, waiting and failure. */
   onPost(command: MessageSend): void;
@@ -75,7 +77,14 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const suggestId = useId();
-  const projects = useProjectMentions(draft, setDraft, inputRef, initialScopeIds, sending || mode === 'later');
+  const recoveryScopeIds = recoveredMessage ? recoveredMessage.scopeId === null ? [] : [recoveredMessage.scopeId] : initialScopeIds;
+  const projects = useProjectMentions(draft, setDraft, inputRef, recoveryScopeIds, sending || mode === 'later', recoveredMessage?.requestId);
+  const returnedRefs = recoveredMessage?.attachments ?? [];
+  const returnedDocs = returnedRefs.filter((ref): ref is DocRef => !('digest' in ref));
+  useEffect(() => {
+    if (!recoveredMessage) return;
+    setMode('talk'); setAssignee(null); setLaterAt(null); setBlocked('');
+  }, [recoveredMessage?.requestId]);
 
   const focus = () => inputRef.current?.focus();
   // Criteria and deadline survive mode switches; only a successful send clears them.
@@ -86,14 +95,15 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   };
   const send = async (text: string) => {
     if (!conversationId || sending) return;
+    if (mode !== 'talk' && (attachments.items.length > 0 || returnedRefs.length > 0)) { onError('첨부가 있는 메시지는 대화로 보내세요.'); return; }
     if (mode === 'talk' && attachments.uploading) { onError('첨부를 올리는 중입니다. 끝나면 보내 주세요.'); return; }
     if (mode === 'talk' && attachments.items.some(item => item.status === 'failed')) { onError('올리지 못한 첨부가 있습니다. 빼거나 다시 붙여 주세요.'); return; }
     if (mode === 'later' && (!laterAt || laterAt <= Date.now())) { onError('보낼 시각을 지금 이후로 골라 주세요.'); return; }
     onError(''); setConfirmation('');
     if (mode === 'talk') {
-      const refs = [...returnedFiles, ...attachments.refs];
+      const refs = [...returnedRefs, ...attachments.refs];
       onPost({ type: 'message.send', conversationId, text, scopeId: projects.scopeIds[0] ?? null, ...(refs.length ? { attachments: refs } : {}) });
-      attachments.clear(); setReturnedFiles([]);
+      attachments.clear(); setRecoveredMessage(null);
       setDraft('');
       projects.clear();
       return;
@@ -117,13 +127,13 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
     } catch (reason) { onError(reason instanceof Error ? reason.message : '보내지 못했습니다.'); }
     finally { setSending(false); }
   };
-  const returnedItems: PendingAttachment[] = returnedFiles.map(ref => ({ id: `returned:${ref.digest}`, name: ref.name, size: ref.size, type: ref.mediaType, status: 'ready', ref }));
+  const returnedItems: PendingAttachment[] = returnedRefs.flatMap(ref => 'digest' in ref ? [{ id: `returned:${messageAttachmentKey(ref)}`, name: ref.name, size: ref.size, type: ref.mediaType, status: 'ready' as const, ref }] : []);
   const removeFile = (id: string) => {
-    if (id.startsWith('returned:')) setReturnedFiles(returnedFiles.filter(ref => `returned:${ref.digest}` !== id));
+    if (id.startsWith('returned:') && recoveredMessage) setRecoveredMessage({ ...recoveredMessage, attachments: returnedRefs.filter(ref => `returned:${messageAttachmentKey(ref)}` !== id) });
     else attachments.remove(id);
   };
 
-  const hasFiles = attachments.items.length + returnedFiles.length > 0;
+  const hasFiles = attachments.items.length + returnedRefs.length > 0;
   const handedTo = assignee && assignee.id !== ghost.id ? assignee : null;
   const placeholder = !conversationId ? '열린 대화가 없어 보낼 수 없습니다' : mode === 'work' ? `${handedTo ? `${handedTo.name}에게 ` : ''}맡길 일을 적어 주세요. 첫 줄이 제목이 됩니다.` : mode === 'later' ? '나중에 보낼 메시지' : running ? '응답 중에도 덧붙일 수 있습니다' : `${ghost.name}에게 메시지`;
   // work.create and schedule.create carry text only; files ride on message.send alone.
@@ -186,7 +196,7 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
           <button type="button" className="composer-mode__close" aria-label="일반 메시지로" onClick={() => switchMode('talk')}><X size={11} aria-hidden="true"/></button>
         </span>
       </div>}
-      tray={<>{projects.chips}<AttachmentTray items={[...returnedItems, ...attachments.items]} onRemove={removeFile}/></>}
+      tray={<>{projects.chips}<DocAttachmentTray refs={returnedDocs} scopes={state?.scopes} onRemove={ref => { if (recoveredMessage) setRecoveredMessage({ ...recoveredMessage, attachments: returnedRefs.filter(item => messageAttachmentKey(item) !== messageAttachmentKey(ref)) }); }}/><AttachmentTray items={[...returnedItems, ...attachments.items]} onRemove={removeFile}/></>}
       extension={mode === 'work' ? <div className="composer-fields">
         <label className="composer-field"><span>완료 기준</span>
           <input value={criteria} onChange={event => setCriteria(event.target.value)} maxLength={8192} disabled={sending} placeholder="무엇이 되면 끝난 것인지"/></label>
