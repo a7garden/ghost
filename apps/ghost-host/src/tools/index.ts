@@ -54,6 +54,13 @@ const OWNER_FORMAT = `The owner's app renders Markdown (GitHub-flavored; single 
 - Briefs you write with work_create or delegate are shown to the owner as the Work's to-do, so give them the same shape: labeled sections or lists, commands in code blocks.`;
 
 /**
+ * 2026-11-12: owner direction ("응답에 빅대시 쓰지말도록해. 이것도 고스트 소스상에 금지 지침으로 있어야해").
+ * Em dash (U+2014) is out of every Ghost's responses: plain punctuation joins sentences instead.
+ * Shipped to direct and work conversations, the kinds that write what the owner reads.
+ */
+const OWNER_EM_DASH = `응답에 em dash(—, 빅대시)를 쓰지 않는다. 문장을 이어야 할 때는 쉼표·콜론·마침표를 쓴다.`;
+
+/**
  * 2026-11-10: owner-facing text follows the owner's language setting in every conversation kind. Before, only direct
  * conversations said "in their language", and Work briefs are English, so approvals and questions reached the owner in English.
  */
@@ -85,6 +92,8 @@ ghost_list shows the active Ghosts. Any Ghost can request work directly from any
 ${OWNER_VOICE}
 
 ${OWNER_FORMAT}
+
+${OWNER_EM_DASH}
 
 ${INTERACTIVE_INSTRUCTIONS}`;
 
@@ -238,6 +247,7 @@ export function createToolSet(deps: {
             ADAPT_INSTRUCTIONS,
             OWNER_CARDS,
             OWNER_FORMAT,
+            OWNER_EM_DASH,
             ownerLanguageRule(language()),
             environment,
             ...capabilityInstructions(ghost),
