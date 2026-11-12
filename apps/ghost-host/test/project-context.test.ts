@@ -4,13 +4,14 @@ import { toMessage } from "../src/engine/messages.ts";
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import { realpathSync, rmSync, symlinkSync } from "node:fs";
-import { Command, Work, validate, type Command as CommandType, type Principal } from "@ghost/contract";
+import { Command, Work, validate, type Command as CommandType, type EffectClass, type PolicyContext, type PolicyRule, type Principal } from "@ghost/contract";
 import { Access } from "../src/core/access.ts";
 import { execute } from "../src/core/commands.ts";
 import { snapshot } from "../src/core/state.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { MIGRATIONS } from "../src/ledger/schema.ts";
 import { harness, tempDir } from "./support.ts";
+import { evaluatePolicy } from "../src/core/policy.ts";
 
 const context = { publicOrigin: "http://localhost", documents: null };
 const cleanups: (() => void | Promise<void>)[] = [];
@@ -371,4 +372,80 @@ test("legacy message origins preserve multiple saved space ids and exact visible
   const projected = toMessage(entry, "conversation", { origin: "owner", attachments: [], spaces: references, text: "Visible owner text" });
   expect(projected?.text).toBe("Visible owner text");
   expect(projected?.scopes).toEqual(references);
+});
+
+test("result-policy upgrade replaces only the exact untouched installation row", () => {
+  const root = tempDir(); cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const original: PolicyRule = {
+    id: "result", tool: "complete", when: { reversible: true }, decision: "review",
+    reviewer: { kind: "main" }, revision: 1, createdBy: { kind: "install" },
+  };
+  const cases: { name: string; saved: PolicyRule | null; ownerHistory?: boolean; delegateNone?: boolean; migrate: boolean }[] = [
+    { name: "untouched", saved: original, migrate: true },
+    { name: "untouched-delegation-off", saved: { id: "result", tool: "complete", when: { reversible: true }, decision: "owner", revision: 1, createdBy: { kind: "install" } }, delegateNone: true, migrate: true },
+    { name: "owner-origin", saved: { ...original, createdBy: { kind: "owner" } }, migrate: false },
+    { name: "edited-revision", saved: { ...original, revision: 2 }, migrate: false },
+    { name: "explicit-deny", saved: { ...original, decision: "deny" }, migrate: false },
+    { name: "edited-condition", saved: { ...original, scopeId: "a-project" }, migrate: false },
+    { name: "owner-edit-then-revert", saved: original, ownerHistory: true, migrate: false },
+    { name: "owner-deleted", saved: null, migrate: false },
+  ];
+  for (const item of cases) {
+    const path = join(root, `${item.name}.db`);
+    let ledger = new Ledger(path);
+    ledger.tx(() => {
+      if (item.delegateNone) ledger.putSetting("approvals", { delegate: "none", autoMinutes: 0 });
+      if (item.saved) ledger.putPolicyRule(item.saved); else ledger.deletePolicyRule(original.id);
+      if (item.ownerHistory) ledger.putConfigRevision({
+        id: "owner-edited-result", entity: "rule", entityId: original.id, before: { ...original, decision: "deny" }, after: original,
+        actor: { kind: "owner", id: null }, reason: "config.revert", at: 1,
+      });
+    });
+    ledger.close();
+    ledger = new Ledger(path);
+    const expected = item.migrate && item.saved ? { ...item.saved, when: { targetKind: "host", reversible: true } } : item.saved;
+    expect(ledger.policyRules().find(rule => rule.id === original.id) ?? null).toEqual(expected);
+    if (item.migrate && item.saved) {
+      expect(ledger.policyRule(original.id).decision).toBe(item.saved.decision);
+      expect(evaluatePolicy({
+        tool: "complete", target: { kind: "workspace", id: "checked-work" }, access: "write", reversible: true,
+        external: false, amount: null, taint: { untrustedInput: false, privateData: false },
+      }, { ghostId: "worker", scopeId: null, triggerId: null, mainGhostId: "reviewer", counts: {} }, ledger.policyRules()).decision).toBe("allow");
+    }
+    const sequence = ledger.seq(), rows = ledger.policyRules();
+    ledger.close();
+    ledger = new Ledger(path);
+    expect(ledger.policyRules()).toEqual(rows);
+    expect(ledger.seq()).toBe(sequence);
+    ledger.close();
+  }
+});
+
+test("installed result-policy upgrades never override explicit review, deny or Ghost exceptions", () => {
+  const root = tempDir(); cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const original: PolicyRule = {
+    id: "result", tool: "complete", when: { reversible: true }, decision: "review",
+    reviewer: { kind: "main" }, revision: 1, createdBy: { kind: "install" },
+  };
+  const effect: EffectClass = {
+    tool: "complete", target: { kind: "workspace", id: "checked-work" }, access: "write", reversible: true,
+    external: false, amount: null, taint: { untrustedInput: false, privateData: false },
+  };
+  const policyContext: PolicyContext = { ghostId: "worker", scopeId: null, triggerId: null, mainGhostId: "reviewer", counts: {} };
+  const constraints: PolicyRule[] = [
+    { ...original, id: "owner-review", createdBy: { kind: "owner" } },
+    { ...original, id: "owner-deny", decision: "deny", createdBy: { kind: "owner" } },
+    { ...original, id: "result:worker", ghostId: "worker", decision: "owner" },
+  ];
+  for (const constraint of constraints) {
+    const path = join(root, `${constraint.id.replaceAll(":", "-")}.db`);
+    let ledger = new Ledger(path);
+    ledger.tx(() => { ledger.putPolicyRule(original); ledger.putPolicyRule(constraint); });
+    ledger.close();
+    ledger = new Ledger(path);
+    expect(ledger.policyRule(original.id).when).toEqual({ targetKind: "host", reversible: true });
+    expect(ledger.policyRule(constraint.id)).toEqual(constraint);
+    expect(evaluatePolicy(effect, policyContext, ledger.policyRules()).decision).toBe(constraint.decision);
+    ledger.close();
+  }
 });

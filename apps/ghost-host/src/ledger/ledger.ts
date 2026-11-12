@@ -95,6 +95,7 @@ export class Ledger {
         if (this.policyRules().length === 0) for (const rule of approvalRules(this.settings().approvals ?? DEFAULT_APPROVAL_POLICY)) this.db.query("INSERT INTO policy_rules(id,data) VALUES (?,?)").run(rule.id, JSON.stringify(rule));
         this.putSetting("policy:seeded", true);
       })();
+      this.migrateInstalledResultPolicy();
     } catch (error) {
       this.db.close();
       throw error;
@@ -127,6 +128,15 @@ export class Ledger {
         if (rebuild) this.db.exec("PRAGMA foreign_keys = ON");
       }
     }
+  }
+
+  private migrateInstalledResultPolicy() {
+    const configured = approvalRules(this.settings().approvals ?? DEFAULT_APPROVAL_POLICY).find(rule => rule.id === "result");
+    if (!configured) return;
+    const previous: PolicyRule = { ...configured, when: { reversible: true } };
+    const current = this.policyRules().find(rule => rule.id === previous.id);
+    if (!current || !isDeepStrictEqual(current, previous) || this.configRevisions("rule", previous.id).length !== 0) return;
+    this.tx(() => this.putPolicyRule({ ...current, when: { targetKind: "host", reversible: true } }));
   }
 
   private migrateProjectBriefs() {
