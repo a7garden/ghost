@@ -373,8 +373,8 @@ class HostEngine implements Engine, MemoryEngine {
           if (!this.helperRead(tool.name) || !allowed.includes(tool.name)) continue;
         }
         if (SELECTABLE_TOOLS.has(tool.name) || /^(mcp|conn)\./.test(tool.name)) {
-          // The ghost-guide is always available to the default Ghost; Work and activity boundaries still apply.
-          if (!matchesToolPatterns(ghost.tools, tool.name) && !(tool.name === "skill_read" && ghost.isDefault)) continue;
+          // The ghost-guide is available to the default Ghost outside a Work; inside one, grants and boundaries decide.
+          if (!matchesToolPatterns(ghost.tools, tool.name) && !(tool.name === "skill_read" && ghost.isDefault && !work)) continue;
           if (toolScopes.some((patterns) => !matchesToolPatterns(patterns, tool.name))) continue;
           if (work?.activityId && (!activity || !matchesToolPatterns(activity.tools, tool.name))) continue;
         }
