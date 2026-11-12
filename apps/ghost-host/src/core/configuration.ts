@@ -2,7 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Type } from "typebox";
-import { Scope, PolicyRule, McpServer, Ghost, Activity, Limits, ModelSlot, SlotName, validate, type Command, type ConfigRevision, type DocRef, type Principal, type ModelSlot as Slot, type Scope as ScopeValue, type PolicyRule as RuleValue, type McpServer as ServerValue, type Ghost as GhostValue, type Activity as ActivityValue, type Limits as LimitsValue } from "@ghost/contract";
+import { Scope, PolicyRule, McpServer, Ghost, Activity, Connection, Limits, ModelSlot, SlotName, validate, type Command, type ConfigRevision, type DocRef, type Principal, type ModelSlot as Slot, type Scope as ScopeValue, type PolicyRule as RuleValue, type McpServer as ServerValue, type Ghost as GhostValue, type Activity as ActivityValue, type Limits as LimitsValue } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { conflict, invalid } from "./errors.ts";
 import { newId } from "./ids.ts";
@@ -10,6 +10,22 @@ import { newId } from "./ids.ts";
 const liveStates = ["queued", "running", "waiting", "verifying", "blocked"] as const;
 type Entity = ConfigRevision["entity"];
 type Entry = { entity: Entity; entityId: string | null; value: unknown };
+
+export type ConnectionMetadata = Omit<Connection, "hasCredential" | "credentialVersion" | "updatedAt">;
+
+export function connectionMetadata(connection: Connection | null): ConnectionMetadata | null {
+  if (!connection) return null;
+  const source = connection.config;
+  let config: Connection["config"];
+  if (source.kind === "api") {
+    const headers = Object.fromEntries(Object.entries(source.headers).filter(([name]) => name.toLowerCase() !== source.authHeader.toLowerCase() && !/authorization|cookie|token|secret|password|api[-_]?key/i.test(name)));
+    config = { kind: "api", baseUrl: source.baseUrl, authHeader: source.authHeader, authPrefix: source.authPrefix, testPath: source.testPath, headers, ghostIds: source.ghostIds,
+      ...(source.readPaths ? { readPaths: source.readPaths.map(({ method, path }) => ({ method, path })) } : {}) };
+  } else if (source.kind === "mail") {
+    config = { kind: "mail", host: source.host, port: source.port, username: source.username, mailbox: source.mailbox, smtpHost: source.smtpHost, smtpPort: source.smtpPort, smtpSecure: source.smtpSecure, ...(source.authType ? { authType: source.authType } : {}) };
+  } else config = { kind: source.kind, baseUrl: source.baseUrl };
+  return { id: connection.id, name: connection.name, config, createdAt: connection.createdAt, ...(connection.serviceId !== undefined ? { serviceId: connection.serviceId } : {}), ...(connection.iconUrl !== undefined ? { iconUrl: connection.iconUrl } : {}) };
+}
 
 export function absoluteDirectory(path: string): string {
   try {
@@ -34,6 +50,7 @@ function configuration(core: Core): Entry[] {
     ...ledger.policyRules().map(value => ({ entity: "rule" as const, entityId: value.id, value })),
     ...ledger.mcpServers().map(value => ({ entity: "mcp" as const, entityId: value.id, value })),
     ...ledger.activities(true).map(value => ({ entity: "activity" as const, entityId: value.id, value })),
+    ...ledger.connections().map(value => ({ entity: "connection" as const, entityId: value.id, value: connectionMetadata(value) })),
     ...Object.entries(ledger.settings().slots ?? {}).map(([entityId, value]) => ({ entity: "slot" as const, entityId, value })),
     { entity: "slot", entityId: null, value: ledger.settings().defaultSlot ?? null },
     { entity: "limits", entityId: null, value: ledger.limits() },
@@ -41,7 +58,7 @@ function configuration(core: Core): Entry[] {
 }
 
 /** Runs inside the command's receipt transaction, including all secondary Ghost/activity mutations. */
-export function reviseConfiguration<T>(core: Core, principal: Principal, command: Command, run: () => T): T {
+export function reviseConfiguration<T>(core: Core, principal: Principal | { kind: "ghost"; ghostId: string }, command: Command, run: () => T, reason: string = command.type): T {
   const reverted = command.type === "config.revert" ? core.ledger.configRevision(command.revisionId) : null;
   const before = configuration(core);
   const result = run();
@@ -59,8 +76,8 @@ export function reviseConfiguration<T>(core: Core, principal: Principal, command
     core.ledger.putConfigRevision({ id: newId(), entity: scopedLimits ? "limits" : entity, entityId,
       before: scopedLimits && old && typeof old === "object" && "limits" in old ? old.limits : old,
       after: scopedLimits && next && typeof next === "object" && "limits" in next ? next.limits : next,
-      actor: { kind: principal.kind, id: principal.kind === "device" ? principal.deviceId : null },
-      reason: command.type === "config.revert" ? `config.revert:${command.revisionId}` : command.type, at: Date.now() });
+      actor: { kind: principal.kind, id: principal.kind === "device" ? principal.deviceId : principal.kind === "ghost" ? principal.ghostId : null },
+      reason: command.type === "config.revert" ? `${reason} (revert ${command.revisionId})` : reason, at: Date.now() });
   }
   if (reverted && revisions === 0) {
     const entry = after.find(item => item.entity === reverted.entity && item.entityId === reverted.entityId);
@@ -92,6 +109,8 @@ export function checkConfiguration(core: Core) {
   }
   for (const activity of ledger.activities()) {
     requireScope(activity.scopeId); requireGhost(activity.ghostId);
+    const ghost = ledger.ghost(activity.ghostId);
+    if (activity.execution.kind === "host" && !ghost.hostExecution) throw conflict("activity would restore PC execution its Ghost no longer has");
     if (activity.source.kind === "commit") requireScope(activity.source.scopeId);
     if ("connectionId" in activity.source && !ledger.findConnection(activity.source.connectionId)) throw conflict("activity refers to a missing connection");
   }
@@ -185,6 +204,11 @@ function revert(core: Core, revision: ConfigRevision) {
   const ledger = core.ledger;
   const id = revision.entityId;
   const value = revision.before;
+  const latest = ledger.configRevisions(revision.entity, revision.entityId).at(-1);
+  if (latest?.id !== revision.id) throw conflict("Configuration has a newer revision; refresh before reverting.");
+  const currentValue = configuration(core).find((entry) => entry.entity === revision.entity && entry.entityId === id)?.value ?? null;
+  const current = revision.entity === "limits" && id !== null ? ledger.scope(id).limits : currentValue;
+  if (!isDeepStrictEqual(current, revision.after)) throw conflict("Configuration changed since this revision; refresh before reverting.");
   const shape = (schema: Parameters<typeof validate>[0]) => { if (!validate(schema, value)) throw conflict("revision has invalid configuration"); };
   switch (revision.entity) {
     case "scope":
@@ -201,6 +225,30 @@ function revert(core: Core, revision: ConfigRevision) {
         ledger.putSetting("slots", slots);
       }
       ledger.emit({ type: "settings", settings: ledger.settings() }); break;
+    }
+    case "connection": {
+      if (!id) throw conflict("Connection revision is missing its identity");
+      const current = ledger.findConnection(id);
+      if (isDeepStrictEqual(revision.before, revision.after)) throw conflict("Authentication-only revisions cannot be reverted; reconnect through connection settings.");
+      if (value === null) {
+        if (current?.hasCredential || core.activitySources?.credentialPresent(id)) throw conflict("A credential-bearing connection must be removed through connection settings.");
+        ledger.deleteConnection(id);
+      } else {
+        if (!validate(ConnectionMetadataSchema, value)) throw conflict("Revision has invalid connection metadata");
+        const metadata = value as ConnectionMetadata;
+        if (metadata.id !== id) throw conflict("Connection revision identity changed");
+        if (current?.hasCredential) {
+          const identity = (config: Connection["config"]) => {
+            if (config.kind !== "api") return config;
+            const { ghostIds: _grants, readPaths: _reads, ...authentication } = config;
+            return authentication;
+          };
+          if (!isDeepStrictEqual(identity(current.config), identity(metadata.config))) throw conflict("Authentication endpoints cannot be reverted while a credential is connected; reconnect through connection settings.");
+        }
+        ledger.putConnection({ ...metadata, hasCredential: current?.hasCredential ?? false, credentialVersion: current?.credentialVersion ?? null, updatedAt: Date.now() });
+      }
+      core.activities.invalidateConnection(id);
+      break;
     }
     case "limits":
       if (id === null) { shape(Limits); ledger.putSetting("limits", value); ledger.emit({ type: "settings", settings: ledger.settings() }); }
@@ -237,14 +285,17 @@ function revert(core: Core, revision: ConfigRevision) {
       if (current && ledger.activityRuns(current.id).some(run => liveStates.includes(run.state as typeof liveStates[number]))) throw conflict("activity still has live Work");
       if (value === null) {
         if (current && (ledger.activityRuns(current.id).length || ledger.db.query("SELECT 1 FROM works WHERE activity_id=? LIMIT 1").get(current.id))) throw conflict("activity has durable Work history");
+        if (current) core.activities.removePolicy(current.id);
         ledger.db.query("DELETE FROM activities WHERE id=?").run(id!);
         ledger.emit({ type: "activity.removed", id: id! });
       } else {
         shape(Activity);
-        const activity = value as ActivityValue;
+        const activity = { ...(value as ActivityValue), revision: Math.max(current?.revision ?? 0, (value as ActivityValue).revision) + 1, updatedAt: Date.now() };
         const ghost = ledger.ghost(activity.ghostId);
-        if (activity.tools.some(tool => !ghost.tools.includes(tool)) || (activity.execution.kind === "host" && !ghost.hostExecution)) throw conflict("activity would restore authority its Ghost no longer has");
+        if (activity.execution.kind === "host" && !ghost.hostExecution) throw conflict("activity would restore PC execution its Ghost no longer has");
         ledger.putActivity(activity);
+        if (activity.deletedAt !== null) core.activities.removePolicy(activity.id);
+        else core.activities.syncPolicy(activity, current ?? undefined);
       }
       break;
     }
@@ -253,3 +304,4 @@ function revert(core: Core, revision: ConfigRevision) {
 }
 
 const importPartialLimits = Type.Partial(Limits);
+const ConnectionMetadataSchema = Type.Omit(Connection, ["hasCredential", "credentialVersion", "updatedAt"]);

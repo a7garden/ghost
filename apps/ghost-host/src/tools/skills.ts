@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { SkillName } from "@ghost/contract";
+import { SkillName, type DocRef } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
 import { forbidden } from "../core/errors.ts";
@@ -32,7 +32,10 @@ export function createSkillsTools(core: Core, skills: SkillsPort | null): Extens
           return text(GHOST_GUIDE);
         }
         if (!skills) throw forbidden("External skills are unavailable");
-        if (!scope.ghost.skills.includes(args.name)) throw forbidden(`${args.name} is not one of ${scope.ghost.name}'s skills`);
+        const context = core.ledger.setting<{ scopeId?: string | null; docAttachments?: DocRef[] }>(`context:${scope.conversation.id}`, {});
+        const scopeId = scope.work ? scope.work.scopeId : context.scopeId;
+        const references = [...scope.ghost.attachments, ...(scope.work?.attachments ?? []), ...(context.docAttachments ?? []), ...(scopeId ? core.ledger.scope(scopeId).attachments : [])];
+        if (!scope.ghost.skills.includes(args.name) && !references.some((ref) => ref.kind === "skill" && ref.name === args.name)) throw forbidden(`${args.name} is not attached to this conversation`);
         if (args.path === undefined) {
           const files = skills.list(args.name);
           return text(files.length === 0 ? `Skill ${args.name} has no readable files.` : files.join("\n"));

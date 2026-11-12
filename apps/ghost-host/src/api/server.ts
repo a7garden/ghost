@@ -37,6 +37,8 @@ import type { Core } from "../core/core.ts";
 import { CommandError, notFound } from "../core/errors.ts";
 import { newId } from "../core/ids.ts";
 import { HOST_VERSION, snapshot, workDetail } from "../core/state.ts";
+import { readMetrics } from "../core/metrics.ts";
+import type { ConfigRevision } from "@ghost/contract";
 import { NotFound } from "../ledger/ledger.ts";
 import type { Vault } from "../stores/vault.ts";
 import type { MemoryStore } from "../stores/memory.ts";
@@ -473,6 +475,22 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       } catch (caught) {
         return failure(caught);
       }
+    }
+    if (pathname === "/api/metrics" && request.method === "GET") {
+      try {
+        const params = url.searchParams;
+        return json(readMetrics(core.ledger, {
+          ...(params.has("scopeId") ? { scopeId: params.get("scopeId") || null } : {}),
+          ...(params.get("ghostId") ? { ghostId: params.get("ghostId")! } : {}),
+          ...(params.get("slot") ? { slot: params.get("slot")! } : {}),
+          ...(params.get("ruleId") ? { ruleId: params.get("ruleId")! } : {}),
+        }));
+      } catch (caught) { return failure(caught); }
+    }
+    if (pathname === "/api/config/revisions" && request.method === "GET") {
+      const entity = url.searchParams.get("entity");
+      if (entity !== null && !["scope", "ghost", "rule", "slot", "mcp", "activity", "limits", "connection"].includes(entity)) return error("invalid", "unknown configuration entity", 400);
+      return json(core.ledger.configRevisions((entity ?? undefined) as ConfigRevision["entity"] | undefined, url.searchParams.has("entityId") ? url.searchParams.get("entityId") || null : undefined));
     }
     if (pathname === "/api/commands" && request.method === "POST") return serveCommand(request, access);
     if (pathname === "/api/artifacts" && request.method === "POST") return uploadArtifact(request);

@@ -998,7 +998,7 @@ export type Live = Static<typeof Live>;
 
 export const ConfigRevision = Type.Object({
   id: Id,
-  entity: Type.Union([Type.Literal("scope"), Type.Literal("ghost"), Type.Literal("rule"), Type.Literal("slot"), Type.Literal("mcp"), Type.Literal("activity"), Type.Literal("limits")]),
+  entity: Type.Union([Type.Literal("scope"), Type.Literal("ghost"), Type.Literal("rule"), Type.Literal("slot"), Type.Literal("mcp"), Type.Literal("activity"), Type.Literal("limits"), Type.Literal("connection")]),
   entityId: nullable(Type.String()),
   before: Type.Unknown(),
   after: Type.Unknown(),

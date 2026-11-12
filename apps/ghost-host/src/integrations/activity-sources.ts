@@ -147,7 +147,7 @@ export function connectionRequestIsReadOnly(connection: Connection, method: ApiR
   if (connection.config.kind !== "api") return false;
   const url = connectionRequestUrl(connection.config, path);
   const relative = url.pathname.slice(apiEndpoint(connection.config).pathname.length).replace(/^\//, "");
-  const readPaths = (connection.config as ApiConfig & { readPaths?: { method: string; path: string }[] }).readPaths ?? [];
+  const readPaths = connection.config.readPaths ?? [];
   if (readPaths.some((entry) => entry.method === method && boundedGlob(entry.path.replace(/^\//, ""), relative))) return true;
   if (method !== "GET") return false;
   const slack = connection.serviceId === "slack" || /(^|\.)slack(?:-gov)?\.com$/.test(url.hostname);
@@ -316,7 +316,10 @@ export class SourceConnections implements ActivitySourcePort {
     const secrets = [secret.credential, JSON.stringify(secret.credential).slice(1, -1), encodeURIComponent(secret.credential)];
     return {
       headers: { ...config.headers, [config.authHeader]: config.authPrefix ? `${config.authPrefix} ${secret.credential}` : secret.credential },
-      authorize: () => { if (this.closed) fail("Source connections are closed."); this.authorized(connection, secret); },
+      authorize: () => {
+        if (this.closed) fail("Source connections are closed.");
+        if (this.authorized(connection, secret).credential !== secret.credential) fail("The authentication token rotated; obtain fresh request headers.");
+      },
       redact: (text) => secrets.reduce((value, credential) => value.split(credential).join("[redacted]"), text),
     };
   }
@@ -374,6 +377,11 @@ export class SourceConnections implements ActivitySourcePort {
       if (target.mailbox !== connection.config.mailbox || !/^[1-9][0-9]{0,19}$/.test(target.validity ?? "") || !/^[1-9][0-9]{0,9}$/.test(target.uid ?? "") || item.id !== `mail:${connection.id}:${hash(target.mailbox).slice(0, 16)}:${target.validity}:${target.uid}`) fail("Mail target does not match this source item.");
     } else if (target.kind === "poll" && connection.config.kind === "api") {
       if (!target.path || target.itemsPointer === undefined || target.idPointer === undefined || !target.itemId) fail("Poll target metadata is invalid.");
+      if (target.itemType !== "string" && target.itemType !== "number") fail("Poll item identity type is invalid.");
+      const rawId = target.itemType === "number" ? Number(target.itemId) : target.itemId;
+      if (typeof rawId === "number" && !Number.isSafeInteger(rawId)) fail("Poll item identity is invalid.");
+      const identity = hash(JSON.stringify([target.itemType, rawId]));
+      if (item.id !== `poll:${connection.id}:${identity}` || item.version !== identity) fail("Poll target does not match this source item.");
       connectionRequestUrl(connection.config, target.path);
     } else fail("Source provider does not match this connection.");
   }
@@ -513,7 +521,10 @@ export class SourceConnections implements ActivitySourcePort {
     const body = redact(Buffer.concat(chunks, size).toString("utf8"));
     let json: unknown;
     try { json = JSON.parse(body) as unknown; } catch { json = undefined; }
-    const link = response.headers.get("link")?.split(",").map((part) => /^\s*<([^>]+)>\s*;\s*rel="?next"?\s*$/i.exec(part)?.[1]).find(Boolean);
+    const link = [...(response.headers.get("link") ?? "").matchAll(/<([^>]+)>\s*([^<>]*)/g)].find((entry) => {
+      const relation = /(?:^|;)\s*rel\s*=\s*(?:"([^"]*)"|([^;\s,]+))/i.exec(entry[2]!);
+      return (relation?.[1] ?? relation?.[2] ?? "").split(/\s+/).includes("next");
+    })?.[1];
     let nextPath: string | undefined;
     if (link) {
       const next = new URL(link, url);
@@ -624,6 +635,7 @@ export class SourceConnections implements ActivitySourcePort {
       seen = parsed.seen as string[];
     }
     const known = new Set(seen);
+    const responseIds = new Set<string>();
     const items: ActivitySourceItem[] = [];
     const pages = new Set<string>();
     let path: string | undefined = source.path;
@@ -639,6 +651,8 @@ export class SourceConnections implements ActivitySourcePort {
         const rawId = jsonPointer(record, source.idPointer);
         if ((typeof rawId !== "string" && typeof rawId !== "number") || String(rawId).length === 0 || String(rawId).length > 256 || (typeof rawId === "number" && !Number.isSafeInteger(rawId))) fail("Poll item idPointer must identify a bounded string or safe integer; no cursor advanced.");
         const id = hash(JSON.stringify([typeof rawId, rawId]));
+        if (responseIds.has(id)) continue;
+        responseIds.add(id);
         if (known.has(id)) continue;
         const body = JSON.stringify(record);
         if (body.length > 32768) fail("Poll item exceeds 32768 characters; narrow the endpoint. No item was discarded.");
@@ -648,8 +662,8 @@ export class SourceConnections implements ActivitySourcePort {
       }
       path = response.nextPath;
     }
-    const cursor = JSON.stringify({ kind: "poll", scope, seen: [...known].sort() });
-    if (cursor.length > 262144) fail("Poll dedup history exceeds its safety limit; narrow the endpoint. No cursor advanced.");
+    const cursor = JSON.stringify({ kind: "poll", scope, seen: [...responseIds].sort() });
+    if (cursor.length > 262144) fail("Poll response identity set exceeds its safety limit; narrow the endpoint. No cursor advanced.");
     return { items, exclusions: [], cursor };
   }
   private async pollPR(connection: Connection, secret: Secret, source: PRSource, parsed: unknown, scope: string, baseline: boolean, signal: AbortSignal): Promise<ActivitySourcePoll> {

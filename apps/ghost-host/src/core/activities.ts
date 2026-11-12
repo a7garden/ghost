@@ -1,6 +1,6 @@
 import { isAbsolute, join, resolve, dirname } from "node:path";
 import { readFile, stat } from "node:fs/promises";
-import { ActivityConfig, ActivityAction, validate, type Activity, type ActivityRun, type ActivitySourceItem, type Connection, type GhostTool, type Work } from "@ghost/contract";
+import { ActivityConfig, ActivityAction, matchesToolPatterns, validate, type Activity, type ActivityRun, type ActivitySourceItem, type Connection, type GhostTool, type Work } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import type { ActivitySourceExclusion, ActivitySourcePoll, ActivitySourcePort } from "../integrations/activity-sources.ts";
 import { CommandError, conflict, forbidden, invalid } from "./errors.ts";
@@ -9,6 +9,8 @@ import { digestOf, idFor, newId } from "./ids.ts";
 import { firstRun } from "./schedules.ts";
 import { isTerminal } from "./works.ts";
 import { repositoryHead } from "./autonomy.ts";
+import { reviseConfiguration } from "./configuration.ts";
+import { activityRules } from "./policy.ts";
 
 const DAY = 86_400_000;
 const DRY_TOOLS: Partial<Record<GhostTool, true>> = { read: true, web_search: true, web_read: true, skill_read: true, delegate: true, host_status: true, host_services: true, host_disk_scan: true, host_disk_usage: true, host_list: true, host_read: true, host_nodes: true, toss_read: true };
@@ -35,15 +37,22 @@ export class Activities {
   private stopped = false;
 
   constructor(private readonly core: Core, private readonly sources: ActivitySourcePort | null) {
+    if (!core.ledger.setting("policy:activities:seeded", false)) core.ledger.tx(() => {
+      for (const activity of core.ledger.activities()) this.syncPolicy(activity);
+      core.ledger.putSetting("policy:activities:seeded", true);
+    });
     core.effects.onApproved("activity_propose", async (effect) => {
       const decision = [...core.ledger.decisionsAwaitingFollowUp(), ...core.ledger.pendingDecisions({ effectId: effect.id })].find((entry) => entry.effectId === effect.id);
       const config = decision?.proposal?.config;
       const conversation = core.ledger.conversation(effect.conversationId);
       const ghost = core.ledger.ghost(conversation.ghostId);
-      if (conversation.kind !== "direct" || !ghost.tools.includes("activity_propose") || !validate(ActivityConfig, config) || config.ghostId !== ghost.id) throw new NoEffect("Activity proposal authority was revoked or the proposal is invalid; nothing was activated.");
-      if (digestOf({ config }) !== effect.inputDigest) throw new NoEffect("The approved configuration identity changed.");
+      if (conversation.kind !== "direct" || ghost.deletedAt !== null || ghost.state !== "active" || !matchesToolPatterns(ghost.tools, "activity_propose") || !validate(ActivityConfig, config) || (!ghost.isDefault && config.ghostId !== ghost.id)) throw new NoEffect("Activity proposal authority was revoked or the proposal is invalid; nothing was activated.");
+      const authority = decision?.proposal?.authority;
+      if (typeof authority !== "string" || digestOf({ config, authority }) !== effect.inputDigest) throw new NoEffect("The approved configuration identity changed.");
       try {
-        const activity = this.create(config, idFor(effect.id, "activity"));
+        if (this.proposalAuthority(config) !== authority) throw forbidden("The approved source account or Ghost authority changed");
+        if (!ghost.isDefault && (!config.scopeId || (this.ledger.scope(config.scopeId).ghostId ?? this.ledger.defaultGhost()?.id) !== ghost.id)) throw forbidden("This Ghost no longer receives the approved scope");
+        const activity = this.ledger.tx(() => reviseConfiguration(core, { kind: "ghost", ghostId: ghost.id }, { type: "activity.create", config }, () => this.create(config, idFor(effect.id, "activity")), "Owner-approved standing trigger"));
         return `Activity ${activity.name} (${activity.id}) activated with owner approval.`;
       } catch (error) { throw new NoEffect(message(error)); }
     });
@@ -55,8 +64,7 @@ export class Activities {
       let bound: ActionAuthority;
       try {
         bound = this.actionAuthority(effect.workId, action);
-        // `review` is the Host's own note on the card (the main Ghost's view), never part of what was approved.
-        const { review: _review, ...approved } = proposal;
+        const approved = { workId: proposal.workId, workRevision: proposal.workRevision, runId: proposal.runId, activityRevision: proposal.activityRevision, sourceItem: proposal.sourceItem, action: proposal.action };
         if (digestOf(approved) !== effect.inputDigest || proposal.workRevision !== core.ledger.work(effect.workId).revision) throw forbidden("the approved action input or Work revision changed");
         if (proposal.runId !== bound.run.id || proposal.activityRevision !== bound.activity.revision || digestOf(proposal.sourceItem) !== digestOf(bound.run.sourceItem)) throw forbidden("the source or approved activity revision changed");
       } catch (error) { throw new NoEffect(message(error)); }
@@ -72,6 +80,21 @@ export class Activities {
     return this.sources;
   }
 
+  syncPolicy(activity: Activity, previous?: Activity) {
+    if (previous && previous.deletedAt === null && previous.scopeId === activity.scopeId && previous.policy.externalActions === activity.policy.externalActions) return;
+    const previousRules = new Map(this.ledger.policyRules().map((rule) => [rule.id, rule]));
+    if (previous) for (const rule of activityRules(previous)) this.ledger.deletePolicyRule(rule.id);
+    for (const rule of activityRules(activity, this.ledger.settings().approvals)) {
+      const prior = previousRules.get(rule.id);
+      if (!previous && prior) continue;
+      this.ledger.putPolicyRule({ ...rule, ...(activity.scopeId ? { scopeId: activity.scopeId } : {}), revision: (prior?.revision ?? 0) + 1 });
+    }
+  }
+
+  removePolicy(activityId: string) {
+    for (const rule of this.ledger.policyRules()) if (rule.triggerId === activityId) this.ledger.deletePolicyRule(rule.id);
+  }
+
   private checkConfig(config: ActivityConfig) {
     if (!validate(ActivityConfig, config)) throw invalid("invalid activity configuration");
     const ghost = this.ledger.ghost(config.ghostId);
@@ -79,7 +102,6 @@ export class Activities {
     if (config.execution.kind === "host" && (!ghost.hostExecution || !isAbsolute(config.execution.cwd))) throw forbidden("unrestricted PC access requires the owner's current Ghost grant and an absolute cwd");
     if (config.scopeId != null) this.ledger.scope(config.scopeId);
     if (config.source.kind === "commit") this.ledger.scope(config.source.scopeId);
-    if (config.tools.some((tool) => !ghost.tools.includes(tool))) throw forbidden("activity tools must be enabled for its Ghost");
     if (config.scopeId) {
       const scope = this.ledger.scope(config.scopeId);
       if (scope.state !== "active" || (scope.ghostId ?? this.ledger.defaultGhost()?.id) !== ghost.id) throw forbidden("activity must run in its receiving Ghost's active scope");
@@ -96,9 +118,19 @@ export class Activities {
     }
   }
 
+  proposalAuthority(config: ActivityConfig): string {
+    this.checkConfig(config);
+    const ghost = this.ledger.ghost(config.ghostId);
+    const connection = "connectionId" in config.source ? this.ledger.connection(config.source.connectionId) : null;
+    return digestOf({ ghostId: ghost.id, tools: ghost.tools, hostExecution: ghost.hostExecution, scope: config.scopeId ? this.ledger.scope(config.scopeId) : null, connection: connection ? { id: connection.id, config: connection.config, credentialVersion: connection.credentialVersion, hasCredential: connection.hasCredential } : null });
+  }
+
   private async poll(activity: Activity, baseline: boolean, cursor = activity.cursor) {
     if (activity.source.kind === "schedule") throw invalid("scheduled activities have no source poll");
-    if (activity.source.kind === "commit") return this.pollCommits(activity, baseline, cursor);
+    if (activity.source.kind === "commit") {
+      try { return await this.pollCommits(activity, baseline, cursor); }
+      catch (error) { throw new SourcePollFailure(error); }
+    }
     const connection = this.ledger.connection(activity.source.connectionId);
     const port = this.sourcePort();
     try { return await port.poll(connection, activity.source, cursor, { baseline }); }
@@ -108,13 +140,17 @@ export class Activities {
   private async pollCommits(activity: Activity, baseline: boolean, encoded: string | null) {
     if (activity.source.kind !== "commit") throw invalid("not a commit trigger");
     const scope = this.ledger.scope(activity.source.scopeId);
-    const prior = encoded ? JSON.parse(encoded) as { paths: string[]; seen: string[] } : null;
+    const prior = encoded ? JSON.parse(encoded) as { paths: string[]; positions: Record<string, { last: string; occurrence: number }> } : null;
+    if (prior && (!Array.isArray(prior.paths) || !prior.positions || typeof prior.positions !== "object")) throw invalid("Commit cursor is malformed; no cursor advanced.");
     if (prior && digestOf(prior.paths) !== digestOf(scope.paths)) throw conflict("Commit scope paths changed; reset the source baseline.");
-    const seen = new Set(prior?.seen ?? []);
     const items: ActivitySourceItem[] = [];
+    const positions: Record<string, { last: string; occurrence: number }> = {};
     for (const path of scope.paths) {
       const head = await repositoryHead(path);
-      if (!head) continue;
+      if (!head) {
+        if (prior?.positions[path]) throw conflict("A watched repository is unavailable; its commit cursor was retained.");
+        continue;
+      }
       let directory = resolve(path);
       let gitDir: string | null = null;
       for (;;) {
@@ -131,22 +167,32 @@ export class Activities {
         directory = parent;
       }
       if (!gitDir) continue;
+      const logInfo = await stat(join(gitDir, "logs", "HEAD")).catch(() => null);
+      if (logInfo && logInfo.size > 8 * 1024 * 1024) throw invalid("Repository HEAD reflog exceeds the scan safety limit; reconcile and rotate it before resetting the baseline.");
       const log = await readFile(join(gitDir, "logs", "HEAD"), "utf8").catch(() => "");
       const entries = log.trim().split("\n").filter(Boolean).map((line) => {
         const match = /^[0-9a-f]{40,64} ([0-9a-f]{40,64}) .+ (\d+) [+-]\d{4}\t(.*)$/.exec(line);
         if (!match) throw invalid("Repository reflog is malformed; no commit cursor advanced.");
-        return { sha: match[1]!, at: Number(match[2]) * 1000, subject: match[3]! };
+        return { sha: match[1]!, at: Number(match[2]) * 1000, subject: match[3]!, key: digestOf(line) };
       });
-      if (!entries.length) entries.push({ sha: head.slice(head.lastIndexOf("@") + 1), at: Date.now(), subject: head });
-      for (const entry of entries) {
+      if (!entries.length) throw invalid("Commit triggers require a repository HEAD reflog; enable Git core.logAllRefUpdates. No cursor advanced.");
+      const checkpoint = prior?.positions[path];
+      let start = 0;
+      if (checkpoint) {
+        let occurrence = 0;
+        const index = entries.findIndex((entry) => entry.key === checkpoint.last && ++occurrence === checkpoint.occurrence);
+        if (index < 0) throw conflict("Repository reflog no longer contains the prior cursor; reconcile missing commits before resetting the baseline.");
+        start = index + 1;
+      }
+      const last = entries.at(-1)!;
+      positions[path] = { last: last.key, occurrence: entries.filter((entry) => entry.key === last.key).length };
+      for (const entry of entries.slice(start)) {
         const id = digestOf([path, entry.sha]);
-        if (seen.has(id)) continue;
-        seen.add(id);
-        if (!baseline) items.push({ id: `commit:${id}`, version: entry.sha, title: entry.subject.slice(0, 512), text: `Repository: ${path}\nCommit: ${entry.sha}\n${entry.subject}`, url: null, author: null, occurredAt: entry.at, target: { kind: "commit", path, sha: entry.sha, scopeId: scope.id } });
+        if (!baseline || entry.at >= Math.floor(activity.createdAt / 1000) * 1000) items.push({ id: `commit:${id}`, version: entry.sha, title: entry.subject.slice(0, 512), text: `Repository: ${path}\nCommit: ${entry.sha}\n${entry.subject}`, url: null, author: null, occurredAt: entry.at, target: { kind: "commit", path, sha: entry.sha, scopeId: scope.id } });
       }
     }
-    const cursor = JSON.stringify({ paths: scope.paths, seen: [...seen].sort() });
-    if (cursor.length > 262144) throw invalid("Commit dedup history exceeds its safety limit; no cursor advanced.");
+    const cursor = JSON.stringify({ paths: scope.paths, positions });
+    if (cursor.length > 262144) throw invalid("Commit cursor exceeds its safety limit; no cursor advanced.");
     return { items, exclusions: [], cursor };
   }
 
@@ -203,12 +249,16 @@ export class Activities {
 
   create(config: ActivityConfig, id = newId()): Activity {
     const existing = this.ledger.findActivity(id);
-    if (existing) return existing;
+    if (existing) {
+      const priorConfig = Object.fromEntries(Object.keys(config).map((key) => [key, Reflect.get(existing, key)]));
+      if (digestOf(priorConfig) !== digestOf(config)) throw conflict("Activity call identity belongs to different configuration");
+      return existing;
+    }
     this.live();
     this.checkConfig(config);
     const now = Date.now();
     const activity: Activity = { ...config, scopeId: config.scopeId ?? null, id, revision: 1, paused: false, pauseReason: null, nextAt: config.source.kind === "schedule" ? firstRun(config.source.spec, now) : now, cursor: null, lastCheckedAt: null, lastError: null, failureCount: 0, deletedAt: null, createdAt: now, updatedAt: now };
-    this.ledger.tx(() => this.ledger.putActivity(activity));
+    this.ledger.tx(() => { this.ledger.putActivity(activity); this.syncPolicy(activity); });
     this.core.schedules.refresh();
     return activity;
   }
@@ -224,6 +274,7 @@ export class Activities {
     const activity: Activity = { ...previous, ...config, scopeId: config.scopeId ?? null, revision: previous.revision + 1, cursor: changedSource ? null : previous.cursor, nextAt: changedSource ? (config.source.kind === "schedule" ? firstRun(config.source.spec, now) : now) : previous.nextAt, lastError: null, failureCount: 0, deferredUntil: null, deferredReason: null, updatedAt: now };
     this.ledger.tx(() => {
       this.ledger.putActivity(activity);
+      this.syncPolicy(activity, previous);
       this.cancelRuns(id, "activity configuration changed by owner");
     });
     this.core.schedules.refresh();
@@ -247,6 +298,7 @@ export class Activities {
     const activity = this.ledger.activity(id);
     this.ledger.tx(() => {
       this.ledger.putActivity({ ...activity, paused: true, deletedAt: Date.now(), revision: activity.revision + 1, updatedAt: Date.now() });
+      this.removePolicy(id);
       this.cancelRuns(id, "activity deleted by owner");
     });
     this.core.schedules.refresh();
@@ -321,7 +373,7 @@ export class Activities {
       const run: ActivityRun = { id, activityId: activity.id, workId: null, trigger: input.trigger, sourceKey: input.key, sourceItem: input.item ?? null, state: "queued", activityRevision: activity.revision, reason: input.reason ?? null, dryRun, noChange: false, createdAt: now, endedAt: null, nextCheckAt: null, nextCheckReason: null, followupOf: input.followupOf ?? null };
       // Persist run+Work together before kick's afterCommit work can open a conversation.
       this.ledger.putActivityRun(run);
-      const work = this.core.works.createRoot({ id: idFor(id, "work"), ghostId: ghost.id, scopeId: activity.scopeId, title: activity.name, brief: activity.prompt, acceptance: { criteria: activity.acceptanceCriteria, checks: [], reviewer: { kind: "model", model } }, originConversationId: ghost.directConversationId, deadlineAt: now + activity.policy.runTimeoutSeconds * 1000, execution: activity.execution, activityId: activity.id, activityRunId: id, toolScope: dryRun ? activity.tools.filter((tool) => DRY_TOOLS[tool]) : activity.tools });
+      const work = this.core.works.createRoot({ id: idFor(id, "work"), ghostId: ghost.id, scopeId: activity.scopeId, title: activity.name, brief: activity.prompt, acceptance: { criteria: activity.acceptanceCriteria, checks: [], reviewer: { kind: "model", model } }, originConversationId: ghost.directConversationId, deadlineAt: now + activity.policy.runTimeoutSeconds * 1000, execution: activity.execution, activityId: activity.id, activityRunId: id, toolScope: dryRun ? Object.keys(DRY_TOOLS).filter((tool) => matchesToolPatterns(activity.tools, tool) && matchesToolPatterns(ghost.tools, tool)) : activity.tools });
       const next = { ...run, workId: work.id };
       this.ledger.putActivityRun(next);
       return next;
@@ -447,16 +499,18 @@ export class Activities {
             if (limit) throw new ActivityDeferred(limit, now + 30_000);
             const pollSeconds = "pollSeconds" in activity.source ? activity.source.pollSeconds : 60;
             const inboxKey = `activity:inbox:${activity.id}`;
-            const authority = digestOf([activity.revision, activity.source, activity.source.kind === "commit" ? this.ledger.scope(activity.source.scopeId).paths : this.ledger.connection(activity.source.connectionId)]);
+            const connection = activity.source.kind === "commit" ? null : this.ledger.connection(activity.source.connectionId);
+            const authority = digestOf([activity.source, activity.ghostId, activity.scopeId, activity.source.kind === "commit" ? this.ledger.scope(activity.source.scopeId).paths : [connection?.id, connection?.config, connection?.credentialVersion, connection?.hasCredential]]);
             const saved = this.ledger.setting<{ authority: string; result: ActivitySourcePoll } | null>(inboxKey, null);
             const result = saved?.authority === authority ? saved.result : await this.poll(activity, activity.cursor === null && ("includeExisting" in activity.source ? !activity.source.includeExisting : activity.source.kind === "commit"));
             this.ledger.tx(() => this.ledger.putSetting(inboxKey, { authority, result }));
             activity = this.current(activity.id, activity.revision);
             const admittedAt = Math.max(now, Date.now());
-            // A deferred item leaves the old cursor intact. Re-polling finds accepted
-            // items by durable identity and never creates a second root.
+            // The durable inbox retains the complete polled batch across capacity waits,
+            // pauses and crashes, even if the provider's next response no longer contains it.
             for (const exclusion of result.exclusions) this.exclude(activity, exclusion);
             for (const item of result.items) this.admit(activity, { key: this.sourceKey(activity, item), trigger: "source", item }, admittedAt);
+            if ((activity.source.kind === "poll" || activity.source.kind === "commit") && result.items.length === 0 && result.exclusions.length === 0) this.skipped(activity, `empty:${activity.revision}:${activity.nextAt ?? now}`, "source", "Source returned no new items; no model was started.");
             const next = { ...activity, cursor: result.cursor, nextAt: admittedAt + pollSeconds * 1000, lastCheckedAt: admittedAt, lastError: null, failureCount: 0, deferredUntil: null, deferredReason: null, updatedAt: admittedAt };
             this.ledger.tx(() => { this.ledger.putActivity(next); this.ledger.putSetting(inboxKey, null); });
           }
@@ -485,9 +539,9 @@ export class Activities {
     if (work.execution?.kind === "host" && !ghost.hostExecution) throw forbidden("unrestricted PC execution grant was revoked");
     if (toolName && !toolName.startsWith("activity_") && toolName !== "complete" && toolName !== "ask_owner" && toolName !== "ask_parent" && toolName !== "ask_peer" && toolName !== "answer_question" && toolName !== "work_status") {
       const tool = toolName as GhostTool;
-      if (!activity.tools.includes(tool) || !ghost.tools.includes(tool) || !work.toolScope?.includes(tool)) throw forbidden(`${toolName} is outside this activity's current scope`);
+      if (!matchesToolPatterns(activity.tools, tool) || !matchesToolPatterns(ghost.tools, tool) || !work.toolScope || !matchesToolPatterns(work.toolScope, tool)) throw forbidden(`${toolName} is outside this activity's current scope`);
       if (run.dryRun && !DRY_TOOLS[tool]) throw forbidden(`${toolName} is disabled in dry runs`);
-      const activityNodes = this.core.ledger.limits().activityNodes;
+      const activityNodes = this.core.ledger.limits(activity.scopeId).activityNodes;
       if (tool === "delegate" && this.workItems(root) >= activityNodes) throw conflict(`activity run is limited to ${activityNodes} Work items including descendants`);
     }
     return { activity, run, work };
@@ -519,7 +573,6 @@ export class Activities {
     if (!validate(ActivityAction, action)) throw invalid("invalid source action");
     const { activity, run } = this.authorize(workId, "activity_action");
     if (run.dryRun) throw forbidden("external actions are disabled in dry runs");
-    if (activity.policy.externalActions === "deny") throw forbidden("this activity denies external actions");
     if (activity.source.kind === "schedule" || activity.source.kind === "commit" || activity.source.kind === "poll" || !run.sourceItem) throw forbidden("this run has no bound source action target");
     if ((action.kind === "mail_reply") !== (activity.source.kind === "mail")) throw forbidden("action does not match this run's source");
     const connection = this.ledger.connection(activity.source.connectionId);
@@ -536,31 +589,25 @@ export class Activities {
     if (!work.conversationId) throw conflict("the Work has no conversation");
     const input = { workId, workRevision: work.revision, runId: bound.run.id, activityRevision: bound.activity.revision, sourceItem: bound.run.sourceItem, action };
     const effect = { conversationId: work.conversationId, callId, tool: "activity_action", input, summary: `${action.kind}: ${bound.run.sourceItem!.title}` };
-    if (bound.activity.policy.externalActions === "approval") {
-      const item = bound.run.sourceItem!;
-      let destination = item.target.replyTo ?? "";
-      let account: string;
-      if (bound.connection.config.kind === "mail") account = `${bound.connection.name} (${bound.connection.config.username})`;
-      else {
-        account = `${bound.connection.name} (${bound.connection.config.baseUrl})`;
-        destination = `${item.target.repository ?? ""}#${item.target.number ?? ""}`;
-        if (item.url) {
-          try {
-            const url = new URL(item.url);
-            if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) destination += `\nURL: ${url.href}`;
-          } catch { /* Invalid provider URLs are not approval destinations. */ }
-        }
+    const item = bound.run.sourceItem!;
+    let destination = item.target.replyTo ?? "";
+    let account: string;
+    if (bound.connection.config.kind === "mail") account = `${bound.connection.name} (${bound.connection.config.username})`;
+    else {
+      account = `${bound.connection.name} (${bound.connection.config.baseUrl})`;
+      destination = `${item.target.repository ?? ""}#${item.target.number ?? ""}`;
+      if (item.url) {
+        try {
+          const url = new URL(item.url);
+          if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) destination += `\nURL: ${url.href}`;
+        } catch { /* Invalid provider URLs are not approval destinations. */ }
       }
-      // 2026-11-10: the owner's card reads title and detail in Korean. The proposal stays the bare input — the executor checks its digest.
-      const verb = action.kind === "mail_reply" ? "메일 답장 보내기" : "PR 댓글 달기";
-      const proposal = this.core.effects.propose({ ...effect, title: `${verb}: ${item.title}`.slice(0, 200), detail: `- 보내는 계정: ${account}\n- 받는 곳: ${destination.replace("\nURL: ", " · ")}\n- 원본: ${item.title}\n\n**보낼 본문**\n\n${action.body}`, proposal: input });
-      return `Action awaiting owner approval (${proposal.id}); nothing sent yet.`;
     }
-    return this.core.effects.run(effect, async () => {
-      let current: ActionAuthority;
-      try { current = this.actionAuthority(workId, action); } catch (error) { throw new NoEffect(message(error)); }
-      return (await this.sourcePort().act(current.connection, current.run.sourceItem!, action)).summary;
-    });
+    const verb = action.kind === "mail_reply" ? "메일 답장 보내기" : "PR 댓글 달기";
+    const proposal = this.core.effects.propose({ ...effect,
+      classification: { target: { kind: action.kind === "mail_reply" ? "mail_account" : "connection", id: bound.connection.id }, access: "write", reversible: false, external: true, amount: null },
+      title: `${verb}: ${item.title}`.slice(0, 200), detail: `- 보내는 계정: ${account}\n- 받는 곳: ${destination.replace("\nURL: ", " · ")}\n- 원본: ${item.title}\n\n**보낼 본문**\n\n${action.body}`, proposal: input });
+    return this.core.effects.proposalStatus(proposal);
   }
 
   context(work: Work): string {
