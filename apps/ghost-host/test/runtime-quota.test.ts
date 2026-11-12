@@ -287,3 +287,72 @@ test("crash recovery acknowledges the exact completed fallback instead of requeu
     expect(delivery.to(id).some((input) => input.requestId === `quota-resume:${id}:2`)).toBe(false);
   } finally { await f.close(); }
 });
+
+for (const result of ["answered", "quota"] as const) {
+  test(`fallback tool successors remain pending until their actual ${result} final boundary`, async () => {
+    const f = await fixture();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    try {
+      const backup = fauxProvider({ provider: "backup", models: [{ id: "backup-1", name: "Backup" }] });
+      f.models.setProvider(backup.provider);
+      f.secrets.put("backup", "backup-key");
+      f.ledger.tx(() => {
+        f.ledger.putProvider({ id: "backup", kind: "openai_compatible", name: "Backup", baseUrl: null, models: [{ id: "backup-1", name: "Backup" }] });
+        f.ledger.putSetting("defaultFallbacks", [{ provider: "backup", model: "backup-1" }]);
+      });
+      // Every retry deliberately uses the same text as the primary settlement. Recovery must
+      // follow the original input's receipt, not mistake the last matching string for its origin.
+      const error = () => fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 Token Plan usage limit reached" });
+      f.faux.setResponses([error(), error()]);
+      backup.setResponses([
+        fauxAssistantMessage(fauxToolCall("ghost_list", {}), { stopReason: "toolUse" }),
+        async () => {
+          started.resolve();
+          await release.promise;
+          return result === "quota" ? error() : fauxAssistantMessage("The successor finished the original fallback run.");
+        },
+        error(),
+      ]);
+      const id = f.ghost.directConversationId;
+      const requestId = `quota-resume:${id}:1`;
+      const ended = f.core.settled(id);
+      await f.engine.submit(id, { requestId, text: "continue the original input", origin: "owner" });
+      await started.promise;
+      // The first fallback generation has completed its tool round, but Pi still owns a live successor.
+      expect(await f.engine.submissionRecovery!(id, requestId)).toMatchObject({ status: "pending", hit: null });
+      release.resolve();
+      await ended;
+      const recovered = await f.engine.submissionRecovery!(id, requestId);
+      if (result === "answered") {
+        expect(recovered).toMatchObject({ status: "done", serving: "backup", hit: null });
+      } else {
+        expect(recovered).toMatchObject({ status: "unanswered", serving: null, hit: { provider: "backup", reason: "429 Token Plan usage limit reached" } });
+      }
+      // Simulate a Host crash after Pi settles the successor, before acknowledging the released input.
+      f.ledger.putSetting("quota", {
+        entries: {
+          primary: { reason: "429", resumeAt: Date.now() + 3600_000, failures: 1, probingBy: id },
+          backup: { reason: "429", resumeAt: Date.now() + 3600_000, failures: 1, probingBy: id },
+        },
+        records: [{ conversationId: id, attempts: 1, entryId: 0, origin: "owner", priority: 0, providers: ["primary", "backup"], queue: [
+          { requestId, text: "continue the original input", origin: "owner" },
+          { requestId: "next-accepted-input", text: "new owner input", origin: "owner" },
+        ], releasing: requestId, updatedAt: 1 }],
+      });
+      const delivery = new FakeEngine();
+      delivery.submissions.set(requestId, { conversationId: id, submission: { requestId, text: "continue the original input", origin: "owner" } });
+      delivery.submissionRecovery = f.engine.submissionRecovery!.bind(f.engine);
+      f.core.attach(delivery);
+      await f.core.quota.start();
+      await f.core.idle();
+      if (result === "answered") {
+        expect(delivery.to(id).map((input) => input.requestId)).toEqual([requestId, "next-accepted-input"]);
+      } else {
+        const journal = f.ledger.setting<{ records: { queue: { requestId: string }[] }[] }>("quota", { records: [] });
+        expect(journal.records[0]!.queue.map((input) => input.requestId)).toEqual([`quota-resume:${id}:2`, "next-accepted-input"]);
+        expect(delivery.to(id).map((input) => input.requestId)).toEqual([requestId]);
+      }
+    } finally { release.resolve(); await f.close(); }
+  });
+}

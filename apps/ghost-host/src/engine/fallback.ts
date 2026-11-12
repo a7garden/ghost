@@ -14,12 +14,12 @@ export const FallbackDoc = defineDoc({
   fork: "initial",
 });
 
-/** The generation re-armed for an exact committed error, atomically with starting that fallback. */
-export const FallbackRunsDoc = defineDoc<{ byError: Record<string, { taskId: number }> }>({
-  kind: "ghost.fallback-runs",
+/** An internal Pi input receipt follows every generation handoff without adding a transcript input. */
+export const FallbackReceiptsDoc = defineDoc<{ byInput: Record<string, { errorId: number; requestId: string; provider: string }> }>({
+  kind: "ghost.fallback-receipts",
   version: 1,
   scope: "conversation",
-  initial: () => ({ byError: {} }),
+  initial: () => ({ byInput: {} }),
   history: "latest",
   fork: "initial",
 });
@@ -35,7 +35,11 @@ export interface QuotaHit {
 /** R1: classify a generation error as a provider quota (usage limit, token plan, rate limit). */
 export function quotaHit(message: AssistantMessage, now = Date.now()): QuotaHit | null {
   if (message.stopReason !== "error") return null;
-  const error = message.errorMessage ?? "";
+  return quotaError(message.errorMessage ?? "", now);
+}
+
+/** Classify the provider's exact durable model-error settlement without searching unrelated transcript text. */
+export function quotaError(error: string, now = Date.now()): QuotaHit | null {
   if (!/(?:^|[^\d])429(?:[^\d]|$)|usage[_ .-]?limit|token[_ .-]?plan|rate[_ .-]?limit/i.test(error)) return null;
   // Validation talk about budgets, tokens or quotas is a bad request, not an exhausted account.
   if (/invalid[_ -]?request|bad request|budget_tokens|max_tokens|must be|unsupported|parameter/i.test(error)) return null;

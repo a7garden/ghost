@@ -24,7 +24,6 @@ import {
   type LiveState,
   type SubmissionRecord,
   type ToolRegistration,
-  type TaskId,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { GHOST_TOOLS, type Conversation as HostConversation, type Ghost, type Live, type LiveEvent, type Message, type MessageOrigin, type ModelRef, type Settings, type Work } from "@ghost/contract";
@@ -36,7 +35,7 @@ import type { ToolSet } from "../tools/types.ts";
 import { liveFrom, renderUserContent, sameLive, toMessage, type UserMeta } from "./messages.ts";
 import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
-import { FallbackDoc, FallbackRunsDoc, fallbackListFor, fallbackModels, fallbackReason, quotaHit } from "./fallback.ts";
+import { FallbackDoc, FallbackReceiptsDoc, fallbackListFor, fallbackModels, fallbackReason, quotaError, quotaHit } from "./fallback.ts";
 import { digestOf } from "../core/ids.ts";
 import { withClockStamp } from "../core/clock.ts";
 import { workGuard } from "./work-guard.ts";
@@ -375,53 +374,36 @@ class HostEngine implements Engine, MemoryEngine {
     if (record.reason !== "model_error" || record.entry === undefined || typeof record.detail !== "string") {
       return { status: "unanswered", entryId: 0, serving: null, hit: null };
     }
+    const fallbacks = await this.harness.snapshot(FallbackReceiptsDoc, state.piId, ctx);
+    const fallback = fallbacks?.byInput[String(record.entry)];
+    if (fallback) {
+      const receipt = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, fallback.requestId), ctx);
+      if (!receipt || receipt.type !== "input" || receipt.entry !== record.entry) throw new Error("fallback receipt does not match its original input");
+      if (receipt.status !== "done" && receipt.status !== "unanswered") return { status: "pending", entryId: 0, serving: null, hit: null };
+      if (receipt.status === "done") {
+        const answer = await state.pi.entries({ minEntryId: receipt.answer, maxEntryId: receipt.answer }, 1, undefined, ctx);
+        const message = answer.items[0]?.model?.find((item): item is AssistantMessage => item.role === "assistant");
+        return { status: "done", entryId: receipt.answer, serving: message?.provider ?? null, hit: null };
+      }
+      // The native receipt follows postTools handoffs and settles only at the run's final boundary.
+      // Its own model_error is authoritative; an aborted/reset successor must never revive the primary error.
+      const hit = receipt.reason === "model_error" && typeof receipt.detail === "string" ? quotaError(receipt.detail) : null;
+      return { status: "unanswered", entryId: receipt.id, serving: null, hit: hit ? { provider: fallback.provider, ...hit } : null };
+    }
     let after = record.entry;
     let matched: EntryRecord | undefined;
-    let upper: EntryId | undefined;
-    const errors: EntryRecord[] = [];
     for (;;) {
       const scan = await state.pi.entries({ minEntryId: after, order: "ascending" }, 100, undefined, ctx);
       if (scan.items.length === 0) break;
       let nextInput = false;
       for (const entry of scan.items) {
         if (entry.id === record.entry) continue;
-        if (entry.kind === "pi.user") { upper = entry.id; nextInput = true; break; }
+        if (entry.kind === "pi.user") { nextInput = true; break; }
         const message = entry.model?.find((item): item is AssistantMessage => item.role === "assistant");
-        if (message?.stopReason === "error") {
-          errors.push(entry);
-          if (message.errorMessage === record.detail) matched = entry;
-        }
+        if (message?.stopReason === "error" && message.errorMessage === record.detail) matched = entry;
       }
       if (nextInput || scan.items.length < 100) break;
       after = (scan.items.at(-1)!.id + 1) as EntryId;
-    }
-    // Pi already settled the original input on the primary failure. Host fallbacks run with
-    // inputs:[], so their own durable task receipt, not that obsolete input settlement, decides recovery.
-    const fallbacks = await this.harness.snapshot(FallbackRunsDoc, state.piId, ctx);
-    while (matched && fallbacks?.byError[String(matched.id)]) {
-      const attempt = fallbacks.byError[String(matched.id)]!;
-      const task = await state.pi.commit((tx) => tx.task(attempt.taskId as TaskId), ctx);
-      if (!task || task.conversationId !== state.piId || task.kind !== "pi.generation" || task.abortRequested) {
-        return { status: "unanswered", entryId: 0, serving: null, hit: null };
-      }
-      if (task.state.status !== "terminal" && task.state.status !== "completing") {
-        return { status: "pending", entryId: 0, serving: null, hit: null };
-      }
-      const outcome = task.state.outcome;
-      if (outcome.status === "completed") {
-        const result = outcome.result;
-        if (result !== null && typeof result === "object" && "entryId" in result && typeof result.entryId === "number" && result.entryId > matched.id && (upper === undefined || result.entryId < upper)) {
-          const answerId = result.entryId as EntryId;
-          const answer = await state.pi.entries({ minEntryId: answerId, maxEntryId: answerId }, 1, undefined, ctx);
-          const message = answer.items[0]?.model?.find((item): item is AssistantMessage => item.role === "assistant");
-          return { status: "done", entryId: answerId, serving: message?.provider ?? null, hit: null };
-        }
-        // A later user owns any answer beyond this input's boundary; never replay the old input for it.
-        return { status: "unanswered", entryId: 0, serving: null, hit: null };
-      }
-      if (outcome.status !== "failed") return { status: "unanswered", entryId: 0, serving: null, hit: null };
-      const previous = matched.id;
-      matched = errors.findLast((entry) => entry.id > previous && entry.model?.some((message) => message.role === "assistant" && message.stopReason === "error" && message.errorMessage === outcome.error.message));
     }
     const message = matched?.model?.find((item): item is AssistantMessage => item.role === "assistant");
     const hit = message ? quotaHit(message) : null;
@@ -790,17 +772,27 @@ class HostEngine implements Engine, MemoryEngine {
       const next = candidates.slice(failedIndex + 1).find((candidate) => this.available(candidate, settings));
       fallback.lastError = tail.id;
       if (!next) return null;
-      const attempts = await tx.doc(FallbackRunsDoc, state.piId);
+      let input = entries.items.find((entry) => entry.kind === "pi.user");
+      let below = entries.items.at(-1)?.id;
+      while (!input && below !== undefined) {
+        const older = await tx.scanEntries({ conversationId: state.piId, maxEntryId: (below - 1) as EntryId }, 100);
+        input = older.items.find((entry) => entry.kind === "pi.user");
+        below = older.items.at(-1)?.id;
+      }
+      if (!input) return null;
+      const receipts = await tx.doc(FallbackReceiptsDoc, state.piId);
       await configureAgent(tx, state.piId, {
         model: { provider: next.provider, modelId: next.model },
         thinkingLevel: next.thinking ?? "off",
       });
-      // Pi exposes no retry API. Re-arm its exported generation task over the existing
-      // context, atomically with the model and handled-error marker. No submission is
-      // replayed; completed tool tasks/results remain in context, including unsafe effects.
+      // Re-arm over committed context with an internal receipt on the existing user entry.
+      // Pi carries that receipt across tool successors and settles it only at the final run
+      // boundary. No transcript input or completed tool effect is replayed.
+      const requestId = `ghost-fallback:${tail.id}`;
+      const receipt = await tx.createSubmission({ type: "input", conversationId: state.piId, requestId, status: "placed", entry: input.id });
+      receipts.byInput[String(input.id)] = { errorId: tail.id, requestId, provider: next.provider };
       const taskId = await tx.createTask(GenerationTask, {}, { conversationId: state.piId, ownership: { kind: "conversation" } });
-      attempts.byError[String(tail.id)] = { taskId };
-      live.run = { taskId, inputs: [] };
+      live.run = { taskId, inputs: [receipt.id] };
       return { from: { provider: message.provider, model: message.model }, next, reason };
     }, ctx);
     if (!switched) return false;
