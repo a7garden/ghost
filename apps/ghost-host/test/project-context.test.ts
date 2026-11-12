@@ -3,7 +3,7 @@ import type { EntryRecord } from "@earendil-works/pi-durable";
 import { toMessage } from "../src/engine/messages.ts";
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
-import { rmSync, symlinkSync } from "node:fs";
+import { realpathSync, rmSync, symlinkSync } from "node:fs";
 import { Command, Work, validate, type Command as CommandType, type Principal } from "@ghost/contract";
 import { Access } from "../src/core/access.ts";
 import { execute } from "../src/core/commands.ts";
@@ -101,7 +101,7 @@ test("scope paths require real absolute directories and default to the receiving
   const root = tempDir(); cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const link = join(root, "link"); symlinkSync(root, link);
   const created = await send({ type: "scope.create", name: "Project", paths: [link] });
-  expect(ledger.scope(String(created.scopeId))).toMatchObject({ paths: [root], vaultPath: null, ghostId: null });
+  expect(ledger.scope(String(created.scopeId))).toMatchObject({ paths: [realpathSync(root)], vaultPath: null, ghostId: null });
   await expect(send({ type: "scope.create", name: "Bad", paths: ["relative"] })).rejects.toThrow("absolute directories");
   await expect(send({ type: "scope.create", name: "Bad", paths: [join(root, "missing")] })).rejects.toThrow("absolute directories");
 });
@@ -249,7 +249,7 @@ test("Ghost and activity owner mutations are revisioned and reversible without d
   expect(ledger.ghost(teammateId)).toEqual(before);
   const activityId = String((await send({ type: "activity.create", config: {
     ghostId: ghost.id, name: "Periodic", prompt: "Read", acceptanceCriteria: "Evidence",
-    source: { kind: "schedule", spec: { kind: "every", seconds: 3600 } }, execution: { kind: "workspace" }, tools: [],
+    source: { kind: "schedule", spec: { kind: "every", seconds: 3600, startAt: Date.now() + 3600_000 } }, execution: { kind: "workspace" }, tools: [],
     policy: { maxRunsPerDay: 1, maxConcurrent: 1, runTimeoutSeconds: 60, allowSelfCheck: false, minCheckSeconds: 60, externalActions: "deny", delivery: "changes" },
   } })).activityId);
   const activity = ledger.activity(activityId);
