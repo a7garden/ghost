@@ -57,7 +57,7 @@ export function ActivityFormDialog({ state, connections, activity, initialScopeI
 
   const save = async () => {
     if (saving) return;
-    if (draft.sourceKind !== 'schedule' && !sourceConnections.some(connection => connection.id === draft.connectionId)) {
+    if (draft.sourceKind !== 'schedule' && draft.sourceKind !== 'commit' && !sourceConnections.some(connection => connection.id === draft.connectionId)) {
       setError('연결을 다시 선택해 주세요. 연결 계정에서 먼저 만들 수 있습니다.');
       return;
     }

@@ -40,7 +40,7 @@ export function PolicySettings({ scopeId }: { scopeId?: string }) {
 function RuleEditor({ rule, scopeId: initialScope, onClose }: { rule: PolicyRule | null; scopeId?: string; onClose(): void }) {
   const { store, client } = useHost();
   const { state } = useHostState(store);
-  const [scopeId, setScopeId] = useState(rule?.scopeId ?? initialScope ?? '');
+  const [scopeId, setScopeId] = useState(rule === null ? initialScope ?? '' : rule.scopeId ?? '');
   const [ghostId, setGhostId] = useState(rule?.ghostId ?? '');
   const [triggerId, setTriggerId] = useState(rule?.triggerId ?? '');
   const [tool, setTool] = useState(rule?.tool ?? '*');

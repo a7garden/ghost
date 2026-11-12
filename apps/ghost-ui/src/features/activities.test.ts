@@ -137,3 +137,17 @@ it('keeps a stored container execution environment when renaming', () => {
   const built = buildActivityConfig(draft({ executionKind: 'container' }), ghost());
   expect(built).toMatchObject({ ok: true, config: { execution: { kind: 'container' } } });
 });
+
+it('loads every stored poll field before an unrelated form edit', () => {
+  const built = buildActivityConfig(draft(), ghost());
+  if (!built.ok) throw new Error(built.error);
+  const config: ActivityConfig = { ...built.config, scopeId: 'scope-poll', source: {
+    kind: 'poll', connectionId: 'api-custom', path: '/changes?cursor=recent',
+    itemsPointer: '/data/changed~1items', idPointer: '/identity/key', pollSeconds: 91,
+  } };
+  expect(draftFromConfig(config)).toMatchObject({
+    sourceKind: 'poll', scopeId: 'scope-poll', connectionId: 'api-custom',
+    pollPath: '/changes?cursor=recent', itemsPointer: '/data/changed~1items',
+    idPointer: '/identity/key', pollMinutes: String(91 / 60),
+  });
+});

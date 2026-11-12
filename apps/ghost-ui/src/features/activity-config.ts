@@ -174,19 +174,21 @@ export function draftFromConfig(config: ActivityConfig): ActivityDraft {
     else draft.everyMinutes = String(source.spec.seconds / 60);
   } else if (source.kind === 'commit') {
     draft.commitScopeId = source.scopeId;
-  } else if (source.kind === "pull_request" || source.kind === "mail") {
+  } else if (source.kind === 'poll') {
     draft.connectionId = source.connectionId;
     draft.pollMinutes = String(source.pollSeconds / 60);
-    if (source.kind !== 'poll') draft.includeExisting = source.includeExisting;
+    draft.pollPath = source.path;
+    draft.itemsPointer = source.itemsPointer;
+    draft.idPointer = source.idPointer;
+  } else if (source.kind === 'pull_request' || source.kind === 'mail') {
+    draft.connectionId = source.connectionId;
+    draft.pollMinutes = String(source.pollSeconds / 60);
+    draft.includeExisting = source.includeExisting;
     if (source.kind === 'pull_request') {
       draft.repository = source.repository;
       draft.baseBranch = source.baseBranch ?? '';
       draft.labels = source.labels.join(', ');
       draft.includeDrafts = source.includeDrafts;
-    } else if (source.kind === 'poll') {
-      draft.pollPath = source.path;
-      draft.itemsPointer = source.itemsPointer;
-      draft.idPointer = source.idPointer;
     } else {
       draft.sender = source.sender ?? '';
       draft.subjectContains = source.subjectContains ?? '';

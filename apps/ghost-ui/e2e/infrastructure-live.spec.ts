@@ -1,5 +1,5 @@
 import { test as base, expect, type Page } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -178,4 +178,68 @@ test('scope, document, slot, MCP, policy and conflict-aware history use the real
   await expect.poll(async () => (await snapshot(page)).scopes.some(item => item.id === scope.id)).toBe(false);
   expect(existsSync(host.vault)).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test('scope edits retain inherited global rules and generic trigger sources', async ({ page, host }) => {
+  await page.goto(`${host.baseUrl}/#/scopes`);
+  const repo = join(host.root, 'trigger-regression-repo');
+  mkdirSync(repo);
+  execFileSync('git', ['init', repo], { stdio: 'ignore' });
+  execFileSync('git', ['-C', repo, '-c', 'user.name=UI regression', '-c', 'user.email=ui@example.invalid', 'commit', '--allow-empty', '-m', 'Initial source baseline'], { stdio: 'ignore' });
+  const scopeId = String((await command(page, { type: 'scope.create', name: '범위 유지 검증', paths: [repo] })).scopeId);
+  const ruleId = String((await command(page, { type: 'rule.create', tool: 'conn.scope-regression', when: {}, decision: 'owner' })).ruleId);
+  await page.goto(`${host.baseUrl}/#/scopes/${scopeId}?view=rules`);
+  await page.locator('article').filter({ hasText: 'conn.scope-regression' }).getByRole('button', { name: '편집', exact: true }).click();
+  const ruleForm = page.getByRole('form', { name: '정책 규칙 편집' });
+  await expect(ruleForm.getByLabel('프로젝트', { exact: true })).toHaveValue('');
+  await ruleForm.getByLabel('하루 횟수 한도 (비우면 없음)', { exact: true }).fill('8');
+  await ruleForm.getByRole('button', { name: '저장', exact: true }).click();
+  await expect(ruleForm).toHaveCount(0);
+  const global = (await snapshot(page)).policyRules.find(rule => rule.id === ruleId);
+  expect(global?.scopeId).toBeUndefined();
+  expect(global?.maxPerDay).toBe(8);
+  await page.getByRole('button', { name: '규칙 추가', exact: true }).click();
+  const newRuleForm = page.getByRole('form', { name: '정책 규칙 추가' });
+  await expect(newRuleForm.getByLabel('프로젝트', { exact: true })).toHaveValue(scopeId);
+  await newRuleForm.getByRole('button', { name: '취소', exact: true }).click();
+
+  await page.goto(`${host.baseUrl}/#/scopes/${scopeId}?view=triggers`);
+  await page.getByRole('button', { name: '활동 만들기', exact: true }).click();
+  const commitForm = page.getByRole('dialog', { name: '활동 만들기', exact: true });
+  await commitForm.getByLabel('이름', { exact: true }).fill('커밋 연결 없이 저장');
+  await commitForm.getByLabel('활동 지시', { exact: true }).fill('새 커밋에서 바뀐 파일을 읽는다.');
+  await commitForm.getByLabel('완료 기준', { exact: true }).fill('읽은 변경 내용이 정리된다.');
+  await commitForm.getByRole('radio', { name: '커밋', exact: true }).click();
+  await expect(commitForm.getByLabel('커밋을 살필 프로젝트', { exact: true })).toHaveValue(scopeId);
+  await expect(commitForm.getByRole('combobox', { name: '연결 계정', exact: true })).toHaveCount(0);
+  await commitForm.getByRole('button', { name: '활동 만들기', exact: true }).click();
+  await expect(commitForm).toHaveCount(0);
+  await expect.poll(async () => (await snapshot(page)).activities.find(activity => activity.name === '커밋 연결 없이 저장')?.source).toEqual({ kind: 'commit', scopeId });
+
+  const receiver = (await snapshot(page)).ghosts.find(ghost => ghost.isDefault)!;
+  const connectionId = String((await command(page, { type: 'connection.upsert', name: '폴링 편집 검증', config: {
+    kind: 'api', baseUrl: 'https://example.com', authHeader: 'Authorization', authPrefix: 'Bearer', testPath: '/',
+    headers: {}, ghostIds: [receiver.id],
+  } })).connectionId);
+  const source = { kind: 'poll' as const, connectionId, path: '/changes', itemsPointer: '/data/entries', idPointer: '/identity/key', pollSeconds: 91 };
+  const activityId = String((await command(page, { type: 'activity.create', config: {
+    scopeId, ghostId: receiver.id, name: '폴링 원본 유지', prompt: '새 항목을 읽고 요약한다.', acceptanceCriteria: '항목의 요약이 남는다.',
+    source, execution: { kind: 'workspace' }, tools: ['read'],
+    policy: { maxRunsPerDay: 1, maxConcurrent: 1, runTimeoutSeconds: 60, allowSelfCheck: false, minCheckSeconds: 60, externalActions: 'deny', delivery: 'changes' },
+  } })).activityId);
+  await command(page, { type: 'activity.pause', activityId, paused: true });
+  await page.reload();
+  await page.getByRole('button', { name: '폴링 원본 유지 편집', exact: true }).click();
+  const pollForm = page.getByRole('dialog', { name: '활동 편집', exact: true });
+  await expect(pollForm.getByLabel('폴링 경로', { exact: true })).toHaveValue('/changes');
+  await expect(pollForm.getByLabel('항목 배열 JSON 포인터', { exact: true })).toHaveValue('/data/entries');
+  await expect(pollForm.getByLabel('항목 ID JSON 포인터', { exact: true })).toHaveValue('/identity/key');
+  await expect(pollForm.getByLabel('확인 주기 (분)', { exact: true })).toHaveValue(String(91 / 60));
+  await pollForm.getByLabel('이름', { exact: true }).fill('이름만 바꾼 폴링');
+  await pollForm.getByRole('button', { name: '저장', exact: true }).click();
+  await expect(pollForm).toHaveCount(0);
+  const saved = (await snapshot(page)).activities.find(activity => activity.id === activityId);
+  expect(saved?.source).toEqual(source);
+  expect(saved?.scopeId).toBe(scopeId);
+  expect(saved?.name).toBe('이름만 바꾼 폴링');
 });
