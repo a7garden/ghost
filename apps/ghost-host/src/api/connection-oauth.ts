@@ -219,7 +219,7 @@ function connectionConfig(service: ConnectionOAuthServiceId, username: string, g
 
 function providerSpec(service: string, client: ClientApp): ProviderSpec {
   if (client.provider) return { ...client.provider, requiresUsername: false, ghostScoped: true };
-  const spec = PROVIDERS[service];
+  const spec = Object.hasOwn(PROVIDERS, service) ? PROVIDERS[service] : undefined;
   if (!spec) throw invalid("Configure OAuth provider metadata before connecting this service");
   return spec;
 }
@@ -318,7 +318,7 @@ export class ConnectionOAuth {
     const service = match[1]!;
     if (!isService(service)) return error("not_found", "not found", 404);
     if (!access) return error("forbidden", "missing or invalid bearer token", 401);
-    if (request.method !== "PUT" && !PROVIDERS[service] && this.loadClient(service) === null) return error("not_found", "not found", 404);
+    if (request.method !== "PUT" && !Object.hasOwn(PROVIDERS, service) && this.loadClient(service) === null) return error("not_found", "not found", 404);
     try {
       if (request.method === "GET") return jsonView(this.view(service));
       if (request.method === "PUT") return jsonView(await this.configure(service, request));
@@ -451,7 +451,7 @@ export class ConnectionOAuth {
         if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw invalid("OAuth endpoints must be HTTPS URLs without credentials, queries or fragments");
       }
       validateConnectionConfig({ ...provider.connection, ghostIds: [] });
-    } else if (!PROVIDERS[service]) throw invalid("A new service needs OAuth provider metadata");
+    } else if (!Object.hasOwn(PROVIDERS, service)) throw invalid("A new service needs OAuth provider metadata");
     const changed = previous === null || previous.clientId !== input.clientId || (previous.clientSecret ?? null) !== (clientSecret ?? null) || digestOf(previous.provider ?? null) !== digestOf(provider ?? null);
     const generation = changed ? (previous?.generation ?? 0) + 1 : previous!.generation;
     this.writeJson(this.clientFile(service), { clientId: input.clientId, clientSecret, generation, updatedAt: this.now(), ...(provider ? { provider } : {}) } satisfies ClientApp);

@@ -8,14 +8,14 @@ import { NoEffect } from "../core/effects.ts";
 import { policyRead } from "../core/policy-context.ts";
 import type { McpPort, McpTool, McpCallResult } from "../integrations/mcp.ts";
 import { createConnectionAlias } from "./connections.ts";
-import { errorResult, requireAllowed, scopeOf } from "./shared.ts";
+import { errorResult, requireAllowed, scopeOf, workAllowsTool } from "./shared.ts";
 
 export const namespaceSegment = (value: string): string => encodeURIComponent(value).replace(/\./g, "%2E").replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 export const mcpToolName = (serverId: string, tool: string): string => `mcp.${namespaceSegment(serverId)}.${namespaceSegment(tool)}`;
 export const connectionToolName = (id: string): string => `conn.${namespaceSegment(id)}`;
-const text = (value: string): ToolExecutionResult => ({ content: [{ type: "text", text: value.length > 48_000 ? `${value.slice(0, 47_960)}\\n[content truncated]` : value }] });
+const text = (value: string): ToolExecutionResult => ({ content: [{ type: "text", text: value.length > 48_000 ? `${value.slice(0, 47_960)}\n[content truncated]` : value }] });
 const BUILTINS: Readonly<Record<string, true>> = Object.fromEntries(GHOST_TOOLS.map(name => [name, true]));
-const CORE_TOOLS: Readonly<Record<string, true>> = Object.fromEntries(["tool_search", "complete", "ask_owner", "ask_parent", "ask_peer", "answer_question", "work_status", "work_decide", "self_adapt", "capability_request", "plan_next", "verdict"].map(name => [name, true]));
+const CORE_TOOLS: Readonly<Record<string, true>> = Object.fromEntries(["tool_search", "complete", "ask_owner", "ask_parent", "ask_peer", "answer_question", "work_create", "work_list", "work_inspect", "work_update", "work_cancel", "delegate", "subagent_run", "work_status", "work_decide", "self_adapt", "capability_request", "plan_next", "verdict"].map(name => [name, true]));
 interface McpInput { serverId: string; tool: string; args: Record<string, unknown>; authority: string }
 function responseText(result: McpCallResult): string {
   const body = result.content.map(item => item.type === "text" ? item.text : item.type === "resource_link" ? `${item.name}: ${item.uri}` : "[image omitted from text result]").join("\n");
@@ -45,11 +45,14 @@ export class DynamicCapabilities {
           const selected = this.loaded.get(scope.conversation.id) ?? new Set<string>();
           for (const tool of matches) selected.add(tool.name);
           this.loaded.set(scope.conversation.id, selected);
-          return text(JSON.stringify(matches.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters }))));
+          return text(JSON.stringify(matches.map(tool => ({ name: tool.name, description: tool.description }))));
         } catch (error) { return errorResult(error); }
       },
     })] }));
-    for (const effect of core.ledger.effectsInState("pending")) if (effect.tool.startsWith("mcp.")) this.registerApproval(effect.tool);
+    for (const effect of core.ledger.effectsInState("pending")) {
+      if (effect.tool.startsWith("mcp.")) this.registerApproval(effect.tool);
+      else if (effect.tool.startsWith("conn.")) createConnectionAlias(core, alias, effect.tool);
+    }
   }
 
   bindLoader(load: (piId: number, tools: ToolRegistration[]) => Promise<void>): void { this.load = load; }
@@ -63,34 +66,31 @@ export class DynamicCapabilities {
     const loaded = this.loaded.get(conversation.id);
     const selected = deferred ? catalog.filter(tool => CORE_TOOLS[tool.name] || loaded?.has(tool.name)) : catalog;
     // The digest changes when a server changes definitions. The engine installs each extension version once.
-    return [...extensions.map(extension => ({ ...extension, tools: [] })), defineExtension({ name: `ghost.catalog.${digestOf(selected).slice(0, 24)}`, tools: selected }), ...(deferred ? [this.extension] : [])];
+    return [...extensions.map(extension => ({ ...extension, tools: [] })), defineExtension({ name: `ghost.catalog.${digestOf([selected, this.core.ledger.mcpServers(), this.core.ledger.connections()]).slice(0, 24)}`, tools: selected }), ...(deferred ? [this.extension] : [])];
   }
 
   private async catalog(conversation: Conversation, ghost: Ghost, work: Work | null, builtins: ToolRegistration[]): Promise<ToolRegistration[]> {
-    const allowed = (name: string) => (!BUILTINS[name] && !/^(?:mcp|conn)\./.test(name) || matchesToolPatterns(ghost.tools, name)) && (!work?.toolScope || !BUILTINS[name] && !/^(?:mcp|conn)\./.test(name) || matchesToolPatterns(work.toolScope, name));
+    const allowed = (name: string) => !BUILTINS[name] && !/^(?:mcp|conn)\./.test(name) || matchesToolPatterns(ghost.tools, name) && workAllowsTool(this.core, work, name);
     const catalog = builtins.filter(tool => allowed(tool.name) && !/^(?:mcp|conn)\./.test(tool.name));
-    if (this.mcp) for (const server of this.core.ledger.mcpServers().filter(server => server.enabled).slice(0, 64)) {
+    if (this.mcp) for (const server of this.core.ledger.mcpServers().filter(server => server.enabled)) {
       try {
         const prefix = `mcp.${namespaceSegment(server.id)}.`;
-        if (!ghost.tools.some(pattern => matchToolPattern(pattern, prefix, true)) || work?.toolScope && !work.toolScope.some(pattern => matchToolPattern(pattern, prefix, true))) continue;
+        if (!ghost.tools.some(pattern => matchToolPattern(pattern, prefix, true)) || !workAllowsTool(this.core, work, prefix, true)) continue;
         if (!this.connectionGranted(server, ghost.id)) continue;
         const tools = await this.mcp.listTools(server.id);
         for (const tool of tools) {
           const name = mcpToolName(server.id, tool.name);
           if (name.length > 256 || !allowed(name) || conversation.kind === "subagent" && !server.readTools.includes(tool.name)) continue;
           catalog.push(this.mcpTool(server, tool));
-          if (catalog.length >= 1024) break;
         }
       } catch { /* An unavailable server does not hide unrelated capabilities. Calls still report its current state. */ }
-      if (catalog.length >= 1024) break;
     }
     for (const connection of this.core.ledger.connections()) {
       if (connection.config.kind !== "api" || !connection.config.ghostIds.includes(ghost.id)) continue;
       const name = connectionToolName(connection.id);
       if (allowed(name)) catalog.push(this.harden({ name: "ghost.connection-alias", tools: [createConnectionAlias(this.core, this.alias, name, connection.id)] }).tools![0]!);
-      if (catalog.length >= 1024) break;
     }
-    return catalog.slice(0, 1024);
+    return catalog;
   }
 
   private connectionGranted(server: McpServer, ghostId: string): boolean {
@@ -157,7 +157,7 @@ export class DynamicCapabilities {
           }
           const effect = await this.core.effects.propose({ conversationId: scope.conversation.id, callId: api.callId, tool: name, input, classification,
             summary: `${server.name}: ${tool.name}`, title: `연결 도구 실행: ${server.name}`, detail: `${tool.name}\n${JSON.stringify(args).slice(0, 16384)}`, proposal: { input } });
-          return text(effect.state === "done" ? effect.result ?? "Finished" : "MCP call recorded for policy approval. Nothing has been sent unless the effect is complete; do not repeat it.");
+          return { ...text(this.core.effects.proposalStatus(effect)), isError: effect.state === "denied" || effect.state === "unknown" };
         } catch (error) { return errorResult(error); }
       },
     });

@@ -52,8 +52,6 @@ export interface McpPort {
   /** Every page of the server's tools; cached until the server announces a change. */
   listTools(serverId: string, signal?: AbortSignal): Promise<McpTool[]>;
   callTool(serverId: string, name: string, args: Record<string, unknown>, signal?: AbortSignal, authorize?: () => void): Promise<McpCallResult>;
-  /** Stderr is discarded because a server may print credentials even before initialization. */
-  stderrTail(serverId: string): string;
   close(): Promise<void>;
 }
 
@@ -71,7 +69,6 @@ export interface McpLimits {
   descriptionChars: number;
   tools: number;
   pages: number;
-  stderrChars: number;
 }
 
 export const MCP_LIMITS: McpLimits = {
@@ -85,7 +82,6 @@ export const MCP_LIMITS: McpLimits = {
   descriptionChars: 4_096,
   tools: 1_000,
   pages: 100,
-  stderrChars: 16_384,
 };
 
 export interface McpOptions {
@@ -261,9 +257,10 @@ function boundResult(result: CallToolResult, limits: McpLimits): McpCallResult {
 type RawTool = Omit<McpTool, "access">;
 
 function toolOf(tool: Tool, limits: McpLimits): RawTool {
+  if (JSON.stringify(tool.inputSchema).length > 64_000) throw invalid("MCP tool input schema exceeds the Host definition limit");
   return {
     name: tool.name,
-    title: tool.title ?? tool.annotations?.title ?? null,
+    title: tool.title === undefined && tool.annotations?.title === undefined ? null : clip(tool.title ?? tool.annotations!.title!, limits.descriptionChars),
     description: tool.description === undefined ? null : clip(tool.description, limits.descriptionChars),
     inputSchema: tool.inputSchema,
     annotations: tool.annotations ?? null,
@@ -351,9 +348,6 @@ export class McpClients implements McpPort {
     }
   }
 
-  stderrTail(_serverId: string): string {
-    return "";
-  }
 
   async close(): Promise<void> {
     this.shut = true;
@@ -431,6 +425,7 @@ export class McpClients implements McpPort {
       this.options.onToolsChanged?.(server.id);
     });
     try {
+      this.assertCurrent(server);
       await client.connect(transport, { timeout: this.limits.connectMs });
     } catch (error) {
       await session.close();
@@ -494,7 +489,7 @@ export class McpClients implements McpPort {
       requestInit: { headers },
       fetch: async (input, init) => {
         const currentHeaders = connectionId === null ? {} : await this.options.authHeaders!(connectionId);
-        const requestHeaders = new Headers(init?.headers);
+        const requestHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
         for (const [name, value] of Object.entries(currentHeaders)) requestHeaders.set(name, value);
         this.secretValues.set(server.id, [...new Set([...(this.secretValues.get(server.id) ?? []), ...Object.values(currentHeaders)])]);
         this.assertCurrent(server);
