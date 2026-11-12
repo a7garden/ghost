@@ -150,7 +150,7 @@ export class DynamicCapabilities {
           if (access === "read") {
             const authorize = () => {
               const current = this.authorize(api, name, input);
-              policyRead(this.core, current.conversation.id, { ...classification, tool: name });
+              policyRead(this.core, current.conversation.id, { ...classification, tool: name }, api.callId);
             };
             authorize();
             const result = await this.call(input, authorize);

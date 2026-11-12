@@ -222,7 +222,7 @@ export function createConnectionAlias(core: Core, deps: { sources: ActivitySourc
     const connection = core.ledger.connection(input.connectionId);
     const check = () => {
       const scope = authorize(api, connection, input.authority);
-      if (connectionRequestIsReadOnly(connection, input.method, input.path)) policyRead(core, scope.conversation.id, { tool: name, target: { kind: "connection", id: connection.id }, access: "read", reversible: false, external: false, amount: null });
+      if (connectionRequestIsReadOnly(connection, input.method, input.path)) policyRead(core, scope.conversation.id, { tool: name, target: { kind: "connection", id: connection.id }, access: "read", reversible: false, external: false, amount: null }, api.callId);
       else core.effects.authorize(scope.conversation.id, api.callId);
     };
     check();
@@ -261,7 +261,7 @@ export function createConnectionAlias(core: Core, deps: { sources: ActivitySourc
         const input: WriteRequest = { connectionId: id, authority, method: args.method, path: args.path, body: args.body ?? null };
         const classification = { target: { kind: "connection" as const, id }, access: read ? "read" as const : "write" as const, reversible: false, external: !read, amount: null };
         if (read) {
-          policyRead(core, scope.conversation.id, { ...classification, tool: name });
+          policyRead(core, scope.conversation.id, { ...classification, tool: name }, api.callId);
           return text(await request(api, input));
         }
         if (scope.work?.activityId && core.ledger.activity(scope.work.activityId).policy.externalActions === "deny") throw forbidden("This activity denies external actions");
