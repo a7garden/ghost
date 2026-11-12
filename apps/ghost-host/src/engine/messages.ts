@@ -104,7 +104,8 @@ export function toMessage(entry: EntryRecord, conversationId: string, userMeta: 
         createdAt: message?.timestamp ?? 0,
       };
     }
-    case "pi.assistant": {
+    case "pi.assistant":
+    case "ghost.wake-reply": {
       const message = model.find((item): item is AssistantMessage => item.role === "assistant");
       const toolCalls: ToolCallView[] = message
         ? message.content

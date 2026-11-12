@@ -73,13 +73,15 @@ export class Works {
     const ghost = this.ledger.ghost(input.ghostId);
     if (ghost.state !== "active") throw conflict(`${ghost.name} is ${ghost.state}`);
     const origin = this.ledger.conversation(input.originConversationId);
-    if (origin.kind !== "direct") throw invalid("a root Work reports to a direct conversation");
+    if (origin.kind !== "direct" && origin.kind !== "wake") throw invalid("a root Work reports to an owner conversation");
     // New Works run in the confined Mac workspace unless the caller picks another target; stored
     // Works without one keep the configured sandbox (legacy reading of `undefined`).
     const execution = input.execution ?? { kind: "workspace" as const };
     this.checkExecution(input.ghostId, execution);
     const id = input.id ?? newId();
-    const work = this.newWork({ ...input, execution, id, parentId: null, rootId: id });
+    const originConversationId = origin.kind === "wake" ? this.ledger.ghost(origin.ghostId).directConversationId : origin.id;
+    const scopeId = input.scopeId === undefined ? this.ledger.setting<{ scopeId: string | null }>(`context:${origin.id}`, { scopeId: null }).scopeId : input.scopeId;
+    const work = this.newWork({ ...input, scopeId, originConversationId, execution, id, parentId: null, rootId: id });
     this.ledger.tx(() => this.ledger.putWork(work)); // queued: no budget span to settle yet
     this.kick(work.id);
     return work;
@@ -98,7 +100,6 @@ export class Works {
     const target = this.ledger.ghost(input.ghostId);
     if (target.deletedAt !== null) throw conflict(`${target.name} was deleted`);
     if (target.state !== "active") throw conflict(`${target.name} is ${target.state}`);
-    if (target.id === parent.ghostId) throw conflict("a Work cannot delegate to its own Ghost");
     if (input.acceptance && !validate(Acceptance, input.acceptance)) throw invalid("invalid delegated acceptance checks");
     this.checkReviewer(input.acceptance?.reviewer ?? null, input.ghostId);
     const limits = this.limits;
@@ -654,14 +655,14 @@ export class Works {
     let next: Work;
     if (verdict.outcome === "pass") {
       next = { ...work, state: "done", verdict, endedAt: now, updatedAt: now };
-    } else if (verdict.outcome === "revise" && work.revisionsUsed < this.limits.revisions) {
+    } else if ((verdict.outcome === "revise" || (work.retry && verdict.source !== "owner")) && work.revisionsUsed < this.limits.revisions) {
       next = { ...work, state: "running", verdict, revisionsUsed: work.revisionsUsed + 1, updatedAt: now };
     } else {
       next = { ...work, state: "failed", verdict, reason: verdict.reasons || "verification failed", endedAt: now, updatedAt: now };
     }
     this.ledger.tx(() => {
       this.put(next);
-      if (verdict.outcome === "revise") this.ledger.appendReviseHistory(work.id, verdict);
+      if (next.state === "running") this.ledger.appendReviseHistory(work.id, verdict);
       this.core.decisions.cancelFor(work.id, "accept_result");
       if (next.state === "running") {
         this.ledger.setIdleNudges(work.id, 0);
@@ -674,6 +675,7 @@ export class Works {
         ].filter(Boolean).join("\n\n"), `work:${work.id}:verdict:${next.revisionsUsed}`, "verdict");
       }
     });
+
     if (isTerminal(next)) {
       this.releaseIncomingQuestions(next.id, "The recipient Work settled before the question was resolved.");
       this.settled(next);

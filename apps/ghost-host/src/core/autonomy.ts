@@ -25,6 +25,7 @@ interface PendingWake {
   requestId: string;
   text: string;
   at: number;
+  scopeId?: string | null;
   heads: Record<string, string>;
   /** The plan revision this record created; a later revision means the plan changed during the wake. */
   revision: number;
@@ -275,7 +276,7 @@ export class Autonomy {
     // 퇴근 중에는 자율 깨우기를 하지 않는다. 계획은 그대로 남아 출근하면 깨운다.
     if (!this.core.duty.onDuty(now)) return;
     const ledger = this.core.ledger;
-    const busy = (ghost: Ghost) => ledger.findConversation(ghost.directConversationId)?.busy === true;
+    const busy = (ghost: Ghost) => ledger.conversations({ ghostId: ghost.id }).some((conversation) => (conversation.id === ghost.directConversationId || conversation.kind === "wake") && conversation.busy);
     const ghosts = this.ghosts().filter((ghost) => ghost.state === "active");
     if (!this.seeded) {
       // After a restart, self-directed turns Pi resumes still hold their slots, however long they run.
@@ -335,14 +336,16 @@ export class Autonomy {
       if (busy(ghost)) continue;
       if (this.awake.size >= this.core.ledger.limits().concurrentWakes) break;
       const observedSeq = ledger.seq();
-      const text = await this.prompt(ghost, plan, due, moved, now);
+      const assigned = ledger.scopes().filter((scope) => scope.state === "active" && (scope.ghostId === ghost.id || (scope.ghostId === null && ghost.isDefault)));
+      const scopeId = moved[0]?.space.id ?? (plan.watch.length === 1 ? plan.watch[0]! : assigned.length === 1 ? assigned[0]!.id : null);
+      const text = await this.prompt(ghost, plan, due, moved, now, scopeId);
       const seen = { ...plan.heads };
       for (const item of moved) seen[`${item.space.id}:${item.path}`] = item.to;
       // Recorded before submission; skipped when the owner or the Ghost changed the plan meanwhile.
       let pending = null as PendingWake | null;
       this.update(ghost.id, (stored) => {
         if (stored.revision !== plan.revision || !stored.enabled || stored.pending) return stored;
-        pending = { requestId: `autonomy:${ghost.id}:${stored.wakes + 1}:${now}`, text, at: now, heads: seen, revision: stored.revision + 1 };
+        pending = { requestId: `autonomy:${ghost.id}:${stored.wakes + 1}:${now}`, text, at: now, scopeId, heads: seen, revision: stored.revision + 1 };
         // Capture before prompt I/O. A later ledger change remains unobserved even on the same clock tick.
         return { ...stored, pending, observed: now, observedSeq };
       });
@@ -353,7 +356,9 @@ export class Autonomy {
   /** Submit a recorded wake, then account for it. A plan the Ghost makes during the wake outlives the fallback. */
   private async submit(ghost: Ghost, pending: PendingWake, now: number) {
     try {
-      await this.core.engine.submit(ghost.directConversationId, { text: pending.text, origin: "schedule", requestId: pending.requestId });
+      const submission = { text: pending.text, origin: "schedule" as const, requestId: pending.requestId, scopeId: pending.scopeId ?? null };
+      if (this.core.engine.wake) await this.core.engine.wake(ghost.id, submission);
+      else await this.core.engine.submit(ghost.directConversationId, submission);
     } catch (error) {
       if (!(error instanceof CommandError)) throw error;
       // No model or credential: an outcome, not a crash. Look again later instead of every minute.
@@ -384,7 +389,7 @@ export class Autonomy {
   }
 
   /** What the Ghost needs to decide on its own: its plan, what changed, what is live, and for the main Ghost the team. */
-  private async prompt(ghost: Ghost, plan: Stored, due: boolean, moved: { space: Scope; path: string; from: string; to: string }[], now: number): Promise<string> {
+  private async prompt(ghost: Ghost, plan: Stored, due: boolean, moved: { space: Scope; path: string; from: string; to: string }[], now: number, scopeId: string | null): Promise<string> {
     const ledger = this.core.ledger;
     const names = new Map(ledger.ghosts().map((item) => [item.id, item.name]));
     const planner = plan.setBy === "self" ? "you" : plan.setBy === "main" ? `the main Ghost ${names.get(ledger.defaultGhost()?.id ?? "") ?? ""}`.trim() : "the Host";
@@ -412,8 +417,7 @@ export class Autonomy {
     const pending = ledger.decisionsForState().filter((decision) => decision.state === "pending");
     if (pending.length) lines.push(`- ${pending.length} decision(s) waiting for the owner`);
     if (settled.count === 0 && moved.length === 0 && pending.length === 0) lines.push("- nothing new reached the Host");
-    // Every Ghost sees the team's directions and boundaries; ids let it link Work to an active milestone.
-    const goals = this.core.goals.context();
+    const goals = this.core.goals.context(scopeId);
     if (goals) lines.push("", goals);
     const mine = ledger.worksInState("queued", "running", "waiting", "verifying", "blocked").filter((work) => work.ghostId === ghost.id && live(work));
     if (mine.length) lines.push("", "Your live Work:", ...mine.slice(0, 8).map((work) => `- "${work.title}" ${work.state}`));
