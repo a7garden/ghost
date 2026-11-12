@@ -56,9 +56,12 @@ export class Works {
     if (ghost.state !== "active") throw conflict(`${ghost.name} is ${ghost.state}`);
     const origin = this.ledger.conversation(input.originConversationId);
     if (origin.kind !== "direct") throw invalid("a root Work reports to a direct conversation");
-    this.checkExecution(input.ghostId, input.execution);
+    // New Works run in the confined Mac workspace unless the caller picks another target; stored
+    // Works without one keep the configured sandbox (legacy reading of `undefined`).
+    const execution = input.execution ?? { kind: "workspace" as const };
+    this.checkExecution(input.ghostId, execution);
     const id = input.id ?? newId();
-    const work = this.newWork({ ...input, id, parentId: null, rootId: id });
+    const work = this.newWork({ ...input, execution, id, parentId: null, rootId: id });
     this.ledger.tx(() => this.ledger.putWork(work)); // queued: no budget span to settle yet
     this.kick(work.id);
     return work;
@@ -88,7 +91,12 @@ export class Works {
     const deadlineAt = minDeadline(parent.deadlineAt, input.deadlineAt ?? null);
     if (parent.activityId) this.core.activities.authorize(parent.id, "delegate");
     if (input.execution?.kind === "host" && parent.execution?.kind !== "host") throw invalid("delegation cannot elevate container work to PC execution");
-    const execution = input.execution ?? (parent.execution?.kind === "host" && !target.hostExecution ? { kind: "container" as const } : parent.execution);
+    if (input.execution?.kind === "workspace" && parent.execution?.kind === "container") throw invalid("delegation cannot move container work to the Mac workspace");
+    // The default is the confined Mac workspace; a container parent stays in its container.
+    const execution = input.execution
+      ?? (parent.execution?.kind === "container" ? { kind: "container" as const }
+        : parent.execution?.kind === "host" && !target.hostExecution ? { kind: "workspace" as const }
+        : parent.execution ?? { kind: "workspace" as const });
     this.checkExecution(target.id, execution);
     const toolScope = (input.toolScope ?? parent.toolScope)?.filter((tool) => (!parent.toolScope || parent.toolScope.includes(tool)) && target.tools.includes(tool));
     const work = this.newWork({
@@ -164,8 +172,11 @@ export class Works {
 
   private checkExecution(ghostId: string, execution: ExecutionTarget | undefined) {
     if (!execution) return;
-    if (execution.kind === "host" && !this.ledger.ghost(ghostId).hostExecution) throw invalid("the owner has not granted this Ghost direct PC execution; ask once with capability_request (host_execution: true) and end your turn, or run it without execution (container) and read Mac files with host_read");
-    try { validateExecutionTarget(execution); }
+    if (execution.kind === "host" && !this.ledger.ghost(ghostId).hostExecution) throw invalid("the owner has not granted this Ghost direct PC execution; ask once with capability_request (host_execution: true) and end your turn, or run it in the confined workspace instead (default) and read Mac files with host_read");
+    try {
+      this.core.sandbox.validateExecution?.(execution);
+      validateExecutionTarget(execution);
+    }
     catch (error) { throw invalid(error instanceof Error ? error.message : "invalid execution target"); }
   }
 

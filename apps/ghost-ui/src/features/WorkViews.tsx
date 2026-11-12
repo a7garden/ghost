@@ -106,7 +106,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
   const [busy, setBusy] = useState(false);
   const ghosts = visibleGhosts(state.ghosts);
   const [ghostId, setGhostId] = useState(defaultGhostId ?? ghosts[0]?.id ?? '');
-  const [execution, setExecution] = useState<'container' | 'host'>('container');
+  const [execution, setExecution] = useState<'workspace' | 'container' | 'host'>('workspace');
   const [cwd, setCwd] = useState('');
   const [briefText, setBriefText] = useState('');
   const briefRef = useRef<HTMLTextAreaElement>(null);
@@ -116,7 +116,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
   const pickGhost = (id: string) => {
     setGhostId(id);
     // PC execution is per-Ghost owner grant; losing it must never leave host selected invisibly.
-    if (ghosts.find(ghost => ghost.id === id)?.hostExecution !== true) { setExecution('container'); setCwd(''); }
+    if (ghosts.find(ghost => ghost.id === id)?.hostExecution !== true) { setExecution('workspace'); setCwd(''); }
   };
   const submit = (data: FormData) => {
     const title = String(data.get('title')).trim();
@@ -124,7 +124,7 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
     const criteria = String(data.get('criteria') ?? '').trim();
     const deadline = String(data.get('deadline'));
     if (!title || !brief || !ghostId) return;
-    let target: ExecutionTarget = { kind: 'container' };
+    let target: ExecutionTarget = { kind: 'workspace' };
     if (execution === 'host') {
       const path = cwd.trim();
       if (!path.startsWith('/')) { setError('작업 폴더는 /로 시작하는 전체 경로여야 합니다.'); return; }
@@ -174,8 +174,8 @@ export function NewWorkModal({ state, defaultGhostId, onClose, onCreated }: {
         ? hostAllowed ? undefined : '이 Ghost는 PC 직접 실행이 허용되지 않았습니다. Ghost 설정의 운영에서 허용할 수 있습니다.'
         : undefined}>
         {control => <SegmentedControl {...control} aria-label="실행 환경" value={execution}
-          onValueChange={value => setExecution(value as 'container' | 'host')}
-          options={[{ value: 'container', label: '컨테이너', disabled: busy },
+          onValueChange={value => setExecution(value as 'workspace' | 'container' | 'host')}
+          options={[{ value: 'workspace', label: '작업 공간', disabled: busy }, { value: 'container', label: '컨테이너', disabled: busy },
             { value: 'host', label: '이 Mac', disabled: busy || !hostAllowed }]}/>}
       </FormField>
       {execution === 'host' && <>

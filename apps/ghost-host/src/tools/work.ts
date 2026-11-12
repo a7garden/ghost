@@ -40,13 +40,21 @@ function shellRecord(shell: { exitCode: number; stdout: string; stderr: string }
 }
 
 /** Run one command through the call's environment, keeping the streams apart for the journal. */
-async function runShell(env: ExecutionEnv, command: string, timeout: number | undefined, api: ToolExecutionApi, context: Context): Promise<ShellResult> {
+export async function runShell(
+  env: ExecutionEnv,
+  command: string,
+  timeout: number | undefined,
+  api: ToolExecutionApi,
+  context: Context,
+  extraEnv?: Record<string, string>,
+): Promise<ShellResult> {
   let stdout = "";
   let stderr = "";
   const result = await env.exec(
     command,
     {
       ...(timeout === undefined ? {} : { timeout }),
+      ...(extraEnv === undefined ? {} : { env: extraEnv }),
       onOutput: (chunk, _context, info) => {
         if (info.stream === "stdout") stdout = (stdout + chunk).slice(-SHELL_STDOUT_TAIL);
         else stderr = (stderr + chunk).slice(-SHELL_STDERR_TAIL);
@@ -221,14 +229,19 @@ async function unchangedMeansNoEffect(root: string, path: string, perform: () =>
 }
 
 /**
- * The directory this call's relative paths resolve against. For Host worktree Works the environment
- * actually runs at the Work's own checkout, not the recorded `work.execution.cwd`, so the root comes
- * from the call's environment (`absolutePath(".")` resolves and re-authorizes against its real cwd);
- * container and legacy Works keep the staging workspace. Missing environment fails closed.
+ * The directory this call's relative paths resolve against. For Host and workspace worktree Works
+ * the environment actually runs at the Work's own checkout, not the recorded
+ * `work.execution.cwd`, so the root comes from the call's environment (`absolutePath(".")` resolves
+ * and re-authorizes against its real cwd); container and legacy Works keep the staging workspace.
+ * A workspace Work without a repository cwd runs in its own workspace directory. Missing
+ * environment fails closed.
  */
 async function executionRoot(work: Work, sandbox: SandboxEnvFactory, api: ToolExecutionApi, context: Context): Promise<string> {
-  if (work.execution?.kind !== "host") return realpathSync(sandbox.workspacePath(work));
-  if (!api.env) throw new Error("no execution environment for this Host Work; refusing to touch files");
+  if (work.execution?.kind !== "host" && work.execution?.kind !== "workspace") return realpathSync(sandbox.workspacePath(work));
+  // A workspace Work without material runs in its own workspace directory; the environment only
+  // matters once a repository cwd gives it another root.
+  if (work.execution.kind === "workspace" && work.execution.cwd === undefined) return realpathSync(sandbox.workspacePath(work));
+  if (!api.env) throw new Error("no execution environment for this Work; refusing to touch files");
   const resolved = await api.env.absolutePath(".", context);
   if (!resolved.ok) throw new NoEffect(`the Work's execution directory is unavailable: ${resolved.error.message}`);
   return realpathSync(resolved.value);
@@ -302,7 +315,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
 
   const bash = defineTool({
     name: "bash",
-    description: "Run one bash command in this Work's selected environment: isolated container or explicitly authorized owner PC. Returns exit code and bounded output.",
+    description: "Run one bash command in this Work's selected environment: the confined Mac workspace (default), an isolated container, or explicitly authorized owner PC. Returns exit code and bounded output; a sandbox refusal names the boundary that refused.",
     parameters: Type.Object({
       command: Type.String({ minLength: 1, maxLength: 2048 }),
       timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "Timeout in seconds" })),
@@ -351,7 +364,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
 
   const publishArtifact = defineTool({
     name: "publish_artifact",
-    description: "Publish a file relative to this Work's execution directory as an artifact. On PC work this is the selected cwd; on container work it is /workspace.",
+    description: "Publish a file relative to this Work's execution directory as an artifact. On workspace and PC work this is the Work's directory (its worktree when the target is a repository); on container work it is /workspace.",
     parameters: Type.Object({
       path: Type.String({ minLength: 1, maxLength: 4096, description: "File path relative to this Work's selected execution cwd: /workspace in a container, or the authorized Host cwd" }),
       name: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: "Artifact name; defaults to the file name" })),
@@ -372,15 +385,15 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
           },
           async (): Promise<string> => {
             const base = await executionRoot(scope.work, sandbox, api, context);
-            const containerWork = scope.work.execution?.kind !== "host";
+            const confinedWork = scope.work.execution?.kind === "container" || scope.work.execution === undefined;
             let path: string;
             try {
               path = confinedPath(base, args.path);
             } catch (error) {
               if (error instanceof NoEffect && needsWorkspaceListing(error.message)) {
-                const nextStep = containerWork
+                const nextStep = confinedWork
                   ? "On a container Work the Mac filesystem is not visible here: read Mac files with host_read or document_read, write the result into the workspace with write, then publish it."
-                  : "On a host Work paths stay relative to the authorized cwd: write the result there with write, then publish it.";
+                  : "Paths stay relative to this Work's execution directory: write the result there with write, then publish it.";
                 throw new NoEffect(`${error.message}. ${workspaceListing(base)} ${nextStep}`);
               }
               throw error;

@@ -33,7 +33,7 @@ export function ActivityFormDialog({ state, connections, activity, onClose, onSa
     return {
       ...prev, ghostId,
       tools: intersectTools(DEFAULT_ACTIVITY_TOOLS, next?.tools ?? []),
-      ...(prev.executionKind === 'host' && next?.hostExecution !== true ? { executionKind: 'container' as const, hostCwd: '' } : {}),
+      ...(prev.executionKind === 'host' && next?.hostExecution !== true ? { executionKind: 'workspace' as const, hostCwd: '' } : {}),
     };
   });
 

@@ -1,4 +1,4 @@
-import type { Decision, Space, VaultItem, Work } from "@ghost/contract";
+import type { Decision, ExecutionTarget, Space, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 
 /** Builds the Pi execution environment of a work conversation. Implemented in src/sandbox. */
@@ -11,6 +11,10 @@ export interface SandboxEnvFactory {
   stageInputs(work: Work, inputs: { childId: string; name: string; digest: string }[]): Promise<void>;
   /** Abort a settled Work's Host processes or free its container; staging and owner files stay. */
   release(work: Work): Promise<void>;
+  /** Confined reviewer environment (read-only view of the Work, writable scratch, no network). */
+  reviewEnvFor?(work: Work, conversationId: string): ExecutionEnv;
+  /** Admission-time validation of an execution target beyond its static shape. */
+  validateExecution?(target: ExecutionTarget): void;
 }
 
 

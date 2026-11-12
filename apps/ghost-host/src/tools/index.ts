@@ -209,7 +209,7 @@ export function createToolSet(deps: {
   const activities = harden(activityTools(deps.core));
   const interactive = harden(createInteractiveTools(deps.core));
   const work = harden(createWorkTools(deps.core, deps.sandbox));
-  const review = harden(createReviewTools(deps.core));
+  const review = harden(createReviewTools(deps.core, deps.sandbox));
   const main = harden(createMainTools(deps.core));
   const goals = harden(createGoalTools(deps.core));
   const self = harden(createSelfTools(deps.core));
@@ -294,7 +294,15 @@ export function createToolSet(deps: {
             .filter(Boolean)
             .join("\n\n");
         case "work":
-          const environment = work?.execution?.kind === "host"
+          const environment = work?.execution?.kind === "workspace"
+            ? `Execution: the confined Mac workspace (this Work's own directories; no PC-wide writes). ${
+                work.execution.cwd
+                  ? work.execution.worktree === false
+                    ? `Material: ${work.execution.cwd} is readable but read-only.`
+                    : `Repository material: a worktree of ${work.execution.cwd} on branch ghost/${work.id} was created for you and is the working directory; commit there. The owner's checkout stays clean.`
+                  : "The working directory is the Work's own workspace."
+              } Reads: the Mac toolchain and the owner-configured project roots; secrets, keychains and Ghost state are refused. Writes: only this Work's directories. Network: only through the egress proxy (HTTP(S)_PROXY is set); tools that cannot use a proxy fail. A refusal names the boundary that refused. Publish results with publish_artifact.`
+            : work?.execution?.kind === "host"
             ? work.execution.worktree
               ? `Execution: owner-authorized unrestricted PC access in your own git worktree of ${work.execution.cwd}, on branch ghost/${work.id} (the Host created it; the file and shell cwd is that worktree, not the owner's checkout). Commit your changes on that branch; never push, switch branches, or edit the owner's checkout — the owner reviews and merges. Artifact/delegation staging: ${deps.sandbox.workspacePath(work)}. Host shell can still affect the full PC and network.`
               : `Execution: owner-authorized unrestricted PC access. File and shell cwd: ${work.execution.cwd}. Artifact/delegation staging: ${deps.sandbox.workspacePath(work)}. Host shell can affect the full PC and network; connector action policy does not confine it.`
