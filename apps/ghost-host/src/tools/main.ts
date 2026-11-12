@@ -6,6 +6,7 @@ import { fallbackListFor } from "../engine/fallback.ts";
 import type { Core } from "../core/core.ts";
 import { conflict, forbidden, invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
+import { NOTE_MAX } from "../core/decisions.ts";
 import { errorResult, scopeOf, type Scope } from "./shared.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
@@ -228,12 +229,13 @@ export function createMainTools(core: Core): Extension {
       "Act on another Ghost's decision that arrives as a [Decision review] or [Decision handed over] message. A reversible one you may approve, deny or answer for the owner; on any one you may leave your view for the owner (outcome leave). " +
       "A handed-over decision is one the owner asked you to settle: decide it, and leave it only if you cannot judge it at all. " +
       "Write note in the owner's language: what you decided or found and what you recommend, one or two sentences. Main Ghost only; the Host refuses to settle anything that is not reversible. " +
-      "A result acceptance card may be approved only after you compare the attached report with the acceptance criteria; approve only what the criteria ask for.",
+      "A result acceptance card may be approved only after you compare the attached report with the acceptance criteria; approve only what the criteria ask for. " +
+      "On a result acceptance the note is the owner's summary on the card: three to six sentences on what you checked against the criteria, what you found and the next step, in your own words.",
     parameters: Type.Object({
       decision_id: Type.String({ minLength: 1, maxLength: 128 }),
       outcome: Type.Union([Type.Literal("approve"), Type.Literal("deny"), Type.Literal("answer"), Type.Literal("leave")]),
       answer: Type.Optional(Type.String({ minLength: 1, maxLength: 1024, description: "The answer, for a question" })),
-      note: Type.String({ minLength: 1, maxLength: 1000 }),
+      note: Type.String({ minLength: 1, maxLength: NOTE_MAX }),
     }),
     replay: "unsafe",
     async execute(args, api) {

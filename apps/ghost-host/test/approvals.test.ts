@@ -310,6 +310,38 @@ describe("accepting a result for the owner", () => {
     expect(reviewOf(t.ledger.decision(decision.id).proposal)?.resolvedBy).toBe("main");
   });
 
+  test("the main is shown the Work and its criteria and asked for a summary the owner reads on the card", async () => {
+    const t = await team();
+    const { work, decision } = await reported(t);
+    await tick();
+    const wake = t.engine.to(t.main.directConversationId).find((item) => item.requestId === `decision-review:${decision.id}`);
+    expect(wake?.text).toContain(`Work ${work.id}`);
+    expect(wake?.text).toContain("The report names the changed file.");
+    expect(wake?.text).toContain("three to six sentences");
+  });
+
+  test("asking for changes passes the main's note on to the Ghost that did the Work", async () => {
+    const t = await team();
+    const { work, decision } = await reported(t);
+    await t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "deny", note: "보고서에 바꾼 파일 이름이 없습니다. 파일 이름을 넣어 다시 보고해 주세요." });
+    await t.core.idle();
+    const reasons = t.ledger.work(work.id).verdict?.reasons ?? "";
+    expect(reasons).toContain("main Ghost asked for changes");
+    expect(reasons).toContain("파일 이름을 넣어 다시 보고해 주세요");
+  });
+
+  test("a result with no acceptance criteria to check it against stays the owner's alone", async () => {
+    const t = await team();
+    const work = t.core.works.createRoot({ ghostId: t.mate.id, title: "Free", brief: "B", originConversationId: t.mate.directConversationId });
+    await t.core.idle();
+    t.core.works.complete(work.id, { summary: "Done.", artifacts: [] });
+    await t.core.idle();
+    const decision = t.ledger.pendingDecisions({ workId: work.id }).find((item) => item.kind === "accept_result")!;
+    expect(decision.proposal?.result).toBeTruthy();
+    await expect(t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "x" })).rejects.toThrow("only the owner");
+    expect(() => t.core.decisions.delegate(decision.id)).toThrow("only reversible");
+  });
+
   test("a result without a report stays the owner's alone", async () => {
     const t = await team();
     const decision = t.core.ledger.tx(() => t.core.decisions.open({

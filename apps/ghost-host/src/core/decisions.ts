@@ -17,6 +17,23 @@ const MINUTE = 60_000;
 /** Effect tools whose approval cards belong to the owner alone: no main settlement, no timeout recommendation. */
 const OWNER_ONLY_EFFECTS: Record<string, true> = { connection_request: true, connection_register: true };
 
+/** The main Ghost's note on a decision; a result summary of three to six sentences fits in any language. */
+export const NOTE_MAX = 2000;
+
+/** How the main writes its note on a result: the owner reads it as the card's summary, the full report one click below. */
+const RESULT_NOTE =
+  "Write note as a summary of three to six sentences in the owner's language: what you checked against each criterion, what you found, and the next step. The owner reads it as the result card's summary, so say it in your own words rather than copying the report.";
+
+/** The facts a result acceptance is checked against: which Work, and its acceptance criteria. */
+function resultLines(decision: Decision): string[] {
+  if (decision.kind !== "accept_result") return [];
+  const criteria = typeof decision.proposal?.criteria === "string" ? decision.proposal.criteria.trim() : "";
+  return [
+    `This is a result acceptance for Work ${decision.workId ?? "(none)"}: compare the attached report with the acceptance criteria and approve only what the criteria ask for.`,
+    criteria ? `Acceptance criteria:\n${criteria.slice(0, 2000)}` : "No acceptance criteria were set.",
+  ];
+}
+
 /** Owner decisions. Opening one notifies; resolving one wakes whoever waits on it. */
 export class Decisions {
   /** Applies an approved document proposal; registered by the documents integration. */
@@ -185,7 +202,9 @@ export class Decisions {
               ? "The Host asked for changes after the owner's wait ran out."
               : "The owner asked for changes.";
         const answer = decision.answer?.trim();
-        const reasons = by === "main" ? [base, answer].filter(Boolean).join(" ") : (answer ?? base);
+        // The main's settle note says what it checked and what to fix; the Ghost that did the Work needs it.
+        const note = by === "main" ? reviewOf(decision.proposal)?.mainNote?.trim() : undefined;
+        const reasons = by === "main" ? [base, note, answer].filter(Boolean).join(" ") : (answer ?? base);
         this.core.works.applyVerdict(decision.workId, {
           outcome: decision.state === "approved" ? "pass" : "revise",
           source: "owner",
@@ -268,9 +287,9 @@ export class Decisions {
     // A goal proposal never carries a recommendation: only the owner adopts a direction for the team.
     if (decision.kind === "question") return !!proposal && !proposal.secureForm && !proposal.browserHandoff && !proposal.goal && typeof reviewOf(proposal)?.answer === "string";
     if (decision.kind === "document_review") return !!proposal && !(proposal.pageId ?? proposal.page_id);
-    // 2026-11-12 owner decision: with the result report attached the main Ghost may accept the result for the
-    // owner; without a report it stays the owner's alone.
-    if (decision.kind === "accept_result") return !!proposal?.result;
+    // 2026-11-12 owner decision: with the result report and its acceptance criteria attached the main Ghost may
+    // accept the result for the owner; without either there is nothing to check it against, so it stays the owner's.
+    if (decision.kind === "accept_result") return !!proposal?.result && typeof proposal.criteria === "string" && proposal.criteria.trim() !== "";
     if (decision.kind !== "approve_effect" || !decision.effectId || !proposal) return false;
     const tool = this.ledger.effect(decision.effectId).tool;
     // Credential authority and external API writes are always the owner's decision, never an automatic one.
@@ -363,14 +382,14 @@ export class Decisions {
     const { delegatedAt, ...prior } = reviewOf(decision.proposal) ?? { expiresAt: null };
     // Leaving a handed-over decision gives it back: it returns to the owner's queue with the main's note.
     const kept = choice.outcome !== "leave" && delegatedAt !== undefined ? { delegatedAt } : {};
-    const review: DecisionReview = { ...prior, ...kept, mainNote: choice.note.slice(0, 1000) };
+    const review: DecisionReview = { ...prior, ...kept, mainNote: choice.note.slice(0, NOTE_MAX) };
     const noted: Decision = { ...decision, proposal: { ...decision.proposal, review } };
     this.ledger.tx(() => this.ledger.putDecision(noted));
     if (choice.outcome === "leave") return "Left for the owner with your note on the card.";
     await this.resolve(decisionId, { outcome: choice.outcome, ...(choice.answer ? { answer: choice.answer } : {}) }, "main");
     this.ledger.tx(() => this.core.notify({
       id: `decision-main:${decision.id}`, kind: "message", ghostId: mainId, conversationId: decision.conversationId, workId: decision.workId, decisionId: decision.id,
-      title: decision.title.slice(0, 256), body: choice.note.slice(0, 2000),
+      title: decision.title.slice(0, 256), body: choice.note.slice(0, NOTE_MAX),
     }));
     return "Settled for the owner; they were told why.";
   }
@@ -421,18 +440,21 @@ export class Decisions {
     const lines = [
       settle
         ? `[Decision review] ${asker} needs a decision the owner would normally make. It is reversible, so you may decide it for the owner.`
-        : `[Decision review] ${asker} needs a decision only the owner can make (it sends, spends, deletes or enters a card). You cannot settle it; look it over for the owner.`,
+        : current.kind === "accept_result"
+          ? `[Decision review] ${asker} needs a result accepted that only the owner can settle (no result report or no acceptance criteria to check it against). You cannot settle it; look it over for the owner.`
+          : `[Decision review] ${asker} needs a decision only the owner can make (it sends, spends, deletes or enters a card). You cannot settle it; look it over for the owner.`,
       `Decision ${decision.id}: ${decision.title}`,
       decision.detail.slice(0, 4000),
       decision.options.length ? `Options: ${decision.options.join(" | ")}` : "",
-      // 2026-11-12 owner decision: a result is settled for the owner only against the acceptance criteria.
-      decision.kind === "accept_result"
-        ? "This is a result acceptance: compare the attached report with the acceptance criteria and approve only what the criteria ask for."
-        : "",
+      ...resultLines(current),
       review?.answer ? `${asker} recommends: ${review.answer}` : "",
-      settle
-        ? `If it clearly serves what the owner wants, settle it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. If only the owner can judge, use outcome "leave" with your recommendation so they see it. Then reply only [quiet].`
-        : `Check it against what you know (the owner's earlier words, the recipient, the amount, the files, the result against its brief). If there is something the owner should know to decide — a mismatch, a risk, a confirmation that it matches — call decision_settle with outcome "leave" and one or two sentences in the owner's language, ending with what you recommend. Then reply only [quiet].`,
+      current.kind === "accept_result"
+        ? settle
+          ? `Settle it with decision_settle: approve only if the report meets every criterion, deny (asking for changes) if it falls short, or leave it if only the owner can judge. ${RESULT_NOTE} Then reply only [quiet].`
+          : `Call decision_settle with outcome "leave". ${RESULT_NOTE} Then reply only [quiet].`
+        : settle
+          ? `If it clearly serves what the owner wants, settle it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. If only the owner can judge, use outcome "leave" with your recommendation so they see it. Then reply only [quiet].`
+          : `Check it against what you know (the owner's earlier words, the recipient, the amount, the files, the result against its brief). If there is something the owner should know to decide — a mismatch, a risk, a confirmation that it matches — call decision_settle with outcome "leave" and one or two sentences in the owner's language, ending with what you recommend. Then reply only [quiet].`,
     ].filter(Boolean);
     await this.core.engine.submit(main.directConversationId, { text: lines.join("\n\n"), origin: "schedule", requestId: `decision-review:${decision.id}` });
   }
@@ -449,8 +471,11 @@ export class Decisions {
       `Decision ${current.id}: ${current.title}`,
       current.detail.slice(0, 4000),
       current.options.length ? `Options: ${current.options.join(" | ")}` : "",
+      ...resultLines(current),
       review?.answer ? `${asker} recommends: ${review.answer}` : "",
-      `Decide it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. Use outcome "leave" only if you cannot judge it at all; that gives it back to the owner with your note. Then reply only [quiet].`,
+      current.kind === "accept_result"
+        ? `Decide it with decision_settle: approve only if the report meets every criterion, otherwise deny (asking for changes). Use outcome "leave" only if you cannot judge it at all; that gives it back to the owner. ${RESULT_NOTE} Then reply only [quiet].`
+        : `Decide it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. Use outcome "leave" only if you cannot judge it at all; that gives it back to the owner with your note. Then reply only [quiet].`,
     ].filter(Boolean);
     await this.core.engine.submit(main.directConversationId, { text: lines.join("\n\n"), origin: "schedule", requestId: `decision-delegate:${current.id}` });
   }
