@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
-import { ApiConnectionConfig, Id, nullable } from "./entities.ts";
+import { Id, nullable } from "./entities.ts";
+import { ApiConnectionConfig } from "./autonomy.ts";
 
 /** Service identifiers are owner data; built-in providers are only presets. */
 export const ConnectionOAuthServiceId = Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" });
