@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AssistantEntry, Harness, UserEntry, createRegistry } from "@earendil-works/pi-durable";
+import { AssistantEntry, GenerationTask, Harness, UserEntry, createRegistry } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createEngine } from "../src/engine/index.ts";
+import { FallbackRunsDoc } from "../src/engine/fallback.ts";
 import { FakeEngine, harness, tempDir } from "./support.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -23,6 +24,7 @@ test("recovery never attributes an older quota error to an aborted or unrelated 
   f.ledger.tx(() => f.ledger.setPiConversationId(id, String(conversation.id)));
   const detail = "429 Token Plan usage limit reached";
   const oldError = await pi.commit(async (tx) => {
+    const attempts = await tx.doc(FallbackRunsDoc, conversation.id);
     const oldInput = await tx.appendEntry(UserEntry, conversation.id, { model: [{ role: "user", content: "previous input", timestamp: 1 }] });
     const oldError = await tx.appendEntry(AssistantEntry, conversation.id, { model: [{ ...fauxAssistantMessage("", { stopReason: "error", errorMessage: detail }), provider: "p", model: "p-1" }] });
     await tx.createSubmission({ type: "input", conversationId: conversation.id, requestId: "old", status: "unanswered", reason: "model_error", detail, entry: oldInput.id });
@@ -34,6 +36,14 @@ test("recovery never attributes an older quota error to an aborted or unrelated 
     const current = await tx.appendEntry(UserEntry, conversation.id, { model: [{ role: "user", content: "new input", timestamp: 4 }] });
     await tx.appendEntry(AssistantEntry, conversation.id, { model: [{ ...fauxAssistantMessage("", { stopReason: "error", errorMessage: detail }), provider: "p", model: "p-1" }] });
     await tx.createSubmission({ type: "input", conversationId: conversation.id, requestId: "current-quota", entry: current.id, status: "unanswered", reason: "model_error", detail });
+    const cancelled = await tx.appendEntry(UserEntry, conversation.id, { model: [{ role: "user", content: "input whose fallback was cancelled", timestamp: 5 }] });
+    const failedPrimary = await tx.appendEntry(AssistantEntry, conversation.id, { model: [{ ...fauxAssistantMessage("", { stopReason: "error", errorMessage: detail }), provider: "p", model: "p-1" }] });
+    await tx.createSubmission({ type: "input", conversationId: conversation.id, requestId: "aborted-fallback", entry: cancelled.id, status: "unanswered", reason: "model_error", detail });
+    const taskId = await tx.createTask(GenerationTask, {}, { conversationId: conversation.id, ownership: { kind: "conversation" } });
+    const task = tx.stagedTasks().find((task) => task.id === taskId);
+    if (!task) throw new Error("fallback task missing");
+    tx.setTask({ id: task.id, conversationId: task.conversationId, kind: task.kind, version: task.version, input: task.input, background: task.background, abortRequested: true, state: { status: "terminal", outcome: { status: "aborted" } } });
+    attempts.byError[String(failedPrimary.id)] = { taskId };
     return oldError.id;
   }, ctx);
   await pi.close(ctx);
@@ -44,7 +54,7 @@ test("recovery never attributes an older quota error to an aborted or unrelated 
   });
   f.core.attach(engine);
   try {
-    for (const requestId of ["aborted-unplaced", "aborted-placed", "unrelated-model-error"]) {
+    for (const requestId of ["aborted-unplaced", "aborted-placed", "unrelated-model-error", "aborted-fallback"]) {
       expect(await engine.submissionRecovery!(id, requestId)).toMatchObject({ status: "unanswered", hit: null });
     }
     const correct = await engine.submissionRecovery!(id, "current-quota");

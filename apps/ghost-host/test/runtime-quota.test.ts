@@ -10,7 +10,7 @@ import { Core } from "../src/core/core.ts";
 import { createEngine } from "../src/engine/index.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { createToolSet } from "../src/tools/index.ts";
-import { MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
+import { FakeEngine, MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
 
 const primary: ModelRef = { provider: "primary", model: "primary-1" };
 
@@ -236,5 +236,54 @@ test("a newly available fallback releases a queued Work while an uncredentialed 
     await f.core.idle();
     expect(f.ledger.work(work.id)).toMatchObject({ state: "verifying", hold: null });
     expect((await f.engine.page(id, null, 50)).messages.filter((message) => message.role === "user")).toHaveLength(2);
+  } finally { await f.close(); }
+});
+
+test("crash recovery acknowledges the exact completed fallback instead of requeuing its primary quota error", async () => {
+  const f = await fixture();
+  try {
+    const backup = fauxProvider({ provider: "backup", models: [{ id: "backup-1", name: "Backup" }] });
+    f.models.setProvider(backup.provider);
+    f.secrets.put("backup", "backup-key");
+    f.ledger.tx(() => {
+      f.ledger.putProvider({ id: "backup", kind: "openai_compatible", name: "Backup", baseUrl: null, models: [{ id: "backup-1", name: "Backup" }] });
+      f.ledger.putSetting("defaultFallbacks", [{ provider: "backup", model: "backup-1" }]);
+    });
+    const quota = () => fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 Token Plan usage limit reached" });
+    f.faux.setResponses([quota(), quota()]);
+    backup.setResponses([fauxAssistantMessage("Fallback answered the original input.")]);
+    const id = f.ghost.directConversationId;
+    const resume = { requestId: `quota-resume:${id}:1`, text: "continue the original turn", origin: "owner" as const };
+    const ended = f.core.settled(id);
+    await f.engine.submit(id, resume);
+    await ended;
+    const recovered = await f.engine.submissionRecovery!(id, resume.requestId);
+    expect(recovered).toMatchObject({ status: "done", serving: "backup", hit: null });
+    const answerId = recovered!.entryId;
+
+    // A later independent answer must not replace the receipt of this original fallback.
+    f.ledger.tx(() => f.ledger.putConversation({ ...f.ledger.conversation(id), model: { provider: "backup", model: "backup-1" } }));
+    backup.setResponses([fauxAssistantMessage("A different future turn.")]);
+    const later = f.core.settled(id);
+    await f.engine.submit(id, { requestId: "unrelated-future-turn", text: "another question", origin: "owner" });
+    await later;
+    expect(await f.engine.submissionRecovery!(id, resume.requestId)).toMatchObject({ status: "done", entryId: answerId, serving: "backup", hit: null });
+
+    // Restore the Host journal from just before it acknowledged the successful fallback.
+    f.ledger.putSetting("quota", {
+      entries: {
+        primary: { reason: "429", resumeAt: Date.now() + 3600_000, failures: 1, probingBy: id },
+        backup: { reason: "429", resumeAt: Date.now() + 3600_000, failures: 1, probingBy: id },
+      },
+      records: [{ conversationId: id, attempts: 1, entryId: 0, origin: "owner", priority: 0, providers: ["primary", "backup"], queue: [resume, { requestId: "accepted-after-resume", text: "next accepted input", origin: "owner" }], releasing: resume.requestId, updatedAt: 1 }],
+    });
+    const delivery = new FakeEngine();
+    delivery.submissions.set(resume.requestId, { conversationId: id, submission: resume });
+    delivery.submissionRecovery = f.engine.submissionRecovery!.bind(f.engine);
+    f.core.attach(delivery);
+    await f.core.quota.start();
+    await f.core.idle();
+    expect(delivery.to(id).map((input) => input.requestId)).toEqual([resume.requestId, "accepted-after-resume"]);
+    expect(delivery.to(id).some((input) => input.requestId === `quota-resume:${id}:2`)).toBe(false);
   } finally { await f.close(); }
 });

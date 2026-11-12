@@ -14,6 +14,16 @@ export const FallbackDoc = defineDoc({
   fork: "initial",
 });
 
+/** The generation re-armed for an exact committed error, atomically with starting that fallback. */
+export const FallbackRunsDoc = defineDoc<{ byError: Record<string, { taskId: number }> }>({
+  kind: "ghost.fallback-runs",
+  version: 1,
+  scope: "conversation",
+  initial: () => ({ byError: {} }),
+  history: "latest",
+  fork: "initial",
+});
+
 /** A provider quota the model itself reported: a condition to wait out, not a Ghost stopping. */
 export interface QuotaHit {
   /** Shortened provider message, kept for the owner's status line. */
