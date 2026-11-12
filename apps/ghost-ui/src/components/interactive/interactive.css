@@ -26,9 +26,23 @@
 .ghost-ui-fields label { overflow-wrap: anywhere; }
 .ghost-ui-fields .ghost-form-field:has([data-slot="checkbox"]) { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; }
 .ghost-ui-fields .ghost-form-field > [data-slot="checkbox"] { order: -1; margin-top: 2px; }
+/* A one-field form: the field and its icon send share a line; feedback and the reset fall below. */
+.ghost-ui-input[data-inline] { grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+.ghost-ui-input[data-inline] > .ghost-ui-input__actions { display: contents; }
+.ghost-ui-input[data-inline] .ghost-ui-feedback, .ghost-ui-input[data-inline] .ghost-ui-input__actions > button:not([type="submit"]) { grid-column: 1 / -1; justify-self: start; }
+/* Long forms fold into bundles split by a hairline; two columns when the room allows. */
+.ghost-ui-groups { display: grid; gap: 16px; min-width: 0; }
+.ghost-ui-groups > .ghost-ui-fields { position: relative; }
+.ghost-ui-groups > .ghost-ui-fields + .ghost-ui-fields { padding-top: 16px; }
+.ghost-ui-groups > .ghost-ui-fields + .ghost-ui-fields::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: var(--ghost-line); }
+@media (min-width: 56rem) { .ghost-ui-groups > .ghost-ui-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Choices read as one quiet list: rows on hairlines inside a single frame,
-   with submit controls anchored in the same frame instead of floating after it. */
+   with submit controls anchored in the same frame instead of floating after it.
+   §2.2: two or three unlabeled options answer at a tap instead — numbered buttons in a
+   row, the decision card's vocabulary; six or more read as numbered cards in the same list. */
 .ghost-ui-input[data-kind="choices"] { gap: 0; border: 1px solid var(--ghost-line-strong); border-radius: 8px; overflow: hidden; }
+.ghost-ui-input[data-kind="choices"][data-shape="buttons"] { gap: 8px; border: 0; border-radius: 0; overflow: visible; }
+.ghost-ui-input[data-kind="choices"][data-shape="buttons"] .ghost-ui-input__actions { padding: 0; border-top: 0; background: none; }
 .ghost-ui-input[data-kind="choices"] .ghost-ui-input__actions { padding: 10px 12px; border-top: 1px solid var(--ghost-line); background: var(--ghost-inset); }
 .ghost-ui-choices { display: grid; margin: 0; padding: 0; min-width: 0; border: 0; }
 .ghost-ui-choice { display: flex; align-items: flex-start; gap: 10px; min-width: 0; min-height: 44px; padding: 12px; cursor: pointer; transition: background-color 150ms ease; }
@@ -40,6 +54,20 @@
 .ghost-ui-choice > span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .ghost-ui-choice__label { font-size: var(--text-body); line-height: 1.55; font-weight: 500; }
 .ghost-ui-choice__description { font-size: var(--text-ui); line-height: 1.5; color: var(--ghost-ink2); white-space: pre-wrap; }
+.ghost-ui-choices[data-shape="buttons"] { display: flex; flex-wrap: wrap; gap: 8px; }
+.ghost-ui-choice-btn { position: relative; display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 32px; padding: 5px 12px; border: 1px solid var(--ghost-line-strong); border-radius: var(--radius-control); background: var(--ghost-surface); color: var(--ghost-ink); font: 500 var(--text-ui)/1.45 var(--font-sans); text-align: left; overflow-wrap: anywhere; cursor: pointer; transition: background-color 150ms ease; }
+.ghost-ui-choice-btn > input { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ghost-ui-choice-btn > span { min-width: 0; }
+.ghost-ui-choice-btn:hover:not(:has(:checked)):not(:has(:disabled)) { background: var(--ghost-hover); }
+.ghost-ui-choice-btn:has(:checked) { background: var(--ghost-hover2); }
+.ghost-ui-choice-btn:has(:focus-visible) { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
+.ghost-ui-choice-btn:has(:disabled) { cursor: default; }
+.ghost-ui-choice-btn__check { display: none; flex: none; color: var(--ghost-ink2); }
+.ghost-ui-choice-btn:has(:checked) .ghost-ui-choice-btn__check { display: block; }
+.ghost-ui-choice--card { align-items: flex-start; }
+/* Number keys reuse the decision card's key look: canvas key on a hairline, mono 11px. */
+.ghost-ui-choice-btn kbd, .ghost-ui-choice--card kbd { display: grid; width: 20px; height: 20px; flex: none; place-items: center; border-radius: 6px; color: var(--ghost-ink2); background: var(--ghost-canvas); box-shadow: 0 0 0 1px var(--ghost-line-strong); font: 500 var(--text-micro)/1 var(--font-mono); }
+.ghost-ui-choice--card kbd { margin-top: 2px; }
 .ghost-ui-input__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .ghost-ui-input__actions button { min-height: 32px; height: auto; white-space: normal; overflow-wrap: anywhere; padding-block: 6px; max-width: 100%; }
 .ghost-ui-feedback { flex-basis: 100%; margin: 0; font-size: var(--text-caption); line-height: 1.45; color: var(--ghost-ink2); overflow-wrap: anywhere; }
@@ -65,4 +93,10 @@
   .ghost-ui-fields .ghost-form-field { scroll-margin-block: 24px; }
   .ghost-ui-fields .ghost-form-field:has([data-slot="checkbox"]) { min-height: 44px; align-items: center; }
   .ghost-ui-fields .ghost-form-field > [data-slot="checkbox"] { margin-top: 0; }
+  /* Every form control reaches 44px on touch; desktop density stays 32–36px. */
+  .ghost-ui-choice-btn { min-height: 44px; }
+  .ghost-ui-fields [data-slot="input"], .ghost-inline-stepper [data-slot="input"] { height: 44px; min-height: 44px; }
+  .ghost-ui-fields [data-slot="select-trigger"] { min-height: 44px; }
+  .ghost-ui-fields [data-slot="segmented-control-item"] { min-height: 44px; }
+  .ghost-inline-stepper > button { width: 44px; height: 44px; }
 }
