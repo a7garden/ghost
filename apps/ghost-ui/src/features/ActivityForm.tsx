@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button, FormField, InlineError, Input, SegmentedControl, SelectField, Switch, Textarea } from '../ui';
 import { type Activity, type ActivityConfig, type ActivitySource, type Connection, type ExecutionTarget, type Ghost, type State } from '@ghost/contract';
 import { Modal } from '../components/Modal';
-import { toolLabels } from './GhostSettings';
+import { toolLabels } from './toolLabels';
 import { visibleGhosts } from './ghostState';
 import { activityToolChoices, buildActivityConfig, draftFromConfig, emptyDraft, intersectTools, DEFAULT_ACTIVITY_TOOLS, externalActionsLabel, sourceKindLabel } from './activity-config';
 

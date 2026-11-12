@@ -5,7 +5,7 @@ import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkCjkFriendly from 'remark-cjk-friendly';
 import remarkGfm from 'remark-gfm';
-import type { Element, ElementContent, Root } from 'hast';
+import type { Element, ElementContent, Root, RootContent } from 'hast';
 import './MessageBody.css';
 import { ExternalAnchor } from './ExternalAnchor';
 import { RefMark } from './agent/RefMark';
@@ -151,8 +151,8 @@ function ImageLink({ alt, src }: { alt?: string; src?: string }) {
     : <span className="message-body__image">{content}</span>;
 }
 
-function ScrollableTable({ children }: { children?: ReactNode }) {
-  return <div className="message-body__tablewrap" role="region" aria-label="표" tabIndex={0}><table>{children}</table></div>;
+function ScrollableTable({ children, node: _node, ...props }: ComponentPropsWithoutRef<'table'> & { node?: unknown }) {
+  return <div className="message-body__tablewrap" role="region" aria-label="표" tabIndex={0}><table {...props}>{children}</table></div>;
 }
 
 function RefNode({ 'data-kind': kind, 'data-value': value }: { 'data-kind'?: Ref['kind']; 'data-value'?: string }) {
@@ -221,8 +221,45 @@ function rehypeStreaming() {
     tail(tree).children.push({ type: 'element', tagName: 'span', properties: { className: ['stream-caret'], ariaHidden: 'true' }, children: [] });
   };
 }
-const rehypePlugins = [rehypeRefs];
-const streamingRehypePlugins = [rehypeRefs, rehypeStreaming];
+/** From this many columns a table stops fitting a phone: mobile.css lays each row out as a card instead. */
+const WIDE_TABLE_COLUMNS = 4;
+const textOf = (node: ElementContent): string => node.type === 'text' ? node.value : node.type === 'element' ? node.children.map(textOf).join('') : '';
+const childElements = (node: Root | Element, tagName?: string) =>
+  (node.children as RootContent[]).filter((child): child is Element => child.type === 'element' && (!tagName || child.tagName === tagName));
+
+/**
+ * A wide table carries what its phone card needs: every cell names its column (`data-label`) and holds
+ * its content in one block, and the table keeps its ARIA roles once the card layout re-displays it.
+ */
+function rehypeTableCells() {
+  const mark = (table: Element) => {
+    const sections = childElements(table);
+    const headRow = childElements(sections.find(section => section.tagName === 'thead') ?? table, 'tr')[0];
+    const names = headRow ? childElements(headRow, 'th').map(cell => textOf(cell).trim()) : [];
+    if (names.length < WIDE_TABLE_COLUMNS) return;
+    table.properties = { ...table.properties, dataWide: '', role: 'table' };
+    for (const section of sections) {
+      section.properties = { ...section.properties, role: 'rowgroup' };
+      for (const row of childElements(section, 'tr')) {
+        row.properties = { ...row.properties, role: 'row' };
+        childElements(row).forEach((cell, index) => {
+          if (cell.tagName === 'th') { cell.properties = { ...cell.properties, role: 'columnheader' }; return; }
+          cell.properties = { ...cell.properties, role: 'cell', ...names[index] ? { dataLabel: names[index] } : {} };
+          cell.children = [{ type: 'element', tagName: 'div', properties: { className: ['message-body__cell'] }, children: cell.children }];
+        });
+      }
+    }
+  };
+  const visit = (node: Root | Element) => {
+    for (const child of childElements(node)) {
+      if (child.tagName === 'table') mark(child);
+      else visit(child);
+    }
+  };
+  return (tree: Root) => visit(tree);
+}
+const rehypePlugins = [rehypeRefs, rehypeTableCells];
+const streamingRehypePlugins = [rehypeRefs, rehypeTableCells, rehypeStreaming];
 
 /** Assistant transcript body: GFM markdown kept inside the message column, no raw HTML, no automatic remote resources. */
 export function MessageBody({ text, streaming = false, document = false }: { text: string; streaming?: boolean; document?: boolean }) {
@@ -233,15 +270,17 @@ export function MessageBody({ text, streaming = false, document = false }: { tex
 
 const inlineRemarkPlugins = [remarkGfm, remarkCjkFriendly];
 const INLINE_ELEMENTS = ['strong', 'em', 'del', 'code', REF_TAG];
+const inlineRehypePlugins = [rehypeRefs];
 
 /**
  * Ghost text in a one-line slot (a failure reason, an outcome, a wake line): emphasis, short
  * code and reference marks render, while blocks fold into the line. Line breaks become spaces
- * first, so unwrapped paragraphs and list items never glue their words together.
+ * first, so unwrapped paragraphs and list items never glue their words together. The wrapper
+ * breaks long tokens (paths, URLs) wherever the slot puts it, so no caller has to.
  */
 export function InlineText({ text }: { text: string }) {
-  return <Markdown remarkPlugins={inlineRemarkPlugins} rehypePlugins={rehypePlugins} allowedElements={INLINE_ELEMENTS} unwrapDisallowed
-    components={components}>{text.replace(/\s*\n\s*/g, ' ')}</Markdown>;
+  return <span className="message-body__inline"><Markdown remarkPlugins={inlineRemarkPlugins} rehypePlugins={inlineRehypePlugins} allowedElements={INLINE_ELEMENTS} unwrapDisallowed
+    components={components}>{text.replace(/\s*\n\s*/g, ' ')}</Markdown></span>;
 }
 
 /**

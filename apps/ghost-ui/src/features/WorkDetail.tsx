@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ChevronRight, Pencil, Play, Square } from 'lucide-react';
 import { Button, Page, InlineError, Input, Textarea, FormField } from '../ui'
 import type { Effect, Message, State, Verdict, Work, WorkDetail as WorkDetailData } from '@ghost/contract';
@@ -6,7 +6,7 @@ import { TERMINAL_WORK_STATES, splitProjectBrief } from '@ghost/contract';
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph, type GlyphState } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
 import { Modal } from '../components/Modal';
-import { LiveReply, Transcript } from '../components/TranscriptMessage';
+import { GhostRunLabel, LiveReply, Transcript, endsInGhostRun } from '../components/TranscriptMessage';
 import { ArtifactPreview } from '../components/ArtifactPreview';
 import { InlineText, MessageBody } from '../components/MessageBody';
 import { DecisionCard } from './Decision';
@@ -14,6 +14,9 @@ import { toneFor } from './ghostState';
 import { useConversationFeed } from './conversationFeed';
 import { absoluteTime, relativeTime, useNow } from './time';
 import { useHost } from '../host/context';
+import { useHostState } from '../host/store';
+import { useCompact } from '../ui/adaptive';
+import { hostStatus } from './hostStatus';
 import { HostError } from '../host/client';
 import { uiTerms } from '../uiText';
 import { executionLabel } from './activity-config';
@@ -38,6 +41,9 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   const [editing, setEditing] = useState(false);
   const [cancellingWorkId, setCancellingWorkId] = useState<string | null>(null);
   const ghostName = (id: string) => state.ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
+  const { connection, offlineSince } = useHostState(store);
+  const compact = useCompact();
+  const pendingRef = useRef<HTMLElement>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -81,37 +87,31 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
   const glyph = workGlyph(work.state, needsOwner);
   const resumable = work.parentId === null && (work.state === 'failed' || work.state === 'blocked');
   const pendingChildIds = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
+  // The bar's 확인 필요 points at the cards below; they keep their place at the top of the page.
+  const showPending = () => {
+    const section = pendingRef.current;
+    if (!section) return;
+    // Measured on the next frame, once a panel the click folded is gone. On a phone the bar sticks over the
+    // sheet's top: the cards land just below it, however tall it has wrapped.
+    requestAnimationFrame(() => {
+      const bar = section.parentElement?.querySelector<HTMLElement>(':scope > .work-bar');
+      section.style.scrollMarginTop = bar && getComputedStyle(bar).position === 'sticky' ? `${bar.offsetHeight + 12}px` : '';
+      section.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      section.focus({ preventScroll: true });
+    });
+  };
+  // The quiet first seconds of a drop stay silent here as everywhere else (hostStatus).
+  const link = hostStatus(connection, true, offlineSince, Date.now());
 
   return <Page className="work-detail">
-    <header className="work-head">
-      {ancestors.length > 0 && <nav className="work-head__trail" aria-label="상위 맡긴 일">
-        {ancestors.map(ancestor => <span key={ancestor.id}>
-          <button type="button" onClick={() => navigate(`/work/${encodeURIComponent(ancestor.id)}`)}>{ancestor.title}</button>
-          <ChevronRight size={12} aria-hidden="true"/>
-        </span>)}
-      </nav>}
-      <div className="work-head__row">
-        <h1 className="work-head__title">{work.title}</h1>
-        <div className="work-head__actions">
-          {live && <Button variant="outline" onClick={() => setEditing(true)}><Pencil/>수정</Button>}
-          {live && <Button variant="outline" onClick={() => setCancellingWorkId(work.id)}><Square/>취소</Button>}
-          {resumable && <Button onClick={() => run(() => client.send({ type: 'work.resume', workId: work.id }))}><Play/>재개</Button>}
-        </div>
-      </div>
-      <div className="work-head__meta">
-        <StateGlyph state={glyph} label/>
-        <span className="work-head__who"><DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={16}/>{ghostName(work.ghostId)}</span>
-        <span title={absoluteTime(work.createdAt)}>{relativeTime(work.createdAt, now)} 맡김</span>
-        {work.deadlineAt && <span data-overdue={live && work.deadlineAt < now || undefined}>기한 {absoluteTime(work.deadlineAt)}</span>}
-        {work.revision > 1 && <span>수정 {work.revisionsUsed}/{work.revision - 1}</span>}
-      </div>
-      <LifecycleTrack state={work.state} needsOwner={needsOwner} className="work-head__track"/>
-      {work.reason && (work.state === 'failed' || work.state === 'blocked' || work.state === 'cancelled') && <p className="work-head__reason" data-state={work.state}><InlineText text={work.reason}/></p>}
-    </header>
+    <WorkHeader work={work} ancestors={ancestors} glyph={glyph} pending={pending.length} artifacts={artifacts} ghostName={ghostName(work.ghostId)} now={now}
+      link={live && link.state !== 'connected' && !link.quiet ? link.label : undefined} navigate={navigate} onPending={showPending}
+      onEdit={live ? () => setEditing(true) : undefined} onCancel={live ? () => setCancellingWorkId(work.id) : undefined}
+      onResume={resumable ? () => run(() => client.send({ type: 'work.resume', workId: work.id })) : undefined}/>
     {loadAlert}
     {error && <InlineError>{error}</InlineError>}
 
-    {pending.length > 0 && <section className="grid gap-3" aria-label="확인 필요">
+    {pending.length > 0 && <section ref={pendingRef} tabIndex={-1} className="work-pending grid gap-3" aria-label="확인 필요">
       {pending.map(decision => <DecisionCard key={decision.id} decision={decision} ghostName={ghostName(decision.ghostId)} workTitle={work.title} onResolved={() => void reload()}/>)}
     </section>}
 
@@ -122,7 +122,8 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
           <div className="receipt">
             {work.verdict && <VerdictStamp verdict={work.verdict}/>}
             {work.result?.summary && <div className="receipt__body"><MessageBody text={work.result.summary}/></div>}
-            {artifacts.length > 0 && <div className="receipt__files">{artifacts.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}</div>}
+            {/* On a phone the files live behind the bar's 결과 자료 only. */}
+            {!compact && artifacts.length > 0 && <div className="receipt__files">{artifacts.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}</div>}
           </div>
         </section>}
 
@@ -130,17 +131,15 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
           <h2 id="work-brief" className="section-title">할 일</h2>
           <ProjectChips spaces={brief.spaces}/>
           <div className="work-brief"><MessageBody text={brief.text}/></div>
-          {work.acceptance.criteria.trim() && <div className="work-criteria"><span>완료 기준</span><MessageBody text={work.acceptance.criteria}/></div>}
           {work.execution && <div className="work-criteria"><span>실행 환경</span><p>{executionLabel[work.execution.kind]}{work.execution.kind === 'host' ? ` · ${work.execution.cwd}` : ''}</p></div>}
           {work.activityId && <Button variant="ghost" size="sm" onClick={() => navigate('/settings?tab=activities')}>자동 활동 열기</Button>}
         </section>
 
-        <WorkConversation work={work} ghostName={ghostName(work.ghostId)}/>
+        <WorkConversation work={work} ghostName={ghostName(work.ghostId)} onEdit={live ? () => setEditing(true) : undefined}/>
       </div>
 
       <aside className="work-aside">
-        {(ancestors.length > 0 || children.length > 0) && <section className="work-section" aria-labelledby="work-tree">
-          <h2 id="work-tree" className="section-title">위임</h2>
+        {(ancestors.length > 0 || children.length > 0) && <AsideSection compact={compact} title="위임">
           <ol className="branch-map">
             {ancestors.map(ancestor => <BranchNode key={ancestor.id} work={ancestor} ghostName={ghostName(ancestor.ghostId)} depth="up" needsOwner={pendingChildIds.has(ancestor.id)}
               onOpen={() => navigate(`/work/${encodeURIComponent(ancestor.id)}`)}/>)}
@@ -148,10 +147,9 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
             {children.map(child => <BranchNode key={child.id} work={child} ghostName={ghostName(child.ghostId)} depth="down" needsOwner={pendingChildIds.has(child.id)}
               onOpen={() => navigate(`/work/${encodeURIComponent(child.id)}`)}/>)}
           </ol>
-        </section>}
+        </AsideSection>}
 
-        <section className="work-section" aria-labelledby="work-effects">
-          <h2 id="work-effects" className="section-title">실행 기록<span className="count">{effects.length || ''}</span></h2>
+        <AsideSection compact={compact} title="실행 기록" count={effects.length}>
           {effects.length > 0 ? <ol className="timeline">{[...effects].sort((a, b) => a.createdAt - b.createdAt).map(effect => <li key={effect.id} data-state={effect.state}>
             <StateGlyph state={effectGlyph[effect.state]} size={14}/>
             <div className="timeline__copy">
@@ -160,12 +158,93 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
               {effect.result && <details className="timeline__result"><summary>출력</summary><pre>{effect.result}</pre></details>}
             </div>
           </li>)}</ol> : <p className="work-aside__empty">실행 기록 없음</p>}
-        </section>
+        </AsideSection>
       </aside>
     </div>
     {editing && <EditWorkModal work={work} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }}/>}
     {cancellingWorkId === work.id && <CancelWorkDialog work={work} onCancel={async () => { await client.send({ type: 'work.cancel', workId: work.id }); void reload(); }} onClose={() => setCancellingWorkId(null)}/>}
   </Page>;
+}
+
+type HeadPanel = 'criteria' | 'files';
+
+/**
+ * The top of a 맡긴 일: where it sits (parents, title, lifecycle), then one bar that answers 「where is it,
+ * and what is mine to do」 — state and deadline, who has it since when, then the owner's moves.
+ * 완료 기준 and 결과 자료 unfold under the bar, one at a time. On a phone the bar sticks while the page
+ * scrolls; it is the parent's direct child (a sibling of the header) so it can stick for the whole page.
+ */
+export function WorkHeader({ work, ancestors, glyph, pending, artifacts, ghostName, now, link, navigate, onPending, onEdit, onCancel, onResume }: {
+  work: Work; ancestors: Work[]; glyph: GlyphState; pending: number; artifacts: WorkDetailData['artifacts']; ghostName: string; now: number;
+  /** The host link's label (재연결 중…, 연결 끊김) while what this page shows may be behind the host. */
+  link?: string;
+  navigate(path: string): void; onPending(): void; onEdit?(): void; onCancel?(): void; onResume?(): void;
+}) {
+  const [panel, setPanel] = useState<HeadPanel | null>(null);
+  const panelId = useId();
+  const criteria = work.acceptance.criteria.trim();
+  const overdue = !TERMINAL_WORK_STATES.includes(work.state) && work.deadlineAt !== null && work.deadlineAt < now;
+  const verbs = Boolean(onEdit || onCancel || onResume);
+  const toggle = (name: HeadPanel) => ({
+    type: 'button' as const, className: 'work-bar__toggle', 'aria-expanded': panel === name, 'aria-controls': panelId,
+    onClick: () => setPanel(current => current === name ? null : name),
+  });
+  // Escape folds the open panel back onto its toggle; a file opened from the panel handles its own Escape.
+  const closeOnEscape = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape' || !panel || !event.currentTarget.contains(event.target as Node)) return;
+    event.currentTarget.querySelector<HTMLButtonElement>('[aria-expanded="true"]')?.focus();
+    setPanel(null);
+  };
+  return <>
+    <header className="work-head">
+      {ancestors.length > 0 && <nav className="work-head__trail" aria-label="상위 맡긴 일">
+        {ancestors.map(ancestor => <span key={ancestor.id}>
+          <button type="button" onClick={() => navigate(`/work/${encodeURIComponent(ancestor.id)}`)}>{ancestor.title}</button>
+          <ChevronRight size={12} aria-hidden="true"/>
+        </span>)}
+      </nav>}
+      <h1 className="work-head__title">{work.title}</h1>
+      <LifecycleTrack state={work.state} needsOwner={pending > 0} stageOnly className="work-head__track"/>
+    </header>
+    <div className="work-bar" onKeyDown={closeOnEscape}>
+      <div className="work-bar__state">
+        {glyph !== 'attention' && <StateGlyph state={glyph} label/>}
+        {pending > 0 && <button type="button" className="work-bar__pending" onClick={() => { setPanel(null); onPending(); }}>
+          <StateGlyph state="attention" label/><span className="tabular">{pending}</span>
+        </button>}
+        {work.deadlineAt && <span className="work-bar__due" data-overdue={overdue || undefined}>{overdue ? '기한 지남' : '기한'} {absoluteTime(work.deadlineAt)}</span>}
+      </div>
+      {link && <p className="work-bar__link" role="status">{link} · 마지막 기록 {relativeTime(work.updatedAt, now)}</p>}
+      <div className="work-bar__who">
+        <span className="work-head__who"><DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={16}/>{ghostName}</span>
+        <span title={absoluteTime(work.createdAt)}>{relativeTime(work.createdAt, now)} 맡김</span>
+        {work.revision > 1 && <span>수정 {work.revisionsUsed}/{work.revision - 1}</span>}
+      </div>
+      {(criteria || artifacts.length > 0 || verbs) && <div className="work-bar__actions">
+        {criteria && <button {...toggle('criteria')}><ChevronRight aria-hidden="true"/>완료 기준</button>}
+        {artifacts.length > 0 && <button {...toggle('files')}><ChevronRight aria-hidden="true"/>결과 자료<span className="count tabular">{artifacts.length}</span></button>}
+        {verbs && <span className="work-bar__verbs">
+          {onEdit && <Button variant="outline" onClick={onEdit}><Pencil/>수정</Button>}
+          {onCancel && <Button variant="outline" onClick={onCancel}><Square/>취소</Button>}
+          {onResume && <Button onClick={onResume}><Play/>재개</Button>}
+        </span>}
+      </div>}
+      {panel && <div id={panelId} className="work-bar__panel" role="region" aria-label={panel === 'criteria' ? '완료 기준' : '결과 자료'}>
+        {panel === 'criteria'
+          ? <div className="work-criteria"><MessageBody text={criteria}/></div>
+          : <div className="work-bar__files">{artifacts.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}</div>}
+      </div>}
+    </div>
+    {work.reason && (work.state === 'failed' || work.state === 'blocked' || work.state === 'cancelled') && <p className="work-head__reason" data-state={work.state}><InlineText text={work.reason}/></p>}
+  </>;
+}
+
+/** 위임 and 실행 기록 sit beside the work on a wide sheet; on a phone they follow it, folded to their title line. */
+function AsideSection({ compact, title, count, children }: { compact: boolean; title: string; count?: number; children: ReactNode }) {
+  const headingId = useId();
+  const heading = <h2 id={headingId} className="section-title">{title}{count !== undefined && <span className="count">{count || ''}</span>}</h2>;
+  if (compact) return <details className="work-section work-fold"><summary>{heading}</summary>{children}</details>;
+  return <section className="work-section" aria-labelledby={headingId}>{heading}{children}</section>;
 }
 
 export function VerdictStamp({ verdict }: { verdict: Verdict }) {
@@ -193,18 +272,23 @@ function BranchNode({ work, ghostName, depth, needsOwner, onOpen }: { work: Work
 }
 
 /** The assignee's conversation, read-only and live while it runs: the owner steers through 수정 and decisions. */
-function WorkConversation({ work, ghostName }: { work: Work; ghostName: string }) {
+function WorkConversation({ work, ghostName, onEdit }: { work: Work; ghostName: string; onEdit?(): void }) {
   const [open, setOpen] = useState(false);
   if (!work.conversationId) return null;
   return <section className="work-section" aria-labelledby="work-conversation">
     <button type="button" className="work-disclosure" aria-expanded={open} onClick={() => setOpen(value => !value)}>
       <ChevronRight size={14} aria-hidden="true"/><h2 id="work-conversation" className="section-title">작업 대화</h2>
     </button>
-    {open && <WorkTranscript conversationId={work.conversationId} ghostId={work.ghostId} ghostName={ghostName}/>}
+    {open && <WorkTranscript conversationId={work.conversationId} ghostId={work.ghostId} ghostName={ghostName} onEdit={onEdit}/>}
   </section>;
 }
 
-function WorkTranscript({ conversationId, ghostId, ghostName }: { conversationId: string; ghostId: string; ghostName: string }) {
+/**
+ * The stream reads as a record, not a chat: the owner's turns hang on a rule at the left, the Ghost's
+ * name heads each run of its rows, and tool work folds to one line of what was done. Wide code, tables
+ * and tool output scroll inside their own block; the stream itself never scrolls the page sideways.
+ */
+function WorkTranscript({ conversationId, ghostId, ghostName, onEdit }: { conversationId: string; ghostId: string; ghostName: string; onEdit?(): void }) {
   const { feed, loading, olderLoading, loadOlder, error, setError } = useConversationFeed(conversationId);
   const speaker = (message: Message) => message.role === 'user' ? 'Ghost에게 전달' : message.role === 'tool' ? '도구 기록' : message.role === 'note' ? '기록' : ghostName;
   const running = Boolean(feed.live?.running);
@@ -214,11 +298,16 @@ function WorkTranscript({ conversationId, ghostId, ghostName }: { conversationId
       <button type="button" className="link-quiet" disabled={olderLoading} onClick={() => { setError(''); loadOlder(); }}>{olderLoading ? '불러오는 중…' : '이전 메시지'}</button>
     </div>}
     {loading && !feed.messages.length ? <div className="chat-loading" aria-busy="true"><span/><span/><span/><span className="sr-only">대화 기록을 읽는 중</span></div>
-      : feed.messages.length || running ? <div className="ghost-conversation__messages">
-        <Transcript messages={feed.messages} speaker={speaker}/>
+      : feed.messages.length || running ? <div className="ghost-conversation__messages work-stream">
+        <Transcript messages={feed.messages} speaker={speaker} runLabel={ghostName}/>
+        {running && !endsInGhostRun(feed.messages) && <GhostRunLabel name={ghostName}/>}
         {feed.live && <LiveReply live={feed.live} ghostId={ghostId} ghostName={ghostName}/>}
       </div>
-        : !error && <p className="work-aside__empty">대화 기록 없음</p>}
+        // Nothing said yet: 수정 is how the owner speaks into this conversation.
+        : !error && <div className="work-transcript__empty">
+          <p className="work-aside__empty">대화 기록 없음</p>
+          {onEdit && <button type="button" className="link-quiet" onClick={onEdit}>수정</button>}
+        </div>}
   </div>;
 }
 

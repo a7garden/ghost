@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GHOST_TOOLS, type Adaptation, type Ghost } from '@ghost/contract';
-import { adaptationLine, canDeleteGhost, editFallbacks, settingsRoster, toggleSkill, toolGroups, toolLabels } from './GhostSettings';
+import { adaptationLine, canDeleteGhost, editFallbacks, settingsRoster, toggleSkill, toolGroups } from './GhostSettings';
+import { toolLabels } from './toolLabels';
 
 const ghost = (patch: Partial<Ghost> = {}): Ghost => ({
   id: 'g1', name: '연구원', persona: '', look: { avatarId: null }, model: null, isDefault: false, state: 'retired',

@@ -3,7 +3,7 @@ import type { Live } from '@ghost/contract';
 import { OutcomeLine, PresenceAvatar } from './agent';
 import { ChevronRight } from 'lucide-react';
 import { ConversationMessage } from '../ui'
-import { INTERACTIVE_UI_TOOL, QUIET_REPLY, readInteractiveUi, type LiveTool, type Message } from '@ghost/contract';
+import { INTERACTIVE_UI_TOOL, QUIET_REPLY, readInteractiveUi, type GhostTool, type LiveTool, type Message } from '@ghost/contract';
 import { ArtifactPreview } from './ArtifactPreview';
 import { CopyButton, InlineText, MessageBody, useSmoothText } from './MessageBody';
 import { MessageMenu } from './MessageMenu';
@@ -11,6 +11,7 @@ import { describeWake, parseOutcome } from './wake';
 import { InteractivePresentation } from './interactive/InteractivePresentation';
 import type { UiSubmit } from './interactive/UiInputBlock';
 import { ProjectChips } from './composer/ProjectMentions';
+import { toolLabels } from '../features/toolLabels';
 
 function Attachments({ message }: { message: Message }) {
   if (message.attachments.length === 0) return null;
@@ -31,19 +32,38 @@ const delegation = (message: Message) => {
 /** Tool results that render on their own row instead of folding into a trail. */
 const standalone = (message: Message) => Boolean(interactive(message) || delegation(message));
 
+/** Trail summaries name at most this many kinds of work; the rest count as 「외 N개」. */
+const SUMMARY_KINDS = 3;
+
 /**
- * Consecutive tool results fold into one trail: the tools a Ghost used, in order, as a single
- * line of chips; opening it shows every call's output on a thread. Running tools tick at the end.
+ * What a trail did, in the tool names the owner grants in 설정 → Ghost: 「파일 읽기 3번 · 명령 실행」.
+ * A trail still running names what it is doing now: 「명령 실행 중」.
+ */
+export function trailSummary(names: readonly string[], live: boolean): string {
+  const counts = new Map<string, number>();
+  for (const name of names) {
+    const label = toolLabels[name as GhostTool] ?? name;
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const kinds = [...counts].map(([label, count]) => live || count === 1 ? label : `${label} ${count}번`);
+  const rest = kinds.length - SUMMARY_KINDS;
+  return `${kinds.slice(0, SUMMARY_KINDS).join(' · ')}${rest > 0 ? ` 외 ${rest}개` : ''}${live ? ' 중' : ''}`;
+}
+
+/**
+ * Consecutive tool results fold into one trail: one line saying what the Ghost did, with the
+ * tools as chips beside it on wide screens; opening it shows every call's output on a thread.
+ * Running tools tick at the end.
  */
 export function ToolTrail({ results, running = [] }: { results: Message[]; running?: LiveTool[] }) {
   const failed = results.filter(message => message.tool?.isError).length;
   const names = [...results.map(message => ({ id: message.id, name: message.tool?.name ?? '도구', error: Boolean(message.tool?.isError), live: false })),
     ...running.map(tool => ({ id: tool.callId, name: tool.name, error: false, live: true }))];
-  const total = names.length;
+  const summary = running.length ? trailSummary(running.map(tool => tool.name), true) : trailSummary(names.map(item => item.name), false);
   return <details className="trail" data-kind="trail" data-live={running.length > 0 || undefined}>
     <summary className="trail__summary">
       <ChevronRight className="trail__chevron" aria-hidden="true"/>
-      <span className="trail__count">{running.length ? `도구 사용 중` : `도구 ${total}개 사용`}{failed > 0 && <span className="trail__failed"> · 실패 {failed}</span>}</span>
+      <span className="trail__count">{summary}{failed > 0 && <span className="trail__failed"> · 실패 {failed}</span>}</span>
       <span className="trail__chips" aria-hidden="true">
         {names.slice(-6).map(item => <span key={item.id} className="trail__chip" data-error={item.error || undefined} data-live={item.live || undefined}>{item.name}</span>)}
         {names.length > 6 && <span className="trail__chip" data-more>+{names.length - 6}</span>}
@@ -103,8 +123,35 @@ function WakeEvent({ message, label }: { message: Message & { origin: Exclude<Me
 /** Composer actions a transcript offers from its message menus; absent in read-only transcripts. */
 export interface TranscriptActions { onQuote?(text: string): void; onReuse?(text: string): void }
 
-/** One transcript row shared by the direct conversation and the read-only work conversation. */
-export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReuse }: { message: Message; speaker(message: Message): string; onUiSubmit?: UiSubmit } & TranscriptActions) {
+/** Rows that render nothing: an empty reply, or a Ghost that looked around and found nothing worth saying. */
+const silent = (message: Message) => message.role === 'assistant' && message.attachments.length === 0
+  && ((!message.text && !message.thinking) || message.text.trim() === QUIET_REPLY);
+
+/** A row the Ghost produced (true), one the owner or host wrote (false), or nothing on screen (null). */
+function ghostRow(message: Message): boolean | null {
+  if (silent(message)) return null;
+  return message.role === 'assistant' || message.role === 'tool';
+}
+
+/** Whether the transcript's last visible row is the Ghost's, so a reply streaming after it continues the same run. */
+export function endsInGhostRun(messages: readonly Message[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const row = ghostRow(messages[index]);
+    if (row !== null) return row;
+  }
+  return false;
+}
+
+/** The Ghost's name over a run of its rows; each article already carries it as its accessible name. */
+export function GhostRunLabel({ name }: { name: string }) {
+  return <p className="ghost-conversation__speaker" data-kind="speaker" aria-hidden="true">{name}</p>;
+}
+
+/**
+ * One transcript row shared by the direct conversation and the read-only work conversation.
+ * `delivered`: an owner turn that takes the place of its outgoing row, already on screen — it does not rise in again.
+ */
+export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReuse, delivered = false }: { message: Message; speaker(message: Message): string; onUiSubmit?: UiSubmit; delivered?: boolean } & TranscriptActions) {
   if (message.role === 'tool') {
     const ui = interactive(message);
     if (ui) return <ConversationMessage role="assistant" label={speaker(message)}>
@@ -124,7 +171,7 @@ export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReu
   }
   if (message.role === 'user') {
     return <MessageMenu text={message.text} onReuse={onReuse}>
-      <ConversationMessage role="user" label={speaker(message)} data-rail="owner" data-rail-label={message.text.replace(/\s+/g, ' ').trim().slice(0, 80)}>
+      <ConversationMessage role="user" label={speaker(message)} data-rail="owner" data-rail-label={message.text.replace(/\s+/g, ' ').trim().slice(0, 80)} data-delivered={delivered || undefined}>
         <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</div>
         <ProjectChips spaces={message.spaces ?? []}/>
         <Attachments message={message}/>
@@ -134,9 +181,7 @@ export function TranscriptMessage({ message, speaker, onUiSubmit, onQuote, onReu
   if (message.role === 'note') {
     return <p className="transcript-note" data-kind="note">{message.text}</p>;
   }
-  if (!message.text && !message.thinking && message.attachments.length === 0) return null;
-  // A Ghost that looked around on its own and found nothing worth saying stays out of the way.
-  if (message.text.trim() === QUIET_REPLY && message.attachments.length === 0) return null;
+  if (silent(message)) return null;
   return <MessageMenu text={message.text} onQuote={onQuote}>
     <ConversationMessage role="assistant" label={speaker(message)}
       actions={message.text ? <CopyButton label="메시지 복사" getText={() => message.text}/> : undefined}>
@@ -159,22 +204,38 @@ function outcomeWorkId(message: Message): string | null {
   return parseOutcome(message.text)?.workId ?? null;
 }
 
-/** A whole transcript: tool results that follow each other become one trail; extras sit where they happened. */
-export function Transcript({ messages, speaker, onUiSubmit, extras = [], onQuote, onReuse }: { messages: Message[]; speaker(message: Message): string; onUiSubmit?(message: Message): UiSubmit | undefined; extras?: TranscriptExtra[] } & TranscriptActions) {
+/**
+ * A whole transcript: tool results that follow each other become one trail; extras sit where they happened.
+ * With `runLabel`, the Ghost's name heads each run of its rows (the work conversation, where nothing else
+ * says who is speaking once the owner's turns lose their bubble).
+ */
+export function Transcript({ messages, speaker, onUiSubmit, extras = [], onQuote, onReuse, runLabel, delivered }: {
+  messages: Message[]; speaker(message: Message): string; onUiSubmit?(message: Message): UiSubmit | undefined; extras?: TranscriptExtra[]; runLabel?: string;
+  /** Owner turns that replaced an outgoing row (useOutbox). */
+  delivered?: ReadonlySet<string>;
+} & TranscriptActions) {
   const rows: ReactNode[] = [];
   const pending = [...extras].sort((a, b) => a.at - b.at);
   // The settled thread card placed last, until any other row follows it.
   let folding: string | undefined;
+  // The last row on screen is the Ghost's: its name is already above.
+  let inRun = false;
   const flushBefore = (at: number) => { while (pending.length && pending[0].at <= at) {
     const extra = pending.shift()!;
     rows.push(<Fragment key={extra.key}>{extra.node}</Fragment>);
     folding = extra.returnsAs;
+    inRun = false;
   } };
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index];
     flushBefore(message.createdAt);
     if (folding && outcomeWorkId(message) === folding) rows.pop();
     folding = undefined;
+    const row = ghostRow(message);
+    if (row !== null) {
+      if (row && !inRun && runLabel) rows.push(<GhostRunLabel key={`${message.conversationId}:${message.id}:speaker`} name={runLabel}/>);
+      inRun = row;
+    }
     if (message.role === 'tool' && !standalone(message)) {
       const run = [message];
       // A thread that began between two results splits the trail so it sits where it started.
@@ -183,7 +244,7 @@ export function Transcript({ messages, speaker, onUiSubmit, extras = [], onQuote
       rows.push(<ToolTrail key={`${message.conversationId}:${message.id}`} results={run}/>);
       continue;
     }
-    rows.push(<TranscriptMessage key={`${message.conversationId}:${message.id}`} message={message} speaker={speaker} onUiSubmit={onUiSubmit?.(message)} onQuote={onQuote} onReuse={onReuse}/>);
+    rows.push(<TranscriptMessage key={`${message.conversationId}:${message.id}`} message={message} speaker={speaker} onUiSubmit={onUiSubmit?.(message)} onQuote={onQuote} onReuse={onReuse} delivered={delivered?.has(message.id)}/>);
   }
   flushBefore(Infinity);
   return <>{rows}</>;

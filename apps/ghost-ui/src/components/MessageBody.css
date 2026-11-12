@@ -227,6 +227,7 @@
   line-height: 1.5;
 }
 
+/* Cells break long paths and URLs instead of widening their column; 5em keeps short words whole. */
 .message-body th,
 .message-body td {
   min-width: 5em;
@@ -234,7 +235,7 @@
   border-bottom: 1px solid var(--ghost-line);
   text-align: start;
   vertical-align: top;
-  overflow-wrap: normal;
+  overflow-wrap: anywhere;
 }
 
 .message-body tr:last-child > td {
@@ -246,6 +247,11 @@
   background: var(--ghost-hover);
   color: var(--ghost-ink2);
   font-weight: 600;
+}
+
+/* InlineText: a one-line slot breaks a long token wherever its caller places it. */
+.message-body__inline {
+  overflow-wrap: anywhere;
 }
 
 

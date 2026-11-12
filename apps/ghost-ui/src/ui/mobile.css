@@ -52,7 +52,8 @@
   .ghost-root { height: var(--ghost-visible-height, 100dvh); transform: translateY(var(--ghost-visible-top, 0px)); }
   .device-alert-kinds { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .shell { height: 100%; }
-  .ghost-titlebar { height: auto; min-height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px; }
+  /* The phone's top bar and dock wear the page's canvas, so the screen reads as one sheet; the desktop title bar keeps the window tone. */
+  .ghost-titlebar { height: auto; min-height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px; background: var(--ghost-canvas); }
   .title-nav__step, .shell-search, .shell-icon-button { width: 44px; height: 44px; }
   .title-nav__step:nth-child(2), .title-nav__crumb:not(:last-child) { display: none; }
   .title-nav__step:first-child { display: inline-grid; }
@@ -73,7 +74,7 @@
   .work-board .ghost-filter button:hover::before { background: var(--ghost-hover); }
   .work-board .ghost-filter button[aria-pressed="true"]::before { background: var(--ghost-surface); box-shadow: var(--shadow-btn); }
   .shell-sidebar { display: none; }
-  .compact-dock { display: grid; flex: none; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 7px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--ghost-page); border-top: 1px solid var(--ghost-line); }
+  .compact-dock { display: grid; flex: none; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 7px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--ghost-canvas); border-top: 1px solid var(--ghost-line); }
   .compact-dock[data-hidden], &[data-keyboard="open"] .compact-dock, .shell:has(.cm-editor) .compact-dock { display: none; }
   .compact-dock button { display: flex; min-height: 49px; align-items: center; justify-content: center; flex-direction: column; gap: 5px; border: 0; border-radius: 13px; background: none; color: var(--ghost-ink3); font-size: 11px; font-weight: 500; cursor: pointer; }
   .compact-dock button[aria-current] { color: var(--ghost-ink); background: var(--ghost-hover); }
@@ -122,11 +123,34 @@
   .file-sheet__document { min-width: 0; padding-inline: 16px; }
   .file-sheet__foot { gap: 6px; font-size: 10px; }
   .message-body, .message-body > *, .ghost-interactive, .ghost-ui-block { min-width: 0; max-width: 100%; }
-  .message-body pre, .message-body table { max-width: 100%; overflow-x: auto; }
-  .message-body table { display: block; }
+  .message-body pre { max-width: 100%; overflow-x: auto; }
+  /* Narrow tables wrap inside the width. Wide ones (rehypeTableCells marks 4+ columns) become one card per row,
+     every value beside its column name, so a phone never scrolls a table sideways or drops a column. */
+  .message-body :is(th, td) { min-width: 0; }
+  .message-body__tablewrap:has(> table[data-wide]) { width: 100%; overflow: visible; border: 0; border-radius: 0; }
+  .message-body table[data-wide], .message-body table[data-wide] > tbody { display: block; }
+  .message-body table[data-wide] > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .message-body table[data-wide] > tbody > tr { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--ghost-line-strong); border-radius: var(--radius-control); }
+  .message-body table[data-wide] > tbody > tr + tr { margin-top: 8px; }
+  .message-body table[data-wide] td { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 12px; padding: 0; border: 0; }
+  .message-body table[data-wide] td::before { content: attr(data-label); content: attr(data-label) / ""; color: var(--ghost-ink3); }
+  .message-body table[data-wide] td:first-child > .message-body__cell { font-weight: 600; }
   .ghost-ui-scroll { overscroll-behavior-x: contain; }
   .home, .work-detail, .work-body, .decision { min-width: 0; }
-  .work-head { flex-wrap: wrap; }
+  /* Work page: the state bar sticks under the top bar; it undoes the sheet's 18px gutter so its canvas covers what scrolls beneath,
+     and its top undoes the sheet's 24px top padding, which sticky offsets count from. */
+  .work-head__title { font-size: var(--text-heading); }
+  .work-bar { position: sticky; top: -24px; z-index: 2; margin-inline: -18px; padding: 10px 18px; row-gap: 8px; background: var(--ghost-canvas); box-shadow: 0 1px 0 var(--ghost-line); }
+  /* Only one thing holds the top edge: while the connection banner shows, the work bar scrolls with the page instead of sliding under it. */
+  .connection-banner { top: -24px; }
+  .shell-sheet:has(> .connection-banner) .work-bar { position: static; }
+  .work-bar__state, .work-bar__who { flex-basis: 100%; }
+  .work-bar__due { margin-left: auto; }
+  .work-bar__panel { max-height: calc(var(--ghost-visible-height, 100dvh) * .45); overflow-y: auto; overscroll-behavior: contain; }
+  .work-bar__files { flex-direction: column; align-items: stretch; }
+  .work-transcript { padding: 14px 12px; }
+  /* A trail says what it did in words; the tool chips stay for wide screens. */
+  .trail__chips { display: none; }
   }
 }
 @media (pointer: coarse) {

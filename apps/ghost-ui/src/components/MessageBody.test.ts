@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 import { InlineText, MessageBody } from './MessageBody';
-import { TranscriptMessage } from './TranscriptMessage';
+import { Transcript, TranscriptMessage } from './TranscriptMessage';
 
 const render = (text: string) => renderToStaticMarkup(createElement(MessageBody, { text }));
 
@@ -38,6 +38,15 @@ it('shows project chips on the owner message without changing its text', () => {
   expect(html).toContain('href="#/spaces/project"');
   expect(html).toContain('비행 &lt;기록&gt;');
   expect(html).not.toContain('document_list');
+});
+
+it('marks only the owner turn that replaced its outgoing row, so it does not rise in a second time', () => {
+  const owner = (id: string, text: string) => ({ id, conversationId: 'c', role: 'user' as const, text, origin: 'owner' as const, toolCalls: [], tool: null, attachments: [], createdAt: 1 });
+  const html = renderToStaticMarkup(createElement(Transcript, {
+    messages: [owner('m1', '어제 보낸 말'), owner('m2', '방금 보낸 말')], speaker: () => '나', delivered: new Set(['m2']),
+  }));
+  expect(html.match(/data-delivered/g)).toHaveLength(1);
+  expect(html.indexOf('data-delivered')).toBeGreaterThan(html.indexOf('어제 보낸 말'));
 });
 
 it('preserves a linked image destination without nesting anchors or loading the image', () => {
@@ -102,4 +111,26 @@ it('renders a one-line slot inline: emphasis and code, no blocks, no glued words
   expect(html).toContain('<code>svn</code>');
   expect(html).not.toMatch(/<p|<br/);
   expect(html).toContain('을 막았습니다');
+});
+
+it('wraps a one-line slot so a 200-character URL breaks inside it instead of widening its row', () => {
+  const url = `https://example.com/${'a'.repeat(200)}`;
+  const html = renderToStaticMarkup(createElement(InlineText, { text: `실패: ${url}` }));
+  expect(html).toMatch(/^<span class="message-body__inline">/);
+  expect(html).toContain(url);
+});
+
+it('gives every cell of a twelve-column table its column name, so a phone can lay rows out as cards', () => {
+  const head = Array.from({ length: 12 }, (_, index) => `열${index + 1}`);
+  const html = render(`| ${head.join(' | ')} |\n|${' --- |'.repeat(12)}\n| ${head.map((_, index) => index === 0 ? '**가**' : `값${index + 1}`).join(' | ')} |`);
+  expect(html).toContain('<table data-wide="" role="table">');
+  expect(html).toContain('<th role="columnheader">열12</th>');
+  expect(html).toContain('<td role="cell" data-label="열1"><div class="message-body__cell"><strong>가</strong></div></td>');
+  expect(html).toContain('<td role="cell" data-label="열12"><div class="message-body__cell">값12</div></td>');
+});
+
+it('leaves a narrow table a plain table that wraps in place', () => {
+  const html = render('| 이름 | 주소 |\n| --- | --- |\n| 문서 | https://example.com/path |');
+  expect(html).toContain('<table>');
+  expect(html).not.toContain('data-label');
 });
