@@ -72,6 +72,37 @@ test("new installations have no scopes and seed owner-editable rules only once",
   ledger.close();
 });
 
+test("policy seeding preserves legacy owner approval timing, delegation and Ghost exceptions once", () => {
+  const root = tempDir(); cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  for (const [index, approvals] of [
+    { autoMinutes: 0, delegate: "none" },
+    { autoMinutes: 7, delegate: "reversible", ghosts: { g: "owner" } },
+  ].entries()) {
+    const path = join(root, `approval-policy-${index}.db`);
+    oldLedger(path);
+    const old = new Database(path);
+    old.query("INSERT INTO settings(key,value) VALUES ('approvals',?)").run(JSON.stringify(approvals));
+    old.close();
+    let ledger = new Ledger(path);
+    const document = ledger.policyRule("document-new");
+    if (approvals.delegate === "none") {
+      expect(document.decision).toBe("owner");
+      expect(document.reviewer).toBeUndefined();
+      expect(document.autoResolve).toBeUndefined();
+    } else {
+      expect(document).toMatchObject({ decision: "review", reviewer: { kind: "main" }, autoResolve: { afterMinutes: 7, answer: "approve" } });
+      expect(ledger.policyRule("document-new:g")).toMatchObject({ ghostId: "g", decision: "owner", reviewer: { kind: "main" } });
+      expect(ledger.policyRule("document-new:g").autoResolve).toBeUndefined();
+    }
+    const seeded = ledger.policyRules();
+    ledger.tx(() => ledger.putSetting("approvals", { autoMinutes: 30, delegate: "reversible" }));
+    ledger.close();
+    ledger = new Ledger(path);
+    expect(ledger.policyRules()).toEqual(seeded);
+    ledger.close();
+  }
+});
+
 test("migration preserves old scope ids, every conversation, foreign keys, indexes and Work text", () => {
   const root = tempDir(); cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const path = join(root, "ledger.db"); oldLedger(path);

@@ -29,7 +29,7 @@ import type {
   Verdict,
 } from "@ghost/contract";
 import { idFor } from "../core/ids.ts";
-import { DEFAULT_RULES } from "../core/policy.ts";
+import { approvalRules } from "../core/policy.ts";
 import { MIGRATIONS } from "./schema.ts";
 import { migrateBrowserAuthority } from "./browser-authority.ts";
 
@@ -92,7 +92,7 @@ export class Ledger {
       this.migrate();
       migrateBrowserAuthority(this.db);
       if (!this.setting("policy:seeded", false)) this.db.transaction(() => {
-        if (this.policyRules().length === 0) for (const rule of DEFAULT_RULES) this.db.query("INSERT INTO policy_rules(id,data) VALUES (?,?)").run(rule.id, JSON.stringify(rule));
+        if (this.policyRules().length === 0) for (const rule of approvalRules(this.settings().approvals ?? DEFAULT_APPROVAL_POLICY)) this.db.query("INSERT INTO policy_rules(id,data) VALUES (?,?)").run(rule.id, JSON.stringify(rule));
         this.putSetting("policy:seeded", true);
       })();
     } catch (error) {
