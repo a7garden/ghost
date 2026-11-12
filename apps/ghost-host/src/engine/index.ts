@@ -166,7 +166,7 @@ class HostEngine implements Engine, MemoryEngine {
     });
     this.fallbackExtension = defineExtension({
       name: "ghost.model-fallback",
-      sections: [{ key: "ghost.context", render: async ({ conversationId }) => {
+      sections: [{ key: "ghost_context", render: async ({ conversationId }) => {
         const state = this.byPiId.get(conversationId) ?? await this.stateFor(this.core.ledger.conversationByPiId(String(conversationId))?.id ?? "");
         if (!state) return;
         await this.activateInputContext(state);
