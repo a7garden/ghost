@@ -3,12 +3,12 @@ import type { Work } from '@ghost/contract';
 import { DotAvatar } from '../DotAvatar';
 import { toneFor } from '../../features/ghostState';
 import { relativeTime } from '../../features/time';
-import { LifecycleTrack } from './LifecycleTrack';
+import { workReason } from '../../features/workText';
 import { StateGlyph, glyphLabel, workGlyph } from './StateGlyph';
 
 /**
- * One Work as a lane: its state shape, title, who carries it and since when, and
- * where it stands on the lifecycle. Delegated children hang below on a branch line.
+ * One Work as a lane: its state shape and word, title, who carries it, since when, and why it stopped.
+ * Delegated children hang below on a branch line.
  */
 export function WorkLane({ work, ghostName, needsOwner, now, onOpen, action, branch, showGhost = true }: {
   work: Work;
@@ -23,7 +23,7 @@ export function WorkLane({ work, ghostName, needsOwner, now, onOpen, action, bra
   showGhost?: boolean;
 }) {
   const glyph = workGlyph(work.state, needsOwner);
-  const note = work.state === 'failed' || work.state === 'blocked' || work.state === 'cancelled' ? work.reason : null;
+  const note = workReason(work);
   const at = work.endedAt ?? work.updatedAt;
   return <div className="lane" data-work-state={work.state} data-needs-owner={needsOwner || undefined}>
     <div className="lane__row">
@@ -38,7 +38,6 @@ export function WorkLane({ work, ghostName, needsOwner, now, onOpen, action, bra
             {note && <span className="lane__note">{note}</span>}
           </span>
         </span>
-        <LifecycleTrack state={work.state} needsOwner={needsOwner} compact stageOnly className="lane__track"/>
       </button>
       {action && <span className="lane__action">{action}</span>}
     </div>

@@ -76,9 +76,10 @@ Built for supervising agents instead of reusing generic cards and badges
   disc, exclamation, check, cross, slash) so state never relies on color alone.
   `workGlyph` reads a live Work with a pending decision as 확인 필요.
 - **LifecycleTrack** — four segments 접수 · 진행 · 검증 · 완료; the current one carries
-  the state color and a sheen only while the Ghost is moving.
-- **WorkLane** — a Work as a lane (glyph, title, assignee, time, compact track) with
-  delegated children hanging on a branch line.
+  the state color and a sheen only while the Ghost is moving. Shown only while a Work is live:
+  a settled Work's state word says how it ended.
+- **WorkLane** — a Work as a lane (glyph, state word, title, assignee, time, and why it stopped)
+  with delegated children hanging on a branch line.
 - **ActivityIsland** — the workspace pulse in the title bar: faces of active Ghosts and
   amber/blue counts; silent when nothing moves; opens into every live item.
 - **Companion work shelf** — the desktop pet carries a short count, not a clipped Work title.
@@ -153,17 +154,21 @@ Feature-level compositions:
   a soft glow behind it and a faint steady ring.
 - **Collaboration**: a `delegate` result reads as a 위임 event line (Ghost · title), and a
   child's report as 위임 결과. Thread cards list every Ghost working under the thread with
-  its live state; a Work waiting on children reads 위임 결과 대기. The Work page's work
-  conversation streams live like the thread panel.
-- **Work detail** (2026-11-12, 판단 → 근거 → 행동): title and lifecycle track, then a bar
-  of three rows: status and deadline (기한 지남 in words), Ghost · handed-over time ·
-  revisions, and 완료 기준 / 결과 자료 N fold-outs beside 수정 · 취소 · 재개. Waiting
-  decisions turn the status word into the one amber 확인 필요 N, which jumps to the cards.
-  On phones the bar sticks under the top bar, 위임 and 실행 기록 fold below the work, and
-  wide tables read as one card per row. In the work conversation the owner's turns are a
-  left rule, not a bubble, and a Ghost's name heads each run of its rows; the thread panel's
-  work conversation reads the same way. The page scrolls only vertically; code, tables and
-  tool output scroll inside their own blocks.
+  its live state; a waiting Work reads 응답 대기, whether it waits on delegated Work, a question
+  or a decision. The Work page's work conversation streams live like the thread panel.
+- **Work detail** (2026-11-12, only what the owner needs): title, and the lifecycle track while
+  live, then a bar: state and, while live, deadline (기한 지남 in words); Ghost · 맡김 or 끝남
+  time; 완료 기준 (folded, absent while a result card shows it) beside 수정 · 취소 · 재개. Why
+  it stopped follows in Korean; Host reasons are translated, and a verdict that ended it is one
+  line with its reasons left under the result. Waiting decisions turn the status word into the
+  one amber 확인 필요 N, which jumps to the cards. The result reads verdict (who judged it: 확인
+  규칙, 검토, 메인 Ghost or 소유자; 사유 folded), summary and files; during a revision only the
+  verdict. 위임 lists only Work handed on from here (parents are the trail above the title);
+  실행 기록 lists what ran, its state only when not 완료. On phones the bar sticks under the top
+  bar, 위임 and 실행 기록 fold below the work, and wide tables read as one card per row. In the
+  work conversation the owner's turns are a left rule, not a bubble, and a Ghost's name heads
+  each run of its rows; the thread panel's work conversation reads the same way. The page
+  scrolls only vertically; code, tables and tool output scroll inside their own blocks.
 - **Context menus**: right-click a message to copy it, its selected text or a link, quote
   it into the reply (assistant) or bring it back into the composer (owner); a thread card
   opens its thread or Work page; a sidebar Ghost opens its conversation, 맡긴 일 or
@@ -339,7 +344,7 @@ Ghost 설정's 운영 group carries **PC 직접 실행**: an explicit owner gran
 states that shell reaches the whole Mac and network: the grant is not a jail or
 PR/mail approval enforcement boundary.
 일 맡기기 shows 이 Mac with an actual cwd field only for granted Ghosts.
-Work detail shows its explicit execution environment and PC cwd, with a route back to
+Work detail names the execution environment only for the Mac (with its cwd), and links back to
 automatic activities for bound runs. Paired devices still see every Ghost; there is no
 per-Ghost device grant editor.
 Work conversations retain the previous-message pager and show read failures rather than

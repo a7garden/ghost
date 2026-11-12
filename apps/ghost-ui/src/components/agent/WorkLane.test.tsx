@@ -23,10 +23,4 @@ describe('lane state reading', () => {
   it('says 확인 필요 while the owner is the one waited on', () => {
     expect(render(work(), true)).toContain('lane__state" aria-hidden="true">확인 필요<');
   });
-
-  it('names the lifecycle stage alone, so the state is never read twice', () => {
-    const markup = render(work({ state: 'verifying' }));
-    expect(markup).toContain('role="img" aria-label="검증"');
-    expect(markup).not.toContain('검증 · ');
-  });
 });

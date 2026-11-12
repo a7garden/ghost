@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, X } from 'lucide-react';
-import type { State, WorkDetail } from '@ghost/contract';
+import { TERMINAL_WORK_STATES, type State, type WorkDetail } from '@ghost/contract';
 import { LifecycleTrack, StateGlyph, glyphLabel, workGlyph } from '../components/agent';
 import { DotAvatar } from '../components/DotAvatar';
 import { InlineText } from '../components/MessageBody';
@@ -12,6 +12,7 @@ import { DecisionCard } from './Decision';
 import { useConversationFeed } from './conversationFeed';
 import { liveWork, toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
+import { workReason } from './workText';
 
 const EXIT_FALLBACK_MS = 700;
 
@@ -82,6 +83,7 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
   const children = detail?.children ?? [];
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
   const carrier = work ? names.get(work.ghostId) ?? 'Ghost' : '';
+  const reason = work ? workReason(work) : null;
 
   return <aside className="thread-panel" data-closing={closing || undefined} aria-label={work ? `스레드: ${work.title}` : '스레드'} aria-hidden={closing || undefined}
     onAnimationEnd={event => { if (closing && event.target === event.currentTarget) onClosed?.(); }}>
@@ -98,8 +100,8 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
         <span>{glyphLabel[workGlyph(work.state, pending.length > 0)]}</span>
         <time className="tabular">{relativeTime(work.updatedAt, now)}</time>
       </div>
-      <LifecycleTrack state={work.state} needsOwner={pending.length > 0}/>
-      {work.reason && (work.state === 'failed' || work.state === 'blocked' || work.state === 'cancelled') && <p className="work-head__reason" data-state={work.state}><InlineText text={work.reason}/></p>}
+      {!TERMINAL_WORK_STATES.includes(work.state) && <LifecycleTrack state={work.state} needsOwner={pending.length > 0}/>}
+      {reason && <p className="work-head__reason" data-state={work.state}><InlineText text={reason}/></p>}
       {pending.map(decision => <DecisionCard key={decision.id} decision={decision} ghostName={names.get(decision.ghostId) ?? 'Ghost'} workTitle={work.title} onResolved={() => undefined}/>)}
       {children.length > 0 && <section className="thread-panel__section">
         <h3 className="section-title">위임한 스레드</h3>

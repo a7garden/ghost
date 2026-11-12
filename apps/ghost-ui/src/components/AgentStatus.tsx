@@ -1,6 +1,7 @@
 import type { Ghost, State } from '@ghost/contract';
 import { ghostLiveWork } from '../features/ghostState';
 import { relativeTime, useNow } from '../features/time';
+import { workReason } from '../features/workText';
 import { StateGlyph, glyphLabel, type GlyphState } from './agent';
 
 export interface AgentObservation {
@@ -43,7 +44,7 @@ export function projectGhostActivity(ghost: Ghost, state: State): AgentStatusMod
     if (seenWorks.has(work.id)) continue;
     seenWorks.add(work.id);
     observations.push({
-      id: `work:${work.id}`, state: work.state, label: work.title, detail: work.reason ?? undefined,
+      id: `work:${work.id}`, state: work.state, label: work.title, detail: workReason(work) ?? undefined,
       at: work.updatedAt, workId: work.id, conversationId: work.conversationId ?? undefined,
     });
   }

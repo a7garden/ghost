@@ -1,40 +1,55 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { QUIET_REPLY, type Message, type Verdict, type Work, type WorkDetail as WorkDetailData } from '@ghost/contract';
+import { QUIET_REPLY, type Decision, type Message, type Verdict, type Work } from '@ghost/contract';
 import { workGlyph } from '../components/agent';
 import { ToolTrail, Transcript, endsInGhostRun, trailSummary } from '../components/TranscriptMessage';
 import { VerdictStamp, WorkHeader } from './WorkDetail';
+import { readVerdict, workReason } from './workText';
 
 const verdict = (patch: Partial<Verdict> = {}): Verdict => ({
   outcome: 'revise', source: 'review', reasons: '요약이 두 문단을 건너뜁니다.', at: 1, ...patch,
 });
+const acceptance = (patch: Partial<Decision> = {}): Decision => ({
+  id: 'd1', kind: 'accept_result', ghostId: 'sage', conversationId: 'cw', workId: 'w1', effectId: null, title: '결과 확인: 리서치 보고서',
+  detail: '', options: [], proposal: null, state: 'approved', answer: null, createdAt: 0, resolvedAt: 1, ...patch,
+} as Decision);
 
-describe('VerdictStamp render', () => {
-  it('shows reasons and hides empty evidence and scope', () => {
-    const markup = renderToStaticMarkup(createElement(VerdictStamp, { verdict: verdict() }));
-    expect(markup).toContain('수정 지시');
-    expect(markup).toContain('사유');
-    expect(markup).toContain('요약이 두 문단을 건너뜁니다.');
-    expect(markup).not.toContain('근거');
-    expect(markup).not.toContain('수정 범위');
+describe('VerdictStamp', () => {
+  it('folds what the judge said under 사유, and shows no fold when there is nothing to say', () => {
+    const said = renderToStaticMarkup(createElement(VerdictStamp, { verdict: verdict(), judge: '검토', note: '요약이 두 문단을 건너뜁니다.' }));
+    expect(said).toContain('수정 지시');
+    expect(said).toMatch(/<summary>사유<\/summary><p>요약이 두 문단을 건너뜁니다.<\/p>/);
+    expect(renderToStaticMarkup(createElement(VerdictStamp, { verdict: verdict({ outcome: 'pass' }), judge: '소유자', note: null }))).not.toContain('사유');
+  });
+});
+
+describe('who judged a result', () => {
+  it('names the main Ghost and carries its note when it settled the owner\'s result card', () => {
+    const owner = verdict({ outcome: 'pass', source: 'owner', reasons: 'Accepted by the main Ghost for the owner after checking the report against the acceptance criteria. 기준 세 가지를 모두 확인했습니다.' });
+    const card = acceptance({ proposal: { review: { recommend: 'approve', expiresAt: null, resolvedBy: 'main', mainNote: '기준 세 가지를 모두 확인했습니다.' } } });
+    expect(readVerdict(owner, [card])).toEqual({ judge: '메인 Ghost', note: '기준 세 가지를 모두 확인했습니다.' });
   });
 
-  it('shows the observed evidence and the bound of a revision when the verdict carries them', () => {
-    const markup = renderToStaticMarkup(createElement(VerdictStamp, { verdict: verdict({
-      evidence: 'src/report.ts:42 — 기대: 3문단, 실제: 1문단',
-      scope: '요약 문단만 고칠 수 있습니다. 데이터 수집은 그대로 둡니다.',
-    }) }));
-    expect(markup).toContain('근거');
-    expect(markup).toContain('src/report.ts:42');
-    expect(markup).toContain('수정 범위');
-    expect(markup).toContain('데이터 수집은 그대로 둡니다.');
+  it('keeps the owner as judge with their own words, and says nothing when the verdict only restates the acceptance', () => {
+    const owner = verdict({ outcome: 'revise', source: 'owner', reasons: '출처를 붙여 주세요.' });
+    expect(readVerdict(owner, [acceptance({ state: 'denied', answer: '출처를 붙여 주세요.' })])).toEqual({ judge: '소유자', note: '출처를 붙여 주세요.' });
+    expect(readVerdict(verdict({ outcome: 'pass', source: 'owner', reasons: 'Accepted by the owner.' }), [])).toEqual({ judge: '소유자', note: null });
+    expect(readVerdict(verdict({ outcome: 'pass', source: 'checks', reasons: '1 check(s) passed.' }), [])).toEqual({ judge: '확인 규칙', note: null });
+  });
+});
+
+describe('why a Work stopped', () => {
+  it('says a Work ended by its verdict in one line, leaving the verdict\'s reasons under the result', () => {
+    const ended = verdict({ source: 'owner', reasons: 'The main Ghost asked for changes. 표가 서로 맞지 않습니다.' });
+    const reason = workReason({ state: 'failed', verdict: ended, reason: ended.reasons });
+    expect(reason).not.toContain('표가 서로 맞지 않습니다');
+    expect(reason).toBe('수정 기회를 다 쓰고도 기준을 채우지 못했습니다');
   });
 
-  it('keeps blank evidence and scope invisible', () => {
-    const markup = renderToStaticMarkup(createElement(VerdictStamp, { verdict: verdict({ evidence: '  ', scope: '' }) }));
-    expect(markup).not.toContain('근거');
-    expect(markup).not.toContain('수정 범위');
+  it('has nothing to say while the Work runs or after it is done', () => {
+    expect(workReason({ state: 'running', verdict: null, reason: 'the deadline passed' })).toBeNull();
+    expect(workReason({ state: 'done', verdict: null, reason: null })).toBeNull();
   });
 });
 
@@ -45,9 +60,8 @@ const work = (patch: Partial<Work> = {}): Work => ({
   revision: 1, revisionsUsed: 0, deadlineAt: null, result: null, verdict: null, reason: null,
   createdAt: NOW - 3_600_000, startedAt: NOW - 3_600_000, endedAt: null, updatedAt: NOW, ...patch,
 });
-const file = { digest: 'a'.repeat(64), name: 'report.md', mediaType: 'text/markdown', size: 1200 } as WorkDetailData['artifacts'][number];
-const header = (target: Work, patch: { pending?: number; artifacts?: WorkDetailData['artifacts']; link?: string } = {}) => renderToStaticMarkup(createElement(WorkHeader, {
-  work: target, ancestors: [], glyph: workGlyph(target.state, (patch.pending ?? 0) > 0), pending: patch.pending ?? 0, artifacts: patch.artifacts ?? [],
+const header = (target: Work, patch: { pending?: number; criteria?: string; link?: string } = {}) => renderToStaticMarkup(createElement(WorkHeader, {
+  work: target, ancestors: [], glyph: workGlyph(target.state, (patch.pending ?? 0) > 0), pending: patch.pending ?? 0, criteria: patch.criteria ?? target.acceptance.criteria,
   ghostName: '리서치', now: NOW, link: patch.link, navigate: () => undefined, onPending: () => undefined,
   onEdit: () => undefined, onCancel: () => undefined,
 }));
@@ -66,14 +80,20 @@ describe('WorkHeader', () => {
     expect(header(work({ state: 'done', deadlineAt: NOW - 60_000 }))).not.toContain('기한 지남');
   });
 
-  it('offers 완료 기준 and 결과 자료 only when there is something to unfold, folded at first', () => {
-    const markup = header(work(), { artifacts: [file, { ...file, digest: 'b'.repeat(64) }] });
-    expect(markup).toMatch(/aria-expanded="false"[^>]*>.*완료 기준<\/button>/);
-    expect(markup).toMatch(/결과 자료<span class="count tabular">2<\/span>/);
-    expect(markup).not.toContain('세 문단 요약');
-    const bare = header(work({ acceptance: { criteria: '  ', checks: [], reviewer: null } }));
-    expect(bare).not.toContain('완료 기준');
-    expect(bare).not.toContain('결과 자료');
+  it('offers 완료 기준 folded, and not at all when a result card already shows it', () => {
+    expect(header(work())).toMatch(/aria-expanded="false"[^>]*>.*완료 기준<\/button>/);
+    expect(header(work())).not.toContain('세 문단 요약');
+    expect(header(work(), { criteria: '' })).not.toContain('완료 기준');
+  });
+
+  it('drops the lifecycle and deadline once the Work has settled, and says when it ended', () => {
+    const live = header(work({ deadlineAt: NOW + 60_000 }));
+    expect(live).toContain('class="lifecycle');
+    expect(live).toContain('맡김');
+    const ended = header(work({ state: 'failed', reason: 'the deadline passed', deadlineAt: NOW - 60_000, endedAt: NOW - 60_000 }));
+    expect(ended).not.toContain('class="lifecycle');
+    expect(ended).not.toContain('work-bar__due');
+    expect(ended).toContain('1분 전 끝남');
   });
 
   it('says how far behind the host the page may be while the link is down', () => {
