@@ -153,7 +153,7 @@ export function createDirectTools(core: Core): Extension {
           brief: args.brief,
           acceptance,
           budgetMinutes: args.budget_minutes,
-        });
+        }, "origin");
         return text(`Work "${next.title}" is now revision ${next.revision} (${next.state}).`);
       } catch (error) {
         return errorResult(error);

@@ -29,7 +29,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { GHOST_TOOLS, type Conversation as HostConversation, type Ghost, type Live, type LiveEvent, type Message, type MessageOrigin, type ModelRef, type Settings, type Work } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { CommandError } from "../core/errors.ts";
-import type { ConversationSetup, Engine, Submission, TranscriptPage } from "../core/ports.ts";
+import type { ConversationSetup, Engine, Submission, SubmissionRecovery, TranscriptPage } from "../core/ports.ts";
 import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import type { ToolSet } from "../tools/types.ts";
 import { liveFrom, renderUserContent, sameLive, toMessage, type UserMeta } from "./messages.ts";
@@ -292,17 +292,16 @@ class HostEngine implements Engine, MemoryEngine {
     if (!this.core.catalog.modelsFor(provider, this.core.secrets.credential(provider.id)?.type).some((info) => info.id === model.model)) {
       throw new CommandError("unavailable", `provider ${provider.id} has no model ${model.model}`);
     }
-    // R1: never submit into a quota the conversation's whole model chain is waiting out. The input is held
-    // in priority order and admitted, unchanged and under its own request id, when the quota recovers.
-    const chain = this.modelChain(settings, conversation, ghost, work, model);
-    if (!this.core.quota.admitting(conversationId, chain, submission.requestId)) {
-      this.core.quota.hold(conversationId, submission, chain, conversation.kind);
-      return;
-    }
     const state = await this.ensureState(conversationId);
     // A duplicate admission must not reset an in-flight fallback or start another run.
     const existing = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, submission.requestId), ctx);
     if (existing) return;
+    // R1: hold the unchanged submission while every available provider is quota-blocked.
+    const chain = this.quotaProviders(conversationId);
+    if (!this.core.quota.admitting(conversationId, chain, submission.requestId)) {
+      this.core.quota.hold(conversationId, submission, chain, conversation.kind);
+      return;
+    }
     const scopeId = submission.scopeId ?? work?.scopeId ?? null;
     const scopes = scopeId === null ? [] : [{ id: scopeId, name: this.core.ledger.scope(scopeId).name }];
     const docAttachments = submission.docAttachments ?? work?.attachments ?? [];
@@ -311,11 +310,12 @@ class HostEngine implements Engine, MemoryEngine {
     state.runEnd = null;
     let serving = model;
     // A release probes the provider it was waiting on; every other turn skips a quota-blocked provider.
-    const quotaBlocked = !this.core.quota.releasing(conversationId, submission.requestId) && this.core.quota.blocked(model.provider);
+    const releaseProvider = this.core.quota.releaseProvider(conversationId, submission.requestId);
+    const quotaBlocked = this.core.quota.blocked(model.provider) && releaseProvider !== model.provider;
     if (!this.core.secrets.has(provider.id) || quotaBlocked) {
       const why = this.core.secrets.has(provider.id) ? "the provider's quota is exhausted" : `provider ${provider.id} has no credential`;
       const next = this.allowsFallback(settings, conversation, work)
-        ? fallbackModels(ghost, model, settings).find((candidate) => this.available(candidate, settings) && !this.core.quota.blocked(candidate.provider))
+        ? fallbackModels(ghost, model, settings).find((candidate) => this.available(candidate, settings) && (!this.core.quota.blocked(candidate.provider) || releaseProvider === candidate.provider))
         : undefined;
       if (!next) throw new CommandError("unavailable", why);
       this.logFallback(state, model, next, why);
@@ -342,6 +342,39 @@ class HostEngine implements Engine, MemoryEngine {
     // A repeated request id returns the old submission; if it has already settled, no run follows.
     const record = await submitted.status(ctx);
     if (record.status === "done" || record.status === "unanswered") state.expectRun = false;
+  }
+
+  quotaProviders(conversationId: string): string[] {
+    const conversation = this.core.ledger.conversation(conversationId);
+    const ghost = this.core.ledger.ghost(conversation.ghostId);
+    const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
+    const settings = this.core.ledger.settings();
+    const model = this.resolveModel(settings, conversation, ghost, work);
+    if (!model) return [];
+    const refs = [model, ...(this.allowsFallback(settings, conversation, work) ? fallbackModels(ghost, model, settings) : [])];
+    return [...new Set(refs.filter((candidate) => this.available(candidate, settings)).map((candidate) => candidate.provider))];
+  }
+
+  async submissionRecovery(conversationId: string, requestId: string): Promise<SubmissionRecovery | null> {
+    const state = await this.stateFor(conversationId);
+    if (!state) return null;
+    const record = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, requestId), ctx);
+    if (!record) return null;
+    if (record.status !== "done" && record.status !== "unanswered") {
+      return { status: "pending", entryId: 0, serving: null, hit: null };
+    }
+    const scan = record.status === "done" && "answer" in record
+      ? await state.pi.entries({ minEntryId: record.answer, maxEntryId: record.answer }, 1, undefined, ctx)
+      : await state.pi.entries({}, 20, undefined, ctx);
+    const entry = scan.items.find((entry) => entry.kind === "pi.assistant");
+    const message = entry?.model?.find((item): item is AssistantMessage => item.role === "assistant");
+    const hit = message && record.status === "unanswered" ? quotaHit(message) : null;
+    return {
+      status: record.status,
+      entryId: entry?.id ?? 0,
+      serving: record.status === "done" ? message?.provider ?? null : null,
+      hit: hit && message ? { provider: message.provider, ...hit } : null,
+    };
   }
 
   async abort(conversationId: string): Promise<void> {

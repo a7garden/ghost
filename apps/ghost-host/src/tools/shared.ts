@@ -200,8 +200,14 @@ export function workDecideTool(core: Core) {
       try {
         const scope = scopeOf(core, api);
         const work = core.ledger.work(args.work_id);
-        const root = work.rootId === work.id ? work : core.ledger.work(work.rootId);
-        if (root.originConversationId !== scope.conversation.id) throw forbidden("only the conversation this Work came from settles it");
+        if (work.originConversationId !== scope.conversation.id) throw forbidden("only the conversation this Work came from settles it");
+        if (scope.ghost.state !== "active") throw forbidden("the originating Ghost is no longer active");
+        if (work.activityId && !work.parentId) throw forbidden("only the owner resumes a paused activity root");
+        if (scope.work) {
+          requireWork(scope);
+          if (scope.ghost.state !== "active" || !["running", "waiting"].includes(scope.work.state)) throw forbidden("the origin Work is no longer active");
+          if (scope.work.activityId) core.activities.authorize(scope.work.id);
+        }
         const next = core.works.decide(work.id, args.action, args.note);
         return {
           content: [{ type: "text", text: `Work "${next.title}" is ${next.state}.` }],

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ArtifactRef, LiveEvent, Sandbox } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
 import { sha256 } from "../src/core/ids.ts";
-import type { ArtifactStore, ConversationSetup, Engine, Submission, TranscriptPage } from "../src/core/ports.ts";
+import type { ArtifactStore, ConversationSetup, Engine, Submission, SubmissionRecovery, TranscriptPage } from "../src/core/ports.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { BaseSecrets } from "../src/stores/secrets.ts";
 
@@ -13,6 +13,13 @@ export class FakeEngine implements Engine {
   readonly opened: ConversationSetup[] = [];
   readonly submissions = new Map<string, { conversationId: string; submission: Submission }>();
   readonly aborted: string[] = [];
+  readonly outcomes = new Map<string, SubmissionRecovery>();
+
+  async submissionRecovery(_conversationId: string, requestId: string): Promise<SubmissionRecovery | null> {
+    return this.outcomes.get(requestId) ?? (this.submissions.has(requestId)
+      ? { status: "pending", entryId: 0, serving: null, hit: null }
+      : null);
+  }
   history: { conversationId: string; role: string; text: string }[] = [];
 
   async open(setup: ConversationSetup) {

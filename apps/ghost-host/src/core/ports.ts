@@ -40,11 +40,23 @@ export interface TranscriptPage {
   live: Live | null;
 }
 
+/** Durable outcome of an input released before a Host crash. */
+export interface SubmissionRecovery {
+  status: "pending" | "done" | "unanswered";
+  entryId: number;
+  serving: string | null;
+  hit: { provider: string; reason: string; resumeAt: number | null } | null;
+}
+
 /** Pi Durable, seen from core. Implemented in src/engine. */
 export interface Engine extends Partial<MemoryEngine> {
   /** Create the conversation if missing and (re)apply its agent: model, instructions, tools. Idempotent. */
   open(setup: ConversationSetup): Promise<void>;
   submit(conversationId: string, submission: Submission): Promise<void>;
+  /** Currently configured, credentialed providers in the conversation's primary/fallback chain. */
+  quotaProviders?(conversationId: string): string[];
+  /** Reconcile a previously released request against durable admissions before replaying or advancing it. */
+  submissionRecovery?(conversationId: string, requestId: string): Promise<SubmissionRecovery | null>;
   /** Stop the current run and withdraw queued inputs. */
   abort(conversationId: string): Promise<void>;
   page(conversationId: string, before: string | null, limit: number): Promise<TranscriptPage>;

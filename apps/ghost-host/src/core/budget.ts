@@ -1,13 +1,15 @@
 import type { Conversation, MessageOrigin, Work } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import type { Submission } from "./ports.ts";
-import { CommandError } from "./errors.ts";
+import { CommandError, conflict } from "./errors.ts";
 
 /** Quota probe cadence when the provider's message carries no resume time: 1, 2, 4, … minutes, capped. */
 const PROBE_BASE_MS = 60_000;
 const PROBE_MAX_MS = 30 * 60_000;
 /** How long the release of one deferred conversation may take before the probe is armed again. */
 const RELEASE_GRACE_MS = 60_000;
+/** Refuse new inputs before accepting them rather than truncating a durable queue on recovery. */
+export const MAX_DEFERRED_INPUTS = 1024;
 /** One provider's quota state, kept in `settings` (`quota.providers`) so it survives a restart. */
 interface QuotaEntry {
   /** What the provider said, shortened; distinguishes a usage limit from a per-minute rate limit. */
@@ -60,27 +62,35 @@ export class Quota {
 
   constructor(private readonly core: Core) {}
 
-  /** Startup: reload the wait, drop probes a restart cut off, and arm the resume timer. */
-  start(now = Date.now()) {
+  /** Reload accepted inputs intact and reconcile any release against Pi's durable request identity. */
+  async start(now = Date.now()) {
     this.stopped = false;
     const stored = this.core.ledger.setting<{ entries?: Record<string, QuotaEntry>; records?: DeferredRecord[] } | null>(this.key, null);
     this.entries = stored?.entries ?? {};
-    this.records = (stored?.records ?? []).filter((record) => {
-      const conversation = this.core.ledger.findConversation(record.conversationId);
-      if (!conversation) return false;
-      record.releasing = null;
-      record.queue = record.queue.slice(0, 200).map((submission) => ({ ...submission, text: submission.text.slice(0, 65536) }));
-      return true;
-    });
-    for (const [provider, entry] of Object.entries(this.entries)) {
-      const busy = entry.probingBy !== null && this.core.ledger.findConversation(entry.probingBy)?.busy === true;
-      if (!busy) entry.probingBy = null;
+    this.records = stored?.records ?? [];
+    for (const entry of Object.values(this.entries)) {
+      if (!this.records.some((record) => record.conversationId === entry.probingBy && record.releasing !== null)) entry.probingBy = null;
     }
-    // A quota hold without a waiting record is over: the restart lost the run end that would have cleared it.
+    this.persist();
+    for (const record of [...this.records]) {
+      if (record.releasing === null) continue;
+      if (!this.core.engine.submissionRecovery) {
+        // Engines without a durable inspection port must replay the same identity, never invent a wake.
+        this.release(record, now);
+        continue;
+      }
+      const settled = await this.core.engine.submissionRecovery(record.conversationId, record.releasing);
+      if (settled === null) {
+        // The Host journal committed before Pi admitted it. Replay the exact accepted input.
+        this.release(record, now);
+      } else if (settled.status !== "pending") {
+        this.turnEnded(record.conversationId, { ...settled, origin: record.origin, providers: record.providers }, now);
+      }
+      // Pending inputs retain releasing and their probe ownership until Pi finishes them.
+    }
     for (const work of this.core.ledger.worksInState("running")) {
       if (work.hold === "quota" && !this.records.some((record) => record.conversationId === work.conversationId)) this.core.works.holdForQuota(work.id, false);
     }
-    this.persist();
     this.arm(now);
   }
 
@@ -88,6 +98,11 @@ export class Quota {
     this.stopped = true;
     clearTimeout(this.timer ?? undefined);
     this.timer = null;
+  }
+
+  /** Whether quota owns the next input for this conversation, including an in-flight release. */
+  awaiting(conversationId: string): boolean {
+    return this.records.some((record) => record.conversationId === conversationId);
   }
 
   /** Whether the provider's quota blocks admitting to it right now. */
@@ -108,13 +123,14 @@ export class Quota {
   admitting(conversationId: string, providers: string[], requestId: string | undefined, now = Date.now()): boolean {
     const record = this.records.find((item) => item.conversationId === conversationId);
     if (record) return record.releasing === requestId && requestId !== undefined;
-    return !providers.some((provider) => this.blocked(provider, now));
+    return providers.length === 0 || !providers.every((provider) => this.blocked(provider, now));
   }
 
-  /** Whether this request id is the one a deferred conversation is currently being released with. */
-  releasing(conversationId: string, requestId: string): boolean {
+  /** The exhausted provider assigned to this particular probe, not blanket permission for the chain. */
+  releaseProvider(conversationId: string, requestId: string): string | null {
     const record = this.records.find((item) => item.conversationId === conversationId);
-    return record?.releasing === requestId;
+    if (record?.releasing !== requestId) return null;
+    return Object.entries(this.entries).find(([, entry]) => entry.probingBy === conversationId)?.[0] ?? null;
   }
 
   /** Hold a submission the chain could not serve. It is admitted, in order, once the quota recovers. */
@@ -126,9 +142,12 @@ export class Quota {
       record = { conversationId, attempts: 0, entryId: 0, origin: submission.origin, priority: admissionPriority(kind, submission.origin), providers, queue: [], releasing: null, updatedAt: now };
       this.records.push(record);
     }
+    if (!record.queue.some((item) => item.requestId === submission.requestId) && record.queue.length >= MAX_DEFERRED_INPUTS) {
+      throw conflict(`this conversation already has ${MAX_DEFERRED_INPUTS} accepted inputs waiting for model quota; retry after it resumes`);
+    }
     record.priority = Math.min(record.priority, admissionPriority(kind, submission.origin));
     record.providers = [...new Set([...record.providers, ...providers])];
-    if (!record.queue.some((item) => item.requestId === submission.requestId)) record.queue.push({ ...submission, text: submission.text.slice(0, 65536) });
+    if (!record.queue.some((item) => item.requestId === submission.requestId)) record.queue.push({ ...submission });
     record.updatedAt = now;
     this.core.works.holdForQuotaOfWork(conversationId, true);
     this.persist();
@@ -140,6 +159,7 @@ export class Quota {
    */
   turnEnded(conversationId: string, end: { entryId: number; origin: MessageOrigin; providers: string[]; serving: string | null; hit: { provider: string; reason: string; resumeAt: number | null } | null }, now = Date.now()): void {
     const record = this.records.find((item) => item.conversationId === conversationId);
+    if (end.hit && record?.entryId === end.entryId) return;
     for (const entry of Object.values(this.entries)) {
       if (entry.probingBy === conversationId) entry.probingBy = null;
     }
@@ -156,18 +176,18 @@ export class Quota {
       dirty = true;
     }
     if (end.hit) {
+      const sequenceKey = `quota-resume-sequence:${conversationId}`;
+      const attempts = Math.max(record?.attempts ?? 0, this.core.ledger.setting<number>(sequenceKey, 0)) + 1;
       if (record) {
-        // One run end is classified once: a restart re-observing the same error entry changes nothing.
-        if (record.entryId === end.entryId) return;
         record.queue = record.queue.filter((item) => item.requestId !== record.releasing);
-        record.attempts += 1;
+        record.attempts = attempts;
         record.entryId = end.entryId;
         record.origin = end.origin;
         record.providers = [...new Set([...record.providers, ...end.providers])];
       } else {
         this.records.push({
           conversationId,
-          attempts: 1,
+          attempts,
           entryId: end.entryId,
           origin: end.origin,
           priority: admissionPriority(this.core.ledger.findConversation(conversationId)?.kind ?? "direct", end.origin),
@@ -182,7 +202,10 @@ export class Quota {
       current.releasing = null;
       current.updatedAt = now;
       this.core.works.holdForQuotaOfWork(conversationId, true);
-      this.persist();
+      this.core.ledger.tx(() => {
+        this.core.ledger.putSetting(sequenceKey, attempts);
+        this.persist();
+      });
       this.arm(now);
       return;
     }
@@ -193,14 +216,9 @@ export class Quota {
     record.queue = record.queue.filter((item) => item.requestId !== record.releasing);
     record.releasing = null;
     record.updatedAt = now;
-    // A held input for a Work that settled meanwhile is stale: its report already reached the origin.
-    const conversation = this.core.ledger.findConversation(conversationId);
-    const work = conversation?.workId ? this.core.ledger.work(conversation.workId) : null;
-    if (conversation?.kind === "work" && (!work || !(work.state === "running" || work.state === "waiting"))) {
-      record.queue = [];
-    }
     if (record.queue.length > 0) {
-      this.release(record, now);
+      this.persist();
+      this.tick(now);
       return;
     }
     this.records = this.records.filter((item) => item.conversationId !== conversationId);
@@ -213,10 +231,18 @@ export class Quota {
   /** Release due waits: the highest-priority record per provider probes it with its next queued input. */
   tick(now = Date.now()): void {
     const order = [...this.records].sort((a, b) => a.priority - b.priority || a.updatedAt - b.updatedAt);
-    const probing = new Set(Object.values(this.entries).filter((entry) => entry.probingBy !== null).map((entry) => entry.probingBy!));
     for (const record of order) {
-      if (probing.has(record.conversationId)) continue;
-      const blocked = record.providers.some((provider) => {
+      if (record.releasing !== null) continue;
+      if (this.core.engine.quotaProviders) {
+        try {
+          record.providers = this.core.engine.quotaProviders(record.conversationId);
+        } catch (error) {
+          this.core.log(`quota chain for ${record.conversationId} could not be resolved`, error);
+          continue;
+        }
+        if (record.providers.length === 0) continue;
+      }
+      const blocked = record.providers.length > 0 && record.providers.every((provider) => {
         const entry = this.entries[provider];
         return entry !== undefined && (entry.probingBy !== null || entry.resumeAt > now);
       });
@@ -235,7 +261,12 @@ export class Quota {
   private release(record: DeferredRecord, now: number): void {
     const submission = record.queue[0];
     if (!submission) return;
-    const provider = record.providers.find((candidate) => this.entries[candidate] !== undefined);
+    // A clear fallback needs no probe. Otherwise assign only a due, unowned provider to this release.
+    const clear = record.providers.some((candidate) => this.entries[candidate] === undefined);
+    const provider = clear ? undefined : record.providers.find((candidate) => {
+      const entry = this.entries[candidate];
+      return entry !== undefined && entry.resumeAt <= now && (entry.probingBy === null || entry.probingBy === record.conversationId);
+    });
     if (provider !== undefined) this.entries[provider]!.probingBy = record.conversationId;
     record.releasing = submission.requestId;
     record.updatedAt = now;
@@ -243,6 +274,7 @@ export class Quota {
     const conversationId = record.conversationId;
     void this.core.lane(`quota:${conversationId}`, async () => {
       try {
+        this.core.works.holdForQuotaOfWork(conversationId, false);
         await this.core.engine.submit(conversationId, submission);
       } catch (error) {
         if (!(error instanceof CommandError)) throw error;
@@ -251,9 +283,15 @@ export class Quota {
         const current = this.records.find((item) => item.conversationId === conversationId);
         if (!current) return;
         current.releasing = null;
+        this.core.works.holdForQuotaOfWork(conversationId, true);
         for (const entry of Object.values(this.entries)) if (entry.probingBy === conversationId) entry.probingBy = null;
         current.updatedAt = Date.now() + RELEASE_GRACE_MS;
+        for (const provider of current.providers) {
+          const entry = this.entries[provider];
+          if (entry) entry.resumeAt = Math.max(entry.resumeAt, current.updatedAt);
+        }
         this.persist();
+        this.arm(Date.now());
       }
     });
   }
@@ -261,8 +299,9 @@ export class Quota {
   private arm(now: number): void {
     if (this.stopped) return;
     clearTimeout(this.timer ?? undefined);
-    const next = Object.values(this.entries)
-      .filter((entry) => entry.probingBy === null)
+    const next = Object.entries(this.entries)
+      .filter(([provider, entry]) => entry.probingBy === null && this.records.some((record) => record.releasing === null && record.providers.includes(provider)))
+      .map(([, entry]) => entry)
       .reduce((at: number | null, entry) => (at === null || entry.resumeAt < at ? entry.resumeAt : at), null);
     const due = this.records.length > 0 && this.records.some((record) => record.queue.length > 0);
     const when = next ?? (due ? now + RELEASE_GRACE_MS : null);

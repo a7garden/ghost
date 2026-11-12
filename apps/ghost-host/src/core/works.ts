@@ -3,7 +3,7 @@ import type { WorkQuestion } from "../ledger/ledger.ts";
 import type { Core } from "./core.ts";
 import { checkAttachments } from "./configuration.ts";
 import { budgetSpent } from "./budget.ts";
-import { CommandError, conflict, invalid } from "./errors.ts";
+import { CommandError, conflict, forbidden, invalid } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
 import { verifyChecks } from "./verify.ts";
 import { validateExecutionTarget } from "../sandbox/index.ts";
@@ -170,15 +170,14 @@ export class Works {
    * hold stops it (quota wait, budget pause, repeat block) and reopens when it works again. Every state
    * change goes through here, so no path can leave the clock running while nothing is being done.
    */
-  private put(work: Work): Work {
-    const now = Date.now();
+  private put(work: Work, now = Date.now()): Work {
     const consuming = work.state === "running" && work.hold === null && !isTerminal(work);
     const closed = work.budgetSince !== null && work.budgetSince < now;
     const next: Work = {
       ...work,
       budgetMinutes: Math.max(1, Math.min(MAX_WORK_BUDGET_MINUTES, work.budgetMinutes || DEFAULT_WORK_BUDGET_MINUTES)),
       budgetUsedMs: closed ? work.budgetUsedMs + (now - work.budgetSince!) : work.budgetUsedMs,
-      budgetSince: consuming ? (work.budgetSince ?? now) : null,
+      budgetSince: consuming ? now : null,
     };
     this.ledger.tx(() => this.ledger.putWork(next));
     return next;
@@ -205,12 +204,19 @@ export class Works {
   }
 
   /** Owner edit. Bumps the revision; a running Work receives the change as steering. */
-  update(workId: string, change: Partial<Pick<Work, "title" | "brief" | "acceptance" | "deadlineAt" | "budgetMinutes">>): Work {
+  update(workId: string, change: Partial<Pick<Work, "title" | "brief" | "acceptance" | "deadlineAt" | "budgetMinutes">>, authority: "owner" | "origin" = "owner"): Work {
     const work = this.ledger.work(workId);
     if (isTerminal(work)) throw conflict(`Work is ${work.state}`);
+    if (authority !== "owner" && change.deadlineAt !== undefined) throw forbidden("only the owner sets or extends a due date");
+    if (authority !== "owner" && change.budgetMinutes !== undefined && change.budgetMinutes > work.budgetMinutes) throw forbidden("the origin extends a paused budget once with work_decide");
+    const resumesBudget = authority === "owner" && work.hold === "budget" && change.budgetMinutes !== undefined && change.budgetMinutes * 60_000 > budgetSpent(work);
+    if (resumesBudget && this.core.effects.unresolved(work.id).some((effect) => !this.core.effects.awaitingApproval(effect))) throw conflict("reconcile the unknown effect first");
     const brief = change.brief ?? work.brief;
-    const next: Work = { ...work, ...stripUndefined(change), brief, revision: work.revision + 1, updatedAt: Date.now() };
-    this.ledger.tx(() => this.put(next));
+    const next: Work = { ...work, ...stripUndefined(change), brief, revision: work.revision + 1, updatedAt: Date.now(), ...(resumesBudget ? { state: "running" as const, hold: null, reason: null } : {}) };
+    this.ledger.tx(() => {
+      this.put(next);
+      if (resumesBudget) this.tellWork(next, `The owner raised the execution budget to ${next.budgetMinutes} working minutes. Continue from where you paused.`, `work:${next.id}:r${next.revision}:budget-raised`);
+    });
     if (next.conversationId && (next.brief !== work.brief || digestOf(next.acceptance) !== digestOf(work.acceptance))) {
       const conversationId = next.conversationId;
       void this.core.lane(`work:${work.id}`, async () => {
@@ -541,9 +547,12 @@ export class Works {
       revisionsUsed: 0,
       verdict: null,
       reason: null,
+      hold: null,
+      ...(work.hold === "budget" ? { budgetUsedMs: 0, budgetSince: null } : {}),
       endedAt: null,
       updatedAt: now,
     };
+    this.core.repeats.reset(work.conversationId ?? work.id);
     this.ledger.tx(() => {
       this.put(next);
       this.ledger.setIdleNudges(work.id, 0);
@@ -779,24 +788,31 @@ export class Works {
   pauseForBudget(workId: string, now = Date.now()) {
     const work = this.ledger.work(workId);
     if (isTerminal(work) || work.state !== "running" || work.hold !== null) return;
-    const next = this.put({ ...work, state: "blocked", hold: "budget", reason: "the execution budget ran out", updatedAt: now });
-    if (work.conversationId) {
-      const conversationId = work.conversationId;
-      void this.core.lane(`work:${work.id}`, () => this.core.engine.abort(conversationId));
-    }
-    this.askOrigin(next, `Work "${next.title}" (${next.id}) paused: its execution budget of ${next.budgetMinutes} working minutes ran out. Answer with work_decide: extend once (action "extend"), stop it (action "stop"), or stop it and delegate the remainder as smaller Works (splitting). While it waits, nothing is spent or failed.`, `work:${next.id}:budget:${next.revision}`);
+    this.pause(work, "budget", "the execution budget ran out", `Work "${work.title}" (${work.id}) paused: its execution budget of ${work.budgetMinutes} working minutes ran out. Answer with work_decide: extend once (action "extend"), stop it (action "stop"), or stop it and delegate the remainder as smaller Works (splitting). While it waits, nothing is spent or failed.`, now);
   }
 
   /** R8: the same tool kept failing the same way. The Work stops and its origin is told. */
   blockForRepeat(workId: string, detail: string, now = Date.now()) {
     const work = this.ledger.work(workId);
     if (isTerminal(work) || work.state === "blocked") return;
-    const next = this.put({ ...work, state: "blocked", hold: "repeat", reason: `the same tool failure repeated: ${detail}`.slice(0, 4096), updatedAt: now });
+    this.pause(work, "repeat", `the same tool failure repeated: ${detail}`.slice(0, 4096), `Work "${work.title}" (${work.id}) stopped: ${detail} Answer with work_decide: continue with the counters cleared (action "continue") or stop it (action "stop"). Fix the cause rather than retrying the same call.`, now);
+  }
+
+  /** Commit the pause and its occurrence-specific notice together; recovery reuses that exact identity. */
+  private pause(work: Work, kind: "budget" | "repeat", reason: string, text: string, now: number) {
+    const key = `work-pause:${work.id}`;
+    const next = this.ledger.tx(() => {
+      const occurrence = this.ledger.setting<{ occurrence: number }>(key, { occurrence: 0 }).occurrence + 1;
+      const notice = { occurrence, kind, text, requestId: `work:${work.id}:${kind}:${occurrence}` };
+      this.ledger.putSetting(key, notice);
+      return this.put({ ...work, state: "blocked", hold: kind, reason, updatedAt: now }, now);
+    });
     if (work.conversationId) {
       const conversationId = work.conversationId;
       void this.core.lane(`work:${work.id}`, () => this.core.engine.abort(conversationId));
     }
-    this.askOrigin(next, `Work "${next.title}" (${next.id}) stopped: ${detail} Answer with work_decide: continue once with the counters cleared (action "continue") or stop it (action "stop"). Fix the cause in the brief or the approach, not by retrying the same call.`, `work:${next.id}:repeat:${digestOf(detail).slice(0, 16)}`);
+    const notice = this.ledger.setting<{ text: string; requestId: string }>(key, { text, requestId: "" });
+    this.askOrigin(next, notice.text, notice.requestId);
   }
 
   /** The origin settles a Work paused for its budget or a repeated failure. */
@@ -810,17 +826,21 @@ export class Works {
     if (action === "extend") {
       if (work.hold !== "budget") throw conflict("this Work is not paused for its budget");
       if (work.budgetExtended) throw conflict("the budget was already extended once; stop this Work and delegate what remains as smaller Works");
-      const next = this.put({ ...work, state: "running", hold: null, reason: null, budgetExtended: true, budgetUsedMs: 0, updatedAt: Date.now() });
-      this.tellWork(next, `The origin extended this Work's execution budget once, by ${next.budgetMinutes} working minutes. Continue from where you stopped.`, `work:${next.id}:budget:extend:${next.revision}`);
-      this.kick(next.id);
-      return next;
+      return this.ledger.tx(() => {
+        const next = this.put({ ...work, state: "running", hold: null, reason: null, budgetExtended: true, budgetUsedMs: 0, budgetSince: null, updatedAt: Date.now() });
+        const pause = this.ledger.setting<{ occurrence: number }>(`work-pause:${work.id}`, { occurrence: 0 });
+        this.tellWork(next, `The origin extended this Work's execution budget once, by ${next.budgetMinutes} working minutes. Continue from where you stopped.`, `work:${next.id}:budget:extend:${pause.occurrence}`);
+        return next;
+      });
     }
     if (work.hold !== "repeat") throw conflict("this Work is not paused for a repeated failure");
     this.core.repeats.reset(work.conversationId ?? work.id);
-    const next = this.put({ ...work, state: "running", hold: null, reason: null, updatedAt: Date.now() });
-    this.tellWork(next, "The origin let this Work continue after a repeated failure. Change the approach; the same failing call will stop it again.", `work:${next.id}:repeat:continue:${next.revision}`);
-    this.kick(next.id);
-    return next;
+    return this.ledger.tx(() => {
+      const next = this.put({ ...work, state: "running", hold: null, reason: null, updatedAt: Date.now() });
+      const pause = this.ledger.setting<{ occurrence: number }>(`work-pause:${work.id}`, { occurrence: 0 });
+      this.tellWork(next, "The origin let this Work continue after a repeated failure. Change the approach; the same failing call will stop it again.", `work:${next.id}:repeat:continue:${pause.occurrence}`);
+      return next;
+    });
   }
 
   /** A held conversation's Work, by conversation: quota holds stop its budget clock. */
@@ -845,6 +865,7 @@ export class Works {
   private tellWork(work: Work, text: string, requestId: string) {
     if (!work.conversationId) return;
     const conversationId = work.conversationId;
+    this.ledger.putSetting(`work-continuation:${work.id}`, { revision: work.revision, text, requestId });
     void this.core.lane(`work:${work.id}`, async () => {
       await this.core.openConversation(conversationId);
       await this.core.engine.submit(conversationId, { text, origin: "work", requestId });
@@ -853,6 +874,8 @@ export class Works {
 
   /** Ask where a paused Work came from: the parent's conversation, or the direct conversation of a root. */
   private askOrigin(work: Work, text: string, requestId: string) {
+    // An activity may never turn bounded source data into a full-authority direct wake.
+    if (work.activityId && !work.parentId) return;
     if (work.parentId) {
       const parent = this.ledger.work(work.parentId);
       if (isTerminal(parent) || !parent.conversationId) return;
@@ -896,9 +919,12 @@ export class Works {
       case "running":
         // A crash between the state change and the first submission leaves a running Work
         // with a silent conversation; the start request id makes this a no-op otherwise.
-        if (!work.conversationId) return;
+        if (!work.conversationId || work.hold !== null) return;
         await this.core.openConversation(work.conversationId);
-        await this.core.engine.submit(work.conversationId, { text: this.input(work), origin: "work", requestId: `work:${work.id}:start` });
+        const continuation = this.ledger.setting<{ revision: number; text: string; requestId: string } | null>(`work-continuation:${work.id}`, null);
+        await this.core.engine.submit(work.conversationId, continuation?.revision === work.revision
+          ? { text: continuation.text, origin: "work", requestId: continuation.requestId }
+          : { text: this.input(work), origin: "work", requestId: `work:${work.id}:start` });
         return;
       case "blocked":
         return;
@@ -1123,10 +1149,16 @@ export class Works {
     for (const question of this.ledger.workQuestionsAwaitingSubmission()) this.deliverQuestion(question.id);
     for (const work of this.ledger.unreportedWorks()) this.kick(work.id);
     // Blocked Works keep their blocker visible to the current main after a restart.
-    for (const work of this.ledger.worksInState("blocked")) void this.core.lane(`team:${work.id}`, () => this.core.team.blocked(work));
+    for (const work of this.ledger.worksInState("blocked")) {
+      void this.core.lane(`team:${work.id}`, () => this.core.team.blocked(work));
+      const notice = this.ledger.setting<{ kind: string; text: string; requestId: string } | null>(`work-pause:${work.id}`, null);
+      if (notice && notice.kind === work.hold) this.askOrigin(work, notice.text, notice.requestId);
+    }
     for (const work of this.ledger.worksInState("running")) {
       // A quota-held Work is resumed by the quota queue's own request ids; a budget or repeat hold waits for its origin.
-      if (work.hold !== null) continue;
+      if (work.hold !== null || (work.conversationId && this.core.quota.awaiting(work.conversationId))) continue;
+      const continuation = this.ledger.setting<{ revision: number; text: string; requestId: string } | null>(`work-continuation:${work.id}`, null);
+      if (continuation?.revision === work.revision) { this.kick(work.id); continue; }
       const conversation = work.conversationId ? this.ledger.findConversation(work.conversationId) : null;
       // A busy conversation is resumed by the engine; an idle one may have lost the wake that
       // a transition committed just before the crash (resume, unblock, child result, revise).
