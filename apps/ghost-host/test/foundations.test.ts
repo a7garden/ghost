@@ -110,8 +110,17 @@ describe("checkout approvals", () => {
     expect(f.browser.clicks).toEqual(["@e1"]);
     f.browser.facts = { ...f.browser.facts, checkout: true, signal: "url:/checkout/" };
     const refused = await f.call("browser_click", { ref: "@e1" });
-    expect(JSON.stringify(refused)).toContain("checkout or payment step");
-    expect(JSON.stringify(await f.call("browser_press", { key: "Enter" }))).toContain("checkout or payment step");
+    expect(refused.isError).toBe(true);
+    const pressed = await f.call("browser_press", { key: "Enter" });
+    expect(pressed.isError).toBe(true);
+    // Policy denies the checkout submission outright: nothing is dispatched and nothing is left to approve.
+    expect(f.browser.clicks).toEqual(["@e1"]);
+    expect(f.ledger.pendingDecisions()).toHaveLength(0);
+    expect(f.ledger.effectsInState("pending")).toHaveLength(0);
+    expect(f.ledger.effectsInState("denied").map((effect) => effect.tool).sort()).toEqual(["browser_click", "browser_press"]);
+    // The owner path remains: a proposal opens an owner card for the same checkout click.
+    await f.call("browser_propose", { ref: "@e1", title: "주문", reason: "확인 후 결제" });
+    expect(f.ledger.pendingDecisions().map((decision) => decision.kind)).toEqual(["approve_effect"]);
     expect(f.browser.clicks).toEqual(["@e1"]);
   });
   test("an approval binds the merchant and total the Host read, and refuses a changed total", async () => {

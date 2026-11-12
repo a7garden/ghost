@@ -293,7 +293,10 @@ describe("skills in conversation setup", () => {
 
     const unlisted = await skillRead.execute({ name: "s1" } as never, api, testContext());
     expect(unlisted.isError).toBe(true);
-    expect(contentOf(unlisted)).toContain("is not one of Skilled's skills");
+    // A skill that exists on disk but is neither listed nor attached is refused without exposing its files or body.
+    expect(contentOf(unlisted)).toContain("s1");
+    expect(contentOf(unlisted)).not.toContain("SKILL.md");
+    expect(contentOf(unlisted)).not.toContain("x".repeat(100));
 
     const traversal = await skillRead.execute({ name: "alpha", path: "../../../etc/passwd" } as never, api, testContext());
     expect(traversal.isError).toBe(true);
