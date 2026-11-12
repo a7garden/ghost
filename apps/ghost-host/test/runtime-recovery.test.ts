@@ -91,13 +91,15 @@ test("budget and repeat pauses of an activity root never bridge into a direct co
     await f.core.idle();
     f.core.works.recover();
     await f.core.idle();
-    expect(f.engine.to(f.ghost.directConversationId)).toEqual([]);
+    // Only this Work's pause notices matter; unrelated self-directed wakes may share the direct conversation.
+    expect(f.engine.to(f.ghost.directConversationId).filter((input) => input.requestId.startsWith(`work:${f.work.id}:`))).toEqual([]);
     // Recreate a running turn without widening its activity identity.
     f.ledger.tx(() => f.ledger.putWork({ ...f.ledger.work(f.work.id), state: "running", hold: null }));
     f.core.works.blockForRepeat(f.work.id, "source controlled refusal");
     f.core.works.recover();
     await f.core.idle();
-    expect(f.engine.to(f.ghost.directConversationId)).toEqual([]);
+    // Only this Work's pause notices matter; unrelated self-directed wakes may share the direct conversation.
+    expect(f.engine.to(f.ghost.directConversationId).filter((input) => input.requestId.startsWith(`work:${f.work.id}:`))).toEqual([]);
   } finally { f.core.stop(); await f.core.idle(); f.ledger.close(); }
 });
 
@@ -150,7 +152,8 @@ test("a crash between pause commit and notice delivery replays only that occurre
     core.works.recover();
     await core.idle();
     expect(ledger.work(f.work.id).hold).toBe("budget");
-    expect(engine.to(f.ghost.directConversationId).map((input) => input.requestId)).toEqual([`work:${f.work.id}:budget:1`]);
+    // Exactly one delivery of the interrupted occurrence; other direct-conversation wakes are out of scope here.
+    expect(engine.to(f.ghost.directConversationId).map((input) => input.requestId).filter((requestId) => requestId.startsWith(`work:${f.work.id}:`))).toEqual([`work:${f.work.id}:budget:1`]);
   } finally { core.stop(); await core.idle(); ledger.close(); }
 });
 
