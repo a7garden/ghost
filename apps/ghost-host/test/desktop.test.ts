@@ -20,7 +20,7 @@ const tree = (send = "Send", id = "sabc") => ({ role: "window", name: "Doc", chi
 function fakeDesktop() {
   const calls: { runtime: "agent-desktop" | "geist"; argv: string[]; args?: Record<string, unknown>; stdin?: string }[] = [];
   const state = {
-    idle: 60, tree: tree(), snapshotId: "sabc", processInstance: "macos-proc-v1:1:2", extraInstance: false, windowVisible: true, windowAccessible: true, protectedScreen: false,
+    idle: 60, tree: tree(), snapshotId: "sabc", processInstance: "macos-proc-v1:1:2", extraInstance: false, windowVisible: true, windowAccessible: true, protectedScreen: false, screenLabel: "Delete",
     staleRefs: new Set<string>(),
     beforeDispatch: null as null | ((runtime: "agent-desktop" | "geist", command: string) => void),
   };
@@ -61,7 +61,7 @@ function fakeDesktop() {
         window: { id: args.window_id, title: "Doc", bounds: { x: 100, y: 50, width: 800, height: 600 } },
         image: { data: "iVBORw0KGgo=", width: 1600, height: 1200 },
         nodes: [
-          { title: "Delete", description: "", value: null, bounds: { x: 500, y: 350, width: 100, height: 40 } },
+          { title: state.screenLabel, description: "", value: null, bounds: { x: 500, y: 350, width: 100, height: 40 } },
           ...(state.protectedScreen ? [{ role: "AXSecureTextField", title: "Password", value: null, bounds: { x: 200, y: 100, width: 100, height: 30 } }] : []),
         ],
       });
@@ -141,6 +141,32 @@ describe("PC control tools", () => {
     lastScreenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
     expect((await f.call("desktop_keys", { screen_id: screenId(), key: "cmd+q" })).isError).toBe(true);
     expect(f.calls.filter((c) => c.runtime === "geist" && c.argv[0] !== "get_app_state")).toHaveLength(1);
+  });
+
+  test("dragging a shared-board item remains external and needs Rule of Two approval", async () => {
+    const f = fixture();
+    f.state.screenLabel = "Card A";
+    const screenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
+    const screen_id = /screen_id (\S+):/.exec(f.said(screenshot))![1]!;
+    const result = await f.call("desktop_pointer", { screen_id, action: "drag", x: 210, y: 160, to_x: 30, to_y: 40 }, "pi-desktop", "shared-board-drag");
+    expect(result.isError).toBe(true);
+    expect(f.calls.some((call) => call.argv[0] === "drag")).toBe(false);
+    const effect = f.ledger.effectByCall(f.ghost.directConversationId, "shared-board-drag")!;
+    const policy = f.ledger.setting<{ evaluation: { decision: string; decidedBy: string[] } } | null>(`policy:effect:${effect.id}`, null)!;
+    expect(policy.evaluation.decision).toBe("owner");
+    expect(policy.evaluation.decidedBy).toContain("rule-of-two");
+  });
+
+  test("physical drag cannot read from or write to an observed protected field", async () => {
+    const f = fixture();
+    f.state.protectedScreen = true;
+    for (const points of [{ x: 60, y: 30, to_x: 10, to_y: 10 }, { x: 10, y: 10, to_x: 60, to_y: 30 }]) {
+      const screenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
+      const screen_id = /screen_id (\S+):/.exec(f.said(screenshot))![1]!;
+      const result = await f.call("desktop_pointer", { screen_id, action: "drag", ...points });
+      expect(f.said(result)).toContain("Protected or password fields");
+    }
+    expect(f.calls.some((call) => call.argv[0] === "drag")).toBe(false);
   });
 
   test("approval uses the original retained ref, never a fresh lookalike", async () => {

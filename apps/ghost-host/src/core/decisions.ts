@@ -323,7 +323,7 @@ export class Decisions {
     if (decision.kind === "reconcile_effect") return null;
     if (decision.effectId) {
       const receipt = this.core.effects.recheck(this.ledger.effect(decision.effectId));
-      if (decision.proposal?.forceOwner || decision.proposal?.secureForm || decision.proposal?.browserHandoff) receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: [], autoResolve: null, reason: "Owner authorization is required to widen configuration or provide credentials." };
+      if (receipt.evaluation.decision !== "deny" && (decision.proposal?.forceOwner || decision.proposal?.secureForm || decision.proposal?.browserHandoff)) receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: [], autoResolve: null, reason: "Owner authorization is required to widen configuration or provide credentials." };
       return receipt;
     }
     const tool = decisionTool(decision);
@@ -340,7 +340,7 @@ export class Decisions {
     const prior = proposal.policy as PolicyReceipt | undefined;
     const receipt = evaluateStoredPolicy(this.core, decision.conversationId, classification, prior, reserve);
     if (tool === "complete" && receipt.evaluation.decision === "allow") receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: [], autoResolve: null, reason: "Policy cannot accept an unverified completion claim. Checks, an independent reviewer or the owner must verify this result." };
-    if (proposal.forceOwner || proposal.secureForm || proposal.browserHandoff || proposal.capability) receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: proposal.capability ? receipt.evaluation.reviewers : [], autoResolve: null, reason: "Owner authorization is required to widen configuration or provide credentials." };
+    if (receipt.evaluation.decision !== "deny" && (proposal.forceOwner || proposal.secureForm || proposal.browserHandoff || proposal.capability)) receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: proposal.capability ? receipt.evaluation.reviewers : [], autoResolve: null, reason: "Owner authorization is required to widen configuration or provide credentials." };
     return receipt;
   }
 

@@ -481,8 +481,11 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
       if (a.action === "scroll" ? !a.direction || a.modifiers !== undefined : a.direction !== undefined || a.pages !== undefined) throw invalid("Only scroll takes direction and pages; scroll needs direction and does not take modifiers");
       const screen = await physical(s, a.screen_id, (screen) => {
         const point = toWindow(screen, a.x, a.y);
-        if (a.action === "drag") toWindow(screen, a.to_x!, a.to_y!);
-        if (a.action !== "scroll" && a.action !== "drag") {
+        if (a.action === "drag") {
+          const destination = toWindow(screen, a.to_x!, a.to_y!);
+          if (labelAt(screen, destination)?.secret) throw new NoEffect("Protected or password fields are outside PC control");
+        }
+        if (a.action !== "scroll") {
           const hit = labelAt(screen, point);
           if (hit?.secret) throw new NoEffect("Protected or password fields are outside PC control");
         }
@@ -495,7 +498,7 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
           ? ["scroll", { ...base, direction: a.direction!, pages: a.pages ?? 1, x: from.x, y: from.y }] as const
           : ["click", { ...base, x: from.x, y: from.y, ...(a.action === "right_click" ? { mouse_button: "right" } : {}), ...(a.action === "double_click" ? { click_count: 2 } : {}), ...(modifier ? { key: modifier } : {}) }] as const;
       const hit = labelAt(screen, from);
-      return mutate(s, api, "desktop_pointer", a, async () => acted(await geistAction(s, api, "desktop_pointer", screen, name, args), `Pointer ${a.action} delivered`), { app: screen.app, label: hit?.label, local: a.action === "scroll" || a.action === "drag" });
+      return mutate(s, api, "desktop_pointer", a, async () => acted(await geistAction(s, api, "desktop_pointer", screen, name, args), `Pointer ${a.action} delivered`), { app: screen.app, label: hit?.label, local: a.action === "scroll" });
     }),
     tool("desktop_keys", "Real keyboard input on a fresh screenshot: one key or chord, or text at the window's focus. Takes focus; newlines may submit.", Type.Object({
       screen_id: screenId, key: Type.Optional(Type.String({ minLength: 1, maxLength: 40 })), text: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000 })),

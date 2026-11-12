@@ -16,7 +16,7 @@ export function policyWork(core: Core, conversationId: string) {
   while (conversation.kind === "subagent") {
     if (visited.has(conversation.id)) throw forbidden("Helper provenance contains a cycle");
     visited.add(conversation.id);
-    const parentId = core.ledger.setting<string | null>(`subagent:parent:${conversation.id}`, null);
+    const parentId: string | null = core.ledger.setting<string | null>(`subagent:parent:${conversation.id}`, null);
     const parent = parentId ? core.ledger.findConversation(parentId) : null;
     if (!parent || parent.ghostId !== conversation.ghostId) throw forbidden("Helper provenance is missing or no longer valid");
     const recordedWork = core.ledger.setting<string | null | undefined>(`subagent:work:${conversation.id}`, undefined);
@@ -35,7 +35,7 @@ export function markPolicyRead(core: Core, conversationId: string, flags: Partia
       const before = core.ledger.setting<EffectTaint>(`policy:taint:${current}`, cleanTaint);
       core.ledger.putSetting(`policy:taint:${current}`, { untrustedInput: before.untrustedInput || !!flags.untrustedInput, privateData: before.privateData || !!flags.privateData });
       const conversation = core.ledger.conversation(current);
-      const parentId = conversation.kind === "subagent" ? core.ledger.setting<string | null>(`subagent:parent:${current}`, null) : null;
+      const parentId: string | null = conversation.kind === "subagent" ? core.ledger.setting<string | null>(`subagent:parent:${current}`, null) : null;
       if (parentId && core.ledger.conversation(parentId).ghostId !== conversation.ghostId) throw forbidden("Helper provenance is invalid");
       current = parentId;
     }

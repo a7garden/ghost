@@ -30,7 +30,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
       command = decision.proposal.input as HostCommand;
       const piId = core.ledger.piConversationId(effect.conversationId);
       if (!piId) throw new Error("approved conversation is unavailable");
-      requireAllowed(core, { conversationId: piId } as Parameters<typeof requireAllowed>[1], "host_command_propose");
+      requireAllowed(core, { conversationId: piId, callId: effect.callId } as unknown as Parameters<typeof requireAllowed>[1], "host_command_propose");
       if (digestOf(command) !== effect.inputDigest)
         throw new Error("approved command identity mismatch");
       const checked = host.validateCommand(command);

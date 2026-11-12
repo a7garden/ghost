@@ -279,7 +279,7 @@ export function createMainTools(core: Core): Extension {
       note: Type.String({ minLength: 1, maxLength: NOTE_MAX }),
     }),
     replay: "unsafe",
-    async execute(args, api) {
+    async execute(args, api, context) {
       try {
         const scope = scopeOf(core, api);
         if (scope.ghost.state !== "active" || scope.ghost.deletedAt !== null) throw forbidden("The reviewer is unavailable");
@@ -287,7 +287,20 @@ export function createMainTools(core: Core): Extension {
         if (scope.conversation.kind === "wake" ? bound !== args.decision_id : scope.conversation.kind !== "direct") throw forbidden("This conversation may settle only its bound decision");
         const reviewer = core.decisions.reviewer(core.ledger.decision(args.decision_id));
         if (reviewer?.ghost.id !== scope.ghost.id) throw forbidden("This Ghost is not the live policy reviewer");
-        if (reviewer.slot && (scope.conversation.kind !== "wake" || bound !== args.decision_id || digestOf(scope.conversation.model) !== digestOf(core.ledger.settings().slots?.[reviewer.slot]?.model))) throw forbidden("This decision requires its configured reviewer slot in the bound wake");
+        if (reviewer.slot) {
+          const slotName = reviewer.slot;
+          const slot = core.ledger.settings().slots?.[slotName];
+          const boundSlot = core.ledger.setting<string | null>(`wake:slot:${scope.conversation.id}`, null);
+          const snapshot = core.ledger.setting<string | null>(`wake:slot-config:${scope.conversation.id}`, null);
+          if (scope.conversation.kind !== "wake" || scope.conversation.model !== null || bound !== args.decision_id || boundSlot !== slotName || !slot || snapshot !== digestOf(slot)) throw forbidden("The configured reviewer slot is missing, changed or not bound to this wake; ask the owner to decide explicitly");
+          const agent = await api.agent(context);
+          const liveConversation = core.ledger.conversation(scope.conversation.id);
+          const liveSlot = core.ledger.settings().slots?.[slotName];
+          if (liveConversation.deletedAt || liveConversation.kind !== "wake" || liveConversation.model !== null
+            || core.ledger.setting<string | null>(`wake:decision:${liveConversation.id}`, null) !== args.decision_id || core.ledger.setting<string | null>(`wake:slot:${liveConversation.id}`, null) !== slotName
+            || !liveSlot || digestOf(liveSlot) !== snapshot || core.decisions.reviewer(core.ledger.decision(args.decision_id))?.slot !== slotName
+            || ![slot.model, ...(slot.fallbacks ?? [])].some((ref) => ref.provider === agent.model?.provider && ref.model === agent.model?.modelId && (ref.thinking ?? "off") === (agent.thinkingLevel ?? "off"))) throw forbidden("The actual reviewer execution does not match the unchanged slot; ask the owner to decide explicitly");
+        }
         if (args.outcome === "answer" && !args.answer) throw invalid("answer is required to answer a question");
         return text(await core.decisions.settleForOwner(scope.ghost.id, args.decision_id, { outcome: args.outcome, answer: args.answer, note: args.note }));
       } catch (error) {

@@ -113,7 +113,7 @@ const TOOL_KINDS: Record<BuiltinGhostTool, readonly Conversation["kind"][]> = {
  * require conversation kind ∩ the Ghost's persisted allow-list. A call configured before a revocation
  * still passes through here before any effect, so revocation stops even in-flight stale calls.
  */
-export function requireAllowed(core: Core, api: Pick<ToolExecutionApi, "conversationId">, name: string): Scope {
+export function requireAllowed(core: Core, api: Pick<ToolExecutionApi, "conversationId"> & Partial<Pick<ToolExecutionApi, "callId">>, name: string): Scope {
   const scope = scopeOf(core, api);
   const kind = scope.conversation.kind === "wake" ? "direct" : scope.conversation.kind;
   const kinds = TOOL_KINDS[name as BuiltinGhostTool] ?? (/^(mcp|conn)\./.test(name) ? ["direct", "work", "subagent"] : []);
@@ -133,6 +133,7 @@ export function requireAllowed(core: Core, api: Pick<ToolExecutionApi, "conversa
   const privateRead = name.startsWith("host_") || name.startsWith("vault_") || name.startsWith("mail_") || name.startsWith("desktop_") || ["toss_read", "browser_fill_secret", "browser_fill_card"].includes(name);
   if (externalRead || privateRead) markPolicyRead(core, scope.conversation.id, { untrustedInput: externalRead || name.startsWith("desktop_"), privateData: privateRead });
   if (!name.startsWith("browser_") && !name.startsWith("mail_") && (externalRead || ["host_status", "host_services", "host_disk_scan", "host_disk_usage", "host_list", "host_read", "host_nodes", "host_message_codes", "vault_list", "desktop_apps", "desktop_snapshot", "desktop_screenshot", "toss_read"].includes(name))) {
+    if (!api.callId) throw forbidden("Read authorization requires its logical tool call id");
     policyRead(core, scope.conversation.id, { tool: name, target: { kind: name.startsWith("web_") || name === "reach" ? "browser_origin" : name.startsWith("host_") || name.startsWith("desktop_") ? "mac" : name === "toss_read" ? "connection" : "host", id: null }, access: "read", reversible: true, external: externalRead, amount: null }, api.callId);
   }
   return scope;

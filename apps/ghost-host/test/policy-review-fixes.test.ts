@@ -5,6 +5,7 @@ import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { Core } from "../src/core/core.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
 import { classifyEffect, evaluateStoredPolicy, policyRead, policyTaint } from "../src/core/policy-context.ts";
+import { digestOf } from "../src/core/ids.ts";
 import { createBrowserTools } from "../src/tools/browser.ts";
 import { classifyDesktopEffect } from "../src/tools/desktop.ts";
 import { createMainTools } from "../src/tools/main.ts";
@@ -147,4 +148,99 @@ test("Work policy inherits the immutable source taint snapshot", async () => {
   await h.core.idle();
   h.ledger.tx(() => h.ledger.putSetting(`work:source-taint:${work.id}`, { untrustedInput: true, privateData: true }));
   expect(policyTaint(h.core, h.ledger.work(work.id).conversationId!)).toEqual({ untrustedInput: true, privateData: true });
+});
+
+function slotReview() {
+  const h = setup();
+  const slot = { model: { provider: "provider", model: "model" }, fallbacks: [{ provider: "fallback", model: "secondary", thinking: "low" }] };
+  Object.assign(h.engine, { wake: async () => {} });
+  h.ledger.tx(() => {
+    h.ledger.putSetting("slots", { careful: slot });
+    for (const old of h.ledger.policyRules()) h.ledger.deletePolicyRule(old.id);
+    h.ledger.putPolicyRule(rule("slot-review", "review", { tool: "document_propose", reviewer: { kind: "slot", slot: "careful" } }));
+  });
+  const decision = h.ledger.tx(() => h.core.decisions.open({ kind: "document_review", ghostId: h.ghost.id, conversationId: h.conversationId, workId: null, effectId: null, title: "Review", detail: "Draft", options: [], proposal: { title: "Draft", body: "Text", pageId: null } }));
+  const wake = h.core.newConversation(h.main.id, "wake", null, "Slot review");
+  h.ledger.tx(() => {
+    h.ledger.putConversation(wake);
+    h.ledger.setPiConversationId(wake.id, "slot-review-pi");
+    h.ledger.putSetting(`wake:decision:${wake.id}`, decision.id);
+    h.ledger.putSetting(`wake:slot:${wake.id}`, "careful");
+    h.ledger.putSetting(`wake:slot-config:${wake.id}`, digestOf(slot));
+  });
+  const tool = createMainTools(h.core).tools!.find((entry) => entry.name === "decision_settle")!;
+  let sequence = 0;
+  const invoke = (agent: () => Promise<unknown>) => tool.execute({ decision_id: decision.id, outcome: "leave", note: "Independent slot review" } as never, { conversationId: "slot-review-pi", callId: `slot-${++sequence}`, agent } as unknown as ToolExecutionApi, {} as Context);
+  return { ...h, slot, decision, wake, invoke };
+}
+
+test("slot review uses the actual primary or fallback execution, not nullable Conversation.model", async () => {
+  const h = slotReview();
+  expect(h.wake.model).toBeNull();
+  expect((await h.invoke(async () => ({ model: { provider: "provider", modelId: "model" }, thinkingLevel: "off" }))).isError).toBeFalsy();
+  expect((await h.invoke(async () => ({ model: { provider: "fallback", modelId: "secondary" }, thinkingLevel: "low" }))).isError).toBeFalsy();
+  expect(h.ledger.decision(h.decision.id).proposal!.reviewedBy).toMatchObject({ ghostId: h.main.id, slot: "careful" });
+});
+
+test("slot review fails closed for wrong execution, wrong binding or changed configuration", async () => {
+  const h = slotReview();
+  expect((await h.invoke(async () => ({ model: { provider: "wrong", modelId: "model" }, thinkingLevel: "off" }))).isError).toBe(true);
+  expect((await h.invoke(async () => ({ model: { provider: "fallback", modelId: "secondary" }, thinkingLevel: "off" }))).isError).toBe(true);
+  h.ledger.tx(() => h.ledger.putSetting(`wake:slot:${h.wake.id}`, "different"));
+  expect((await h.invoke(async () => ({ model: { provider: "provider", modelId: "model" }, thinkingLevel: "off" }))).isError).toBe(true);
+  h.ledger.tx(() => {
+    h.ledger.putSetting(`wake:slot:${h.wake.id}`, "careful");
+    h.ledger.putSetting("slots", { careful: { ...h.slot, fallbacks: [] } });
+  });
+  expect((await h.invoke(async () => ({ model: { provider: "provider", modelId: "model" }, thinkingLevel: "off" }))).isError).toBe(true);
+  expect(h.ledger.decision(h.decision.id).proposal!.reviewedBy).toBeUndefined();
+});
+
+test("a slot change during actual execution lookup revokes settlement before audit mutation", async () => {
+  const h = slotReview();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<unknown>();
+  const result = h.invoke(() => { entered.resolve(); return release.promise; });
+  await entered.promise;
+  h.ledger.tx(() => h.ledger.putSetting("slots", { careful: { ...h.slot, model: { provider: "other", model: "other" } } }));
+  release.resolve({ model: { provider: "provider", modelId: "model" }, thinkingLevel: "off" });
+  expect((await result).isError).toBe(true);
+  expect(h.ledger.decision(h.decision.id).proposal!.reviewedBy).toBeUndefined();
+});
+
+test("owner-only credential, handoff, capability and configuration floors never replace deny", () => {
+  const h = setup();
+  h.ledger.tx(() => h.ledger.putPolicyRule(rule("explicit-deny", "deny")));
+  for (const proposal of [
+    { forceOwner: true },
+    { secureForm: { kind: "login" } },
+    { browserHandoff: { reason: "Sign in" } },
+    { capability: { ghostId: h.ghost.id, tools: ["host_read"], hostExecution: true } },
+  ]) {
+    const decision = h.core.decisions.ask(h.conversationId, "Denied request", "Do not perform", [CAPABILITY_GRANT], undefined, proposal);
+    expect(decision.state).toBe("denied");
+    expect(decision.proposal!.policy).toMatchObject({ evaluation: { decision: "deny", decidedBy: ["explicit-deny"] } });
+  }
+});
+
+test("top-level forceOwner is durable and cannot suppress later explicit effect denial", async () => {
+  const h = setup();
+  let calls = 0;
+  h.core.effects.onApproved("mail_send", async () => { calls++; return "sent"; });
+  h.ledger.tx(() => {
+    for (const old of h.ledger.policyRules()) h.ledger.deletePolicyRule(old.id);
+    h.ledger.putPolicyRule(rule("allow", "allow"));
+  });
+  const effect = h.core.effects.propose({ conversationId: h.main.directConversationId, callId: "forced-owner", tool: "mail_send", input: {}, summary: "Send", title: "Owner authorization", detail: "Review before sending", proposal: { input: {} }, forceOwner: true });
+  const decision = h.ledger.pendingDecisions({ effectId: effect.id })[0]!;
+  expect(decision.proposal!.forceOwner).toBe(true);
+  expect(h.core.effects.proposalStatus(effect)).toContain("approval required");
+  h.ledger.tx(() => h.ledger.putPolicyRule(rule("revoke-forced-owner", "deny", { tool: "mail_send" })));
+  await h.core.decisions.settleExpired();
+  expect(h.ledger.decision(decision.id).state).toBe("denied");
+  expect(h.ledger.effect(effect.id).state).toBe("denied");
+  expect(calls).toBe(0);
+  const blocked = h.ledger.tx(() => h.core.decisions.open({ kind: "approve_effect", ghostId: h.main.id, conversationId: h.main.directConversationId, workId: null, effectId: effect.id, title: "Still denied", detail: "A floor cannot revive denial", options: [], proposal: { forceOwner: true } }));
+  expect(blocked.state).toBe("denied");
+  expect(blocked.proposal!.policy).toMatchObject({ evaluation: { decision: "deny", decidedBy: ["revoke-forced-owner"] } });
 });

@@ -296,11 +296,11 @@ export class Effects {
   }
 
   /** Persist a proposed effect as pending and ask the owner. The host runs it after approval. */
-  propose(input: BeginEffect & { title: string; detail: string; proposal: Record<string, unknown> }): Effect {
+  propose(input: BeginEffect & { title: string; detail: string; proposal: Record<string, unknown>; forceOwner?: boolean }): Effect {
     if (!this.approved.has(input.tool)) throw new Error(`no approval executor for ${input.tool}`);
     const start = this.begin(input);
     if (start.kind === "replay") return start.effect;
-    this.openApproval(start.effect, input.title, input.detail, input.proposal);
+    this.openApproval(start.effect, input.title, input.detail, { ...input.proposal, ...(input.forceOwner ? { forceOwner: true } : {}) });
     return start.effect;
   }
 
@@ -310,9 +310,11 @@ export class Effects {
     if (current.state === "denied") return `Not performed (${current.id}): ${current.result ?? "policy denied"}`;
     if (current.state === "unknown") return `Outcome unknown (${current.id}); do not retry. Reconciliation is required.`;
     const receipt = this.ledger.setting<PolicyReceipt | null>(`policy:effect:${current.id}`, null);
-    return receipt?.evaluation.decision === "allow"
+    const decision = this.ledger.pendingDecisions({ effectId: current.id }).find((entry) => entry.kind === "approve_effect");
+    const evaluation = (decision?.proposal?.policy as PolicyReceipt | undefined)?.evaluation ?? receipt?.evaluation;
+    return evaluation?.decision === "allow"
       ? `Policy allowed the proposal (${current.id}); execution is scheduled. Only the follow-up receipt confirms the outcome. Do not retry.`
-      : `Policy approval required (${current.id}); nothing has been performed. ${receipt?.evaluation.reason ?? ""} End the turn or continue unrelated steps; the decision arrives as a message.`;
+      : `Policy approval required (${current.id}); nothing has been performed. ${evaluation?.reason ?? ""} End the turn or continue unrelated steps; the decision arrives as a message.`;
   }
 
   private openApproval(effect: Effect, title: string, detail: string, proposal: Record<string, unknown>) {
