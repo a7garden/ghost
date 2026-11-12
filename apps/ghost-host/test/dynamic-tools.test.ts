@@ -24,7 +24,7 @@ const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const context = { abortSignal: undefined, value: () => undefined, toString: () => "test" } as Context;
 const content = (result: ToolExecutionResult) => (result.content ?? []).map(part => part.type === "text" ? part.text : "").join("\n");
-const api = (callId: string) => ({ conversationId: 1, callId, output() {}, diagnostic() {} }) as unknown as ToolExecutionApi;
+const api = (callId: string, conversationId = 1) => ({ conversationId, callId, output() {}, diagnostic() {} }) as unknown as ToolExecutionApi;
 
 function setup(connectGate?: Promise<void>) {
   const h = harness();
@@ -102,14 +102,14 @@ test("wildcard grants cannot widen a Work tool scope or conversation kind", asyn
   const current = s.ledger.work(work.id);
   if (!current.conversationId) throw new Error("Work did not start");
   s.ledger.setPiConversationId(current.conversationId, "2");
-  const workApi = { ...api("narrowed"), conversationId: 2 };
+  const workApi = api("narrowed", 2);
   expect(() => requireAllowed(s.core, workApi, "mcp.fake.grow")).toThrow("outside this Work");
   expect(requireAllowed(s.core, workApi, "mcp.fake.echo").work?.id).toBe(work.id);
 });
 
 test("tool search actually installs and invokes a discovered tool after delayed server registration", async () => {
   const s = setup();
-  s.ledger.tx(() => { s.ledger.deleteMcpServer(s.server.id); s.ledger.setSetting("toolSearchThreshold", 1); });
+  s.ledger.tx(() => { s.ledger.deleteMcpServer(s.server.id); s.ledger.putSetting("toolSearchThreshold", 1); });
   expect((await s.catalog()).some(tool => tool.name.startsWith("mcp."))).toBe(false);
   s.ledger.tx(() => s.ledger.putMcpServer(s.server));
   const initial = await s.catalog();
@@ -199,7 +199,9 @@ test("MCP HTTP uses only granted stored credentials and never exposes echoed sec
   const otherConversation = h.ledger.conversation(other.directConversationId);
   expect((await tools.prepare!(otherConversation, other, null, tools.extensionsFor(otherConversation, other, null))).flatMap(extension => extension.tools ?? []).some(tool => tool.name.startsWith("mcp.remote."))).toBe(false);
   const connection = h.ledger.connection("service");
-  h.ledger.tx(() => h.ledger.putConnection({ ...connection, config: { ...connection.config, ghostIds: [] } }));
+  if (connection.config.kind !== "api") throw new Error("Expected the HTTP credential fixture to use an API connection");
+  const revoked = { ...connection, config: { ...connection.config, ghostIds: [] } };
+  h.ledger.tx(() => h.ledger.putConnection(revoked));
   expect((await echo.execute({ text: "revoked" } as never, api("http-revoked"), context)).isError).toBe(true);
 });
 
