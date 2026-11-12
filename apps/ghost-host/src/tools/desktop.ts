@@ -30,6 +30,7 @@ const DENIED_BUNDLES: Record<string, true> = {
 const DENIED_NAMES = /^(?:ghost|ghost control|keychain access|키체인 접근|passwords|암호|1password(?: 7)?|bitwarden|keepassxc|enpass)$/i;
 // A conservative heuristic, not an authorization/security boundary (same words as the browser).
 const HIGH_IMPACT = /(?:^|[^\p{L}\p{N}])(?:pay|buy|purchase|order|checkout|delete|remove|send|transfer|submit|unsubscribe)(?=$|[^\p{L}\p{N}])|결제|구매|주문|삭제|송금|이체|전송|보내기|제출|탈퇴|해지/iu;
+const MONEY_IMPACT = /(?:^|[^\p{L}\p{N}])(?:pay|buy|purchase|checkout|transfer)(?=$|[^\p{L}\p{N}])|결제|구매|송금|이체/iu;
 const SECRET_ROLE = /password|secure.?text|protected/i;
 
 const ref = Type.String({ pattern: "^@[a-z0-9]{2,40}:e[0-9]{1,6}$", maxLength: 64, description: "A ref from desktop_snapshot, e.g. @s8f3k2p9:e5" });
@@ -213,7 +214,7 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
     const irreversible = target ? HIGH_IMPACT.test(target.element.name) : !knownLocal;
     return text(await core.effects.run({
       conversationId: scope.conversation.id, callId: api.callId, tool: name, input, summary: name,
-      classification: { target: { kind: "mac", id: target?.snapshot.app.bundleId ?? target?.snapshot.app.name ?? null }, access: "write", reversible: !irreversible, external: irreversible, amount: null },
+      classification: { target: { kind: "mac", id: target?.snapshot.app.bundleId ?? target?.snapshot.app.name ?? null }, access: "write", reversible: !irreversible, external: !knownLocal, amount: target && MONEY_IMPACT.test(target.element.name) ? { value: null, currency: null } : null },
     }, perform));
   }
   async function physical(scope: Scope, id: string, validate?: (screen: Screen) => void): Promise<Screen> {
@@ -287,7 +288,7 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
           if (prior && name === "desktop_propose") {
             if (prior.tool !== name || prior.inputDigest !== digestOf(args)) throw invalid(`call ${api.callId} was recorded with different input`);
             if (prior.state !== "pending") throw invalid(`the outcome of call ${api.callId} is ${prior.state}; it will not run again`);
-            return text(`Owner approval required (${prior.id}); nothing clicked`);
+            return text(core.effects.proposalStatus(prior));
           }
           return await perform(args, scope, api);
         } catch (error) { return errorResult(error); }
@@ -504,10 +505,11 @@ export function createDesktopTools(core: Core, desktop: DesktopPort): Extension 
       if (!snapshot.app.processInstance) throw new NoEffect("The app's process identity is unavailable; take a fresh snapshot");
       const effect = core.effects.propose({
         conversationId: s.conversation.id, callId: api.callId, tool: "desktop_propose", input: a, summary: "PC click approval", title: a.title,
+        classification: { target: { kind: "mac", id: snapshot.app.bundleId ?? snapshot.app.name }, access: "write", reversible: false, external: true, amount: MONEY_IMPACT.test(element.name) ? { value: null, currency: null } : null },
         detail: `앱: ${snapshot.app.name}\n누를 곳: ${element.role}: ${element.name.slice(0, 1000)}\n${a.reason}\n24시간 안에 답하지 않으면 만료됩니다.`,
         proposal: { input: a, target: { app: snapshot.app, windowId: snapshot.windowId, surface: snapshot.surface, element }, app: snapshot.app.name, element: `${element.role}: ${element.name.slice(0, 1000)}`, reason: a.reason, expiresAt: Date.now() + DAY },
       });
-      return text(`Owner approval required (${effect.id}); nothing clicked`);
+      return text(core.effects.proposalStatus(effect));
     }),
   ];
   return defineExtension({ name: "ghost.desktop", tools });

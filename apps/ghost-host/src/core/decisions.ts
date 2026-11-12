@@ -1,9 +1,9 @@
-import { CAPABILITY_GRANT, HOST_TOOLS, reviewOf, type CapabilityRequest, type Decision, type DecisionReview, type VaultItem, type Work } from "@ghost/contract";
+import { CAPABILITY_GRANT, GOAL_ADOPT, HOST_TOOLS, reviewOf, type CapabilityRequest, type Decision, type DecisionReview, type VaultItem, type Work } from "@ghost/contract";
 import { updateGhost } from "./commands.ts";
 import type { Core } from "./core.ts";
 import { NoEffect } from "./effects.ts";
 import { conflict, invalid } from "./errors.ts";
-import { newId } from "./ids.ts";
+import { digestOf, newId } from "./ids.ts";
 import { classifyEffect, decisionTool, evaluateStoredPolicy, type PolicyReceipt } from "./policy-context.ts";
 
 export type OpenDecision = Omit<Decision, "id" | "state" | "answer" | "createdAt" | "resolvedAt">;
@@ -38,7 +38,7 @@ function resultLines(decision: Decision): string[] {
 /** Owner decisions. Opening one notifies; resolving one wakes whoever waits on it. */
 export class Decisions {
   /** Applies an approved document proposal; registered by the documents integration. */
-  private documentApplier: ((decision: Decision) => Promise<string>) | null = null;
+  private documentApplier: ((decision: Decision, authorize: () => void) => Promise<string>) | null = null;
 
   private timer: ReturnType<typeof setInterval> | null = null;
 
@@ -60,7 +60,7 @@ export class Decisions {
     return this.core.ledger;
   }
 
-  onDocumentApproved(apply: (decision: Decision) => Promise<string>) {
+  onDocumentApproved(apply: (decision: Decision, authorize: () => void) => Promise<string>) {
     this.documentApplier = apply;
   }
 
@@ -81,7 +81,7 @@ export class Decisions {
     this.ledger.tx(() => {
       const current = this.ledger.decision(decision.id);
       if (current.state !== "pending") return;
-      const noted = { ...current, detail: `${current.detail}\n\nConfigured reviewer unavailable: ${String(error)}. Configure the reviewer or decide explicitly as owner.` };
+      const noted = { ...current, detail: `${current.detail}\n\nConfigured reviewer unavailable: ${String(error)}. Configure the reviewer or decide explicitly as owner.`, proposal: { ...current.proposal, policyReviewUnavailable: true, review: { ...reviewOf(current.proposal), expiresAt: null } } };
       this.ledger.putDecision(noted);
       this.notifyOwner(noted);
     });
@@ -212,15 +212,16 @@ export class Decisions {
       case "accept_result": {
         if (!decision.workId || decision.state === "cancelled") break;
         const by = reviewOf(decision.proposal)?.resolvedBy;
+        const reviewerName = (decision.proposal?.reviewedBy as { name?: string } | undefined)?.name ?? "the policy reviewer";
         // 2026-11-12 owner decision: the verdict names who settled the result, not always the owner.
         const base = decision.state === "approved"
           ? by === "main"
-            ? "Accepted by the main Ghost for the owner after checking the report against the acceptance criteria."
+            ? `Accepted by ${reviewerName} for the owner after checking the report against the acceptance criteria.`
             : by === "timeout"
               ? "Accepted after the owner's wait ran out."
               : "Accepted by the owner."
           : by === "main"
-            ? "The main Ghost asked for changes."
+            ? `${reviewerName} asked for changes.`
             : by === "timeout"
               ? "The Host asked for changes after the owner's wait ran out."
               : "The owner asked for changes.";
@@ -251,14 +252,15 @@ export class Decisions {
 
   private async answerQuestion(decision: Decision) {
     const by = reviewOf(decision.proposal)?.resolvedBy;
-    const who = by === "timeout" ? "The owner did not answer in time, so the Host took your recommended answer for" : by === "main" ? "The main Ghost answered for the owner" : "The owner answered";
+    const reviewerName = (decision.proposal?.reviewedBy as { name?: string } | undefined)?.name ?? "The policy reviewer";
+    const who = by === "timeout" ? "The owner did not answer in time, so the Host took your recommended answer for" : by === "main" ? `${reviewerName} answered for the owner` : "The owner answered";
     const granted = this.grantCapability(decision, by ?? "owner");
     const goal = this.core.goals.settleProposal(decision);
     const text = granted
       ? `${who} "${decision.title}": ${decision.answer ?? CAPABILITY_GRANT}\n${granted}`
       : decision.state === "answered"
         ? `${who} "${decision.title}": ${decision.answer ?? ""}${goal ? `\n${goal}` : ""}`
-        : `${by === "main" ? "The main Ghost declined" : "The owner declined"} to answer "${decision.title}".${goal ? `\n${goal}` : ""}`;
+        : `${by === "main" ? `${reviewerName} declined` : "The owner declined"} to answer "${decision.title}".${goal ? `\n${goal}` : ""}`;
     if (decision.workId) this.core.works.resumeFromWaiting(decision.workId);
     // The granted tools must be configured before the turn that reads the answer starts.
     if (granted) await this.core.openConversation(decision.conversationId);
@@ -308,6 +310,7 @@ export class Decisions {
   reversible(decision: Decision): boolean {
     const receipt = this.evaluateDecision(decision);
     if (!receipt || decision.kind === "reconcile_effect" || decision.proposal?.secureForm || decision.proposal?.browserHandoff) return false;
+    if (decision.proposal?.goal && !this.safeAutomatic(decision, receipt)) return false;
     if (decision.kind === "accept_result" && (!decision.proposal?.result || typeof decision.proposal.criteria !== "string" || !decision.proposal.criteria.trim())) return false;
     return receipt.evaluation.decision === "review" || (receipt.evaluation.decision === "allow" && receipt.classification.reversible);
   }
@@ -325,25 +328,32 @@ export class Decisions {
     // Answering a question performs no I/O; any resulting mutation is checked separately.
     if (tool === "ask_owner") classification = { ...classification, reversible: typeof reviewOf(proposal)?.answer === "string" };
     if (tool === "complete") classification = { ...classification, reversible: !!proposal.result && typeof proposal.criteria === "string" && proposal.criteria.trim().length > 0 };
+    if (tool === "goal_propose") classification = { ...classification, target: { kind: "host", id: digestOf(proposal.goal) } };
     if (tool === "capability_request") {
       const capability = proposal.capability as CapabilityRequest;
       classification = { ...classification, target: { kind: capability.hostExecution || capability.tools.some((name) => HOST_TOOLS.includes(name)) ? "mac" : "host", id: capability.ghostId }, reversible: true, external: false };
     }
     const prior = proposal.policy as PolicyReceipt | undefined;
     const receipt = evaluateStoredPolicy(this.core, decision.conversationId, classification, prior, reserve);
+    if (tool === "complete" && receipt.evaluation.decision === "allow") receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: [], autoResolve: null, reason: "Policy cannot accept an unverified completion claim. Checks, an independent reviewer or the owner must verify this result." };
     if (proposal.forceOwner || proposal.secureForm || proposal.browserHandoff) receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: [], autoResolve: null, reason: "Owner authorization is required to widen configuration or provide credentials." };
     return receipt;
   }
 
   private safeAutomatic(decision: Decision, receipt: PolicyReceipt): boolean {
-    if (decision.kind === "reconcile_effect" || decision.kind === "accept_result" || decision.proposal?.secureForm || decision.proposal?.browserHandoff || decision.proposal?.goal) return false;
+    if (decision.kind === "reconcile_effect" || decision.kind === "accept_result" || decision.proposal?.secureForm || decision.proposal?.browserHandoff || decision.proposal?.forceOwner || decision.proposal?.policyReviewUnavailable) return false;
     const facts = receipt.classification;
-    // Opaque effects and unknown amounts never advance on silence.
-    if (!facts.reversible || facts.amount?.value === null) return false;
-    if (facts.amount) return receipt.evaluation.decidedBy.every((id) => {
+    if (decision.proposal?.goal) return receipt.evaluation.decidedBy.length > 0 && receipt.evaluation.decidedBy.every((id) => {
       const rule = this.ledger.policyRule(id);
-      return rule.createdBy.kind === "owner" && !!rule.maxAmount && rule.maxAmount.currency === facts.amount!.currency && facts.amount!.value! <= rule.maxAmount.value;
+      return rule.createdBy.kind === "owner" && rule.tool === "goal_propose" && rule.when.targetKind === "host" && rule.when.targetId === facts.target.id && rule.maxPerDay !== undefined;
     });
+    // Opaque effects and unreadable amounts never advance on silence.
+    if (facts.amount) return facts.amount.value !== null && facts.target.id !== null && receipt.evaluation.decidedBy.length > 0 && receipt.evaluation.decidedBy.every((id) => {
+      const rule = this.ledger.policyRule(id);
+      return rule.createdBy.kind === "owner" && rule.when.amount === true && rule.when.targetKind === facts.target.kind && rule.when.targetId === facts.target.id
+        && !!rule.maxAmount && rule.maxAmount.currency === facts.amount!.currency && facts.amount!.value! <= rule.maxAmount.value;
+    });
+    if (!facts.reversible) return false;
     return true;
   }
 
@@ -359,13 +369,14 @@ export class Decisions {
     const automatic = receipt.evaluation.autoResolve;
     const expiresAt = automatic && this.safeAutomatic(decision, receipt) ? decision.createdAt + automatic.afterMinutes * MINUTE : null;
     const review: DecisionReview = decision.kind === "question"
-      ? { ...prior, ...(prior?.answer ? { recommend: "answer" as const, answer: prior.answer } : {}), expiresAt }
+      ? { ...prior, ...(decision.proposal?.goal && this.safeAutomatic(decision, receipt) ? { recommend: "answer" as const, answer: GOAL_ADOPT } : prior?.answer ? { recommend: "answer" as const, answer: prior.answer } : {}), expiresAt }
       : { ...prior, recommend: "approve", expiresAt };
     const mayApprove = decision.kind !== "question" && !(decision.proposal?.secureForm || decision.proposal?.browserHandoff);
-    const state = receipt.evaluation.decision === "deny" ? "denied" : receipt.evaluation.decision === "allow" && mayApprove ? "approved" : "pending";
+    const adopt = !!decision.proposal?.goal && receipt.evaluation.decision === "allow" && this.safeAutomatic(decision, receipt);
+    const state = receipt.evaluation.decision === "deny" ? "denied" : adopt ? "answered" : receipt.evaluation.decision === "allow" && mayApprove ? "approved" : "pending";
     const conversation = this.ledger.conversation(decision.conversationId);
     const scopeId = decision.workId ? this.ledger.work(decision.workId).scopeId : this.ledger.setting<{ scopeId: string | null }>(`context:${conversation.id}`, { scopeId: null }).scopeId;
-    return { ...decision, state, resolvedAt: state === "pending" ? null : Date.now(), detail: `${decision.detail}\n\n${receipt.evaluation.reason}`, proposal: { ...decision.proposal, scopeId: decision.proposal?.scopeId ?? scopeId, policy: receipt, review } };
+    return { ...decision, state, answer: adopt ? GOAL_ADOPT : decision.answer, resolvedAt: state === "pending" ? null : Date.now(), detail: `${decision.detail}\n\n${receipt.evaluation.reason}`, proposal: { ...decision.proposal, scopeId: decision.proposal?.scopeId ?? scopeId, policy: receipt, review } };
   }
 
   reviewer(decision: Decision) {
@@ -431,7 +442,8 @@ export class Decisions {
     // Leaving a handed-over decision gives it back: it returns to the owner's queue with the main's note.
     const kept = choice.outcome !== "leave" && delegatedAt !== undefined ? { delegatedAt } : {};
     const review: DecisionReview = { ...prior, ...kept, mainNote: choice.note.slice(0, NOTE_MAX) };
-    const noted: Decision = { ...decision, proposal: { ...decision.proposal, review } };
+    const reviewer = this.reviewer(decision);
+    const noted: Decision = { ...decision, proposal: { ...decision.proposal, review, reviewedBy: { ghostId: mainId, name: this.ledger.ghost(mainId).name, slot: reviewer?.slot ?? null } } };
     this.ledger.tx(() => {
       this.ledger.putDecision(noted);
       // Left for the owner: now it is theirs, so they hear of it if they have not already.
@@ -565,7 +577,12 @@ export class Decisions {
           { conversationId: decision.conversationId, callId: `decision:${decision.id}`, tool: "document_write", input: decision.proposal, summary: `save "${decision.title}"` },
           async () => {
             try {
-              return await apply(decision);
+              return await apply(decision, () => {
+                this.core.effects.authorize(decision.conversationId, `decision:${decision.id}`);
+                const live = this.evaluateDecision(decision);
+                const approved = decision.proposal?.policy as PolicyReceipt | undefined;
+                if (live?.evaluation.decision === "deny" || approved && live?.rulesDigest !== approved.rulesDigest) throw new NoEffect("Document policy changed while the write waited; nothing was saved");
+              });
             } catch (error) {
               // The adapter checks before it writes and writes atomically: a thrown error means nothing was saved.
               throw new NoEffect(error instanceof Error ? error.message : String(error));

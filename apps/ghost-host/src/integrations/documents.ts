@@ -1151,20 +1151,22 @@ class VaultDocuments implements DocumentsPort {
   }
 
   /** Writes an approved `document_review` decision's proposal. */
-  async apply(decision: Decision): Promise<string> {
+  async apply(decision: Decision, authorize: () => void): Promise<string> {
     if (decision.state !== "approved") throw new Error("only an approved document decision can be applied");
+    if (!authorize) throw new Error("document mutation requires live Host authorization");
     const proposal = parseProposal(decision.proposal);
     const space = this.requireScope(proposal.scopeId);
-    const page = await this.save(proposal);
+    const page = await this.save(proposal, authorize);
     return proposal.pageId === null
       ? `Saved "${proposal.title}" as ${page.locator} in ${space.name}.`
       : `Updated "${proposal.title}" (${page.locator}) in ${space.name}.`;
   }
 
   /** The owner's direct write: the same checks and atomic path as an applied decision. */
-  async save(proposal: DocumentProposal): Promise<Page> {
+  async save(proposal: DocumentProposal, authorize?: () => void): Promise<Page> {
     const space = this.requireScope(proposal.scopeId);
     await this.check(proposal);
+    authorize?.();
     return proposal.pageId === null ? this.createPage(space, proposal) : this.updatePage(space, proposal);
   }
 
@@ -1559,6 +1561,6 @@ function parseProposal(payload: unknown): DocumentProposal {
 /** The document plane of the host, bound to the ledger's Scopes. */
 export function createDocuments(core: Core): DocumentsPort {
   const port = new VaultDocuments(core);
-  core.decisions.onDocumentApproved((decision) => port.apply(decision));
+  core.decisions.onDocumentApproved((decision, authorize) => port.apply(decision, authorize));
   return port;
 }

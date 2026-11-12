@@ -9,6 +9,7 @@ import { NoEffect } from "../core/effects.ts";
 import { digestOf } from "../core/ids.ts";
 import type { HostCommand, HostPort } from "../integrations/ports.ts";
 import { errorResult, requireAllowed } from "./shared.ts";
+import { policyRead } from "../core/policy-context.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 const UNTRUSTED =
@@ -159,7 +160,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
     async execute(args, api) {
       try {
         const scope = requireAllowed(core, api, "host_command_propose");
-        const result = await host.inspect(args);
+        const result = await host.inspect(args, () => policyRead(core, scope.conversation.id, { tool: "host_command_propose", target: { kind: "mac", id: null }, access: "read", reversible: true, external: false, amount: null }));
         if (result !== null) {
           return {
             content: [{ type: "text", text: JSON.stringify(result) }],
@@ -192,7 +193,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
           content: [
             {
               type: "text",
-              text: `Owner approval required (${effect.id}); nothing ran, so do not retry or wait — continue with other steps or end the turn; the outcome arrives as a message.`,
+              text: core.effects.proposalStatus(effect),
             },
           ],
         };

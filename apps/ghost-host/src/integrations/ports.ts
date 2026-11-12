@@ -52,7 +52,7 @@ export interface DocumentsPort {
   /** Validate a proposal without writing; throws when it can never apply (stale hash, bad profile). */
   check(proposal: DocumentProposal): Promise<void>;
   /** Write an approved `document_review` decision's proposal. Returns a line for the Ghost. */
-  apply(decision: Decision): Promise<string>;
+  apply(decision: Decision, authorize: () => void): Promise<string>;
   /** Owner edit from the UI: same checks and atomic write as `apply`, returns the saved page. */
   save(proposal: DocumentProposal): Promise<Page>;
 }
@@ -154,7 +154,7 @@ export interface HostPort {
   /** Read incoming verification codes from Messages; dbPath is injectable for tests. */
   messageCodes(input: { dbPath?: string; withinMinutes: number; senderContains?: string }): Promise<{ codes: MessageVerificationCode[] }>;
   /** Runs an eligible inspection; null means the requested command did not run and needs approval. */
-  inspect(input: HostCommand): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean } | null>;
+  inspect(input: HostCommand, authorize?: () => void): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean } | null>;
   validateCommand(input: HostCommand): HostCommand;
   executeCommand(input: HostCommand, authorize?: () => void): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
 }
@@ -248,7 +248,7 @@ export interface BrowserPort {
   /** Host-only atomic issuer-field capture; protects the value from subsequent model output. */
   captureCredential(session: BrowserSessionRef, input: { origin: string; ref?: string; selector?: string }): Promise<string>;
   /** Prepare secure Chrome owner interaction; headed defaults true for the explicit Mac-window action. */
-  handoff(session: BrowserSessionRef, url: string | null, options?: { headed?: boolean }): Promise<void>;
+  handoff(session: BrowserSessionRef, url: string | null, options?: { headed?: boolean; authorize?: () => void }): Promise<void>;
   sessions(): BrowserSessionInfo[];
   /** Shared local screencast, owner-only. Returns an unsubscribe function. */
   live(session: BrowserSessionRef, options: { maxFps: number }, sink: (event: BrowserLiveEvent) => void): Promise<() => void>;
@@ -260,7 +260,7 @@ export interface BrowserPort {
   /** Save the headed state and reopen headless at the owner's final page before the next command. */
   endHandoff(session: BrowserSessionRef): Promise<BrowserHandoffEnd>;
   /** Close the conversation's session; the Ghost's login state is saved. */
-  close(session: BrowserSessionRef): Promise<void>;
+  close(session: BrowserSessionRef, authorize?: () => void): Promise<void>;
   /** Keep sessions alive and out of eviction while `held` says an owner approval or handoff still needs them. */
   retainWhile?(held: (session: BrowserSessionRef) => boolean): void;
   /** Stop every session and the egress proxy (host shutdown). */

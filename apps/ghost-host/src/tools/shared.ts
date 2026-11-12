@@ -130,10 +130,10 @@ export function requireAllowed(core: Core, api: Pick<ToolExecutionApi, "conversa
   if (scope.work && scope.work.deadlineAt !== null && scope.work.deadlineAt <= Date.now()) throw forbidden("Work deadline has passed");
   if (scope.work?.activityId) core.activities.authorize(scope.work.id, name);
   const externalRead = ["web_search", "web_read", "reach", "browser_open", "browser_snapshot", "browser_screenshot", "browser_read", "mail_search", "mail_read"].includes(name);
-  const privateRead = name.startsWith("host_") || name.startsWith("vault_") || name.startsWith("mail_") || name.startsWith("desktop_") || name === "toss_read";
+  const privateRead = name.startsWith("host_") || name.startsWith("vault_") || name.startsWith("mail_") || name.startsWith("desktop_") || ["toss_read", "browser_fill_secret", "browser_fill_card"].includes(name);
   if (externalRead || privateRead) markPolicyRead(core, scope.conversation.id, { untrustedInput: externalRead || name.startsWith("desktop_"), privateData: privateRead });
   if (externalRead || ["host_status", "host_services", "host_disk_scan", "host_disk_usage", "host_list", "host_read", "host_nodes", "host_message_codes", "vault_list", "desktop_apps", "desktop_snapshot", "desktop_screenshot", "toss_read"].includes(name)) {
-    policyRead(core, scope.conversation.id, { tool: name, target: { kind: name.startsWith("mail_") ? "mail_account" : name.startsWith("browser_") ? "browser_origin" : name.startsWith("host_") || name.startsWith("desktop_") ? "mac" : "host", id: null }, access: "read", reversible: true, external: externalRead, amount: null });
+    policyRead(core, scope.conversation.id, { tool: name, target: { kind: name.startsWith("mail_") ? "mail_account" : name.startsWith("browser_") || name.startsWith("web_") || name === "reach" ? "browser_origin" : name.startsWith("host_") || name.startsWith("desktop_") ? "mac" : name === "toss_read" ? "connection" : "host", id: null }, access: "read", reversible: true, external: externalRead, amount: null });
   }
   return scope;
 }

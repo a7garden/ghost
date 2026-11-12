@@ -326,6 +326,7 @@ Body text.
         pageId: null,
         expectedHash: null,
       }),
+      () => {},
     );
 
     expect(line.split("\n")).toHaveLength(1);
@@ -348,6 +349,7 @@ Body text.
         pageId: page.pageId,
         expectedHash: page.hash,
       }),
+      () => {},
     );
 
     expect(line).toContain("note.md");
@@ -387,6 +389,7 @@ Body text.
           pageId: page.pageId,
           expectedHash: page.hash,
         }),
+        () => {},
       ),
     ).rejects.toThrow(/external_change_conflict/);
 
@@ -407,6 +410,7 @@ Body text.
           pageId: page.pageId,
           expectedHash: page.hash,
         }),
+        () => {},
       ),
     ).rejects.toThrow(/legacy_document_read_only/);
 
@@ -515,8 +519,8 @@ Body text.
       profile: "pdc-markdown/1", pageId: null, expectedHash: null,
     });
     const before = readdirSync(path);
-    await expect(documents.apply({ ...decision, state: "pending" })).rejects.toThrow(/only an approved/);
+    await expect(documents.apply({ ...decision, state: "pending" }, () => {})).rejects.toThrow(/only an approved/);
     expect(readdirSync(path)).toEqual(before);
-    await expect(documents.apply(decision)).resolves.toContain("Watering plan");
+    await expect(documents.apply(decision, () => {})).resolves.toContain("Watering plan");
   });
 });

@@ -5,6 +5,7 @@ import { invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
 import type { DocumentsPort, PageMeta } from "../integrations/ports.ts";
 import { errorResult, firstLine, requireAllowed } from "./shared.ts";
+import { markPolicyRead, policyRead } from "../core/policy-context.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -58,9 +59,11 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
     replay: "safe",
     async execute(args, api) {
       try {
-        requireAllowed(core, api, "document_read");
+        const scope = requireAllowed(core, api, "document_read");
+        policyRead(core, scope.conversation.id, { tool: "document_read", target: { kind: "document_vault", id: args.scope_id }, access: "read", reversible: true, external: false, amount: null });
         if (args.page_id === undefined && args.locator === undefined) throw invalid("give page_id or locator");
         const page = await documents.readPage(args.scope_id, { pageId: args.page_id, locator: args.locator });
+        markPolicyRead(core, scope.conversation.id, { untrustedInput: true, privateData: true });
         const body = page.body.length > READ_WINDOW ? `${page.body.slice(0, READ_WINDOW)}\n[truncated]` : page.body;
         return text(`${page.title} (${page.pageId}) ${page.locator} — ${page.profile}\n\n${body}`);
       } catch (error) {
@@ -71,7 +74,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
 
   const documentPropose = defineTool({
     name: "document_propose",
-    description: "Propose a new page or an edit of an existing page for owner review; nothing is written until the owner approves.",
+    description: "Propose a new page or edit under the current Host policy. A follow-up receipt reports whether it was saved.",
     parameters: Type.Object({
       scope_id: Type.String({ minLength: 1 }),
       title: Type.String({ minLength: 1, maxLength: 256 }),
@@ -109,7 +112,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
             proposal: { ...proposal },
           }),
         );
-        return text(`The proposal is awaiting owner review (${decision.id}). Their answer arrives as a message.`);
+        return text(`Document proposal ${decision.id}: ${decision.state}. ${(decision.proposal?.policy as { evaluation?: { reason?: string } } | undefined)?.evaluation?.reason ?? ""} A follow-up receipt reports the save outcome.`);
       } catch (error) {
         return errorResult(error);
       }

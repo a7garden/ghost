@@ -98,10 +98,10 @@ function glob(pattern: string, value: string): boolean {
 
 function apply(rule: PolicyRule, effect: EffectClass, context: PolicyContext): Applied {
   const declared = rule.decision === "allow" || rule.decision === "deny" ? null : rule.autoResolve ?? null;
-  if (rule.decision === "review" && !rule.reviewer) return { rule, decision: "owner", autoResolve: declared, note: `${rule.id} names no reviewer` };
-  if (RANK[rule.decision] >= RANK.owner) return { rule, decision: rule.decision, autoResolve: declared, note: null };
+  if (rule.decision === "deny") return { rule, decision: "deny", autoResolve: null, note: null };
   const exceeded = limitExceeded(rule, effect, context);
   if (exceeded) return { rule, decision: "owner", autoResolve: null, note: `${rule.id} exceeded ${exceeded}` };
+  if (rule.decision === "review" && !rule.reviewer) return { rule, decision: "owner", autoResolve: declared, note: `${rule.id} names no reviewer` };
   return { rule, decision: rule.decision, autoResolve: declared, note: null };
 }
 
@@ -193,6 +193,7 @@ const ROWS: readonly Row[] = [
   { id: "result", tool: "complete", when: { reversible: true }, decision: "review", main: true },
   { id: "document-write", tool: "document_write", when: { targetKind: "document_vault" }, decision: "allow" },
   { id: "outside-mac", tool: "*", when: { targetKind: "mac", access: "write", reversible: false }, decision: "owner" },
+  { id: "browser-unknown-effect", tool: "browser_*", when: { targetKind: "browser_origin", reversible: false }, decision: "owner" },
   { id: "money", tool: "*", when: { amount: true }, decision: "owner" },
   { id: "rule-of-two", tool: "*", when: { access: "write", external: true, untrustedInput: true, privateData: true }, decision: "owner" },
 ];
@@ -240,9 +241,13 @@ export function activityRules(activity: Pick<Activity, "id" | "policy">, approva
       return [
         ruleOf({ id: id("action"), tool: "activity_action", decision: "deny" }, approvals, scoped),
         ruleOf({ id: id("connection-write"), tool: "connection_request", when: { access: "write" }, decision: "deny" }, approvals, scoped),
+        ruleOf({ id: id("external-write"), tool: "*", when: { access: "write", external: true }, decision: "deny" }, approvals, scoped),
       ];
     case "approval":
-      return [ruleOf({ id: id("action"), tool: "activity_action", decision: "owner", main: true }, approvals, scoped)];
+      return [
+        ruleOf({ id: id("action"), tool: "activity_action", decision: "owner", main: true }, approvals, scoped),
+        ruleOf({ id: id("external-write"), tool: "*", when: { access: "write", external: true }, decision: "owner" }, approvals, scoped),
+      ];
     case "allow":
       return [ruleOf({ id: id("action"), tool: "activity_action", decision: "allow" }, approvals, scoped)];
   }

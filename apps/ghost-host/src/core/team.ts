@@ -58,7 +58,7 @@ export class Team {
    * listed separately by the wake, so rows cover teammates; full detail stays with work_list and
    * work_inspect.
    */
-  context(): string {
+  context(sources?: Set<string>): string {
     const live = this.ledger.worksInState(...LIVE_STATES);
     if (live.length === 0) return "";
     const tally = LIVE_STATES.map((state) => [state, live.filter((work) => work.state === state).length] as const)
@@ -69,6 +69,7 @@ export class Team {
     const rows = live.filter((work) => !main || work.ghostId !== main.id);
     const lines = [`Live team Work: ${live.length} (${tally})`];
     for (const work of rows.slice(0, MAX_CONTEXT_ROWS)) {
+      if (work.conversationId) sources?.add(work.conversationId);
       const assignee = this.ledger.ghost(work.ghostId).name;
       const marker = work.activityId ? " [activity]" : "";
       const reason = work.reason ? ` — ${work.reason.split("\n", 1)[0]!.slice(0, 200)}` : "";

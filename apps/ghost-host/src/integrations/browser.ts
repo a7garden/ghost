@@ -1286,10 +1286,11 @@ export class AgentBrowser implements BrowserPort {
     });
     session.ownerQueue = next.catch(() => {}); return next;
   }
-  handoff(ref: BrowserSessionRef, url: string | null, options: { headed?: boolean } = {}) {
+  handoff(ref: BrowserSessionRef, url: string | null, options: { headed?: boolean; authorize?: () => void } = {}) {
     this.existing(ref);
     return this.enqueueSession(ref, async (session) => {
       await this.recoverLogin(session);
+      options.authorize?.();
       const headed = options.headed !== false;
       if (headed ? session.headed : session.engine === "chrome") return;
       session.promoting = true;
@@ -1312,20 +1313,20 @@ export class AgentBrowser implements BrowserPort {
           cookies = exported.data;
         } else if (session.captureArmed) await this.capture(session);
         this.disconnect(session,"engine_changed");
-        if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not save browser state");
+        if (!(await this.invoke(session, ["close"], { authorize: options.authorize })).ok) throw new CommandError("unavailable", "Could not save browser state");
         // Obscura's CDP pages are connection-scoped and have no isolated realm. Owner interaction uses Chrome.
         // Cookies survive migration; DOM/localStorage/JS state cannot transfer. Chrome remains the session engine.
         session.engine = "chrome"; session.headed = headed; session.handoffUrl = headed ? url : null; session.handoffFallback = false;
-        if (!(await this.invoke(session, ["open", cookies ? "about:blank" : url])).ok) throw new CommandError("unavailable", "Could not open the owner browser");
+        if (!(await this.invoke(session, ["open", cookies ? "about:blank" : url], { authorize: options.authorize })).ok) throw new CommandError("unavailable", "Could not open the owner browser");
         if (cookies) {
           const staging = this.sessionDirs(session)[1]!; mkdirSync(staging, { recursive: true, mode: 0o700 });
           const path = join(staging, randomUUID());
           try {
             const data = typeof cookies === "object" && "cookies" in cookies ? cookies.cookies : cookies;
             writeFileSync(path, JSON.stringify({cookies:data,origins:[]}), { flag: "wx", mode: 0o600 });
-            if (!(await this.invoke(session, ["state", "load", path])).ok) throw new CommandError("unavailable", "Could not restore browser cookies");
+            if (!(await this.invoke(session, ["state", "load", path], { authorize: options.authorize })).ok) throw new CommandError("unavailable", "Could not restore browser cookies");
           } finally { rmSync(path, { force: true }); cookies = null; }
-          if (!(await this.invoke(session, ["open", url])).ok) throw new CommandError("unavailable", "Could not open migrated page");
+          if (!(await this.invoke(session, ["open", url], { authorize: options.authorize })).ok) throw new CommandError("unavailable", "Could not open migrated page");
         }
         if (session.ownerViewport && !(await this.invoke(session,["set","viewport",String(session.ownerViewport.width),String(session.ownerViewport.height)])).ok) throw new CommandError("unavailable","Could not restore the owner viewport");
         if (headed) {
@@ -1376,10 +1377,10 @@ export class AgentBrowser implements BrowserPort {
       return { fallback: session.handoffFallback };
     });
   }
-  close(ref: BrowserSessionRef) {
+  close(ref: BrowserSessionRef, authorize?: () => void) {
     return this.enqueueSession(ref, async (session) => {
       try { await this.capture(session); } catch { session.login?.clear(); }
-      if (!(await this.invoke(session, ["close"])).ok) throw new CommandError("unavailable", "Could not close browser session");
+      if (!(await this.invoke(session, ["close"], { authorize })).ok) throw new CommandError("unavailable", "Could not close browser session");
       this.disconnect(session, "closed");
       this.clearFiles(session);
       this.sessionMap.delete(ref.conversationId);

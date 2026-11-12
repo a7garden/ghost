@@ -304,6 +304,17 @@ export class Effects {
     return start.effect;
   }
 
+  proposalStatus(effect: Effect): string {
+    const current = this.ledger.effect(effect.id);
+    if (current.state === "done") return `${current.tool} (${current.id}): ${current.result ?? "completed"}`;
+    if (current.state === "denied") return `Not performed (${current.id}): ${current.result ?? "policy denied"}`;
+    if (current.state === "unknown") return `Outcome unknown (${current.id}); do not retry. Reconciliation is required.`;
+    const receipt = this.ledger.setting<PolicyReceipt | null>(`policy:effect:${current.id}`, null);
+    return receipt?.evaluation.decision === "allow"
+      ? `Policy allowed the proposal (${current.id}); execution is scheduled. Only the follow-up receipt confirms the outcome. Do not retry.`
+      : `Policy approval required (${current.id}); nothing has been performed. ${receipt?.evaluation.reason ?? ""} End the turn or continue unrelated steps; the decision arrives as a message.`;
+  }
+
   private openApproval(effect: Effect, title: string, detail: string, proposal: Record<string, unknown>) {
     const conversation = this.ledger.conversation(effect.conversationId);
     this.ledger.tx(() => this.core.decisions.open({
@@ -340,6 +351,7 @@ export class Effects {
     const work = effect.workId ? this.ledger.work(effect.workId) : null;
     if (ghost.state !== "active" || ghost.deletedAt !== null) throw new NoEffect("The executing Ghost is no longer active");
     if (conversation.kind === "review" || conversation.kind === "subagent") throw new NoEffect("Read-only conversations cannot execute effects");
+    if (["write", "edit", "bash", "publish_artifact", "activity_action"].includes(effect.tool) && conversation.kind !== "work") throw new NoEffect("This tool requires a Work conversation");
     const tool = effect.tool === "document_write" ? "document_propose" : effect.tool;
     const internal = ["self_adapt", "activity_action"].includes(tool);
     const matches = (pattern: string) => new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`).test(tool);

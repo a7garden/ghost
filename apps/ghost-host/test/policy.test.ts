@@ -161,8 +161,8 @@ const CASES: Case[] = [
   { behavior: "connection_register waits for the owner alone", effect: effect("connection_register", "connection", { id: "new" }), expected: { decision: "owner" } },
   // host_command_propose (tools/host.ts, core/decisions.ts reversible()).
   { behavior: "host_command_propose allowlisted read-only inspection runs immediately", effect: read("host_command_propose", "mac", "/Users/o"), expected: { decision: "allow" } },
-  { behavior: "host_command_propose with a risk speaking of no loss: main settles, approves after 30 min", effect: effect("host_command_propose", "mac", { reversible: true }), expected: { decision: "review", main: true, auto: "approve" } },
-  { behavior: "host_command_propose destructive risk: owner, main leaves a view", effect: effect("host_command_propose", "mac"), expected: { decision: "owner", main: true } },
+  { behavior: "host_command_propose with host-proven reversible effects: main settles, approves after 30 min", effect: effect("host_command_propose", "mac", { reversible: true }), expected: { decision: "review", main: true, auto: "approve" } },
+  { behavior: "host_command_propose with opaque or irreversible effects: owner, main leaves a view", effect: effect("host_command_propose", "mac"), expected: { decision: "owner", main: true } },
   { behavior: "the main's own reversible Mac command: owner, approves after 30 min", effect: effect("host_command_propose", "mac", { reversible: true }), context: { ghostId: MAIN }, expected: { decision: "owner", auto: "approve" } },
   // Browser (tools/browser.ts).
   { behavior: "browser_click on an ordinary element", effect: effect("browser_click", "browser_origin", { id: "https://a.example", reversible: true }), expected: { decision: "allow" } },
@@ -171,14 +171,14 @@ const CASES: Case[] = [
   { behavior: "browser_press Enter on a high-impact target is refused", effect: effect("browser_press", "browser_origin", { id: "https://a.example" }), expected: { decision: "deny" } },
   { behavior: "browser_press Enter on a checkout page is refused", effect: effect("browser_press", "browser_origin", { reversible: true, amount: { value: 30_000, currency: "KRW" } }), expected: { decision: "deny" } },
   { behavior: "browser_fill and browser_type are not guarded", effect: effect("browser_fill", "browser_origin", { reversible: true }), expected: { decision: "allow" } },
-  { behavior: "browser_upload sends a workspace file", effect: effect("browser_upload", "browser_origin", { external: true }), expected: { decision: "allow" } },
-  { behavior: "browser_fill_secret with a granted vault item", effect: effect("browser_fill_secret", "browser_origin", { taint: { untrustedInput: false, privateData: true } }), expected: { decision: "allow" } },
+  { behavior: "browser_upload sends a workspace file", effect: effect("browser_upload", "browser_origin", { external: true, reversible: true }), expected: { decision: "allow" } },
+  { behavior: "browser_fill_secret with a granted vault item", effect: effect("browser_fill_secret", "browser_origin", { reversible: true, taint: { untrustedInput: false, privateData: true } }), expected: { decision: "allow" } },
   { behavior: "browser_propose: owner, main leaves a view", effect: effect("browser_propose", "browser_origin", { external: true, amount: { value: 30_000, currency: "KRW" } }), expected: { decision: "owner", main: true } },
   { behavior: "browser_fill_card: owner, main leaves a view", effect: effect("browser_fill_card", "browser_origin", { amount: { value: null, currency: null }, taint: { untrustedInput: false, privateData: true } }), expected: { decision: "owner", main: true } },
   { behavior: "browser_handoff: owner alone", effect: effect("browser_handoff", "browser_origin"), expected: { decision: "owner" } },
   // Desktop (tools/desktop.ts).
   { behavior: "desktop_click on an ordinary element", effect: effect("desktop_click", "mac", { reversible: true }), expected: { decision: "allow" } },
-  { behavior: "desktop_launch and desktop_focus", effect: effect("desktop_launch", "mac"), expected: { decision: "allow" } },
+  { behavior: "desktop_launch and desktop_focus", effect: effect("desktop_launch", "mac", { reversible: true }), expected: { decision: "allow" } },
   { behavior: "desktop_click on a send/pay/delete-named element is refused", effect: effect("desktop_click", "mac"), expected: { decision: "deny" } },
   { behavior: "desktop_pointer on a high-impact label is refused", effect: effect("desktop_pointer", "mac"), expected: { decision: "deny" } },
   { behavior: "desktop_keys submit on a high-impact target is refused", effect: effect("desktop_keys", "mac"), expected: { decision: "deny" } },
@@ -190,6 +190,8 @@ const CASES: Case[] = [
   // Documents (tools/documents.ts).
   { behavior: "document_propose new page: main settles, approves after 30 min", effect: effect("document_propose", "document_vault", { id: "space-1", reversible: true }), expected: { decision: "review", main: true, auto: "approve" } },
   { behavior: "document_propose edit of an existing page: owner, main leaves a view", effect: effect("document_propose", "document_vault", { id: "space-1" }), expected: { decision: "owner", main: true } },
+  { behavior: "approved document_write journals a vault revision", effect: effect("document_write", "document_vault", { reversible: true }), expected: { decision: "allow" } },
+  { behavior: "outward browser action after private and untrusted reads needs the owner", effect: effect("browser_upload", "browser_origin", { reversible: true, external: true, taint: { untrustedInput: true, privateData: true } }), expected: { decision: "owner" } },
   // Activities (core/activities.ts, tools/activities.ts).
   { behavior: "activity_action under deny is refused", effect: effect("activity_action", "mail_account", { external: true }), context: inRun, rules: activity("deny"), expected: { decision: "deny" } },
   { behavior: "activity_action under approval: owner, main leaves a view", effect: effect("activity_action", "connection", { external: true }), context: inRun, rules: activity("approval"), expected: { decision: "owner", main: true } },

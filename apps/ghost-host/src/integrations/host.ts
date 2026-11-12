@@ -1248,7 +1248,7 @@ export class MacHost implements HostPort {
     return { ...input, args: [...input.args.slice(0, -1), destination] };
   }
   /** A refusal is not execution: the caller may offer the ordinary approval path. */
-  async inspect(input: HostCommand) {
+  async inspect(input: HostCommand, authorize?: () => void) {
     this.validateCommandInput(input);
     input = { ...input, program: inspectionProgram(input.program) };
     const shape = inspectionShape(input.program, input.args);
@@ -1257,12 +1257,13 @@ export class MacHost implements HostPort {
     let checked: HostCommand;
     try { checked = this.prepareInspection(input, shape); }
     catch { return null; }
+    authorize?.();
     if (shape.gitRemote) {
       const remote = await this.prepareRemote(checked, shape, deadline);
       if (!remote) return null;
       checked = remote;
     }
-    return this.runCommand(checked, shape, deadline);
+    return this.runCommand(checked, shape, deadline, authorize);
   }
   async executeCommand(input: HostCommand, authorize?: () => void) {
     let checked: HostCommand;
