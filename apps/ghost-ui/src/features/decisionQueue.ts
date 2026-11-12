@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { reviewOf, type Decision, type State } from '@ghost/contract';
 import { highRiskApproval } from './Decision';
-import { secureFormProposal, browserHandoffProposal } from './decisionText';
+import { secureFormProposal, browserHandoffProposal, decisionTone } from './decisionText';
 import { handedOver } from './ghostState';
 
 export { handedOver };
@@ -18,14 +18,19 @@ export { handedOver };
  */
 export function canHandOver(decision: Decision, state: State): boolean {
   if (decision.state !== 'pending' || handedOver(decision) || !reviewOf(decision.proposal)?.recommend) return false;
+  // A result older than the criteria rule still carries a recommendation; the Host hands a result over only with criteria to check.
+  if (decision.kind === 'accept_result' && !(decision.proposal?.result && typeof decision.proposal.criteria === 'string' && decision.proposal.criteria.trim())) return false;
   const main = state.ghosts.find(ghost => ghost.isDefault && ghost.deletedAt === null);
   if (!main || main.state !== 'active' || main.id === decision.ghostId) return false;
   return (state.settings.approvals?.delegate ?? 'reversible') === 'reversible';
 }
 
-/** 추천대로 처리할 때 보낼 결과. 추천이 없거나 위험해서 한 장씩 봐야 하는 결정은 null. */
+/**
+ * 추천대로 처리할 때 보낼 결과. 추천이 없거나 위험해서 한 장씩 봐야 하는 결정은 null.
+ * 결과 확인은 Host 가 되돌릴 수 있다고 보아 추천을 붙여도 누가 승인을 권한 것이 아니다 — 한꺼번에 승인하지 않는다.
+ */
 export function recommendedResolution(decision: Decision): { outcome: 'approve' } | { outcome: 'answer'; answer: string } | null {
-  if (decision.state !== 'pending' || handedOver(decision)) return null;
+  if (decision.state !== 'pending' || handedOver(decision) || decision.kind === 'accept_result') return null;
   if (secureFormProposal(decision) || browserHandoffProposal(decision) || highRiskApproval(decision)) return null;
   const review = reviewOf(decision.proposal);
   if (review?.recommend === 'approve') return { outcome: 'approve' };
@@ -75,9 +80,21 @@ export function useLater(): Later {
   return useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => later, () => later);
 }
 
-/** 주인이 볼 순서: 오래 기다린 것부터, 미룬 것은 미룬 순서대로 맨 뒤. */
+/**
+ * 주인이 볼 순서: 급한 것(답할 질문 · 실행 승인 · 금고)이 결과 확인 · 문서 검토보다 먼저, 같은 무게끼리는 오래 기다린 것부터.
+ * 미룬 것은 무게와 상관없이 미룬 순서대로 맨 뒤.
+ */
 export function ownerOrder(decisions: Decision[], deferred: Later): Decision[] {
-  const now = decisions.filter(decision => deferred[decision.id] === undefined).sort((a, b) => a.createdAt - b.createdAt);
+  const weight = (decision: Decision) => decisionTone(decision) === 'calm' ? 1 : 0;
+  const now = decisions.filter(decision => deferred[decision.id] === undefined).sort((a, b) => weight(a) - weight(b) || a.createdAt - b.createdAt);
   const after = decisions.filter(decision => deferred[decision.id] !== undefined).sort((a, b) => deferred[a.id]! - deferred[b.id]!);
   return [...now, ...after];
 }
+
+// ── 펼친 전문 ────────────────────────────────────────────────────────────
+// 결과 확인 카드의 「전문 보기」는 정하기 전까지 펼친 그대로 둔다 — 다른 화면에 다녀와도. 정하고 나면 잊는다.
+
+const fullOpen = new Set<string>();
+
+export function fullTextOpen(decision: Decision): boolean { return decision.state === 'pending' && fullOpen.has(decision.id); }
+export function setFullTextOpen(id: string, open: boolean) { if (open) fullOpen.add(id); else fullOpen.delete(id); }

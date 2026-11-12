@@ -47,11 +47,24 @@ describe('확인할 일 빠른 처리', () => {
     // A recommended answer that is not among the offered options is never sent blind.
     expect(recommendedResolution(decision({ proposal: { review: { recommend: 'answer', answer: 'C', expiresAt: null } } }))).toBeNull();
     expect(recommendedResolution(handed())).toBeNull();
+    // A reported result is reversible for the main, but nobody recommended accepting it: never accepted in bulk.
+    expect(recommendedResolution(decision({ kind: 'accept_result', options: [], proposal: { result: { summary: 's', artifacts: [] }, criteria: 'c', review: { recommend: 'approve', expiresAt: null } } }))).toBeNull();
   });
 
   it('keeps the oldest first and moves what was put off to the back, in the order it was put off', () => {
     const items = [decision({ id: 'a', createdAt: 1 }), decision({ id: 'b', createdAt: 2 }), decision({ id: 'c', createdAt: 3 })];
     expect(ownerOrder(items, {}).map(item => item.id)).toEqual(['a', 'b', 'c']);
     expect(ownerOrder(items, { c: 10, a: 20 }).map(item => item.id)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('puts what only the owner can answer ahead of results to check, and what was put off still at the back', () => {
+    const items = [
+      decision({ id: 'result', kind: 'accept_result', options: [], createdAt: 1 }),
+      decision({ id: 'page', kind: 'document_review', options: [], createdAt: 2 }),
+      decision({ id: 'question', createdAt: 3 }),
+      decision({ id: 'command', kind: 'approve_effect', options: [], createdAt: 4 }),
+      decision({ id: 'urgent-later', createdAt: 0 }),
+    ];
+    expect(ownerOrder(items, { 'urgent-later': 10 }).map(item => item.id)).toEqual(['question', 'command', 'result', 'page', 'urgent-later']);
   });
 });

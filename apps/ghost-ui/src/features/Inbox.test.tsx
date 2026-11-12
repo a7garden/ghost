@@ -39,3 +39,20 @@ it('lists what waits as rows with quick actions, and keeps what the main is deci
 it('opens the linked decision in place', () => {
   expect(render('quick')).toContain('자세한 근거');
 });
+
+it('shows the deadline on a folded row and keeps results out of the bulk recommendation', () => {
+  const due = {
+    ...state,
+    decisions: [
+      decision({ id: 'due', title: '곧 정해질 질문', proposal: { review: { recommend: 'answer', answer: 'A', expiresAt: Date.now() + 12 * 60_000 - 5_000 } } }),
+      decision({ id: 'result', kind: 'accept_result', title: '결과 확인: R', options: [], workId: 'w1',
+        proposal: { result: { summary: '보고', artifacts: [] }, criteria: '기준', review: { recommend: 'approve', expiresAt: null } } }),
+    ],
+  } as unknown as State;
+  const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(InboxView, { state: due, navigate() {}, focusDecisionId: null })));
+  expect(markup).toContain('마감 12분');
+  expect(markup.match(/마감 \d/g)).toHaveLength(1);
+  expect(markup).toContain('추천대로 처리 1');
+  // Folding is not hiding: both still count.
+  expect(markup).toMatch(/확인 필요<span class="count">2<\/span>/);
+});

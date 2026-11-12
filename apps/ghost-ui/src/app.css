@@ -163,8 +163,12 @@ body {
 .decision__meta { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 6px; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .decision__meta .dot-avatar { border-radius: 50%; }
 .decision__who { color: var(--ghost-ink2); font-weight: 500; overflow-wrap: anywhere; }
-.decision__kind { color: var(--ghost-amber-ink); font-size: var(--text-caption); }
-.decision__kind::before { content: '·'; margin-right: 6px; color: var(--ghost-ink3); }
+/* The kind mark is the card's one color (2026-11-12): ink for a checked result, amber for what only the owner answers, red for acting on their behalf. */
+.decision__kind { display: inline-flex; align-items: center; gap: 4px; color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 600; }
+.decision__kind > svg { flex: none; }
+.decision__kind[data-tone="urgent"] { color: var(--ghost-amber-ink); }
+.decision__kind[data-tone="authority"] { color: var(--ghost-danger-ink); }
+.decision__kind::after { content: '·'; margin-left: 2px; color: var(--ghost-ink3); font-weight: 400; }
 .decision__time { margin-left: auto; }
 .decision__work { display: inline-flex; min-width: 0; max-width: 40%; min-height: 24px; align-items: center; gap: 3px; padding: 2px 0; border: 0; color: var(--ghost-ink3); background: none; font: 500 var(--text-caption)/1.3 var(--font-sans); cursor: pointer; }
 .decision__work:hover { color: var(--ghost-ink); }
@@ -175,6 +179,27 @@ body {
 .decision__detail--md .message-body { color: inherit; font-size: inherit; line-height: inherit; }
 .decision__detail--md .message-body > :first-child { margin-top: 0; }
 .decision__detail--md .message-body > :last-child { margin-bottom: 0; }
+/* A result card: the main Ghost's summary is the body; the Ghost's own report folds beneath it. */
+.decision__summary { min-width: 0; color: var(--ghost-ink); font-size: var(--text-body); line-height: 1.6; overflow-wrap: anywhere; }
+.decision__full { min-width: 0; }
+.decision__full > summary { display: inline-flex; min-height: 36px; align-items: center; gap: 6px; color: var(--ghost-ink2); font-size: var(--text-ui); list-style: none; cursor: pointer; }
+.decision__full > summary::-webkit-details-marker { display: none; }
+.decision__full > summary > svg { flex: none; transition: transform var(--duration-fast) var(--ease-enter); }
+.decision__full[open] > summary > svg { transform: rotate(180deg); }
+.decision__full > summary:hover { color: var(--ghost-ink); }
+.decision__full-count { color: var(--ghost-ink3); font-size: var(--text-caption); }
+.decision__full-count::before { content: '·'; margin-right: 6px; }
+.decision__full[open] > .decision__report { margin-top: 4px; animation: fade-in 180ms var(--ease-enter) both; }
+.decision__report { display: grid; min-width: 0; gap: 12px; }
+.decision__report-text { max-height: 360px; overflow-y: auto; overscroll-behavior: contain; color: var(--ghost-ink2); font-size: var(--text-ui); line-height: 1.6; overflow-wrap: anywhere; }
+/* With no summary the report stands in the body, kept short enough that the answer stays in reach. */
+.decision__report[data-alone] .decision__report-text { max-height: 240px; }
+.decision__files { display: flex; flex-wrap: wrap; gap: 8px; }
+.decision__criteria { display: grid; gap: 4px; }
+.decision__criteria > span { color: var(--ghost-ink3); font-size: var(--text-micro); font-weight: 600; }
+.decision__criteria > p { margin: 0; color: var(--ghost-ink2); font-size: var(--text-ui); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+:is(.decision__full > summary, .decision__report-text):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; border-radius: 4px; }
+@media (pointer: coarse) { .decision__full > summary { min-height: 44px; } }
 .decision__response { display: grid; flex: none; gap: 10px; min-width: 0; }
 .decision__options { display: grid; min-width: 0; max-height: 112px; overflow-y: auto; overscroll-behavior: contain; }
 .decision__option {
@@ -347,19 +372,26 @@ body {
 /* 확인할 일: 한 줄에 무엇 · 누가 · 추천과 빠른 처리. 줄을 누르면 카드가 그 자리에 펼쳐진다 (2026.11.11). */
 .queue { display: grid; gap: 1px; margin: 0; padding: 4px; list-style: none; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
 .queue[data-quiet] { background: none; box-shadow: none; padding: 0; }
-.queue__item { min-width: 0; border-radius: var(--radius-lg); }
+.queue__item { position: relative; min-width: 0; border-radius: var(--radius-lg); }
 .queue__item[data-open] { background: var(--ghost-hover); }
-.queue__row { display: flex; min-width: 0; align-items: center; gap: 8px; padding-right: 8px; }
+.queue__row { position: relative; display: flex; min-width: 0; align-items: center; gap: 8px; padding-right: 8px; border-radius: var(--radius-lg); transition: transform var(--duration-fast) var(--ease-enter); }
+/* A folded row slides left under a finger to go to 나중에; vertical drags stay the page's scroll. */
+.queue__row[data-swipe] { touch-action: pan-y; }
+.queue__row[data-swiping] { background: var(--ghost-surface); transition: none; }
+.queue__swipe { position: absolute; top: 0; right: 16px; bottom: 0; display: flex; align-items: center; color: var(--ghost-ink3); font-size: var(--text-caption); font-weight: 600; }
+.queue__swipe[data-ready] { color: var(--ghost-ink); }
 .queue__main { display: flex; min-width: 0; flex: 1; align-items: flex-start; gap: 12px; padding: 10px 6px 10px 12px; border: 0; border-radius: var(--radius-lg); color: var(--ghost-ink); background: none; text-align: left; font: inherit; cursor: pointer; }
 .queue__item:not([data-open]) .queue__main:hover { background: var(--ghost-hover); }
 .queue__copy { display: grid; min-width: 0; gap: 2px; }
 .queue__title { overflow: hidden; font-size: var(--text-ui); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .queue__meta { color: var(--ghost-ink3); font-size: var(--text-caption); }
+.queue__deadline { margin-left: 6px; vertical-align: 1px; }
 .queue__note { overflow: hidden; color: var(--ghost-ink2); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
 .queue__actions { display: flex; flex: none; align-items: center; gap: 4px; }
 .queue__actions button { max-width: 180px; }
 .queue__actions button > span, .queue__actions button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue__card { padding: 0 8px 8px; }
+@media (pointer: coarse) { .queue__actions button { min-height: 44px; } }
 @media (max-width: 640px) {
   .queue__row { flex-wrap: wrap; padding: 0 8px 8px 0; }
   .queue__main { flex-basis: 100%; }
@@ -513,6 +545,9 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .thread-panel__transcript { gap: 0; font-size: var(--text-ui); }
 .thread-panel__transcript .ghost-conversation-message { font-size: 14px; line-height: 1.65; }
 .thread-panel__transcript > * + * { margin-top: 18px; }
+/* The panel's tighter rhythm: a new speaker a little further off, the name close to its run. */
+.thread-panel__transcript.work-stream > * + [data-kind="speaker"] { margin-top: 24px; }
+.thread-panel__transcript.work-stream > [data-kind="speaker"] + * { margin-top: 6px; }
 .thread-panel .decision { padding: 16px; }
 
 /* Tool trail */
@@ -524,7 +559,7 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .trail[open] .trail__chevron { transform: rotate(90deg); }
 /* Opened disclosures unfold their content instead of snapping in. */
 .trail[open] > .trail__steps, .reasoning[open]:not([data-live]) > .reasoning__body { animation: rise-in var(--duration-base) var(--ease-enter) both; }
-.trail__count { flex: none; color: var(--ghost-ink2); font-weight: 500; }
+.trail__count { min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .trail__failed { color: var(--ghost-danger-ink); }
 .trail__chips { display: inline-flex; min-width: 0; gap: 4px; overflow: hidden; }
 .trail__chip { flex: none; padding: 2px 7px; border-radius: var(--radius-pill); color: var(--ghost-ink2); background: var(--ghost-hover); font: 500 11px/1.4 var(--font-mono); }
@@ -537,7 +572,8 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .trail__steps li::before { content: ''; position: absolute; top: 6px; left: -22.5px; width: 7px; height: 7px; border-radius: 50%; background: var(--ghost-canvas); box-shadow: inset 0 0 0 1.5px var(--ghost-ink3); }
 .trail__steps li[data-error]::before { box-shadow: inset 0 0 0 4px var(--ghost-danger); }
 .trail__steps li[data-live]::before { box-shadow: inset 0 0 0 4px var(--ghost-signal); }
-.trail__step-name { display: flex; align-items: center; gap: 8px; color: var(--ghost-ink); font: 600 12px/1.4 var(--font-mono); }
+/* A tool name is one long token (mcp__ghost__delegate_work): it breaks inside the thread, never widens it. */
+.trail__step-name { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 2px 8px; color: var(--ghost-ink); font: 600 12px/1.4 var(--font-mono); overflow-wrap: anywhere; }
 .trail__step-name em { color: var(--ghost-ink3); font: 500 var(--text-micro)/1 var(--font-sans); font-style: normal; }
 .trail__steps li[data-error] em { color: var(--ghost-danger-ink); }
 .trail__steps pre { max-height: 220px; margin: 0; overflow: auto; padding: 10px 12px; border-radius: var(--radius-control); color: var(--ghost-ink2); background: var(--ghost-inset); font: var(--text-micro)/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -578,18 +614,40 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .ghost-filter .dot-avatar { border-radius: 50%; }
 
 /* Work detail */
-.work-detail { display: grid; align-content: start; gap: 32px; }
+.work-detail { --work-gap: 32px; display: grid; align-content: start; gap: var(--work-gap); }
 .work-head { display: grid; gap: 12px; }
 .work-head__trail { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .work-head__trail > span { display: inline-flex; align-items: center; gap: 2px; }
 .work-head__trail button { max-width: 240px; overflow: hidden; padding: 2px 6px; border: 0; border-radius: var(--radius-chip); color: inherit; background: none; font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .work-head__trail button:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
 .work-head__trail > span:first-child button { margin-left: -6px; }
-.work-head__row { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
-.work-head__title { flex: 1 1 320px; margin: 0; color: var(--ghost-ink); font-size: var(--text-headingLg); font-weight: 650; line-height: 1.22; letter-spacing: -.028em; overflow-wrap: anywhere; }
-.work-head__actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.work-head__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; color: var(--ghost-ink3); font-size: var(--text-caption); }
-.work-head__meta [data-overdue] { color: var(--ghost-danger-ink); }
+.work-head__title { margin: 0; color: var(--ghost-ink); font-size: var(--text-headingLg); font-weight: 650; line-height: 1.22; letter-spacing: -.028em; overflow-wrap: anywhere; }
+/* The bar continues the header at its 12px rhythm; it is the page's own child only so it can stick on a phone. */
+.work-bar, .work-bar + .work-head__reason { margin-top: calc(12px - var(--work-gap)); }
+.work-bar { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 10px 20px; }
+.work-bar__state, .work-bar__who { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; }
+.work-bar__state { gap: 6px 14px; color: var(--ghost-ink); font-size: var(--text-ui); font-weight: 550; }
+.work-bar__due { color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 500; }
+.work-bar__due[data-overdue] { color: var(--ghost-danger-ink); font-weight: 600; }
+.work-bar__who { gap: 4px 14px; color: var(--ghost-ink3); font-size: var(--text-caption); }
+/* 확인 필요 is the page's one accent: the state itself, counted, and a way down to the cards. */
+.work-bar__pending { display: inline-flex; min-height: 28px; align-items: center; gap: 6px; padding: 2px 11px 2px 7px; border: 0; border-radius: var(--radius-pill); color: var(--ghost-amber-ink); background: var(--ghost-amber-tint); font: inherit; cursor: pointer; }
+.work-bar__pending:hover { box-shadow: inset 0 0 0 1px var(--ghost-amber); }
+.work-bar__link, .work-bar__panel { flex-basis: 100%; }
+.work-bar__link { margin: 0; color: var(--ghost-amber-ink); font-size: var(--text-caption); }
+/* On a wide sheet the actions share the status line (판단 then 행동, one glance); they wrap below when it is full. */
+.work-bar__actions { display: flex; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 6px; }
+.work-bar__verbs { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.work-bar__toggle { display: inline-flex; min-height: 28px; align-items: center; gap: 4px; padding: 4px 9px 4px 5px; border: 0; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: none; font: 500 var(--text-caption)/1.3 var(--font-sans); cursor: pointer; }
+.work-bar__actions > .work-bar__toggle:first-child { margin-left: -5px; }
+.work-bar__toggle:hover, .work-bar__toggle[aria-expanded="true"] { color: var(--ghost-ink); background: var(--ghost-hover); }
+.work-bar__toggle > svg { width: 14px; height: 14px; flex: none; color: var(--ghost-ink3); transition: transform var(--duration-base) var(--ease-enter); }
+.work-bar__toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
+.work-bar__toggle > .count { margin-left: 2px; color: var(--ghost-ink3); }
+.work-bar :is(.work-bar__pending, .work-bar__toggle):focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
+.work-bar__panel { min-width: 0; animation: rise-in var(--duration-base) var(--ease-enter) both; }
+.work-bar__files { display: flex; flex-wrap: wrap; gap: 8px; }
+.work-pending:focus:not(:focus-visible) { outline: none; }
 .work-head__who { display: inline-flex; align-items: center; gap: 6px; color: var(--ghost-ink2); font-weight: 500; }
 .work-head__who .dot-avatar { border-radius: 50%; }
 .work-head__track { margin-top: 6px; }
@@ -610,7 +668,23 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .work-disclosure:hover { background: var(--ghost-hover); }
 .work-disclosure > svg { transition: transform var(--duration-base) var(--ease-enter); }
 .work-disclosure[aria-expanded="true"] > svg { transform: rotate(90deg); }
-.work-transcript { padding: 20px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
+/* min-width 0 keeps a wide row from widening the section's grid track; clip keeps any stray overflow inside the card. */
+.work-transcript { min-width: 0; max-width: var(--ghost-layout-document-max); overflow-x: clip; padding: 20px; border-radius: var(--radius-xl); background: var(--ghost-surface); box-shadow: var(--shadow-card); }
+/* A work conversation (page and thread panel) reads as a record: the owner's turns hang on a rule at the left
+   instead of a chat bubble, both voices on one edge. Wide rows stay inside; the 8px keeps hover and focus edges unclipped. */
+.work-stream { min-width: 0; margin-inline: -8px; padding-inline: 8px; overflow-x: clip; }
+.work-stream .ghost-conversation-message[data-role="user"] { align-items: stretch; }
+.work-stream .ghost-conversation-message[data-role="user"] .ghost-conversation-message__content { width: auto; max-width: none; padding: 1px 0 1px 12px; border-left: 2px solid var(--ghost-ink3); border-radius: 0; background: none; }
+.work-transcript__empty { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+/* On a phone 위임 and 실행 기록 fold to their title line under the work. */
+.work-fold { display: block; }
+.work-fold > summary { display: flex; width: fit-content; align-items: center; gap: 6px; list-style: none; cursor: pointer; }
+.work-fold > summary::-webkit-details-marker { display: none; }
+.work-fold > summary::before { content: ''; width: 5px; height: 5px; margin: 0 2px; border-right: 1.5px solid var(--ghost-ink3); border-bottom: 1.5px solid var(--ghost-ink3); transform: rotate(-45deg); transition: transform var(--duration-base) var(--ease-enter); }
+.work-fold[open] > summary::before { transform: rotate(45deg); }
+.work-fold[open] > summary { margin-bottom: 12px; }
+.work-fold > summary:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; border-radius: var(--radius-chip); }
+@media (prefers-reduced-motion: reduce) { .work-bar__toggle > svg, .work-fold > summary::before { transition: none; } .work-bar__panel { animation: none; } }
 
 .verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-bottom: 12px; border-bottom: 1px dashed var(--ghost-line-strong); font-size: var(--text-caption); }
 .verdict strong { font-size: var(--text-ui); font-weight: 650; }
@@ -643,7 +717,7 @@ details.transcript-event[open] .transcript-event__chevron { transform: rotate(90
 .timeline__copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .timeline__summary { font-size: var(--text-ui); line-height: 1.45; overflow-wrap: anywhere; }
 .timeline__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--ghost-ink3); font-size: var(--text-micro); }
-.timeline__meta code { padding: 1px 5px; border-radius: 5px; color: var(--ghost-ink2); background: var(--ghost-hover); font: 500 var(--text-micro)/1.4 var(--font-mono); }
+.timeline__meta code { min-width: 0; padding: 1px 5px; border-radius: 5px; color: var(--ghost-ink2); background: var(--ghost-hover); font: 500 var(--text-micro)/1.4 var(--font-mono); overflow-wrap: anywhere; }
 .timeline > li[data-state="unknown"] .timeline__meta > span { color: var(--ghost-amber-ink); }
 .timeline__result summary { width: fit-content; color: var(--ghost-ink3); font-size: var(--text-micro); cursor: pointer; }
 .timeline__result pre { max-height: 200px; margin: 6px 0 0; overflow: auto; padding: 8px 10px; border-radius: var(--radius-chip); color: var(--ghost-ink2); background: var(--ghost-inset); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }

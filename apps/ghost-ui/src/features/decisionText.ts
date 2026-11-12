@@ -28,6 +28,19 @@ export function decisionChip(decision: Decision): string {
   return goalProposal(decision) ? goalProposalLabel : secureFormProposal(decision) ? secureFormLabel : browserHandoffProposal(decision) ? browserHandoffLabel : decisionLabel.question;
 }
 
+/**
+ * How hard a decision asks for the owner (2026-11-12): `calm` for a checked result or a page to review,
+ * `urgent` for what only the owner can answer, `authority` for running something on their behalf or a vault value.
+ * Urgent and authority cards come before calm ones; the card's kind mark wears the matching state color.
+ */
+export type DecisionTone = 'calm' | 'urgent' | 'authority';
+
+export function decisionTone(decision: Decision): DecisionTone {
+  if (decision.kind === 'accept_result' || decision.kind === 'document_review') return 'calm';
+  if (decision.kind === 'approve_effect' || secureFormProposal(decision)) return 'authority';
+  return 'urgent';
+}
+
 /** The completion answer a browser handoff suggests; it goes through the ordinary answer path. */
 export const handoffDoneAnswer = '다 했어요';
 

@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { CheckCheck, ChevronDown, Undo2 } from 'lucide-react';
-import { Banner, Button, Checkbox, Page, PageHeader, InlineError } from '../ui'
+import { Badge, Banner, Button, Checkbox, Page, PageHeader, InlineError } from '../ui'
 import type { Decision, Notification, State } from '@ghost/contract';
 import { reviewOf } from '@ghost/contract';
 import { DotAvatar } from '../components/DotAvatar';
 import { NotificationRow } from '../components/NotificationRow';
 import { useHost } from '../host/context';
 import { uiTerms } from '../uiText';
-import { DecisionCard, resolvedText } from './Decision';
+import { DecisionCard, autoSettleText, deadlineText, resolvedText } from './Decision';
 import { decisionChip, decisionHeading } from './decisionText';
 import { canHandOver, deferDecision, handedOver, ownerOrder, pruneLater, recommendedLabel, recommendedResolution, undeferDecision, useLater } from './decisionQueue';
 import { pendingDecisions, toneFor } from './ghostState';
@@ -191,7 +191,15 @@ export function InboxView({ state, navigate, focusDecisionId }: {
   </Page>;
 }
 
-/** 결정 한 줄: 무엇을 · 누가 · 추천, 그리고 빠른 처리. 줄을 누르면 전체 카드가 그 자리에 펼쳐진다. */
+/** How far a finger drags a folded row left before letting go puts it off, and how far the row follows. */
+const SWIPE_AT = 72;
+const SWIPE_MAX = 112;
+
+/**
+ * 결정 한 줄: 무엇을 · 누가 · 추천, 그리고 빠른 처리. 줄을 누르면 전체 카드가 그 자리에 펼쳐진다.
+ * 2026.11.12 : 접힌 줄에도 마감이 보이고, 손가락으로 왼쪽으로 밀거나 L 을 누르면 「나중에」로 간다 (버튼과 함께).
+ * 나중에는 숨김이 아니다 — 아래 「나중에」에 남고, 배지 수도 그대로다.
+ */
 function QueueRow({ decision, state, now, ghostName, open, place, onToggle, onRecommended, onHandOver, onLater, onNow, onResolved, navigate }: {
   decision: Decision; state: State; now: number; ghostName: string; open: boolean; place: 'now' | 'later';
   onToggle(): void; onRecommended(): void; onHandOver(): void; onLater(): void; onNow(): void;
@@ -200,15 +208,65 @@ function QueueRow({ decision, state, now, ghostName, open, place, onToggle, onRe
   const heading = decisionHeading(decision, state);
   const recommended = recommendedLabel(decision);
   const note = reviewOf(decision.proposal)?.mainNote;
+  const deadline = deadlineText(decision, now);
   const workTitle = decision.workId ? state.works.find(work => work.id === decision.workId)?.title : undefined;
   const panel = `queue-card-${decision.id}`;
+  const canPutOff = place === 'now' && !open;
+  const [shift, setShift] = useState(0);
+  const drag = useRef<{ pointer: number; x: number; y: number; dx: number; horizontal: boolean } | null>(null);
+  const swiped = useRef(false);
+
+  // A touch drag that starts sideways moves the row; one that starts up or down is left to the page's scroll (touch-action: pan-y).
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    swiped.current = false;
+    if (!canPutOff || event.pointerType === 'mouse' || !event.isPrimary) return;
+    drag.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, dx: 0, horizontal: false };
+  };
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const current = drag.current;
+    if (!current || current.pointer !== event.pointerId) return;
+    const dx = event.clientX - current.x;
+    const dy = event.clientY - current.y;
+    if (!current.horizontal) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { drag.current = null; return; }
+      if (dx > -10 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      current.horizontal = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    current.dx = Math.max(-SWIPE_MAX, Math.min(0, dx));
+    setShift(current.dx);
+  };
+  const endDrag = (commit: boolean) => {
+    const current = drag.current;
+    drag.current = null;
+    if (!current?.horizontal) return;
+    // The press that ends a swipe is not a tap on the row or its buttons.
+    swiped.current = true;
+    setShift(0);
+    if (commit && current.dx <= -SWIPE_AT) onLater();
+  };
+  // L puts a folded row off, like the deck; focus moves to the row that takes its place.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!canPutOff || event.code !== 'KeyL' || event.repeat || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    const item = event.currentTarget.closest('li');
+    (item?.nextElementSibling ?? item?.previousElementSibling)?.querySelector<HTMLElement>('.queue__main')?.focus();
+    onLater();
+  };
+
   return <li className="queue__item" data-open={open || undefined}>
-    <div className="queue__row">
-      <button type="button" className="queue__main" aria-expanded={open} aria-controls={panel} onClick={onToggle}>
+    {shift < 0 && <span className="queue__swipe" data-ready={shift <= -SWIPE_AT || undefined} aria-hidden="true">나중에</span>}
+    <div className="queue__row" data-swipe={canPutOff || undefined} data-swiping={shift < 0 || undefined}
+      style={shift < 0 ? { transform: `translateX(${shift}px)` } : undefined}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={() => endDrag(true)} onPointerCancel={() => endDrag(false)}
+      onClickCapture={event => { if (swiped.current) { swiped.current = false; event.preventDefault(); event.stopPropagation(); } }}
+      onKeyDown={onKeyDown}>
+      <button type="button" className="queue__main" aria-expanded={open} aria-controls={panel} aria-keyshortcuts={canPutOff ? 'L' : undefined} onClick={onToggle}>
         <DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={20}/>
         <span className="queue__copy">
           <span className="queue__title">{heading}</span>
-          <span className="queue__meta">{ghostName} · {decisionChip(decision)} · <time className="tabular">{relativeTime(decision.createdAt, now)}</time></span>
+          <span className="queue__meta">{ghostName} · {decisionChip(decision)} · <time className="tabular">{relativeTime(decision.createdAt, now)}</time>
+            {deadline && <Badge variant="warning" className="queue__deadline" title={autoSettleText(decision, now) ?? undefined}>{deadline}</Badge>}</span>
           {note && !open && <span className="queue__note">메인: {note}</span>}
         </span>
       </button>
@@ -216,7 +274,7 @@ function QueueRow({ decision, state, now, ghostName, open, place, onToggle, onRe
         {recommended && <Button size="sm" variant="secondary" title="추천대로 처리" onClick={onRecommended}>{recommended}</Button>}
         {canHandOver(decision, state) && <Button size="sm" variant="ghost" title="메인 Ghost가 대신 정합니다" onClick={onHandOver}>메인에게</Button>}
         {place === 'now'
-          ? <Button size="sm" variant="ghost" onClick={onLater}>나중에</Button>
+          ? <Button size="sm" variant="ghost" title="나중에 (L)" aria-keyshortcuts="L" onClick={onLater}>나중에</Button>
           : <Button size="sm" variant="ghost" onClick={onNow}><Undo2 size={14} aria-hidden="true"/>지금 보기</Button>}
       </div>}
     </div>

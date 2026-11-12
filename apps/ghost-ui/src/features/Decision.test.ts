@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Decision, State, Work } from '@ghost/contract';
 import { HostProvider } from '../host/context';
-import { DecisionCard, DecisionDeck, autoSettleText, cardDetail, chatDecisions, decisionCommand, documentProposal, highRiskApproval, recommendedOption } from './Decision';
+import { DecisionCard, DecisionDeck, autoSettleText, cardDetail, chatDecisions, deadlineText, decisionCommand, documentProposal, highRiskApproval, recommendedOption } from './Decision';
+import { fullTextOpen, setFullTextOpen } from './decisionQueue';
 import { browserHandoffProposal, decisionChip, emptySecureForm, goalProposal, secureFormBody, secureFormProposal } from './decisionText';
 
 const decision = (patch: Partial<Decision> = {}): Decision => ({
@@ -196,6 +197,72 @@ describe('DecisionCard render', () => {
     expect(markup).not.toContain('답변 보내기');
   });
 
+});
+
+describe('result card', () => {
+  const render = (node: Decision) => renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, {
+    decision: node, ghostName: '세이지', workTitle: '분기 보고서', onResolved() {},
+  })));
+  const result = (review: Record<string, unknown> | null, patch: Partial<Decision> = {}) => decision({
+    id: 'r1', kind: 'accept_result', workId: 'w1', effectId: null, title: '결과 확인: 분기 보고서',
+    detail: '검토자: 기준을 모두 채웠습니다.\n\n하위 보고 원문입니다.',
+    proposal: { result: { summary: '하위 보고 원문입니다.', artifacts: [] }, criteria: '바꾼 파일을 적는다', ...(review ? { review } : {}) }, ...patch,
+  });
+  const summarized = () => result({ recommend: 'approve', expiresAt: null, mainNote: '메인이 기준과 대조했습니다. 승인해도 됩니다.' });
+
+  it('reads the main Ghost summary as the body and folds the full report beneath it', () => {
+    const markup = render(summarized());
+    const [body, fold] = markup.split('<details class="decision__full"');
+    expect(body).toContain('메인이 기준과 대조했습니다.');
+    expect(body).not.toContain('하위 보고 원문입니다.');
+    expect(fold).toContain('전문 보기');
+    expect(fold).toContain('하위 보고 원문입니다.');
+    expect(fold).toContain('바꾼 파일을 적는다');
+    expect(markup).not.toMatch(/<details class="decision__full"[^>]* open/);
+  });
+
+  it('shows the report in the body, kept short, when no summary exists', () => {
+    const markup = render(result(null));
+    expect(markup).not.toContain('decision__full');
+    expect(markup).toContain('data-alone="true"');
+    expect(markup).toContain('하위 보고 원문입니다.');
+  });
+
+  it('keeps the full report open until the result is decided, then folds it again', () => {
+    const pending = summarized();
+    setFullTextOpen(pending.id, true);
+    expect(render(pending)).toMatch(/<details class="decision__full" open=""/);
+    // Settled by anyone, the card folds again.
+    const settled = { ...pending, state: 'approved' as const };
+    expect(fullTextOpen(settled)).toBe(false);
+    // The owner's own resolution forgets it, so the same pending card folds too.
+    setFullTextOpen(pending.id, false);
+    expect(render(pending)).not.toMatch(/<details class="decision__full"[^>]* open/);
+  });
+
+  it('never presents accepting a result as recommended', () => {
+    expect(render(summarized())).not.toContain('되돌릴 수 있는 요청입니다');
+    expect(render(decision({ kind: 'document_review', effectId: null, proposal: { review: { recommend: 'approve', expiresAt: null } } }))).toContain('되돌릴 수 있는 요청입니다');
+  });
+
+  it('marks each kind by how hard it asks', () => {
+    expect(render(summarized())).toContain('data-tone="calm"');
+    expect(render(decision({ kind: 'question', effectId: null, options: ['A', 'B'] }))).toContain('data-tone="urgent"');
+    expect(render(decision())).toContain('data-tone="authority"');
+    expect(render(decision({ kind: 'question', effectId: null, proposal: { secureForm: loginRequest } }))).toContain('data-tone="authority"');
+  });
+});
+
+describe('deadlineText', () => {
+  const due = (expiresAt: number | null) => decision({ kind: 'question', options: ['A'], proposal: { review: { recommend: 'answer', answer: 'A', expiresAt } } });
+  it('shortens the automatic line for a folded row, and exists exactly when that line does', () => {
+    expect(deadlineText(due(12 * 60_000), 0)).toBe('마감 12분');
+    expect(deadlineText(due(150 * 60_000), 0)).toBe('마감 3시간');
+    expect(deadlineText(due(0), 1)).toBe('곧 마감');
+    expect(deadlineText(due(null), 0)).toBeNull();
+    expect(autoSettleText(due(null), 0)).toBeNull();
+    expect(deadlineText({ ...due(12 * 60_000), state: 'answered' }, 0)).toBeNull();
+  });
 });
 
 describe('answer field purpose', () => {

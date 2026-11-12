@@ -1,21 +1,22 @@
 import { haptic } from '../host/shell';
 import { useContext, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowRight, ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight, FileText, Monitor, KeyRound } from 'lucide-react';
+import { ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleHelp, FileText, Flag, KeyRound,
+  ListChecks, Lock, Monitor, MousePointerClick, type LucideIcon } from 'lucide-react';
 import { Button, Checkbox, FormField, InlineError, Input } from '../ui'
 import { DESTRUCTIVE_RISK, reviewOf, type ActivityConfig, type Decision, type SecureFormRequest, type State, type VaultItemKind, type WorkResult } from '@ghost/contract';
 import { executionLabel, policySummary, sourceSummary } from './activity-config';
-import { toolLabels } from './GhostSettings';
+import { toolLabels } from './toolLabels';
 import { DotAvatar } from '../components/DotAvatar';
 import { ArtifactPreview } from '../components/ArtifactPreview';
 import { DocumentProposalPreview } from '../components/DocumentProposalPreview';
 import { BrowserLiveView } from './BrowserLiveView';
 import { MessageBody } from '../components/MessageBody';
 import { useHost } from '../host/context';
-import { browserHandoffProposal, decisionChip, decisionHeading, emptySecureForm, goalProposal, handoffDoneAnswer,
+import { browserHandoffProposal, decisionChip, decisionHeading, decisionTone, emptySecureForm, goalProposal, handoffDoneAnswer,
   secureFormBody, secureFormProposal, type SecureFormValues } from './decisionText';
 import { goalError } from './goals/goalError';
 import { pendingDecisions, toneFor } from './ghostState';
-import { canHandOver, deferDecision, ownerOrder, useLater } from './decisionQueue';
+import { canHandOver, deferDecision, fullTextOpen, ownerOrder, setFullTextOpen, useLater } from './decisionQueue';
 import { relativeTime, useNow } from './time';
 import { uiTerms } from '../uiText';
 import { isMac, modKey } from '../ui/keys';
@@ -36,16 +37,42 @@ function acceptanceProposal(decision: Decision): { result: WorkResult | null; cr
   return { result: proposal?.result ?? null, criteria: proposal?.criteria ?? '' };
 }
 
-/**
- * What a pending decision settles to when the owner does not reply in time (the Host's review,
- * 2026-11-10), as one line for the card; null when it waits for the owner however long it takes.
- */
-export function autoSettleText(decision: Decision, now: number): string | null {
+/** How long until a pending decision settles on its own (the Host's review, 2026-11-10); null when it waits for the owner however long it takes. */
+function settleSpan(decision: Decision, now: number): { soon: true } | { soon: false; span: string } | null {
   const review = reviewOf(decision.proposal);
   if (decision.state !== 'pending' || !review || review.expiresAt === null) return null;
   const minutes = Math.ceil((review.expiresAt - now) / 60_000);
-  const when = minutes <= 0 ? '곧' : minutes < 60 ? `${minutes}분 뒤` : `${Math.round(minutes / 60)}시간 뒤`;
-  return review.recommend === 'answer' ? `답이 없으면 ${when} 「${review.answer}」(으)로 답합니다.` : `답이 없으면 ${when} 추천대로 승인합니다.`;
+  return minutes <= 0 ? { soon: true } : { soon: false, span: minutes < 60 ? `${minutes}분` : `${Math.round(minutes / 60)}시간` };
+}
+
+/** What a pending decision settles to when the owner does not reply in time, as one line for the card. */
+export function autoSettleText(decision: Decision, now: number): string | null {
+  const left = settleSpan(decision, now);
+  if (!left) return null;
+  const when = left.soon ? '곧' : `${left.span} 뒤`;
+  const review = reviewOf(decision.proposal);
+  return review?.recommend === 'answer' ? `답이 없으면 ${when} 「${review.answer}」(으)로 답합니다.` : `답이 없으면 ${when} 추천대로 승인합니다.`;
+}
+
+/** The same deadline shortened for a folded row: 「마감 12분」. Null exactly when the card has no automatic line. */
+export function deadlineText(decision: Decision, now: number): string | null {
+  const left = settleSpan(decision, now);
+  return !left ? null : left.soon ? '곧 마감' : `마감 ${left.span}`;
+}
+
+/** The shape that names a decision's kind, so the kind never depends on color alone. */
+function kindIcon(decision: Decision): LucideIcon {
+  switch (decision.kind) {
+    case 'accept_result': return CircleCheck;
+    case 'document_review': return FileText;
+    case 'approve_effect': return KeyRound;
+    case 'reconcile_effect': return CircleAlert;
+    case 'question':
+      if (secureFormProposal(decision)) return Lock;
+      if (browserHandoffProposal(decision)) return MousePointerClick;
+      if (goalProposal(decision)) return Flag;
+      return decision.options.length > 0 ? ListChecks : CircleHelp;
+  }
 }
 
 /** The recommended answer of a question, shown first and marked on its tile. */
@@ -176,7 +203,8 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     const command = decisionCommand(decision, outcome, text);
     if ('error' in command) { setError(command.error); setBusy(false); return; }
     void client.send(command)
-      .then(() => { haptic(); onResolved(outcome); })
+      // Once decided, the result card's full report folds again the next time it is shown.
+      .then(() => { haptic(); setFullTextOpen(decision.id, false); onResolved(outcome); })
       .catch(e => { setError(goalProposal(decision) ? goalError(e) : e instanceof Error ? e.message : '결정을 전달하지 못했습니다. 다시 시도해 주세요.'); setBusy(false); });
   };
   const reasonPrompt = denyReasonPrompt[decision.kind];
@@ -200,16 +228,27 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   const handoff = browserHandoffProposal(decision);
   const proposedGoal = goalProposal(decision);
   const labels = actionLabels[decision.kind];
-  const kindLabel = decisionChip(decision);
-  const heading = decision.kind === 'accept_result' && workTitle ? workTitle : decision.title;
+  const isResult = decision.kind === 'accept_result';
+  const heading = isResult && workTitle ? workTitle : decision.title;
   const detail = cardDetail(decision, heading, acceptance.result?.summary ?? null);
   // A structured preview (command, checkout click, card fill) says what the text detail says for text-only clients.
-  const showDetail = detail && !previewCoversDetail(decision);
+  // A result card carries its whole detail in the report below.
+  const showDetail = detail && !isResult && !previewCoversDetail(decision);
   const fallback = autoSettleText(decision, now);
   const review = reviewOf(decision.proposal);
+  // A result card reads the main Ghost's summary first; the Ghost's own report (and the reviewer's note) is the full text.
+  const summary = isResult ? review?.mainNote?.trim() || null : null;
+  const reportText = isResult ? cardDetail(decision, heading, null) || acceptance.result?.summary.trim() || '' : '';
+  const artifacts = acceptance.result?.artifacts ?? [];
+  const criteria = acceptance.criteria.trim();
+  const hasReport = Boolean(reportText || artifacts.length || criteria);
+  const [, redraw] = useState(0);
+  const fullOpen = fullTextOpen(decision);
   const recommended = recommendedOption(decision);
   // The recommended answer leads; the digit keys follow what is shown.
   const options = recommended ? [recommended, ...decision.options.filter(option => option !== recommended)] : decision.options;
+  // The Host marks a reported result reversible so the main may settle it, but nobody recommended accepting it.
+  const recommendsApproval = review?.recommend === 'approve' && !isResult;
 
   // Digits pick a suggested answer; ⌘/Ctrl+Enter approves; D opens the reason step. Typing in a field is never
   // intercepted, and a held key (repeat) never resolves.
@@ -236,9 +275,9 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
     onBlur={event => { if (armed && !event.currentTarget.contains(event.relatedTarget as Node | null)) setArmedAt(null); }}>
     <header className="decision__heading">
     <div className="decision__meta">
+      <KindMark decision={decision}/>
       <DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={20}/>
       <span className="decision__who">{ghostName}</span>
-      <span className="decision__kind">{kindLabel}</span>
       <time className="decision__time tabular">{relativeTime(decision.createdAt, now)}</time>
       {decision.workId && onOpenWork && <button type="button" className="decision__work" onClick={() => onOpenWork(decision.workId!)}>
         <span className="truncate">{workTitle && workTitle !== heading ? workTitle : uiTerms.work}</span><ArrowUpRight size={13} aria-hidden="true"/>
@@ -255,11 +294,14 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
       {proposedGoal.signal && <div><dt>참고 신호</dt><dd>{proposedGoal.signal}</dd></div>}
     </dl>}
 
-    {decision.kind === 'accept_result' && acceptance.result && <div className="receipt">
-      <div className="receipt__body"><MessageBody text={acceptance.result.summary}/></div>
-      {acceptance.result.artifacts.length > 0 && <div className="receipt__files">{acceptance.result.artifacts.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}</div>}
-      {acceptance.criteria.trim() && <div className="receipt__criteria"><span>완료 기준</span><p>{acceptance.criteria}</p></div>}
-    </div>}
+    {summary && <div className="decision__summary decision__detail--md"><MessageBody text={summary}/></div>}
+    {isResult && hasReport && (summary
+      ? <details className="decision__full" open={fullOpen} onToggle={event => { setFullTextOpen(decision.id, event.currentTarget.open); redraw(count => count + 1); }}>
+        <summary><ChevronDown size={14} aria-hidden="true"/>{fullOpen ? '전문 접기' : '전문 보기'}
+          {artifacts.length > 0 && <span className="decision__full-count">결과 자료 {artifacts.length}</span>}</summary>
+        <ResultReport text={reportText} artifacts={artifacts} criteria={criteria}/>
+      </details>
+      : <ResultReport text={reportText} artifacts={artifacts} criteria={criteria} alone/>)}
 
     {decision.kind === 'document_review' && proposal && <div className="decision__document">
       <p className="decision__document-head"><FileText size={14} aria-hidden="true"/>제안된 문서{proposal.pageId || proposal.page_id ? ' · 기존 페이지 수정' : ' · 새 페이지'}</p>
@@ -282,12 +324,12 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
         : <BrowserLiveView conversationId={decision.conversationId} compact/>)}
     </div>}
 
-    {review?.mainNote && <div className="decision__review"><p><strong>메인 의견</strong> {review.mainNote}</p></div>}
+    {review?.mainNote && !isResult && <div className="decision__review"><p><strong>메인 의견</strong> {review.mainNote}</p></div>}
     </div>
 
     <div className="decision__response">
-    {(review?.recommend === 'approve' || fallback) && <div className="decision__review">
-      {review?.recommend === 'approve' && <p><strong>추천</strong> 승인 · 되돌릴 수 있는 요청입니다.</p>}
+    {(recommendsApproval || fallback) && <div className="decision__review">
+      {recommendsApproval && <p><strong>추천</strong> 승인 · 되돌릴 수 있는 요청입니다.</p>}
       {fallback && <p className="decision__review-auto">{fallback}</p>}
     </div>}
 
@@ -341,6 +383,26 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
         </footer>}
     </div>
   </article>;
+}
+
+/**
+ * The kind of a decision as one mark: a shape any reader can tell apart, and the card's single color, saying how
+ * hard it asks (2026-11-12). A checked result stays in ink; what only the owner answers is amber; running something
+ * for them or a vault value is red.
+ */
+function KindMark({ decision }: { decision: Decision }) {
+  const Icon = kindIcon(decision);
+  return <span className="decision__kind" data-tone={decisionTone(decision)}><Icon size={14} aria-hidden="true"/>{decisionChip(decision)}</span>;
+}
+
+/** The Ghost's own report on a result: its full text, files and the completion criteria it was held to. */
+function ResultReport({ text, artifacts, criteria, alone = false }: { text: string; artifacts: WorkResult['artifacts']; criteria: string; alone?: boolean }) {
+  return <div className="decision__report" data-alone={alone || undefined}>
+    {/* Focusable, so a keyboard can scroll a long report. */}
+    {text && <div className="decision__report-text decision__detail--md" role="region" aria-label="결과 보고 전문" tabIndex={0}><MessageBody text={text}/></div>}
+    {artifacts.length > 0 && <div className="decision__files">{artifacts.map(artifact => <ArtifactPreview key={artifact.digest} artifact={artifact}/>)}</div>}
+    {criteria && <div className="decision__criteria"><span>완료 기준</span><p>{criteria}</p></div>}
+  </div>;
 }
 
 function AnswerField({ answer, onChange, busy, onSend }: {
@@ -572,13 +634,23 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
   const later = useLater();
   // 미룬 것은 이 기기에서 맨 뒤로 — 넘기고 나면 같은 자리에 다음 결정이 올라온다.
   const pending = ownerOrder(decisions ?? pendingDecisions(state), later);
-  const [index, setIndex] = useState(() => Math.max(0, pending.findIndex(decision => decision.id === focusId)));
+  const [pick, setPick] = useState(() => {
+    const index = Math.max(0, pending.findIndex(decision => decision.id === focusId));
+    return { id: pending[index]?.id ?? null, index };
+  });
   const [focusNext, setFocusNext] = useState(false);
   const [error, setError] = useState('');
   /** What the owner just did; `stays` when the decision still waits (deferred), so it still counts. */
   const [settled, setSettled] = useState<{ id: string; text: string; stays?: boolean } | null>(null);
   const focusPosition = pending.findIndex(decision => decision.id === focusId);
-  useEffect(() => { if (focusPosition >= 0) setIndex(focusPosition); }, [focusId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (focusPosition >= 0) setPick({ id: focusId!, index: focusPosition }); }, [focusId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Urgent decisions sort ahead of calm ones, so one arriving must not swap the card under the owner: the deck follows
+  // the card it shows. When that card leaves (resolved, handed over), the one now in its place takes over.
+  const tracked = pick.id ? pending.findIndex(decision => decision.id === pick.id) : -1;
+  const at = tracked >= 0 ? tracked : Math.min(pick.index, Math.max(0, pending.length - 1));
+  const shownId = pending[at]?.id ?? null;
+  useEffect(() => { if (shownId !== pick.id || at !== pick.index) setPick({ id: shownId, index: at }); }, [shownId, at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const show = (position: number) => setPick({ id: pending[position]?.id ?? null, index: position });
   useEffect(() => {
     if (!settled) return;
     const timer = setTimeout(() => setSettled(null), 2400);
@@ -588,12 +660,13 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
   if (!pending.length && !settled) return null;
   const rest = settled ? pending.filter(decision => settled.stays || decision.id !== settled.id).length : 0;
   const ack = settled ? `${settled.text} · ${rest ? `다음 확인 ${rest}건` : '남은 확인 없음'}` : '';
-  const at = Math.min(index, Math.max(0, pending.length - 1));
   const current = pending[at] as Decision | undefined;
   const canLater = !!current && pending.length > 1 && pending.indexOf(current) < pending.length - 1;
   const deferCurrent = () => {
     if (!current || !canLater) return;
-    deferDecision(current.id); setSettled({ id: current.id, text: '나중에 보도록 뒤로 보냈습니다', stays: true }); setFocusNext(true);
+    // The deferred card moves to the back; the next one takes its place.
+    deferDecision(current.id); setPick({ id: pending[at + 1]?.id ?? null, index: at });
+    setSettled({ id: current.id, text: '나중에 보도록 뒤로 보냈습니다', stays: true }); setFocusNext(true);
   };
   const handOverCurrent = () => {
     if (!current) return;
@@ -618,7 +691,7 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
     const step = event.key === 'ArrowLeft' || event.key === '[' ? -1 : event.key === 'ArrowRight' || event.key === ']' ? 1 : 0;
     const next = at + step;
     if (!step || next < 0 || next >= pending.length) return;
-    event.preventDefault(); setIndex(next); setFocusNext(true);
+    event.preventDefault(); show(next); setFocusNext(true);
   };
   return <section className="deck" aria-label="확인 필요" data-overview={overview || undefined} data-docked={docked || undefined} onKeyDown={onKeyDown}>
     {/* Docked, a single card speaks for itself; the head appears only to browse several. */}
@@ -630,13 +703,13 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
       </div>
       {pending.length > 1 && <div className="deck__nav">
         <span className="tabular" aria-live="polite">{at + 1} / {pending.length}</span>
-        <button type="button" aria-label="이전 항목" title="이전 항목 (←)" aria-keyshortcuts="ArrowLeft" disabled={at === 0} onClick={() => setIndex(at - 1)}><ChevronLeft size={15}/></button>
-        <button type="button" aria-label="다음 항목" title="다음 항목 (→)" aria-keyshortcuts="ArrowRight" disabled={at === pending.length - 1} onClick={() => setIndex(at + 1)}><ChevronRight size={15}/></button>
+        <button type="button" aria-label="이전 항목" title="이전 항목 (←)" aria-keyshortcuts="ArrowLeft" disabled={at === 0} onClick={() => show(at - 1)}><ChevronLeft size={15}/></button>
+        <button type="button" aria-label="다음 항목" title="다음 항목 (→)" aria-keyshortcuts="ArrowRight" disabled={at === pending.length - 1} onClick={() => show(at + 1)}><ChevronRight size={15}/></button>
       </div>}
     </header>}
     {current && <div className="deck__body">
       {pending.length > 1 && <ol className="deck__index" aria-label="확인 필요 목록">{pending.map((decision, position) => <li key={decision.id}>
-        <button type="button" aria-current={position === at || undefined} onClick={() => { setIndex(position); setFocusNext(true); }}>
+        <button type="button" aria-current={position === at || undefined} onClick={() => { show(position); setFocusNext(true); }}>
           <span className="deck__position tabular" aria-hidden="true">{position + 1}</span>
           <span className="deck__index-copy"><span>{decisionHeading(decision, state)}</span>
             <small>{names.get(decision.ghostId) ?? 'Ghost'} · {decisionChip(decision)}</small></span>
