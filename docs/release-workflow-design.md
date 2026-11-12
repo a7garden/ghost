@@ -45,7 +45,7 @@ git tag v<x.y.z> push
 - 잡 내용: App Store Connect API 키로 자동 서명 archive → `app-store-connect` 방식 export → `xcrun altool --upload-app`로 TestFlight 업로드.
 - ASC는 같은 build number(`CURRENT_PROJECT_VERSION`) 재업로드를 거부: ios 네이티브가 바뀐 릴리스는 버전을 먼저 올린다(기존 문서 규칙 동일). TestFlight가 이후 배포·업데이트를 담당하므로 Host의 QR/OTA 경로는 신규 배포에 사용하지 않는다(기존 설치 기기용으로만 존속).
 
-**중복 게시 방지**: guard 단계가 태그의 Release 존재를 확인 — 게시된 릴리스가 있으면 잡 전체 스킵(로컬 `--publish` 병행 가능), 게시 안 된 드래프트만 제거하고 재빌드(태그는 유지).
+**중복 게시 방지**: guard 단계가 태그의 Release 존재를 확인한다. 게시됐든 업로드 중인 드래프트든 Release가 있으면 잡 전체를 스킵하므로 Mac의 `--publish`가 올리는 드래프트를 건드리지 않는다. 실패한 실행이 남긴 드래프트는 소유자가 지운다. CI는 태그가 이미 원격에 있는 상태에서 시작하므로 `GHOST_RELEASE_TAG_PUSHED=1`로 release.ts의 「태그 없음」 가드 대신 「태그가 이 커밋을 가리킴」을 확인한다.
 
 **release.ts 최소 수정 (기본 동작 불변)**
 - `GHOST_SKIP_IOS=1` 환경변수 추가: iOS 빌드 섹션 건너뜀, 매니페스트 `ios` 필드 생략(parseManifest상 ios는 선택이라 Host 검증 통과), 검증·에셋 목록에서 IPA 제외. 환경변수 미설정 시 로컬 동작은 한 글자도 바뀌지 않는다.

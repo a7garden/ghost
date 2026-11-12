@@ -26,6 +26,9 @@ const publish = process.argv.includes("--publish");
 // a separate job, so the release script skips the Xcode archive and export when
 // GHOST_SKIP_IOS=1 is set. Unset means the local behaviour is unchanged.
 const skipIos = process.env.GHOST_SKIP_IOS === "1";
+// CI starts from the pushed tag, so there the tag must already exist and name
+// this commit; locally the tag must not exist yet (gh release creates it).
+const tagPushed = process.env.GHOST_RELEASE_TAG_PUSHED === "1";
 
 
 function run(command: string, args: string[], options: { cwd?: string; env?: Record<string, string>; capture?: boolean } = {}): string {
@@ -99,7 +102,7 @@ const pubkey = readFileSync(`${keyPath}.pub`, "utf8").trim();
 const configuredPubkey: string = readJson("apps/ghost-desktop/src-tauri/tauri.conf.json").plugins.updater.pubkey;
 if (configuredPubkey !== pubkey) throw new Error(`${keyPath}.pub does not match tauri.conf.json plugins.updater.pubkey`);
 const identity = signingIdentity();
-const signerEnv = { TAURI_SIGNING_PRIVATE_KEY: readFileSync(keyPath, "utf8"), TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "" };
+const signerEnv = { TAURI_SIGNING_PRIVATE_KEY: readFileSync(keyPath, "utf8"), TAURI_SIGNING_PRIVATE_KEY_PASSWORD: process.env.GHOST_UPDATER_KEY_PASSWORD ?? "" };
 const tauri = join(repoRoot, "apps/ghost-desktop/node_modules/.bin/tauri");
 
 console.log(`Ghost ${version} (${commit}) · shell ${shellVersion} · ${repository}`);
@@ -110,7 +113,11 @@ const previousTag = latest.status === 0 ? latest.stdout.trim() : null;
 if (previousTag && compareVersions(version, previousTag) <= 0) throw new Error(`${version} is not newer than the latest release ${previousTag}; bump apps/ghost-host/package.json`);
 if (publish) {
   if (run("git", ["status", "--porcelain"], { capture: true })) throw new Error("--publish needs a clean working tree");
-  if (run("git", ["ls-remote", "--tags", remote, `refs/tags/${tag}`], { capture: true })) throw new Error(`tag ${tag} already exists on ${remote}`);
+  const remoteTag = run("git", ["ls-remote", "--tags", remote, `refs/tags/${tag}^{}`, `refs/tags/${tag}`], { capture: true });
+  if (tagPushed) {
+    // An annotated tag lists its peeled commit (^{}) too; either line naming this commit is enough.
+    if (!remoteTag.split("\n").some(line => line.startsWith(fullCommit))) throw new Error(`tag ${tag} on ${remote} does not name ${commit}`);
+  } else if (remoteTag) throw new Error(`tag ${tag} already exists on ${remote}`);
   // The Release tags this exact commit on GitHub, so GitHub must already have it.
   if (!run("git", ["branch", "-r", "--contains", fullCommit], { capture: true }).split("\n").some(line => line.trim().startsWith(`${remote}/`))) {
     throw new Error(`push ${commit} to ${remote} before publishing`);

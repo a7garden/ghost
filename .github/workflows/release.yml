@@ -8,7 +8,9 @@ name: Release
 # tarball, waits for idle and installs (apps/ghost-host/src/update/).
 #
 # Publishing from the Mac (`bun scripts/release.ts --publish`) keeps working: the
-# guard step skips this workflow when the Release already exists.
+# guard skips this workflow whenever a Release for the tag exists, draft or not,
+# so a Mac publish that is still uploading its draft is never touched. A draft
+# left by a failed run stays until the owner deletes it.
 #
 # The iPhone IPA is NOT built here: TestFlight uploads live in the gated
 # ios-testflight job below (Apple 개발자 팀 활성화가 확인된 후 켠다).
@@ -35,22 +37,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          draft="$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)"
-          case "$draft" in
-            false)
-              echo "exists=true" >> "$GITHUB_OUTPUT"
-              echo "Release $tag already exists (published from the Mac); skipping."
-              ;;
-            true)
-              # Machine-created, never-published draft: replace it with a CI build.
-              gh release delete "$tag" --yes --cleanup-tag=false
-              echo "exists=false" >> "$GITHUB_OUTPUT"
-              echo "Unpublished draft for $tag removed; building fresh release."
-              ;;
-            *)
-              echo "exists=false" >> "$GITHUB_OUTPUT"
-              ;;
-          esac
+          # The guard runs before checkout, so it names the repository itself.
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "A Release for $tag already exists (published or uploading from the Mac); skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/checkout@v4
         if: steps.guard.outputs.exists != 'true'
@@ -148,8 +141,8 @@ jobs:
           GHOST_SIGNING_IDENTITY: ${{ vars.GHOST_SIGNING_IDENTITY }}
           GEIST_REPO: ${{ github.workspace }}/geist
           GHOST_SKIP_IOS: "1"  # iPhone IPA는 ios-testflight 잡이 담당 (팀 활성화 후)
+          GHOST_RELEASE_TAG_PUSHED: "1"  # 이 실행을 시작한 태그가 이미 원격에 있다
           GHOST_UPDATER_KEY_PASSWORD: ${{ secrets.GHOST_UPDATER_KEY_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.GHOST_UPDATER_KEY_PASSWORD }}
         run: bun scripts/release.ts --publish
 
   ios-testflight:
