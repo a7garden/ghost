@@ -488,7 +488,7 @@ export class Activities {
         if (snapshot.source.kind === "schedule" || snapshot.paused || (snapshot.deferredUntil ?? 0) > now) continue;
         try {
           let activity = this.current(snapshot.id, snapshot.revision);
-          if (activity.source.kind === "schedule" || activity.source.kind === "commit" || activity.source.kind === "poll") continue;
+          if (activity.source.kind === "schedule") continue;
           const failed = this.recentFailedRuns(activity);
           if (failed.length >= 3) {
             this.pauseForFailures(activity, failed.length, failed[0]!.reason ?? "Activity Work failed", now, failed[0]!.workId);

@@ -96,7 +96,7 @@ export function planGhostConfiguration(core: Core, ghostId: string, command: Com
         const old = ledger.mcpServer(command.serverId);
         const next = { ...old, ...command };
         widening = !(isDeepStrictEqual(next.transport, old.transport) && next.readTools.every((tool) => old.readTools.includes(tool)) && (!next.enabled || old.enabled));
-      } else if (command.type === "slot.set") widening = !isDeepStrictEqual(ledger.settings().slots[command.name], { model: command.model, fallbacks: command.fallbacks });
+      } else if (command.type === "slot.set") widening = !isDeepStrictEqual((ledger.settings().slots ?? {})[command.name], { model: command.model, fallbacks: command.fallbacks });
       break;
     }
     case "config.revert": {

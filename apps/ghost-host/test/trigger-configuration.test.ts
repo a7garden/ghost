@@ -45,6 +45,7 @@ test("poll inbox survives restart and disappearing provider data without duplica
   const activity = first.core.activities.create(first.config);
   const now = Date.now();
   await first.core.activities.tickSources(now); await first.core.idle();
+  expect(first.ledger.activityRuns(activity.id).filter((run) => run.workId)).toHaveLength(1);
   const one = first.ledger.activityRuns(activity.id).find((run) => run.workId)!;
   expect(first.ledger.activity(activity.id).cursor).toBeNull();
   const work = first.ledger.work(one.workId!);
@@ -118,6 +119,7 @@ test("commit triggers watch every scope repository directly from Git metadata", 
   const activity = f.core.activities.create({ ...f.config, scopeId: "repos", source: { kind: "commit", scopeId: "repos" }, policy: { ...f.config.policy, maxConcurrent: 2 } });
   const now = Date.now();
   await f.core.activities.tickSources(now);
+  expect(f.ledger.activity(activity.id).cursor).not.toBeNull();
   expect(f.ledger.activityRuns(activity.id).filter((run) => run.workId)).toHaveLength(0);
   for (const path of paths) {
     writeFileSync(join(path, ".git", "refs", "heads", "main"), `${next}\n`);
