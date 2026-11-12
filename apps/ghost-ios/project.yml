@@ -39,7 +39,7 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         MARKETING_VERSION: '0.1.0'
-        CURRENT_PROJECT_VERSION: '10'
+        CURRENT_PROJECT_VERSION: '11'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   GhostUITests:
     type: bundle.ui-testing

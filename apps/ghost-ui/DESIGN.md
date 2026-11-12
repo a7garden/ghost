@@ -116,8 +116,14 @@ Feature-level compositions:
   metadata; full-width answer rows keep option text, recommendation and action
   together. Digit keys answer in displayed order. Free text stays visible for an
   open question, and unfolds under 직접 답하기 when choices already answer it.
-  Approvals keep the exact command, location and stated risk visible; results
-  show their summary, files and completion criteria without a second card.
+  Approvals keep the exact command, location and stated risk visible. A result card
+  (2026-11-12) reads the main Ghost's summary as its body; the Work's own report, files
+  and completion criteria fold under 전문 보기 and stay open until the card is decided.
+  Without a summary the report is the body, capped with its own scroll. The kind mark
+  (icon and kind word at the head of the metadata) is the card's one colour: ink for
+  results and document reviews, amber for questions and browser waits, red for execution
+  approvals and vault requests. Urgent and authority cards queue ahead of calm ones;
+  results never carry a recommendation and never join 추천대로 처리.
   `⌘↵` approves; 수정 요청, reconciliation and document rejection open a reason
   field first (`D`). Loss-speaking commands, browser commit clicks and protected
   card fills still require two deliberate presses within 4s.
@@ -130,7 +136,9 @@ Feature-level compositions:
   추천대로 처리 settles every recommended, reversible decision after one checklist
   confirmation; vault forms, browser handoffs and loss-speaking commands never join it.
   What the main is deciding sits apart and leaves every pending count until it comes
-  back. 소식 and 처리한 결정 fold below.
+  back. 소식 and 처리한 결정 fold below. A row with an automatic deadline shows 마감 N분;
+  a short left swipe (touch) or `L` on a focused row sends it to 나중에. Deferring folds,
+  never hides: every count stays.
   Chat docks the same component above the composer; long evidence scrolls separately
   from the title and answer controls. Automatic-settlement conditions stay beside the
   response. Exceptionally short windows can scroll the whole request; secure forms
@@ -138,7 +146,8 @@ Feature-level compositions:
   use the same component in place. Secure inputs still submit only to the vault route.
 - **Work cancellation** (`src/components/ConfirmDialog.tsx`): the dialog states the consequence,
   names the action on the confirmation button and shows a failed cancellation in place.
-- **Tool trail** (conversations): consecutive tool results fold into one line of chips;
+- **Tool trail** (conversations): consecutive tool results fold into one line that says
+  what was done (파일 읽기 3번 · 명령 실행), with the tool chips beside it on wide screens only;
   opening it shows each call's output on a thread. Live tools tick in at the end; the
   composer edge carries a travelling signal while the Ghost responds: a comet on the edge,
   a soft glow behind it and a faint steady ring.
@@ -146,8 +155,15 @@ Feature-level compositions:
   child's report as 위임 결과. Thread cards list every Ghost working under the thread with
   its live state; a Work waiting on children reads 위임 결과 대기. The Work page's work
   conversation streams live like the thread panel.
-- **Work detail**: lifecycle track, the delegation map (parents above, children below)
-  and the effect timeline beside the brief, criteria and result receipt.
+- **Work detail** (2026-11-12, 판단 → 근거 → 행동): title and lifecycle track, then a bar
+  of three rows: status and deadline (기한 지남 in words), Ghost · handed-over time ·
+  revisions, and 완료 기준 / 결과 자료 N fold-outs beside 수정 · 취소 · 재개. Waiting
+  decisions turn the status word into the one amber 확인 필요 N, which jumps to the cards.
+  On phones the bar sticks under the top bar, 위임 and 실행 기록 fold below the work, and
+  wide tables read as one card per row. In the work conversation the owner's turns are a
+  left rule, not a bubble, and a Ghost's name heads each run of its rows; the thread panel's
+  work conversation reads the same way. The page scrolls only vertically; code, tables and
+  tool output scroll inside their own blocks.
 - **Context menus**: right-click a message to copy it, its selected text or a link, quote
   it into the reply (assistant) or bring it back into the composer (owner); a thread card
   opens its thread or Work page; a sidebar Ghost opens its conversation, 맡긴 일 or
@@ -212,6 +228,17 @@ chip names the model; its provider is the tooltip. Model choice, cancel and send
 Suggestions populate and focus the draft. Conversation
 identity resets local transcript/draft state so switching history never shows another
 conversation's messages or sends its draft accidentally.
+An owner message joins the transcript the moment it is sent (2026-11-12): a slow send says
+보내는 중 under it, a message written while the Host is unreachable waits as a dashed
+bubble (연결이 돌아오면 보냅니다, once, on the last) and goes on its own when the
+connection returns, and a failed send stays in place with 다시 보내기 · 버리기. Retries
+reuse the request id; 버리기 returns the text and files to the composer.
+
+The Host connection speaks only when it changes the owner's trust in the screen
+(2026-11-12): nothing for the first 4s of a drop, then 재연결 중… in amber, and after 20s
+연결 끊김 in red with 다시 연결. Returning from the background keeps the screen and
+reconnects from where it was; the last snapshot is cached per principal so a cold start
+draws real content first.
 
 Assistant text uses GFM Markdown, including scrollable code/tables and copy
 actions; owner text and ordinary tool output remain literal. Completed tools use inline
