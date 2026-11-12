@@ -363,16 +363,38 @@ class HostEngine implements Engine, MemoryEngine {
     if (record.status !== "done" && record.status !== "unanswered") {
       return { status: "pending", entryId: 0, serving: null, hit: null };
     }
-    const scan = record.status === "done" && "answer" in record
-      ? await state.pi.entries({ minEntryId: record.answer, maxEntryId: record.answer }, 1, undefined, ctx)
-      : await state.pi.entries({}, 20, undefined, ctx);
-    const entry = scan.items.find((entry) => entry.kind === "pi.assistant");
-    const message = entry?.model?.find((item): item is AssistantMessage => item.role === "assistant");
-    const hit = message && record.status === "unanswered" ? quotaHit(message) : null;
+    if (record.type !== "input") return { status: record.status, entryId: 0, serving: null, hit: null };
+    if (record.status === "done") {
+      const scan = await state.pi.entries({ minEntryId: record.answer, maxEntryId: record.answer }, 1, undefined, ctx);
+      const message = scan.items[0]?.model?.find((item): item is AssistantMessage => item.role === "assistant");
+      return { status: "done", entryId: record.answer, serving: message?.provider ?? null, hit: null };
+    }
+    // Only this input's model-error settlement can establish quota. An aborted/withdrawn input
+    // may have no transcript entry at all, and its conversation can still end in an older quota error.
+    if (record.reason !== "model_error" || record.entry === undefined || typeof record.detail !== "string") {
+      return { status: "unanswered", entryId: 0, serving: null, hit: null };
+    }
+    let after = record.entry;
+    let matched: EntryRecord | undefined;
+    for (;;) {
+      const scan = await state.pi.entries({ minEntryId: after, order: "ascending" }, 100, undefined, ctx);
+      if (scan.items.length === 0) break;
+      let nextInput = false;
+      for (const entry of scan.items) {
+        if (entry.id === record.entry) continue;
+        if (entry.kind === "pi.user") { nextInput = true; break; }
+        const message = entry.model?.find((item): item is AssistantMessage => item.role === "assistant");
+        if (message?.stopReason === "error" && message.errorMessage === record.detail) matched = entry;
+      }
+      if (nextInput || scan.items.length < 100) break;
+      after = (scan.items.at(-1)!.id + 1) as EntryId;
+    }
+    const message = matched?.model?.find((item): item is AssistantMessage => item.role === "assistant");
+    const hit = message ? quotaHit(message) : null;
     return {
-      status: record.status,
-      entryId: entry?.id ?? 0,
-      serving: record.status === "done" ? message?.provider ?? null : null,
+      status: "unanswered",
+      entryId: matched?.id ?? 0,
+      serving: null,
       hit: hit && message ? { provider: message.provider, ...hit } : null,
     };
   }
@@ -851,6 +873,7 @@ class HostEngine implements Engine, MemoryEngine {
     if (!state) return;
     const requestId = record.requestId;
     if (!requestId) return;
+    if (record.status === "done" || record.status === "unanswered") this.core.works.settleContinuation(state.hostId, requestId);
     let meta = state.origins.get(requestId);
     if (!meta) {
       await this.loadOrigins(state);

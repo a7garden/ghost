@@ -1,4 +1,4 @@
-import { Acceptance, DEFAULT_WORK_BUDGET_MINUTES, MAX_WORK_BUDGET_MINUTES, TERMINAL_WORK_STATES, validate, type ExecutionTarget, type GhostTool, type Verdict, type Work, type WorkHold, type WorkResult } from "@ghost/contract";
+import { Acceptance, DEFAULT_WORK_BUDGET_MINUTES, MAX_WORK_BUDGET_MINUTES, TERMINAL_WORK_STATES, validate, type ExecutionTarget, type GhostTool, type MessageOrigin, type Verdict, type Work, type WorkHold, type WorkResult } from "@ghost/contract";
 import type { WorkQuestion } from "../ledger/ledger.ts";
 import type { Core } from "./core.ts";
 import { checkAttachments } from "./configuration.ts";
@@ -10,6 +10,14 @@ import { validateExecutionTarget } from "../sandbox/index.ts";
 
 /** Reminders sent when a work conversation stops without completing; a quota-ended turn never counts. */
 const MAX_IDLE_NUDGES = 2;
+
+interface WorkContinuation {
+  revision: number;
+  revisionsUsed: number;
+  origin: MessageOrigin;
+  text: string;
+  requestId: string;
+}
 
 const EMPTY_ACCEPTANCE: Acceptance = { criteria: "", checks: [], reviewer: null };
 
@@ -182,7 +190,12 @@ export class Works {
       budgetUsedMs: closed ? work.budgetUsedMs + (now - work.budgetSince!) : work.budgetUsedMs,
       budgetSince: consuming ? now : null,
     };
-    this.ledger.tx(() => this.ledger.putWork(next));
+    this.ledger.tx(() => {
+      const key = `work-continuation:${work.id}`;
+      const continuation = this.ledger.setting<WorkContinuation | null>(key, null);
+      if (continuation && (work.state !== "running" || continuation.revision !== work.revision || continuation.revisionsUsed !== work.revisionsUsed)) this.ledger.putSetting(key, null);
+      this.ledger.putWork(next);
+    });
     return next;
   }
 
@@ -628,24 +641,17 @@ export class Works {
       this.put(next);
       if (verdict.outcome === "revise") this.ledger.appendReviseHistory(work.id, verdict);
       this.core.decisions.cancelFor(work.id, "accept_result");
-      if (next.state === "running") this.ledger.setIdleNudges(work.id, 0);
+      if (next.state === "running") {
+        this.ledger.setIdleNudges(work.id, 0);
+        this.tellWork(next, [
+          `Verification asked for a revision (${verdict.source}).`,
+          `## Reasons\n${verdict.reasons}`,
+          verdict.evidence === undefined ? "" : `## Evidence\n${verdict.evidence}`,
+          verdict.scope === undefined ? "" : `## Scope\n${verdict.scope}`,
+          "Change only what the scope allows; leave unrelated behavior untouched. Fix the result and call complete again.",
+        ].filter(Boolean).join("\n\n"), `work:${work.id}:verdict:${next.revisionsUsed}`, "verdict");
+      }
     });
-    if (next.state === "running" && next.conversationId) {
-      const conversationId = next.conversationId;
-      void this.core.lane(`work:${work.id}`, () =>
-        this.core.engine.submit(conversationId, {
-          text: [
-            `Verification asked for a revision (${verdict.source}).`,
-            `## Reasons\n${verdict.reasons}`,
-            verdict.evidence === undefined ? "" : `## Evidence\n${verdict.evidence}`,
-            verdict.scope === undefined ? "" : `## Scope\n${verdict.scope}`,
-            "Change only what the scope allows; leave unrelated behavior untouched. Fix the result and call complete again.",
-          ].filter(Boolean).join("\n\n"),
-          origin: "verdict",
-          requestId: `work:${work.id}:verdict:${next.revisionsUsed}`,
-        }),
-      );
-    }
     if (isTerminal(next)) {
       this.releaseIncomingQuestions(next.id, "The recipient Work settled before the question was resolved.");
       this.settled(next);
@@ -869,13 +875,59 @@ export class Works {
   }
 
   /** One message into the Work's own conversation, waking it without changing its brief. */
-  private tellWork(work: Work, text: string, requestId: string) {
+  private tellWork(work: Work, text: string, requestId: string, origin: MessageOrigin = "work") {
     if (!work.conversationId) return;
     const conversationId = work.conversationId;
-    this.ledger.putSetting(`work-continuation:${work.id}`, { revision: work.revision, text, requestId });
+    this.ledger.putSetting(`work-continuation:${work.id}`, { revision: work.revision, revisionsUsed: work.revisionsUsed, text, requestId, origin } satisfies WorkContinuation);
     void this.core.lane(`work:${work.id}`, async () => {
       await this.core.openConversation(conversationId);
-      await this.core.engine.submit(conversationId, { text, origin: "work", requestId });
+      await this.core.engine.submit(conversationId, { text, origin, requestId });
+    });
+  }
+
+  /** A settled old input must never clear a newer wake prepared while that turn was finishing. */
+  settleContinuation(conversationId: string, requestId: string) {
+    const work = this.ledger.workByConversation(conversationId);
+    if (!work) return;
+    const key = `work-continuation:${work.id}`;
+    this.ledger.tx(() => {
+      if (this.ledger.setting<WorkContinuation | null>(key, null)?.requestId === requestId) this.ledger.putSetting(key, null);
+    });
+  }
+
+  /** Reconcile the exact journaled wake; a completed wake cannot suppress recovery of later work. */
+  private async resumeContinuation(work: Work, recover: boolean): Promise<boolean> {
+    if (!work.conversationId || work.state !== "running" || work.hold !== null) return true;
+    const key = `work-continuation:${work.id}`;
+    const continuation = this.ledger.setting<WorkContinuation | null>(key, null);
+    if (!continuation || continuation.revision !== work.revision || continuation.revisionsUsed !== work.revisionsUsed) return false;
+    const status = await this.core.engine.submissionRecovery?.(work.conversationId, continuation.requestId);
+    const current = this.ledger.work(work.id);
+    const latest = this.ledger.setting<WorkContinuation | null>(key, null);
+    if (current.state !== "running" || current.hold !== null) return true;
+    if (current.revision !== work.revision || current.revisionsUsed !== work.revisionsUsed || latest?.requestId !== continuation.requestId) {
+      if (latest) return this.resumeContinuation(current, recover);
+      if (recover) await this.recoverWake(current);
+      return true;
+    }
+    if (status?.status === "pending") return true;
+    if (status?.status === "done" || status?.status === "unanswered") {
+      this.settleContinuation(work.conversationId, continuation.requestId);
+      if (recover && !this.ledger.conversation(work.conversationId).busy) await this.recoverWake(current);
+      return true;
+    }
+    await this.core.openConversation(work.conversationId);
+    await this.core.engine.submit(work.conversationId, { text: continuation.text, origin: continuation.origin, requestId: continuation.requestId });
+    return true;
+  }
+
+  private async recoverWake(work: Work) {
+    if (!work.conversationId || work.state !== "running" || work.hold !== null || this.ledger.conversation(work.conversationId).busy) return;
+    await this.core.openConversation(work.conversationId);
+    await this.core.engine.submit(work.conversationId, {
+      text: `The host restarted. Continue this Work from where you stopped; call \`work_status\` if you need to see what changed.\n\n${this.input(work)}`,
+      origin: "work",
+      requestId: `work:${work.id}:recover:${work.updatedAt}`,
     });
   }
 
@@ -928,10 +980,8 @@ export class Works {
         // with a silent conversation; the start request id makes this a no-op otherwise.
         if (!work.conversationId || work.hold !== null) return;
         await this.core.openConversation(work.conversationId);
-        const continuation = this.ledger.setting<{ revision: number; text: string; requestId: string } | null>(`work-continuation:${work.id}`, null);
-        await this.core.engine.submit(work.conversationId, continuation?.revision === work.revision
-          ? { text: continuation.text, origin: "work", requestId: continuation.requestId }
-          : { text: this.input(work), origin: "work", requestId: `work:${work.id}:start` });
+        if (await this.resumeContinuation(work, false)) return;
+        await this.core.engine.submit(work.conversationId, { text: this.input(work), origin: "work", requestId: `work:${work.id}:start` });
         return;
       case "blocked":
         return;
@@ -1164,20 +1214,10 @@ export class Works {
     for (const work of this.ledger.worksInState("running")) {
       // A quota-held Work is resumed by the quota queue's own request ids; a budget or repeat hold waits for its origin.
       if (work.hold !== null || (work.conversationId && this.core.quota.awaiting(work.conversationId))) continue;
-      const continuation = this.ledger.setting<{ revision: number; text: string; requestId: string } | null>(`work-continuation:${work.id}`, null);
-      if (continuation?.revision === work.revision) { this.kick(work.id); continue; }
-      const conversation = work.conversationId ? this.ledger.findConversation(work.conversationId) : null;
-      // A busy conversation is resumed by the engine; an idle one may have lost the wake that
-      // a transition committed just before the crash (resume, unblock, child result, revise).
-      if (!conversation || conversation.busy) continue;
-      const conversationId = conversation.id;
-      void this.core.lane(`work:${work.id}`, () =>
-        this.core.engine.submit(conversationId, {
-          text: `The host restarted. Continue this Work from where you stopped; call \`work_status\` if you need to see what changed.\n\n${this.input(work)}`,
-          origin: "work",
-          requestId: `work:${work.id}:recover:${work.updatedAt}`,
-        }),
-      );
+      void this.core.lane(`work:${work.id}`, async () => {
+        const current = this.ledger.work(work.id);
+        if (!(await this.resumeContinuation(current, true))) await this.recoverWake(current);
+      });
     }
   }
 }
