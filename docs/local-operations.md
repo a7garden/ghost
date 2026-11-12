@@ -87,15 +87,15 @@ Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작�
 - [v2.7.1](https://github.com/a7garden/ghost/releases/tag/v2.7.1)(`a8a6122`)을 `main`에 통합하고 Gitea·GitHub에 일반 푸시했다. Host 1,048 통과·8 생략, UI 229, 셸 Rust 28, 계약·Host·UI 타입과 전체 릴리스 빌드·Developer ID 서명·업데이터 서명·해시·묶음 검증을 통과했다. 두 변경의 강한 독립 검토는 최종 응답 메타데이터가 Codex Sol인 검토에서 P0–P2가 없었다. 셸 0.2.4·iPhone 빌드는 유지하며 공증은 기존 릴리스 방식대로 생략했다. 검증한 배포 산출물은 정본 `dist/release/2.7.1/`에 보존했다.
 - 운영 PID 78864의 실행 파일·단일 62062 리스너·운영 DB 루트를 재확인한 뒤 Host 자체 업데이트를 요청했다. 서명 검증된 `releases/2.7.1-a8a6122/` 스테이징과 해당 바이너리의 버전·서명을 확인했으나, 마지막 Owner API 관측은 `waiting`이었다. 기획의 direct/work·디자이너 work·기억 관리 work가 busy라 중단하지 않았다. 현재 버전·`lastResult`는 여전히 2.7.0 설치 결과이며, 2.7.1 적용·재시작 뒤 준비 상태·상태 보존·설치 앱 확인은 미완료다.
 
-### iPhone 푸시 알림 — 2026-11-11, Apple 팀 활성화 차단
+### iPhone 푸시 알림 — 2026-11-12 운영 수신
 
 - 소유자의 멤버십 갱신 결제 뒤 푸시 권한을 포함하는 iPhone 빌드 10·Host 2.8.0을 준비했다. 릴리스는 프로젝트의 `Ghost.entitlements`를 그대로 사용하고, 내보낸 IPA의 서명·내장 프로필 양쪽에서 `aps-environment=development`를 확인한다. 권한을 빼서 서명하는 우회는 제거했다.
 - 검증: Swift 패키지 29개 검사, iOS Release 시뮬레이터 빌드, 알림 탭 이동·셸 이벤트 UI 검사 6개, 릴리스 스크립트 Bun 구문 빌드를 통과했다. 서명·발송 상태 전이·페이로드 크기 제한은 작성자와 다른 공급자인 실제 Anthropic의 독립 검토에서 지적이 없었다. GLM으로 대체된 별도 검토는 강한 독립 수용으로 세지 않았다.
 - Host 알림 검사 57개·423개 단언과 타입 검사를 통과했다. 새 APNs 등록 시점 이전의 누적 알림(관측 시 805개)은 푸시로 보내지 않고 받은 알림에는 남긴다. 앱 재실행·토큰 교체는 등록 시점을 유지하고, 토큰 삭제·기기 해제는 지운다. 느린 발송의 중복 tick, 발송 중 철회·토큰 교체, 이전 토큰의 지연된 410 응답을 격리된 전송 경계로 확인했다.
 - [Apple의 4096바이트 제한](https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/CreatingtheNotificationPayload.html)에 맞춰 JSON 이스케이프·UTF-8 바이트를 계산해 긴 알림 미리보기만 줄인다. 한글·이모지·제어 문자·정확한 경계에서 검사했으며, 제목·알림 ID·받은 알림 원문·읽지 않음 상태는 보존한다.
-- 실기기 archive(`-allowProvisioningUpdates`, 팀 W5SAS95CBV)는 Apple이 팀을 `Personal Team`으로 취급해 실패했다. 기존 프로필에 Push Notifications·`aps-environment`가 없으며 새 푸시 프로필 생성도 거부됐다. Apple 키 포털도 “The selected team does not have a program membership that is eligible for this feature”로 거부했다. 결제 완료와 개발자 팀 활성화를 구분한다.
-- 결제 완료 화면의 Apple Developer 복귀 흐름으로 세션을 갱신하고 Safari 재로그인을 열어 소유자에게 인계했다. APNs 키 발급·운영 `apns` 설정·릴리스 게시·새 iPhone 설치·닫힌 앱 수신은 아직 완료하지 않았다. 이 작업에서는 운영 Host나 iPhone 앱을 교체하거나 운영 대화·작업을 끊지 않았다.
-- 활성화 후 APNs 키는 저장소 밖의 Host `secrets/`에 0600으로 보관하고, `config.json.apns`에 `teamId`·`keyId`·절대 `keyPath`·`topic: "io.a7garden.ghost"`를 설정한다. 그 뒤 푸시 프로필로 archive/export → 릴리스 게시 → Host 자체 업데이트 → iPhone 설치 → 앱을 닫은 상태의 실제 승인·완료 알림과 탭 이동을 확인한다.
+- 2026-11-11에는 Apple이 결제 반영 전이라 팀을 무료 `Personal Team`으로 취급해 푸시 프로필과 APNs 키를 거부했다. 2026-11-12 같은 개인 유료 팀 W5SAS95CBV로 푸시 서명 archive가 통과했다(조직 계정 불필요).
+- APNs 키 `P6RNHSQ7PW`(Sandbox, 팀 범위)를 만들어 Host `secrets/apns/`(0600)와 `~/Documents/IMPORTANT/apple-apns/`(0600)에 두고 다운로드 사본은 지웠다. 운영 `config.json.apns`를 설정했다(이전 설정 백업 `backups/pre-apns-config-1794436314.json`). 가짜 기기 토큰으로 보낸 Sandbox 요청이 `BadDeviceToken`을 돌려줘 키 인증을 확인했다. Production 키는 TestFlight·App Store 배포 때 따로 필요하다.
+- [v2.8.0](https://github.com/a7garden/ghost/releases/tag/v2.8.0)을 게시했다(Host 1,029 통과·46 생략, UI 230, Rust 28, 내보낸 IPA의 `aps-environment=development` 확인). 운영에는 이를 포함한 2.8.1이 설치됐다. 기기 `iPhone`은 `pushEnabled: true`, 활성화 시점 `device.push.since`가 기록됐다. 이후 결정·메시지 알림이 생성 3초 안에 발송 표시됐고, 미발송 대기는 0개다. 소유자가 iPhone에서 알림 수신을 확인했다. 알림 탭 이동과 앱을 닫은 상태의 승인·완료 알림을 따로 나눈 실기기 확인은 아직 기록하지 않았다.
 
 ### GitHub `main` 병합과 2.7.0 설치 — 2026-11-11
 
