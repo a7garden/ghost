@@ -5,7 +5,7 @@ import { DEFAULT_GHOST_TOOLS } from "@ghost/contract";
 import { createVault, type Vault } from "../src/stores/vault.ts";
 import { TOSS_ORIGIN, TossClient, tossQuery, tossRoute, type TossCredential, type TossPort } from "../src/integrations/toss.ts";
 import { createTossTools } from "../src/tools/toss.ts";
-import { harness, tempDir } from "./support.ts";
+import { harness, tempDir, hostTaskId } from "./support.ts";
 
 const SECRET = "SYNTHETIC-toss-client-secret-never-shown", CLIENT = "tsck_live_synthetic";
 const roots: string[] = [], vaults: Vault[] = [];
@@ -164,7 +164,7 @@ describe("toss_read tool", () => {
     const extension = createTossTools(h.core, vault, port);
     const call = async (args: unknown) => {
       const execute = extension.tools![0]!.execute as (args: unknown, api: ToolExecutionApi, context: unknown) => Promise<{ isError?: boolean; content: { text: string }[] }>;
-      const result = await execute(args, { conversationId: "pi-toss-test", callId: "c" } as unknown as ToolExecutionApi, {});
+      const result = await execute(args, { conversationId: "pi-toss-test", callId: "c", taskId: hostTaskId() } as unknown as ToolExecutionApi, {});
       return { error: result.isError === true, text: result.content.map((part) => part.text).join("\n") };
     };
     return { h, vault, ghost, call };

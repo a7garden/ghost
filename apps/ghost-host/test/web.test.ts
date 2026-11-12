@@ -11,7 +11,7 @@ import { AgentReach, createReach } from "../src/integrations/reach.ts";
 import type { Ledger } from "../src/ledger/ledger.ts";
 import { createToolSet } from "../src/tools/index.ts";
 import type { ToolSet } from "../src/tools/types.ts";
-import { harness, tempDir } from "./support.ts";
+import { harness, tempDir, hostTaskId } from "./support.ts";
 
 /**
  * A tiny stand-in for the agent-reach CLI: it appends the argv it received to
@@ -100,7 +100,7 @@ function setup(): Setup {
 }
 
 const apiOf = (piConversationId: string): ToolExecutionApi =>
-  ({ conversationId: piConversationId, callId: "call-1" }) as unknown as ToolExecutionApi;
+  ({ conversationId: piConversationId, callId: "call-1", taskId: hostTaskId() }) as unknown as ToolExecutionApi;
 
 // Stub of the invocation context; the web tools only read nothing from it.
 const testContext = (): Context => ({ abortSignal: undefined }) as Context;

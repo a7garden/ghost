@@ -1,12 +1,23 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { TaskId } from "@earendil-works/pi-durable";
 import type { ArtifactRef, LiveEvent, Sandbox } from "@ghost/contract";
 import { Core } from "../src/core/core.ts";
 import { sha256 } from "../src/core/ids.ts";
 import type { ArtifactStore, ConversationSetup, Engine, Submission, SubmissionRecovery, TranscriptPage } from "../src/core/ports.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { BaseSecrets } from "../src/stores/secrets.ts";
+
+let hostTaskSeq = 0;
+/**
+ * A distinct Host-issued Pi task identity for one fabricated tool call. Production read admission
+ * binds to it; a fixture creates one per call and reuses that call's API object for its rechecks.
+ */
+export function hostTaskId(): TaskId {
+  hostTaskSeq += 1;
+  return hostTaskSeq as TaskId;
+}
 
 /** Records what core asks of Pi. Deduplicates submissions by request id like Pi does. */
 export class FakeEngine implements Engine {

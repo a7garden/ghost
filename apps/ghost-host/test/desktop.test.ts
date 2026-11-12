@@ -8,7 +8,7 @@ import { loadConfig } from "../src/config.ts";
 import { GhostControl } from "../src/integrations/desktop.ts";
 import type { DesktopPort, DesktopResult } from "../src/integrations/ports.ts";
 import { createDesktopTools } from "../src/tools/desktop.ts";
-import { harness, tempDir } from "./support.ts";
+import { harness, tempDir, hostTaskId } from "./support.ts";
 
 const ok = (data: unknown): DesktopResult => ({ ok: true, data, error: null, delivered: true });
 const tree = (send = "Send", id = "sabc") => ({ role: "window", name: "Doc", children: [
@@ -88,7 +88,7 @@ function fixture() {
   let seq = 0;
   const call = async (name: string, args: unknown = {}, pi = "pi-desktop", callId = `call-${++seq}`, abortSignal?: AbortSignal): Promise<ToolExecutionResult> => {
     const tool = extension.tools!.find((t) => t.name === name)!;
-    return tool.execute(args as never, { conversationId: pi, callId } as unknown as ToolExecutionApi, { abortSignal } as Context);
+    return tool.execute(args as never, { conversationId: pi, callId, taskId: hostTaskId() } as unknown as ToolExecutionApi, { abortSignal } as Context);
   };
   const said = (result: ToolExecutionResult) => (result.content ?? []).map((part) => part.type === "text" ? part.text : "").join("\n");
   const ownerCall = async (name: string, args: unknown = {}, pi = "pi-desktop", callId = `owner-call-${++seq}`, abortSignal?: AbortSignal) => {

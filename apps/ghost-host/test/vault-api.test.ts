@@ -10,7 +10,7 @@ import { digestOf, idFor } from "../src/core/ids.ts";
 import { hashSecret } from "../src/core/commands.ts";
 import { createVault } from "../src/stores/vault.ts";
 import { createVaultTools } from "../src/tools/vault.ts";
-import { harness, tempDir } from "./support.ts";
+import { harness, tempDir, hostTaskId } from "./support.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
@@ -29,7 +29,7 @@ function fixture() {
   async function tool(name: string, args: unknown, callId = name) {
     const selected = extension.tools!.find((entry) => entry.name === name)!;
     const invoke = selected.execute as (args: unknown, api: ToolExecutionApi) => Promise<unknown>;
-    return invoke(args, { conversationId: "pi-vault-test", callId } as unknown as ToolExecutionApi);
+    return invoke(args, { conversationId: "pi-vault-test", callId, taskId: hostTaskId() } as unknown as ToolExecutionApi);
   }
   return { ...h, root, ledgerPath, vault, ghost, conversation, request, tool };
 }

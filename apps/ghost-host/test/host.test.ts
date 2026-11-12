@@ -32,7 +32,7 @@ import type {
 import { HostWatch } from "../src/core/hostwatch.ts";
 import { createHostTools } from "../src/tools/host.ts";
 import { loadConfig } from "../src/config.ts";
-import { harness, tempDir } from "./support.ts";
+import { harness, tempDir, hostTaskId } from "./support.ts";
 import { openApp, type App } from "../src/app.ts";
 import { CommandError } from "../src/core/errors.ts";
 
@@ -193,7 +193,7 @@ describe("guarded Mac host", () => {
       for (const [index, [program, args]] of cases.entries()) {
         const before = calls.length;
         const result = await invoke({ ...command(f.root), program, args }, {
-          conversationId: "read-argv", callId: `read-${index}`,
+          conversationId: "read-argv", callId: `read-${index}`, taskId: hostTaskId(),
         } as unknown as ToolExecutionApi);
         expect(JSON.stringify(result)).toContain("observed");
         expect(calls.length).toBeGreaterThan(before);
@@ -238,7 +238,7 @@ describe("guarded Mac host", () => {
       h.ledger.setPiConversationId(ghost.directConversationId, "paged-read");
       const tool = createHostTools(h.core, f.host).tools!.find((tool) => tool.name === "host_read")!;
       const invoke = tool.execute as unknown as (args: { path: string; offset?: number; limit?: number }, api: ToolExecutionApi) => Promise<{ content: { text: string }[] }>;
-      const result = await invoke({ path, offset: 2, limit: 1 }, { conversationId: "paged-read", callId: "page" } as unknown as ToolExecutionApi);
+      const result = await invoke({ path, offset: 2, limit: 1 }, { conversationId: "paged-read", callId: "page", taskId: hostTaskId() } as unknown as ToolExecutionApi);
       expect(JSON.parse(result.content[0]!.text)).toMatchObject({ text: "two\n", startLine: 2, endLine: 2, totalLines: 3, nextOffset: 3 });
     } finally {
       h.ledger.close();
@@ -1083,7 +1083,7 @@ describe("host command approval", () => {
       ];
       for (const [index, [program, args]] of cases.entries()) {
         await invoke({ ...command(f.root), program, args }, {
-          conversationId: "pi-host-fallback", callId: `fallback-${index}`,
+          conversationId: "pi-host-fallback", callId: `fallback-${index}`, taskId: hostTaskId(),
         } as unknown as ToolExecutionApi);
         expect(calls).toHaveLength(0);
         const decision = h.ledger.pendingDecisions()[0]!;
@@ -1109,7 +1109,7 @@ describe("host command approval", () => {
         input: HostCommand, api: ToolExecutionApi,
       ) => Promise<unknown>;
       const api = (callId: string) => ({
-        conversationId: "pi-host-inspect", callId,
+        conversationId: "pi-host-inspect", callId, taskId: hostTaskId(),
       }) as unknown as ToolExecutionApi;
       const logs = join(f.home, "Library/Logs");
       mkdirSync(logs);
@@ -1162,6 +1162,7 @@ describe("host command approval", () => {
       ({
         conversationId: "pi-host-test",
         callId,
+        taskId: hostTaskId(),
       }) as unknown as ToolExecutionApi;
     const invoke = tool.execute as unknown as (
       input: HostCommand,
