@@ -600,7 +600,7 @@ export class Activities {
   }
 
   private workIdentity(work: Work): string {
-    return digestOf({ execution: workExecutionIdentity(work), artifacts: this.ledger.artifactsForWork(work.id).map((artifact) => artifact.digest).sort() });
+    return digestOf({ execution: workExecutionIdentity(this.ledger, work), artifacts: this.ledger.artifactsForWork(work.id).map((artifact) => artifact.digest).sort() });
   }
 
   async action(workId: string, callId: string, action: ActivityAction): Promise<string> {
