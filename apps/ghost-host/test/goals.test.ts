@@ -71,9 +71,18 @@ describe("goal proposals", () => {
     expect(textOf(await propose({ ...proposal, title: "다른 방향" }, "p2"))).toContain("for 3 days");
   });
 
-  test("goal tools stay with the current main", () => {
+  test("a non-main Ghost manages goals only inside a scope it receives", async () => {
     const t = team();
-    for (const name of ["goal_propose", "goal_list", "milestone_plan", "milestone_update"]) expect(() => t.use(t.mateDirect, name)).toThrow("not offered");
+    t.ledger.tx(() => {
+      t.ledger.putScope({ id: "mate-scope", name: "Mate", ghostId: t.mate.id, paths: [], vaultPath: null, state: "active", attachments: [], limits: {}, createdAt: 1, updatedAt: 1 });
+      t.ledger.putScope({ id: "other-scope", name: "Other", ghostId: null, paths: [], vaultPath: null, state: "active", attachments: [], limits: {}, createdAt: 1, updatedAt: 1 });
+    });
+    const list = t.use(t.mateDirect, "goal_list");
+    expect(textOf(await list({}, "global"))).toContain("received by this Ghost");
+    expect(textOf(await list({ scope_id: "other-scope" }, "foreign"))).toContain("received by this Ghost");
+    expect((await list({ scope_id: "mate-scope" }, "own")).isError).toBeFalsy();
+    expect(textOf(await t.use(t.mateDirect, "goal_propose")({ ...proposal, scope_id: "other-scope" }, "foreign-proposal"))).toContain("received by this Ghost");
+    expect(t.ledger.pendingDecisions().some((item) => item.proposal?.goal)).toBe(false);
   });
 
   test("three open goals is the limit for the owner and for proposals", async () => {
