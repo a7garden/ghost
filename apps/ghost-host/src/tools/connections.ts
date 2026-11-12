@@ -12,6 +12,7 @@ import type { Vault } from "../stores/vault.ts";
 import { errorResult, requireAllowed, type Scope } from "./shared.ts";
 import { policyRead } from "../core/policy-context.ts";
 import { connectionMetadata } from "../core/configuration.ts";
+import { NotFound } from "../ledger/ledger.ts";
 
 export const CONNECTION_INSTRUCTIONS = "connection_list shows service metadata and granted API endpoints, never credentials. connection_request reads a granted API account with a base-relative path (users/me or /users/me); writes require owner approval and are never replayed. connection_register proposes API, GitHub/Gitea or mail setup using a granted vault item or browser credential field; never copy a key into tool arguments or chat. After generating a key, do not snapshot or screenshot the secret: register using a unique CSS selector for its input/textarea, or a previously known ref. Keep the issuer page open at credential_origin until approval. Host captures and redacts the credential without returning it to you. Use browser_handoff for login/SSO/2FA and vault_request if the issuer cannot expose its key in an input field. Verify API access with a read after registration; never claim authentication was checked just because registration succeeded.";
 const DAY = 86_400_000;
@@ -212,24 +213,44 @@ export function createConnectionTools(core: Core, deps: { sources: ActivitySourc
 /** Same transport and live grants for the generic tool and each open connection namespace. */
 export function createConnectionAlias(core: Core, deps: { sources: ActivitySourcePort | null; vault?: Vault | null; browser?: BrowserPort | null }, name: string, connectionId?: string) {
   const authorize = (api: ToolExecutionApi, connection: Connection, expected: string) => {
-    const scope = requireAllowed(core, api, name);
-    const current = core.ledger.connection(connection.id);
-    if (current.config.kind !== "api" || !current.config.ghostIds.includes(scope.ghost.id)) throw forbidden("This API connection is not granted to this Ghost");
-    if (authorityOf(current) !== expected) throw new NoEffect("Connection authority changed; nothing was sent");
-    return scope;
+    try {
+      const scope = requireAllowed(core, api, name);
+      const current = core.ledger.connection(connection.id);
+      if (current.config.kind !== "api" || !current.config.ghostIds.includes(scope.ghost.id)) throw forbidden("This API connection is not granted to this Ghost");
+      if (authorityOf(current) !== expected) throw new NoEffect("Connection authority changed; nothing was sent");
+      return scope;
+    } catch (error) {
+      if (error instanceof CommandError || error instanceof NotFound) throw new NoEffect(error.message);
+      throw error;
+    }
   };
   const request = async (api: ToolExecutionApi, input: WriteRequest) => {
     const connection = core.ledger.connection(input.connectionId);
+    const read = connectionRequestIsReadOnly(connection, input.method, input.path);
+    let dispatched = false;
     const check = () => {
-      const scope = authorize(api, connection, input.authority);
-      if (connectionRequestIsReadOnly(connection, input.method, input.path)) policyRead(core, scope.conversation.id, { tool: name, target: { kind: "connection", id: connection.id }, access: "read", reversible: false, external: false, amount: null }, api.callId);
-      else core.effects.authorize(scope.conversation.id, api.callId);
+      try {
+        const scope = authorize(api, connection, input.authority);
+        if (read) policyRead(core, scope.conversation.id, { tool: name, target: { kind: "connection", id: connection.id }, access: "read", reversible: false, external: false, amount: null }, api.callId);
+        else core.effects.authorize(scope.conversation.id, api.callId);
+      } catch (error) {
+        if (dispatched && !read) throw new Error("The request was dispatched before authority changed; inspect the service outcome before retrying.");
+        throw error;
+      }
     };
     check();
     if (!deps.sources?.apiRequest) throw new NoEffect("Authenticated API requests are unavailable");
-    const response = await deps.sources.apiRequest(connection, { method: input.method, path: input.path, ...(input.body === null ? {} : { body: input.body }), authorize: check });
-    check();
-    return responseText(response);
+    try {
+      const response = await deps.sources.apiRequest(connection, {
+        method: input.method, path: input.path, ...(input.body === null ? {} : { body: input.body }),
+        authorize: () => { check(); dispatched = true; },
+      });
+      check();
+      return responseText(response);
+    } catch (error) {
+      if (!dispatched && error instanceof SourceError) throw new NoEffect(error.message);
+      throw error;
+    }
   };
   core.effects.onApproved(name, async effect => {
     const decision = core.ledger.decisionsAwaitingFollowUp().find(decision => decision.effectId === effect.id && decision.state === "approved");
@@ -238,7 +259,9 @@ export function createConnectionAlias(core: Core, deps: { sources: ActivitySourc
     const piId = core.ledger.piConversationId(effect.conversationId);
     if (!piId) throw new NoEffect("Connection conversation is unavailable");
     const api = { conversationId: piId, callId: effect.callId } as unknown as ToolExecutionApi;
-    const scope = authorize(api, core.ledger.connection(input.connectionId), input.authority);
+    const connection = core.ledger.findConnection(input.connectionId);
+    if (!connection) throw new NoEffect("The connection was deleted; nothing was sent");
+    const scope = authorize(api, connection, input.authority);
     if (scope.conversation.kind === "subagent") throw new NoEffect("Subagents cannot change external services");
     if (scope.work?.activityId && core.ledger.activity(scope.work.activityId).policy.externalActions === "deny") throw new NoEffect("This activity denies external actions");
     return request(api, input);

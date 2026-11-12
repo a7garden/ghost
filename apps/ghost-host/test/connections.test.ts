@@ -190,12 +190,14 @@ describe("connection tools", () => {
       const request = toolOf(s, s.ledger.conversation(s.ghost.directConversationId), s.ghost, "connection_request");
       const proposed = await call(request, { connection_id: "notion", method: "POST", path: "/v1/pages", body: JSON.stringify({ page: "Plan" }), reason: "새 페이지 생성" }, apiOf(s.pi, "post-1"));
       expect(proposed.isError).toBeFalsy();
-      expect(contentOf(proposed)).toContain("awaiting owner approval");
+      expect(contentOf(proposed)).toContain("Policy approval required");
+      expect(contentOf(proposed)).toContain("connection-write");
       expect(s.writes).toHaveLength(0);
       const decision = s.ledger.pendingDecisions({ conversationId: s.ghost.directConversationId }).at(-1)!;
       expect(decision.kind).toBe("approve_effect");
       expect(s.core.decisions.reversible(decision)).toBe(false);
-      expect(reviewOf(decision.proposal)).toBeNull();
+      expect(reviewOf(decision.proposal)).toMatchObject({ recommend: "approve", expiresAt: null });
+      await expect(s.core.decisions.settleForOwner(s.other.id, decision.id, { outcome: "approve", note: "No owner authorization" })).rejects.toThrow("live policy reviewer");
       const effectId = decision.effectId!;
       const resolvedId = await resolveOwner(s, effectId, "approve");
       expect(s.writes).toEqual([{ path: "/v1/pages", method: "POST" }]);
@@ -469,4 +471,29 @@ test("connection namespace grants invoke the generic API without the generic-too
     s.ledger.tx(() => s.ledger.putConnection(revoked));
     expect((await call(request, { method: "GET", path: "/users/me" }, apiOf(s.pi, "alias-revoked"))).isError).toBe(true);
   } finally { s.close(); }
+});
+
+test("revocation after HTTP dispatch keeps the external outcome unknown, never falsely denied", async () => {
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let dispatches = 0;
+  const s = setup(async () => {
+    dispatches++;
+    entered.resolve();
+    await release.promise;
+    return Response.json({ id: "created-before-revocation" }, { status: 201 });
+  });
+  try {
+    const request = toolOf(s, s.ledger.conversation(s.ghost.directConversationId), s.ghost, "connection_request");
+    await call(request, { connection_id: s.connection.id, method: "POST", path: "pages", body: "{}" }, apiOf(s.pi, "dispatched-revocation"));
+    const decision = s.ledger.pendingDecisions().find(decision => decision.kind === "approve_effect")!;
+    const resolution = resolveOwner(s, decision.effectId!, "approve");
+    await entered.promise;
+    s.ledger.tx(() => s.ledger.putGhost({ ...s.ghost, tools: s.ghost.tools.filter(tool => tool !== "connection_request") }));
+    release.resolve();
+    await resolution;
+    expect(dispatches).toBe(1);
+    expect(s.ledger.effect(decision.effectId!).state).toBe("unknown");
+    expect(s.ledger.pendingDecisions({ effectId: decision.effectId! }).some(decision => decision.kind === "reconcile_effect")).toBe(true);
+  } finally { release.resolve(); s.close(); }
 });
