@@ -6,6 +6,7 @@ import { budgetSpent } from "./budget.ts";
 import { CommandError, conflict, forbidden, invalid } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
 import { verifyChecks } from "./verify.ts";
+import { policyTaint } from "./policy-context.ts";
 import { validateExecutionTarget } from "../sandbox/index.ts";
 import { classifyEffect, evaluateStoredPolicy } from "./policy-context.ts";
 
@@ -86,7 +87,11 @@ export class Works {
     if (origin.kind === "wake" && input.scopeId !== undefined && input.scopeId !== context!.scopeId) throw invalid("a wake cannot create Work outside its current scope");
     const scopeId = input.scopeId === undefined ? context?.scopeId ?? null : input.scopeId;
     const work = this.newWork({ ...input, scopeId, originConversationId: owner.id, execution, id, parentId: null, rootId: id });
-    this.ledger.tx(() => this.ledger.putWork(work)); // queued: no budget span to settle yet
+    this.ledger.tx(() => {
+      this.ledger.putWork(work);
+      this.ledger.putSetting(`work:source:${work.id}`, origin.id);
+      this.ledger.putSetting(`work:source-taint:${work.id}`, policyTaint(this.core, origin.id));
+    });
     this.kick(work.id);
     return work;
   }

@@ -67,30 +67,37 @@ export class Quota {
     this.stopped = false;
     const stored = this.core.ledger.setting<{ entries?: Record<string, QuotaEntry>; records?: DeferredRecord[] } | null>(this.key, null);
     this.entries = stored?.entries ?? {};
-    this.records = stored?.records ?? [];
+    const superseded = new Set<string>();
+    this.records = (stored?.records ?? []).filter((record) => {
+      const conversation = this.core.ledger.findConversation(record.conversationId);
+      if (conversation?.kind === "wake" && (this.core.ledger.setting(`wake:cancelled:${conversation.id}`, false)
+        || this.core.ledger.setting<number | null>(`wake:epoch:${conversation.id}`, null) !== this.core.ledger.setting(`owner:epoch:${conversation.ghostId}`, 0))) {
+        superseded.add(conversation.id);
+        return false;
+      }
+      return true;
+    });
     for (const entry of Object.values(this.entries)) {
       if (!this.records.some((record) => record.conversationId === entry.probingBy && record.releasing !== null)) entry.probingBy = null;
     }
-    this.persist();
+    this.core.ledger.tx(() => {
+      for (const id of superseded) this.core.ledger.putSetting(`wake:cancelled:${id}`, true);
+      this.persist();
+    });
     for (const record of [...this.records]) {
       if (record.releasing === null) continue;
       if (!this.core.engine.submissionRecovery) {
-        // Engines without a durable inspection port must replay the same identity, never invent a wake.
         this.release(record, now);
         continue;
       }
       const settled = await this.core.engine.submissionRecovery(record.conversationId, record.releasing);
-      if (settled === null) {
-        // The Host journal committed before Pi admitted it. Replay the exact accepted input.
-        this.release(record, now);
-      } else if (settled.status !== "pending") {
-        this.turnEnded(record.conversationId, { ...settled, origin: record.origin, providers: record.providers }, now);
-      }
-      // Pending inputs retain releasing and their probe ownership until Pi finishes them.
+      if (settled === null) this.release(record, now);
+      else if (settled.status !== "pending") this.turnEnded(record.conversationId, { ...settled, origin: record.origin, providers: record.providers }, now);
     }
     for (const work of this.core.ledger.worksInState("running")) {
       if (work.hold === "quota" && !this.records.some((record) => record.conversationId === work.conversationId)) this.core.works.holdForQuota(work.id, false);
     }
+
     this.arm(now);
   }
 
@@ -151,6 +158,19 @@ export class Quota {
     record.updatedAt = now;
     this.core.works.holdForQuotaOfWork(conversationId, true);
     this.persist();
+  }
+
+  /** Only an explicitly superseded wake may discard its deferred inputs. */
+  cancel(conversationId: string): void {
+    if (this.core.ledger.findConversation(conversationId)?.kind !== "wake") throw new CommandError("forbidden", "only a superseded wake queue may be cancelled");
+    this.records = this.records.filter((record) => record.conversationId !== conversationId);
+    for (const entry of Object.values(this.entries)) if (entry.probingBy === conversationId) entry.probingBy = null;
+    this.core.ledger.tx(() => {
+      this.core.ledger.putSetting(`wake:cancelled:${conversationId}`, true);
+      this.persist();
+    });
+    if (this.records.length) this.arm(Date.now());
+    else { clearTimeout(this.timer ?? undefined); this.timer = null; }
   }
 
   /**

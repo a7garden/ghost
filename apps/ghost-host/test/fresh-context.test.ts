@@ -21,6 +21,8 @@ import { Ledger } from "../src/ledger/ledger.ts";
 import { createSubagentTools } from "../src/tools/subagent.ts";
 import { createDirectTools } from "../src/tools/direct.ts";
 import { errorResult, requireAllowed } from "../src/tools/shared.ts";
+import { createAutonomyTools } from "../src/tools/autonomy.ts";
+import { markPolicyRead, policyTaint } from "../src/core/policy-context.ts";
 import type { ToolSet } from "../src/tools/types.ts";
 import { harness, MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
 
@@ -474,5 +476,165 @@ test("wake Work management requires a trusted origin and the exact current scope
     const content = JSON.stringify(result.content);
     expect(content).toContain("Visible scoped task");
     expect(content).not.toContain("Other scope hidden task");
+  } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
+});
+
+test("wake-root Work keeps immutable tainted provenance and a separate owner reporting destination", async () => {
+  const h = harness();
+  try {
+    const ghost = h.core.createGhost({ name: "Receiver", persona: "" });
+    const wake = h.core.newConversation(ghost.id, "wake", null, "Original wake");
+    h.ledger.tx(() => {
+      h.ledger.putConversation(wake);
+      h.ledger.putSetting(`wake:owner:${wake.id}`, ghost.directConversationId);
+      h.ledger.putSetting(`context:${wake.id}`, { scopeId: null, docAttachments: [] });
+    });
+    markPolicyRead(h.core, wake.id, { untrustedInput: true, privateData: true });
+    const work = h.core.works.createRoot({ ghostId: ghost.id, title: "Carry source", brief: "Read", originConversationId: wake.id });
+    await h.core.idle();
+    expect(h.ledger.work(work.id).originConversationId).toBe(ghost.directConversationId);
+    expect(h.ledger.setting(`work:source:${work.id}`, null)).toBe(wake.id);
+    expect(policyTaint(h.core, h.ledger.work(work.id).conversationId!)).toEqual({ untrustedInput: true, privateData: true });
+  } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
+});
+
+test("owner steering cancels quota-held idle wakes without discarding other queues", async () => {
+  const f = await fixture();
+  try {
+    f.core.quota.start();
+    const other = f.core.createDirectConversation(f.ghost.id, "Other owner thread");
+    await f.core.idle();
+    f.core.quota.turnEnded(other.id, { entryId: 1, origin: "owner", providers: ["faux"], serving: null, hit: { provider: "faux", reason: "fixture quota", resumeAt: Date.now() + 600000 } });
+    const input = { text: "Deferred autonomous operation", origin: "schedule" as const, requestId: "held-wake" };
+    await f.engine.wake!(f.ghost.id, input);
+    const wakeId = idFor(f.ghost.directConversationId, "wake:held-wake");
+    expect(f.ledger.conversation(wakeId).busy).toBe(false);
+    await f.engine.submit(f.ghost.directConversationId, { text: "Supersede deferred wake", origin: "owner", requestId: "held-owner" });
+    const quota = f.ledger.setting<{ records: { conversationId: string }[] }>("quota", { records: [] });
+    expect(quota.records.some(record => record.conversationId === wakeId)).toBe(false);
+    expect(quota.records.some(record => record.conversationId === other.id)).toBe(true);
+    expect(quota.records.some(record => record.conversationId === f.ghost.directConversationId)).toBe(true);
+    await f.engine.submit(wakeId, input); // An already-scheduled quota release must also lose.
+    expect(f.faux.state.callCount).toBe(0);
+    expect(f.ledger.setting(`wake:cancelled:${wakeId}`, false)).toBe(true);
+  } finally { await f.close(); }
+});
+
+test("plan_next accepts only a current trusted self-directed wake", async () => {
+  const h = harness();
+  try {
+    const ghost = h.core.createGhost({ name: "Planner", persona: "" });
+    const wake = h.core.newConversation(ghost.id, "wake", null, "Self-directed");
+    h.ledger.tx(() => {
+      h.ledger.putConversation(wake); h.ledger.setPiConversationId(wake.id, "404");
+      h.ledger.putSetting(`wake:owner:${wake.id}`, ghost.directConversationId);
+      h.ledger.putSetting(`wake:epoch:${wake.id}`, 0);
+      h.ledger.putSetting(`context:${wake.id}`, { scopeId: null, docAttachments: [] });
+    });
+    const api = { conversationId: 404 } as unknown as ToolExecutionApi;
+    const plan = createAutonomyTools(h.core).tools![0]!;
+    expect((await plan.execute({ after_minutes: 20, intent: "Inspect updates" }, api, BACKGROUND_CONTEXT)).isError).toBeFalsy();
+    h.ledger.tx(() => h.ledger.putSetting(`wake:decision:${wake.id}`, "bound-decision"));
+    expect((await plan.execute({ after_minutes: 20, intent: "Unrelated planning" }, api, BACKGROUND_CONTEXT)).isError).toBe(true);
+    h.ledger.tx(() => { h.ledger.putSetting(`wake:decision:${wake.id}`, null); h.ledger.putSetting(`owner:epoch:${ghost.id}`, 1); });
+    expect((await plan.execute({ after_minutes: 20, intent: "Stale planning" }, api, BACKGROUND_CONTEXT)).isError).toBe(true);
+  } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
+});
+
+test("work_create without a milestone inherits the active selected scope", async () => {
+  const h = harness();
+  try {
+    const ghost = h.core.createGhost({ name: "Receiver", persona: "", tools: ["work_create"] });
+    h.ledger.tx(() => {
+      h.ledger.putScope(scope("selected", ghost.id));
+      h.ledger.setPiConversationId(ghost.directConversationId, "505");
+      h.ledger.putSetting(`context:${ghost.directConversationId}`, { scopeId: "selected", docAttachments: [] });
+    });
+    const create = createDirectTools(h.core).tools!.find(tool => tool.name === "work_create")!;
+    const result = await create.execute({ title: "Keep scope", brief: "Read" }, { conversationId: 505, callId: "create-scoped" } as unknown as ToolExecutionApi, BACKGROUND_CONTEXT);
+    expect(result.isError).toBeFalsy();
+    expect(h.ledger.worksForState()[0]?.scopeId).toBe("selected");
+  } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
+});
+
+test("queued scope metadata cannot replace active tool context, including after restart", async () => {
+  const firstStarted = Promise.withResolvers<void>();
+  const resumed = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let runs = 0;
+  const seen: string[] = [];
+  const systemScopes: string[] = [];
+  const f = await fixture(undefined, core => {
+    const read = defineExtension({ name: "fixture.turn-bound-read", tools: [defineTool({
+      name: "host_read", description: "Inspect active context", parameters: Type.Object({}), replay: "safe",
+      async execute(_args, api, context) {
+        requireAllowed(core, api, "host_read");
+        const host = core.ledger.conversationByPiId(String(api.conversationId))!;
+        seen.push(core.ledger.setting<{ scopeId: string }>(`context:${host.id}`, { scopeId: "missing" }).scopeId);
+        if (++runs === 1) {
+          firstStarted.resolve();
+          const interrupted = Promise.withResolvers<void>();
+          if (context.abortSignal?.aborted) interrupted.resolve();
+          else context.abortSignal?.addEventListener("abort", () => interrupted.resolve(), { once: true });
+          await interrupted.promise;
+        } else { resumed.resolve(); await release.promise; }
+        seen.push(core.ledger.setting<{ scopeId: string }>(`context:${host.id}`, { scopeId: "missing" }).scopeId);
+        return { content: [{ type: "text", text: "Read complete" }] };
+      },
+    })] });
+    return {
+      all: () => [read], extensionsFor: () => [read],
+      instructionsFor(conversation) { return `Active scope=${core.ledger.setting<{ scopeId: string }>(`context:${conversation.id}`, { scopeId: "missing" }).scopeId}`; },
+    };
+  });
+  try {
+    f.ledger.tx(() => { f.ledger.putScope(scope("A", f.ghost.id)); f.ledger.putScope(scope("B", f.ghost.id)); });
+    f.faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("host_read", {}), { stopReason: "toolUse" }),
+      context => { systemScopes.push(context.systemPrompt ?? ""); return fauxAssistantMessage("A finished"); },
+      context => { systemScopes.push(context.systemPrompt ?? ""); return fauxAssistantMessage("B finished"); },
+    ]);
+    await f.engine.submit(f.ghost.directConversationId, { text: "Read A", origin: "owner", requestId: "turn-A", scopeId: "A", docAttachments: [{ kind: "skill", name: "A-skill" }] });
+    await firstStarted.promise;
+    await f.engine.submit(f.ghost.directConversationId, { text: "Then B", origin: "owner", requestId: "turn-B", scopeId: "B", docAttachments: [{ kind: "skill", name: "B-skill" }] });
+    expect(f.ledger.setting<{ scopeId: string; docAttachments: unknown[] }>(`context:${f.ghost.directConversationId}`, { scopeId: "", docAttachments: [] })).toMatchObject({ scopeId: "A", docAttachments: [{ name: "A-skill" }] });
+    await f.reopen();
+    const done = message(f.engine, f.ghost.directConversationId, m => m.text === "B finished");
+    f.engine.resume();
+    await resumed.promise;
+    expect(f.ledger.setting<{ scopeId: string }>(`context:${f.ghost.directConversationId}`, { scopeId: "" }).scopeId).toBe("A");
+    release.resolve();
+    await done;
+    expect(seen.every(value => value === "A")).toBe(true);
+    expect(systemScopes[0]).toContain("Active scope=A");
+    expect(systemScopes[1]).toContain("Active scope=B");
+    expect(f.ledger.setting<{ scopeId: string }>(`context:${f.ghost.directConversationId}`, { scopeId: "" }).scopeId).toBe("B");
+  } finally { release.resolve(); await f.close(); }
+}, 10000);
+
+test("quota restart discards an epoch-superseded wake and only its provider probe", async () => {
+  const h = harness();
+  try {
+    const ghost = h.core.createGhost({ name: "Receiver", persona: "" });
+    const wake = h.core.newConversation(ghost.id, "wake", null, "Deferred wake");
+    h.ledger.tx(() => {
+      h.ledger.putConversation({ ...wake, busy: true });
+      h.ledger.putSetting(`wake:owner:${wake.id}`, ghost.directConversationId);
+      h.ledger.putSetting(`wake:epoch:${wake.id}`, 0);
+    });
+    h.core.quota.start();
+    h.core.quota.turnEnded(ghost.directConversationId, { entryId: 1, origin: "owner", providers: ["provider"], serving: null, hit: { provider: "provider", reason: "quota", resumeAt: Date.now() + 600000 } });
+    h.core.quota.hold(wake.id, { text: "Deferred", origin: "schedule", requestId: "deferred" }, ["provider"], "wake");
+    const saved = h.ledger.setting<{ entries: Record<string, { probingBy: string | null }>; records: { conversationId: string }[] }>("quota", { entries: {}, records: [] });
+    saved.entries.provider!.probingBy = wake.id;
+    h.ledger.tx(() => { h.ledger.putSetting("quota", saved); h.ledger.putSetting(`owner:epoch:${ghost.id}`, 1); });
+    h.core.quota.stop();
+    h.core.quota.start();
+    const recovered = h.ledger.setting<typeof saved>("quota", { entries: {}, records: [] });
+    expect(recovered.records.some(record => record.conversationId === wake.id)).toBe(false);
+    expect(recovered.records.some(record => record.conversationId === ghost.directConversationId)).toBe(true);
+    expect(recovered.entries.provider?.probingBy).toBeNull();
+    expect(h.ledger.setting(`wake:cancelled:${wake.id}`, false)).toBe(true);
+    expect(() => h.core.quota.cancel(ghost.directConversationId)).toThrow();
   } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
 });

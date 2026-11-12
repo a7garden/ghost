@@ -292,7 +292,8 @@ export function createToolSet(deps: {
           if (mail) selected.push(mail);
           if (toss) selected.push(toss);
           // Main-only management: resolved again at every execution, so a stale main keeps nothing.
-          if (ghost.isDefault && ghost.state === "active") selected.push(main);
+          if (conversation.kind === "wake" && deps.core.ledger.setting<string | null>(`wake:decision:${conversation.id}`, null)) selected.push(main);
+          else if (ghost.isDefault && ghost.state === "active") selected.push(main);
           return selected;
         }
         case "work": {

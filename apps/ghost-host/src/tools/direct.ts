@@ -76,6 +76,9 @@ export function createDirectTools(core: Core): Extension {
         const id = idFor(scope.conversation.id, api.callId);
         // Refused before the Work exists, so a stale milestone never leaves an unlinked Work behind; a replay finds its Work.
         if (args.milestone_id && !core.ledger.findWork(id)) core.goals.checkLink(args.milestone_id);
+        const active = core.ledger.setting<{ scopeId: string | null } | null>(`context:${scope.conversation.id}`, null);
+        const scopeId = args.milestone_id ? core.goals.milestone(args.milestone_id).scopeId : active?.scopeId;
+        if (active && scopeId !== active.scopeId) throw forbidden("a Work cannot leave the current input's scope");
         // The Work and its milestone link commit together, so a crash never leaves a milestone Work without its goal's boundaries.
         const work = core.ledger.tx(() => {
           const created = core.works.createRoot({
@@ -87,6 +90,7 @@ export function createDirectTools(core: Core): Extension {
             deadlineAt: null,
             budgetMinutes: args.budget_minutes,
             originConversationId: scope.conversation.id,
+            scopeId,
             execution: args.execution,
             id,
           });

@@ -542,7 +542,7 @@ export class Decisions {
           : `Check it against what you know (the owner's earlier words, the recipient, the amount, the files, the result against its brief). If there is something the owner should know to decide — a mismatch, a risk, a confirmation that it matches — call decision_settle with outcome "leave" and one or two sentences in the owner's language, ending with what you recommend. Then reply only [quiet].`,
     ].filter(Boolean);
     const submission = { text: lines.join("\n\n"), origin: "schedule" as const, requestId: `decision-review:${decision.id}` };
-    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission);
+    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission, { decisionId: decision.id });
     else await this.core.engine.submit(main.directConversationId, submission);
   }
 
@@ -565,7 +565,7 @@ export class Decisions {
         : `Decide it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. Use outcome "leave" only if you cannot judge it at all; that gives it back to the owner with your note. Then reply only [quiet].`,
     ].filter(Boolean);
     const submission = { text: lines.join("\n\n"), origin: "schedule" as const, requestId: `decision-delegate:${current.id}` };
-    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission);
+    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission, { decisionId: current.id });
     else await this.core.engine.submit(main.directConversationId, submission);
   }
 

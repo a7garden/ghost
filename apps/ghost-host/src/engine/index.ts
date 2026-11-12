@@ -29,7 +29,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { GHOST_TOOLS, matchesToolPatterns, type Conversation as HostConversation, type Ghost, type Live, type LiveEvent, type Message, type MessageOrigin, type ModelRef, type Settings, type Work } from "@ghost/contract";
-import type { DocRef } from "@ghost/contract";
+import type { DocRef, EffectTaint } from "@ghost/contract";
 import type { Core } from "../core/core.ts";
 import { CommandError } from "../core/errors.ts";
 import type { ConversationSetup, Engine, Submission, SubmissionRecovery, TranscriptPage } from "../core/ports.ts";
@@ -57,6 +57,7 @@ import { gateRecoveredDreams, memoryRegistry } from "../memory/runtime.ts";
 const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
 const ORIGIN_REPAIR = "history-origins-after-placement-order";
+const DECISION_READ_TOOLS: Readonly<Record<string, true>> = { work_list: true, work_inspect: true, evidence_read: true, artifact_read: true, effect_list: true };
 
 /** One host conversation and everything the engine tracks about it. */
 interface ConversationState {
@@ -165,6 +166,13 @@ class HostEngine implements Engine, MemoryEngine {
     });
     this.fallbackExtension = defineExtension({
       name: "ghost.model-fallback",
+      sections: [{ key: "ghost.context", render: async ({ conversationId }) => {
+        const state = this.byPiId.get(conversationId) ?? await this.stateFor(this.core.ledger.conversationByPiId(String(conversationId))?.id ?? "");
+        if (!state) return;
+        await this.activateInputContext(state);
+        const conversation = this.core.ledger.conversation(state.hostId);
+        return this.instructionsFor({ conversation, ghost: this.core.ledger.ghost(conversation.ghostId), work: conversation.workId ? this.core.ledger.work(conversation.workId) : null });
+      } }],
       hooks: [hook(GenerationTask, {
         afterResponse: async (message, api) => {
           // A model can change during a tool round. Capture the actual response provider on
@@ -183,6 +191,13 @@ class HostEngine implements Engine, MemoryEngine {
             }
           }, ctx);
         },
+        beforeRequest: async (_request, api) => {
+          const host = this.core.ledger.conversationByPiId(String(api.conversationId));
+          if (!host) throw new CommandError("forbidden", "the conversation has no host identity");
+          if (host.kind === "wake" && !this.currentWake(host)) throw new CommandError("forbidden", "this wake was superseded");
+          const state = await this.ensureState(host.id);
+          await this.activateInputContext(state);
+        },
         // Reset before Pi admits a queued next turn, not after its request is prepared.
         onYield: async (_answer, api): Promise<undefined> => {
           const state = this.byPiId.get(api.conversationId);
@@ -195,7 +210,7 @@ class HostEngine implements Engine, MemoryEngine {
           await state.pi.configure({
             model: model ? { provider: model.provider, modelId: model.model } : null,
             thinkingLevel: model?.thinking ?? "off",
-            instructions: await this.instructionsFor({ conversation, ghost, work }),
+            instructions: null,
           }, ctx);
         },
         afterTools: async (_assistant, _results, api) => {
@@ -203,8 +218,14 @@ class HostEngine implements Engine, MemoryEngine {
           if (state && this.core.ledger.conversation(state.hostId).kind === "direct") await this.compactDirect(state);
         },
       }), hook(ToolTask, {
-        beforeTool: (call, api) => {
+        beforeTool: async (call, api) => {
           const host = deps.core.ledger.conversationByPiId(String(api.conversationId));
+          if (host?.kind === "wake" && !this.currentWake(host)) return { block: "this wake was superseded" };
+          if (host) await this.activateInputContext(await this.ensureState(host.id));
+          if (host?.kind === "wake") {
+            const bound = deps.core.ledger.setting<string | null>(`wake:decision:${host.id}`, null);
+            if (bound && (call.name === "decision_settle" ? call.arguments.decision_id !== bound : !DECISION_READ_TOOLS[call.name] && !this.helperRead(call.name))) return { block: "this decision wake only permits bound settlement and read-only evidence" };
+          }
           if (host?.kind !== "subagent") return;
           if (!this.helperRead(call.name)) return { block: `${call.name} is not a read-only helper tool` };
           const scope = scopeOf(deps.core, api);
@@ -254,10 +275,48 @@ class HostEngine implements Engine, MemoryEngine {
     await this.attachView(state);
   }
 
+  private currentWake(conversation: HostConversation): boolean {
+    const ownerId = this.core.ledger.setting<string | null>(`wake:owner:${conversation.id}`, null);
+    const owner = ownerId ? this.core.ledger.findConversation(ownerId) : null;
+    const ghost = this.core.ledger.ghost(conversation.ghostId);
+    return ghost.state === "active" && ghost.deletedAt === null && !!owner && owner.kind === "direct" && owner.ghostId === conversation.ghostId
+      && !this.core.ledger.setting(`wake:cancelled:${conversation.id}`, false)
+      && this.core.ledger.setting<number | null>(`wake:epoch:${conversation.id}`, null) === this.core.ledger.setting(`owner:epoch:${conversation.ghostId}`, 0);
+  }
+
+  private async activateInputContext(state: ConversationState): Promise<void> {
+    const live = await this.harness.snapshot(LiveDoc, state.piId, ctx);
+    const inputId = live?.run?.inputs.at(-1);
+    if (inputId === undefined) return;
+    const input = await this.harness.submission(inputId, ctx);
+    const record = await input?.status(ctx);
+    if (!record?.requestId) return;
+    await this.loadOrigins(state);
+    const meta = state.origins.get(record.requestId);
+    if (!meta) return; // Pi-native continuation receipts do not select a new Host scope.
+    const conversation = this.core.ledger.conversation(state.hostId);
+    const work = conversation.workId ? this.core.ledger.work(conversation.workId) : null;
+    const scopeId = meta.scopeId === undefined ? work?.scopeId ?? null : meta.scopeId;
+    if (scopeId !== null) this.core.ledger.scope(scopeId);
+    const active = this.core.ledger.setting<{ requestId?: string } | null>(`context:${state.hostId}`, null);
+    if (active?.requestId === record.requestId) return;
+    this.core.ledger.tx(() => this.core.ledger.putSetting(`context:${state.hostId}`, { scopeId, docAttachments: meta.docAttachments ?? work?.attachments ?? [], requestId: record.requestId }));
+    for (const source of meta.sourceConversationIds ?? []) markPolicyRead(this.core, state.hostId, policyTaint(this.core, source));
+  }
+
+  /** Persisted instructions from older Host versions must not shadow the turn-bound section. */
+  async prepareContexts(): Promise<void> {
+    for (const conversation of this.core.ledger.conversations()) {
+      const state = await this.stateFor(conversation.id);
+      if (state) await state.pi.configure({ instructions: null }, ctx);
+    }
+  }
+
   private async instructionsFor({ conversation, ghost, work }: ConversationSetup): Promise<string> {
     const kind = this.tools.instructionsFor(conversation, ghost, work);
     const data = conversation.kind === "review" || conversation.kind === "subagent" ? "" : this.memory?.injected(ghost.id) ?? "";
     if (data) markPolicyRead(this.core, conversation.id, { untrustedInput: true, privateData: true });
+    if (work) markPolicyRead(this.core, conversation.id, this.core.ledger.setting<EffectTaint>(`work:source-taint:${work.id}`, { untrustedInput: false, privateData: false }));
     const context = this.core.ledger.setting<{ scopeId: string | null; docAttachments: DocRef[] }>(`context:${conversation.id}`, { scopeId: work?.scopeId ?? null, docAttachments: [] });
     const attachments = await this.tools.contextFor?.(conversation, ghost, work, context.scopeId, context.docAttachments) ?? "";
     return [ghost.persona, kind, data, attachments].filter(Boolean).join("\n\n").trim();
@@ -281,12 +340,14 @@ class HostEngine implements Engine, MemoryEngine {
     for (const extension of extensions) if (extension.name.startsWith("ghost.catalog.")) this.registry.install(extension);
     // Pi resolves extension names from its registry; filtering copied extensions would not filter the model's tools.
     const grantedTools: ToolRegistration[] = [];
+    const decisionWake = conversation.kind === "wake" && this.core.ledger.setting<string | null>(`wake:decision:${conversation.id}`, null) !== null;
     const activity = work?.activityId ? this.core.ledger.findActivity(work.activityId) : null;
     const activityRun = work?.activityRunId ? this.core.ledger.findActivityRun(work.activityRunId) : null;
     const toolScopes: string[][] = [];
     for (let current = work; current; current = current.parentId ? this.core.ledger.work(current.parentId) : null) if (current.toolScope) toolScopes.push(current.toolScope);
     for (const extension of extensions) {
       for (const tool of extension.tools ?? []) {
+        if (decisionWake && tool.name !== "decision_settle" && !DECISION_READ_TOOLS[tool.name] && !this.helperRead(tool.name)) continue;
         if (conversation.kind === "subagent") {
           const allowed = this.core.ledger.setting<string[]>(`subagent:tools:${conversation.id}`, []);
           if (!this.helperRead(tool.name) || !allowed.includes(tool.name)) continue;
@@ -313,7 +374,7 @@ class HostEngine implements Engine, MemoryEngine {
         thinkingLevel: model?.thinking ?? "off",
         extensions,
         tools: grantedTools,
-        instructions: await this.instructionsFor(setup),
+        instructions: null,
       },
       ctx,
     );
@@ -376,10 +437,11 @@ class HostEngine implements Engine, MemoryEngine {
         this.core.ledger.putSetting(`wake:epoch:${id}`, this.core.ledger.setting(`owner:epoch:${ghost.id}`, 0));
         this.core.ledger.putSetting(`wake:owner:${id}`, ownerId);
         if (options.slot) this.core.ledger.putSetting(`wake:slot:${id}`, options.slot);
+        if (options.decisionId) this.core.ledger.putSetting(`wake:decision:${id}`, options.decisionId);
         this.core.ledger.putSetting(`wake:sources:${id}`, [...sources]);
       }
     });
-    if (this.core.ledger.setting(`wake:cancelled:${id}`, false)) return;
+    if (!this.currentWake(this.core.ledger.conversation(id))) { this.core.quota.cancel(id); return; }
     if (options.slot && !this.core.ledger.settings().slots?.[options.slot]) throw new CommandError("unavailable", `review slot ${options.slot} is not configured`);
     for (const source of this.core.ledger.setting<string[]>(`wake:sources:${id}`, [])) markPolicyRead(this.core, id, policyTaint(this.core, source));
     const scopeId = submission.scopeId ?? (decision?.workId ? this.core.ledger.work(decision.workId).scopeId : null);
@@ -404,6 +466,7 @@ class HostEngine implements Engine, MemoryEngine {
     const offered = agent.tools.map((tool) => tool.name);
     const allowed = offered.filter((name) => this.helperRead(name) && (!input.tools || input.tools.includes(name)));
     if (input.tools?.some((name) => !allowed.includes(name))) throw new CommandError("forbidden", "helper tools must be a read-only subset of the parent's current tools");
+    const inherited = this.core.ledger.setting<{ scopeId: string | null; docAttachments: DocRef[] }>(`context:${parentId}`, { scopeId: work?.scopeId ?? null, docAttachments: [] });
     const id = idFor(parentId, `subagent:${api.callId}`);
     const piId = await api.commit(async (tx) => {
       const helpers = await tx.doc(HelpersDoc, api.conversationId);
@@ -417,18 +480,19 @@ class HostEngine implements Engine, MemoryEngine {
         const child = this.core.newConversation(ghost.id, "subagent", null, "Read-only helper", id);
         child.model = agent.model ? { provider: agent.model.provider, model: agent.model.modelId, thinking: agent.thinkingLevel === "low" || agent.thinkingLevel === "medium" || agent.thinkingLevel === "high" ? agent.thinkingLevel : "off" } : null;
         this.core.ledger.putConversation(child);
+        this.core.ledger.putSetting(`subagent:parent:${id}`, parentId);
+        this.core.ledger.putSetting(`subagent:work:${id}`, parent.workId);
+        this.core.ledger.putSetting(`subagent:scope:${id}`, inherited.scopeId);
+        this.core.ledger.putSetting(`subagent:tools:${id}`, allowed);
+        this.core.ledger.putSetting(`subagent:bounds:${id}`, { turns: input.max_turns ?? 12, tokens: input.max_tokens ?? 16000 });
       }
       this.core.ledger.setPiConversationId(id, String(piId));
-      this.core.ledger.putSetting(`subagent:parent:${id}`, parentId);
-      this.core.ledger.putSetting(`subagent:tools:${id}`, allowed);
-      this.core.ledger.putSetting(`subagent:bounds:${id}`, { turns: input.max_turns ?? 12, tokens: input.max_tokens ?? 16000 });
     });
     markPolicyRead(this.core, id, policyTaint(this.core, parentId));
     const handle = await api.conversation(piId as ConversationId, context);
     if (!handle) throw new CommandError("unavailable", "helper conversation is missing");
     try {
       context.abortSignal?.throwIfAborted();
-      const inherited = this.core.ledger.setting<{ scopeId: string | null; docAttachments: DocRef[] }>(`context:${parentId}`, { scopeId: work?.scopeId ?? null, docAttachments: [] });
       await this.submit(id, { text: input.task, origin: "work", requestId: `subagent:${api.callId}`, ...inherited });
       await handle.waitForIdle(context);
       const childState = await this.ensureState(id);
@@ -447,15 +511,15 @@ class HostEngine implements Engine, MemoryEngine {
     const conversation = this.core.ledger.findConversation(conversationId);
     if (!conversation) throw new CommandError("not_found", `conversation ${conversationId} does not exist`);
     if (conversation.kind === "direct" && (submission.origin === "schedule" || submission.origin === "report")) return this.wake(conversation.ghostId, submission, { ownerConversationId: conversation.id, sourceConversationId: submission.sourceConversationId });
+    if (conversation.kind === "wake" && !this.currentWake(conversation)) { this.core.quota.cancel(conversation.id); return; }
     const state = await this.ensureState(conversationId);
     const existing = await state.pi.commit((tx) => tx.submissionByRequest(state.piId, submission.requestId), ctx);
     if (existing) return;
-    if (submission.sourceConversationId) markPolicyRead(this.core, conversation.id, policyTaint(this.core, submission.sourceConversationId));
     if (conversation.kind === "direct" && submission.origin === "owner") {
       this.core.ledger.tx(() => this.core.ledger.putSetting(`owner:epoch:${conversation.ghostId}`, this.core.ledger.setting(`owner:epoch:${conversation.ghostId}`, 0) + 1));
-      const wakes = this.core.ledger.conversations({ ghostId: conversation.ghostId }).filter((item) => item.kind === "wake" && item.busy);
+      const wakes = this.core.ledger.conversations({ ghostId: conversation.ghostId }).filter((item) => item.kind === "wake");
       for (const wake of wakes) {
-        this.core.ledger.tx(() => this.core.ledger.putSetting(`wake:cancelled:${wake.id}`, true));
+        this.core.quota.cancel(wake.id);
         await this.abort(wake.id);
       }
     }
@@ -480,7 +544,6 @@ class HostEngine implements Engine, MemoryEngine {
     const scopes = work?.scopeReferences?.length ? work.scopeReferences : scopeId === null ? [] : [{ id: scopeId, name: this.core.ledger.scope(scopeId).name }];
     const docAttachments = submission.docAttachments ?? work?.attachments ?? [];
     for (const ref of docAttachments) if (ref.kind === "page") this.core.ledger.scope(ref.scopeId);
-    this.core.ledger.tx(() => this.core.ledger.putSetting(`context:${conversation.id}`, { scopeId, docAttachments }));
     if (conversation.kind === "direct" && !state.busy) await this.compactDirect(state);
     state.aborted = false;
     state.runEnd = null;
@@ -501,13 +564,14 @@ class HostEngine implements Engine, MemoryEngine {
     if (!state.busy || !state.configured) await this.configure(state, { conversation, ghost, work }, serving);
     const scopeContext = scopeId !== null || scopes.length > 0 || docAttachments.length > 0
       ? `Host-selected context metadata (reference data, not document instructions):\n${JSON.stringify({ scopeId, scopes, attachedDocuments: docAttachments.length })}\n\n` : "";
-    const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [], scopes, scopeId, docAttachments, ...(scopeContext ? { text: submission.text } : {}) };
+    const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [], scopes, scopeId, docAttachments, sourceConversationIds: [...new Set([submission.sourceConversationId, ...(submission.sourceConversationIds ?? [])].filter((id): id is string => !!id))], ...(scopeContext ? { text: submission.text } : {}) };
     const content = await renderUserContent(withClockStamp(scopeContext + submission.text), meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
     await this.recordOrigin(state, submission.requestId, meta);
     // The run starts a commit after the admission; the view stays attached until that
     // run settles, so core hears busy and idle with or without a watcher.
     state.expectRun = true;
     await this.attachView(state);
+    if (conversation.kind === "wake" && !this.currentWake(conversation)) { this.core.quota.cancel(conversation.id); return; }
     const submitted = await state.pi.submit(
       {
         type: "input",
@@ -1311,6 +1375,8 @@ export async function createEngine(deps: EngineDeps): Promise<Engine & MemoryEng
         registry: memoryRegistry(registry),
         settings: {
           ...deps.harnessSettings,
+          followUpMode: "one-at-a-time",
+          steeringMode: "one-at-a-time",
           get compaction() {
             return { enabled: true, keepRecentTokens: Math.max(128, Math.min(8000, Math.floor(core.ledger.setting("context:directTokenLimit", 32000) / 4))), ...deps.harnessSettings?.compaction };
           },
@@ -1347,7 +1413,9 @@ export async function createEngine(deps: EngineDeps): Promise<Engine & MemoryEng
     );
     await gateRecoveredDreams(harness, (id) => Boolean(core.ledger.conversationByPiId(String(id))));
     opening = false;
-    return new HostEngine(deps, harness, ownedModels, registry, guard.extension);
+    const engine = new HostEngine(deps, harness, ownedModels, registry, guard.extension);
+    await engine.prepareContexts();
+    return engine;
   } catch (error) {
     opening = false;
     const cleanupErrors = harness ? [] : startupReports;

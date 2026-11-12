@@ -47,7 +47,16 @@ export function createAutonomyTools(core: Core): Extension {
       async execute(args, api) {
         try {
           const scope = scopeOf(core, api);
-          if (scope.conversation.kind !== "direct") throw forbidden("plan_next runs only in a direct conversation");
+          if (scope.conversation.kind === "wake") {
+            const ownerId = core.ledger.setting<string | null>(`wake:owner:${scope.conversation.id}`, null);
+            const owner = ownerId ? core.ledger.findConversation(ownerId) : null;
+            const current = core.ledger.setting<{ scopeId: string | null } | null>(`context:${scope.conversation.id}`, null);
+            if (!owner || owner.kind !== "direct" || owner.ghostId !== scope.ghost.id || !current
+              || core.ledger.setting(`wake:cancelled:${scope.conversation.id}`, false)
+              || core.ledger.setting<number | null>(`wake:epoch:${scope.conversation.id}`, null) !== core.ledger.setting(`owner:epoch:${scope.ghost.id}`, 0)
+              || core.ledger.setting<string | null>(`wake:decision:${scope.conversation.id}`, null)) throw forbidden("plan_next requires a current self-directed wake");
+            if (current.scopeId !== null && ((args.ghost_id && args.ghost_id !== scope.ghost.id) || args.watch_scope_ids?.some(id => id !== current.scopeId))) throw forbidden("a scoped wake may only plan itself in its current scope");
+          } else if (scope.conversation.kind !== "direct") throw forbidden("plan_next runs only in a direct conversation or a current self-directed wake");
           if ((args.after_minutes === undefined) === (args.at === undefined)) throw invalid("give exactly one of after_minutes or at");
           const now = Date.now();
           const at = args.at === undefined ? now + args.after_minutes! * 60_000 : Date.parse(args.at);

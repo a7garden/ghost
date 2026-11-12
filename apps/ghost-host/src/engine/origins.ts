@@ -9,6 +9,7 @@ export type OriginRecord = {
   spaces?: { id: string; name: string }[];
   scopeId?: string | null;
   docAttachments?: DocRef[];
+  sourceConversationIds?: string[];
   /** Exact visible text; project context is only part of the model input. */
   text?: string;
 };
