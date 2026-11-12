@@ -5,6 +5,7 @@ import { Modal } from '../components/Modal';
 import { toolLabels } from './toolLabels';
 import { visibleGhosts } from './ghostState';
 import { activityToolChoices, buildActivityConfig, draftFromConfig, emptyDraft, intersectTools, DEFAULT_ACTIVITY_TOOLS, externalActionsLabel, sourceKindLabel } from './activity-config';
+import { Choice, TextField } from './InfrastructureFields';
 
 /** Ghosts a form may target: everyone in circulation, plus the edited activity's own Ghost if it left those lists. */
 export function formGhosts(state: State, activity: Activity | null): Ghost[] {
@@ -14,15 +15,21 @@ export function formGhosts(state: State, activity: Activity | null): Ghost[] {
 }
 
 /** 활동 만들기/편집. Every field lands in one contract ActivityConfig; nothing sends before the owner saves. */
-export function ActivityFormDialog({ state, connections, activity, onClose, onSave }: {
+export function ActivityFormDialog({ state, connections, activity, initialScopeId, onClose, onSave }: {
   state: State;
   connections: readonly Connection[];
   activity: Activity | null;
+  initialScopeId?: string;
   onClose(): void;
   onSave(config: ActivityConfig): Promise<void>;
 }) {
   const ghosts = formGhosts(state, activity);
-  const [draft, setDraft] = useState(() => activity ? draftFromConfig(activity) : emptyDraft(ghosts[0] ?? null));
+  const [draft, setDraft] = useState(() => {
+    if (activity) return draftFromConfig(activity);
+    const scope = state.scopes.find(item => item.id === initialScopeId);
+    const receiver = ghosts.find(ghost => ghost.id === scope?.ghostId) ?? ghosts.find(ghost => ghost.isDefault) ?? ghosts[0] ?? null;
+    return { ...emptyDraft(receiver), scopeId: initialScopeId ?? '', commitScopeId: initialScopeId ?? '' };
+  });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const ghost = ghosts.find(item => item.id === draft.ghostId);
@@ -37,7 +44,7 @@ export function ActivityFormDialog({ state, connections, activity, onClose, onSa
     };
   });
 
-  const sourceConnections = connections.filter(connection => draft.sourceKind === 'mail'
+  const sourceConnections = connections.filter(connection => draft.sourceKind === 'poll' ? connection.config.kind === 'api' : draft.sourceKind === 'mail'
     ? connection.config.kind === 'mail' : connection.config.kind === 'github' || connection.config.kind === 'gitea');
   const staleConnection = draft.connectionId !== '' && !sourceConnections.some(connection => connection.id === draft.connectionId);
   const connectionOptions = sourceConnections.map(connection => ({
@@ -74,6 +81,7 @@ export function ActivityFormDialog({ state, connections, activity, onClose, onSa
             onChange={event => set({ name: event.target.value })}/>}
         </FormField>
       </div>
+      <Choice label="프로젝트" value={draft.scopeId} onChange={scopeId => set({ scopeId })} options={[{ value: '', label: '전체' }, ...state.scopes.map(scope => ({ value: scope.id, label: scope.name }))]}/>
       <FormField label="활동 지시" required description="이 활동이 켜질 때마다 Ghost가 이 지시로 맡긴 일을 실행합니다.">
         {control => <Textarea {...control} value={draft.prompt} rows={4} maxLength={8192} required disabled={saving}
           placeholder="무엇을 살피고 무엇을 할지 적어 주세요." onChange={event => set({ prompt: event.target.value })}/>}
@@ -102,7 +110,7 @@ export function ActivityFormDialog({ state, connections, activity, onClose, onSa
                 onChange={event => set({ everyMinutes: event.target.value })}/>}
             </FormField>}
         </>
-        : <>
+        : draft.sourceKind === 'commit' ? <Choice label="커밋을 살필 프로젝트" required value={draft.commitScopeId} onChange={commitScopeId => set({ commitScopeId })} options={[{ value: '', label: '선택' }, ...state.scopes.filter(scope => scope.paths.length > 0).map(scope => ({ value: scope.id, label: scope.name }))]}/> : <>
           <FormField label="연결 계정" required error={staleConnection ? '선택한 연결이 없습니다. 다시 선택해 주세요.' : undefined}
             description={sourceConnections.length ? undefined : '연결 계정 탭에서 먼저 만들어 주세요.'}>
             {control => <SelectField {...control} label="연결 계정" value={draft.connectionId} disabled={saving}
@@ -127,7 +135,11 @@ export function ActivityFormDialog({ state, connections, activity, onClose, onSa
               </FormField>
               <SwitchLine label="드래프트 PR 포함" checked={draft.includeDrafts} disabled={saving} onChange={includeDrafts => set({ includeDrafts })}/>
             </>
-            : <>
+            : draft.sourceKind === 'poll' ? <>
+              <TextField label="폴링 경로" required value={draft.pollPath} onChange={pollPath => set({ pollPath })} placeholder="/items"/>
+              <TextField label="항목 배열 JSON 포인터" value={draft.itemsPointer} onChange={itemsPointer => set({ itemsPointer })} placeholder="/items"/>
+              <TextField label="항목 ID JSON 포인터" value={draft.idPointer} onChange={idPointer => set({ idPointer })} placeholder="/id"/>
+            </> : <>
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField label="보낸 사람" description="비워 두면 모든 보낸 사람.">
                   {control => <Input {...control} type="email" value={draft.sender} maxLength={320} disabled={saving}
@@ -144,8 +156,8 @@ export function ActivityFormDialog({ state, connections, activity, onClose, onSa
             {control => <Input {...control} type="number" min={1} max={1440} step="any" value={draft.pollMinutes} disabled={saving}
               onChange={event => set({ pollMinutes: event.target.value })}/>}
           </FormField>
-          <SwitchLine label="처음 기존 항목도 실행" checked={draft.includeExisting} disabled={saving} onChange={includeExisting => set({ includeExisting })}
-            description="끄면 지금 있는 항목은 기준으로 건너뛰고 새 항목부터 실행합니다."/>
+          {draft.sourceKind !== 'poll' && <SwitchLine label="처음 기존 항목도 실행" checked={draft.includeExisting} disabled={saving} onChange={includeExisting => set({ includeExisting })}
+            description="끄면 지금 있는 항목은 기준으로 건너뛰고 새 항목부터 실행합니다."/>}
         </>}
 
       <h3 className="section-title">어디서 실행할까</h3>
@@ -154,6 +166,7 @@ export function ActivityFormDialog({ state, connections, activity, onClose, onSa
         {control => <SegmentedControl {...control} aria-label="실행 환경" value={draft.executionKind}
           onValueChange={value => set({ executionKind: value as ExecutionTarget['kind'] })}
           options={[
+            { value: 'workspace', label: '작업 공간', disabled: saving },
             { value: 'container', label: '컨테이너', disabled: saving },
             { value: 'host', label: '이 Mac', disabled: saving || ghost?.hostExecution !== true },
           ]}/>}
@@ -166,7 +179,7 @@ export function ActivityFormDialog({ state, connections, activity, onClose, onSa
           </FormField>
           <p className="activity-warn">이 Mac 실행은 샌드박스 없이 셸을 씁니다. PC 전체와 네트워크에 영향을 줄 수 있고 아래 PR 댓글·메일 회신 승인 설정으로 제한되지 않습니다.</p>
         </>
-        : <p className="activity-warn activity-warn--calm">활동은 Ghost의 컨테이너 안에서 실행됩니다.</p>}
+        : <p className="activity-warn activity-warn--calm">{draft.executionKind === 'workspace' ? '분리된 작업 공간에서 실행됩니다.' : '컨테이너에서 실행됩니다.'}</p>}
 
       <h3 className="section-title">쓸 수 있는 도구</h3>
       <div className="skills" role="group" aria-label="활동 도구">

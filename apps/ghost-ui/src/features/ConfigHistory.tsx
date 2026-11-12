@@ -6,7 +6,7 @@ import { useHostState } from '../host/store';
 import { absoluteTime } from './time';
 import { Choice, errorText } from './InfrastructureFields';
 
-const entities = [{ value: '', label: 'すべて' }, { value: 'scope', label: '프로젝트' }, { value: 'ghost', label: 'Ghost' }, { value: 'rule', label: '정책 규칙' }, { value: 'slot', label: '모델 자리' }, { value: 'mcp', label: 'MCP 서버' }, { value: 'activity', label: '계기' }, { value: 'limits', label: '한도' }];
+const entities = [{ value: '', label: '전체' }, { value: 'scope', label: '프로젝트' }, { value: 'ghost', label: 'Ghost' }, { value: 'rule', label: '정책 규칙' }, { value: 'slot', label: '모델 자리' }, { value: 'mcp', label: 'MCP 서버' }, { value: 'activity', label: '계기' }, { value: 'limits', label: '한도' }];
 
 export function ConfigHistory({ scopeId }: { scopeId?: string }) {
   const { store, client } = useHost();

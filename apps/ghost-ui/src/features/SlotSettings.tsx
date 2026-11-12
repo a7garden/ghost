@@ -6,7 +6,7 @@ import { useHostState } from '../host/store';
 import { modelDisplayName, modelFromKey, modelSelectOptions } from '../pets/ModelPicker';
 import { Choice, EditorActions, errorText, TextField } from './InfrastructureFields';
 
-type Slot = Settings['slots'][string];
+type Slot = NonNullable<Settings['slots']>[string];
 export function SlotSettings() {
   const { store, client } = useHost();
   const { state } = useHostState(store);
@@ -14,7 +14,7 @@ export function SlotSettings() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   if (!state) return null;
-  const slots = state.settings.slots;
+  const slots = state.settings.slots ?? {};
   const act = async (work: () => Promise<unknown>) => {
     setBusy(true); setError('');
     try { await work(); setRemoving(null); } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
@@ -47,7 +47,7 @@ function SlotEditor({ name: original, slot, onClose }: { name: string | null; sl
       const alternatives = fallbacks.map(value => modelFromKey(state?.settings, value));
       if (!primary || alternatives.some(value => !value)) throw new Error('모델을 선택하세요.');
       if (new Set([model, ...fallbacks]).size !== fallbacks.length + 1) throw new Error('대체 모델은 서로 달라야 합니다.');
-      if (original === null && state?.settings.slots[name]) throw new Error('이미 등록된 자리 이름입니다.');
+      if (original === null && state?.settings.slots?.[name]) throw new Error('이미 등록된 자리 이름입니다.');
       await client.send({ type: 'slot.set', name, model: primary, fallbacks: alternatives as ModelRef[] }); onClose();
     } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };

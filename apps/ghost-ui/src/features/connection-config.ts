@@ -24,6 +24,7 @@ export interface ConnectionDraft {
   testPath: string;
   headers: string;
   ghostIds: string[];
+  readPaths?: Extract<ConnectionConfig, { kind: 'api' }>['readPaths'];
   host: string;
   port: string;
   mailAuthType?: 'password' | 'oauth2';
@@ -67,6 +68,7 @@ export function draftFromConnection(connection: Connection): ConnectionDraft {
     ...(config.kind === 'api' ? {
       authHeader: config.authHeader, authPrefix: config.authPrefix, testPath: config.testPath,
       headers: JSON.stringify(config.headers), ghostIds: [...config.ghostIds],
+      readPaths: config.readPaths ?? [],
     } : {}),
   };
 }
@@ -138,8 +140,9 @@ export function buildConnectionCommand(draft: ConnectionDraft, existing: Connect
         headers = parsed as Record<string, string>;
       } catch { return { ok: false, error: '추가 헤더는 문자열 값의 JSON 객체로 입력해 주세요.' }; }
       if (!draft.testPath.trim()) return { ok: false, error: '계정 확인 API 경로를 입력해 주세요.' };
+      if (draft.readPaths?.some(item => !/^\/[^?#\\\s]*$/.test(item.path))) return { ok: false, error: '읽기 API 경로는 /로 시작하는 경로만 입력하세요.' };
       config = { kind: 'api', baseUrl, authHeader: draft.authHeader.trim(), authPrefix: draft.authPrefix.trim(),
-        testPath: draft.testPath.trim(), headers, ghostIds: draft.ghostIds };
+        testPath: draft.testPath.trim(), headers, ghostIds: draft.ghostIds, ...(draft.readPaths?.length ? { readPaths: draft.readPaths } : {}) };
     } else config = { kind: draft.kind, baseUrl };
   }
 

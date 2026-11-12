@@ -17,7 +17,7 @@ const settledRun = (run: ActivityRun) => run.state === 'skipped' || TERMINAL_WOR
  * 설정 → 자동 활동: standing delegations per Ghost. 만들기·편집·일시정지·삭제·실행·시험·기록은
  * activity.* 명령으로 곧장 저장되고, 활동이 활성화되려면 항상 소유자의 저장을 거칩니다.
  */
-export function Activities({ navigate }: { navigate(path: string): void }) {
+export function Activities({ navigate, scopeId }: { navigate(path: string): void; scopeId?: string }) {
   const { store, client } = useHost();
   const { state } = useHostState(store);
   const now = useNow();
@@ -32,16 +32,17 @@ export function Activities({ navigate }: { navigate(path: string): void }) {
   const ghosts = state?.ghosts ?? [];
   const connections = state?.connections ?? [];
   const runs = state?.activityRuns ?? [];
-  const activities = (state?.activities ?? []).filter(activity => activity.deletedAt === null)
+  const activities = (state?.activities ?? []).filter(activity => activity.deletedAt === null && (scopeId === undefined || activity.scopeId === scopeId))
     .sort((a, b) => Number(a.paused) - Number(b.paused)
       || (a.nextAt ?? Number.POSITIVE_INFINITY) - (b.nextAt ?? Number.POSITIVE_INFINITY)
       || a.createdAt - b.createdAt);
-  const liveRuns = runs.filter(run => !settledRun(run));
+  const activityIds = new Set(activities.map(activity => activity.id));
+  const liveRuns = runs.filter(run => !settledRun(run) && (scopeId === undefined || activityIds.has(run.activityId)));
   const stoppable = liveRuns.length > 0 || activities.some(activity => !activity.paused);
   const runsOf = (activityId: string): ActivityRun[] =>
     runs.filter(run => run.activityId === activityId).sort((a, b) => b.createdAt - a.createdAt);
   const activeIds = new Set(activities.map(activity => activity.id));
-  const archivedRuns = runs.filter(run => !activeIds.has(run.activityId)).sort((a, b) => b.createdAt - a.createdAt);
+  const archivedRuns = scopeId === undefined ? runs.filter(run => !activeIds.has(run.activityId)).sort((a, b) => b.createdAt - a.createdAt) : [];
 
   const act = async (label: string, work: () => Promise<unknown>, done: string) => {
     setPending(label); setError(''); setNotice('');
@@ -60,7 +61,7 @@ export function Activities({ navigate }: { navigate(path: string): void }) {
     <div className="settings-section-header flex flex-wrap items-center justify-between gap-3">
       <h2 className="section-title">{uiTerms.activities}</h2>
       <span className="flex items-center gap-2">
-        {stoppable && <Button variant="outline" type="button" disabled={pending !== ''} onClick={() => { setError(''); setStopping(true); }}>
+        {stoppable && scopeId === undefined && <Button variant="outline" type="button" disabled={pending !== ''} onClick={() => { setError(''); setStopping(true); }}>
           <Square size={15}/>모두 멈추기
         </Button>}
         <Button type="button" disabled={!state} onClick={() => { setError(''); setCreating(true); }}><Plus size={15}/>활동 만들기</Button>
@@ -79,7 +80,7 @@ export function Activities({ navigate }: { navigate(path: string): void }) {
                 <Badge variant="outline">{ghostName(activity.ghostId)}</Badge>
                 {activity.paused && <Badge variant="warning">일시정지</Badge>}
                 {deferred && <Badge variant="outline">대기</Badge>}
-                {activity.source.kind !== 'schedule' && !connection && <Badge variant="danger">연결 없음</Badge>}
+                {activity.source.kind !== 'schedule' && activity.source.kind !== 'commit' && !connection && <Badge variant="danger">연결 없음</Badge>}
                 <span className="text-caption font-normal text-ink-3">{sourceKindLabel[activity.source.kind]}</span>
               </span>
               <span className="text-ui font-medium text-ink [overflow-wrap:anywhere]">{activity.name}</span>
@@ -136,7 +137,7 @@ export function Activities({ navigate }: { navigate(path: string): void }) {
           </div>}
         </Fragment>;
       })}</SettingsGroup>
-      : state && <div className="calm"><FlaskConical size={16} aria-hidden="true"/><p>자동 활동 없음. 메일·PR·일정을 주기적으로 살피게 할 수 있습니다.</p></div>}
+      : state && <div className="calm"><FlaskConical size={16} aria-hidden="true"/><p>등록된 자동 활동이 없습니다.</p></div>}
     {archivedRuns.length > 0 && <section className="activity-runs" aria-label="삭제된 활동 실행 기록">
       <h3 className="section-title">삭제된 활동 실행 기록</h3>
       <ul className="activity-runs__list">{archivedRuns.map(run => <RunRow key={run.id} run={run} now={now} navigate={navigate}/>)}</ul>
@@ -144,7 +145,7 @@ export function Activities({ navigate }: { navigate(path: string): void }) {
     {error && <InlineError>{error}</InlineError>}
     {notice && <p className="m-0 text-caption text-success" role="status">{notice}</p>}
 
-    {(creating || editing) && state && <ActivityFormDialog state={state} connections={connections} activity={editing}
+    {(creating || editing) && state && <ActivityFormDialog state={state} connections={connections} activity={editing} initialScopeId={scopeId}
       onClose={() => { setCreating(false); setEditing(null); }}
       onSave={async config => {
         await client.send(editing

@@ -10,6 +10,7 @@ import { buildConnectionCommand, type ConnectionDraft, connectionSummary, draftF
 import { connectionServices, connectionSetupPrompt, serviceById, serviceForConnection, type ConnectionService } from './connection-services';
 import { ExternalAnchor } from '../components/ExternalAnchor';
 import { ConnectionOAuthPanel, supportsConnectionOAuth } from './ConnectionOAuthPanel';
+import { ReadPaths } from './ReadPaths';
 
 type TestState = { phase: 'testing' } | { phase: 'ok'; summary: string } | { phase: 'error'; message: string };
 
@@ -190,6 +191,7 @@ function ConnectionDialog({ existing, service, ghosts, canAssist, onAssist, onCl
           <p className="m-0 text-caption text-ink-2">선택한 Ghost만 이 계정의 API를 사용합니다. 외부 쓰기는 별도 확인을 받습니다.</p>
           {ghosts.map(ghost => <label key={ghost.id} className="flex items-center gap-2 text-ui"><Checkbox checked={draft.ghostIds.includes(ghost.id)} disabled={saving} onCheckedChange={checked => set({ ghostIds: checked ? [...draft.ghostIds, ghost.id] : draft.ghostIds.filter(id => id !== ghost.id) })}/>{ghost.name}</label>)}
         </fieldset>}
+        {api && <fieldset disabled={saving} className="border-0 m-0 p-0"><ReadPaths value={draft.readPaths ?? []} onChange={readPaths => set({ readPaths })}/></fieldset>}
         <button type="button" className="connection-advanced" aria-expanded={advanced} disabled={saving} onClick={() => setAdvanced(!advanced)}>고급 설정<ChevronDown size={14} className={advanced ? 'rotate-180' : ''}/></button>
         {advanced && <div className="flex flex-col gap-4">
           {mail && <>

@@ -62,7 +62,7 @@ function RuleEditor({ rule, scopeId: initialScope, onClose }: { rule: PolicyRule
       const review: PolicyReviewer | undefined = reviewer === 'main' ? { kind: 'main' } : reviewer === 'ghost' ? { kind: 'ghost', ghostId: reviewerGhost } : reviewer === 'slot' ? { kind: 'slot', slot: reviewerSlot } : undefined;
       if (decision === 'review' && !review) throw new Error('평가자를 선택하세요.');
       const input = { scopeId: scopeId || undefined, ghostId: ghostId || undefined, triggerId: triggerId || undefined, tool: tool.trim(), when, decision, reviewer: decision === 'review' || decision === 'owner' ? review : undefined, maxPerDay: daily ? Number(daily) : undefined, maxAmount: amount ? { value: Number(amount), currency } : undefined, autoResolve: minutes && (decision === 'owner' || decision === 'review') ? { afterMinutes: Number(minutes), answer } : undefined };
-      await client.send(rule ? { type: 'rule.update', ruleId: rule.id, ...input } : { type: 'rule.create', ...input }); onClose();
+      await client.send(rule ? { type: 'rule.update', ruleId: rule.id, ...input, scopeId: input.scopeId ?? null, ghostId: input.ghostId ?? null, triggerId: input.triggerId ?? null, reviewer: input.reviewer ?? null, maxPerDay: input.maxPerDay ?? null, maxAmount: input.maxAmount ?? null, autoResolve: input.autoResolve ?? null } : { type: 'rule.create', ...input }); onClose();
     } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
   return <form className="infra-form" onSubmit={event => void save(event)} aria-label={rule ? '정책 규칙 편집' : '정책 규칙 추가'}>
@@ -71,7 +71,7 @@ function RuleEditor({ rule, scopeId: initialScope, onClose }: { rule: PolicyRule
         <Choice label="프로젝트" value={scopeId} onChange={setScopeId} options={[{ value: '', label: '전체' }, ...(state?.scopes ?? []).map(scope => ({ value: scope.id, label: scope.name }))]}/>
         <Choice label="실행 Ghost" value={ghostId} onChange={setGhostId} options={[{ value: '', label: '모든 Ghost' }, ...(state?.ghosts ?? []).filter(ghost => !ghost.deletedAt).map(ghost => ({ value: ghost.id, label: ghost.name }))]}/>
       </div>
-      <Choice label="계기" value={triggerId} onChange={setTriggerId} options={[{ value: '', label: '모든 계기' }, ...(state?.activities ?? []).filter(activity => !activity.deletedAt).map(activity => ({ value: activity.id, label: activity.title }))]}/>
+      <Choice label="계기" value={triggerId} onChange={setTriggerId} options={[{ value: '', label: '모든 계기' }, ...(state?.activities ?? []).filter(activity => !activity.deletedAt).map(activity => ({ value: activity.id, label: activity.name }))]}/>
       <TextField label="도구 무늬" value={tool} onChange={setTool} required placeholder="mcp.*"/>
       <div className="infra-columns">
         <Choice label="대상" value={when.targetKind ?? ''} onChange={value => axis('targetKind', value ? value as PolicyConditions['targetKind'] : undefined)} options={targets}/>

@@ -42,13 +42,15 @@ export function activityToolChoices(tools: readonly GhostTool[]): GhostTool[] {
   return tools.filter(tool => !DENIED_IN_ACTIVITY[tool]);
 }
 
-export const sourceKindLabel: Record<ActivitySource['kind'], string> = { schedule: '일정', pull_request: 'PR', mail: '메일' };
+export const sourceKindLabel: Record<ActivitySource['kind'], string> = { schedule: '일정', commit: '커밋', poll: '연결 폴링', pull_request: 'PR', mail: '메일' };
 
 /** One short line about what a source watches; the filters that actually apply. Pure; tests pin it. */
 export function sourceSummary(source: ActivitySource): string {
   if (source.kind === 'schedule') {
     return source.spec.kind === 'at' ? `${dateTimeLabel(source.spec.at)}에 한 번` : `${intervalLabel(source.spec.seconds)}마다`;
   }
+  if (source.kind === 'commit') return `커밋 · ${source.scopeId}`;
+  if (source.kind === 'poll') return `폴링 · ${source.path} · ${intervalLabel(source.pollSeconds)}마다`;
   if (source.kind === 'pull_request') {
     return [`PR · ${source.repository}`, source.baseBranch ? `${source.baseBranch} 브랜치` : null,
       source.labels.length ? `${source.labels.join(', ')} 라벨` : null,
@@ -100,6 +102,11 @@ function dateTimeLabel(at: number): string {
 /** Everything the form owns, as input strings. */
 export interface ActivityDraft {
   ghostId: string;
+  scopeId: string;
+  commitScopeId: string;
+  pollPath: string;
+  itemsPointer: string;
+  idPointer: string;
   name: string;
   prompt: string;
   acceptanceCriteria: string;
@@ -133,6 +140,7 @@ export interface ActivityDraft {
 
 export const emptyDraft = (ghost: Ghost | null): ActivityDraft => ({
   ghostId: ghost?.id ?? '',
+  scopeId: '', commitScopeId: '', pollPath: '', itemsPointer: '', idPointer: '',
   name: '', prompt: '', acceptanceCriteria: '',
   sourceKind: 'schedule', scheduleMode: 'every', scheduleAt: toLocalInput(Date.now() + 3600_000), scheduleSpec: null, everyMinutes: '30',
   connectionId: '', pollMinutes: '5', includeExisting: false,
@@ -149,6 +157,7 @@ export const emptyDraft = (ghost: Ghost | null): ActivityDraft => ({
 export function draftFromConfig(config: ActivityConfig): ActivityDraft {
   const draft: ActivityDraft = {
     ...emptyDraft(null),
+    scopeId: config.scopeId ?? '',
     ghostId: config.ghostId, name: config.name, prompt: config.prompt, acceptanceCriteria: config.acceptanceCriteria,
     sourceKind: config.source.kind, tools: activityToolChoices(config.tools),
     executionKind: config.execution.kind, hostCwd: config.execution.kind === 'host' ? config.execution.cwd : '',
@@ -163,15 +172,21 @@ export function draftFromConfig(config: ActivityConfig): ActivityDraft {
     draft.scheduleSpec = source.spec;
     if (source.spec.kind === 'at') draft.scheduleAt = toLocalInput(source.spec.at);
     else draft.everyMinutes = String(source.spec.seconds / 60);
+  } else if (source.kind === 'commit') {
+    draft.commitScopeId = source.scopeId;
   } else if (source.kind === "pull_request" || source.kind === "mail") {
     draft.connectionId = source.connectionId;
     draft.pollMinutes = String(source.pollSeconds / 60);
-    draft.includeExisting = source.includeExisting;
+    if (source.kind !== 'poll') draft.includeExisting = source.includeExisting;
     if (source.kind === 'pull_request') {
       draft.repository = source.repository;
       draft.baseBranch = source.baseBranch ?? '';
       draft.labels = source.labels.join(', ');
       draft.includeDrafts = source.includeDrafts;
+    } else if (source.kind === 'poll') {
+      draft.pollPath = source.path;
+      draft.itemsPointer = source.itemsPointer;
+      draft.idPointer = source.idPointer;
     } else {
       draft.sender = source.sender ?? '';
       draft.subjectContains = source.subjectContains ?? '';
@@ -240,8 +255,11 @@ export function buildActivityConfig(draft: ActivityDraft, ghost: Ghost | undefin
         ? original : { kind: 'every', seconds, startAt: Date.now() };
     }
     source = { kind: 'schedule', spec };
+  } else if (draft.sourceKind === 'commit') {
+    if (!draft.commitScopeId) return { ok: false, error: '커밋을 살필 프로젝트를 선택해 주세요.' };
+    source = { kind: 'commit', scopeId: draft.commitScopeId };
   } else {
-    if (!draft.connectionId) return { ok: false, error: `${draft.sourceKind === 'pull_request' ? 'GitHub·Gitea' : '메일'} 연결을 선택해 주세요. 연결 계정에서 먼저 만들 수 있습니다.` };
+    if (!draft.connectionId) return { ok: false, error: '연결을 선택해 주세요. 연결 계정에서 먼저 만들 수 있습니다.' };
     const poll = secondsFromMinutes(draft.pollMinutes, 60, 86400, '확인 주기(분)');
     if (typeof poll === 'string') return { ok: false, error: poll };
     if (draft.sourceKind === 'pull_request') {
@@ -257,6 +275,10 @@ export function buildActivityConfig(draft: ActivityDraft, ghost: Ghost | undefin
         kind: 'pull_request', connectionId: draft.connectionId, repository, baseBranch, labels,
         includeDrafts: draft.includeDrafts, includeExisting: draft.includeExisting, pollSeconds: poll,
       };
+    } else if (draft.sourceKind === 'poll') {
+      if (!draft.pollPath.startsWith('/')) return { ok: false, error: '폴링 경로는 /로 시작해야 합니다.' };
+      if ([draft.itemsPointer, draft.idPointer].some(pointer => pointer !== '' && !/^(?:\/(?:[^~]|~[01])*)*$/.test(pointer))) return { ok: false, error: 'JSON 포인터를 확인해 주세요. 예: /items, /id' };
+      source = { kind: 'poll', connectionId: draft.connectionId, path: draft.pollPath, itemsPointer: draft.itemsPointer, idPointer: draft.idPointer, pollSeconds: poll };
     } else {
       const sender = optionalText(draft.sender, 320, '보낸 사람');
       if (sender !== null && typeof sender === 'object') return { ok: false, error: sender.error };
@@ -277,7 +299,7 @@ export function buildActivityConfig(draft: ActivityDraft, ghost: Ghost | undefin
     if (cwd.length > 4096) return { ok: false, error: '작업 폴더 경로는 4,096자 이하여야 합니다.' };
     execution = { kind: 'host', cwd };
   } else {
-    execution = { kind: 'workspace' };
+    execution = { kind: draft.executionKind === 'container' ? 'container' : 'workspace' };
   }
 
   const maxRunsPerDay = intIn(draft.maxRunsPerDay, 1, 1000, '하루 최대 실행');
@@ -292,7 +314,7 @@ export function buildActivityConfig(draft: ActivityDraft, ghost: Ghost | undefin
   return {
     ok: true,
     config: {
-      ghostId: draft.ghostId, name, prompt, acceptanceCriteria: criteria, source, execution,
+      ghostId: draft.ghostId, scopeId: draft.scopeId || null, name, prompt, acceptanceCriteria: criteria, source, execution,
       tools: intersectTools(draft.tools, ghost.tools),
       policy: {
         maxRunsPerDay, maxConcurrent, runTimeoutSeconds: runTimeout,
