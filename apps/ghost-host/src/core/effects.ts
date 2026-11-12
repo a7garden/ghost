@@ -353,7 +353,9 @@ export class Effects {
     if (conversation.kind === "review" || conversation.kind === "subagent") throw new NoEffect("Read-only conversations cannot execute effects");
     if (["write", "edit", "bash", "publish_artifact", "activity_action"].includes(effect.tool) && conversation.kind !== "work") throw new NoEffect("This tool requires a Work conversation");
     const tool = effect.tool === "document_write" ? "document_propose" : effect.tool;
-    const internal = ["self_adapt", "activity_action"].includes(tool);
+    const managedGhost = tool === "ghost_create" || tool === "ghost_update";
+    if (managedGhost && (!ghost.isDefault || !["direct", "wake"].includes(conversation.kind))) throw new NoEffect("The main Ghost's configuration authority was revoked");
+    const internal = managedGhost || ["self_adapt", "activity_action"].includes(tool);
     const matches = (pattern: string) => new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`).test(tool);
     if (!internal && !ghost.tools.some(matches)) throw new NoEffect("The tool grant was revoked; nothing was performed");
     if (work?.toolScope && !internal && !work.toolScope.some(matches)) throw new NoEffect("This Work no longer permits the tool");

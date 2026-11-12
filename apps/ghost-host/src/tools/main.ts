@@ -1,13 +1,16 @@
 import { Type } from "typebox";
-import { ADAPTATION_MAX_CHARS, DESKTOP_TOOLS, DocRefs, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, type Ghost } from "@ghost/contract";
+import { ADAPTATION_MAX_CHARS, Command, DESKTOP_TOOLS, DocRefs, FallbackList, GhostState, GhostToolList, HOST_TOOLS, Look, ModelRef, SkillList, nullable, parse, type Ghost } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { updateGhost } from "../core/commands.ts";
 import { fallbackListFor } from "../engine/fallback.ts";
 import type { Core } from "../core/core.ts";
 import { conflict, forbidden, invalid } from "../core/errors.ts";
-import { idFor } from "../core/ids.ts";
+import { digestOf, idFor } from "../core/ids.ts";
 import { NOTE_MAX } from "../core/decisions.ts";
 import { errorResult, scopeOf, type Scope } from "./shared.ts";
+import { planGhostConfiguration } from "../core/ghost-configuration.ts";
+import { reviseConfiguration } from "../core/configuration.ts";
+import { NoEffect } from "../core/effects.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -69,7 +72,7 @@ function requireMain(core: Core, api: ToolExecutionApi, targetId: string): Scope
 
 export function requireMainCaller(core: Core, api: ToolExecutionApi): Scope {
   const scope = scopeOf(core, api);
-  if (scope.conversation.kind !== "direct") throw forbidden("Ghost management runs only in a direct conversation");
+  if (!["direct", "wake"].includes(scope.conversation.kind)) throw forbidden("Ghost management runs only in a direct or wake conversation");
   if (!scope.ghost.isDefault) throw forbidden("only the current main Ghost may create, inspect or update other Ghosts");
   if (scope.ghost.state !== "active") throw forbidden(`${scope.ghost.name} is ${scope.ghost.state}`);
   return scope;
@@ -77,6 +80,100 @@ export function requireMainCaller(core: Core, api: ToolExecutionApi): Scope {
 
 /** `ghost_create`, `ghost_inspect`, `ghost_update` and `decision_settle`: main-only, never selectable, never granted to work or review conversations. */
 export function createMainTools(core: Core): Extension {
+  interface ManagedChange {
+    command: Extract<Command, { type: "ghost.create" | "ghost.update" }>;
+    entityId: string;
+    ghostId: string;
+    tool: "ghost_create" | "ghost_update";
+    reason: string;
+    notes?: string;
+    notesReason?: string;
+    selfDirected?: boolean;
+    fingerprint: string;
+  }
+  const identity = ({ fingerprint: _, ...input }: ManagedChange) => input;
+  const plan = (input: ManagedChange) => {
+    const configured = planGhostConfiguration(core, input.ghostId, input.command);
+    const targetId = input.command.type === "ghost.update" ? input.command.ghostId : null;
+    return {
+      widening: configured.widening || input.selfDirected === true && targetId !== null && !core.autonomy.enabled(targetId),
+      scopeId: configured.scopeId,
+      fingerprint: digestOf({ configuration: configured.fingerprint,
+        autonomy: targetId && input.selfDirected !== undefined ? core.autonomy.enabled(targetId) : null,
+        adaptation: targetId && input.notes !== undefined ? core.adaptations.get(targetId)?.revision ?? null : null }),
+    };
+  };
+  const apply = (conversationId: string, input: ManagedChange) => core.ledger.tx(() => {
+    const conversation = core.ledger.conversation(conversationId);
+    const caller = core.ledger.ghost(conversation.ghostId);
+    if (caller.id !== input.ghostId || !caller.isDefault || caller.state !== "active" || caller.deletedAt !== null || !["direct", "wake"].includes(conversation.kind)) throw forbidden("The main Ghost's configuration authority was revoked");
+    if (plan(input).fingerprint !== input.fingerprint) throw conflict("Configuration changed while this request waited; inspect it and propose again");
+    return reviseConfiguration(core, { kind: "ghost", ghostId: caller.id }, input.command, () => {
+      let changed: Ghost;
+      let granted: string[];
+      const command = input.command;
+      if (command.type === "ghost.create") {
+        const existing = core.ledger.ghosts().find((ghost) => ghost.id === input.entityId);
+        if (existing) throw conflict("This Ghost was already created; inspect it instead of replaying creation");
+        const since = Date.now() - 24 * 60 * 60_000;
+        if (core.ledger.ghosts().filter((ghost) => ghost.createdAt >= since).length >= core.ledger.limits().ghostsPerDay) throw conflict("The daily Ghost creation limit was reached");
+        if (core.ledger.ghosts().some((ghost) => ghost.deletedAt === null && ghost.name === command.name.trim())) throw conflict("A Ghost with that name already exists");
+        const { type: _, ...fields } = command;
+        granted = macGrants(null, fields.tools, fields.hostExecution);
+        changed = core.createGhost({ ...fields, id: input.entityId, name: fields.name.trim() });
+      } else {
+        const { type: _, ghostId, ...patch } = command;
+        const before = core.ledger.ghost(ghostId);
+        if (before.id === caller.id || before.isDefault || before.deletedAt !== null) throw forbidden("This Ghost's settings remain owner-only");
+        granted = macGrants(before, patch.tools, patch.hostExecution);
+        changed = updateGhost(core, ghostId, patch);
+        if (input.selfDirected !== undefined) core.autonomy.setEnabled(ghostId, input.selfDirected);
+        if (input.notes !== undefined) core.adaptations.set(ghostId, input.notes, "main", input.notesReason ?? input.reason, conversationId);
+      }
+      core.notify({
+        id: `ghost-configured:${conversationId}:${input.entityId}:${input.fingerprint}`,
+        kind: "message", ghostId: caller.id, conversationId, workId: null, decisionId: null,
+        title: `${changed.name}${granted.length ? ` (${granted.join(", ")} 허용)` : ""}`,
+        body: input.reason,
+      });
+      return `${command.type === "ghost.create" ? "Created" : "Updated"} ${changed.name}.\n${renderGhost(core, changed)}`;
+    }, input.reason);
+  });
+  for (const name of ["ghost_create", "ghost_update"] as const) core.effects.onApproved(name, async (effect) => {
+    const decision = core.ledger.decisionsAwaitingFollowUp().find((entry) => entry.effectId === effect.id && entry.state === "approved");
+    const input = decision?.proposal?.input as ManagedChange | undefined;
+    if (!input || input.tool !== name || digestOf(identity(input)) !== effect.inputDigest) throw new NoEffect("The approved Ghost configuration identity is invalid");
+    try { return apply(effect.conversationId, input); }
+    catch (error) { throw new NoEffect(error instanceof Error ? error.message : String(error)); }
+  });
+  const change = (scope: Scope, api: ToolExecutionApi, input: ManagedChange) => {
+    const stable = identity(input);
+    const requestId = idFor(scope.conversation.id, `${api.callId}:ghost-configuration`);
+    const receipt = core.ledger.request(requestId);
+    if (receipt) {
+      if (receipt.principal !== `ghost:${scope.ghost.id}` || receipt.digest !== digestOf(stable)) throw conflict("Call identity belongs to different Ghost configuration input");
+      return String(receipt.outcome.text);
+    }
+    const prior = core.ledger.effectByCall(scope.conversation.id, api.callId);
+    if (prior) {
+      if (prior.tool !== input.tool || prior.inputDigest !== digestOf(stable)) throw conflict("Call identity belongs to different Ghost configuration input");
+      return core.effects.proposalStatus(prior);
+    }
+    const planned = plan(input);
+    input.fingerprint = planned.fingerprint;
+    if (!planned.widening) return core.ledger.tx(() => {
+      const result = apply(scope.conversation.id, input);
+      core.ledger.putRequest(requestId, `ghost:${scope.ghost.id}`, digestOf(stable), { text: result });
+      return result;
+    });
+    const effect = core.effects.propose({
+      conversationId: scope.conversation.id, callId: api.callId, tool: input.tool, input: stable,
+      classification: { target: { kind: "host", id: input.entityId }, access: "write", reversible: true, external: false, amount: null },
+      summary: input.reason, title: `Ghost 설정 변경: ${input.command.type}`.slice(0, 200),
+      detail: `${input.reason}\n\n${JSON.stringify(stable)}`, proposal: { input, forceOwner: true, scopeId: planned.scopeId },
+    });
+    return core.effects.proposalStatus(effect);
+  };
   const ghostCreate = defineTool({
     name: "ghost_create",
     description:
@@ -98,43 +195,10 @@ export function createMainTools(core: Core): Extension {
     async execute(args, api) {
       try {
         const scope = requireMainCaller(core, api);
-        const id = idFor(scope.conversation.id, api.callId);
-        const replayed = core.ledger.ghosts().find((ghost) => ghost.id === id);
-        if (!replayed) {
-          const since = Date.now() - 24 * 60 * 60_000;
-          const perDay = core.ledger.limits().ghostsPerDay;
-          if (core.ledger.ghosts().filter((ghost) => ghost.createdAt >= since).length >= perDay) {
-            throw conflict(`at most ${perDay} Ghosts are created a day; give the work to an existing Ghost or update one with ghost_update`);
-          }
-          if (core.ledger.ghosts().some((ghost) => ghost.deletedAt === null && ghost.name === args.name.trim())) throw conflict(`a Ghost named ${args.name.trim()} already exists; update it with ghost_update or choose another name`);
-        }
-        const granted = macGrants(null, args.tools, args.host_execution);
-        const ghost = core.ledger.tx(() => {
-          const created = core.createGhost({
-            id,
-            name: args.name.trim(),
-            persona: args.persona,
-            model: args.model ?? null,
-            ...(args.look ? { look: args.look } : {}),
-            ...(args.tools ? { tools: args.tools } : {}),
-            ...(args.fallbacks ? { fallbacks: args.fallbacks } : {}),
-            ...(args.skills ? { skills: args.skills } : {}),
-            ...(args.attachments ? { attachments: args.attachments } : {}),
-            hostExecution: args.host_execution ?? false,
-          });
-          core.notify({
-            id: `ghost-created:${created.id}`,
-            kind: "message",
-            ghostId: scope.ghost.id,
-            conversationId: scope.conversation.id,
-            workId: null,
-            decisionId: null,
-            title: `새 Ghost ${created.name}${granted.length ? ` (${granted.join(", ")} 허용)` : ""}`,
-            body: `${args.reason.trim()}\n\n설정 › Ghost에서 고치거나 은퇴시킬 수 있습니다.`,
-          });
-          return created;
-        });
-        return text(`Created ${ghost.name} (ghost_id ${ghost.id}). Hand it Work with work_create and its ghost_id.\n${renderGhost(core, ghost)}`);
+        const { reason, host_execution, ...fields } = args;
+        const command = parse(Command, { ...fields, type: "ghost.create", ...(host_execution === undefined ? {} : { hostExecution: host_execution }) });
+        if (command.type !== "ghost.create") throw invalid("Invalid Ghost creation command");
+        return text(change(scope, api, { command, entityId: idFor(scope.conversation.id, api.callId), ghostId: scope.ghost.id, tool: "ghost_create", reason: reason.trim(), fingerprint: "" }));
       } catch (error) {
         return errorResult(error);
       }
@@ -183,39 +247,11 @@ export function createMainTools(core: Core): Extension {
       try {
         const { target, ...scope } = requireMain(core, api, args.ghost_id);
         if (target.deletedAt !== null) throw forbidden(`${target.name} was deleted`);
-        const granted = macGrants(target, args.tools, args.host_execution);
-        // The Mac is the owner's: the main Ghost may open it to a teammate, but never silently —
-        // the grant and its notification commit together.
-        const next = core.ledger.tx(() => {
-          const updated = updateGhost(core, target.id, {
-            name: args.name,
-            persona: args.persona,
-            model: args.model === undefined ? undefined : args.model,
-            look: args.look,
-            state: args.state,
-            tools: args.tools,
-            fallbacks: args.fallbacks,
-            skills: args.skills,
-            attachments: args.attachments,
-            hostExecution: args.host_execution,
-          });
-          if (args.self_directed !== undefined) core.autonomy.setEnabled(target.id, args.self_directed);
-          if (args.notes !== undefined) core.adaptations.set(target.id, args.notes, "main", args.notes_reason ?? "");
-          if (granted.length > 0) {
-            core.notify({
-              id: `grant:${scope.conversation.id}:${api.callId}`,
-              kind: "message",
-              ghostId: scope.ghost.id,
-              conversationId: scope.conversation.id,
-              workId: scope.work?.id ?? null,
-              decisionId: null,
-              title: `${updated.name}에게 ${granted.join(", ")} 허용`,
-              body: `${scope.ghost.name}이(가) 작업에 필요해 허용했습니다. 설정 › Ghost에서 되돌릴 수 있습니다.`,
-            });
-          }
-          return updated;
-        });
-        return text(`Updated.\n${renderGhost(core, next)}`);
+        const { ghost_id, host_execution, self_directed, notes, notes_reason, ...fields } = args;
+        const command = parse(Command, { ...fields, type: "ghost.update", ghostId: ghost_id, ...(host_execution === undefined ? {} : { hostExecution: host_execution }) });
+        if (command.type !== "ghost.update") throw invalid("Invalid Ghost update command");
+        return text(change(scope, api, { command, entityId: target.id, ghostId: scope.ghost.id, tool: "ghost_update",
+          reason: notes_reason?.trim() || "Update Ghost configuration", notes, notesReason: notes_reason, selfDirected: self_directed, fingerprint: "" }));
       } catch (error) {
         return errorResult(error);
       }
