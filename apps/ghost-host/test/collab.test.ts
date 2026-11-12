@@ -1174,10 +1174,10 @@ describe("collaboration migration 6 and autonomy migration 7", () => {
     try {
 
       for (const row of ledger.db.query("SELECT * FROM works ORDER BY id").all()) {
-        const { execution, activity_id, activity_run_id, tool_scope, budget_minutes, budget_used_ms, budget_since, budget_extended, hold, scope_id, attachments, slot, retry, ...preserved } = row as Record<string, unknown>;
+        const { execution, activity_id, activity_run_id, tool_scope, budget_minutes, budget_used_ms, budget_since, budget_extended, hold, scope_id, attachments, slot, retry, scope_references, ...preserved } = row as Record<string, unknown>;
         expect([execution, activity_id, activity_run_id, tool_scope]).toEqual([null, null, null, null]);
         expect([budget_minutes, budget_used_ms, budget_extended, hold]).toEqual([90, 0, 0, null]);
-        expect([scope_id, attachments, slot, retry]).toEqual([null, "[]", null, null]);
+        expect([scope_id, attachments, slot, retry, scope_references]).toEqual([null, "[]", null, null, "[]"]);
         // Migration 10 starts the clock only for rows still running.
         expect(budget_since === null || Number.isFinite(budget_since)).toBe(true);
         expect(oldWorks).toContainEqual(preserved);
