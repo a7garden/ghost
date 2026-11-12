@@ -81,7 +81,7 @@ export function reviseConfiguration<T>(core: Core, principal: Principal | { kind
   }
   if (reverted && revisions === 0) {
     const entry = after.find(item => item.entity === reverted.entity && item.entityId === reverted.entityId);
-    core.ledger.putConfigRevision({ ...reverted, id: newId(), before: entry?.value ?? reverted.before, after: entry?.value ?? reverted.before, actor: { kind: principal.kind, id: principal.kind === "device" ? principal.deviceId : null }, reason: `config.revert:${reverted.id}`, at: Date.now() });
+    core.ledger.putConfigRevision({ ...reverted, id: newId(), before: entry?.value ?? reverted.before, after: entry?.value ?? reverted.before, actor: { kind: principal.kind, id: principal.kind === "device" ? principal.deviceId : principal.kind === "ghost" ? principal.ghostId : null }, reason: `config.revert:${reverted.id}`, at: Date.now() });
   }
   return result;
 }
