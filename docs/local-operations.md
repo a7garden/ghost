@@ -7,6 +7,7 @@
 | Host | `ghost serve` 한 프로세스. 상태 루트(`~/Library/Application Support/Ghost`)의 단일 writer이고 API·웹 UI·기기 연결을 같은 포트(기본 `127.0.0.1:62062`)에서 제공한다. LaunchAgent `com.a7.ghost`가 `ghost service install`이 만든 `~/.local/share/ghost/bin/ghost-launch`로 띄운다. |
 | Mac 앱 | `~/Applications/Ghost.app`. 상태 루트의 `host.json`을 읽어 실행 중인 Host에 붙기만 한다. Host를 띄우거나 끄지 않는다. `~/.config/ghost/console.json`은 `root`만 읽는다. |
 | iPhone | 페어링한 기기가 Host의 공개 origin(`publicOrigin`, TLS 리버스 프록시)으로 직접 접속한다. 별도 Gateway는 없다. |
+| 웹 | `https://ghost.a7garden.com`. Cloudflare Access(이메일 인증코드, `a7garden@icloud.com`만 허용, 세션 7일)가 로그인을 받고, Mac Studio의 LaunchAgent `com.a7.ghost-cloudflare`(cloudflared, 원격 관리 터널 `ghost`)가 `127.0.0.1:62062`로 전달한다. Host는 `config.json`의 `cloudflareAccess`로 Access JWT를 다시 검사하고 통과한 요청만 소유자로 받는다. |
 
 ## 개발 변경의 자동 운영 반영
 
@@ -56,6 +57,7 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`(셸 shim) → `Ghost Host.app/Contents/MacOS/ghost`, `current` → `releases/2.8.1-6ce871a`(GitHub Release `v2.8.1`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, Apple container 샌드박스, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`, Obscura), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 기억 `memory.db`(Host 내장), 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
+| 웹 origin | `https://ghost.a7garden.com` → Cloudflare Access 앱 `Ghost`(팀 `dawn-hat-3ab7.cloudflareaccess.com`, 정책 `Ghost owner`, IdP `One-time PIN`) → 터널 `ghost`(`765d8841-…`) → `127.0.0.1:62062`. 커넥터 `~/Library/LaunchAgents/com.a7.ghost-cloudflare.plist`, 토큰·로그 `~/Library/Application Support/ghost-cloudflare/`(0700, 토큰 0600). 끄려면 `launchctl bootout gui/$UID/com.a7.ghost-cloudflare` |
 | Mac 앱 | `~/Applications/Ghost.app` 0.2.4(Developer ID 서명, 공증 없음, Host를 거친 자체 업데이트), `console.json`은 `root`만 읽는다(남은 `host_mode` 키는 무시). 데스크톱 아바타 상태·위치는 `~/.config/ghost/companion.json` |
 | 중지됨 | `com.a7.ghost-gateway`(disabled), 구형 worker LaunchAgent, `dev.garden.macfra.agent`(2026-11-08 Ghost `Mac 관리`로 이전, disabled) |
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |

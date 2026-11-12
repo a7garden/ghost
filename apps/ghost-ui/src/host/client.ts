@@ -155,12 +155,25 @@ export class HostClient {
     return this.token ? { Authorization: `Bearer ${this.token}`, ...extra } : extra;
   }
 
+  /**
+   * Every Host request. The Host never redirects an API call; on the Cloudflare Access web origin
+   * a redirect is Access sending an expired session to its login, which only a page load can follow.
+   */
+  private async request(path: string, init: RequestInit = {}): Promise<Response> {
+    const response = await fetch(path, { ...init, redirect: 'manual' });
+    if (response.type === 'opaqueredirect') {
+      window.location.reload();
+      throw new HostError('forbidden', '다시 로그인해야 합니다.');
+    }
+    return response;
+  }
+
   private async json<T>(path: string, init: RequestInit = {}): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(path, { ...init, cache: 'no-store', headers: this.headers(init.headers as Record<string, string> | undefined) });
-    } catch {
-      throw new HostError('network', 'Ghost 호스트에 연결할 수 없습니다.');
+      response = await this.request(path, { ...init, cache: 'no-store', headers: this.headers(init.headers as Record<string, string> | undefined) });
+    } catch (caught) {
+      throw caught instanceof HostError ? caught : new HostError('network', 'Ghost 호스트에 연결할 수 없습니다.');
     }
     const body = (await response.json().catch(() => null)) as { error?: ApiError } | null;
     if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
@@ -391,7 +404,7 @@ export class HostClient {
   /** Download one attachment: fetch the bytes with the bearer token, then save them as a file. */
   async mailAttachment(connectionId: string, mailbox: string, uid: number, part: string, filename: string): Promise<void> {
     const params = new URLSearchParams({ mailbox, uid: String(uid), part });
-    const response = await fetch(`/api/mail/${encodeURIComponent(connectionId)}/attachment?${params}`, { headers: this.headers() });
+    const response = await this.request(`/api/mail/${encodeURIComponent(connectionId)}/attachment?${params}`, { headers: this.headers() });
     if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok) throw new HostError('not_found', '첨부 파일을 저장하지 못했습니다.');
     const url = URL.createObjectURL(await response.blob());
@@ -425,9 +438,9 @@ export class HostClient {
   async browserLive(conversationId: string, fps: number, onEvent: (event: BrowserLiveEvent) => void, signal: AbortSignal): Promise<void> {
     let response: Response;
     try {
-      response = await fetch(`/api/browser/sessions/${encodeURIComponent(conversationId)}/live?fps=${fps}`, { cache: 'no-store', headers: this.headers({ Accept: 'application/x-ndjson' }), signal });
-    } catch {
-      throw new HostError('network', '브라우저 화면에 연결할 수 없습니다.');
+      response = await this.request(`/api/browser/sessions/${encodeURIComponent(conversationId)}/live?fps=${fps}`, { cache: 'no-store', headers: this.headers({ Accept: 'application/x-ndjson' }), signal });
+    } catch (caught) {
+      throw caught instanceof HostError ? caught : new HostError('network', '브라우저 화면에 연결할 수 없습니다.');
     }
     if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok || !response.body) {
@@ -475,7 +488,7 @@ export class HostClient {
 
   /** Artifact bytes as an object URL; callers may type an image/PDF for its native decoder. Revoke when done. */
   async artifactUrl(digest: string, mediaType?: string): Promise<string> {
-    const response = await fetch(`/api/artifacts/${digest}`, { headers: this.headers() });
+    const response = await this.request(`/api/artifacts/${digest}`, { headers: this.headers() });
     if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok) throw new HostError('not_found', '파일을 불러올 수 없습니다.');
     const blob = await response.blob();
@@ -483,7 +496,7 @@ export class HostClient {
   }
 
   async artifactText(digest: string): Promise<string> {
-    const response = await fetch(`/api/artifacts/${digest}`, { headers: this.headers() });
+    const response = await this.request(`/api/artifacts/${digest}`, { headers: this.headers() });
     if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok) throw new HostError('not_found', '파일을 불러올 수 없습니다.');
     return response.text();
@@ -496,7 +509,7 @@ export class HostClient {
   async stream(after: number, conversations: string[], handlers: StreamHandlers, signal: AbortSignal): Promise<void> {
     const query = new URLSearchParams({ after: String(after) });
     for (const id of conversations) query.append('conversation', id);
-    const response = await fetch(`/api/events?${query}`, { headers: this.headers({ Accept: 'text/event-stream' }), signal });
+    const response = await this.request(`/api/events?${query}`, { headers: this.headers({ Accept: 'text/event-stream' }), signal });
     if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok || !response.body) throw new HostError('network', '이벤트 스트림에 연결할 수 없습니다.');
     const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();

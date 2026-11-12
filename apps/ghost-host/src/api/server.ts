@@ -30,6 +30,7 @@ import type { BrowserPort, DocumentsPort, SkillsPort } from "../integrations/por
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
+import { CloudflareAccessVerifier } from "./cloudflare-access.ts";
 import { Access } from "../core/access.ts";
 import { execute, hashSecret } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
@@ -123,6 +124,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   } catch {
     core.log("invalid publicOrigin; only loopback hosts are accepted", publicOrigin);
   }
+  const edge = config.cloudflareAccess ? new CloudflareAccessVerifier(config.cloudflareAccess, fetch, Date.now, core.log) : null;
+  if (edge !== null) allowedHosts.add(edge.host);
   const connectionOAuth = new ConnectionOAuth(core, { root: config.root, publicOrigin });
   core.activitySources?.setOAuthRefresher?.(connection => connectionOAuth.refresh(connection));
 
@@ -417,6 +420,9 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
     // DNS rebinding: only loopback and the public origin may talk to this server.
     const host = (request.headers.get("host") ?? "").toLowerCase();
     if (!allowedHosts.has(host)) return error("forbidden", "untrusted host", 403);
+    // The Access web origin admits nothing, UI included, without a verified Access session; that session is the owner.
+    const viaEdge = edge !== null && host === edge.host;
+    if (viaEdge && (await edge.verify(request)) === null) return error("forbidden", "Cloudflare Access login required", 401);
     const peer = bound.requestIP(request);
     const injectToken = loopbackHosts.has(host) && peer !== null && isLoopbackAddress(peer.address);
 
@@ -441,7 +447,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
 
-    const access = authenticate(request);
+    const access = viaEdge ? new Access({ kind: "owner" }) : authenticate(request);
     if (access === null) return error("forbidden", "missing or invalid bearer token", 401);
     if (pathname.startsWith("/api/connection-oauth/")) {
       try { return await connectionOAuth.handle(request, url, access) ?? error("not_found", "not found", 404); }
@@ -451,7 +457,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       try { return await serveUpdate(request, url, updater); } catch (caught) { return failure(caught); }
     }
     if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) return serveVault(request, url, core, vault);
-    if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser, () => authenticate(request) !== null);
+    if (pathname.startsWith("/api/browser/")) return serveBrowser(request, url, core, browser, () => viaEdge || authenticate(request) !== null);
     if (pathname.startsWith("/api/mail/")) return serveMail(request, url, deps.mail ?? null);
     if (pathname.startsWith("/api/memory/")) {
       try {

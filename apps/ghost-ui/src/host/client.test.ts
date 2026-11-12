@@ -1,5 +1,30 @@
-import { describe, expect, it } from 'vitest';
-import { ndjsonLines } from './client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { HostClient, HostError, ndjsonLines } from './client';
+
+describe('HostClient on the Cloudflare Access origin', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reloads into the Access login when an expired session redirects an API call', async () => {
+    const reload = vi.fn();
+    const fetch = vi.fn(async () => ({ type: 'opaqueredirect', status: 0, ok: false }) as Response);
+    vi.stubGlobal('window', { location: { reload } });
+    vi.stubGlobal('fetch', fetch);
+    const error = await new HostClient(undefined).state().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HostError);
+    expect((error as HostError).code).toBe('forbidden');
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith('/api/state', expect.objectContaining({ redirect: 'manual' }));
+  });
+
+  it('keeps an unreachable Host a network error without reloading', async () => {
+    const reload = vi.fn();
+    vi.stubGlobal('window', { location: { reload } });
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    const error = await new HostClient(undefined).state().catch((caught: unknown) => caught);
+    expect((error as HostError).code).toBe('network');
+    expect(reload).not.toHaveBeenCalled();
+  });
+});
 
 describe('ndjsonLines', () => {
   it('returns the complete lines of one chunk and keeps nothing when lines end cleanly', () => {

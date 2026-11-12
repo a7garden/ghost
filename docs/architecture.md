@@ -286,7 +286,7 @@ worktrees/<ghost_id>/<work_id>   per-Work git worktrees (branch ghost/<work_id>)
 browser/                     agent-browser HOME (per-Ghost login state, encrypted with browser/key), config, downloads
 sandboxes/<ghost_id>/<work_id>/workspace   private staging / container mount; never the unrestricted PC cwd
 host.json                    port + owner token for local clients, 0600
-config.json                  optional: publicOrigin, uiDir, sandbox, apns, reach, skills, mac, browser
+config.json                  optional: publicOrigin, cloudflareAccess, uiDir, sandbox, apns, reach, skills, mac, browser
 secrets/update-github.json   GitHub token for release checks, 0600
 secrets/connections/         per-account credentials, 0600, outside ledger/events
 secrets/connection-oauth/    OAuth client configuration and refresh grants, 0600
@@ -372,6 +372,7 @@ update/cache/                shell bundle and iPhone IPA proxied from the newest
 `Bun.serve` on one port. Principals:
 
 - **Owner**: bearer token from `host.json`. Used by the Mac app and the web UI.
+- **Owner on the web origin**: `config.json` `cloudflareAccess` (`origin`, `teamDomain`, `audience`, `emails`) names a public HTTPS origin behind Cloudflare Access and a Cloudflare Tunnel. A request whose `Host` is that origin is refused with `401` on every path, UI and `/api/health` included, unless its `Cf-Access-Jwt-Assertion` verifies: RS256 against the team's `/cdn-cgi/access/certs` keys (an unknown `kid` refetches them at most every 30 s), the application's AUD tag, the team issuer, `exp`/`nbf` within 60 s and an allowed email. A verified request is the owner; a bearer token on that origin is ignored and the owner token is never injected into its HTML. When an expired Access session redirects an API call, the UI reloads into the Access login.
 - **Device**: bearer token issued at pairing. It hosts the same web UI as the owner and has owner-equivalent capability (owner decision, 2026-11-09): every Ghost, conversation, Work, decision, schedule, activity, connection, space, provider setting, artifact and other device, including ones created after pairing, and every command except device management. Only the owner may send `device.pairing_start` or `device.update`, or `device.revoke` another device; a device may revoke itself. Revocation closes its stream and invalidates its token. The device-management exception is not a containment boundary: a device can grant PC execution, and PC execution runs with the owner's OS account (including `host.json`), so revocation stops the device but does not undo what it already ran.
 
 | Route | Purpose |

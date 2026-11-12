@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { releaseDirectoryOf } from "./update/storage.ts";
+import { parseCloudflareAccess, type CloudflareAccessConfig } from "./api/cloudflare-access.ts";
 
 /** Everything the process reads at startup. Nothing else reads the environment. */
 export interface Config {
@@ -12,6 +13,8 @@ export interface Config {
   port: number;
   /** Origin paired devices use (a TLS reverse proxy in front of `port`); null = the bound loopback address. */
   publicOrigin: string | null;
+  /** Optional public web origin behind Cloudflare Access; requests on its host must carry a valid Access JWT. */
+  cloudflareAccess?: CloudflareAccessConfig | null;
   /** Built web UI served at `/`; null serves no UI. */
   uiDir: string | null;
   sandbox:
@@ -66,7 +69,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const root = resolve(rootOverride ?? env.GHOST_ROOT ?? DEFAULT_ROOT);
   const path = join(root, "config.json");
   const file = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Partial<Config>) : {};
-  const allowed = ["host", "port", "publicOrigin", "uiDir", "sandbox", "voice", "apns", "skills", "mac", "reach", "browser", "desktop"];
+  const allowed = ["host", "port", "publicOrigin", "cloudflareAccess", "uiDir", "sandbox", "voice", "apns", "skills", "mac", "reach", "browser", "desktop"];
   for (const key of Object.keys(file)) if (!allowed.includes(key)) throw new Error(`config.json: unknown key ${key}`);
   const port = Number(env.GHOST_PORT ?? file.port ?? DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("GHOST_PORT must be a TCP port (0 picks a free one)");
@@ -111,6 +114,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     host,
     port,
     publicOrigin: env.GHOST_PUBLIC_ORIGIN ?? file.publicOrigin ?? null,
+    cloudflareAccess: file.cloudflareAccess == null ? null : parseCloudflareAccess(file.cloudflareAccess),
     uiDir: env.GHOST_UI_DIR ?? file.uiDir ?? null,
     sandbox: file.sandbox ?? { kind: "local" },
     mac: file.mac ? { roots: (file.mac.roots ?? ["~/Workspace/Projects"]).map(expandHome), watch: file.mac.watch ?? null } : null,
