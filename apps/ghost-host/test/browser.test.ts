@@ -682,12 +682,12 @@ describe("browser tools", () => {
       // Reading the current URL may have started the session; the handoff itself must add no open or close.
       const sessionCommands = () => commands(f.root).filter(argv => argv[0] === "open" || argv[0] === "close").length;
       await f.call("browser_snapshot");
-      const before = sessionCommands();
+      const beforeHandoff = sessionCommands();
       await f.call("browser_handoff", { reason: "Complete SSO" });
       const decision = f.ledger.pendingDecisions()[0]!;
       expect(decision.kind).toBe("question"); expect(decision.proposal?.browserHandoff).toEqual({ url: "https://example.com/", reason: "Complete SSO", live: true });
       expect(f.ledger.effectsInState("pending")).toHaveLength(0);
-      expect(sessionCommands()).toBe(before);
+      expect(sessionCommands()).toBe(beforeHandoff);
       expect(decision.title).toBe("브라우저에서 직접 처리해 주세요"); expect(decision.options).toEqual([]);
       expect(records(f.root).some((r) => r.argv.includes("--headed"))).toBe(false);
       expect((await f.call("browser_snapshot")).isError).toBe(true);
