@@ -1,6 +1,7 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,12 +9,13 @@ import type { ArtifactRef, Command, PageSummary, State } from '@ghost/contract';
 import type { MessageSend, OutboxEntry } from '../src/features/outbox';
 
 /** No provider process, route interception, canned snapshot, or production root. */
-const test = base.extend<{}, { host: { baseUrl: string; root: string; vault: string } }>({
+const test = base.extend<{}, { host: { baseUrl: string; root: string; vault: string }; pollSource: { url: string; credential: string } }>({
   host: [async ({}, use) => {
     const ui = fileURLToPath(new URL('..', import.meta.url));
     if (!existsSync(join(ui, 'dist/index.html'))) throw new Error('Build the integrated UI first: cd apps/ghost-ui && bun run build');
-    const root = mkdtempSync(join(tmpdir(), 'ghost-infrastructure-ui-'));
-    const vault = join(root, 'documents'); mkdirSync(vault);
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ghost-infrastructure-ui-')));
+    const vaultPath = join(root, 'documents'); mkdirSync(vaultPath);
+    const vault = realpathSync(vaultPath);
     const child = spawn('bun', ['../ghost-host/src/main.ts', 'serve'], { cwd: ui, env: { ...process.env, GHOST_ROOT: root, GHOST_PORT: '0', GHOST_UI_DIR: resolve(ui, 'dist') }, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = ''; child.stderr?.on('data', chunk => { stderr += String(chunk); });
     const exit = Promise.withResolvers<void>();
@@ -30,6 +32,28 @@ const test = base.extend<{}, { host: { baseUrl: string; root: string; vault: str
       if (child.exitCode === null) child.kill('SIGTERM');
       const timer = setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 5000);
       await exit.promise; clearTimeout(timer); rmSync(root, { recursive: true, force: true });
+    }
+  }, { scope: 'worker' }],
+  pollSource: [async ({}, use) => {
+    const credential = crypto.randomUUID();
+    const source = createServer((request, response) => {
+      response.setHeader('content-type', 'application/json');
+      if (request.method !== 'GET') { response.writeHead(405).end('{}'); return; }
+      if (request.headers.authorization !== `Bearer ${credential}`) { response.writeHead(401).end('{}'); return; }
+      response.end(JSON.stringify({ data: { entries: [] } }));
+    });
+    const listening = Promise.withResolvers<void>();
+    source.once('error', listening.reject);
+    source.listen(0, '127.0.0.1', listening.resolve);
+    try {
+      await listening.promise;
+      const address = source.address();
+      if (!address || typeof address === 'string') throw new Error('isolated poll source did not bind');
+      await use({ url: `http://127.0.0.1:${address.port}`, credential });
+    } finally {
+      const closed = Promise.withResolvers<void>();
+      source.close(error => error ? closed.reject(error) : closed.resolve());
+      await closed.promise;
     }
   }, { scope: 'worker' }],
 });
@@ -181,7 +205,7 @@ test('scope, document, slot, MCP, policy and conflict-aware history use the real
   expect(errors).toEqual([]);
 });
 
-test('scope edits retain inherited global rules and generic trigger sources', async ({ page, host }) => {
+test('scope edits retain inherited global rules and generic trigger sources', async ({ page, host, pollSource }) => {
   await page.goto(`${host.baseUrl}/#/scopes`);
   const repo = join(host.root, 'trigger-regression-repo');
   mkdirSync(repo);
@@ -218,8 +242,8 @@ test('scope edits retain inherited global rules and generic trigger sources', as
   await expect.poll(async () => (await snapshot(page)).activities.find(activity => activity.name === '커밋 연결 없이 저장')?.source).toEqual({ kind: 'commit', scopeId });
 
   const receiver = (await snapshot(page)).ghosts.find(ghost => ghost.isDefault)!;
-  const connectionId = String((await command(page, { type: 'connection.upsert', name: '폴링 편집 검증', config: {
-    kind: 'api', baseUrl: 'https://example.com', authHeader: 'Authorization', authPrefix: 'Bearer', testPath: '/',
+  const connectionId = String((await command(page, { type: 'connection.upsert', name: '폴링 편집 검증', credential: pollSource.credential, config: {
+    kind: 'api', baseUrl: pollSource.url, authHeader: 'Authorization', authPrefix: 'Bearer', testPath: '/',
     headers: {}, ghostIds: [receiver.id],
   } })).connectionId);
   const source = { kind: 'poll' as const, connectionId, path: '/changes', itemsPointer: '/data/entries', idPointer: '/identity/key', pollSeconds: 91 };
