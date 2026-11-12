@@ -39,10 +39,14 @@ export function workGuard(core: Core, models: Models) {
   // The request hook cannot finish a turn itself. Pi shallow-copies the request
   // messages into streamSimple. Mark only that request, never the transcript.
   const stops = new WeakMap<Message, string>();
+  const tokenLimits = new WeakMap<Message, number>();
   const streamSimple: Models["streamSimple"] = (model, context, options) => {
     const last = context.messages.at(-1);
     const reason = last && stops.get(last);
-    if (!reason) return models.streamSimple(model, context, options);
+    if (!reason) {
+      const limit = last && tokenLimits.get(last);
+      return models.streamSimple(model, context, limit === undefined ? options : { ...options, maxTokens: Math.min(options?.maxTokens ?? limit, limit) });
+    }
     const stream = createAssistantMessageEventStream();
     stream.end({
       role: "assistant",
@@ -75,9 +79,17 @@ export function workGuard(core: Core, models: Models) {
     name: "ghost.work-guard",
     hooks: [hook(GenerationTask, {
       beforeRequest({ messages }, api) {
-        const reason = awaitsApproval(api.conversationId) ? "승인 또는 거절을 기다리고 있습니다."
+        const conversation = core.ledger.conversationByPiId(String(api.conversationId));
+        const bounds = conversation?.kind === "subagent"
+          ? core.ledger.setting<{ turns: number; tokens: number } | null>(`subagent:bounds:${conversation.id}`, null) : null;
+        const answers = messages.filter((message) => message.role === "assistant");
+        const spent = answers.reduce((total, message) => total + message.usage.totalTokens, 0);
+        const remaining = bounds ? bounds.tokens - spent - Math.ceil(JSON.stringify(messages).length / 3) : Infinity;
+        let reason = awaitsApproval(api.conversationId) ? "승인 또는 거절을 기다리고 있습니다."
           : repeatedWithoutProgress(messages) ? "같은 오류 또는 대기가 반복돼 이번 실행을 멈췄습니다."
           : null;
+        if (bounds && (answers.length >= bounds.turns || remaining < 64)) reason = "Read-only helper reached its configured turn or token bound. Report only the observations already obtained.";
+        if (bounds && !reason && messages.at(-1)) tokenLimits.set(messages.at(-1)!, Math.floor(remaining));
         if (!reason) return;
         const marker: Message = { role: "user", content: reason, timestamp: Date.now() };
         stops.set(marker, reason);
@@ -85,7 +97,7 @@ export function workGuard(core: Core, models: Models) {
       },
     }), hook(CompactionTask, {
       beforeCompact(_compaction, api) {
-        if (awaitsApproval(api.conversationId)) return { decline: true };
+        if (awaitsApproval(api.conversationId) || core.ledger.conversationByPiId(String(api.conversationId))?.kind === "subagent") return { decline: true };
       },
     })],
   });

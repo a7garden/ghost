@@ -12,6 +12,8 @@ import type {
 } from "@ghost/contract";
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import type { MemoryEngine } from "../memory/types.ts";
+import type { Context } from "@earendil-works/chord";
+import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 
 /** What the engine needs to run one conversation. Built by core from ledger rows. */
 export interface ConversationSetup {
@@ -57,6 +59,9 @@ export interface Engine extends Partial<MemoryEngine> {
   quotaProviders?(conversationId: string): string[];
   /** Reconcile a previously released request against durable admissions before replaying or advancing it. */
   submissionRecovery?(conversationId: string, requestId: string): Promise<SubmissionRecovery | null>;
+  /** Fresh, deterministic background conversation; no background transcript enters the owner's thread. */
+  wake?(ghostId: string, submission: Submission): Promise<void>;
+  runSubagent?(parentId: string, input: { task: string; tools?: string[]; max_turns?: number; max_tokens?: number }, api: ToolExecutionApi, context: Context): Promise<string>;
   /** Stop the current run and withdraw queued inputs. */
   abort(conversationId: string): Promise<void>;
   page(conversationId: string, before: string | null, limit: number): Promise<TranscriptPage>;

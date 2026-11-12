@@ -541,7 +541,9 @@ export class Decisions {
           ? `If it clearly serves what the owner wants, settle it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. If only the owner can judge, use outcome "leave" with your recommendation so they see it. Then reply only [quiet].`
           : `Check it against what you know (the owner's earlier words, the recipient, the amount, the files, the result against its brief). If there is something the owner should know to decide — a mismatch, a risk, a confirmation that it matches — call decision_settle with outcome "leave" and one or two sentences in the owner's language, ending with what you recommend. Then reply only [quiet].`,
     ].filter(Boolean);
-    await this.core.engine.submit(main.directConversationId, { text: lines.join("\n\n"), origin: "schedule", requestId: `decision-review:${decision.id}` });
+    const submission = { text: lines.join("\n\n"), origin: "schedule" as const, requestId: `decision-review:${decision.id}` };
+    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission);
+    else await this.core.engine.submit(main.directConversationId, submission);
   }
 
   /** Wake the main to settle a decision the owner handed over; it leaves it back only when it truly cannot judge. */
@@ -562,7 +564,9 @@ export class Decisions {
         ? `Decide it with decision_settle: approve only if the report meets every criterion, otherwise deny (asking for changes). Use outcome "leave" only if you cannot judge it at all; that gives it back to the owner. ${RESULT_NOTE} Then reply only [quiet].`
         : `Decide it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. Use outcome "leave" only if you cannot judge it at all; that gives it back to the owner with your note. Then reply only [quiet].`,
     ].filter(Boolean);
-    await this.core.engine.submit(main.directConversationId, { text: lines.join("\n\n"), origin: "schedule", requestId: `decision-delegate:${current.id}` });
+    const submission = { text: lines.join("\n\n"), origin: "schedule" as const, requestId: `decision-delegate:${current.id}` };
+    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission);
+    else await this.core.engine.submit(main.directConversationId, submission);
   }
 
   /** The vault write is a journaled effect: a crash mid-write becomes an unknown the owner reconciles, never a second write. */
