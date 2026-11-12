@@ -10,4 +10,5 @@ export * from "./goals.ts";
 export * from "./project-context.ts";
 export * from "./review.ts";
 export * from "./memory.ts";
+export * from "./mcp.ts";
 export { validate, parse, ContractError } from "./validate.ts";

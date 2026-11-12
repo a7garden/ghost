@@ -17,6 +17,7 @@
     "@earendil-works/pi-ai": "1.1.0",
     "@earendil-works/pi-durable": "1.1.0",
     "@ghost/contract": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "imapflow": "2.11.0",
     "nodemailer": "10.4.0",
     "postal-mime": "4.2.0",
