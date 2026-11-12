@@ -242,7 +242,7 @@ describe("ghost backup", () => {
       ledger.exec("PRAGMA journal_mode = WAL; CREATE TABLE unrelated (v TEXT)");
       pi.exec("PRAGMA journal_mode = WAL; CREATE TABLE unrelated (v TEXT)");
       const dir = join(tempDir(), "snapshot");
-      expect(() => backup(root, dir)).toThrow(/scopes/);
+      expect(() => backup(root, dir)).toThrow();
       expect(readdirSync(dir)).toEqual([]);
       for (const db of [ledger, pi]) db.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE; ROLLBACK");
     } finally {

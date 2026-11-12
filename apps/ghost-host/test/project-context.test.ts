@@ -230,6 +230,7 @@ test("delete and revert cannot orphan live Work, attachment roots, reviewers or 
   const created = await send({ type: "scope.create", name: "Project", paths: ["/tmp"], vaultPath: "/tmp" });
   const scopeId = String(created.scopeId);
   const work = core.works.createRoot({ ghostId: ghost.id, title: "Task", brief: "Task", scopeId, originConversationId: ghost.directConversationId });
+  await core.idle();
   const seq = ledger.seq(), revisions = ledger.configRevisions().length;
   await expect(send({ type: "scope.delete", scopeId })).rejects.toThrow();
   await expect(send({ type: "config.revert", revisionId: ledger.configRevisions("scope", scopeId)[0]!.id })).rejects.toThrow();
@@ -335,7 +336,11 @@ test("Ghost and activity owner mutations are revisioned and reversible without d
   const activity = ledger.activity(activityId);
   await send({ type: "activity.pause", activityId, paused: true });
   await send({ type: "config.revert", revisionId: ledger.configRevisions("activity", activityId).at(-1)!.id });
-  expect(ledger.activity(activityId)).toEqual(activity);
+  const { revision: beforeRevision, updatedAt: beforeUpdatedAt, ...beforeConfiguration } = activity;
+  const { revision: restoredRevision, updatedAt: restoredUpdatedAt, ...restoredConfiguration } = ledger.activity(activityId);
+  expect(restoredConfiguration).toEqual(beforeConfiguration);
+  expect(restoredRevision).toBeGreaterThan(beforeRevision);
+  expect(restoredUpdatedAt).toBeGreaterThanOrEqual(beforeUpdatedAt);
 });
 
 test("a failed revision write rolls back configuration, events and the API receipt atomically", async () => {
