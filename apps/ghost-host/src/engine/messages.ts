@@ -5,6 +5,7 @@ import type { AssistantMessage, ToolCall, ToolResultMessage, UserMessage } from 
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
 import type { ArtifactStore } from "../core/ports.ts";
 import { CommandError } from "../core/errors.ts";
+import { withoutClockStamp } from "../core/clock.ts";
 
 /** Bounded preview of a tool call's arguments. */
 const MAX_TOOL_ARGS = 4096;
@@ -92,7 +93,7 @@ export function toMessage(entry: EntryRecord, conversationId: string, userMeta: 
         ...base,
         role: "user",
         origin: userMeta?.origin ?? null,
-        text: userMeta?.text ?? cutAttachmentBlock(text),
+        text: userMeta?.text ?? withoutClockStamp(cutAttachmentBlock(text)),
         attachments: userMeta?.attachments ?? [],
         ...(userMeta?.spaces?.length ? { spaces: userMeta.spaces } : {}),
         createdAt: message?.timestamp ?? 0,

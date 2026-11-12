@@ -37,6 +37,7 @@ import { applyProviders, buildModels } from "./models.ts";
 import { OriginsDoc, type OriginRecord } from "./origins.ts";
 import { FallbackDoc, fallbackListFor, fallbackModels, fallbackReason } from "./fallback.ts";
 import { digestOf } from "../core/ids.ts";
+import { withClockStamp } from "../core/clock.ts";
 import { workGuard } from "./work-guard.ts";
 import { projectContext, splitProjectBrief, QUIET_REPLY as QUIET } from "@ghost/contract";
 import type { MemoryStore } from "../stores/memory.ts";
@@ -291,7 +292,7 @@ class HostEngine implements Engine, MemoryEngine {
     // A new turn always starts at the primary, not the previous turn's serving model.
     if (!state.busy || !state.configured) await this.configure(state, { conversation, ghost, work }, serving);
     const meta: OriginRecord = { origin: submission.origin, attachments: submission.attachments ?? [], spaces, ...(context ? { text: submission.text } : {}) };
-    const content = await renderUserContent(context + submission.text, meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
+    const content = await renderUserContent(withClockStamp(context + submission.text), meta.attachments, submission.origin === "owner" ? this.core.artifacts : undefined);
     await this.recordOrigin(state, submission.requestId, meta);
     // The run starts a commit after the admission; the view stays attached until that
     // run settles, so core hears busy and idle with or without a watcher.

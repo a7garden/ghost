@@ -2,6 +2,7 @@ import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
 import { BROWSER_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, HOST_TOOLS, MAIL_TOOLS } from "@ghost/contract";
 import type { Extension } from "@earendil-works/pi-durable";
 import type { Core } from "../core/core.ts";
+import { CLOCK_INSTRUCTIONS } from "../core/clock.ts";
 import { describeWork } from "../core/works.ts";
 import { modelInputOf } from "../engine/models.ts";
 import type { DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort, DesktopPort } from "../integrations/ports.ts";
@@ -233,7 +234,7 @@ export function createToolSet(deps: {
     instructionsFor(conversation: Conversation, ghost: Ghost, work: Work | null): string {
       switch (conversation.kind) {
         case "direct":
-          return [DIRECT_INSTRUCTIONS, ADAPT_INSTRUCTIONS, driveInstructions(deps.core, ghost), ownerLanguageRule(language()), ...capabilityInstructions(ghost), skillsInstructions(deps.skills, ghost), deps.core.adaptations.instructions(ghost.id)]
+          return [DIRECT_INSTRUCTIONS, ADAPT_INSTRUCTIONS, CLOCK_INSTRUCTIONS, driveInstructions(deps.core, ghost), ownerLanguageRule(language()), ...capabilityInstructions(ghost), skillsInstructions(deps.skills, ghost), deps.core.adaptations.instructions(ghost.id)]
             .filter(Boolean)
             .join("\n\n");
         case "work":
@@ -245,6 +246,7 @@ export function createToolSet(deps: {
           return [
             WORK_INSTRUCTIONS,
             ADAPT_INSTRUCTIONS,
+            CLOCK_INSTRUCTIONS,
             OWNER_CARDS,
             OWNER_FORMAT,
             OWNER_EM_DASH,
@@ -260,7 +262,7 @@ export function createToolSet(deps: {
             .filter(Boolean)
             .join("\n\n");
         case "review":
-          return [REVIEW_INSTRUCTIONS, work ? describeWork(work) : ""].filter(Boolean).join("\n\n");
+          return [REVIEW_INSTRUCTIONS, CLOCK_INSTRUCTIONS, work ? describeWork(work) : ""].filter(Boolean).join("\n\n");
       }
     },
   };

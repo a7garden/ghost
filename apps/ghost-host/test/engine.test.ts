@@ -23,6 +23,7 @@ import { WorkspaceEnv } from "../src/sandbox/workspace-env.ts";
 import { MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
 import { ProviderCatalog } from "../src/integrations/provider-catalog.ts";
 import { createDocuments } from "../src/integrations/documents.ts";
+import { withoutClockStamp } from "../src/core/clock.ts";
 
 const echo = defineTool({
   name: "echo",
@@ -550,7 +551,7 @@ test("project context reaches the model while original text and chips survive re
     await settled;
     expect(modelInput).toContain('"name":"비행 기록","spaceId":"project"');
     expect(modelInput).toContain("document_list and document_read");
-    expect(modelInput.endsWith("계획을 알려줘")).toBe(true);
+    expect(withoutClockStamp(modelInput).endsWith("계획을 알려줘")).toBe(true);
     ledger.tx(() => ledger.deleteSpace("project"));
     await active.close();
     const models = createModels();
@@ -896,6 +897,31 @@ test("a repeated permanent Work error stops model calls at the retry window", as
     expect(faux.getPendingResponseCount()).toBe(1);
     const page = await engine.page(workConversation, null, 30);
     expect(page.messages.at(-1)?.text).toContain("반복돼");
+  } finally {
+    core.stop();
+    await core.idle();
+    await engine.close();
+    ledger.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("every turn carries the Host's clock, and the owner still reads their own words", async () => {
+  const { core, engine, ledger, root, conversationId, faux } = await fixture();
+  try {
+    let input = "";
+    faux.setResponses([(context) => {
+      const message = context.messages.find((item) => item.role === "user");
+      input = typeof message?.content === "string" ? message.content : "";
+      return fauxAssistantMessage(fauxText("알겠습니다"));
+    }]);
+    const answered = nextMessage(engine, conversationId, "assistant");
+    await engine.submit(conversationId, { text: "지금 몇 시야", origin: "owner", requestId: "r1" });
+    await answered;
+    expect(input).toContain("<host-clock>");
+    expect(input).toContain(String(new Date().getFullYear()));
+    const page = await engine.page(conversationId, null, 50);
+    expect(page.messages[0]?.text).toBe("지금 몇 시야");
   } finally {
     core.stop();
     await core.idle();
