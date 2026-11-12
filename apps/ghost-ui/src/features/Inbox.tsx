@@ -13,7 +13,7 @@ import { canHandOver, deferDecision, handedOver, ownerOrder, pruneLater, recomme
 import { pendingDecisions, toneFor } from './ghostState';
 import { relativeTime, useNow } from './time';
 import { notificationRoute } from './notificationRoute';
-import { groupDecisionsByScope } from './scopeState';
+import { decisionScopeId, groupDecisionsByScope } from './scopeState';
 import './infrastructure.css';
 
 const SETTLED_PREVIEW = 8;
@@ -65,6 +65,13 @@ export function InboxView({ state, navigate, focusDecisionId }: {
   // 「모두 읽음」은 목록이 대신 보여 준 질문의 알림까지 읽음으로 한다 — 숨긴 것만 남으면 답한 뒤 새 소식으로 되살아난다.
   const unreadAll = state.notifications.filter(item => !item.readAt);
   const shownNotifications = notifications.slice(0, notificationLimit);
+  const notificationGroups = new Map<string | null, Notification[]>();
+  for (const item of shownNotifications) {
+    const decision = item.decisionId ? state.decisions.find(decision => decision.id === item.decisionId) : undefined;
+    const id = item.workId ? state.works.find(work => work.id === item.workId)?.scopeId ?? null : decision ? decisionScopeId(decision, state) : null;
+    const group = notificationGroups.get(id);
+    if (group) group.push(item); else notificationGroups.set(id, [item]);
+  }
   const moreNotifications = notifications.length - shownNotifications.length;
   const focusedSettled = focusDecisionId ? state.decisions.find(decision => decision.id === focusDecisionId && decision.state !== 'pending') : undefined;
 
@@ -153,30 +160,30 @@ export function InboxView({ state, navigate, focusDecisionId }: {
 
     {withMain.length > 0 && <section className="grid gap-2" aria-labelledby="queue-main">
       <h2 id="queue-main" className="section-title">메인 Ghost가 판단 중<span className="count">{withMain.length}</span></h2>
-      <ul className="feed" data-quiet>{withMain.map(decision => <li key={decision.id}>
+      {groupDecisionsByScope(withMain, state).map(group => <section className="infra-scope-group" key={group.id ?? 'global'}><h3>{group.name}</h3><ul className="feed" data-quiet>{group.decisions.map(decision => <li key={decision.id}>
         <div className="feed__row" data-inbox-kind="handed-over">
           <span className="feed__mark"><DotAvatar profileId={decision.ghostId} tone={toneFor(decision.ghostId)} size={18}/></span>
           <span className="feed__copy"><span className="feed__title">{decisionHeading(decision, state)}</span>
             <span className="feed__body">{ghostName(decision.ghostId)} · {decisionChip(decision)} · 정하지 못하면 여기로 돌아옵니다</span></span>
         </div>
-      </li>)}</ul>
+      </li>)}</ul></section>)}
     </section>}
 
     {notifications.length > 0 && <details className="queue-fold" open={unread.length > 0}>
       <summary><span className="section-title">소식{unread.length > 0 && <span className="count">새 소식 {unread.length}</span>}</span><ChevronDown aria-hidden="true"/></summary>
       {unread.length > 0 && <Button variant="ghost" size="sm" className="justify-self-start" onClick={() => markRead(unreadAll.map(item => item.id))}>모두 읽음 표시</Button>}
-      <ul className="feed">{shownNotifications.map(item => {
+      {[...notificationGroups].map(([id, items]) => <section className="infra-scope-group" key={id ?? 'global'}><h3>{id === null ? '전체' : state.scopes.find(scope => scope.id === id)?.name ?? '삭제된 프로젝트'}</h3><ul className="feed">{items.map(item => {
         const navigable = Boolean(item.workId || item.decisionId || item.conversationId);
         return <NotificationRow key={item.id} item={item} ghostName={ghostName(item.ghostId)} now={now}
           disabled={!navigable && Boolean(item.readAt)} onOpen={() => navigable ? openNotification(item) : markRead([item.id])}/>;
-      })}</ul>
+      })}</ul></section>)}
       {moreNotifications > 0 && <Button variant="ghost" size="sm" className="justify-self-start" onClick={() => setNotificationLimit(limit => limit + NOTIFICATION_PAGE)}>
         {Math.min(moreNotifications, NOTIFICATION_PAGE)}건 더 보기</Button>}
     </details>}
 
     {settled.length > 0 && <details className="queue-fold">
       <summary><span className="section-title">처리한 결정<span className="count">{settled.length}</span></span><ChevronDown aria-hidden="true"/></summary>
-      <ul className="feed" data-quiet>{shownSettled.map(decision => {
+      {groupDecisionsByScope(shownSettled, state).map(group => <section className="infra-scope-group" key={group.id ?? 'global'}><h3>{group.name}</h3><ul className="feed" data-quiet>{group.decisions.map(decision => {
         const by = reviewOf(decision.proposal)?.resolvedBy;
         return <li key={decision.id}>
           <button type="button" className="feed__row" data-inbox-kind="settled" disabled={!decision.workId} onClick={() => decision.workId && navigate(`/work/${encodeURIComponent(decision.workId)}`)}>
@@ -186,7 +193,7 @@ export function InboxView({ state, navigate, focusDecisionId }: {
               <time className="tabular">{relativeTime(decision.resolvedAt ?? decision.createdAt, now)}</time></span>
           </button>
         </li>;
-      })}</ul>
+      })}</ul></section>)}
       {settled.length > SETTLED_PREVIEW && <Button variant="ghost" size="sm" className="justify-self-start" aria-expanded={allSettled} onClick={() => setAllSettled(value => !value)}>
         {allSettled ? '접기' : `${settled.length - SETTLED_PREVIEW}건 더 보기`}</Button>}
     </details>}

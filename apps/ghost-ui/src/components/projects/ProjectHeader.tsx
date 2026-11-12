@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
-import { pathCrumb } from '../../features/spacePages';
+import { pathCrumb } from '../../features/scopePages';
 import { relativeTime } from '../../features/time';
 import type { Scope } from '@ghost/contract';
 

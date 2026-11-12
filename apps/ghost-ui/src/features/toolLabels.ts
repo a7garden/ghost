@@ -26,4 +26,5 @@ export const toolLabels: Record<string, string> = {
   rule_create: '규칙 만들기', rule_update: '규칙 고치기', rule_delete: '규칙 삭제',
   mcp_create: 'MCP 서버 추가', mcp_update: 'MCP 서버 고치기', mcp_delete: 'MCP 서버 삭제',
   config_revert: '구성 되돌리기', config_history: '구성 기록', metrics_read: '계측 읽기',
+  rule_propose: '규칙 제안', goal_list: '목표 목록', goal_propose: '목표 제안', milestone_plan: '단계 계획', milestone_update: '단계 고치기',
 };

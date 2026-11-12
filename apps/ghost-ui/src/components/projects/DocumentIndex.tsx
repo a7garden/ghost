@@ -1,6 +1,6 @@
 import { Search, X } from 'lucide-react';
 import { Button, InlineError } from '../../ui';
-import { isEditableProfile } from '../../features/spacePages';
+import { isEditableProfile } from '../../features/scopePages';
 import type { PageSummary } from '@ghost/contract';
 
 /**

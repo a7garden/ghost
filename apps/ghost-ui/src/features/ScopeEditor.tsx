@@ -23,8 +23,9 @@ export function ScopeEditor({ scope, onClose, onSaved }: { scope?: Scope; onClos
     event.preventDefault(); setBusy(true); setError('');
     try {
       const roots = paths.map(path => path.trim()).filter(Boolean);
-      if (roots.some(path => !path.startsWith('/')) || vaultPath && !vaultPath.trim().startsWith('/')) throw new Error('경로는 /로 시작하는 절대 경로를 입력하세요.');
-      const input = { name: name.trim(), ghostId: ghostId || null, paths: roots, vaultPath: vaultPath.trim() || null, state: status, attachments, limits };
+      const vault = vaultPath.trim();
+      if (roots.some(path => !path.startsWith('/')) || vault && !vault.startsWith('/')) throw new Error('경로는 /로 시작하는 절대 경로를 입력하세요.');
+      const input = { name: name.trim(), ghostId: ghostId || null, paths: roots, vaultPath: vault || null, state: status, attachments, limits };
       const result = await client.send<{ scopeId: string }>(scope ? { type: 'scope.update', scopeId: scope.id, ...input } : { type: 'scope.create', ...input });
       onSaved(scope?.id ?? result.scopeId);
     } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }

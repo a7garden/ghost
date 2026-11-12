@@ -13,11 +13,15 @@ export function ConfigHistory({ scopeId }: { scopeId?: string }) {
   const { state } = useHostState(store);
   const [filter, setFilter] = useState(''), [confirm, setConfirm] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
-  const revisions = (state?.configRevisions ?? []).filter(revision => (!filter || revision.entity === filter) && (!scopeId || (revision.entity === 'scope' || revision.entity === 'limits') && revision.entityId === scopeId)).sort((a, b) => b.at - a.at);
+  const revisions = (state?.configRevisions ?? []).filter(revision => {
+    if (filter && revision.entity !== filter) return false;
+    if (!scopeId) return true;
+    if ((revision.entity === 'scope' || revision.entity === 'limits') && revision.entityId === scopeId) return true;
+    return [revision.before, revision.after].some(value => value !== null && typeof value === 'object' && 'scopeId' in value && value.scopeId === scopeId);
+  }).sort((a, b) => b.at - a.at);
   const name = (revision: ConfigRevision) => {
-    const after = revision.after as { name?: unknown } | null, before = revision.before as { name?: unknown } | null;
-    const stored = after?.name ?? before?.name;
-    return typeof stored === 'string' ? stored : revision.entityId ?? '전체';
+    const stored = [revision.after, revision.before].flatMap(value => value !== null && typeof value === 'object' && 'name' in value && typeof value.name === 'string' ? [value.name] : [])[0];
+    return stored ?? revision.entityId ?? '전체';
   };
   const revert = async (revisionId: string) => {
     setBusy(true); setError(''); setNotice('');
