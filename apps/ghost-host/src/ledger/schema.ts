@@ -309,4 +309,39 @@ export const MIGRATIONS: readonly string[] = [
     WHERE state IN ('queued','running','waiting','verifying','blocked') AND deadline_at IS NOT NULL AND activity_id IS NULL AND deadline_at % 60000 <> 0;
   UPDATE works SET budget_since = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE state = 'running';
   `,
+  /* 11: scope configuration and fresh-context conversation kinds. The runner disables FKs only for this rebuild. */ `
+  CREATE TABLE scopes (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  INSERT INTO scopes SELECT id, json_object('id', id, 'name', name, 'ghostId', NULL, 'paths', json_array(path), 'vaultPath', path, 'state', 'active', 'attachments', json('[]'), 'limits', json('{}'), 'createdAt', created_at, 'updatedAt', created_at) FROM spaces;
+  DROP TABLE spaces;
+  ALTER TABLE works ADD COLUMN scope_id TEXT;
+  ALTER TABLE works ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE works ADD COLUMN slot TEXT;
+  ALTER TABLE works ADD COLUMN retry TEXT;
+  ALTER TABLE works ADD COLUMN scope_references TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE ghosts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
+  CREATE TABLE policy_rules (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  CREATE TABLE mcp_servers (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  CREATE TABLE config_revisions (id TEXT PRIMARY KEY, entity TEXT NOT NULL, entity_id TEXT, data TEXT NOT NULL, at INTEGER NOT NULL);
+  CREATE INDEX config_revisions_by_entity ON config_revisions(entity, entity_id, at);
+  CREATE TABLE conversations_new (
+    id TEXT PRIMARY KEY,
+    ghost_id TEXT NOT NULL REFERENCES ghosts(id),
+    kind TEXT NOT NULL CHECK (kind IN ('direct','work','review','wake','subagent')),
+    work_id TEXT,
+    title TEXT NOT NULL,
+    model TEXT,
+    busy INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    last_activity_at INTEGER NOT NULL,
+    pi_conversation_id TEXT UNIQUE
+  );
+  INSERT INTO conversations_new SELECT id, ghost_id, kind, work_id, title, model, busy, created_at, last_activity_at, pi_conversation_id FROM conversations;
+  DROP TABLE conversations;
+  ALTER TABLE conversations_new RENAME TO conversations;
+  CREATE INDEX conversations_by_ghost ON conversations(ghost_id, kind);
+  CREATE UNIQUE INDEX conversations_one_work ON conversations(work_id, kind) WHERE work_id IS NOT NULL AND kind IN ('work','review');
+  UPDATE activities SET data = json_set(data, '$.scopeId', NULL);
+  UPDATE ghosts SET tools = replace(tools, '"document_spaces"', '"document_scopes"');
+  UPDATE works SET tool_scope = replace(tool_scope, '"document_spaces"', '"document_scopes"') WHERE tool_scope IS NOT NULL;
+  `,
 ];

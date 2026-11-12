@@ -1,4 +1,4 @@
-import type { Decision, ExecutionTarget, Space, VaultItem, Work } from "@ghost/contract";
+import type { Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 
 /** Builds the Pi execution environment of a work conversation. Implemented in src/sandbox. */
@@ -32,7 +32,7 @@ export interface Page extends PageMeta {
 }
 
 export interface DocumentProposal {
-  spaceId: string;
+  scopeId: string;
   title: string;
   body: string;
   /** `pdc-markdown/1` by default, `pdc-html/1` when authored HTML matters. */
@@ -42,12 +42,12 @@ export interface DocumentProposal {
   expectedHash: string | null;
 }
 
-/** PDC document vaults registered as Spaces. Implemented in src/integrations/documents.ts. */
+/** PDC document vaults registered as Scopes. Implemented in src/integrations/documents.ts. */
 export interface DocumentsPort {
-  /** Every active Ghost may read and propose to every registered Space. */
-  spacesFor(ghostId: string): Space[];
-  listPages(spaceId: string, query: string | null): Promise<PageMeta[]>;
-  readPage(spaceId: string, ref: { pageId?: string; locator?: string }): Promise<Page>;
+  /** Every active Ghost may read and propose to every registered Scope. */
+  scopesFor(ghostId: string): Scope[];
+  listPages(scopeId: string, query: string | null): Promise<PageMeta[]>;
+  readPage(scopeId: string, ref: { pageId?: string; locator?: string }): Promise<Page>;
   /** Validate a proposal without writing; throws when it can never apply (stale hash, bad profile). */
   check(proposal: DocumentProposal): Promise<void>;
   /** Write an approved `document_review` decision's proposal. Returns a line for the Ghost. */

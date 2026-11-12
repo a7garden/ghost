@@ -41,12 +41,12 @@ export function createGoalTools(core: Core): Extension {
   const goalList = defineTool({
     name: "goal_list",
     description: "List the team's goals with their milestone lines and linked Work. Closed goals are listed last. Main Ghost only.",
-    parameters: Type.Object({}),
+    parameters: Type.Object({ scope_id: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])) }),
     replay: "safe",
-    async execute(_args, api) {
+    async execute(args, api) {
       try {
         requireMainCaller(core, api);
-        const goals = core.goals.goals();
+        const goals = core.goals.goals(args.scope_id);
         if (goals.length === 0) return text("No goals yet. The owner writes them, or adopts one you propose.");
         const order = [...goals].sort((a, b) => Number(a.state === "closed") - Number(b.state === "closed") || a.createdAt - b.createdAt);
         const milestones = core.goals.milestones();
@@ -63,6 +63,7 @@ export function createGoalTools(core: Core): Extension {
       "Propose a long-term team goal to the owner: a direction, not a quota or deadline. Only for a lasting intent the owner has expressed. " +
       "The owner alone adopts it (등록) or declines it; the answer arrives as a message. One proposal waits at a time. Main Ghost only.",
     parameters: Type.Object({
+      scope_id: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])),
       title: Type.String({ minLength: 1, maxLength: GOAL_TITLE_MAX, description: "The direction, in the owner's language" }),
       why: Type.String({ minLength: 1, maxLength: GOAL_TEXT_MAX, description: "Why it matters, and the owner's words or requests it comes from" }),
       boundaries: Type.Optional(Type.String({ maxLength: GOAL_TEXT_MAX, description: "Means the team must not use for it" })),
@@ -72,7 +73,7 @@ export function createGoalTools(core: Core): Extension {
     async execute(args, api) {
       try {
         const scope = requireMainCaller(core, api);
-        const decision = core.goals.propose(scope.ghost, args, idFor(scope.conversation.id, api.callId));
+        const decision = core.goals.propose(scope.ghost, { ...args, scopeId: args.scope_id }, idFor(scope.conversation.id, api.callId));
         return text(`Proposed to the owner (${decision.id}). Wait for the answer; it arrives here.`);
       } catch (error) {
         return errorResult(error);

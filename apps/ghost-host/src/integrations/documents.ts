@@ -1,4 +1,4 @@
-import { validate, type Decision, type Space } from "@ghost/contract";
+import { validate, type Decision, type Scope } from "@ghost/contract";
 import { Type } from "typebox";
 import {
   closeSync,
@@ -22,7 +22,7 @@ import type { DocumentProposal, DocumentsPort, Page, PageMeta } from "./ports.ts
 /**
  * Portable Document Contract vault access.
  *
- * The file in the Space is canonical. New pages are written as PDC 2
+ * The file in the Scope is canonical. New pages are written as PDC 2
  * (`pdc-markdown/1` by default, `pdc-html/1` when authored HTML matters);
  * PDC 1 documents and unmarked legacy files stay readable and are never
  * rewritten or converted. Edits keep the page's own body profile and use
@@ -54,7 +54,7 @@ const VaultManifest = Type.Object({
 
 /** The proposal payload of a document decision, in the host's camel case spelling. */
 const ProposalPayload = Type.Object({
-  spaceId: Type.String({ minLength: 1 }),
+  scopeId: Type.String({ minLength: 1 }),
   title: Type.String(),
   body: Type.String(),
   profile: Type.String(),
@@ -64,7 +64,7 @@ const ProposalPayload = Type.Object({
 
 /** The same payload in the snake case spelling the ledger uses elsewhere. */
 const SnakeCaseProposalPayload = Type.Object({
-  space_id: Type.String({ minLength: 1 }),
+  scope_id: Type.String({ minLength: 1 }),
   title: Type.String(),
   body: Type.String(),
   profile: Type.String(),
@@ -1082,16 +1082,16 @@ function newDocumentBytes(id: string, title: string, body: string, profile: stri
   return new TextEncoder().encode(source);
 }
 
-/** Vault access over the Spaces the ledger knows. */
+/** Vault access over the Scopes the ledger knows. */
 class VaultDocuments implements DocumentsPort {
   constructor(private readonly core: Core) {}
 
-  spacesFor(_ghostId: string): Space[] {
-    return this.core.ledger.spaces();
+  scopesFor(_ghostId: string): Scope[] {
+    return this.core.ledger.scopes().filter(scope => scope.vaultPath !== null);
   }
 
-  async listPages(spaceId: string, query: string | null): Promise<PageMeta[]> {
-    const space = this.requireSpace(spaceId);
+  async listPages(scopeId: string, query: string | null): Promise<PageMeta[]> {
+    const space = this.requireScope(scopeId);
     const needle = (query ?? "").toLowerCase();
     const pages: PageMeta[] = [];
     for (const page of this.scan(space)) {
@@ -1110,8 +1110,8 @@ class VaultDocuments implements DocumentsPort {
     return pages;
   }
 
-  async readPage(spaceId: string, ref: { pageId?: string; locator?: string }): Promise<Page> {
-    const space = this.requireSpace(spaceId);
+  async readPage(scopeId: string, ref: { pageId?: string; locator?: string }): Promise<Page> {
+    const space = this.requireScope(scopeId);
     const raw = ref.locator ?? ref.pageId;
     if (raw === undefined) throw new Error("a page reference needs a page id or a locator");
     return this.toPage(this.project(space, this.requireLocator(space, raw)));
@@ -1119,7 +1119,7 @@ class VaultDocuments implements DocumentsPort {
 
   /** Validates a proposal without writing; it throws when the proposal can never apply. */
   async check(proposal: DocumentProposal): Promise<void> {
-    const space = this.requireSpace(proposal.spaceId);
+    const space = this.requireScope(proposal.scopeId);
     this.checkProfile(proposal.profile);
     this.checkTitle(proposal.title);
     this.checkBody(proposal.body);
@@ -1145,7 +1145,7 @@ class VaultDocuments implements DocumentsPort {
   async apply(decision: Decision): Promise<string> {
     if (decision.state !== "approved") throw new Error("only an approved document decision can be applied");
     const proposal = parseProposal(decision.proposal);
-    const space = this.requireSpace(proposal.spaceId);
+    const space = this.requireScope(proposal.scopeId);
     const page = await this.save(proposal);
     return proposal.pageId === null
       ? `Saved "${proposal.title}" as ${page.locator} in ${space.name}.`
@@ -1154,13 +1154,13 @@ class VaultDocuments implements DocumentsPort {
 
   /** The owner's direct write: the same checks and atomic path as an applied decision. */
   async save(proposal: DocumentProposal): Promise<Page> {
-    const space = this.requireSpace(proposal.spaceId);
+    const space = this.requireScope(proposal.scopeId);
     await this.check(proposal);
     return proposal.pageId === null ? this.createPage(space, proposal) : this.updatePage(space, proposal);
   }
 
   /** Creates a new canonical PDC 2 page; the fresh UUIDv7 cannot clobber an existing file. */
-  private async createPage(space: Space, proposal: DocumentProposal): Promise<Page> {
+  private async createPage(space: Scope, proposal: DocumentProposal): Promise<Page> {
     const id = Bun.randomUUIDv7();
     const locator = `${id}.${proposal.profile === PDC2_HTML ? "html" : "md"}`;
     const bytes = newDocumentBytes(id, proposal.title, canonicalBody(proposal.body), proposal.profile, canonicalTimestamp());
@@ -1170,7 +1170,7 @@ class VaultDocuments implements DocumentsPort {
   }
 
   /** Rewrites one canonical page in place, refusing an external change since the proposal. */
-  private async updatePage(space: Space, proposal: DocumentProposal): Promise<Page> {
+  private async updatePage(space: Scope, proposal: DocumentProposal): Promise<Page> {
     if (proposal.pageId === null) throw new Error("editing a page requires the page it was read with");
     const locator = this.locate(space, proposal.pageId);
     const current = this.project(space, locator);
@@ -1204,14 +1204,20 @@ class VaultDocuments implements DocumentsPort {
     };
   }
 
-  private requireSpace(spaceId: string): Space {
-    const spaces = this.core.ledger.spaces();
-    const space = spaces.find((item) => item.id === spaceId) ?? spaces.find((item) => item.name.toLowerCase() === spaceId.toLowerCase());
+  private requireScope(scopeId: string): Scope {
+    const scopes = this.core.ledger.scopes();
+    const space = scopes.find((item) => item.id === scopeId) ?? scopes.find((item) => item.name.toLowerCase() === scopeId.toLowerCase());
     if (!space) {
-      const known = spaces.slice(0, 10).map((item) => `"${item.name}" (${item.id})`).join(", ");
-      throw new Error(`unknown document space "${spaceId}"; registered Spaces: ${known || "none"}. Retry with one of these names or ids`);
+      const known = scopes.slice(0, 10).map((item) => `"${item.name}" (${item.id})`).join(", ");
+      throw new Error(`unknown document space "${scopeId}"; registered Scopes: ${known || "none"}. Retry with one of these names or ids`);
     }
+    if (space.vaultPath === null) throw new Error(`scope "${space.name}" has no document vault`);
     return space;
+  }
+
+  private vaultRoot(scope: Scope): string {
+    if (scope.vaultPath === null) throw new Error(`scope "${scope.name}" has no document vault`);
+    return scope.vaultPath;
   }
 
   private checkProfile(profile: string): void {
@@ -1233,29 +1239,29 @@ class VaultDocuments implements DocumentsPort {
   }
 
   /** The locator of the page with this id, or the locator itself when it names a file. */
-  private locate(space: Space, pageId: string): string {
+  private locate(space: Scope, pageId: string): string {
     return this.requireLocator(space, pageId);
   }
 
   /**
-   * The locator a raw model reference points at, or null when nothing in the Space matches.
+   * The locator a raw model reference points at, or null when nothing in the Scope matches.
    * A duplicated document id is refused first, before any filename alias can pick a copy;
    * then the ladder, in order: exact id/locator, `?…`/`#…` stripped, an absolute path inside
-   * the Space, a leading segment equal to the Space folder's own name, `.md` added, a unique
+   * the Scope, a leading segment equal to the Scope folder's own name, `.md` added, a unique
    * case-insensitive basename match, then a path in parentheses inside the reference.
    * Confinement never widens: `safePath` still checks every candidate.
    */
-  private requireLocator(space: Space, raw: string): string {
+  private requireLocator(space: Scope, raw: string): string {
     const locator = this.resolveLocator(space, raw);
     if (locator === null) throw this.unresolvedError(space, raw);
     return locator;
   }
 
-  private resolveLocator(space: Space, raw: string): string | null {
+  private resolveLocator(space: Scope, raw: string): string | null {
     const stripped = raw.replace(/[?#].*$/, "");
-    // An absolute path outside the Space, or a `..` segment, points somewhere else on the
-    // host: refuse here instead of letting a filename alias quietly pick an in-Space namesake.
-    if (isAbsolute(stripped) && this.insideSpace(space, stripped) === stripped) throw this.unresolvedError(space, raw);
+    // An absolute path outside the Scope, or a `..` segment, points somewhere else on the
+    // host: refuse here instead of letting a filename alias quietly pick an in-Scope namesake.
+    if (isAbsolute(stripped) && this.insideScope(space, stripped) === stripped) throw this.unresolvedError(space, raw);
     if (stripped.split("/").includes("..")) throw this.unresolvedError(space, raw);
     // Reference resolution sees every readable page: one unreadable file elsewhere never
     // blocks an ID-ambiguity check or an unrelated read, and a direct read of the skipped
@@ -1269,8 +1275,8 @@ class VaultDocuments implements DocumentsPort {
     let current = raw;
     for (const step of [
       () => stripped,
-      (value: string) => this.insideSpace(space, value),
-      (value: string) => this.withoutSpaceSegment(space, value),
+      (value: string) => this.insideScope(space, value),
+      (value: string) => this.withoutScopeSegment(space, value),
       (value: string) => (/\.(md|html|djot)$/i.test(value) ? value : `${value}.md`),
     ]) {
       current = step(current);
@@ -1300,18 +1306,18 @@ class VaultDocuments implements DocumentsPort {
     // A well-formed relative path that names an existing regular file stays readable even
     // when it is not a document the vault indexes (plain `.txt` notes, for example).
     for (const candidate of candidates) {
-      if (this.isDirectLocator(candidate) && lstatSync(join(space.path, candidate), { throwIfNoEntry: false })?.isFile()) return candidate;
+      if (this.isDirectLocator(candidate) && lstatSync(join(this.vaultRoot(space), candidate), { throwIfNoEntry: false })?.isFile()) return candidate;
     }
     return null;
   }
 
-  /** An absolute candidate becomes Space-relative only when it stays inside the Space. */
-  private insideSpace(space: Space, candidate: string): string {
+  /** An absolute candidate becomes Scope-relative only when it stays inside the Scope. */
+  private insideScope(space: Scope, candidate: string): string {
     if (!isAbsolute(candidate)) return candidate;
     const target = resolve(candidate);
-    const roots = new Set<string>([space.path]);
+    const roots = new Set<string>([this.vaultRoot(space)]);
     try {
-      roots.add(realpathSync(space.path));
+      roots.add(realpathSync(this.vaultRoot(space)));
     } catch {}
     for (const root of roots) {
       const base = resolve(root);
@@ -1320,28 +1326,28 @@ class VaultDocuments implements DocumentsPort {
     return candidate;
   }
 
-  /** `docs/wms-ux.md` inside the Space whose folder is itself named `docs`. */
-  private withoutSpaceSegment(space: Space, candidate: string): string {
-    const folder = basename(space.path).toLowerCase();
+  /** `docs/wms-ux.md` inside the Scope whose folder is itself named `docs`. */
+  private withoutScopeSegment(space: Scope, candidate: string): string {
+    const folder = basename(this.vaultRoot(space)).toLowerCase();
     const parts = candidate.split("/");
     if (parts.length > 1 && parts[0]!.toLowerCase() === folder) return parts.slice(1).join("/");
     return candidate;
   }
 
-  /** A relative path safe to `join` under the Space root: no empty, dot, `..` or dotfile segments. */
+  /** A relative path safe to `join` under the Scope root: no empty, dot, `..` or dotfile segments. */
   private isDirectLocator(candidate: string): boolean {
     if (candidate === "" || isAbsolute(candidate) || candidate.includes("\\")) return false;
     return candidate.split("/").every((part) => part !== "." && part !== ".." && !part.startsWith("."));
   }
 
-  private unresolvedError(space: Space, raw: string): Error {
+  private unresolvedError(space: Scope, raw: string): Error {
     const near = this.closestDocuments(space, raw);
-    const listing = near.length > 0 ? near.join(", ") : "the Space holds no readable documents";
-    return new Error(`no document in Space "${space.name}" matches "${raw}"; closest documents: ${listing}. Retry with an exact page id or one of these locators`);
+    const listing = near.length > 0 ? near.join(", ") : "the Scope holds no readable documents";
+    return new Error(`no document in Scope "${space.name}" matches "${raw}"; closest documents: ${listing}. Retry with an exact page id or one of these locators`);
   }
 
   /** Up to 10 existing locators closest to a failed reference, by basename and substring match. */
-  private closestDocuments(space: Space, raw: string): string[] {
+  private closestDocuments(space: Scope, raw: string): string[] {
     let pages: VaultPage[] = [];
     try {
       pages = this.scanReadable(space);
@@ -1369,7 +1375,7 @@ class VaultDocuments implements DocumentsPort {
   }
 
   /** Every document file in the space, sorted by locator. One unreadable file fails the listing. */
-  private scan(space: Space): VaultPage[] {
+  private scan(space: Scope): VaultPage[] {
     return this.scanLocators(space).map((locator) => this.project(space, locator));
   }
 
@@ -1379,7 +1385,7 @@ class VaultDocuments implements DocumentsPort {
    * failures of the vault itself still throw, and a direct read of the skipped file still
    * fails with its own honest error.
    */
-  private scanReadable(space: Space): VaultPage[] {
+  private scanReadable(space: Scope): VaultPage[] {
     const pages: VaultPage[] = [];
     for (const locator of this.scanLocators(space)) {
       try {
@@ -1392,15 +1398,15 @@ class VaultDocuments implements DocumentsPort {
   }
 
   /** Every indexed document locator in the space, sorted; shape failures throw. */
-  private scanLocators(space: Space): string[] {
-    const root = space.path;
+  private scanLocators(space: Scope): string[] {
+    const root = this.vaultRoot(space);
     const rootStat = lstatSync(root, { throwIfNoEntry: false });
     if (!rootStat) return [];
-    if (rootStat.isSymbolicLink()) throw new Error("Space root must not be a symlink");
+    if (rootStat.isSymbolicLink()) throw new Error("Scope root must not be a symlink");
     const locators: string[] = [];
     const walk = (relative: string, depth: number) => {
-      if (depth > MAX_DEPTH) throw new Error("Space directory nesting exceeds its limit");
-      if (locators.length >= MAX_LIST_ITEMS) throw new Error("Space listing exceeds its document limit; choose a narrower root");
+      if (depth > MAX_DEPTH) throw new Error("Scope directory nesting exceeds its limit");
+      if (locators.length >= MAX_LIST_ITEMS) throw new Error("Scope listing exceeds its document limit; choose a narrower root");
       const directory = relative === "" ? root : join(root, relative);
       for (const entry of readdirSync(directory, { withFileTypes: true })) {
         const name = entry.name;
@@ -1417,12 +1423,12 @@ class VaultDocuments implements DocumentsPort {
   }
 
   /** Classifies one file in the space. */
-  private project(space: Space, locator: string): VaultPage {
+  private project(space: Scope, locator: string): VaultPage {
     this.safePath(space, locator);
     return classify(locator, this.readBytes(space, locator));
   }
 
-  private readBytes(space: Space, locator: string): Uint8Array {
+  private readBytes(space: Scope, locator: string): Uint8Array {
     const path = this.safePath(space, locator);
     const bytes = readFileSync(path);
     if (bytes.length > MAX_DOCUMENT_BYTES) throw new Error("document_too_large");
@@ -1430,13 +1436,13 @@ class VaultDocuments implements DocumentsPort {
   }
 
   /** Resolves a locator inside the space; symlinks are never followed. */
-  private safePath(space: Space, locator: string): string {
-    if (lstatSync(space.path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error("Space root must not be a symlink");
+  private safePath(space: Scope, locator: string): string {
+    if (lstatSync(this.vaultRoot(space), { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error("Scope root must not be a symlink");
     const parts = locator.split("/");
     for (const part of parts) {
       if (part === "" || part === "." || part === ".." || part.startsWith(".")) throw new Error("invalid document locator");
     }
-    let current = space.path;
+    let current = this.vaultRoot(space);
     for (const part of parts) {
       current = join(current, part);
       if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error("document symlink is not followed");
@@ -1445,9 +1451,9 @@ class VaultDocuments implements DocumentsPort {
   }
 
   /** Creates the vault manifest of a space without rewriting existing documents. */
-  private initializeVault(space: Space): void {
-    mkdirSync(space.path, { recursive: true });
-    const meta = join(space.path, ".pdc");
+  private initializeVault(space: Scope): void {
+    mkdirSync(this.vaultRoot(space), { recursive: true });
+    const meta = join(this.vaultRoot(space), ".pdc");
     if (lstatSync(meta, { throwIfNoEntry: false })?.isSymbolicLink()) {
       throw new Error("vault manifest directory must not be a symlink");
     }
@@ -1499,7 +1505,7 @@ class VaultDocuments implements DocumentsPort {
 function parseProposal(payload: unknown): DocumentProposal {
   if (validate(ProposalPayload, payload)) {
     return {
-      spaceId: payload.spaceId,
+      scopeId: payload.scopeId,
       title: payload.title,
       body: payload.body,
       profile: payload.profile,
@@ -1509,7 +1515,7 @@ function parseProposal(payload: unknown): DocumentProposal {
   }
   if (validate(SnakeCaseProposalPayload, payload)) {
     return {
-      spaceId: payload.space_id,
+      scopeId: payload.scope_id,
       title: payload.title,
       body: payload.body,
       profile: payload.profile,
@@ -1520,7 +1526,7 @@ function parseProposal(payload: unknown): DocumentProposal {
   throw new Error("the document decision carries no usable proposal");
 }
 
-/** The document plane of the host, bound to the ledger's Spaces. */
+/** The document plane of the host, bound to the ledger's Scopes. */
 export function createDocuments(core: Core): DocumentsPort {
   const port = new VaultDocuments(core);
   core.decisions.onDocumentApproved((decision) => port.apply(decision));

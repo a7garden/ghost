@@ -163,13 +163,13 @@ export function backup(root: string, dir: string, now = Date.now()): BackupManif
       files.push({ path: VAULT_KEY, sha256: sha256(key), bytes: key.length });
     }
     const ledger = new Database(join(dir, "ledger.db"), { readonly: true });
-    let spaces: BackupManifest["external_spaces"];
+    let scopes: BackupManifest["external_spaces"];
     try {
-      spaces = (ledger.query("SELECT path FROM spaces ORDER BY path").all() as { path: string }[]).map(({ path }) => ({ path }));
+      scopes = (ledger.query("SELECT DISTINCT json_extract(data, '$.vaultPath') AS path FROM scopes WHERE json_extract(data, '$.vaultPath') IS NOT NULL ORDER BY path").all() as { path: string }[]).map(({ path }) => ({ path }));
     } finally {
       ledger.close();
     }
-    const manifest: BackupManifest = { format: BACKUP_FORMAT, complete: true, created_ms: now, files, external_spaces: spaces };
+    const manifest: BackupManifest = { format: BACKUP_FORMAT, complete: true, created_ms: now, files, external_spaces: scopes };
     const temporary = join(dir, ".backup.json.tmp");
     copied.push(temporary);
     writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });

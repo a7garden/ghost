@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { AUTONOMOUS_WAKE, type AutonomyPlan, type Ghost, type Space, type Work } from "@ghost/contract";
+import { AUTONOMOUS_WAKE, type AutonomyPlan, type Ghost, type Scope, type Work } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { CommandError, conflict, forbidden, invalid } from "./errors.ts";
 import { digestOf } from "./ids.ts";
@@ -52,7 +52,7 @@ export interface PlanInput {
 }
 
 export interface AutonomyDeps {
-  /** A Space's Git position (`branch@sha`), or null outside a repository. */
+  /** A Scope's Git position (`branch@sha`), or null outside a repository. */
   head?: (path: string) => Promise<string | null>;
   /** Commit subjects between two positions of the repository holding `path`. */
   commits?: (path: string, from: string, to: string) => Promise<string[]>;
@@ -196,7 +196,7 @@ export class Autonomy {
 
   /**
    * Record when a Ghost looks again. `by` is the caller: the Ghost itself, or the main Ghost planning a
-   * teammate. Watched Spaces start from their current position, so only later changes wake early.
+   * teammate. Watched Scopes start from their current position, so only later changes wake early.
    */
   async plan(by: Ghost, targetId: string, input: PlanInput, now = Date.now()): Promise<AutonomyPlan> {
     const ahead = input.at - now;
@@ -207,13 +207,16 @@ export class Autonomy {
     const target = this.authorize(by.id, targetId);
     let watched: { watch: string[]; heads: Record<string, string> } | null = null;
     if (input.watch) {
-      const spaces = new Map(this.core.ledger.spaces().map((space) => [space.id, space]));
-      const unknown = input.watch.filter((id) => !spaces.has(id));
+      const scopes = new Map(this.core.ledger.scopes().map((space) => [space.id, space]));
+      const unknown = input.watch.filter((id) => !scopes.has(id));
       if (unknown.length) throw invalid(`unknown project ${unknown[0]}`);
       const known = this.load(target.id).heads;
       const watch = [...new Set(input.watch)].slice(0, 8);
       const heads: Record<string, string> = {};
-      for (const id of watch) heads[id] = known[id] ?? (await this.head(spaces.get(id)!.path).catch(() => null)) ?? "";
+      for (const id of watch) for (const path of scopes.get(id)!.paths) {
+        const key = `${id}:${path}`;
+        heads[key] = known[key] ?? (scopes.get(id)!.paths[0] === path ? known[id] : undefined) ?? (await this.head(path).catch(() => null)) ?? "";
+      }
       watched = { watch, heads };
     }
     // Authority is checked again after the repository reads: a switch-off or a new main meanwhile wins.
@@ -286,11 +289,11 @@ export class Autonomy {
       const ghost = ghosts.find((item) => item.id === id);
       if (!ghost || !busy(ghost)) this.awake.delete(id);
     }
-    const spaces = new Map(ledger.spaces().map((space) => [space.id, space]));
+    const scopes = new Map(ledger.scopes().map((space) => [space.id, space]));
     const heads = new Map<string, string>();
-    const headOf = async (space: Space) => {
-      if (!heads.has(space.id)) heads.set(space.id, (await this.head(space.path).catch(() => null)) ?? "");
-      return heads.get(space.id)!;
+    const headOf = async (path: string) => {
+      if (!heads.has(path)) heads.set(path, (await this.head(path).catch(() => null)) ?? "");
+      return heads.get(path)!;
     };
     const order = [...ghosts].sort((a, b) => (this.load(a.id).nextAt ?? Infinity) - (this.load(b.id).nextAt ?? Infinity));
     for (const ghost of order) {
@@ -307,13 +310,16 @@ export class Autonomy {
         continue;
       }
       const wakesToday = plan.day === localDay(now) ? plan.wakesToday : 0;
-      const moved: { space: Space; from: string; to: string }[] = [];
+      const moved: { space: Scope; path: string; from: string; to: string }[] = [];
       for (const id of plan.watch) {
-        const space = spaces.get(id);
+        const space = scopes.get(id);
         if (!space) continue;
-        const to = await headOf(space);
-        const from = plan.heads[id] ?? "";
-        if (to && to !== from) moved.push({ space, from, to });
+        if (space.state !== "active") continue;
+        for (const path of space.paths) {
+          const to = await headOf(path);
+          const from = plan.heads[`${id}:${path}`] ?? (space.paths[0] === path ? plan.heads[id] : undefined) ?? "";
+          if (to && to !== from) moved.push({ space, path, from, to });
+        }
       }
       const due = now >= plan.nextAt;
       const early = !due && moved.length > 0 && (plan.lastWakeAt === null || now - plan.lastWakeAt >= WATCH_GAP);
@@ -331,7 +337,7 @@ export class Autonomy {
       const observedSeq = ledger.seq();
       const text = await this.prompt(ghost, plan, due, moved, now);
       const seen = { ...plan.heads };
-      for (const item of moved) seen[item.space.id] = item.to;
+      for (const item of moved) seen[`${item.space.id}:${item.path}`] = item.to;
       // Recorded before submission; skipped when the owner or the Ghost changed the plan meanwhile.
       let pending = null as PendingWake | null;
       this.update(ghost.id, (stored) => {
@@ -378,7 +384,7 @@ export class Autonomy {
   }
 
   /** What the Ghost needs to decide on its own: its plan, what changed, what is live, and for the main Ghost the team. */
-  private async prompt(ghost: Ghost, plan: Stored, due: boolean, moved: { space: Space; from: string; to: string }[], now: number): Promise<string> {
+  private async prompt(ghost: Ghost, plan: Stored, due: boolean, moved: { space: Scope; path: string; from: string; to: string }[], now: number): Promise<string> {
     const ledger = this.core.ledger;
     const names = new Map(ledger.ghosts().map((item) => [item.id, item.name]));
     const planner = plan.setBy === "self" ? "you" : plan.setBy === "main" ? `the main Ghost ${names.get(ledger.defaultGhost()?.id ?? "") ?? ""}`.trim() : "the Host";
@@ -400,7 +406,7 @@ export class Autonomy {
       if (settled.count > settled.works.length) lines.push(`+${settled.count - settled.works.length} more: work_list shows all, work_inspect takes a row's id`);
     }
     for (const item of moved) {
-      const subjects = item.from ? await this.commits(item.space.path, item.from, item.to).catch(() => []) : [];
+      const subjects = item.from ? await this.commits(item.path, item.from, item.to).catch(() => []) : [];
       lines.push(`- Project ${item.space.name}: ${subjects.length ? subjects.slice(0, 8).join(" · ") : "new commits"}`);
     }
     const pending = ledger.decisionsForState().filter((decision) => decision.state === "pending");
@@ -417,8 +423,8 @@ export class Autonomy {
       if (team) lines.push("", team);
     }
     if (plan.watch.length) {
-      const spaces = new Map(ledger.spaces().map((space) => [space.id, space.name]));
-      lines.push("", `Watching: ${plan.watch.map((id) => spaces.get(id) ?? id).join(", ")}`);
+      const scopes = new Map(ledger.scopes().map((space) => [space.id, space.name]));
+      lines.push("", `Watching: ${plan.watch.map((id) => scopes.get(id) ?? id).join(", ")}`);
     }
     if (ghost.isDefault) {
       const team = this.ghosts().filter((item) => item.id !== ghost.id && item.state === "active");

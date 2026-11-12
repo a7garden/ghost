@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { extname } from "node:path";
-import type { ArtifactRef, Live, LiveTool, Message, MessageOrigin, ToolCallView } from "@ghost/contract";
+import type { ArtifactRef, DocRef, Live, LiveTool, Message, MessageOrigin, ToolCallView } from "@ghost/contract";
 import type { AssistantMessage, ToolCall, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
 import type { ArtifactStore } from "../core/ports.ts";
@@ -23,7 +23,10 @@ export const ATTACHMENT_MARKER = "\n\n<attachments>\n";
 export interface UserMeta {
   origin: MessageOrigin | null;
   attachments: ArtifactRef[];
+  scopes?: { id: string; name: string }[];
   spaces?: { id: string; name: string }[];
+  scopeId?: string | null;
+  docAttachments?: DocRef[];
   text?: string;
 }
 
@@ -95,7 +98,9 @@ export function toMessage(entry: EntryRecord, conversationId: string, userMeta: 
         origin: userMeta?.origin ?? null,
         text: userMeta?.text ?? withoutClockStamp(cutAttachmentBlock(text)),
         attachments: userMeta?.attachments ?? [],
-        ...(userMeta?.spaces?.length ? { spaces: userMeta.spaces } : {}),
+        ...((userMeta?.scopes ?? userMeta?.spaces)?.length ? { scopes: userMeta?.scopes ?? userMeta?.spaces } : {}),
+        ...(userMeta?.scopeId !== undefined ? { scopeId: userMeta.scopeId } : {}),
+        ...(userMeta?.docAttachments ? { docAttachments: userMeta.docAttachments } : {}),
         createdAt: message?.timestamp ?? 0,
       };
     }

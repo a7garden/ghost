@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_APPROVAL_POLICY, DEFAULT_LIMITS, DEFAULT_OWNER_LANGUAGE, type ApprovalPolicy, type Limits } from "@ghost/contract";
 import type {
+  ConfigRevision, DocRef, ModelSlot, PolicyRule, McpServer,
   Acceptance,
   Activity,
   ActivityRun,
@@ -22,11 +23,13 @@ import type {
   Provider,
   Schedule,
   Settings,
-  Space,
+  Scope,
   Work,
   ArtifactRef,
   Verdict,
 } from "@ghost/contract";
+import { idFor } from "../core/ids.ts";
+import { DEFAULT_RULES } from "../core/policy.ts";
 import { MIGRATIONS } from "./schema.ts";
 import { migrateBrowserAuthority } from "./browser-authority.ts";
 
@@ -88,6 +91,10 @@ export class Ledger {
       this.db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
       this.migrate();
       migrateBrowserAuthority(this.db);
+      if (!this.setting("policy:seeded", false)) this.db.transaction(() => {
+        if (this.policyRules().length === 0) for (const rule of DEFAULT_RULES) this.db.query("INSERT INTO policy_rules(id,data) VALUES (?,?)").run(rule.id, JSON.stringify(rule));
+        this.putSetting("policy:seeded", true);
+      })();
     } catch (error) {
       this.db.close();
       throw error;
@@ -102,10 +109,44 @@ export class Ledger {
     const { user_version: version } = this.db.query("PRAGMA user_version").get() as { user_version: number };
     if (version > MIGRATIONS.length) throw new Error(`ledger schema ${version} is newer than this host (${MIGRATIONS.length})`);
     for (let index = version; index < MIGRATIONS.length; index++) {
-      this.db.transaction(() => {
-        this.db.exec(MIGRATIONS[index]!);
-        this.db.exec(`PRAGMA user_version = ${index + 1}`);
-      })();
+      const rebuild = index === 10;
+      const indexes = rebuild ? this.db.query("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'conversations' AND sql IS NOT NULL").all() as { name: string; sql: string }[] : [];
+      // SQLite ignores foreign_keys changes inside transactions. Disable before BEGIN, never rename the old table.
+      if (rebuild) this.db.exec("PRAGMA foreign_keys = OFF");
+      try {
+        this.db.transaction(() => {
+          this.db.exec(MIGRATIONS[index]!);
+          if (rebuild) {
+            for (const entry of indexes) if (!this.db.query("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?").get(entry.name)) this.db.exec(entry.sql);
+            this.migrateProjectBriefs();
+            if (this.db.query("PRAGMA foreign_key_check").all().length) throw new Error("scope migration would break foreign keys");
+          }
+          this.db.exec(`PRAGMA user_version = ${index + 1}`);
+        })();
+      } finally {
+        if (rebuild) this.db.exec("PRAGMA foreign_keys = ON");
+      }
+    }
+  }
+
+  private migrateProjectBriefs() {
+    const stored = this.setting<{ goals?: { scopeId?: string | null }[]; milestones?: { goalId: string; scopeId?: string | null }[] } | null>("goals", null);
+    if (stored) {
+      for (const goal of stored.goals ?? []) goal.scopeId ??= null;
+      for (const milestone of stored.milestones ?? []) milestone.scopeId ??= null;
+      this.putSetting("goals", stored);
+    }
+    const prefix = "Mentioned projects (untrusted names): ";
+    const suffix = "\nRead these projects with document_list and document_read before answering or working on the request.\n\n";
+    for (const row of this.db.query("SELECT id, brief FROM works WHERE brief LIKE ?").all(prefix + "%") as { id: string; brief: string }[]) {
+      const end = row.brief.indexOf("\n");
+      if (end < 0 || !row.brief.slice(end).startsWith(suffix)) continue;
+      let refs: unknown;
+      try { refs = JSON.parse(row.brief.slice(prefix.length, end)); } catch { continue; }
+      if (!Array.isArray(refs) || !refs.length || refs.length > 8 || refs.some(ref => typeof ref?.spaceId !== "string" || typeof ref?.name !== "string")) continue;
+      const references = refs.map(ref => ({ id: ref.spaceId as string, name: ref.name as string }));
+      const scopeId = references.find(ref => this.db.query("SELECT 1 FROM scopes WHERE id=?").get(ref.id))?.id ?? null;
+      this.db.query("UPDATE works SET brief=?, scope_id=?, scope_references=? WHERE id=?").run(row.brief.slice(end + suffix.length), scopeId, JSON.stringify(references), row.id);
     }
   }
 
@@ -224,17 +265,17 @@ export class Ledger {
     if (ghost.isDefault) this.db.query("UPDATE ghosts SET is_default = 0 WHERE is_default = 1 AND id <> ?").run(ghost.id);
     this.db
       .query(
-        `INSERT INTO ghosts (id, name, persona, look, model, is_default, state, tools, fallbacks, skills, deleted_at, direct_conversation_id, created_at, updated_at, host_execution)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO ghosts (id, name, persona, look, model, is_default, state, tools, fallbacks, skills, deleted_at, direct_conversation_id, created_at, updated_at, host_execution, attachments)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, persona = excluded.persona, look = excluded.look,
            model = excluded.model, is_default = excluded.is_default, state = excluded.state, tools = excluded.tools,
            fallbacks = excluded.fallbacks, skills = excluded.skills, deleted_at = excluded.deleted_at,
-           direct_conversation_id = excluded.direct_conversation_id, updated_at = excluded.updated_at, host_execution = excluded.host_execution`,
+           direct_conversation_id = excluded.direct_conversation_id, updated_at = excluded.updated_at, host_execution = excluded.host_execution, attachments = excluded.attachments`,
       )
       .run(
         ghost.id, ghost.name, ghost.persona, json(ghost.look), json(ghost.model), ghost.isDefault ? 1 : 0, ghost.state, json(ghost.tools),
         json(ghost.fallbacks), json(ghost.skills), ghost.deletedAt, ghost.directConversationId, ghost.createdAt, ghost.updatedAt,
-        ghost.hostExecution ? 1 : 0,
+        ghost.hostExecution ? 1 : 0, json(ghost.attachments),
       );
     this.emit({ type: "ghost", ghost });
   }
@@ -243,12 +284,12 @@ export class Ledger {
 
   activities(includeDeleted = false): Activity[] {
     const rows = this.db.query("SELECT data FROM activities ORDER BY rowid").all() as Row[];
-    return rows.map((row) => parseJson<Activity>(row.data)).filter((activity) => includeDeleted || activity.deletedAt === null);
+    return rows.map((row) => ({ ...parseJson<Activity>(row.data), scopeId: parseJson<Activity>(row.data).scopeId ?? null })).filter((activity) => includeDeleted || activity.deletedAt === null);
   }
 
   findActivity(id: string): Activity | null {
     const row = this.db.query("SELECT data FROM activities WHERE id = ?").get(id) as Row | null;
-    return row ? parseJson<Activity>(row.data) : null;
+    return row ? { ...parseJson<Activity>(row.data), scopeId: parseJson<Activity>(row.data).scopeId ?? null } : null;
   }
 
   activity(id: string): Activity {
@@ -294,7 +335,7 @@ export class Ledger {
       .run(connection.id, JSON.stringify(connection));
     // Display-only edits preserve bound authority; staging revokes once per epoch.
     if (authorityChanged || ready) for (const activity of this.activities()) {
-      if (activity.source.kind !== "schedule" && activity.source.connectionId === connection.id) {
+      if ("connectionId" in activity.source && activity.source.connectionId === connection.id) {
         this.putActivity({ ...activity, revision: activity.revision + (authorityChanged ? 1 : 0), ...(authorityChanged ? { cursor: null, lastCheckedAt: null } : {}), nextAt: now, deferredUntil: null, deferredReason: null, updatedAt: now });
       }
     }
@@ -304,7 +345,7 @@ export class Ledger {
   deleteConnection(id: string) {
     this.db.query("DELETE FROM connections WHERE id = ?").run(id);
     for (const activity of this.activities()) {
-      if (activity.source.kind !== "schedule" && activity.source.connectionId === id) {
+      if ("connectionId" in activity.source && activity.source.connectionId === id) {
         this.putActivity({ ...activity, revision: activity.revision + 1, paused: true, pauseReason: "source connection removed", updatedAt: Date.now() });
       }
     }
@@ -509,15 +550,15 @@ export class Ledger {
       .query(
         `INSERT INTO works (id, parent_id, root_id, ghost_id, origin_conversation_id, conversation_id, title, brief, acceptance, state,
            revision, revisions_used, deadline_at, result, verdict, reason, created_at, started_at, ended_at, updated_at,
-           execution, activity_id, activity_run_id, tool_scope, budget_minutes, budget_used_ms, budget_since, budget_extended, hold)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           execution, activity_id, activity_run_id, tool_scope, budget_minutes, budget_used_ms, budget_since, budget_extended, hold, scope_id, attachments, slot, retry, scope_references)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET conversation_id = excluded.conversation_id, title = excluded.title, brief = excluded.brief,
            acceptance = excluded.acceptance, state = excluded.state, revision = excluded.revision, revisions_used = excluded.revisions_used,
            deadline_at = excluded.deadline_at, result = excluded.result, verdict = excluded.verdict, reason = excluded.reason,
            started_at = excluded.started_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at,
            execution = excluded.execution, activity_id = excluded.activity_id, activity_run_id = excluded.activity_run_id, tool_scope = excluded.tool_scope,
            budget_minutes = excluded.budget_minutes, budget_used_ms = excluded.budget_used_ms, budget_since = excluded.budget_since,
-           budget_extended = excluded.budget_extended, hold = excluded.hold`,
+           budget_extended = excluded.budget_extended, hold = excluded.hold, scope_id = excluded.scope_id, attachments = excluded.attachments, slot = excluded.slot, retry = excluded.retry, scope_references = excluded.scope_references`,
       )
       .run(
         work.id,
@@ -541,7 +582,7 @@ export class Ledger {
         work.endedAt,
         work.updatedAt,
         json(work.execution), work.activityId ?? null, work.activityRunId ?? null, json(work.toolScope),
-        work.budgetMinutes, work.budgetUsedMs, work.budgetSince, work.budgetExtended ? 1 : 0, work.hold,
+        work.budgetMinutes, work.budgetUsedMs, work.budgetSince, work.budgetExtended ? 1 : 0, work.hold, work.scopeId, json(work.attachments), work.slot, json(work.retry), json(work.scopeReferences ?? []),
       );
     this.emit({ type: "work", work });
   }
@@ -991,31 +1032,104 @@ export class Ledger {
     this.db.query("DELETE FROM pairings WHERE expires_at <= ?").run(now);
   }
 
-  // Spaces
+  // Scopes and configuration
 
-  spaces(): Space[] {
-    return (this.db.query("SELECT * FROM spaces ORDER BY created_at").all() as Row[]).map(toSpace);
+  scopes(): Scope[] {
+    return (this.db.query("SELECT data FROM scopes ORDER BY rowid").all() as Row[]).map(row => parseJson<Scope>(row.data));
   }
 
-  space(id: string): Space {
-    const row = this.db.query("SELECT * FROM spaces WHERE id = ?").get(id) as Row | null;
-    if (!row) throw new NotFound(`space ${id}`);
-    return toSpace(row);
+  scope(id: string): Scope {
+    const row = this.db.query("SELECT data FROM scopes WHERE id=?").get(id) as Row | null;
+    if (!row) throw new NotFound(`scope ${id}`);
+    return parseJson<Scope>(row.data);
   }
 
-  putSpace(space: Space) {
-    this.db
-      .query(
-        `INSERT INTO spaces (id, name, path, grants, created_at) VALUES (?, ?, ?, '[]', ?)
-         ON CONFLICT (id) DO UPDATE SET name = excluded.name, grants = excluded.grants`,
-      )
-      .run(space.id, space.name, space.path, space.createdAt);
-    this.emit({ type: "space", space });
+  putScope(scope: Scope) {
+    this.db.query("INSERT INTO scopes(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(scope.id, JSON.stringify(scope));
+    this.emit({ type: "scope", scope });
   }
 
-  deleteSpace(id: string) {
-    this.db.query("DELETE FROM spaces WHERE id = ?").run(id);
-    this.emit({ type: "space.removed", id });
+  deleteScope(id: string) {
+    this.db.query("DELETE FROM scopes WHERE id=?").run(id);
+    for (const row of this.db.query("SELECT key,value FROM settings WHERE key LIKE 'autonomy:%'").all() as { key: string; value: string }[]) {
+      const plan = JSON.parse(row.value);
+      if (Array.isArray(plan.watch) && plan.watch.includes(id)) {
+        plan.watch = plan.watch.filter((value: string) => value !== id);
+        for (const key of Object.keys(plan.heads ?? {})) if (key === id || key.startsWith(id + ":")) delete plan.heads[key];
+        this.putSetting(row.key, plan);
+        this.emit({ type: "autonomy", plan });
+      }
+    }
+    this.emit({ type: "scope.removed", id });
+  }
+
+  policyRules(): PolicyRule[] {
+    return (this.db.query("SELECT data FROM policy_rules ORDER BY rowid").all() as Row[]).map(row => parseJson<PolicyRule>(row.data));
+  }
+  policyRule(id: string): PolicyRule {
+    const row = this.db.query("SELECT data FROM policy_rules WHERE id=?").get(id) as Row | null;
+    if (!row) throw new NotFound(`rule ${id}`);
+    return parseJson<PolicyRule>(row.data);
+  }
+  putPolicyRule(rule: PolicyRule) {
+    this.db.query("INSERT INTO policy_rules(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(rule.id, JSON.stringify(rule));
+    this.emit({ type: "policy_rule", rule });
+  }
+  deletePolicyRule(id: string) {
+    this.db.query("DELETE FROM policy_rules WHERE id=?").run(id);
+    this.emit({ type: "policy_rule.removed", id });
+  }
+  mcpServers(): McpServer[] {
+    return (this.db.query("SELECT data FROM mcp_servers ORDER BY rowid").all() as Row[]).map(row => parseJson<McpServer>(row.data));
+  }
+  mcpServer(id: string): McpServer {
+    const row = this.db.query("SELECT data FROM mcp_servers WHERE id=?").get(id) as Row | null;
+    if (!row) throw new NotFound(`MCP server ${id}`);
+    return parseJson<McpServer>(row.data);
+  }
+  putMcpServer(server: McpServer) {
+    this.db.query("INSERT INTO mcp_servers(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(server.id, JSON.stringify(server));
+    this.emit({ type: "mcp_server", server });
+  }
+  deleteMcpServer(id: string) {
+    this.db.query("DELETE FROM mcp_servers WHERE id=?").run(id);
+    this.emit({ type: "mcp_server.removed", id });
+  }
+  configRevisions(entity?: ConfigRevision["entity"], entityId?: string | null): ConfigRevision[] {
+    const clauses: string[] = [], values: SQLQueryBindings[] = [];
+    if (entity !== undefined) { clauses.push("entity=?"); values.push(entity); }
+    if (entityId !== undefined) { clauses.push("entity_id IS ?"); values.push(entityId); }
+    return (this.db.query(`SELECT data FROM config_revisions ${clauses.length ? "WHERE " + clauses.join(" AND ") : ""} ORDER BY rowid`).all(...values) as Row[]).map(row => parseJson<ConfigRevision>(row.data));
+  }
+  configRevision(id: string): ConfigRevision {
+    const row = this.db.query("SELECT data FROM config_revisions WHERE id=?").get(id) as Row | null;
+    if (!row) throw new NotFound(`configuration revision ${id}`);
+    return parseJson<ConfigRevision>(row.data);
+  }
+  putConfigRevision(revision: ConfigRevision) {
+    this.db.query("INSERT INTO config_revisions(id,entity,entity_id,data,at) VALUES (?,?,?,?,?)").run(revision.id, revision.entity, revision.entityId, JSON.stringify(revision), revision.at);
+    this.emit({ type: "config_revision", revision });
+  }
+
+  createFreshConversation(kind: "wake" | "subagent", ghostId: string, requestId: string, title: string, workId: string | null = null): Conversation {
+    const id = idFor(`conversation:${kind}:${ghostId}`, requestId);
+    const existing = this.findConversation(id);
+    if (existing) {
+      if (existing.kind !== kind || existing.ghostId !== ghostId || existing.workId !== workId) throw new Error("fresh conversation identity reused");
+      return existing;
+    }
+    this.ghost(ghostId);
+    if (workId !== null) this.work(workId);
+    const now = Date.now();
+    const conversation: Conversation = { id, ghostId, kind, workId, title, model: null, busy: false, createdAt: now, lastActivityAt: now };
+    this.tx(() => this.putConversation(conversation));
+    return conversation;
+  }
+  createWakeConversation(ghostId: string, requestId: string, title: string, workId: string | null = null): Conversation {
+    return this.createFreshConversation("wake", ghostId, requestId, title, workId);
+  }
+  createSubagentConversation(ghostId: string, requestId: string, title: string, workId: string | null = null): Conversation {
+    return this.createFreshConversation("subagent", ghostId, requestId, title, workId);
   }
 
   // Avatars
@@ -1049,12 +1163,15 @@ export class Ledger {
       ownerLanguage: this.setting<string>("ownerLanguage", DEFAULT_OWNER_LANGUAGE),
       approvals: { ...DEFAULT_APPROVAL_POLICY, ...this.setting<Partial<ApprovalPolicy>>("approvals", {}) },
       limits: this.limits(),
+      slots: this.setting<Record<string, ModelSlot>>("slots", {}),
+      defaultSlot: this.setting<string | null>("defaultSlot", null),
+      toolSearchThreshold: this.setting<number>("toolSearchThreshold", 80),
     };
   }
 
   /** The owner's bounds over the defaults, read at each use so an edit applies without a restart. */
-  limits(): Limits {
-    return { ...DEFAULT_LIMITS, ...this.setting<Partial<Limits>>("limits", {}) };
+  limits(scopeId?: string | null): Limits {
+    return { ...DEFAULT_LIMITS, ...this.setting<Partial<Limits>>("limits", {}), ...(scopeId == null ? {} : this.scope(scopeId).limits) };
   }
 
   setting<T>(key: string, fallback: T): T {
@@ -1123,6 +1240,7 @@ function toGhost(row: Row): Ghost {
     tools: parseJson(row.tools),
     fallbacks: parseJson(row.fallbacks),
     skills: parseJson(row.skills),
+    attachments: parseJson(row.attachments),
     hostExecution: bool(row.host_execution),
     deletedAt: row.deleted_at === null ? null : Number(row.deleted_at),
     directConversationId: String(row.direct_conversation_id),
@@ -1155,6 +1273,11 @@ function toWork(row: Row): Work {
     conversationId: row.conversation_id === null ? null : String(row.conversation_id),
     title: String(row.title),
     brief: String(row.brief),
+    scopeId: row.scope_id === null ? null : String(row.scope_id),
+    attachments: parseJson<DocRef[]>(row.attachments),
+    slot: row.slot === null ? null : String(row.slot),
+    retry: parseNullable<Work["retry"]>(row.retry),
+    scopeReferences: parseJson(row.scope_references),
     acceptance: parseJson<Acceptance>(row.acceptance),
     state: String(row.state) as Work["state"],
     revision: Number(row.revision),
@@ -1253,9 +1376,7 @@ function toDevice(row: Row, alerts: DeviceAlerts): Device {
   };
 }
 
-function toSpace(row: Row): Space {
-  return { id: String(row.id), name: String(row.name), path: String(row.path), createdAt: Number(row.created_at) };
-}
+
 
 function toAvatar(row: Row): Avatar {
   return {

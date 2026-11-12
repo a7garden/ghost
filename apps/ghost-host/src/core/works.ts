@@ -1,6 +1,7 @@
-import { Acceptance, DEFAULT_WORK_BUDGET_MINUTES, MAX_WORK_BUDGET_MINUTES, TERMINAL_WORK_STATES, validate, splitProjectBrief, type ExecutionTarget, type GhostTool, type Verdict, type Work, type WorkHold, type WorkResult } from "@ghost/contract";
+import { Acceptance, DEFAULT_WORK_BUDGET_MINUTES, MAX_WORK_BUDGET_MINUTES, TERMINAL_WORK_STATES, validate, type ExecutionTarget, type GhostTool, type Verdict, type Work, type WorkHold, type WorkResult } from "@ghost/contract";
 import type { WorkQuestion } from "../ledger/ledger.ts";
 import type { Core } from "./core.ts";
+import { checkAttachments } from "./configuration.ts";
 import { budgetSpent } from "./budget.ts";
 import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
@@ -16,6 +17,10 @@ export const isTerminal = (work: Work) => TERMINAL_WORK_STATES.includes(work.sta
 
 export interface CreateWork {
   ghostId: string;
+  scopeId?: string | null;
+  attachments?: Work["attachments"];
+  slot?: string | null;
+  retry?: Work["retry"];
   title: string;
   brief: string;
   acceptance?: Acceptance;
@@ -52,6 +57,10 @@ export class Works {
   createRoot(input: CreateWork): Work {
     const existing = input.id ? this.ledger.findWork(input.id) : null;
     if (existing) return existing;
+    if (input.scopeId != null) this.ledger.scope(input.scopeId);
+    checkAttachments(this.core, input.attachments ?? []);
+    const slots = this.ledger.settings().slots ?? {};
+    if ((input.slot && !slots[input.slot]) || (input.retry && !slots[input.retry.slot])) throw invalid("Work refers to a missing slot");
     const ghost = this.ledger.ghost(input.ghostId);
     if (ghost.state !== "active") throw conflict(`${ghost.name} is ${ghost.state}`);
     const origin = this.ledger.conversation(input.originConversationId);
@@ -104,6 +113,7 @@ export class Works {
       deadlineAt,
       id: input.id ?? newId(),
       parentId: parent.id,
+      scopeId: parent.scopeId,
       rootId: parent.rootId,
       originConversationId: parent.conversationId,
       execution,
@@ -120,6 +130,10 @@ export class Works {
     const now = Date.now();
     return {
       id: input.id,
+      scopeId: input.scopeId ?? null,
+      attachments: input.attachments ?? [],
+      slot: input.slot ?? null,
+      retry: input.retry ?? null,
       parentId: input.parentId,
       rootId: input.rootId,
       ghostId: input.ghostId,
@@ -194,8 +208,7 @@ export class Works {
   update(workId: string, change: Partial<Pick<Work, "title" | "brief" | "acceptance" | "deadlineAt" | "budgetMinutes">>): Work {
     const work = this.ledger.work(workId);
     if (isTerminal(work)) throw conflict(`Work is ${work.state}`);
-    const context = splitProjectBrief(work.brief).context;
-    const brief = change.brief !== undefined && context && !change.brief.startsWith(context) ? context + change.brief : change.brief ?? work.brief;
+    const brief = change.brief ?? work.brief;
     const next: Work = { ...work, ...stripUndefined(change), brief, revision: work.revision + 1, updatedAt: Date.now() };
     this.ledger.tx(() => this.put(next));
     if (next.conversationId && (next.brief !== work.brief || digestOf(next.acceptance) !== digestOf(work.acceptance))) {

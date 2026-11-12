@@ -1,11 +1,14 @@
-import type { ArtifactRef, MessageOrigin } from "@ghost/contract";
+import type { ArtifactRef, DocRef, MessageOrigin } from "@ghost/contract";
 import { defineDoc } from "@earendil-works/pi-durable";
 
 /** What the host recorded for one submitted input. */
 export type OriginRecord = {
   origin: MessageOrigin;
   attachments: ArtifactRef[];
+  scopes?: { id: string; name: string }[];
   spaces?: { id: string; name: string }[];
+  scopeId?: string | null;
+  docAttachments?: DocRef[];
   /** Exact visible text; project context is only part of the model input. */
   text?: string;
 };

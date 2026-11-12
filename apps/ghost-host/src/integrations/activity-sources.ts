@@ -28,7 +28,7 @@ export interface ActivitySourcePort {
   /** Host-only OAuth: run before every operation; null clears it. Implementations must not swallow refresh errors. */
   setOAuthRefresher?(refresh: ((connection: Connection) => Promise<void>) | null): void;
   test(connection: Connection): Promise<{ summary: string }>;
-  poll(connection: Connection, source: Exclude<ActivitySource, { kind: "schedule" }>, cursor: string | null, options?: { baseline?: boolean }): Promise<ActivitySourcePoll>;
+  poll(connection: Connection, source: Exclude<ActivitySource, { kind: "schedule" | "commit" | "poll" }>, cursor: string | null, options?: { baseline?: boolean }): Promise<ActivitySourcePoll>;
   read(connection: Connection, item: ActivitySourceItem): Promise<ActivitySourceItem>;
   act(connection: Connection, item: ActivitySourceItem, action: ActivityAction): Promise<{ summary: string }>;
   /** One bounded authenticated REST exchange against an api-kind connection; responses are sanitized. Absent on minimal ports. */
@@ -58,7 +58,7 @@ export interface ApiResponse {
 
 type MailConfig = Extract<Connection["config"], { kind: "mail" }>;
 type ApiConfig = Extract<Connection["config"], { kind: "api" }>;
-type Source = Exclude<ActivitySource, { kind: "schedule" }>;
+type Source = Exclude<ActivitySource, { kind: "schedule" | "commit" | "poll" }>;
 type PRSource = Extract<Source, { kind: "pull_request" }>;
 type MailSource = Extract<Source, { kind: "mail" }>;
 type ImapClient = Pick<ImapFlow, "connect" | "mailboxOpen" | "search" | "fetchOne" | "close" | "on">;

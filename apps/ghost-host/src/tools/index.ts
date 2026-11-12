@@ -82,7 +82,7 @@ const AUTONOMY = `Decide reversible, internal, read-only and drafting steps your
 /** Ghosts used to tell the owner they had no web; with these tools they do, live and read-only. */
 const WEB_INSTRUCTIONS = `You have live, read-only internet access: web_search finds pages, web_read reads any public URL, and reach covers platforms (X/Twitter search and profiles, YouTube search and subtitles, GitHub, Reddit, V2EX). Look things up yourself instead of asking the owner for sources, and never say you cannot access the web. The Work sandbox shell has no network; use these tools for anything online.`;
 
-const DOCUMENT_INSTRUCTIONS = `document_spaces lists the owner's project Spaces you may read (design docs, QA reports, remaining-work notes); document_list and document_read open them. Read the relevant Space before saying you cannot see a project.`;
+const DOCUMENT_INSTRUCTIONS = `document_scopes lists the owner's project Scopes you may read (design docs, QA reports, remaining-work notes); document_list and document_read open them. Read the relevant Scope before saying you cannot see a project.`;
 
 const DIRECT_INSTRUCTIONS = `This is a direct conversation with the owner: talk with them and act in conversation.
 Create a Work (work_create) when the owner hands over a task, or on your own initiative (initiative: true) for a bounded piece of work you judge worth doing — never for chat. A Work runs in its own conversation and reports back here.
@@ -249,6 +249,9 @@ export function createToolSet(deps: {
     },
     extensionsFor(conversation: Conversation, ghost: Ghost, _work: Work | null): Extension[] {
       switch (conversation.kind) {
+        case "wake":
+        case "subagent":
+          return [];
         case "direct": {
           const selected = [direct, interactive, drive, activities, self];
           if (memory) selected.push(memory);
@@ -289,6 +292,9 @@ export function createToolSet(deps: {
     },
     instructionsFor(conversation: Conversation, ghost: Ghost, work: Work | null): string {
       switch (conversation.kind) {
+        case "wake":
+        case "subagent":
+          return "This conversation kind has no enabled tools yet.";
         case "direct":
           return [DIRECT_INSTRUCTIONS, ADAPT_INSTRUCTIONS, CLOCK_INSTRUCTIONS, driveInstructions(deps.core, ghost), ownerLanguageRule(language()), ...capabilityInstructions(ghost), skillsInstructions(deps.skills, ghost), deps.core.adaptations.instructions(ghost.id)]
             .filter(Boolean)

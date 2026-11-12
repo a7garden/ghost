@@ -32,7 +32,7 @@ const TOOL_KINDS: Record<GhostTool, readonly Conversation["kind"][]> = {
   bash: ["work"],
   publish_artifact: ["work"],
   delegate: ["work"],
-  document_spaces: ["direct", "work"],
+  document_scopes: ["direct", "work"],
   document_list: ["direct", "work"],
   document_read: ["direct", "work"],
   document_propose: ["direct"],

@@ -506,7 +506,7 @@ function assertEmptyTarget(ledger: Ledger): void {
     "notifications",
     "devices",
     "pairings",
-    "spaces",
+    "scopes",
     "avatars",
     "providers",
     "requests",

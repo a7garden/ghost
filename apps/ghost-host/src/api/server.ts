@@ -97,7 +97,7 @@ type EventPayload =
   | { type: "decision"; decision: Decision }
   | { type: "effect"; effect: Effect }
   | { type: "notification"; notification: Notification }
-  | { type: "schedule" | "schedule.removed" | "space" | "space.removed" | "settings" | "sandbox" | "activity" | "activity_run" | "connection" | "connection.removed" }
+  | { type: "schedule" | "schedule.removed" | "scope" | "scope.removed" | "settings" | "sandbox" | "activity" | "activity_run" | "connection" | "connection.removed" }
   | { type: "avatar" | "avatar.removed" }
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
@@ -532,17 +532,17 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         return failure(caught);
       }
     }
-    const pages = /^\/api\/spaces\/([^/]+)\/pages(?:\/([^/]+))?$/.exec(pathname);
+    const pages = /^\/api\/scopes\/([^/]+)\/pages(?:\/([^/]+))?$/.exec(pathname);
     if (pages !== null && request.method === "GET") {
       try {
-        if (!documents) throw new CommandError("unavailable", "document spaces are not available");
-        const spaceId = decodeURIComponent(pages[1]!);
-        core.ledger.space(spaceId);
+        if (!documents) throw new CommandError("unavailable", "document scopes are not available");
+        const scopeId = decodeURIComponent(pages[1]!);
+        core.ledger.scope(scopeId);
         if (pages[2] === undefined) {
-          const list = await documents.listPages(spaceId, url.searchParams.get("query"));
+          const list = await documents.listPages(scopeId, url.searchParams.get("query"));
           return json(list satisfies PageSummary[]);
         }
-        const { pageId, locator, title, profile, body, hash } = await documents.readPage(spaceId, { pageId: decodeURIComponent(pages[2]) });
+        const { pageId, locator, title, profile, body, hash } = await documents.readPage(scopeId, { pageId: decodeURIComponent(pages[2]) });
         return json({ pageId, locator, title, profile, body, hash } satisfies PageView);
       } catch (caught) {
         return failure(caught);

@@ -40,7 +40,7 @@ export function createAutonomyTools(core: Core): Extension {
         after_minutes: Type.Optional(Type.Integer({ minimum: PLAN_MIN_MINUTES, maximum: PLAN_MAX_MINUTES, description: "Minutes from now" })),
         at: Type.Optional(Type.String({ minLength: 1, description: "Exact ISO 8601 time instead of after_minutes" })),
         intent: Type.String({ minLength: 1, maxLength: 1024, description: "What you will look at or do then, and why" }),
-        watch_space_ids: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 8, description: "Project Spaces whose new commits should wake you earlier; replaces the watched list" })),
+        watch_scope_ids: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 8, description: "Project Scopes whose new commits should wake you earlier; replaces the watched list" })),
         ghost_id: Type.Optional(Type.String({ minLength: 1, description: "Main Ghost only: plan this teammate instead of yourself" })),
       }),
       replay: "safe",
@@ -52,7 +52,7 @@ export function createAutonomyTools(core: Core): Extension {
           const now = Date.now();
           const at = args.at === undefined ? now + args.after_minutes! * 60_000 : Date.parse(args.at);
           if (!Number.isFinite(at)) throw invalid("at must be an ISO 8601 time");
-          const plan = await core.autonomy.plan(scope.ghost, args.ghost_id ?? scope.ghost.id, { at, intent: args.intent, watch: args.watch_space_ids }, now);
+          const plan = await core.autonomy.plan(scope.ghost, args.ghost_id ?? scope.ghost.id, { at, intent: args.intent, watch: args.watch_scope_ids }, now);
           const who = plan.ghostId === scope.ghost.id ? "You" : core.ledger.ghost(plan.ghostId).name;
           return { content: [{ type: "text", text: `${who} will look again at ${new Date(plan.nextAt!).toISOString()}${plan.watch.length ? `, earlier if a watched project changes` : ""}.` }] };
         } catch (error) {

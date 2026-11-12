@@ -75,8 +75,10 @@ export class Activities {
     const ghost = this.ledger.ghost(config.ghostId);
     if (ghost.deletedAt !== null || ghost.state !== "active") throw conflict("the activity Ghost is not active");
     if (config.execution.kind === "host" && (!ghost.hostExecution || !isAbsolute(config.execution.cwd))) throw forbidden("unrestricted PC access requires the owner's current Ghost grant and an absolute cwd");
+    if (config.scopeId != null) this.ledger.scope(config.scopeId);
+    if (config.source.kind === "commit") this.ledger.scope(config.source.scopeId);
     if (config.tools.some((tool) => !ghost.tools.includes(tool))) throw forbidden("activity tools must be enabled for its Ghost");
-    if (config.source.kind !== "schedule") {
+    if ("connectionId" in config.source) {
       const connection = this.ledger.connection(config.source.connectionId);
       if (!connection.hasCredential || !this.sourcePort().credentialPresent(connection.id)) throw conflict("source connection credential is missing or being replaced");
       if (config.source.kind === "mail" && connection.config.kind !== "mail") throw invalid("mail activities need an IMAP mail connection");
@@ -85,7 +87,7 @@ export class Activities {
   }
 
   private async poll(activity: Activity, baseline: boolean, cursor = activity.cursor) {
-    if (activity.source.kind === "schedule") throw invalid("scheduled activities have no source poll");
+    if (activity.source.kind === "schedule" || activity.source.kind === "commit" || activity.source.kind === "poll") throw invalid("this source is not enabled for polling yet");
     const connection = this.ledger.connection(activity.source.connectionId);
     const port = this.sourcePort();
     try { return await port.poll(connection, activity.source, cursor, { baseline }); }
@@ -149,7 +151,7 @@ export class Activities {
     this.live();
     this.checkConfig(config);
     const now = Date.now();
-    const activity: Activity = { ...config, id, revision: 1, paused: false, pauseReason: null, nextAt: config.source.kind === "schedule" ? firstRun(config.source.spec, now) : now, cursor: null, lastCheckedAt: null, lastError: null, failureCount: 0, deletedAt: null, createdAt: now, updatedAt: now };
+    const activity: Activity = { ...config, scopeId: config.scopeId ?? null, id, revision: 1, paused: false, pauseReason: null, nextAt: config.source.kind === "schedule" ? firstRun(config.source.spec, now) : now, cursor: null, lastCheckedAt: null, lastError: null, failureCount: 0, deletedAt: null, createdAt: now, updatedAt: now };
     this.ledger.tx(() => this.ledger.putActivity(activity));
     this.core.schedules.refresh();
     return activity;
@@ -163,7 +165,7 @@ export class Activities {
     this.checkConfig(config);
     const changedSource = digestOf(previous.source) !== digestOf(config.source);
     const now = Date.now();
-    const activity: Activity = { ...previous, ...config, revision: previous.revision + 1, cursor: changedSource ? null : previous.cursor, nextAt: changedSource ? (config.source.kind === "schedule" ? firstRun(config.source.spec, now) : now) : previous.nextAt, lastError: null, failureCount: 0, deferredUntil: null, deferredReason: null, updatedAt: now };
+    const activity: Activity = { ...previous, ...config, scopeId: config.scopeId ?? null, revision: previous.revision + 1, cursor: changedSource ? null : previous.cursor, nextAt: changedSource ? (config.source.kind === "schedule" ? firstRun(config.source.spec, now) : now) : previous.nextAt, lastError: null, failureCount: 0, deferredUntil: null, deferredReason: null, updatedAt: now };
     this.ledger.tx(() => {
       this.ledger.putActivity(activity);
       this.cancelRuns(id, "activity configuration changed by owner");
@@ -205,7 +207,7 @@ export class Activities {
   /** Called inside the same transaction that replaces/revokes account authority. */
   invalidateConnection(connectionId: string) {
     for (const activity of this.ledger.activities()) {
-      if (activity.source.kind !== "schedule" && activity.source.connectionId === connectionId) this.cancelRuns(activity.id, "source account configuration or credential changed");
+      if ("connectionId" in activity.source && activity.source.connectionId === connectionId) this.cancelRuns(activity.id, "source account configuration or credential changed");
     }
   }
 
@@ -220,7 +222,7 @@ export class Activities {
 
   private sourceKey(activity: Activity, item: Pick<ActivitySourceItem, "id" | "version">): string {
     const source = activity.source;
-    const connection = source.kind === "schedule" ? null : this.ledger.connection(source.connectionId);
+    const connection = "connectionId" in source ? this.ledger.connection(source.connectionId) : null;
     return `source:${digestOf([source.kind, connection?.id, connection?.credentialVersion, connection?.config, source.kind === "pull_request" ? source.repository : null, item.id, item.version])}`;
   }
 
@@ -374,7 +376,7 @@ export class Activities {
         if (snapshot.source.kind === "schedule" || snapshot.paused || (snapshot.deferredUntil ?? 0) > now) continue;
         try {
           let activity = this.current(snapshot.id, snapshot.revision);
-          if (activity.source.kind === "schedule") continue;
+          if (activity.source.kind === "schedule" || activity.source.kind === "commit" || activity.source.kind === "poll") continue;
           const failed = this.recentFailedRuns(activity);
           if (failed.length >= 3) {
             this.pauseForFailures(activity, failed.length, failed[0]!.reason ?? "Activity Work failed", now, failed[0]!.workId);
@@ -442,7 +444,7 @@ export class Activities {
 
   async read(workId: string): Promise<ActivitySourceItem> {
     const { activity, run } = this.authorize(workId, "activity_read");
-    if (activity.source.kind === "schedule" || !run.sourceItem) throw forbidden("this run has no bound source item");
+    if (!("connectionId" in activity.source) || !run.sourceItem) throw forbidden("this run has no bound source item");
     const item = await this.sourcePort().read(this.ledger.connection(activity.source.connectionId), run.sourceItem);
     this.authorize(workId, "activity_read");
     return item;
@@ -453,7 +455,7 @@ export class Activities {
     const { activity, run } = this.authorize(workId, "activity_action");
     if (run.dryRun) throw forbidden("external actions are disabled in dry runs");
     if (activity.policy.externalActions === "deny") throw forbidden("this activity denies external actions");
-    if (activity.source.kind === "schedule" || !run.sourceItem) throw forbidden("this run has no bound source action target");
+    if (!("connectionId" in activity.source) || !run.sourceItem) throw forbidden("this run has no bound source action target");
     if ((action.kind === "mail_reply") !== (activity.source.kind === "mail")) throw forbidden("action does not match this run's source");
     const connection = this.ledger.connection(activity.source.connectionId);
     if (action.kind === "mail_reply") {

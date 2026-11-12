@@ -241,7 +241,7 @@ export function createConnectionTools(core: Core, deps: { sources: ActivitySourc
           const endpoint = config.kind === "mail" ? `${config.username} · IMAP ${config.host}:${config.port} · SMTP ${config.smtpHost ?? "없음"}:${config.smtpPort}` : config.baseUrl;
           const source = args.secret.source === "browser" ? captureOrigin(args.secret.credential_origin) : `금고 · ${deps.vault!.itemFor(scope.ghost.id, args.secret.item_id).title}`;
           const names = config.kind === "api" ? config.ghostIds.map(id => core.ledger.ghost(id).name).join(", ") || "없음" : "자동 활동의 별도 권한";
-          const affected = previous ? core.ledger.activities().filter(activity => activity.source.kind !== "schedule" && activity.source.connectionId === previous.id).map(activity => activity.name) : [];
+          const affected = previous ? core.ledger.activities().filter(activity => "connectionId" in activity.source && activity.source.connectionId === previous.id).map(activity => activity.name) : [];
           const effect = core.effects.propose({ conversationId: scope.conversation.id, callId: api.callId, tool: "connection_register", input,
             summary: `${previous ? "Replace authentication for" : "Register"} ${input.name}`, title: `${previous ? "인증 교체" : "연결 등록"}: ${input.name}`,
             detail: [`서비스: ${input.name}`, `연결 대상: ${endpoint}`, `인증 정보 출처: ${source}`, `사용 Ghost: ${names}`, ...(previous ? [`현재 연결된 활동: ${affected.join(", ") || "없음"}`] : []), "", previous ? "승인하면 이 계정의 인증을 교체하고 관련 활동을 중단합니다." : "승인하면 인증 정보를 Host에 저장합니다.", "저장 후 실제 인증을 확인하며, 실패한 계정은 준비 완료로 보고하지 않습니다."].join("\n"), proposal: { input } });

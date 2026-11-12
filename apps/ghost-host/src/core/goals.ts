@@ -31,6 +31,7 @@ interface Stored {
 type Change = { type: "goal"; goal: Goal } | { type: "milestone"; milestone: Milestone };
 
 export interface GoalText {
+  scopeId?: string | null;
   title: string;
   why?: string;
   boundaries?: string;
@@ -65,7 +66,10 @@ export class Goals {
   }
 
   private load(): Stored {
-    return { goals: [], milestones: [], declinedAt: null, ...this.ledger.setting<Partial<Stored> | null>(KEY, null) };
+    const stored = { goals: [], milestones: [], declinedAt: null, ...this.ledger.setting<Partial<Stored> | null>(KEY, null) };
+    stored.goals = stored.goals.map(goal => ({ ...goal, scopeId: goal.scopeId ?? null }));
+    stored.milestones = stored.milestones.map(milestone => ({ ...milestone, scopeId: stored.goals.find(goal => goal.id === milestone.goalId)?.scopeId ?? null }));
+    return stored;
   }
 
   /** Read, change and write synchronously inside one transaction. Returning the loaded object unchanged writes nothing. */
@@ -81,8 +85,8 @@ export class Goals {
     });
   }
 
-  goals(): Goal[] {
-    return this.load().goals;
+  goals(scopeId?: string | null): Goal[] {
+    return this.load().goals.filter(goal => scopeId === undefined || goal.scopeId === scopeId);
   }
 
   milestones(): Milestone[] {
@@ -112,10 +116,11 @@ export class Goals {
   private newGoal(stored: Stored, input: GoalText, proposedBy: string | null, id: string): Goal {
     const title = clean(input.title);
     if (!title) throw invalid("a goal needs a direction");
-    const openGoals = this.ledger.limits().openGoals;
-    if (stored.goals.filter(open).length >= openGoals) throw conflict(`at most ${openGoals} goals can be open at once; close one first`);
+    if (input.scopeId != null) this.ledger.scope(input.scopeId);
+    const openGoals = this.ledger.limits(input.scopeId).openGoals;
+    if (stored.goals.filter(goal => open(goal) && goal.scopeId === (input.scopeId ?? null)).length >= openGoals) throw conflict(`at most ${openGoals} goals can be open at once; close one first`);
     const now = Date.now();
-    return { id, title, why: clean(input.why), boundaries: clean(input.boundaries), signal: clean(input.signal), state: "active", proposedBy, createdAt: now, updatedAt: now, closedAt: null };
+    return { id, scopeId: input.scopeId ?? null, title, why: clean(input.why), boundaries: clean(input.boundaries), signal: clean(input.signal), state: "active", proposedBy, createdAt: now, updatedAt: now, closedAt: null };
   }
 
   /** The owner edits, pauses, resumes or closes a goal. Closing is final and drops its open milestones. */
@@ -160,15 +165,16 @@ export class Goals {
     const stored = this.load();
     const title = clean(input.title);
     if (!title) throw invalid("a goal needs a direction");
-    const openGoals = this.ledger.limits().openGoals;
-    if (stored.goals.filter(open).length >= openGoals) throw conflict(`the owner already has ${openGoals} open goals; propose only after one closes`);
+    if (input.scopeId != null) this.ledger.scope(input.scopeId);
+    const openGoals = this.ledger.limits(input.scopeId).openGoals;
+    if (stored.goals.filter(goal => open(goal) && goal.scopeId === (input.scopeId ?? null)).length >= openGoals) throw conflict(`the owner already has ${openGoals} open goals; propose only after one closes`);
     if (stored.goals.some((goal) => open(goal) && goal.title === title)) throw conflict("this goal is already open");
     if (this.ledger.pendingDecisions().some((decision) => decision.proposal?.goal)) throw conflict("a goal proposal is already waiting for the owner");
     const cooldown = this.ledger.limits().goalProposalCooldownDays * DAY;
     if (stored.declinedAt !== null && Date.now() - stored.declinedAt < cooldown) {
       throw conflict(`the owner declined a goal proposal on ${new Date(stored.declinedAt).toISOString()}; do not propose another for ${this.ledger.limits().goalProposalCooldownDays} days`);
     }
-    const proposal: GoalProposal = { title, why: clean(input.why), boundaries: clean(input.boundaries), signal: clean(input.signal) };
+    const proposal: GoalProposal = { scopeId: input.scopeId ?? null, title, why: clean(input.why), boundaries: clean(input.boundaries), signal: clean(input.signal) };
     const detail = [
       proposal.why,
       proposal.boundaries ? `지키는 선: ${proposal.boundaries}` : "",
@@ -221,7 +227,7 @@ export class Goals {
       const exit = clean(input.exit);
       if (!exit) throw invalid("say what evidence would finish this milestone");
       const milestone: Milestone = {
-        id, goalId, title, hypothesis: clean(input.hypothesis), exit, state: "planned", outcome: "", workIds: [],
+        id, goalId, scopeId: goal.scopeId, title, hypothesis: clean(input.hypothesis), exit, state: "planned", outcome: "", workIds: [],
         createdBy: by.id, settledBy: null, createdAt: Date.now(), startedAt: null, endedAt: null,
       };
       return { stored: { ...stored, milestones: [...stored.milestones, milestone] }, changes: [{ type: "milestone", milestone }], result: milestone };
@@ -278,6 +284,7 @@ export class Goals {
   checkLink(milestoneId: string) {
     const milestone = this.milestone(milestoneId);
     const goal = this.goal(milestone.goalId);
+    if (goal.scopeId !== null) this.ledger.scope(goal.scopeId);
     if (goal.state !== "active") throw conflict(`the goal is ${goal.state}; do not start Work for it`);
     if (milestone.state !== "active") throw conflict(`the milestone is ${milestone.state}; only an active milestone takes Work (the main starts it)`);
     if (milestone.workIds.length >= MAX_MILESTONE_WORKS) throw conflict("this milestone already has its maximum of linked Work");
@@ -299,9 +306,9 @@ export class Goals {
   }
 
   /** The goals section of a self-directed wake: open goals, their boundaries and the milestone line. Empty without goals. */
-  context(): string {
+  context(scopeId: string | null = null): string {
     const stored = this.load();
-    const goals = stored.goals.filter(open);
+    const goals = stored.goals.filter(goal => open(goal) && goal.scopeId === scopeId);
     if (goals.length === 0) return "";
     const lines = ["Team goals (owner-approved long-term directions: let them guide what you choose; they are not quotas, carry no deadline and grant no authority):"];
     for (const goal of goals) {
@@ -327,14 +334,13 @@ export class Goals {
   /** A Work started for a milestone carries its goal's boundaries into execution, delegated children included. */
   workInstructions(work: Work): string {
     const stored = this.load();
-    const milestone = stored.milestones.find((item) => item.workIds.includes(work.rootId));
-    if (!milestone) return "";
-    const goal = stored.goals.find((item) => item.id === milestone.goalId);
-    if (!goal) return "";
+    const milestone = stored.milestones.find(item => item.workIds.includes(work.rootId));
+    const goal = milestone ? stored.goals.find(item => item.id === milestone.goalId && item.scopeId === work.scopeId) : undefined;
+    const boundaries = stored.goals.filter(item => item.state !== "closed" && (item.scopeId === null || item.scopeId === work.scopeId) && item.boundaries);
     return [
-      `This Work serves the team goal "${goal.title}" through the milestone "${milestone.title}" (finishes with: ${milestone.exit}).`,
-      goal.boundaries ? `The owner's boundaries for this goal bind this Work: never use ${goal.boundaries}` : "",
-      "The goal is a direction, not a quota: do not stretch facts, results or means to look closer to it.",
+      goal && milestone ? `This Work serves the goal "${goal.title}" through the milestone "${milestone.title}" (finishes with: ${milestone.exit}).` : "",
+      ...boundaries.map(item => `The owner's boundaries for "${item.title}" bind this Work: never use ${item.boundaries}`),
+      goal ? "The goal is a direction, not a quota: do not stretch facts, results or means to look closer to it." : "",
     ].filter(Boolean).join("\n");
   }
 }

@@ -1,3 +1,4 @@
+import type { DocRef } from "@ghost/contract";
 import type {
   ArtifactRef,
   Conversation,
@@ -27,7 +28,8 @@ export interface Submission {
   requestId: string;
   attachments?: ArtifactRef[];
   /** Resolve only after checking the durable submission identity, so retries survive deletion. */
-  spaceIds?: string[];
+  scopeId?: string | null;
+  docAttachments?: DocRef[];
   /** Join the running turn instead of queueing a follow-up. */
   steer?: boolean;
 }

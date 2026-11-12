@@ -1,5 +1,6 @@
-import { DEFAULT_GHOST_TOOLS, type ArtifactRef, type Conversation, type Ghost, type Notification } from "@ghost/contract";
+import { DEFAULT_GHOST_TOOLS, type ArtifactRef, type DocRef, type Conversation, type Ghost, type Notification } from "@ghost/contract";
 import type { Ledger } from "../ledger/ledger.ts";
+import { checkAttachments } from "./configuration.ts";
 import { Decisions } from "./decisions.ts";
 import { Effects } from "./effects.ts";
 import { conflict, invalid } from "./errors.ts";
@@ -229,11 +230,12 @@ export class Core implements EngineEvents {
    * Create a Ghost with its main direct conversation. New Ghosts default to every selectable tool except host tools.
    * `id` comes from a tool call when the main Ghost creates one, so a replayed call finds the Ghost it made.
    */
-  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "id" | "model" | "look" | "isDefault" | "tools" | "fallbacks" | "skills" | "hostExecution">>): Ghost {
+  createGhost(input: Pick<Ghost, "name" | "persona"> & Partial<Pick<Ghost, "id" | "model" | "look" | "isDefault" | "tools" | "fallbacks" | "skills" | "hostExecution" | "attachments">>): Ghost {
     if (input.id) {
       const existing = this.ledger.ghosts().find((ghost) => ghost.id === input.id);
       if (existing) return existing;
     }
+    checkAttachments(this, input.attachments ?? []);
     const now = Date.now();
     const id = input.id ?? newId();
     const conversationId = input.id ? idFor(input.id, "direct") : newId();
@@ -248,6 +250,7 @@ export class Core implements EngineEvents {
       tools: input.tools ?? [...DEFAULT_GHOST_TOOLS],
       fallbacks: input.fallbacks ?? [],
       skills: input.skills ?? [],
+      attachments: input.attachments ?? [],
       hostExecution: input.hostExecution ?? false,
       deletedAt: null,
       directConversationId: conversationId,
@@ -313,13 +316,13 @@ export class Core implements EngineEvents {
   }
 
   /** Submit an owner message; rejects when the engine refuses it (no model, no credential). */
-  sendMessage(conversationId: string, text: string, requestId: string, attachments: ArtifactRef[] = [], spaceIds: string[] = []): Promise<void> {
+  sendMessage(conversationId: string, text: string, requestId: string, attachments: (ArtifactRef | DocRef)[] = [], scopeId: string | null = null): Promise<void> {
     const conversation = this.ledger.conversation(conversationId);
     if (conversation.kind !== "direct") throw invalid("owner messages go to direct conversations; edit a Work to steer it");
     const ghost = this.ledger.ghost(conversation.ghostId);
     if (ghost.deletedAt !== null) throw conflict(`${ghost.name} was deleted`);
     return this.run(`conversation:${conversationId}`, () =>
-      this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments, spaceIds }),
+      this.engine.submit(conversationId, { text, origin: "owner", requestId: `owner:${requestId}`, attachments: attachments.filter((ref): ref is ArtifactRef => "digest" in ref), docAttachments: attachments.filter((ref): ref is DocRef => "kind" in ref), scopeId }),
     );
   }
 

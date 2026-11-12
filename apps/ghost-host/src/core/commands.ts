@@ -1,6 +1,4 @@
-import { existsSync, statSync } from "node:fs";
-import { isAbsolute } from "node:path";
-import { connectionCredentialScope, FallbackList, GhostToolList, SkillList, validate, type Command, type CommandRequest, type Connection, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef, type Space } from "@ghost/contract";
+import { connectionCredentialScope, FallbackList, GhostToolList, SkillList, validate, type Command, type CommandRequest, type Connection, type Ghost, type GhostState, type GhostTool, type Look, type ModelRef } from "@ghost/contract";
 import type { Access } from "./access.ts";
 import type { Core } from "./core.ts";
 import { NoEffect, type CommandEffectTool } from "./effects.ts";
@@ -9,7 +7,7 @@ import { CommandError, conflict, invalid } from "./errors.ts";
 import { digestOf, newId, sha256 } from "./ids.ts";
 import { supportsAutomaticModels } from "../integrations/provider-catalog.ts";
 import { validateConnectionConfig } from "../integrations/activity-sources.ts";
-import { projectContext } from "@ghost/contract";
+import { configurationCommand, reviseConfiguration, checkConfiguration, checkAttachments } from "./configuration.ts";
 import type { MailService } from "../integrations/mail.ts";
 
 export interface CommandContext {
@@ -62,7 +60,7 @@ export async function execute(core: Core, access: Access, request: CommandReques
       || (request.command.type === "provider.upsert" && request.command.apiKey !== undefined);
     if (!asyncCommand) {
       return core.ledger.tx(() => {
-        const result = runSync(core, access, request, context);
+        const result = reviseConfiguration(core, access.principal, request.command, () => runSync(core, access, request, context));
         core.ledger.putRequest(request.requestId, principal, digest, result);
         return result;
       });
@@ -102,7 +100,7 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
   switch (command.type) {
     case "message.send":
       // Pi admission identity is distinct from the API mutation/receipt transaction.
-      await core.sendMessage(command.conversationId, command.text, requestId, command.attachments ?? [], command.spaceIds ?? []);
+      await core.sendMessage(command.conversationId, command.text, requestId, command.attachments ?? [], command.scopeId ?? null);
       return {};
     case "message.cancel":
       await core.effects.cancelMessage(command.conversationId, requestId);
@@ -219,11 +217,11 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
       });
     }
     case "document.save": {
-      if (!context.documents) throw new CommandError("unavailable", "document spaces are not available");
-      ledger.space(command.spaceId);
+      if (!context.documents) throw new CommandError("unavailable", "document scopes are not available");
+      ledger.scope(command.scopeId);
       const documents = context.documents;
       const proposal = {
-        spaceId: command.spaceId, title: command.title, body: command.body,
+        scopeId: command.scopeId, title: command.title, body: command.body,
         profile: command.profile ?? "pdc-markdown/1", pageId: command.pageId, expectedHash: command.expectedHash,
       };
       const conversationId = ledger.request(requestId)!.outcome.conversationId as string;
@@ -295,6 +293,8 @@ function recordedCommandOutcome(state: string, result: string | null): Outcome {
 
 function runSync(core: Core, access: Access, { command }: CommandRequest, context: CommandContext): Outcome {
   const { ledger } = core;
+  const configuration = configurationCommand(core, command);
+  if (configuration !== undefined) return configuration;
   switch (command.type) {
 
     case "conversation.create":
@@ -317,7 +317,11 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       const work = core.works.createRoot({
         ghostId: ghost.id,
         title: command.title,
-        brief: projectContext((command.spaceIds ?? []).map(id => ledger.space(id))) + command.brief,
+        brief: command.brief,
+        scopeId: command.scopeId ?? null,
+        attachments: command.attachments ?? [],
+        slot: command.slot ?? null,
+        retry: command.retry ?? null,
         acceptance: command.acceptance,
         deadlineAt: command.deadlineAt ?? null,
         budgetMinutes: command.budgetMinutes,
@@ -368,6 +372,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         fallbacks: command.fallbacks,
         skills: command.skills,
         hostExecution: command.hostExecution,
+        attachments: command.attachments,
       });
       return { ghostId: ghost.id };
     }
@@ -383,6 +388,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         fallbacks: command.fallbacks,
         skills: command.skills,
         hostExecution: command.hostExecution,
+        attachments: command.attachments,
       });
       return {};
 
@@ -449,26 +455,11 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       return {};
 
 
-    case "space.create": {
-      if (!isAbsolute(command.path) || !existsSync(command.path) || !statSync(command.path).isDirectory()) throw invalid("the space path must be an existing absolute directory");
-      const space: Space = { id: newId(), name: command.name, path: command.path, createdAt: Date.now() };
-      ledger.tx(() => ledger.putSpace(space));
-      return { spaceId: space.id };
-    }
-
-    case "space.update": {
-      const space = ledger.space(command.spaceId);
-      const next = { ...space, name: command.name ?? space.name };
-      ledger.tx(() => ledger.putSpace(next));
-      return {};
-    }
-
-    case "space.delete": {
-      const space = ledger.space(command.spaceId);
-      ledger.tx(() => ledger.deleteSpace(space.id));
-      return {};
-    }
-
+    case "scope.create": case "scope.update": case "scope.delete": case "scope.attach":
+    case "slot.set": case "slot.delete": case "limits.set":
+    case "rule.create": case "rule.update": case "rule.delete":
+    case "mcp.create": case "mcp.update": case "mcp.delete": case "config.revert":
+      throw new Error("configuration command was not handled");
 
     case "avatar.delete":
       if (ledger.ghosts().some((ghost) => ghost.look.avatarId === command.avatarId)) throw conflict("a Ghost still uses this avatar");
@@ -477,6 +468,8 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
 
     case "settings.update":
       ledger.tx(() => {
+        if (command.toolSearchThreshold !== undefined) ledger.putSetting("toolSearchThreshold", command.toolSearchThreshold);
+        if (command.defaultSlot !== undefined) ledger.putSetting("defaultSlot", command.defaultSlot);
         if (command.defaultModel !== undefined) ledger.putSetting("defaultModel", command.defaultModel);
         if (command.defaultFallbacks !== undefined) ledger.putSetting("defaultFallbacks", command.defaultFallbacks);
         if (command.noFallbackGhosts !== undefined) ledger.putSetting("noFallbackGhosts", [...new Set(command.noFallbackGhosts)]);
@@ -485,6 +478,7 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         if (command.ownerLanguage !== undefined) ledger.putSetting("ownerLanguage", command.ownerLanguage);
         if (command.approvals !== undefined) ledger.putSetting("approvals", command.approvals);
         if (command.limits !== undefined) ledger.putSetting("limits", { ...ledger.limits(), ...command.limits });
+        checkConfiguration(core);
         ledger.emit({ type: "settings", settings: settingsView(core) });
       });
       for (const ghost of ledger.ghosts()) if (ghost.model === null) core.refreshGhost(ghost.id);
@@ -566,6 +560,7 @@ export interface GhostPatch {
   fallbacks?: ModelRef[];
   skills?: string[];
   hostExecution?: boolean;
+  attachments?: Ghost["attachments"];
 }
 
 /**
@@ -579,6 +574,7 @@ export function updateGhost(core: Core, ghostId: string, patch: GhostPatch): Gho
   if (patch.tools !== undefined && !validate(GhostToolList, patch.tools)) throw invalid("tools must be a duplicate-free list of known tool names");
   if (patch.fallbacks !== undefined && !validate(FallbackList, patch.fallbacks)) throw invalid("fallbacks must be at most 3 models");
   if (patch.skills !== undefined && !validate(SkillList, patch.skills)) throw invalid("skills must be a duplicate-free list of skill names");
+  if (patch.attachments) checkAttachments(core, patch.attachments);
   const next: Ghost = {
     ...ghost,
     name: patch.name ?? ghost.name,
@@ -589,6 +585,7 @@ export function updateGhost(core: Core, ghostId: string, patch: GhostPatch): Gho
     tools: patch.tools ?? ghost.tools,
     fallbacks: patch.fallbacks ?? ghost.fallbacks,
     skills: patch.skills ?? ghost.skills,
+    attachments: patch.attachments ?? ghost.attachments,
     hostExecution: patch.hostExecution ?? ghost.hostExecution ?? false,
     updatedAt: Date.now(),
   };
@@ -620,6 +617,7 @@ export function deleteGhost(core: Core, ghostId: string): void {
     throw conflict(`${ghost.name} still reviews live Work`);
   }
   if (ledger.pendingDecisions().some((decision) => decision.ghostId === ghost.id)) throw conflict(`${ghost.name} still has pending decisions`);
+  if (ledger.scopes().some(scope => scope.ghostId === ghostId) || ledger.policyRules().some(rule => rule.ghostId === ghostId || (rule.reviewer?.kind === "ghost" && rule.reviewer.ghostId === ghostId))) throw conflict("Ghost is still referenced by configuration");
   const now = Date.now();
   ledger.tx(() => {
     for (const schedule of ledger.schedules()) if (schedule.ghostId === ghost.id) ledger.deleteSchedule(schedule.id);
