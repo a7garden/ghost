@@ -11,7 +11,7 @@ import { classifyDesktopEffect } from "../src/tools/desktop.ts";
 import { createMainTools } from "../src/tools/main.ts";
 import type { BrowserPort, BrowserRunOptions, BrowserSessionRef } from "../src/integrations/ports.ts";
 import { harness, tempDir } from "./support.ts";
-import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createWorkTools } from "../src/tools/work.ts";
 import { HostExecutionEnv, HostMutationQueue } from "../src/sandbox/host-env.ts";
@@ -658,4 +658,61 @@ test("a Scope-path write re-checks its Scope after waiting in the queue", async 
   expect((await writing).isError).toBe(true);
   expect(existsSync(join(s.scopeDir, "late.txt"))).toBe(false);
   expect(s.ledger.effect(s.ledger.effectByCall(s.conversationId, "late")!.id).state).not.toBe("done");
+});
+
+test("git metadata inside a Scope is never an automatic Scope-path write", async () => {
+  const s = await scopedHostWork();
+  mkdirSync(join(s.scopeDir, ".git", "hooks"), { recursive: true });
+  mkdirSync(join(s.scopeDir, "vendor", "lib", ".GIT"), { recursive: true });
+  const bare = join(s.scopeDir, "mirror");
+  for (const dir of ["objects", "refs"]) mkdirSync(join(bare, dir), { recursive: true });
+  writeFileSync(join(bare, "HEAD"), "ref: refs/heads/main\n");
+  const attempts: [string, string][] = [
+    [".git/hooks/pre-commit", "git-hook"],
+    ["vendor/lib/.GIT/config", "nested-case"],
+    ["vendor/lib/.g\u200Bit/config", "ignorable"],
+    ["mirror/hooks/post-merge", "bare"],
+    ["backup.git/config", "bare-name"],
+    [".git", "worktree-link"],
+  ];
+  for (const [path, callId] of attempts) {
+    expect((await s.write(path, "#!/bin/sh\nexit 0\n", callId)).isError).toBe(true);
+    expect(s.receipt(callId)?.classification.target.kind).toBe("mac");
+  }
+  expect(existsSync(join(s.scopeDir, ".git", "hooks", "pre-commit"))).toBe(false);
+  expect(existsSync(join(bare, "hooks", "post-merge"))).toBe(false);
+});
+
+test("a file hard-linked outside the Scope is never a Scope-path write", async () => {
+  const s = await scopedHostWork();
+  writeFileSync(join(s.outside, "owner.txt"), "owner bytes");
+  linkSync(join(s.outside, "owner.txt"), join(s.scopeDir, "linked.txt"));
+  expect((await s.write("linked.txt", "overwritten", "hardlink")).isError).toBe(true);
+  expect(s.receipt("hardlink")?.classification.target.kind).toBe("mac");
+  expect(readFileSync(join(s.outside, "owner.txt"), "utf8")).toBe("owner bytes");
+});
+
+test("a hard link made after admission is refused at the open, before any byte changes", async () => {
+  const s = await scopedHostWork();
+  s.ledger.tx(() => s.ledger.putPolicyRule(rule("owner-writes", "owner", { tool: "write" })));
+  writeFileSync(join(s.scopeDir, "target.txt"), "original");
+  expect((await s.write("target.txt", "replaced", "late-link")).isError).toBe(true);
+  expect(s.receipt("late-link")?.classification.target.kind).toBe("scope_path");
+  linkSync(join(s.scopeDir, "target.txt"), join(s.outside, "alias.txt"));
+  await s.approve("late-link");
+  await s.write("target.txt", "replaced", "late-link");
+  expect(readFileSync(join(s.outside, "alias.txt"), "utf8")).toBe("original");
+  expect(s.ledger.effect(s.ledger.effectByCall(s.conversationId, "late-link")!.id).state).not.toBe("done");
+});
+
+test("the confined writer itself refuses a file with another hard link", async () => {
+  const { WorkspaceEnv } = await import("../src/sandbox/workspace-env.ts");
+  const root = realpathSync(tempDir());
+  const outside = realpathSync(tempDir());
+  writeFileSync(join(outside, "owner.txt"), "owner bytes");
+  linkSync(join(outside, "owner.txt"), join(root, "alias.txt"));
+  const env = new WorkspaceEnv({ hostRoot: root });
+  expect((await env.writeFile(join(root, "alias.txt"), "x", {} as Context)).ok).toBe(false);
+  expect((await env.truncateFile(join(root, "alias.txt"), 0, {} as Context)).ok).toBe(false);
+  expect(readFileSync(join(outside, "owner.txt"), "utf8")).toBe("owner bytes");
 });

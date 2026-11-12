@@ -167,6 +167,11 @@ export function readFileNoFollow(path: string): Buffer {
  * truncation happens only once confinement is confirmed. A create that turned out to be
  * redirected is unlinked again. Callers confine the parent chain themselves first.
  */
+/** Refuse an opened file whose inode has another hard link: the other name may live outside every confined root. */
+function refuseSharedInode(fd: number, path: string): void {
+  if (fstatSync(fd).nlink > 1) throw Object.assign(new Error(`Refusing to modify ${path}: it has more than one hard link`), { code: "EPERM" });
+}
+
 export function writeFileNoFollow(path: string, content: string | Uint8Array, mode: "write" | "append"): void {
   ensureRealParent(path); // fail before any side effect
   const bytes = typeof content === "string" ? Buffer.from(content, "utf8") : content;
@@ -181,6 +186,8 @@ export function writeFileNoFollow(path: string, content: string | Uint8Array, mo
   }
   try {
     ensureRealParent(path);
+    // A second hard link shares this inode with a path the confinement never checked; writing would change it too.
+    if (!created) refuseSharedInode(fd, path);
     if (!created && mode === "write") ftruncateSync(fd, 0);
     let written = 0;
     while (written < bytes.byteLength) written += writeSync(fd, bytes, written);
@@ -484,6 +491,7 @@ export class WorkspaceEnv extends NodeExecutionEnv {
       const fd = openSync(target.value, fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW);
       try {
         ensureRealParent(target.value);
+        refuseSharedInode(fd, path);
         ftruncateSync(fd, size);
       } finally {
         closeSync(fd);

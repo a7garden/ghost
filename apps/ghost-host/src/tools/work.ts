@@ -5,7 +5,7 @@ import { createEditTool, createReadTool, createWriteTool } from "@earendil-works
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { Context } from "@earendil-works/chord";
 import { createHash } from "node:crypto";
-import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readSync, realpathSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readSync, realpathSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Core } from "../core/core.ts";
 import { KnownOutcome, NoEffect } from "../core/effects.ts";
@@ -269,17 +269,36 @@ export function scopeWriteTarget(core: Core, work: Work, cwd: string, path: stri
     try { root = realpathSync(configured); } catch { continue; }
     if (!candidate.startsWith(`${root}/`)) continue;
     const segments = candidate.slice(root.length + 1).split("/");
+    if (segments.some(gitInternalName) || gitDirectory(root)) return null;
     let current = root;
     for (const [index, segment] of segments.entries()) {
       current = join(current, segment);
       const info = lstatSync(current, { throwIfNoEntry: false });
       if (!info) break;
       if (info.isSymbolicLink()) return null;
-      if (index < segments.length - 1 ? !info.isDirectory() : !info.isFile()) return null;
+      if (index < segments.length - 1) {
+        if (!info.isDirectory() || gitDirectory(current)) return null;
+      } else if (!info.isFile() || info.nlink > 1) return null;
     }
     return { root, host: candidate };
   }
   return null;
+}
+
+/**
+ * Git metadata is never an automatic Scope write: hooks and config there run later as the owner's git, outside any
+ * effect boundary. Names compare case-insensitively after Unicode normalization with default-ignorable code points
+ * removed (the forms HFS+/APFS may treat as `.git`); `*.git` covers bare repositories and `.git` files of linked
+ * worktrees and submodules.
+ */
+function gitInternalName(segment: string): boolean {
+  const name = segment.normalize("NFC").replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/gu, "").toLowerCase().replace(/[. ]+$/, "");
+  return name === ".git" || name.endsWith(".git");
+}
+
+/** A directory laid out as a git directory (HEAD plus objects and refs), whatever it is called. */
+function gitDirectory(path: string): boolean {
+  return existsSync(join(path, "HEAD")) && existsSync(join(path, "objects")) && existsSync(join(path, "refs"));
 }
 
 const scopeWrite = (target: { root: string }): ObservedEffect => ({ target: { kind: "scope_path", id: target.root }, access: "write", reversible: true, external: false, amount: null });
