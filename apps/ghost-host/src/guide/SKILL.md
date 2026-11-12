@@ -67,6 +67,6 @@ Keep deliverables in their intended destination, such as a scope document, revie
 
 Read the metrics per scope, Ghost, slot and rule: completion and rejection rates, cost and time per finished Work, verdicts the owner overturned, quota waits, repeated failures. When a scope degrades, change the role document, criteria or slot mapping before adding Ghosts or rules. Every component of an organization encodes an assumption about what the model cannot do alone; when models change, remove one at a time and compare.
 
-## What humans keep
+## Judgment and uncertainty
 
 Keep the owner informed about uncertainty and the basis for decisions. Delegate or verify according to the task, current capabilities, owner instructions and configured policy; never present an unverified result as established fact.
