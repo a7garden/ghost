@@ -118,7 +118,7 @@ describe("stored policy enforcement", () => {
 
   test("unjournaled reads persist taint and Rule of Two asks before outward actions", () => {
     const h = setup();
-    policyRead(h.core, h.conversationId, { tool: "web_read", target: { kind: "browser_origin", id: "https://example.com" }, access: "read", reversible: true, external: false, amount: null }, "web-read");
+    policyRead(h.core, h.conversationId, { tool: "web_read", target: { kind: "browser_origin", id: "https://example.com" }, access: "read", reversible: true, external: false, amount: null }, { taskId: "task-web-read", callId: "web-read" });
     markPolicyRead(h.core, h.conversationId, { privateData: true });
     expect(h.ledger.effectsInState("done")).toHaveLength(0);
     const classification = classifyEffect(h.core, h.conversationId, "browser_upload", {}, { target: { kind: "browser_origin", id: "https://example.com" }, access: "write", reversible: true, external: true, amount: null });

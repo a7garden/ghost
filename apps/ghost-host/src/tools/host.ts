@@ -160,7 +160,7 @@ export function createHostTools(core: Core, host: HostPort): Extension {
     async execute(args, api) {
       try {
         const scope = requireAllowed(core, api, "host_command_propose");
-        const result = await host.inspect(args, () => policyRead(core, scope.conversation.id, { tool: "host_command_propose", target: { kind: "mac", id: null }, access: "read", reversible: true, external: false, amount: null }, api.callId));
+        const result = await host.inspect(args, () => policyRead(core, scope.conversation.id, { tool: "host_command_propose", target: { kind: "mac", id: null }, access: "read", reversible: true, external: false, amount: null }, api));
         if (result !== null) {
           return {
             content: [{ type: "text", text: JSON.stringify(result) }],

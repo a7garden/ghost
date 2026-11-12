@@ -361,12 +361,12 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
           const resumed = await ready(scope);
           notice = [notice, resumed, browser.takeNotice?.(sessionOf(scope))].filter(Boolean).join("\n") || null;
           const readOrigin = !mutation && name !== "browser_open" ? new URL(await currentUrl(scope)).origin : null;
-          if (readOrigin !== null) policyRead(core, scope.conversation.id, { tool: name, target: { kind: "browser_origin", id: readOrigin }, access: "read", reversible: true, external: false, amount: null }, api.callId);
+          if (readOrigin !== null) policyRead(core, scope.conversation.id, { tool: name, target: { kind: "browser_origin", id: readOrigin }, access: "read", reversible: true, external: false, amount: null }, api);
           result = await perform(args, scope, api);
           if (!mutation) {
             const actualOrigin = new URL(await currentUrl(scope)).origin;
             if (readOrigin !== null && readOrigin !== actualOrigin) throw new NoEffect("Browser origin changed during the read; no page content was exposed");
-            policyRead(core, scope.conversation.id, { tool: name, target: { kind: "browser_origin", id: actualOrigin }, access: "read", reversible: true, external: false, amount: null }, api.callId);
+            policyRead(core, scope.conversation.id, { tool: name, target: { kind: "browser_origin", id: actualOrigin }, access: "read", reversible: true, external: false, amount: null }, api);
           }
         } catch (error) {
           result = error instanceof KnownOutcome ? { ...text(error.message), isError: true } : errorResult(error);
@@ -396,7 +396,7 @@ export function createBrowserTools(core: Core, browser: BrowserPort, deps: { vau
     tool("browser_open", Type.Object({ url: bounded(), engine: Type.Optional(Type.Union([Type.Literal("chrome"), Type.Literal("obscura")])) }), false, async (a, s, api) => {
       const url = (await openableUrl(a.url, "url")).href;
       const origin = new URL(url).origin;
-      const authorize = () => policyRead(core, s.conversation.id, { tool: "browser_open", target: { kind: "browser_origin", id: origin }, access: "read", reversible: true, external: false, amount: null }, api.callId);
+      const authorize = () => policyRead(core, s.conversation.id, { tool: "browser_open", target: { kind: "browser_origin", id: origin }, access: "read", reversible: true, external: false, amount: null }, api);
       authorize();
       const data = await command(s, ["open", url], { ...(a.engine ? { engine: a.engine } : {}), authorize });
       const title = data && typeof data === "object" && "title" in data && typeof data.title === "string" ? data.title : "";

@@ -60,7 +60,7 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
     async execute(args, api) {
       try {
         const scope = requireAllowed(core, api, "document_read");
-        policyRead(core, scope.conversation.id, { tool: "document_read", target: { kind: "document_vault", id: args.scope_id }, access: "read", reversible: true, external: false, amount: null }, api.callId);
+        policyRead(core, scope.conversation.id, { tool: "document_read", target: { kind: "document_vault", id: args.scope_id }, access: "read", reversible: true, external: false, amount: null }, api);
         if (args.page_id === undefined && args.locator === undefined) throw invalid("give page_id or locator");
         const page = await documents.readPage(args.scope_id, { pageId: args.page_id, locator: args.locator });
         markPolicyRead(core, scope.conversation.id, { untrustedInput: true, privateData: true });

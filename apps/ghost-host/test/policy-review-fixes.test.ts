@@ -27,18 +27,114 @@ const read = { tool: "web_read", target: { kind: "browser_origin" as const, id: 
 test("read reservations charge once per call and cannot race another read", () => {
   const h = setup();
   h.ledger.tx(() => { for (const old of h.ledger.policyRules()) h.ledger.deletePolicyRule(old.id); h.ledger.putPolicyRule(rule("one-read", "allow", { tool: "web_read", maxPerDay: 1 })); });
-  policyRead(h.core, h.conversationId, read, "first");
-  policyRead(h.core, h.conversationId, read, "first");
-  expect(() => policyRead(h.core, h.conversationId, read, "second")).toThrow("1 a day");
+  policyRead(h.core, h.conversationId, read, { taskId: "task-first", callId: "first" });
+  policyRead(h.core, h.conversationId, read, { taskId: "task-first", callId: "first" });
+  expect(() => policyRead(h.core, h.conversationId, read, { taskId: "task-second", callId: "second" })).toThrow("1 a day");
   const day = new Date(Date.now()).toISOString().slice(0, 10);
   expect(h.ledger.setting<Record<string, number>>(`policy:counts:${day}`, {})["one-read"]).toBe(1);
   expect(h.ledger.effectsInState("done")).toHaveLength(0);
 });
 
+test("a repeated model call id in another Host task is a new read and cannot reuse a reservation", () => {
+  const h = setup();
+  h.ledger.tx(() => { for (const old of h.ledger.policyRules()) h.ledger.deletePolicyRule(old.id); h.ledger.putPolicyRule(rule("one-read", "allow", { tool: "web_read", maxPerDay: 1 })); });
+  policyRead(h.core, h.conversationId, read, { taskId: 41, callId: "call_0" });
+  expect(() => policyRead(h.core, h.conversationId, read, { taskId: 42, callId: "call_0" })).toThrow("1 a day");
+  expect(() => policyRead(h.core, h.conversationId, read, { taskId: undefined, callId: "call_0" })).toThrow("task identity");
+  // A restarted invocation of the same durable task keeps its admitted reservation instead of charging again.
+  policyRead(h.core, h.conversationId, read, { taskId: 41, callId: "call_0" });
+  const day = new Date(Date.now()).toISOString().slice(0, 10);
+  expect(h.ledger.setting<Record<string, number>>(`policy:counts:${day}`, {})["one-read"]).toBe(1);
+});
+
+async function checkedWork(h: ReturnType<typeof setup>, extra: { reviewer?: { kind: "ghost"; ghostId: string } | null } = {}) {
+  const bytes = new TextEncoder().encode("42\n");
+  const ref = await h.artifacts.put(bytes, "answer.txt", "text/plain");
+  const work = h.core.works.createRoot({
+    ghostId: h.ghost.id, title: "Answer", brief: "Write 42", originConversationId: h.conversationId,
+    acceptance: { criteria: "", checks: [{ kind: "artifact_sha256", name: "answer.txt", sha256: ref.digest }], reviewer: extra.reviewer ?? null },
+  });
+  await h.core.idle();
+  h.ledger.tx(() => h.ledger.addArtifact(work.id, ref));
+  return { work, ref };
+}
+
+test("Host-executed checks on the current revision accept without the owner", async () => {
+  const h = setup();
+  const { work, ref } = await checkedWork(h);
+  h.core.works.complete(work.id, { summary: "42", artifacts: [ref] });
+  await h.core.idle();
+  expect(h.ledger.work(work.id)).toMatchObject({ state: "done", verdict: { source: "checks" } });
+  expect(h.ledger.setting<{ pass: boolean; count: number } | null>(`work:checks:${work.id}`, null)).toMatchObject({ pass: true, count: 1 });
+});
+
+test("a check verdict without a fresh Host receipt never self-accepts", async () => {
+  const h = setup();
+  const { work, ref } = await checkedWork(h);
+  h.ledger.tx(() => h.ledger.putWork({ ...h.ledger.work(work.id), state: "verifying", result: { summary: "claimed", artifacts: [ref] } }));
+  h.core.works.applyVerdict(work.id, { outcome: "pass", source: "checks", reasons: "model says checks passed", at: Date.now() });
+  expect(h.ledger.work(work.id).state).toBe("verifying");
+  expect(h.ledger.pendingDecisions({ workId: work.id }).some((decision) => decision.kind === "accept_result")).toBe(true);
+});
+
+test("a Work without checks never qualifies for verified acceptance", async () => {
+  const h = setup();
+  const work = h.core.works.createRoot({ ghostId: h.ghost.id, title: "Free", brief: "No checks", originConversationId: h.conversationId });
+  await h.core.idle();
+  h.ledger.tx(() => h.ledger.putWork({ ...h.ledger.work(work.id), state: "verifying", result: { summary: "done", artifacts: [] } }));
+  h.core.works.applyVerdict(work.id, { outcome: "pass", source: "checks", reasons: "0 check(s) passed.", at: Date.now() });
+  expect(h.ledger.work(work.id).state).toBe("verifying");
+});
+
+test("a receipt from earlier evidence or revision is stale and cannot accept", async () => {
+  const h = setup();
+  const { work, ref } = await checkedWork(h);
+  h.ledger.tx(() => h.ledger.putWork({ ...h.ledger.work(work.id), state: "verifying", result: { summary: "42", artifacts: [ref] } }));
+  h.ledger.tx(() => h.ledger.putSetting(`work:checks:${work.id}`, { pass: true, count: 1, fingerprint: "earlier-revision", at: Date.now() }));
+  h.core.works.applyVerdict(work.id, { outcome: "pass", source: "checks", reasons: "stale", at: Date.now() });
+  expect(h.ledger.work(work.id).state).toBe("verifying");
+});
+
+test("an explicit owner deny or review rule on completion still wins over verified checks", async () => {
+  for (const decision of ["deny", "review"] as const) {
+    const h = setup();
+    h.ledger.tx(() => h.ledger.putPolicyRule(rule(`owner-complete-${decision}`, decision, { tool: "complete", ...(decision === "review" ? { reviewer: { kind: "ghost" as const, ghostId: h.main.id } } : {}) })));
+    const { work, ref } = await checkedWork(h);
+    h.core.works.complete(work.id, { summary: "42", artifacts: [ref] });
+    await h.core.idle();
+    expect(h.ledger.work(work.id).state).not.toBe("done");
+  }
+});
+
+test("a named reviewer remains required after passing checks", async () => {
+  const h = setup();
+  const { work, ref } = await checkedWork(h, { reviewer: { kind: "ghost", ghostId: h.main.id } });
+  h.core.works.complete(work.id, { summary: "42", artifacts: [ref] });
+  await h.core.idle();
+  expect(h.ledger.work(work.id).state).toBe("verifying");
+  expect(h.ledger.conversations({ kind: "review" }).some((conversation) => conversation.workId === work.id && conversation.ghostId === h.main.id)).toBe(true);
+});
+
+test("a command check passes only on a shell receipt bound to the current attempt", async () => {
+  const h = setup();
+  const work = h.core.works.createRoot({
+    ghostId: h.ghost.id, title: "Test", brief: "Run tests", originConversationId: h.conversationId,
+    acceptance: { criteria: "", checks: [{ kind: "command_exit_zero", command: "bun test" }], reviewer: null },
+  });
+  await h.core.idle();
+  const conversationId = h.ledger.work(work.id).conversationId!;
+  await h.core.effects.run({ conversationId, callId: "old-run", tool: "bash", input: { command: "bun test" }, summary: "bun test" }, async () => JSON.stringify({ exitCode: 0, stdout: "", stderr: "" }));
+  const effect = h.ledger.effectByCall(conversationId, "old-run")!;
+  h.ledger.tx(() => h.ledger.putSetting(`effect:work-binding:${effect.id}`, { revision: h.ledger.work(work.id).revision, attempt: h.ledger.work(work.id).revisionsUsed - 1 }));
+  h.core.works.complete(work.id, { summary: "tests ran", artifacts: [] });
+  await h.core.idle();
+  expect(h.ledger.work(work.id).state).not.toBe("done");
+});
+
 test("connection and MCP reads taint private data before a later outward action", () => {
   for (const kind of ["connection", "mcp_server"] as const) {
     const h = setup();
-    policyRead(h.core, h.conversationId, { ...read, tool: `${kind}.read`, target: { kind, id: "account" } }, kind);
+    policyRead(h.core, h.conversationId, { ...read, tool: `${kind}.read`, target: { kind, id: "account" } }, { taskId: `task-${kind}`, callId: kind });
     expect(policyTaint(h.core, h.conversationId)).toEqual({ untrustedInput: true, privateData: true });
     const effect = classifyEffect(h.core, h.conversationId, "browser_upload", null, { target: { kind: "browser_origin", id: "https://8.8.8.8" }, access: "write", reversible: true, external: true, amount: null });
     expect(h.ledger.tx(() => evaluateStoredPolicy(h.core, h.conversationId, effect)).evaluation.decidedBy).toContain("rule-of-two");
@@ -115,11 +211,11 @@ test("helper reads retain the parent's live activity trigger and reject invalid 
     h.ledger.putSetting(`subagent:work:${helper.id}`, work.id);
     h.ledger.putSetting(`subagent:scope:${helper.id}`, work.scopeId);
   });
-  expect(() => policyRead(h.core, helper.id, read, "helper-read")).toThrow("trigger-read-deny");
+  expect(() => policyRead(h.core, helper.id, read, { taskId: "task-helper-read", callId: "helper-read" })).toThrow("trigger-read-deny");
   h.ledger.tx(() => h.ledger.putSetting(`subagent:work:${helper.id}`, "different-work"));
-  expect(() => policyRead(h.core, helper.id, read, "moved-work")).toThrow("binding");
+  expect(() => policyRead(h.core, helper.id, read, { taskId: "task-moved-work", callId: "moved-work" })).toThrow("binding");
   h.ledger.tx(() => h.ledger.putSetting(`subagent:parent:${helper.id}`, h.main.directConversationId));
-  expect(() => policyRead(h.core, helper.id, read, "invalid-parent")).toThrow("provenance");
+  expect(() => policyRead(h.core, helper.id, read, { taskId: "task-invalid-parent", callId: "invalid-parent" })).toThrow("provenance");
 });
 
 test("a decision wake can settle only its bound card and cannot manage Ghosts", async () => {

@@ -141,11 +141,14 @@ export function evaluateStoredPolicy(core: Core, conversationId: string, classif
   return { classification: fresh, evaluation, rulesDigest: digestOf(rules), scopeId, ghostId: conversation.ghostId, day, reserved, positions };
 }
 
-export function policyRead(core: Core, conversationId: string, classification: EffectClass | (ObservedEffect & { tool: string }), callId: string): void {
+/** Host-owned identity of one tool invocation: the durable task id; the model-emitted call id alone is never trusted. */
+export type ReadCall = { readonly taskId: unknown; readonly callId: string };
+
+export function policyRead(core: Core, conversationId: string, classification: EffectClass | (ObservedEffect & { tool: string }), call: ReadCall): void {
   if (classification.access !== "read") throw forbidden("read admission requires a Host-observed read");
-  if (!callId) throw forbidden("Read admission requires its logical Host call id");
+  if (call.taskId === undefined || call.taskId === null || String(call.taskId) === "" || !call.callId) throw forbidden("Read admission requires its Host task identity and call id");
   core.ledger.tx(() => {
-    const key = `policy:read:${conversationId}:${callId}:${classification.tool}`;
+    const key = `policy:read:${conversationId}:${String(call.taskId)}:${call.callId}:${classification.tool}`;
     const prior = core.ledger.setting<PolicyReceipt | null>(key, null);
     const receipt = evaluateStoredPolicy(core, conversationId, classifyEffect(core, conversationId, classification.tool, null, classification), prior ?? undefined, true);
     if (receipt.evaluation.decision !== "allow") throw forbidden(receipt.evaluation.reason);
