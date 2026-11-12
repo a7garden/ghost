@@ -141,7 +141,7 @@ export class HostExecutionEnv extends NodeExecutionEnv {
       if (root !== undefined) return { env: this.confinedEnv(real, [root]), host: real };
     }
     // System and toolchain reads stay on the unrestricted base: they are read-only locations.
-    return { env: this, host: real };
+    return { env: this.base, host: real };
   }
 
   private confinedEnv(real: string, roots: string[]): NodeExecutionEnv {
@@ -491,12 +491,12 @@ export class HostExecutionEnv extends NodeExecutionEnv {
           // No inherited tokens, provider keys, BASH_ENV or startup-file configuration.
           // Explicit per-call values are permitted: the boundary (or full PC authority) still holds.
           env: {
-            ...(this.boundary === null ? {} : this.boundaryProcessEnv()),
             PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
             HOME: homedir(),
             LANG: "en_US.UTF-8",
             TMPDIR: ensureTempRoot(this.staging.hostRoot),
             ...options?.env,
+            ...(this.boundary === null ? {} : this.boundaryProcessEnv()),
           },
         });
       } catch (error) {
@@ -536,8 +536,8 @@ export class HostExecutionEnv extends NodeExecutionEnv {
    * The environment every confined command runs with: a private HOME and TMPDIR inside the Work's
    * own scratch (no dotfiles appear in the workspace or the owner's home), caches redirected
    * there, toolchain homes still read from the real home, git identity from the owner's global
-   * config, background git maintenance off, and the egress proxy as the only network. These are
-   * defaults: per-call `options.env` still overrides them, and the kernel boundary holds either way.
+   * config, background git maintenance off, and the egress proxy as the only network. These
+   * protected settings override per-call `options.env`; the kernel boundary still holds.
    */
   private boundaryProcessEnv(): Record<string, string> {
     const temp = ensureTempRoot(this.staging.hostRoot);
@@ -565,11 +565,9 @@ export class HostExecutionEnv extends NodeExecutionEnv {
       GIT_CONFIG_VALUE_0: "0",
       GIT_CONFIG_KEY_1: "maintenance.auto",
       GIT_CONFIG_VALUE_1: "false",
-      ...(proxyUrl === null ? {} : {
-        HTTP_PROXY: proxyUrl, HTTPS_PROXY: proxyUrl, ALL_PROXY: proxyUrl,
-        http_proxy: proxyUrl, https_proxy: proxyUrl, all_proxy: proxyUrl,
-        no_proxy: "", NO_PROXY: "",
-      }),
+      HTTP_PROXY: proxyUrl ?? "", HTTPS_PROXY: proxyUrl ?? "", ALL_PROXY: proxyUrl ?? "",
+      http_proxy: proxyUrl ?? "", https_proxy: proxyUrl ?? "", all_proxy: proxyUrl ?? "",
+      no_proxy: "", NO_PROXY: "",
       ...this.options.extraProcessEnv,
     };
   }

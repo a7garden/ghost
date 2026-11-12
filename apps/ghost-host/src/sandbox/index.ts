@@ -14,7 +14,7 @@ import { CLI_TIMEOUT_MS, ContainerDriver, listContainers, runCli, type Container
 import { buildSeatbeltPolicy, realBelow } from "./seatbelt.ts";
 import { confineDirChain, readFileNoFollow, WorkspaceEnv, writeFileNoFollow } from "./workspace-env.ts";
 import { HostExecutionEnv, HostMutationQueue, validateExecutionTarget } from "./host-env.ts";
-import { ensureWorktree, repositoryOf, worktreeBranch } from "./worktree.ts";
+import { ensureWorktree, repositoryOf, verifiedWorktree, worktreeBranch } from "./worktree.ts";
 
 export { validateExecutionTarget } from "./host-env.ts";
 
@@ -206,18 +206,9 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     readRoots: string[];
     git: { objects: string; refs: string[] } | null;
   } => {
-    const repo = work.execution?.kind === "workspace" && work.execution.worktree === false
-      ? null
-      : ensureWorktree(config.root, work, cwd);
-    if (repo === null) return { cwd, writeRoots: [], readRoots: [cwd], git: null };
-    const gitDir = (...flags: string[]) => {
-      const child = Bun.spawnSync(["git", "-C", repo, "rev-parse", ...flags], { stdout: "pipe", stderr: "pipe" });
-      const path = child.stdout.toString().trim();
-      if (child.exitCode !== 0 || !isAbsolute(path)) throw new Error(`sandbox: git worktree metadata failed: ${child.stderr.toString().slice(0, 256)}`);
-      return realpathSync(path);
-    };
-    const admin = gitDir("--absolute-git-dir");
-    const common = gitDir("--path-format=absolute", "--git-common-dir");
+    if (work.execution?.kind === "workspace" && work.execution.worktree === false)
+      return { cwd, writeRoots: [], readRoots: [cwd], git: null };
+    const { path: repo, admin, common } = verifiedWorktree(config.root, work, cwd);
     return {
       cwd: repo,
       writeRoots: [repo, admin],
@@ -291,19 +282,20 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     const roots = readRoots();
     const extra: Record<string, string> = { GHOST_REVIEWED_WORKSPACE: realWorkspace };
     if (existsSync(join(worktree, ".git"))) {
-      const real = realpathSync(worktree);
+      const target = work.execution;
+      if (!target || target.kind === "container" || target.cwd === undefined)
+        throw new Error("sandbox: reviewed worktree has no recorded repository target");
+      const { path: real, common } = verifiedWorktree(config.root, work, target.cwd);
       viewRoots.push(real);
       extra.GHOST_REVIEWED_WORKTREE = real;
-      const child = Bun.spawnSync(["git", "-C", real, "rev-parse", "--path-format=absolute", "--git-common-dir"], { stdout: "pipe", stderr: "ignore" });
-      const common = child.stdout.toString().trim();
-      if (child.exitCode === 0 && isAbsolute(common)) roots.push(realpathSync(common));
+      roots.push(common);
     }
     const env = new HostExecutionEnv({
       cwd: reviewDir,
       workspace: reviewDir,
       id: `ghost-review:${conversationId}`,
       mutations: queueFor(`review:${conversationId}`),
-      deadlineAt: work.deadlineAt,
+      deadlineAt: null,
       extraProcessEnv: extra,
       boundary: buildSeatbeltPolicy(homedir(), config.root, {
         writeRoots: [reviewDir],

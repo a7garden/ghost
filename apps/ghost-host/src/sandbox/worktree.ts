@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { Work } from "@ghost/contract";
+import { readFileNoFollow } from "./workspace-env.ts";
 
 /** Branch of a Work's worktree. Work ids are host-generated, so the name needs no escaping. */
 export const worktreeBranch = (workId: string) => `ghost/${workId}`;
@@ -35,4 +36,37 @@ export function ensureWorktree(root: string, work: Work, cwd: string): string {
   const added = hasBranch ? git(repo, ["worktree", "add", path, branch]) : git(repo, ["worktree", "add", "-b", branch, path, base]);
   if (!added.ok) throw new Error(`git worktree add failed: ${added.stderr.slice(0, 512)}`);
   return realpathSync(path);
+}
+
+/**
+ * Derive privileged git paths from the owner's checkout, never the Work-writable `.git` file.
+ * Validate both sides of the worktree link and its branch before granting any metadata writes.
+ */
+export function verifiedWorktree(root: string, work: Work, ownerCwd: string): { path: string; admin: string; common: string } {
+  const owner = repositoryOf(ownerCwd);
+  const found = git(owner, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (!found.ok || !found.stdout.startsWith("/")) throw new Error("sandbox: cannot establish the owner's git common directory");
+  const common = realpathSync(found.stdout);
+  const path = join(realpathSync(root), "worktrees", work.ghostId, work.id);
+  const admin = join(common, "worktrees", work.id);
+  const refuse = () => { throw new Error("sandbox: refusing tampered worktree metadata, identity or branch"); };
+  ensureWorktree(root, work, ownerCwd);
+  if (realpathSync(path) !== path || realpathSync(admin) !== admin) refuse();
+  const metadata = (file: string): string => readFileNoFollow(file).toString("utf8").trim();
+  const link = metadata(join(path, ".git"));
+  if (!link.startsWith("gitdir: ") || resolve(path, link.slice(8)) !== admin) refuse();
+  if (resolve(admin, metadata(join(admin, "commondir"))) !== common) refuse();
+  if (resolve(admin, metadata(join(admin, "gitdir"))) !== join(path, ".git")) refuse();
+  if (metadata(join(admin, "HEAD")) !== `ref: refs/heads/${worktreeBranch(work.id)}`) refuse();
+  // Policy normalization resolves symlinks: none of the plumbing paths may redirect a grant.
+  const branch = worktreeBranch(work.id);
+  for (const relative of ["objects", `refs/heads/${branch}`, `logs/refs/heads/${branch}`]) {
+    let current = join(common, relative);
+    while (current !== common) {
+      const info = lstatSync(current, { throwIfNoEntry: false });
+      if (info?.isSymbolicLink()) refuse();
+      current = dirname(current);
+    }
+  }
+  return { path, admin, common };
 }

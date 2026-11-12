@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -160,4 +160,96 @@ describe.skipIf(!darwin)("workspace execution boundary", () => {
     const scratch = await shell(reviewer, "printf note > notes.txt && cat notes.txt");
     expect(scratch.exitCode).toBe(0);
   });
+
+  test("file tools can read system files without recursive environment dispatch", async () => {
+    const f = fixture();
+    const env = await f.sandbox.envFor(f.work({ kind: "workspace" }));
+    const read = await env.readTextFile("/etc/hosts", context);
+    if (!read.ok) throw read.error;
+    expect(read.value).toBe(readFileSync("/etc/hosts", "utf8"));
+    const info = await env.fileInfo("/usr/bin/true", context);
+    expect(info.ok).toBe(true);
+    const binary = await env.readBinaryFile("/usr/bin/true", context);
+    if (!binary.ok) throw binary.error;
+    expect(Buffer.from(binary.value)).toEqual(readFileSync("/usr/bin/true"));
+  });
+
+  test("commands use private HOME and TMPDIR and cannot override protected proxy variables", async () => {
+    const f = fixture();
+    const work = f.work({ kind: "workspace" });
+    const env = await f.sandbox.envFor(work);
+    const workspace = realpathSync(f.sandbox.workspacePath(work));
+    const command = `python3 -c 'import json,os; print(json.dumps(dict(os.environ)))'`;
+    const normal = await shell(env, command);
+    expect(normal.exitCode).toBe(0);
+    const actual = JSON.parse(normal.stdout);
+    expect(actual.HOME).toBe(join(workspace, ".ghost-tmp", "home"));
+    expect(actual.TMPDIR).toBe(join(workspace, ".ghost-tmp"));
+    expect(actual.HTTP_PROXY).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    let output = "";
+    const attempted = await env.exec(command, {
+      timeout: 60,
+      env: {
+        HOME: "/tmp", TMPDIR: "/tmp", HTTP_PROXY: "http://attacker.invalid",
+        HTTPS_PROXY: "http://attacker.invalid", ALL_PROXY: "http://attacker.invalid",
+        http_proxy: "http://attacker.invalid", https_proxy: "http://attacker.invalid",
+        all_proxy: "http://attacker.invalid", NO_PROXY: "*", no_proxy: "*",
+        WORK_TEST_VALUE: "per-call value",
+      },
+      onOutput: (chunk, _ctx, info) => { if (info.stream === "stdout") output += chunk; },
+    }, context);
+    if (!attempted.ok) throw attempted.error;
+    expect(attempted.value.exitCode).toBe(0);
+    const protectedEnv = JSON.parse(output);
+    for (const key of ["HOME", "TMPDIR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NO_PROXY", "no_proxy"])
+      expect(protectedEnv[key]).toBe(actual[key]);
+    expect(protectedEnv.WORK_TEST_VALUE).toBe("per-call value");
+  });
+
+  test("a review can run after the reviewed Work's execution deadline", async () => {
+    const f = fixture();
+    const work = f.work({ kind: "workspace" });
+    work.deadlineAt = Date.now() - 60_000;
+    const reviewer = f.sandbox.reviewEnvFor!(work, "late-review");
+    const result = await shell(reviewer, "printf reviewed > check.txt && cat check.txt");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("reviewed");
+  });
+
+  test.each(["gitfile", "admin symlink", "commondir", "gitdir", "branch", "worktree symlink"])(
+    "refuses tampered worktree metadata before granting writes: %s",
+    async (tampering) => {
+      const f = fixture();
+      const owner = join(f.projects, "owner");
+      mkdirSync(owner);
+      const git = (args: string[]) => {
+        const result = Bun.spawnSync(["git", "-C", owner, ...args], { stdout: "pipe", stderr: "pipe" });
+        if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+        return result.stdout.toString().trim();
+      };
+      git(["init", "-q"]);
+      writeFileSync(join(owner, "README"), "owner\n");
+      git(["add", "."]);
+      git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "initial"]);
+      const work = f.work({ kind: "workspace", cwd: owner });
+      const first = await f.sandbox.envFor(work);
+      await first.cleanup(BACKGROUND_CONTEXT);
+      const checkout = join(f.state, "worktrees", work.ghostId, work.id);
+      const common = join(owner, ".git");
+      const admin = join(common, "worktrees", work.id);
+      if (tampering === "gitfile") writeFileSync(join(checkout, ".git"), `gitdir: ${common}\n`);
+      else if (tampering === "commondir") writeFileSync(join(admin, "commondir"), owner);
+      else if (tampering === "gitdir") writeFileSync(join(admin, "gitdir"), join(owner, ".git"));
+      else if (tampering === "branch") writeFileSync(join(admin, "HEAD"), "ref: refs/heads/main\n");
+      else if (tampering === "admin symlink") {
+        rmSync(admin, { recursive: true });
+        symlinkSync(common, admin);
+      } else {
+        rmSync(checkout, { recursive: true });
+        symlinkSync(owner, checkout);
+      }
+      await expect(f.sandbox.envFor(work)).rejects.toThrow();
+      expect(readFileSync(join(owner, "README"), "utf8")).toBe("owner\n");
+    },
+  );
 });
