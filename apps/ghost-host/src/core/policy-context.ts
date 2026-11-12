@@ -97,7 +97,8 @@ export function classifyEffect(core: Core, conversationId: string, tool: string,
   if (["write", "edit", "publish_artifact"].includes(tool)) facts = { ...facts, target: { kind: work?.execution?.kind === "host" ? "mac" : "workspace", id: work?.id ?? null }, external: false, reversible: true };
   // File changes stay in the Work's workspace. A shell that reaches the egress proxy (or an unconfined local shell) can
   // send, so it is external and Rule of Two / activity external-write rules apply; a network-none container cannot.
-  // Without the sandbox port, only an explicit workspace target is assumed networked (the default target is the container).
+  // New Works default to the networked workspace target. Without the sandbox port, only an explicit container target or a
+  // legacy target-less Work (older Hosts ran those in the container) is assumed isolated.
   if (tool === "bash" && work && work.execution?.kind !== "host") {
     const egress = core.sandbox.shellEgress ? core.sandbox.shellEgress(work) : work.execution?.kind === "workspace";
     facts = { ...facts, target: { kind: "workspace", id: work.id }, external: egress, reversible: true };

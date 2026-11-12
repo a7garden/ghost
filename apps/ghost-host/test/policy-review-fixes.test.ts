@@ -431,8 +431,8 @@ test("a workspace shell reaches the egress proxy, so it is external and Rule of 
 
 test("a network-none container shell is not external, so taint alone does not send it to the owner", async () => {
   const h = setup();
-  for (const execution of [{ kind: "container" as const }, undefined]) {
-    const work = h.core.works.createRoot({ ghostId: h.ghost.id, title: "Encode", brief: "Run ffmpeg", originConversationId: h.conversationId, ...(execution ? { execution } : {}) });
+  {
+    const work = h.core.works.createRoot({ ghostId: h.ghost.id, title: "Encode", brief: "Run ffmpeg", originConversationId: h.conversationId, execution: { kind: "container" } });
     await h.core.idle();
     const conversationId = h.ledger.work(work.id).conversationId!;
     h.ledger.tx(() => h.ledger.putSetting(`policy:taint:${conversationId}`, { untrustedInput: true, privateData: true }));
@@ -442,9 +442,17 @@ test("a network-none container shell is not external, so taint alone does not se
   }
 });
 
-test("the sandbox port decides shell egress when present", async () => {
+test("a Work without an explicit target runs in the networked workspace, so its shell is external", async () => {
   const h = setup();
   const work = h.core.works.createRoot({ ghostId: h.ghost.id, title: "Encode", brief: "Run ffmpeg", originConversationId: h.conversationId });
+  await h.core.idle();
+  expect(h.ledger.work(work.id).execution).toEqual({ kind: "workspace" });
+  expect(classifyEffect(h.core, h.ledger.work(work.id).conversationId!, "bash", { command: "ls" }).external).toBe(true);
+});
+
+test("the sandbox port decides shell egress when present", async () => {
+  const h = setup();
+  const work = h.core.works.createRoot({ ghostId: h.ghost.id, title: "Encode", brief: "Run ffmpeg", originConversationId: h.conversationId, execution: { kind: "container" } });
   await h.core.idle();
   const conversationId = h.ledger.work(work.id).conversationId!;
   // Replace this Core's port object only; the harness sandbox is shared by every test.
@@ -497,13 +505,14 @@ test("a resumed attempt never revives approvals or receipts from an earlier atte
   const h = setup();
   const { work, effect, decision } = await pendingCommand(h, "stale-attempt");
   const before = h.ledger.work(work.id);
+  const beforeIdentity = workExecutionIdentity(h.ledger, before);
   // Two revisions, then failure; resume restarts revisionsUsed at 0, the attempt the approval was bound to.
   h.ledger.tx(() => h.ledger.putWork({ ...h.ledger.work(work.id), revisionsUsed: 2 }));
   h.ledger.tx(() => h.ledger.putWork({ ...h.ledger.work(work.id), state: "failed", reason: "exhausted", endedAt: Date.now() }));
   h.core.works.resume(work.id);
   const after = h.ledger.work(work.id);
   expect(after.revisionsUsed).toBe(before.revisionsUsed);
-  expect(workExecutionIdentity(h.ledger, after)).not.toBe(workExecutionIdentity(h.ledger, before));
+  expect(workExecutionIdentity(h.ledger, after)).not.toBe(beforeIdentity);
   await h.core.decisions.resolve(decision.id, { outcome: "approve" });
   expect(h.ledger.effect(effect.id).state).toBe("denied");
   // A second resume is yet another attempt.
