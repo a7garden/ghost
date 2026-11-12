@@ -145,6 +145,11 @@ describe("connection configuration revisions", () => {
   });
 });
 
+async function approveRecordedEffect(core: Core, effectId: string) {
+  const decision = core.ledger.pendingDecisions({ effectId }).find((entry) => entry.kind === "approve_effect");
+  if (decision) core.decisions.resolveState(decision.id, { outcome: "approve" });
+  await core.effects.resolveApproval(effectId, true);
+}
 describe("durable activity admission", () => {
   test("activity admission and delegated children retain scope and its goal boundaries", async () => {
     const f = fixture();
@@ -546,8 +551,8 @@ describe("activity authority and delivery", () => {
       if (change === "activity") f.activities.update(activity.id, activity.revision, { ...f.config, prompt: "Different task" });
       if (change === "work") f.core.works.update(run.workId!, { brief: "Changed work" });
       if (change === "cancel") f.core.works.cancel(run.workId!);
-      // resolveApproval is the public effect boundary also used by decision follow-up.
-      await f.core.effects.resolveApproval(decision.effectId!, true);
+      // Approval is committed before the effect follow-up; cancelled cards cannot be reopened.
+      await approveRecordedEffect(f.core, decision.effectId!);
       expect(f.source.actions).toHaveLength(0);
       expect(f.ledger.effect(decision.effectId!).state).toBe("denied");
     }
@@ -643,8 +648,8 @@ describe("activity authority and delivery", () => {
       expect(f.ledger.work(run.workId!).state).toBe("waiting");
       if (outcome === "unknown") f.source.failAction = true;
       else f.core.works.cancel(run.workId!);
-      await f.core.effects.resolveApproval(decision.effectId!, true);
-      await f.core.effects.resolveApproval(decision.effectId!, true);
+      await approveRecordedEffect(f.core, decision.effectId!);
+      await approveRecordedEffect(f.core, decision.effectId!);
       await f.core.idle();
       expect(f.ledger.work(run.workId!).state).toBe(outcome === "unknown" ? "blocked" : "cancelled");
       expect(f.ledger.effect(decision.effectId!).state).toBe(outcome === "unknown" ? "unknown" : "denied");
@@ -756,12 +761,13 @@ describe("activity authority and delivery", () => {
       await f.core.idle();
       let changedWork = f.ledger.work(run.workId!);
       if (descendant) {
-        const helper = f.core.createGhost({ name: "Mutating helper", persona: "Perform the approved subtask.", tools: ["read"] });
-        changedWork = f.core.works.delegate(changedWork.id, { ghostId: helper.id, title: "Subtask", brief: "Return evidence.", toolScope: ["read"] });
+        const helper = f.core.createGhost({ name: "Mutating helper", persona: "Perform the approved subtask.", tools: ["read", "write"] });
+        changedWork = f.core.works.delegate(changedWork.id, { ghostId: helper.id, title: "Subtask", brief: "Return evidence.", toolScope: ["read", "write"] });
         await f.core.idle();
         changedWork = f.ledger.work(changedWork.id);
       }
-      await f.core.effects.run({ conversationId: changedWork.conversationId!, callId: "mutation", tool: descendant ? "write" : "activity_action", input: { body: "changed" }, summary: "A real mutation was completed" }, async () => "changed");
+      await f.core.effects.run({ conversationId: changedWork.conversationId!, callId: "mutation", tool: "write", input: { path: "result.txt", content: "changed" }, summary: "A real workspace mutation was completed",
+        classification: { target: { kind: "workspace", id: changedWork.id }, access: "write", reversible: true, external: false, amount: null } }, async () => "changed");
       if (descendant) await accept(f.core, changedWork.id);
       await accept(f.core, run.workId!);
       expect(f.activities.settled(f.ledger.work(run.workId!))).toEqual({ notify: true });

@@ -576,6 +576,16 @@ export class Activities {
     if (activity.source.kind === "schedule" || activity.source.kind === "commit" || activity.source.kind === "poll" || !run.sourceItem) throw forbidden("this run has no bound source action target");
     if ((action.kind === "mail_reply") !== (activity.source.kind === "mail")) throw forbidden("action does not match this run's source");
     const connection = this.ledger.connection(activity.source.connectionId);
+    let origin: ActivityRun = run;
+    const lineage = new Set<string>();
+    while (origin.followupOf) {
+      if (lineage.has(origin.id)) throw forbidden("source run lineage is invalid");
+      lineage.add(origin.id);
+      const parent: ActivityRun | null = this.ledger.findActivityRun(origin.followupOf);
+      if (!parent || parent.activityId !== activity.id) throw forbidden("source run lineage is invalid");
+      origin = parent;
+    }
+    if (!origin.sourceItem || origin.sourceKey !== this.sourceKey(activity, origin.sourceItem)) throw forbidden("the bound source account or credential authority changed");
     if (action.kind === "mail_reply") {
       if (!run.sourceItem.target.replyTo) throw forbidden("this source email has no safe reply mailbox");
       if (connection.config.kind !== "mail" || !connection.config.smtpHost) throw forbidden("mail replies require configured SMTP; read-only triage is still available");
@@ -607,6 +617,14 @@ export class Activities {
     const proposal = this.core.effects.propose({ ...effect,
       classification: { target: { kind: action.kind === "mail_reply" ? "mail_account" : "connection", id: bound.connection.id }, access: "write", reversible: false, external: true, amount: null },
       title: `${verb}: ${item.title}`.slice(0, 200), detail: `- 보내는 계정: ${account}\n- 받는 곳: ${destination.replace("\nURL: ", " · ")}\n- 원본: ${item.title}\n\n**보낼 본문**\n\n${action.body}`, proposal: input });
+    const policy = this.ledger.setting<{ evaluation: { decision: string } } | null>(`policy:effect:${proposal.id}`, null);
+    if (policy?.evaluation.decision === "allow") {
+      await this.core.effects.resolveApproval(proposal.id, true);
+      const settled = this.ledger.effect(proposal.id);
+      if (settled.state === "unknown") throw conflict(settled.result ?? "The external action outcome is unknown; reconcile it before retrying.");
+      if (settled.state === "denied") throw forbidden(settled.result ?? "The action was denied before it ran.");
+      if (settled.state === "done" && settled.result !== null) return settled.result;
+    }
     return this.core.effects.proposalStatus(proposal);
   }
 
