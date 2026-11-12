@@ -148,6 +148,41 @@ export class Ledger {
       const scopeId = references.find(ref => this.db.query("SELECT 1 FROM scopes WHERE id=?").get(ref.id))?.id ?? null;
       this.db.query("UPDATE works SET brief=?, scope_id=?, scope_references=? WHERE id=?").run(row.brief.slice(end + suffix.length), scopeId, JSON.stringify(references), row.id);
     }
+    // Old retained events must project the same contract as the post-migration snapshot.
+    for (const row of this.db.query("SELECT seq,data FROM events").all() as { seq: number; data: string }[]) {
+      const event = JSON.parse(row.data);
+      if (event.type === "space" && event.space) {
+        const old = event.space;
+        event.type = "scope";
+        event.scope = { id: old.id, name: old.name, ghostId: null, paths: [old.path], vaultPath: old.path, state: "active", attachments: [], limits: {}, createdAt: old.createdAt, updatedAt: old.createdAt };
+        delete event.space;
+      } else if (event.type === "space.removed") event.type = "scope.removed";
+      else if (event.type === "ghost" && event.ghost) {
+        event.ghost.attachments ??= [];
+        event.ghost.tools = event.ghost.tools?.map((tool: string) => tool === "document_spaces" ? "document_scopes" : tool) ?? [];
+      } else if (event.type === "work" && event.work) {
+        const work = event.work;
+        work.scopeId ??= null; work.attachments ??= []; work.slot ??= null; work.retry ??= null;
+        work.budgetMinutes ??= 90; work.budgetUsedMs ??= 0; work.budgetSince ??= null; work.budgetExtended ??= false; work.hold ??= null;
+        if (typeof work.brief === "string" && work.brief.startsWith(prefix)) {
+          const newline = work.brief.indexOf("\n");
+          if (newline >= 0 && work.brief.slice(newline).startsWith(suffix)) {
+            try {
+              const refs = JSON.parse(work.brief.slice(prefix.length, newline));
+              if (Array.isArray(refs) && refs.length > 0 && refs.length <= 8 && refs.every(ref => typeof ref?.spaceId === "string" && typeof ref?.name === "string")) {
+                work.scopeReferences = refs.map(ref => ({ id: ref.spaceId, name: ref.name }));
+                work.scopeId = work.scopeReferences.find((ref: { id: string }) => this.db.query("SELECT 1 FROM scopes WHERE id=?").get(ref.id))?.id ?? null;
+                work.brief = work.brief.slice(newline + suffix.length);
+              }
+            } catch { /* A literal owner brief is not metadata. */ }
+          }
+        }
+        if (Array.isArray(work.toolScope)) work.toolScope = work.toolScope.map((tool: string) => tool === "document_spaces" ? "document_scopes" : tool);
+      } else if (event.type === "activity" && event.activity) event.activity.scopeId ??= null;
+      else if (event.type === "goal" && event.goal) event.goal.scopeId ??= null;
+      else if (event.type === "milestone" && event.milestone) event.milestone.scopeId ??= null;
+      this.db.query("UPDATE events SET data=? WHERE seq=?").run(JSON.stringify(event), row.seq);
+    }
   }
 
   /** Run synchronous `fn` atomically. Nested calls join the outer transaction. */

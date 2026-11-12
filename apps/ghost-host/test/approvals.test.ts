@@ -30,7 +30,7 @@ function newPage(t: { core: Core; mate: Ghost }, id = "new-page") {
   return t.core.ledger.tx(() => t.core.decisions.open({
     id, kind: "document_review", ghostId: t.mate.id, conversationId: t.mate.directConversationId,
     workId: null, effectId: null, title: "New page", detail: "A new page for the project.", options: [],
-    proposal: { spaceId: "space", title: "Plan", body: "The plan.", pageId: null, expectedHash: null },
+    proposal: { scopeId: "scope", title: "Plan", body: "The plan.", pageId: null, expectedHash: null },
   }));
 }
 

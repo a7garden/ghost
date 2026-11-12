@@ -5,7 +5,7 @@ import type { PageSummary, Scope } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { routeLabels } from '../uiText';
-import { noteSpaceEdit, spaceLastEdit } from './spacePages';
+import { noteScopeEdit, scopeLastEdit } from './scopePages';
 import { useNow } from './time';
 import { Modal } from '../components/Modal';
 import { HandoffComposer } from '../components/HandoffComposer';
@@ -93,7 +93,7 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
     };
     return <Page width="reading">
       <div className="grid gap-10">
-        <ProjectHeader space={space} total={total} lastEditAt={spaceLastEdit(space.id)} now={now} disabled={pending !== ''}
+        <ProjectHeader space={space} total={total} lastEditAt={scopeLastEdit(space.id)} now={now} disabled={pending !== ''}
           onRename={async name => { await client.send({ type: 'scope.update', scopeId: space.id, name }); }}/>
         <div className="flex flex-wrap gap-2">
           <Button type="button" className="min-h-11" disabled={!main} onClick={() => navigate(`/ghosts/${encodeURIComponent(main!.id)}?scope=${encodeURIComponent(space.id)}`)}>
@@ -123,7 +123,7 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
       </Modal>}
       {open && <Suspense fallback={<Modal title={open.pageId ? '문서' : '새 문서'} onClose={() => setOpen(undefined)} drawer focusClose><p className="m-0 text-ui text-ink-2" role="status">편집기를 불러오는 중…</p></Modal>}>
         <PageEditorDrawer scopeId={space.id} pageId={open.pageId} onClose={() => setOpen(undefined)}
-          onSaved={() => { noteSpaceEdit(space.id); setReload(value => value + 1); }}/>
+          onSaved={() => { noteScopeEdit(space.id); setReload(value => value + 1); }}/>
       </Suspense>}
     </Page>;
   }

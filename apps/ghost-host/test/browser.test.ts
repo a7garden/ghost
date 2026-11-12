@@ -745,7 +745,7 @@ describe("browser tools", () => {
       expect((await f.call("browser_download", { ref: "@e1", name: "file.txt" }, "pi-work")).isError).toBe(true);
     } finally { await f.browser.shutdown(); }
   });
-  test("dangerous names require a proposal for click or focused Enter/Space", async () => {
+  test("dangerous names require a proposal for click or focused Enter/Scope", async () => {
     const f = fixture();
     try {
       expect((await f.call("browser_open", { url: "https://example.com/" })).isError).toBeFalsy();
@@ -757,7 +757,7 @@ describe("browser tools", () => {
       }
       await f.call("browser_fill", { ref: "@e1", text: "message" });
       await f.call("browser_tabs", { action: "list" });
-      for (const key of ["Enter", "Space", "Control+Enter", "Shift+Space"]) expect((await f.call("browser_press", { key })).isError).toBe(true);
+      for (const key of ["Enter", "Scope", "Control+Enter", "Shift+Scope"]) expect((await f.call("browser_press", { key })).isError).toBe(true);
       writeFileSync(join(f.root, "snapshot"), JSON.stringify(snapshotFixture("textbox", "Comment")));
       await f.call("browser_snapshot"); await f.call("browser_fill", { ref: "@e1", text: "message" });
       writeFileSync(join(f.root, "snapshot"), JSON.stringify(snapshotFixture("textbox", "Send")));

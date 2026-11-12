@@ -147,9 +147,9 @@ describe("API command crash atomicity", () => {
     mkdirSync(vault);
     const first = harness(path);
     const ghost = first.core.createGhost({ name: "Owner", persona: "" });
-    first.ledger.tx(() => first.ledger.putSpace({ id: "space", name: "Docs", path: vault, createdAt: Date.now() }));
+    first.ledger.tx(() => first.ledger.putScope({ id: "scope", name: "Docs", paths: [vault], vaultPath: vault, createdAt: Date.now() , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
     await first.core.idle();
-    const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "document.save", spaceId: "space", title: "Once", body: "Durable\n", pageId: null, expectedHash: null } };
+    const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "document.save", scopeId: "scope", title: "Once", body: "Durable\n", pageId: null, expectedHash: null } };
     // Permit the pending identity, fail only the final success receipt.
     first.ledger.db.exec(`CREATE TRIGGER reject_receipt BEFORE INSERT ON requests WHEN NEW.id = '${request.requestId}' AND NEW.state = 'done' BEGIN SELECT RAISE(ABORT, 'receipt fault'); END;`);
     await expect(execute(first.core, new Access(owner), request, { ...context, documents: createDocuments(first.core) })).rejects.toThrow("receipt fault");
@@ -163,7 +163,7 @@ describe("API command crash atomicity", () => {
     const result = await execute(restarted.core, new Access(owner), request, { ...context, documents: createDocuments(restarted.core) });
     expect(saved.result).toBe(`api-result:${JSON.stringify(result)}`);
     expect(readdirSync(vault).filter((name) => name.endsWith(".md"))).toHaveLength(1);
-    expect((await createDocuments(restarted.core).readPage("space", { pageId: result.pageId as string })).body).toBe("Durable\n");
+    expect((await createDocuments(restarted.core).readPage("scope", { pageId: result.pageId as string })).body).toBe("Durable\n");
     restarted.core.stop();
     restarted.ledger.close();
   });
@@ -175,11 +175,11 @@ describe("API command crash atomicity", () => {
     mkdirSync(vault);
     const first = harness(path);
     const ghost = first.core.createGhost({ name: "Owner", persona: "" });
-    first.ledger.tx(() => first.ledger.putSpace({ id: "space", name: "Docs", path: vault, createdAt: Date.now() }));
+    first.ledger.tx(() => first.ledger.putScope({ id: "scope", name: "Docs", paths: [vault], vaultPath: vault, createdAt: Date.now() , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
     await first.core.idle();
     first.core.stop();
     first.ledger.close();
-    const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "document.save", spaceId: "space", title: "Unknown", body: "Body", pageId: null, expectedHash: null } };
+    const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "document.save", scopeId: "scope", title: "Unknown", body: "Body", pageId: null, expectedHash: null } };
     const child = Bun.spawn([process.execPath, "--eval", `
       import { harness } from ${source("./support.ts")};
       import { Access } from ${source("../src/core/access.ts")};
@@ -392,7 +392,7 @@ describe("API command crash atomicity", () => {
       const conversationId = ghost.directConversationId;
       ledger.tx(() => {
         ledger.putProvider({ id: "revoked-provider", kind: "openai", name: "Revoked", baseUrl: null, models: [] });
-        ledger.putSpace({ id: "owner-docs", name: "Docs", path: vault, createdAt: Date.now() });
+        ledger.putScope({ id: "owner-docs", name: "Docs", paths: [vault], vaultPath: vault, createdAt: Date.now() , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 });
       });
       secrets.put("revoked-provider", "must-be-revoked");
       core.effects.onApproved("browser_propose", async () => { throw new Error("approval must not execute"); });
@@ -410,7 +410,7 @@ describe("API command crash atomicity", () => {
       const documents = createDocuments(core);
       const saved = await execute(core, access, {
         requestId: crypto.randomUUID(),
-        command: { type: "document.save", spaceId: "owner-docs", title: "Owner note", body: "Saved independently\n", pageId: null, expectedHash: null },
+        command: { type: "document.save", scopeId: "owner-docs", title: "Owner note", body: "Saved independently\n", pageId: null, expectedHash: null },
       }, { ...context, documents });
       expect((await documents.readPage("owner-docs", { pageId: saved.pageId as string })).body).toBe("Saved independently\n");
       await execute(core, access, { requestId: crypto.randomUUID(), command: { type: "sandbox.control", ghostId: ghost.id, action: "reset" } }, context);
@@ -479,8 +479,8 @@ describe("API command crash atomicity", () => {
     const { core, ledger } = harness();
     core.createGhost({ name: "Owner", persona: "" });
     const vault = tempDir();
-    ledger.tx(() => ledger.putSpace({ id: "space", name: "Docs", path: vault, createdAt: Date.now() }));
-    const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "document.save", spaceId: "space", title: "T", body: "Body", pageId: null, expectedHash: null } };
+    ledger.tx(() => ledger.putScope({ id: "scope", name: "Docs", paths: [vault], vaultPath: vault, createdAt: Date.now() , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
+    const request: CommandRequest = { requestId: crypto.randomUUID(), command: { type: "document.save", scopeId: "scope", title: "T", body: "Body", pageId: null, expectedHash: null } };
     const documents = createDocuments(core);
     const check = documents.check.bind(documents);
     documents.check = async () => { throw new Error("temporarily unavailable vault"); };

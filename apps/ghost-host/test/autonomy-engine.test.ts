@@ -296,7 +296,7 @@ test("a read-only activity keeps hostile source data out of instructions and ref
 
 /** Non-executing relatives make the review boundary a subtree, not a Ghost or root-id boundary. */
 function relative(id: string, ghostId: string, originConversationId: string, parentId: string | null = null, rootId = id): Work {
-  return { id, rootId, parentId, ghostId, originConversationId, conversationId: null, title: id, brief: "Private relative Work", acceptance: { criteria: "", checks: [], reviewer: null }, state: "running", revision: 1, revisionsUsed: 0, deadlineAt: null, budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null, result: null, verdict: null, reason: null, createdAt: 1, startedAt: 1, endedAt: null, updatedAt: 1 };
+  return { id, rootId, parentId, ghostId, originConversationId, conversationId: null, title: id, brief: "Private relative Work", acceptance: { criteria: "", checks: [], reviewer: null }, state: "running", revision: 1, revisionsUsed: 0, deadlineAt: null, scopeId: null, attachments: [], slot: null, retry: null, budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null, result: null, verdict: null, reason: null, createdAt: 1, startedAt: 1, endedAt: null, updatedAt: 1 };
 }
 
 test("review evidence is the recorded read, not current PC bytes, and cannot escape the reviewed subtree", async () => {

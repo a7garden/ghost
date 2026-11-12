@@ -283,11 +283,11 @@ describe("PC control tools", () => {
     expect(f.said(await f.call("desktop_keys", { screen_id: /screen_id (\S+):/.exec(f.said(fresh))![1]!, key: "Tab" }))).toContain("used or expired");
   });
 
-  test("focus and launch never bring inaccessible or other-Space windows forward", async () => {
+  test("focus and launch never bring inaccessible or other-Scope windows forward", async () => {
     const f = fixture();
     f.state.windowVisible = false;
-    expect(f.said(await f.call("desktop_focus", { app: "TextEdit", window_id: "w-100" }))).toContain("another Space");
-    expect(f.said(await f.call("desktop_launch", { app: "TextEdit" }))).toContain("another Space");
+    expect(f.said(await f.call("desktop_focus", { app: "TextEdit", window_id: "w-100" }))).toContain("another Scope");
+    expect(f.said(await f.call("desktop_launch", { app: "TextEdit" }))).toContain("another Scope");
     f.state.windowVisible = true; f.state.windowAccessible = false;
     expect(f.said(await f.call("desktop_focus", { app: "TextEdit", window_id: "w-100" }))).toContain("inaccessible");
     expect(f.said(await f.call("desktop_launch", { app: "TextEdit" }))).toContain("inaccessible");
@@ -296,16 +296,16 @@ describe("PC control tools", () => {
     expect(f.said(await f.call("desktop_focus", { app: "TextEdit", window_id: "w-100" }))).toBe("Window focused");
   });
 
-  test("physical input refuses an invisible window before capture and after a captured window changes Space", async () => {
+  test("physical input refuses an invisible window before capture and after a captured window changes Scope", async () => {
     const f = fixture();
     f.state.windowVisible = false;
-    expect(f.said(await f.call("desktop_screenshot", { app: "TextEdit", window_id: "w-100" }))).toContain("another Space");
+    expect(f.said(await f.call("desktop_screenshot", { app: "TextEdit", window_id: "w-100" }))).toContain("another Scope");
     expect(f.calls.some((c) => c.runtime === "geist")).toBe(false);
     f.state.windowVisible = true;
     const capture = await f.call("desktop_screenshot", { app: "TextEdit", window_id: "w-100" });
     const screen_id = /screen_id (\S+):/.exec(f.said(capture))![1]!;
     f.state.windowVisible = false;
-    expect(f.said(await f.call("desktop_pointer", { screen_id, action: "click", x: 10, y: 10 }))).toContain("another Space");
+    expect(f.said(await f.call("desktop_pointer", { screen_id, action: "click", x: 10, y: 10 }))).toContain("another Scope");
     expect(f.calls.some((c) => c.runtime === "geist" && c.argv[0] === "click")).toBe(false);
   });
 

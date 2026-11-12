@@ -218,3 +218,19 @@ export const MemoryDeleteRequest = Type.Object({
   requestId: Id,
 });
 export type MemoryDeleteRequest = Static<typeof MemoryDeleteRequest>;
+
+export const MetricsFilter = Type.Object({
+  scopeId: Type.Optional(nullable(Id)), ghostId: Type.Optional(Id), slot: Type.Optional(Type.String()), ruleId: Type.Optional(Id),
+});
+export type MetricsFilter = Static<typeof MetricsFilter>;
+const MetricRatio = nullable(Type.Number());
+export const MetricsView = Type.Object({
+  filter: MetricsFilter,
+  works: Type.Integer({ minimum: 0 }), completed: Type.Integer({ minimum: 0 }), rejected: Type.Integer({ minimum: 0 }),
+  completionRate: MetricRatio, rejectionRate: MetricRatio,
+  elapsedMsPerAcceptedWork: MetricRatio, tokensPerAcceptedWork: MetricRatio, costPerAcceptedWork: MetricRatio,
+  ownerOverturnedVerdicts: Type.Integer({ minimum: 0 }), quotaWaitMs: Type.Number({ minimum: 0 }), repeatGuardHits: Type.Integer({ minimum: 0 }),
+  observationHistoryComplete: Type.Boolean(), usageComplete: Type.Boolean(),
+  rules: Type.Record(Type.String(), Type.Object({ approved: Type.Integer({ minimum: 0 }), denied: Type.Integer({ minimum: 0 }) })),
+});
+export type MetricsView = Static<typeof MetricsView>;

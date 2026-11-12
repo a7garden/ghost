@@ -71,6 +71,7 @@ export function createDirectTools(core: Core): Extension {
             ghostId,
             title: args.title,
             brief: args.brief,
+            scopeId: args.milestone_id ? core.goals.milestone(args.milestone_id).scopeId : null,
             acceptance: { criteria: args.criteria ?? "", checks: [], reviewer: args.initiative ? initiativeReviewer(core, scope.ghost, ghostId) : null },
             deadlineAt: null,
             budgetMinutes: args.budget_minutes,

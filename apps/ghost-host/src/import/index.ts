@@ -507,6 +507,8 @@ function assertEmptyTarget(ledger: Ledger): void {
     "devices",
     "pairings",
     "scopes",
+    "mcp_servers",
+    "config_revisions",
     "avatars",
     "providers",
     "requests",
@@ -568,6 +570,7 @@ function planGhost(
     tools: [...DEFAULT_GHOST_TOOLS],
     fallbacks: [],
     skills: [],
+    attachments: [],
     deletedAt: null,
     directConversationId: row.conversationId,
     createdAt,
@@ -803,6 +806,10 @@ export async function runImport(opts: {
     workPlans.push({
       work: {
         id: legacyWork.id,
+        scopeId: null,
+        attachments: [],
+        slot: null,
+        retry: null,
         parentId: parentOf(legacyWork.id),
         rootId: rootOf(legacyWork.id),
         ghostId: plan.ghost.id,

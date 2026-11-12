@@ -4,8 +4,8 @@ import { MarkdownEditor } from '../editor/MarkdownEditor';
 import '../editor/styles.css';
 import type { PageView } from '@ghost/contract';
 import { useHost } from '../host/context';
-import { isConflict, isEditableProfile } from './spacePages';
-import type { EditableProfile } from './spacePages';
+import { isConflict, isEditableProfile } from './scopePages';
+import type { EditableProfile } from './scopePages';
 import { Modal } from '../components/Modal';
 
 const MAX_BODY_BYTES = 1_048_576;

@@ -249,6 +249,7 @@ async function runAsync(core: Core, request: CommandRequest, context: CommandCon
     }
     case "provider.upsert":
     case "provider.delete": {
+      if (command.type === "provider.delete" && Object.values(ledger.settings().slots ?? {}).some(slot => [slot.model, ...slot.fallbacks].some(model => model.provider === command.providerId))) throw conflict("a model slot still references this provider");
       const conversationId = ledger.request(requestId)!.outcome.conversationId as string;
       const start = core.effects.beginCommand({ conversationId, requestId, tool: command.type, input: command, summary: command.type });
       if (start.kind === "replay") return recordedCommandOutcome(start.effect.state, start.effect.result);

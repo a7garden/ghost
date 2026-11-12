@@ -57,7 +57,7 @@ function makeWork(ghostId = "ghost-1"): Work {
     revision: 1,
     revisionsUsed: 0,
     deadlineAt: null,
-    budgetMinutes: 90,
+    scopeId: null, attachments: [], slot: null, retry: null, budgetMinutes: 90,
     budgetUsedMs: 0,
     budgetSince: null,
     budgetExtended: false,

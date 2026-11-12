@@ -62,12 +62,12 @@ test("a teammate outcome during watched-project reads is included in the next ad
     });
     await f.core.idle();
     const now = Date.now();
-    const spaceId = "11111111-1111-4111-8111-111111111111";
+    const scopeId = "11111111-1111-4111-8111-111111111111";
     f.ledger.tx(() => {
-      f.ledger.putSpace({ id: spaceId, name: "Twill", path: "/work/twill", createdAt: now });
+      f.ledger.putScope({ id: scopeId, name: "Twill", paths: ["/work/twill"], vaultPath: "/work/twill", createdAt: now , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 });
       f.ledger.putSetting(`autonomy:${f.main.id}`, {
-        enabled: true, nextAt: now, intent: "Inspect the project", setBy: "host", watch: [spaceId],
-        lastWakeAt: null, wakesToday: 0, day: "", heads: { [spaceId]: `main@${"a".repeat(40)}` },
+        enabled: true, nextAt: now, intent: "Inspect the project", setBy: "host", watch: [scopeId],
+        lastWakeAt: null, wakesToday: 0, day: "", heads: { [scopeId]: `main@${"a".repeat(40)}` },
         revision: 1, wakes: 0, pending: null,
       });
     });
@@ -133,7 +133,7 @@ test("plans are bounded, the main Ghost may plan a teammate, and an owner switch
 test("a watched project's new commits wake a Ghost early with what changed, at most hourly", async () => {
   const f = fixture();
   const now = day(11);
-  f.ledger.tx(() => f.ledger.putSpace({ id: "11111111-1111-4111-8111-111111111111", name: "Twill", path: "/work/twill", createdAt: 1 }));
+  f.ledger.tx(() => f.ledger.putScope({ id: "11111111-1111-4111-8111-111111111111", name: "Twill", paths: ["/work/twill"], vaultPath: "/work/twill", createdAt: 1 , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
   f.heads.set("/work/twill", `main@${"a".repeat(40)}`);
   await f.core.autonomy.plan(f.mate, f.mate.id, { at: now + 10 * 60 * MINUTE, intent: "Weekly look", watch: ["11111111-1111-4111-8111-111111111111"] }, now);
 
@@ -198,7 +198,7 @@ test("a switch-off or a new plan made while a wake is prepared or admitted is ne
   const now = day(12);
   // Keep the main Ghost's ID-spread first wake out of this admission race.
   await f.core.autonomy.plan(f.main, f.main.id, { at: now + 6 * 60 * MINUTE, intent: "look later" }, now);
-  f.ledger.tx(() => f.ledger.putSpace({ id: "11111111-1111-4111-8111-111111111111", name: "Twill", path: "/work/twill", createdAt: 1 }));
+  f.ledger.tx(() => f.ledger.putScope({ id: "11111111-1111-4111-8111-111111111111", name: "Twill", paths: ["/work/twill"], vaultPath: "/work/twill", createdAt: 1 , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
   await f.core.autonomy.plan(f.mate, f.mate.id, { at: now + 10 * MINUTE, intent: "first", watch: ["11111111-1111-4111-8111-111111111111"] }, now);
   disable = () => f.core.autonomy.setEnabled(f.mate.id, false);
   await f.core.autonomy.tick(now + 10 * MINUTE);
@@ -253,7 +253,7 @@ test("a wake recorded before a crash is retried with its own identity, and a rep
   // Counted from when it was actually admitted, not when it was recorded before the crash.
   expect(f.plan(f.mate.id)).toMatchObject({ lastWakeAt: now + 5 * MINUTE, nextAt: now + 5 * MINUTE + 24 * 60 * MINUTE });
 
-  f.ledger.tx(() => f.ledger.putSpace({ id: "11111111-1111-4111-8111-111111111111", name: "Twill", path: "/work/twill", createdAt: 1 }));
+  f.ledger.tx(() => f.ledger.putScope({ id: "11111111-1111-4111-8111-111111111111", name: "Twill", paths: ["/work/twill"], vaultPath: "/work/twill", createdAt: 1 , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
   const [a, b] = [`main@${"a".repeat(40)}`, `feature@${"b".repeat(40)}`];
   f.heads.set("/work/twill", a);
   let at = now + 10 * MINUTE;

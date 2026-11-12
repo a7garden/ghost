@@ -380,7 +380,7 @@ describe("API server", () => {
     }).result.ghostId;
     await pairDevice("Other Phone");
     ledger.tx(() => {
-      ledger.putSpace({ id: "owner-vault", name: "Vault", path: root, createdAt: Date.now() });
+      ledger.putScope({ id: "owner-vault", name: "Vault", paths: [root], vaultPath: root, createdAt: Date.now() , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 });
       ledger.putSchedule({
         id: "owner-schedule", ghostId: betaId, conversationId: ledger.ghost(betaId).directConversationId,
         prompt: "Later", spec: { kind: "at", at: Date.now() + 60_000 }, nextAt: Date.now() + 60_000,
@@ -389,14 +389,14 @@ describe("API server", () => {
     });
     const state = parse(State, await (await get("/api/state", deviceToken)).json());
     const ownerState = parse(State, await (await get("/api/state", OWNER_TOKEN)).json());
-    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications", "schedules", "spaces", "settings", "devices", "sandboxes", "activities", "activityRuns", "connections"] as const) {
+    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications", "schedules", "scopes", "settings", "devices", "sandboxes", "activities", "activityRuns", "connections"] as const) {
       expect(state[key]).toEqual(ownerState[key]);
     }
     expect(state.ghosts.map((ghost) => ghost.id)).toContain(betaId);
     expect(state.principal).toEqual({ kind: "device", deviceId, name: "Test Phone" });
     expect(ledger.device(deviceId).name).toBe("Test Phone");
     expect(state.schedules.length).toBeGreaterThan(0);
-    expect(state.spaces.length).toBeGreaterThan(0);
+    expect(state.scopes.length).toBeGreaterThan(0);
     expect(state.devices.length).toBeGreaterThan(1);
     expect(state.devices[0]).not.toHaveProperty("grants");
   });
@@ -806,7 +806,7 @@ describe("API server", () => {
     expect(state.principal).toEqual({ kind: "device", deviceId: paired.deviceId, name: "Renamed" });
     ledger.tx(() => {
       ledger.putSchedule({ ...ledger.schedule("owner-schedule"), prompt: "Private schedule" });
-      ledger.putSpace({ ...ledger.space("owner-vault"), name: "Private vault" });
+      ledger.putScope({ ...ledger.scope("owner-vault"), name: "Private vault" });
       ledger.emit({ type: "settings", settings: ledger.settings() });
       ledger.emit({ type: "sandbox", sandbox: { ghostId: alphaId, state: "none", detail: "" } });
     });
@@ -815,7 +815,7 @@ describe("API server", () => {
     expect(await stream.drainUntil((frame) => notificationId(frame) === "rename-beta")).not.toBeNull();
     const events = stream.frames.filter((frame) => frame.event === "ledger").map(ledgerFrame);
     expect(events.some((event) => mentions(event, other.deviceId))).toBe(true);
-    expect(events.some((event) => ["schedule", "space", "settings", "sandbox"].includes(event.data.type))).toBe(true);
+    expect(events.some((event) => ["schedule", "scope", "settings", "sandbox"].includes(event.data.type))).toBe(true);
     expect(stream.frames.some((frame) => notificationId(frame) === "rename-alpha")).toBe(true);
     stream.close();
   });

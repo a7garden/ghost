@@ -42,21 +42,29 @@ function configuration(core: Core): Entry[] {
 
 /** Runs inside the command's receipt transaction, including all secondary Ghost/activity mutations. */
 export function reviseConfiguration<T>(core: Core, principal: Principal, command: Command, run: () => T): T {
+  const reverted = command.type === "config.revert" ? core.ledger.configRevision(command.revisionId) : null;
   const before = configuration(core);
   const result = run();
+  if (command.type.startsWith("ghost.") || command.type.startsWith("activity.")) checkConfiguration(core);
   const after = configuration(core);
   const keys = new Set([...before, ...after].map(entry => JSON.stringify([entry.entity, entry.entityId])));
+  let revisions = 0;
   for (const key of keys) {
     const [entity, entityId] = JSON.parse(key) as [Entity, string | null];
     const old = before.find(entry => entry.entity === entity && entry.entityId === entityId)?.value ?? null;
     const next = after.find(entry => entry.entity === entity && entry.entityId === entityId)?.value ?? null;
     if (isDeepStrictEqual(old, next)) continue;
-    const scopedLimits = command.type === "limits.set" && entity === "scope";
+    const scopedLimits = entity === "scope" && (command.type === "limits.set" || (reverted?.entity === "limits" && reverted.entityId === entityId));
+    revisions++;
     core.ledger.putConfigRevision({ id: newId(), entity: scopedLimits ? "limits" : entity, entityId,
       before: scopedLimits && old && typeof old === "object" && "limits" in old ? old.limits : old,
       after: scopedLimits && next && typeof next === "object" && "limits" in next ? next.limits : next,
       actor: { kind: principal.kind, id: principal.kind === "device" ? principal.deviceId : null },
       reason: command.type === "config.revert" ? `config.revert:${command.revisionId}` : command.type, at: Date.now() });
+  }
+  if (reverted && revisions === 0) {
+    const entry = after.find(item => item.entity === reverted.entity && item.entityId === reverted.entityId);
+    core.ledger.putConfigRevision({ ...reverted, id: newId(), before: entry?.value ?? reverted.before, after: entry?.value ?? reverted.before, actor: { kind: principal.kind, id: principal.kind === "device" ? principal.deviceId : null }, reason: `config.revert:${reverted.id}`, at: Date.now() });
   }
   return result;
 }
@@ -84,14 +92,12 @@ export function checkConfiguration(core: Core) {
   }
   for (const activity of ledger.activities()) {
     requireScope(activity.scopeId); requireGhost(activity.ghostId);
-    const ghost = ledger.ghost(activity.ghostId);
-    if (activity.tools.some(tool => !ghost.tools.includes(tool)) || (activity.execution.kind === "host" && !ghost.hostExecution)) throw conflict("activity would restore authority its Ghost no longer has");
     if (activity.source.kind === "commit") requireScope(activity.source.scopeId);
     if ("connectionId" in activity.source && !ledger.findConnection(activity.source.connectionId)) throw conflict("activity refers to a missing connection");
   }
   for (const server of ledger.mcpServers()) if (server.transport.kind === "http" && server.transport.connectionId && !ledger.findConnection(server.transport.connectionId)) throw conflict("MCP server refers to a missing connection");
   requireSlot(ledger.settings().defaultSlot);
-  for (const slot of Object.values(slots)) for (const model of [slot.model, ...slot.fallbacks]) if (!ledger.providers().some(provider => provider.id === model.providerId)) throw conflict("slot refers to a missing provider");
+  for (const slot of Object.values(slots)) for (const model of [slot.model, ...slot.fallbacks]) if (!ledger.providers().some(provider => provider.id === model.provider)) throw conflict("slot refers to a missing provider");
   for (const goal of core.goals.goals()) if (goal.state !== "closed") requireScope(goal.scopeId);
 }
 
@@ -116,7 +122,7 @@ export function configurationCommand(core: Core, command: Command): Record<strin
       ledger.scope(command.scopeId); ledger.deleteScope(command.scopeId); checkConfiguration(core); return {};
     case "slot.set": {
       const { name, model, fallbacks } = command;
-      for (const ref of [model, ...fallbacks]) if (!ledger.providers().some(provider => provider.id === ref.providerId)) throw invalid("slot refers to a missing provider");
+      for (const ref of [model, ...fallbacks]) if (!ledger.providers().some(provider => provider.id === ref.provider)) throw invalid("slot refers to a missing provider");
       ledger.putSetting("slots", { ...ledger.settings().slots, [name]: { model, fallbacks } });
       ledger.emit({ type: "settings", settings: ledger.settings() }); return {};
     }
@@ -201,19 +207,45 @@ function revert(core: Core, revision: ConfigRevision) {
       else { if (!validate(importPartialLimits, value)) throw conflict("revision has invalid limits"); const scope = ledger.scope(id); ledger.putScope({ ...scope, limits: value as Partial<LimitsValue> }); }
       break;
     case "ghost": {
-      if (value === null) throw conflict("a Ghost with durable history cannot be removed by reverting its creation; retire and delete it instead");
+      if (value === null) {
+        const conversations = ledger.conversations({ ghostId: id! });
+        if (conversations.some(conversation => conversation.busy || ledger.piConversationId(conversation.id) !== null)
+          || ledger.db.query("SELECT 1 FROM works WHERE ghost_id=? OR origin_conversation_id IN (SELECT id FROM conversations WHERE ghost_id=?) LIMIT 1").get(id!, id!)
+          || ledger.db.query("SELECT 1 FROM schedules WHERE ghost_id=? LIMIT 1").get(id!)) throw conflict("Ghost has durable history or active references");
+        for (const conversation of conversations) {
+          ledger.db.query("DELETE FROM conversations WHERE id=?").run(conversation.id);
+          ledger.emit({ type: "conversation.removed", id: conversation.id });
+        }
+        ledger.db.query("DELETE FROM ghosts WHERE id=?").run(id!);
+        ledger.emit({ type: "ghost.removed", id: id! });
+        break;
+      }
       shape(Ghost);
       const ghost = value as GhostValue;
       const current = ledger.ghost(ghost.id);
-      if (ghost.isDefault !== current.isDefault) throw conflict("revert default Ghost changes with ghost.set_default");
+      if (!ghost.isDefault && current.isDefault) throw conflict("choose another default Ghost before this revert");
+      if (ghost.isDefault && !current.isDefault) {
+        if (ghost.state !== "active" || ghost.deletedAt !== null) throw conflict("the restored default Ghost must be active");
+        const previousDefault = ledger.defaultGhost();
+        if (previousDefault) { ledger.putGhost({ ...previousDefault, isDefault: false }); core.refreshGhost(previousDefault.id); }
+      }
       if (ghost.deletedAt !== null && ledger.worksInState(...liveStates).some(work => work.ghostId === ghost.id || (work.acceptance.reviewer?.kind === "ghost" && work.acceptance.reviewer.ghostId === ghost.id))) throw conflict("Ghost still has live Work");
       ledger.conversation(ghost.directConversationId); ledger.putGhost(ghost); core.refreshGhost(ghost.id); break;
     }
     case "activity": {
       const current = id ? ledger.findActivity(id) : null;
       if (current && ledger.activityRuns(current.id).some(run => liveStates.includes(run.state as typeof liveStates[number]))) throw conflict("activity still has live Work");
-      if (value === null) { if (current) ledger.putActivity({ ...current, paused: true, deletedAt: Date.now(), updatedAt: Date.now() }); }
-      else { shape(Activity); ledger.putActivity(value as ActivityValue); }
+      if (value === null) {
+        if (current && (ledger.activityRuns(current.id).length || ledger.db.query("SELECT 1 FROM works WHERE activity_id=? LIMIT 1").get(current.id))) throw conflict("activity has durable Work history");
+        ledger.db.query("DELETE FROM activities WHERE id=?").run(id!);
+        ledger.emit({ type: "activity.removed", id: id! });
+      } else {
+        shape(Activity);
+        const activity = value as ActivityValue;
+        const ghost = ledger.ghost(activity.ghostId);
+        if (activity.tools.some(tool => !ghost.tools.includes(tool)) || (activity.execution.kind === "host" && !ghost.hostExecution)) throw conflict("activity would restore authority its Ghost no longer has");
+        ledger.putActivity(activity);
+      }
       break;
     }
   }

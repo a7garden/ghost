@@ -81,6 +81,9 @@ export class Works {
     const existing = input.id ? this.ledger.findWork(input.id) : null;
     if (existing) return existing;
     const parent = this.ledger.work(parentId);
+    checkAttachments(this.core, input.attachments ?? []);
+    const configuredSlots = this.ledger.settings().slots ?? {};
+    if ((input.slot && !configuredSlots[input.slot]) || (input.retry && !configuredSlots[input.retry.slot])) throw invalid("Work refers to a missing slot");
     if (parent.state !== "running") throw conflict(`parent Work is ${parent.state}`);
     if (!parent.conversationId) throw conflict("parent Work has no conversation");
     const target = this.ledger.ghost(input.ghostId);
@@ -539,6 +542,10 @@ export class Works {
     if (work.parentId) throw invalid("only a root Work can be resumed");
     if (work.state !== "failed" && work.state !== "blocked") throw conflict(`Work is ${work.state}`);
     if (this.core.effects.unresolved(work.id).some((effect) => !this.core.effects.awaitingApproval(effect))) throw conflict("reconcile the unknown effect first");
+    if (work.scopeId !== null) this.ledger.scope(work.scopeId);
+    checkAttachments(this.core, work.attachments);
+    const slots = this.ledger.settings().slots ?? {};
+    if ((work.slot && !slots[work.slot]) || (work.retry && !slots[work.retry.slot])) throw conflict("Work refers to a missing model slot");
     const now = Date.now();
     const next: Work = {
       ...work,

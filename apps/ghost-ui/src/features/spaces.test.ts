@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { HostError } from '../host/client';
-import { isConflict, isEditableProfile, spaceNameFromPath, pathCrumb } from './spacePages';
+import { isConflict, isEditableProfile, spaceNameFromPath, pathCrumb } from './scopePages';
 
 it('derives the project name from the folder path', () => {
   expect(spaceNameFromPath('/tmp/ghost-r2-docs/notes')).toBe('notes');

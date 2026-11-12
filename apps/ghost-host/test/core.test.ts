@@ -527,7 +527,7 @@ describe("commands and access", () => {
 
     const state = snapshot(core, device);
     const ownerState = snapshot(core, new Access(owner));
-    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications", "schedules", "spaces", "settings", "devices", "sandboxes", "activities", "activityRuns", "connections"] as const) {
+    for (const key of ["ghosts", "conversations", "works", "decisions", "notifications", "schedules", "scopes", "settings", "devices", "sandboxes", "activities", "activityRuns", "connections"] as const) {
       expect(state[key]).toEqual(ownerState[key]);
     }
     expect(state.ghosts.map((item) => item.id)).toContain(later.id);
@@ -649,7 +649,7 @@ describe("commands and access", () => {
     const ghostId = historicalGhosts(path, 3, ["G"])[0]!;
 
     const second = harness(path);
-    expect(second.ledger.ghost(ghostId)).toMatchObject({ fallbacks: [], skills: [], deletedAt: null });
+    expect(second.ledger.ghost(ghostId)).toMatchObject({ fallbacks: [], skills: [], attachments: [], deletedAt: null });
     second.core.stop();
     second.ledger.close();
   });

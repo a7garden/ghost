@@ -49,7 +49,7 @@ function setup() {
   const { ledger, core, engine } = harness();
   const ghost = core.createGhost({ name: "Tester", persona: "A tester." });
   ledger.tx(() =>
-    ledger.putSpace({ id: "space-1", name: "Garden", path, createdAt: Date.now() }),
+    ledger.putScope({ id: "space-1", name: "Garden", paths: [path], vaultPath: path, createdAt: Date.now() , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }),
   );
   const documents = createDocuments(core);
   return { path, ledger, core, engine, documents, ghost };
@@ -78,12 +78,12 @@ describe("documents", () => {
   test("lists and reads a markdown page", async () => {
     const { documents, ghost, core } = setup();
     const another = core.createGhost({ name: "Another", persona: "" });
-    expect(documents.spacesFor(ghost.id).map(space => space.id)).toEqual(["space-1"]);
-    expect(documents.spacesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
+    expect(documents.scopesFor(ghost.id).map(space => space.id)).toEqual(["space-1"]);
+    expect(documents.scopesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
     core.ledger.tx(() => core.ledger.putGhost({ ...another, state: "paused" }));
-    expect(documents.spacesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
+    expect(documents.scopesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
     core.ledger.tx(() => core.ledger.putGhost({ ...another, state: "retired" }));
-    expect(documents.spacesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
+    expect(documents.scopesFor(another.id).map(space => space.id)).toEqual(["space-1"]);
 
     const pages = await documents.listPages("space-1", null);
 
@@ -142,7 +142,7 @@ ${htmlBody}`;
     try {
       ledger.setPiConversationId(ghost.directConversationId, "pi-document-read");
       const read = createDocumentsTools(core, documents).tools!.find(tool => tool.name === "document_read")!;
-      const base = `http://127.0.0.1:${server.port}/api/spaces/space-1/pages`;
+      const base = `http://127.0.0.1:${server.port}/api/scopes/space-1/pages`;
       const headers = { authorization: "Bearer document-test" };
       const listing = await fetch(base, { headers });
       expect(listing.status).toBe(200);
@@ -154,7 +154,7 @@ ${htmlBody}`;
         expect(response.status).toBe(200);
         expect((await response.json() as { body: string }).body).toBe(body);
         const result = await read.execute(
-          { space_id: "space-1", page_id: page.pageId } as never,
+          { scope_id: "space-1", page_id: page.pageId } as never,
           { conversationId: "pi-document-read", callId: locator } as unknown as ToolExecutionApi,
           {} as never,
         );
@@ -171,9 +171,9 @@ ${htmlBody}`;
     }
   });
 
-  test("references the models actually send resolve inside the Space", async () => {
+  test("references the models actually send resolve inside the Scope", async () => {
     const { path, ledger, documents } = setup();
-    // A Space whose root already is the docs folder, like the reported "Talking Stage" Space,
+    // A Scope whose root already is the docs folder, like the reported "Talking Stage" Scope,
     // plus a nested docs/ copy of the roadmap so exact locators beat basename matches.
     const docs = join(dirname(path), "talking-stage", "docs");
     mkdirSync(join(docs, "docs"), { recursive: true });
@@ -181,34 +181,34 @@ ${htmlBody}`;
       writeFileSync(join(docs, name), PLAIN_MARKDOWN);
     }
     writeFileSync(join(docs, "docs", "ROADMAP.md"), PLAIN_MARKDOWN);
-    ledger.tx(() => ledger.putSpace({ id: "space-2", name: "Talking Stage", path: docs, createdAt: Date.now() }));
+    ledger.tx(() => ledger.putScope({ id: "space-2", name: "Talking Stage", paths: [docs], vaultPath: docs, createdAt: Date.now() , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
 
-    // A Space name (case-insensitive) is accepted for space_id.
+    // A Scope name (case-insensitive) is accepted for scope_id.
     expect((await documents.readPage("talking stage", { locator: "docs/wms-ux.md" })).locator).toBe("wms-ux.md");
     expect((await documents.readPage("TALKING STAGE", { locator: "docs/DESIGN.md?rev=latest" })).locator).toBe("DESIGN.md");
-    // An absolute path inside the Space resolves to its locator.
+    // An absolute path inside the Scope resolves to its locator.
     expect((await documents.readPage("space-2", { locator: `${docs}/DESIGN.md` })).locator).toBe("DESIGN.md");
     expect((await documents.readPage("space-2", { locator: "docs/DESIGN" })).locator).toBe("DESIGN.md");
-    // An extensionless basename finds the file anywhere in the Space.
+    // An extensionless basename finds the file anywhere in the Scope.
     expect((await documents.readPage("space-2", { locator: "RENDERING_UI_BASELINE" })).locator).toBe("RENDERING_UI_BASELINE.md");
     // A filename passed as page_id and a path quoted inside a page_id both resolve.
     expect((await documents.readPage("space-2", { pageId: "TASK_UX_RESEARCH.md" })).locator).toBe("TASK_UX_RESEARCH.md");
     expect((await documents.readPage("space-2", { pageId: "ROADMAP (docs/ROADMAP.md)" })).locator).toBe("docs/ROADMAP.md");
-    // Nothing outside the Space resolves, even by absolute path.
+    // Nothing outside the Scope resolves, even by absolute path.
     await expect(documents.readPage("space-2", { locator: `${dirname(docs)}/vault/note.md` })).rejects.toThrow(/closest documents/);
   });
 
-  test("an unresolvable reference names the Space and its documents without leaking host paths", async () => {
+  test("an unresolvable reference names the Scope and its documents without leaking host paths", async () => {
     const { path, documents } = setup();
     const failure = await documents.readPage("space-1", { locator: "docs/DESIGN.md" }).then(
       () => null,
       (error: Error) => error,
     );
-    expect(failure?.message).toContain('Space "Garden"');
+    expect(failure?.message).toContain('Scope "Garden"');
     expect(failure?.message).toContain("legacy.djot, note.md, plain.md");
     expect(failure?.message).not.toContain(path);
     await expect(documents.readPage("space-1", { pageId: "zzz-does-not-exist" })).rejects.toThrow(/Retry with an exact page id/);
-    await expect(documents.listPages("Missing Space", null)).rejects.toThrow(/unknown document space "Missing Space"; registered Spaces: "Garden" \(space-1\)/);
+    await expect(documents.listPages("Missing Scope", null)).rejects.toThrow(/unknown document space "Missing Scope"; registered Scopes: "Garden" \(space-1\)/);
   });
 
   test("duplicated ids, escape paths and vault-wide failures cannot silently reroute a read", async () => {
@@ -224,21 +224,21 @@ title: Duplicate
 Body text.
 `;
     const uuid = "0190f3a0-1234-7abc-8def-0123456789ab";
-    // One Space holding a duplicated document id, an unrelated oversized file and an ordinary document.
+    // One Scope holding a duplicated document id, an unrelated oversized file and an ordinary document.
     const dupDocs = join(dirname(path), "dup", "docs");
     mkdirSync(dupDocs, { recursive: true });
     writeFileSync(join(dupDocs, `${uuid}.md`), envelope(uuid));
     writeFileSync(join(dupDocs, "copy.md"), envelope(uuid));
     writeFileSync(join(dupDocs, "DESIGN.md"), PLAIN_MARKDOWN);
     writeFileSync(join(dupDocs, "huge.md"), Buffer.alloc(4 * 1024 * 1024 + 1, 120));
-    ledger.tx(() => ledger.putSpace({ id: "space-3", name: "Dup", path: dupDocs, createdAt: Date.now() }));
+    ledger.tx(() => ledger.putScope({ id: "space-3", name: "Dup", paths: [dupDocs], vaultPath: dupDocs, createdAt: Date.now() , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
 
     // The duplicated id is still refused although the oversized file aborts a whole-vault projection.
     await expect(documents.readPage("space-3", { pageId: uuid })).rejects.toThrow(new RegExp(`is used by several files \\(${uuid}\\.md, copy\\.md\\)`));
     await expect(documents.readPage("space-3", { locator: uuid })).rejects.toThrow(/is used by several files/);
-    // An absolute path outside the Space and a `..` segment refuse instead of matching an in-Space namesake.
-    await expect(documents.readPage("space-3", { locator: "/outside/DESIGN.md" })).rejects.toThrow(/no document in Space "Dup" matches/);
-    await expect(documents.readPage("space-3", { locator: "../DESIGN.md" })).rejects.toThrow(/no document in Space "Dup" matches/);
+    // An absolute path outside the Scope and a `..` segment refuse instead of matching an in-Scope namesake.
+    await expect(documents.readPage("space-3", { locator: "/outside/DESIGN.md" })).rejects.toThrow(/no document in Scope "Dup" matches/);
+    await expect(documents.readPage("space-3", { locator: "../DESIGN.md" })).rejects.toThrow(/no document in Scope "Dup" matches/);
     // The unreadable file elsewhere does not abort a read of an unrelated document...
     expect((await documents.readPage("space-3", { locator: "DESIGN.md" })).locator).toBe("DESIGN.md");
     // ...and the oversized file itself fails with its own honest error.
@@ -259,7 +259,7 @@ Body text.
         detail: "A document proposal.",
         options: [],
         proposal: {
-          spaceId: "space-1",
+          scopeId: "space-1",
           title: "Watering plan",
           body: "Water the tomatoes on Monday.",
           profile: "pdc-markdown/1",
@@ -289,7 +289,7 @@ Body text.
 
     const line = await documents.apply(
       documentDecision(ghost.id, ghost.directConversationId, {
-        spaceId: "space-1",
+        scopeId: "space-1",
         title: "Compost notes",
         body: "Turn the compost on Sunday.",
         profile: "pdc-markdown/1",
@@ -311,7 +311,7 @@ Body text.
 
     const line = await documents.apply(
       documentDecision(ghost.id, ghost.directConversationId, {
-        spaceId: "space-1",
+        scopeId: "space-1",
         title: "Garden notes",
         body: "The tomatoes need more water.",
         profile: "pdc-markdown/1",
@@ -338,7 +338,7 @@ Body text.
 
     await expect(
       documents.check({
-        spaceId: "space-1",
+        scopeId: "space-1",
         title: "Garden notes",
         body: "The tomatoes need more water.",
         profile: "pdc-markdown/1",
@@ -350,7 +350,7 @@ Body text.
     await expect(
       documents.apply(
         documentDecision(ghost.id, ghost.directConversationId, {
-          spaceId: "space-1",
+          scopeId: "space-1",
           title: "Garden notes",
           body: "The tomatoes need more water.",
           profile: "pdc-markdown/1",
@@ -370,7 +370,7 @@ Body text.
     await expect(
       documents.apply(
         documentDecision(ghost.id, ghost.directConversationId, {
-          spaceId: "space-1",
+          scopeId: "space-1",
           title: "Old note",
           body: "New body.",
           profile: "pdc-markdown/1",
@@ -388,7 +388,7 @@ Body text.
 
     await expect(
       documents.check({
-        spaceId: "space-1",
+        scopeId: "space-1",
         title: "Old note",
         body: "New body.",
         profile: "pdc-djot/1",
@@ -404,7 +404,7 @@ Body text.
 
     await expect(
       documents.check({
-        spaceId: "space-1",
+        scopeId: "space-1",
         title: "Garden notes",
         body: "<p>The tomatoes need more water.</p>",
         profile: "pdc-html/1",
@@ -418,7 +418,7 @@ Body text.
     const { documents, path } = setup();
 
     const page = await documents.save({
-      spaceId: "space-1",
+      scopeId: "space-1",
       title: "Pruning notes",
       body: "Prune the roses in March.",
       profile: "pdc-markdown/1",
@@ -442,7 +442,7 @@ Body text.
     const before = await documents.readPage("space-1", { locator: "note.md" });
 
     const page = await documents.save({
-      spaceId: "space-1",
+      scopeId: "space-1",
       title: "Garden notes",
       body: "The tomatoes need shade cloth.",
       profile: "pdc-markdown/1",
@@ -465,7 +465,7 @@ Body text.
 
     await expect(
       documents.save({
-        spaceId: "space-1",
+        scopeId: "space-1",
         title: "Garden notes",
         body: "The tomatoes need shade cloth.",
         profile: "pdc-markdown/1",
@@ -481,7 +481,7 @@ Body text.
     const { documents, core, path } = setup();
     const ghost = core.createGhost({ name: "New Ghost", persona: "" });
     const decision = documentDecision(ghost.id, ghost.directConversationId, {
-      spaceId: "space-1", title: "Watering plan", body: "Water the tomatoes.",
+      scopeId: "space-1", title: "Watering plan", body: "Water the tomatoes.",
       profile: "pdc-markdown/1", pageId: null, expectedHash: null,
     });
     const before = readdirSync(path);

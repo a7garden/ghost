@@ -21,12 +21,12 @@ async function until(path: string, limitMs = 10_000): Promise<void> {
 }
 
 describe("ghost backup", () => {
-  test("copies both open databases and lists external spaces", () => {
+  test("copies both open databases and lists external scopes", () => {
     const root = tempDir();
     const ledger = new Ledger(join(root, "ledger.db"));
     const pi = new Database(join(root, "pi.db"));
     try {
-      ledger.tx(() => ledger.putSpace({ id: "s1", name: "Notes", path: "/Users/someone/Notes", createdAt: 1 }));
+      ledger.tx(() => ledger.putScope({ id: "s1", name: "Notes", paths: ["/Users/someone/Notes"], vaultPath: "/Users/someone/Notes", createdAt: 1 , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
       pi.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('kept')");
       const dir = join(tempDir(), "snapshot");
       const manifest = backup(root, dir, 42);
@@ -70,7 +70,7 @@ describe("ghost backup", () => {
     const root = tempDir();
     const app = await openApp(loadConfig({}, root));
     try {
-      app.ledger.tx(() => app.ledger.putSpace({ id: "s1", name: "Notes", path: "/Users/someone/Notes", createdAt: 1 }));
+      app.ledger.tx(() => app.ledger.putScope({ id: "s1", name: "Notes", paths: ["/Users/someone/Notes"], vaultPath: "/Users/someone/Notes", createdAt: 1 , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }));
       const ghost = app.core.createGhost({ name: "Memory owner", persona: "" });
       const saved = app.memory.write({ ghostId: ghost.id, path: "/me/decision.md", content: "회차 목표 시간: 2~3시간", expectedHash: null, actor: "owner", operationId: "backup-note", reason: "Owner decision" })!;
       const dir = join(tempDir(), "snapshot");
@@ -218,7 +218,7 @@ describe("ghost backup", () => {
       ledger.exec("PRAGMA journal_mode = WAL; CREATE TABLE unrelated (v TEXT)");
       pi.exec("PRAGMA journal_mode = WAL; CREATE TABLE unrelated (v TEXT)");
       const dir = join(tempDir(), "snapshot");
-      expect(() => backup(root, dir)).toThrow(/spaces/);
+      expect(() => backup(root, dir)).toThrow(/scopes/);
       expect(readdirSync(dir)).toEqual([]);
       for (const db of [ledger, pi]) db.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE; ROLLBACK");
     } finally {

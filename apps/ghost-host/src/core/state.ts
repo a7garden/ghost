@@ -17,7 +17,7 @@ export function snapshot(core: Core, access: Access): State {
     principal: access.principal,
     runtime: { ready: engine.ready, detail: engine.detail, version: HOST_VERSION },
     ghosts,
-    conversations: ledger.conversations().filter((conversation) => conversation.kind === "direct" || conversation.workId !== null),
+    conversations: ledger.conversations(),
     works: ledger.worksForState(),
     decisions: ledger.decisionsForState(),
     notifications: ledger.notificationsForState(),

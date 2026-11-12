@@ -508,14 +508,14 @@ describe("ghost.delete", () => {
         state: "active",
         createdAt: Date.now(),
       });
-      s.ledger.putSpace({ id: "space-1", name: "Vault", path: "/tmp/vault", createdAt: Date.now() });
+      s.ledger.putScope({ id: "space-1", name: "Vault", paths: ["/tmp/vault"], vaultPath: "/tmp/vault", createdAt: Date.now() , ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 });
     });
     retireAndDelete(s, s.helper.id);
     // A repeat delete is a no-op, not an update of a deleted row.
     deleteGhost(s.core, s.helper.id);
 
     expect(s.ledger.schedules().map((schedule) => schedule.id)).toEqual(["sch-kept"]);
-    expect(s.ledger.space("space-1").name).toBe("Vault");
+    expect(s.ledger.scope("space-1").name).toBe("Vault");
     expect(s.ledger.ghost(s.helper.id)).toMatchObject({ deletedAt: expect.any(Number), state: "retired" });
   });
 

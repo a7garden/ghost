@@ -59,7 +59,7 @@ export type ConnectionConfig = Static<typeof ConnectionConfig>;
 /** API grants change who may use an account, not the account's authentication identity. */
 export function connectionCredentialScope(config: ConnectionConfig) {
   if (config.kind !== "api") return config;
-  const { ghostIds: _grants, ...authentication } = config;
+  const { ghostIds: _grants, readPaths: _reads, ...authentication } = config;
   return authentication;
 }
 

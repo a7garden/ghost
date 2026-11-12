@@ -115,14 +115,13 @@ async function expectLegacyWriteRefused(dir: string, caseId: string, input: stri
   const path = mkdtempSync(join(tmpdir(), "ghost-pdc-mutator-"));
   mkdirSync(path, { recursive: true });
   writeFileSync(join(path, locator), bytes);
-  const spaceId = `space-${caseId.replace(/[^a-z0-9-]/gi, "-")}`;
+  const scopeId = `space-${caseId.replace(/[^a-z0-9-]/gi, "-")}`;
   ledger.tx(() =>
-    ledger.putSpace({
-      id: spaceId,
+    ledger.putScope({
+      id: scopeId,
       name: caseId,
-      path,
-      createdAt: Date.now(),
-    }),
+      paths: [path], vaultPath: path,
+      createdAt: Date.now(), ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 }),
   );
   const classified = classifyDocument(locator, bytes);
   expect(classified.outcome).toBe("valid");
@@ -130,7 +129,7 @@ async function expectLegacyWriteRefused(dir: string, caseId: string, input: stri
   expect(classified.legacy).toBe(true);
   await expect(
     documents.check({
-      spaceId,
+      scopeId,
       title: "Corpus case",
       body: "A body that would overwrite the legacy source.",
       profile: "pdc-markdown/1",

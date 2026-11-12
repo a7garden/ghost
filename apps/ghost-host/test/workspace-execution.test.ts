@@ -43,6 +43,8 @@ function fixture() {
     const id = `work-${seq}-${crypto.randomUUID()}`;
     return {
       id, rootId: id, parentId: null, ghostId: "ghost-1", originConversationId: "direct-1", conversationId: null,
+      scopeId: null, attachments: [], slot: null, retry: null,
+      budgetMinutes: 90, budgetUsedMs: 0, budgetSince: null, budgetExtended: false, hold: null,
       title: "workspace execution", brief: "prove the boundary", acceptance: { criteria: "", checks: [], reviewer: null },
       state: "running", revision: 1, revisionsUsed: 0, deadlineAt: null, result: null, verdict: null, reason: null,
       createdAt: 0, startedAt: null, endedAt: null, updatedAt: 0,

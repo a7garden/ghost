@@ -12,7 +12,7 @@ const text = (message: string): ToolExecutionResult => ({ content: [{ type: "tex
 const READ_WINDOW = 16_384;
 
 export function createDocumentsTools(core: Core, documents: DocumentsPort): Extension {
-  const documentSpaces = defineTool({
+  const documentScopes = defineTool({
     name: "document_scopes",
     description: "List all registered project document Scopes.",
     parameters: Type.Object({}),
@@ -116,5 +116,5 @@ export function createDocumentsTools(core: Core, documents: DocumentsPort): Exte
     },
   });
 
-  return defineExtension({ name: "ghost.documents", tools: [documentSpaces, documentList, documentRead, documentPropose] });
+  return defineExtension({ name: "ghost.documents", tools: [documentScopes, documentList, documentRead, documentPropose] });
 }

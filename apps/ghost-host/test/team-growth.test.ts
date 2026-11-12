@@ -65,10 +65,10 @@ describe("Ghosts adapt to this environment", () => {
   test("self_adapt keeps notes apart from the persona, in the Ghost's next instructions, with the previous text kept", async () => {
     const t = team();
     const adapt = t.use(t.mateDirect, "self_adapt");
-    expect((await adapt({ notes: "Docs live under docs/ in each Space.", reason: "문서 경로가 달랐습니다." }, "a1")).isError).toBeFalsy();
+    expect((await adapt({ notes: "Docs live under docs/ in each Scope.", reason: "문서 경로가 달랐습니다." }, "a1")).isError).toBeFalsy();
     await adapt({ notes: "Docs live under docs/; read large files with host_read offset.", reason: "큰 파일" }, "a2");
     const saved = t.core.adaptations.get(t.mate.id)!;
-    expect(saved).toMatchObject({ by: "self", revision: 2, previous: "Docs live under docs/ in each Space." });
+    expect(saved).toMatchObject({ by: "self", revision: 2, previous: "Docs live under docs/ in each Scope." });
     expect(t.ledger.ghost(t.mate.id).persona).toBe("You research.");
     expect(t.tools.instructionsFor(t.mateDirect, t.ledger.ghost(t.mate.id), null)).toContain("read large files with host_read offset");
     // Another Ghost's instructions do not carry them.

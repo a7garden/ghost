@@ -424,7 +424,7 @@ export const Work = Type.Object({
   /** Additional owner-approved activity allow-list; inherited by delegated children. */
   toolScope: Type.Optional(GhostToolList),
   title: Type.String({ minLength: 1, maxLength: 256 }),
-  /** Owner text is bounded to 32,768 characters; allow room for the durable project preface. */
+  /** Owner text is bounded to 32,768 characters; older saved briefs may be longer. */
   brief: Type.String({ minLength: 1, maxLength: 49152 }),
   acceptance: Acceptance,
   state: WorkState,
