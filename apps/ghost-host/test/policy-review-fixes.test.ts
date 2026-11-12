@@ -541,7 +541,8 @@ async function scopedHostWork() {
   await h.core.idle();
   const conversationId = h.ledger.work(work.id).conversationId!;
   h.ledger.setPiConversationId(conversationId, "scoped-host-pi");
-  const env = new HostExecutionEnv({ cwd: scopeDir, workspace: staging, id: "ghost-host", mutations: new HostMutationQueue(), deadlineAt: null });
+  const mutations = new HostMutationQueue();
+  const env = new HostExecutionEnv({ cwd: scopeDir, workspace: staging, id: "ghost-host", mutations, deadlineAt: null });
   const sandbox = { workspacePath: () => staging } as unknown as SandboxEnvFactory;
   const tools = createWorkTools(h.core, sandbox).tools!;
   const write = (path: string, content: string, callId: string) => tools.find((tool) => tool.name === "write")!.execute({ path, content } as never,
@@ -551,7 +552,7 @@ async function scopedHostWork() {
     const decision = h.ledger.pendingDecisions({ effectId: h.ledger.effectByCall(conversationId, callId)!.id })[0]!;
     await h.core.decisions.resolve(decision.id, { outcome: "approve" });
   };
-  return { ...h, scopeDir, outside, work, conversationId, write, receipt, approve };
+  return { ...h, scopeDir, outside, work, conversationId, write, receipt, approve, mutations };
 }
 
 test("a Host write the Host proves inside the Work's Scope is a Scope-path write and runs at once", async () => {
@@ -605,4 +606,56 @@ test("pausing the Scope while a Scope-path write waits refuses it instead of wri
   await s.write("queued.txt", "queued", "revoked");
   expect(existsSync(join(s.scopeDir, "queued.txt"))).toBe(false);
   expect(s.ledger.effect(s.ledger.effectByCall(s.conversationId, "revoked")!.id).state).not.toBe("done");
+});
+
+/** Hold this Work's PC mutation queue, as a running shell command does, until `release`. */
+function holdQueue(mutations: HostMutationQueue) {
+  const gate = Promise.withResolvers<void>();
+  const held = Promise.withResolvers<void>();
+  const running = mutations.run(new AbortController().signal, async () => { held.resolve(); await gate.promise; }, () => undefined);
+  return { held: held.promise, release: () => { gate.resolve(); return running; } };
+}
+
+/** Resolves when the next caller has joined the queue, so later entries are ordered after it. */
+function nextEnqueued(mutations: HostMutationQueue) {
+  const joined = Promise.withResolvers<void>();
+  const original = mutations.run.bind(mutations);
+  mutations.run = ((signal, action, cancelled) => {
+    mutations.run = original;
+    const result = original(signal, action, cancelled);
+    joined.resolve();
+    return result;
+  }) as typeof mutations.run;
+  return joined.promise;
+}
+
+test("a Scope-path write keeps its place in the Work's PC mutation queue", async () => {
+  const s = await scopedHostWork();
+  const shell = holdQueue(s.mutations);
+  await shell.held;
+  const joined = nextEnqueued(s.mutations);
+  const writing = s.write("ordered.txt", "after the shell", "ordered");
+  await joined;
+  const order: string[] = [];
+  const next = s.mutations.run(new AbortController().signal, async () => { order.push(existsSync(join(s.scopeDir, "ordered.txt")) ? "after-write" : "before-write"); }, () => undefined);
+  expect(existsSync(join(s.scopeDir, "ordered.txt"))).toBe(false);
+  await shell.release();
+  expect((await writing).isError).toBeFalsy();
+  await next;
+  expect(readFileSync(join(s.scopeDir, "ordered.txt"), "utf8")).toBe("after the shell");
+  expect(order).toEqual(["after-write"]);
+});
+
+test("a Scope-path write re-checks its Scope after waiting in the queue", async () => {
+  const s = await scopedHostWork();
+  const shell = holdQueue(s.mutations);
+  await shell.held;
+  const joined = nextEnqueued(s.mutations);
+  const writing = s.write("late.txt", "too late", "late");
+  await joined;
+  s.ledger.tx(() => s.ledger.putScope({ ...s.ledger.scope("scope-1"), state: "paused", updatedAt: 2 }));
+  await shell.release();
+  expect((await writing).isError).toBe(true);
+  expect(existsSync(join(s.scopeDir, "late.txt"))).toBe(false);
+  expect(s.ledger.effect(s.ledger.effectByCall(s.conversationId, "late")!.id).state).not.toBe("done");
 });

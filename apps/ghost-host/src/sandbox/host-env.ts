@@ -92,9 +92,11 @@ export class HostExecutionEnv extends NodeExecutionEnv {
   override readonly id: string;
   readonly logicalRoot: string;
   private readonly staging: WorkspaceEnv;
-  private readonly stopped = new AbortController();
-  private readonly pending = new Set<Promise<unknown>>();
-  private readonly children = new Set<number>();
+  private readonly stopped: AbortController;
+  private readonly pending: Set<Promise<unknown>>;
+  private readonly children: Set<number>;
+  /** A file-only view (see `scopedTo`): it never spawns a process. */
+  private readonly fileOnly: boolean;
   private readonly boundary: SeatbeltPolicy | null;
   /** One confined single-root environment per real root, so its no-follow checks apply per path. */
   private readonly confinedRoots = new Map<string, WorkspaceEnv>();
@@ -106,7 +108,7 @@ export class HostExecutionEnv extends NodeExecutionEnv {
     return this.baseDelegate;
   }
 
-  constructor(private readonly options: HostEnvOptions) {
+  constructor(private readonly options: HostEnvOptions, shared?: { stopped: AbortController; pending: Set<Promise<unknown>>; children: Set<number> }) {
     validateExecutionTarget({ kind: "host", cwd: options.cwd });
     super({ cwd: options.cwd });
     this.id = options.id;
@@ -115,6 +117,25 @@ export class HostExecutionEnv extends NodeExecutionEnv {
     this.boundary = options.boundary ?? null;
     if (this.boundary !== null && this.staging.hostRoot !== options.workspace)
       throw new FileError("permission_denied", "sandbox: refusing redirected staging root", options.workspace);
+    this.stopped = shared?.stopped ?? new AbortController();
+    this.pending = shared?.pending ?? new Set();
+    this.children = shared?.children ?? new Set();
+    this.fileOnly = shared !== undefined;
+  }
+
+  /**
+   * This environment narrowed to one real directory for file operations. It shares this Work's mutation queue (so a
+   * write keeps its exact place among this Work's shell commands and other writes), its deadline, its cancellation and
+   * its live re-authorization after waiting in the queue; but its only readable and writable root is `root`, so every
+   * operation runs in the single-root confined environment (no symlink in any component, final open `O_NOFOLLOW`).
+   * It never runs commands. `recheck` runs with every authorization, including the one after the queue wait, and
+   * refuses by throwing (for example when the Scope that admitted the write was paused while it waited).
+   */
+  scopedTo(root: string, recheck: () => void): HostExecutionEnv {
+    const real = realpathSync(root);
+    const boundary: SeatbeltPolicy = { home: homedir(), stateRoot: real, writeRoots: [real], readRoots: [], viewRoots: [], tempRoots: [], git: null, proxyPort: null, secrets: [], privacy: [], toolchain: [] };
+    const authorize = this.options.authorize;
+    return new HostExecutionEnv({ ...this.options, boundary, authorize: () => { recheck(); return authorize?.() ?? "scoped"; } }, { stopped: this.stopped, pending: this.pending, children: this.children });
   }
 
   /** A caller path in this environment's spelling, resolved to the real path the boundary sees. */
@@ -386,6 +407,7 @@ export class HostExecutionEnv extends NodeExecutionEnv {
   }
 
   override exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> {
+    if (this.fileOnly) return Promise.resolve(err(new ExecutionError("spawn_error", "This file-only Scope view never runs commands")));
     const timeout = options?.timeout;
     if (timeout !== undefined && (!Number.isFinite(timeout) || timeout <= 0 || timeout * 1000 > MAX_TIMEOUT_MS))
       return Promise.resolve(err(new ExecutionError("timeout", "Invalid timeout: must be positive finite seconds within the platform timer limit")));

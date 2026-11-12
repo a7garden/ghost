@@ -15,7 +15,7 @@ import type { SandboxEnvFactory } from "../integrations/ports.ts";
 import { describeOutcome, describeWork } from "../core/works.ts";
 import { parseShellResult, type ShellResult } from "../core/verify.ts";
 import { askOwnerTool, errorResult, requireAllowed, requireWork, scopeOf, workDecideTool } from "./shared.ts";
-import { WorkspaceEnv } from "../sandbox/workspace-env.ts";
+import { HostExecutionEnv } from "../sandbox/host-env.ts";
 import type { ObservedEffect, PolicyReceipt } from "../core/policy-context.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
@@ -254,6 +254,8 @@ async function executionRoot(work: Work, sandbox: SandboxEnvFactory, api: ToolEx
  * environment's real cwd) under one canonical Scope path, and no existing component below that path is a symlink or a
  * non-directory. Anything else — no Scope, a paused or another Ghost's Scope, `~`/`file://`, a path outside, a symlink —
  * is null and stays a Mac write for the owner. Shell commands never come here: an opaque command proves nothing.
+ * A host-kind worktree Work writes its own checkout under Ghost state, outside every Scope path, so its writes stay Mac
+ * writes for the owner (no widening); the default workspace kind already writes its own checkout as a `workspace` target.
  */
 export function scopeWriteTarget(core: Core, work: Work, cwd: string, path: string): { root: string; host: string } | null {
   if (work.execution?.kind !== "host" || work.scopeId === null) return null;
@@ -283,20 +285,27 @@ export function scopeWriteTarget(core: Core, work: Work, cwd: string, path: stri
 const scopeWrite = (target: { root: string }): ObservedEffect => ({ target: { kind: "scope_path", id: target.root }, access: "write", reversible: true, external: false, amount: null });
 
 /**
- * Run a write admitted as a Scope-path write through a single-root confined environment at that Scope path: every
- * component is checked without following symlinks and the final open is O_NOFOLLOW, so a symlink planted after
- * classification cannot redirect it. The decision comes from the admitted policy receipt, never from a fresh lookup, so
- * a call retried after its Scope was paused, moved or narrowed refuses instead of falling back to unconfined PC I/O.
- * Returns false when the effect was admitted as an ordinary (owner-approved) Mac write.
+ * Run a write admitted as a Scope-path write in the Host environment narrowed to that Scope path: it keeps its place in
+ * this Work's mutation queue among shell commands and other writes, is re-authorized (live Work/PC authority and this
+ * Scope binding) after waiting, and every component is checked without following symlinks with an O_NOFOLLOW final
+ * open, so a symlink planted after classification cannot redirect it. The decision comes from the admitted policy
+ * receipt, never a fresh lookup, so a call retried after its Scope was paused, moved or narrowed refuses instead of
+ * falling back to unconfined PC I/O. Returns false when the effect was admitted as an ordinary (owner-approved) Mac write.
  */
-async function inAdmittedScope(core: Core, conversationId: string, callId: string, workId: string, cwd: string, path: string, perform: (env: WorkspaceEnv, host: string) => Promise<void>): Promise<boolean> {
+async function inAdmittedScope(core: Core, env: ExecutionEnv | undefined, conversationId: string, callId: string, workId: string, cwd: string, path: string, perform: (env: ExecutionEnv, host: string) => Promise<void>): Promise<boolean> {
   const effect = core.ledger.effectByCall(conversationId, callId);
   const receipt = effect ? core.ledger.setting<PolicyReceipt | null>(`policy:effect:${effect.id}`, null) : null;
   if (receipt?.classification.target.kind !== "scope_path") return false;
-  const live = scopeWriteTarget(core, core.ledger.work(workId), cwd, path);
-  if (!live || live.root !== receipt.classification.target.id) throw new NoEffect("The Work's Scope no longer covers this path; nothing was written");
-  const env = new WorkspaceEnv({ hostRoot: live.root, id: `ghost-scope:${live.root}` });
-  await unchangedMeansNoEffect(live.root, relative(live.root, live.host), () => perform(env, live.host));
+  const root = receipt.classification.target.id;
+  const live = () => {
+    const target = scopeWriteTarget(core, core.ledger.work(workId), cwd, path);
+    if (!target || target.root !== root) throw new NoEffect("The Work's Scope no longer covers this path; nothing was written");
+    return target;
+  };
+  const target = live();
+  if (!(env instanceof HostExecutionEnv)) throw new NoEffect("The Host PC environment is unavailable; nothing was written");
+  const scoped = env.scopedTo(target.root, () => { live(); });
+  await unchangedMeansNoEffect(target.root, relative(target.root, target.host), () => perform(scoped, target.host));
   return true;
 }
 
@@ -332,7 +341,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "write", input: args, summary: `write ${args.path}`, ...(target ? { classification: scopeWrite(target) } : {}) },
           async () => {
-            const confined = cwd !== null && await inAdmittedScope(core, scope.conversation.id, api.callId, scope.work.id, cwd, args.path, async (env, host) => {
+            const confined = cwd !== null && await inAdmittedScope(core, api.env, scope.conversation.id, api.callId, scope.work.id, cwd, args.path, async (env, host) => {
               fresh = await write.execute({ ...args, path: host }, { ...api, env }, context);
             });
             if (!confined) await unchangedMeansNoEffect(await executionRoot(scope.work, sandbox, api, context), args.path, async () => {
@@ -360,7 +369,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
         const recorded = await core.effects.run(
           { conversationId: scope.conversation.id, callId: api.callId, tool: "edit", input: args, summary: `edit ${args.path}`, ...(target ? { classification: scopeWrite(target) } : {}) },
           async () => {
-            const confined = cwd !== null && await inAdmittedScope(core, scope.conversation.id, api.callId, scope.work.id, cwd, args.path, async (env, host) => {
+            const confined = cwd !== null && await inAdmittedScope(core, api.env, scope.conversation.id, api.callId, scope.work.id, cwd, args.path, async (env, host) => {
               fresh = await edit.execute({ ...args, path: host }, { ...api, env }, context);
             });
             if (!confined) await unchangedMeansNoEffect(await executionRoot(scope.work, sandbox, api, context), args.path, async () => {
