@@ -76,7 +76,7 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
     <div className="hidden min-[56rem]:contents"><DecisionDeck state={state} navigate={navigate}/></div>
     {roots.length > 0 && <section className="home__band" aria-labelledby="home-live">
       <header className="home__band-head">
-        <h2 id="home-live" className="section-title">진행 중<span className="count">{live.length}</span></h2>
+        <h2 id="home-live" className="section-title">진행 중</h2>
         <button type="button" className="link-quiet" onClick={() => navigate('/work')}>{uiTerms.work}<ArrowRight size={13} aria-hidden="true"/></button>
       </header>
       <div className="lanes">{roots.slice(0, LIVE_LANES).map(lane)}</div>

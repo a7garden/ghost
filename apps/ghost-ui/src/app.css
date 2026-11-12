@@ -153,7 +153,7 @@ body {
 /* Keep evidence and responses separate; exceptionally short windows can scroll the whole request. */
 .deck[data-docked] .decision { max-height: min(65dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
 .deck[data-docked] .decision__body { min-height: min(72px, 20dvh); overflow-y: auto; overscroll-behavior: contain; }
-.deck[data-docked] .decision__options { max-height: min(24dvh, 240px); overflow-y: auto; overscroll-behavior: contain; }
+.deck[data-docked] .decision__options { max-height: min(24dvh, 112px); overflow-y: auto; overscroll-behavior: contain; }
 .decision {
   position: relative; display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 18px 20px;
   border: 1px solid var(--ghost-line-strong); border-radius: var(--radius-control); background: var(--ghost-surface); outline: none;
@@ -176,11 +176,11 @@ body {
 .decision__detail--md .message-body > :first-child { margin-top: 0; }
 .decision__detail--md .message-body > :last-child { margin-bottom: 0; }
 .decision__response { display: grid; flex: none; gap: 10px; min-width: 0; }
-.decision__options { display: grid; min-width: 0; }
+.decision__options { display: grid; min-width: 0; max-height: 112px; overflow-y: auto; overscroll-behavior: contain; }
 .decision__option {
-  display: flex; min-width: 0; min-height: 44px; align-items: center; gap: 10px; padding: 10px 8px;
+  display: flex; min-width: 0; min-height: 28px; align-items: center; gap: 8px; padding: 4px 8px;
   border: 0; border-bottom: 1px solid var(--ghost-line); border-radius: 0; color: var(--ghost-ink); background: transparent; text-align: left;
-  font: 500 var(--text-body)/1.5 var(--font-sans); cursor: pointer; transition: background-color var(--duration-fast) ease;
+  font: 500 var(--text-ui)/1.45 var(--font-sans); cursor: pointer; transition: background-color var(--duration-fast) ease;
 }
 .decision__option:first-child { border-top: 1px solid var(--ghost-line); }
 .decision__option:hover:not(:disabled) { background: var(--ghost-hover); }
@@ -194,6 +194,7 @@ body {
 .decision__review p { margin: 0; overflow-wrap: anywhere; }
 .decision__review strong { margin-right: 4px; font-weight: 500; }
 .decision__review-auto { color: var(--ghost-ink2); }
+.decision__answer-hint { margin: 0; color: var(--ghost-ink3); font-size: var(--text-caption); line-height: 1.55; }
 .decision__custom { min-width: 0; }
 .decision__custom > summary { width: fit-content; padding: 4px 0; color: var(--ghost-ink2); font-size: var(--text-caption); cursor: pointer; }
 .decision__custom[open] > summary { margin-bottom: 6px; }
@@ -238,6 +239,7 @@ body {
   .decision__actions > button { flex: 1; min-height: 44px; }
 }
 @media (hover: none) { .decision__option kbd { display: none; } }
+@media (hover: none), (pointer: coarse) { .decision__option { min-height: 44px; padding: 8px 8px; } .decision__options { max-height: 176px; } }
 /* The conversation's live browser: the Host streams JPEG frames the owner drives from any device. */
 .browser-live { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; height: 100%; }
 .browser-live[data-compact] { height: auto; margin-top: 2px; }
@@ -311,6 +313,7 @@ body {
 .lane__copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
 .lane__title { overflow: hidden; font-size: var(--text-ui); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .lane__meta { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--ghost-ink3); font-size: var(--text-caption); }
+.lane__state { flex: none; color: var(--ghost-ink2); font-weight: 500; }
 .lane__ghost { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--ghost-ink2); }
 .lane__ghost .dot-avatar { border-radius: 50%; }
 .lane__note { overflow: hidden; color: var(--ghost-ink2); text-overflow: ellipsis; white-space: nowrap; }

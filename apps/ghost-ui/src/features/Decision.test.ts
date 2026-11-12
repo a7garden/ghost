@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Decision, State, Work } from '@ghost/contract';
 import { HostProvider } from '../host/context';
-import { DecisionCard, autoSettleText, cardDetail, chatDecisions, decisionCommand, documentProposal, highRiskApproval, recommendedOption } from './Decision';
+import { DecisionCard, DecisionDeck, autoSettleText, cardDetail, chatDecisions, decisionCommand, documentProposal, highRiskApproval, recommendedOption } from './Decision';
 import { browserHandoffProposal, decisionChip, emptySecureForm, goalProposal, secureFormBody, secureFormProposal } from './decisionText';
 
 const decision = (patch: Partial<Decision> = {}): Decision => ({
@@ -196,6 +196,36 @@ describe('DecisionCard render', () => {
     expect(markup).not.toContain('답변 보내기');
   });
 
+});
+
+describe('answer field purpose', () => {
+  it('says where the free answer goes while the toggle is closed', () => {
+    const card = decision({ kind: 'question', title: '어느 쪽으로 할까요?', detail: '', options: ['서울', '부산'] });
+    const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, {
+      decision: card, ghostName: '세이지', onResolved() {},
+    })));
+    expect(markup).toContain('답변을 직접 적으려면 「직접 답하기」를 펼쳐 주세요.');
+    expect(markup).toContain('직접 답하기');
+  });
+
+  it('shows no hint when the answer field is already open', () => {
+    const card = decision({ kind: 'question', title: '어느 쪽으로 할까요?', detail: '', options: [] });
+    const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionCard, {
+      decision: card, ghostName: '세이지', onResolved() {},
+    })));
+    expect(markup).not.toContain('답변을 직접 적으려면');
+    expect(markup).toContain('답변을 적어 주세요');
+  });
+});
+
+describe('the count lives in the sidebar only', () => {
+  it('keeps the section label and drops the header number', () => {
+    const pending = decision({ kind: 'question', title: '어느 쪽으로 할까요?', detail: '', options: ['서울', '부산'] });
+    const state = { decisions: [pending], works: [], ghosts: [{ id: 'sage', name: '세이지' }] } as unknown as State;
+    const markup = renderToStaticMarkup(createElement(HostProvider, null, createElement(DecisionDeck, { state, navigate() {} })));
+    expect(markup).toContain('<h2 class="section-title">확인 필요</h2>');
+    expect(markup).not.toContain('class="count"');
+  });
 });
 
 describe('secureFormProposal and browserHandoffProposal', () => {

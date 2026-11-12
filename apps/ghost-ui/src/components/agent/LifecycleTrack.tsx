@@ -28,15 +28,17 @@ export function lifecycleLabel(state: WorkState, needsOwner: boolean): string {
  * Four segments from 접수 to 완료. Passed segments are solid ink, the current one carries
  * the state color (and a travelling sheen while the Ghost is actually working).
  */
-export function LifecycleTrack({ state, needsOwner = false, compact = false, decorative = false, className = '' }: {
+export function LifecycleTrack({ state, needsOwner = false, compact = false, decorative = false, stageOnly = false, className = '' }: {
   state: WorkState; needsOwner?: boolean; compact?: boolean;
   /** Beside a StateGlyph that already speaks the state, the track stays out of the accessible name. */
-  decorative?: boolean; className?: string;
+  decorative?: boolean;
+  /** Say the stage alone ("진행"), for a lane that already shows the state word next to it. */
+  stageOnly?: boolean; className?: string;
 }) {
   const { step, tone, moving } = lifecyclePosition(state, needsOwner);
   const ended = state === 'cancelled' || state === 'failed';
   return <div className={`lifecycle ${className}`} data-compact={compact || undefined} data-tone={tone}
-    {...decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': lifecycleLabel(state, needsOwner) }}>
+    {...decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': stageOnly ? steps[lifecyclePosition(state, needsOwner).step] : lifecycleLabel(state, needsOwner) }}>
     <div className="lifecycle__bars">
       {steps.map((name, index) => <span key={name} className="lifecycle__bar"
         data-phase={index < step ? 'past' : index === step ? 'current' : ended ? 'void' : 'future'}

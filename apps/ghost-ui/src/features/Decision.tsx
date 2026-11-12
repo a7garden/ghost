@@ -158,6 +158,7 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
   const [revising, setRevising] = useState(false);
   const [reason, setReason] = useState('');
   const [armedAt, setArmedAt] = useState<number | null>(null);
+  const [customOpen, setCustomOpen] = useState(false);
   const armed = armedAt !== null;
   const cardRef = useRef<HTMLElement>(null);
   const reasonRef = useRef<HTMLTextAreaElement>(null);
@@ -308,9 +309,12 @@ export function DecisionCard({ decision, ghostName, workTitle, onResolved, onOpe
           <Button disabled={busy} onClick={() => resolve('answer', handoffDoneAnswer)}>{handoffDoneAnswer}</Button>
         </div>}
         {options.length > 0 || handoff
-          ? <details className="decision__custom"><summary>직접 답하기</summary>
-            <AnswerField answer={answer} onChange={setAnswer} busy={busy} onSend={() => resolve('answer', answer)}/>
-          </details>
+          ? <>
+            {!customOpen && <p className="decision__answer-hint">답변을 직접 적으려면 「직접 답하기」를 펼쳐 주세요.</p>}
+            <details className="decision__custom" open={customOpen} onToggle={event => setCustomOpen(event.currentTarget.open)}><summary>직접 답하기</summary>
+              <AnswerField answer={answer} onChange={setAnswer} busy={busy} onSend={() => resolve('answer', answer)}/>
+            </details>
+          </>
           : <AnswerField answer={answer} onChange={setAnswer} busy={busy} onSend={() => resolve('answer', answer)}/>}
       </>
       : revising && reasonPrompt
@@ -619,7 +623,7 @@ export function DecisionDeck({ state, navigate, focusId, overview = false, docke
   return <section className="deck" aria-label="확인 필요" data-overview={overview || undefined} data-docked={docked || undefined} onKeyDown={onKeyDown}>
     {/* Docked, a single card speaks for itself; the head appears only to browse several. */}
     {current && (!docked || pending.length > 1) && <header className="deck__head">
-      <h2 className="section-title">확인 필요<span className="count">{pending.length}</span></h2>
+      <h2 className="section-title">확인 필요</h2>
       <div className="deck__quick">
         {canHandOver(current, state) && <button type="button" title="메인 Ghost가 대신 정합니다. 되돌릴 수 있는 결정만 맡길 수 있습니다." onClick={handOverCurrent}>메인에게 맡기기</button>}
         {canLater && <button type="button" title="나중에 (L)" aria-keyshortcuts="L" onClick={deferCurrent}>나중에</button>}

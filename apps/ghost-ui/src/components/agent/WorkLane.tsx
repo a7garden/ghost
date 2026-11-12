@@ -4,7 +4,7 @@ import { DotAvatar } from '../DotAvatar';
 import { toneFor } from '../../features/ghostState';
 import { relativeTime } from '../../features/time';
 import { LifecycleTrack } from './LifecycleTrack';
-import { StateGlyph, workGlyph } from './StateGlyph';
+import { StateGlyph, glyphLabel, workGlyph } from './StateGlyph';
 
 /**
  * One Work as a lane: its state shape, title, who carries it and since when, and
@@ -32,12 +32,13 @@ export function WorkLane({ work, ghostName, needsOwner, now, onOpen, action, bra
         <span className="lane__copy">
           <span className="lane__title">{work.title}</span>
           <span className="lane__meta">
+            <span className="lane__state" aria-hidden="true">{glyphLabel[glyph]}</span>
             {showGhost && <span className="lane__ghost"><DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={14}/>{ghostName}</span>}
             <time className="tabular">{relativeTime(at, now)}</time>
             {note && <span className="lane__note">{note}</span>}
           </span>
         </span>
-        <LifecycleTrack state={work.state} needsOwner={needsOwner} compact decorative className="lane__track"/>
+        <LifecycleTrack state={work.state} needsOwner={needsOwner} compact stageOnly className="lane__track"/>
       </button>
       {action && <span className="lane__action">{action}</span>}
     </div>
