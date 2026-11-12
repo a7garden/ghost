@@ -10,7 +10,12 @@ import { createBrowserTools } from "../src/tools/browser.ts";
 import { classifyDesktopEffect } from "../src/tools/desktop.ts";
 import { createMainTools } from "../src/tools/main.ts";
 import type { BrowserPort, BrowserRunOptions, BrowserSessionRef } from "../src/integrations/ports.ts";
-import { harness } from "./support.ts";
+import { harness, tempDir } from "./support.ts";
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createWorkTools } from "../src/tools/work.ts";
+import { HostExecutionEnv, HostMutationQueue } from "../src/sandbox/host-env.ts";
+import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
 
 const opened: { core: Core; ledger: Ledger }[] = [];
 afterEach(async () => { for (const h of opened.splice(0)) { h.core.stop(); await h.core.idle(); h.ledger.close(); } });
@@ -520,4 +525,84 @@ test("a resumed attempt never revives approvals or receipts from an earlier atte
   const identity = workExecutionIdentity(h.ledger, h.ledger.work(work.id));
   h.core.works.resume(work.id);
   expect(workExecutionIdentity(h.ledger, h.ledger.work(work.id))).not.toBe(identity);
+});
+
+/** A Host Work whose cwd is the Work's Scope path, with the real Host filesystem environment. */
+async function scopedHostWork() {
+  const h = setup();
+  const scopeDir = realpathSync(tempDir());
+  const outside = realpathSync(tempDir());
+  const staging = realpathSync(tempDir());
+  h.ledger.tx(() => {
+    h.ledger.putGhost({ ...h.ledger.ghost(h.ghost.id), hostExecution: true, tools: [...h.ghost.tools, "write", "edit"] });
+    h.ledger.putScope({ id: "scope-1", name: "Project", paths: [scopeDir], vaultPath: null, createdAt: 1, ghostId: null, state: "active", attachments: [], limits: {}, updatedAt: 1 });
+  });
+  const work = h.core.works.createRoot({ ghostId: h.ghost.id, title: "Edit", brief: "Edit project files", originConversationId: h.conversationId, scopeId: "scope-1", execution: { kind: "host", cwd: scopeDir } });
+  await h.core.idle();
+  const conversationId = h.ledger.work(work.id).conversationId!;
+  h.ledger.setPiConversationId(conversationId, "scoped-host-pi");
+  const env = new HostExecutionEnv({ cwd: scopeDir, workspace: staging, id: "ghost-host", mutations: new HostMutationQueue(), deadlineAt: null });
+  const sandbox = { workspacePath: () => staging } as unknown as SandboxEnvFactory;
+  const tools = createWorkTools(h.core, sandbox).tools!;
+  const write = (path: string, content: string, callId: string) => tools.find((tool) => tool.name === "write")!.execute({ path, content } as never,
+    { conversationId: "scoped-host-pi", taskId: `task:${callId}`, callId, env, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
+  const receipt = (callId: string) => h.ledger.setting<{ classification: { target: { kind: string } } } | null>(`policy:effect:${h.ledger.effectByCall(conversationId, callId)!.id}`, null);
+  const approve = async (callId: string) => {
+    const decision = h.ledger.pendingDecisions({ effectId: h.ledger.effectByCall(conversationId, callId)!.id })[0]!;
+    await h.core.decisions.resolve(decision.id, { outcome: "approve" });
+  };
+  return { ...h, scopeDir, outside, work, conversationId, write, receipt, approve };
+}
+
+test("a Host write the Host proves inside the Work's Scope is a Scope-path write and runs at once", async () => {
+  const s = await scopedHostWork();
+  mkdirSync(join(s.scopeDir, "docs"));
+  expect((await s.write("docs/plan.md", "in scope", "in-scope")).isError).toBeFalsy();
+  expect(readFileSync(join(s.scopeDir, "docs/plan.md"), "utf8")).toBe("in scope");
+  expect(s.receipt("in-scope")?.classification.target.kind).toBe("scope_path");
+});
+
+test("a Host write outside the Scope stays a Mac write for the owner and writes nothing", async () => {
+  const s = await scopedHostWork();
+  expect((await s.write(join(s.outside, "x.txt"), "escape", "outside")).isError).toBe(true);
+  expect(existsSync(join(s.outside, "x.txt"))).toBe(false);
+  expect(s.receipt("outside")?.classification.target.kind).toBe("mac");
+  expect((await s.write("~/x.txt", "home", "home")).isError).toBe(true);
+  expect(s.receipt("home")?.classification.target.kind).toBe("mac");
+});
+
+test("a symlink inside the Scope never makes an outside target a Scope-path write", async () => {
+  const s = await scopedHostWork();
+  symlinkSync(s.outside, join(s.scopeDir, "link"));
+  expect((await s.write("link/evil.txt", "escape", "symlink")).isError).toBe(true);
+  expect(existsSync(join(s.outside, "evil.txt"))).toBe(false);
+  expect(s.receipt("symlink")?.classification.target.kind).toBe("mac");
+});
+
+test("a symlink planted after admission cannot redirect a queued Scope-path write", async () => {
+  const s = await scopedHostWork();
+  s.ledger.tx(() => s.ledger.putPolicyRule(rule("owner-writes", "owner", { tool: "write" })));
+  mkdirSync(join(s.scopeDir, "sub"));
+  expect((await s.write("sub/file.txt", "queued", "planted")).isError).toBe(true);
+  expect(s.receipt("planted")?.classification.target.kind).toBe("scope_path");
+  // Swap the admitted directory for a symlink to an outside tree while the write waits for the owner.
+  const { renameSync } = await import("node:fs");
+  renameSync(join(s.scopeDir, "sub"), join(s.scopeDir, "sub-moved"));
+  symlinkSync(s.outside, join(s.scopeDir, "sub"));
+  await s.approve("planted");
+  await s.write("sub/file.txt", "queued", "planted");
+  expect(existsSync(join(s.outside, "file.txt"))).toBe(false);
+  expect(s.ledger.effect(s.ledger.effectByCall(s.conversationId, "planted")!.id).state).not.toBe("done");
+});
+
+test("pausing the Scope while a Scope-path write waits refuses it instead of writing unconfined", async () => {
+  const s = await scopedHostWork();
+  s.ledger.tx(() => s.ledger.putPolicyRule(rule("owner-writes", "owner", { tool: "write" })));
+  expect((await s.write("queued.txt", "queued", "revoked")).isError).toBe(true);
+  expect(s.receipt("revoked")?.classification.target.kind).toBe("scope_path");
+  s.ledger.tx(() => s.ledger.putScope({ ...s.ledger.scope("scope-1"), state: "paused", updatedAt: 2 }));
+  await s.approve("revoked");
+  await s.write("queued.txt", "queued", "revoked");
+  expect(existsSync(join(s.scopeDir, "queued.txt"))).toBe(false);
+  expect(s.ledger.effect(s.ledger.effectByCall(s.conversationId, "revoked")!.id).state).not.toBe("done");
 });
