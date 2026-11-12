@@ -429,7 +429,17 @@ class HostEngine implements Engine, MemoryEngine {
     const primary = this.resolveModel(settings, conversation, ghost, work);
     if (!primary) return null;
     if (!this.allowsFallback(settings, conversation, work) || !this.core.quota.blocked(primary.provider)) return primary;
-    return this.resolution(settings, conversation, ghost, work).fallbacks.find((candidate) => this.available(candidate, settings) && !this.core.quota.blocked(candidate.provider)) ?? primary;
+    return this.resolution(settings, conversation, ghost, work).fallbacks.find((candidate) => this.usable(candidate, settings) && !this.core.quota.blocked(candidate.provider)) ?? primary;
+  }
+
+  /** A credential read failure cannot count as available quota capacity. */
+  private usable(model: ModelRef, settings: Settings): boolean {
+    try {
+      return this.available(model, settings);
+    } catch (error) {
+      this.log(`engine: provider ${model.provider} availability could not be read`, error);
+      return false;
+    }
   }
 
   private available(model: ModelRef, settings: Settings): boolean {
@@ -580,7 +590,7 @@ class HostEngine implements Engine, MemoryEngine {
     if (!this.core.secrets.has(provider.id) || quotaBlocked) {
       const why = this.core.secrets.has(provider.id) ? "the provider's quota is exhausted" : `provider ${provider.id} has no credential`;
       const next = this.allowsFallback(settings, conversation, work)
-        ? this.resolution(settings, conversation, ghost, work).fallbacks.find((candidate) => this.available(candidate, settings) && (!this.core.quota.blocked(candidate.provider) || releaseProvider === candidate.provider))
+        ? this.resolution(settings, conversation, ghost, work).fallbacks.find((candidate) => this.usable(candidate, settings) && (!this.core.quota.blocked(candidate.provider) || releaseProvider === candidate.provider))
         : undefined;
       if (!next) throw new CommandError("unavailable", why);
       this.logFallback(state, model, next, why);
@@ -620,7 +630,7 @@ class HostEngine implements Engine, MemoryEngine {
     const model = this.resolveModel(settings, conversation, ghost, work);
     if (!model) return [];
     const refs = [model, ...this.resolution(settings, conversation, ghost, work).fallbacks];
-    return [...new Set(refs.filter((candidate) => this.available(candidate, settings)).map((candidate) => candidate.provider))];
+    return [...new Set(refs.filter((candidate) => this.usable(candidate, settings)).map((candidate) => candidate.provider))];
   }
 
   async submissionRecovery(conversationId: string, requestId: string): Promise<SubmissionRecovery | null> {
