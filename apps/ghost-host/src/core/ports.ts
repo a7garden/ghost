@@ -32,6 +32,9 @@ export interface Submission {
   /** Resolve only after checking the durable submission identity, so retries survive deletion. */
   scopeId?: string | null;
   docAttachments?: DocRef[];
+  /** Host provenance of background payloads; never supplied by model arguments. */
+  sourceConversationId?: string;
+  sourceConversationIds?: string[];
   /** Join the running turn instead of queueing a follow-up. */
   steer?: boolean;
 }
@@ -60,7 +63,7 @@ export interface Engine extends Partial<MemoryEngine> {
   /** Reconcile a previously released request against durable admissions before replaying or advancing it. */
   submissionRecovery?(conversationId: string, requestId: string): Promise<SubmissionRecovery | null>;
   /** Fresh, deterministic background conversation; no background transcript enters the owner's thread. */
-  wake?(ghostId: string, submission: Submission): Promise<void>;
+  wake?(ghostId: string, submission: Submission, options?: { slot?: string; decisionId?: string; ownerConversationId?: string; sourceConversationId?: string }): Promise<void>;
   runSubagent?(parentId: string, input: { task: string; tools?: string[]; max_turns?: number; max_tokens?: number }, api: ToolExecutionApi, context: Context): Promise<string>;
   /** Stop the current run and withdraw queued inputs. */
   abort(conversationId: string): Promise<void>;

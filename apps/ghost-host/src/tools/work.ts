@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { Check, type Work } from "@ghost/contract";
+import { Check, DocRefs, SlotName, type Work } from "@ghost/contract";
 import { defineExtension, defineTool, type Extension, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
@@ -421,11 +421,14 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
   const delegate = defineTool({
     name: "delegate",
     description:
-      "Hand a self-contained part of this Work to another Ghost. Optional checks gate review; the named reviewer or delegating Ghost still judges a passing result.",
+      "Hand a self-contained part of this Work to a Ghost, including your own identity in a fresh context. The child inherits this scope and capability boundary, and obeys the same depth and tree limits. Optional checks gate review; the named reviewer or delegating Ghost still judges a passing result.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "Assignee Ghost" }),
       title: Type.String({ minLength: 1, maxLength: 256 }),
       brief: Type.String({ minLength: 1, maxLength: 32768 }),
+      attachments: Type.Optional(DocRefs),
+      slot: Type.Optional(SlotName),
+      retry_slot: Type.Optional(SlotName),
       criteria: Type.Optional(Type.String({ maxLength: 8192, description: "When the delegated Work is done" })),
       checks: Type.Optional(Type.Array(Check, { maxItems: 16, description: "Deterministic checks the child must pass before review" })),
       reviewer_ghost_id: Type.Optional(
@@ -441,6 +444,9 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
           ghostId: args.ghost_id,
           title: args.title,
           brief: args.brief,
+          attachments: args.attachments,
+          slot: args.slot,
+          retry: args.retry_slot ? { slot: args.retry_slot } : null,
           acceptance: {
             criteria: args.criteria ?? "",
             checks: args.checks ?? [],

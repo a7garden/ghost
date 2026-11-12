@@ -62,13 +62,14 @@ async function runningParent(s: Setup) {
 const acceptance = (reviewer: { kind: "ghost"; ghostId: string } | null = null) => ({ criteria: "", checks: [], reviewer });
 
 describe("delegate rules", () => {
-  test("a Work cannot delegate to its own Ghost", async () => {
+  test("a Work may delegate to its own Ghost in an independent conversation", async () => {
     const s = setup();
     const parent = await runningParent(s);
-    expect(() => s.core.works.delegate(parent.id, { ghostId: s.ghost.id, title: "Loop", brief: "B" })).toThrow(
-      "a Work cannot delegate to its own Ghost",
-    );
-    expect(s.ledger.children(parent.id)).toHaveLength(0);
+    const child = s.core.works.delegate(parent.id, { ghostId: s.ghost.id, title: "Independent slice", brief: "B" });
+    await s.core.idle();
+    expect(child.ghostId).toBe(parent.ghostId);
+    expect(s.ledger.work(child.id).conversationId).not.toBe(s.ledger.work(parent.id).conversationId);
+    expect(s.ledger.children(parent.id)).toHaveLength(1);
   });
 
   test("a named reviewer Ghost is stored and hosts the review conversation", async () => {
@@ -196,14 +197,14 @@ describe("delegate tool", () => {
     expect(s.ledger.children(work.id)[1]!.acceptance.reviewer).toBeNull();
   });
 
-  test("delegating to its own Ghost or to a deleted Ghost is refused at the tool", async () => {
+  test("self-delegation is allowed but a deleted Ghost remains refused at the tool", async () => {
     const s = setup();
     const { conversation, pi } = await runningToolWork(s);
     const delegate = toolOf(s, conversation, s.ghost, "delegate");
 
     const self = await call(delegate, { ghost_id: s.ghost.id, title: "Loop", brief: "B" }, apiOf(pi, "del-3"));
-    expect(self.isError).toBe(true);
-    expect(contentOf(self)).toContain("a Work cannot delegate to its own Ghost");
+    expect(self.isError).toBeFalsy();
+    expect(contentOf(self)).toContain("Delegated");
 
     updateGhost(s.core, s.helper.id, { state: "retired" });
     deleteGhost(s.core, s.helper.id);

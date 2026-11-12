@@ -7,7 +7,7 @@ const label = (ref: DocRef) => ref.kind === "skill" ? `skill:${ref.name}` : `pag
 const clean = (value: string) => value.replace(/[\r\n]/g, " ").slice(0, 256);
 
 /** Bodies are JSON quoted so attached text cannot close a delimiter or impersonate a Host instruction. */
-export async function attachmentLayer(name: string, refs: readonly DocRef[], documents: DocumentsPort | null, skills: SkillsPort | null, extra?: { title: string; body: string }): Promise<string> {
+export async function attachmentLayer(name: string, refs: readonly DocRef[], documents: Pick<DocumentsPort, "readPage"> | null, skills: Pick<SkillsPort, "body"> | null, extra?: { title: string; body: string }): Promise<string> {
   if (!refs.length && !extra?.body) return "";
   const index: string[] = [];
   const bodies: string[] = [];

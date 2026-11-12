@@ -26,6 +26,7 @@ interface PendingWake {
   text: string;
   at: number;
   scopeId?: string | null;
+  sourceConversationIds?: string[];
   heads: Record<string, string>;
   /** The plan revision this record created; a later revision means the plan changed during the wake. */
   revision: number;
@@ -338,14 +339,15 @@ export class Autonomy {
       const observedSeq = ledger.seq();
       const assigned = ledger.scopes().filter((scope) => scope.state === "active" && (scope.ghostId === ghost.id || (scope.ghostId === null && ghost.isDefault)));
       const scopeId = moved[0]?.space.id ?? (plan.watch.length === 1 ? plan.watch[0]! : assigned.length === 1 ? assigned[0]!.id : null);
-      const text = await this.prompt(ghost, plan, due, moved, now, scopeId);
+      const sources = new Set<string>();
+      const text = await this.prompt(ghost, plan, due, moved, now, scopeId, sources);
       const seen = { ...plan.heads };
       for (const item of moved) seen[`${item.space.id}:${item.path}`] = item.to;
       // Recorded before submission; skipped when the owner or the Ghost changed the plan meanwhile.
       let pending = null as PendingWake | null;
       this.update(ghost.id, (stored) => {
         if (stored.revision !== plan.revision || !stored.enabled || stored.pending) return stored;
-        pending = { requestId: `autonomy:${ghost.id}:${stored.wakes + 1}:${now}`, text, at: now, scopeId, heads: seen, revision: stored.revision + 1 };
+        pending = { requestId: `autonomy:${ghost.id}:${stored.wakes + 1}:${now}`, text, at: now, scopeId, sourceConversationIds: [...sources], heads: seen, revision: stored.revision + 1 };
         // Capture before prompt I/O. A later ledger change remains unobserved even on the same clock tick.
         return { ...stored, pending, observed: now, observedSeq };
       });
@@ -356,7 +358,7 @@ export class Autonomy {
   /** Submit a recorded wake, then account for it. A plan the Ghost makes during the wake outlives the fallback. */
   private async submit(ghost: Ghost, pending: PendingWake, now: number) {
     try {
-      const submission = { text: pending.text, origin: "schedule" as const, requestId: pending.requestId, scopeId: pending.scopeId ?? null };
+      const submission = { text: pending.text, origin: "schedule" as const, requestId: pending.requestId, scopeId: pending.scopeId ?? null, sourceConversationIds: pending.sourceConversationIds ?? [] };
       if (this.core.engine.wake) await this.core.engine.wake(ghost.id, submission);
       else await this.core.engine.submit(ghost.directConversationId, submission);
     } catch (error) {
@@ -389,7 +391,7 @@ export class Autonomy {
   }
 
   /** What the Ghost needs to decide on its own: its plan, what changed, what is live, and for the main Ghost the team. */
-  private async prompt(ghost: Ghost, plan: Stored, due: boolean, moved: { space: Scope; path: string; from: string; to: string }[], now: number, scopeId: string | null): Promise<string> {
+  private async prompt(ghost: Ghost, plan: Stored, due: boolean, moved: { space: Scope; path: string; from: string; to: string }[], now: number, scopeId: string | null, sources: Set<string>): Promise<string> {
     const ledger = this.core.ledger;
     const names = new Map(ledger.ghosts().map((item) => [item.id, item.name]));
     const planner = plan.setBy === "self" ? "you" : plan.setBy === "main" ? `the main Ghost ${names.get(ledger.defaultGhost()?.id ?? "") ?? ""}`.trim() : "the Host";
@@ -401,6 +403,7 @@ export class Autonomy {
     const sinceLabel = plan.observed === null && plan.lastWakeAt === null ? "yesterday" : stamp(since);
     lines.push("", `Since ${sinceLabel}:`);
     const settled = ledger.settledRootsSince(since, plan.observedSeq, ghost.isDefault ? null : ghost.id);
+    for (const work of settled.works) if (work.conversationId) sources.add(work.conversationId);
     if (settled.count > 0) {
       // Ids, state and failure reasons travel so the main can work_inspect the exact task.
       lines.push(`${ghost.isDefault ? "Team" : "Your"} settled Work: ${settled.count}`);
@@ -420,10 +423,11 @@ export class Autonomy {
     const goals = this.core.goals.context(scopeId);
     if (goals) lines.push("", goals);
     const mine = ledger.worksInState("queued", "running", "waiting", "verifying", "blocked").filter((work) => work.ghostId === ghost.id && live(work));
+    for (const work of mine.slice(0, 8)) if (work.conversationId) sources.add(work.conversationId);
     if (mine.length) lines.push("", "Your live Work:", ...mine.slice(0, 8).map((work) => `- "${work.title}" ${work.state}`));
     // The main connects the team: its wake also carries every live teammate Work and blocker, bounded; everyone else stays scoped to their own Work.
     if (ghost.isDefault) {
-      const team = this.core.team.context();
+      const team = this.core.team.context(sources);
       if (team) lines.push("", team);
     }
     if (plan.watch.length) {

@@ -18,6 +18,17 @@ function isCurrentMain(scope: Scope): boolean {
 /** Works created here (their whole tree) plus this Ghost's live Work, one compact line each. The current main Ghost sees the whole team's Work. */
 function visibleWorks(core: Core, scope: Scope): Work[] {
   const { ledger } = core;
+  if (scope.conversation.kind === "wake") {
+    const ownerId = ledger.setting<string | null>(`wake:owner:${scope.conversation.id}`, null);
+    const owner = ownerId ? ledger.findConversation(ownerId) : null;
+    const context = ledger.setting<{ scopeId: string | null } | null>(`context:${scope.conversation.id}`, null);
+    if (!owner || owner.kind !== "direct" || owner.ghostId !== scope.ghost.id || !context) throw forbidden("this wake has no trusted owner origin");
+    return ledger.worksForState().filter((work) => {
+      if (work.scopeId !== context.scopeId) return false;
+      const root = work.rootId === work.id ? work : ledger.work(work.rootId);
+      return root.originConversationId === owner.id;
+    });
+  }
   if (isCurrentMain(scope)) return ledger.worksForState();
   const found = new Map<string, Work>();
   const walk = (work: Work) => {

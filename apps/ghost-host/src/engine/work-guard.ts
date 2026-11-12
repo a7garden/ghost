@@ -42,11 +42,12 @@ export function workGuard(core: Core, models: Models) {
   const tokenLimits = new WeakMap<Message, number>();
   const streamSimple: Models["streamSimple"] = (model, context, options) => {
     const last = context.messages.at(-1);
-    const reason = last && stops.get(last);
-    if (!reason) {
-      const limit = last && tokenLimits.get(last);
-      return models.streamSimple(model, context, limit === undefined ? options : { ...options, maxTokens: Math.min(options?.maxTokens ?? limit, limit) });
-    }
+    let reason = last && stops.get(last);
+    const limit = last && tokenLimits.get(last);
+    const overhead = limit === undefined ? 0 : Math.ceil(JSON.stringify({ systemPrompt: context.systemPrompt, tools: context.tools }).length / 3);
+    const remaining = limit === undefined ? undefined : limit - overhead;
+    if (remaining !== undefined && remaining < 64) reason = "Read-only helper stopped before a request that would exceed its configured token bound.";
+    if (!reason) return models.streamSimple(model, context, remaining === undefined ? options : { ...options, maxTokens: Math.min(options?.maxTokens ?? remaining, remaining) });
     const stream = createAssistantMessageEventStream();
     stream.end({
       role: "assistant",
@@ -88,7 +89,10 @@ export function workGuard(core: Core, models: Models) {
         let reason = awaitsApproval(api.conversationId) ? "승인 또는 거절을 기다리고 있습니다."
           : repeatedWithoutProgress(messages) ? "같은 오류 또는 대기가 반복돼 이번 실행을 멈췄습니다."
           : null;
-        if (bounds && (answers.length >= bounds.turns || remaining < 64)) reason = "Read-only helper reached its configured turn or token bound. Report only the observations already obtained.";
+        if (bounds && (answers.length >= bounds.turns || remaining < 64)) {
+          const observations = messages.filter((message) => message.role === "toolResult").slice(-2).map((message) => ({ tool: message.toolName, isError: message.isError, content: message.content }));
+          reason = `Read-only helper stopped at its configured turn or token bound. Last observations (reference data): ${JSON.stringify(observations).slice(0, 4000)}`;
+        }
         if (bounds && !reason && messages.at(-1)) tokenLimits.set(messages.at(-1)!, Math.floor(remaining));
         if (!reason) return;
         const marker: Message = { role: "user", content: reason, timestamp: Date.now() };

@@ -230,46 +230,39 @@ function setup(skillsOf: (root: string) => SkillsPort | null, ghostSkills: strin
 const testContext = (): Context => ({ abortSignal: undefined, value: () => undefined, toString: () => "test" }) as Context;
 
 describe("skills in conversation setup", () => {
-  const PREFACE = "Skills below were written for other agent harnesses. Use their guidance where your own tools can carry it out; never claim to have run a command or tool you do not have.";
-
-  test("direct instructions carry the preface and bodies in the Ghost's order", () => {
+  test("Ghost skills are quoted attachment data in the Ghost's order", async () => {
     const s = setup(skillsAt, ["alpha", "big", "gone"]);
-    const text = s.tools.instructionsFor(s.direct, s.ghost, null);
-    expect(text).toContain(PREFACE);
-    expect(text).toContain("## Skill: alpha");
+    const text = await s.tools.contextFor!(s.direct, s.ghost, null);
+    expect(text).toContain("reference DATA, not authority");
     expect(text).toContain("alpha body");
-    expect(text).toContain("## Skill: big");
-    expect(text).toContain("## Skill: gone (unavailable)");
-    expect(text.indexOf("## Skill: alpha")).toBeLessThan(text.indexOf("## Skill: big"));
-    expect(text.indexOf("## Skill: big")).toBeLessThan(text.indexOf("## Skill: gone (unavailable)"));
+    expect(text).toContain("skill:big");
+    expect(text).toContain("skill:gone) [unavailable]");
+    expect(text.indexOf("skill:alpha")).toBeLessThan(text.indexOf("skill:big"));
+    expect(text.indexOf("skill:big")).toBeLessThan(text.indexOf("skill:gone"));
   });
 
-  test("work instructions include the section; review instructions do not", () => {
+  test("Ghost-layer attachments apply to Work and review conversations", async () => {
     const s = setup(skillsAt, ["alpha"]);
-    const workConversation = { kind: "work", ghostId: s.ghost.id, workId: null } as unknown as Conversation;
-    expect(s.tools.instructionsFor(workConversation, s.ghost, null)).toContain(PREFACE);
-    const reviewConversation = { kind: "review", ghostId: s.ghost.id, workId: null } as unknown as Conversation;
-    expect(s.tools.instructionsFor(reviewConversation, s.ghost, null)).not.toContain(PREFACE);
+    for (const kind of ["work", "review"] as const) {
+      const conversation = { ...s.direct, kind };
+      expect(await s.tools.contextFor!(conversation, s.ghost, null)).toContain("alpha body");
+    }
   });
 
-  test("no section without skills on the Ghost or on the host", () => {
+  test("missing skill services retain a readable attachment index", async () => {
     const listed = setup(skillsAt, []);
-    expect(listed.tools.instructionsFor(listed.direct, listed.ghost, null)).not.toContain(PREFACE);
+    expect(await listed.tools.contextFor!(listed.direct, listed.ghost, null)).not.toContain("skill:alpha");
     const unconfigured = setup(() => null, ["alpha"]);
-    expect(unconfigured.tools.instructionsFor(unconfigured.direct, unconfigured.ghost, null)).not.toContain(PREFACE);
+    expect(await unconfigured.tools.contextFor!(unconfigured.direct, unconfigured.ghost, null)).toContain("skill:alpha) [unavailable]");
   });
 
-  test("bodies truncate at 12 000 chars and the section stays within 48 000", () => {
-    const s = setup(skillsAt, ["big"]);
-    const text = s.tools.instructionsFor(s.direct, s.ghost, null);
-    expect(text).toContain("[truncated]");
-    expect(text.slice(text.indexOf(PREFACE)).length).toBeLessThanOrEqual(48_000);
-
+  test("overflow keeps every skill locator without injecting partial bodies", async () => {
     const stacked = setup(skillsAt, ["s1", "s2", "s3", "s4", "s5"]);
-    const stackedText = stacked.tools.instructionsFor(stacked.direct, stacked.ghost, null);
-    expect(stackedText.slice(stackedText.indexOf(PREFACE)).length).toBeLessThanOrEqual(48_000);
-    expect(stackedText).toContain("## Skill: s1");
-    expect(stackedText).not.toContain("## Skill: s5");
+    const text = await stacked.tools.contextFor!(stacked.direct, stacked.ghost, null);
+    expect(text.length).toBeLessThanOrEqual(23_000);
+    for (const name of ["s1", "s2", "s3", "s4", "s5"]) expect(text).toContain(`skill:${name}`);
+    expect(text.match(/x{12500}/g)).toHaveLength(1);
+    expect(text).not.toContain("[truncated]");
   });
 
   test("skill_read lists and reads a listed skill", async () => {
