@@ -47,6 +47,7 @@ import { gateRecoveredDreams, memoryRegistry } from "../memory/runtime.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
+const ORIGIN_REPAIR = "history-origins-after-placement-order";
 
 /** One host conversation and everything the engine tracks about it. */
 interface ConversationState {
@@ -121,6 +122,7 @@ class HostEngine implements Engine, MemoryEngine {
   private readonly memory?: MemoryStore;
   private readonly memoryCatchups = new Map<string, Promise<void>>();
   private readonly memoryReady = new Set<string>();
+  private memoryRepair: Promise<void> | null = null;
   private closing = false;
 
   constructor(deps: EngineDeps, harness: Harness, ownedModels: MutableModels | null, registry: Registry, private readonly guardExtension: Extension) {
@@ -480,7 +482,7 @@ class HostEngine implements Engine, MemoryEngine {
 
   async close(): Promise<void> {
     this.closing = true;
-    await Promise.allSettled(this.memoryCatchups.values());
+    await Promise.allSettled([...this.memoryCatchups.values(), this.memoryRepair]);
     this.unsubscribeLedger();
     this.unsubscribeCommits();
     await Promise.allSettled([...this.states.values()].map((state) => state.dispatch));
@@ -818,6 +820,33 @@ class HostEngine implements Engine, MemoryEngine {
       await pending;
       if (this.closing) return;
     }
+    if (!ghostId && !this.memory.maintained(ORIGIN_REPAIR)) {
+      this.memoryRepair ??= this.repairIndexedOrigins().finally(() => { this.memoryRepair = null; });
+      await this.memoryRepair;
+    }
+  }
+
+  /**
+   * Once per memory root: user messages indexed with no origin before placement was learned
+   * ahead of publication sit behind their checkpoint, so catch-up never reads them again.
+   */
+  private async repairIndexedOrigins(): Promise<void> {
+    const memory = this.memory!;
+    for (const conversation of this.core.ledger.conversations()) {
+      const ids = memory.unresolvedOrigins(conversation.ghostId, conversation.id).filter((id) => /^[1-9]\d*$/.test(id));
+      if (!ids.length) continue;
+      if (this.closing) return;
+      const state = await this.stateFor(conversation.id);
+      if (!state) continue;
+      for (const id of ids) {
+        const entryId = Number(id) as EntryId;
+        const page = await state.pi.entries({ minEntryId: entryId, maxEntryId: entryId }, 1, undefined, ctx);
+        const message = page.items[0] ? await this.toMessage(state, page.items[0]) : null;
+        if (this.closing) return;
+        if (message) memory.indexMessage(conversation.ghostId, message);
+      }
+    }
+    memory.markMaintained(ORIGIN_REPAIR);
   }
 
   private async indexGhostHistory(ghostId: string): Promise<void> {

@@ -82,6 +82,7 @@ export class MemoryStore {
       CREATE INDEX IF NOT EXISTS memory_history_chunks_message ON memory_history_chunks(history_seq);
       CREATE TABLE IF NOT EXISTS memory_checkpoints (conversation_id TEXT PRIMARY KEY, entry_id INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_cursors (ghost_id TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS memory_maintenance (name TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_runs (
         id TEXT PRIMARY KEY, ghost_id TEXT NOT NULL, state TEXT NOT NULL,
         started_at INTEGER NOT NULL, ended_at INTEGER, through_seq INTEGER NOT NULL,
@@ -323,6 +324,26 @@ export class MemoryStore {
   historySeq(ghostId: string): number {
     identifier(ghostId, "ghostId");
     return this.db.query<{ seq: number }, [string]>("SELECT coalesce(max(seq), 0) AS seq FROM memory_history WHERE ghost_id = ?").get(ghostId)!.seq;
+  }
+
+  /** User messages of a conversation indexed before the Host had resolved their origin. */
+  unresolvedOrigins(ghostId: string, conversationId: string): string[] {
+    identifier(ghostId, "ghostId");
+    identifier(conversationId, "conversationId", 1024);
+    return this.db.query<{ message_id: string }, [string, string]>(
+      "SELECT message_id FROM memory_history WHERE ghost_id = ? AND conversation_id = ? AND role = 'user' AND origin IS NULL ORDER BY seq",
+    ).all(ghostId, conversationId).map(row => row.message_id);
+  }
+
+  /** One-time repairs of this database record their completion here. */
+  maintained(name: string): boolean {
+    identifier(name, "maintenance name");
+    return this.db.query("SELECT 1 FROM memory_maintenance WHERE name = ?").get(name) !== null;
+  }
+
+  markMaintained(name: string): void {
+    identifier(name, "maintenance name");
+    this.db.query("INSERT INTO memory_maintenance(name, at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING").run(name, Date.now());
   }
 
   checkpoint(conversationId: string): number {

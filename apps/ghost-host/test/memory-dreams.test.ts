@@ -7,6 +7,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type { Message } from "@ghost/contract";
+import { Database } from "bun:sqlite";
 import { createEngine } from "../src/engine/index.ts";
 import { MemoryStore } from "../src/stores/memory.ts";
 import { commitProposal, MemoryDreams, memoryIndex, memorySnapshot, readProposal } from "../src/memory/dreams.ts";
@@ -28,20 +29,40 @@ function memoryFixture() {
   return { root, memory, source, message, snapshot, output, start, close };
 }
 
-test("dream citations require exact conversation, message and quote, without claiming entailment", () => {
+test("a citation that does not match its source drops only its change, named in the report", () => {
   const f = memoryFixture();
   try {
     const cases: [typeof f.source, string][] = [
-      [{ ...f.source, quote: "모든 대화는 Ghost에서" }, 'memory quote for message "owner-1" of conversation "conversation" for /me/architecture.md does not occur in the immutable source snapshot (exact prefix 7 of 14 characters)'],
-      [{ ...f.source, conversationId: "other" }, 'memory source message "owner-1" of conversation "other" for /me/architecture.md is not in the immutable source snapshot'],
-      [{ ...f.source, messageId: "other" }, 'memory source message "other" of conversation "conversation" for /me/architecture.md is not in the immutable source snapshot'],
+      [{ ...f.source, quote: "모든 대화는 Ghost에서" }, '- /me/architecture.md: quote from message "owner-1" of conversation "conversation" does not occur in it (exact prefix 7 of 14 characters)'],
+      [{ ...f.source, conversationId: "other" }, '- /me/architecture.md: message "owner-1" of conversation "other" is not in the immutable source snapshot'],
+      [{ ...f.source, messageId: "other" }, '- /me/architecture.md: message "other" of conversation "conversation" is not in the immutable source snapshot'],
     ];
-    for (const [source, error] of cases) {
+    for (const [source, dropped] of cases) {
       const proposal = JSON.parse(f.output);
       proposal.changes[0].sources = [source];
-      expect(() => readProposal(JSON.stringify(proposal), f.snapshot)).toThrow(error);
+      const read = readProposal(JSON.stringify(proposal), f.snapshot);
+      expect(read.changes).toEqual([]);
+      expect(read.report).toBe(`${proposal.report}\n\nDropped 1 change(s) whose citation did not match the source snapshot:\n${dropped}`);
     }
     expect(readProposal(f.output, f.snapshot).changes[0]?.sources).toEqual([f.source]);
+  } finally { f.close(); }
+});
+
+test("a run with one misquoted change commits the rest and advances the cursor", () => {
+  const f = memoryFixture();
+  try {
+    const good = { path: "/me/retained.md", content: "# Retained\nHost memory, kept.", sources: [f.source], reason: "Solid evidence" };
+    const bad = { path: "/me/dropped.md", content: "# Dropped\nParaphrased.", sources: [{ ...f.source, quote: "글자가 아닌 인용" }], reason: "Inexact quote" };
+    f.start("mixed");
+    commitProposal(f.memory, "mixed", f.snapshot, JSON.stringify({ changes: [good, bad], report: "Two proposals." }));
+    expect(f.memory.read("ghost", good.path)?.content).toContain("kept.");
+    expect(f.memory.read("ghost", bad.path)).toBeNull();
+    expect(f.memory.dreamCursor("ghost")).toBe(f.snapshot.through);
+    const run = f.memory.runs("ghost")[0]!;
+    expect(run.state).toBe("done");
+    expect(run.error).toBeNull();
+    expect(run.report).toContain("Two proposals.");
+    expect(run.report).toContain('- /me/dropped.md: quote from message "owner-1" of conversation "conversation" does not occur in it');
   } finally { f.close(); }
 });
 
@@ -387,6 +408,48 @@ test("a queued input is published and indexed with its origin, so catch-up advan
     expect(engine.memoryStatus(ghost.id)).toEqual({ ready: true, pending: 0 });
     expect(logs.filter((line) => line.startsWith("memory:"))).toEqual([]);
   } finally { stop(); h.core.stop(); await h.core.idle(); await engine.close(); h.ledger.close(); f.close(); }
+});
+
+test("a one-time repair recovers origins indexed before their checkpoint and then stays done", async () => {
+  const f = memoryFixture();
+  const h = harness();
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "faux-1", name: "Faux" }] });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([() => fauxAssistantMessage(fauxText("done"))]);
+  h.ledger.tx(() => {
+    h.ledger.putProvider({ id: "faux", kind: "openai_compatible", name: "Faux", baseUrl: null, models: [{ id: "faux-1", name: "Faux" }] });
+    h.ledger.putSetting("defaultModel", { provider: "faux", model: "faux-1" });
+  });
+  h.core.secrets.put("faux", "test-key");
+  const ghost = h.core.createGhost({ name: "Repair test", persona: "" });
+  await h.core.idle();
+  const open = () => createEngine({ core: h.core, storagePath: join(f.root, "pi.db"), tools: { all: () => [], extensionsFor: () => [], instructionsFor: () => "" }, sandbox: { envFor: async () => { throw new Error("no sandbox"); }, workspacePath: () => "", stageInputs: async () => {}, release: async () => {} }, models, memory: f.memory, log: () => {} });
+  const engine = await open();
+  const answered = Promise.withResolvers<void>();
+  const stop = engine.watch(ghost.directConversationId, (event) => { if (event.type === "message" && event.message.text === "done") answered.resolve(); });
+  try {
+    await engine.submit(ghost.directConversationId, { text: "아침 점검 시간입니다.", origin: "schedule", requestId: "r1" });
+    await answered.promise;
+    await engine.catchUpMemory(ghost.id);
+  } finally { stop(); await engine.close(); }
+  // The production failure shape: a recorded origin the first index never resolved, now behind its checkpoint.
+  const wake = f.memory.history(ghost.id, 0, 10).find(row => row.role === "user")!.id;
+  const tamper = new Database(join(f.root, "memory.db"));
+  tamper.exec("UPDATE memory_history SET origin = NULL WHERE message_id = " + JSON.stringify(wake));
+  tamper.close();
+  expect(f.memory.unresolvedOrigins(ghost.id, ghost.directConversationId)).toEqual([wake]);
+  const repaired = await open();
+  try {
+    await repaired.catchUpMemory();
+    expect(f.memory.unresolvedOrigins(ghost.id, ghost.directConversationId)).toEqual([]);
+    expect(f.memory.history(ghost.id, 0, 10).find(row => row.id === wake)?.origin).toBe("schedule");
+    const again = new Database(join(f.root, "memory.db"));
+    again.exec("UPDATE memory_history SET origin = NULL WHERE message_id = " + JSON.stringify(wake));
+    again.close();
+    await repaired.catchUpMemory();
+    expect(f.memory.history(ghost.id, 0, 10).find(row => row.id === wake)?.origin).toBeNull();
+  } finally { await repaired.close(); h.core.stop(); await h.core.idle(); h.ledger.close(); f.close(); }
 });
 
 test("nested imported notes and own-team notes can be superseded/deleted with preserved revisions", () => {

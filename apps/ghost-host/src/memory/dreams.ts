@@ -72,7 +72,11 @@ export function memorySnapshot(memory: MemoryStore, ghostId: string, after: numb
   return { ghostId, after, through: history.at(-1)?.seq ?? after, versions: all.map(({ path, hash }) => ({ path, hash })), files, shared: { paths, omitted: sharedPaths.length - paths.length }, history };
 }
 
-/** Existence of a quote is checked; this is provenance validation, not semantic entailment. */
+/**
+ * Existence of a quote is checked; this is provenance validation, not semantic entailment.
+ * A malformed response fails the run. A change whose citation does not match its source is
+ * dropped and named in the report, so one inexact quote does not discard and retry the window.
+ */
 export function readProposal(output: string, snapshot: MemorySnapshot): Proposal {
   if (Buffer.byteLength(output) > MAX_OUTPUT) throw new Error("memory response exceeds the output limit");
   const value: unknown = JSON.parse(output);
@@ -80,7 +84,8 @@ export function readProposal(output: string, snapshot: MemorySnapshot): Proposal
   const proposal = value as Record<string, unknown>;
   if (!Array.isArray(proposal.changes) || proposal.changes.length > 8 || typeof proposal.report !== "string" || proposal.report.length > 2000) throw new Error("invalid memory proposal");
   const paths = new Set<string>();
-  const changes = proposal.changes.map((raw: unknown): Change => {
+  const dropped: string[] = [];
+  const changes = proposal.changes.flatMap((raw: unknown): Change[] => {
     if (!raw || typeof raw !== "object") throw new Error("invalid memory change");
     const change = raw as Record<string, unknown>;
     const path = change.path;
@@ -95,15 +100,25 @@ export function readProposal(output: string, snapshot: MemorySnapshot): Proposal
       if (!rawSource || typeof rawSource !== "object") throw new Error("invalid memory source");
       const source = rawSource as Record<string, unknown>;
       if (typeof source.conversationId !== "string" || typeof source.messageId !== "string" || typeof source.quote !== "string" || !source.quote.trim() || source.quote.length > 4000) throw new Error("invalid source identity or quote");
-      const evidence = snapshot.history.find((row) => row.conversationId === source.conversationId && row.id === source.messageId);
-      const cited = `message ${JSON.stringify(source.messageId.slice(0, 64))} of conversation ${JSON.stringify(source.conversationId.slice(0, 64))} for ${path}`;
-      if (!evidence) throw new Error(`memory source ${cited} is not in the immutable source snapshot`);
-      if (!evidence.text.includes(source.quote)) throw new Error(`memory quote for ${cited} does not occur in the immutable source snapshot (exact prefix ${quotedPrefix(evidence.text, source.quote)} of ${source.quote.length} characters)`);
       return { conversationId: source.conversationId, messageId: source.messageId, quote: source.quote };
     });
-    return { path, content: change.content as string | null, sources, reason: change.reason };
+    for (const source of sources) {
+      const evidence = snapshot.history.find((row) => row.conversationId === source.conversationId && row.id === source.messageId);
+      const cited = `message ${JSON.stringify(source.messageId.slice(0, 64))} of conversation ${JSON.stringify(source.conversationId.slice(0, 64))}`;
+      const failure = !evidence ? `${cited} is not in the immutable source snapshot`
+        : evidence.text.includes(source.quote) ? null
+        : `quote from ${cited} does not occur in it (exact prefix ${quotedPrefix(evidence.text, source.quote)} of ${source.quote.length} characters)`;
+      if (failure) {
+        dropped.push(`${path}: ${failure}`);
+        return [];
+      }
+    }
+    return [{ path, content: change.content as string | null, sources, reason: change.reason }];
   });
-  return { changes, report: proposal.report };
+  const report = dropped.length
+    ? `${proposal.report}\n\nDropped ${dropped.length} change(s) whose citation did not match the source snapshot:\n${dropped.map((line) => `- ${line}`).join("\n")}`
+    : proposal.report;
+  return { changes, report };
 }
 
 /** Length of the quote's longest leading part found in the source, without echoing either text. */
