@@ -682,6 +682,8 @@ describe("browser tools", () => {
       await f.call("browser_handoff", { reason: "Complete SSO" });
       const decision = f.ledger.pendingDecisions()[0]!;
       expect(decision.kind).toBe("question"); expect(decision.proposal?.browserHandoff).toEqual({ url: "https://example.com/", reason: "Complete SSO", live: true });
+      expect(f.ledger.effectsInState("pending")).toHaveLength(0);
+      expect(commands(f.root).some(argv => argv[0] === "open" || argv[0] === "close")).toBe(false);
       expect(decision.title).toBe("브라우저에서 직접 처리해 주세요"); expect(decision.options).toEqual([]);
       expect(records(f.root).some((r) => r.argv.includes("--headed"))).toBe(false);
       expect((await f.call("browser_snapshot")).isError).toBe(true);
@@ -795,7 +797,16 @@ describe("browser tools", () => {
       expect(f.ledger.effect(card.effectId!).state).toBe("denied");
       expect(f.ledger.effect(card.effectId!).result).toContain("Secret fill refused (frame)");
       expect(f.ledger.effectsInState("unknown")).toHaveLength(0);
-      expect((await f.call("browser_fill", { ref: "@e1", text: "still usable" })).isError).toBeFalsy();
+      const fill = await f.call("browser_fill", { ref: "@e1", text: "still usable" });
+      expect(fill.isError).toBe(true);
+      const approval = f.ledger.pendingDecisions()[0]!;
+      expect(approval.kind).toBe("approve_effect");
+      expect(JSON.stringify(approval.proposal?.policy)).toContain("rule-of-two");
+      expect(commands(f.root).some(argv => argv[0] === "fill")).toBe(false);
+      await f.core.decisions.resolve(approval.id, { outcome: "approve" });
+      expect(f.ledger.effect(approval.effectId!).state).toBe("done");
+      expect(commands(f.root).filter(argv => argv[0] === "fill")).toEqual([["fill", "@e1", "still usable"]]);
+      expect((await f.call("browser_snapshot")).isError).toBeFalsy();
     } finally { await f.browser.shutdown(); }
   });
   test("upload staging survives source replacement and download commit refuses directory/leaf swaps without touching outside files", async () => {

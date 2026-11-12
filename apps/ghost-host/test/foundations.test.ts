@@ -136,7 +136,14 @@ describe("checkout approvals", () => {
     const f = browserFixture();
     await f.call("browser_snapshot");
     f.browser.url = "https://login.shop.example/login";
-    expect((await f.call("browser_fill_secret", { ref: "@e1", item_id: "login1", field: "username" })).isError).toBeFalsy();
+    const fill = await f.call("browser_fill_secret", { ref: "@e1", item_id: "login1", field: "username" });
+    expect(fill.isError).toBe(true);
+    const approval = f.ledger.pendingDecisions()[0]!;
+    expect(approval.kind).toBe("approve_effect");
+    expect(JSON.stringify(approval.proposal?.policy)).toContain("rule-of-two");
+    await f.core.decisions.resolve(approval.id, { outcome: "approve" });
+    expect(f.ledger.effect(approval.effectId!).state).toBe("done");
+    expect(f.ledger.effect(approval.effectId!).result).toBe("Secret filled");
     f.browser.url = "https://evil.example/login";
     const refused = await f.call("browser_fill_secret", { ref: "@e1", item_id: "login1", field: "password" });
     expect(refused.isError).toBe(true);
@@ -182,12 +189,23 @@ describe("live browser sessions", () => {
     const f = browserFixture();
     await f.call("browser_handoff", { reason: "PASS 본인인증" });
     const decision = f.ledger.pendingDecisions()[0]!;
+    expect(decision.kind).toBe("question");
+    expect(f.browser.handoffs).toEqual([]);
+    expect(f.ledger.effectsInState("pending")).toHaveLength(0);
     expect((await f.call("browser_snapshot")).isError).toBe(true);
     const url = new URL(`http://host/api/browser/sessions/${f.direct.id}/input`);
     expect((await serveBrowser(new Request(url, { method: "POST", body: JSON.stringify({ type: "text", text: "인증" }) }), url, f.core, f.browser)).status).toBe(200);
     await f.core.decisions.resolve(decision.id, { outcome: "answer", answer: "다 했어요" });
     expect((await f.call("browser_snapshot")).isError).toBeFalsy();
     expect(f.browser.ends).toBe(1);
+  });
+  test("policy can deny a native browser handoff without opening a browser or an approval detour", async () => {
+    const f = browserFixture();
+    f.ledger.tx(() => f.ledger.putPolicyRule({ id: "no-handoff", tool: "browser_handoff", when: {}, decision: "deny", revision: 1, createdBy: { kind: "owner" } }));
+    expect((await f.call("browser_handoff", { reason: "Sign in" })).isError).toBe(true);
+    expect(f.browser.handoffs).toEqual([]);
+    expect(f.ledger.pendingDecisions()).toHaveLength(0);
+    expect(f.ledger.effectsInState("pending")).toHaveLength(0);
   });
   test("only exact, bounded, finite owner inputs reach the browser", () => {
     expect(parseInput({ type: "mouse", event: "wheel", x: 4, y: 8, deltaY: -400 })).toMatchObject({ deltaY: -400 });
