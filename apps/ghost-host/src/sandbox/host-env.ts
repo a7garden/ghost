@@ -113,6 +113,8 @@ export class HostExecutionEnv extends NodeExecutionEnv {
     this.logicalRoot = options.cwd;
     this.staging = new WorkspaceEnv({ hostRoot: options.workspace });
     this.boundary = options.boundary ?? null;
+    if (this.boundary !== null && this.staging.hostRoot !== options.workspace)
+      throw new FileError("permission_denied", "sandbox: refusing redirected staging root", options.workspace);
   }
 
   /** A caller path in this environment's spelling, resolved to the real path the boundary sees. */
@@ -150,6 +152,8 @@ export class HostExecutionEnv extends NodeExecutionEnv {
     let env = this.confinedRoots.get(root);
     if (env === undefined) {
       env = new WorkspaceEnv({ hostRoot: root, id: `ghost-confined:${root}` });
+      if (env.hostRoot !== root)
+        throw new FileError("permission_denied", `sandbox: writable or reviewed root was redirected: ${root}`, root);
       this.confinedRoots.set(root, env);
     }
     return env;

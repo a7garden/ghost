@@ -7,8 +7,8 @@ import { dirname, isAbsolute, resolve } from "node:path";
  * process, refuses what the profile denies; `SeatbeltPolicy` is the one ordered rule set both the
  * generated profile and the Host-side path checks read, so a refusal names the same boundary
  * either way. Paths are passed as `sandbox-exec -D` parameters (or, for the two git regexes,
- * escaped into the pattern), never spliced raw into the profile text, and every path in a policy
- * is a real path (symlinks resolved by `buildSeatbeltPolicy`).
+ * escaped into the pattern), never spliced raw into the profile text. Writable roots and git
+ * plumbing keep their trusted lexical spelling: resolving mutable symlinks would expand grants.
  */
 
 /** `/usr/bin/sandbox-exec`; the only way a confined argv is started. */
@@ -71,13 +71,13 @@ export const privacyPaths = (home: string): string[] =>
   ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music", "Library"].map((name) => `${home}/${name}`);
 
 export interface SeatbeltBoundary {
-  /** Real directories the confined process may read and write (its own workspace, worktree, temp). */
+  /** Trusted lexical roots beneath canonical owner/state parents; never resolve Work-controlled links. */
   writeRoots: string[];
   /** Real directories readable on top of the toolchain set; they override the privacy deny. */
   readRoots: string[];
   /** Read-only roots that beat the secret deny: a reviewed Work's own directories. */
   viewRoots?: string[];
-  /** Git plumbing a worktree commit touches inside the owner's repository, nothing else there. */
+  /** Git plumbing derived from the owner's canonical common directory, not Work-writable metadata. */
   git?: { objects: string; refs: string[] };
   /** Loopback port of the Host egress proxy; null denies all network. */
   proxyPort: number | null;
@@ -109,6 +109,14 @@ function realPaths(paths: readonly (string | null | undefined)[]): string[] {
   return [...seen].sort();
 }
 
+/** Grant spelling must not depend on the current targets of Work-writable symlinks. */
+function lexicalPaths(paths: readonly string[]): string[] {
+  for (const path of paths) {
+    if (!isAbsolute(path) || path.includes("\0")) throw new Error("seatbelt: write grants require absolute paths");
+  }
+  return [...new Set(paths.map((path) => resolve(path)))].sort();
+}
+
 /**
  * Build the boundary's rule set. Tiers hold real paths and are decided in this order (last match
  * wins, mirroring SBPL): write roots, secrets, read roots inside privacy folders, privacy
@@ -117,14 +125,14 @@ function realPaths(paths: readonly (string | null | undefined)[]): string[] {
  * secret path.
  */
 export function buildSeatbeltPolicy(home: string, stateRoot: string, boundary: SeatbeltBoundary): SeatbeltPolicy {
-  const objects = boundary.git ? realBelow(boundary.git.objects) : null;
+  const objects = boundary.git ? lexicalPaths([boundary.git.objects])[0]! : null;
   const policy: SeatbeltPolicy = {
     home,
     stateRoot,
-    writeRoots: realPaths(boundary.writeRoots),
+    writeRoots: lexicalPaths(boundary.writeRoots),
     readRoots: realPaths(boundary.readRoots),
-    viewRoots: realPaths(boundary.viewRoots ?? []),
-    git: boundary.git && objects !== null ? { objects, refs: realPaths(gitRefPlumbing(boundary.git.refs)) } : null,
+    viewRoots: lexicalPaths(boundary.viewRoots ?? []),
+    git: boundary.git && objects !== null ? { objects, refs: lexicalPaths(gitRefPlumbing(boundary.git.refs)) } : null,
     proxyPort: boundary.proxyPort,
     secrets: realPaths(secretPaths(home, stateRoot)),
     privacy: privacyPaths(home),
@@ -138,11 +146,11 @@ export function buildSeatbeltPolicy(home: string, stateRoot: string, boundary: S
  * Everything a Work's worktree commit touches for one branch ref, and nothing else: the ref
  * file, its lock, its reflog entry and the reflog directory that may not exist yet.
  */
-function gitRefPlumbing(refs: string[]): string[] {
+export function gitRefPlumbing(refs: string[]): string[] {
   const plumbing: string[] = [];
   for (const ref of refs) {
     const reflog = ref.replace("/refs/heads/", "/logs/refs/heads/");
-    plumbing.push(ref, `${ref}.lock`, reflog, dirname(reflog));
+    plumbing.push(ref, `${ref}.lock`, reflog, `${reflog}.lock`, dirname(reflog));
   }
   return plumbing;
 }
@@ -200,7 +208,10 @@ export function seatbeltProfile(policy: SeatbeltPolicy): { profile: string; defi
   // `(deny op (require-all (subpath ROOT) (require-not (require-any exceptions...))))`; with no
   // exception the inner filter collapses to a plain subpath.
   const denyExcept = (root: string, exceptions: string[], operations: string[]): string => {
-    const inside = exceptions.filter((exception) => insidePath(exception, root)).map((exception) => `(subpath "${exception}")`);
+    const inside = exceptions.filter((exception) => insidePath(exception, root)).map((exception) => {
+      const escaped = exception.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return `(regex #"^${escaped}(/|$)")`;
+    });
     const filter = inside.length === 0
       ? `(subpath "${root}")`
       : `(require-all (subpath "${root}") (require-not (require-any ${inside.join(" ")})))`;
@@ -211,8 +222,16 @@ export function seatbeltProfile(policy: SeatbeltPolicy): { profile: string; defi
     allowSubpaths(paramPrefix("T", policy.toolchain), ["file-read*"]),
     allowSubpaths(paramPrefix("U", policy.tempRoots), ["file-read*", "file-write*", "file-write-xattr"]),
     allowSubpaths(paramPrefix("R", policy.readRoots), ["file-read*"]),
-    allowSubpaths(paramPrefix("E", policy.viewRoots), ["file-read*"]),
-    allowSubpaths(paramPrefix("W", policy.writeRoots), ["file-read*", "file-write*", "file-write-xattr"]),
+    policy.viewRoots.map((root) => {
+      const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return `(allow file-read* (regex #"^${escaped}(/|$)"))`;
+    }).join("\n"),
+    // Regex filters match the kernel's resolved path without resolving the grant's spelling.
+    // A symlink swapped before profile compilation must never grant its outside target.
+    policy.writeRoots.map((root) => {
+      const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return `(allow file-read* file-write* file-write-xattr (regex #"^${escaped}(/|$)"))`;
+    }).join("\n"),
     // Privacy folders deny even under a read root, except the roots the owner configured there.
     policy.privacy
       .map((folder) => denyExcept(folder, [...policy.readRoots, ...policy.writeRoots, ...policy.viewRoots], ["file-read-data", "file-read-xattr"]))
@@ -234,7 +253,7 @@ export function seatbeltProfile(policy: SeatbeltPolicy): { profile: string; defi
     // A branch ref, its lock file and its reflog entry: lock, write, rename into place.
     const refRules = policy.git.refs.map((ref) => {
       const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const filter = `(regex #"^${escaped}(\\.lock)?$")`;
+      const filter = `(regex #"^${escaped}$")`;
       return [`(allow file-write* file-write-create ${filter})`, `(allow file-unlink ${filter})`].join("\n");
     });
     rules.push([

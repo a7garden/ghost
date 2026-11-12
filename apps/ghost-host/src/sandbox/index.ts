@@ -233,7 +233,8 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
           "Workspace execution requires macOS; refusing to run unconfined",
         )),
       });
-    const realWorkspace = realpathSync(workspace);
+    // Keep mutable Work directories lexical beneath the trusted state root.
+    const realWorkspace = join(realpathSync(config.root), "sandboxes", work.ghostId, work.id, "workspace");
     const writeRoots = [realWorkspace];
     const roots = [...readRoots()];
     let git: { objects: string; refs: string[] } | null = null;
@@ -251,7 +252,7 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     }
     const env = new HostExecutionEnv({
       cwd,
-      workspace,
+      workspace: realWorkspace,
       id: `ghost-workspace:${work.ghostId}/${work.id}`,
       mutations: queueFor(cwd),
       deadlineAt: work.deadlineAt,
@@ -275,7 +276,8 @@ export function createSandbox(config: Config, artifacts: ArtifactStore): Sandbox
     if (process.platform !== "darwin") throw new Error("review execution requires macOS");
     const cached = reviewEnvs.get(conversationId);
     if (cached !== undefined) return cached;
-    const realWorkspace = realpathSync(workspacePath(work));
+    workspacePath(work);
+    const realWorkspace = join(realpathSync(config.root), "sandboxes", work.ghostId, work.id, "workspace");
     const reviewDir = confineDirChain(dirname(realWorkspace), [`review-${sha256(conversationId).slice(0, 12)}`], true);
     const viewRoots = [realWorkspace];
     const worktree = join(config.root, "worktrees", work.ghostId, work.id);

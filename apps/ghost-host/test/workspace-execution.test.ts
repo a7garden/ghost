@@ -216,7 +216,7 @@ describe.skipIf(!darwin)("workspace execution boundary", () => {
     expect(result.stdout).toBe("reviewed");
   });
 
-  test.each(["gitfile", "admin symlink", "commondir", "gitdir", "branch", "worktree symlink"])(
+  test.each(["gitfile", "admin symlink", "commondir", "gitdir", "branch", "worktree symlink", "ref lock symlink"])(
     "refuses tampered worktree metadata before granting writes: %s",
     async (tampering) => {
       const f = fixture();
@@ -241,6 +241,9 @@ describe.skipIf(!darwin)("workspace execution boundary", () => {
       else if (tampering === "commondir") writeFileSync(join(admin, "commondir"), owner);
       else if (tampering === "gitdir") writeFileSync(join(admin, "gitdir"), join(owner, ".git"));
       else if (tampering === "branch") writeFileSync(join(admin, "HEAD"), "ref: refs/heads/main\n");
+      else if (tampering === "ref lock symlink") {
+        symlinkSync(join(common, "config"), join(common, "refs/heads/ghost", `${work.id}.lock`));
+      }
       else if (tampering === "admin symlink") {
         rmSync(admin, { recursive: true });
         symlinkSync(common, admin);
@@ -252,4 +255,37 @@ describe.skipIf(!darwin)("workspace execution boundary", () => {
       expect(readFileSync(join(owner, "README"), "utf8")).toBe("owner\n");
     },
   );
+
+  test.each(["ref", "lock"])("a %s symlink swapped during async environment setup cannot promote its target", async (entry) => {
+    const f = fixture();
+    const owner = join(f.projects, "race-owner");
+    mkdirSync(owner);
+    const git = (args: string[]) => {
+      const result = Bun.spawnSync(["git", "-C", owner, ...args], { stdout: "pipe", stderr: "pipe" });
+      if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+    };
+    git(["init", "-q"]);
+    writeFileSync(join(owner, "README"), "owner\n");
+    git(["add", "."]);
+    git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "initial"]);
+    const work = f.work({ kind: "workspace", cwd: owner });
+    const first = await f.sandbox.envFor(work);
+    await first.cleanup(BACKGROUND_CONTEXT);
+    const ownerConfig = join(owner, ".git", "config");
+    const original = readFileSync(ownerConfig, "utf8");
+    const ref = join(owner, ".git", "refs/heads/ghost", work.id);
+    const swapped = entry === "lock" ? `${ref}.lock` : ref;
+    // envFor validates synchronously, then awaits the already-open egress proxy. Swap the
+    // entry in that precise gap, before buildSeatbeltPolicy gets its grant paths.
+    const opening = f.sandbox.envFor(work);
+    rmSync(swapped, { force: true });
+    symlinkSync(ownerConfig, swapped);
+    const env = await opening;
+    const result = await shell(env, `printf forged > '${ownerConfig}'`);
+    expect(result.exitCode).not.toBe(0);
+    expect(readFileSync(ownerConfig, "utf8")).toBe(original);
+    const indirect = await shell(env, `printf forged > '${swapped}'`);
+    expect(indirect.exitCode).not.toBe(0);
+    expect(readFileSync(ownerConfig, "utf8")).toBe(original);
+  });
 });

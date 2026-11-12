@@ -2,6 +2,7 @@ import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Work } from "@ghost/contract";
 import { readFileNoFollow } from "./workspace-env.ts";
+import { gitRefPlumbing } from "./seatbelt.ts";
 
 /** Branch of a Work's worktree. Work ids are host-generated, so the name needs no escaping. */
 export const worktreeBranch = (workId: string) => `ghost/${workId}`;
@@ -58,10 +59,11 @@ export function verifiedWorktree(root: string, work: Work, ownerCwd: string): { 
   if (resolve(admin, metadata(join(admin, "commondir"))) !== common) refuse();
   if (resolve(admin, metadata(join(admin, "gitdir"))) !== join(path, ".git")) refuse();
   if (metadata(join(admin, "HEAD")) !== `ref: refs/heads/${worktreeBranch(work.id)}`) refuse();
-  // Policy normalization resolves symlinks: none of the plumbing paths may redirect a grant.
-  const branch = worktreeBranch(work.id);
-  for (const relative of ["objects", `refs/heads/${branch}`, `logs/refs/heads/${branch}`]) {
-    let current = join(common, relative);
+  // Check all grants, including lock paths; fixed lexical policy rules also prevent a later
+  // swap from promoting a symlink target into a privilege.
+  const ref = join(common, "refs/heads", worktreeBranch(work.id));
+  for (const grant of [join(common, "objects"), ...gitRefPlumbing([ref])]) {
+    let current = grant;
     while (current !== common) {
       const info = lstatSync(current, { throwIfNoEntry: false });
       if (info?.isSymbolicLink()) refuse();
