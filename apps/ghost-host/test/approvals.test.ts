@@ -279,6 +279,79 @@ describe("approvals that do not wait forever", () => {
   });
 });
 
+describe("accepting a result for the owner", () => {
+  /** A teammate's finished Work: its result goes to the owner as an accept_result card. */
+  async function reported(t: Awaited<ReturnType<typeof team>>) {
+    const work = t.core.works.createRoot({
+      ghostId: t.mate.id, title: "R", brief: "B",
+      acceptance: { criteria: "The report names the changed file.", checks: [], reviewer: null },
+      originConversationId: t.mate.directConversationId,
+    });
+    await t.core.idle();
+    t.core.works.complete(work.id, { summary: "Wrote the file.", artifacts: [] });
+    await t.core.idle();
+    const decision = t.ledger.pendingDecisions({ workId: work.id })[0]!;
+    expect(decision.kind).toBe("accept_result");
+    return { work, decision };
+  }
+
+  test("the main settles a teammate's result after checking it against the acceptance criteria", async () => {
+    const t = await team();
+    const { work, decision } = await reported(t);
+    expect(decision.proposal?.result).toBeTruthy();
+
+    await t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "보고서를 수용 기준과 대조했습니다." });
+    await t.core.idle();
+
+    const done = t.ledger.work(work.id);
+    expect(done.state).toBe("done");
+    expect(done.verdict?.source).toBe("owner");
+    expect(done.verdict?.reasons).toContain("main Ghost");
+    expect(reviewOf(t.ledger.decision(decision.id).proposal)?.resolvedBy).toBe("main");
+  });
+
+  test("a result without a report stays the owner's alone", async () => {
+    const t = await team();
+    const decision = t.core.ledger.tx(() => t.core.decisions.open({
+      id: "acc-no-report", kind: "accept_result", ghostId: t.mate.id, conversationId: t.conversationId,
+      workId: null, effectId: null, title: "결과 확인", detail: "", options: [], proposal: null,
+    }));
+    await tick();
+    await expect(t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "x" })).rejects.toThrow("only the owner");
+    await t.core.decisions.settleExpired(decision.createdAt + 60 * MINUTE);
+    expect(t.ledger.decision(decision.id).state).toBe("pending");
+  });
+
+  test("silence never accepts a result", async () => {
+    const t = await team();
+    const { work, decision } = await reported(t);
+    expect(reviewOf(decision.proposal)?.expiresAt).toBeNull();
+    await t.core.decisions.settleExpired(decision.createdAt + 60 * MINUTE);
+    expect(t.ledger.decision(decision.id).state).toBe("pending");
+    expect(t.ledger.work(work.id).state).toBe("verifying");
+  });
+
+  test("the main cannot accept its own result", async () => {
+    const t = await team();
+    const work = t.core.works.createRoot({ ghostId: t.main.id, title: "Own", brief: "B", originConversationId: t.main.directConversationId });
+    await t.core.idle();
+    t.core.works.complete(work.id, { summary: "s", artifacts: [] });
+    await t.core.idle();
+    const decision = t.ledger.pendingDecisions({ workId: work.id }).find((item) => item.kind === "accept_result")!;
+    await expect(t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "x" })).rejects.toThrow("own requests");
+  });
+
+  test("credential and external-API effect requests are never the main's to settle", async () => {
+    const t = await team();
+    t.core.effects.onApproved("connection_request", async () => "linked");
+    const effect = t.core.effects.propose({ conversationId: t.conversationId, callId: "conn1", tool: "connection_request", input: {}, summary: "connect", title: "연결 요청", detail: "", proposal: {} });
+    const decision = t.ledger.pendingDecisions({ effectId: effect.id })[0]!;
+    await tick();
+    expect(t.engine.to(t.main.directConversationId).find((item) => item.requestId === `decision-review:${decision.id}`)).toBeUndefined();
+    await expect(t.core.decisions.settleForOwner(t.main.id, decision.id, { outcome: "approve", note: "x" })).rejects.toThrow("the owner decides this one themselves");
+  });
+});
+
 describe("handing a decision to the main Ghost", () => {
   const handOver = (t: Awaited<ReturnType<typeof team>>, id: string) => t.ledger.tx(() => t.core.decisions.delegate(id));
 
