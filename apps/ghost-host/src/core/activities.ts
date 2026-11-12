@@ -1,12 +1,14 @@
-import { isAbsolute } from "node:path";
+import { isAbsolute, join, resolve, dirname } from "node:path";
+import { readFile, stat } from "node:fs/promises";
 import { ActivityConfig, ActivityAction, validate, type Activity, type ActivityRun, type ActivitySourceItem, type Connection, type GhostTool, type Work } from "@ghost/contract";
 import type { Core } from "./core.ts";
-import type { ActivitySourceExclusion, ActivitySourcePort } from "../integrations/activity-sources.ts";
+import type { ActivitySourceExclusion, ActivitySourcePoll, ActivitySourcePort } from "../integrations/activity-sources.ts";
 import { CommandError, conflict, forbidden, invalid } from "./errors.ts";
 import { NoEffect } from "./effects.ts";
 import { digestOf, idFor, newId } from "./ids.ts";
 import { firstRun } from "./schedules.ts";
 import { isTerminal } from "./works.ts";
+import { repositoryHead } from "./autonomy.ts";
 
 const DAY = 86_400_000;
 const DRY_TOOLS: Partial<Record<GhostTool, true>> = { read: true, web_search: true, web_read: true, skill_read: true, delegate: true, host_status: true, host_services: true, host_disk_scan: true, host_disk_usage: true, host_list: true, host_read: true, host_nodes: true, toss_read: true };
@@ -78,20 +80,74 @@ export class Activities {
     if (config.scopeId != null) this.ledger.scope(config.scopeId);
     if (config.source.kind === "commit") this.ledger.scope(config.source.scopeId);
     if (config.tools.some((tool) => !ghost.tools.includes(tool))) throw forbidden("activity tools must be enabled for its Ghost");
-    if ("connectionId" in config.source) {
+    if (config.scopeId) {
+      const scope = this.ledger.scope(config.scopeId);
+      if (scope.state !== "active" || (scope.ghostId ?? this.ledger.defaultGhost()?.id) !== ghost.id) throw forbidden("activity must run in its receiving Ghost's active scope");
+    }
+    if (config.source.kind === "commit") {
+      if (config.scopeId !== config.source.scopeId) throw forbidden("commit trigger must watch its own scope");
+      this.ledger.scope(config.source.scopeId);
+    } else if (config.source.kind !== "schedule") {
       const connection = this.ledger.connection(config.source.connectionId);
       if (!connection.hasCredential || !this.sourcePort().credentialPresent(connection.id)) throw conflict("source connection credential is missing or being replaced");
       if (config.source.kind === "mail" && connection.config.kind !== "mail") throw invalid("mail activities need an IMAP mail connection");
       if (config.source.kind === "pull_request" && connection.config.kind !== "github" && connection.config.kind !== "gitea") throw invalid("pull request activities need a GitHub or Gitea connection");
+      if (config.source.kind === "poll" && (connection.config.kind !== "api" || !connection.config.ghostIds.includes(ghost.id))) throw forbidden("poll connection is not granted to this Ghost");
     }
   }
 
   private async poll(activity: Activity, baseline: boolean, cursor = activity.cursor) {
-    if (activity.source.kind === "schedule" || activity.source.kind === "commit" || activity.source.kind === "poll") throw invalid("this source is not enabled for polling yet");
+    if (activity.source.kind === "schedule") throw invalid("scheduled activities have no source poll");
+    if (activity.source.kind === "commit") return this.pollCommits(activity, baseline, cursor);
     const connection = this.ledger.connection(activity.source.connectionId);
     const port = this.sourcePort();
     try { return await port.poll(connection, activity.source, cursor, { baseline }); }
     catch (error) { throw new SourcePollFailure(error); }
+  }
+
+  private async pollCommits(activity: Activity, baseline: boolean, encoded: string | null) {
+    if (activity.source.kind !== "commit") throw invalid("not a commit trigger");
+    const scope = this.ledger.scope(activity.source.scopeId);
+    const prior = encoded ? JSON.parse(encoded) as { paths: string[]; seen: string[] } : null;
+    if (prior && digestOf(prior.paths) !== digestOf(scope.paths)) throw conflict("Commit scope paths changed; reset the source baseline.");
+    const seen = new Set(prior?.seen ?? []);
+    const items: ActivitySourceItem[] = [];
+    for (const path of scope.paths) {
+      const head = await repositoryHead(path);
+      if (!head) continue;
+      let directory = resolve(path);
+      let gitDir: string | null = null;
+      for (;;) {
+        const candidate = join(directory, ".git");
+        const info = await stat(candidate).catch(() => null);
+        if (info?.isDirectory()) { gitDir = candidate; break; }
+        if (info?.isFile()) {
+          const pointer = /^gitdir:\s*(.+)$/m.exec(await readFile(candidate, "utf8"))?.[1]?.trim();
+          if (pointer) gitDir = resolve(directory, pointer);
+          break;
+        }
+        const parent = dirname(directory);
+        if (parent === directory) break;
+        directory = parent;
+      }
+      if (!gitDir) continue;
+      const log = await readFile(join(gitDir, "logs", "HEAD"), "utf8").catch(() => "");
+      const entries = log.trim().split("\n").filter(Boolean).map((line) => {
+        const match = /^[0-9a-f]{40,64} ([0-9a-f]{40,64}) .+ (\d+) [+-]\d{4}\t(.*)$/.exec(line);
+        if (!match) throw invalid("Repository reflog is malformed; no commit cursor advanced.");
+        return { sha: match[1]!, at: Number(match[2]) * 1000, subject: match[3]! };
+      });
+      if (!entries.length) entries.push({ sha: head.slice(head.lastIndexOf("@") + 1), at: Date.now(), subject: head });
+      for (const entry of entries) {
+        const id = digestOf([path, entry.sha]);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (!baseline) items.push({ id: `commit:${id}`, version: entry.sha, title: entry.subject.slice(0, 512), text: `Repository: ${path}\nCommit: ${entry.sha}\n${entry.subject}`, url: null, author: null, occurredAt: entry.at, target: { kind: "commit", path, sha: entry.sha, scopeId: scope.id } });
+      }
+    }
+    const cursor = JSON.stringify({ paths: scope.paths, seen: [...seen].sort() });
+    if (cursor.length > 262144) throw invalid("Commit dedup history exceeds its safety limit; no cursor advanced.");
+    return { items, exclusions: [], cursor };
   }
 
   private defer(activity: Activity, deferred: ActivityDeferred) {
@@ -207,7 +263,11 @@ export class Activities {
   /** Called inside the same transaction that replaces/revokes account authority. */
   invalidateConnection(connectionId: string) {
     for (const activity of this.ledger.activities()) {
-      if ("connectionId" in activity.source && activity.source.connectionId === connectionId) this.cancelRuns(activity.id, "source account configuration or credential changed");
+      if (activity.source.kind !== "schedule" && activity.source.kind !== "commit" && activity.source.connectionId === connectionId) {
+        this.cancelRuns(activity.id, "source account configuration or credential changed");
+        this.ledger.putActivity({ ...activity, cursor: null, nextAt: Date.now(), updatedAt: Date.now() });
+        this.ledger.putSetting(`activity:inbox:${activity.id}`, null);
+      }
     }
   }
 
@@ -222,8 +282,8 @@ export class Activities {
 
   private sourceKey(activity: Activity, item: Pick<ActivitySourceItem, "id" | "version">): string {
     const source = activity.source;
-    const connection = "connectionId" in source ? this.ledger.connection(source.connectionId) : null;
-    return `source:${digestOf([source.kind, connection?.id, connection?.credentialVersion, connection?.config, source.kind === "pull_request" ? source.repository : null, item.id, item.version])}`;
+    const connection = source.kind === "schedule" || source.kind === "commit" ? null : this.ledger.connection(source.connectionId);
+    return `source:${digestOf([source, connection?.id, connection?.credentialVersion, connection?.config, item.id, source.kind === "poll" ? null : item.version])}`;
   }
 
   private capacity(activity: Activity, now: number): string | null {
@@ -261,7 +321,7 @@ export class Activities {
       const run: ActivityRun = { id, activityId: activity.id, workId: null, trigger: input.trigger, sourceKey: input.key, sourceItem: input.item ?? null, state: "queued", activityRevision: activity.revision, reason: input.reason ?? null, dryRun, noChange: false, createdAt: now, endedAt: null, nextCheckAt: null, nextCheckReason: null, followupOf: input.followupOf ?? null };
       // Persist run+Work together before kick's afterCommit work can open a conversation.
       this.ledger.putActivityRun(run);
-      const work = this.core.works.createRoot({ id: idFor(id, "work"), ghostId: ghost.id, title: activity.name, brief: activity.prompt, acceptance: { criteria: activity.acceptanceCriteria, checks: [], reviewer: { kind: "model", model } }, originConversationId: ghost.directConversationId, deadlineAt: now + activity.policy.runTimeoutSeconds * 1000, execution: activity.execution, activityId: activity.id, activityRunId: id, toolScope: dryRun ? activity.tools.filter((tool) => DRY_TOOLS[tool]) : activity.tools });
+      const work = this.core.works.createRoot({ id: idFor(id, "work"), ghostId: ghost.id, scopeId: activity.scopeId, title: activity.name, brief: activity.prompt, acceptance: { criteria: activity.acceptanceCriteria, checks: [], reviewer: { kind: "model", model } }, originConversationId: ghost.directConversationId, deadlineAt: now + activity.policy.runTimeoutSeconds * 1000, execution: activity.execution, activityId: activity.id, activityRunId: id, toolScope: dryRun ? activity.tools.filter((tool) => DRY_TOOLS[tool]) : activity.tools });
       const next = { ...run, workId: work.id };
       this.ledger.putActivityRun(next);
       return next;
@@ -385,8 +445,12 @@ export class Activities {
           if (activity.nextAt === null || activity.nextAt <= now) {
             const limit = this.capacity(activity, now);
             if (limit) throw new ActivityDeferred(limit, now + 30_000);
-            const pollSeconds = activity.source.pollSeconds;
-            const result = await this.poll(activity, activity.cursor === null && !activity.source.includeExisting);
+            const pollSeconds = "pollSeconds" in activity.source ? activity.source.pollSeconds : 60;
+            const inboxKey = `activity:inbox:${activity.id}`;
+            const authority = digestOf([activity.revision, activity.source, activity.source.kind === "commit" ? this.ledger.scope(activity.source.scopeId).paths : this.ledger.connection(activity.source.connectionId)]);
+            const saved = this.ledger.setting<{ authority: string; result: ActivitySourcePoll } | null>(inboxKey, null);
+            const result = saved?.authority === authority ? saved.result : await this.poll(activity, activity.cursor === null && ("includeExisting" in activity.source ? !activity.source.includeExisting : activity.source.kind === "commit"));
+            this.ledger.tx(() => this.ledger.putSetting(inboxKey, { authority, result }));
             activity = this.current(activity.id, activity.revision);
             const admittedAt = Math.max(now, Date.now());
             // A deferred item leaves the old cursor intact. Re-polling finds accepted
@@ -394,7 +458,7 @@ export class Activities {
             for (const exclusion of result.exclusions) this.exclude(activity, exclusion);
             for (const item of result.items) this.admit(activity, { key: this.sourceKey(activity, item), trigger: "source", item }, admittedAt);
             const next = { ...activity, cursor: result.cursor, nextAt: admittedAt + pollSeconds * 1000, lastCheckedAt: admittedAt, lastError: null, failureCount: 0, deferredUntil: null, deferredReason: null, updatedAt: admittedAt };
-            this.ledger.tx(() => this.ledger.putActivity(next));
+            this.ledger.tx(() => { this.ledger.putActivity(next); this.ledger.putSetting(inboxKey, null); });
           }
         } catch (error) {
           const activity = this.ledger.activity(snapshot.id);
@@ -444,7 +508,8 @@ export class Activities {
 
   async read(workId: string): Promise<ActivitySourceItem> {
     const { activity, run } = this.authorize(workId, "activity_read");
-    if (!("connectionId" in activity.source) || !run.sourceItem) throw forbidden("this run has no bound source item");
+    if (activity.source.kind === "schedule" || !run.sourceItem) throw forbidden("this run has no bound source item");
+    if (activity.source.kind === "commit") return run.sourceItem;
     const item = await this.sourcePort().read(this.ledger.connection(activity.source.connectionId), run.sourceItem);
     this.authorize(workId, "activity_read");
     return item;
@@ -455,7 +520,7 @@ export class Activities {
     const { activity, run } = this.authorize(workId, "activity_action");
     if (run.dryRun) throw forbidden("external actions are disabled in dry runs");
     if (activity.policy.externalActions === "deny") throw forbidden("this activity denies external actions");
-    if (!("connectionId" in activity.source) || !run.sourceItem) throw forbidden("this run has no bound source action target");
+    if (activity.source.kind === "schedule" || activity.source.kind === "commit" || activity.source.kind === "poll" || !run.sourceItem) throw forbidden("this run has no bound source action target");
     if ((action.kind === "mail_reply") !== (activity.source.kind === "mail")) throw forbidden("action does not match this run's source");
     const connection = this.ledger.connection(activity.source.connectionId);
     if (action.kind === "mail_reply") {

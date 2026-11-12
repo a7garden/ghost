@@ -4,6 +4,7 @@ import { defineExtension, defineTool, type Extension, type ToolExecutionResult }
 import type { Core } from "../core/core.ts";
 import { forbidden, invalid } from "../core/errors.ts";
 import { errorResult, requireAllowed, requireWork, scopeOf } from "./shared.ts";
+import { idFor } from "../core/ids.ts";
 
 const text = (summary: string): ToolExecutionResult => ({ content: [{ type: "text", text: summary }] });
 
@@ -11,18 +12,25 @@ const text = (summary: string): ToolExecutionResult => ({ content: [{ type: "tex
 export function activityTools(core: Core): Extension {
   const propose = defineTool({
     name: "activity_propose",
-    description: "Propose an ongoing activity for this Ghost. Only explicit owner approval activates it. Specify its source/account, limits, tools and execution authority; PC access is unrestricted and requires an existing owner grant.",
+    description: "Configure an ongoing trigger in your received scope. Read-only triggers activate immediately. Standing external effects or PC execution always require owner approval.",
     parameters: Type.Omit(ActivityConfig, ["ghostId"]),
     replay: "unsafe",
     async execute(args, api) {
       try {
         const scope = requireAllowed(core, api, "activity_propose");
         if (scope.conversation.kind !== "direct") throw forbidden("activity proposals run only in direct conversations");
+        const received = args.scopeId ? core.ledger.scope(args.scopeId) : null;
+        if (!scope.ghost.isDefault && (!received || (received.ghostId ?? core.ledger.defaultGhost()?.id) !== scope.ghost.id)) throw forbidden("Only the receiving Ghost can configure this scope");
         const config = { ...args, ghostId: scope.ghost.id };
         if (JSON.stringify(config).length > 32768) throw invalid("Activity proposal exceeds the owner review size limit; shorten its prompt or criteria. Nothing was activated.");
+        const readOnly = config.policy.externalActions === "deny" && config.execution.kind !== "host" && config.tools.every((tool) => ["read", "web_search", "web_read", "skill_read", "host_status", "host_services", "host_disk_scan", "host_disk_usage", "host_list", "host_read", "host_nodes", "toss_read", "activity_read"].includes(tool));
+        if (readOnly) {
+          const activity = core.activities.create(config, idFor(scope.conversation.id, `${api.callId}:activity`));
+          return text(`Read-only activity ${activity.name} (${activity.id}) activated.`);
+        }
         // 2026-11-10: the card draws the config itself (source · limits · tools); the detail is the plain-words version for notifications.
         const detail = `승인하면 이 활동이 승인을 다시 묻지 않고 계속 돌아갑니다.\n\n**할 일**\n\n${config.prompt}\n\n**완료 기준**\n\n${config.acceptanceCriteria}`;
-        const effect = core.effects.propose({ conversationId: scope.conversation.id, callId: api.callId, tool: "activity_propose", input: { config }, summary: `Propose ongoing activity: ${config.name}`, title: `상시 활동 켜기: ${config.name}`, detail, proposal: { config } });
+        const effect = core.effects.propose({ conversationId: scope.conversation.id, callId: api.callId, tool: "activity_propose", input: { config }, summary: `Propose ongoing activity: ${config.name}`, title: `상시 활동 켜기: ${config.name}`, detail, proposal: { config, forceOwner: true } });
         return text(`Activity proposal awaiting owner approval (${effect.id}). No activity was activated. Do not retry or wait for it: continue with other steps or end your turn; the decision arrives as a message.`);
       } catch (error) { return errorResult(error); }
     },

@@ -4,13 +4,16 @@ import { defineExtension, defineTool, type Extension, type ToolExecutionResult }
 import type { Core } from "../core/core.ts";
 import { forbidden } from "../core/errors.ts";
 import type { SkillsPort } from "../integrations/ports.ts";
-import { errorResult, requireAllowed } from "./shared.ts";
+import { errorResult, requireAllowed, scopeOf } from "./shared.ts";
+import guide from "../guide/SKILL.md" with { type: "text" };
+
+export const GHOST_GUIDE = guide;
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
 const MAX_PATH_CHARS = 512;
 
-export function createSkillsTools(core: Core, skills: SkillsPort): Extension {
+export function createSkillsTools(core: Core, skills: SkillsPort | null): Extension {
   const skillRead = defineTool({
     name: "skill_read",
     description:
@@ -22,7 +25,13 @@ export function createSkillsTools(core: Core, skills: SkillsPort): Extension {
     replay: "safe",
     async execute(args, api) {
       try {
-        const scope = requireAllowed(core, api, "skill_read");
+        const scope = args.name === "ghost-guide" ? scopeOf(core, api) : requireAllowed(core, api, "skill_read");
+        if (scope.ghost.deletedAt !== null || scope.ghost.state !== "active") throw forbidden("Ghost is unavailable");
+        if (args.name === "ghost-guide") {
+          if (args.path !== undefined && args.path !== "SKILL.md") throw forbidden("The built-in ghost-guide contains only SKILL.md");
+          return text(GHOST_GUIDE);
+        }
+        if (!skills) throw forbidden("External skills are unavailable");
         if (!scope.ghost.skills.includes(args.name)) throw forbidden(`${args.name} is not one of ${scope.ghost.name}'s skills`);
         if (args.path === undefined) {
           const files = skills.list(args.name);

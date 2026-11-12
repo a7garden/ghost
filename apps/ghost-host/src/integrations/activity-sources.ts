@@ -27,8 +27,9 @@ export interface ActivitySourcePort {
   rotateCredential?(id: string, value: string, version: string): Promise<void>;
   /** Host-only OAuth: run before every operation; null clears it. Implementations must not swallow refresh errors. */
   setOAuthRefresher?(refresh: ((connection: Connection) => Promise<void>) | null): void;
+  mcpAuthority?(connection: Connection): Promise<{ headers: Record<string, string>; authorize(): void; redact(text: string): string }>;
   test(connection: Connection): Promise<{ summary: string }>;
-  poll(connection: Connection, source: Exclude<ActivitySource, { kind: "schedule" | "commit" | "poll" }>, cursor: string | null, options?: { baseline?: boolean }): Promise<ActivitySourcePoll>;
+  poll(connection: Connection, source: Exclude<ActivitySource, { kind: "schedule" | "commit" }>, cursor: string | null, options?: { baseline?: boolean }): Promise<ActivitySourcePoll>;
   read(connection: Connection, item: ActivitySourceItem): Promise<ActivitySourceItem>;
   act(connection: Connection, item: ActivitySourceItem, action: ActivityAction): Promise<{ summary: string }>;
   /** One bounded authenticated REST exchange against an api-kind connection; responses are sanitized. Absent on minimal ports. */
@@ -54,11 +55,12 @@ export interface ApiResponse {
   truncated: boolean;
   /** Parsed JSON body, or undefined when the body is not JSON. */
   json: unknown;
+  nextPath?: string;
 }
 
 type MailConfig = Extract<Connection["config"], { kind: "mail" }>;
 type ApiConfig = Extract<Connection["config"], { kind: "api" }>;
-type Source = Exclude<ActivitySource, { kind: "schedule" | "commit" | "poll" }>;
+type Source = Exclude<ActivitySource, { kind: "schedule" | "commit" }>;
 type PRSource = Extract<Source, { kind: "pull_request" }>;
 type MailSource = Extract<Source, { kind: "mail" }>;
 type ImapClient = Pick<ImapFlow, "connect" | "mailboxOpen" | "search" | "fetchOne" | "close" | "on">;
@@ -142,10 +144,40 @@ export function connectionRequestUrl(config: ApiConfig, path: string): URL {
 // Slack's GET endpoints are RPC methods: HTTP GET alone does not make them reads.
 const SLACK_READ_METHODS = new Set(["api.test", "auth.test", "team.info", "team.profile.get", "users.list", "users.info", "users.lookupByEmail", "users.getPresence", "users.profile.get", "conversations.list", "conversations.info", "conversations.history", "conversations.replies", "conversations.members", "search.all", "search.messages", "search.files", "files.list", "files.info", "emoji.list", "reactions.get", "stars.list", "pins.list", "usergroups.list", "usergroups.users.list"]);
 export function connectionRequestIsReadOnly(connection: Connection, method: ApiRequestInput["method"], path: string): boolean {
-  if (method !== "GET" || connection.config.kind !== "api") return false;
+  if (connection.config.kind !== "api") return false;
   const url = connectionRequestUrl(connection.config, path);
+  const relative = url.pathname.slice(apiEndpoint(connection.config).pathname.length).replace(/^\//, "");
+  const readPaths = (connection.config as ApiConfig & { readPaths?: { method: string; path: string }[] }).readPaths ?? [];
+  if (readPaths.some((entry) => entry.method === method && boundedGlob(entry.path.replace(/^\//, ""), relative))) return true;
+  if (method !== "GET") return false;
   const slack = connection.serviceId === "slack" || /(^|\.)slack(?:-gov)?\.com$/.test(url.hostname);
   return !slack || SLACK_READ_METHODS.has(url.pathname.slice(url.pathname.lastIndexOf("/") + 1));
+}
+
+function boundedGlob(pattern: string, value: string): boolean {
+  if (pattern.length > 4096 || value.length > 8192) return false;
+  const parts = pattern.split("*");
+  let offset = 0;
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index]!;
+    if (!part) continue;
+    const found = value.indexOf(part, offset);
+    if (found < 0 || (index === 0 && found !== 0)) return false;
+    offset = found + part.length;
+  }
+  return pattern.endsWith("*") || offset === value.length;
+}
+
+function jsonPointer(value: unknown, pointer: string): unknown {
+  if (pointer === "") return value;
+  if (!pointer.startsWith("/") || /~(?![01])/u.test(pointer)) fail("Invalid JSON pointer.");
+  let current = value;
+  for (const encoded of pointer.slice(1).split("/")) {
+    const key = encoded.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (current === null || typeof current !== "object" || !Object.hasOwn(current, key)) fail("JSON pointer does not exist in the poll response.");
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
 }
 function validateApi(config: ApiConfig): void {
   apiEndpoint(config);
@@ -272,6 +304,22 @@ export class SourceConnections implements ActivitySourcePort {
       this.authorized(connection, secret);
     } };
   }
+  async mcpAuthority(connection: Connection): Promise<{ headers: Record<string, string>; authorize(): void; redact(text: string): string }> {
+    if (this.closed || connection.config.kind !== "api") fail("MCP authentication requires an available API connection.");
+    validateApi(connection.config);
+    if (this.refresher) {
+      try { await this.refresher(connection); }
+      catch { fail("OAuth access token could not be refreshed; reconnect this account."); }
+    }
+    const secret = this.authorized(connection);
+    const config = connection.config;
+    const secrets = [secret.credential, JSON.stringify(secret.credential).slice(1, -1), encodeURIComponent(secret.credential)];
+    return {
+      headers: { ...config.headers, [config.authHeader]: config.authPrefix ? `${config.authPrefix} ${secret.credential}` : secret.credential },
+      authorize: () => { if (this.closed) fail("Source connections are closed."); this.authorized(connection, secret); },
+      redact: (text) => secrets.reduce((value, credential) => value.split(credential).join("[redacted]"), text),
+    };
+  }
   async setCredential(id: string, value: string | null, version: string | null): Promise<void> {
     this.storeCredential(id, value, version);
   }
@@ -324,6 +372,9 @@ export class SourceConnections implements ActivitySourcePort {
       if (!/^[1-9][0-9]{0,9}$/.test(target.number ?? "") || item.id !== `pr:${connection.id}:${target.repository}:${target.number}`) fail("Pull request target does not match this source item.");
     } else if (target.kind === "mail" && connection.config.kind === "mail") {
       if (target.mailbox !== connection.config.mailbox || !/^[1-9][0-9]{0,19}$/.test(target.validity ?? "") || !/^[1-9][0-9]{0,9}$/.test(target.uid ?? "") || item.id !== `mail:${connection.id}:${hash(target.mailbox).slice(0, 16)}:${target.validity}:${target.uid}`) fail("Mail target does not match this source item.");
+    } else if (target.kind === "poll" && connection.config.kind === "api") {
+      if (!target.path || target.itemsPointer === undefined || target.idPointer === undefined || !target.itemId) fail("Poll target metadata is invalid.");
+      connectionRequestUrl(connection.config, target.path);
     } else fail("Source provider does not match this connection.");
   }
   /** Register the host's OAuth refresher; it must fail loudly so stale tokens are never used silently. */
@@ -462,7 +513,15 @@ export class SourceConnections implements ActivitySourcePort {
     const body = redact(Buffer.concat(chunks, size).toString("utf8"));
     let json: unknown;
     try { json = JSON.parse(body) as unknown; } catch { json = undefined; }
-    return { status: response.status, contentType: redact(response.headers.get("content-type") ?? "").slice(0, 128), body: `${body}${truncated ? "\n[body truncated]" : ""}`, truncated, json };
+    const link = response.headers.get("link")?.split(",").map((part) => /^\s*<([^>]+)>\s*;\s*rel="?next"?\s*$/i.exec(part)?.[1]).find(Boolean);
+    let nextPath: string | undefined;
+    if (link) {
+      const next = new URL(link, url);
+      const root = apiEndpoint(config);
+      if (next.origin !== root.origin || !next.pathname.startsWith(root.pathname) || next.username || next.password || next.hash) fail("Pagination escaped the configured API origin.");
+      nextPath = `${next.pathname}${next.search}`;
+    }
+    return { status: response.status, contentType: redact(response.headers.get("content-type") ?? "").slice(0, 128), body: `${body}${truncated ? "\n[body truncated]" : ""}`, truncated, json, ...(nextPath ? { nextPath } : {}) };
   }
   /** Model-facing REST entry: bounded, sanitized, and re-authorized around the exchange. */
   async apiRequest(connection: Connection, input: ApiRequestInput): Promise<ApiResponse> {
@@ -542,12 +601,13 @@ export class SourceConnections implements ActivitySourcePort {
   async poll(connection: Connection, source: Source, cursor: string | null, options?: { baseline?: boolean }): Promise<ActivitySourcePoll> {
     return this.operation(connection, async (secret, signal) => {
       if (source.connectionId !== connection.id) fail("Activity source belongs to a different connection.");
-      const baseline = options?.baseline ?? (cursor === null && !source.includeExisting);
+      const baseline = options?.baseline ?? (cursor === null && ("includeExisting" in source) && !source.includeExisting);
       if (cursor && cursor.length > 262144) fail("Source cursor exceeds its safety limit; reset the activity source baseline.");
       const scope = hash(JSON.stringify([this.scope(connection, secret), source]));
       let parsed: unknown = null;
       if (cursor) { try { parsed = JSON.parse(cursor); } catch { fail("Source cursor is invalid; reset the activity source baseline."); } }
       if (parsed !== null && (!object(parsed) || parsed.scope !== scope)) fail("Source cursor belongs to an old account or different source; reset the activity source baseline.");
+      if (source.kind === "poll") return this.pollGeneric(connection, secret, source, parsed, scope, baseline, signal);
       if (source.kind === "pull_request") {
         if (connection.config.kind !== "github" && connection.config.kind !== "gitea") fail("Pull request activities require a GitHub or Gitea connection.");
         return this.pollPR(connection, secret, source, parsed, scope, baseline, signal);
@@ -555,6 +615,42 @@ export class SourceConnections implements ActivitySourcePort {
       if (connection.config.kind !== "mail") fail("Mail activities require an IMAP connection.");
       return this.pollMail(connection, secret, source, parsed, scope, baseline, signal);
     });
+  }
+  private async pollGeneric(connection: Connection, secret: Secret, source: Extract<Source, { kind: "poll" }>, parsed: unknown, scope: string, baseline: boolean, signal: AbortSignal): Promise<ActivitySourcePoll> {
+    if (connection.config.kind !== "api") fail("Polling requires an API connection.");
+    let seen: string[] = [];
+    if (parsed !== null) {
+      if (!object(parsed) || parsed.kind !== "poll" || !Array.isArray(parsed.seen) || parsed.seen.some((id) => typeof id !== "string")) fail("Poll cursor is invalid.");
+      seen = parsed.seen as string[];
+    }
+    const known = new Set(seen);
+    const items: ActivitySourceItem[] = [];
+    const pages = new Set<string>();
+    let path: string | undefined = source.path;
+    while (path !== undefined) {
+      if (pages.size >= 50 || pages.has(path)) fail("Poll pagination is cyclic or exceeds 50 pages; no cursor advanced.");
+      pages.add(path);
+      if (!connectionRequestIsReadOnly(connection, "GET", path)) fail("Poll endpoint must be owner-marked read-only.");
+      const response = await this.requestApi(connection, secret, { method: "GET", path }, signal);
+      if (response.truncated || response.json === undefined) fail("Poll response is empty, malformed JSON or too large; no cursor advanced.");
+      const records = jsonPointer(response.json, source.itemsPointer);
+      if (!Array.isArray(records)) fail("Poll itemsPointer must identify an array; no cursor advanced.");
+      for (const record of records) {
+        const rawId = jsonPointer(record, source.idPointer);
+        if ((typeof rawId !== "string" && typeof rawId !== "number") || String(rawId).length === 0 || String(rawId).length > 256 || (typeof rawId === "number" && !Number.isSafeInteger(rawId))) fail("Poll item idPointer must identify a bounded string or safe integer; no cursor advanced.");
+        const id = hash(JSON.stringify([typeof rawId, rawId]));
+        if (known.has(id)) continue;
+        const body = JSON.stringify(record);
+        if (body.length > 32768) fail("Poll item exceeds 32768 characters; narrow the endpoint. No item was discarded.");
+        known.add(id);
+        if (!baseline) items.push({ id: `poll:${connection.id}:${id}`, version: id, title: String(rawId).slice(0, 512), text: body, url: null, author: null, occurredAt: null,
+          target: this.target(connection, secret, id, { kind: "poll", path: source.path, itemsPointer: source.itemsPointer, idPointer: source.idPointer, itemId: String(rawId), itemType: typeof rawId }) });
+      }
+      path = response.nextPath;
+    }
+    const cursor = JSON.stringify({ kind: "poll", scope, seen: [...known].sort() });
+    if (cursor.length > 262144) fail("Poll dedup history exceeds its safety limit; narrow the endpoint. No cursor advanced.");
+    return { items, exclusions: [], cursor };
   }
   private async pollPR(connection: Connection, secret: Secret, source: PRSource, parsed: unknown, scope: string, baseline: boolean, signal: AbortSignal): Promise<ActivitySourcePoll> {
     const repository = repositoryPath(source.repository);
@@ -686,6 +782,13 @@ export class SourceConnections implements ActivitySourcePort {
     return this.operation(connection, async (secret, signal) => {
       this.bound(connection, secret, item);
       if (item.target.kind === "pr") return this.prItem(connection, secret, item.target.repository!, item.target.number!, signal);
+      if (item.target.kind === "poll") {
+        const source = { kind: "poll" as const, connectionId: connection.id, path: item.target.path!, itemsPointer: item.target.itemsPointer!, idPointer: item.target.idPointer!, pollSeconds: 60 };
+        const result = await this.pollGeneric(connection, secret, source, null, hash(JSON.stringify(source)), false, signal);
+        const current = result.items.find((candidate) => candidate.id === item.id);
+        if (!current) fail("The bound poll item is no longer available.");
+        return current;
+      }
       return this.mail(connection, secret, signal, async (client, mailbox) => {
         if (String(mailbox.uidValidity) !== item.target.validity) fail("Mailbox UIDVALIDITY changed; this source email cannot be safely resolved. Poll again.");
         return (await this.mailItem(connection, secret, client, mailbox, Number(item.target.uid))).item;
@@ -696,6 +799,7 @@ export class SourceConnections implements ActivitySourcePort {
     let writeStarted = false;
     return this.operation(connection, async (secret, signal) => {
       this.bound(connection, secret, item);
+      if (item.target.kind === "poll") fail("Generic poll sources do not grant source actions; use an explicitly authorized connection tool.");
       if (!action.body.trim() || action.body.length > 16384) fail("Action body must contain 1–16384 characters.");
       if (item.target.kind === "pr") {
         if (action.kind !== "pr_comment") fail("Only a pull request comment is allowed for this source.");
