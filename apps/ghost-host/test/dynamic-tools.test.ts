@@ -13,7 +13,7 @@ import { createHostMcpClients, McpClients } from "../src/integrations/mcp.ts";
 import { SourceConnections } from "../src/integrations/activity-sources.ts";
 import { createVault } from "../src/stores/vault.ts";
 import { DEFAULT_RULES } from "../src/core/policy.ts";
-import { harness } from "./support.ts";
+import { harness, hostTaskId } from "./support.ts";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { randomUUID } from "node:crypto";
@@ -24,7 +24,7 @@ const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const context = { abortSignal: undefined, value: () => undefined, toString: () => "test" } as Context;
 const content = (result: ToolExecutionResult) => (result.content ?? []).map(part => part.type === "text" ? part.text : "").join("\n");
-const api = (callId: string, conversationId = 1) => ({ conversationId, callId, output() {}, diagnostic() {} }) as unknown as ToolExecutionApi;
+const api = (callId: string, conversationId = 1) => ({ conversationId, taskId: hostTaskId(), callId, output() {}, diagnostic() {} }) as unknown as ToolExecutionApi;
 
 function setup(connectGate?: Promise<void>) {
   const h = harness();
