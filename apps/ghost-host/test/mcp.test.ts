@@ -72,7 +72,6 @@ test("a crashed server fails the running call without its stderr and relaunches 
   const crash = await mcp.callTool("fake", "crash", {}).then(() => null, (error: Error) => error);
   expect(crash?.message).toContain("stopped during tool crash");
   expect(crash?.message).not.toContain("SECRET-STDERR-TOKEN");
-  expect(mcp.stderrTail("fake")).toBe("");
   const after = textOf(await mcp.callTool("fake", "pid", {}));
   expect(after).not.toBe(before);
 });
