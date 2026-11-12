@@ -15,6 +15,12 @@ export interface VaultInput {
   password?: string; totp?: string; card?: { number: string; expiry: string; cvc: string; name: string };
   contact?: VaultItem["contact"]; value?: string; hints?: string; ghostIds?: string[];
 }
+/** Host-only credential authority notifications; no secret field values cross this boundary. */
+export interface VaultChange {
+  id: string;
+  beforeTitle: string | null;
+  afterTitle: string | null;
+}
 type Stored = { metadata: string; version: number };
 type SecretRow = { field: VaultField; version: number; sealed: Uint8Array };
 const INPUT_KEYS: Record<string, true> = { id: true, kind: true, title: true, origin: true, extraOrigins: true, username: true, password: true, totp: true, card: true, contact: true, value: true, hints: true, ghostIds: true };
@@ -30,6 +36,14 @@ export class Vault implements VaultPort {
   private readonly aeadKey: Buffer;
   private readonly importTagKey: Buffer;
   private readonly now: () => number;
+  private readonly listeners = new Set<(change: VaultChange) => void>();
+  subscribe(listener: (change: VaultChange) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  private changed(change: VaultChange): void {
+    for (const listener of this.listeners) listener(change);
+  }
   constructor(root: string, options: { now?: () => number } = {}) {
     this.now = options.now ?? Date.now;
     const dir = join(root, "vault"), keyPath = join(dir, "key"), dbPath = join(dir, "vault.db");
@@ -71,11 +85,17 @@ export class Vault implements VaultPort {
         PRAGMA user_version=1;`);
     } catch { throw new CommandError("unavailable", "vault storage could not be opened"); }
   }
-  close() { this.db.close(); this.aeadKey.fill(0); this.importTagKey.fill(0); }
+  close() { this.listeners.clear(); this.db.close(); this.aeadKey.fill(0); this.importTagKey.fill(0); }
   private storage<T>(operation: () => T): T {
     try { return operation(); } catch (error) { if (error instanceof CommandError) throw error; throw new CommandError("unavailable", "vault storage operation failed"); }
   }
-  private prune() { this.db.query("DELETE FROM items WHERE expires_at IS NOT NULL AND expires_at<=?").run(this.now()); }
+  private prune() {
+    const expired = this.db.query("DELETE FROM items WHERE expires_at IS NOT NULL AND expires_at<=? RETURNING id,metadata").all(this.now()) as { id: string; metadata: string }[];
+    for (const row of expired) {
+      const item = JSON.parse(row.metadata) as VaultItem;
+      this.changed({ id: row.id, beforeTitle: item.title, afterTitle: null });
+    }
+  }
   list(): VaultItem[] {
     return this.storage(() => { this.prune(); return (this.db.query("SELECT metadata FROM items ORDER BY rowid").all() as { metadata: string }[]).map((row) => JSON.parse(row.metadata) as VaultItem); });
   }
@@ -179,7 +199,7 @@ export class Vault implements VaultPort {
   }
   create(input: VaultInput, options: { expiresAt?: number; creatorGhostId?: string } = {}): VaultItem {
     const { item, secrets } = this.prepare(input, undefined, options.expiresAt);
-    return this.storage(() => this.db.transaction(() => {
+    const created = this.storage(() => this.db.transaction(() => {
       this.prune();
       if (this.db.query("SELECT id FROM items WHERE id=?").get(item.id)) throw conflict("vault item id already exists");
       const count = this.db.query("SELECT count(*) AS n FROM items").get() as { n: number };
@@ -192,13 +212,21 @@ export class Vault implements VaultPort {
       if (options.creatorGhostId) this.db.query("UPDATE items SET creator_ghost_id=? WHERE id=?").run(options.creatorGhostId, item.id);
       return item;
     })());
+    this.changed({ id: created.id, beforeTitle: null, afterTitle: created.title });
+    return created;
   }
   update(id: string, input: Partial<VaultInput>): VaultItem {
-    return this.storage(() => this.db.transaction(() => {
-      const old = this.row(id), { item, secrets } = this.prepare(input, JSON.parse(old.metadata));
+    let beforeTitle: string | null = null;
+    const updated = this.storage(() => this.db.transaction(() => {
+      const old = this.row(id);
+      const previous = JSON.parse(old.metadata) as VaultItem;
+      beforeTitle = previous.title;
+      const { item, secrets } = this.prepare(input, previous);
       if (old.version >= 10000) throw conflict("vault version limit exceeded");
       this.write(item, secrets, old.version + 1); return item;
     })());
+    this.changed({ id, beforeTitle, afterTitle: updated.title });
+    return updated;
   }
   /** Owner-only history metadata. Secret revisions remain encrypted and have no public read API. */
   history(id: string): { version: number; item: VaultItem }[] {
@@ -222,7 +250,14 @@ export class Vault implements VaultPort {
       return { keyId: item.username ?? "", secret: this.field(item.id, "value") };
     });
   }
-  remove(id: string) { return this.storage(() => { this.row(id); this.db.query("DELETE FROM items WHERE id=?").run(id); }); }
+  remove(id: string) {
+    const previous = this.storage(() => {
+      const item = JSON.parse(this.row(id).metadata) as VaultItem;
+      this.db.query("DELETE FROM items WHERE id=?").run(id);
+      return item;
+    });
+    this.changed({ id, beforeTitle: previous.title, afterTitle: null });
+  }
   generateLogin(ghostId: string, input: { origin: string; username: string; title?: string; hints?: string }, id?: string): VaultItem {
     const items = this.list();
     if (id && items.some((item) => item.id === id)) return this.itemFor(ghostId, id);

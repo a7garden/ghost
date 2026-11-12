@@ -117,7 +117,7 @@ export async function openApp(config: Config): Promise<App> {
     }
     // A rejected engine close is not proof that its tasks stopped. Retain ownership
     // and the ledger in that case; close() can retry, or process exit releases the lock.
-    if (!unsafeEngine && !openedEngine && !openedSandbox && (!openedCore || (coreStopped && coreDrained))) {
+    if (!unsafeEngine && !openedEngine && !openedSandbox && !openedMcp && (!openedCore || (coreStopped && coreDrained))) {
       // No tool can run any more: end browser sessions (login state saved) and seal the vault.
       await attempt(async () => { await openedBrowser?.shutdown(); openedBrowser = null; });
       // Stops Ghost Control and the Geist worker under it.

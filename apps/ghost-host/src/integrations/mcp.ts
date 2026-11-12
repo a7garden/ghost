@@ -272,21 +272,29 @@ class Session {
   tools: RawTool[] | null = null;
   /** Bumped by every list_changed notification so a listing that raced one is not cached. */
   generation = 0;
+  private closing: Promise<void> | null = null;
 
   constructor(
     readonly client: Client,
     readonly transport: Transport,
+    readonly signal: AbortSignal,
   ) {}
 
-  async close(): Promise<void> {
+  close(immediate = false): Promise<void> {
+    if (immediate && !this.closed && this.transport instanceof StdioClientTransport && this.transport.pid !== null) {
+      try { process.kill(this.transport.pid, "SIGKILL"); } catch { /* Transport closure below also handles a child that already exited. */ }
+    }
+    if (this.closing) return this.closing;
     this.closed = true;
-    await this.client.close().catch(() => undefined);
+    this.closing = this.client.close().catch(() => undefined);
+    return this.closing;
   }
 }
 
 interface Entry {
   key: string;
   ready: Promise<Session>;
+  abort: AbortController;
 }
 
 /**
@@ -337,7 +345,7 @@ export class McpClients implements McpPort {
       const result = await this.callAuthority.run(authorize ?? (() => undefined), () => session.client.callTool({ name, arguments: args }, undefined, {
         timeout: this.limits.callMs,
         maxTotalTimeout: this.limits.callMs,
-        ...(signal ? { signal } : {}),
+        signal: signal ? AbortSignal.any([signal, session.signal]) : session.signal,
       }));
       this.assertCurrent(server);
       authorize?.();
@@ -353,6 +361,7 @@ export class McpClients implements McpPort {
     this.shut = true;
     const entries = [...this.sessions.values()];
     this.sessions.clear();
+    for (const entry of entries) entry.abort.abort();
     await Promise.all(entries.map((entry) => entry.ready.then((session) => session.close(), () => undefined)));
     this.secretValues.clear();
   }
@@ -372,6 +381,7 @@ export class McpClients implements McpPort {
     const entry = this.sessions.get(serverId);
     this.sessions.delete(serverId);
     this.secretValues.delete(serverId);
+    entry?.abort.abort();
     if (entry) void entry.ready.then(session => session.close(), () => undefined);
   }
 
@@ -399,10 +409,12 @@ export class McpClients implements McpPort {
       }
       if (entry) {
         this.sessions.delete(serverId);
+        entry.abort.abort();
         void entry.ready.then((session) => session.close(), () => undefined);
       }
       if (launches++ === 2) throw unavailable(`MCP server ${server.name} stopped right after starting`);
-      const fresh: Entry = { key, ready: this.connect(server) };
+      const abort = new AbortController();
+      const fresh: Entry = { key, abort, ready: this.connect(server, abort.signal) };
       this.sessions.set(serverId, fresh);
       fresh.ready.catch(() => {
         if (this.sessions.get(serverId) === fresh) this.sessions.delete(serverId);
@@ -410,10 +422,11 @@ export class McpClients implements McpPort {
     }
   }
 
-  private async connect(server: McpServer): Promise<Session> {
+  private async connect(server: McpServer, signal: AbortSignal): Promise<Session> {
     const transport = server.transport.kind === "stdio" ? await this.stdio(server) : await this.http(server);
     const client = new Client({ name: "ghost", version: HOST_VERSION }, { capabilities: {} });
-    const session = new Session(client, transport);
+    const session = new Session(client, transport, signal);
+    signal.addEventListener("abort", () => { void session.close(true); }, { once: true });
     client.onclose = () => {
       session.closed = true;
     };
@@ -425,6 +438,7 @@ export class McpClients implements McpPort {
       this.options.onToolsChanged?.(server.id);
     });
     try {
+      if (signal.aborted) throw forbidden("MCP session authority was revoked");
       this.assertCurrent(server);
       await client.connect(transport, { timeout: this.limits.connectMs });
     } catch (error) {
@@ -510,7 +524,7 @@ export class McpClients implements McpPort {
     for (let page = 0; page < this.limits.pages; page++) {
       const result = await session.client.listTools(cursor === undefined ? undefined : { cursor }, {
         timeout: this.limits.listMs,
-        ...(signal ? { signal } : {}),
+        signal: signal ? AbortSignal.any([signal, session.signal]) : session.signal,
       });
       for (const tool of result.tools) {
         if (tools.length === this.limits.tools) return tools;
@@ -539,8 +553,17 @@ export class McpClients implements McpPort {
 
 /** Production wiring keeps secrets and the stdio sandbox outside every model-facing interface. */
 export function createHostMcpClients(deps: { root: string; ledger: Ledger; sources: SourceConnections; vault: Vault }): McpClients {
-  let proxy: EgressProxy | null = null;
-  let openingProxy: Promise<EgressProxy> | null = null;
+  const proxies = new Map<string, { ready: Promise<EgressProxy>; value: EgressProxy | null }>();
+  const closingProxies = new Set<Promise<void>>();
+  const bindings = new Map<string, Set<string>>();
+  const closeProxy = (serverId: string) => {
+    const entry = proxies.get(serverId);
+    proxies.delete(serverId);
+    if (!entry) return;
+    const closing = entry.value ? entry.value.close() : entry.ready.then(proxy => proxy.close(), () => undefined);
+    closingProxies.add(closing);
+    void closing.then(() => { closingProxies.delete(closing); }, () => undefined);
+  };
   const authorities = new Map<string, { headers: Record<string, string>; authorize(): void; redact(text: string): string }>();
   const workspace = (server: McpServer) => {
     const directory = confineDirChain(deps.root, ["mcp", createHash("sha256").update(server.id).digest("hex")], true);
@@ -573,16 +596,27 @@ export function createHostMcpClients(deps: { root: string; ledger: Ledger; sourc
       const ghost = deps.ledger.ghosts().find(ghost => ghost.isDefault && ghost.deletedAt === null);
       if (!ghost) throw unavailable("MCP secrets need an active default Ghost");
       const values: Record<string, string> = {};
+      const itemIds = new Set<string>();
       for (const name of server.transport.env) {
         const items = deps.vault.listFor(ghost.id, { kind: "secret" }).filter(item => item.title === `mcp.${server.id}.${name}`);
         if (items.length !== 1) throw unavailable(`MCP environment ${name} needs exactly one granted vault secret named mcp.${server.id}.${name}`);
         values[name] = deps.vault.reveal(ghost.id, items[0]!.id, "value");
+        itemIds.add(items[0]!.id);
       }
+      bindings.set(server.id, itemIds);
       return values;
     },
     wrapCommand: async (argv, server) => {
-      if (!openingProxy) openingProxy = createEgressProxy();
-      proxy = await openingProxy;
+      let entry = proxies.get(server.id);
+      if (!entry) {
+        entry = { ready: createEgressProxy(), value: null };
+        proxies.set(server.id, entry);
+      }
+      let proxy: EgressProxy;
+      try { proxy = await entry.ready; }
+      catch (error) { if (proxies.get(server.id) === entry) proxies.delete(server.id); throw error; }
+      if (proxies.get(server.id) !== entry) throw forbidden("MCP egress authority was revoked");
+      entry.value = proxy;
       const directory = workspace(server);
       const program = Bun.which(argv[0]!, { PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" });
       if (!program) throw invalid("MCP server executable is unavailable");
@@ -594,21 +628,41 @@ export function createHostMcpClients(deps: { root: string; ledger: Ledger; sourc
     },
     runtimeEnv: server => {
       const directory = workspace(server);
-      return { HOME: directory, TMPDIR: join(directory, "tmp"), PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", ...(proxy ? { HTTP_PROXY: proxy.url, HTTPS_PROXY: proxy.url, http_proxy: proxy.url, https_proxy: proxy.url, ALL_PROXY: proxy.url, all_proxy: proxy.url } : {}), NO_PROXY: "", no_proxy: "" };
+      const proxy = proxies.get(server.id)?.value;
+      if (!proxy) throw forbidden("MCP egress authority is unavailable");
+      return { HOME: directory, TMPDIR: join(directory, "tmp"), PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", HTTP_PROXY: proxy.url, HTTPS_PROXY: proxy.url, http_proxy: proxy.url, https_proxy: proxy.url, ALL_PROXY: proxy.url, all_proxy: proxy.url, NO_PROXY: "", no_proxy: "" };
     },
   });
+  const stopServer = (serverId: string) => {
+    closeProxy(serverId);
+    clients.invalidate(serverId);
+    bindings.delete(serverId);
+  };
+  const unsubscribeVault = deps.vault.subscribe(change => {
+    for (const server of deps.ledger.mcpServers()) {
+      if (server.transport.kind !== "stdio") continue;
+      const affected = bindings.get(server.id)?.has(change.id) || server.transport.env.some(name => {
+        const title = `mcp.${server.id}.${name}`;
+        return change.beforeTitle === title || change.afterTitle === title;
+      });
+      if (affected) stopServer(server.id);
+    }
+  });
   const unsubscribe = deps.ledger.subscribe(event => {
-    if (event.data.type === "mcp_server") clients.invalidate(event.data.server.id);
-    else if (event.data.type === "mcp_server.removed") clients.invalidate(event.data.id);
+    if (event.data.type === "mcp_server") stopServer(event.data.server.id);
+    else if (event.data.type === "mcp_server.removed") stopServer(event.data.id);
     else if (event.data.type === "connection" || event.data.type === "connection.removed") {
-      for (const server of deps.ledger.mcpServers()) if (server.transport.kind === "http") clients.invalidate(server.id);
+      for (const server of deps.ledger.mcpServers()) if (server.transport.kind === "http") stopServer(server.id);
     }
   });
   const close = clients.close.bind(clients);
   clients.close = async () => {
     unsubscribe();
+    unsubscribeVault();
+    for (const serverId of proxies.keys()) stopServer(serverId);
     await close();
-    if (openingProxy) await openingProxy.then(value => value.close(), () => undefined);
+    await Promise.all(closingProxies);
+    bindings.clear();
     authorities.clear();
   };
   return clients;

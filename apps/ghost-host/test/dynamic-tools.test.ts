@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -18,6 +18,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { randomUUID } from "node:crypto";
 import { fakeMcpServer } from "./fixtures/mcp-server.ts";
+import { connect } from "node:net";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -201,3 +202,61 @@ test("MCP HTTP uses only granted stored credentials and never exposes echoed sec
   h.ledger.tx(() => h.ledger.putConnection({ ...connection, config: { ...connection.config, ghostIds: [] } }));
   expect((await echo.execute({ text: "revoked" } as never, api("http-revoked"), context)).isError).toBe(true);
 });
+
+for (const mutation of ["grant", "replace", "delete", "rename"] as const) {
+  test.skipIf(process.platform !== "darwin")(`vault ${mutation} immediately stops credentialed stdio MCP and its egress`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "ghost-mcp-revoke-"));
+    const h = harness();
+    const owner = h.core.createGhost({ name: "Owner", persona: "", isDefault: true });
+    const sources = new SourceConnections({ root, currentConnection: id => h.ledger.findConnection(id) });
+    const vault = createVault(root);
+    const token = "VAULT-RAW-MCP-TOKEN";
+    const item = vault.create({ kind: "secret", title: "mcp.revoke.FAKE_SECRET", value: token, ghostIds: [owner.id] });
+    const changes: unknown[] = [];
+    const unsubscribe = vault.subscribe(change => changes.push(change));
+    // A live IPC port keeps the real child alive after stdin closes without a clock-based wait.
+    const program = `const fs=require('node:fs');const readline=require('node:readline');const channel=new (require('node:worker_threads').MessageChannel)();channel.port1.on('message',()=>{});process.on('SIGTERM',()=>fs.writeFileSync('term','received'));readline.createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line);if(q.id===undefined)return;let result;if(q.method==='initialize')result={protocolVersion:'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'revoke',version:'1'}};else if(q.method==='tools/list')result={tools:['pid','hold'].map(name=>({name,inputSchema:{type:'object'}}))};else if(q.params.name==='hold'){process.stderr.write(process.env.FAKE_SECRET);fs.writeFileSync('waiting','ready');return}else result={content:[{type:'text',text:JSON.stringify({pid:process.pid,proxy:process.env.HTTP_PROXY,changed:process.env.FAKE_SECRET==='replacement-value'})}]};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n')});`;
+    const server: McpServer = { id: "revoke", name: "Revoke", enabled: true, transport: { kind: "stdio", command: process.execPath, args: ["-e", program], env: ["FAKE_SECRET"], cwd: null }, readTools: ["pid", "hold"], createdAt: 1, updatedAt: 1 };
+    h.ledger.tx(() => h.ledger.putMcpServer(server));
+    const clients = createHostMcpClients({ root, ledger: h.ledger, sources, vault });
+    cleanup.push(async () => { unsubscribe(); await clients.close(); await sources.close(); vault.close(); h.core.stop(); await h.core.idle(); h.ledger.close(); rmSync(root, { recursive: true, force: true }); });
+    const first = await clients.callTool(server.id, "pid", {});
+    const before = JSON.parse(first.content.map(part => part.type === "text" ? part.text : "").join("")) as { pid: number; proxy: string; changed: boolean };
+    const unrelated = vault.create({ kind: "secret", title: "unrelated", value: "unrelated-secret", ghostIds: [owner.id] });
+    vault.update(unrelated.id, { value: "unrelated-new-value" });
+    expect(JSON.stringify(await clients.callTool(server.id, "pid", {}))).toContain(String(before.pid));
+    const directory = join(root, "mcp", createHash("sha256").update(server.id).digest("hex"));
+    const entered = Promise.withResolvers<void>();
+    const watcher = watch(directory, (_event, filename) => {
+      if (filename === "waiting") { watcher.close(); entered.resolve(); }
+    });
+    cleanup.push(async () => { watcher.close(); });
+    const pending = clients.callTool(server.id, "hold", {}).then(() => null, (error: unknown) => error);
+    await entered.promise;
+    if (mutation === "grant") vault.update(item.id, { ghostIds: [] });
+    else if (mutation === "replace") vault.update(item.id, { value: "replacement-value" });
+    else if (mutation === "rename") vault.update(item.id, { title: "renamed" });
+    else vault.remove(item.id);
+    const proxy = new URL(before.proxy);
+    const reachable = Promise.withResolvers<boolean>();
+    const socket = connect({ host: proxy.hostname, port: Number(proxy.port) });
+    socket.once("connect", () => { socket.destroy(); reachable.resolve(true); });
+    socket.once("error", () => { socket.destroy(); reachable.resolve(false); });
+    const outcome = await pending;
+    expect(outcome).toBeInstanceOf(Error);
+    if (!(outcome instanceof Error)) throw new Error("Revoked MCP call unexpectedly completed");
+    expect(outcome.message).not.toContain(token);
+    expect(await reachable.promise).toBe(false);
+    expect(existsSync(join(directory, "term"))).toBe(false);
+    expect(JSON.stringify(changes)).not.toContain(token);
+    expect(JSON.stringify(changes)).not.toContain("replacement-value");
+    if (mutation === "replace") {
+      const next = await clients.callTool(server.id, "pid", {});
+      const metadata = JSON.parse(next.content.map(part => part.type === "text" ? part.text : "").join("")) as { pid: number; changed: boolean };
+      expect(metadata.changed).toBe(true);
+      expect(metadata.pid).not.toBe(before.pid);
+      expect(JSON.stringify(next)).not.toContain(token);
+      expect(JSON.stringify(next)).not.toContain("replacement-value");
+    } else await expect(clients.callTool(server.id, "pid", {})).rejects.toThrow("needs exactly one");
+  }, 10_000);
+}
