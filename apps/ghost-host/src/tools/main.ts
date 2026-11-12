@@ -73,6 +73,7 @@ function requireMain(core: Core, api: ToolExecutionApi, targetId: string): Scope
 export function requireMainCaller(core: Core, api: ToolExecutionApi): Scope {
   const scope = scopeOf(core, api);
   if (!["direct", "wake"].includes(scope.conversation.kind)) throw forbidden("Ghost management runs only in a direct or wake conversation");
+  if (scope.conversation.kind === "wake" && core.ledger.setting<string | null>(`wake:decision:${scope.conversation.id}`, null)) throw forbidden("A decision review wake cannot manage global Ghost configuration");
   if (!scope.ghost.isDefault) throw forbidden("only the current main Ghost may create, inspect or update other Ghosts");
   if (scope.ghost.state !== "active") throw forbidden(`${scope.ghost.name} is ${scope.ghost.state}`);
   return scope;
@@ -281,7 +282,12 @@ export function createMainTools(core: Core): Extension {
     async execute(args, api) {
       try {
         const scope = scopeOf(core, api);
-        if (scope.conversation.kind !== "direct" || !scope.ghost.isDefault || scope.ghost.state !== "active") throw forbidden("only the current main Ghost may settle decisions for the owner");
+        if (scope.ghost.state !== "active" || scope.ghost.deletedAt !== null) throw forbidden("The reviewer is unavailable");
+        const bound = core.ledger.setting<string | null>(`wake:decision:${scope.conversation.id}`, null);
+        if (scope.conversation.kind === "wake" ? bound !== args.decision_id : scope.conversation.kind !== "direct") throw forbidden("This conversation may settle only its bound decision");
+        const reviewer = core.decisions.reviewer(core.ledger.decision(args.decision_id));
+        if (reviewer?.ghost.id !== scope.ghost.id) throw forbidden("This Ghost is not the live policy reviewer");
+        if (reviewer.slot && (scope.conversation.kind !== "wake" || bound !== args.decision_id || digestOf(scope.conversation.model) !== digestOf(core.ledger.settings().slots?.[reviewer.slot]?.model))) throw forbidden("This decision requires its configured reviewer slot in the bound wake");
         if (args.outcome === "answer" && !args.answer) throw invalid("answer is required to answer a question");
         return text(await core.decisions.settleForOwner(scope.ghost.id, args.decision_id, { outcome: args.outcome, answer: args.answer, note: args.note }));
       } catch (error) {

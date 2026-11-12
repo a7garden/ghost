@@ -273,6 +273,10 @@ export class Decisions {
   private grantCapability(decision: Decision, by: ResolvedBy): string | null {
     const request = decision.proposal?.capability as CapabilityRequest | undefined;
     if (!request || !(decision.state === "approved" || (decision.state === "answered" && grants(decision.answer)))) return null;
+    if (by !== "owner" && !request.grantedAt) {
+      const confirmation = this.ask(decision.conversationId, decision.title, decision.detail, decision.options, `capability-owner:${decision.id}`, { capability: request, forceOwner: true });
+      return `This delegated answer did not grant authority. Owner decision ${confirmation.id} is ${confirmation.state}.`;
+    }
     const ghost = this.ledger.ghost(request.ghostId);
     if (ghost.deletedAt !== null) return null;
     this.ledger.tx(() => {
@@ -336,12 +340,12 @@ export class Decisions {
     const prior = proposal.policy as PolicyReceipt | undefined;
     const receipt = evaluateStoredPolicy(this.core, decision.conversationId, classification, prior, reserve);
     if (tool === "complete" && receipt.evaluation.decision === "allow") receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: [], autoResolve: null, reason: "Policy cannot accept an unverified completion claim. Checks, an independent reviewer or the owner must verify this result." };
-    if (proposal.forceOwner || proposal.secureForm || proposal.browserHandoff) receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: [], autoResolve: null, reason: "Owner authorization is required to widen configuration or provide credentials." };
+    if (proposal.forceOwner || proposal.secureForm || proposal.browserHandoff || proposal.capability) receipt.evaluation = { ...receipt.evaluation, decision: "owner", reviewers: proposal.capability ? receipt.evaluation.reviewers : [], autoResolve: null, reason: "Owner authorization is required to widen configuration or provide credentials." };
     return receipt;
   }
 
   private safeAutomatic(decision: Decision, receipt: PolicyReceipt): boolean {
-    if (decision.kind === "reconcile_effect" || decision.kind === "accept_result" || decision.proposal?.secureForm || decision.proposal?.browserHandoff || decision.proposal?.forceOwner || decision.proposal?.policyReviewUnavailable) return false;
+    if (decision.kind === "reconcile_effect" || decision.kind === "accept_result" || decision.proposal?.secureForm || decision.proposal?.browserHandoff || decision.proposal?.forceOwner || decision.proposal?.policyReviewUnavailable || decision.proposal?.capability) return false;
     const facts = receipt.classification;
     if (decision.proposal?.goal) return receipt.evaluation.decidedBy.length > 0 && receipt.evaluation.decidedBy.every((id) => {
       const rule = this.ledger.policyRule(id);
@@ -516,7 +520,8 @@ export class Decisions {
 
   /** Wake the main Ghost's direct conversation to look at one decision; a quiet reply never reaches the owner. */
   private async askMain(decision: Decision) {
-    const main = this.reviewer(decision)?.ghost;
+    const reviewer = this.reviewer(decision);
+    const main = reviewer?.ghost;
     const current = this.ledger.decision(decision.id);
     if (!main || current.state !== "pending" || !this.mainReviews(current) || reviewOf(current.proposal)?.mainNote !== undefined) return;
     const asker = this.ledger.ghost(current.ghostId).name;
@@ -541,14 +546,18 @@ export class Decisions {
           ? `If it clearly serves what the owner wants, settle it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. If only the owner can judge, use outcome "leave" with your recommendation so they see it. Then reply only [quiet].`
           : `Check it against what you know (the owner's earlier words, the recipient, the amount, the files, the result against its brief). If there is something the owner should know to decide — a mismatch, a risk, a confirmation that it matches — call decision_settle with outcome "leave" and one or two sentences in the owner's language, ending with what you recommend. Then reply only [quiet].`,
     ].filter(Boolean);
-    const submission = { text: lines.join("\n\n"), origin: "schedule" as const, requestId: `decision-review:${decision.id}` };
-    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission, { decisionId: decision.id });
-    else await this.core.engine.submit(main.directConversationId, submission);
+    const submission = { text: lines.join("\n\n"), origin: "schedule" as const, requestId: `decision-review:${decision.id}`, sourceConversationId: decision.conversationId, scopeId: (decision.proposal?.policy as PolicyReceipt | undefined)?.scopeId ?? null };
+    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission, { slot: reviewer?.slot ?? undefined, decisionId: decision.id });
+    else {
+      if (reviewer?.slot) throw conflict(`Reviewer slot ${reviewer.slot} requires a configured wake engine; ask the owner to decide explicitly`);
+      await this.core.engine.submit(main.directConversationId, submission);
+    }
   }
 
   /** Wake the main to settle a decision the owner handed over; it leaves it back only when it truly cannot judge. */
   private async askMainToSettle(decision: Decision) {
-    const main = this.reviewer(decision)?.ghost;
+    const reviewer = this.reviewer(decision);
+    const main = reviewer?.ghost;
     const current = this.ledger.decision(decision.id);
     if (!main || current.state !== "pending" || !this.handedOver(current)) return;
     const asker = this.ledger.ghost(current.ghostId).name;
@@ -564,9 +573,12 @@ export class Decisions {
         ? `Decide it with decision_settle: approve only if the report meets every criterion, otherwise deny (asking for changes). Use outcome "leave" only if you cannot judge it at all; that gives it back to the owner. ${RESULT_NOTE} Then reply only [quiet].`
         : `Decide it with decision_settle (approve, deny or answer) and a one-sentence reason in the owner's language. Use outcome "leave" only if you cannot judge it at all; that gives it back to the owner with your note. Then reply only [quiet].`,
     ].filter(Boolean);
-    const submission = { text: lines.join("\n\n"), origin: "schedule" as const, requestId: `decision-delegate:${current.id}` };
-    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission, { decisionId: current.id });
-    else await this.core.engine.submit(main.directConversationId, submission);
+    const submission = { text: lines.join("\n\n"), origin: "schedule" as const, requestId: `decision-delegate:${current.id}`, sourceConversationId: current.conversationId, scopeId: (current.proposal?.policy as PolicyReceipt | undefined)?.scopeId ?? null };
+    if (this.core.engine.wake) await this.core.engine.wake(main.id, submission, { slot: reviewer?.slot ?? undefined, decisionId: current.id });
+    else {
+      if (reviewer?.slot) throw conflict(`Reviewer slot ${reviewer.slot} requires a configured wake engine; ask the owner to decide explicitly`);
+      await this.core.engine.submit(main.directConversationId, submission);
+    }
   }
 
   /** The vault write is a journaled effect: a crash mid-write becomes an unknown the owner reconciles, never a second write. */

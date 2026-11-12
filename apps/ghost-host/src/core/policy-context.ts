@@ -1,4 +1,4 @@
-import type { Decision, EffectClass, EffectTaint, PolicyEvaluation, PolicyRule } from "@ghost/contract";
+import { GHOST_TOOLS, matchesToolPatterns, type Decision, type EffectClass, type EffectTaint, type PolicyEvaluation, type PolicyRule } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { forbidden } from "./errors.ts";
 import { digestOf } from "./ids.ts";
@@ -9,6 +9,23 @@ export type ObservedEffect = Omit<EffectClass, "tool" | "taint">;
 export type PolicyReceipt = { classification: EffectClass; evaluation: PolicyEvaluation; rulesDigest: string; scopeId: string | null; ghostId: string; day: string; reserved: string[]; positions: Record<string, number> };
 const cleanTaint: EffectTaint = { untrustedInput: false, privateData: false };
 
+/** A helper inherits only its verified durable parent binding, never a model-supplied Work id. */
+export function policyWork(core: Core, conversationId: string) {
+  const visited = new Set<string>();
+  let conversation = core.ledger.conversation(conversationId);
+  while (conversation.kind === "subagent") {
+    if (visited.has(conversation.id)) throw forbidden("Helper provenance contains a cycle");
+    visited.add(conversation.id);
+    const parentId = core.ledger.setting<string | null>(`subagent:parent:${conversation.id}`, null);
+    const parent = parentId ? core.ledger.findConversation(parentId) : null;
+    if (!parent || parent.ghostId !== conversation.ghostId) throw forbidden("Helper provenance is missing or no longer valid");
+    const recordedWork = core.ledger.setting<string | null | undefined>(`subagent:work:${conversation.id}`, undefined);
+    if (recordedWork !== undefined && recordedWork !== parent.workId) throw forbidden("Helper Work binding no longer matches its verified parent");
+    conversation = parent;
+  }
+  return conversation.workId ? core.ledger.work(conversation.workId) : null;
+}
+
 export function markPolicyRead(core: Core, conversationId: string, flags: Partial<EffectTaint>): void {
   core.ledger.tx(() => {
     const visited = new Set<string>();
@@ -17,7 +34,10 @@ export function markPolicyRead(core: Core, conversationId: string, flags: Partia
       visited.add(current);
       const before = core.ledger.setting<EffectTaint>(`policy:taint:${current}`, cleanTaint);
       core.ledger.putSetting(`policy:taint:${current}`, { untrustedInput: before.untrustedInput || !!flags.untrustedInput, privateData: before.privateData || !!flags.privateData });
-      current = core.ledger.setting<string | null>(`subagent:parent:${current}`, null);
+      const conversation = core.ledger.conversation(current);
+      const parentId = conversation.kind === "subagent" ? core.ledger.setting<string | null>(`subagent:parent:${current}`, null) : null;
+      if (parentId && core.ledger.conversation(parentId).ghostId !== conversation.ghostId) throw forbidden("Helper provenance is invalid");
+      current = parentId;
     }
   });
 }
@@ -25,8 +45,10 @@ export function markPolicyRead(core: Core, conversationId: string, flags: Partia
 export function policyTaint(core: Core, conversationId: string): EffectTaint {
   const flags = { ...cleanTaint };
   const visited = new Set<string>();
-  let current: string | null = conversationId;
-  while (current && !visited.has(current)) {
+  const pending = [conversationId];
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (visited.has(current)) continue;
     visited.add(current);
     const stored = core.ledger.setting<EffectTaint>(`policy:taint:${current}`, cleanTaint);
     flags.untrustedInput ||= stored.untrustedInput;
@@ -38,21 +60,34 @@ export function policyTaint(core: Core, conversationId: string): EffectTaint {
       flags.untrustedInput ||= source !== "schedule";
       flags.privateData ||= source !== "schedule";
     }
-    current = core.ledger.setting<string | null>(`subagent:parent:${current}`, null) ?? work?.originConversationId ?? null;
+    if (conversation.kind === "subagent") {
+      policyWork(core, current);
+      pending.push(core.ledger.setting<string>(`subagent:parent:${current}`, ""));
+    }
+    if (work) {
+      const inherited = core.ledger.setting<EffectTaint>(`work:source-taint:${work.id}`, cleanTaint);
+      flags.untrustedInput ||= inherited.untrustedInput;
+      flags.privateData ||= inherited.privateData;
+      const source = core.ledger.setting<string | null>(`work:source:${work.id}`, null);
+      if (source) pending.push(source);
+      pending.push(work.originConversationId);
+    }
   }
   return flags;
 }
 
 export function classifyEffect(core: Core, conversationId: string, tool: string, input: unknown, observed?: ObservedEffect): EffectClass {
-  const conversation = core.ledger.conversation(conversationId);
-  const work = conversation.workId ? core.ledger.work(conversation.workId) : null;
+  const work = policyWork(core, conversationId);
   const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
   let facts: ObservedEffect = { target: { kind: "mac", id: null }, access: "write", reversible: false, external: true, amount: null };
   if (["write", "edit", "publish_artifact"].includes(tool)) facts = { ...facts, target: { kind: work?.execution?.kind === "host" ? "mac" : "workspace", id: work?.id ?? null }, external: false, reversible: true };
   // Workspace shell has public egress. It is not proof that an opaque command cannot send or spend.
   if (tool === "bash" && work?.execution?.kind === "container") facts = { ...facts, target: { kind: "workspace", id: work.id }, external: false, reversible: true };
   if (tool === "mail_send" || tool === "mail_update") facts = { ...facts, target: { kind: "mail_account", id: typeof args.account === "string" ? args.account : null }, external: tool === "mail_send", reversible: tool === "mail_update" };
-  if (tool === "document_write" || tool === "document_propose") facts = { ...facts, target: { kind: "document_vault", id: typeof args.scopeId === "string" ? args.scopeId : null }, external: false, reversible: !(args.pageId ?? args.page_id) };
+  if (tool === "document_write" || tool === "document_propose") {
+    const scopeId = args.scopeId ?? args.scope_id ?? args.spaceId ?? args.space_id;
+    facts = { ...facts, target: { kind: "document_vault", id: typeof scopeId === "string" ? scopeId : null }, external: false, reversible: !(args.pageId ?? args.page_id) };
+  }
   if (tool === "connection_request" || tool.startsWith("conn.")) facts = { ...facts, target: { kind: "connection", id: typeof args.connectionId === "string" ? args.connectionId : null } };
   if (tool.startsWith("mcp.")) facts = { ...facts, target: { kind: "mcp_server", id: tool.split(".")[1] ?? null } };
   if (tool.startsWith("browser_")) facts = { ...facts, target: { kind: "browser_origin", id: null } };
@@ -67,8 +102,18 @@ export function classifyEffect(core: Core, conversationId: string, tool: string,
 export function evaluateStoredPolicy(core: Core, conversationId: string, classification: EffectClass, prior?: PolicyReceipt, reserve = false): PolicyReceipt {
   const ledger = core.ledger;
   const conversation = ledger.conversation(conversationId);
-  const work = conversation.workId ? ledger.work(conversation.workId) : null;
-  const scopeId = prior ? prior.scopeId : work ? work.scopeId : ledger.setting<{ scopeId: string | null }>(`context:${conversation.id}`, { scopeId: null }).scopeId;
+  const work = policyWork(core, conversationId);
+  if (conversation.kind === "subagent") {
+    const ghost = ledger.ghost(conversation.ghostId);
+    if (ghost.deletedAt !== null || ghost.state !== "active") throw forbidden("Helper authority was revoked");
+    const selectable = (GHOST_TOOLS as readonly string[]).includes(classification.tool) || /^(?:mcp|conn)\./.test(classification.tool);
+    if (selectable && (!matchesToolPatterns(ghost.tools, classification.tool) || work?.toolScope && !matchesToolPatterns(work.toolScope, classification.tool))) throw forbidden("Helper tool authority was revoked");
+    if (work && (!["running", "waiting", "verifying"].includes(work.state) || work.deadlineAt !== null && work.deadlineAt <= Date.now())) throw forbidden("The helper's Work no longer permits reads");
+    if (work?.activityId) core.activities.authorize(work.id, classification.tool);
+  }
+  const helperScope = conversation.kind === "subagent" ? ledger.setting<string | null | undefined>(`subagent:scope:${conversation.id}`, undefined) : undefined;
+  if (work && helperScope !== undefined && helperScope !== work.scopeId) throw forbidden("Helper scope binding no longer matches its Work");
+  const scopeId = prior ? prior.scopeId : work ? work.scopeId : helperScope !== undefined ? helperScope : ledger.setting<{ scopeId: string | null }>(`context:${conversation.id}`, { scopeId: null }).scopeId;
   const day = new Date(Date.now()).toISOString().slice(0, 10);
   const rules = ledger.policyRules();
   const counts = ledger.setting<Record<string, number>>(`policy:counts:${day}`, {});
@@ -96,12 +141,16 @@ export function evaluateStoredPolicy(core: Core, conversationId: string, classif
   return { classification: fresh, evaluation, rulesDigest: digestOf(rules), scopeId, ghostId: conversation.ghostId, day, reserved, positions };
 }
 
-export function policyRead(core: Core, conversationId: string, classification: EffectClass | (ObservedEffect & { tool: string })): void {
+export function policyRead(core: Core, conversationId: string, classification: EffectClass | (ObservedEffect & { tool: string }), callId: string): void {
   if (classification.access !== "read") throw forbidden("read admission requires a Host-observed read");
+  if (!callId) throw forbidden("Read admission requires its logical Host call id");
   core.ledger.tx(() => {
-    const receipt = evaluateStoredPolicy(core, conversationId, classifyEffect(core, conversationId, classification.tool, null, classification));
+    const key = `policy:read:${conversationId}:${callId}:${classification.tool}`;
+    const prior = core.ledger.setting<PolicyReceipt | null>(key, null);
+    const receipt = evaluateStoredPolicy(core, conversationId, classifyEffect(core, conversationId, classification.tool, null, classification), prior ?? undefined, true);
     if (receipt.evaluation.decision !== "allow") throw forbidden(receipt.evaluation.reason);
-    markPolicyRead(core, conversationId, { untrustedInput: ["browser_origin", "connection", "mcp_server", "mail_account"].includes(classification.target.kind), privateData: ["mail_account", "mac"].includes(classification.target.kind) });
+    core.ledger.putSetting(key, receipt);
+    markPolicyRead(core, conversationId, { untrustedInput: ["browser_origin", "connection", "mcp_server", "mail_account"].includes(classification.target.kind), privateData: ["mail_account", "mac", "connection", "mcp_server"].includes(classification.target.kind) });
   });
 }
 

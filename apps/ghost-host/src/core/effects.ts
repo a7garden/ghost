@@ -351,6 +351,7 @@ export class Effects {
     const work = effect.workId ? this.ledger.work(effect.workId) : null;
     if (ghost.state !== "active" || ghost.deletedAt !== null) throw new NoEffect("The executing Ghost is no longer active");
     if (conversation.kind === "review" || conversation.kind === "subagent") throw new NoEffect("Read-only conversations cannot execute effects");
+    if (conversation.kind === "wake" && this.ledger.setting<string | null>(`wake:decision:${conversation.id}`, null)) throw new NoEffect("Decision review wakes are read-only");
     if (["write", "edit", "bash", "publish_artifact", "activity_action"].includes(effect.tool) && conversation.kind !== "work") throw new NoEffect("This tool requires a Work conversation");
     const tool = effect.tool === "document_write" ? "document_propose" : effect.tool;
     const managedGhost = tool === "ghost_create" || tool === "ghost_update";
