@@ -218,6 +218,9 @@ export function createToolSet(deps: {
   const work = harden(createWorkTools(deps.core, deps.sandbox));
   const review = harden(createReviewTools(deps.core, deps.sandbox));
   const main = harden(createMainTools(deps.core));
+  const settlementTool = main.tools?.find(tool => tool.name === "decision_settle");
+  if (!settlementTool) throw new Error("The main tool extension must register decision_settle");
+  const settlement: Extension = { name: "ghost.decision-settlement", tools: [settlementTool] };
   const goals = harden(createGoalTools(deps.core));
   const self = harden(createSelfTools(deps.core));
   const subagent = createSubagentTools(deps.core);
@@ -270,7 +273,7 @@ export function createToolSet(deps: {
       ]))].filter(Boolean).join("\n\n");
     },
     all(): Extension[] {
-      return [direct, interactive, drive, activities, work, review, main, goals, self, configuration, dynamic.extension, subagent, ...optional];
+      return [direct, interactive, drive, activities, work, review, main, settlement, goals, self, configuration, dynamic.extension, subagent, ...optional];
     },
     prepare: (conversation, ghost, work, extensions) => dynamic.prepare(conversation, ghost, work, extensions),
     bindLoader: load => dynamic.bindLoader(load),
@@ -291,9 +294,8 @@ export function createToolSet(deps: {
           if (desktop) selected.push(desktop);
           if (mail) selected.push(mail);
           if (toss) selected.push(toss);
-          // Main-only management: resolved again at every execution, so a stale main keeps nothing.
-          if (conversation.kind === "wake" && deps.core.ledger.setting<string | null>(`wake:decision:${conversation.id}`, null)) selected.push(main);
-          else if (ghost.isDefault && ghost.state === "active") selected.push(main);
+          const boundDecision = conversation.kind === "wake" ? deps.core.ledger.setting<string | null>(`wake:decision:${conversation.id}`, null) : null;
+          if (ghost.state === "active") selected.push(ghost.isDefault && boundDecision === null ? main : settlement);
           return selected;
         }
         case "work": {

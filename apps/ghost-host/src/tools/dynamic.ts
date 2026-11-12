@@ -15,7 +15,7 @@ export const mcpToolName = (serverId: string, tool: string): string => `mcp.${na
 export const connectionToolName = (id: string): string => `conn.${namespaceSegment(id)}`;
 const text = (value: string): ToolExecutionResult => ({ content: [{ type: "text", text: value.length > 48_000 ? `${value.slice(0, 47_960)}\n[content truncated]` : value }] });
 const BUILTINS: Readonly<Record<string, true>> = Object.fromEntries(GHOST_TOOLS.map(name => [name, true]));
-const CORE_TOOLS: Readonly<Record<string, true>> = Object.fromEntries(["tool_search", "complete", "ask_owner", "ask_parent", "ask_peer", "answer_question", "work_create", "work_list", "work_inspect", "work_update", "work_cancel", "delegate", "subagent_run", "skill_read", "work_status", "work_decide", "self_adapt", "capability_request", "plan_next", "verdict"].map(name => [name, true]));
+const CORE_TOOLS: Readonly<Record<string, true>> = Object.fromEntries(["tool_search", "complete", "ask_owner", "ask_parent", "ask_peer", "answer_question", "work_create", "work_list", "work_inspect", "work_update", "work_cancel", "delegate", "subagent_run", "skill_read", "decision_settle", "work_status", "work_decide", "self_adapt", "capability_request", "plan_next", "verdict"].map(name => [name, true]));
 interface McpInput { serverId: string; tool: string; args: Record<string, unknown>; authority: string }
 function responseText(result: McpCallResult): string {
   const body = result.content.map(item => item.type === "text" ? item.text : item.type === "resource_link" ? `${item.name}: ${item.uri}` : "[image omitted from text result]").join("\n");
