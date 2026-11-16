@@ -165,17 +165,18 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
 
   // A project space on a stable temp folder, with two saved pages.
   const spaceId = String((await command(host, {
-    type: 'space.create',
+    type: 'scope.create',
     name: '비행 기록',
-    path: host.spacePath,
-  })).spaceId);
+    paths: [host.spacePath],
+    vaultPath: host.spacePath,
+  })).scopeId);
   await command(host, {
-    type: 'document.save', spaceId, pageId: null, expectedHash: null, profile: 'pdc-markdown/1',
+    type: 'document.save', scopeId: spaceId, pageId: null, expectedHash: null, profile: 'pdc-markdown/1',
     title: '비행 기록 노트',
     body: '# 비행 기록 노트\n\n시험 비행마다 관측한 값을 한 줄씩 남긴다.\n\n- 이륙 고도와 바람 방향\n- 배터리 잔량과 비행 시간\n- 착륙 지점과 특이 사항\n\n다음 비행 전에 이전 기록을 다시 읽는다.',
   });
   await command(host, {
-    type: 'document.save', spaceId, pageId: null, expectedHash: null, profile: 'pdc-markdown/1',
+    type: 'document.save', scopeId: spaceId, pageId: null, expectedHash: null, profile: 'pdc-markdown/1',
     title: '회의 정리',
     body: '# 회의 정리\n\n- 발사 창구는 오전 바람이 약한 시간대로 잡는다.\n- 기록가는 매 비행 후 30분 안에 초안을 올린다.\n- 연구원은 두 주차 데이터를 비교해 추세를 요약한다.',
   });

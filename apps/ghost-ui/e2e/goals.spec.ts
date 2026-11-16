@@ -7,12 +7,12 @@ import { readRunState } from './run-state';
 const at = Date.UTC(2026, 10, 11, 9);
 const evidenceDir = process.env.GHOST_GOALS_EVIDENCE_DIR ?? resolve(import.meta.dirname, '../../../.build/goals');
 const goal = (id: string, patch: Partial<Goal> = {}): Goal => ({
-  id, title: '오래 쓸 수 있는 도구 만들기', why: '사람들이 자기 일을 차분히 이어 가도록 돕습니다.',
+  id, scopeId: null, title: '오래 쓸 수 있는 도구 만들기', why: '사람들이 자기 일을 차분히 이어 가도록 돕습니다.',
   boundaries: '허락 없이 메시지를 보내지 않습니다.', signal: '도구를 다시 찾는 사람의 이야기',
   state: 'active', proposedBy: null, createdAt: at, updatedAt: at, closedAt: null, ...patch,
 });
 const milestone = (id: string, patch: Partial<Milestone> = {}): Milestone => ({
-  id, goalId: 'g1', title: id, hypothesis: '실제 사용 경험에서 다음 방향을 찾습니다.', exit: '사용자와 확인한 기록이 남습니다.',
+  id, scopeId: null, goalId: 'g1', title: id, hypothesis: '실제 사용 경험에서 다음 방향을 찾습니다.', exit: '사용자와 확인한 기록이 남습니다.',
   outcome: '', state: 'planned', workIds: [], createdBy: 'main', settledBy: null, createdAt: at,
   startedAt: null, endedAt: null, ...patch,
 });
@@ -141,8 +141,9 @@ test('goals show chronology, proposals, inline evidence and owner settlement', a
   expect(await page.locator('.goal-line').first().getAttribute('data-compact')).toBe(testInfo.project.name === 'iphone' ? 'true' : null);
   if (testInfo.project.name === 'iphone') {
     const dock = page.getByRole('navigation', { name: '주요 화면' });
-    await expect(dock.getByRole('button')).toHaveCount(6);
-    await dock.getByRole('button', { name: '작업실', exact: true }).click();
+    await expect(dock.getByRole('button')).toHaveCount(3);
+    await dock.getByRole('button', { name: '대화', exact: true }).click();
+    await page.getByRole('button', { name: /^작업실/ }).click();
     await page.locator('.workspace-page').getByRole('button', { name: '목표', exact: true }).click();
     await expect(page.locator('.goals-page')).toBeVisible();
   }
@@ -180,8 +181,14 @@ test('goals show chronology, proposals, inline evidence and owner settlement', a
 
 test('open goal cap is explained and closed goal lines are read-only', async ({ page }) => {
   await mockGoals(page, { cap: true, closed: true });
-  await expect(page.getByRole('button', { name: '목표 추가', exact: true })).toBeDisabled();
-  await expect(page.getByText('진행 중이거나 일시정지한 목표는 3개까지 둘 수 있습니다.')).toBeVisible();
+  // The whole team is full but the seeded project has room, so adding is open and defaults to the project.
+  await page.getByRole('button', { name: '목표 추가', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('프로젝트', { exact: true })).toHaveValue(/.+/);
+  await dialog.getByLabel('프로젝트', { exact: true }).selectOption({ label: '전체' });
+  await expect(dialog.getByText('진행 중이거나 일시정지한 목표는 3개까지 둘 수 있습니다.')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '목표 추가', exact: true })).toBeDisabled();
+  await dialog.getByRole('button', { name: '닫기', exact: true }).click();
   await page.locator('.goals-closed > summary').click();
   await page.locator('.goals-closed__goal > summary').click();
   await page.getByRole('button', { name: '이정표 접어 둔 실험, 접음', exact: true }).click();

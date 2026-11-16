@@ -403,4 +403,11 @@ and upright on compact screens. Two active steps fork and rejoin on one column.
 Every state has its own shape; signal blue appears only for a linked Work actually running
 or verifying. Selecting a step opens evidence and owner settlement inline, without a modal.
 Paused directions stay visible, closed ones fold below; closing names its irreversible
-consequence before dropping open steps. There are at most three open directions.
+consequence before dropping open steps. Each owner (the whole team, or one project) has at most
+three open directions unless the project's own limit says otherwise.
+
+A direction belongs to the whole team (shown as 전체) or to one project. The 목표 screen groups
+directions by project, whole-team first, and labels groups only once a project has a goal; the
+add dialog picks the project and explains a full group inside the dialog, so the button itself
+stays enabled while any group has room. A project's 목표 tab shows only its directions and
+creates them in that project.

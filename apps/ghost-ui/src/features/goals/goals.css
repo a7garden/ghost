@@ -1,6 +1,7 @@
 @layer components {
 .goals-page { display: grid; align-content: start; gap: 36px; }
 .goals-page > .ghost-page-header { margin-bottom: 0; }
+.goals-page > .goals-add { justify-self: end; }
 .goals-add { display: flex; flex-direction: row-reverse; align-items: center; gap: 12px; }
 .goals-add > span { white-space: nowrap; }
 .goals-add > span, .goal-form__cap { color: var(--ghost-ink2); font-size: var(--text-caption); line-height: 1.5; }
@@ -8,10 +9,13 @@
 .goal-section + .goal-section { padding-top: 12px; }
 .goal-section__heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .goal-section__heading > div:first-child { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; min-width: 0; }
-.goal-section h2 { margin: 0; font-size: var(--text-heading); font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.goal-section :is(h2, h3) { margin: 0; font-size: var(--text-heading); font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 .goal-paused { color: var(--ghost-ink3); font-size: var(--text-caption); white-space: nowrap; }
 .goal-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .goal-section__heading > .goal-actions { flex: none; }
+.goal-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.goal-group__title { padding-bottom: 4px; }
+.goal-closed__scope { color: var(--ghost-ink3); }
 .goal-section__why { margin: 12px 0; color: var(--ghost-ink2); font-size: var(--text-body); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .goal-facts, .decision__goal { display: grid; gap: 8px; margin: 0; font-size: var(--text-ui); line-height: 1.6; }
 .goal-facts > div, .decision__goal > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 12px; }

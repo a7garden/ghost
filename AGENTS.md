@@ -12,6 +12,8 @@ See [current goals and scope](docs/current-priorities.md) for the product entry 
 
 Use **맡긴 일** for work assigned to Ghost. Keep execution time limits, durable scheduling, work resumption, and completion notifications. There is no personal planner or calendar.
 
+Work, goals, decisions and standing activities may belong to a **프로젝트** (`Scope` in code and API; the retired `Space` name survives only in legacy data and migrations). A project groups paths, a PDC vault, context, an optional responsible Ghost and its own limits; it grants no authority, and unscoped work and goals stay valid. The product does not hard-code an organisation: per-project responsibility is a recommended arrangement, not a rule the code enforces. See [the foundation design](docs/ghost-infrastructure.md) and [the paradigm](docs/ghost-paradigm.md).
+
 ## Local operations
 
 - Use the canonical checkout at `~/Workspace/Projects/ghost` and integrate verified changes into `main`. Use temporary worktrees for isolation and consolidate or archive them after verification.

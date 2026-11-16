@@ -30,6 +30,7 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
     .sort((a, b) => b.createdAt - a.createdAt).slice(0, 4);
   const ghosts = [...state.ghosts].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
   const names = new Map(state.ghosts.map(ghost => [ghost.id, ghost.name]));
+  const projectOf = (work: Work) => work.scopeId ? state.scopes.find(scope => scope.id === work.scopeId)?.name ?? '삭제된 프로젝트' : undefined;
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
   // Root lanes only; a delegated child shows under its parent.
   const live = liveWorks(state);
@@ -39,7 +40,7 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
     .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)).slice(0, 4);
   const lane = (work: Work) => {
     const children = live.filter(child => child.parentId === work.id);
-    return <WorkLane key={work.id} work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'} needsOwner={waiting.has(work.id)} now={now}
+    return <WorkLane key={work.id} work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'} projectName={projectOf(work)} needsOwner={waiting.has(work.id)} now={now}
       onOpen={() => navigate(`/work/${encodeURIComponent(work.id)}`)}
       branch={children.length > 0 ? children.map(lane) : undefined}/>;
   };
@@ -87,7 +88,7 @@ export function Overview({ state, navigate }: { state: State; navigate(path: str
     {!roots.length && <button type="button" className="link-quiet justify-self-start min-[56rem]:hidden" onClick={() => navigate('/work')}>{uiTerms.work} 전체<ArrowRight size={13} aria-hidden="true"/></button>}
     {recent.length > 0 && <section className="home__band" aria-labelledby="home-recent">
       <header className="home__band-head"><h2 id="home-recent" className="section-title">최근 끝난 일</h2></header>
-      <div className="lanes">{recent.map(work => <WorkLane key={work.id} work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'} needsOwner={false} now={now}
+      <div className="lanes">{recent.map(work => <WorkLane key={work.id} work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'} projectName={projectOf(work)} needsOwner={false} now={now}
         onOpen={() => navigate(`/work/${encodeURIComponent(work.id)}`)}/>)}</div>
     </section>}
   </Page>;

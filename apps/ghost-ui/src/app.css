@@ -341,6 +341,7 @@ body {
 .lane__state { flex: none; color: var(--ghost-ink2); font-weight: 500; }
 .lane__ghost { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--ghost-ink2); }
 .lane__ghost .dot-avatar { border-radius: 50%; }
+.lane__project { flex: none; max-width: 14ch; overflow: hidden; color: var(--ghost-ink2); text-overflow: ellipsis; white-space: nowrap; }
 .lane__note { overflow: hidden; color: var(--ghost-ink2); text-overflow: ellipsis; white-space: nowrap; }
 .lane[data-work-state="failed"] .lane__note { color: var(--ghost-danger-ink); }
 .lane[data-work-state="blocked"] .lane__note { color: var(--ghost-amber-ink); }

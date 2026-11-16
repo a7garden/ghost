@@ -29,7 +29,7 @@ export function Conversations({ ghosts, openGhost, openWorkspace }: { ghosts: re
       : <p className="conversations__empty" role="status">{needle ? '일치하는 Ghost가 없습니다.' : '대화할 Ghost가 없습니다.'}</p>}
     {/* 2026.11.11 : 휴대폰 탭에서 작업실을 뺐다. 프로젝트 대화로 가는 길을 여기 한 줄로 남긴다 — 없으면 검색으로만 닿는다. */}
     {openWorkspace && <button type="button" className="conversations__workspace" onClick={openWorkspace}>
-      <PanelsTopLeft size={18} aria-hidden="true"/><span>작업실<small>프로젝트와 공간의 대화</small></span><ChevronRight size={16} aria-hidden="true"/>
+      <PanelsTopLeft size={18} aria-hidden="true"/><span>작업실<small>프로젝트 대화</small></span><ChevronRight size={16} aria-hidden="true"/>
     </button>}
   </section>;
 }

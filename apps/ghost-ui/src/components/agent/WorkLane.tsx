@@ -10,9 +10,11 @@ import { StateGlyph, glyphLabel, workGlyph } from './StateGlyph';
  * One Work as a lane: its state shape and word, title, who carries it, since when, and why it stopped.
  * Delegated children hang below on a branch line.
  */
-export function WorkLane({ work, ghostName, needsOwner, now, onOpen, action, branch, showGhost = true }: {
+export function WorkLane({ work, ghostName, projectName, needsOwner, now, onOpen, action, branch, showGhost = true }: {
   work: Work;
   ghostName: string;
+  /** The project the Work belongs to; omitted where the project is already the context. */
+  projectName?: string;
   /** A pending decision on this Work turns waiting into 확인 필요. */
   needsOwner: boolean;
   now: number;
@@ -34,6 +36,7 @@ export function WorkLane({ work, ghostName, needsOwner, now, onOpen, action, bra
           <span className="lane__meta">
             <span className="lane__state" aria-hidden="true">{glyphLabel[glyph]}</span>
             {showGhost && <span className="lane__ghost"><DotAvatar profileId={work.ghostId} tone={toneFor(work.ghostId)} size={14}/>{ghostName}</span>}
+            {projectName && <span className="lane__project">{projectName}</span>}
             <time className="tabular">{relativeTime(at, now)}</time>
             {note && <span className="lane__note">{note}</span>}
           </span>

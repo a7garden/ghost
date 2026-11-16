@@ -47,7 +47,7 @@ export function WorkView({ state, navigate, filterGhostId, createRequested = fal
   const counts = { active: scoped.filter(work => !settled(work)).length, finished: scoped.filter(settled).length };
   const lane = (work: Work) => {
     const children = inTab.filter(child => child.parentId === work.id);
-    return <WorkLane key={work.id} work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'} needsOwner={waiting.has(work.id)} now={now}
+    return <WorkLane key={work.id} work={work} ghostName={names.get(work.ghostId) ?? 'Ghost'} projectName={work.scopeId ? state.scopes.find(scope => scope.id === work.scopeId)?.name ?? '삭제된 프로젝트' : undefined} needsOwner={waiting.has(work.id)} now={now}
       showGhost={!filterGhostId || work.ghostId !== filterGhostId}
       onOpen={() => navigate(`/work/${encodeURIComponent(work.id)}`)}
       action={work.state === 'running' || work.state === 'queued' || work.state === 'waiting'

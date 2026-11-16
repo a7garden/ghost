@@ -274,7 +274,7 @@ const inlineRehypePlugins = [rehypeRefs];
 
 /**
  * Ghost text in a one-line slot (a failure reason, an outcome, a wake line): emphasis, short
- * code and reference marks render, while blocks fold into the line. Line breaks become scopes
+ * code and reference marks render, while blocks fold into the line. Line breaks become spaces
  * first, so unwrapped paragraphs and list items never glue their words together. The wrapper
  * breaks long tokens (paths, URLs) wherever the slot puts it, so no caller has to.
  */

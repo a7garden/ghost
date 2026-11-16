@@ -17,6 +17,7 @@ import { ScopeEditor } from './ScopeEditor';
 import { GhostChat } from './GhostChat';
 import { InboxView } from './Inbox';
 import { Activities } from './Activities';
+import { ScopeGoals } from './goals/Goals';
 import { PolicySettings } from './PolicySettings';
 import { ScopeMetrics } from './ScopeMetrics';
 import { ConfigHistory } from './ConfigHistory';
@@ -24,7 +25,7 @@ import { decisionScopeId } from './scopeState';
 import './scopes.css';
 
 const PageEditorDrawer = lazy(() => import('./PageEditorDrawer'));
-const destinations = [{ id: 'conversation', label: '대화' }, { id: 'work', label: '맡긴 일' }, { id: 'decisions', label: '결정' }, { id: 'documents', label: '문서' }, { id: 'triggers', label: '계기' }, { id: 'rules', label: '규칙' }, { id: 'metrics', label: '계측' }, { id: 'history', label: '구성 기록' }];
+const destinations = [{ id: 'conversation', label: '대화' }, { id: 'goals', label: '목표' }, { id: 'work', label: '맡긴 일' }, { id: 'decisions', label: '결정' }, { id: 'documents', label: '문서' }, { id: 'triggers', label: '계기' }, { id: 'rules', label: '규칙' }, { id: 'metrics', label: '계측' }, { id: 'history', label: '구성 기록' }];
 
 export function ScopesView({ selectedScope, onSelectScope, createRequested, onCreateClosed, navigate, section = 'documents', onSectionChange }: {
   selectedScope?: string; onSelectScope?(id: string): void; createRequested?: boolean; onCreateClosed?(): void;
@@ -85,6 +86,7 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
         {active === 'conversation' && (receiver ? <div className="scope-conversation"><GhostChat key={`${scope.id}:${receiver.id}`} ghost={receiver} state={state} conversationId={receiver.directConversationId} threadId={null} navigate={navigate} initialScopeIds={[scope.id]}/></div> : <p>프로젝트 편집에서 받을 Ghost를 선택하세요.</p>)}
         {active === 'documents' && (scope.vaultPath ? <DocumentIndex pages={pages} total={total} search={search} onSearch={setSearch} loading={pagesLoading} error={listError} onOpen={pageId => setOpen({ pageId })} onCreate={() => setOpen({ pageId: null })}/>
           : <div className="infra-form"><p className="infra-record__meta">문서 금고가 지정되지 않았습니다.</p><div><Button variant="outline" onClick={() => setEditing(true)}>금고 경로 설정</Button></div></div>)}
+        {active === 'goals' && <ScopeGoals state={state} navigate={navigate} scopeId={scope.id}/>}
         {active === 'work' && <section aria-label="프로젝트 맡긴 일">{works.length ? works.map(work => <WorkLane key={work.id} work={work} ghostName={state.ghosts.find(ghost => ghost.id === work.ghostId)?.name ?? 'Ghost'} needsOwner={decisions.some(decision => decision.workId === work.id && decision.state === 'pending')} now={now} onOpen={() => navigate(`/work/${encodeURIComponent(work.id)}`)}/>) : <p className="infra-record__meta">맡긴 일이 없습니다.</p>}</section>}
         {active === 'decisions' && <InboxView state={{ ...state, decisions, notifications: state.notifications.filter(item => item.workId ? works.some(work => work.id === item.workId) : item.decisionId ? decisions.some(decision => decision.id === item.decisionId) : false) }} navigate={navigate} focusDecisionId={null}/>}
         {active === 'triggers' && <Activities scopeId={scope.id} navigate={navigate}/>}

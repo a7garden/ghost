@@ -24,3 +24,11 @@ describe('lane state reading', () => {
     expect(render(work(), true)).toContain('lane__state" aria-hidden="true">확인 필요<');
   });
 });
+
+describe('lane project', () => {
+  it('names the project only when the caller passes one', () => {
+    const named = renderToStaticMarkup(createElement(WorkLane, { work: work(), ghostName: '세이지', projectName: 'Ascent', needsOwner: false, now: 60_000, onOpen() {} }));
+    expect(named).toContain('<span class="lane__project">Ascent</span>');
+    expect(render(work())).not.toContain('lane__project');
+  });
+});
