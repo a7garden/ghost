@@ -481,6 +481,16 @@ function inspectionShape(program: string, args: string[]): InspectionShape | nul
 
 export const isReadOnlyHostCommand = (input: Pick<HostCommand, "program" | "args">) =>
   inspectionShape(input.program, input.args) !== null;
+
+/**
+ * What the Host itself can prove about a Mac command, never what the model says about its risk: an argv shape
+ * the read-only inspector accepts cannot change anything, and only a Git remote lookup leaves the machine.
+ * Null when the shape is unknown, which stays an irreversible, external write.
+ */
+export function provenHostCommandFacts(input: Pick<HostCommand, "program" | "args">): { external: boolean } | null {
+  const shape = inspectionShape(input.program, input.args);
+  return shape ? { external: shape.gitRemote === true } : null;
+}
 async function entries(path: string, limit: number) {
   const result = [];
   const dir = await opendir(path);

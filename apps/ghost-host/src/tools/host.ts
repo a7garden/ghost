@@ -7,6 +7,7 @@ import {
 import type { Core } from "../core/core.ts";
 import { NoEffect } from "../core/effects.ts";
 import { digestOf } from "../core/ids.ts";
+import { provenHostCommandFacts } from "../integrations/host.ts";
 import type { HostCommand, HostPort } from "../integrations/ports.ts";
 import { errorResult, requireAllowed } from "./shared.ts";
 import { policyRead } from "../core/policy-context.ts";
@@ -171,10 +172,14 @@ export function createHostTools(core: Core, host: HostPort): Extension {
         const display = [command.program, ...command.args]
           .map((part) => JSON.stringify(part))
           .join(" ");
+        // A read-only argv the inspector refused (private path, project roots) still changes nothing, so the main
+        // Ghost may review it and the owner's automatic wait applies; every other command stays an unknown write.
+        const proven = provenHostCommandFacts(command);
         const effect = core.effects.propose({
           conversationId: scope.conversation.id,
           callId: api.callId,
           tool: "host_command_propose",
+          ...(proven ? { classification: { target: { kind: "mac" as const, id: null }, access: "write" as const, reversible: true, external: proven.external, amount: null } } : {}),
           input: command,
           summary: command.title,
           title: command.title,

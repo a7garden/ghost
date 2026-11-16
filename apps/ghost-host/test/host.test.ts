@@ -1095,6 +1095,30 @@ describe("host command approval", () => {
       rmSync(f.home, { recursive: true, force: true });
     }
   });
+  test("a read-only command the inspector refused goes to review, anything unproven waits for the owner", async () => {
+    const h = harness();
+    const f = fixture(async () => ok("approved"));
+    try {
+      const main = h.core.createGhost({ name: "Main", persona: "" });
+      const ghost = h.core.createGhost({ name: "Mac", persona: "", tools: ["host_command_propose"] });
+      h.ledger.setPiConversationId(h.ledger.conversation(ghost.directConversationId).id, "pi-host-review");
+      expect(main.id).not.toBe(ghost.id);
+      const invoke = createHostTools(h.core, f.host).tools!.find((candidate) => candidate.name === "host_command_propose")!.execute as unknown as (input: HostCommand, api: ToolExecutionApi) => Promise<unknown>;
+      const policyOf = (callId: string) => {
+        const decision = h.ledger.pendingDecisions().find((item) => h.ledger.effect(item.effectId!).callId === callId)!;
+        return (decision.proposal!.policy as { evaluation: { decision: string; decidedBy: string[] } }).evaluation;
+      };
+      // /etc is outside the owner's roots and home, so the inspector refuses it; the argv is still a plain listing.
+      await invoke({ ...command(f.root), program: "/bin/ls", args: ["/etc"], risk: "Deletes everything" }, { conversationId: "pi-host-review", callId: "listing", taskId: hostTaskId() } as unknown as ToolExecutionApi);
+      expect(policyOf("listing")).toMatchObject({ decision: "review", decidedBy: ["host-command"] });
+      // The same ask whose argv is not a proven read: the model's own risk text decides nothing either way.
+      await invoke({ ...command(f.root), program: "/bin/rm", args: ["-rf", join(f.root, "x")], risk: "읽기 전용" }, { conversationId: "pi-host-review", callId: "removal", taskId: hostTaskId() } as unknown as ToolExecutionApi);
+      expect(policyOf("removal").decision).toBe("owner");
+    } finally {
+      h.ledger.close();
+      rmSync(f.home, { recursive: true, force: true });
+    }
+  });
   test("an existing command grant inspects without effects or decisions, while mutations still await approval", async () => {
     const h = harness();
     const calls: HostRun[] = [];
