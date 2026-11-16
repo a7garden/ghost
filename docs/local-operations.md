@@ -49,12 +49,12 @@ Geist worker의 IPC는 실행 파일 identity를 기준으로 나뉘므로 Host�
 PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원장 → 서명 헬퍼 → agent-desktop/Geist 경로로 한글 값 채우기, 체크박스 변경, 화면 JPEG와 좌표 클릭 결과를 재관찰했다. Geist의 실제 키보드 한글 입력도 확인했다. 격리 Host가 제공하는 설정 화면에서 **PC 조작 16/16**과 **PC 직접 실행** 저장을 Owner API로 확인했다. PC 검사 20개·100개 단언과 타입 검사를 통과했다. 독립 검토의 출력 파이프 정리 제한·종료 단축키 일관성·다른 Space 창 거부를 반영했다. 물리 클릭은 전달 성공만으로 앱 반영을 단정하지 않는다. 시험 창은 첫 클릭이 활성화만 한 경우가 있어, 명시적 창 포커스 뒤 새 화면에서 클릭하고 결과를 확인했다.
 
 
-## 현재 설치 (2026-11-12)
+## 현재 설치 (2026-11-17)
 
 | 항목 | 값 |
 | --- | --- |
 | LaunchAgent | `com.a7.ghost`(`ghost service install`이 씀) → `~/.local/share/ghost/bin/ghost-launch`(업데이트 롤백 가드, `GHOST_SERVICE=launchd`) → `~/.local/share/ghost/current/ghost serve`. infra `scripts/ghost-run.sh`는 더 쓰지 않는다 |
-| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`(셸 shim) → `Ghost Host.app/Contents/MacOS/ghost`, `current` → `releases/2.10.0-c79e585`(GitHub Release `v2.10.0`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 빌드 11 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
+| 실행 파일 | `~/.local/bin/ghost` → `~/.local/share/ghost/current/ghost`(셸 shim) → `Ghost Host.app/Contents/MacOS/ghost`, `current` → `releases/2.11.0-7800802`(GitHub Release `v2.11.0`, Developer ID 서명, 패치한 `agent-browser` 0.41.2·Obscura 0.2.6·Ghost Control 포함, iPhone `Ghost.ipa` 빌드 11 동봉). 업데이트 토큰 `secrets/update-github.json`, 상태 `update/` |
 | 상태 루트 | `~/Library/Application Support/Ghost` (`config.json`: 포트 62062, `publicOrigin` `https://macstudio.tail1d0d8d.ts.net:8443`, `cloudflareAccess`(웹 origin, 아래), Apple container 샌드박스, `reach`(`~/.local/bin/agent-reach`), `browser`(`~/.local/share/ghost/current/agent-browser`, Obscura), `skills.roots` `~/.agents/skills`, `mac.roots` `~/Workspace/Projects` + `mac.watch`(Mac 관리 Ghost, 5분)). 기억 `memory.db`(Host 내장), 금고 `vault/`(0700, key 0600), 브라우저 상태 `browser/` |
 | 기기 origin | `tailscale serve`의 `:8443` → `127.0.0.1:62062` |
 | 웹 origin | `https://ghost.a7garden.com` → Cloudflare Access 앱 `Ghost`(팀 `dawn-hat-3ab7.cloudflareaccess.com`, 정책 `Ghost owner`, IdP `One-time PIN`) → 터널 `ghost`(`765d8841-…`) → `127.0.0.1:62062`. 커넥터 `~/Library/LaunchAgents/com.a7.ghost-cloudflare.plist`, 토큰·로그 `~/Library/Application Support/ghost-cloudflare/`(0700, 토큰 0600). 끄려면 `launchctl bootout gui/$UID/com.a7.ghost-cloudflare` |
@@ -63,6 +63,12 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 | 백업 | infra restic이 `ghost backup`(ghost-backup/2)으로 스냅숏을 만든다 |
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
+
+### 프로젝트(Scope) 기반과 2.11.0 운영 반영 — 2026-11-17
+
+- 바꾼 것(`7800802`): 2.10.2 이후 Host 변경 전부(프로젝트 `Space`→`Scope` 전환과 설정 기록·되돌리기, 정책 규칙, 계기·계측, Mac 작업 공간 실행 환경, MCP 클라이언트, 실행 신뢰성)와 UI. 목표는 팀 전체 또는 프로젝트별이고, 목표 화면은 프로젝트별로 묶으며 프로젝트 화면에 「목표」 탭이 생겼다. 홈·맡긴 일 줄에 프로젝트 이름을 보인다. 표 미리보기 단축키 안내 `Enter Scope`를 `Enter Space`로, 문서 도구 이름을 「프로젝트 문서」로 바로잡았다. 문서(우선순위·UI 용어·구조·설계)를 이 모델에 맞췄다.
+- 검사: Host 1401 통과·46 생략, UI 308 통과·타입·빌드, 릴리스 스크립트의 타입·테스트·`cargo test`·서명·매니페스트·묶음 검증 통과. 격리 Host에서 프로젝트 「목표」 탭 생성·목표 화면 묶음을 데스크톱으로, 프로젝트 탭 줄바꿈을 390px로 확인했다. 목표 e2e 8개 중 iPhone 「목표 흐름」 하나가 실패한다: 문서 가로 스크롤 너비가 화면보다 1px 넓다. 측정상 화면 밖으로 나간 요소는 없고 넓은 쪽은 타이틀바 오른쪽 칸이었지만 원인은 확정하지 못했고, 이전 릴리스에서 같은 검사가 통과했는지는 확인하지 않았다. 프로젝트 화면을 쓰는 나머지 e2e(`visual`·`project-mentions`·`audit`)는 아직 `/spaces` 경로와 `spaceIds`를 쓰므로 새 구조에 맞게 고치기 전까지 돌리지 않는다.
+- 배포: [v2.11.0](https://github.com/a7garden/ghost/releases/tag/v2.11.0), 소스 `7800802`, `main` GitHub·Gitea 일반 푸시, 깨끗한 임시 worktree에서 `bun scripts/release.ts --publish`. 운영 PID 73919·진행 중인 일 0·busy 0을 확인하고 Owner API로 설치했다. `lastResult: installed`(`2.10.2-278900d` → `2.11.0-7800802`), 백업 `backups/pre-2.11.0-7800802-1794841827112/`, health 2.11.0·runtime ready, 새 PID 7217. Ghost 31·맡긴 일 200·결정 102·기기 1·프로젝트 9가 보존됐고 운영이 제공하는 UI 묶음에 새 화면 문구가 들어 있다. 셸 0.2.4·iPhone 빌드 11은 그대로라 앱 업데이트는 없다. 설치된 Mac 앱 창에서 직접 화면을 열어 확인하지는 못했다.
 
 ### 맡긴 일 화면 정보 정리와 2.10.2 운영 반영 — 2026-11-12
 
