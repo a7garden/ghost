@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { MailboxInfo, MailMessage, MailSummary } from '../../host/client';
 import {
   appendMailPage, buildMailSend, defaultMailbox, emptyMailList, forwardQuote,
-  forwardSubject, mailboxLabel, mailSizeLabel, mailAddressName, mailAddressList,
-  orderMailboxes, patchMailMessage, parseMailAddresses, removeMailMessage, replyQuote,
-  replySubject, shiftMailboxUnseen,
+  forwardSubject, inboxMailbox, mailboxLabel, mailSizeLabel, mailAddressName, mailAddressList,
+  mergeUnifiedPages, orderMailboxes, patchMailMessage, parseMailAddresses, refreshMailPage,
+  removeMailMessage, replyQuote, replySubject, shiftMailboxUnseen, unifiedHasMore,
 } from './mail-data';
 
 const mailbox = (path: string, specialUse: MailboxInfo['specialUse'] = null, name = path, unseen: number | null = 1): MailboxInfo =>
@@ -79,6 +79,75 @@ describe('message list paging state', () => {
     expect(patchMailMessage(state, 99, { seen: true }).messages).toHaveLength(2);
     expect(removeMailMessage(state, 2).messages.map(item => item.uid)).toEqual([1]);
     expect(removeMailMessage(state, 2).nextBefore).toBe(1);
+  });
+});
+
+describe('merged inbox across accounts', () => {
+  const page = (accountId: string, messages: MailSummary[], nextBefore: number | null) =>
+    ({ accountId, accountName: `계정 ${accountId}`, mailboxPath: 'INBOX', messages, nextBefore });
+
+  it('interleaves accounts newest first and keeps the same uid from two accounts apart', () => {
+    const merged = mergeUnifiedPages(emptyMailList, [
+      page('A', [summary(1, { date: 300 }), summary(2, { date: 100 })], null),
+      page('B', [summary(1, { date: 200 })], null),
+    ]);
+    expect(merged.messages.map(item => `${item.accountId}${item.uid}`)).toEqual(['A1', 'B1', 'A2']);
+    expect(merged.messages[1]).toMatchObject({ accountName: '계정 B', mailboxPath: 'INBOX' });
+  });
+
+  it('tracks each account cursor and reports more only while one account has older mail', () => {
+    const first = mergeUnifiedPages(emptyMailList, [page('A', [summary(5, { date: 500 })], 5), page('B', [summary(9, { date: 400 })], null)]);
+    expect(first.cursors).toEqual({ A: 5, B: null });
+    expect(unifiedHasMore(first)).toBe(true);
+    const second = mergeUnifiedPages(first, [page('A', [summary(4, { date: 50 })], null)]);
+    expect(second.cursors).toEqual({ A: null, B: null });
+    expect(unifiedHasMore(second)).toBe(false);
+    expect(second.messages.map(item => `${item.accountId}${item.uid}`)).toEqual(['A5', 'B9', 'A4']);
+  });
+
+  it('does not show a message twice when a page repeats it', () => {
+    const once = mergeUnifiedPages(emptyMailList, [page('A', [summary(1, { date: 10 })], null)]);
+    expect(mergeUnifiedPages(once, [page('A', [summary(1, { date: 10 })], null)]).messages).toHaveLength(1);
+  });
+
+  it('patches and removes one account\'s uid without touching the other account\'s same uid', () => {
+    const merged = mergeUnifiedPages(emptyMailList, [page('A', [summary(1, { date: 2 })], null), page('B', [summary(1, { date: 1 })], null)]);
+    const patched = patchMailMessage(merged, 1, { seen: false }, 'B');
+    expect(patched.messages.map(item => [item.accountId, item.seen])).toEqual([['A', true], ['B', false]]);
+    expect(removeMailMessage(merged, 1, 'A').messages.map(item => item.accountId)).toEqual(['B']);
+  });
+
+  it('finds the inbox by special use, else by the name INBOX, else none', () => {
+    expect(inboxMailbox([mailbox('Sent', 'sent'), mailbox('Posteingang', 'inbox')])?.path).toBe('Posteingang');
+    expect(inboxMailbox([mailbox('Sent', 'sent'), mailbox('inbox')])?.path).toBe('inbox');
+    expect(inboxMailbox([mailbox('Sent', 'sent')])).toBeNull();
+  });
+});
+
+describe('quiet refresh', () => {
+  it('puts new mail on top, keeps older pages and the older-page cursor', () => {
+    const state = { ...emptyMailList, messages: [summary(30), summary(29)], nextBefore: 29 };
+    const next = refreshMailPage(state, { messages: [summary(32), summary(31), summary(30)] });
+    expect(next.messages.map(item => item.uid)).toEqual([32, 31, 30, 29]);
+    expect(next.nextBefore).toBe(29);
+  });
+
+  it('refreshes flags another client changed, and hands back the same state when nothing changed', () => {
+    const state = { ...emptyMailList, messages: [summary(2), summary(1)], nextBefore: null };
+    const changed = refreshMailPage(state, { messages: [summary(2, { seen: false, flagged: true }), summary(1)] });
+    expect(changed.messages[0]).toMatchObject({ uid: 2, seen: false, flagged: true });
+    expect(refreshMailPage(state, { messages: [summary(2), summary(1)] })).toBe(state);
+  });
+
+  it('in the merged view only touches the refreshed account and keeps newest-first order', () => {
+    const merged = mergeUnifiedPages(emptyMailList, [
+      { accountId: 'A', accountName: 'A', mailboxPath: 'INBOX', messages: [summary(1, { date: 100 })], nextBefore: null },
+      { accountId: 'B', accountName: 'B', mailboxPath: 'INBOX', messages: [summary(1, { date: 50 })], nextBefore: null },
+    ]);
+    const next = refreshMailPage(merged, { accountId: 'B', accountName: 'B', mailboxPath: 'INBOX', messages: [summary(2, { date: 200 }), summary(1, { date: 50, seen: false })] });
+    expect(next.messages.map(item => `${item.accountId}${item.uid}`)).toEqual(['B2', 'A1', 'B1']);
+    expect(next.messages.find(item => item.accountId === 'A')?.seen).toBe(true);
+    expect(next.messages.find(item => item.accountId === 'B' && item.uid === 1)?.seen).toBe(false);
   });
 });
 

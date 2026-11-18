@@ -36,15 +36,35 @@ export function shiftMailboxUnseen(mailboxes: readonly MailboxInfo[], path: stri
     : { ...mailbox, unseen: Math.max(0, mailbox.unseen + delta) });
 }
 
+/** The pseudo account that merges every account's 받은편지함 into one list. */
+export const ALL_ACCOUNTS = '*';
+/** The pseudo mailbox path paired with `ALL_ACCOUNTS`; no server mailbox has this name. */
+export const ALL_INBOX = '*inbox';
+
+/**
+ * A listed message. The merged view carries its origin, because uids repeat across accounts;
+ * a single account's list leaves these unset.
+ */
+export interface ListedMail extends MailSummary {
+  accountId?: string;
+  accountName?: string;
+  mailboxPath?: string;
+}
+
 /** The list on screen plus the cursor for older pages. */
 export interface MailListState {
-  messages: MailSummary[];
+  messages: ListedMail[];
   nextBefore: number | null;
   /** The committed search text the current page was fetched with. */
   query: string;
+  /** Merged view only: each account's cursor for older mail, `null` once that account has no more. */
+  cursors: Record<string, number | null>;
 }
 
-export const emptyMailList: MailListState = { messages: [], nextBefore: null, query: '' };
+export const emptyMailList: MailListState = { messages: [], nextBefore: null, query: '', cursors: {} };
+
+const sameOrigin = (message: ListedMail, accountId: string | undefined) => (message.accountId ?? '') === (accountId ?? '');
+const listedKey = (message: ListedMail) => `${message.accountId ?? ''}\u0000${message.uid}`;
 
 /** Append one fetched page: uids already on screen drop out, newest first is preserved. Pure; tests pin it. */
 export function appendMailPage(state: MailListState, page: { messages: MailSummary[]; nextBefore: number | null }): MailListState {
@@ -53,13 +73,68 @@ export function appendMailPage(state: MailListState, page: { messages: MailSumma
 }
 
 /** Patch one message in place (읽음 · 별표); a message that already left the list is ignored. Pure; tests pin it. */
-export function patchMailMessage(state: MailListState, uid: number, patch: Partial<MailSummary>): MailListState {
-  return { ...state, messages: state.messages.map(message => message.uid === uid ? { ...message, ...patch } : message) };
+export function patchMailMessage(state: MailListState, uid: number, patch: Partial<MailSummary>, accountId?: string): MailListState {
+  return { ...state, messages: state.messages.map(message => message.uid === uid && sameOrigin(message, accountId) ? { ...message, ...patch } : message) };
 }
 
 /** Drop one message from the list because it moved or left the mailbox. Pure; tests pin it. */
-export function removeMailMessage(state: MailListState, uid: number): MailListState {
-  return { ...state, messages: state.messages.filter(message => message.uid !== uid) };
+export function removeMailMessage(state: MailListState, uid: number, accountId?: string): MailListState {
+  return { ...state, messages: state.messages.filter(message => !(message.uid === uid && sameOrigin(message, accountId))) };
+}
+
+/** One account's 받은편지함 for the merged view: the server's inbox, else a mailbox literally named INBOX. */
+export function inboxMailbox(mailboxes: readonly MailboxInfo[]): MailboxInfo | null {
+  return mailboxes.find(mailbox => mailbox.specialUse === 'inbox') ?? mailboxes.find(mailbox => mailbox.path.toUpperCase() === 'INBOX') ?? null;
+}
+
+/** One account's page of its inbox, tagged for the merged list. */
+export interface UnifiedPage {
+  accountId: string;
+  accountName: string;
+  mailboxPath: string;
+  messages: MailSummary[];
+  nextBefore: number | null;
+}
+
+/** Newest first across accounts; equal dates fall back to account then uid so the order never flickers. */
+const newestFirst = (a: ListedMail, b: ListedMail) =>
+  b.date - a.date || (a.accountId ?? '').localeCompare(b.accountId ?? '') || b.uid - a.uid;
+
+/** Fold fetched pages into the merged list; messages already shown drop out. Pure; tests pin it. */
+export function mergeUnifiedPages(state: MailListState, pages: readonly UnifiedPage[]): MailListState {
+  const shown = new Map(state.messages.map(message => [listedKey(message), message] as const));
+  const cursors = { ...state.cursors };
+  for (const page of pages) {
+    cursors[page.accountId] = page.nextBefore;
+    for (const message of page.messages) {
+      const listed: ListedMail = { ...message, accountId: page.accountId, accountName: page.accountName, mailboxPath: page.mailboxPath };
+      if (!shown.has(listedKey(listed))) shown.set(listedKey(listed), listed);
+    }
+  }
+  return { ...state, messages: [...shown.values()].sort(newestFirst), cursors };
+}
+
+/** True while at least one account still has older mail to fetch. */
+export const unifiedHasMore = (state: MailListState): boolean => Object.values(state.cursors).some(cursor => cursor !== null);
+
+/**
+ * Fold a fresh first page into a list that may already show older pages. New mail goes on top,
+ * flags on mail the page also contains are refreshed, and the older-page cursor never moves.
+ * Pure; tests pin it.
+ */
+export function refreshMailPage(state: MailListState, page: { messages: MailSummary[]; accountId?: string; accountName?: string; mailboxPath?: string }): MailListState {
+  const origin = page.accountId;
+  const fresh = new Map(page.messages.map(message => [message.uid, message] as const));
+  const known = new Set(state.messages.filter(message => sameOrigin(message, origin)).map(message => message.uid));
+  const added: ListedMail[] = page.messages.filter(message => !known.has(message.uid)).map(message => origin === undefined ? message
+    : { ...message, accountId: origin, accountName: page.accountName, mailboxPath: page.mailboxPath });
+  const updated = state.messages.map(message => {
+    const next = sameOrigin(message, origin) ? fresh.get(message.uid) : undefined;
+    if (!next || (next.seen === message.seen && next.flagged === message.flagged && next.answered === message.answered)) return message;
+    return { ...message, seen: next.seen, flagged: next.flagged, answered: next.answered };
+  });
+  if (!added.length && updated.every((message, index) => message === state.messages[index])) return state;
+  return { ...state, messages: origin === undefined ? [...added, ...updated] : [...added, ...updated].sort(newestFirst) };
 }
 
 /** A header address as people read it: the display name when there is one, else the address. */

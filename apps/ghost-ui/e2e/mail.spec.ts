@@ -12,7 +12,9 @@ const message = (subject: string, uid = 10): MailMessage => ({
 });
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-async function mailApi(page: Page) {
+/** `view` is the remembered mail view the screen opens on; `null` leaves a first visit, which opens 전체 계정. */
+async function mailApi(page: Page, view: string | null = 'A') {
+  if (view) await page.addInitScript(value => localStorage.setItem('ghost-mail:view', value), view);
   const counts = new Map<string, number>();
   const updates: Record<string, unknown>[] = [];
   let hold: { matches: (url: URL) => boolean; resolve: (route: Route) => void } | null = null;
@@ -304,4 +306,63 @@ test('mail empty-state opens the shared account setup with service-specific mail
   await dialog.getByRole('button', { name: '고급 설정', exact: true }).click();
   await expect(dialog.getByRole('textbox', { name: 'IMAP 서버', exact: true })).toHaveValue('imap.gmail.com');
   await expect(dialog.getByRole('textbox', { name: 'SMTP 서버', exact: true })).toHaveValue('smtp.gmail.com');
+});
+
+test('first visit with two accounts opens the merged inbox; reading one account\'s message marks only that account\'s row', async ({ page }) => {
+  const api = await mailApi(page, null); await openMail(page);
+  await expect(row(page, 'A INBOX #1')).toBeVisible(); await expect(row(page, 'B INBOX #1')).toBeVisible();
+  await expect(row(page, 'A INBOX #1').locator('.mail-row__account')).toHaveText('Account A');
+  await expect(row(page, 'B INBOX #1').locator('.mail-row__account')).toHaveText('Account B');
+  await row(page, 'B INBOX #1').click();
+  await expect(page.getByRole('article', { name: '메일 읽기: B read' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '안읽음으로 표시', exact: true })).toBeEnabled();
+  expect(api.updates).toHaveLength(1); expect(api.updates[0]).toMatchObject({ connectionId: 'B', mailbox: 'INBOX', action: 'seen', uids: [10] });
+  await expect(row(page, 'B INBOX #1')).not.toHaveAttribute('data-unread'); await expect(row(page, 'A INBOX #1')).toHaveAttribute('data-unread');
+  await page.getByRole('button', { name: '보관함으로 이동', exact: true }).click();
+  await expect(row(page, 'B INBOX #1')).toHaveCount(0); await expect(row(page, 'A INBOX #1')).toBeVisible();
+  expect(api.updates[1]).toMatchObject({ connectionId: 'B', action: 'archive', uids: [10] });
+});
+
+test('a merged-view reply stays on the receiving account, a new mail can pick the sender, and the chosen view is remembered', async ({ page }) => {
+  const sent: { connectionId: string; replyTo?: unknown }[] = [];
+  await mailApi(page, null);
+  await page.route('**/api/commands', route => {
+    const { command } = route.request().postDataJSON();
+    if (command.type !== 'mail.send') return route.fallback();
+    sent.push(command); return json(route, { ok: true, result: { messageId: '<sent@example.com>' } });
+  });
+  await openMail(page); await row(page, 'B INBOX #1').click();
+  await page.getByRole('button', { name: '답장', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: '보내는 계정' })).toHaveCount(0);
+  await page.getByRole('textbox', { name: '받는 사람', exact: true }).fill('recipient@example.com');
+  await page.getByRole('textbox', { name: '본문', exact: true }).fill('Reply body');
+  await page.getByRole('button', { name: '보내기', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '답장 쓰기', exact: true })).toHaveCount(0);
+  expect(sent).toHaveLength(1); expect(sent[0]).toMatchObject({ connectionId: 'B', replyTo: { mailbox: 'INBOX', uid: 10 } });
+  await page.getByRole('button', { name: '메일 쓰기', exact: true }).click();
+  const sender = page.getByRole('combobox', { name: '보내는 계정' });
+  await expect(sender).toHaveValue('A'); await sender.selectOption('B');
+  await page.getByRole('textbox', { name: '받는 사람', exact: true }).fill('recipient@example.com');
+  await page.getByRole('textbox', { name: '제목', exact: true }).fill('From B');
+  await page.getByRole('textbox', { name: '본문', exact: true }).fill('New body');
+  await page.getByRole('button', { name: '보내기', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '메일 쓰기', exact: true })).toHaveCount(0);
+  expect(sent).toHaveLength(2); expect(sent[1]).toMatchObject({ connectionId: 'B' }); expect(sent[1]!.replyTo).toBeUndefined();
+  await page.getByRole('combobox', { name: '메일 계정' }).selectOption('B');
+  await page.reload(); await expect(page.getByRole('combobox', { name: '메일 계정' })).toHaveValue('B');
+});
+
+test('a quiet refresh puts new mail on top without a click', async ({ page }) => {
+  await page.clock.install();
+  await mailApi(page);
+  let arrived = false;
+  await page.route('**/api/mail/A/messages**', route => arrived
+    ? json(route, { mailbox: 'INBOX', uidValidity: 1, messages: [summary('Fresh arrival', 11), summary('A INBOX #1', 10)], nextBefore: null })
+    : route.fallback());
+  await openMail(page); await expect(row(page, 'A INBOX #1')).toBeVisible();
+  await expect(row(page, 'Fresh arrival')).toHaveCount(0);
+  arrived = true;
+  await page.clock.fastForward(95_000);
+  await expect(row(page, 'Fresh arrival')).toBeVisible();
+  await expect(page.locator('.mail-row').first()).toContainText('Fresh arrival');
 });

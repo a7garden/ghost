@@ -83,6 +83,7 @@
 .mail-row[aria-current] { background: var(--ghost-hover2); }
 .mail-row__line { display: flex; min-width: 0; align-items: center; gap: 6px; }
 .mail-row__from { flex: 1; min-width: 0; overflow: hidden; color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.mail-row__account { flex: none; max-width: 40%; overflow: hidden; color: var(--ghost-ink3); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
 .mail-row__flags { display: flex; flex: none; gap: 4px; color: var(--ghost-ink3); }
 .mail-row__date { flex: none; color: var(--ghost-ink3); font-size: var(--text-caption); }
 .mail-row__subject { overflow: hidden; font-size: var(--text-ui); line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }

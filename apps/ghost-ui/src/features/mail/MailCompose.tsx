@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Button, FormField, InlineError, Input, Textarea } from '../../ui';
-import { HostError, type MailMessage, type MailSendCommand } from '../../host/client';
+import { HostError, type MailAccounts, type MailMessage, type MailSendCommand } from '../../host/client';
 import { useHost } from '../../host/context';
 import { Modal } from '../../components/Modal';
 import { buildMailSend, forwardQuote, forwardSubject, replyQuote, replySubject, type MailComposeDraft } from './mail-data';
@@ -24,11 +24,14 @@ const draftFromSeed = (connectionId: string, seed: ComposeSeed): MailComposeDraf
 
 const composeTitle: Record<ComposeSeed['mode'], string> = { new: '메일 쓰기', reply: '답장 쓰기', forward: '전달 쓰기' };
 
-/** The compose sheet: 받는 사람 · 참조 · 숨은참조 · 제목 · 본문. A failed send keeps every field. */
-export function MailCompose({ connectionId, canSend, seed, onSent, onClose }: {
+/**
+ * The compose sheet: 보내는 계정 · 받는 사람 · 참조 · 숨은참조 · 제목 · 본문. A failed send keeps every field.
+ * A reply stays on the account that received the message; a new mail or forward may pick any account.
+ */
+export function MailCompose({ connectionId, accounts, seed, onSent, onClose }: {
+  /** The account the sheet opens on. */
   connectionId: string;
-  /** False when the account has no SMTP; sending stays off with one clear line. */
-  canSend: boolean;
+  accounts: MailAccounts['accounts'];
   seed: ComposeSeed;
   onSent(): void;
   onClose(): void;
@@ -73,9 +76,16 @@ export function MailCompose({ connectionId, canSend, seed, onSent, onClose }: {
       {control => <Input {...control} value={draft[key]} disabled={sending || uncertain} autoComplete="off" inputMode={options.inputMode}
         placeholder={options.placeholder} onChange={event => set({ [key]: event.target.value })}/>}
     </FormField>;
+  const sender = accounts.find(account => account.connectionId === draft.connectionId);
   return <Modal title={composeTitle[seed.mode]} onClose={() => { if (!sending) onClose(); }}>
     <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void send(); }}>
-      {!canSend && <InlineError>이 계정에는 보내기 설정(SMTP)이 없습니다. 설정 → 연결 계정에서 SMTP 서버를 저장해 주세요.</InlineError>}
+      {accounts.length > 1 && seed.mode !== 'reply' && <FormField label="보내는 계정">
+        {control => <select {...control} className="mail-switch" value={draft.connectionId} disabled={sending || uncertain}
+          onChange={event => set({ connectionId: event.target.value })}>
+          {accounts.map(account => <option key={account.connectionId} value={account.connectionId}>{account.name || account.address}</option>)}
+        </select>}
+      </FormField>}
+      {!sender?.canSend && <InlineError>이 계정에는 보내기 설정(SMTP)이 없습니다. 설정 → 연결 계정에서 SMTP 서버를 저장해 주세요.</InlineError>}
       {field('to', '받는 사람', { required: true, inputMode: 'email', placeholder: 'a@example.com, b@example.com' })}
       <div className="grid gap-4 sm:grid-cols-2">
         {field('cc', '참조', { inputMode: 'email' })}
@@ -90,7 +100,7 @@ export function MailCompose({ connectionId, canSend, seed, onSent, onClose }: {
       {uncertain && <p className="m-0 text-caption text-ink-2">중복 전송을 막기 위해 내용을 잠갔습니다. 전송 상태 확인은 같은 요청을 다시 확인합니다. 보낸편지함도 확인해 주세요. 닫은 뒤 새로 보내면 중복될 수 있습니다.</p>}
       <div className="flex justify-end gap-2">
         <Button variant="outline" type="button" disabled={sending} onClick={onClose}>{uncertain ? '닫기' : '취소'}</Button>
-        <Button type="submit" disabled={sending || !canSend}>{sending ? (uncertain ? '확인 중…' : '보내는 중…') : uncertain ? '전송 상태 확인' : '보내기'}</Button>
+        <Button type="submit" disabled={sending || !sender?.canSend}>{sending ? (uncertain ? '확인 중…' : '보내는 중…') : uncertain ? '전송 상태 확인' : '보내기'}</Button>
       </div>
     </form>
   </Modal>;
