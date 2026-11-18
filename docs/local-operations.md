@@ -64,6 +64,15 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
 
+### 운영 Ghost 정리 — 2026-11-18
+
+- 소유자 결정(아직 실사용 전이라 지워도 됨): 기본 Ghost `메인`을 뺀 Ghost 26명을 Owner API(`ghost.update` 은퇴 → `ghost.delete`)로 모두 삭제했다. 기본 Ghost는 코드가 삭제를 막는다(`the default Ghost cannot be deleted`). 삭제는 묘비(`deletedAt`)를 남기므로 과거 맡긴 일 작성자와 읽기 전용 기억이 유지된다. 프로젝트 9개는 담당이 없어 그대로다.
+- 삭제 전 백업: `~/.local/share/ghost/backups/pre-ghost-purge-1794988819/`의 `ledger.db`·`pi.db`·`memory.db`(SQLite 온라인 백업, `integrity_check` ok). 복원은 이 사본으로 하되 별도 승인이 필요하다.
+- 삭제를 막는 항목을 먼저 정리했다. 대기 중이던 맡긴 일 2건(「mini Gitea 404 저장소 10개…」, 「백업 제외 규칙 수정」)을 취소하고, 대기 승인 요청 19건을 거절하고(나머지 4건은 취소 때 함께 정리), 결과 불명 확인 6건은 '처리되지 않음'으로 닫았다(선택지가 승인·거절뿐이고 실제 처리 여부는 확인하지 않았다). 자동 활동 2개와 일정 2개를 삭제했다.
+- 결과: 활성 Ghost `메인` 하나, 묘비 30개, `/api/state`의 맡긴 일 200건, 대기 결정 0건. health 2.11.1.
+- 2.11.1은 11-17 09:27경 설치됐다(`GET /api/update`의 `lastResult`: `installed`, `2.11.0-7800802` → `2.11.1-beea660`). 아래 2.11.1 절의 `waiting` 기록은 그 시점 이전의 상태다.
+- 이 작업의 한계: 정리 중 `/api/state` 조회와 명령이 느렸고(`/api/state` 15초) 처음 호출이 30초 제한에 걸려 Host가 잠시 응답하지 않았다. 프로세스는 유지되었고 이후 정상 응답했다. 원인은 조사하지 않았다.
+
 ### Mac 읽기 명령의 승인 요청 수정과 2.11.1 — 2026-11-17
 
 - 원인: 2.11.0의 정책 기준(`classifyEffect`)이 Host 점검기가 직접 읽기를 거절한 Mac 명령(비공개 경로, 프로젝트 밖 재귀 검색)을 모두 「되돌릴 수 없는 외부 쓰기」로 분류했다. 그래서 `ls`·`du`·`grep`·`find`가 `host-command-irreversible`·`outside-mac`·`rule-of-two`에 걸려 소유자 전용이 되었고, 이전처럼 메인 Ghost가 먼저 검토하거나 자동 대기(30분)로 진행하지 못했다. 운영에서 Mac 관리 Ghost의 대기 중 승인 42건 중 다수가 이 명령들이었다.
