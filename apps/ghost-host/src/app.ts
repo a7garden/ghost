@@ -31,6 +31,7 @@ import { SourceStore } from "./stores/sources.ts";
 import { hostIsIdle, Updater } from "./update/index.ts";
 import { detectLayout, registerHostBundle } from "./update/storage.ts";
 import { MailService } from "./integrations/mail.ts";
+import { MailWatcher } from "./integrations/mail-watch.ts";
 import { createHostMcpClients, type McpClients } from "./integrations/mcp.ts";
 
 export interface App {
@@ -46,6 +47,7 @@ export interface App {
   memory: MemoryStore;
   memoryDreams: MemoryDreams;
   mail: MailService;
+  mailWatcher: MailWatcher;
   close(): Promise<void>;
 }
 
@@ -80,6 +82,7 @@ export async function openApp(config: Config): Promise<App> {
   let openedDesktop: DesktopPort | null = null;
   let openedSources: SourceConnections | null = null;
   let openedMail: MailService | null = null;
+  let openedMailWatcher: MailWatcher | null = null;
   let openedMcp: McpClients | null = null;
   let openedSourceStore: SourceStore | null = null;
   let openedMemory: MemoryStore | null = null;
@@ -101,6 +104,7 @@ export async function openApp(config: Config): Promise<App> {
     await attempt(async () => { await openedDreams?.close(); openedDreams = null; });
     if (openedCore && !coreStopped) await attempt(() => { openedCore!.stop(); coreStopped = true; });
     await Promise.all([
+      attempt(async () => { await openedMailWatcher?.stop(); openedMailWatcher = null; }),
       attempt(async () => { await openedMail?.close(); }),
       attempt(async () => { await openedMcp?.close(); openedMcp = null; }),
       attempt(async () => { await openedSources?.close(); }),
@@ -167,6 +171,7 @@ export async function openApp(config: Config): Promise<App> {
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
     core.attach(engine);
+    const mailWatcher = (openedMailWatcher = new MailWatcher(core, mail));
     return {
       core,
       engine,
@@ -179,6 +184,7 @@ export async function openApp(config: Config): Promise<App> {
       memory,
       memoryDreams,
       mail,
+      mailWatcher,
       close,
     };
   } catch (error) {
@@ -242,6 +248,7 @@ export async function serve(config: Config) {
     hostWatch?.start();
     app.core.autonomy.start();
     app.memoryDreams.start();
+    void app.mailWatcher.start();
     updater?.start();
     log(`serving ${config.root} on http://${config.host}:${server.port}`);
   } catch (error) {

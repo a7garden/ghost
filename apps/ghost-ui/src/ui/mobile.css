@@ -54,6 +54,8 @@
   .shell { height: 100%; }
   /* The phone's top bar and dock wear the page's canvas, so the screen reads as one sheet; the desktop title bar keeps the window tone. */
   .ghost-titlebar { height: auto; min-height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px; background: var(--ghost-canvas); }
+  /* The 44px buttons grow their touch target 9px outward; the bar's 8px edge padding would let that last 1px widen the page. */
+  .ghost-titlebar { overflow-x: clip; }
   .title-nav__step, .shell-search, .shell-icon-button { width: 44px; height: 44px; }
   .title-nav__step:nth-child(2), .title-nav__crumb:not(:last-child) { display: none; }
   .title-nav__step:first-child { display: inline-grid; }

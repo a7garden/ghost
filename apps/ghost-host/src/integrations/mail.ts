@@ -10,6 +10,8 @@ import { CommandError, invalid, notFound } from "../core/errors.ts";
 import { NoEffect } from "../core/effects.ts";
 
 const MAX_RAW = 25 * 1024 * 1024;
+const INBOX_SEARCH_WINDOW = 4096;
+const INBOX_PREVIEW_LIMIT = 3;
 export class MailTooLarge extends Error {}
 export interface Addr { name: string; address: string }
 export interface MailMailbox {
@@ -21,6 +23,8 @@ export interface MailSummary {
   uid: number; messageId: string | null; from: Addr | null; to: Addr[]; subject: string; date: number;
   seen: boolean; flagged: boolean; answered: boolean; hasAttachments: boolean; size: number;
 }
+export interface MailAccount { connectionId: string; name: string; address: string; canSend: boolean }
+export interface MailInboxCursor { uidValidity: number; highWaterUid: number }
 export interface MailMessage extends MailSummary {
   uidValidity: number;
   cc: Addr[]; replyTo: Addr[]; text: string; html: string | null;
@@ -84,7 +88,7 @@ export class MailService {
   private readonly active = new Set<() => void>();
   private closed = false;
   constructor(private readonly options: Options) {}
-  accounts() {
+  accounts(): MailAccount[] {
     return this.options.connections().filter(connection => connection.config.kind === "mail" && this.options.sources.credentialPresent(connection.id)).map(connection => ({ connectionId: connection.id, name: connection.name, address: connection.config.kind === "mail" ? connection.config.username : "", canSend: connection.config.kind === "mail" && !!connection.config.smtpHost }));
   }
   resolve(account: string): Connection {
@@ -160,6 +164,46 @@ export class MailService {
       const selected = [...new Set(uids)].slice(0, limit), messages: MailSummary[] = [];
       for (const uid of selected) { authorize(); const message = await client.fetchOne(String(uid), { uid: true, envelope: true, flags: true, size: true, internalDate: true, bodyStructure: true }, { uid: true }); if (message) messages.push(summary(message)); }
       return { mailbox, uidValidity: Number(box.uidValidity), messages, nextBefore: uids.length > limit ? selected.at(-1)! : null };
+    });
+  }
+  /** Poll a fixed read-only INBOX snapshot, fetching only the newest matching envelopes. */
+  async inboxWindow(account: string, previous: MailInboxCursor | null) {
+    return this.operation(account, false, async (client, authorize) => {
+      const box = await client.mailboxOpen("INBOX", { readOnly: true });
+      const uidValidity = Number(box.uidValidity), highWaterUid = box.uidNext - 1;
+      if (!Number.isSafeInteger(uidValidity) || uidValidity < 1 || !Number.isSafeInteger(highWaterUid) || highWaterUid < 0) {
+        throw new CommandError("unavailable", "받은편지함의 UID 상태를 확인할 수 없습니다.");
+      }
+      const cursor = { uidValidity, highWaterUid };
+      const newest: Pick<MailSummary, "from" | "subject">[] = [];
+      if (!previous || previous.uidValidity !== uidValidity) return { cursor, count: 0, maxUnreadUid: null, newest };
+      if (previous.highWaterUid >= highWaterUid) return { cursor: previous, count: 0, maxUnreadUid: null, newest };
+
+      const ids: number[] = [];
+      let count = 0;
+      // Keep even a full SEARCH reply below the IMAP line limit.
+      for (let end = highWaterUid; end > previous.highWaterUid;) {
+        const start = Math.max(previous.highWaterUid + 1, end - INBOX_SEARCH_WINDOW + 1);
+        authorize();
+        const found = await client.search({ uid: `${start}:${end}`, seen: false }, { uid: true });
+        if (!found) throw new CommandError("unavailable", "받은편지함의 새 메일을 확인할 수 없습니다.");
+        // ImapFlow returns unique, ascending UIDs.
+        for (let i = found.length - 1; i >= 0; i--) {
+          const uid = found[i]!;
+          if (uid < start || uid > end) continue;
+          count++;
+          if (ids.length < INBOX_PREVIEW_LIMIT) ids.push(uid);
+        }
+        end = start - 1;
+      }
+      for (const uid of ids) {
+        authorize();
+        const message = await client.fetchOne(String(uid), { uid: true, envelope: true }, { uid: true });
+        if (message && message.uid === uid && message.envelope) {
+          newest.push({ from: addr(message.envelope.from?.[0]), subject: message.envelope.subject ?? "" });
+        }
+      }
+      return { cursor, count, maxUnreadUid: ids[0] ?? null, newest };
     });
   }
   private async raw(client: ImapFlow, mailbox: string, uid: number, authorize: () => void, expectedValidity?: number): Promise<{ message: FetchMessageObject; email: Email; uidValidity: number }> {

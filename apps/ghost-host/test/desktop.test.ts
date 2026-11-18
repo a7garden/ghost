@@ -21,7 +21,7 @@ function fakeDesktop() {
   const calls: { runtime: "agent-desktop" | "geist"; argv: string[]; args?: Record<string, unknown>; stdin?: string }[] = [];
   const state = {
     idle: 60, tree: tree(), snapshotId: "sabc", processInstance: "macos-proc-v1:1:2", extraInstance: false, windowVisible: true, windowAccessible: true, protectedScreen: false, screenLabel: "Delete",
-    staleRefs: new Set<string>(),
+    staleRefs: new Set<string>(), geistError: null as null | { code: string; message: string },
     beforeDispatch: null as null | ((runtime: "agent-desktop" | "geist", command: string) => void),
   };
   const retained = new Map<string, { role: string; name: string }>();
@@ -66,6 +66,7 @@ function fakeDesktop() {
           { title: "Document body", description: "", value: null, bounds: { x: 100, y: 50, width: 800, height: 600 } },
         ],
       });
+      if (state.geistError) return { ok: false, data: null, error: { code: state.geistError.code, message: state.geistError.message }, delivered: false };
       return ok({});
     },
     async status() { return { accessibility: true, screenRecording: true, idleSeconds: state.idle }; },
@@ -146,7 +147,7 @@ describe("PC control tools", () => {
     expect(lastScreenshot.content?.some((part) => part.type === "image")).toBe(true);
     // The 400×300 image of an 800×600 window: image pixels are half a window point.
     expect(f.said(await f.ownerCall("desktop_pointer", { screen_id: screenId(), action: "double_click", x: 10, y: 20, modifiers: "cmd" }))).toBe("Pointer double_click delivered");
-    expect(f.calls.filter((c) => c.argv[0] === "click").at(-1)!.args).toMatchObject({ app: "pid:10", headed: true, x: 20, y: 40, click_count: 2, key: "super" });
+    expect(f.calls.filter((c) => c.argv[0] === "click").at(-1)!.args).toMatchObject({ app: "pid:10", background: true, x: 20, y: 40, click_count: 2, key: "super" });
     expect(f.said(await f.call("desktop_pointer", { screen_id: screenId(), action: "click", x: 10, y: 20 }))).toContain("used or expired");
 
     lastScreenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
@@ -155,6 +156,33 @@ describe("PC control tools", () => {
     lastScreenshot = await f.call("desktop_screenshot", { app: "TextEdit" });
     expect((await f.call("desktop_keys", { screen_id: screenId(), key: "cmd+q" })).isError).toBe(true);
     expect(f.calls.filter((c) => c.runtime === "geist" && c.argv[0] !== "get_app_state")).toHaveLength(1);
+  });
+
+  test("physical input is background by default and headed only on request, never falling back", async () => {
+    const f = fixture();
+    const clickCalls = () => f.calls.filter((c) => c.runtime === "geist" && c.argv[0] === "click");
+    const freshScreen = async () => /screen_id (\S+):/.exec(f.said(await f.call("desktop_screenshot", { app: "TextEdit" })))![1]!;
+    expect(f.said(await f.ownerCall("desktop_pointer", { screen_id: await freshScreen(), action: "click", x: 10, y: 20 }))).toBe("Pointer click delivered");
+    expect(clickCalls().at(-1)!.args).toMatchObject({ app: "pid:10", background: true, x: 20, y: 40 });
+    expect(clickCalls().at(-1)!.args).not.toHaveProperty("headed");
+    expect(f.said(await f.ownerCall("desktop_keys", { screen_id: await freshScreen(), key: "Tab" }))).toBe("Key delivered");
+    expect(f.calls.filter((c) => c.argv[0] === "press_key").at(-1)!.args).toMatchObject({ app: "pid:10", background: true, key: "Tab" });
+    expect(f.calls.filter((c) => c.argv[0] === "press_key").at(-1)!.args).not.toHaveProperty("headed");
+
+    expect(f.said(await f.ownerCall("desktop_pointer", { screen_id: await freshScreen(), action: "click", x: 10, y: 20, headed: true }))).toBe("Pointer click delivered");
+    expect(clickCalls().at(-1)!.args).toMatchObject({ app: "pid:10", headed: true, x: 20, y: 40 });
+    expect(clickCalls().at(-1)!.args).not.toHaveProperty("background");
+    expect(f.said(await f.ownerCall("desktop_keys", { screen_id: await freshScreen(), key: "Tab", headed: true }))).toBe("Key delivered");
+    expect(f.calls.filter((c) => c.argv[0] === "press_key").at(-1)!.args).toMatchObject({ app: "pid:10", headed: true, key: "Tab" });
+    expect(f.calls.filter((c) => c.argv[0] === "press_key").at(-1)!.args).not.toHaveProperty("background");
+
+    // A failed background action returns Geist's error unchanged; no headed retry happens.
+    const before = clickCalls().length;
+    f.state.geistError = { code: "SYNTHETIC_FOCUS_FAILED", message: "SkyLight refused the focus record" };
+    const failed = await f.ownerCall("desktop_pointer", { screen_id: await freshScreen(), action: "click", x: 10, y: 20 });
+    expect(f.said(failed)).toContain("SYNTHETIC_FOCUS_FAILED: SkyLight refused the focus record");
+    expect(clickCalls()).toHaveLength(before + 1);
+    expect(clickCalls().at(-1)!.args).not.toHaveProperty("headed");
   });
 
   test("dragging a shared-board item remains external and needs Rule of Two approval", async () => {
