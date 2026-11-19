@@ -177,6 +177,12 @@ describe("guarded Mac host", () => {
         ["/usr/bin/which", ["grep"]],
         ["/bin/cat", ["data/free_talk_intents.json"]],
         ["/bin/ls", ["-d", f.root]],
+        ["/usr/bin/uname", ["-a"]],
+        ["/usr/bin/id", ["-u"]],
+        ["/usr/bin/whoami", []],
+        ["/bin/hostname", []],
+        ["/bin/date", ["-u", "+%Y-%m-%d %H:%M"]],
+        ["/bin/ps", ["-Ao", "pid,etime,pcpu,comm"]],
         ["/usr/bin/git", ["stash", "list"]],
         ["/usr/bin/git", ["-C", f.root, "stash", "list"]],
         ...([
@@ -219,6 +225,10 @@ describe("guarded Mac host", () => {
         ["/usr/bin/grep", ["-D", "read", "x", source]],
         ["/usr/bin/find", [f.root, "-print0"]],
         ["/usr/bin/find", [f.root, "-delete"]],
+        ["/bin/date", ["1120103025"]],
+        ["/usr/bin/uname", ["-S", "name"]],
+        ["/usr/bin/id", ["-P"]],
+        ["/bin/ps", ["-Ao", "pid,command"]],
         ["/usr/bin/find", [f.root, "-exec", "/bin/rm", "{}"]],
       ] as [string, string[]][]) {
         expect(await f.host.inspect({ ...command(f.root), program, args })).toBeNull();

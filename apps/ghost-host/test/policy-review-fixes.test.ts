@@ -15,7 +15,7 @@ import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSyn
 import { join } from "node:path";
 import { createWorkTools } from "../src/tools/work.ts";
 import { HostExecutionEnv, HostMutationQueue } from "../src/sandbox/host-env.ts";
-import type { SandboxEnvFactory } from "../src/integrations/ports.ts";
+import type { HostPort, SandboxEnvFactory } from "../src/integrations/ports.ts";
 
 const opened: { core: Core; ledger: Ledger }[] = [];
 afterEach(async () => { for (const h of opened.splice(0)) { h.core.stop(); await h.core.idle(); h.ledger.close(); } });
@@ -736,4 +736,35 @@ test("a failure preparing the confined Scope view is a known non-effect, never a
   expect((await s.write("never.txt", "x", "setup-failure")).isError).toBe(true);
   expect(existsSync(join(s.scopeDir, "never.txt"))).toBe(false);
   expect(s.ledger.effect(s.ledger.effectByCall(s.conversationId, "setup-failure")!.id).state).toBe("denied");
+});
+
+test("a plain read in a Host Work runs at once through the inspector; a change still waits for the owner", async () => {
+  const s = await scopedHostWork();
+  s.ledger.tx(() => s.ledger.putGhost({ ...s.ledger.ghost(s.ghost.id), tools: [...s.ledger.ghost(s.ghost.id).tools, "bash"] }));
+  mkdirSync(join(s.scopeDir, "docs"));
+  const inspected: { program: string; args: string[]; cwd: string }[] = [];
+  const host = {
+    inspect: async (input: { program: string; args: string[]; cwd: string }, authorize?: () => void) => {
+      authorize?.();
+      inspected.push({ program: input.program, args: input.args, cwd: input.cwd });
+      return { exitCode: 0, output: "notes.txt\n", timedOut: false, truncated: false };
+    },
+  } as unknown as HostPort;
+  const sandbox = { workspacePath: () => s.scopeDir } as unknown as SandboxEnvFactory;
+  const bash = createWorkTools(s.core, sandbox, host).tools!.find((tool) => tool.name === "bash")!;
+  const run = (command: string, callId: string) => bash.execute({ command } as never,
+    { conversationId: "scoped-host-pi", taskId: `task:${callId}`, callId, env: s.env, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
+
+  const listed = await run("cd docs && ls -la | head -5", "read-1");
+  expect(listed.isError).toBeFalsy();
+  expect(JSON.stringify(listed)).toContain("notes.txt");
+  expect(inspected).toEqual([{ program: "ls", args: ["-la"], cwd: join(s.scopeDir, "docs") }]);
+  expect(s.ledger.effectByCall(s.conversationId, "read-1")).toBeNull();
+  expect(s.ledger.pendingDecisions()).toHaveLength(0);
+
+  const changed = await run("touch docs/x", "write-1");
+  expect(changed.isError).toBe(true);
+  expect(inspected).toHaveLength(1);
+  expect(s.ledger.pendingDecisions()).toHaveLength(1);
+  expect(existsSync(join(s.scopeDir, "docs/x"))).toBe(false);
 });

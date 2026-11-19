@@ -215,7 +215,7 @@ export function createToolSet(deps: {
   const drive = createAutonomyTools(deps.core);
   const activities = harden(activityTools(deps.core));
   const interactive = harden(createInteractiveTools(deps.core));
-  const work = harden(createWorkTools(deps.core, deps.sandbox));
+  const work = harden(createWorkTools(deps.core, deps.sandbox, deps.host));
   const review = harden(createReviewTools(deps.core, deps.sandbox));
   const main = harden(createMainTools(deps.core));
   const settlementTool = main.tools?.find(tool => tool.name === "decision_settle");

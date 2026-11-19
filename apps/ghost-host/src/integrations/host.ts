@@ -297,6 +297,7 @@ const inspectionPrograms: Record<string, string> = Object.fromEntries([
   "/usr/bin/sed", "/usr/bin/grep", "/usr/bin/which", "/usr/bin/stat",
   "/usr/bin/file", "/usr/bin/du", "/bin/df", "/usr/bin/find", "/bin/ps",
   "/usr/bin/sw_vers", "/usr/bin/uptime", "/usr/bin/plutil", "/bin/launchctl", "/usr/bin/git",
+  "/usr/bin/uname", "/usr/bin/id", "/usr/bin/whoami", "/bin/date", "/bin/hostname",
 ].map((program) => [basename(program), program]));
 const inspectionProgram = (program: string) =>
   Object.hasOwn(inspectionPrograms, program) ? inspectionPrograms[program]! : program;
@@ -424,11 +425,21 @@ function inspectionShape(program: string, args: string[]): InspectionShape | nul
     }
     case "/bin/ps":
       // No environment or command arguments: they commonly contain credentials.
-      return args.length === 0 || (args.length === 2 && args[0] === "-axo" &&
+      return args.length === 0 || (args.length === 2 && /^-(?:ax|Ax|A)o$/.test(args[0]!) &&
         /^(?:pid|ppid|pcpu|pmem|rss|vsz|stat|comm|etime|time)(?:=)?(?:,(?:pid|ppid|pcpu|pmem|rss|vsz|stat|comm|etime|time)(?:=)?)*$/.test(args[1]!))
         ? { paths } : null;
     case "/usr/bin/sw_vers":
       return args.length === 0 || (args.length === 1 && ["-productName", "-productVersion", "-buildVersion"].includes(args[0]!)) ? { paths } : null;
+    case "/usr/bin/uname":
+      return args.every((arg) => /^-[amnprsv]+$/.test(arg)) ? { paths } : null;
+    case "/usr/bin/id":
+      return args.length === 0 || (args.length === 1 && /^-(?:u|g|un|gn)$/.test(args[0]!)) ? { paths } : null;
+    case "/usr/bin/whoami":
+    case "/bin/hostname":
+      return args.length === 0 ? { paths } : null;
+    case "/bin/date":
+      // `-u` and a `+format` only: a bare operand would set the clock.
+      return args.length <= 2 && args.every((arg) => arg === "-u" || /^\+[A-Za-z0-9%:_ .,/-]{1,64}$/.test(arg)) ? { paths } : null;
     case "/usr/bin/uptime":
       return args.length === 0 ? { paths } : null;
     case "/usr/bin/plutil":

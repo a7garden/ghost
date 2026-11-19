@@ -11,12 +11,14 @@ import type { Core } from "../core/core.ts";
 import { KnownOutcome, NoEffect } from "../core/effects.ts";
 import { invalid } from "../core/errors.ts";
 import { idFor } from "../core/ids.ts";
-import type { SandboxEnvFactory } from "../integrations/ports.ts";
+import type { HostPort, SandboxEnvFactory } from "../integrations/ports.ts";
 import { describeOutcome, describeWork } from "../core/works.ts";
 import { parseShellResult, type ShellResult } from "../core/verify.ts";
 import { askOwnerTool, errorResult, requireAllowed, requireWork, scopeOf, workDecideTool } from "./shared.ts";
 import { HostExecutionEnv } from "../sandbox/host-env.ts";
-import type { ObservedEffect, PolicyReceipt } from "../core/policy-context.ts";
+import { policyRead, type ObservedEffect, type PolicyReceipt } from "../core/policy-context.ts";
+import { isReadOnlyHostCommand } from "../integrations/host.ts";
+import { parseReadShell, runReadShell } from "./read-shell.ts";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -334,7 +336,7 @@ async function inAdmittedScope(core: Core, env: ExecutionEnv | undefined, conver
   return true;
 }
 
-export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extension {
+export function createWorkTools(core: Core, sandbox: SandboxEnvFactory, host: HostPort | null = null): Extension {
   const write = createWriteTool();
   const edit = createEditTool();
 
@@ -412,7 +414,7 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
 
   const bash = defineTool({
     name: "bash",
-    description: "Run one bash command in this Work's selected environment: the confined Mac workspace (default), an isolated container, or explicitly authorized owner PC. Returns exit code and bounded output; a sandbox refusal names the boundary that refused.",
+    description: "Run one bash command in this Work's selected environment: the confined Mac workspace (default), an isolated container, or explicitly authorized owner PC. Returns exit code and bounded output; a sandbox refusal names the boundary that refused. On owner-PC Works, plain read-only lines (ls, cat, grep, find, git status, du, df and the like, joined by && or ; or ending in | head, tail or wc -l, with no globs, redirects or substitutions) run at once without approval; any other command waits for the owner's approval.",
     parameters: Type.Object({
       command: Type.String({ minLength: 1, maxLength: 2048 }),
       timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "Timeout in seconds" })),
@@ -421,6 +423,20 @@ export function createWorkTools(core: Core, sandbox: SandboxEnvFactory): Extensi
     async execute(args, api, context) {
       try {
         const scope = requireWork(requireAllowed(core, api, "bash"));
+        const hostCwd = scope.work.execution?.kind === "host" ? scope.work.execution.cwd : null;
+        const readPlan = hostCwd !== null && host ? parseReadShell(args.command) : null;
+        if (readPlan && hostCwd !== null && host) {
+          const authorize = () => policyRead(core, scope.conversation.id, { tool: "bash", target: { kind: "mac", id: null }, access: "read", reversible: true, external: false, amount: null }, api);
+          const result = await runReadShell(readPlan, hostCwd, async ([program, ...rest], cwd) => {
+            const input = { title: args.command.slice(0, 200), reason: "Read-only inspection in an owner-PC Work", risk: "Reads only", program: program!, args: rest, cwd };
+            return isReadOnlyHostCommand(input) ? host.inspect(input, authorize) : null;
+          });
+          if (result) {
+            const report = `exit ${result.exitCode}${result.output.trim() ? `\n[stdout]\n${result.output}` : ""}`;
+            if (result.exitCode !== 0) throw new Error(report);
+            return text(report);
+          }
+        }
         if (!api.env) throw new Error("no sandbox environment for this conversation");
         const env = api.env;
         const recorded = await core.effects
