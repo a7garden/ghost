@@ -2,30 +2,30 @@ import { rmSync } from 'node:fs';
 import { stopMockProvider } from './mock-provider';
 import { readCleanupState } from './run-state';
 
-/** Global teardown: only this run's metadata can identify its host and unique temporary root. */
+/** Global teardown only touches this run's Hosts and unique temporary root. */
 export default async function globalTeardown(): Promise<void> {
   await stopMockProvider().catch(() => {});
   const cleanup = readCleanupState();
-  if (cleanup?.hostPid) {
+  await Promise.all((cleanup?.hostPids ?? []).map(async pid => {
     try {
-      process.kill(cleanup.hostPid, 'SIGTERM');
+      process.kill(pid, 'SIGTERM');
     } catch {
       // Already gone; nothing to clean.
     }
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
       try {
-        process.kill(cleanup.hostPid, 0);
+        process.kill(pid, 0);
         await new Promise(resolve => setTimeout(resolve, 100));
       } catch {
         break;
       }
     }
     try {
-      process.kill(cleanup.hostPid, 'SIGKILL');
+      process.kill(pid, 'SIGKILL');
     } catch {
       // Exited before the kill; fine.
     }
-  }
+  }));
   if (cleanup?.tempRoot) rmSync(cleanup.tempRoot, { recursive: true, force: true });
 }

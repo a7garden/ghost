@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { openScreen, screenshot, type Screen } from './visual';
-import { mockIPhone, mockRichConversation } from './iphone-fixtures';
+import { mockBrowserLiveStream, mockIPhone, mockRichConversation, releaseBrowserFrame, showTranscriptElement } from './iphone-fixtures';
 import { readRunState } from './run-state';
 
 const screens: Screen[] = [
@@ -21,14 +21,15 @@ test('open and switch Ghost conversations from the mobile dock', async ({ page }
   await tab.tap();
   await expect(tab).toHaveAttribute('aria-current', 'page');
   const list = page.getByRole('region', { name: '대화', exact: true });
-  await expect(list.getByRole('button').first()).toHaveAccessibleName('도우미 메인');
+  const ghosts = list.getByRole('list').getByRole('button');
+  await expect(ghosts.first()).toHaveAccessibleName('도우미 메인');
   await list.getByRole('button', { name: '도우미 메인' }).tap();
   await expect(page.getByText('이번 주에 들어온 요청을 정리해서 우선순위를 알려 줘.')).toBeVisible();
   await back.tap();
 
   const search = list.getByRole('searchbox', { name: 'Ghost 찾기' });
   await search.fill('연구');
-  await expect(list.getByRole('button')).toHaveCount(1);
+  await expect(ghosts).toHaveCount(1);
   await list.getByRole('button', { name: '연구원', exact: true }).tap();
   await expect(page.getByRole('navigation', { name: '위치' }).getByText('연구원', { exact: true })).toBeVisible();
   await expect(page.locator('#message-input')).toBeVisible();
@@ -39,7 +40,7 @@ test('open and switch Ghost conversations from the mobile dock', async ({ page }
 
   await page.setViewportSize({ width: 320, height: 690 });
   const hitWidths = await dock.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().width));
-  expect(hitWidths).toHaveLength(6);
+  expect(hitWidths).toHaveLength(3);
   expect(hitWidths.every(width => width >= 44)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
@@ -137,7 +138,14 @@ for (const theme of ['light', 'dark'] as const) {
       const transcript = page.locator('.ghost-conversation__transcript');
       await transcript.dispatchEvent('touchmove');
       await transcript.evaluate(element => { element.scrollTop = 0; });
-      await expect(page.getByRole('heading', { name: '주간 조사', exact: true })).toBeVisible();
+      const heading = page.getByRole('heading', { name: '주간 조사', exact: true });
+      await expect(heading).toBeVisible();
+      const agenda = (await page.getByRole('button', { name: '예약', exact: true }).boundingBox())!;
+      expect((await heading.boundingBox())!.y).toBeGreaterThanOrEqual(agenda.y + agenda.height);
+      const jump = page.getByRole('button', { name: '최신 메시지', exact: true });
+      await expect(jump).toBeVisible();
+      const transcriptBounds = (await transcript.boundingBox())!;
+      expect((await jump.boundingBox())!.y).toBeGreaterThanOrEqual(transcriptBounds.y + transcriptBounds.height);
       await screenshot(page, `rich-chart-${theme}-iphone.png`);
       const chart = page.locator('.ghost-ui-block').filter({ has: page.getByRole('heading', { name: '처리량', exact: false }) });
       await chart.getByRole('radio', { name: '데이터', exact: true }).click();
@@ -146,7 +154,7 @@ for (const theme of ['light', 'dark'] as const) {
       await chart.getByRole('radio', { name: '차트', exact: true }).click();
       expect(await chart.locator('.ghost-ui-scroll').evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
       for (const [name, title] of [['comparison', '접근 방식 비교'], ['choices', '다음 조사'], ['form', '조사 범위'], ['html', '보고서 미리보기'], ['markdown', '비교 메모']]) {
-        await page.getByRole('heading', { name: title, exact: true }).evaluate(element => element.scrollIntoView({ block: 'start' }));
+        await showTranscriptElement(page.getByRole('heading', { name: title, exact: true }));
         await screenshot(page, `rich-${name}-${theme}-iphone.png`);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -163,7 +171,22 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(sheet.getByText('파일을 읽는 중…')).not.toBeVisible();
         if (name === 'image') await expect(sheet.getByRole('img', { name: file })).toBeVisible();
         if (name === 'markdown') await expect(sheet.getByRole('heading', { name: '조사 기록' })).toBeVisible();
-        if (name === 'pdf') await expect(sheet.locator('iframe')).toBeVisible();
+        if (name === 'pdf') {
+          const viewer = sheet.getByTitle(file, { exact: true });
+          await expect(viewer).toBeVisible();
+          // Chrome may paint an empty PDF viewer before its document pixels arrive.
+          await expect.poll(async () => {
+            const bytes = await viewer.screenshot({ scale: 'css' });
+            return page.evaluate(async encoded => {
+              const png = Uint8Array.from(atob(encoded), byte => byte.charCodeAt(0));
+              const bitmap = await createImageBitmap(new Blob([png], { type: 'image/png' }));
+              const context = new OffscreenCanvas(1, 1).getContext('2d')!;
+              context.drawImage(bitmap, Math.floor(bitmap.width / 2), Math.floor(bitmap.height / 2), 1, 1, 0, 0, 1, 1);
+              bitmap.close();
+              return context.getImageData(0, 0, 1, 1).data.slice(0, 3).every(channel => channel >= 245);
+            }, bytes.toString('base64'));
+          }, { message: 'The white PDF page has painted' }).toBe(true);
+        }
         await screenshot(page, `file-${name}-${theme}-iphone.png`);
         await sheet.getByRole('button', { name: '파일 닫기' }).click();
       }
@@ -224,6 +247,7 @@ for (const theme of ['light', 'dark'] as const) {
           window.visualViewport!.dispatchEvent(new Event('resize'));
         });
         await expect(page.locator('html')).toHaveAttribute('data-keyboard', 'open');
+        await showTranscriptElement(form.getByText('자료 수', { exact: true }));
         await form.getByRole('button', { name: '범위 보내기' }).scrollIntoViewIfNeeded();
         expect((await form.getByRole('button', { name: '범위 보내기' }).boundingBox())!.y + 44).toBeLessThanOrEqual(500);
         const numberBounds = (await form.getByRole('spinbutton', { name: '자료 수' }).boundingBox())!;
@@ -275,33 +299,7 @@ test('live browser preserves the focused touch draft until matching viewport pix
           await route.fulfill({ status: 409, json: { error: { code: 'conflict', message: 'The browser runtime changed.' } } });
         } else await route.fulfill({ json: { ok: true } });
       });
-      // Route.fulfill buffers response bodies. Keep NDJSON open so the test, not reconnect timing,
-      // releases each real JPEG through the production stream parser and image decoder.
-      await page.addInitScript(() => {
-        const originalFetch = window.fetch.bind(window);
-        let streams = 0;
-        window.fetch = (input, init) => {
-          const url = new URL(input instanceof Request ? input.url : String(input), location.href);
-          if (!/^\/api\/browser\/sessions\/[^/]+\/live$/.test(url.pathname)) return originalFetch(input, init);
-          Object.assign(window, { __browserStreamCount: ++streams });
-          const body = new ReadableStream<Uint8Array>({
-            start(controller) {
-              Object.assign(window, { __releaseBrowserFrame(width: number, height: number) {
-                const canvas = document.createElement('canvas');
-                canvas.width = width; canvas.height = height;
-                const context = canvas.getContext('2d')!;
-                context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
-                context.fillStyle = '#246'; context.fillRect(0, 0, width / 2, height);
-                controller.enqueue(new TextEncoder().encode(`${JSON.stringify({
-                  type: 'frame', width, height, data: canvas.toDataURL('image/jpeg').split(',')[1],
-                })}\n`));
-              } });
-              init?.signal?.addEventListener('abort', () => controller.close(), { once: true });
-            },
-          });
-          return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'application/x-ndjson' } }));
-        };
-      });
+      await mockBrowserLiveStream(page, conversationA);
     },
   }, 'light');
   await page.getByRole('button', { name: '브라우저 화면', exact: true }).tap();
@@ -310,15 +308,9 @@ test('live browser preserves the focused touch draft until matching viewport pix
   const field = live.getByRole('textbox', { name: '브라우저에 입력할 내용', exact: true });
   const send = live.getByRole('button', { name: '글자 보내기', exact: true });
   const macWindow = live.getByRole('button', { name: 'Mac 창으로 열기', exact: true });
-  const releaseFrame = async (size: { width: number; height: number }) => {
-    await page.evaluate(({ width, height }) => {
-      const release = (window as typeof window & { __releaseBrowserFrame: (width: number, height: number) => void }).__releaseBrowserFrame;
-      release(width, height);
-    }, size);
-  };
   await expect.poll(() => page.evaluate(() => '__releaseBrowserFrame' in window)).toBe(true);
   const initial = await screen.evaluate(element => ({ width: element.clientWidth, height: element.clientHeight }));
-  await releaseFrame(initial);
+  await releaseBrowserFrame(page, initial);
   await expect(send).toBeEnabled();
   const draft = '계속 입력한 초안';
   await field.fill(draft);
@@ -345,7 +337,7 @@ test('live browser preserves the focused touch draft until matching viewport pix
   await expect(field).toBeFocused();
   expect(inputs.filter(input => input.type === 'text')).toEqual([]);
 
-  await releaseFrame({ width: pending.width!, height: pending.height! });
+  await releaseBrowserFrame(page, { width: pending.width!, height: pending.height! });
   await expect(live.locator('.browser-live__placeholder')).toHaveCount(0);
   await expect(send).toBeEnabled();
   await expect(field).toBeFocused();
@@ -373,7 +365,7 @@ test('live browser preserves the focused touch draft until matching viewport pix
     width: Math.max(320, Math.min(2560, element.clientWidth)),
     height: Math.max(240, Math.min(1600, element.clientHeight)),
   }));
-  await releaseFrame(recovered);
+  await releaseBrowserFrame(page, recovered);
   await expect(live.locator('.browser-live__placeholder')).toHaveCount(0);
   await expect(send).toBeEnabled();
   await expect(field).toBeFocused();

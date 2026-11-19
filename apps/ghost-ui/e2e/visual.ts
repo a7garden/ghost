@@ -1,31 +1,23 @@
 import { expect, type Page } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 import { readRunState, type VisualRunState } from './run-state';
 
-/**
- * Screen-opening helpers shared by the visual spec. Every screen freezes the
- * browser clock (`page.clock.setFixedTime`) at the seeding end so `Date.now()`
- * is constant, and covers the nondeterministic regions: `<time>` elements
- * (relative-time text), host wake lines and the project's actual temporary folder
- * breadcrumb (`title` holds the full path; rendered text abbreviates it).
- * A returned Work renders as its outcome line, whose id stays behind a hover.
- * The verdict stamp's absolute timestamp is a plain span with proportional
- * digits, so it is hidden outright instead of masked.
- */
+/** Freeze the browser clock at seed completion; suppress live values only in captures. */
+const RUN_ID = /[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i;
 
-const MASK_SELECTORS = ['time', '.transcript-event', '.place__crumb[title]'];
-
-/** Test-side style that removes text no mask can cover deterministically. */
+/** Motion and geometry fixed by the visual harness. */
 const STABILITY_CSS = `
-  .verdict span { visibility: hidden !important; }
-  /* Mask geometry must not depend on TMPDIR's random path length. Test-only. */
+  /* Keep the project path chip independent of TMPDIR. */
   .place__crumb[title] { width: 240px !important; max-width: 100%; overflow: hidden; }
-  /* A Ghost's next self-directed look is a live clock time; fix its masked width. Test-only. */
+  /* A Ghost's next self-directed look is a live clock time. */
   .ghost-settings-row time { display: inline-block; width: 160px; vertical-align: bottom; overflow: hidden; }
   /* The auto-color swatch hashes a newly seeded Ghost id; keep its geometry, not that random hue. */
   .look-swatch[data-auto] { background: conic-gradient(#5b7fd4 0 50%, var(--ghost-hover2) 50%) !important; }
   /* Finish the width/translation entrance before text can acquire a fractional compositor layer. */
   .thread-panel, .thread-panel > * { animation: none !important; }
 `;
+
+const CAPTURE_STYLE = fileURLToPath(new URL('./capture.css', import.meta.url));
 
 export type Theme = 'light' | 'dark';
 
@@ -62,8 +54,13 @@ export async function openScreen(page: Page, screen: Screen, theme: Theme): Prom
 }
 
 export async function screenshot(page: Page, name: string): Promise<void> {
-  await expect(page).toHaveScreenshot(name, {
-    mask: MASK_SELECTORS.map(selector => page.locator(selector)),
+  await page.locator('.feed__body').filter({ hasText: RUN_ID }).evaluateAll((rows, runId) => {
+    for (const row of rows) row.setAttribute('data-visual-text', row.textContent!.replace(runId, '작업 ID'));
+  }, RUN_ID);
+  await page.getByRole('region', { name: '모델 설정' }).getByText(/^http:\/\/127\.0\.0\.1:\d+\/v1$/, { exact: true })
+    .evaluateAll(rows => { for (const row of rows) row.setAttribute('data-visual-text', 'http://127.0.0.1:8080/v1'); });
+  await expect.soft(page).toHaveScreenshot(name, {
+    stylePath: CAPTURE_STYLE,
     animations: 'disabled',
     caret: 'hide',
     threshold: 0.2,

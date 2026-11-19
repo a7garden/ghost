@@ -99,6 +99,11 @@
   .ghost-conversation__dock { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
   &[data-keyboard="open"] .ghost-conversation__dock { padding-bottom: 6px; }
   .ghost-conversation { min-width: 0; }
+  /* Keep the agenda in the top control row so it cannot cover transcript text. */
+  .chat-agenda { top: 6px; right: auto; left: 12px; }
+  .ghost-conversation__transcript-frame[data-overlay]::before { background: linear-gradient(var(--ghost-canvas) 50px, transparent); }
+  .ghost-conversation__transcript-frame:has(> .ghost-conversation__jump) { flex-direction: column; }
+  .ghost-conversation__jump { position: relative; inset: auto; translate: none; flex: none; align-self: center; margin-block: 4px; }
   .thread-panel { position: absolute; inset: 0; width: 100%; max-width: 100%; z-index: 3; }
   .compact-settings-list { overflow-y: auto; padding: 8px 18px 24px; }
   .compact-settings-list > button { display: flex; min-height: 60px; width: 100%; align-items: center; gap: 16px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--ghost-line); background: none; color: var(--ghost-ink2); text-align: left; font-size: 16px; cursor: pointer; }

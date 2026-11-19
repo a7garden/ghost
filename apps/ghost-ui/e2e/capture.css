@@ -1,0 +1,6 @@
+/* Rectangular masks on scrolled content can cover the titlebar or dock. */
+:is(time, .verdict span, .transcript-event__text, .transcript-event__detail, .place__crumb[title] > *) {
+  visibility: hidden !important;
+}
+[data-visual-text] { font-size: 0 !important; }
+[data-visual-text]::after { content: attr(data-visual-text); font-size: var(--text-caption); }

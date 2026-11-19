@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { openScreen } from './visual';
 import { mockIPhone } from './iphone-fixtures';
-import { projectContext } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 for (const viewport of [
@@ -12,16 +11,17 @@ for (const viewport of [
     test.use({ viewport: { width: viewport.width, height: viewport.height }, isMobile: viewport.isMobile, hasTouch: viewport.hasTouch });
     const prepare = viewport.isMobile ? mockIPhone : undefined;
 
-    test('project page starts an addressed conversation and hand-off', async ({ page }, info) => {
-      const state = await openScreen(page, { name: 'projects', route: state => `/spaces/${state.spaceId}`, waits: () => ['비행 기록 노트', '회의 정리'], prepare }, 'light');
-      await expect(page.getByText('Ghost 접근', { exact: true })).toHaveCount(0);
+    test('project page opens a scoped conversation and hand-off', async ({ page }, info) => {
+      const state = await openScreen(page, { name: 'projects', route: state => `/scopes/${state.scopeId}`, waits: () => ['비행 기록 노트', '회의 정리'], prepare }, 'light');
       await page.screenshot({ path: info.outputPath(`project-page-${viewport.name}.png`), animations: 'disabled' });
-      await page.getByRole('button', { name: '대화하기', exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`/ghosts/${state.defaultGhostId}\\?space=${state.spaceId}`));
-      await expect(page.getByRole('button', { name: '비행 기록 프로젝트 빼기' })).toBeVisible();
-      await page.goto(`${state.baseUrl}/#/spaces/${state.spaceId}`);
-      await page.getByRole('button', { name: '맡기기', exact: true }).click();
-      const dialog = page.getByRole('dialog');
+      const sections = page.getByRole('navigation', { name: '프로젝트 내용' });
+      await sections.getByRole('button', { name: '대화', exact: true }).click();
+      await expect(page).toHaveURL(`${state.baseUrl}/#/scopes/${state.scopeId}?view=conversation`);
+      const chat = page.getByRole('region', { name: '도우미와 대화', exact: true });
+      await expect(chat.getByLabel('도우미에게 메시지', { exact: true })).toBeVisible();
+      await expect(chat.getByRole('button', { name: '비행 기록 프로젝트 빼기' })).toBeVisible();
+      await page.getByRole('button', { name: '일 맡기기', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: '일 맡기기', exact: true });
       await expect(dialog.getByRole('button', { name: '비행 기록 프로젝트 빼기' })).toBeVisible();
       await expect(dialog.getByRole('radio', { name: '맡기기', exact: true })).toHaveAttribute('aria-checked', 'true');
       await dialog.getByRole('button', { name: '받는 Ghost:', exact: false }).click();
@@ -54,7 +54,7 @@ for (const viewport of [
       });
       await page.getByRole('button', { name: '메시지 보내기', exact: true }).click();
       await expect(input).toHaveValue('');
-      expect(sent).toMatchObject({ type: 'message.send', text: '먼저  뒤에', spaceIds: [state.spaceId] });
+      await expect.poll(() => sent).toMatchObject({ type: 'message.send', text: '먼저  뒤에', scopeId: state.scopeId });
       await expect(chip).toHaveCount(0);
     });
 
@@ -75,7 +75,7 @@ for (const viewport of [
       });
       await page.getByRole('button', { name: '일 맡기기', exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`/work/${state.workDoneId}`));
-      expect(sent).toMatchObject({ type: 'work.create', brief: '계획을 세워줘', spaceIds: [state.spaceId] });
+      expect(sent).toMatchObject({ type: 'work.create', brief: '계획을 세워줘', scopeId: state.scopeId });
       await page.goto(`${state.baseUrl}/#/work`);
       await page.getByRole('button', { name: '일 맡기기', exact: true }).click();
       const brief = page.getByRole('dialog').getByRole('combobox', { name: '할 일', exact: false });
@@ -84,16 +84,16 @@ for (const viewport of [
       await expect(page.getByRole('dialog').getByRole('button', { name: '비행 기록 프로젝트 빼기' })).toBeVisible();
     });
 
-    test('Work briefs show project chips and preserve hidden context on edit', async ({ page }) => {
+    test('Work briefs show structured project references when editing', async ({ page }) => {
       const seed = readRunState();
-      const context = projectContext([{ id: seed.spaceId, name: '비행 기록' }]);
       await openScreen(page, { name: 'project-work', route: () => `/work/${seed.workLiveId}`, waits: () => ['계획을 세워줘'],
         prepare: async page => {
           await prepare?.(page);
           await page.route(`**/api/works/${seed.workLiveId}`, async route => {
             const response = await route.fetch();
             const detail = await response.json();
-            detail.work.brief = context + '계획을 세워줘';
+            detail.work.brief = '계획을 세워줘';
+            detail.work.scopeReferences = [{ id: seed.scopeId, name: '비행 기록' }];
             await route.fulfill({ response, json: detail });
           });
         },
@@ -104,6 +104,7 @@ for (const viewport of [
       const dialog = page.getByRole('dialog', { name: '맡긴 일 수정', exact: true });
       const brief = dialog.getByRole('textbox', { name: '할 일', exact: true });
       await expect(brief).toHaveValue('계획을 세워줘');
+      await expect(dialog.getByRole('link', { name: '비행 기록', exact: true })).toHaveAttribute('href', `#/scopes/${seed.scopeId}`);
       await brief.fill('계획을 수정해줘');
       let sent: Record<string, unknown> | undefined;
       await page.route('**/api/commands', async route => {
@@ -114,7 +115,7 @@ for (const viewport of [
       });
       await dialog.getByRole('button', { name: '저장', exact: true }).click();
       await expect(dialog).not.toBeVisible();
-      expect(sent?.brief).toBe('계획을 수정해줘');
+      expect(sent).toMatchObject({ type: 'work.update', workId: seed.workLiveId, brief: '계획을 수정해줘' });
     });
 
     test('the companion conversation uses the same project chips', async ({ page }) => {
@@ -135,7 +136,7 @@ for (const viewport of [
       });
       await page.locator('#send').click();
       await expect(input).toHaveValue('');
-      expect(sent).toMatchObject({ type: 'message.send', text: '계획을 알려줘', spaceIds: [state.spaceId] });
+      expect(sent).toMatchObject({ type: 'message.send', text: '계획을 알려줘', scopeId: state.scopeId });
     });
   });
 }

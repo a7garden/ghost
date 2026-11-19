@@ -39,7 +39,8 @@ test('Markdown reads safely; source, clipboard and downloaded bytes stay exact',
   const dialog = page.getByRole('dialog', { name });
   await expect(dialog.getByRole('heading', { name: '비행 기록', exact: true })).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
-  await expect(dialog.getByRole('checkbox')).toBeDisabled();
+  await expect(dialog.getByRole('img', { name: '확인됨', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('checkbox')).toHaveCount(0);
   expect(await page.evaluate(() => Reflect.get(window, '__fileExecuted'))).toBeUndefined();
   expect(requests).toEqual([]);
   await dialog.getByRole('link', { name: '1', exact: true }).click();
@@ -128,7 +129,7 @@ test('closing a pending load cannot replace a reopened file or leak object URLs'
   const trigger = page.getByRole('button', { name: /pending.txt/ });
   await trigger.click();
   await firstRequest;
-  await expect(page.getByRole('status')).toHaveText('파일을 읽는 중…');
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('파일을 읽는 중…');
   await page.keyboard.press('Escape');
   await trigger.click();
   await expect(page.getByRole('dialog').locator('.file-sheet__code')).toHaveText('원본 내용');

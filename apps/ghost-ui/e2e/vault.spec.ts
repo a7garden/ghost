@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { VaultItem } from '@ghost/contract';
 import { readRunState } from './run-state';
-import { mockStateDecisions, mockVaultApi, validateVaultWrite, visualSecureDecisionId, visualHandoffDecisionId } from './mocks';
+import { mockStateDecisions, mockVaultApi, validateVaultWrite, visualDecisions, visualSecureDecisionId, visualHandoffDecisionId } from './mocks';
+import { mockBrowserLiveStream, releaseBrowserFrame } from './iphone-fixtures';
 
 /**
  * Functional checks for the vault and secure-form surfaces. The host API they need
@@ -89,14 +90,30 @@ test('the handoff completion button answers the question normally', async ({ pag
 test('a live handoff without a native window keeps input available in Ghost', async ({ page }) => {
   const { baseUrl } = readRunState();
   await mockStateDecisions(page, true);
-  await page.route('**/api/browser/handoffs/*/frame', route => route.fulfill({ json: {
-    image: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=',
-    mediaType: 'image/jpeg', width: 1280, height: 720, url: 'https://example.com/', title: 'Example Domain', windowAvailable: false,
+  const conversationId = visualDecisions().find(decision => decision.id === visualHandoffDecisionId)!.conversationId;
+  const endpoint = `**/api/browser/sessions/${conversationId}`;
+  await mockBrowserLiveStream(page, conversationId, { url: 'https://example.com/', title: 'Example Domain' });
+  await page.route(`${endpoint}/window`, route => route.fulfill({ status: 409, json: {
+    ok: false, error: { code: 'conflict', message: 'Mac 창을 열 수 없습니다.' },
   } }));
+  await page.route(`${endpoint}/input`, async route => {
+    const input = route.request().postDataJSON();
+    await route.fulfill({ json: { ok: true } });
+    if (input.type === 'viewport') await releaseBrowserFrame(page, input);
+  });
   await page.goto(`${baseUrl}/#/inbox?decision=${visualHandoffDecisionId}`);
-  await expect(page.getByRole('img', { name: '브라우저 화면: Example Domain' })).toBeVisible();
-  await expect(page.getByLabel('브라우저에 입력할 글자')).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Mac 앞이라면 Chrome 창으로 열기' })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => '__releaseBrowserFrame' in window)).toBe(true);
+  const live = page.locator('.browser-live');
+  await releaseBrowserFrame(page, { width: 640, height: 480 });
+  await expect(live.getByRole('img', { name: 'https://example.com — 클릭해 조작할 수 있습니다' })).toBeVisible();
+  await expect(live.locator('.browser-live__placeholder')).toHaveCount(0);
+  await live.getByRole('button', { name: 'Mac 창으로 열기', exact: true }).click();
+  await expect(live.getByRole('alert')).toHaveText('Mac 창을 열 수 없습니다.');
+  const field = live.getByRole('textbox', { name: '브라우저에 입력', exact: true });
+  await expect(field).toBeEnabled();
+  const input = page.waitForRequest(request => request.url().endsWith('/input') && request.postDataJSON()?.type === 'text');
+  await field.fill('브라우저 입력 확인');
+  expect((await input).postDataJSON()).toEqual({ type: 'text', text: '브라우저 입력 확인' });
 });
 
 test('a browser approval requires two deliberate presses', async ({ page }) => {
@@ -182,7 +199,7 @@ test('creating a login demands its primary fields and stores the generated passw
   await page.goto(`${baseUrl}/#/settings?tab=vault`);
   await page.getByRole('button', { name: '새 항목' }).click();
   await expect(page.getByRole('heading', { name: '새 금고 항목' })).toBeVisible();
-  await page.getByRole('textbox', { name: '이름', exact: true }).fill('새 로그인');
+  await page.getByRole('textbox', { name: '항목 이름', exact: true }).fill('새 로그인');
   await page.getByLabel('주소', { exact: true }).fill('https://new.example.com');
   await page.getByLabel('사용자 이름').fill('new@example.com');
   await page.getByRole('button', { name: '저장', exact: true }).click();

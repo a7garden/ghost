@@ -53,6 +53,9 @@ function replyFor(messages: ChatMessage[]): MockReply {
   if (lastText.startsWith('Work "')) return { kind: 'text', withThinking: false, text: afterReport(/\(([0-9a-f-]{36})\)/.exec(lastText)?.[1] ?? '') };
   if (lastText.includes('MEDIC-COMPLETE')) return { kind: 'tool', name: 'complete', args: { summary: COMPLETE_SUMMARY, artifacts: [] } };
   if (lastText.includes('MEDIC-QUESTION')) return { kind: 'tool', name: 'ask_owner', args: { question: QUESTION, options: QUESTION_OPTIONS } };
+  if (lastText.includes('좋아. 중요한 항목은 따로 모아서')) {
+    return { kind: 'text', withThinking: true, text: '중요한 항목을 모아 보고서 초안을 준비할게요.' };
+  }
   return { kind: 'text', withThinking: true, text: REPLY };
 }
 

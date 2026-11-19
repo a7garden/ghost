@@ -43,6 +43,10 @@ export function InboxView({ state, navigate, focusDecisionId }: {
   const [allSettled, setAllSettled] = useState(false);
   const [notificationLimit, setNotificationLimit] = useState(NOTIFICATION_PAGE);
   useEffect(() => { if (focusDecisionId) setOpen(focusDecisionId); }, [focusDecisionId]);
+  useEffect(() => {
+    if (!focusDecisionId || open !== focusDecisionId) return;
+    document.getElementById(`queue-card-${focusDecisionId}`)?.scrollIntoView({ block: 'nearest' });
+  }, [focusDecisionId, open]);
   useEffect(() => { if (!ack) return; const timer = setTimeout(() => setAck(''), 2400); return () => clearTimeout(timer); }, [ack]);
 
   const ghostName = (id: string | null) => state.ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';

@@ -39,8 +39,8 @@ test.describe('Connection and activity edits', () => {
 
   test.beforeEach(async ({ page }) => {
     connections.length = activities.length = ghosts.length = 0;
-    await page.goto(`${readRunState().baseUrl}/#/settings?tab=connections`);
-    await expect(page.getByRole('button', { name: '연결 추가', exact: true })).toBeVisible();
+    await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=connections`);
+    await expect(page.getByRole('textbox', { name: '서비스 검색', exact: true })).toBeVisible();
   });
 
   test.afterEach(async ({ page }) => {
@@ -54,12 +54,11 @@ test.describe('Connection and activity edits', () => {
   });
 
   test('keeps every entered account field after a failed save and allows an explicit retry', async ({ page }) => {
-    await page.getByRole('button', { name: '연결 추가', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '연결 추가', exact: true });
-    await dialog.getByRole('radio', { name: '메일', exact: true }).click();
+    await page.getByRole('button', { name: '다른 메일 계정', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '다른 메일 계정 연결', exact: true });
     const fields = [
-      ['이름', 'Retry mail account'], ['IMAP 서버', 'imap.example.test'], ['포트', '1993'],
-      ['사용자 이름', 'owner@example.test'], ['메일함', 'Priority'],
+      ['메일 주소', 'owner@example.test'], ['이름', 'Retry mail account'],
+      ['IMAP 서버', 'imap.example.test'], ['IMAP 포트', '1993'], ['메일함', 'Priority'],
       ['SMTP 서버', 'smtp.example.test'], ['SMTP 포트', '2465'],
     ] as const;
     for (const [label, value] of fields) await dialog.getByRole(label.endsWith('포트') ? 'spinbutton' : 'textbox', { name: label, exact: true }).fill(value);
@@ -75,17 +74,17 @@ test.describe('Connection and activity edits', () => {
         }) });
       } else await route.continue();
     });
-    await dialog.getByRole('button', { name: '연결 추가', exact: true }).click();
+    await dialog.getByRole('button', { name: '연결', exact: true }).click();
     await expect(dialog.getByRole('alert')).toContainText('Synthetic save unavailable');
     for (const [label, value] of fields) await expect(dialog.getByRole(label.endsWith('포트') ? 'spinbutton' : 'textbox', { name: label, exact: true })).toHaveValue(value);
     await expect(dialog.getByLabel('앱 비밀번호', { exact: true })).toHaveValue('synthetic-retry-secret');
     await expect(implicitTLS).toHaveAttribute('aria-checked', 'true');
-    await expect(dialog.getByRole('button', { name: '연결 추가', exact: true })).toBeEnabled();
+    await expect(dialog.getByRole('button', { name: '연결', exact: true })).toBeEnabled();
     expect(attempts).toBe(1);
     expect((await storedState(page)).connections.some(item => item.name === 'Retry mail account')).toBe(false);
 
     await page.unroute('**/api/commands');
-    await dialog.getByRole('button', { name: '연결 추가', exact: true }).click();
+    await dialog.getByRole('button', { name: '연결', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     const saved = (await storedState(page)).connections.find(item => item.name === 'Retry mail account');
     expect(saved).toBeDefined();
@@ -102,8 +101,9 @@ test.describe('Connection and activity edits', () => {
     const connectionId = String(created.connectionId);
     connections.push(connectionId);
     await page.getByRole('button', { name: 'Disconnected account 편집', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '연결 편집', exact: true });
+    const dialog = page.getByRole('dialog', { name: 'Disconnected account 편집', exact: true });
     await dialog.getByRole('textbox', { name: '이름', exact: true }).fill('Changed disconnected account');
+    await dialog.getByRole('button', { name: '고급 설정', exact: true }).click();
     await dialog.getByRole('textbox', { name: 'API 주소', exact: true }).fill('https://github.example.test/api');
     await dialog.getByRole('button', { name: '저장', exact: true }).click();
     await expect(dialog).toHaveCount(0);
@@ -117,7 +117,7 @@ test.describe('Connection and activity edits', () => {
     const ghostId = String((await send(page, { type: 'ghost.create', name: 'Capability Ghost', persona: '',
       tools: ['read', 'browser_open', 'vault_list', 'document_read', 'activity_propose', 'work_create'] })).ghostId);
     ghosts.push(ghostId);
-    await page.goto(`${readRunState().baseUrl}/#/settings?tab=activities`);
+    await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=activities`);
     await page.getByRole('button', { name: '활동 만들기', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '활동 만들기', exact: true });
     await dialog.getByRole('combobox', { name: 'Ghost', exact: true }).click();
@@ -161,7 +161,7 @@ test.describe('Connection and activity edits', () => {
       }), name: 'Archive source activity' };
       const activityId = String((await send(page, { type: 'activity.create', config })).activityId);
       activities.push(activityId);
-      await page.goto(`${readRunState().baseUrl}/#/settings?tab=activities`);
+      await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=activities`);
       await page.getByRole('button', { name: 'Archive source activity 지금 실행', exact: true }).click();
       await expect.poll(async () => (await storedState(page)).activityRuns.some(run =>
         run.activityId === activityId && run.state === 'skipped')).toBe(true);
@@ -190,7 +190,7 @@ test.describe('Connection and activity edits', () => {
   });
 
   test('pages Work history and keeps a failed older-page request visible for retry', async ({ page }) => {
-    const seeded = readRunState();
+    const seeded = readRunState('activities');
     let olderAttempts = 0;
     await page.route('**/api/conversations/*?*', async route => {
       const url = new URL(route.request().url());
@@ -233,7 +233,7 @@ test.describe('Connection and activity edits', () => {
     const activityId = String((await send(page, { type: 'activity.create', config })).activityId);
     activities.push(activityId);
     const before = (await storedState(page)).activities.find(item => item.id === activityId)!;
-    await page.goto(`${readRunState().baseUrl}/#/settings?tab=activities`);
+    await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=activities`);
     await page.getByRole('button', { name: 'Precise activity 편집', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '활동 편집', exact: true });
     await expect(dialog.getByRole('combobox', { name: 'Ghost', exact: true })).toBeDisabled();
@@ -276,7 +276,7 @@ test.describe('Connection and activity edits', () => {
       await send(page, { type: 'activity.pause', activityId, paused: true });
       const before = (await storedState(page)).activities.find(item => item.id === activityId)!;
       expect(JSON.parse(before.cursor!).seen).toHaveProperty('1');
-      await page.goto(`${readRunState().baseUrl}/#/settings?tab=activities`);
+      await page.goto(`${readRunState('activities').baseUrl}/#/settings?tab=activities`);
       await page.getByRole('button', { name: 'Precise activity 편집', exact: true }).click();
       const dialog = page.getByRole('dialog', { name: '활동 편집', exact: true });
       await dialog.getByRole('textbox', { name: '이름', exact: true }).fill('Renamed source');

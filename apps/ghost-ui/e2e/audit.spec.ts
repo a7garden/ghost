@@ -1,8 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openScreen, screenshot, type Theme } from './visual';
-import { mockConversationActivity, mockIPhone, mockMessageNotification, mockRichConversation } from './iphone-fixtures';
+import { mockConversationActivity, mockIPhone, mockMessageNotification, mockRichConversation, showTranscriptElement } from './iphone-fixtures';
 import { mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
-import type { Decision } from '@ghost/contract';
+import type { Decision, MemoryView } from '@ghost/contract';
+import { readRunState } from './run-state';
 
 async function capture(page: Page, name: string, theme: Theme, device: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize()!.width);
@@ -28,6 +29,14 @@ for (const theme of ['light', 'dark'] as const) {
         await openScreen(page, { name: tab, route: () => `/settings?tab=${tab}`, waits: () => [], prepare: async page => {
           await mockIPhone(page);
           if (tab === 'vault') await mockVaultApi(page);
+          if (tab === 'team') {
+            const { defaultGhostId, fixedNow } = readRunState();
+            await page.route(`**/api/memory/${defaultGhostId}`, route => route.fulfill({ json: {
+              files: [{ path: '/me/MEMORY.md', content: '보고는 요약부터 시작합니다.', hash: 'visual-memory', revision: 1,
+                updatedAt: fixedNow - 60_000, author: '도우미', trust: 'untrusted', reads: 0, lastReadAt: null, sources: [] }],
+              runs: [],
+            } satisfies MemoryView }));
+          }
         } }, theme);
         await expect(page.locator('.ghost-settings__content-inner')).not.toBeEmpty();
         await capture(page, `settings-${tab}`, theme, info.project.name);
@@ -84,7 +93,7 @@ for (const theme of ['light', 'dark'] as const) {
       });
     }
     test('project editor and command palette', async ({ page }, info) => {
-      await openScreen(page, { name: 'project', route: state => `/spaces/${state.spaceId}`, waits: () => ['비행 기록 노트'] }, theme);
+      await openScreen(page, { name: 'project', route: state => `/scopes/${state.scopeId}`, waits: () => ['비행 기록 노트', '회의 정리'] }, theme);
       await capture(page, 'project', theme, info.project.name);
       await page.getByRole('button', { name: /비행 기록 노트/ }).click();
       await expect(page.getByRole('dialog').getByRole('textbox', { name: '제목', exact: true })).toHaveValue('비행 기록 노트');
@@ -127,7 +136,7 @@ for (const theme of ['light', 'dark'] as const) {
       const state = await openScreen(page, { name: 'decisions', route: () => '/inbox', waits: () => ['어떤 항목부터 조사할까요?'], prepare: mockStateDecisions }, theme);
       for (const [name, id] of [['question', state.questionDecisionId], ['secure', visualSecureDecisionId], ['handoff', visualHandoffDecisionId]]) {
         await page.goto(`${state.baseUrl}/#/inbox?decision=${id}`);
-        await expect(page.locator('.decision')).toBeVisible();
+        await expect(page.locator('.queue__card .decision')).toBeInViewport({ ratio: 1 });
         await capture(page, `decision-${name}`, theme, info.project.name);
       }
       await page.goto(`${state.baseUrl}/#/work/${state.workLiveId}`);
@@ -154,7 +163,7 @@ for (const theme of ['light', 'dark'] as const) {
       } }, theme);
       for (const kind of ids) {
         await page.goto(`${state.baseUrl}/#/inbox?decision=audit-${kind}`);
-        await expect(page.locator(`[data-decision-kind="${kind}"]`)).toBeVisible();
+        await expect(page.locator(`.queue__card [data-decision-kind="${kind}"]`)).toBeInViewport({ ratio: 1 });
         await capture(page, `decision-${kind}`, theme, info.project.name);
       }
     });
@@ -166,7 +175,7 @@ for (const theme of ['light', 'dark'] as const) {
           await route.fulfill({ status: 503, json: { ok: false, error: { code: 'internal', message: '금고를 읽지 못했습니다.' } } });
         });
       } }, theme);
-      await expect(page.getByRole('status')).toHaveText('금고를 불러오는 중…');
+      await expect(page.locator('.ghost-settings__content-inner').getByRole('status')).toHaveText('금고를 불러오는 중…');
       await capture(page, 'vault-loading', theme, info.project.name);
       release();
       await expect(page.getByRole('alert')).toContainText('금고를 읽지 못했습니다.');
@@ -181,7 +190,7 @@ for (const theme of ['light', 'dark'] as const) {
       await transcript.evaluate(element => { element.scrollTop = 0; });
       await capture(page, 'interactive-chart', theme, info.project.name);
       for (const [name, title] of [['comparison', '접근 방식 비교'], ['choices', '다음 조사'], ['form', '조사 범위'], ['html', '보고서 미리보기']]) {
-        await page.getByRole('heading', { name: title, exact: true }).evaluate(element => element.scrollIntoView({ block: 'start' }));
+        await showTranscriptElement(page.getByRole('heading', { name: title, exact: true }));
         await capture(page, `interactive-${name}`, theme, info.project.name);
       }
     });

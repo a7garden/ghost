@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 /**
- * Deterministic data seeding through the owner API only. Every turn runs against
- * the mock provider, so `message.send` resolves after the whole model turn has
- * settled and the seed is a straight sequence of API calls.
+ * Deterministic data seeding through the owner API only. The Host acknowledges
+ * `message.send` at admission, so wait for each scripted reply before the next turn.
  */
 
 export interface SeedResult {
@@ -15,10 +14,10 @@ export interface SeedResult {
   workDoneId: string;
   workLiveId: string;
   questionDecisionId: string;
-  spaceId: string;
+  scopeId: string;
 }
 
-export interface HostHandle { baseUrl: string; token: string; mockBaseUrl: string; /** Existing absolute folder the seeded project space points at. */ spacePath: string; }
+export interface HostHandle { baseUrl: string; token: string; mockBaseUrl: string; scopePath: string; }
 
 interface GhostRow { id: string; name: string; isDefault: boolean; directConversationId: string; }
 interface WorkRow { id: string; state: string; }
@@ -60,7 +59,7 @@ async function workDetail(host: HostHandle, workId: string): Promise<WorkDetailR
   return await response.json() as WorkDetailResponse;
 }
 
-/** Poll until `probe` returns a value; the host settles each turn before answering `message.send`. */
+/** Poll until the admitted work has produced its observable result. */
 async function waitFor<T>(label: string, probe: () => Promise<T | null>, timeoutMs = 30_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -75,6 +74,19 @@ async function untilQuiescent(host: HostHandle): Promise<void> {
   await waitFor('every conversation to go quiet', async () => {
     const rows = await stateRows(host);
     return rows.conversations.every(conversation => !conversation.busy) ? rows : null;
+  });
+}
+
+async function untilReply(host: HostHandle, conversationId: string, reply: string): Promise<void> {
+  await waitFor(`settled reply "${reply}"`, async () => {
+    const response = await fetch(`${host.baseUrl}/api/conversations/${encodeURIComponent(conversationId)}?limit=50`, {
+      headers: { authorization: `Bearer ${host.token}` },
+    });
+    if (!response.ok) return null;
+    const { messages } = await response.json() as { messages: { role: string; text: string }[] };
+    if (!messages.some(message => message.role === 'assistant' && message.text.includes(reply))) return null;
+    const conversation = (await stateRows(host)).conversations.find(row => row.id === conversationId);
+    return conversation && !conversation.busy ? true : null;
   });
 }
 
@@ -95,7 +107,8 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
     kind: 'openai_compatible',
     name: 'Visual Mock',
     baseUrl: host.mockBaseUrl,
-    models: [{ id: 'mock-1', name: 'Mock 1', contextWindow: 32_000 }],
+    // Leave room for the default Ghost's tool catalog without automatic compaction.
+    models: [{ id: 'mock-1', name: 'Mock 1', contextWindow: 256_000 }],
     apiKey: 'visual-mock-key',
   });
   await command(host, {
@@ -132,7 +145,9 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
   // Direct conversation with the default Ghost: two owner turns, two streamed replies.
   const conversationA = defaultGhost.directConversationId;
   await command(host, { type: 'message.send', conversationId: conversationA, text: '이번 주에 들어온 요청을 정리해서 우선순위를 알려 줘.' });
+  await untilReply(host, conversationA, '이번 주에는 세 가지 요청이 들어왔어요.');
   await command(host, { type: 'message.send', conversationId: conversationA, text: '좋아. 중요한 항목은 따로 모아서 보고서 초안으로 만들어 줘.' });
+  await untilReply(host, conversationA, '중요한 항목을 모아 보고서 초안을 준비할게요.');
 
   // A pending question from 연구원: the mock calls ask_owner, the decision stays open.
   const conversationB = String((await command(host, { type: 'conversation.create', ghostId: researchGhostId, title: '방향 점검' })).conversationId);
@@ -153,6 +168,7 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
   const acceptanceDone = await untilAcceptance(host, workDoneId);
   await command(host, { type: 'decision.resolve', decisionId: acceptanceDone.id, outcome: 'approve' });
   await waitFor('work to finish', async () => (await workDetail(host, workDoneId)).work.state === 'done' ? true : null);
+  await untilReply(host, conversationA, '맡긴 일에서 볼 수 있어요.');
 
   const workLiveId = String((await command(host, {
     type: 'work.create',
@@ -163,20 +179,20 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
   })).workId);
   await untilAcceptance(host, workLiveId);
 
-  // A project space on a stable temp folder, with two saved pages.
-  const spaceId = String((await command(host, {
+  // A project with two saved pages.
+  const scopeId = String((await command(host, {
     type: 'scope.create',
     name: '비행 기록',
-    paths: [host.spacePath],
-    vaultPath: host.spacePath,
+    paths: [host.scopePath],
+    vaultPath: host.scopePath,
   })).scopeId);
   await command(host, {
-    type: 'document.save', scopeId: spaceId, pageId: null, expectedHash: null, profile: 'pdc-markdown/1',
+    type: 'document.save', scopeId, pageId: null, expectedHash: null, profile: 'pdc-markdown/1',
     title: '비행 기록 노트',
     body: '# 비행 기록 노트\n\n시험 비행마다 관측한 값을 한 줄씩 남긴다.\n\n- 이륙 고도와 바람 방향\n- 배터리 잔량과 비행 시간\n- 착륙 지점과 특이 사항\n\n다음 비행 전에 이전 기록을 다시 읽는다.',
   });
   await command(host, {
-    type: 'document.save', scopeId: spaceId, pageId: null, expectedHash: null, profile: 'pdc-markdown/1',
+    type: 'document.save', scopeId, pageId: null, expectedHash: null, profile: 'pdc-markdown/1',
     title: '회의 정리',
     body: '# 회의 정리\n\n- 발사 창구는 오전 바람이 약한 시간대로 잡는다.\n- 기록가는 매 비행 후 30분 안에 초안을 올린다.\n- 연구원은 두 주차 데이터를 비교해 추세를 요약한다.',
   });
@@ -194,6 +210,6 @@ export async function seed(host: HostHandle): Promise<SeedResult> {
     workDoneId,
     workLiveId,
     questionDecisionId: question.id,
-    spaceId,
+    scopeId,
   };
 }

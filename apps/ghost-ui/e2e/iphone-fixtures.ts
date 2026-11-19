@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import type { Device, InteractiveUi, Message, State } from '@ghost/contract';
 import { readRunState } from './run-state';
 
@@ -40,6 +40,51 @@ export async function mockIPhone(page: Page) {
       alerts = body.command.alerts;
       await route.fulfill({ json: { ok: true, result: {} } });
     } else await route.continue();
+  });
+}
+
+export async function mockBrowserLiveStream(page: Page, conversationId: string, initialPage?: { url: string; title: string }) {
+  await page.addInitScript(({ conversationId, initialPage }) => {
+    const originalFetch = window.fetch.bind(window);
+    let streams = 0;
+    window.fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+      if (url.pathname !== `/api/browser/sessions/${encodeURIComponent(conversationId)}/live`) return originalFetch(input, init);
+      Object.assign(window, { __browserStreamCount: ++streams });
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const enqueue = (event: object) => controller.enqueue(new TextEncoder().encode(`${JSON.stringify(event)}\n`));
+          if (initialPage) enqueue({ type: 'page', ...initialPage });
+          Object.assign(window, { __releaseBrowserFrame(width: number, height: number) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const context = canvas.getContext('2d')!;
+            context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
+            context.fillStyle = '#246'; context.fillRect(0, 0, width / 2, height);
+            enqueue({ type: 'frame', width, height, data: canvas.toDataURL('image/jpeg').split(',')[1] });
+          } });
+          init?.signal?.addEventListener('abort', () => controller.close(), { once: true });
+        },
+      });
+      return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'application/x-ndjson' } }));
+    };
+  }, { conversationId, initialPage });
+}
+
+export async function releaseBrowserFrame(page: Page, size: { width: number; height: number }) {
+  await page.evaluate(({ width, height }) => {
+    const release = (window as Window & { __releaseBrowserFrame: (width: number, height: number) => void }).__releaseBrowserFrame;
+    release(width, height);
+  }, size);
+}
+
+export async function showTranscriptElement(locator: Locator) {
+  await locator.evaluate(element => {
+    const content = element.closest('.ghost-conversation__transcript-content')!;
+    const transcript = content.closest('.ghost-conversation__transcript')!;
+    const offset = element.getBoundingClientRect().top - transcript.getBoundingClientRect().top;
+    transcript.scrollTop += offset - Number.parseFloat(getComputedStyle(content).paddingTop) - 4;
   });
 }
 

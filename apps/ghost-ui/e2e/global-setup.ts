@@ -5,14 +5,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startMockProvider } from './mock-provider';
 import { seed } from './seed';
-import { writeCleanupState, writeRunState } from './run-state';
+import { writeCleanupState, writeRunState, type RunHost } from './run-state';
 
-/**
- * Global setup: one isolated Ghost host from source plus the in-process mock
- * provider, then deterministic seed data through the owner API. The run facts
- * land in this run's unique temporary root; workers inherit its path through the
- * environment. Concurrent worktrees/runs never share metadata or host state.
- */
+/** Each run seeds isolated Hosts; workers inherit only the unique run root. */
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 
@@ -38,38 +33,44 @@ async function waitForHealth(baseUrl: string): Promise<void> {
   }
 }
 
+async function startSeededHost(tempRoot: string, name: RunHost, mockPort: number, hostPids: number[]) {
+  const root = join(tempRoot, name);
+  const hostRoot = join(root, 'host');
+  const scopePath = join(root, 'projects');
+  mkdirSync(hostRoot, { recursive: true });
+  mkdirSync(scopePath);
+  const host = spawn('bun', ['../ghost-host/src/main.ts', 'serve'], {
+    cwd: join(dirname(fileURLToPath(import.meta.url)), '..'),
+    env: { ...process.env, GHOST_ROOT: hostRoot, GHOST_PORT: '0', GHOST_UI_DIR: uiDir },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  if (host.pid) hostPids.push(host.pid);
+  writeCleanupState({ hostPids, tempRoot });
+  let hostErrors = '';
+  host.stderr?.on('data', piece => { hostErrors += String(piece); });
+
+  const hostFilePath = join(hostRoot, 'host.json');
+  await waitForFile(hostFilePath, 120_000, () => `host stderr: ${hostErrors}`);
+  const { port, token } = JSON.parse(readFileSync(hostFilePath, 'utf8')) as { port: number; token: string };
+  const baseUrl = `http://127.0.0.1:${port}`;
+  await waitForHealth(baseUrl);
+
+  const seeded = await seed({ baseUrl, token, mockBaseUrl: `http://127.0.0.1:${mockPort}/v1`, scopePath });
+  writeRunState(name, { ...seeded, baseUrl, mockPort, fixedNow: Date.now() + 60_000 });
+}
+
 export default async function globalSetup(): Promise<void> {
   if (!existsSync(join(uiDir, 'index.html'))) {
     throw new Error(`the UI is not built; run \`bun run build\` first (missing ${uiDir})`);
   }
   const tempRoot = mkdtempSync(join(tmpdir(), 'ghost-visual-regression-'));
   process.env.GHOST_VISUAL_RUN_ROOT = tempRoot;
-  const hostRoot = join(tempRoot, 'host');
-  mkdirSync(hostRoot);
-  mkdirSync(join(tempRoot, 'projects'));
-
+  const hostPids: number[] = [];
+  writeCleanupState({ hostPids, tempRoot });
   const mock = await startMockProvider();
-  const host = spawn('bun', ['../ghost-host/src/main.ts', 'serve'], {
-    cwd: join(dirname(fileURLToPath(import.meta.url)), '..'),
-    env: { ...process.env, GHOST_ROOT: hostRoot, GHOST_PORT: '0', GHOST_UI_DIR: uiDir },
-    stdio: ['ignore', 'ignore', 'pipe'],
-  });
-  writeCleanupState({ hostPid: host.pid, tempRoot });
-  let hostErrors = '';
-  host.stderr?.on('data', piece => { hostErrors += String(piece); });
-
-  const hostFilePath = join(hostRoot, 'host.json');
-  try {
-    await waitForFile(hostFilePath, 120_000, () => `host stderr: ${hostErrors}`);
-  } catch (error) {
-    host.kill('SIGKILL');
-    void mock.stop().catch(() => {});
-    throw error;
-  }
-  const hostFile = JSON.parse(readFileSync(hostFilePath, 'utf8')) as { port: number; token: string; pid: number };
-  const baseUrl = `http://127.0.0.1:${hostFile.port}`;
-  await waitForHealth(baseUrl);
-
-  const seeded = await seed({ baseUrl, token: hostFile.token, mockBaseUrl: `http://127.0.0.1:${mock.port}/v1`, spacePath: join(tempRoot, 'projects') });
-  writeRunState({ ...seeded, baseUrl, mockPort: mock.port, fixedNow: Date.now() + 60_000 });
+  // Activity edits install policy rules, which invalidate pending approvals on the primary Host.
+  await Promise.all([
+    startSeededHost(tempRoot, 'primary', mock.port, hostPids),
+    startSeededHost(tempRoot, 'activities', mock.port, hostPids),
+  ]);
 }

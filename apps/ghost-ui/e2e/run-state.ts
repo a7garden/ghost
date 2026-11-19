@@ -16,11 +16,13 @@ function runRoot(): string {
   return root;
 }
 
-/** Early partial state (process handle, temp root) so teardown can clean up a failed setup. */
-export interface CleanupState { hostPid?: number; tempRoot?: string; }
+export type RunHost = 'primary' | 'activities';
 
-export function writeRunState(state: VisualRunState): void {
-  const statePath = join(runRoot(), 'state.json');
+/** Early partial state (process handle, temp root) so teardown can clean up a failed setup. */
+export interface CleanupState { hostPids: number[]; tempRoot: string; }
+
+export function writeRunState(host: RunHost, state: VisualRunState): void {
+  const statePath = join(runRoot(), `${host}.json`);
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
 }
@@ -31,8 +33,8 @@ export function writeCleanupState(state: CleanupState): void {
   writeFileSync(cleanupPath, JSON.stringify(state, null, 2));
 }
 
-export function readRunState(): VisualRunState {
-  return JSON.parse(readFileSync(join(runRoot(), 'state.json'), 'utf8')) as VisualRunState;
+export function readRunState(host: RunHost = 'primary'): VisualRunState {
+  return JSON.parse(readFileSync(join(runRoot(), `${host}.json`), 'utf8')) as VisualRunState;
 }
 
 export function readCleanupState(): CleanupState | null {
