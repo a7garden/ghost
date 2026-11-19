@@ -65,6 +65,14 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
 
+### 읽기 명령 승인 없이 실행, 2.12.3 운영 반영 — 2026-11-20
+
+- 문제(소유자: "ls, grep 하나하나 승인 물어봐서 일이 안 된다"): 최근 5일 승인 요청 102건 대부분이 `ls`·`grep`·`du`·`df`·`ps`·`find`·`git log` 같은 읽기였다. Mac 실행 Work의 `bash`가 명령을 전부 되돌릴 수 없는 쓰기로 분류해서였다. 설계와 한계는 [구조](architecture.md)의 「Read-only lines in owner-PC Works」.
+- 바꾼 것(`8fb4043`): 읽기 전용이 확실한 줄(`&&`·`;`로 이은 단순 명령, 앞의 `cd`, `echo`, 끝의 `| head|tail|wc -l`)은 기존 읽기 점검기로 승인 없이 실행한다. 점검기에 `uname`·`id`·`whoami`·`hostname`·`date`·`ps -Ao`를 더했다. 별표·`$`·리디렉션·`||`·`~` 등은 승인 경로 그대로.
+- 검사: Host 1417 통과·46 생략, 타입 통과. 설치 뒤 실제 Work(Mac 실행)에서 `ls -la … | head -5`, `git -C … status --short | wc -l`, `cd … && git log --oneline -3 && uname -a`가 모두 결정 카드 없이 exit 0으로 실행됐다. 시험 Work는 취소했다.
+- 배포: [v2.12.3](https://github.com/a7garden/ghost/releases/tag/v2.12.3). 설치 때 `waiting` 상태의 일 2건(승인 대기, 소유자 응답 대기)이 있었고 실행 중인 일은 없었다. 백업 `backups/pre-2.12.3-8fb4043-1795130809406/`, `current` → `releases/2.12.3-8fb4043`. 보존: Ghost 1·프로젝트 13·runtime ready.
+- 남은 것: 직접 대화에서 쓰는 `host_command_propose`는 점검기가 거부하는 모양(`git cat-file`·`rev-parse --git-common-dir`·`git log -n N`·`/System/Volumes/Data` 등)이 아직 승인으로 넘어간다. 소유자 승인 대기 12건은 그대로 두었다.
+
 ### 페르소나 필드를 「책임과 원칙」으로 재정의, 2.12.2 운영 반영 — 2026-11-19
 
 - 바꾼 것(`24238ca`): 필드와 저장은 그대로 두고 뜻과 안내문을 바꿨다(결정 근거와 기각한 안은 [패러다임](ghost-paradigm.md)의 「`persona` 필드의 뜻」). `ghost_create`·`ghost_update`·메인의 팀 키우기 지침·환경 적응 문구가 더는 역할 소개용 페르소나를 쓰라고 하지 않고, Ghost는 책임·권한·소유자의 질문 중 하나가 있을 때만 만들며 역할이 일하는 방식은 스킬에 둔다. 설정 화면은 「책임과 원칙」과 첫 줄 한 줄 소개 안내를 보인다. `ghost-guide` 스킬·용어집·구조 문서를 맞췄다. 캡처의 Host 버전 글자를 가려 릴리스마다 기준 이미지가 바뀌지 않게 했다.
