@@ -65,6 +65,13 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
 
+### e2e 스위트 복구와 2.12.1 운영 반영 — 2026-11-19
+
+- 원인과 분류: 전체 e2e는 시작도 못 했다. `project-mentions.spec.ts`가 11-12에 삭제된 `projectContext`를 불러왔고(숨은 brief 맥락 방식은 구조화된 `scopeReferences`로 대체됨), 시각 기준은 2026-11-10 이후 갱신되지 않았다. 실패를 낡은 시험, 의도된 UI 변화, 비결정성, 제품 버그로 나눴다. 제품 버그는 둘이다: 확인 요청 딥링크가 화면 밖에서 열리던 것(`Inbox.tsx`가 카드를 스크롤해 보이게 함), iPhone 대화에서 일정 버튼과 「최신 메시지」 버튼이 본문을 가리던 것(`mobile.css`). 폐기한 방식을 되살리지 않고 현재 동작을 검사하도록 시험을 고쳤다.
+- 검사: 기준 이미지 254개를 실제·기대·차이 이미지를 보고 다시 만들었고(임계값 0.2 유지), 전체 스위트를 설정 없이 연속 2회 돌려 두 번 모두 208 통과·0 실패·2 건너뜀(Tauri 전용 시험)이었다. 메일 16·목표 4는 그대로 통과. UI 단위 316, 타입 통과. 릴리스 검사(Host·UI·셸) 통과.
+- 배포: [v2.12.1](https://github.com/a7garden/ghost/releases/tag/v2.12.1), 깨끗한 임시 worktree. 운영 PID 67175, 진행 중인 일 0·바쁜 대화 0 확인 후 Owner API로 설치. 새 PID 56895, health 2.12.1, `current` → `releases/2.12.1-4f953c8`, 백업 `backups/pre-2.12.1-4f953c8-1795093436668/`. Ghost 1(`메인`)·맡긴 일 200·프로젝트 9·연결 2 보존, runtime ready, 제공 UI 묶음에 새 코드 확인. Mac 셸 0.2.4와 iPhone 빌드 11은 바뀌지 않았다(화면은 Host가 제공).
+- 한계: 시각 기준은 렌더링 미세 차이로 바이트까지 같지는 않다(비교기 임계값 안). 설치된 Mac 앱 창과 실물 iPhone에서 두 화면 수정을 직접 확인하지는 못했다.
+
 ### 새 메일 알림·Geist 1.0.0·iPhone 타이틀바와 2.12.0 운영 반영 — 2026-11-18
 
 - 바꾼 것(`21983f8`): (1) `MailWatcher`가 메일 계정마다 5분 간격으로 받은편지함의 새 안 읽은 메일을 읽기 전용으로 확인해(UID 상한 이후만, 봉투 3통까지) 기본 Ghost의 대화에 알림을 한 번만 낸다. 첫 관찰과 UIDVALIDITY 변경은 알림 없이 기준만 잡고, 커서는 알림과 같은 원장 트랜잭션에 `settings`로 저장한다. 모델을 깨우지 않는다. (2) Geist 고정 커밋을 1.0.0(`cfeabcc`)으로 올리고 `desktop_pointer`·`desktop_keys`는 `background: true`가 기본, `headed: true`는 호출이 요청할 때만이며 실패해도 자동 대체하지 않는다. (3) 2.11.0에서 e2e를 실패시킨 iPhone 가로 1px 넘침의 원인은 타이틀바 버튼의 터치 영역 확장(`::after`, 바깥 9px)이 8px 가장자리를 1px 넘는 것이었고 `.ghost-titlebar { overflow-x: clip }`으로 닫았다.
