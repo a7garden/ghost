@@ -178,8 +178,8 @@ export function createMainTools(core: Core): Extension {
   const ghostCreate = defineTool({
     name: "ghost_create",
     description:
-      "Create a new Ghost when a recurring kind of work deserves its own identity, persona, model or tools, instead of stretching an existing one. " +
-      "Write its persona as a role brief (what it owns, how it works, how it reports). Tools default to every tool except Mac host tools. Main Ghost only; the owner is told about every new Ghost.",
+      "Create a new Ghost only when at least one is true: it is accountable for the outcome of a lasting subject (a business, this Mac, an asset), it needs a permission other Ghosts must not hold, or the owner will ask it by name how things are going. Otherwise do the work as a Work with a playbook (a skill) instead of a new Ghost. " +
+      "Write `persona` as standing instructions, not a character: line one is a one-line introduction shown in the team list and search, then what it is accountable for, its boundaries and how it reports. How a role works (planner, reviewer) belongs in a skill. Tools default to every tool except Mac host tools. Main Ghost only; the owner is told about every new Ghost.",
     parameters: Type.Object({
       name: Type.String({ minLength: 1, maxLength: 128 }),
       persona: Type.String({ minLength: 1, maxLength: 8192 }),
@@ -225,7 +225,7 @@ export function createMainTools(core: Core): Extension {
   const ghostUpdate = defineTool({
     name: "ghost_update",
     description:
-      "Change another Ghost's name, persona, notes about this environment, model, fallback models, skills, look, state, tool allow-list (host tools included) or direct PC execution, and re-apply its conversations. " +
+      "Change another Ghost's name, persona (its standing instructions: accountability, boundaries, reporting; line one is its introduction in the team list), notes about this environment, model, fallback models, skills, look, state, tool allow-list (host tools included) or direct PC execution, and re-apply its conversations. " +
       "Correct its notes when its results show it keeps working the wrong way here. Main Ghost only; the main designation and credentials stay with the owner. Grant PC execution or host tools only when a concrete task needs them; the owner is told about every such grant.",
     parameters: Type.Object({
       ghost_id: Type.String({ minLength: 1, description: "The Ghost to update" }),

@@ -9,7 +9,7 @@ export const uiTerms = {
   activities: '자동 활동',
   connections: '연결 계정',
   conversationHistory: '대화 기록',
-  roleInstructions: '역할 지시',
+  standingInstructions: '책임과 원칙',
   ghostSettings: 'Ghost 설정',
   settings: '설정',
 } as const;

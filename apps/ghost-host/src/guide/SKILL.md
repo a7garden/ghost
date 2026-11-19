@@ -24,6 +24,10 @@ Consider a separate Ghost when it gives the owner a useful persistent identity o
 
 For a one-off specialty, consider a Work with a role document or a read-only subagent. Roles, permissions and model choices do not by themselves require another persistent Ghost. The owner can still choose role-based Ghosts when that better suits their work.
 
+## What a Ghost's persona field holds
+
+The persona field is the Ghost's standing instructions, not a character. Line one is a one-line introduction: the team list, search and delegation picks show only that line. After it, write what the Ghost is accountable for, its boundaries and how it reports. Keep how a role works (planner, reviewer, writer) in a skill so it can be applied to any Work, and keep what only this Mac needs in environment notes. Rules that name other Ghosts go stale when the team changes; prefer rules that stay true without them.
+
 ## Scopes
 
 A scope can represent a product, a novel, a channel, a household or another area the owner chooses. Its receiving Ghost, available paths and optional document vault are configuration, not a prescribed organizational chart.

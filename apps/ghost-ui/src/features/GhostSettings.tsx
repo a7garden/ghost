@@ -188,7 +188,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
     {error && <div className="ghost-sheet__feedback" role="status"><InlineError>{error}</InlineError></div>}
 
     <Panel title="모델"><ModelRoute ghost={ghost} save={save}/></Panel>
-    <Panel title={uiTerms.roleInstructions}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
+    <Panel title={uiTerms.standingInstructions}><PersonaNote key={ghost.persona} persona={ghost.persona} onSave={persona => update({ persona })}/></Panel>
     <Panel title="환경 적응">
       <AdaptationNote key={adaptation?.notes ?? ''} adaptation={adaptation} onSave={notes => save({ type: 'ghost.adapt', ghostId: ghost.id, notes })}/>
     </Panel>
@@ -351,7 +351,7 @@ function StateSwitch({ value, disabled, onChange }: { value: GhostState; disable
 
 
 /**
- * Role instructions read as text first; 「역할 편집」 opens the note for editing, and saving or cancelling closes it.
+ * Standing instructions read as text first; 「편집」 opens the note for editing, and saving or cancelling closes it.
  * 2026.11.11 : 늘 열린 입력칸이라 설정을 훑다가 실수로 고치기 쉬웠다. 읽기가 기본이고 편집은 고르는 일로 바꿨다.
  * 이 글은 Host 가 정한 기본 지시 앞에 붙는 Ghost 의 몫이다 — 기본 지시를 갈아 끼우지 않는다.
  */
@@ -370,12 +370,12 @@ function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: str
   if (!editing) return <div className="persona-note" data-reading>
     <p className="persona-note__text">{persona}</p>
     <div className="persona-note__actions">
-      <span className="persona-note__hint">기본 지시 앞에 이 Ghost만의 역할로 붙습니다.</span>
-      <button type="button" className="persona-note__edit" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>역할 편집</button>
+      <span className="persona-note__hint">첫 줄은 팀 목록의 한 줄 소개입니다. 기본 지시 앞에 붙습니다.</span>
+      <button type="button" className="persona-note__edit" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>편집</button>
     </div>
   </div>;
   return <div className="persona-note" data-changed={changed || undefined}>
-    <textarea ref={area} aria-label={uiTerms.roleInstructions} value={draft} maxLength={8192} rows={3} onChange={event => setDraft(event.target.value)}
+    <textarea ref={area} aria-label={uiTerms.standingInstructions} value={draft} maxLength={8192} rows={3} onChange={event => setDraft(event.target.value)}
       onKeyDown={event => {
         if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); void commit(); }
         if (event.key === 'Escape') { event.preventDefault(); cancel(); }
@@ -480,8 +480,8 @@ function GhostCreator({ onCancel, onCreated }: { onCancel(): void; onCreated(id:
         <input className="ghost-sheet__name" aria-label="이름" placeholder="이름" value={name} maxLength={128} autoFocus required disabled={saving} onChange={event => setName(event.target.value)}/>
       </div>
     </header>
-    <Panel title={uiTerms.roleInstructions}>
-      <div className="persona-note"><textarea aria-label={uiTerms.roleInstructions} placeholder="어떻게 말하고 일할지" value={persona} rows={4} maxLength={8192} required disabled={saving} onChange={event => setPersona(event.target.value)}/></div>
+    <Panel title={uiTerms.standingInstructions}>
+      <div className="persona-note"><textarea aria-label={uiTerms.standingInstructions} placeholder="첫 줄: 한 줄 소개 (팀 목록에 보입니다). 이어서 맡은 일, 지킬 원칙, 보고 방식" value={persona} rows={4} maxLength={8192} required disabled={saving} onChange={event => setPersona(event.target.value)}/></div>
     </Panel>
     {error && <InlineError>{error}</InlineError>}
     <div className="ghost-sheet__footer">

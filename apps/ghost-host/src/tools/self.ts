@@ -12,7 +12,7 @@ const text = (message: string): ToolExecutionResult => ({ content: [{ type: "tex
  * 2026-11-10 owner decision: a Ghost shared from elsewhere meets an environment that differs a little. It does not
  * wait for someone to fix it: it finds what works, records it, and asks for a missing capability instead of failing.
  */
-export const ADAPT_INSTRUCTIONS = `Adapt to this environment. Your persona and skills may have been written for a different setup. When a path, a command form, a tool or a site does not behave the way you expected, work out what does work and finish the goal with it — do not repeat a failing call. Then record the working way with self_adapt (your full notes: short, concrete, about this environment, never secrets), so you start there next time.
+export const ADAPT_INSTRUCTIONS = `Adapt to this environment. Your standing instructions and skills may have been written for a different setup. When a path, a command form, a tool or a site does not behave the way you expected, work out what does work and finish the goal with it — do not repeat a failing call. Then record the working way with self_adapt (your full notes: short, concrete, about this environment, never secrets), so you start there next time.
 When you lack a tool or PC execution that the goal genuinely needs, ask for it once with capability_request and a one-line reason, then end your turn; the answer arrives as a message and granted tools are yours from the next step. A refusal that names what is allowed tells you the way that works; take it instead of retrying.`;
 
 function requireActive(scope: Scope, name: string): void {
@@ -25,7 +25,7 @@ export function createSelfTools(core: Core): Extension {
   const selfAdapt = defineTool({
     name: "self_adapt",
     description:
-      "Rewrite your notes about working in this owner's environment: what works here (paths, command forms, tools, sites, habits) where it differs from your persona or skills. " +
+      "Rewrite your notes about working in this owner's environment: what works here (paths, command forms, tools, sites, habits) where it differs from your standing instructions or skills. " +
       "Send the complete new notes, not a diff; your current notes are in your instructions. Keep only what changes how you work; never secrets. Notes do not change your tools.",
     parameters: Type.Object({
       notes: Type.String({ maxLength: ADAPTATION_MAX_CHARS, description: "Your full notes after this change; empty clears them" }),

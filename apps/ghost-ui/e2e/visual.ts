@@ -59,6 +59,8 @@ export async function screenshot(page: Page, name: string): Promise<void> {
   }, RUN_ID);
   await page.getByRole('region', { name: '모델 설정' }).getByText(/^http:\/\/127\.0\.0\.1:\d+\/v1$/, { exact: true })
     .evaluateAll(rows => { for (const row of rows) row.setAttribute('data-visual-text', 'http://127.0.0.1:8080/v1'); });
+  // The Host version changes with every release; a baseline must not.
+  await page.getByText(/^버전 \d+\.\d+\.\d+/).evaluateAll(rows => { for (const row of rows) row.setAttribute('data-visual-text', '버전 0.0.0'); });
   await expect.soft(page).toHaveScreenshot(name, {
     stylePath: CAPTURE_STYLE,
     animations: 'disabled',

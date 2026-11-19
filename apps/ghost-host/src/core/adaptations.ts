@@ -60,6 +60,6 @@ export class Adaptations {
   instructions(ghostId: string): string {
     const notes = this.get(ghostId)?.notes;
     if (!notes) return "";
-    return `## What you learned about this environment\nYour own notes from earlier work here (rewrite them with self_adapt). Where they differ from habits in your persona or skills, they win.\n\n${notes}`;
+    return `## What you learned about this environment\nYour own notes from earlier work here (rewrite them with self_adapt). Where they differ from habits in your standing instructions or skills, they win.\n\n${notes}`;
   }
 }
