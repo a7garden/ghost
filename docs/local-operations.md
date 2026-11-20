@@ -39,7 +39,7 @@ Obscura를 켤 때는 운영 설정의 기존 `browser` 항목에
 운영 전에는 설치 사본의 절대 경로를 `GHOST_TEST_OBSCURA`와
 `GHOST_TEST_AGENT_BROWSER`에 넣어 `bun test apps/ghost-host/test/browser.test.ts`를 실행한다.
 
-PC 조작은 릴리스의 `Ghost Control.app`·`agent-desktop` 1.2.0·Geist 1.0.0을 자동 감지한다. 끄려면 `config.json`에 `"desktop": null`을 넣는다. 개발 사본은 `"desktop": {"control": "/절대경로/Ghost Control.app", "agentDesktop": "/절대경로/agent-desktop", "geist": "/절대경로/geist"}`로 지정한다. `stage-desktop.sh`는 Geist 저장소의 고정 커밋 `cfeabcc`만 빌드하며 미커밋 편집은 포함하지 않는다(`GEIST_REPO`로 저장소 위치 지정).
+PC 조작은 릴리스의 `Ghost Control.app`·`agent-desktop` 1.2.0·Geist 1.4.1을 자동 감지한다. 끄려면 `config.json`에 `"desktop": null`을 넣는다. 개발 사본은 `"desktop": {"control": "/절대경로/Ghost Control.app", "agentDesktop": "/절대경로/agent-desktop", "geist": "/절대경로/geist"}`로 지정한다. `stage-desktop.sh`는 Geist 저장소의 고정 커밋 `baffff2`만 빌드하며 미커밋 편집은 포함하지 않는다(`GEIST_REPO`로 저장소 위치 지정).
 
 처음에는 설치된 `Ghost Control.app/Contents/MacOS/ghost-control permissions --request`를 실행하고 시스템 설정에서 **Ghost Control**의 손쉬운 사용과 화면 기록을 승인한다. 앱은 권한 확인 전에 LaunchServices에 등록된다. 등록이 없으면 macOS가 승인을 저장하고도 설정 목록에서 숨기는 `kLSApplicationNotFoundErr`가 발생한다. 같은 번들 ID·Developer ID로 다시 빌드한 사본과 별도 launchd 작업에서 두 권한이 유지되는 것을 확인했다. 테스트용 ad-hoc 빌드는 별도 번들 ID를 써서 운영 권한을 덮어쓰지 않는다.
 

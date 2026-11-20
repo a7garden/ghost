@@ -17,8 +17,8 @@ agent_desktop=1.2.0
 agent_desktop_sha=219813428bb1ad8decae172faed05c5964a2415170df402e2786ccfa6452ba82
 agent_desktop_license_sha=cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
 geist_repo=${GEIST_REPO:-$HOME/Workspace/Projects/geist}
-geist_commit=cfeabcce7c92f6acfbe5082981668dc0679c7406
-geist_version=1.0.0
+geist_commit=baffff23696b55bf82ad1c6b527e7659a182a4b1
+geist_version=1.4.1
 scratch=$(mktemp -d "$release/.desktop.XXXXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
 cd "$scratch"

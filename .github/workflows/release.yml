@@ -69,8 +69,8 @@ jobs:
             echo "::error::GEIST_MIRROR_PAT 시크릿이 없거나 a7garden/geist 미러에 접근할 수 없습니다. docs/release-workflow-design.md의 '소유자가 할 일'을 참고하세요."
             exit 1
           }
-          git -C geist cat-file -e 'cfeabcce7c92f6acfbe5082981668dc0679c7406^{commit}' || {
-            echo "::error::geist 미러에 pinned commit cfeabcc가 없습니다. 미러를 갱신하세요."
+          git -C geist cat-file -e 'baffff23696b55bf82ad1c6b527e7659a182a4b1^{commit}' || {
+            echo "::error::geist 미러에 pinned commit baffff2가 없습니다. 미러를 갱신하세요."
             exit 1
           }
 
