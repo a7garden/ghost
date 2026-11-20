@@ -65,6 +65,13 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
 
+### 코딩은 omp로: `omp-coding` 스킬 — 2026-11-21
+
+- 배경: 소유자가 본 글(https://x.com/0ooooo0/status/2123401633711423630)의 구도, 곧 비서 에이전트와 코딩 에이전트를 나누는 방식을 Ghost에 적용한다. Ghost(비서)는 범위 정하기·diff 확인·검사·통합·보고를 맡고, 저장소 코드는 소유자가 쓰는 도구인 omp가 쓴다. 사람이 코딩할 때와 같은 `AGENTS.md`·스킬·검사 기준이 그대로 적용되기 때문이다.
+- 구성: 스킬 원본 `apps/ghost-host/skills/omp-coding/SKILL.md`, `~/.agents/skills/omp-coding`에 심볼릭 링크(`agent-orchestra`와 같은 방식, 릴리스 불필요). `메인`의 스킬에 추가했고 환경 노트에 "저장소 코드 변경은 직접 write·edit하지 말고 omp-coding을 따른다"를 적었다. 절차: 브랜치 worktree → 브리프 파일 → `/Users/garden/.bun/bin/omp -p --no-session --cwd <worktree> @<brief>` → diff·검사 직접 확인 → 프로젝트 규칙대로 통합·푸시·정리 → 보고.
+- 시험: 실제 Ghost Work(Mac 실행)에 시험용 저장소의 버그 수정을 맡기자 스킬을 읽고 worktree를 만들어 omp를 한 번 실행하고, diff와 `bun test`를 직접 확인한 뒤 브랜치에 커밋했다(`omp` 경로를 몰라 한 번 헤맸고, 그 뒤 스킬에 절대 경로를 적었다). 시험 Work·저장소는 지웠다.
+- 한계: omp가 쓰는 모델과 비용은 소유자의 omp 설정을 따른다. 30분을 넘는 일은 브리프를 나누라고 적었을 뿐 백그라운드 실행·진행 표시·취소는 없다. 그 단계가 필요하면 `omp_run` 도구를 Host에 만들어야 한다. 결과 확인 카드는 이번 시험에서도 소유자에게 올라왔다.
+
 ### Mac 셸·도구 자동 승인 모드 (운영 정책 변경) — 2026-11-20
 
 - 소유자 지시: "쉘 명령어나 도구 쓰는 것은 내게 묻지 말고, 내 판단이 필요한 것만 물어라." 코드가 아니라 운영 정책 규칙 변경이며 릴리스는 없다. 변경 전 규칙은 `~/.local/share/ghost/backups/policy-rules-before-automode-20261120.json`, 변경 전 `메인` 환경 노트는 `main-adaptations-before-automode-20261120.txt`.
