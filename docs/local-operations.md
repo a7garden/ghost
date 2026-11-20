@@ -65,6 +65,16 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
 
+### Mac 셸·도구 자동 승인 모드 (운영 정책 변경) — 2026-11-20
+
+- 소유자 지시: "쉘 명령어나 도구 쓰는 것은 내게 묻지 말고, 내 판단이 필요한 것만 물어라." 코드가 아니라 운영 정책 규칙 변경이며 릴리스는 없다. 변경 전 규칙은 `~/.local/share/ghost/backups/policy-rules-before-automode-20261120.json`, 변경 전 `메인` 환경 노트는 `main-adaptations-before-automode-20261120.txt`.
+- 바꾼 규칙: `outside-mac`(Mac 쓰기, 되돌릴 수 없는 것 포함)·`host-command-irreversible`·`host-command`를 `allow`로. `rule-of-two`는 Mac 대상을 뺀 나머지 대상 종류(연결·워크스페이스·범위 경로·문서 금고·MCP·브라우저 출처·메일 계정·호스트)별 규칙 8개로 쪼개 유지했다. 이유: 메인의 대화는 웹·Mac 읽기로 늘 오염 상태라 `rule-of-two`가 Mac 셸 명령을 전부 막고 있었다.
+- 그대로 묻는 것: 돈(`money`), 메일 발송, 연결 계정 쓰기·등록, 금고 입력, 브라우저의 구매·결제·발송·삭제, 목표 채택, 소유자 질문, 되돌릴 수 없는 결과 수락, 자동 활동 제안, 연결이 끊겨 결과를 알 수 없는 명령(`reconcile_effect`). 데스크톱의 되돌릴 수 없는 클릭·키 입력과 브라우저의 되돌릴 수 없는 클릭은 `deny` 그대로다.
+- 알려진 위험: 웹·메일에서 읽은 지시가 프롬프트 주입으로 Mac 셸을 시켜 파일을 읽고 네트워크로 보내는 경로를 `rule-of-two`가 더는 막지 않는다. Ghost는 소유자와 같은 OS 사용자로 돌고 상태 폴더의 토큰 파일도 읽을 수 있다. 문서가 정한 "PC는 격리가 아니다"의 연장이며, 소유자 지시에 따른 선택이고 위험은 이 기록과 보고로 알렸다.
+- 되돌리기: 위 백업 JSON의 규칙을 `rule.update`로 복원하고 `rule.delete`로 새로 만든 `rule-of-two` 분할 규칙 7개(`when.targetKind`가 workspace·scope_path·document_vault·mcp_server·browser_origin·mail_account·host인 것)를 지운 뒤 `rule-of-two`의 `when`에서 `targetKind`를 빼면 된다.
+- 확인: 실제 Mac 실행 Work에서 `mkdir && touch && ls && rm -r` 한 줄이 카드 없이 실행되고 결과가 맞았다(변경 전에는 `rule-of-two` 때문에 카드가 생겼다). 변경 전 승인 대기 12건은 규칙 변경 뒤 대기 목록에서 사라졌고(처리 경로는 확인하지 않았다) 기다리던 일 2건이 다시 `running`이 되었다. 시험 Work는 모두 취소했다.
+- 남은 것: 결과 확인(`accept_result`)은 코드가 "검증 없는 완료 주장은 정책이 수용하지 못한다"고 고정해 두어 규칙으로 못 바꾼다. 인수 조건에 점검 명령이 있으면 자동으로 통과하고, 없으면 소유자 카드가 남는다.
+
 ### 읽기 명령 승인 없이 실행, 2.12.3 운영 반영 — 2026-11-20
 
 - 문제(소유자: "ls, grep 하나하나 승인 물어봐서 일이 안 된다"): 최근 5일 승인 요청 102건 대부분이 `ls`·`grep`·`du`·`df`·`ps`·`find`·`git log` 같은 읽기였다. Mac 실행 Work의 `bash`가 명령을 전부 되돌릴 수 없는 쓰기로 분류해서였다. 설계와 한계는 [구조](architecture.md)의 「Read-only lines in owner-PC Works」.
