@@ -287,6 +287,7 @@ describe("tools", () => {
 
   test("self-started Work is judged by a Ghost instead of waiting on the owner", async () => {
     const s = setup();
+    s.core.goals.create({ title: "스트링스 출시" });
     const main = s.core.createGhost({ name: "Main", persona: "Lead", isDefault: true });
     const helper = s.core.createGhost({ name: "Helper", persona: "You help." });
     const pi = asPi(s, s.direct, "pi-direct");
@@ -300,6 +301,7 @@ describe("tools", () => {
 
   test("a self-started Work is refused the owner's PC before any grant is considered", async () => {
     const s = setup();
+    s.core.goals.create({ title: "스트링스 출시" });
     const pi = asPi(s, s.direct, "pi-direct");
     const tool = toolOf(s, s.direct, s.ghost, "work_create");
     const refused = await call(tool, { title: "Own", brief: "Do it", initiative: true, execution: { kind: "host", cwd: "/tmp" } }, apiOf(pi, "call-1"));
@@ -308,6 +310,21 @@ describe("tools", () => {
     expect(s.ledger.worksForState().map((work) => work.title)).not.toContain("Own");
     const research = await call(tool, { title: "Research", brief: "Read", initiative: true }, apiOf(pi, "call-2"));
     expect(research.isError).toBeFalsy();
+  });
+
+  test("with no owner goal a Ghost starts no Work on its own, only owner-requested Work", async () => {
+    const s = setup();
+    const pi = asPi(s, s.direct, "pi-direct");
+    const tool = toolOf(s, s.direct, s.ghost, "work_create");
+    const own = await call(tool, { title: "Own", brief: "Read", initiative: true }, apiOf(pi, "call-1"));
+    expect(own.isError).toBe(true);
+    expect(JSON.stringify(own.content)).toContain("propose a goal");
+    const asked = await call(tool, { title: "Asked", brief: "Do it" }, apiOf(pi, "call-2"));
+    expect(asked.isError).toBeFalsy();
+    expect(s.ledger.worksForState().map((work) => work.title)).toEqual(["Asked"]);
+    // Once the owner has a goal the same call goes through, and its replay after a restart still finds its Work.
+    s.core.goals.create({ title: "스트링스 출시" });
+    expect((await call(tool, { title: "Own", brief: "Read", initiative: true }, apiOf(pi, "call-3"))).isError).toBeFalsy();
   });
 
   test("a work conversation cannot see work_create; a direct one cannot see bash", async () => {

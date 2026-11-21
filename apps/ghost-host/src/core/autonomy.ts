@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { AUTONOMOUS_WAKE, type AutonomyPlan, type Ghost, type Scope, type Work } from "@ghost/contract";
+import { AUTONOMOUS_WAKE, QUIET_REPLY, type AutonomyPlan, type Ghost, type Scope, type Work } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { CommandError, conflict, forbidden, invalid } from "./errors.ts";
 import { digestOf } from "./ids.ts";
@@ -422,6 +422,7 @@ export class Autonomy {
     if (settled.count === 0 && moved.length === 0 && pending.length === 0) lines.push("- nothing new reached the Host");
     const goals = this.core.goals.context(scopeId);
     if (goals) lines.push("", goals);
+    else lines.push("", `No owner goals exist. Start no Work of your own (work_create with initiative is refused). You may propose one goal with its reason (goal_propose) and let the owner decide; otherwise reply ${QUIET_REPLY}. Work the owner handed over keeps going.`);
     const mine = ledger.worksInState("queued", "running", "waiting", "verifying", "blocked").filter((work) => work.ghostId === ghost.id && live(work));
     for (const work of mine.slice(0, 8)) if (work.conversationId) sources.add(work.conversationId);
     if (mine.length) lines.push("", "Your live Work:", ...mine.slice(0, 8).map((work) => `- "${work.title}" ${work.state}`));

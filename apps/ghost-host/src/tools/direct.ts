@@ -75,6 +75,10 @@ export function createDirectTools(core: Core): Extension {
         }
         const ghostId = args.ghost_id ?? scope.ghost.id;
         const id = idFor(scope.conversation.id, api.callId);
+        // Without an owner goal there is nothing to steer toward, so a Ghost on its own proposes a goal and starts nothing; a replay of an existing Work is untouched.
+        if (args.initiative && !core.ledger.findWork(id) && !core.goals.goals().some((goal) => goal.state === "active")) {
+          throw forbidden("no owner goal exists, so you do not start Work on your own: propose a goal with its reason (goal_propose) and let the owner decide, or stay quiet. Work the owner hands you is not affected.");
+        }
         // Refused before the Work exists, so a stale milestone never leaves an unlinked Work behind; a replay finds its Work.
         if (args.milestone_id && !core.ledger.findWork(id)) core.goals.checkLink(args.milestone_id);
         const active = core.ledger.setting<{ scopeId: string | null } | null>(`context:${scope.conversation.id}`, null);
