@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CodingAgentId, CodingAgentsView } from '@ghost/contract';
 import { Badge, Button, InlineError, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
+import { RecentCodingSessions } from './CodingSession';
 
 /** The agent a run uses when no one names one: the owner's pick if it can run, else the first that can. */
 export function usedByDefault(view: CodingAgentsView): CodingAgentId | null {
@@ -59,5 +60,6 @@ export function CodingAgentSettings() {
         </SettingsRow>;
       })}
     </SettingsGroup>
+    <RecentCodingSessions/>
   </section>;
 }

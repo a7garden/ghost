@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { CodingAgents, pickCodingAgent } from "../src/integrations/coding-agents.ts";
 import type { CodingAgentInfo } from "../src/integrations/ports.ts";
 
+/** Detection never opens a session, so nothing is written here. */
+const SESSIONS = join(tmpdir(), "ghost-coding-sessions-unused");
+
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
@@ -25,7 +28,7 @@ test("finds the agents that run, in preference order, and skips broken or non-ex
     omp: { body: "echo", mode: 0o644 },
   });
   const second = bin({ omp: { body: "echo omp/9.9.9", mode: 0o755 } });
-  const agents = await new CodingAgents({ dirs: [join(first, "missing"), first, second] }).detect();
+  const agents = await new CodingAgents(SESSIONS, { dirs: [join(first, "missing"), first, second] }).detect();
   expect(agents.map(({ id, name, version }) => ({ id, name, version }))).toEqual([
     { id: "omp", name: "omp", version: "omp/9.9.9" },
     { id: "codex", name: "Codex", version: "codex-cli 0.9.0" },
@@ -39,25 +42,41 @@ test("a run is one argv with the prompt as a single word, headless and in the gi
     claude: { body: "echo '2.1.0 (Claude Code)'", mode: 0o755 },
     codex: { body: "echo codex-cli 1", mode: 0o755 },
   });
-  const coding = new CodingAgents({ dirs: [dir] });
+  const coding = new CodingAgents(SESSIONS, { dirs: [dir] });
   const prompt = "# Task\nfix `x`; rm -rf / $(whoami)";
-  const argv = Object.fromEntries((await coding.detect()).map((agent) => [agent.id, coding.command(agent, prompt, "/work/tree")]));
-  expect(argv.omp).toEqual([join(dir, "omp"), "-p", "--no-session", "--cwd", "/work/tree", "--thinking", "medium", prompt]);
-  expect(argv.claude).toEqual([join(dir, "claude"), "-p", "--permission-mode", "bypassPermissions", prompt]);
-  expect(argv.codex).toEqual([join(dir, "codex"), "exec", "--cd", "/work/tree", "--sandbox", "workspace-write", prompt]);
+  const argv = Object.fromEntries((await coding.detect()).map((agent) => [agent.id, coding.command(agent, prompt, "/work/tree", null)]));
+  expect(argv.omp).toEqual([join(dir, "omp"), "-p", "--mode", "json", "--cwd", "/work/tree", "--thinking", "medium", prompt]);
+  expect(argv.claude).toEqual([join(dir, "claude"), "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", prompt]);
+  expect(argv.codex).toEqual([join(dir, "codex"), "exec", "--json", "--cd", "/work/tree", "--sandbox", "workspace-write", prompt]);
+  // Nothing asks an agent to forget the session: the owner can open it, and a later run can continue it.
+  expect(Object.values(argv).flat()).not.toContain("--no-session");
+});
+
+test("continuing a session names the agent's own id and keeps the prompt one word", async () => {
+  const dir = bin({
+    omp: { body: "echo omp/1", mode: 0o755 },
+    claude: { body: "echo claude/1", mode: 0o755 },
+    codex: { body: "echo codex/1", mode: 0o755 },
+  });
+  const coding = new CodingAgents(SESSIONS, { dirs: [dir] });
+  const prompt = "also add a test; $(whoami)";
+  const argv = Object.fromEntries((await coding.detect()).map((agent) => [agent.id, coding.command(agent, prompt, "/work/tree", "native-1")]));
+  expect(argv.omp).toEqual([join(dir, "omp"), "-p", "--mode", "json", "--cwd", "/work/tree", "--thinking", "medium", "--resume", "native-1", prompt]);
+  expect(argv.claude).toEqual([join(dir, "claude"), "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", "--resume", "native-1", prompt]);
+  expect(argv.codex).toEqual([join(dir, "codex"), "exec", "resume", "--json", "-c", 'sandbox_mode="workspace-write"', "native-1", prompt]);
 });
 
 test("a Mac with no agent reports none", async () => {
   const empty = bin({});
   mkdirSync(join(empty, "sub"));
-  expect(await new CodingAgents({ dirs: [empty, join(empty, "sub")] }).detect()).toEqual([]);
+  expect(await new CodingAgents(SESSIONS, { dirs: [empty, join(empty, "sub")] }).detect()).toEqual([]);
 });
 
 test("an agent that is a script finds its interpreter beside it even when the Host's PATH has none", async () => {
   const dir = bin({ fakeinterp: { body: "echo codex-cli 7.7.7", mode: 0o755 } });
   writeFileSync(join(dir, "codex"), "#!/usr/bin/env fakeinterp\n");
   chmodSync(join(dir, "codex"), 0o755);
-  const agents = await new CodingAgents({ dirs: [dir] }).detect();
+  const agents = await new CodingAgents(SESSIONS, { dirs: [dir] }).detect();
   expect(agents.map(({ id, version }) => ({ id, version }))).toEqual([{ id: "codex", version: "codex-cli 7.7.7" }]);
 });
 
@@ -67,7 +86,7 @@ test("an agent whose login ended is listed as not ready, with the reason", async
     codex: { body: "if [ \"$1\" = login ]; then exit 1; fi; echo codex-cli 1", mode: 0o755 },
     omp: { body: "echo omp/1", mode: 0o755 },
   });
-  const agents = await new CodingAgents({ dirs: [dir] }).detect();
+  const agents = await new CodingAgents(SESSIONS, { dirs: [dir] }).detect();
   const state = Object.fromEntries(agents.map(({ id, ready, note }) => [id, { ready, note }]));
   expect(state.omp).toEqual({ ready: true, note: null });
   expect(state.claude!.ready).toBe(false);
@@ -77,7 +96,7 @@ test("an agent whose login ended is listed as not ready, with the reason", async
 
 test("a login that ends later is still ready and says until when; a fresh look sees a new install", async () => {
   const dir = bin({ claude: { body: "case \"$1\" in --version) echo 2.1.0;; auth) echo '{\"loggedIn\":true,\"loginExpiresAt\":\"2099-06-01T00:00:00Z\"}';; esac", mode: 0o755 } });
-  const coding = new CodingAgents({ dirs: [dir] });
+  const coding = new CodingAgents(SESSIONS, { dirs: [dir] });
   const [claude] = await coding.detect();
   expect(claude).toMatchObject({ id: "claude", ready: true });
   expect(claude!.note).toContain("2099");

@@ -23,6 +23,8 @@ import {
   type PageSummary,
   type PageView,
   type CodingAgentsView,
+  type CodingSessionDetail,
+  type CodingSessionList,
   type CodingPrefs,
   type SkillCatalog,
   parse,
@@ -522,6 +524,28 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         const prefs = core.ledger.setting<CodingPrefs>("coding", { default: null, disabled: [] });
         const agents = await coding.detect(url.searchParams.get("refresh") === "1");
         return json({ agents: agents.map(({ id, name, path, version, ready, note }) => ({ id, name, path, version, ready, note })), default: prefs.default, disabled: prefs.disabled } satisfies CodingAgentsView);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+
+    // Every code_run kept as a session: the newest first, or one with its steps from `?after=` on (poll with the returned `next` to follow a running one).
+    if (pathname === "/api/coding-sessions" && request.method === "GET") {
+      try {
+        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
+        return json({ sessions: coding.sessions.list(30, url.searchParams.get("work") ?? undefined) } satisfies CodingSessionList);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+    const codingSession = /^\/api\/coding-sessions\/([0-9a-f]{32})$/.exec(pathname);
+    if (codingSession !== null && request.method === "GET") {
+      try {
+        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
+        const after = Number(url.searchParams.get("after") ?? 0);
+        const detail = coding.sessions.get(codingSession[1]!, Number.isInteger(after) && after >= 0 ? after : 0);
+        if (detail === null) throw notFound(`coding session ${codingSession[1]}`);
+        return json(detail satisfies CodingSessionDetail);
       } catch (caught) {
         return failure(caught);
       }

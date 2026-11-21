@@ -173,12 +173,58 @@ export interface CodingAgentInfo {
   note: string | null;
 }
 
+/** One thing an agent did, read from its event stream. */
+export interface CodingEvent {
+  kind: CodingStep["kind"];
+  text: string;
+}
+
+/** Reads an agent's JSON-lines output as it arrives: the events so far, the agent's own id for the session and its last message. */
+export interface CodingStream {
+  /** The agent's own session id, once it has said it. */
+  nativeId: string | null;
+  /** The agent's last message, which is its closing summary when the run ends well. */
+  final: string | null;
+  feed(chunk: string): CodingEvent[];
+  /** What the last unterminated line holds, when the output ends. */
+  flush(): CodingEvent[];
+}
+
 /** The coding agents installed on the owner's Mac. Implemented in src/integrations/coding-agents.ts. */
 export interface CodingAgentPort {
   /** Agents found on this Mac, in preference order; cached briefly unless `refresh`. */
   detect(refresh?: boolean): Promise<CodingAgentInfo[]>;
-  /** argv for one non-interactive run of a detected agent in `cwd`. */
-  command(agent: CodingAgentInfo, prompt: string, cwd: string): string[];
+  /** argv for one non-interactive run in `cwd`, continuing the agent's own session `resume` when given; its output is read with `stream`. */
+  command(agent: CodingAgentInfo, prompt: string, cwd: string, resume: string | null): string[];
+  stream(agent: CodingAgentInfo): CodingStream;
+  readonly sessions: CodingSessionStore;
+}
+
+export interface CodingSessionOpen {
+  agent: CodingAgentId;
+  workId: string | null;
+  callId: string;
+  task: string;
+  cwd: string;
+  branch: string | null;
+  base: string | null;
+}
+
+export interface CodingSessionWriter {
+  readonly id: string;
+  native(nativeId: string): void;
+  step(kind: CodingStep["kind"], text: string): void;
+  end(exitCode: number): void;
+}
+
+/** Every `code_run` kept as a session the owner can read. Implemented in src/integrations/coding-sessions.ts. */
+export interface CodingSessionStore {
+  open(meta: CodingSessionOpen): CodingSessionWriter;
+  /** Newest first; with `workId`, only that Work's runs. */
+  list(limit?: number, workId?: string): CodingSessionView[];
+  get(id: string, after?: number): CodingSessionDetail | null;
+  /** Where a session ran and the agent's own id for it, or null when it cannot be continued. */
+  continuation(id: string): { agent: CodingAgentId; cwd: string; branch: string | null; base: string | null; nativeId: string } | null;
 }
 
 /** The owner's skill folders, read-only. Implemented in src/integrations/skills.ts. */

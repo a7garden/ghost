@@ -18,6 +18,7 @@ import { createWorkTools } from "../src/tools/work.ts";
 import { HostExecutionEnv, HostMutationQueue } from "../src/sandbox/host-env.ts";
 import type { CodingAgentPort, HostPort, SandboxEnvFactory } from "../src/integrations/ports.ts";
 import { createCodingTools } from "../src/tools/coding.ts";
+import { CodingAgents } from "../src/integrations/coding-agents.ts";
 
 const opened: { core: Core; ledger: Ledger }[] = [];
 afterEach(async () => { for (const h of opened.splice(0)) { h.core.stop(); await h.core.idle(); h.ledger.close(); } });
@@ -783,12 +784,29 @@ async function codingFixture(agents: { id: "omp" | "claude" | "codex"; ready?: b
   writeFileSync(join(repo, "a.txt"), "one\n");
   git("add", "-A");
   git("commit", "-qm", "init");
-  // The fake agent edits a file, commits it and prints a summary, the way a headless coding agent does.
+  // The fake agent behaves like omp in JSON mode: it announces a session, edits and commits a file in the directory it is given, and closes with a summary. A resumed run keeps the session id it was given.
   const script = join(s.scopeDir, "fake-agent.sh");
-  writeFileSync(script, "#!/bin/sh\ncd \"$2\" || exit 3\necho two > b.txt\n/usr/bin/git add b.txt\n/usr/bin/git commit -qm 'add b'\necho \"changed b.txt; checked nothing\"\n");
+  writeFileSync(script, [
+    "#!/bin/sh",
+    "cd \"$2\" || exit 3",
+    "echo \"{\\\"type\\\":\\\"session\\\",\\\"id\\\":\\\"${3:-native-1}\\\"}\"",
+    "echo '{\"type\":\"tool_execution_start\",\"toolName\":\"bash\",\"args\":{\"command\":\"edit b.txt\"}}'",
+    "echo two >> b.txt",
+    "/usr/bin/git add b.txt",
+    "/usr/bin/git commit -qm 'touch b'",
+    "echo '{\"type\":\"tool_execution_end\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"committed\"}]}}'",
+    "echo '{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"changed b.txt; checked nothing\"}]}}'",
+    "",
+  ].join("\n"));
   chmodSync(script, 0o755);
   const found = agents.map(({ id, ready = true, note = null }) => ({ id, name: id, path: script, version: "9.9.9", ready, note }));
-  const coding: CodingAgentPort = { detect: async () => found, command: (_agent, prompt, cwd) => [script, prompt, cwd] };
+  const real = new CodingAgents(join(tempDir(), "coding-sessions"));
+  const coding: CodingAgentPort = {
+    detect: async () => found,
+    command: (_agent, prompt, cwd, resume) => [script, prompt, cwd, ...(resume === null ? [] : [resume])],
+    stream: (agent) => real.stream(agent),
+    sessions: real.sessions,
+  };
   const tools = createCodingTools(s.core, coding).tools!;
   const call = async (name: string, args: object, callId: string) => {
     const result = await tools.find((tool) => tool.name === name)!.execute(args as never,
@@ -796,7 +814,7 @@ async function codingFixture(agents: { id: "omp" | "claude" | "codex"; ready?: b
     const part = result.content?.[0];
     return { isError: result.isError === true, text: part?.type === "text" ? part.text : "" };
   };
-  return { ...s, repo, git, call };
+  return { ...s, repo, git, call, sessions: real.sessions };
 }
 
 test("code_run puts the coding agent in a fresh branch worktree and leaves the owner's checkout untouched", async () => {
@@ -816,6 +834,42 @@ test("code_run puts the coding agent in a fresh branch worktree and leaves the o
   // The same branch name is never reused: a second task gets its own worktree.
   const second = JSON.parse((await s.call("code_run", { repo: s.repo, task: "Again", branch: "Add B file" }, "run-2")).text);
   expect(second.branch).toBe("ghost/add-b-file-2");
+});
+
+test("every code_run is a session the owner can read: what the agent said and did, and how to carry on by hand", async () => {
+  const s = await codingFixture([{ id: "omp" }]);
+  const report = JSON.parse((await s.call("code_run", { repo: s.repo, task: "Add b.txt", branch: "sess" }, "sess-1")).text);
+  const [session] = s.sessions.list();
+  expect(report.sessionId).toBe(session!.id);
+  expect(session).toMatchObject({ agent: "omp", state: "done", exitCode: 0, branch: "ghost/sess", nativeId: "native-1", cwd: report.worktree, task: "Add b.txt", workId: s.work.id });
+  expect(session!.resumeCommand).toBe(`cd '${report.worktree}' && omp --resume native-1`);
+  const detail = s.sessions.get(session!.id)!;
+  expect(detail.steps.map(({ kind, text }) => ({ kind, text }))).toEqual([
+    { kind: "tool", text: "bash: edit b.txt" },
+    { kind: "result", text: "committed" },
+    { kind: "say", text: "changed b.txt; checked nothing" },
+  ]);
+  // Asking again from `next` returns only what is new, which is how a running session is followed.
+  expect(s.sessions.get(session!.id, detail.next)!.steps).toEqual([]);
+});
+
+test("continue_session carries on in the same worktree and agent conversation, and refuses what cannot be continued", async () => {
+  const s = await codingFixture([{ id: "omp" }, { id: "codex" }]);
+  const first = JSON.parse((await s.call("code_run", { repo: s.repo, task: "Add b", branch: "again" }, "c-1")).text);
+  const second = JSON.parse((await s.call("code_run", { continue_session: first.sessionId, task: "Also touch it again" }, "c-2")).text);
+  expect(second).toMatchObject({ worktree: first.worktree, branch: first.branch, agent: "omp", base: first.base });
+  expect(second.commits).toHaveLength(2);
+  expect(second.sessionId).not.toBe(first.sessionId);
+  expect(s.sessions.get(second.sessionId)!.session.nativeId).toBe("native-1");
+  expect(readFileSync(join(first.worktree, "b.txt"), "utf8")).toBe("two\ntwo\n");
+  expect(s.git("branch", "--list", "ghost/*").trim().split("\n")).toHaveLength(1);
+
+  const unknown = await s.call("code_run", { continue_session: "0".repeat(32), task: "x" }, "c-3");
+  expect(unknown.isError).toBe(true);
+  expect(unknown.text).toContain("cannot be continued");
+  const otherAgent = await s.call("code_run", { continue_session: first.sessionId, task: "x", agent: "codex" }, "c-4");
+  expect(otherAgent.isError).toBe(true);
+  expect(otherAgent.text).toContain("continues in the agent that started it");
 });
 
 test("code_run names what is missing instead of guessing: no such agent, no repo, no PC Work", async () => {

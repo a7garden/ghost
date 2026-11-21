@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import type { CodingAgentsView, Decision, VaultItem } from '@ghost/contract';
+import type { CodingAgentsView, CodingSessionDetail, CodingSessionView, Decision, VaultItem } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 /** The synthetic decision ids the decision-surface screens focus. */
@@ -85,8 +85,9 @@ export async function mockVaultApi(page: Page): Promise<void> {
   });
 }
 
-/** Serves a fixed set of coding agents so the 코딩 에이전트 screen does not depend on what the test Mac has installed. */
+/** Serves a fixed set of coding agents and sessions so the 코딩 에이전트 screen does not depend on what the test Mac has installed or run. */
 export async function mockCodingApi(page: Page): Promise<void> {
+  const { fixedNow } = readRunState();
   const view: CodingAgentsView = {
     agents: [
       { id: 'omp', name: 'omp', path: '/Users/garden/.bun/bin/omp', version: 'omp/19.0.1', ready: true, note: null },
@@ -96,7 +97,30 @@ export async function mockCodingApi(page: Page): Promise<void> {
     default: null,
     disabled: [],
   };
+  const fixed: CodingSessionView = {
+    id: 'a1'.repeat(16), agent: 'omp', workId: 'visual-work', callId: 'call-1', task: '로그인 실패 시 안내 문구 고치기\n오류 문구가 비어 있습니다.',
+    cwd: '/Users/garden/Workspace/Projects/wt/app-fix-login', branch: 'ghost/fix-login', nativeId: '01a1fce5-08b9',
+    resumeCommand: "cd '/Users/garden/Workspace/Projects/wt/app-fix-login' && omp --resume 01a1fce5-08b9",
+    // The dialog prints the start as an absolute time, so it is a fixed calendar point; the list's relative times come from `endedAt`.
+    startedAt: Date.UTC(2026, 10, 21, 6, 10), endedAt: fixedNow - 3_300_000, state: 'done', exitCode: 0,
+  };
+  const sessions: CodingSessionView[] = [
+    { ...fixed, id: 'b2'.repeat(16), agent: 'claude', task: '결제 화면 테스트 추가', branch: 'ghost/checkout-tests', nativeId: null, resumeCommand: null, startedAt: fixedNow - 600_000, endedAt: null, state: 'running', exitCode: null },
+    fixed,
+  ];
+  const detail: CodingSessionDetail = {
+    session: fixed,
+    steps: [
+      { at: fixedNow - 3_590_000, kind: 'say', text: '로그인 화면의 오류 처리부터 읽어 보겠습니다.' },
+      { at: fixedNow - 3_580_000, kind: 'tool', text: 'grep: 오류 문구' },
+      { at: fixedNow - 3_570_000, kind: 'result', text: 'src/login.ts:41: const message = ""' },
+      { at: fixedNow - 3_400_000, kind: 'say', text: '빈 문구를 기본 안내로 바꾸고 테스트를 통과시켰습니다.' },
+    ],
+    next: 4,
+  };
   await page.route('**/api/coding-agents*', route => void fulfillJson(route, 200, view));
+  await page.route(/\/api\/coding-sessions$/, route => void fulfillJson(route, 200, { sessions }));
+  await page.route(/\/api\/coding-sessions\/[0-9a-f]{32}(\?.*)?$/, route => void fulfillJson(route, 200, detail));
 }
 
 /** Adds synthetic decisions to the state snapshot; everything else stays the real seeded host. */

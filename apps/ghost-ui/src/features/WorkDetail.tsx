@@ -23,6 +23,7 @@ import { executionLabel } from './activity-config';
 import { readVerdict, workReason } from './workText';
 import { ProjectChips } from '../components/composer/ProjectMentions';
 import { CancelWorkDialog } from './WorkViews';
+import { CodeRunSessionLink } from './CodingSession';
 
 const effectGlyph: Record<Effect['state'], GlyphState> = { pending: 'running', done: 'done', unknown: 'blocked', denied: 'cancelled' };
 const effectLabel: Record<Effect['state'], string> = { pending: '실행 중', done: '완료', unknown: '결과 미확정', denied: '거부됨' };
@@ -161,6 +162,7 @@ export function WorkDetail({ state, workId, navigate }: { state: State; workId: 
                 {effect.state !== 'done' && <span>{effectLabel[effect.state]}</span>}
                 <time className="tabular" title={absoluteTime(effect.createdAt)}>{relativeTime(effect.endedAt ?? effect.createdAt, now)}</time>
               </span>
+              {effect.tool === 'code_run' && <CodeRunSessionLink workId={work.id} callId={effect.callId} running={effect.state === 'pending'}/>}
               {effect.result && <details className="timeline__result"><summary>출력</summary><pre>{effect.result}</pre></details>}
             </div>
           </li>)}</ol> : <p className="work-aside__empty">실행 기록 없음</p>}

@@ -4,6 +4,8 @@ import type {
   ArtifactRef,
   Command,
   CodingAgentsView,
+  CodingSessionDetail,
+  CodingSessionList,
   CommandOf,
   ConnectionOAuthView,
   ConnectionOAuthClientInput,
@@ -205,6 +207,15 @@ export class HostClient {
   /** The coding agents the Host found on its Mac and the owner's choice among them; `refresh` looks again. */
   codingAgents(refresh = false): Promise<CodingAgentsView> {
     return this.json(refresh ? '/api/coding-agents?refresh=1' : '/api/coding-agents');
+  }
+
+  /** Coding sessions, newest first; with `workId`, only that Work's. */
+  codingSessions(workId?: string): Promise<CodingSessionList> {
+    return this.json(workId === undefined ? '/api/coding-sessions' : `/api/coding-sessions?work=${encodeURIComponent(workId)}`);
+  }
+  /** One coding session with its steps from `after` on; ask again with `next` to follow a running one. */
+  codingSession(id: string, after = 0): Promise<CodingSessionDetail> {
+    return this.json(`/api/coding-sessions/${encodeURIComponent(id)}?after=${after}`);
   }
 
   /** The host's own release update state. */
