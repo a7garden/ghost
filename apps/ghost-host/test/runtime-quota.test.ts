@@ -12,7 +12,7 @@ import { Core } from "../src/core/core.ts";
 import { createEngine } from "../src/engine/index.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { createToolSet } from "../src/tools/index.ts";
-import { FakeEngine, MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
+import { FakeEngine, MemoryArtifacts, MemorySecrets, noSandbox, sentMail } from "./support.ts";
 
 const primary: ModelRef = { provider: "primary", model: "primary-1" };
 

@@ -16,7 +16,7 @@ import { Ledger } from "../src/ledger/ledger.ts";
 import { MIGRATIONS } from "../src/ledger/schema.ts";
 import { createReviewTools } from "../src/tools/review.ts";
 import { createWorkTools } from "../src/tools/work.ts";
-import { FakeEngine, harness } from "./support.ts";
+import { FakeEngine, harness, sentMail } from "./support.ts";
 
 interface Harness {
   core: Core;
