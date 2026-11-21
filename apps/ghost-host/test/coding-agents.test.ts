@@ -106,6 +106,18 @@ test("a login that ends later is still ready and says until when; a fresh look s
   expect((await coding.detect(true)).map((agent) => agent.id)).toEqual(["omp", "claude"]);
 });
 
+test("a busy Mac that makes a probe run out of time does not make the agent 'not installed' for the next minute", async () => {
+  // The first call hangs, as it does when the Mac is under load; later calls answer at once.
+  const dir = bin({ omp: { body: 'm="$(dirname "$0")/seen"\nif [ ! -f "$m" ]; then touch "$m"; exec sleep 5; fi\necho omp/1', mode: 0o755 } });
+  const coding = new CodingAgents(SESSIONS, { dirs: [dir], probeMs: 300 });
+  expect(await coding.detect()).toEqual([]);
+  // The empty answer was not kept: the very next call looks again and finds it.
+  expect((await coding.detect()).map((agent) => agent.id)).toEqual(["omp"]);
+  // A complete answer is kept for the minute.
+  rmSync(join(dir, "omp"));
+  expect((await coding.detect()).map((agent) => agent.id)).toEqual(["omp"]);
+});
+
 test("selection: a named agent or a reason, else the owner's default, else the first ready one", () => {
   const agent = (id: CodingAgentInfo["id"], ready = true): CodingAgentInfo => ({ id, name: id, path: `/bin/${id}`, version: "1", ready, note: ready ? null : "로그인이 필요합니다" });
   const all = [agent("omp"), agent("claude"), agent("codex", false)];

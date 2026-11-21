@@ -243,6 +243,8 @@ const ADAPTERS: Record<CodingAgentId, {
 export const CODING_AGENT_ORDER: readonly CodingAgentId[] = ["omp", "claude", "codex"];
 
 const CACHE_MS = 60_000;
+/** A probe of a quiet Mac answers in well under a second; this is for one that is busy. */
+const PROBE_MS = 20_000;
 
 const isExecutable = (path: string) => {
   try {
@@ -255,16 +257,19 @@ const isExecutable = (path: string) => {
 };
 
 /**
- * Runs `path args` for at most five seconds. An agent can be a script whose interpreter sits beside it
- * (`#!/usr/bin/env node`), so the probe's PATH starts with its own directory.
+ * Runs `path args` for at most `limitMs`. An agent can be a script whose interpreter sits beside it
+ * (`#!/usr/bin/env node`), so the probe's PATH starts with its own directory. A probe that ran out of time or could
+ * not run is `null`, which is not the same as an agent that answered with a failure.
  */
-async function probe(path: string, args: string[], searchDirs: string[]): Promise<{ code: number; out: string } | null> {
+async function probe(path: string, args: string[], searchDirs: string[], limitMs: number): Promise<{ code: number; out: string } | null> {
   const env = { ...process.env, PATH: [dirname(path), ...searchDirs, "/usr/bin", "/bin"].join(":") };
   const child = Bun.spawn([path, ...args], { stdout: "pipe", stderr: "ignore", stdin: "ignore", env });
-  const timer = setTimeout(() => child.kill(), 5_000);
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; child.kill(); }, limitMs);
   try {
     const out = await new Response(child.stdout).text();
-    return { code: await child.exited, out };
+    const code = await child.exited;
+    return timedOut ? null : { code, out };
   } catch {
     return null;
   } finally {
@@ -280,35 +285,41 @@ async function probe(path: string, args: string[], searchDirs: string[]): Promis
 export class CodingAgents implements CodingAgentPort {
   private cached: { at: number; agents: CodingAgentInfo[] } | null = null;
   private readonly dirs: string[];
+  private readonly probeMs: number;
   readonly sessions: CodingSessions;
   readonly run: CodingRunner;
 
   /** `sessionsDir` is where every run's session file goes; `prefs` is the owner's choice of agents, read when a session starts. */
-  constructor(sessionsDir: string, options: { dirs?: string[]; prefs?: () => CodingPrefs } = {}) {
+  constructor(sessionsDir: string, options: { dirs?: string[]; prefs?: () => CodingPrefs; probeMs?: number } = {}) {
     const home = homedir();
     const path = (process.env.PATH ?? "").split(":").filter(Boolean);
     this.dirs = options.dirs ?? [...new Set([join(home, ".bun/bin"), join(home, ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", ...path])];
+    this.probeMs = options.probeMs ?? PROBE_MS;
     this.sessions = new CodingSessions(sessionsDir);
     this.run = new CodingRunner(this, options.prefs);
   }
 
   async detect(refresh = false): Promise<CodingAgentInfo[]> {
     if (!refresh && this.cached && Date.now() - this.cached.at < CACHE_MS) return this.cached.agents;
+    // A Mac under load can make a probe run out of time; what that leaves out is unknown, so it is shown but not remembered.
+    let complete = true;
     const found = await Promise.all(CODING_AGENT_ORDER.map(async (id): Promise<CodingAgentInfo | null> => {
       const adapter = ADAPTERS[id];
       for (const dir of this.dirs) {
         const path = join(dir, id);
         if (!isExecutable(path)) continue;
-        const version = await probe(path, ["--version"], this.dirs);
-        if (version?.code !== 0) continue;
-        const state = adapter.status ? await probe(path, adapter.status.args, this.dirs) : null;
+        const version = await probe(path, ["--version"], this.dirs, this.probeMs);
+        if (version === null) { complete = false; continue; }
+        if (version.code !== 0) continue;
+        const state = adapter.status ? await probe(path, adapter.status.args, this.dirs, this.probeMs) : null;
+        if (adapter.status && state === null) complete = false;
         const readiness = adapter.status && state ? adapter.status.read(state.code, state.out) : { ready: true, note: null };
         return { id, name: adapter.name, path, version: version.out.split("\n").find((line) => line.trim())?.trim().slice(0, 80) || null, ...readiness };
       }
       return null;
     }));
     const agents = found.filter((agent): agent is CodingAgentInfo => agent !== null);
-    this.cached = { at: Date.now(), agents };
+    if (complete) this.cached = { at: Date.now(), agents };
     return agents;
   }
 
