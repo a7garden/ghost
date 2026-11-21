@@ -250,7 +250,7 @@ describe("delegation roster", () => {
     expect(instructions).toContain(`Operator (ghost_id ${operator.id}) — Runs the Mac. [faux/gpt-4.1 image web host]`);
     expect(instructions).toContain(`Custom (ghost_id ${custom.id}) — Custom model. [faux/custom-text web]`);
     expect(instructions).toContain(`Remote (ghost_id ${remote.id}) — Unconfigured provider. [nowhere/m-1 web]`);
-    expect(instructions).toContain("model vendor differs from the assignee's");
+    expect(instructions).toContain("reads the result with a fresh context");
     // Self-delegation is intended: the delegating Ghost appears once, marked as a separate fresh-context Work.
     expect(instructions).toContain(`${s.ghost.name} (ghost_id ${s.ghost.id}; yourself, as a separate fresh-context Work)`);
     expect(instructions.split(`ghost_id ${s.ghost.id}`)).toHaveLength(2);

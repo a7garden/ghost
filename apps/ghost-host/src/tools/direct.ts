@@ -64,6 +64,7 @@ export function createDirectTools(core: Core): Extension {
     async execute(args, api) {
       try {
         const scope = requireAllowed(core, api, "work_create");
+        if (args.initiative && args.execution?.kind === "host") throw forbidden("a Work you start on your own judgment never gets the owner's PC (execution kind host): propose the change to the owner and let them hand it over");
         // 퇴근 중에는 스스로 새 일을 시작하지 않는다. 소유자가 시킨 일은 막지 않는다.
         // 2026.11.11 : 「plan_next 로 남겨라」는 그 도구가 없는 Ghost(구동 꺼짐)에게는 막다른 안내였다.
         if (args.initiative && !core.duty.onDuty()) {

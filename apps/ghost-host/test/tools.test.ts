@@ -298,6 +298,18 @@ describe("tools", () => {
     expect(reviewer("Own")).toEqual({ kind: "ghost", ghostId: main.id });
   });
 
+  test("a self-started Work is refused the owner's PC before any grant is considered", async () => {
+    const s = setup();
+    const pi = asPi(s, s.direct, "pi-direct");
+    const tool = toolOf(s, s.direct, s.ghost, "work_create");
+    const refused = await call(tool, { title: "Own", brief: "Do it", initiative: true, execution: { kind: "host", cwd: "/tmp" } }, apiOf(pi, "call-1"));
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain("on your own judgment");
+    expect(s.ledger.worksForState().map((work) => work.title)).not.toContain("Own");
+    const research = await call(tool, { title: "Research", brief: "Read", initiative: true }, apiOf(pi, "call-2"));
+    expect(research.isError).toBeFalsy();
+  });
+
   test("a work conversation cannot see work_create; a direct one cannot see bash", async () => {
     const s = setup();
     const { conversation } = await runningWork(s);
