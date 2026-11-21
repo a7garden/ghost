@@ -59,7 +59,8 @@ async function openWorktree(git: Git, top: string, base: string, wanted: string)
   for (let attempt = 1; attempt <= 20; attempt++) {
     const suffix = attempt === 1 ? "" : `-${attempt}`;
     const branch = `ghost/${slug}${suffix}`;
-    const path = join(dirname(top), "wt", `${basename(top)}-${slug}${suffix}`);
+    // A repository already inside a wt folder gets its worktrees beside it, not in wt/wt.
+    const path = join(basename(dirname(top)) === "wt" ? dirname(top) : join(dirname(top), "wt"), `${basename(top)}-${slug}${suffix}`);
     if (existsSync(path) || (await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], top)).code === 0) continue;
     const added = await git(["worktree", "add", "-b", branch, path, base], top);
     if (added.code !== 0) throw new NoEffect(`could not create the worktree: ${added.out}`);

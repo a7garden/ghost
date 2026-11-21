@@ -65,12 +65,14 @@ PC 통합 검증(2026-11-10): 전용 임시 창에서 Host 도구 → 효과 원
 
 Ghost별 모델·대체 모델·스킬·도구는 아래 "Ghost 팀 상시 작업 설정"을 따른다. 기본 모델은 MiniMax `MiniMax-M3.1-Flash`이다. 기억은 2.7.0부터 Host 내장이며, Oxibrain `pc-infra`의 Ghost 기록은 각 Ghost의 `/team/<ghostId>/oxibrain.md`로 옮겼다.
 
-### 코딩은 omp로: `omp-coding` 스킬 — 2026-11-21
+### 코딩 에이전트 연결: `code_agents`·`code_run`, 2.13.0·2.13.1 운영 반영 — 2026-11-21
 
-- 배경: 소유자가 본 글(https://x.com/0ooooo0/status/2123401633711423630)의 구도, 곧 비서 에이전트와 코딩 에이전트를 나누는 방식을 Ghost에 적용한다. Ghost(비서)는 범위 정하기·diff 확인·검사·통합·보고를 맡고, 저장소 코드는 소유자가 쓰는 도구인 omp가 쓴다. 사람이 코딩할 때와 같은 `AGENTS.md`·스킬·검사 기준이 그대로 적용되기 때문이다.
-- 구성: 스킬 원본 `apps/ghost-host/skills/omp-coding/SKILL.md`, `~/.agents/skills/omp-coding`에 심볼릭 링크(`agent-orchestra`와 같은 방식, 릴리스 불필요). `메인`의 스킬에 추가했고 환경 노트에 "저장소 코드 변경은 직접 write·edit하지 말고 omp-coding을 따른다"를 적었다. 절차: 브랜치 worktree → 브리프 파일 → `/Users/garden/.bun/bin/omp -p --no-session --cwd <worktree> @<brief>` → diff·검사 직접 확인 → 프로젝트 규칙대로 통합·푸시·정리 → 보고.
-- 시험: 실제 Ghost Work(Mac 실행)에 시험용 저장소의 버그 수정을 맡기자 스킬을 읽고 worktree를 만들어 omp를 한 번 실행하고, diff와 `bun test`를 직접 확인한 뒤 브랜치에 커밋했다(`omp` 경로를 몰라 한 번 헤맸고, 그 뒤 스킬에 절대 경로를 적었다). 시험 Work·저장소는 지웠다.
-- 한계: omp가 쓰는 모델과 비용은 소유자의 omp 설정을 따른다. 30분을 넘는 일은 브리프를 나누라고 적었을 뿐 백그라운드 실행·진행 표시·취소는 없다. 그 단계가 필요하면 `omp_run` 도구를 Host에 만들어야 한다. 결과 확인 카드는 이번 시험에서도 소유자에게 올라왔다.
+- 배경: 소유자가 본 글(https://x.com/0ooooo0/status/2123401633711423630)의 구도, 곧 비서 에이전트와 코딩 에이전트를 나누는 방식을 Ghost에 기본 기능으로 넣는다. 스킬과 `bash`로 omp를 부르던 첫 안(2.12.4 직후의 `omp-coding` 스킬)은 이 도구로 대체되어 지웠다. 설계는 [구조](architecture.md)의 「Coding agents」.
+- 동작: Host가 이 Mac의 omp·Claude Code·Codex를 찾고(`config.json`의 `"coding": false`로 끔), `code_run`이 저장소에 새 브랜치 worktree를 만들어 에이전트를 헤드리스로 돌리고 요약·브랜치·커밋·diff stat을 돌려준다. 소유자의 checkout은 건드리지 않는다. 도구는 명시적으로 부여하며(`CODE_TOOLS`는 새 Ghost의 기본 목록에 없음) 운영 `메인`에 `code_agents`·`code_run`을 부여했다. 설정 화면에 「코딩 에이전트」 그룹이 있다.
+- 검사(2.13.0): Host 1424 통과, UI 316 통과, 감사 화면 기준 이미지 2개 갱신. 설치 뒤 실제 Work(Mac 실행)에서 `메인`이 `code_agents`로 에이전트를 확인하고 `code_run`으로 시험 저장소의 버그를 omp에게 고치게 한 뒤, 브랜치·커밋·diff를 읽고 `bun test`를 직접 돌리고 수정 전 코드에서 테스트가 실패하는지까지 확인했다. 시험 Work·저장소는 지웠다.
+- 시험에서 나온 결함 두 가지(2.13.1에서 수정): ①Host의 PATH에 `node`가 없어 `#!/usr/bin/env node` 스크립트인 Codex가 감지되지 않았다(목록에 omp와 Claude Code만 나옴). 감지 때 에이전트 자신의 폴더를 PATH 앞에 둔다. ②이미 `wt` 폴더 안에 있는 저장소는 worktree가 `wt/wt`에 만들어졌다. 이제 옆에 만든다.
+- 한계: omp가 쓰는 모델과 비용은 소유자의 omp 설정을 따른다. 에이전트의 진행 표시·중간 취소는 Work 취소에 맡긴다(최대 120분). Claude Code는 로그인 만료 경고(2026-11-24)가 나오므로 그 전에 `claude auth login` 또는 `claude setup-token`이 필요하다. Claude Code와 Codex의 실제 위임은 Host 안에서 돌려 보지 않았다(헤드리스 호출 자체는 토이 저장소에서 확인).
+- 같이 한 일: `메인` 환경 노트에서 사라진 스킬을 가리키던 지시와, 내가 대기 카드에 달았던 "새 지시가 있을 때까지 대기" 답변을 상시 규칙으로 잘못 적은 항목을 지웠다(원본은 `backups/main-adaptations-before-coding-20261121.txt`).
 
 ### Mac 셸·도구 자동 승인 모드 (운영 정책 변경) — 2026-11-20
 

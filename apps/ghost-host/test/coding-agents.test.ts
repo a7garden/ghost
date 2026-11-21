@@ -51,3 +51,11 @@ test("a Mac with no agent reports none", async () => {
   mkdirSync(join(empty, "sub"));
   expect(await new CodingAgents({ dirs: [empty, join(empty, "sub")] }).detect()).toEqual([]);
 });
+
+test("an agent that is a script finds its interpreter beside it even when the Host's PATH has none", async () => {
+  const dir = bin({ fakeinterp: { body: "echo codex-cli 7.7.7", mode: 0o755 } });
+  writeFileSync(join(dir, "codex"), "#!/usr/bin/env fakeinterp\n");
+  chmodSync(join(dir, "codex"), 0o755);
+  const agents = await new CodingAgents({ dirs: [dir] }).detect();
+  expect(agents.map(({ id, version }) => ({ id, version }))).toEqual([{ id: "codex", version: "codex-cli 7.7.7" }]);
+});

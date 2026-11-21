@@ -771,11 +771,11 @@ test("a plain read in a Host Work runs at once through the inspector; a change s
   expect(existsSync(join(s.scopeDir, "docs/x"))).toBe(false);
 });
 
-async function codingFixture(agents: { id: "omp" | "claude" | "codex"; script?: string }[]) {
+async function codingFixture(agents: { id: "omp" | "claude" | "codex"; script?: string }[], repoDir = "repo") {
   const s = await scopedHostWork();
   s.ledger.tx(() => s.ledger.putGhost({ ...s.ledger.ghost(s.ghost.id), tools: [...s.ledger.ghost(s.ghost.id).tools, "code_run", "code_agents"] }));
-  const repo = join(s.scopeDir, "repo");
-  mkdirSync(repo);
+  const repo = join(s.scopeDir, repoDir);
+  mkdirSync(repo, { recursive: true });
   const git = (...args: string[]) => execFileSync("/usr/bin/git", args, { cwd: repo, encoding: "utf8" });
   git("init", "-q", "-b", "main");
   git("config", "user.email", "t@t");
@@ -828,4 +828,10 @@ test("code_run names what is missing instead of guessing: no such agent, no repo
   expect(s.git("branch", "--list").trim()).toBe("* main");
   const listed = await s.call("code_agents", {}, "list");
   expect(JSON.parse(listed.text)).toEqual([{ id: "omp", name: "omp", version: "9.9.9" }]);
+});
+
+test("code_run keeps worktrees beside a repository that already lives in a wt folder", async () => {
+  const s = await codingFixture([{ id: "omp" }], "wt/repo");
+  const report = JSON.parse((await s.call("code_run", { repo: s.repo, task: "Add b", branch: "nested" }, "nested")).text);
+  expect(report.worktree).toBe(join(s.scopeDir, "wt", "repo-nested"));
 });

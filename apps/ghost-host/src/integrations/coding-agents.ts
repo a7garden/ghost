@@ -1,6 +1,6 @@
 import { accessSync, constants, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { CodingAgentId, CodingAgentInfo, CodingAgentPort } from "./ports.ts";
 
 /** Non-interactive invocation of each supported coding agent; the prompt is one argv word, never a shell string. */
@@ -25,8 +25,10 @@ const isExecutable = (path: string) => {
   }
 };
 
-async function versionOf(path: string): Promise<string | null> {
-  const child = Bun.spawn([path, "--version"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+/** An agent can be a script whose interpreter sits beside it (`#!/usr/bin/env node`), so the probe's PATH starts with its own directory. */
+async function versionOf(path: string, searchDirs: string[]): Promise<string | null> {
+  const env = { ...process.env, PATH: [dirname(path), ...searchDirs, "/usr/bin", "/bin"].join(":") };
+  const child = Bun.spawn([path, "--version"], { stdout: "pipe", stderr: "ignore", stdin: "ignore", env });
   const timer = setTimeout(() => child.kill(), 5_000);
   try {
     const out = await new Response(child.stdout).text();
@@ -59,7 +61,7 @@ export class CodingAgents implements CodingAgentPort {
       for (const dir of this.dirs) {
         const path = join(dir, id);
         if (!isExecutable(path)) continue;
-        const version = await versionOf(path);
+        const version = await versionOf(path, this.dirs);
         if (version !== null) return { id, name: ADAPTERS[id].name, path, version: version || null };
       }
       return null;
