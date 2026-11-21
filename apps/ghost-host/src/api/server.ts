@@ -26,6 +26,8 @@ import {
   type CodingSessionDetail,
   type CodingSessionList,
   type CodingPrefs,
+  CodingSessionMessage,
+  CodingSessionStart,
   type SkillCatalog,
   parse,
 } from "@ghost/contract";
@@ -38,7 +40,7 @@ import { CloudflareAccessVerifier } from "./cloudflare-access.ts";
 import { Access } from "../core/access.ts";
 import { execute, hashSecret } from "../core/commands.ts";
 import type { Core } from "../core/core.ts";
-import { CommandError, notFound } from "../core/errors.ts";
+import { CommandError, invalid, notFound } from "../core/errors.ts";
 import { newId } from "../core/ids.ts";
 import { HOST_VERSION, snapshot, workDetail } from "../core/state.ts";
 import { readMetrics } from "../core/metrics.ts";
@@ -551,6 +553,29 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       }
     }
 
+    // The owner drives coding from the app with no Ghost between: start a session, send a follow-up into a finished turn, stop a running one.
+    // Each answers with the session as it stands; follow it with the GET above.
+    if (pathname === "/api/coding-sessions" && request.method === "POST") {
+      try {
+        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
+        const body: unknown = await request.json().catch(() => { throw invalid("malformed JSON body"); });
+        return json(await coding.run.start(parse(CodingSessionStart, body)) satisfies CodingSessionDetail, 202);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+    const codingControl = /^\/api\/coding-sessions\/([0-9a-f]{32})\/(messages|stop)$/.exec(pathname);
+    if (codingControl !== null && request.method === "POST") {
+      try {
+        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
+        const id = codingControl[1]!;
+        if (codingControl[2] === "stop") return json(coding.run.stop(id) satisfies CodingSessionDetail);
+        const body: unknown = await request.json().catch(() => { throw invalid("malformed JSON body"); });
+        return json(await coding.run.send(id, parse(CodingSessionMessage, body).text) satisfies CodingSessionDetail, 202);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
     const providerOAuth = /^\/api\/providers\/([a-z0-9][a-z0-9_-]{0,63})\/oauth$/.exec(pathname);
     if (providerOAuth !== null) {
       try {

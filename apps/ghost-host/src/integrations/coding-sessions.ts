@@ -20,6 +20,7 @@ const Line = Type.Union([
   }),
   Type.Object({ t: Type.Literal("native"), id: Type.String() }),
   Type.Object({ t: Type.Literal("step"), at: Type.Integer(), kind: CodingStep.properties.kind, text: Type.String() }),
+  Type.Object({ t: Type.Literal("turn"), at: Type.Integer() }),
   Type.Object({ t: Type.Literal("end"), at: Type.Integer(), exitCode: Type.Integer() }),
 ]);
 type Line = Static<typeof Line>;
@@ -55,8 +56,22 @@ export class CodingSessions implements CodingSessionStore {
     const path = join(this.dir, `${id}.jsonl`);
     const start: Start = { t: "start", id, at: Date.now(), ...meta };
     writeFileSync(path, `${JSON.stringify(start)}\n`, { mode: 0o600 });
+    return this.writer(id, path, 0);
+  }
+
+  /** Carries a finished session on with another turn: the same file, the same agent conversation, running again. Null when it is unknown or still running. */
+  reopen(id: string): CodingSessionWriter | null {
+    if (this.fold(id) === null || this.live.has(id)) return null;
+    const path = join(this.dir, `${id}.jsonl`);
+    const size = statSync(path).size;
+    const writer = this.writer(id, path, size);
+    appendFileSync(path, `${JSON.stringify({ t: "turn", at: Date.now() } satisfies Line)}\n`);
+    return writer;
+  }
+
+  private writer(id: string, path: string, startSize: number): CodingSessionWriter {
     this.live.add(id);
-    let size = 0;
+    let size = startSize;
     let capped = false;
     const append = (line: Line) => {
       const text = `${JSON.stringify(line)}\n`;
@@ -142,6 +157,7 @@ export class CodingSessions implements CodingSessionStore {
       if (parsed.t === "start") start = parsed;
       else if (parsed.t === "native") nativeId = parsed.id;
       else if (parsed.t === "end") ended = parsed;
+      else if (parsed.t === "turn") ended = null;
       else steps.push({ at: parsed.at, kind: parsed.kind, text: parsed.text });
     }
     return start === null ? null : { start, nativeId, ended, steps };

@@ -806,6 +806,7 @@ async function codingFixture(agents: { id: "omp" | "claude" | "codex"; ready?: b
     command: (_agent, prompt, cwd, resume) => [script, prompt, cwd, ...(resume === null ? [] : [resume])],
     stream: (agent) => real.stream(agent),
     sessions: real.sessions,
+    run: real.run,
   };
   const tools = createCodingTools(s.core, coding).tools!;
   const call = async (name: string, args: object, callId: string) => {

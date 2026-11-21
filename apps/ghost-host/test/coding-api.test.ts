@@ -18,7 +18,7 @@ test("the owner sees what the Host found, picks a default and switches an agent 
   ];
   const looks: boolean[] = [];
   const real = new CodingAgents(join(tempDir(), "coding-sessions"));
-  const coding: CodingAgentPort = { detect: async (refresh = false) => { looks.push(refresh); return agents; }, command: () => [], stream: (agent) => real.stream(agent), sessions: real.sessions };
+  const coding: CodingAgentPort = { detect: async (refresh = false) => { looks.push(refresh); return agents; }, command: () => [], stream: (agent) => real.stream(agent), sessions: real.sessions, run: real.run };
   const h = harness(":memory:");
   const config: Config = { root: tempDir(), host: "127.0.0.1", port: 0, publicOrigin: "http://127.0.0.1", uiDir: null, sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null };
   const server = startServer({ core: h.core, config, ownerToken: OWNER, documents: null, skills: null, coding });
@@ -65,7 +65,7 @@ test("a Host with no coding agents port says so", async () => {
 test("the owner reads each coding session and follows a running one from where they left off", async () => {
   const h = harness(":memory:");
   const real = new CodingAgents(join(tempDir(), "coding-sessions"));
-  const coding: CodingAgentPort = { detect: async () => [], command: () => [], stream: (agent) => real.stream(agent), sessions: real.sessions };
+  const coding: CodingAgentPort = { detect: async () => [], command: () => [], stream: (agent) => real.stream(agent), sessions: real.sessions, run: real.run };
   const config: Config = { root: tempDir(), host: "127.0.0.1", port: 0, publicOrigin: "http://127.0.0.1", uiDir: null, sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null };
   const server = startServer({ core: h.core, config, ownerToken: OWNER, documents: null, skills: null, coding });
   const get = (path: string, token?: string) => fetch(`http://127.0.0.1:${server.port}${path}`, { headers: token === undefined ? {} : { authorization: `Bearer ${token}` } });

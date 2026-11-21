@@ -30,10 +30,10 @@ export const CodingAgentsView = Type.Object({
 });
 export type CodingAgentsView = Static<typeof CodingAgentsView>;
 
-/** One thing a coding agent did, normalised across agents: what it said, a tool it called, what that returned, or a Host note. */
+/** One thing in a coding session, normalised across agents: what the agent said, a tool it called, what that returned, a Host note, or a message the owner sent into the session. */
 export const CodingStep = Type.Object({
   at: Timestamp,
-  kind: Type.Union([Type.Literal("say"), Type.Literal("tool"), Type.Literal("result"), Type.Literal("note")]),
+  kind: Type.Union([Type.Literal("say"), Type.Literal("tool"), Type.Literal("result"), Type.Literal("note"), Type.Literal("user")]),
   text: Type.String({ maxLength: 4096 }),
 });
 export type CodingStep = Static<typeof CodingStep>;
@@ -69,3 +69,22 @@ export const CodingSessionDetail = Type.Object({
   next: Type.Integer({ minimum: 0 }),
 });
 export type CodingSessionDetail = Static<typeof CodingSessionDetail>;
+
+/**
+ * The owner starts a session in the app, with no Ghost between: a repository (or any directory), the first instruction
+ * and, optionally, the agent, a branch name, whether to work in a fresh worktree (default yes in a git repository)
+ * and an agent session already begun elsewhere to carry on (`resume`, with `repo` its working directory).
+ */
+export const CodingSessionStart = Type.Object({
+  repo: Type.String({ minLength: 1, maxLength: 4096 }),
+  task: Type.String({ minLength: 1, maxLength: 24_000 }),
+  agent: Type.Optional(CodingAgentId),
+  branch: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+  worktree: Type.Optional(Type.Boolean()),
+  resume: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9._-]{1,128}$" })),
+});
+export type CodingSessionStart = Static<typeof CodingSessionStart>;
+
+/** A follow-up the owner sends into a session that is not running: it continues the same agent conversation in the same directory. */
+export const CodingSessionMessage = Type.Object({ text: Type.String({ minLength: 1, maxLength: 24_000 }) });
+export type CodingSessionMessage = Static<typeof CodingSessionMessage>;

@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import { validate, type CodingAgentId, type CodingPrefs } from "@ghost/contract";
 import type { CodingAgentInfo, CodingAgentPort, CodingEvent, CodingStream } from "./ports.ts";
 import { CodingSessions } from "./coding-sessions.ts";
+import { CodingRunner } from "./coding-runner.ts";
 
 type Readiness = Pick<CodingAgentInfo, "ready" | "note">;
 
@@ -280,13 +281,15 @@ export class CodingAgents implements CodingAgentPort {
   private cached: { at: number; agents: CodingAgentInfo[] } | null = null;
   private readonly dirs: string[];
   readonly sessions: CodingSessions;
+  readonly run: CodingRunner;
 
-  /** `sessionsDir` is where every run's session file goes. */
-  constructor(sessionsDir: string, options: { dirs?: string[] } = {}) {
+  /** `sessionsDir` is where every run's session file goes; `prefs` is the owner's choice of agents, read when a session starts. */
+  constructor(sessionsDir: string, options: { dirs?: string[]; prefs?: () => CodingPrefs } = {}) {
     const home = homedir();
     const path = (process.env.PATH ?? "").split(":").filter(Boolean);
     this.dirs = options.dirs ?? [...new Set([join(home, ".bun/bin"), join(home, ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", ...path])];
     this.sessions = new CodingSessions(sessionsDir);
+    this.run = new CodingRunner(this, options.prefs);
   }
 
   async detect(refresh = false): Promise<CodingAgentInfo[]> {

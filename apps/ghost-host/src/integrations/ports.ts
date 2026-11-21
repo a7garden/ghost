@@ -1,4 +1,4 @@
-import type { CodingAgentId, CodingSessionDetail, CodingSessionView, CodingStep, Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
+import type { CodingAgentId, CodingSessionDetail, CodingSessionStart, CodingSessionView, CodingStep, Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 
@@ -198,6 +198,7 @@ export interface CodingAgentPort {
   command(agent: CodingAgentInfo, prompt: string, cwd: string, resume: string | null): string[];
   stream(agent: CodingAgentInfo): CodingStream;
   readonly sessions: CodingSessionStore;
+  readonly run: CodingRunPort;
 }
 
 export interface CodingSessionOpen {
@@ -220,11 +221,26 @@ export interface CodingSessionWriter {
 /** Every `code_run` kept as a session the owner can read. Implemented in src/integrations/coding-sessions.ts. */
 export interface CodingSessionStore {
   open(meta: CodingSessionOpen): CodingSessionWriter;
+  /** Another turn of a finished session: its file and agent conversation, running again; null when unknown or still running. */
+  reopen(id: string): CodingSessionWriter | null;
   /** Newest first; with `workId`, only that Work's runs. */
   list(limit?: number, workId?: string): CodingSessionView[];
   get(id: string, after?: number): CodingSessionDetail | null;
   /** Where a session ran and the agent's own id for it, or null when it cannot be continued. */
   continuation(id: string): { agent: CodingAgentId; cwd: string; branch: string | null; base: string | null; nativeId: string } | null;
+}
+
+/**
+ * Sessions the owner drives from the app with no Ghost between: start one, send a follow-up into a finished turn,
+ * stop a running one. Each turn is one headless agent run; its steps go to the same session record the viewer reads.
+ * Implemented in src/integrations/coding-runner.ts.
+ */
+export interface CodingRunPort {
+  start(input: CodingSessionStart): Promise<CodingSessionDetail>;
+  send(id: string, text: string): Promise<CodingSessionDetail>;
+  stop(id: string): CodingSessionDetail;
+  /** Ends every running turn: the Host is shutting down. */
+  stopAll(): void;
 }
 
 /** The owner's skill folders, read-only. Implemented in src/integrations/skills.ts. */
