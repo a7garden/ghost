@@ -20,8 +20,15 @@ live in `apps/ghost-ui`; this app owns only what a web page cannot.
   script on the paired origin's main frame.
 - **Notifications.** Permission, APNs registration, and push taps. A tap becomes a
   `notification.open` page event; the web UI routes it exactly as its inbox does.
-- **The two moments the page cannot draw.** First load (the Ghost mark with a travelling
-  arc) and an unreachable Host (retry, or forget the connection).
+- **The moments the page cannot draw.** Launch, first load and an unreachable Host
+  (retry, or forget the connection). Launch and first load are one picture: the face from
+  the app icon (a disc with two bar eyes and a small mouth, cut in the canvas colour) alone
+  in the middle of the whole screen, no words. The launch screen is the canvas colour and
+  `LaunchMark` (declared as `UILaunchScreen` in `App/Info.plist`, light and dark); the first-load
+  view draws the same mark at the same size and place, so the mark never moves and only gains
+  the icon's blue working arc, which fades in and travels once around it every 1.6 s (Reduce
+  Motion keeps it still). `LaunchMark` is rendered by `scripts/render-launch-mark.swift`; run
+  it again when `GhostMark`'s proportions or the canvas and ink tokens change.
 
 ## Shell rules
 

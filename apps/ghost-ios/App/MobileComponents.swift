@@ -1,50 +1,62 @@
 import SwiftUI
 
-// The few native surfaces left in the shell (pairing, unreachable host) share these.
+// The few native surfaces left in the shell (first load, unreachable host, pairing) share these.
 
+/// The face from the app icon: a disc with two bar eyes and a small mouth, so the first thing on screen is the
+/// icon that was tapped. `size` is the disc's diameter and the proportions are the icon's, in units of it. The
+/// face is cut in the canvas colour, so it reads on light and dark; the launch screen image
+/// (`Assets.xcassets/LaunchMark`) is this same drawing and must stay in step with it.
 struct GhostMark: View {
+    /// The mark's size on the launch screen and the first-load view; `LaunchMark` in the asset catalog is drawn at it.
+    static let launchSize: CGFloat = 112
     var size: CGFloat = 36
     var body: some View {
-        GhostSilhouette()
-            .fill(GhostStyle.ink, style: FillStyle(eoFill: true))
-            .frame(width: size * 0.56, height: size * 0.64)
-            .frame(width: size, height: size)
-            .background(GhostStyle.under, in: RoundedRectangle(cornerRadius: size * 0.34))
-            .accessibilityHidden(true)
-    }
-}
-
-// A small, original vector mark, shared with the generated app icon.
-struct GhostSilhouette: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height) }
-        p.move(to: point(0.05, 0.94))
-        p.addLine(to: point(0.05, 0.43))
-        p.addCurve(to: point(0.5, 0.02), control1: point(0.05, 0.18), control2: point(0.23, 0.02))
-        p.addCurve(to: point(0.95, 0.43), control1: point(0.77, 0.02), control2: point(0.95, 0.18))
-        p.addLine(to: point(0.95, 0.94))
-        p.addQuadCurve(to: point(0.73, 0.84), control: point(0.85, 1.02))
-        p.addQuadCurve(to: point(0.5, 0.96), control: point(0.62, 1.02))
-        p.addQuadCurve(to: point(0.27, 0.84), control: point(0.38, 1.02))
-        p.addQuadCurve(to: point(0.05, 0.94), control: point(0.15, 1.02))
-        p.closeSubpath()
-        for x: CGFloat in [0.30, 0.59] {
-            p.addRoundedRect(in: CGRect(x: rect.minX + x * rect.width, y: rect.minY + 0.36 * rect.height, width: 0.11 * rect.width, height: 0.18 * rect.height), cornerSize: CGSize(width: rect.width * 0.055, height: rect.width * 0.055))
+        ZStack {
+            Circle().fill(GhostStyle.ink)
+            ForEach([-1.0, 1.0], id: \.self) { side in
+                Capsule().fill(GhostStyle.canvas)
+                    .frame(width: size * 0.170, height: size * 0.058)
+                    .offset(x: side * size * 0.167, y: -size * 0.158)
+            }
+            Circle().fill(GhostStyle.canvas).frame(width: size * 0.066).offset(y: -size * 0.012)
         }
-        return p
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 
-struct TravellingArc: View {
+/// The icon's blue working arc travelling once around the mark every 1.6 s, fading in where the icon draws it.
+/// With Reduce Motion it stays there.
+struct WorkingArc: View {
+    let size: CGFloat
     var color = GhostStyle.signal
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var start = Date()
+    @State private var shown = false
+
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
-            Circle().trim(from: 0.05, to: 0.75)
-                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(reduceMotion ? -90 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4 * 360))
-        }.accessibilityHidden(true)
+            let turn = reduceMotion ? 0 : (timeline.date.timeIntervalSince(start) / 1.6).truncatingRemainder(dividingBy: 1)
+            Circle().trim(from: 0, to: 95.0 / 360)
+                .stroke(color, style: StrokeStyle(lineWidth: size * 0.054, lineCap: .round))
+                .frame(width: size * 1.19, height: size * 1.19)
+                .rotationEffect(.degrees(-62 + turn * 360))
+        }
+        .frame(width: size * 1.3, height: size * 1.3)
+        .opacity(shown ? 1 : 0)
+        .onAppear { withAnimation(.easeOut(duration: 0.3)) { shown = true } }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The mark with its working arc, for a moment the owner waits through.
+struct GhostWorking: View {
+    let size: CGFloat
+    var body: some View {
+        ZStack {
+            GhostMark(size: size)
+            WorkingArc(size: size)
+        }
     }
 }
 

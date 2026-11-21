@@ -162,10 +162,7 @@ private struct ConnectingState: View {
     let origin: URL?
     var body: some View {
         VStack(spacing: 14) {
-            ZStack {
-                GhostMark(size: 52)
-                TravellingArc().frame(width: 64, height: 64)
-            }
+            GhostWorking(size: 52)
             Text("연결하는 중").font(.headline)
             if let host = origin?.host() {
                 Text(host).font(.footnote.monospaced()).foregroundStyle(GhostStyle.secondary)

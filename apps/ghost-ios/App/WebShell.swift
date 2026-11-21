@@ -60,14 +60,15 @@ struct WebShellView: View {
         await model.retryPendingPushToken()
     }
 
+    /// Same size and place as the launch screen's mark (the middle of the whole screen, not of the safe area), so
+    /// the app opens on one still mark that only gains the working arc.
     private var loading: some View {
-        ZStack {
-            GhostMark(size: 56)
-            TravellingArc().frame(width: 84, height: 84)
-        }
-        .accessibilityElement()
-        .accessibilityLabel("PC Ghost를 여는 중")
-        .accessibilityIdentifier("shell-loading")
+        GhostWorking(size: GhostMark.launchSize)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+            .accessibilityElement()
+            .accessibilityLabel("PC Ghost를 여는 중")
+            .accessibilityIdentifier("shell-loading")
     }
 
     private var unreachable: some View {
