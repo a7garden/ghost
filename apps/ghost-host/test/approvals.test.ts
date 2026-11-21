@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { reviewOf, type ApprovalPolicy, type Ghost } from "@ghost/contract";
 import { join } from "node:path";
 import type { Core } from "../src/core/core.ts";
-import { harness, tempDir } from "./support.ts";
+import { harness, sentMail, tempDir } from "./support.ts";
 import { approvalRules } from "../src/core/policy.ts";
 
 const MINUTE = 60_000;
@@ -298,6 +298,7 @@ describe("accepting a result for the owner", () => {
       originConversationId: t.mate.directConversationId,
     });
     await t.core.idle();
+    sentMail(t.ledger, work.id);
     t.core.works.complete(work.id, { summary: "Wrote the file.", artifacts: [] });
     await t.core.idle();
     const decision = t.ledger.pendingDecisions({ workId: work.id })[0]!;
@@ -344,6 +345,7 @@ describe("accepting a result for the owner", () => {
     const t = await team();
     const work = t.core.works.createRoot({ ghostId: t.mate.id, title: "Free", brief: "B", originConversationId: t.mate.directConversationId });
     await t.core.idle();
+    sentMail(t.ledger, work.id);
     t.core.works.complete(work.id, { summary: "Done.", artifacts: [] });
     await t.core.idle();
     const decision = t.ledger.pendingDecisions({ workId: work.id }).find((item) => item.kind === "accept_result")!;
@@ -377,6 +379,7 @@ describe("accepting a result for the owner", () => {
     const t = await team();
     const work = t.core.works.createRoot({ ghostId: t.main.id, title: "Own", brief: "B", originConversationId: t.main.directConversationId });
     await t.core.idle();
+    sentMail(t.ledger, work.id);
     t.core.works.complete(work.id, { summary: "s", artifacts: [] });
     await t.core.idle();
     const decision = t.ledger.pendingDecisions({ workId: work.id }).find((item) => item.kind === "accept_result")!;
@@ -467,6 +470,7 @@ describe("one owner alert per decision", () => {
       originConversationId: t.mate.directConversationId,
     });
     await t.core.idle();
+    sentMail(t.ledger, work.id);
     t.core.works.complete(work.id, { summary: "Wrote a file.", artifacts: [] });
     await t.core.idle();
     const first = t.ledger.pendingDecisions({ workId: work.id })[0]!;

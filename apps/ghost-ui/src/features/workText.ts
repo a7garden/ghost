@@ -49,6 +49,7 @@ const RESTATED = /^(Accepted by the owner\.|accepted by the owner before import|
 export function readVerdict(verdict: Verdict, decisions: Decision[]): { judge: string; note: string | null } {
   if (verdict.source === 'checks') return { judge: '확인 규칙', note: RESTATED.test(verdict.reasons.trim()) ? null : verdict.reasons.trim() || null };
   if (verdict.source === 'review') return { judge: '검토', note: verdict.reasons.trim() || null };
+  if (verdict.source === 'host') return { judge: '자동 수용', note: null };
   const card = decisions.find(decision => decision.kind === 'accept_result' && decision.resolvedAt === verdict.at);
   const review = card ? reviewOf(card.proposal) : null;
   if (review?.resolvedBy === 'main') return { judge: '메인 Ghost', note: review.mainNote?.trim() || null };

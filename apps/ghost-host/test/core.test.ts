@@ -8,7 +8,7 @@ import { Core } from "../src/core/core.ts";
 import { KnownOutcome } from "../src/core/effects.ts";
 import { digestOf } from "../src/core/ids.ts";
 import { snapshot } from "../src/core/state.ts";
-import { FakeEngine, MemorySecrets, harness, noSandbox, tempDir } from "./support.ts";
+import { FakeEngine, MemorySecrets, harness, noSandbox, sentMail, tempDir } from "./support.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
 import { MIGRATIONS } from "../src/ledger/schema.ts";
 import type { Submission } from "../src/core/ports.ts";
@@ -60,6 +60,7 @@ describe("root Work", () => {
     core.works.kick(work.id);
     core.works.kick(work.id);
     await core.idle();
+    sentMail(ledger, work.id);
 
     const running = ledger.work(work.id);
     expect(running.state).toBe("running");
@@ -89,6 +90,7 @@ describe("root Work", () => {
     const { core, ledger, engine, ghost } = setup();
     const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
     await core.idle();
+    sentMail(ledger, work.id);
     for (let round = 0; round <= core.ledger.limits().revisions; round++) {
       core.works.complete(work.id, { summary: `try ${round}`, artifacts: [] });
       await core.idle();

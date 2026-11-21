@@ -462,7 +462,8 @@ export type VerdictOutcome = Static<typeof VerdictOutcome>;
 
 export const Verdict = Type.Object({
   outcome: VerdictOutcome,
-  source: Type.Union([Type.Literal("checks"), Type.Literal("review"), Type.Literal("owner")]),
+  /** `host`: the Host accepted a result that touched nothing the owner owns (read-only Work), with no owner card. */
+  source: Type.Union([Type.Literal("checks"), Type.Literal("review"), Type.Literal("owner"), Type.Literal("host")]),
   reasons: Type.String({ maxLength: 8192 }),
   /** What the reviewer observed: failing check, file and line, expected vs actual. */
   evidence: Type.Optional(Type.String({ maxLength: 8192 })),

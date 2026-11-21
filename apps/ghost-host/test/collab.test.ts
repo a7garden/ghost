@@ -1021,6 +1021,7 @@ describe("structured verification and revision lessons", () => {
     expect(childReport.text).toContain("## Revision history");
     expect(childReport.text).toContain(recorded.evidence!);
     expect(childReport.text).toContain(recorded.scope!);
+    sentMail(s.ledger, s.parent.id);
     s.core.works.complete(s.parent.id, { summary: "Root first", artifacts: [] });
     await s.core.idle();
     s.core.works.applyVerdict(s.parent.id, { outcome: "revise", source: "owner", reasons: "Keep format stable", at: Date.now() });

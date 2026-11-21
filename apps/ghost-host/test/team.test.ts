@@ -61,6 +61,7 @@ function team(path?: string): Fixture {
   const main = h.core.createGhost({ name: "Main", persona: "You connect the team." });
   const alice = h.core.createGhost({ name: "Alice", persona: "You research." });
   const bob = h.core.createGhost({ name: "Bob", persona: "You implement.", model: { provider: "test", model: "test-model" } });
+  h.core.goals.create({ title: "Ship the export feature" });
   // Only the main is due in these scenarios; unrelated random first-look offsets cannot steal the hook.
   for (const ghost of [alice, bob]) h.ledger.putSetting(`autonomy:${ghost.id}`, { nextAt: Date.now() + 3 * 24 * 60 * MINUTE });
   const bind = (ghost: Ghost) => {

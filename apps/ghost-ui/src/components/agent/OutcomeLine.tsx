@@ -6,7 +6,7 @@ import { InlineText } from '../MessageBody';
 import { useHostSnapshot, useOpenWork } from './RefMark';
 import { StateGlyph, glyphLabel, glyphTone, type GlyphState } from './StateGlyph';
 
-const judge: Record<Verdict['source'], string> = { checks: '자동 검사', review: '검토 Ghost', owner: '직접 확인' };
+const judge: Record<Verdict['source'], string> = { checks: '자동 검사', review: '검토 Ghost', owner: '직접 확인', host: '자동 수용' };
 const ruling: Record<Verdict['outcome'], string> = { pass: '통과', revise: '수정 요청', fail: '불합격' };
 
 function duration(work: Work): string | null {

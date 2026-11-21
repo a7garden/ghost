@@ -120,6 +120,7 @@ describe("provider quota (R1)", () => {
       ]);
       const work = f.core.works.createRoot({ ghostId: f.ghost.id, title: "T", brief: "Do it.", originConversationId: f.ghost.directConversationId });
       await f.core.idle();
+      sentMail(f.ledger, work.id);
       const conversationId = f.ledger.work(work.id).conversationId!;
       await f.core.settled(conversationId);
 
@@ -172,6 +173,7 @@ describe("provider quota (R1)", () => {
       ]);
       const work = f.core.works.createRoot({ ghostId: f.ghost.id, title: "T", brief: "B", originConversationId: f.ghost.directConversationId });
       await f.core.idle();
+      sentMail(f.ledger, work.id);
       const conversationId = f.ledger.work(work.id).conversationId!;
       await f.core.settled(conversationId);
 
@@ -225,6 +227,7 @@ test("a newly available fallback releases a queued Work while an uncredentialed 
     f.faux.setResponses([error(), error()]);
     const work = f.core.works.createRoot({ ghostId: f.ghost.id, title: "Fallback", brief: "B", originConversationId: f.ghost.directConversationId });
     await f.core.idle();
+    sentMail(f.ledger, work.id);
     const id = f.ledger.work(work.id).conversationId!;
     await f.core.settled(id);
     const backup = fauxProvider({ provider: "backup", models: [{ id: "backup-1", name: "Backup" }] });

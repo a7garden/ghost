@@ -25,7 +25,7 @@ import { errorResult, requireAllowed } from "../src/tools/shared.ts";
 import { createAutonomyTools } from "../src/tools/autonomy.ts";
 import { markPolicyRead, policyTaint } from "../src/core/policy-context.ts";
 import type { ToolSet } from "../src/tools/types.ts";
-import { harness, MemoryArtifacts, MemorySecrets, noSandbox } from "./support.ts";
+import { harness, MemoryArtifacts, MemorySecrets, noSandbox, sentMail } from "./support.ts";
 
 const sandbox: SandboxEnvFactory = {
   async envFor() { throw new Error("This fixture never runs commands"); },
@@ -660,12 +660,12 @@ test("explicit model review can settle in a separate read-only conversation owne
   } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
 });
 
-test("model review still refuses missing review execution, a producer conversation, or a conflicting model override", async () => {
-  for (const defect of ["missing", "producer", "override"] as const) {
+test("model review still refuses a producer conversation or a conflicting model override", async () => {
+  for (const defect of ["producer", "override"] as const) {
     const h = harness();
     try {
       const ghost = h.core.createGhost({ name: "Only Ghost", persona: "" });
-      const work = h.core.works.createRoot({ ghostId: ghost.id, title: "Bound review", brief: "Read", originConversationId: ghost.directConversationId, acceptance: { criteria: "Cite evidence", checks: [], reviewer: defect === "missing" ? null : { kind: "model", model: { provider: "review", model: "independent" } } } });
+      const work = h.core.works.createRoot({ ghostId: ghost.id, title: "Bound review", brief: "Read", originConversationId: ghost.directConversationId, acceptance: { criteria: "Cite evidence", checks: [], reviewer: { kind: "model", model: { provider: "review", model: "independent" } } } });
       await h.core.idle();
       h.core.works.complete(work.id, { summary: "Evidence", artifacts: [] });
       await h.core.idle();
@@ -675,6 +675,30 @@ test("model review still refuses missing review execution, a producer conversati
       h.core.works.applyVerdict(work.id, { outcome: "pass", source: "review", reasons: "Unproven", at: Date.now() });
       expect(h.ledger.work(work.id).state).toBe("verifying");
       expect(h.ledger.pendingDecisions({ workId: work.id }).some(decision => decision.kind === "accept_result")).toBe(true);
+    } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
+  }
+});
+
+test("a Work that touched nothing the owner owns is accepted by the Host; one that sent mail still waits for the owner", async () => {
+  for (const touched of [false, true]) {
+    const h = harness();
+    try {
+      const ghost = h.core.createGhost({ name: "Only Ghost", persona: "" });
+      const work = h.core.works.createRoot({ ghostId: ghost.id, title: "Look into it", brief: "Read", originConversationId: ghost.directConversationId });
+      await h.core.idle();
+      if (touched) {
+        sentMail(h.ledger, work.id);
+      }
+      h.core.works.complete(work.id, { summary: "Findings", artifacts: [] });
+      await h.core.idle();
+      const cards = h.ledger.pendingDecisions({ workId: work.id }).filter(decision => decision.kind === "accept_result");
+      if (touched) {
+        expect(h.ledger.work(work.id).state).toBe("verifying");
+        expect(cards).toHaveLength(1);
+      } else {
+        expect(h.ledger.work(work.id)).toMatchObject({ state: "done", verdict: { outcome: "pass", source: "host" } });
+        expect(cards).toHaveLength(0);
+      }
     } finally { h.core.stop(); await h.core.idle(); h.ledger.close(); }
   }
 });

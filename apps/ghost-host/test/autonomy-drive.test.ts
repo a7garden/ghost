@@ -9,7 +9,7 @@ import { FakeEngine, MemoryArtifacts, MemorySecrets, noSandbox, tempDir } from "
 
 const MINUTE = 60_000;
 
-function fixture(options: { onHead?: (path: string) => void; onCommits?: () => Promise<void> } = {}) {
+function fixture(options: { onHead?: (path: string) => void; onCommits?: () => Promise<void>; goal?: boolean } = {}) {
   const heads = new Map<string, string>();
   const ledger = new Ledger(":memory:");
   const core = new Core({
@@ -30,6 +30,7 @@ function fixture(options: { onHead?: (path: string) => void; onCommits?: () => P
   const model = { provider: "test", model: "test-model" };
   const main = core.createGhost({ name: "Main", persona: "Lead", model, isDefault: true });
   const mate = core.createGhost({ name: "Mate", persona: "Research", model });
+  if (options.goal !== false) core.goals.create({ title: "Ship the export feature" });
   const plan = (ghostId: string) => core.autonomy.view().find((item) => item.ghostId === ghostId)!;
   const wakes = (ghostId: string) => engine.to(ledger.ghost(ghostId).directConversationId);
   const setBusy = (ghostId: string, busy: boolean) => {
@@ -109,6 +110,40 @@ test("a Ghost's planned time wakes it once in its direct conversation; without a
   expect(wake).toMatchObject({ origin: "schedule", requestId: `autonomy:${f.mate.id}:1:${first}` });
   expect(wake!.text.startsWith("[Autonomous wake]")).toBe(true);
   expect(f.plan(f.mate.id)).toMatchObject({ nextAt: first + 24 * 60 * MINUTE, setBy: "host", lastWakeAt: first, wakesToday: 1 });
+});
+
+test("with no open owner goal and nothing in flight a due plan wakes nobody, and its stale intent is dropped; a goal or a teammate's plan wakes it again", async () => {
+  const f = fixture({ goal: false });
+  try {
+    const start = day(9);
+    await f.core.autonomy.tick(start);
+    const first = f.plan(f.mate.id).nextAt!;
+    await f.core.autonomy.plan(f.mate, f.mate.id, { at: first + 20 * MINUTE, intent: "Look into the packaging failure" }, first);
+    await f.core.autonomy.tick(first + 21 * MINUTE);
+    expect(f.wakes(f.mate.id)).toEqual([]);
+    expect(f.plan(f.mate.id)).toMatchObject({ intent: "", setBy: "host", nextAt: first + 21 * MINUTE + 24 * 60 * MINUTE });
+
+    const due = f.plan(f.mate.id).nextAt!;
+    f.core.goals.create({ title: "Ship the export feature" });
+    await f.core.autonomy.tick(due);
+    await f.core.autonomy.tick(due + MINUTE);
+    expect(f.wakes(f.mate.id)).toHaveLength(1);
+
+    const g = fixture({ goal: false });
+    try {
+      await g.core.autonomy.plan(g.main, g.mate.id, { at: day(12), intent: "Compare the two export libraries" }, day(10));
+      await g.core.autonomy.tick(day(12));
+      expect(g.wakes(g.mate.id)).toHaveLength(1);
+    } finally {
+      await g.core.idle();
+      g.core.stop();
+      g.ledger.close();
+    }
+  } finally {
+    await f.core.idle();
+    f.core.stop();
+    f.ledger.close();
+  }
 });
 
 test("plans are bounded, the main Ghost may plan a teammate, and an owner switch-off stops both plans and wakes", async () => {

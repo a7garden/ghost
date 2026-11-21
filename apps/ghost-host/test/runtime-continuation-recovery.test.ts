@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { Core } from "../src/core/core.ts";
 import type { ArtifactStore } from "../src/core/ports.ts";
 import { Ledger } from "../src/ledger/ledger.ts";
-import { FakeEngine, harness, MemorySecrets, noSandbox, tempDir } from "./support.ts";
+import { FakeEngine, harness, MemorySecrets, noSandbox, sentMail, tempDir } from "./support.ts";
 
 async function restart(path: string, artifacts: ArtifactStore, previous: FakeEngine) {
   const ledger = new Ledger(path);
@@ -24,6 +24,7 @@ test("a completed extension cannot shadow a newer revise verdict lost before adm
   const ghost = f.core.createGhost({ name: "G", persona: "" });
   const work = f.core.works.createRoot({ ghostId: ghost.id, title: "Task", brief: "B", originConversationId: ghost.directConversationId });
   await f.core.idle();
+  sentMail(f.ledger, work.id);
   const conversationId = f.ledger.work(work.id).conversationId!;
   f.core.works.pauseForBudget(work.id);
   await f.core.idle();

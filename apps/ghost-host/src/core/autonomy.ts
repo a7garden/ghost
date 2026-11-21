@@ -326,6 +326,13 @@ export class Autonomy {
       const due = now >= plan.nextAt;
       const early = !due && moved.length > 0 && (plan.lastWakeAt === null || now - plan.lastWakeAt >= WATCH_GAP);
       if (!due && !early) continue;
+      // With no open owner goal and nothing in flight, a plan's own clock is not a reason to wake: a change in a watched project, the owner or a teammate is.
+      // The plan's text is dropped with the wake it asked for, so a stale intent cannot come back when a goal appears.
+      if (due && moved.length === 0 && plan.setBy !== "main" && !this.core.goals.goals().some((goal) => goal.state === "active")
+        && !ledger.worksInState("queued", "running", "waiting", "verifying", "blocked").some((work) => work.ghostId === ghost.id)) {
+        this.update(ghost.id, (stored) => (stored.revision === plan.revision ? { ...stored, nextAt: now + FALLBACK, intent: "", setBy: "host" } : stored));
+        continue;
+      }
       if (wakesToday >= this.core.ledger.limits().dailyWakes) {
         if (due) {
           const tomorrow = new Date(now);

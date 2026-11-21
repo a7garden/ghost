@@ -101,6 +101,15 @@ export function tempDir() {
   return mkdtempSync(join(tmpdir(), "ghost-"));
 }
 
+/** A finished mail in the Work's conversation: the one kind of Work the Host never accepts for the owner. */
+export function sentMail(ledger: Ledger, workId: string) {
+  const work = ledger.work(workId);
+  ledger.tx(() => ledger.putEffect({
+    id: crypto.randomUUID(), conversationId: work.conversationId!, workId, callId: `mail-${crypto.randomUUID()}`,
+    tool: "mail_send", summary: "Mail to a customer", inputDigest: "0".repeat(64), state: "done", result: "sent", createdAt: 1, endedAt: 2,
+  }));
+}
+
 /** A Core over a fresh ledger with a fake engine attached. */
 export function harness(path = ":memory:", artifacts: ArtifactStore = new MemoryArtifacts()) {
   const ledger = new Ledger(path);

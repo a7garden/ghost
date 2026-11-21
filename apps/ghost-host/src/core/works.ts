@@ -22,6 +22,8 @@ interface WorkContinuation {
 }
 
 const EMPTY_ACCEPTANCE: Acceptance = { criteria: "", checks: [], reviewer: null };
+/** Journaled tools a Work may use and still be accepted without the owner: shell lines in its own staging workspace. */
+const STAGING_EFFECTS: Record<string, boolean> = { bash: true };
 
 export const isTerminal = (work: Work) => TERMINAL_WORK_STATES.includes(work.state);
 
@@ -675,7 +677,7 @@ export class Works {
         return work;
       }
     }
-    if (verdict.outcome === "pass" && work.conversationId) {
+    if (verdict.outcome === "pass" && work.conversationId && verdict.source !== "host") {
       const receipt = this.ledger.tx(() => {
         const key = `policy:acceptance:${work.id}:${workExecutionIdentity(this.ledger, work)}`;
         const prior = this.ledger.setting<PolicyReceipt | null>(key, null);
@@ -1163,6 +1165,12 @@ export class Works {
     const reviewer = work.acceptance.reviewer;
     if (reviewer || work.parentId) {
       await this.startReview(work, this.reviewerGhost(work));
+      return;
+    }
+    // A result that touched nothing the owner owns is not worth a card: no PC and no journaled effect beyond shell lines in the Work's own workspace.
+    // The owner still sees the finished Work and its summary; a change to their repositories or Mac keeps the owner's acceptance.
+    if (work.execution?.kind !== "host" && this.ledger.effectsForWork(work.id).every((effect) => STAGING_EFFECTS[effect.tool])) {
+      this.applyVerdict(work.id, { outcome: "pass", source: "host", reasons: "No PC access and no effect beyond the Work's own shell lines; the owner's repositories and Mac were not touched.", at: Date.now() });
       return;
     }
     this.ledger.tx(() => this.core.decisions.openAcceptance(work, null));
