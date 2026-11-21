@@ -384,8 +384,8 @@ describe("effects", () => {
     expect(engine.to(conversationId).at(-1)?.text).toContain("Outcome uncertain");
   });
 
-  test("an uncertain shell that could reach the network stays with the owner and never replays", async () => {
-    const { core, ledger } = harness();
+  test("an uncertain shell goes back to the Ghost even when it could reach the network, and never replays", async () => {
+    const { core, ledger, engine } = harness();
     const ghost = core.createGhost({ name: "G", persona: "" });
     const work = core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId, execution: { kind: "workspace" } });
     await core.idle();
@@ -399,9 +399,34 @@ describe("effects", () => {
     });
     core.effects.returnSelfCheckable();
     await core.idle();
-    expect(ledger.decision("networked").state).toBe("pending");
-    expect(ledger.effect(start.effect.id).state).toBe("unknown");
-    expect(ledger.work(work.id).state).toBe("blocked");
+    expect(ledger.decision("networked").state).toBe("cancelled");
+    expect(ledger.effect(start.effect.id).state).toBe("done");
+    expect(ledger.work(work.id).state).toBe("running");
+    expect(engine.to(conversationId).at(-1)?.text).toContain("Outcome uncertain");
+  });
+
+  test("a Mac command or coding run interrupted by a restart is the Ghost's to check, not a question to the owner", async () => {
+    const path = join(tempDir(), "ledger.db");
+    const first = harness(path);
+    const ghost = first.core.createGhost({ name: "G", persona: "" });
+    const work = first.core.works.createRoot({ ghostId: ghost.id, title: "T", brief: "B", originConversationId: ghost.directConversationId });
+    await first.core.idle();
+    const conversationId = first.ledger.work(work.id).conversationId!;
+    // The shape a Mac shell line leaves: an irreversible write on the Mac that may reach the network.
+    first.core.effects.begin({ conversationId, callId: "c1", tool: "bash", input: { command: "git ls-remote origin; echo $?" }, summary: "git ls-remote origin",
+      classification: { target: { kind: "mac", id: "/Users/owner/project" }, access: "write", reversible: false, external: true, amount: null } });
+    first.ledger.close();
+
+    const second = harness(path);
+    second.core.effects.recoverInterrupted();
+    expect(second.ledger.pendingDecisions({ workId: work.id })).toHaveLength(0);
+    expect(second.ledger.work(work.id).state).not.toBe("blocked");
+    const effect = second.ledger.effectByCall(conversationId, "c1")!;
+    expect(effect.state).toBe("done");
+    expect(effect.result).toContain("Check what it did yourself");
+    // Nothing is left unresolved, so the next step is not held back by it.
+    expect(second.core.effects.begin({ conversationId, callId: "c2", tool: "bash", input: { command: "true" }, summary: "true",
+      classification: { target: { kind: "mac", id: "/Users/owner/project" }, access: "write", reversible: false, external: true, amount: null } }).kind).toBe("run");
   });
 
   test("an effect interrupted by a restart blocks the Work until the owner reconciles it", async () => {

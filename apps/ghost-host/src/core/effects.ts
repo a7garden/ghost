@@ -1,10 +1,16 @@
-import { GHOST_TOOLS, TERMINAL_WORK_STATES, matchesToolPatterns, type Effect } from "@ghost/contract";
+import { GHOST_TOOLS, TERMINAL_WORK_STATES, matchesToolPatterns, type Effect, type EffectTargetKind } from "@ghost/contract";
 import type { Core } from "./core.ts";
 import { CommandError, conflict } from "./errors.ts";
 import { digestOf, newId } from "./ids.ts";
 import { classifyEffect, evaluateStoredPolicy, workExecutionIdentity, type ObservedEffect, type PolicyReceipt } from "./policy-context.ts";
 
 const MAX_RESULT = 16_384;
+
+/** Where the Ghost reaches with its own tools, so it can inspect what an interrupted effect did there. */
+const GHOST_INSPECTS: Record<EffectTargetKind, boolean> = {
+  workspace: true, scope_path: true, mac: true, document_vault: true,
+  connection: false, mcp_server: false, browser_origin: false, mail_account: false, host: false,
+};
 
 export interface BeginEffect {
   conversationId: string;
@@ -136,18 +142,24 @@ export class Effects {
     // 2026-11-10: the owner was asked "did write happen?" and the Work waited on it. A change the Ghost can
     // look at itself is recorded as uncertain and handed back to it; it never runs again on its own.
     if (current.state === "pending" && this.selfCheckable(current)) {
-      return this.settle(effectId, "done", `Outcome uncertain (${reason}). Inspect the result before relying on it. This call will never execute again.`);
+      return this.settle(effectId, "done", `Outcome uncertain (${reason}). Check what it did yourself with read-only steps before relying on it; the owner can see no more than you can. This call will never execute again; if it did not happen, do it again as a new step.`);
     }
     const effect = this.settle(effectId, "unknown", reason);
     this.escalate(effect);
     return effect;
   }
 
-  /** Everything a Ghost can look at itself: no owner reconciliation. */
+  /**
+   * Everything a Ghost can look at itself: no owner reconciliation. That is any effect on the Ghost's own side
+   * (workspace, scope paths, the Mac, the document vault), shell commands and `code_run` included: the Ghost checks a
+   * file, `git status` or `git ls-remote` as easily as the owner could. Outside effects the owner alone can see
+   * (`OWNER_CONFIRMS`: mail, services, purchases, clicks) and Host API commands stay with the owner.
+   */
   selfCheckable(effect: Effect): boolean {
+    if (effect.tool in OWNER_CONFIRMS || (COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool)) return false;
     const receipt = this.ledger.setting<PolicyReceipt | null>(`policy:effect:${effect.id}`, null);
-    if (receipt) return !receipt.classification.external && receipt.classification.reversible;
-    return !(effect.tool in OWNER_CONFIRMS) && !(COMMAND_EFFECT_TOOLS as readonly string[]).includes(effect.tool) && ["write", "edit", "publish_artifact", "document_write"].includes(effect.tool);
+    if (receipt) return GHOST_INSPECTS[receipt.classification.target.kind] || (!receipt.classification.external && receipt.classification.reversible);
+    return ["write", "edit", "publish_artifact", "document_write"].includes(effect.tool);
   }
 
   /**
