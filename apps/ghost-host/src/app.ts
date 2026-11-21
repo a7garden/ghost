@@ -21,7 +21,7 @@ import { FileSecrets } from "./stores/secrets.ts";
 import { createVault, type Vault } from "./stores/vault.ts";
 import { acquireRootLock } from "./state-lock.ts";
 import { createToolSet } from "./tools/index.ts";
-import type { BrowserPort, DesktopPort, DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
+import type { BrowserPort, CodingAgentPort, DesktopPort, DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
 import { MacHost } from "./integrations/host.ts";
 import { CodingAgents } from "./integrations/coding-agents.ts";
 import { HostWatch } from "./core/hostwatch.ts";
@@ -41,6 +41,7 @@ export interface App {
   ledger: Ledger;
   documents: DocumentsPort;
   skills: SkillsPort | null;
+  coding: CodingAgentPort | null;
   host: HostPort | null;
   vault: Vault;
   /** Host-side Chrome; the owner's handoff live view reaches it through the API. */
@@ -180,6 +181,7 @@ export async function openApp(config: Config): Promise<App> {
       ledger,
       documents,
       skills,
+      coding,
       host,
       vault,
       browser,
@@ -241,7 +243,7 @@ export async function serve(config: Config) {
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, coding: app.coding, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });

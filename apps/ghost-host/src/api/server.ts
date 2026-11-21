@@ -22,11 +22,13 @@ import {
   type StreamFrame,
   type PageSummary,
   type PageView,
+  type CodingAgentsView,
+  type CodingPrefs,
   type SkillCatalog,
   parse,
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
-import type { BrowserPort, DocumentsPort, SkillsPort } from "../integrations/ports.ts";
+import type { BrowserPort, CodingAgentPort, DocumentsPort, SkillsPort } from "../integrations/ports.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
@@ -104,8 +106,8 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null }): { port: number; stop(): Promise<void> } {
-  const { core, config, ownerToken, documents, skills, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; coding?: CodingAgentPort | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null }): { port: number; stop(): Promise<void> } {
+  const { core, config, ownerToken, documents, skills, coding = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
@@ -508,6 +510,18 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
       try {
         if (!skills) throw new CommandError("unavailable", "skill folders are not configured");
         return json({ skills: skills.catalog() } satisfies SkillCatalog);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+
+    // The coding agents the Host found on its Mac and the owner's choice among them; `?refresh=1` looks again instead of using the minute cache.
+    if (pathname === "/api/coding-agents" && request.method === "GET") {
+      try {
+        if (!coding) throw new CommandError("unavailable", "coding agents are not available on this Host");
+        const prefs = core.ledger.setting<CodingPrefs>("coding", { default: null, disabled: [] });
+        const agents = await coding.detect(url.searchParams.get("refresh") === "1");
+        return json({ agents: agents.map(({ id, name, path, version, ready, note }) => ({ id, name, path, version, ready, note })), default: prefs.default, disabled: prefs.disabled } satisfies CodingAgentsView);
       } catch (caught) {
         return failure(caught);
       }

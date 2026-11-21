@@ -3,6 +3,7 @@ import type {
   ApiError,
   ArtifactRef,
   Command,
+  CodingAgentsView,
   CommandOf,
   ConnectionOAuthView,
   ConnectionOAuthClientInput,
@@ -199,6 +200,11 @@ export class HostClient {
   /** Skills a Ghost may be given (owner only); 404 or empty when no skill root is configured. */
   skills(): Promise<SkillCatalog> {
     return this.json('/api/skills');
+  }
+
+  /** The coding agents the Host found on its Mac and the owner's choice among them; `refresh` looks again. */
+  codingAgents(refresh = false): Promise<CodingAgentsView> {
+    return this.json(refresh ? '/api/coding-agents?refresh=1' : '/api/coding-agents');
   }
 
   /** The host's own release update state. */

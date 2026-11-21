@@ -1,4 +1,4 @@
-import type { Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
+import type { CodingAgentId, Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 
@@ -161,20 +161,22 @@ export interface HostPort {
   executeCommand(input: HostCommand, authorize?: () => void): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
 }
 
-export type CodingAgentId = "omp" | "claude" | "codex";
-
 export interface CodingAgentInfo {
   id: CodingAgentId;
   name: string;
   /** Absolute path of the executable the Host found. */
   path: string;
   version: string | null;
+  /** False when it is installed but cannot run a task now, such as a login that ended. */
+  ready: boolean;
+  /** Why it is not ready, or what the owner should know (a login that ends soon). */
+  note: string | null;
 }
 
 /** The coding agents installed on the owner's Mac. Implemented in src/integrations/coding-agents.ts. */
 export interface CodingAgentPort {
-  /** Agents found on this Mac, in preference order; cached briefly. */
-  detect(): Promise<CodingAgentInfo[]>;
+  /** Agents found on this Mac, in preference order; cached briefly unless `refresh`. */
+  detect(refresh?: boolean): Promise<CodingAgentInfo[]>;
   /** argv for one non-interactive run of a detected agent in `cwd`. */
   command(agent: CodingAgentInfo, prompt: string, cwd: string): string[];
 }

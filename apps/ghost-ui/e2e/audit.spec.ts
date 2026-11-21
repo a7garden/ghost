@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openScreen, screenshot, type Theme } from './visual';
 import { mockConversationActivity, mockIPhone, mockMessageNotification, mockRichConversation, showTranscriptElement } from './iphone-fixtures';
-import { mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
+import { mockCodingApi, mockStateDecisions, mockVaultApi, visualHandoffDecisionId, visualSecureDecisionId } from './mocks';
 import type { Decision, MemoryView } from '@ghost/contract';
 import { readRunState } from './run-state';
 
@@ -24,11 +24,12 @@ for (const theme of ['light', 'dark'] as const) {
       expect(await page.locator('header[data-tauri-drag-region]').evaluate(element => getComputedStyle(element).getPropertyValue('--ghost-titlebar-macos-inset').trim())).toBe('80px');
       await capture(page, 'tauri-home', theme, info.project.name);
     });
-    for (const tab of ['team', 'models', 'vault', 'devices', 'schedules', 'activities', 'connections', 'host', 'appearance']) {
+    for (const tab of ['team', 'models', 'vault', 'devices', 'schedules', 'activities', 'connections', 'host', 'coding', 'appearance']) {
       test(`settings ${tab}`, async ({ page }, info) => {
         await openScreen(page, { name: tab, route: () => `/settings?tab=${tab}`, waits: () => [], prepare: async page => {
           await mockIPhone(page);
           if (tab === 'vault') await mockVaultApi(page);
+          if (tab === 'coding') await mockCodingApi(page);
           if (tab === 'team') {
             const { defaultGhostId, fixedNow } = readRunState();
             await page.route(`**/api/memory/${defaultGhostId}`, route => route.fulfill({ json: {
@@ -49,6 +50,23 @@ for (const theme of ['light', 'dark'] as const) {
           await expect(conversation).toHaveAttribute('aria-pressed', 'false');
           await conversation.click();
           await expect(conversation).toHaveAttribute('aria-pressed', 'true');
+        }
+        if (tab === 'coding') {
+          const claude = page.getByRole('switch', { name: 'Claude Code 사용' });
+          await expect(claude).toBeChecked();
+          const saved = () => page.waitForRequest(request => request.url().endsWith('/api/commands') && request.postDataJSON()?.command?.type === 'coding.set');
+          const off = saved();
+          await claude.click();
+          expect((await off).postDataJSON().command).toMatchObject({ default: null, disabled: ['claude'] });
+          await expect(claude).not.toBeChecked();
+          const on = saved();
+          await claude.click();
+          expect((await on).postDataJSON().command).toMatchObject({ disabled: [] });
+          await expect(claude).toBeChecked();
+          const pick = saved();
+          await page.getByRole('button', { name: '기본으로' }).click();
+          expect((await pick).postDataJSON().command).toMatchObject({ default: 'claude', disabled: [] });
+          await expect(page.getByRole('button', { name: '기본으로' })).toHaveCount(1);
         }
         if (tab === 'models' && info.project.name === 'iphone') {
           const options = await page.getByRole('radiogroup', { name: '생각 수준' }).getByRole('radio').evaluateAll(elements =>

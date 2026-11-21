@@ -8,7 +8,9 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Core } from "../core/core.ts";
 import { KnownOutcome, NoEffect } from "../core/effects.ts";
 import { errorResult, requireAllowed, requireWork } from "./shared.ts";
-import type { CodingAgentInfo, CodingAgentPort } from "../integrations/ports.ts";
+import type { CodingAgentPort } from "../integrations/ports.ts";
+import { pickCodingAgent } from "../integrations/coding-agents.ts";
+import type { CodingPrefs } from "@ghost/contract";
 
 const text = (message: string): ToolExecutionResult => ({ content: [{ type: "text", text: message }] });
 
@@ -17,6 +19,7 @@ const MAX_MINUTES = 120;
 /** The agent's closing message is kept from the end of its output. */
 const SUMMARY_CHARS = 3_000;
 const GIT = "/usr/bin/git";
+const NO_PREFS: CodingPrefs = { default: null, disabled: [] };
 
 /** Guidance for a Ghost holding the coding tools: the Ghost scopes, verifies and integrates; the coding agent writes the code. */
 export const CODING_INSTRUCTIONS = `Repository code is written by a coding agent installed on the owner's Mac, the tool the owner codes with, not by you. code_agents lists what is installed. For a change in a repository, run code_run in an owner-PC Work with the repository path and a task that carries what the agent lacks: the goal, files to read first, decided interfaces, protected files, observable acceptance and the narrowest check. The Host puts the agent in a new branch and worktree, so the owner's checkout stays untouched. Its summary is a claim: read the diff and run the project's check yourself, then integrate by the project's own rules (its AGENTS.md says whether to merge and push) and remove the worktree and branch you created once merged. Do not edit repository files with write or edit, and do not write the code yourself when code_run fails; report what blocked it. Split work that needs more than about 30 minutes into several tasks.`;
@@ -72,14 +75,18 @@ async function openWorktree(git: Git, top: string, base: string, wanted: string)
 export function createCodingTools(core: Core, coding: CodingAgentPort): Extension {
   const agents = defineTool({
     name: "code_agents",
-    description: "List the coding agents installed on the owner's Mac (omp, Claude Code, Codex) with their versions, in preference order. code_run uses the first unless you name one.",
+    description: "List the coding agents installed on the owner's Mac (omp, Claude Code, Codex) with their versions, whether each is ready (an ended login makes it not ready), whether the owner turned it off, and which one code_run uses when you name none: the owner's default in Settings, else the first ready one.",
     parameters: Type.Object({}),
     replay: "safe",
     async execute(_args, api) {
       try {
         requireAllowed(core, api, "code_agents");
         const found = await coding.detect();
-        return text(found.length === 0 ? "No coding agent is installed on this Mac." : JSON.stringify(found.map(({ id, name, version }) => ({ id, name, version }))));
+        const prefs = core.ledger.setting<CodingPrefs>("coding", NO_PREFS);
+        const picked = pickCodingAgent(found, prefs);
+        return text(found.length === 0
+          ? "No coding agent is installed on this Mac."
+          : JSON.stringify({ agents: found.map(({ id, name, version, ready, note }) => ({ id, name, version, ready, note, enabled: !prefs.disabled.includes(id) })), usedByDefault: "agent" in picked ? picked.agent.id : null }));
       } catch (error) {
         return errorResult(error);
       }
@@ -93,7 +100,7 @@ export function createCodingTools(core: Core, coding: CodingAgentPort): Extensio
     parameters: Type.Object({
       repo: Type.String({ minLength: 1, maxLength: 4096, description: "Absolute path of the repository (or directory) to change" }),
       task: Type.String({ minLength: 1, maxLength: 24_000, description: "The goal, files to read first, decided interfaces, protected files, observable acceptance and the narrowest check to run" }),
-      agent: Type.Optional(Type.Union([Type.Literal("omp"), Type.Literal("claude"), Type.Literal("codex")], { description: "Which agent; default the first detected" })),
+      agent: Type.Optional(Type.Union([Type.Literal("omp"), Type.Literal("claude"), Type.Literal("codex")], { description: "Which agent; default the owner's choice in Settings, else the first ready one" })),
       branch: Type.Optional(Type.String({ minLength: 1, maxLength: 80, description: "Short name for the branch and worktree, such as fix-login; defaults to one derived from the task" })),
       timeout_minutes: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_MINUTES, description: `Default ${DEFAULT_MINUTES}; split larger changes into several tasks` })),
     }),
@@ -107,9 +114,9 @@ export function createCodingTools(core: Core, coding: CodingAgentPort): Extensio
         const env = api.env;
         if (!isAbsolute(args.repo) || !existsSync(args.repo) || !statSync(args.repo).isDirectory()) throw new NoEffect(`${args.repo} is not an absolute path of an existing directory`);
         const repo = realpathSync(args.repo);
-        const found = await coding.detect();
-        const agent: CodingAgentInfo | undefined = args.agent ? found.find((candidate) => candidate.id === args.agent) : found[0];
-        if (!agent) throw new NoEffect(args.agent ? `${args.agent} is not installed on this Mac; code_agents lists what is` : "No coding agent is installed on this Mac");
+        const picked = pickCodingAgent(await coding.detect(), core.ledger.setting<CodingPrefs>("coding", NO_PREFS), args.agent);
+        if ("problem" in picked) throw new NoEffect(picked.problem);
+        const agent = picked.agent;
         const minutes = args.timeout_minutes ?? DEFAULT_MINUTES;
         const recorded = await core.effects
           .run(

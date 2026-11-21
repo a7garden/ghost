@@ -451,6 +451,9 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
       return { duty: core.duty.switch(command.onDuty) };
     case "duty.hours":
       return { duty: core.duty.setHours(command.hours) };
+    case "coding.set":
+      ledger.tx(() => ledger.putSetting("coding", { default: command.default, disabled: command.disabled }));
+      return {};
     case "activity.create":
       return { activityId: core.activities.create(command.config).id };
 

@@ -771,7 +771,7 @@ test("a plain read in a Host Work runs at once through the inspector; a change s
   expect(existsSync(join(s.scopeDir, "docs/x"))).toBe(false);
 });
 
-async function codingFixture(agents: { id: "omp" | "claude" | "codex"; script?: string }[], repoDir = "repo") {
+async function codingFixture(agents: { id: "omp" | "claude" | "codex"; ready?: boolean; note?: string }[], repoDir = "repo") {
   const s = await scopedHostWork();
   s.ledger.tx(() => s.ledger.putGhost({ ...s.ledger.ghost(s.ghost.id), tools: [...s.ledger.ghost(s.ghost.id).tools, "code_run", "code_agents"] }));
   const repo = join(s.scopeDir, repoDir);
@@ -787,7 +787,7 @@ async function codingFixture(agents: { id: "omp" | "claude" | "codex"; script?: 
   const script = join(s.scopeDir, "fake-agent.sh");
   writeFileSync(script, "#!/bin/sh\ncd \"$2\" || exit 3\necho two > b.txt\n/usr/bin/git add b.txt\n/usr/bin/git commit -qm 'add b'\necho \"changed b.txt; checked nothing\"\n");
   chmodSync(script, 0o755);
-  const found = agents.map(({ id }) => ({ id, name: id, path: script, version: "9.9.9" }));
+  const found = agents.map(({ id, ready = true, note = null }) => ({ id, name: id, path: script, version: "9.9.9", ready, note }));
   const coding: CodingAgentPort = { detect: async () => found, command: (_agent, prompt, cwd) => [script, prompt, cwd] };
   const tools = createCodingTools(s.core, coding).tools!;
   const call = async (name: string, args: object, callId: string) => {
@@ -827,11 +827,33 @@ test("code_run names what is missing instead of guessing: no such agent, no repo
   expect(missingRepo.isError).toBe(true);
   expect(s.git("branch", "--list").trim()).toBe("* main");
   const listed = await s.call("code_agents", {}, "list");
-  expect(JSON.parse(listed.text)).toEqual([{ id: "omp", name: "omp", version: "9.9.9" }]);
+  expect(JSON.parse(listed.text)).toEqual({ agents: [{ id: "omp", name: "omp", version: "9.9.9", ready: true, note: null, enabled: true }], usedByDefault: "omp" });
 });
 
 test("code_run keeps worktrees beside a repository that already lives in a wt folder", async () => {
   const s = await codingFixture([{ id: "omp" }], "wt/repo");
   const report = JSON.parse((await s.call("code_run", { repo: s.repo, task: "Add b", branch: "nested" }, "nested")).text);
   expect(report.worktree).toBe(join(s.scopeDir, "wt", "repo-nested"));
+});
+
+test("code_run follows the owner's choice in Settings and says why an agent cannot be used", async () => {
+  const s = await codingFixture([{ id: "omp" }, { id: "claude" }, { id: "codex", ready: false, note: "로그인이 필요합니다(codex login)." }]);
+  const used = async (args: object, callId: string) => JSON.parse((await s.call("code_run", { repo: s.repo, task: "Add b", ...args }, callId)).text).agent;
+  expect(await used({ branch: "one" }, "default-first")).toBe("omp");
+  s.ledger.tx(() => s.ledger.putSetting("coding", { default: "claude", disabled: [] }));
+  expect(await used({ branch: "two" }, "default-chosen")).toBe("claude");
+  expect(await used({ branch: "three", agent: "omp" }, "named")).toBe("omp");
+  s.ledger.tx(() => s.ledger.putSetting("coding", { default: "claude", disabled: ["claude"] }));
+  expect(await used({ branch: "four" }, "disabled-default")).toBe("omp");
+  const off = await s.call("code_run", { repo: s.repo, task: "x", agent: "claude" }, "named-off");
+  expect(off.isError).toBe(true);
+  expect(off.text).toContain("turned off by the owner");
+  const notReady = await s.call("code_run", { repo: s.repo, task: "x", agent: "codex" }, "named-not-ready");
+  expect(notReady.isError).toBe(true);
+  expect(notReady.text).toContain("로그인이 필요합니다");
+  s.ledger.tx(() => s.ledger.putSetting("coding", { default: null, disabled: ["omp", "claude"] }));
+  const none = await s.call("code_run", { repo: s.repo, task: "x" }, "none-usable");
+  expect(none.isError).toBe(true);
+  expect(none.text).toContain("No coding agent can run now");
+  expect(s.git("branch", "--list", "ghost/*").trim().split("\n")).toHaveLength(4);
 });

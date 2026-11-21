@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import type { Decision, VaultItem } from '@ghost/contract';
+import type { CodingAgentsView, Decision, VaultItem } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 /** The synthetic decision ids the decision-surface screens focus. */
@@ -83,6 +83,20 @@ export async function mockVaultApi(page: Page): Promise<void> {
     if (route.request().method() === 'GET') void fulfillJson(route, 200, { items });
     else void route.continue();
   });
+}
+
+/** Serves a fixed set of coding agents so the 코딩 에이전트 screen does not depend on what the test Mac has installed. */
+export async function mockCodingApi(page: Page): Promise<void> {
+  const view: CodingAgentsView = {
+    agents: [
+      { id: 'omp', name: 'omp', path: '/Users/garden/.bun/bin/omp', version: 'omp/19.0.1', ready: true, note: null },
+      { id: 'claude', name: 'Claude Code', path: '/Users/garden/.local/bin/claude', version: '2.1.319 (Claude Code)', ready: true, note: '로그인이 2026. 11. 24.까지 유효합니다.' },
+      { id: 'codex', name: 'Codex', path: '/Users/garden/.local/bin/codex', version: 'codex-cli 0.167.0', ready: false, note: '로그인이 필요합니다(codex login).' },
+    ],
+    default: null,
+    disabled: [],
+  };
+  await page.route('**/api/coding-agents*', route => void fulfillJson(route, 200, view));
 }
 
 /** Adds synthetic decisions to the state snapshot; everything else stays the real seeded host. */

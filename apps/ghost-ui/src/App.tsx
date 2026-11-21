@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Server, Smartphone, Users } from 'lucide-react';
+import { BriefcaseBusiness, CircleAlert, Clock3, KeyRound, MonitorSmartphone, PlugZap, RefreshCw, Repeat2, Server, Smartphone, SquareTerminal, Users } from 'lucide-react';
 import { DutySwitch } from './components/DutySwitch';
 import { DutySettings } from './features/DutySettings';
 import { Banner, Button, EmptyState, ScrollRails, Skeleton, type CommandItem } from './ui';
@@ -28,6 +28,7 @@ import { Goals } from './features/goals/Goals';
 import { WorkDetail } from './features/WorkDetail';
 import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
+import { CodingAgentSettings } from './features/CodingAgentSettings';
 import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
 import { VaultView } from './features/VaultView';
@@ -243,6 +244,7 @@ function Shell() {
     { id: 'history', label: '구성 기록', icon: RefreshCw, content: <ConfigHistory/> },
     { id: 'metrics', label: '계측', icon: Server, content: <ScopeMetrics/> },
     { id: 'host', label: routeLabels.host, icon: Server, content: <HostView/> },
+    { id: 'coding', label: '코딩 에이전트', icon: SquareTerminal, content: <CodingAgentSettings/> },
     { id: 'update', label: '업데이트', icon: RefreshCw, content: <UpdateSettings monitor={update}/> },
     ...(desktopShell ? [{ id: 'desktop', label: '데스크톱 아바타', icon: MonitorSmartphone, content: <>
       {desktopError && <Banner variant="warning" className="mb-4">{desktopError}</Banner>}
