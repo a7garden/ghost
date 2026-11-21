@@ -11,11 +11,13 @@ import { classifyDesktopEffect } from "../src/tools/desktop.ts";
 import { createMainTools } from "../src/tools/main.ts";
 import type { BrowserPort, BrowserRunOptions, BrowserSessionRef } from "../src/integrations/ports.ts";
 import { harness, tempDir } from "./support.ts";
-import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { createWorkTools } from "../src/tools/work.ts";
 import { HostExecutionEnv, HostMutationQueue } from "../src/sandbox/host-env.ts";
-import type { HostPort, SandboxEnvFactory } from "../src/integrations/ports.ts";
+import type { CodingAgentPort, HostPort, SandboxEnvFactory } from "../src/integrations/ports.ts";
+import { createCodingTools } from "../src/tools/coding.ts";
 
 const opened: { core: Core; ledger: Ledger }[] = [];
 afterEach(async () => { for (const h of opened.splice(0)) { h.core.stop(); await h.core.idle(); h.ledger.close(); } });
@@ -767,4 +769,63 @@ test("a plain read in a Host Work runs at once through the inspector; a change s
   expect(inspected).toHaveLength(1);
   expect(s.ledger.pendingDecisions()).toHaveLength(1);
   expect(existsSync(join(s.scopeDir, "docs/x"))).toBe(false);
+});
+
+async function codingFixture(agents: { id: "omp" | "claude" | "codex"; script?: string }[]) {
+  const s = await scopedHostWork();
+  s.ledger.tx(() => s.ledger.putGhost({ ...s.ledger.ghost(s.ghost.id), tools: [...s.ledger.ghost(s.ghost.id).tools, "code_run", "code_agents"] }));
+  const repo = join(s.scopeDir, "repo");
+  mkdirSync(repo);
+  const git = (...args: string[]) => execFileSync("/usr/bin/git", args, { cwd: repo, encoding: "utf8" });
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  writeFileSync(join(repo, "a.txt"), "one\n");
+  git("add", "-A");
+  git("commit", "-qm", "init");
+  // The fake agent edits a file, commits it and prints a summary, the way a headless coding agent does.
+  const script = join(s.scopeDir, "fake-agent.sh");
+  writeFileSync(script, "#!/bin/sh\ncd \"$2\" || exit 3\necho two > b.txt\n/usr/bin/git add b.txt\n/usr/bin/git commit -qm 'add b'\necho \"changed b.txt; checked nothing\"\n");
+  chmodSync(script, 0o755);
+  const found = agents.map(({ id }) => ({ id, name: id, path: script, version: "9.9.9" }));
+  const coding: CodingAgentPort = { detect: async () => found, command: (_agent, prompt, cwd) => [script, prompt, cwd] };
+  const tools = createCodingTools(s.core, coding).tools!;
+  const call = async (name: string, args: object, callId: string) => {
+    const result = await tools.find((tool) => tool.name === name)!.execute(args as never,
+      { conversationId: "scoped-host-pi", taskId: `task:${callId}`, callId, env: s.env, output: () => {}, diagnostic: () => {} } as unknown as ToolExecutionApi, { abortSignal: undefined } as Context);
+    const part = result.content?.[0];
+    return { isError: result.isError === true, text: part?.type === "text" ? part.text : "" };
+  };
+  return { ...s, repo, git, call };
+}
+
+test("code_run puts the coding agent in a fresh branch worktree and leaves the owner's checkout untouched", async () => {
+  const s = await codingFixture([{ id: "omp" }]);
+  const result = await s.call("code_run", { repo: s.repo, task: "Add b.txt\nwith the number two", branch: "Add B file" }, "run-1");
+  expect(result.isError).toBeFalsy();
+  const report = JSON.parse(result.text);
+  expect(report).toMatchObject({ agent: "omp", version: "9.9.9", exitCode: 0, branch: "ghost/add-b-file", worktree: join(s.scopeDir, "wt", "repo-add-b-file") });
+  expect(report.commits).toHaveLength(1);
+  expect(report.diffStat).toContain("b.txt");
+  expect(report.summary).toContain("changed b.txt");
+  expect(readFileSync(join(report.worktree, "b.txt"), "utf8")).toBe("two\n");
+  expect(s.git("status", "--short")).toBe("");
+  expect(s.git("rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
+  expect(existsSync(join(s.repo, "b.txt"))).toBe(false);
+  expect(s.ledger.pendingDecisions()).toHaveLength(0);
+  // The same branch name is never reused: a second task gets its own worktree.
+  const second = JSON.parse((await s.call("code_run", { repo: s.repo, task: "Again", branch: "Add B file" }, "run-2")).text);
+  expect(second.branch).toBe("ghost/add-b-file-2");
+});
+
+test("code_run names what is missing instead of guessing: no such agent, no repo, no PC Work", async () => {
+  const s = await codingFixture([{ id: "omp" }]);
+  const missingAgent = await s.call("code_run", { repo: s.repo, task: "x", agent: "codex" }, "no-agent");
+  expect(missingAgent.isError).toBe(true);
+  expect(missingAgent.text).toContain("codex is not installed");
+  const missingRepo = await s.call("code_run", { repo: join(s.scopeDir, "nowhere"), task: "x" }, "no-repo");
+  expect(missingRepo.isError).toBe(true);
+  expect(s.git("branch", "--list").trim()).toBe("* main");
+  const listed = await s.call("code_agents", {}, "list");
+  expect(JSON.parse(listed.text)).toEqual([{ id: "omp", name: "omp", version: "9.9.9" }]);
 });

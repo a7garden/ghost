@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Pencil, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
-import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, GHOST_TOOLS, HOST_TOOLS, MAIL_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
+import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, CODE_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, GHOST_TOOLS, HOST_TOOLS, MAIL_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
 import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -38,6 +38,7 @@ export const toolGroups: readonly { title: string; tools: readonly GhostTool[]; 
   { title: '구성', tools: ['scope_create', 'scope_update', 'scope_attach', 'scope_delete', 'slot_set', 'slot_delete', 'limits_set', 'rule_create', 'rule_update', 'rule_delete', 'rule_propose', 'mcp_create', 'mcp_update', 'mcp_delete', 'config_revert', 'config_history', 'metrics_read'] },
   { title: '목표', tools: ['goal_list', 'goal_propose', 'milestone_plan', 'milestone_update'] },
   { title: 'Mac', tools: [...HOST_TOOLS], privileged: true },
+  { title: '코딩 에이전트', tools: [...CODE_TOOLS], privileged: true },
   { title: 'PC 조작', tools: [...DESKTOP_TOOLS], privileged: true },
   { title: '자산', tools: [...FINANCE_TOOLS], privileged: true },
 ];

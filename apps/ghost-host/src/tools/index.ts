@@ -1,5 +1,5 @@
 import type { Conversation, Ghost, GhostTool, Work } from "@ghost/contract";
-import { BROWSER_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, HOST_TOOLS, MAIL_TOOLS, matchesToolPatterns } from "@ghost/contract";
+import { BROWSER_TOOLS, CODE_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, HOST_TOOLS, MAIL_TOOLS, matchesToolPatterns } from "@ghost/contract";
 import type { Extension, ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import type { Core } from "../core/core.ts";
@@ -7,12 +7,13 @@ import { CLOCK_INSTRUCTIONS } from "../core/clock.ts";
 import { describeWork } from "../core/works.ts";
 import { firstLine } from "./shared.ts";
 import { modelInputOf } from "../engine/models.ts";
-import type { DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort, DesktopPort } from "../integrations/ports.ts";
+import type { DocumentsPort, SandboxEnvFactory, SkillsPort, ReachPort, HostPort, BrowserPort, DesktopPort, CodingAgentPort } from "../integrations/ports.ts";
 import type { TossPort } from "../integrations/toss.ts";
 import type { MemoryStore } from "../stores/memory.ts";
 import type { MemoryEngine } from "../memory/types.ts";
 import type { Vault } from "../stores/vault.ts";
 import { BROWSER_INSTRUCTIONS, createBrowserTools } from "./browser.ts";
+import { CODING_INSTRUCTIONS, createCodingTools } from "./coding.ts";
 import { createDesktopTools, DESKTOP_INSTRUCTIONS } from "./desktop.ts";
 import { createDocumentsTools } from "./documents.ts";
 import { createDirectTools } from "./direct.ts";
@@ -195,6 +196,8 @@ export function createToolSet(deps: {
   memoryEngine?: () => Partial<MemoryEngine> | null;
   documents: DocumentsPort | null;
   host?: HostPort | null;
+  /** Coding agents installed on the owner's Mac (ghost.coding); null leaves the tools out. */
+  coding?: CodingAgentPort | null;
   skills: SkillsPort | null;
   /** Read-only web research (ghost.web); null leaves the tools out. */
   reach?: ReachPort | null;
@@ -227,6 +230,7 @@ export function createToolSet(deps: {
   const memory = deps.memory === null ? null : createMemoryTools(deps.core, deps.memory, deps.memoryEngine);
   const documents = deps.documents === null ? null : harden(createDocumentsTools(deps.core, deps.documents));
   const host = deps.host ? harden(createHostTools(deps.core, deps.host)) : null;
+  const coding = deps.coding ? harden(createCodingTools(deps.core, deps.coding)) : null;
   const skills = harden(createSkillsTools(deps.core, deps.skills));
   const web = deps.reach ? harden(createWebTools(deps.core, deps.reach)) : null;
   // Citation tools come with web_read; the engine hides them from a Ghost without it, never from a reviewer.
@@ -239,7 +243,7 @@ export function createToolSet(deps: {
   const toss = deps.toss && deps.vault ? createTossTools(deps.core, deps.vault, deps.toss) : null;
   const dynamic = new DynamicCapabilities(deps.core, deps.mcp ?? null, { sources: deps.core.activitySources ?? null, vault: deps.vault ?? null, browser: deps.browser ?? null }, harden);
   const configuration = harden(createConfigurationTools(deps.core));
-  const optional = [memory, documents, host, skills, web, sources, browser, vault, connections, desktop, mail, toss].filter((extension): extension is Extension => extension !== null);
+  const optional = [memory, documents, host, coding, skills, web, sources, browser, vault, connections, desktop, mail, toss].filter((extension): extension is Extension => extension !== null);
   /** Guidance for an installed capability, only for a Ghost that holds one of its tools. */
   const capabilityInstructions = (ghost: Ghost) =>
     [
@@ -251,6 +255,7 @@ export function createToolSet(deps: {
       vault && ghost.tools.some((tool) => tool.startsWith("vault_") || tool === "browser_fill_secret" || tool === "browser_fill_card") ? VAULT_INSTRUCTIONS : "",
       connections && ghost.tools.some((tool) => tool.startsWith("connection_")) ? CONNECTION_INSTRUCTIONS : "",
       desktop && ghost.hostExecution && ghost.tools.some((tool) => DESKTOP_TOOLS.includes(tool)) ? DESKTOP_INSTRUCTIONS : "",
+      coding && ghost.hostExecution && ghost.tools.some((tool) => CODE_TOOLS.includes(tool)) ? CODING_INSTRUCTIONS : "",
       mail && ghost.tools.some((tool) => MAIL_TOOLS.includes(tool)) ? MAIL_INSTRUCTIONS : "",
       toss && ghost.tools.some((tool) => FINANCE_TOOLS.includes(tool)) ? TOSS_INSTRUCTIONS : "",
     ];
@@ -285,6 +290,7 @@ export function createToolSet(deps: {
           if (memory) selected.push(memory);
           if (documents) selected.push(documents);
           if (host) selected.push(host);
+          if (coding) selected.push(coding);
           if (skills) selected.push(skills);
           if (web) selected.push(web);
           if (sources) selected.push(sources);
@@ -303,6 +309,7 @@ export function createToolSet(deps: {
           if (memory) selected.push(memory);
           if (documents) selected.push(documents);
           if (host) selected.push(host);
+          if (coding) selected.push(coding);
           if (skills) selected.push(skills);
           if (web) selected.push(web);
           if (sources) selected.push(sources);

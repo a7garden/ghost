@@ -186,6 +186,9 @@ const CASES: Case[] = [
   { behavior: "desktop_pointer on a high-impact label is refused", effect: effect("desktop_pointer", "mac"), expected: { decision: "deny" } },
   { behavior: "desktop_keys submit on a high-impact target is refused", effect: effect("desktop_keys", "mac"), expected: { decision: "deny" } },
   { behavior: "desktop_press submit on a high-impact target is refused", effect: effect("desktop_press", "mac"), expected: { decision: "deny" } },
+  // Coding agents (tools/coding.ts): an isolated branch worktree, external because the agent can run anything.
+  { behavior: "code_run in a fresh branch worktree", effect: effect("code_run", "mac", { reversible: true, external: true }), expected: { decision: "allow" } },
+  { behavior: "code_run after the conversation read untrusted input and private data still asks the owner", effect: effect("code_run", "mac", { reversible: true, external: true, taint: { untrustedInput: true, privateData: true } }), expected: { decision: "owner" } },
   { behavior: "desktop_propose: owner, main leaves a view", effect: effect("desktop_propose", "mac", { external: true }), expected: { decision: "owner", main: true } },
   // Mail (tools/mail.ts).
   { behavior: "mail_update (seen, flag, archive, trash, move) runs journaled", effect: effect("mail_update", "mail_account", { id: "inbox", reversible: true }), expected: { decision: "allow" } },

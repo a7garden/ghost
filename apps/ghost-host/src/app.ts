@@ -23,6 +23,7 @@ import { acquireRootLock } from "./state-lock.ts";
 import { createToolSet } from "./tools/index.ts";
 import type { BrowserPort, DesktopPort, DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
 import { MacHost } from "./integrations/host.ts";
+import { CodingAgents } from "./integrations/coding-agents.ts";
 import { HostWatch } from "./core/hostwatch.ts";
 import { ProviderCatalog } from "./integrations/provider-catalog.ts";
 import { settingsView } from "./core/commands.ts";
@@ -167,7 +168,8 @@ export async function openApp(config: Config): Promise<App> {
     } }));
     const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
-    const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });
+    const coding = config.coding === false || process.platform !== "darwin" ? null : new CodingAgents();
+    const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, coding, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
     core.attach(engine);

@@ -96,6 +96,8 @@ export const BuiltinGhostTool = Type.Union([
   Type.Literal("host_nodes"),
   Type.Literal("host_command_propose"),
   Type.Literal("host_message_codes"),
+  Type.Literal("code_agents"),
+  Type.Literal("code_run"),
   Type.Literal("browser_open"),
   Type.Literal("browser_snapshot"),
   Type.Literal("browser_screenshot"),
@@ -217,6 +219,8 @@ export const GHOST_TOOLS: readonly BuiltinGhostTool[] = [
   "host_nodes",
   "host_command_propose",
   "host_message_codes",
+  "code_agents",
+  "code_run",
   "browser_open",
   "browser_snapshot",
   "browser_screenshot",
@@ -291,9 +295,16 @@ export const MAIL_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => too
  */
 export const FINANCE_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("toss_"));
 
+/**
+ * The coding agents installed on the owner's Mac (omp, Claude Code, Codex): `code_agents` lists what the Host found and
+ * `code_run` hands one a task in an isolated git worktree. Like PC execution it reaches everything the owner's account
+ * can, so it is granted only explicitly and runs only for a Ghost the owner allows PC 직접 실행.
+ */
+export const CODE_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => tool.startsWith("code_"));
 
-/** The allow-list a new Ghost gets when none is given: every selectable tool except host, PC control, mail and finance tools. */
-export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool) && !MAIL_TOOLS.includes(tool) && !FINANCE_TOOLS.includes(tool));
+
+/** The allow-list a new Ghost gets when none is given: every selectable tool except host, coding agent, PC control, mail and finance tools. */
+export const DEFAULT_GHOST_TOOLS: readonly GhostTool[] = GHOST_TOOLS.filter((tool) => !HOST_TOOLS.includes(tool) && !CODE_TOOLS.includes(tool) && !DESKTOP_TOOLS.includes(tool) && !MAIL_TOOLS.includes(tool) && !FINANCE_TOOLS.includes(tool));
 
 /** A skill directory name under the configured skills root. */
 export const SkillName = Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" });

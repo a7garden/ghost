@@ -40,6 +40,8 @@ export interface Config {
    * A release finds its own copies beside its Host bundle; `"desktop": null` turns it off.
    */
   desktop?: null | DesktopConfig;
+  /** Coding agents (omp, Claude Code, Codex) found on this Mac for code_agents and code_run; `"coding": false` turns them off. */
+  coding?: boolean;
 }
 
 export interface DesktopConfig {
@@ -69,7 +71,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const root = resolve(rootOverride ?? env.GHOST_ROOT ?? DEFAULT_ROOT);
   const path = join(root, "config.json");
   const file = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Partial<Config>) : {};
-  const allowed = ["host", "port", "publicOrigin", "cloudflareAccess", "uiDir", "sandbox", "voice", "apns", "skills", "mac", "reach", "browser", "desktop"];
+  const allowed = ["host", "port", "publicOrigin", "cloudflareAccess", "uiDir", "sandbox", "voice", "apns", "skills", "mac", "reach", "browser", "desktop", "coding"];
   for (const key of Object.keys(file)) if (!allowed.includes(key)) throw new Error(`config.json: unknown key ${key}`);
   const port = Number(env.GHOST_PORT ?? file.port ?? DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("GHOST_PORT must be a TCP port (0 picks a free one)");
@@ -124,5 +126,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     reach: file.reach ?? null,
     browser: file.browser ?? null,
     desktop,
+    coding: file.coding ?? true,
   };
 }

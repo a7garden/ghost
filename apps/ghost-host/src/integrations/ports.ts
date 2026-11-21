@@ -161,6 +161,24 @@ export interface HostPort {
   executeCommand(input: HostCommand, authorize?: () => void): Promise<{ exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }>;
 }
 
+export type CodingAgentId = "omp" | "claude" | "codex";
+
+export interface CodingAgentInfo {
+  id: CodingAgentId;
+  name: string;
+  /** Absolute path of the executable the Host found. */
+  path: string;
+  version: string | null;
+}
+
+/** The coding agents installed on the owner's Mac. Implemented in src/integrations/coding-agents.ts. */
+export interface CodingAgentPort {
+  /** Agents found on this Mac, in preference order; cached briefly. */
+  detect(): Promise<CodingAgentInfo[]>;
+  /** argv for one non-interactive run of a detected agent in `cwd`. */
+  command(agent: CodingAgentInfo, prompt: string, cwd: string): string[];
+}
+
 /** The owner's skill folders, read-only. Implemented in src/integrations/skills.ts. */
 export interface SkillsPort {
   /** Skills across the configured roots, first root wins on duplicate names; cached briefly. */

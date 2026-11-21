@@ -364,7 +364,7 @@ export class Effects {
     if (ghost.state !== "active" || ghost.deletedAt !== null) throw new NoEffect("The executing Ghost is no longer active");
     if (conversation.kind === "review" || conversation.kind === "subagent") throw new NoEffect("Read-only conversations cannot execute effects");
     if (conversation.kind === "wake" && this.ledger.setting<string | null>(`wake:decision:${conversation.id}`, null)) throw new NoEffect("Decision review wakes are read-only");
-    if (["write", "edit", "bash", "publish_artifact", "activity_action"].includes(effect.tool) && conversation.kind !== "work") throw new NoEffect("This tool requires a Work conversation");
+    if (["write", "edit", "bash", "code_run", "publish_artifact", "activity_action"].includes(effect.tool) && conversation.kind !== "work") throw new NoEffect("This tool requires a Work conversation");
     const tool = effect.tool === "document_write" ? "document_propose" : effect.tool;
     const managedGhost = tool === "ghost_create" || tool === "ghost_update";
     if (managedGhost && (!ghost.isDefault || !["direct", "wake"].includes(conversation.kind))) throw new NoEffect("The main Ghost's configuration authority was revoked");
@@ -380,7 +380,7 @@ export class Effects {
       if (boundary.toolScope && !internal && !matchesToolPatterns(boundary.toolScope, tool)) throw new NoEffect("This Work or its ancestor no longer permits the tool");
       if (boundary.activityId) this.core.activities.authorize(boundary.id, tool);
     }
-    if ((tool.startsWith("desktop_") || work?.execution?.kind === "host" && ["write", "edit", "bash", "publish_artifact"].includes(tool)) && !ghost.hostExecution) throw new NoEffect("PC execution was revoked");
+    if ((tool.startsWith("desktop_") || work?.execution?.kind === "host" && ["write", "edit", "bash", "code_run", "publish_artifact"].includes(tool)) && !ghost.hostExecution) throw new NoEffect("PC execution was revoked");
     if (work && (!["running", "waiting", "verifying"].includes(work.state) || work.deadlineAt !== null && work.deadlineAt <= Date.now())) throw new NoEffect("The Work no longer permits execution");
     const binding = this.ledger.setting<{ identity: string } | null>(`effect:work-binding:${effect.id}`, null);
     if (work && binding?.identity !== workExecutionIdentity(this.ledger, work)) throw new NoEffect("The Work's brief, acceptance, execution boundary or attempt changed; create a fresh proposal");

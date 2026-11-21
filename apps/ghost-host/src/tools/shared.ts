@@ -57,6 +57,8 @@ const TOOL_KINDS: Record<BuiltinGhostTool, readonly Conversation["kind"][]> = {
   host_nodes: ["direct", "work"],
   host_command_propose: ["direct", "work"],
   host_message_codes: ["direct", "work"],
+  code_agents: ["direct", "work"],
+  code_run: ["work"],
   browser_open: ["direct", "work"],
   browser_snapshot: ["direct", "work"],
   browser_screenshot: ["direct", "work"],
@@ -124,7 +126,7 @@ export function requireAllowed(core: Core, api: Pick<ToolExecutionApi, "conversa
   } else if (!kinds.includes(kind)) throw forbidden(`${name} does not run in a ${scope.conversation.kind} conversation`);
   if (!matchesToolPatterns(scope.ghost.tools, name)) throw forbidden(`${name} is not enabled for ${scope.ghost.name}; if the goal needs it, ask once with capability_request (tools: ["${name}"]) and end your turn`);
   if (!workAllowsTool(core, scope.work, name)) throw forbidden(`${name} is outside this Work's activity rule, which only the owner changes; do the step with another tool or report it in complete`);
-  if (scope.work?.execution?.kind === "host" && ["read", "write", "edit", "bash", "publish_artifact"].includes(name) && !scope.ghost.hostExecution) throw forbidden("direct PC execution was revoked by the owner");
+  if (scope.work?.execution?.kind === "host" && ["read", "write", "edit", "bash", "publish_artifact", "code_run"].includes(name) && !scope.ghost.hostExecution) throw forbidden("direct PC execution was revoked by the owner");
   if (scope.work && scope.ghost.state !== "active") throw forbidden("the executing Ghost is no longer active");
   if (scope.work && !["running", "waiting"].includes(scope.work.state)) throw forbidden(`Work is ${scope.work.state}`);
   if (scope.work && scope.work.deadlineAt !== null && scope.work.deadlineAt <= Date.now()) throw forbidden("Work deadline has passed");
