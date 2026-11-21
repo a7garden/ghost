@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { rmSync } from "node:fs";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { CodingAgentsView, CodingSessionDetail, CodingSessionList, parse } from "@ghost/contract";
 import { startServer } from "../src/api/server.ts";

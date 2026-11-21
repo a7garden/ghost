@@ -1,4 +1,4 @@
-import type { CodingAgentId, Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
+import type { CodingAgentId, CodingSessionDetail, CodingSessionView, CodingStep, Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 

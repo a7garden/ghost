@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { nullable } from "./entities.ts";
+import { Id, nullable, Timestamp } from "./entities.ts";
 
 /** The coding agents the Host knows how to run headless. */
 export const CodingAgentId = Type.Union([Type.Literal("omp"), Type.Literal("claude"), Type.Literal("codex")]);
@@ -29,3 +29,43 @@ export const CodingAgentsView = Type.Object({
   disabled: Type.Array(CodingAgentId),
 });
 export type CodingAgentsView = Static<typeof CodingAgentsView>;
+
+/** One thing a coding agent did, normalised across agents: what it said, a tool it called, what that returned, or a Host note. */
+export const CodingStep = Type.Object({
+  at: Timestamp,
+  kind: Type.Union([Type.Literal("say"), Type.Literal("tool"), Type.Literal("result"), Type.Literal("note")]),
+  text: Type.String({ maxLength: 4096 }),
+});
+export type CodingStep = Static<typeof CodingStep>;
+
+/**
+ * One `code_run` as a session the owner can open: which agent ran where, whether it still runs, and the command that
+ * continues it in a terminal. `interrupted` is a run the Host lost track of (restart mid-run), not one that failed.
+ */
+export const CodingSessionView = Type.Object({
+  id: Id,
+  agent: CodingAgentId,
+  workId: nullable(Id),
+  callId: Type.String(),
+  task: Type.String(),
+  cwd: Type.String(),
+  branch: nullable(Type.String()),
+  nativeId: nullable(Type.String()),
+  resumeCommand: nullable(Type.String()),
+  startedAt: Timestamp,
+  endedAt: nullable(Timestamp),
+  state: Type.Union([Type.Literal("running"), Type.Literal("done"), Type.Literal("failed"), Type.Literal("interrupted")]),
+  exitCode: nullable(Type.Integer()),
+});
+export type CodingSessionView = Static<typeof CodingSessionView>;
+
+export const CodingSessionList = Type.Object({ sessions: Type.Array(CodingSessionView) });
+export type CodingSessionList = Static<typeof CodingSessionList>;
+
+/** A session with the steps from `after` on; ask again with `next` to follow a running one. */
+export const CodingSessionDetail = Type.Object({
+  session: CodingSessionView,
+  steps: Type.Array(CodingStep),
+  next: Type.Integer({ minimum: 0 }),
+});
+export type CodingSessionDetail = Static<typeof CodingSessionDetail>;
