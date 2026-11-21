@@ -6,6 +6,7 @@ import type {
   CodingAgentsView,
   CodingSessionDetail,
   CodingSessionList,
+  CodingSessionStart,
   CommandOf,
   ConnectionOAuthView,
   ConnectionOAuthClientInput,
@@ -216,6 +217,22 @@ export class HostClient {
   /** One coding session with its steps from `after` on; ask again with `next` to follow a running one. */
   codingSession(id: string, after = 0): Promise<CodingSessionDetail> {
     return this.json(`/api/coding-sessions/${encodeURIComponent(id)}?after=${after}`);
+  }
+
+  startCodingSession(input: CodingSessionStart): Promise<CodingSessionDetail> {
+    return this.json('/api/coding-sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+  }
+
+  sendCodingSession(id: string, text: string): Promise<CodingSessionDetail> {
+    return this.json(`/api/coding-sessions/${encodeURIComponent(id)}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    });
+  }
+
+  stopCodingSession(id: string): Promise<CodingSessionDetail> {
+    return this.json(`/api/coding-sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' });
   }
 
   /** The host's own release update state. */

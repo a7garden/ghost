@@ -29,6 +29,7 @@ import { WorkDetail } from './features/WorkDetail';
 import { InboxView } from './features/Inbox';
 import { HostView } from './features/HostView';
 import { CodingAgentSettings } from './features/CodingAgentSettings';
+import { CodingPage, codingSessionPath } from './features/CodingSession';
 import { GhostSettings } from './features/GhostSettings';
 import { MobilePairing } from './features/MobilePairing';
 import { VaultView } from './features/VaultView';
@@ -181,7 +182,14 @@ function Shell() {
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
   const selectedScope = section === 'scopes' && path.split('/')[2] ? decodeURIComponent(path.split('/')[2]!) : undefined;
-  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail';
+  const codingDetail = section === 'coding' && (params.get('new') === '1' || params.has('session'));
+  const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail' || section === 'coding';
+  const closeCodingForm = (next: string) => {
+    // A start can finish after the owner leaves the form, without pulling them back.
+    if (currentRoute() !== route) return;
+    history.replaceState(history.state, '', `#${next}`);
+    setRoute(next);
+  };
 
   const go = (target: string) => () => navigate(target);
   const ghostName = (id: string) => ghosts.find(ghost => ghost.id === id)?.name ?? 'Ghost';
@@ -201,9 +209,11 @@ function Shell() {
     { id: 'new-work', label: '일 맡기기', group: '실행', onSelect: go('/work?new=1') },
     { id: 'new-ghost', label: '새 Ghost', group: '실행', onSelect: go('/settings?tab=team&new=1') },
     { id: 'new-space', label: '새 프로젝트', group: '실행', onSelect: go('/scopes?new=1') },
+    { id: 'new-coding-session', label: '새 코딩 세션', group: '실행', onSelect: go('/coding?new=1') },
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
+    { id: 'coding', label: routeLabels.coding, group: '이동', onSelect: go('/coding') },
     { id: 'mail', label: '메일', group: '이동', onSelect: go('/mail') },
     { id: 'goals', label: uiTerms.goals, group: '이동', onSelect: go('/goals') },
     { id: 'scopes', label: routeLabels.scopes, group: '이동', onSelect: go('/scopes') },
@@ -253,7 +263,7 @@ function Shell() {
   ];
 
   const ghostNotFound = <EmptyState icon={<CircleAlert/>} title="이 Ghost를 찾을 수 없습니다" action={<Button variant="outline" onClick={() => navigate('/')}>홈으로</Button>}/>;
-  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, scopes: true, inbox: true, work: true, mail: true, goals: true, settings: true, workspace: true };
+  const knownSections: Record<string, true> = { home: true, conversations: true, ghosts: true, scopes: true, inbox: true, work: true, mail: true, goals: true, coding: true, settings: true, workspace: true };
 
   const runtimeDown = Boolean(state && !state.runtime.ready);
   const sidebar = <WorkspaceSidebar state={state} section={section} openGhostId={openGhost?.id ?? null}
@@ -265,11 +275,12 @@ function Shell() {
       <AvatarProvider animate={preferences.animate}>
         <AppFrame desktop={desktopShell} macOSInset={desktopMac ? 80 : 0}
           section={section} attentionCount={attentionCount} navigate={navigate}
-          hideDock={section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
+          hideDock={codingDetail || section === 'ghosts' || (section === 'work' && Boolean(path.split('/')[2])) || (section === 'settings' && params.has('tab'))}
           location={<TitleNav crumbs={crumbsFor(route, state)} canBack={historyNav.canBack} canForward={historyNav.canForward}
             compactBack={section === 'settings' && params.has('tab') ? '/settings'
               : section === 'ghosts' ? crumbsFor(route, state).at(-2)?.path ?? '/conversations'
               : section === 'work' && path.split('/')[2] ? '/work'
+              : codingDetail ? '/coding'
               : section === 'scopes' && selectedScope ? '/workspace' : undefined}
             onBack={historyNav.back} onForward={historyNav.forward} navigate={navigate}/>}
           island={state && <ActivityIsland state={state} navigate={navigate}/>}
@@ -284,13 +295,15 @@ function Shell() {
               : <Banner variant="warning">{status.label}</Banner>}
           </div>}
           <UpdatePrompt monitor={update} navigate={navigate}/>
-          {runtimeDown && state && section !== 'home' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
+          {runtimeDown && state && section !== 'home' && section !== 'coding' && <Banner variant="warning" className="mb-4" action={<Button variant="outline" onClick={() => navigate('/settings?tab=models')}>모델 설정</Button>}>{`Ghost가 지금 대화를 실행할 수 없습니다. ${state.runtime.detail}`}</Banner>}
           {!state ? <div className="grid gap-3 p-8" aria-busy={status.state !== 'offline'}><Skeleton className="h-7 w-48"/><Skeleton className="h-4 w-72"/><Skeleton className="h-24 w-full"/></div> : <>
             {section === 'home' && <Overview state={state} navigate={navigate}/>}
             {section === 'conversations' && <Conversations ghosts={ghosts} openGhost={switchGhost} openWorkspace={() => navigate('/workspace')}/>}
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
+            {section === 'coding' && <CodingPage scopes={state.scopes} sessionId={params.get('session')} creating={params.get('new') === '1'} compact={compact}
+              onCancel={() => closeCodingForm('/coding')} onStarted={id => closeCodingForm(codingSessionPath(id))}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>

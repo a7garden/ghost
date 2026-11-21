@@ -67,13 +67,9 @@ for (const theme of ['light', 'dark'] as const) {
           await page.getByRole('button', { name: '기본으로' }).click();
           expect((await pick).postDataJSON().command).toMatchObject({ default: 'claude', disabled: [] });
           await expect(page.getByRole('button', { name: '기본으로' })).toHaveCount(1);
-          await page.getByRole('button', { name: '열기' }).last().click();
-          const dialog = page.getByRole('dialog', { name: '코딩 세션' });
-          await expect(dialog.getByText('빈 문구를 기본 안내로 바꾸고 테스트를 통과시켰습니다.')).toBeVisible();
-          await expect(dialog.getByLabel('이어받기 명령')).toContainText('omp --resume 01a1fce5-08b9');
-          await capture(page, 'settings-coding-session', theme, info.project.name);
-          await page.keyboard.press('Escape');
-          await expect(dialog).toBeHidden();
+          await page.getByRole('link', { name: '세션 목록 보기' }).click();
+          await expect(page).toHaveURL(/#\/coding$/);
+          await expect(page.getByRole('link', { name: /로그인 실패 시 안내 문구 고치기/ })).toBeVisible();
         }
         if (tab === 'models' && info.project.name === 'iphone') {
           const options = await page.getByRole('radiogroup', { name: '생각 수준' }).getByRole('radio').evaluateAll(elements =>

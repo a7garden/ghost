@@ -20,6 +20,7 @@ export const routeLabels = {
   settings: uiTerms.settings,
   inbox: uiTerms.inbox,
   work: uiTerms.work,
+  coding: '코딩',
   mail: '메일',
   host: '호스트',
   scopes: '프로젝트',

@@ -141,7 +141,7 @@ test('goals show chronology, proposals, inline evidence and owner settlement', a
   expect(await page.locator('.goal-line').first().getAttribute('data-compact')).toBe(testInfo.project.name === 'iphone' ? 'true' : null);
   if (testInfo.project.name === 'iphone') {
     const dock = page.getByRole('navigation', { name: '주요 화면' });
-    await expect(dock.getByRole('button')).toHaveCount(3);
+    await expect(dock.getByRole('button')).toHaveCount(4);
     await dock.getByRole('button', { name: '대화', exact: true }).click();
     await page.getByRole('button', { name: /^작업실/ }).click();
     await page.locator('.workspace-page').getByRole('button', { name: '목표', exact: true }).click();

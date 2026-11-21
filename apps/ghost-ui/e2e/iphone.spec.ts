@@ -40,7 +40,7 @@ test('open and switch Ghost conversations from the mobile dock', async ({ page }
 
   await page.setViewportSize({ width: 320, height: 690 });
   const hitWidths = await dock.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().width));
-  expect(hitWidths).toHaveLength(3);
+  expect(hitWidths).toHaveLength(4);
   expect(hitWidths.every(width => width >= 44)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
