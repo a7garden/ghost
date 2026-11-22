@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Crown, Lock, MessageCircle, Pencil, Plus, Power, RotateCcw, Search, Square, Trash2, X } from 'lucide-react';
 import { ADAPTATION_MAX_CHARS, BROWSER_TOOLS, CODE_TOOLS, DESKTOP_TOOLS, FINANCE_TOOLS, GHOST_TOOLS, HOST_TOOLS, MAIL_TOOLS, VAULT_TOOLS, type Adaptation, type AutonomyPlan, type Command, type Ghost, type GhostState, type GhostTool, type ModelRef, type SkillCatalog } from '@ghost/contract';
-import { InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
+import { Button, InlineError, Popover, PopoverContent, PopoverTrigger, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { DotAvatar } from '../components/DotAvatar';
@@ -184,7 +184,7 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
           <span className="ghost-sheet__state" data-state={ghost.state}><Power aria-hidden="true"/>{states.find(item => item.value === ghost.state)?.label}</span>
         </div>
       </div>
-      <button type="button" className="ghost-sheet__chat" onClick={onChat}><MessageCircle aria-hidden="true"/>대화</button>
+      <Button type="button" variant="outline" className="ghost-sheet__chat" onClick={onChat}><MessageCircle aria-hidden="true"/>대화</Button>
     </header>
     {error && <div className="ghost-sheet__feedback" role="status"><InlineError>{error}</InlineError></div>}
 
@@ -208,16 +208,16 @@ export function GhostSheet({ ghost, onChat }: { ghost: Ghost; onChat(): void }) 
           onCheckedChange={next => void save({ type: 'autonomy.set', ghostId: ghost.id, enabled: next })}/>
       </SettingsRow>
       {!ghost.isDefault && <SettingsRow label="메인 Ghost" description="새 대화와 일을 처음 받는 Ghost">
-        <button type="button" className="sandbox-strip__action" disabled={saving || ghost.state !== 'active'} onClick={() => void save({ type: 'ghost.set_default', ghostId: ghost.id })}>
+        <Button type="button" variant="secondary" size="sm" disabled={saving || ghost.state !== 'active'} onClick={() => void save({ type: 'ghost.set_default', ghostId: ghost.id })}>
           <Crown aria-hidden="true"/>메인으로 지정
-        </button>
+        </Button>
       </SettingsRow>}
       <SettingsRow label="PC 직접 실행" description="이 Ghost가 샌드박스 없이 이 Mac의 파일과 셸 명령을 직접 실행합니다. Mac 전체와 네트워크에 영향을 줄 수 있고, 활동의 PR 댓글·메일 회신 승인 설정으로 제한되지 않습니다. 허용을 끄면 진행 중인 PC 작업도 중지됩니다.">
         <Switch checked={ghost.hostExecution === true} disabled={saving} aria-label="PC 직접 실행 허용"
           onCheckedChange={next => void update({ hostExecution: next })}/>
       </SettingsRow>
       {canDeleteGhost(ghost) && <SettingsRow label="Ghost 삭제" description="목록에서 제거합니다. 지난 맡긴 일의 기록은 남습니다.">
-        <button type="button" className="sandbox-strip__action" data-danger onClick={() => setDeleting(true)}><Trash2 aria-hidden="true"/>삭제</button>
+        <Button type="button" variant="destructive" size="sm" onClick={() => setDeleting(true)}><Trash2 aria-hidden="true"/>삭제</Button>
       </SettingsRow>}
     </Panel>
     {sandbox && sandbox.state !== 'none' && <Panel title="샌드박스"><SandboxStrip ghostId={ghost.id} state={sandbox.state} detail={sandbox.detail}/></Panel>}
@@ -322,8 +322,8 @@ function DeleteDialog({ ghost, onClose }: { ghost: Ghost; onClose(): void }) {
   return <Modal title={`${ghost.name} 삭제`} onClose={onClose} className="sm:max-w-[420px]">
     {error && <InlineError>{error}</InlineError>}
     <div className="mt-4 flex justify-end gap-2">
-      <button type="button" className="sandbox-strip__action" disabled={busy} onClick={onClose}>취소</button>
-      <button type="button" className="sandbox-strip__action" data-danger disabled={busy} onClick={remove}>삭제</button>
+      <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={onClose}>취소</Button>
+      <Button type="button" variant="destructive" size="sm" disabled={busy} onClick={remove}>삭제</Button>
     </div>
   </Modal>;
 }
@@ -372,7 +372,7 @@ function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: str
     <p className="persona-note__text">{persona}</p>
     <div className="persona-note__actions">
       <span className="persona-note__hint">첫 줄은 팀 목록의 한 줄 소개입니다. 기본 지시 앞에 붙습니다.</span>
-      <button type="button" className="persona-note__edit" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>편집</button>
+      <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil aria-hidden="true"/>편집</Button>
     </div>
   </div>;
   return <div className="persona-note" data-changed={changed || undefined}>
@@ -382,9 +382,9 @@ function PersonaNote({ persona, onSave }: { persona: string; onSave(persona: str
         if (event.key === 'Escape') { event.preventDefault(); cancel(); }
       }}/>
     <div className="persona-note__actions">
-      {changed && <button type="button" className="persona-note__revert" onClick={() => setDraft(persona)} aria-label="되돌리기" title="되돌리기"><RotateCcw aria-hidden="true"/></button>}
-      <button type="button" className="persona-note__cancel" onClick={cancel}>취소</button>
-      <button type="button" className="persona-note__save" disabled={!draft.trim()} onClick={() => void commit()}>저장</button>
+      {changed && <Button type="button" variant="ghost" size="icon" onClick={() => setDraft(persona)} aria-label="되돌리기" title="되돌리기"><RotateCcw aria-hidden="true"/></Button>}
+      <Button type="button" variant="outline" size="sm" onClick={cancel}>취소</Button>
+      <Button type="button" size="sm" disabled={!draft.trim()} onClick={() => void commit()}>저장</Button>
     </div>
   </div>;
 }
@@ -404,8 +404,8 @@ function AdaptationNote({ adaptation, onSave }: { adaptation: Adaptation | undef
       onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); commit(); } }}/>
     {adaptation && <p className="adaptation-note__meta">{adaptationLine(adaptation, now)}</p>}
     {(changed || previous !== null) && <div className="persona-note__actions">
-      {previous !== null && <button type="button" className="adaptation-note__revert" onClick={() => void onSave(previous)}>되돌리기</button>}
-      {changed && <button type="button" className="persona-note__save" onClick={commit}>저장</button>}
+      {previous !== null && <Button type="button" variant="ghost" size="sm" onClick={() => void onSave(previous)}>되돌리기</Button>}
+      {changed && <Button type="button" size="sm" onClick={commit}>저장</Button>}
     </div>}
   </div>;
 }
@@ -450,13 +450,13 @@ function SandboxStrip({ ghostId, state, detail }: { ghostId: string; state: stri
   return <div className="sandbox-strip" data-state={state}>
     <span className="sandbox-strip__orb" aria-hidden="true"/>
     <span className="sandbox-strip__copy"><strong>{label[state] ?? state}</strong>{detail && <small>{detail}</small>}</span>
-    {state === 'running' && <button type="button" className="sandbox-strip__action" onClick={() => void save({ type: 'sandbox.control', ghostId, action: 'stop' })}><Square aria-hidden="true"/>정지</button>}
+    {state === 'running' && <Button type="button" variant="secondary" size="sm" onClick={() => void save({ type: 'sandbox.control', ghostId, action: 'stop' })}><Square aria-hidden="true"/>정지</Button>}
     {confirm
       ? <span className="sandbox-strip__confirm">
-        <button type="button" className="sandbox-strip__action" data-danger onClick={() => void save({ type: 'sandbox.control', ghostId, action: 'reset' }).then(() => setConfirm(false))}>파일까지 지우고 초기화</button>
-        <button type="button" className="sandbox-strip__action" aria-label="취소" onClick={() => setConfirm(false)}><X aria-hidden="true"/></button>
+        <Button type="button" variant="destructive" size="sm" onClick={() => void save({ type: 'sandbox.control', ghostId, action: 'reset' }).then(() => setConfirm(false))}>파일까지 지우고 초기화</Button>
+        <Button type="button" variant="secondary" size="icon" aria-label="취소" onClick={() => setConfirm(false)}><X aria-hidden="true"/></Button>
       </span>
-      : <button type="button" className="sandbox-strip__action" onClick={() => setConfirm(true)}><RotateCcw aria-hidden="true"/>초기화</button>}
+      : <Button type="button" variant="secondary" size="sm" onClick={() => setConfirm(true)}><RotateCcw aria-hidden="true"/>초기화</Button>}
     {error && <InlineError>{error}</InlineError>}
   </div>;
 }
@@ -486,8 +486,8 @@ function GhostCreator({ onCancel, onCreated }: { onCancel(): void; onCreated(id:
     </Panel>
     {error && <InlineError>{error}</InlineError>}
     <div className="ghost-sheet__footer">
-      <button type="button" className="sandbox-strip__action" disabled={saving} onClick={onCancel}>취소</button>
-      <button type="submit" className="persona-note__save" disabled={saving || !name.trim() || !persona.trim()}>{saving ? '만드는 중…' : '만들기'}</button>
+      <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={onCancel}>취소</Button>
+      <Button type="submit" size="sm" disabled={saving || !name.trim() || !persona.trim()}>{saving ? '만드는 중…' : '만들기'}</Button>
     </div>
   </form>;
 }

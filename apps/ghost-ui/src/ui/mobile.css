@@ -167,7 +167,8 @@
   .look-editor__swatches { gap: 4px; }
   .look-swatch { flex-shrink: 0; width: 44px; height: 44px; min-width: 44px; }
   .ghost-sheet-handle { min-height: 44px; }
-  button, [role="button"], [role="tab"], [role="option"], summary, [data-slot="context-menu-item"] { min-width: 44px !important; min-height: 44px !important; }
+  /* Kit Buttons size their own touch target; this covers raw buttons and other roles. */
+  button:not([data-slot="button"]), [role="button"]:not([data-slot="button"]), [role="tab"], [role="option"], summary, [data-slot="context-menu-item"] { min-width: 44px !important; min-height: 44px !important; }
   /* Keep the familiar visual track inside a full-size hit area. */
   body [data-slot="switch"] { position: relative; width: 44px; height: 44px; min-width: 44px; padding: 6px; background: none !important; box-shadow: none; }
   body [data-slot="switch"]::before { content: ''; position: absolute; left: 4px; top: 11px; width: 36px; height: 22px; border-radius: 22px; background: var(--ghost-hover2); box-shadow: inset 0 0 0 1px var(--ghost-line-strong); }

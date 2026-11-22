@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, FileText, History, Pencil, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
 import type { Ghost, MemoryFile, MemoryRevision, MemoryView } from '@ghost/contract';
-import { InlineError, Input, SettingsRow } from '../ui';
+import { Button, InlineError, Input, SettingsRow } from '../ui';
 import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useHost } from '../host/context';
@@ -170,9 +170,9 @@ export function GhostMemory({ ghost }: { ghost: Ghost }) {
       onCloseRequest={() => (draftIsDirty(draft) ? setPendingClose(true) : closeDraft())}/>}
 
     {!draft && editable && <div className="memory-new">
-      <button type="button" className="sandbox-strip__action" onClick={() => openDraft({ path: '/me/', content: '', original: '', hash: null, isNew: true })}>
+      <Button type="button" variant="secondary" size="sm" onClick={() => openDraft({ path: '/me/', content: '', original: '', hash: null, isNew: true })}>
         <Plus aria-hidden="true"/>새 기억 파일
-      </button>
+      </Button>
     </div>}
 
     {!loading && !loadError && files.length === 0 && <div className="calm"><FileText size={16} aria-hidden="true"/><p>아직 기억 파일이 없습니다. Ghost가 일하면서 기록을 쌓습니다.</p></div>}
@@ -193,10 +193,10 @@ export function GhostMemory({ ghost }: { ghost: Ghost }) {
     <div className="memory-runs">
       <div className="memory-runs__head">
         <p className="memory-runs__title">기억 정리{awaiting !== null ? ' · 요청됨, 시작을 기다리는 중' : ''}</p>
-        {editable && <button type="button" className="sandbox-strip__action" disabled={busy || awaiting !== null}
+        {editable && <Button type="button" variant="secondary" size="sm" disabled={busy || awaiting !== null}
           onClick={() => void requestDream()}>
           <Sparkles aria-hidden="true"/>지금 정리하기
-        </button>}
+        </Button>}
       </div>
       {runs.length === 0 && <p className="memory-runs__empty">아직 정리 기록이 없습니다. 대화가 쌓이면 Host가 찾을 때마다 정리합니다.</p>}
       {runs.map(runRow => <div key={runRow.id} className="memory-run" data-state={runRow.state}>
@@ -247,17 +247,17 @@ function MemoryDraft({ draft, busy, editable, conflict, now, onChange, onSave, o
       <textarea ref={area} aria-label={`${draft.path} 내용`} value={draft.content} rows={5} maxLength={32768}
         disabled={!editable || busy} onChange={event => onChange({ ...draft, content: event.target.value })}/>
       <div className="persona-note__actions">
-        <button type="button" className="persona-note__revert" aria-label="닫기" disabled={busy} onClick={onCloseRequest}><X aria-hidden="true"/></button>
-        <button type="button" className="persona-note__revert" aria-label="되돌리기" disabled={busy} onClick={() => onChange({ ...draft, content: draft.original })}><RotateCcw aria-hidden="true"/></button>
-        <button type="button" className="persona-note__save" disabled={busy || !editable || !draft.path || !pathOk} onClick={onSave}>저장</button>
+        <Button type="button" variant="ghost" size="icon" aria-label="닫기" disabled={busy} onClick={onCloseRequest}><X aria-hidden="true"/></Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="되돌리기" disabled={busy} onClick={() => onChange({ ...draft, content: draft.original })}><RotateCcw aria-hidden="true"/></Button>
+        <Button type="button" size="sm" disabled={busy || !editable || !draft.path || !pathOk} onClick={onSave}>저장</Button>
       </div>
     </div>
     {conflict && <div className="memory-conflict">
       <p className="memory-conflict__title">서버의 최신 내용 (v{conflict.revision} · {relativeTime(conflict.updatedAt, now)})</p>
       <pre>{conflict.content}</pre>
       <div className="memory-conflict__actions">
-        <button type="button" className="sandbox-strip__action" disabled={busy} onClick={onOverwrite}>이 화면의 내용으로 저장</button>
-        <button type="button" className="sandbox-strip__action" disabled={busy} onClick={onLoadServer}>서버 내용 불러오기</button>
+        <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={onOverwrite}>이 화면의 내용으로 저장</Button>
+        <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={onLoadServer}>서버 내용 불러오기</Button>
       </div>
     </div>}
   </div>;
@@ -311,8 +311,8 @@ function ConfirmDelete({ file, busy, onConfirm, onClose }: {
     </div>
     {error && <InlineError>{error}</InlineError>}
     <div className="mt-4 flex justify-end gap-2">
-      <button type="button" className="sandbox-strip__action" disabled={pending || busy} onClick={onClose}>취소</button>
-      <button type="button" className="sandbox-strip__action" data-danger disabled={pending || busy} onClick={() => void remove()}>삭제</button>
+      <Button type="button" variant="secondary" size="sm" disabled={pending || busy} onClick={onClose}>취소</Button>
+      <Button type="button" variant="destructive" size="sm" disabled={pending || busy} onClick={() => void remove()}>삭제</Button>
     </div>
   </Modal>;
 }
