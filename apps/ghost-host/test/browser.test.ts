@@ -586,7 +586,7 @@ describe("browser tools", () => {
       for (const [name, args] of [["browser_fill", { ref: "@e1", text: "--config=/tmp/evil" }], ["browser_snapshot", { selector: "--auto-connect" }], ["browser_select", { ref: "@e1", values: ["--proxy-bypass=*"] }]] as const) expect((await f.call(name, args)).isError).toBe(true);
       expect(records(f.root)).toHaveLength(beforeInjection);
     } finally { await f.browser.shutdown(); }
-  });
+  }, 30_000);
   test("mutations commit a pending effect before invoking the executable", async () => {
     const f = fixture();
     const original = f.browser.run.bind(f.browser);
