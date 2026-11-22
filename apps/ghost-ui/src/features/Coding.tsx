@@ -8,7 +8,8 @@ import { OpenHerdrPane, useHerdr } from './Herdr';
 import { HerdrActionDialog } from './HerdrActions';
 import { findHerdrPane, HerdrRoster, type HerdrNode, type RosterAction } from './HerdrRoster';
 import { parseHerdrPane } from './herdrDisplay';
-import { CodingSkeleton, HerdrInbox, useHerdrActivity } from './HerdrInbox';
+import { HerdrInbox, useHerdrActivity } from './HerdrInbox';
+import { CodingSkeleton } from './HerdrParts';
 import { useHerdrAsks } from './HerdrAsk';
 import './coding.css';
 

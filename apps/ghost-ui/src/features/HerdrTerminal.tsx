@@ -5,7 +5,7 @@ import { useHost } from '../host/context';
 import { HostError } from '../host/client';
 import { decodeHerdrFrame } from './herdrTerminalProtocol';
 import { openHerdrXterm } from './herdrXterm';
-import { CodingSkeleton } from './HerdrInbox';
+import { CodingSkeleton } from './HerdrParts';
 import HerdrHistory, { type HistoryViewport } from './HerdrHistory';
 import { followingTerminalTop, isHistoryPageKey, OBSERVED_TERMINAL_ROWS, terminalDragOffset,
   terminalUsedRows, terminalWheelOffset, type TerminalAnchor } from './herdrTerminalScroll';

@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, SquareTerminal } from 'lucide-react';
 import type { HerdrWorkspaceView } from '@ghost/contract';
+import { WorkingTime } from './HerdrParts';
 import { HerdrAskCard, type HerdrAsks } from './HerdrAsk';
 import { HerdrState, herdrPanePath } from './herdrDisplay';
-import { agentGroupName, agentGroups, elapsedLabel, groupAgents, readCodingValue, trackActivity, writeCodingValue, type ActivityLog } from './herdrInboxModel';
-import { useNow } from './time';
+import { agentGroupName, agentGroups, groupAgents, readCodingValue, trackActivity, writeCodingValue, type ActivityLog } from './herdrInboxModel';
 
 const emptyLog: ActivityLog = {};
 export function useHerdrActivity(session: string | null, workspaces: readonly HerdrWorkspaceView[], open: string | null) {
@@ -25,12 +25,6 @@ export function useHerdrActivity(session: string | null, workspaces: readonly He
     if (observed) writeCodingValue(`activity:${observed.session}`, JSON.stringify(observed.log));
   }, [observed]);
   return observed?.session === session ? observed.log : emptyLog;
-}
-
-export function CodingSkeleton({ detail = false }: { detail?: boolean }) {
-  return <div className={`herdr-skeleton${detail ? ' herdr-skeleton--pane' : ''}`} role="status" aria-label="불러오는 중">
-    {[0, 1, 2].map(i => <div key={i}><i/><span><b/><b/></span></div>)}
-  </div>;
 }
 
 export function HerdrInbox({ workspaces, open, log, asks, onSpaces }: {
@@ -82,9 +76,4 @@ export function HerdrInbox({ workspaces, open, log, asks, onSpaces }: {
       })}</ul>
     </section> : null)}
   </div>;
-}
-
-export function WorkingTime({ since }: { since: number }) {
-  const now = useNow(1000);
-  return <span className="herdr-elapsed">{elapsedLabel(since || now, now)}</span>;
 }

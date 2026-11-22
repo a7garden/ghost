@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HerdrControlError, HostError } from '../host/client';
-import { controlComposerText, controlRailKey, shouldControlTerminal, TerminalResize, TerminalScrollLines, terminalProblem, type TerminalSize } from './herdrControlModel';
+import { controlComposerText, controlRailKey, initialTerminalLease, shouldControlTerminal, takenNote, terminalLeaseConsent, terminalLeaseReducer, TerminalResize, TerminalScrollLines, terminalProblem, type TerminalLeaseAction, type TerminalSize } from './herdrControlModel';
 
 it('controls owned panes by default, respecting explicit Watch or a fit consent', () => {
   expect(shouldControlTerminal(true, null)).toBe(true);
@@ -76,5 +76,32 @@ describe('controlled terminal resizing', () => {
     expect(send.mock.calls).toEqual([[keyboard], [rotated], [rotated], [rotated], [rotated]]);
     expect(failure).toHaveBeenCalledTimes(1);
     resize.stop();
+  });
+});
+
+describe('terminal lease', () => {
+  const fresh = () => initialTerminalLease(false);
+  const run = (...actions: TerminalLeaseAction[]) => actions.reduce(terminalLeaseReducer, fresh());
+
+  it('asks before fitting a pane the owner does not control, and remembers the yes', () => {
+    const asked = run({ type: 'fit', owned: false });
+    expect(asked.confirmation).toBe('fit');
+    const fitted = terminalLeaseReducer(asked, { type: 'confirm' });
+    expect(terminalLeaseConsent(fitted)).toBe('fit');
+    expect(terminalLeaseConsent(terminalLeaseReducer(fitted, { type: 'watch' }))).toBe('watch');
+    // A remembered yes returns to the lease without asking again.
+    expect(terminalLeaseConsent(terminalLeaseReducer(terminalLeaseReducer(fitted, { type: 'watch' }), { type: 'fit', owned: false }))).toBe('fit');
+  });
+
+  it('falls back to watching with a note when another client takes the pane, and asks again when held', () => {
+    expect(run({ type: 'ready' }, { type: 'problem', reason: 'taken' })).toMatchObject({ watch: true, leased: false, note: takenNote });
+    const held = run({ type: 'problem', reason: 'held' });
+    expect(held).toMatchObject({ watch: true, confirmation: 'held' });
+    expect(terminalLeaseReducer(held, { type: 'confirm' })).toMatchObject({ watch: false, takeover: true, confirmation: null });
+  });
+
+  it('drops the lease, takeover and any question when leaving the live view', () => {
+    expect(run({ type: 'problem', reason: 'held' }, { type: 'confirm' }, { type: 'ready' }, { type: 'leave' }))
+      .toMatchObject({ leased: false, takeover: false, confirmation: null });
   });
 });

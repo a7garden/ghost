@@ -4,7 +4,7 @@ import type { HerdrControlCommand, HerdrControlLease } from '@ghost/contract';
 import { HostError } from '../host/client';
 import { useHost } from '../host/context';
 import { Button } from '../ui';
-import { CodingSkeleton } from './HerdrInbox';
+import { CodingSkeleton } from './HerdrParts';
 import type { HerdrTerminalControls } from './HerdrTerminal';
 import { controlComposerText, controlRailKey, TerminalResize, TerminalScrollLines, terminalProblem, type TerminalProblem, type TerminalSize } from './herdrControlModel';
 import { decodeHerdrFrame, HerdrInputQueue } from './herdrTerminalProtocol';

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { lazy, Suspense, useEffect, useEffectEvent, useReducer, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Smartphone, Undo2 } from 'lucide-react';
 import type { HerdrPaneView, HerdrUpload, HerdrView } from '@ghost/contract';
 import { useHost } from '../host/context';
@@ -11,13 +11,13 @@ import { HerdrChangesView, usePaneChanges } from './HerdrChanges';
 import { modifiedTerminalKey, noModifiers, shellCommand, type TerminalModifiers } from './herdrMobileInput';
 import { HerdrAskCard, type HerdrAsks } from './HerdrAsk';
 import { HerdrConversation, useHerdrChat } from './HerdrChat';
-import { CodingSkeleton } from './HerdrInbox';
+import { CodingSkeleton } from './HerdrParts';
 import { readCodingValue, writeCodingValue } from './herdrInboxModel';
 import { HerdrPaneHeader, herdrModes, type HerdrMode, type PaneNavigation } from './HerdrPaneHeader';
 import { readTerminalSize, TerminalKeyRail } from './HerdrTerminalControls';
 import type { HerdrTerminalControls } from './HerdrTerminal';
 import type { LeasedTerminalControls } from './HerdrControl';
-import { shouldControlTerminal, type TerminalConsent } from './herdrControlModel';
+import { initialTerminalLease, shouldControlTerminal, terminalLeaseConsent, terminalLeaseReducer } from './herdrControlModel';
 
 const WatchTerminal = lazy(() => import('./HerdrTerminal'));
 const ControlTerminal = lazy(() => import('./HerdrControl'));
@@ -143,13 +143,8 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
   const terminal = useRef<HerdrTerminalControls>(null);
   const control = useRef<LeasedTerminalControls>(null);
   const fitKey = `ghost.coding.fit:${preferencesKey}`;
-  const [consent, setConsent] = useState<TerminalConsent>(() => rememberedFit(fitKey) ? 'fit' : null);
-  const [watch, setWatch] = useState(false);
-  const [leased, setLeased] = useState(false);
-  const [takeover, setTakeover] = useState(false);
-  const [confirmation, setConfirmation] = useState<'fit' | 'held' | null>(null);
-  const [terminalNote, setTerminalNote] = useState('');
-  const controlWanted = shouldControlTerminal(pane.owned, watch ? 'watch' : consent);
+  const [lease, dispatchLease] = useReducer(terminalLeaseReducer, undefined, () => initialTerminalLease(rememberedFit(fitKey)));
+  const controlWanted = shouldControlTerminal(pane.owned, terminalLeaseConsent(lease));
   const busy = useRef(false);
   const modifierRef = useRef(noModifiers);
   const [modifiers, setModifiers] = useState(noModifiers);
@@ -168,28 +163,10 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
   const id = pane.id;
 
   function confirmTerminal() {
-    if (confirmation === 'fit') {
+    if (lease.confirmation === 'fit') {
       try { sessionStorage.setItem(fitKey, '1'); } catch { /* The current pane still remembers the choice. */ }
-      setConsent('fit');
     }
-    setWatch(false);
-    setTakeover(confirmation === 'held');
-    setConfirmation(null);
-    setTerminalNote('');
-  }
-
-  function watchTerminal(note = '') {
-    setWatch(true);
-    setLeased(false);
-    setTakeover(false);
-    setTerminalNote(note);
-  }
-
-  function fitTerminal() {
-    if (pane.owned || consent === 'fit') {
-      setWatch(false);
-      setTerminalNote('');
-    } else setConfirmation('fit');
+    dispatchLease({ type: 'confirm' });
   }
 
   useEffect(() => {
@@ -266,13 +243,13 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
   const controlling = activeMode === 'live' && controlWanted;
   const activeTerminal = controlling ? control : terminal;
   const terminalAction = controlling
-    ? leased && <Button type="button" variant="outline" size="sm" className="herdr-fit-action" aria-label="원래 크기로"
-      title="원래 크기로" onClick={() => watchTerminal()}>폰 크기<Undo2 aria-hidden="true"/></Button>
-    : <Button type="button" variant="ghost" size="sm" className="herdr-fit-action" onClick={fitTerminal}>
+    ? lease.leased && <Button type="button" variant="outline" size="sm" className="herdr-fit-action" aria-label="원래 크기로"
+      title="원래 크기로" onClick={() => dispatchLease({ type: 'watch' })}>폰 크기<Undo2 aria-hidden="true"/></Button>
+    : <Button type="button" variant="ghost" size="sm" className="herdr-fit-action" onClick={() => dispatchLease({ type: 'fit', owned: pane.owned })}>
       <Smartphone aria-hidden="true"/>폰 크기에 맞추기</Button>;
   return <HerdrPaneBody pane={displayed} compact={compact}
-    mode={activeMode} onMode={next => { if (next !== 'live') { setLeased(false); setTakeover(false); setConfirmation(null); } select(next); }}
-    pending={pending || (controlling && !leased)} error={error}
+    mode={activeMode} onMode={next => { if (next !== 'live') dispatchLease({ type: 'leave' }); select(next); }}
+    pending={pending || (controlling && !lease.leased)} error={error}
     onPrompt={prompt} onKey={key => {
       setError('');
       if (controlling) control.current?.key(key);
@@ -288,14 +265,13 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
       : activeMode === 'changes' ? <HerdrChangesView pane={displayed} compact={compact} data={changes} error={changesError}
         onRefresh={refreshChanges} revision={changesRevision}/>
       : checkingChat ? <CodingSkeleton detail/> : <Suspense fallback={<CodingSkeleton detail/>}>
-        {controlling ? <ControlTerminal key={id} ref={control} pane={id} fit={consent === 'fit'} takeover={takeover} fontSize={fontSize}
-          onReady={() => setLeased(true)} onProblem={reason => {
-            if (reason === 'gone') { onGone(); return; }
-            watchTerminal(reason === 'taken' ? '다른 곳에서 이 패널을 가져갔어요.' : '');
-            if (reason === 'fit' || reason === 'held') setConfirmation(reason);
+        {controlling ? <ControlTerminal key={id} ref={control} pane={id} fit={lease.consent === 'fit'} takeover={lease.takeover} fontSize={fontSize}
+          onReady={() => dispatchLease({ type: 'ready' })} onProblem={reason => {
+            if (reason === 'gone') onGone();
+            else dispatchLease({ type: 'problem', reason });
           }} onInput={text => changed({ text })} onError={setError} onModifiedKey={modifiedKey}/>
           : <WatchTerminal key={id} ref={terminal} pane={id} onData={sendText} onModifiedKey={modifiedKey} onGone={onGone} fontSize={fontSize}/>}
-        {terminalNote && <div className="herdr-live-status" role="status">{terminalNote}</div>}
-        <TerminalConfirmation kind={confirmation} cancel={() => setConfirmation(null)} confirm={confirmTerminal}/>
+        {lease.note && <div className="herdr-live-status" role="status">{lease.note}</div>}
+        <TerminalConfirmation kind={lease.confirmation} cancel={() => dispatchLease({ type: 'cancel' })} confirm={confirmTerminal}/>
       </Suspense>}/>;
 }

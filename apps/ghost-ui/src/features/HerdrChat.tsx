@@ -5,7 +5,7 @@ import { MessageBody } from '../components/MessageBody';
 import { useHost } from '../host/context';
 import { Button, InlineError } from '../ui';
 import { HerdrState } from './herdrDisplay';
-import { WorkingTime } from './HerdrInbox';
+import { WorkingTime } from './HerdrParts';
 import { elapsedLabel, foldChat, mergeChat, type ChatRow } from './herdrInboxModel';
 
 type ChatSnapshot = { items: readonly HerdrChatItem[]; source?: Chat['source']; title?: string | null };

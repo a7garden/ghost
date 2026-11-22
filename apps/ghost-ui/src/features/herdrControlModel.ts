@@ -117,3 +117,60 @@ export function controlComposerText(text: string, bracketedPaste: boolean): stri
   const normalized = text.replace(/\r\n|\n/g, '\r');
   return bracketedPaste ? `\x1b[200~${normalized}\x1b[201~\r` : `${normalized}\r`;
 }
+
+/** One lease lifecycle for the terminal: who may drive it, what needs the owner's yes, and what to tell them. */
+export type TerminalLease = {
+  /** The owner's remembered "fit to phone" yes. */
+  consent: 'fit' | null;
+  /** Explicit read-only choice; overrides consent and ownership until the owner fits again. */
+  watch: boolean;
+  leased: boolean;
+  takeover: boolean;
+  confirmation: 'fit' | 'held' | null;
+  note: string;
+};
+
+export type TerminalLeaseAction =
+  | { type: 'watch'; note?: string }
+  | { type: 'fit'; owned: boolean }
+  | { type: 'confirm' }
+  | { type: 'cancel' }
+  | { type: 'ready' }
+  | { type: 'leave' }
+  | { type: 'problem'; reason: 'fit' | 'held' | 'taken' | 'released' };
+
+export const takenNote = '다른 곳에서 이 패널을 가져갔어요.';
+
+export function initialTerminalLease(remembered: boolean): TerminalLease {
+  return { consent: remembered ? 'fit' : null, watch: false, leased: false, takeover: false, confirmation: null, note: '' };
+}
+
+export function terminalLeaseConsent(lease: TerminalLease): TerminalConsent {
+  return lease.watch ? 'watch' : lease.consent;
+}
+
+export function terminalLeaseReducer(state: TerminalLease, action: TerminalLeaseAction): TerminalLease {
+  switch (action.type) {
+    case 'watch':
+      return { ...state, watch: true, leased: false, takeover: false, note: action.note ?? '' };
+    case 'fit':
+      // An owned pane or an earlier "fit" yes needs no new question.
+      if (action.owned || state.consent === 'fit') return { ...state, watch: false, note: '' };
+      return { ...state, confirmation: 'fit' };
+    case 'confirm':
+      return {
+        ...state, consent: state.confirmation === 'fit' ? 'fit' : state.consent,
+        watch: false, takeover: state.confirmation === 'held', confirmation: null, note: '',
+      };
+    case 'cancel':
+      return { ...state, confirmation: null };
+    case 'ready':
+      return { ...state, leased: true };
+    case 'leave':
+      return { ...state, leased: false, takeover: false, confirmation: null };
+    case 'problem': {
+      const watching = terminalLeaseReducer(state, { type: 'watch', note: action.reason === 'taken' ? takenNote : '' });
+      return action.reason === 'fit' || action.reason === 'held' ? { ...watching, confirmation: action.reason } : watching;
+    }
+  }
+}
