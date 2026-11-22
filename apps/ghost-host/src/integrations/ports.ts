@@ -1,4 +1,4 @@
-import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrKeys, HerdrOutput, HerdrPaneView, HerdrView, Scope, VaultItem, Work } from "@ghost/contract";
+import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrAgentStart, HerdrClose, HerdrFrame, HerdrInput, HerdrOutput, HerdrPaneView, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 
@@ -323,11 +323,22 @@ export interface HerdrWait {
 export interface HerdrPort {
   /** The session coding uses. */
   readonly session: string;
+  /** The session as herdr's sidebar shows it: workspaces, tabs, panes. */
   overview(): Promise<HerdrView>;
+  /** The end of a pane's terminal as text. */
   output(pane: string): Promise<HerdrOutput>;
   setup(): Promise<CodingSetup>;
   installIntegration(agent: CodingAgentId): Promise<void>;
+  /** An agent in a new worktree workspace with its task (`code_run`), waiting for it to settle when asked. */
   start(input: CodingStart, wait?: HerdrWait): Promise<HerdrRun>;
   prompt(pane: string, text: string, wait?: HerdrWait): Promise<HerdrRun>;
-  keys(input: HerdrKeys): Promise<HerdrPaneView>;
+  createWorkspace(input: HerdrWorkspaceCreate): Promise<HerdrPaneView>;
+  createTab(input: HerdrTabCreate): Promise<HerdrPaneView>;
+  split(input: HerdrSplit): Promise<HerdrPaneView>;
+  startAgent(input: HerdrAgentStart): Promise<HerdrPaneView>;
+  rename(input: HerdrRename): Promise<void>;
+  close(input: HerdrClose): Promise<void>;
+  input(input: HerdrInput): Promise<void>;
+  /** A pane's live terminal rendered for a viewer of cols x rows, without resizing the pane. */
+  terminal(pane: string, cols: number, rows: number, signal: AbortSignal): Promise<AsyncGenerator<HerdrFrame>>;
 }

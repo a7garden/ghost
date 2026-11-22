@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { CodingSetup, HerdrOutput, HerdrPaneView, HerdrView, parse } from "@ghost/contract";
+import { CodingSetup, HerdrFrame, HerdrOutput, HerdrPaneView, HerdrView, parse } from "@ghost/contract";
 import { startServer } from "../src/api/server.ts";
 import type { Config } from "../src/config.ts";
 import { codingPrefs, Herdr, HerdrStartError, terminalText } from "../src/integrations/herdr.ts";
@@ -13,14 +13,23 @@ const OWNER = "owner-herdr-token";
 const snapshot = {
   id: "cli:api:snapshot",
   result: { snapshot: {
-    workspaces: [{ workspace_id: "w1", label: "ghost" }],
-    tabs: [{ tab_id: "w1:t1", label: "로그인 고치기" }, { tab_id: "w1:t2", label: "shell" }],
+    workspaces: [
+      { workspace_id: "w1", label: "ghost", number: 1, agent_status: "blocked" },
+      { workspace_id: "w2", label: "fix", number: 2, agent_status: "idle", worktree: { checkout_path: "/wt/repo-fix", branch: "ghost/fix" } },
+    ],
+    tabs: [
+      { tab_id: "w1:t1", workspace_id: "w1", label: "로그인 고치기", number: 1, agent_status: "blocked" },
+      { tab_id: "w1:t2", workspace_id: "w1", label: "shell", number: 2, agent_status: "unknown" },
+      { tab_id: "w2:t1", workspace_id: "w2", label: "1", number: 1, agent_status: "idle" },
+    ],
     panes: [
-      { pane_id: "w1:pA", workspace_id: "w1", tab_id: "w1:t1", agent: "claude", agent_status: "blocked", cwd: "/work", foreground_cwd: "/work/tree", terminal_title_stripped: "x" },
+      { pane_id: "w1:pA", workspace_id: "w1", tab_id: "w1:t1", agent: "claude", agent_status: "blocked", focused: true, cwd: "/work", foreground_cwd: "/work/tree", terminal_title_stripped: "x" },
       { pane_id: "w1:p2", workspace_id: "w1", tab_id: "w1:t2", agent: null, agent_status: "unknown", cwd: "/work" },
       // herdr leaves the key out of a pane that never had an agent.
       { pane_id: "w1:p3", workspace_id: "w1", tab_id: "w1:t2", agent_status: "unknown", cwd: "/work" },
-      { pane_id: "w9:p1", workspace_id: "w1", tab_id: "w1:t1", agent: "omp", agent_status: "idle", cwd: "/work/new" },
+      { pane_id: "w9:p1", workspace_id: "w2", tab_id: "w2:t1", agent: "omp", agent_status: "idle", cwd: "/work/new" },
+      { pane_id: "w9:p5", workspace_id: "w2", tab_id: "w2:t1", agent_status: "unknown", cwd: "/work/new" },
+      { pane_id: "w9:p6", workspace_id: "w2", tab_id: "w2:t1", agent_status: "unknown", cwd: "/work/new" },
     ],
   } },
 };
@@ -58,7 +67,14 @@ case "$*" in
   "--session default agent start "*) ${extra.agentStart ?? "echo '{\"result\":{}}'"} ;;
   "--session default agent prompt w1:pA "*) echo '{"error":{"code":"agent_blocked","message":"agent w1:pA is waiting at a dialog"}}'; exit 1 ;;
   "--session default agent prompt "*) echo '{"result":{}}' ;;
-  "--session default agent send-keys "*) echo '{"result":{}}' ;;
+  "--session default tab create "*) echo '${created("w9:p5")}' ;;
+  "--session default pane split "*) echo '{"id":"x","result":{"pane":{"pane_id":"w9:p6"}}}' ;;
+  "--session default workspace close w1") echo '{"error":{"code":"workspace_group_close_required","message":"close the linked worktree workspaces first"}}'; exit 1 ;;
+  "--session default workspace rename "*|"--session default tab rename "*|"--session default pane rename "*|"--session default workspace close "*|"--session default tab close "*|"--session default pane close "*) echo '{"result":{}}' ;;
+  "--session default pane send-keys w1:p2 nonsense") echo '{"error":{"code":"invalid_params","message":"unknown key nonsense"}}'; exit 1 ;;
+  "--session default pane send-text "*|"--session default pane send-keys "*) echo '{"result":{}}' ;;
+  "--session default terminal session observe w1:pA "*) printf '{"bytes":"aGk=","encoding":"ansi","full":true,"height":24,"seq":1,"type":"terminal.frame","width":80}\n{"bytes":"IQ==","encoding":"ansi","full":false,"height":24,"seq":2,"type":"terminal.frame","width":80}\n{"reason":"terminal attach ended: gone","type":"terminal.closed"}\n' ;;
+  "--session default terminal session observe w1:p2 "*) printf '{"bytes":"aGk=","encoding":"ansi","full":true,"height":24,"seq":1,"type":"terminal.frame","width":80}\n' ;;
   *) echo "unexpected: $*" >&2; exit 2 ;;
 esac
 `);
@@ -75,21 +91,24 @@ const gitRepo = (dir: string) => {
   execFileSync("/usr/bin/git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir });
 };
 
-test("herdr lists only agent panes of the session in use and reads one pane's terminal as plain text", async () => {
+test("herdr shows the session as its sidebar does, and reads any pane's terminal as plain text", async () => {
   const dir = tempDir();
   const fake = fakeHerdr(dir);
   try {
     const herdr = new Herdr(fake.path);
     const view = await herdr.overview();
     expect(view).toMatchObject({ available: true, session: "default", note: null });
-    expect(view.panes.map((pane) => pane.id)).toEqual(["w1:pA", "w9:p1"]);
-    expect(view.panes[0]).toEqual({ id: "w1:pA", workspace: "ghost", tab: "로그인 고치기", agent: "claude", status: "blocked", cwd: "/work/tree", title: "로그인 고치기" });
+    expect(view.workspaces.map((workspace) => [workspace.id, workspace.label, workspace.status, workspace.worktree])).toEqual([
+      ["w1", "ghost", "blocked", null],
+      ["w2", "fix", "idle", { path: "/wt/repo-fix", branch: "ghost/fix" }],
+    ]);
+    expect(view.workspaces[0]!.tabs.map((tab) => [tab.id, tab.label, tab.panes.map((pane) => pane.id)])).toEqual([["w1:t1", "로그인 고치기", ["w1:pA"]], ["w1:t2", "shell", ["w1:p2", "w1:p3"]]]);
+    expect(view.workspaces[0]!.tabs[0]!.panes[0]).toEqual({ id: "w1:pA", workspaceId: "w1", tabId: "w1:t1", workspace: "ghost", tab: "로그인 고치기", agent: "claude", status: "blocked", cwd: "/work/tree", title: "로그인 고치기", focused: true });
+    // A plain shell is a pane too, with no agent.
+    expect(view.workspaces[0]!.tabs[1]!.panes[0]).toMatchObject({ id: "w1:p2", agent: null, status: "unknown", focused: false, title: "work" });
 
-    const output = await herdr.output("w1:pA");
-    expect(output.text).toBe("  working on it\nred");
-    expect(output.pane.status).toBe("blocked");
-    // A shell pane is not an agent pane, and a pane herdr does not know is the same answer.
-    await expect(herdr.output("w1:p2")).rejects.toMatchObject({ code: "not_found" });
+    expect((await herdr.output("w1:pA")).text).toBe("  working on it\nred");
+    expect((await herdr.output("w1:pA")).pane.status).toBe("blocked");
     await expect(herdr.output("w1:pZ")).rejects.toMatchObject({ code: "not_found" });
     await expect(herdr.output("w1:pA --raw")).rejects.toMatchObject({ code: "invalid" });
   } finally {
@@ -105,9 +124,9 @@ test("the session in use is the owner's choice, herdr's default otherwise, and a
     const runs = await fake.runs();
     expect(runs.some((run) => run.join(" ") === "--session work api snapshot")).toBe(true);
     const missing = await new Herdr(fake.path, { prefs: () => ({ session: "nope", agent: null }) }).overview();
-    expect(missing).toMatchObject({ available: true, session: "nope", panes: [] });
+    expect(missing).toMatchObject({ available: true, session: "nope", workspaces: [] });
     expect(missing.note).toContain("unexpected");
-    expect(await new Herdr(null).overview()).toEqual({ available: false, session: "default", note: null, panes: [] });
+    expect(await new Herdr(null).overview()).toEqual({ available: false, session: "default", note: null, workspaces: [] });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -252,20 +271,131 @@ test("an agent that stops at startup is a start error that names the pane herdr 
   }
 });
 
-test("prompts and keys reach only agent panes, and a blocked agent's refusal is the owner's to read", async () => {
+test("a prompt reaches only an agent, and a blocked agent's refusal is the owner's to read", async () => {
   const dir = tempDir();
   const fake = fakeHerdr(dir);
   try {
     const herdr = new Herdr(fake.path);
     await expect(herdr.prompt("w1:pA", "go on")).rejects.toMatchObject({ code: "conflict", message: "agent w1:pA is waiting at a dialog" });
-    const prompted = await herdr.prompt("w9:p1", "go on");
+    const prompted = await herdr.prompt("w9:p1", "-x go on");
     expect(prompted.pane.id).toBe("w9:p1");
-    expect((await fake.runs()).filter((run) => run.includes("prompt")).at(-1)).toEqual(["--session", "default", "agent", "prompt", "w9:p1", "go on"]);
+    // A word that starts like a flag would be read as one by herdr.
+    expect((await fake.runs()).filter((run) => run.includes("prompt")).at(-1)).toEqual(["--session", "default", "agent", "prompt", "w9:p1", " -x go on"]);
+    await expect(herdr.prompt("w1:p3", "x")).rejects.toMatchObject({ code: "invalid" });
+    await expect(herdr.prompt("w1:pZ", "x")).rejects.toMatchObject({ code: "not_found" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
-    expect((await herdr.keys({ pane: "w1:pA", keys: ["down", "enter"] })).id).toBe("w1:pA");
-    expect((await fake.runs()).filter((run) => run.includes("send-keys")).at(-1)!.slice(2)).toEqual(["agent", "send-keys", "w1:pA", "down", "enter"]);
-    await expect(herdr.keys({ pane: "w1:p2", keys: ["esc"] })).rejects.toMatchObject({ code: "not_found" });
-    await expect(herdr.prompt("w1:p3", "x")).rejects.toMatchObject({ code: "not_found" });
+test("the keyboard of a pane's terminal sends text exactly as typed, then named keys, to any pane", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  try {
+    const herdr = new Herdr(fake.path);
+    await herdr.input({ pane: "w1:p2", text: "ls -la\r\u001b[A\u0003\0", keys: ["enter", "shift+tab"] });
+    const runs = (await fake.runs()).filter((run) => run.includes("send-text") || run.includes("send-keys"));
+    expect(runs).toEqual([
+      ["--session", "default", "pane", "send-text", "w1:p2", "ls -la\r\u001b[A\u0003"],
+      ["--session", "default", "pane", "send-keys", "w1:p2", "enter", "shift+tab"],
+    ]);
+    await expect(herdr.input({ pane: "w1:p2" })).rejects.toMatchObject({ code: "invalid" });
+    await expect(herdr.input({ pane: "w1:p2 x", text: "a" })).rejects.toMatchObject({ code: "invalid" });
+    await expect(herdr.input({ pane: "w1:p2", keys: ["nonsense"] })).rejects.toMatchObject({ code: "invalid", message: "unknown key nonsense" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the owner creates workspaces, tabs, panes and agents in herdr, with an agent and a first instruction when asked", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  const plain = join(dir, "plain");
+  mkdirSync(plain);
+  const repo = join(dir, "repo");
+  gitRepo(repo);
+  try {
+    const herdr = new Herdr(fake.path);
+    const bare = await herdr.createWorkspace({ cwd: plain, label: "ops" });
+    expect(bare.id).toBe("w9:p1");
+    let runs = (await fake.runs()).map((run) => run.slice(2));
+    expect(runs.find((run) => run[0] === "workspace")).toEqual(["workspace", "create", "--cwd", realpathSync(plain), "--label", "ops", "--no-focus"]);
+    expect(runs.some((run) => run[0] === "agent")).toBe(false);
+
+    await herdr.createWorkspace({ cwd: plain, agent: "gemini", task: "look around" });
+    runs = (await fake.runs()).map((run) => run.slice(2));
+    expect(runs.filter((run) => run[0] === "agent" && run[1] === "start").at(-1)!.slice(3, 7)).toEqual(["--kind", "gemini", "--pane", "w9:p1"]);
+    // Not a worktree: the instruction goes as the owner wrote it.
+    expect(runs.filter((run) => run[1] === "prompt").at(-1)).toEqual(["agent", "prompt", "w9:p1", "look around"]);
+
+    const made = await herdr.createWorkspace({ cwd: repo, worktree: true, branch: "spike", agent: "omp", task: "try it" });
+    expect(made.id).toBe("w9:p1");
+    runs = (await fake.runs()).map((run) => run.slice(2));
+    expect(runs.find((run) => run[0] === "worktree")!.slice(4)).toEqual(["--branch", "ghost/spike", "--no-focus"]);
+    expect(runs.filter((run) => run[1] === "prompt").at(-1)![3]).toContain("git worktree on branch ghost/spike");
+
+    await expect(herdr.createWorkspace({ cwd: plain, task: "orphan" })).rejects.toMatchObject({ code: "invalid" });
+    await expect(herdr.createWorkspace({ cwd: "relative" })).rejects.toMatchObject({ code: "invalid" });
+
+    const tab = await herdr.createTab({ workspace: "w2", label: "logs", cwd: plain });
+    expect(tab.id).toBe("w9:p5");
+    expect((await fake.runs()).map((run) => run.slice(2)).find((run) => run[0] === "tab" && run[1] === "create")).toEqual(["tab", "create", "--workspace", "w2", "--cwd", realpathSync(plain), "--label", "logs", "--no-focus"]);
+    await expect(herdr.createTab({ workspace: "w2 x" })).rejects.toMatchObject({ code: "invalid" });
+
+    const split = await herdr.split({ pane: "w1:p2", direction: "down", agent: "claude" });
+    expect(split.id).toBe("w9:p6");
+    runs = (await fake.runs()).map((run) => run.slice(2));
+    expect(runs.find((run) => run[0] === "pane" && run[1] === "split")).toEqual(["pane", "split", "w1:p2", "--direction", "down", "--no-focus"]);
+    expect(runs.filter((run) => run[1] === "start").at(-1)!.slice(3, 7)).toEqual(["--kind", "claude", "--pane", "w9:p6"]);
+
+    expect((await herdr.startAgent({ pane: "w1:p2", agent: "codex" })).id).toBe("w1:p2");
+    await expect(herdr.startAgent({ pane: "w1:pA", agent: "codex" })).rejects.toMatchObject({ code: "invalid" });
+    await expect(herdr.split({ pane: "w1:pZ", direction: "right" })).rejects.toMatchObject({ code: "not_found" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renaming and closing pass herdr's own words through, including a refusal", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  try {
+    const herdr = new Herdr(fake.path);
+    await herdr.rename({ target: "workspace", id: "w2", label: "새 이름" });
+    await herdr.rename({ target: "tab", id: "w2:t1", label: "logs" });
+    await herdr.rename({ target: "pane", id: "w1:p2", label: "server" });
+    await herdr.close({ target: "tab", id: "w1:t2" });
+    await herdr.close({ target: "pane", id: "w1:p3" });
+    await herdr.close({ target: "workspace", id: "w2" });
+    expect((await fake.runs()).map((run) => run.slice(2).join(" "))).toEqual(["workspace rename w2 새 이름", "tab rename w2:t1 logs", "pane rename w1:p2 server", "tab close w1:t2", "pane close w1:p3", "workspace close w2"]);
+    await expect(herdr.close({ target: "workspace", id: "w1" })).rejects.toMatchObject({ message: "close the linked worktree workspaces first" });
+    await expect(herdr.rename({ target: "tab", id: "w2", label: "x" })).rejects.toMatchObject({ code: "invalid" });
+    await expect(herdr.rename({ target: "workspace", id: "w2", label: "-rf" })).rejects.toMatchObject({ code: "invalid" });
+    await expect(herdr.close({ target: "pane", id: "w2" })).rejects.toMatchObject({ code: "invalid" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a pane's live terminal arrives as frames at the size asked for, and a pane that is not there is refused", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  try {
+    const herdr = new Herdr(fake.path);
+    const abort = new AbortController();
+    const frames: { seq: number; full: boolean; text: string }[] = [];
+    for await (const frame of await herdr.terminal("w1:pA", 100, 30, abort.signal)) frames.push({ seq: frame.seq, full: frame.full, text: Buffer.from(frame.bytes, "base64").toString() });
+    expect(frames).toEqual([{ seq: 1, full: true, text: "hi" }, { seq: 2, full: false, text: "!" }]);
+    const run = (await fake.runs()).find((entry) => entry.includes("observe"))!;
+    expect(run.slice(2)).toEqual(["terminal", "session", "observe", "w1:pA", "--cols", "100", "--rows", "30"]);
+    // A size outside what a terminal can be is brought into range, not passed on.
+    for await (const _ of await herdr.terminal("w1:pA", 5, 999, abort.signal)) break;
+    expect((await fake.runs()).filter((entry) => entry.includes("observe")).at(-1)!.slice(-4)).toEqual(["--cols", "20", "--rows", "120"]);
+    // A stream that ends without herdr saying the pane closed is not the pane's end: the viewer is told to try again.
+    const dropped = await herdr.terminal("w1:p2", 80, 24, abort.signal);
+    await expect((async () => { for await (const _ of dropped) { /* frames */ } })()).rejects.toMatchObject({ code: "unavailable", message: "the terminal stream stopped" });
+    await expect(herdr.terminal("w1:pZ", 80, 24, abort.signal)).rejects.toMatchObject({ code: "not_found" });
+    await expect(herdr.terminal("nope", 80, 24, abort.signal)).rejects.toMatchObject({ code: "invalid" });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -306,17 +436,38 @@ test("the herdr routes need the owner token and answer with the contract's shape
     expect((await post("/api/herdr/prompt", { pane: "w9:p1", text: "x" }, "wrong")).status).toBe(401);
 
     expect(parse(CodingSetup, await (await get("/api/coding", OWNER)).json()).herdr.version).toBe("0.9.5");
-    expect(parse(HerdrView, await (await get("/api/herdr", OWNER)).json()).panes).toHaveLength(2);
+    expect(parse(HerdrView, await (await get("/api/herdr", OWNER)).json()).workspaces).toHaveLength(2);
     expect(parse(HerdrOutput, await (await get("/api/herdr/output?pane=w1%3ApA", OWNER)).json()).text).toBe("  working on it\nred");
     expect((await get("/api/herdr/output?pane=w1%3ApZ", OWNER)).status).toBe(404);
     expect((await get("/api/herdr/output?pane=nope", OWNER)).status).toBe(400);
 
     expect(parse(HerdrPaneView, await (await post("/api/herdr/start", { repo: plain, task: "tidy" })).json()).id).toBe("w9:p1");
     expect((await post("/api/herdr/start", { repo: plain })).status).toBe(400);
+    expect(parse(HerdrPaneView, await (await post("/api/herdr/workspaces", { cwd: plain, label: "ops" })).json()).id).toBe("w9:p1");
+    expect((await post("/api/herdr/workspaces", { cwd: plain, task: "x" })).status).toBe(400);
+    expect(parse(HerdrPaneView, await (await post("/api/herdr/tabs", { workspace: "w2" })).json()).id).toBe("w9:p5");
+    expect(parse(HerdrPaneView, await (await post("/api/herdr/split", { pane: "w1:p2", direction: "right" })).json()).id).toBe("w9:p6");
+    expect((await post("/api/herdr/split", { pane: "w1:p2", direction: "left" })).status).toBe(400);
+    expect(parse(HerdrPaneView, await (await post("/api/herdr/agents", { pane: "w1:p2", agent: "codex" })).json()).id).toBe("w1:p2");
+    expect((await post("/api/herdr/agents", { pane: "w1:p2", agent: "vim" })).status).toBe(400);
+    expect((await post("/api/herdr/rename", { target: "tab", id: "w2:t1", label: "logs" })).status).toBe(200);
+    expect((await post("/api/herdr/close", { target: "pane", id: "w1:p3" })).status).toBe(200);
+    expect((await post("/api/herdr/close", { target: "workspace", id: "w1" })).status).toBe(503);
     expect((await post("/api/herdr/prompt", { pane: "w1:pA", text: "x" })).status).toBe(409);
     expect((await post("/api/herdr/prompt", { pane: "w9:p1", text: "keep going" })).status).toBe(200);
-    expect((await post("/api/herdr/keys", { pane: "w1:pA", keys: ["enter"] })).status).toBe(200);
-    expect((await post("/api/herdr/keys", { pane: "w1:pA", keys: ["rm -rf"] })).status).toBe(400);
+    expect((await post("/api/herdr/input", { pane: "w1:pA", text: "\r", keys: ["enter"] })).status).toBe(200);
+    expect((await post("/api/herdr/input", { pane: "w1:pA", keys: ["rm -rf"] })).status).toBe(400);
+    expect((await post("/api/herdr/input", { pane: "w1:pA" }, "wrong")).status).toBe(401);
+    expect((await post("/api/herdr/nothing", {})).status).toBe(404);
+
+    const live = await get("/api/herdr/terminal?pane=w1%3ApA&cols=100&rows=30", OWNER);
+    expect(live.status).toBe(200);
+    expect(live.headers.get("content-type")).toBe("text/event-stream");
+    const events = (await live.text()).split("\n\n").filter((entry) => entry.startsWith("event:"));
+    expect(events.map((entry) => entry.split("\n")[0])).toEqual(["event: frame", "event: frame", "event: end"]);
+    expect(parse(HerdrFrame, JSON.parse(events[0]!.split("\n")[1]!.slice("data: ".length))).full).toBe(true);
+    expect((await get("/api/herdr/terminal?pane=w1%3ApZ", OWNER)).status).toBe(404);
+    expect((await get("/api/herdr/terminal?pane=w1%3ApA")).status).toBe(401);
     expect(parse(CodingSetup, await (await post("/api/coding/integrations", { agent: "claude" })).json()).agents).toHaveLength(3);
     expect((await post("/api/coding/integrations", { agent: "codex" })).status).toBe(503);
     expect((await post("/api/coding/integrations", { agent: "vim" })).status).toBe(400);

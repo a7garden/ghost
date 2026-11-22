@@ -790,20 +790,22 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
   const calls: { op: string; arg: unknown }[] = [];
   const tree = new Map<string, { checkout: string; branch: string }>();
   const commit = (cwd: string) => { writeFileSync(join(cwd, "b.txt"), `${calls.length}\n`); gitIn(cwd, "add", "b.txt"); gitIn(cwd, "commit", "-qm", "touch b"); };
-  const pane = (id: string) => ({ id, workspace: "repo", tab: "work", agent: "omp", status: options.status ?? "idle" as const, cwd: tree.get(id)?.checkout ?? null, title: "work" });
+  const pane = (id: string) => ({ id, workspaceId: "w1", tabId: "w1:t1", workspace: "repo", tab: "work", agent: "omp", status: options.status ?? "idle" as const, cwd: tree.get(id)?.checkout ?? null, title: "work", focused: false });
   const result = (id: string, base: string | null) => ({ pane: pane(id), checkout: tree.get(id)!.checkout, branch: tree.get(id)!.branch, base, settled: options.outcome ?? "settled" as const });
+  const unused = async (): Promise<never> => { throw new Error("not used by the coding tools"); };
   const herdr: HerdrPort = {
     session: "default",
-    overview: async () => ({ available: true, session: "default", note: null, panes: [] }),
+    overview: async () => ({ available: true, session: "default", note: null, workspaces: [] }),
     output: async () => ({ pane: pane("w1:p1"), text: "changed b.txt; checked nothing" }),
     setup: async () => ({
       herdr: { path: "/bin/herdr", version: "0.9.5" }, config: { ok: true, note: null }, session: "default", sessions: [{ name: "default", running: options.server !== false }],
       server: options.server === false ? null : { version: "0.9.5", compatible: true, restartNeeded: false },
       agents: (["omp", "claude", "codex"] as const).map((id) => ({ id, name: id, path: (options.installed ?? ["omp"]).includes(id) ? `/bin/${id}` : null, integration: "current" as const })),
+      kinds: [],
       prefs: { session: null, agent: null },
     }),
     installIntegration: async () => {},
-    start: async (input, wait) => {
+    start: async (input, wait?) => {
       calls.push({ op: "start", arg: { ...input, waited: wait !== undefined } });
       if (options.startFails !== undefined && !options.failAfterPane) throw new CommandError("unavailable", options.startFails);
       const checkout = join(s.scopeDir, "wt", `repo-${input.branch ?? "task"}`);
@@ -822,7 +824,7 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
       commit(tree.get(id)!.checkout);
       return result(id, null);
     },
-    keys: async (input) => pane(input.pane),
+    createWorkspace: unused, createTab: unused, split: unused, startAgent: unused, rename: unused, close: unused, input: unused, terminal: unused,
   };
   const tools = createCodingTools(s.core, herdr).tools!;
   const call = async (name: string, args: object, callId: string) => {

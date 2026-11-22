@@ -1,12 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { HerdrPaneView } from '@ghost/contract';
-import { groupHerdrPanes, HerdrPaneBody, HerdrRoster } from './Herdr';
-import { codingStartInput } from './HerdrStart';
+import type { HerdrPaneView, HerdrWorkspaceView } from '@ghost/contract';
+import { HerdrHistoryText, HerdrPaneBody } from './Herdr';
+import { findHerdrPane, herdrNodeActions, HerdrRoster } from './HerdrRoster';
+import { herdrAgentOptions, workspaceInput } from './HerdrStart';
 import { codeRunPane, herdrPanePath, parseHerdrPane } from './herdrDisplay';
+import { decodeHerdrFrame, HerdrInputQueue } from './herdrTerminalProtocol';
 
 const pane: HerdrPaneView = {
-  id: 'w1:pA', workspace: 'ghost', tab: 'login', agent: 'Claude Code', status: 'blocked', cwd: '/work/tree', title: '로그인 고치기',
+  id: 'w1:pA', workspaceId: 'w1', tabId: 'w1:t1', workspace: 'ghost', tab: 'login', agent: 'Claude Code',
+  status: 'blocked', cwd: '/work/tree', title: '로그인 고치기', focused: true,
 };
 
 describe('herdr address', () => {
@@ -28,34 +31,47 @@ describe('herdr address', () => {
   });
 });
 
+const shell = { ...pane, id: 'w1:pB', title: 'zsh', agent: null, status: 'unknown' } satisfies HerdrPaneView;
+const workspaces: HerdrWorkspaceView[] = [{
+  id: 'w1', label: 'ghost', status: 'blocked', worktree: { path: '/work/tree', branch: 'fix/login' },
+  tabs: [{ id: 'w1:t1', label: 'login', status: 'blocked', panes: [pane, shell] }],
+}];
+
 describe('herdr roster', () => {
-  it('groups interleaved panes by workspace id in sidebar order, even when labels match', () => {
-    const anotherWorkspace = { ...pane, id: 'w2:pA' };
-    const anotherPane = { ...pane, id: 'w1:pB' };
-    expect(groupHerdrPanes([pane, anotherWorkspace, anotherPane])).toEqual([
-      { id: 'w1', workspace: 'ghost', panes: [pane, anotherPane] },
-      { id: 'w2', workspace: 'ghost', panes: [anotherWorkspace] },
-    ]);
-    expect(groupHerdrPanes([])).toEqual([]);
+  it('finds a pane in nested tabs by id, including a plain shell', () => {
+    expect(findHerdrPane(workspaces, shell.id)).toBe(shell);
+    expect(findHerdrPane(workspaces, 'w1:pC')).toBeUndefined();
+  });
+
+  it('offers only the available operations at each level', () => {
+    const forNode = (target: 'workspace' | 'tab' | 'pane', shell = false) =>
+      herdrNodeActions({ id: 'id', label: 'name', target }, { splitPane: 'w1:pA', shell });
+    expect(forNode('workspace').map(action => action.kind)).toEqual(['tab', 'rename', 'close']);
+    expect(forNode('tab')).toMatchObject([{ direction: 'right', pane: 'w1:pA' }, { direction: 'down', pane: 'w1:pA' }, { kind: 'rename' }, { kind: 'close' }]);
+    expect(forNode('pane').map(action => action.kind)).toEqual(['close']);
+    expect(forNode('pane', true).map(action => action.kind)).toEqual(['agent', 'close']);
   });
 
   it('names the group, shows the agent state and marks only the selected link', () => {
-    const markup = renderToStaticMarkup(<HerdrRoster panes={[pane, { ...pane, id: 'w1:pB', status: 'working' }]} selected={pane.id}/>);
+    const markup = renderToStaticMarkup(<HerdrRoster workspaces={workspaces} selected={pane.id} onAction={() => {}}/>);
     expect(markup).toContain('<h2>ghost</h2>');
+    expect(markup).toContain('fix/login');
+    expect(markup).toContain('탭 · login');
+    expect(markup).toContain('zsh');
     expect(markup).toContain('입력 필요');
-    expect(markup).toContain('작업 중');
     expect(markup).toContain('href="#/coding?herdr=w1%3ApA" aria-current="page"');
     expect(markup.match(/aria-current=/g)).toHaveLength(1);
   });
 });
 
 describe('herdr pane', () => {
-  const body = (status: HerdrPaneView['status'], pending?: boolean) => renderToStaticMarkup(<HerdrPaneBody
-    pane={{ ...pane, status }} pending={pending} text={'<b>$ bun test</b>\n3 pass'} onPrompt={async () => true} onKey={() => {}}/>);
+  const body = (status: HerdrPaneView['status'], pending?: boolean, compact = false, agent = pane.agent) => renderToStaticMarkup(<HerdrPaneBody
+    pane={{ ...pane, status, agent }} pending={pending} compact={compact} mode="live" onMode={() => {}}
+    screen={<HerdrHistoryText text={'<b>$ bun test</b>\n3 pass'}/>} onPrompt={async () => true} onKey={() => {}}/>);
 
-  it('escapes terminal text and exposes the pane context, not an editable terminal', () => {
+  it('escapes history as text and keeps the pane context', () => {
     const markup = body('blocked');
-    expect(markup).toMatch(/<pre[^>]*aria-label="터미널 출력"[^>]*>&lt;b&gt;\$ bun test&lt;\/b&gt;\n3 pass<\/pre>/);
+    expect(markup).toMatch(/<pre[^>]*aria-label="터미널 기록"[^>]*>&lt;b&gt;\$ bun test&lt;\/b&gt;\n3 pass<\/pre>/);
     expect(markup).not.toContain('<b>$ bun test');
     expect(markup).not.toContain('contenteditable');
     expect(markup).toContain('/work/tree');
@@ -66,30 +82,78 @@ describe('herdr pane', () => {
   ('renders the right composer and key controls for %s', (status, disabled) => {
     const markup = body(status);
     expect(markup).toContain('aria-label="중단 (Esc)"');
-    expect(markup.includes('aria-label="승인 응답 키"')).toBe(status === 'blocked');
+    expect(markup.includes('aria-label="터미널 키"')).toBe(status === 'blocked');
     expect(markup.match(/<textarea[^>]+>/)?.[0].includes('disabled=""')).toBe(disabled);
   });
 
-  it('provides the approval keys, but disables them and the composer during an input request', () => {
-    const markup = body('blocked', true);
-    const keys = markup.match(/aria-label="승인 응답 키">(.*?)<\/div>/)?.[1] ?? '';
-    expect(keys.match(/disabled=""/g)).toHaveLength(8);
-    for (const label of ['Enter', '↑', '↓', 'Y', 'N', '1', '2', '3']) expect(keys).toContain(`>${label}</button>`);
+  it('provides touch keys for any pane on compact; plain shells do not have a prompt composer', () => {
+    const markup = body('idle', true, true, null);
+    const keys = markup.match(/aria-label="터미널 키">(.*?)<\/div>/)?.[1] ?? '';
+    for (const label of ['Esc', 'Tab', '↑', '↓', '←', '→', 'Enter', 'Ctrl+C']) expect(keys).toContain(`>${label}</button>`);
+    expect(markup).not.toContain('후속 지시');
     expect(body('idle', true).match(/<textarea[^>]+>/)?.[0]).toContain('disabled=""');
   });
 });
 
 it('starts with the chosen agent, multiline task and a branch only when using a worktree', () => {
   const fields = new FormData();
-  fields.set('repo', ' /Projects/ghost ');
+  fields.set('cwd', ' /Projects/ghost ');
   fields.set('task', ' 첫 줄\n둘째 줄 ');
   fields.set('worktree', 'on');
   fields.set('branch', ' fix/login ');
-  expect(codingStartInput(fields, 'claude')).toEqual({
-    agent: 'claude', repo: '/Projects/ghost', task: '첫 줄\n둘째 줄', worktree: true, branch: 'fix/login',
+  expect(workspaceInput(fields, 'pi')).toEqual({
+    agent: 'pi', cwd: '/Projects/ghost', task: '첫 줄\n둘째 줄', worktree: true, branch: 'fix/login',
   });
   fields.delete('worktree');
-  expect(codingStartInput(fields, 'claude')).toEqual({
-    agent: 'claude', repo: '/Projects/ghost', task: '첫 줄\n둘째 줄', worktree: false,
+  expect(workspaceInput(fields)).toEqual({
+    cwd: '/Projects/ghost', worktree: false,
   });
+});
+
+it('offers every herdr agent kind, with only installed kinds enabled and first', () => {
+  const options = herdrAgentOptions(['claude', 'pi']);
+  expect(options).toHaveLength(24);
+  expect(options.slice(0, 2).map(option => option.value)).toEqual(['claude', 'pi']);
+  expect(options.slice(2).every(option => option.disabled && option.label.endsWith('설치 안 됨'))).toBe(true);
+});
+
+it('decodes base64 into exact ANSI and UTF-8 bytes, without treating the bytes as Latin-1 text', () => {
+  const sample = '\x1b[32m안녕\x1b[0m\r\n';
+  expect(new TextDecoder().decode(decodeHerdrFrame(Buffer.from(sample).toString('base64')))).toBe(sample);
+});
+
+it('coalesces waiting text without reordering control keys or a submitted prompt', async () => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const sent: unknown[] = [];
+  const queue = new HerdrInputQueue(async data => {
+    sent.push(data);
+    if (sent.length === 1) await promise;
+  }, error => { throw error; });
+  queue.text('a');
+  queue.text('\x1b[B');
+  queue.text('\r');
+  queue.key('ctrl+c');
+  queue.text('b');
+  queue.text('c');
+  const prompt = queue.afterInput(async () => { sent.push('prompt'); return true; });
+  expect(sent).toEqual([{ text: 'a' }]);
+  resolve();
+  await expect(prompt).resolves.toBe(true);
+  expect(sent).toEqual([{ text: 'a' }, { text: '\x1b[B\r' }, { keys: ['ctrl+c'] }, { text: 'bc' }, 'prompt']);
+});
+
+it('does not send a queued Enter after ambiguous failure, or pending input after closing', async () => {
+  const { promise, reject } = Promise.withResolvers<void>();
+  const { promise: reported, resolve: report } = Promise.withResolvers<unknown>();
+  const sent: unknown[] = [];
+  const queue = new HerdrInputQueue(async data => { sent.push(data); await promise; }, report);
+  queue.text('command');
+  queue.key('enter');
+  reject(new Error('lost'));
+  await expect(reported).resolves.toMatchObject({ message: 'lost' });
+  expect(sent).toEqual([{ text: 'command' }]);
+  queue.close();
+  queue.key('enter');
+  await expect(queue.afterInput(async () => true)).resolves.toBe(false);
+  expect(sent).toHaveLength(1);
 });

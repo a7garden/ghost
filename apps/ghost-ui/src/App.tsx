@@ -210,7 +210,7 @@ function Shell() {
     { id: 'new-work', label: '일 맡기기', group: '실행', onSelect: go('/work?new=1') },
     { id: 'new-ghost', label: '새 Ghost', group: '실행', onSelect: go('/settings?tab=team&new=1') },
     { id: 'new-space', label: '새 프로젝트', group: '실행', onSelect: go('/scopes?new=1') },
-    { id: 'new-coding-session', label: '새 코딩 세션', group: '실행', onSelect: go('/coding?new=1') },
+    { id: 'new-herdr-space', label: '새 스페이스', group: '실행', onSelect: go('/coding?new=1') },
     { id: 'home', label: routeLabels.home, group: '이동', onSelect: go('/') },
     { id: 'inbox', label: uiTerms.inbox, group: '이동', onSelect: go('/inbox') },
     { id: 'work', label: uiTerms.work, group: '이동', onSelect: go('/work') },
@@ -304,7 +304,11 @@ function Shell() {
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
             {section === 'coding' && <CodingPage scopes={state.scopes} herdrPane={params.get('herdr')} creating={params.get('new') === '1'} compact={compact}
-              onCancel={() => closeCodingForm('/coding')} onStarted={id => closeCodingForm(herdrPanePath(id))}/>}
+              onCancel={() => closeCodingForm('/coding')} onOpen={id => {
+                if (currentRoute() !== route) return;
+                if (params.get('new') === '1') closeCodingForm(herdrPanePath(id));
+                else navigate(herdrPanePath(id));
+              }}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]
               ? <WorkDetail state={state} workId={decodeURIComponent(path.split('/')[2])} navigate={navigate}/>

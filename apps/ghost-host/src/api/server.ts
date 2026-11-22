@@ -27,9 +27,15 @@ import {
   type HerdrPaneView,
   type HerdrView,
   CodingStart,
+  HerdrAgentStart,
+  HerdrClose,
+  HerdrInput,
   HerdrIntegrationInstall,
-  HerdrKeys,
   HerdrPrompt,
+  HerdrRename,
+  HerdrSplit,
+  HerdrTabCreate,
+  HerdrWorkspaceCreate,
   type SkillCatalog,
   parse,
 } from "@ghost/contract";
@@ -557,29 +563,71 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         return failure(caught);
       }
     }
-    if (pathname === "/api/herdr/start" && request.method === "POST") {
+    // The owner's herdr, from the app: the live terminal of a pane and its keyboard, and creating, renaming and closing workspaces, tabs, panes and agents.
+    if (pathname === "/api/herdr/terminal" && request.method === "GET") {
       try {
         if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        const body: unknown = await request.json().catch(() => { throw invalid("malformed JSON body"); });
-        return json((await herdr.start(parse(CodingStart, body))).pane satisfies HerdrPaneView);
+        const cols = Number(url.searchParams.get("cols") ?? 80), rows = Number(url.searchParams.get("rows") ?? 24);
+        if (!Number.isFinite(cols) || !Number.isFinite(rows)) throw invalid("cols and rows must be numbers");
+        const abort = new AbortController();
+        request.signal.addEventListener("abort", () => abort.abort(), { once: true });
+        const frames = await herdr.terminal(url.searchParams.get("pane") ?? "", cols, rows, abort.signal);
+        const encoder = new TextEncoder();
+        let keepalive: ReturnType<typeof setInterval> | undefined;
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const send = (event: string, data: unknown) => { try { controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); } catch { /* the viewer is gone */ } };
+            keepalive = setInterval(() => { try { controller.enqueue(encoder.encode(": keepalive\n\n")); } catch { /* the viewer is gone */ } }, 15_000);
+            try {
+              for await (const frame of frames) send("frame", frame);
+              send("end", {});
+            } catch (caught) {
+              send("error", { message: caught instanceof Error ? caught.message : "the terminal stopped" });
+            } finally {
+              clearInterval(keepalive);
+              try { controller.close(); } catch { /* already closed */ }
+            }
+          },
+          cancel() {
+            clearInterval(keepalive);
+            abort.abort();
+            void frames.return(undefined);
+          },
+        });
+        return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-store" } });
       } catch (caught) {
         return failure(caught);
       }
     }
-    if (pathname === "/api/herdr/prompt" && request.method === "POST") {
-      try {
-        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
-        const body = parse(HerdrPrompt, await request.json().catch(() => { throw invalid("malformed JSON body"); }));
-        return json((await herdr.prompt(body.pane, body.text)).pane satisfies HerdrPaneView);
-      } catch (caught) {
-        return failure(caught);
-      }
-    }
-    if (pathname === "/api/herdr/keys" && request.method === "POST") {
+    if (pathname.startsWith("/api/herdr/") && request.method === "POST") {
       try {
         if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
         const body: unknown = await request.json().catch(() => { throw invalid("malformed JSON body"); });
-        return json(await herdr.keys(parse(HerdrKeys, body)) satisfies HerdrPaneView);
+        switch (pathname) {
+          case "/api/herdr/start":
+            return json((await herdr.start(parse(CodingStart, body))).pane satisfies HerdrPaneView);
+          case "/api/herdr/workspaces":
+            return json(await herdr.createWorkspace(parse(HerdrWorkspaceCreate, body)) satisfies HerdrPaneView);
+          case "/api/herdr/tabs":
+            return json(await herdr.createTab(parse(HerdrTabCreate, body)) satisfies HerdrPaneView);
+          case "/api/herdr/split":
+            return json(await herdr.split(parse(HerdrSplit, body)) satisfies HerdrPaneView);
+          case "/api/herdr/agents":
+            return json(await herdr.startAgent(parse(HerdrAgentStart, body)) satisfies HerdrPaneView);
+          case "/api/herdr/prompt": {
+            const prompt = parse(HerdrPrompt, body);
+            return json((await herdr.prompt(prompt.pane, prompt.text)).pane satisfies HerdrPaneView);
+          }
+          case "/api/herdr/input":
+            await herdr.input(parse(HerdrInput, body));
+            return json({ ok: true });
+          case "/api/herdr/rename":
+            await herdr.rename(parse(HerdrRename, body));
+            return json({ ok: true });
+          case "/api/herdr/close":
+            await herdr.close(parse(HerdrClose, body));
+            return json({ ok: true });
+        }
       } catch (caught) {
         return failure(caught);
       }

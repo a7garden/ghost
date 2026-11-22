@@ -20,23 +20,95 @@ export type CodingPrefs = Static<typeof CodingPrefs>;
 export const HerdrStatus = Type.Union([Type.Literal("idle"), Type.Literal("working"), Type.Literal("blocked"), Type.Literal("done"), Type.Literal("unknown")]);
 export type HerdrStatus = Static<typeof HerdrStatus>;
 
-/** One coding agent running in a pane of the session in use. */
+/** Every agent kind `herdr agent start` can start (`herdr agent start --help`). The three the app sets up integrations for are `CodingAgentId`. */
+export const HERDR_AGENT_KINDS = [
+  "omp",
+  "claude",
+  "codex",
+  "pi",
+  "gemini",
+  "cursor",
+  "devin",
+  "agy",
+  "cline",
+  "mastracode",
+  "opencode",
+  "copilot",
+  "kimi",
+  "kiro",
+  "droid",
+  "amp",
+  "grok",
+  "hermes",
+  "kilo",
+  "qodercli",
+  "qwen",
+  "letta",
+  "maki",
+  "muse",
+] as const;
+export const HerdrAgentKind = Type.Union([
+  Type.Literal("omp"),
+  Type.Literal("claude"),
+  Type.Literal("codex"),
+  Type.Literal("pi"),
+  Type.Literal("gemini"),
+  Type.Literal("cursor"),
+  Type.Literal("devin"),
+  Type.Literal("agy"),
+  Type.Literal("cline"),
+  Type.Literal("mastracode"),
+  Type.Literal("opencode"),
+  Type.Literal("copilot"),
+  Type.Literal("kimi"),
+  Type.Literal("kiro"),
+  Type.Literal("droid"),
+  Type.Literal("amp"),
+  Type.Literal("grok"),
+  Type.Literal("hermes"),
+  Type.Literal("kilo"),
+  Type.Literal("qodercli"),
+  Type.Literal("qwen"),
+  Type.Literal("letta"),
+  Type.Literal("maki"),
+  Type.Literal("muse"),
+]);
+export type HerdrAgentKind = Static<typeof HerdrAgentKind>;
+
+/** A pane of the session in use: a terminal, with the agent herdr recognises in it (null for a plain shell). */
 export const HerdrPaneView = Type.Object({
   id: Type.String(),
+  workspaceId: Type.String(),
+  tabId: Type.String(),
   workspace: Type.String(),
   tab: Type.String(),
-  agent: Type.String(),
+  agent: nullable(Type.String()),
   status: HerdrStatus,
   cwd: nullable(Type.String()),
   title: Type.String(),
+  focused: Type.Boolean(),
 });
 export type HerdrPaneView = Static<typeof HerdrPaneView>;
 
+export const HerdrTabView = Type.Object({ id: Type.String(), label: Type.String(), status: HerdrStatus, panes: Type.Array(HerdrPaneView) });
+export type HerdrTabView = Static<typeof HerdrTabView>;
+
+/** A workspace (herdr's project-level container) with its tabs and panes; `worktree` is set when it is a git worktree workspace. */
+export const HerdrWorkspaceView = Type.Object({
+  id: Type.String(),
+  label: Type.String(),
+  status: HerdrStatus,
+  worktree: nullable(Type.Object({ path: Type.String(), branch: nullable(Type.String()) })),
+  tabs: Type.Array(HerdrTabView),
+});
+export type HerdrWorkspaceView = Static<typeof HerdrWorkspaceView>;
+
 /**
- * The agents of the herdr session in use (`session`). `available` is false when no `herdr` binary is found; `note` says
- * why a look failed, such as a session that is not running. The Host never starts a herdr server.
+ * The whole herdr session in use (`session`), as herdr's own sidebar shows it: workspaces, their tabs, their panes.
+ * `available` is false when no `herdr` binary is found; `note` says why a look failed, such as a session that is not
+ * running. The Host never starts a herdr server.
  */
-export const HerdrView = Type.Object({ available: Type.Boolean(), session: Type.String(), note: nullable(Type.String()), panes: Type.Array(HerdrPaneView) });
+export const HerdrView = Type.Object({ available: Type.Boolean(), session: Type.String(), note: nullable(Type.String()), workspaces: Type.Array(HerdrWorkspaceView) });
 export type HerdrView = Static<typeof HerdrView>;
 
 /** A pane as it stands with the end of its terminal, as text. */
@@ -67,6 +139,8 @@ export const CodingSetup = Type.Object({
     path: nullable(Type.String()),
     integration: HerdrIntegration,
   })),
+  /** Every herdr agent kind whose executable is on this Mac, for choosing what to start. */
+  kinds: Type.Array(HerdrAgentKind),
   prefs: CodingPrefs,
 });
 export type CodingSetup = Static<typeof CodingSetup>;
@@ -86,20 +160,81 @@ export const CodingStart = Type.Object({
 export type CodingStart = Static<typeof CodingStart>;
 
 const PaneRef = { pane: Type.String({ pattern: "^[A-Za-z0-9]{1,16}:[A-Za-z0-9]{1,16}$" }) };
+const Ref = Type.String({ pattern: "^[A-Za-z0-9]{1,16}(:[A-Za-z0-9]{1,16})?$" });
+const Label = Type.String({ minLength: 1, maxLength: 80 });
+const Dir = Type.String({ minLength: 1, maxLength: 4096 });
+const Task = Type.String({ minLength: 1, maxLength: 24_000 });
 
-/** A follow-up instruction typed into an agent pane, submitted as herdr submits a prompt. */
-export const HerdrPrompt = Type.Object({ ...PaneRef, text: Type.String({ minLength: 1, maxLength: 24_000 }) });
+/**
+ * A new workspace in herdr, the owner's "space": a directory, a label (default: herdr's own), and for a git repository
+ * a fresh worktree on a new branch (`worktree`, default false here). With `agent` it starts that agent in the first
+ * pane and, with `task`, gives it its first instruction; without, the workspace is a plain shell.
+ */
+export const HerdrWorkspaceCreate = Type.Object({
+  cwd: Dir,
+  label: Type.Optional(Label),
+  worktree: Type.Optional(Type.Boolean()),
+  branch: Type.Optional(Label),
+  agent: Type.Optional(HerdrAgentKind),
+  task: Type.Optional(Task),
+});
+export type HerdrWorkspaceCreate = Static<typeof HerdrWorkspaceCreate>;
+
+/** A new tab in a workspace; `cwd` defaults to the workspace's. Agent and task as in a new workspace. */
+export const HerdrTabCreate = Type.Object({
+  workspace: Type.String({ pattern: "^[A-Za-z0-9]{1,16}$" }),
+  label: Type.Optional(Label),
+  cwd: Type.Optional(Dir),
+  agent: Type.Optional(HerdrAgentKind),
+  task: Type.Optional(Task),
+});
+export type HerdrTabCreate = Static<typeof HerdrTabCreate>;
+
+/** Split a pane; the new pane is a plain shell, or an agent when `agent` is given. */
+export const HerdrSplit = Type.Object({
+  ...PaneRef,
+  direction: Type.Union([Type.Literal("right"), Type.Literal("down")]),
+  agent: Type.Optional(HerdrAgentKind),
+  task: Type.Optional(Task),
+});
+export type HerdrSplit = Static<typeof HerdrSplit>;
+
+/** Start an agent in a pane that is a shell at its prompt, and optionally give it its first instruction. */
+export const HerdrAgentStart = Type.Object({ ...PaneRef, agent: HerdrAgentKind, task: Type.Optional(Task) });
+export type HerdrAgentStart = Static<typeof HerdrAgentStart>;
+
+/** What can be renamed or closed. A workspace id is `w1`, a tab `w1:t1`, a pane `w1:p1`. Closing ends the processes in it. */
+export const HerdrTarget = Type.Union([Type.Literal("workspace"), Type.Literal("tab"), Type.Literal("pane")]);
+export type HerdrTarget = Static<typeof HerdrTarget>;
+export const HerdrRename = Type.Object({ target: HerdrTarget, id: Ref, label: Label });
+export type HerdrRename = Static<typeof HerdrRename>;
+export const HerdrClose = Type.Object({ target: HerdrTarget, id: Ref });
+export type HerdrClose = Static<typeof HerdrClose>;
+
+/** A follow-up instruction submitted to the agent in a pane, as herdr submits a prompt (refused while the agent waits at a dialog). */
+export const HerdrPrompt = Type.Object({ ...PaneRef, text: Task });
 export type HerdrPrompt = Static<typeof HerdrPrompt>;
 
-/** Keys the owner may send to an agent pane: enough to interrupt it and to answer an approval dialog. */
-export const HerdrKey = Type.Union([
-  Type.Literal("esc"), Type.Literal("ctrl+c"), Type.Literal("enter"), Type.Literal("up"), Type.Literal("down"), Type.Literal("tab"),
-  Type.Literal("y"), Type.Literal("n"), Type.Literal("1"), Type.Literal("2"), Type.Literal("3"),
-]);
-export type HerdrKey = Static<typeof HerdrKey>;
-export const HERDR_KEYS = ["esc", "ctrl+c", "enter", "up", "down", "tab", "y", "n", "1", "2", "3"] as const satisfies readonly HerdrKey[];
-export const HerdrKeys = Type.Object({ ...PaneRef, keys: Type.Array(HerdrKey, { minItems: 1, maxItems: 8 }) });
-export type HerdrKeys = Static<typeof HerdrKeys>;
+/**
+ * Input for a pane's terminal, the keyboard of the web terminal: `text` is typed exactly as given, control characters
+ * and escape sequences included (what a terminal emulator produces for a key press or a paste), then `keys` are sent
+ * as herdr key names (`enter`, `esc`, `ctrl+c`, `shift+tab`, `up`, `f1`, …).
+ */
+export const HerdrInput = Type.Object({
+  ...PaneRef,
+  text: Type.Optional(Type.String({ minLength: 1, maxLength: 65_536 })),
+  keys: Type.Optional(Type.Array(Type.String({ pattern: "^[a-z0-9+_-]{1,24}$" }), { minItems: 1, maxItems: 16 })),
+});
+export type HerdrInput = Static<typeof HerdrInput>;
+
+/**
+ * One frame of a pane's live terminal, `GET /api/herdr/terminal?pane=&cols=&rows=` as server-sent events (`event: frame`,
+ * data this object as JSON; `event: end` when the pane or the stream is gone). `bytes` is base64 of ANSI output to write
+ * to a terminal emulator of `width` x `height` as it arrives; a `full` frame repaints everything. The view is rendered
+ * by herdr at the requested size; the pane itself, and the owner's herdr, are not resized.
+ */
+export const HerdrFrame = Type.Object({ seq: Type.Integer(), full: Type.Boolean(), width: Type.Integer(), height: Type.Integer(), bytes: Type.String() });
+export type HerdrFrame = Static<typeof HerdrFrame>;
 
 /** Install herdr's hook for one agent (writes into that agent's own config folder, as `herdr integration install` does). */
 export const HerdrIntegrationInstall = Type.Object({ agent: CodingAgentId });

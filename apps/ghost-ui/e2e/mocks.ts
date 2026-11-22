@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import type { CodingPrefs, CodingSetup, CodingStart, Decision, HerdrIntegrationInstall, HerdrKeys, HerdrOutput, HerdrPrompt, HerdrView, VaultItem } from '@ghost/contract';
+import type { CodingPrefs, CodingSetup, Decision, HerdrAgentStart, HerdrClose, HerdrFrame, HerdrInput, HerdrIntegrationInstall, HerdrOutput, HerdrPaneView, HerdrPrompt, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, HerdrWorkspaceView, VaultItem } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 /** The synthetic decision ids the decision-surface screens focus. */
@@ -85,7 +85,21 @@ export async function mockVaultApi(page: Page): Promise<void> {
   });
 }
 
-export const visualCodingIds = { finished: 'w79:pA', running: 'w79:pB', blocked: 'w80:pA', started: 'w81:pA' };
+export const visualCodingIds = { finished: 'w79:pA', running: 'w79:pB', blocked: 'w80:pA', shell: 'w79:pC', started: 'w81:p81' };
+
+export function fulfillHerdrFrame(route: Route, text: string, { end = false }: { end?: boolean } = {}) {
+  const url = new URL(route.request().url());
+  const width = Number(url.searchParams.get('cols')), height = Number(url.searchParams.get('rows'));
+  const colors = [36, 0, 32, 0, 33];
+  const lines = text.split('\n').slice(-height);
+  const body = lines.map((line, index) => `\x1b[${colors[index % colors.length]}m${line}\x1b[0m`).join('\r\n');
+  const bytes = Buffer.from(`\x1b[?25l\x1b[2J\x1b[H\x1b[?2004h${body}\x1b[?25h`).toString('base64');
+  const frame: HerdrFrame = { seq: 1, full: true, bytes, width, height };
+  return route.fulfill({
+    status: 200, contentType: 'text/event-stream',
+    body: `event: frame\r\ndata: ${JSON.stringify(frame)}\r\n\r\n${end ? 'event: end\r\n\r\n' : ''}`,
+  });
+}
 
 /** Coding requests use a page-local herdr session; other API calls go to the seeded Host. */
 export async function mockCodingApi(page: Page, { stopped = false }: { stopped?: boolean } = {}): Promise<void> {
@@ -101,13 +115,14 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
       { id: 'claude', name: 'Claude Code', path: '/Users/garden/.local/bin/claude', integration: 'outdated' },
       { id: 'codex', name: 'Codex', path: null, integration: 'missing' },
     ],
+    kinds: ['omp', 'claude', 'pi', 'gemini'],
     prefs: { session: null, agent: 'claude' },
   };
   const entries = new Map<string, HerdrOutput>();
   for (const output of [
     {
-      pane: { id: visualCodingIds.running, workspace: 'app', tab: 'checkout', agent: 'Claude Code', status: 'working',
-        cwd: '/Users/garden/Workspace/Projects/wt/app-checkout-tests', title: '결제 화면 테스트 추가' },
+      pane: { id: visualCodingIds.running, workspaceId: 'w79', tabId: 'w79:tB', workspace: 'app', tab: 'checkout', agent: 'Claude Code',
+        status: 'working', focused: true, cwd: '/Users/garden/Workspace/Projects/wt/app-checkout-tests', title: '결제 화면 테스트 추가' },
       text: [
         '❯ 결제 화면 테스트를 추가해 주세요.',
         '',
@@ -122,8 +137,8 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
       ].join('\n'),
     },
     {
-      pane: { id: visualCodingIds.finished, workspace: 'app', tab: 'login', agent: 'omp', status: 'done',
-        cwd: '/Users/garden/Workspace/Projects/wt/app-fix-login', title: '로그인 실패 시 안내 문구 고치기' },
+      pane: { id: visualCodingIds.finished, workspaceId: 'w79', tabId: 'w79:tA', workspace: 'app', tab: 'login', agent: 'omp',
+        status: 'done', focused: false, cwd: '/Users/garden/Workspace/Projects/wt/app-fix-login', title: '로그인 실패 시 안내 문구 고치기' },
       text: [
         '❯ 로그인 실패 시 안내 문구를 고쳐 주세요.',
         '',
@@ -138,8 +153,8 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
       ].join('\n'),
     },
     {
-      pane: { id: visualCodingIds.blocked, workspace: 'ghost', tab: 'settings', agent: 'Claude Code', status: 'blocked',
-        cwd: '/Users/garden/Workspace/Projects/ghost', title: '설정 화면 키보드 탐색 확인' },
+      pane: { id: visualCodingIds.blocked, workspaceId: 'w80', tabId: 'w80:tA', workspace: 'ghost', tab: 'settings', agent: 'Claude Code',
+        status: 'blocked', focused: true, cwd: '/Users/garden/Workspace/Projects/ghost', title: '설정 화면 키보드 탐색 확인' },
       text: [
         '❯ 설정 화면에서 키보드로 탭을 옮길 수 있는지 확인해 주세요.',
         '',
@@ -152,7 +167,46 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
         '    3. No',
       ].join('\n'),
     },
+    {
+      pane: { id: visualCodingIds.shell, workspaceId: 'w79', tabId: 'w79:tB', workspace: 'app', tab: 'checkout', agent: null,
+        status: 'unknown', focused: false, cwd: '/Users/garden/Workspace/Projects/app', title: 'zsh' },
+      text: 'app % git status --short\n M src/checkout/payment.ts\n?? src/checkout/payment.test.ts\n\napp %',
+    },
   ] satisfies HerdrOutput[]) entries.set(output.pane.id, output);
+  const spaces = new Map<string, Pick<HerdrWorkspaceView, 'label' | 'worktree'>>([
+    ['w79', { label: 'app', worktree: null }],
+    ['w80', { label: 'ghost', worktree: { path: '/Projects/wt/ghost-settings', branch: 'fix/settings-navigation' } }],
+  ]);
+  let sequence = 81;
+  let approval = 1;
+  const agentLabel = (id?: string) => setup.agents.find(item => item.id === id)?.name ?? (id === 'pi' ? 'Pi' : id ?? null);
+  function addPane({ workspaceId, tabId, cwd, title, tab, agent, task }: {
+    workspaceId: string; tabId: string; cwd: string | null; tab: string; title?: string; agent?: string; task?: string;
+  }): HerdrPaneView {
+    const id = `${workspaceId}:p${sequence++}`;
+    const pane = {
+      id, tabId, workspaceId, cwd, tab, workspace: spaces.get(workspaceId)!.label,
+      title: title || task?.split('\n')[0] || (agent ? agentLabel(agent)! : 'zsh'),
+      agent: agentLabel(agent), status: agent ? 'working' : 'unknown', focused: true,
+    } satisfies HerdrPaneView;
+    entries.set(id, { pane, text: task ? `❯ ${task}` : agent ? `${pane.agent} ready` : 'zsh %' });
+    return pane;
+  }
+  function overview(): HerdrView {
+    const workspaces: HerdrWorkspaceView[] = [];
+    if (setup.server) for (const [id, space] of spaces) {
+      const tabs = new Map<string, HerdrWorkspaceView['tabs'][number]>();
+      for (const { pane } of entries.values()) {
+        if (pane.workspaceId !== id) continue;
+        const tab = tabs.get(pane.tabId);
+        if (tab) tab.panes.push(pane);
+        else tabs.set(pane.tabId, { id: pane.tabId, label: pane.tab, status: pane.status, panes: [pane] });
+      }
+      const groups = [...tabs.values()];
+      workspaces.push({ id, ...space, status: groups.some(tab => tab.status === 'blocked') ? 'blocked' : groups[0]?.status ?? 'unknown', tabs: groups });
+    }
+    return { available: true, session: setup.session, note: setup.server ? null : 'herdr 서버가 실행 중이 아닙니다.', workspaces };
+  }
 
   const error = (route: Route, status: number, message: string) =>
     fulfillJson(route, status, { error: { code: status === 409 ? 'conflict' : status === 404 ? 'not_found' : 'invalid', message } });
@@ -173,24 +227,69 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
     return fulfillJson(route, 200, { ok: true, result: {} });
   });
 
-  await page.route('**/api/herdr', route => fulfillJson(route, 200, {
-    available: true, session: setup.session, note: setup.server ? null : 'herdr 서버가 실행 중이 아닙니다.',
-    panes: setup.server ? Array.from(entries.values(), entry => entry.pane) : [],
-  } satisfies HerdrView));
+  await page.route('**/api/herdr', route => fulfillJson(route, 200, overview()));
+  await page.route('**/api/herdr/terminal?*', route => {
+    const id = new URL(route.request().url()).searchParams.get('pane');
+    const entry = id ? entries.get(id) : undefined;
+    if (!setup.server || !entry) return error(route, 404, '패널을 찾을 수 없습니다.');
+    const text = id === visualCodingIds.blocked && entry.pane.status === 'blocked' && approval > 1
+      ? entry.text.replace('❯ 1.', '  1.').replace(`  ${approval}.`, `❯ ${approval}.`) : entry.text;
+    return fulfillHerdrFrame(route, text);
+  });
   await page.route('**/api/herdr/output?*', route => {
     const pane = new URL(route.request().url()).searchParams.get('pane');
     const entry = entries.get(pane ?? '');
     return setup.server && entry ? fulfillJson(route, 200, entry) : error(route, 404, '패널을 찾을 수 없습니다.');
   });
-  await page.route('**/api/herdr/start', route => {
-    const input = route.request().postDataJSON() as CodingStart;
-    if (!input.repo.startsWith('/') || input.repo === '/missing') return error(route, 400, '저장소 경로를 찾을 수 없습니다.');
-    const pane: HerdrOutput['pane'] = {
-      id: visualCodingIds.started, agent: setup.agents.find(item => item.id === (input.agent ?? setup.prefs.agent))?.name ?? 'omp',
-      title: input.task.split('\n')[0]!, workspace: input.branch ?? '비행 기록', tab: 'main', cwd: input.repo, status: 'working',
-    };
-    entries.set(pane.id, { pane, text: `❯ ${input.task}` });
+  await page.route('**/api/herdr/workspaces', route => {
+    const { cwd, label, branch, worktree, agent, task } = route.request().postDataJSON() as HerdrWorkspaceCreate;
+    if (!cwd.startsWith('/') || cwd === '/missing') return error(route, 400, '디렉터리를 찾을 수 없습니다.');
+    const workspaceId = `w${sequence}`;
+    spaces.set(workspaceId, { label: label ?? '비행 기록', worktree: worktree ? { path: cwd, branch: branch ?? null } : null });
+    const pane = addPane({ workspaceId, tabId: `${workspaceId}:tA`, cwd, tab: 'main', agent, task });
     return fulfillJson(route, 200, pane);
+  });
+  await page.route('**/api/herdr/tabs', route => {
+    const { workspace: workspaceId, label, cwd, agent, task } = route.request().postDataJSON() as HerdrTabCreate;
+    if (!spaces.has(workspaceId)) return error(route, 404, '스페이스를 찾을 수 없습니다.');
+    const pane = addPane({ workspaceId, tabId: `${workspaceId}:t${sequence}`, cwd: cwd ?? '/Projects/app', tab: label ?? 'shell', agent, task });
+    return fulfillJson(route, 200, pane);
+  });
+  await page.route('**/api/herdr/split', route => {
+    const { pane: id, agent, task } = route.request().postDataJSON() as HerdrSplit;
+    const original = entries.get(id)?.pane;
+    if (!original) return error(route, 404, '패널을 찾을 수 없습니다.');
+    const pane = addPane({ workspaceId: original.workspaceId, tabId: original.tabId, cwd: original.cwd, tab: original.tab, agent, task });
+    return fulfillJson(route, 200, pane);
+  });
+  await page.route('**/api/herdr/agents', route => {
+    const { pane: id, agent, task } = route.request().postDataJSON() as HerdrAgentStart;
+    const entry = entries.get(id);
+    if (!entry) return error(route, 404, '패널을 찾을 수 없습니다.');
+    if (entry.pane.agent) return error(route, 409, '셸에서만 에이전트를 시작할 수 있습니다.');
+    entry.pane.agent = agentLabel(agent);
+    entry.pane.status = task ? 'working' : 'idle';
+    entry.text = task ? `❯ ${task}` : `${entry.pane.agent} ready`;
+    return fulfillJson(route, 200, entry.pane);
+  });
+  await page.route('**/api/herdr/rename', route => {
+    const { target, id, label } = route.request().postDataJSON() as HerdrRename;
+    const space = spaces.get(id);
+    if (target === 'workspace' && space) space.label = label;
+    for (const { pane } of entries.values()) {
+      if (target === 'workspace' && pane.workspaceId === id) pane.workspace = label;
+      if (target === 'tab' && pane.tabId === id) pane.tab = label;
+    }
+    return fulfillJson(route, 200, { ok: true });
+  });
+  await page.route('**/api/herdr/close', route => {
+    const { target, id } = route.request().postDataJSON() as HerdrClose;
+    if (target === 'workspace' && id === 'w79' && spaces.has('w80')) return error(route, 409, '워크트리 스페이스를 먼저 닫으세요.');
+    if (target === 'workspace') spaces.delete(id);
+    for (const [key, { pane }] of entries) {
+      if ((target === 'pane' && pane.id === id) || (target === 'tab' && pane.tabId === id) || (target === 'workspace' && pane.workspaceId === id)) entries.delete(key);
+    }
+    return fulfillJson(route, 200, { ok: true });
   });
   await page.route('**/api/herdr/prompt', route => {
     const { pane, text } = route.request().postDataJSON() as HerdrPrompt;
@@ -201,18 +300,22 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
     entry.pane.status = 'working';
     return fulfillJson(route, 200, entry.pane);
   });
-  await page.route('**/api/herdr/keys', route => {
-    const { pane, keys } = route.request().postDataJSON() as HerdrKeys;
+  await page.route('**/api/herdr/input', route => {
+    const { pane, text, keys = [] } = route.request().postDataJSON() as HerdrInput;
     const entry = entries.get(pane);
     if (!entry) return error(route, 404, '패널을 찾을 수 없습니다.');
-    if (keys.includes('esc')) {
-      entry.text += '\n\nInterrupted (Esc)';
+    if (keys.includes('esc') || keys.includes('ctrl+c') || text === '\x03' || text === '\x1b') {
+      entry.text += '\n\nInterrupted';
       entry.pane.status = 'idle';
-    } else if (keys.includes('enter')) {
+    } else if (entry.pane.status === 'blocked' && (keys.includes('down') || text === '\x1b[B')) {
+      approval = Math.min(3, approval + 1);
+    } else if (entry.pane.status === 'blocked' && (keys.includes('enter') || text === '\r' || /^[123yn]$/i.test(text ?? ''))) {
       entry.text += '\n\n● Running tests…';
       entry.pane.status = 'working';
+    } else if (entry.pane.agent === null && text) {
+      entry.text += text.replaceAll('\r', '\n').replace(/\x1b\[(200|201)~/g, '');
     }
-    return fulfillJson(route, 200, entry.pane);
+    return fulfillJson(route, 200, { ok: true });
   });
 }
 

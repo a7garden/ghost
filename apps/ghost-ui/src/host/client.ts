@@ -4,7 +4,6 @@ import type {
   ArtifactRef,
   Command,
   CodingSetup,
-  CodingStart,
   CommandOf,
   ConnectionOAuthView,
   ConnectionOAuthClientInput,
@@ -13,7 +12,14 @@ import type {
   HerdrOutput,
   HerdrView,
   HerdrIntegrationInstall,
-  HerdrKeys,
+  HerdrAgentStart,
+  HerdrClose,
+  HerdrFrame,
+  HerdrInput,
+  HerdrRename,
+  HerdrSplit,
+  HerdrTabCreate,
+  HerdrWorkspaceCreate,
   HerdrPaneView,
   HerdrPrompt,
   ConversationPage,
@@ -218,27 +224,66 @@ export class HostClient {
     });
   }
 
-  /** The coding agents in the herdr session in use. */
+  /** The workspace tree of the herdr session in use. */
   herdr(): Promise<HerdrView> {
     return this.json('/api/herdr');
   }
   herdrOutput(pane: string): Promise<HerdrOutput> {
     return this.json(`/api/herdr/output?pane=${encodeURIComponent(pane)}`);
   }
-  startHerdr(input: CodingStart): Promise<HerdrPaneView> {
-    return this.json('/api/herdr/start', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
-    });
+  createHerdrWorkspace(input: HerdrWorkspaceCreate): Promise<HerdrPaneView> {
+    return this.postHerdr('workspaces', input);
+  }
+  createHerdrTab(input: HerdrTabCreate): Promise<HerdrPaneView> {
+    return this.postHerdr('tabs', input);
+  }
+  splitHerdrPane(input: HerdrSplit): Promise<HerdrPaneView> {
+    return this.postHerdr('split', input);
+  }
+  startHerdrAgent(input: HerdrAgentStart): Promise<HerdrPaneView> {
+    return this.postHerdr('agents', input);
+  }
+  renameHerdrNode(input: HerdrRename): Promise<{ ok: true }> {
+    return this.postHerdr('rename', input);
+  }
+  closeHerdrNode(input: HerdrClose): Promise<{ ok: true }> {
+    return this.postHerdr('close', input);
+  }
+  inputHerdr(input: HerdrInput): Promise<{ ok: true }> {
+    return this.postHerdr('input', input);
   }
   promptHerdr(input: HerdrPrompt): Promise<HerdrPaneView> {
-    return this.json('/api/herdr/prompt', {
+    return this.postHerdr('prompt', input);
+  }
+
+  private postHerdr<T>(operation: string, input: object): Promise<T> {
+    return this.json(`/api/herdr/${operation}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     });
   }
-  herdrKeys(input: HerdrKeys): Promise<HerdrPaneView> {
-    return this.json('/api/herdr/keys', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+
+  /** Returns `end` only for an explicit terminal end. A dropped connection is retryable. */
+  async herdrTerminal(pane: string, cols: number, rows: number, onFrame: (frame: HerdrFrame) => void, signal: AbortSignal): Promise<'end' | 'disconnected'> {
+    const query = new URLSearchParams({ pane, cols: String(cols), rows: String(rows) });
+    const response = await this.request(`/api/herdr/terminal?${query}`, {
+      headers: this.headers({ Accept: 'text/event-stream' }), cache: 'no-store', signal,
     });
+    if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
+    if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
+      const body = (await response.json().catch(() => null)) as { error?: ApiError } | null;
+      throw new HostError(response.status === 404 ? 'not_found' : body?.error?.code ?? 'network',
+        body?.error?.message ?? '터미널에 연결할 수 없습니다.');
+    }
+    for await (const { event, data } of serverEvents(response.body)) {
+      if (signal.aborted) return 'disconnected';
+      if (event === 'end') return 'end';
+      if (event === 'frame' && data) onFrame(JSON.parse(data) as HerdrFrame);
+      if (event === 'error') {
+        const problem = data ? JSON.parse(data) as { message?: string } : null;
+        throw new HostError('unavailable', problem?.message ?? '터미널에 연결할 수 없습니다.');
+      }
+    }
+    return 'disconnected';
   }
 
   /** The host's own release update state. */
@@ -563,34 +608,42 @@ export class HostClient {
     const response = await this.request(`/api/events?${query}`, { headers: this.headers({ Accept: 'text/event-stream' }), signal });
     if (response.status === 401 && shell) void shellCall({ type: 'revoked' }).catch(() => {});
     if (!response.ok || !response.body) throw new HostError('network', '이벤트 스트림에 연결할 수 없습니다.');
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffer = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return;
-      buffer += value;
-      let boundary = buffer.indexOf('\n\n');
-      while (boundary >= 0) {
-        const frame = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        dispatch(frame, handlers);
-        boundary = buffer.indexOf('\n\n');
-      }
+    for await (const { event, data } of serverEvents(response.body)) {
+      if (!data) continue;
+      const payload = JSON.parse(data) as unknown;
+      if (event === 'ledger') handlers.ledger(payload as LedgerEvent);
+      else if (event === 'live') handlers.live(payload as LiveEvent);
+      else if (event === 'reset') handlers.reset();
     }
   }
 }
 
-function dispatch(frame: string, handlers: StreamHandlers) {
-  let event = 'message';
-  const data: string[] = [];
-  for (const line of frame.split('\n')) {
-    if (line.startsWith(':')) continue;
-    if (line.startsWith('event:')) event = line.slice(6).trim();
-    else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+async function* serverEvents(body: ReadableStream<Uint8Array>) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  try {
+    let buffer = '';
+    let event = 'message';
+    let data: string[] = [];
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      let start = 0;
+      for (let end = buffer.indexOf('\n'); end >= 0; end = buffer.indexOf('\n', start)) {
+        const line = buffer.slice(start, buffer[end - 1] === '\r' ? end - 1 : end);
+        start = end + 1;
+        if (!line) {
+          if (data.length || event !== 'message') yield { event, data: data.join('\n') };
+          event = 'message';
+          data = [];
+        } else if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+      }
+      buffer = buffer.slice(start);
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  if (data.length === 0) return;
-  const payload = JSON.parse(data.join('\n')) as unknown;
-  if (event === 'ledger') handlers.ledger(payload as LedgerEvent);
-  else if (event === 'live') handlers.live(payload as LiveEvent);
-  else if (event === 'reset') handlers.reset();
 }
