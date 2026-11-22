@@ -61,13 +61,14 @@ describe('herdr roster', () => {
     expect(findHerdrPane(workspaces, 'w1:pC')).toBeUndefined();
   });
 
-  it('offers only the available operations at each level', () => {
+  it('offers only the available operations at each level, each creation one tap away with its options behind it', () => {
     const forNode = (target: 'workspace' | 'tab' | 'pane', shell = false) =>
       herdrNodeActions({ id: 'id', label: 'name', target }, { splitPane: 'w1:pA', shell });
-    expect(forNode('workspace').map(action => action.kind)).toEqual(['tab', 'rename', 'close']);
-    expect(forNode('tab')).toMatchObject([{ direction: 'right', pane: 'w1:pA' }, { direction: 'down', pane: 'w1:pA' }, { kind: 'rename' }, { kind: 'close' }]);
-    expect(forNode('pane').map(action => action.kind)).toEqual(['close']);
-    expect(forNode('pane', true).map(action => action.kind)).toEqual(['agent', 'close']);
+    const shape = (actions: ReturnType<typeof forNode>) => actions.map(action => `${action.kind}${'direction' in action ? `:${action.direction}` : ''}${'quick' in action && action.quick ? ':quick' : ''}`);
+    expect(shape(forNode('workspace'))).toEqual(['tab:quick', 'tab', 'rename', 'close']);
+    expect(shape(forNode('tab'))).toEqual(['split:right:quick', 'split:down:quick', 'split:right', 'rename', 'close']);
+    expect(shape(forNode('pane'))).toEqual(['close']);
+    expect(shape(forNode('pane', true))).toEqual(['agent:quick', 'agent', 'close']);
   });
 
   it('names the group, shows the agent state and marks only the selected link', () => {
@@ -98,9 +99,9 @@ describe('herdr pane', () => {
     expect(markup).toContain('Claude Code');
   });
 
-  it.each(['blocked', 'working', 'done', 'idle', 'unknown'] as const)('leaves typing to the terminal in the live view of a %s pane', status => {
+  it.each(['blocked', 'working', 'done', 'idle', 'unknown'] as const)('answers an agent from its terminal view too, unless it waits at an approval: %s', status => {
     const markup = body(status);
-    expect(markup).not.toContain('<textarea');
+    expect(markup.includes('>후속 지시</label>')).toBe(status !== 'blocked');
     expect(markup.includes('aria-label="터미널 키"')).toBe(status === 'blocked');
     // A blocked pane's Esc lives on the terminal key rail, beside the other keys it answers with.
     expect(markup.includes('aria-label="작업 중단"')).toBe(status === 'working');
@@ -121,17 +122,18 @@ describe('herdr pane', () => {
     expect(body('idle', { mode: 'chat', agent: 'omp', delivery: 'queue' })).not.toContain('대기열');
   });
 
+  it('offers the conversation model only for omp and Claude', () => {
+    expect(body('idle', { mode: 'chat', agent: 'omp' })).toContain('title="모델 바꾸기"');
+    expect(body('idle', { mode: 'chat', agent: 'claude' })).toContain('title="모델 바꾸기"');
+    expect(body('idle', { mode: 'chat', agent: 'codex' })).not.toContain('title="모델 바꾸기"');
+  });
+
   it('offers a likely next message only to an empty field of an agent that waits for the owner', () => {
     const suggestions = ['테스트도 돌려줘', '커밋해 줘'];
     const markup = body('done', { mode: 'chat', suggestions });
     expect(markup).toContain('aria-label="다음 메시지 제안"');
     expect(markup).toContain('테스트도 돌려줘');
     expect(body('working', { mode: 'chat', suggestions })).not.toContain('다음 지시 제안');
-  });
-
-  it('keeps the follow-up field in the terminal of an agent that has no conversation view', () => {
-    expect(body('done', { mode: 'live', chat: false })).toContain('>후속 지시</label>');
-    expect(body('done', { mode: 'live', chat: true })).not.toContain('>후속 지시</label>');
   });
 
   it('has no follow-up field for a plain shell', () => {

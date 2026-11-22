@@ -358,6 +358,8 @@ export type HerdrChatItem = Static<typeof HerdrChatItem>;
  */
 export const HerdrChat = Type.Object({
   pane: Type.String(),
+  /** The model the session currently runs (omp: `provider/id`; Claude: its model id), from the session record; null when it has not said. */
+  model: nullable(Type.String()),
   source: nullable(Type.Union([Type.Literal("omp"), Type.Literal("claude")])),
   title: nullable(Type.String()),
   items: Type.Array(HerdrChatItem),
@@ -365,6 +367,18 @@ export const HerdrChat = Type.Object({
   reset: Type.Boolean(),
 });
 export type HerdrChat = Static<typeof HerdrChat>;
+
+/** One slash command the agent in a pane accepts, as it would be typed after the slash. */
+export const HerdrSlashCommand = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: 64 }),
+  description: Type.String({ maxLength: 300 }),
+  /** What follows the name, when it takes an argument (for example `provider/model`); null when it takes none. */
+  hint: nullable(Type.String({ maxLength: 120 })),
+  source: Type.Union([Type.Literal("builtin"), Type.Literal("skill"), Type.Literal("custom")]),
+});
+export type HerdrSlashCommand = Static<typeof HerdrSlashCommand>;
+export const HerdrCommands = Type.Object({ commands: Type.Array(HerdrSlashCommand, { maxItems: 500 }) });
+export type HerdrCommands = Static<typeof HerdrCommands>;
 
 /**
  * Driving a pane at the phone's own size (herdr `terminal session control`), as opposed to watching it

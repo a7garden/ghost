@@ -808,10 +808,11 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
     overview: async () => ({ available: true, session: "default", note: null, workspaces: [...tree.keys()].length === 0 ? [] : [{ id: "w1", label: "repo", status: sessionStatus(), worktree: null, tabs: [{ id: "w1:t1", label: "work", status: sessionStatus(), panes: [...tree.keys()].map(pane) }] }] }),
     output: async (id: string) => ({ pane: pane(id), text: "changed b.txt; checked nothing" }),
     // The agent's own record: each managed prompt (marker and all) is one user record with its answer after it, and the cursor names the newest pair.
-    chat: async (id: string, after?: string | null) => ({ pane: id, source: "omp", title: null, items: after === `c${promptSeq.get(id) ?? 0}` ? [] : [
+    chat: async (id: string, after?: string | null) => ({ pane: id, source: "omp", title: null, model: null, items: after === `c${promptSeq.get(id) ?? 0}` ? [] : [
       { id: `u${promptSeq.get(id) ?? 0}`, kind: "user", at: 1, text: lastPrompt.get(id) ?? "earlier owner chat" },
       { id: `a${promptSeq.get(id) ?? 0}`, kind: "agent", at: 2, text: "changed b.txt; checked nothing" },
     ], cursor: `c${promptSeq.get(id) ?? 0}`, reset: false }),
+    commands: unused,
     ask: unused,
     answer: unused,
     control: unused,

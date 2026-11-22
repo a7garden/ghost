@@ -7,6 +7,7 @@ import type { HerdrChat, HerdrChatItem } from "@ghost/contract";
 
 const WINDOW = 1024 * 1024;
 const HEAD = 8 * 1024;
+const MODEL_WINDOW = 64 * 1024;
 const MAX_TOOL_CALLS = 256;
 const MAX_CHECKPOINTS = 32;
 const ANCHOR = 64;
@@ -16,13 +17,14 @@ type SessionRef = { agent: string; kind: string; value: string };
 type RecordObject = Record<string, unknown>;
 type Tool = Extract<HerdrChatItem, { kind: "tool" }>;
 type Context = { title: string | null; tools: Map<string, Tool> };
-type Checkpoint = Context & { ref: SessionRef; path: string; identity: string; cursor: number; anchor: Buffer };
+type ModelCheckpoint = { value: string | null; cursor: number; anchor: Buffer };
+type Checkpoint = Context & { ref: SessionRef; path: string; identity: string; cursor: number; anchor: Buffer; model: ModelCheckpoint };
 
 const object = (value: unknown): value is RecordObject => typeof value === "object" && value !== null && !Array.isArray(value);
 const string = (value: unknown): string => typeof value === "string" ? value : "";
 
 export function emptyHerdrChat(pane: string): HerdrChat {
-  return { pane, source: null, title: null, items: [], cursor: "0", reset: false };
+  return { pane, source: null, title: null, model: null, items: [], cursor: "0", reset: false };
 }
 
 async function confined(root: string, path: string): Promise<string | null> {
@@ -62,7 +64,7 @@ async function bytes(file: FileHandle, start: number, length: number): Promise<B
   return count === length ? buffer : buffer.subarray(0, count);
 }
 
-/** Project text only; never return raw records, injected context, tool inputs other than a summary, or model metadata. */
+/** Project text only; never return raw records, injected context or tool inputs other than a summary. */
 function cleanText(value: string): string {
   return value
     .replace(/<(system-reminder|developer-instructions|project-context|harness-context|local-command-caveat|local-command-stdout|local-command-stderr|command-name|command-message|command-args|user-prompt-submit-hook|injected-context)(?:\s[^>]*)?>[\s\S]*?(?:<\/\1\s*>|$)/gi, "")
@@ -183,6 +185,59 @@ function collect(data: Buffer, start: number, emitFrom: number, source: Source, 
   });
 }
 
+function modelFromRecord(record: unknown, source: Source): string | null {
+  if (!object(record) || record.isSidechain === true || record.isMeta === true || record.isCompactSummary === true) return null;
+  if (source === "omp" && record.type === "model_change" && (record.role === undefined || record.role === "default")) {
+    const model = string(record.model);
+    if (model.includes("/")) return model;
+  }
+  if (record.type !== (source === "omp" ? "message" : "assistant") || !object(record.message) || record.message.role !== "assistant") return null;
+  const model = string(record.message.model);
+  if (!model || model === "<synthetic>") return null;
+  if (source === "claude") return model;
+  const provider = string(record.message.provider);
+  return provider ? `${provider}/${model}` : null;
+}
+
+/** Read new complete records backwards so chat pagination cannot hide a later model switch. */
+async function readModel(file: FileHandle, size: number, source: Source, previous?: ModelCheckpoint): Promise<ModelCheckpoint> {
+  const stop = previous?.cursor ?? 0;
+  let cursor = stop;
+  let lineEnd = -1;
+  for (let end = size; end > stop;) {
+    const start = Math.max(stop, end - MODEL_WINDOW);
+    const chunk = await bytes(file, start, end - start);
+    for (let lf = chunk.lastIndexOf(LF); lf >= 0; lf = lf === 0 ? -1 : chunk.lastIndexOf(LF, lf - 1)) {
+      if (lineEnd === -1) cursor = start + lf + 1; // Ignore a trailing record that hasn't been committed.
+      else {
+        const value = await readLine(start + lf + 1, chunk, start);
+        if (value !== null) return checkpoint(value);
+      }
+      lineEnd = start + lf;
+    }
+    if (start === stop && lineEnd >= stop) {
+      const value = await readLine(stop, chunk, start);
+      if (value !== null) return checkpoint(value);
+    }
+    end = start;
+  }
+  return cursor === stop && previous ? previous : checkpoint(previous?.value ?? null);
+
+  async function readLine(from: number, chunk: Buffer, start: number): Promise<string | null> {
+    const length = lineEnd - from;
+    if (length === 0) return null;
+    const row = lineEnd < start + chunk.length ? chunk.subarray(from - start, lineEnd - start) : await bytes(file, from, length);
+    if (!row.includes('"model"')) return null;
+    try { return modelFromRecord(JSON.parse(row.toString("utf8")), source); }
+    catch { return null; }
+  }
+
+  async function checkpoint(value: string | null): Promise<ModelCheckpoint> {
+    const anchorStart = Math.max(0, cursor - ANCHOR);
+    return { value, cursor, anchor: await bytes(file, anchorStart, cursor - anchorStart) };
+  }
+}
+
 /** A bounded read of the transcript named by herdr, with enough context to resolve results across polls. */
 export class HerdrChatReader {
   private readonly checkpoints = new Map<string, Checkpoint>();
@@ -209,6 +264,9 @@ export class HerdrChatReader {
       const requested = after !== null && /^\d{1,16}$/.test(after) ? Number(after) : null;
       const same = previous?.path === path && previous.identity === identity;
       const unchanged = same && previous.cursor <= size && previous.anchor.equals(await bytes(file, previous.cursor - previous.anchor.length, previous.anchor.length));
+      const lastModel = unchanged && previous.model.cursor <= size &&
+        (previous.model.cursor === previous.cursor || previous.model.anchor.equals(await bytes(file, previous.model.cursor - previous.model.anchor.length, previous.model.anchor.length)))
+        ? previous.model : undefined;
       const reset = after !== null && (requested === null || !Number.isSafeInteger(requested) || requested > size ||
         (previous !== undefined && !unchanged) || (requested > 0 && (await bytes(file, requested - 1, 1))[0] !== LF));
       const context: Context = { title: unchanged ? previous.title : null, tools: new Map() };
@@ -248,10 +306,11 @@ export class HerdrChatReader {
       }
       const anchorStart = Math.max(0, cursor - ANCHOR);
       const anchor = await bytes(file, anchorStart, cursor - anchorStart);
+      const model = await readModel(file, size, source, lastModel);
       this.checkpoints.delete(key);
       if (this.checkpoints.size >= MAX_CHECKPOINTS) this.checkpoints.delete(this.checkpoints.keys().next().value!);
-      this.checkpoints.set(key, { ...context, ref, path, identity, cursor, anchor });
-      return { pane, source, title: context.title, items, cursor: String(cursor), reset };
+      this.checkpoints.set(key, { ...context, ref, path, identity, cursor, anchor, model });
+      return { pane, source, title: context.title, model: model.value, items, cursor: String(cursor), reset };
     } catch (error) {
       if (!object(error) || typeof error.code !== "string") throw error;
       return unavailable;

@@ -1,6 +1,6 @@
 import { useContext, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, GitBranch, Square } from 'lucide-react';
+import { ChevronDown, GitBranch } from 'lucide-react';
 import { CompactTitleSlot } from '../components/AppFrame';
 import type { HerdrPaneView } from '@ghost/contract';
 import { Button, Popover, PopoverContent, PopoverTrigger, SegmentedControl } from '../ui';
@@ -13,10 +13,10 @@ export const herdrModes: readonly HerdrMode[] = ['chat', 'live', 'changes'];
 const modes = [{ value: 'chat', label: '대화' }, { value: 'live', label: '터미널' }, { value: 'changes', label: '변경' }] as const;
 export type PaneNavigation = { panes: readonly HerdrPaneView[]; onNavigate(id: string): void };
 
-export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, branch, navigation, onStop, fontSize, onFontSize, terminalAction }: {
+export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, branch, navigation, fontSize, onFontSize, terminalAction }: {
   pane: HerdrPaneView; mode: HerdrMode; onMode(mode: HerdrMode): void; compact: boolean;
   chat: boolean; changes: boolean; branch?: string | null; navigation?: PaneNavigation;
-  onStop?: () => void; fontSize: number; onFontSize(size: number): void;
+  fontSize: number; onFontSize(size: number): void;
   terminalAction?: ReactNode;
 }) {
   const slot = useContext(CompactTitleSlot);
@@ -67,8 +67,6 @@ export function HerdrPaneHeader({ pane, mode, onMode, compact, chat, changes, br
       {mode === 'live' && <div className="herdr-pane-tools" role="toolbar" aria-label="터미널 도구">
         {terminalAction}
         <TerminalTextSize size={fontSize} onSize={onFontSize}/>
-        {onStop && <Button type="button" variant="ghost" size="icon" className="herdr-stop" aria-label="작업 중단" title="작업 중단 (Esc)" onClick={onStop}>
-          <Square aria-hidden="true"/></Button>}
       </div>}
     </div>
   </header>;

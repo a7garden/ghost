@@ -600,11 +600,13 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         return failure(caught);
       }
     }
-    if ((pathname === "/api/herdr/ask" || pathname === "/api/herdr/chat") && request.method === "GET") {
+    if ((pathname === "/api/herdr/ask" || pathname === "/api/herdr/chat" || pathname === "/api/herdr/commands") && request.method === "GET") {
       try {
         if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
         const pane = url.searchParams.get("pane") ?? "";
-        return json(pathname === "/api/herdr/ask" ? await herdr.ask(pane) : await herdr.chat(pane, url.searchParams.get("after")));
+        if (pathname === "/api/herdr/ask") return json(await herdr.ask(pane));
+        if (pathname === "/api/herdr/commands") return json(await herdr.commands(pane));
+        return json(await herdr.chat(pane, url.searchParams.get("after")));
       } catch (caught) {
         return failure(caught);
       }

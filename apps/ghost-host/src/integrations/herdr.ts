@@ -2,11 +2,12 @@ import { accessSync, constants, existsSync, realpathSync, statSync } from "node:
 import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import { Type } from "typebox";
-import { HERDR_AGENT_KINDS, validate, type CodingAgentId, type CodingPrefs, type CodingSetup, type CodingStart, type HerdrAgentKind, type HerdrAgentStart, type HerdrAnswer, type HerdrAsk, type HerdrChangedFile, type HerdrChanges, type HerdrChat, type HerdrClose, type HerdrControlCommand, type HerdrControlRelease, type HerdrDiff, type HerdrFrame, type HerdrInput, type HerdrIntegration, type HerdrOutput, type HerdrPaneView, type HerdrRename, type HerdrSplit, type HerdrTabCreate, type HerdrView, type HerdrWorkspaceCreate, type HerdrWorkspaceView } from "@ghost/contract";
+import { HERDR_AGENT_KINDS, validate, type CodingAgentId, type CodingPrefs, type CodingSetup, type CodingStart, type HerdrAgentKind, type HerdrAgentStart, type HerdrAnswer, type HerdrAsk, type HerdrChangedFile, type HerdrChanges, type HerdrChat, type HerdrClose, type HerdrCommands, type HerdrControlCommand, type HerdrControlRelease, type HerdrDiff, type HerdrFrame, type HerdrInput, type HerdrIntegration, type HerdrOutput, type HerdrPaneView, type HerdrRename, type HerdrSplit, type HerdrTabCreate, type HerdrView, type HerdrWorkspaceCreate, type HerdrWorkspaceView } from "@ghost/contract";
 import type { HerdrDelivery } from "@ghost/contract";
 import { CommandError, conflict, invalid, notFound } from "../core/errors.ts";
 import { detectHerdrAsk } from "./herdr-ask.ts";
 import { HerdrChatReader } from "./herdr-chat.ts";
+import { HerdrCommandsProvider } from "./herdr-commands.ts";
 import { ControlLeases, type ControlPane, type HerdrControlRequest, type HerdrControlStream } from "./herdr-control.ts";
 import { HERDR_PANE as PANE, HERDR_SESSION as SESSION, HERDR_TERMINAL, HerdrState, TerminalSize } from "./herdr-state.ts";
 import type { HerdrPort, HerdrRun, HerdrWait } from "./ports.ts";
@@ -250,7 +251,7 @@ function failure(code: string | null, message: string): CommandError {
 
 /**
  * The owner's herdr, driven through its `herdr` CLI by argv, in one session: the one the owner is using. Coding is
- * herdr and nothing else: the Host never runs a coding agent itself and never starts a herdr server (a server it
+ * herdr and nothing else: the Host leaves coding tasks to herdr panes and never starts a herdr server (a server it
  * started would be a second instance, not the owner's). It lists the agent panes, reads their terminals, opens a
  * workspace (a git worktree for a repository) with an agent in it, prompts and keys an agent, and reads what must be
  * set up for that to work. The environment is rebuilt without herdr's own `HERDR_*` variables, so a Host started inside
@@ -259,6 +260,7 @@ function failure(code: string | null, message: string): CommandError {
 export class Herdr implements HerdrPort {
   private found: string | null = null;
   private readonly transcripts: HerdrChatReader;
+  private readonly commandCatalog: HerdrCommandsProvider;
   private readonly answering = new Set<string>();
   private readonly state: HerdrState;
   private readonly controls: ControlLeases;
@@ -269,6 +271,7 @@ export class Herdr implements HerdrPort {
     private readonly options: { prefs?: () => CodingPrefs; agentDirs?: string[]; transcriptHome?: string; root?: string; log?: (message: string, error?: unknown) => void } = {},
   ) {
     this.transcripts = new HerdrChatReader(options.transcriptHome);
+    this.commandCatalog = new HerdrCommandsProvider(() => findProgram("omp", options.agentDirs), options.transcriptHome, options.log);
     this.state = new HerdrState(options.root);
     this.controls = new ControlLeases({
       state: this.state,
@@ -495,6 +498,11 @@ export class Herdr implements HerdrPort {
     if (!listed) throw notFound(`herdr pane ${pane}`);
     const ref = listed.agent_session;
     return this.transcripts.read(pane, ref?.agent === listed.agent ? ref ?? null : null, after, `${session}/${pane}`);
+  }
+
+  async commands(id: string, session = this.session): Promise<HerdrCommands> {
+    const pane = await this.pane(id, session);
+    return this.commandCatalog.list(pane.agent, pane.cwd);
   }
 
   /** The repository a pane works in, and the commit its work is measured from: where its worktree was cut, for the main checkout HEAD itself. */

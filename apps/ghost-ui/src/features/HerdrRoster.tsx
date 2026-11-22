@@ -1,14 +1,15 @@
 import { useState } from 'react';
-import { Columns2, GitBranch, MoreHorizontal, Pencil, Plus, Rows2, SquareTerminal, X } from 'lucide-react';
+import { Columns2, GitBranch, MoreHorizontal, Pencil, Plus, Rows2, SlidersHorizontal, SquareTerminal, X } from 'lucide-react';
 import type { HerdrPaneView, HerdrTabView, HerdrTarget, HerdrWorkspaceView } from '@ghost/contract';
 import { Button, Popover, PopoverContent, PopoverTrigger } from '../ui';
 import { HerdrState, herdrPanePath } from './herdrDisplay';
 
 export type HerdrNode = { id: string; label: string; target: HerdrTarget; cwd?: string | null };
+/** `quick` creates at once with the default agent and no questions; without it the options dialog opens. */
 export type RosterAction =
-  | { kind: 'tab'; node: HerdrNode }
-  | { kind: 'split'; node: HerdrNode; pane: string; direction: 'right' | 'down' }
-  | { kind: 'agent'; node: HerdrNode }
+  | { kind: 'tab'; node: HerdrNode; quick?: true }
+  | { kind: 'split'; node: HerdrNode; pane: string; direction: 'right' | 'down'; quick?: true }
+  | { kind: 'agent'; node: HerdrNode; quick?: true }
   | { kind: 'rename'; node: HerdrNode }
   | { kind: 'close'; node: HerdrNode };
 
@@ -22,11 +23,12 @@ export function findHerdrPane(workspaces: readonly HerdrWorkspaceView[], pane: s
 
 export function herdrNodeActions(node: HerdrNode, { splitPane, shell = false }: { splitPane?: string; shell?: boolean } = {}): RosterAction[] {
   const actions: RosterAction[] = [];
-  if (node.target === 'workspace') actions.push({ kind: 'tab', node });
+  if (node.target === 'workspace') actions.push({ kind: 'tab', node, quick: true }, { kind: 'tab', node });
   if (node.target === 'tab' && splitPane) actions.push(
-    { kind: 'split', node, pane: splitPane, direction: 'right' }, { kind: 'split', node, pane: splitPane, direction: 'down' },
+    { kind: 'split', node, pane: splitPane, direction: 'right', quick: true }, { kind: 'split', node, pane: splitPane, direction: 'down', quick: true },
+    { kind: 'split', node, pane: splitPane, direction: 'right' },
   );
-  if (node.target === 'pane' && shell) actions.push({ kind: 'agent', node });
+  if (node.target === 'pane' && shell) actions.push({ kind: 'agent', node, quick: true }, { kind: 'agent', node });
   if (node.target !== 'pane') actions.push({ kind: 'rename', node });
   actions.push({ kind: 'close', node });
   return actions;
@@ -37,6 +39,9 @@ const actions = {
   right: { label: '오른쪽으로 분할', Icon: Columns2 },
   down: { label: '아래로 분할', Icon: Rows2 },
   agent: { label: '에이전트 시작', Icon: SquareTerminal },
+  'tab-options': { label: '새 탭 옵션…', Icon: SlidersHorizontal },
+  'split-options': { label: '분할 옵션…', Icon: SlidersHorizontal },
+  'agent-options': { label: '에이전트 옵션…', Icon: SlidersHorizontal },
   rename: { label: '이름 바꾸기', Icon: Pencil },
   close: { label: '닫기', Icon: X },
 };
@@ -48,7 +53,8 @@ function NodeActions({ node, items, onAction }: { node: HerdrNode; items: Roster
     <PopoverTrigger asChild><Button type="button" variant="ghost" size="icon" className="herdr-node-more" aria-label={label}><MoreHorizontal aria-hidden="true"/></Button></PopoverTrigger>
     <PopoverContent className="herdr-node-menu" aria-label={label} align="end" sideOffset={4}>
       {items.map(action => {
-        const key = action.kind === 'split' ? action.direction : action.kind;
+        const key = action.kind === 'split' ? (action.quick ? action.direction : 'split-options')
+          : action.kind === 'tab' || action.kind === 'agent' ? (action.quick ? action.kind : `${action.kind}-options` as const) : action.kind;
         const { label, Icon } = actions[key];
         return <Button key={key} type="button" variant="ghost" className="herdr-node-action" data-danger={key === 'close' || undefined}
           onClick={() => { setOpen(false); onAction(action); }}><Icon aria-hidden="true"/>{label}</Button>;

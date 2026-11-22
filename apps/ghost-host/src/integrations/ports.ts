@@ -1,4 +1,4 @@
-import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrAgentStart, HerdrAnswer, HerdrAsk, HerdrChanges, HerdrChat, HerdrClose, HerdrControlCommand, HerdrControlRelease, HerdrDiff, HerdrFrame, HerdrInput, HerdrOutput, HerdrPaneView, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, Scope, VaultItem, Work } from "@ghost/contract";
+import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrAgentStart, HerdrAnswer, HerdrAsk, HerdrChanges, HerdrChat, HerdrClose, HerdrCommands, HerdrControlCommand, HerdrControlRelease, HerdrDiff, HerdrFrame, HerdrInput, HerdrOutput, HerdrPaneView, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, Scope, VaultItem, Work } from "@ghost/contract";
 import type { HerdrDelivery } from "@ghost/contract";
 import type { HerdrControlRequest, HerdrControlStream } from "./herdr-control.ts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
@@ -332,6 +332,7 @@ export interface HerdrPort {
   ask(pane: string, session?: string): Promise<HerdrAsk | null>;
   answer(input: HerdrAnswer): Promise<HerdrPaneView>;
   chat(pane: string, after: string | null, session?: string): Promise<HerdrChat>;
+  commands(pane: string, session?: string): Promise<HerdrCommands>;
   control(request: HerdrControlRequest, principal: string, signal: AbortSignal): Promise<HerdrControlStream>;
   controlSend(command: HerdrControlCommand, principal: string): Promise<void>;
   controlRelease(lease: HerdrControlRelease, principal: string): Promise<void>;

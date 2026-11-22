@@ -5,6 +5,7 @@ import { Button, FormField, InlineError, Input, Popover, PopoverContent, Popover
 import { useHost } from '../host/context';
 import { submitCodingOnShortcut } from './herdrDisplay';
 import { AgentOptionsSection, useAgentLaunch } from './HerdrAgentOptions';
+import { readCodingValue, writeCodingValue } from './herdrInboxModel';
 
 const kindNames: Record<HerdrAgentKind, string> = {
   omp: 'omp', claude: 'Claude Code', codex: 'Codex', pi: 'Pi', gemini: 'Gemini CLI', cursor: 'Cursor',
@@ -70,7 +71,7 @@ export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
 }) {
   const { client } = useHost();
   const [agent, setAgent] = useState<HerdrAgentKind | 'shell'>();
-  const [repo, setRepo] = useState('');
+  const [repo, setRepo] = useState(() => readCodingValue('new-space-dir') ?? '');
   const [label, setLabel] = useState('');
   const [branch, setBranch] = useState('');
   const [worktree, setWorktree] = useState(true);
@@ -97,6 +98,7 @@ export function NewHerdrWorkspace({ scopes, setup, onStarted, onCancel }: {
     try {
       const pane = await client.createHerdrWorkspace(args.length ? { ...input, args } : input);
       launch.remember();
+      writeCodingValue('new-space-dir', input.cwd);
       onStarted(pane);
     }
     catch (reason) { setError(reason instanceof Error ? reason.message : '스페이스를 만들지 못했습니다.'); }

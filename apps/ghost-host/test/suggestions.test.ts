@@ -69,7 +69,7 @@ test("suggestion routes authorize transcript reads, persist settings and reuse r
     status: "done", agent: "omp", cwd: null, focused: true, owned: false,
   };
   let chat: HerdrChat = {
-    pane: paneId, source: "omp", title: null, cursor: "100", reset: false,
+    pane: paneId, source: "omp", title: null, model: null, cursor: "100", reset: false,
     items: [{ id: "1", kind: "user", at: 1, text: "확인해줘" }, { id: "2", kind: "agent", at: 2, text: "확인했어" }, { id: "3", kind: "thinking", at: 2 }],
   };
   herdr.overview = async () => ({ available: true, note: null, session: "default", workspaces: [{

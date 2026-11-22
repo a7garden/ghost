@@ -1,6 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import type { CodingPrefs, CodingSetup, Decision, HerdrAgentStart, HerdrChanges, HerdrClose, HerdrDiff, HerdrFrame, HerdrInput, HerdrIntegrationInstall, HerdrOutput, HerdrPaneView, HerdrPrompt, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrUpload, HerdrView, HerdrWorkspaceCreate, HerdrWorkspaceView, OmpInfo, VaultItem } from '@ghost/contract';
-import type { HerdrAnswer, HerdrAsk, HerdrChat, HerdrChatItem, HerdrControlCommand, HerdrControlEnd, HerdrControlLease, HerdrControlRelease } from '@ghost/contract';
+import type { HerdrAnswer, HerdrAsk, HerdrChat, HerdrChatItem, HerdrCommands, HerdrControlCommand, HerdrControlEnd, HerdrControlLease, HerdrControlRelease } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 /** The synthetic decision ids the decision-surface screens focus. */
@@ -278,6 +278,7 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
       { id: 'ask-a1', kind: 'agent', at: now - 22_000, text: '**탭 순서와 초점 표시**를 검증하는 테스트가 있습니다. 기존 테스트를 실행해 확인하겠습니다.' },
     ]],
   ]);
+  const models = new Map([[visualCodingIds.finished, 'anthropic/claude-sonnet-4-6']]);
   const question: HerdrAsk = {
     pane: visualCodingIds.blocked, kind: 'approval', title: '설정 테스트를 실행할까요?', detail: 'bun test src/ui/settings.test.tsx',
     choices: [
@@ -371,8 +372,10 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
     const items = rich ? initialChats.get(pane) : undefined;
     const after = Number(query.get('after') ?? 0);
     const source = items ? pane === visualCodingIds.finished ? 'omp' : 'claude' : null;
-    return fulfillJson(route, 200, { pane, source, items: items?.slice(after) ?? [], title: null, cursor: String(items?.length ?? 0), reset: !after } satisfies HerdrChat);
+    return fulfillJson(route, 200, { pane, source, items: items?.slice(after) ?? [], title: null, model: source ? models.get(pane) ?? null : null,
+      cursor: String(items?.length ?? 0), reset: !after } satisfies HerdrChat);
   });
+  await page.route('**/api/herdr/commands?*', route => fulfillJson(route, 200, { commands: [] } satisfies HerdrCommands));
   await page.route('**/api/herdr/terminal?*', route => {
     const id = new URL(route.request().url()).searchParams.get('pane');
     const entry = id ? entries.get(id) : undefined;
@@ -506,6 +509,14 @@ export async function mockCodingApi(page: Page, { stopped = false, rich = false,
     const entry = entries.get(pane);
     if (!entry) return error(route, 404, '패널을 찾을 수 없습니다.');
     if (entry.pane.status === 'blocked') return error(route, 409, '승인에 먼저 답하세요.');
+    if (text.startsWith('/model ')) {
+      models.set(pane, text.slice('/model '.length));
+      return fulfillJson(route, 200, entry.pane);
+    }
+    if (text.startsWith('/')) {
+      entry.text += `\n❯ ${text}`;
+      return fulfillJson(route, 200, entry.pane);
+    }
     entry.text += `\n❯ ${text}\n\n● 실패 응답도 확인하겠습니다.`;
     entry.pane.status = 'working';
     const list = initialChats.get(pane);

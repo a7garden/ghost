@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { HerdrPaneView, HerdrView, Scope } from '@ghost/contract';
 import { Button, InlineError, SegmentedControl } from '../ui';
+import { useHost } from '../host/context';
 import { useCodingPageSetup } from './CodingSetup';
 import { NewHerdrWorkspace } from './HerdrStart';
 import { OpenHerdrPane, useHerdr } from './Herdr';
@@ -30,6 +31,7 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
 }) {
   const showDetail = creating || herdrPane !== null;
   const [revision, refresh] = useReducer((count: number) => count + 1, 0);
+  const { client } = useHost();
   const [action, setAction] = useState<RosterAction | null>(null);
   const [notice, setNotice] = useState('');
   const [rosterMode, setRosterMode] = useState<'agents' | 'spaces'>('agents');
@@ -98,6 +100,22 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
     }
     refresh();
   }
+  /** One tap: the preferred (else first installed) agent, no dialog. Options stay one menu item away. */
+  async function quick(request: RosterAction & { kind: 'tab' | 'split' | 'agent' }) {
+    const agent = setup?.kinds.find(kind => kind === setup.prefs.agent) ?? setup?.kinds[0];
+    setNotice('');
+    try {
+      let created: HerdrPaneView;
+      if (request.kind === 'tab') created = await client.createHerdrTab({ workspace: request.node.id, ...(agent && { agent }) });
+      else if (request.kind === 'split') created = await client.splitHerdrPane({ pane: request.pane, direction: request.direction, ...(agent && { agent }) });
+      else if (agent) created = await client.startHerdrAgent({ pane: request.node.id, agent });
+      else { setNotice('설치된 에이전트가 없습니다.'); return; }
+      changed(created);
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : '만들지 못했습니다.');
+      refresh();
+    }
+  }
   function paneGone() {
     setNotice('이 패널은 더 이상 없습니다.');
     onCancel();
@@ -120,13 +138,13 @@ export function CodingPage({ scopes, herdrPane, herdrSession, creating, onOpen, 
         </Button>
       </header>
       <div className="coding-roster-scroll">
-        {notice && !showDetail && <p className="coding-hint" role="status">{notice}</p>}
+        {notice && <p className="coding-hint" role="status">{notice}</p>}
         {!required && !errors && (error || roster?.note) && <InlineError onRetry={refresh} retryLabel="다시 불러오기">{error || roster?.note}</InlineError>}
         {!required && !errors && !error && !roster && <CodingSkeleton/>}
         {required && showSetupInRoster && setupNotice}
         {roster?.available && !roster.note && (rosterMode === 'agents'
           ? <HerdrInbox workspaces={workspaces} open={creating ? null : paneId} log={log} asks={asks} onSpaces={() => setRosterMode('spaces')}/>
-          : workspaces.length ? <HerdrRoster workspaces={workspaces} selected={creating ? null : paneId} onAction={setAction}/>
+          : workspaces.length ? <HerdrRoster workspaces={workspaces} selected={creating ? null : paneId} onAction={request => { if (request.kind !== 'rename' && request.kind !== 'close' && request.quick) void quick({ ...request, quick: true }); else setAction(request); }}/>
             : <p className="coding-hint">열린 스페이스가 없습니다.</p>)}
         {!required && showSetupInRoster && setupNotice}
       </div>

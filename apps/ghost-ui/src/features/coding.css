@@ -107,7 +107,6 @@
   .herdr-pane-tools > [data-slot='button']:hover { color: var(--ghost-ink); background: var(--ghost-hover); }
   .herdr-control-action[aria-pressed='true'] { background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); }
   .herdr-pane-tools svg { width: 15px; height: 15px; }
-  .herdr-stop svg { width: 11px; height: 11px; fill: currentColor; }
   [data-slot='dialog-content'].herdr-takeover-confirm { max-width: min(23rem, calc(100% - 24px)); gap: 10px; }
   .herdr-takeover-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
   .coding-context { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; color: var(--ghost-ink3); font-size: var(--text-caption); }
@@ -208,6 +207,14 @@
   /* The coding pane clips outside the dock; keep the halo within its gutters. */
   .coding-composer { --composer-glow-blur: 5px; }
   /* How a message sent now reaches the working agent. */
+  /* The conversation's model, as a quiet control in the composer footer. */
+  .coding-model { display: inline-flex; align-items: center; gap: 4px; max-width: 12rem; min-height: 28px; padding: 2px 8px; border: 0; border-radius: var(--radius-pill);
+    background: none; color: var(--ghost-ink2); font: inherit; font-size: var(--text-caption); font-weight: 550; cursor: pointer; }
+  .coding-model span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .coding-model svg { flex: none; width: 12px; height: 12px; opacity: .7; }
+  .coding-model:hover:not(:disabled) { background: var(--ghost-hover); color: var(--ghost-ink); }
+  .coding-model:focus-visible { outline: 2px solid var(--ghost-signal); outline-offset: 1px; }
+  .coding-model:disabled { opacity: .5; cursor: default; }
   .coding-delivery { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px 3px 7px; border-radius: var(--radius-pill);
     background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); font-size: var(--text-caption); font-weight: 550; white-space: nowrap; }
   .coding-delivery svg { width: 13px; height: 13px; }
@@ -333,6 +340,7 @@
   .coding-page[data-compact] .herdr-pane-tools { gap: 0; padding: 0; box-shadow: none; }
   .coding-page[data-compact] .herdr-pane-tools > [data-slot='button'], .coding-page[data-compact] .herdr-pane-tools > [data-slot='popover-trigger'] { height: 44px; min-width: 44px; padding-inline: 0; }
   .coding-page[data-compact] .herdr-tool-label { display: none; }
+  .coding-page[data-compact] .coding-model { min-height: 44px; }
   .coding-page[data-compact] .herdr-view-actions .ghost-segmented-control { padding: 0; border: 0; box-shadow: none; background: none; }
   .coding-page[data-compact] .herdr-view-actions .ghost-segmented-control__item { position: relative; min-width: 44px; padding-inline: 10px; background: none; box-shadow: none; }
   .coding-page[data-compact] .herdr-view-actions .ghost-segmented-control__item[aria-checked='true']::after { content: ''; position: absolute; inset: auto 9px 0; height: 2px; background: var(--ghost-ink); }

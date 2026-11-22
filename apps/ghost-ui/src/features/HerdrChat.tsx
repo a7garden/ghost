@@ -8,7 +8,7 @@ import { HerdrState } from './herdrDisplay';
 import { WorkingTime } from './HerdrParts';
 import { elapsedLabel, foldChat, mergeChat, stepLines, type ChatRow } from './herdrInboxModel';
 
-type ChatSnapshot = { items: readonly HerdrChatItem[]; source?: Chat['source']; title?: string | null };
+type ChatSnapshot = { items: readonly HerdrChatItem[]; source?: Chat['source']; title?: string | null; model?: string | null };
 const emptyItems: readonly HerdrChatItem[] = [];
 export function useHerdrChat(pane: HerdrPaneView, watching: boolean) {
   const { client } = useHost();
@@ -29,8 +29,8 @@ export function useHerdrChat(pane: HerdrPaneView, watching: boolean) {
         cursor.current = delta.source ? delta.cursor : '';
         setChat(current => {
           const items = delta.source ? mergeChat(current.source === delta.source ? current.items : emptyItems, delta) : emptyItems;
-          return items === current.items && current.source === delta.source && current.title === delta.title ? current
-            : { items, source: delta.source, title: delta.title };
+          return items === current.items && current.source === delta.source && current.title === delta.title && current.model === delta.model ? current
+            : { items, source: delta.source, title: delta.title, model: delta.model };
         });
         setError('');
       } catch (reason) {

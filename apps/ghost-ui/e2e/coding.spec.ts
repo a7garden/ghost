@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import type { CodingSetup, Effect, HerdrChat, HerdrChatItem, HerdrControlCommand, HerdrOutput, WorkDetail } from '@ghost/contract';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { CodingSetup, Effect, HerdrChat, HerdrChatItem, HerdrCommands, HerdrControlCommand, HerdrOutput, WorkDetail } from '@ghost/contract';
 import { fulfillHerdrFrame, mockCodingApi, visualCodingIds } from './mocks';
 import { openScreen } from './visual';
 import { readRunState } from './run-state';
@@ -35,7 +35,9 @@ const directControl = (page: Page) => page.getByRole('button', { name: '직접 �
 const controlRequest = (page: Page) => page.waitForRequest(request => new URL(request.url()).pathname === '/api/herdr/control');
 const controlCommand = (page: Page, type: HerdrControlCommand['type']) => page.waitForRequest(request =>
   new URL(request.url()).pathname === '/api/herdr/control/send' && request.postDataJSON().type === type);
-const followUp = (page: Page) => page.getByRole('textbox', { name: '후속 지시', exact: true });
+const followUp = (scope: Page | Locator) => scope.getByRole('combobox', { name: '후속 지시', exact: true });
+const paneMode = (page: Page, name: '대화' | '터미널' | '변경') => page.getByRole('radio', { name, exact: true });
+const terminalTools = (page: Page) => page.getByRole('toolbar', { name: '터미널 도구' });
 const stop = (page: Page) => page.getByRole('button', { name: '작업 중단', exact: true });
 const attachments = (page: Page) => page.getByRole('button', { name: '파일 첨부', exact: true });
 const nextMessages = (page: Page) => page.getByRole('list', { name: '다음 메시지 제안', exact: true });
@@ -51,6 +53,12 @@ const choice = async (page: Page, field: string, option: string) => {
   await page.getByRole('combobox', { name: field, exact: true }).click();
   await page.getByRole('option', { name: option, exact: true }).click();
 };
+
+async function chooseRosterAction(page: Page, node: string, label: string) {
+  const menu = `${node} 작업`;
+  await page.getByRole('button', { name: menu, exact: true }).click();
+  await page.getByRole('dialog', { name: menu, exact: true }).getByRole('button', { name: label, exact: true }).click();
+}
 
 for (const { name, width, height, touch } of sizes) {
   test.describe(name, () => {
@@ -110,9 +118,10 @@ for (const { name, width, height, touch } of sizes) {
         await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('기존 결제 테스트');
         expect(await terminal(page).locator('.xterm-fg-6').count()).toBeGreaterThan(0);
-        await expect(composer).toHaveCount(0);
-        await expect(attachments(page)).toHaveCount(0);
-        await expect(stop(page)).toHaveCount(touch ? 0 : 1);
+        await expect(composer).toBeEnabled();
+        await expect(attachments(page)).toBeVisible();
+        await expect(terminalTools(page).getByRole('button', { name: '작업 중단', exact: true })).toHaveCount(0);
+        await expect(stop(page)).toBeVisible();
         await expect(keys).toHaveCount(touch ? 1 : 0);
         if (touch) {
           await expect(list).toBeHidden();
@@ -137,7 +146,7 @@ for (const { name, width, height, touch } of sizes) {
         await captureCoding(page, `chat-done-${theme}-${name}.png`);
         await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('3 pass');
-        await expect(composer).toHaveCount(0);
+        await expect(composer).toBeEnabled();
         await expect(terminal(page).locator('b')).toHaveCount(0);
         await captureCoding(page, `finished-${theme}-${name}.png`);
 
@@ -254,9 +263,9 @@ for (const { name, width, height, touch } of sizes) {
       if (touch) {
         await page.getByRole('group', { name: '터미널 키' }).getByRole('button', { name: '중단 (Esc)', exact: true }).tap();
       } else {
-        const headerStop = page.locator('.coding-detail-head').getByRole('button', { name: '작업 중단', exact: true });
-        await expect(headerStop).toHaveAttribute('title', '작업 중단 (Esc)');
-        await headerStop.click();
+        const composerStop = page.locator('.coding-composer').getByRole('button', { name: '작업 중단', exact: true });
+        await expect(composerStop).toHaveAttribute('title', '작업 중단 (Esc)');
+        await composerStop.click();
       }
       expect((await interrupted).postDataJSON()).toMatchObject({ pane: visualCodingIds.started, type: 'input', text: '\x1b' });
       await expect(terminal(page)).toContainText('Interrupted');
@@ -264,7 +273,8 @@ for (const { name, width, height, touch } of sizes) {
 
       await page.getByRole('link', { name: /로그인 실패 시 안내 문구 고치기/ }).click();
       const replyPane = page.getByRole('region', { name: '로그인 실패 시 안내 문구 고치기', exact: true });
-      const compose = followUp(page);
+      await expect(replyPane.getByRole('radio', { name: '대화', exact: true })).toBeChecked();
+      const compose = followUp(replyPane);
       const send = replyPane.getByRole('button', { name: '보내기', exact: true });
       await compose.fill('실패 응답도 확인해 주세요.');
       if (touch) {
@@ -332,6 +342,126 @@ for (const { name, width, height, touch } of sizes) {
       await expect(field).toHaveValue(suggested[1]!);
       await expect(field).toBeFocused();
       expect(prompts).toEqual([]);
+    });
+
+    test('keeps the agent draft in chat and terminal, but hides the composer in changes, blocked and shell panes', async ({ page }) => {
+      const pane = visualCodingIds.finished;
+      await openScreen(page, { ...richCoding, route: () => paneRoute(pane), waits: () => ['기본 안내 문구'] }, 'light');
+      const field = followUp(page);
+      const draft = '터미널에서 이어서 쓸 초안';
+      await expect(paneMode(page, '대화')).toBeChecked();
+      await field.fill(draft);
+      await paneMode(page, '터미널').click();
+      await expect(terminal(page)).toContainText('3 pass');
+      await expect(field).toBeEnabled();
+      await expect(field).toHaveValue(draft);
+      await expect(attachments(page)).toBeVisible();
+      if (touch) await expect(page.getByRole('group', { name: '터미널 키' })).toBeVisible();
+      await paneMode(page, '변경').click();
+      await expect(page.getByRole('region', { name: '작업 변경' })).toBeVisible();
+      await expect(field).toHaveCount(0);
+      await paneMode(page, '대화').click();
+      await expect(field).toHaveValue(draft);
+
+      await page.evaluate(route => { location.hash = route; }, paneRoute(visualCodingIds.blocked));
+      const blockedPane = page.getByRole('region', { name: '설정 화면 키보드 탐색 확인', exact: true });
+      await expect(blockedPane.getByRole('region', { name: '승인 요청' })).toBeVisible();
+      await expect(field).toHaveCount(0);
+      await paneMode(page, '터미널').click();
+      await expect(terminal(page)).toContainText('Do you want to proceed?');
+      await expect(page.getByRole('group', { name: '터미널 키' })).toBeVisible();
+      await expect(field).toHaveCount(0);
+
+      await page.evaluate(route => { location.hash = route; }, paneRoute(visualCodingIds.shell));
+      await expect(terminal(page)).toContainText('git status --short');
+      await expect(paneMode(page, '대화')).toHaveCount(0);
+      await expect(field).toHaveCount(0);
+    });
+
+    test('filters slash commands, completes without sending and shows submitted output in the terminal', async ({ page }, info) => {
+      const pane = visualCodingIds.finished;
+      const commands = [
+        { name: 'compact', description: 'Compact the conversation', hint: null, source: 'builtin' },
+        { name: 'config', description: 'Open settings', hint: null, source: 'builtin' },
+        { name: 'model', description: 'Change model', hint: 'provider/model', source: 'builtin' },
+      ] satisfies HerdrCommands['commands'];
+      const prompts: unknown[] = [];
+      page.on('request', request => {
+        if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/herdr/prompt') prompts.push(request.postDataJSON());
+      });
+      const requested = page.waitForRequest(request => new URL(request.url()).pathname === '/api/herdr/commands');
+      await openScreen(page, { ...richCoding, route: () => paneRoute(pane), waits: () => ['기본 안내 문구'], prepare: async page => {
+        await mockCodingApi(page, { rich: true });
+        await page.route('**/api/herdr/commands?*', route => route.fulfill({ json: { commands } }));
+      } }, 'light');
+      expect(new URL((await requested).url()).searchParams.get('pane')).toBe(pane);
+      const field = followUp(page);
+      const list = page.getByRole('listbox', { name: '슬래시 명령' });
+      const options = list.getByRole('option');
+      await field.fill('한 줄에 /');
+      await expect(list).toHaveCount(0);
+      await field.fill('/');
+      await expect(options).toHaveCount(3);
+      await page.screenshot({ path: info.outputPath('slash-menu.png'), animations: 'disabled', caret: 'hide' });
+      await field.fill('/co');
+      await expect(options).toHaveCount(2);
+      await expect(options.first()).toHaveAccessibleName(/^compact /);
+      await field.press('ArrowDown');
+      await expect(list.getByRole('option', { selected: true })).toHaveAccessibleName(/^config /);
+      await field.press('Enter');
+      await expect(field).toHaveValue('/config ');
+      await expect(list).toHaveCount(0);
+      expect(prompts).toEqual([]);
+
+      await field.fill('/com');
+      await expect(options).toHaveCount(1);
+      await field.press('Tab');
+      await expect(field).toHaveValue('/compact ');
+      await expect(field).toBeFocused();
+      await expect(list).toHaveCount(0);
+      await field.fill('/compact');
+      await expect(list).toBeVisible();
+      await field.press('Escape');
+      await expect(list).toHaveCount(0);
+      await expect(field).toHaveValue('/compact');
+      expect(prompts).toEqual([]);
+
+      await expect(paneMode(page, '대화')).toBeChecked();
+      const sent = post(page, '/api/herdr/prompt');
+      await page.getByRole('button', { name: '보내기', exact: true }).click();
+      expect((await sent).postDataJSON()).toEqual({ pane, text: '/compact' });
+      await expect(paneMode(page, '터미널')).toBeChecked();
+      await expect(terminal(page)).toContainText('/compact');
+      await expect(field).toHaveValue('');
+    });
+
+    test('shows the session model, changes it without leaving chat and locks the chip while working', async ({ page }, info) => {
+      const pane = visualCodingIds.finished;
+      await openScreen(page, { ...richCoding, route: () => paneRoute(pane), waits: () => ['기본 안내 문구'] }, 'dark');
+      const chip = page.getByRole('button', { name: /^모델 · / });
+      await expect(chip).toHaveAccessibleName('모델 · claude-sonnet-4-6');
+      await expect(chip).toHaveAttribute('title', '모델 바꾸기');
+      const loaded = page.waitForRequest(request => new URL(request.url()).pathname === '/api/coding/omp');
+      await chip.click();
+      expect(new URL((await loaded).url()).searchParams.get('cwd')).toBe('/Users/garden/Workspace/Projects/wt/app-fix-login');
+      const models = page.getByRole('group', { name: '모델 목록' });
+      await expect(models.getByRole('button', { name: /Claude Sonnet 4\.6/, pressed: true })).toBeVisible();
+      const picked = post(page, '/api/herdr/prompt');
+      await models.getByRole('button', { name: /GLM 5\.1/ }).click();
+      expect((await picked).postDataJSON()).toEqual({ pane, text: '/model zai/glm-5.1' });
+      await expect(paneMode(page, '대화')).toBeChecked();
+      await expect(chip).toHaveAccessibleName('모델 · GLM 5.1');
+      await expect(chip).toBeEnabled();
+
+      await followUp(page).fill('실패 응답도 확인해 주세요.');
+      await page.getByRole('button', { name: '보내기', exact: true }).click();
+      await expect(page.getByText('스티어링', { exact: true })).toBeVisible();
+      await expect(chip).toBeDisabled();
+      await page.screenshot({ path: info.outputPath('omp-chat-working.png'), animations: 'disabled', caret: 'hide' });
+      await paneMode(page, '터미널').click();
+      await expect(terminal(page)).toContainText('3 pass');
+      await expect(chip).toBeDisabled();
+      await page.screenshot({ path: info.outputPath('omp-terminal-working.png'), animations: 'disabled', caret: 'hide' });
     });
 
     test('moves the blocked choice with arrows, submits it and returns to the roster when the terminal ends', async ({ page }) => {
@@ -493,7 +623,7 @@ test('forwards native terminal input, including bracketed paste, and refits with
   await input(page).press('Control+c');
   expect((await interrupted).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: '\x03' });
   await input(page).press('Shift+Escape');
-  await expect(page.getByRole('toolbar', { name: '터미널 도구' }).getByRole('button').first()).toBeFocused();
+  await expect(terminalTools(page).getByRole('button').first()).toBeFocused();
   const initial = requests[0]!.searchParams;
   const refitted = page.waitForRequest(request => {
     const url = new URL(request.url());
@@ -654,12 +784,7 @@ test('retains the last picture during loss and reconnects after the quiet interv
 test('manages workspaces, tabs, splits and shell agents through the roster', async ({ page, hasTouch }) => {
   await openScreen(page, coding, 'light');
   await spaces(page);
-  async function choose(node: string, label: string) {
-    const menu = `${node} 작업`;
-    await page.getByRole('button', { name: menu, exact: true }).click();
-    await page.getByRole('dialog', { name: menu }).getByRole('button', { name: label, exact: true })
-      .and(page.locator('.herdr-node-action')).click();
-  }
+  const choose = (node: string, label: string) => chooseRosterAction(page, node, label);
   async function returnToRoster(text: string) {
     if (!hasTouch) return;
     // Let the new pane establish its lease before leaving, then wait for its release.
@@ -683,7 +808,8 @@ test('manages workspaces, tabs, splits and shell agents through the roster', asy
   expect((await renamed).postDataJSON()).toEqual({ target: 'workspace', id: 'w79', label: '새 앱' });
   await expect(page.getByRole('region', { name: '스페이스 · 새 앱' })).toBeVisible();
 
-  await choose('새 앱', '새 탭');
+  await choose('새 앱', '새 탭 옵션…');
+  await expect(page.getByRole('dialog', { name: '새 탭', exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: '이름 (선택)' }).fill('실험');
   const tab = post(page, '/api/herdr/tabs');
   await page.getByRole('button', { name: '탭 만들기' }).click();
@@ -691,7 +817,8 @@ test('manages workspaces, tabs, splits and shell agents through the roster', asy
   await expect(page).toHaveURL(url => url.hash === `#${paneRoute('w79:p81')}`);
   await returnToRoster('zsh %');
 
-  await choose('실험', '오른쪽으로 분할');
+  await choose('실험', '분할 옵션…');
+  await expect(page.getByRole('dialog', { name: '오른쪽으로 분할', exact: true })).toBeVisible();
   const split = post(page, '/api/herdr/split');
   await page.getByRole('button', { name: '분할', exact: true }).click();
   expect((await split).postDataJSON()).toEqual({ pane: 'w79:p81', direction: 'right' });
@@ -700,7 +827,8 @@ test('manages workspaces, tabs, splits and shell agents through the roster', asy
   const shell = page.getByRole('region', { name: '탭 · 실험', exact: true }).locator('.herdr-pane-row')
     .filter({ has: page.locator(`a[href="#${paneRoute('w79:p82')}"]`) });
   await shell.getByRole('button', { name: 'zsh 작업' }).click();
-  await page.getByRole('dialog', { name: 'zsh 작업' }).getByRole('button', { name: '에이전트 시작' }).click();
+  await page.getByRole('dialog', { name: 'zsh 작업' }).getByRole('button', { name: '에이전트 옵션…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '에이전트 시작', exact: true })).toBeVisible();
   await page.getByRole('combobox', { name: '에이전트' }).click();
   await expect(page.getByRole('option', { name: /설치 안 됨/ })).toHaveCount(0);
   await page.getByRole('option', { name: 'Pi', exact: true }).click();
@@ -719,6 +847,49 @@ test('manages workspaces, tabs, splits and shell agents through the roster', asy
   expect((await closing).postDataJSON()).toEqual({ target: 'tab', id: 'w79:t81' });
   await expect(page).toHaveURL(/#\/coding$/);
   await expect(page.getByRole('region', { name: '탭 · 실험' })).toHaveCount(0);
+});
+
+test('quick roster actions post immediately with the preferred agent and no options dialog', async ({ page }) => {
+  await openScreen(page, coding, 'light');
+  await spaces(page);
+  async function quick(node: string, label: string, path: string, expected: object, openedPane: string) {
+    const { promise: hold, resolve: release } = Promise.withResolvers<void>();
+    await page.route(`**${path}`, async route => {
+      await hold;
+      await route.fallback();
+    }, { times: 1 });
+    const sent = post(page, path);
+    try {
+      await chooseRosterAction(page, node, label);
+      expect((await sent).postDataJSON()).toEqual({ ...expected, agent: 'claude' });
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+    } finally { release(); }
+    await expect(page).toHaveURL(url => url.hash === `#${paneRoute(openedPane)}`);
+  }
+  await quick('checkout', '오른쪽으로 분할', '/api/herdr/split', { pane: visualCodingIds.running, direction: 'right' }, 'w79:p81');
+  await quick('checkout', '아래로 분할', '/api/herdr/split', { pane: 'w79:p81', direction: 'down' }, 'w79:p82');
+  await quick('app', '새 탭', '/api/herdr/tabs', { workspace: 'w79' }, 'w79:p83');
+  await quick('zsh', '에이전트 시작', '/api/herdr/agents', { pane: visualCodingIds.shell }, visualCodingIds.shell);
+});
+
+test('prefills a new space with the last directory successfully used', async ({ page }) => {
+  await openScreen(page, { ...coding, route: () => '/coding?new=1', waits: () => [] }, 'light');
+  const repo = page.getByRole('textbox', { name: '디렉터리', exact: true });
+  const open = page.getByRole('link', { name: '새 스페이스' });
+  const start = page.getByRole('button', { name: '스페이스 만들기' });
+  await expect(repo).toHaveValue('');
+  await repo.fill('/Projects/last-used');
+  const created = post(page, '/api/herdr/workspaces');
+  await start.click();
+  expect((await created).postDataJSON()).toMatchObject({ cwd: '/Projects/last-used' });
+  await expect(page).toHaveURL(url => url.hash === `#${paneRoute(visualCodingIds.started)}`);
+  await open.click();
+  await expect(repo).toHaveValue('/Projects/last-used');
+  await repo.fill('/missing');
+  await start.click();
+  await expect(page.getByRole('alert')).toHaveText('디렉터리를 찾을 수 없습니다.');
+  await page.reload();
+  await expect(repo).toHaveValue('/Projects/last-used');
 });
 
 test('preloads colour history, applies the original wheel delta, and keeps the anchor as output rolls', async ({ page }) => {
@@ -849,7 +1020,7 @@ test('starts omp with the chosen options, and never reuses approval bypass witho
   await expect(terminal(page)).toContainText('이어서 수정해 주세요.');
   if (hasTouch) await back(page).click();
   await page.getByRole('link', { name: '새 스페이스' }).click();
-  await repo.fill('/Projects/app');
+  await expect(repo).toHaveValue('/Projects/app');
   await choice(page, '에이전트', 'omp');
   await expect(page.locator('.herdr-agent-options')).not.toHaveAttribute('open');
   await expect(page.locator('.herdr-agent-options > summary')).toContainText('승인 없이 실행');
@@ -1291,7 +1462,7 @@ test('merges tool completion by id and preserves scroll and the unsent draft', a
       const items: HerdrChatItem[] = !after ? [...transcript, tool] : update && after === '1024' ? [
         { ...tool, ok: false }, { id: 'latest', kind: 'agent', text: '테스트가 실패했습니다.', at: 160 },
       ] : [];
-      return route.fulfill({ json: { pane: id, source: 'omp', title: null, reset: !after, cursor: update ? '1256' : '1024', items } satisfies HerdrChat });
+      return route.fulfill({ json: { pane: id, source: 'omp', title: null, model: null, reset: !after, cursor: update ? '1256' : '1024', items } satisfies HerdrChat });
     });
   } }, 'light');
   const feed = page.getByRole('region', { name: '에이전트 대화' });
@@ -1314,8 +1485,8 @@ test('merges tool completion by id and preserves scroll and the unsent draft', a
   await draft.fill('고치기 전에 기록을 보여 주세요.');
   await page.getByRole('radio', { name: '터미널', exact: true }).click();
   await expect(terminal(page)).toContainText('3 pass');
-  await expect(draft).toHaveCount(0);
-  await expect(attachments(page)).toHaveCount(0);
+  await expect(draft).toHaveValue('고치기 전에 기록을 보여 주세요.');
+  await expect(attachments(page)).toBeVisible();
   await page.getByRole('radio', { name: '변경', exact: true }).click();
   await expect(page.getByRole('region', { name: '작업 변경' })).toBeVisible();
   await expect(draft).toHaveCount(0);
@@ -1344,7 +1515,7 @@ test('reads a dense run: counted repeats, failures named in the fold, markdown r
         { id: 'dense-x4', kind: 'tool', at: 160_000, name: 'edit', summary: 'src/checkout/payment.test.ts', ok: null },
         { id: 'dense-a1', kind: 'agent', at: 165_000, text: '실패한 케이스를 고쳤습니다.\n\n- `payment.test.ts` 승인 분기\n- 거절 뒤 버튼 다시 활성화\n\n```ts\nawait approve()\n```' },
       ];
-      return route.fulfill({ json: { pane: id, source: 'omp', title: null, items, cursor: '8', reset: !after } satisfies HerdrChat });
+      return route.fulfill({ json: { pane: id, source: 'omp', title: null, model: null, items, cursor: '8', reset: !after } satisfies HerdrChat });
     });
   } }, 'light');
   const feed = page.getByRole('region', { name: '에이전트 대화' });

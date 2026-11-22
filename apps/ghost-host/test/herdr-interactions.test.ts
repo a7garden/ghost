@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { HerdrAsk, HerdrChat, HerdrPaneView, parse, type HerdrOutput } from "@ghost/contract";
+import { HerdrAsk, HerdrChat, HerdrCommands, HerdrPaneView, parse, type HerdrOutput } from "@ghost/contract";
 import { startServer } from "../src/api/server.ts";
 import type { Config } from "../src/config.ts";
 import { Herdr } from "../src/integrations/herdr.ts";
@@ -106,7 +106,7 @@ test("distinguishes durable trust and refusal without guessing from choice order
 
 const row = (value: unknown) => `${JSON.stringify(value)}\n`;
 const omp = (role: string, content: unknown) => row({ type: "message", timestamp: "2026-01-01T00:00:00Z", message: { role, content } });
-const claude = (role: string, content: unknown) => row({ type: role, message: { role, content } });
+const claude = (role: string, content: unknown, model?: string) => row({ type: role, message: { role, content, model } });
 const text = (value: string) => ({ type: "text", text: value });
 const ompFolder = (dir: string) => join(dir, ".omp", "agent", "sessions", "sample");
 
@@ -143,6 +143,39 @@ test("reads omp records at byte offsets and resolves a pending tool by the same 
   } finally { rmSync(dir, { force: true, recursive: true }); }
 });
 
+test("reads the live omp model across a switch and delta pagination", async () => {
+  const dir = tempDir();
+  try {
+    mkdirSync(ompFolder(dir), { recursive: true });
+    const file = join(ompFolder(dir), "models.jsonl");
+    const reader = new HerdrChatReader(dir);
+    const ref = { agent: "omp", kind: "path", value: file };
+    writeFileSync(file, row({ type: "message", message: { role: "assistant", provider: "zai", model: "glm-5.3-flash", content: [text("Ready")] } }));
+    const first = parse(HerdrChat, await reader.read(PANE, ref, null));
+    expect(first.model).toBe("zai/glm-5.3-flash");
+
+    const change = row({ type: "model_change", model: "anthropic/claude-sonnet-5-5" });
+    appendFileSync(file, change.slice(0, -1));
+    expect(await reader.read(PANE, ref, first.cursor)).toMatchObject({ cursor: first.cursor, model: first.model, items: [] });
+    appendFileSync(file, "\n" + row({ type: "model_change", role: "smol", model: "zai/glm-5.3-flash" }));
+    const switched = await reader.read(PANE, ref, first.cursor);
+    expect(switched).toMatchObject({ model: "anthropic/claude-sonnet-5-5", items: [] });
+    expect(await reader.read(PANE, ref, switched.cursor)).toMatchObject({ model: switched.model, items: [] });
+
+    appendFileSync(file, omp("user", "x".repeat(1024 * 1024)) + omp("user", "latest question"));
+    const cold = await new HerdrChatReader(dir).read(PANE, ref, null);
+    expect(cold).toMatchObject({ model: switched.model, items: [{ kind: "user", text: "latest question" }] });
+    appendFileSync(file, row({ type: "model_change", model: "openai/gpt-6.2" }));
+    const past = await reader.read(PANE, ref, switched.cursor);
+    expect(past).toMatchObject({ model: "openai/gpt-6.2", items: [] });
+    expect(Number(past.cursor)).toBeLessThan(Number(cold.cursor));
+
+    renameSync(file, `${file}.old`);
+    writeFileSync(file, omp("user", "new conversation"));
+    expect(await reader.read(PANE, ref, past.cursor)).toMatchObject({ reset: true, model: null });
+  } finally { rmSync(dir, { force: true, recursive: true }); }
+});
+
 test("looks up a Claude session ID, filters metadata and redacts credentials even in visible text", async () => {
   const dir = tempDir();
   try {
@@ -155,16 +188,22 @@ test("looks up a Claude session ID, filters metadata and redacts credentials eve
       claude("assistant", [{ type: "redacted_thinking", data: "reasoning bytes" },
         { type: "tool_use", id: "read", name: "Read", input: { file_path: "/work/readme", content: "body of input" } }]) +
       claude("user", [{ type: "tool_result", tool_use_id: "read", content: "tool output body" }]);
-    const last = claude("assistant", [text("Authorization: Bearer ABCDEFG1234567890\nTOKEN=private-value\nsk-ant-A123456789012345\n완료")]);
+    const last = claude("assistant", [text("Authorization: Bearer ABCDEFG1234567890\nTOKEN=private-value\nsk-ant-A123456789012345\n완료")], "claude-sonnet-4-6");
     writeFileSync(file, first + last);
     const reader = new HerdrChatReader(dir);
     const ref = { agent: "claude", kind: "id", value: "session-id" };
     const chat = await reader.read(PANE, ref, null);
-    expect(chat).toMatchObject({ source: "claude", title: "Claude 작업", cursor: String(Buffer.byteLength(first + last)), items: [
+    expect(chat).toMatchObject({ source: "claude", title: "Claude 작업", model: "claude-sonnet-4-6", cursor: String(Buffer.byteLength(first + last)), items: [
       { kind: "user", text: "작업" }, { kind: "thinking" }, { kind: "tool", name: "Read", summary: "/work/readme", ok: true },
       { kind: "agent", text: "Authorization: Bearer [redacted]\nTOKEN=[redacted]\n[redacted]\n완료" },
     ] });
     expect(JSON.stringify(chat)).not.toMatch(/hidden|reasoning bytes|output body|body of input|private-value/);
+    appendFileSync(file, claude("assistant", [text("Switched")], "claude-opus-4-7") +
+      row({ type: "assistant", isSidechain: true, message: { role: "assistant", model: "claude-haiku-4-5" } }));
+    const switched = await reader.read(PANE, ref, chat.cursor);
+    expect(switched).toMatchObject({ model: "claude-opus-4-7", items: [{ kind: "agent", text: "Switched" }] });
+    expect(await reader.read(PANE, ref, switched.cursor)).toMatchObject({ model: switched.model, items: [] });
+    expect(await new HerdrChatReader(dir).read(PANE, ref, switched.cursor)).toMatchObject({ model: switched.model, items: [] });
   } finally { rmSync(dir, { force: true, recursive: true }); }
 });
 
@@ -245,7 +284,7 @@ test("never reads paths outside an agent's root, symlink escapes, directories or
   } finally { rmSync(dir, { force: true, recursive: true }); }
 });
 
-test("authenticates ask, answer and chat; rejects stale answers without sending and batches the matching keys once", async () => {
+test("authenticates pane reads and answers, uses the pane directory, and batches matching keys once", async () => {
   const dir = tempDir();
   const cli = join(dir, "herdr");
   const log = join(dir, "keys");
@@ -254,9 +293,13 @@ test("authenticates ask, answer and chat; rejects stale answers without sending 
   writeFileSync(file, omp("user", "안녕"));
   writeFileSync(join(dir, "screen"), OMP_APPROVAL);
   writeFileSync(join(dir, "panes"), JSON.stringify({ result: { panes: [{ pane_id: PANE, agent: "omp", agent_session: { agent: "omp", kind: "path", value: file } }] } }));
+  const repo = join(dir, "repo");
+  const repoCommands = join(repo, ".claude", "commands");
+  mkdirSync(repoCommands, { recursive: true });
+  writeFileSync(join(repoCommands, "local.md"), "---\ndescription: A pane-local command\n---\nHidden prompt");
   writeFileSync(cli, `#!/bin/sh
 case "$*" in
-  '--session isolated api snapshot') echo '{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1"}],"tabs":[{"workspace_id":"w1","tab_id":"w1:t1"}],"panes":[{"workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","agent":"omp","agent_status":"blocked"},{"workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p2","agent":"omp","agent_status":"idle"}]}}}' ;;
+  '--session isolated api snapshot') echo '{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1"}],"tabs":[{"workspace_id":"w1","tab_id":"w1:t1"}],"panes":[{"workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","agent":"omp","agent_status":"blocked"},{"workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p2"},{"workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p3","agent":"claude","foreground_cwd":"${repo}","cwd":"${dir}"}]}}}' ;;
   '--session isolated pane read w1:p1 '*) cat '${join(dir, "screen")}' ;;
   '--session isolated pane list --workspace w1') cat '${join(dir, "panes")}' ;;
   '--session isolated pane send-keys '*) shift 4; printf '%s\\n' "$*" >> '${log}'; echo '{}' ;;
@@ -275,12 +318,19 @@ esac
   try {
     expect((await request(`ask?pane=${PANE}`, undefined, "wrong")).status).toBe(401);
     expect((await request(`chat?pane=${PANE}`, undefined, "wrong")).status).toBe(401);
+    expect((await request("commands?pane=w1:p3", undefined, "wrong")).status).toBe(401);
+    expect((await request("commands?pane=invalid")).status).toBe(400);
+    expect((await request("commands?pane=w1:p9")).status).toBe(404);
+    expect(await (await request("commands?pane=w1:p2")).json()).toEqual({ commands: [] });
+    const catalog = parse(HerdrCommands, await (await request("commands?pane=w1:p3&cwd=/ignored&session=ignored")).json());
+    expect(catalog.commands).toContainEqual({ name: "local", description: "A pane-local command", hint: null, source: "custom" });
     expect((await request("answer", { pane: PANE, title: "Allow tool: bash", index: 2 }, "wrong")).status).toBe(401);
     const ask = parse(HerdrAsk, await (await request(`ask?pane=${PANE}`)).json());
     expect(ask.selected).toBe(0);
     expect(await (await request("ask?pane=w1:p2")).json()).toBeNull();
     const chat = parse(HerdrChat, await (await request(`chat?pane=${PANE}&path=/ignore-me`)).json());
     expect(chat.items).toMatchObject([{ kind: "user", text: "안녕" }]);
+    expect(chat.model).toBeNull();
     expect((await request("answer", { pane: PANE, title: "old", index: 2 })).status).toBe(409);
     for (const index of [-1, 3, 100]) expect((await request("answer", { pane: PANE, title: ask.title, index })).status).toBe(409);
     expect((await request("answer", { pane: PANE, title: ask.title, index: 1.5 })).status).toBe(400);

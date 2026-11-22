@@ -74,7 +74,7 @@ class HerdrFixture implements Pick<HerdrPort, "session" | "overview" | "start" |
     return this.run();
   }
   async chat(pane: string, after: string | null): Promise<HerdrChat> {
-    return { pane, source: this.transcriptAvailable ? "omp" : null, title: null, items: this.items.slice(Number(after)), cursor: String(this.items.length), reset: false };
+    return { pane, source: this.transcriptAvailable ? "omp" : null, title: null, model: null, items: this.items.slice(Number(after)), cursor: String(this.items.length), reset: false };
   }
   async ask() { return null; }
   async changes(): Promise<HerdrChanges> {

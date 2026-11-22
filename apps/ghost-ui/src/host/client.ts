@@ -32,6 +32,7 @@ import type {
   HerdrAnswer,
   HerdrAsk,
   HerdrChat,
+  HerdrCommands,
   NextMessageSuggestions,
   OmpInfo,
   ConversationPage,
@@ -276,6 +277,9 @@ export class HostClient {
   }
   conversationSuggestions(conversation: string, signal?: AbortSignal): Promise<NextMessageSuggestions> {
     return this.json(`/api/suggestions?${new URLSearchParams({ conversation })}`, { signal });
+  }
+  herdrCommands(pane: string, signal?: AbortSignal): Promise<HerdrCommands> {
+    return this.json(`/api/herdr/commands?${new URLSearchParams({ pane })}`, { signal });
   }
   herdrDiff(pane: string, path: string, signal?: AbortSignal): Promise<HerdrDiff> {
     return this.json(`/api/herdr/diff?${new URLSearchParams({ pane, path })}`, { signal });
