@@ -23,6 +23,8 @@ import {
   type PageSummary,
   type PageView,
   type CodingAgentsView,
+  type HerdrOutput,
+  type HerdrView,
   type CodingSessionDetail,
   type CodingSessionList,
   type CodingPrefs,
@@ -32,7 +34,7 @@ import {
   parse,
 } from "@ghost/contract";
 import type { Config } from "../config.ts";
-import type { BrowserPort, CodingAgentPort, DocumentsPort, SkillsPort } from "../integrations/ports.ts";
+import type { BrowserPort, CodingAgentPort, DocumentsPort, HerdrPort, SkillsPort } from "../integrations/ports.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
 import { OAuthLogins } from "./oauth.ts";
 import { ConnectionOAuth } from "./connection-oauth.ts";
@@ -110,8 +112,8 @@ type EventPayload =
   | { type: "device"; device: Device }
   | { type: "device.removed"; id: string };
 
-export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; coding?: CodingAgentPort | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null }): { port: number; stop(): Promise<void> } {
-  const { core, config, ownerToken, documents, skills, coding = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
+export function startServer(deps: { core: Core; config: Config; ownerToken: string; documents: DocumentsPort | null; skills: SkillsPort | null; coding?: CodingAgentPort | null; herdr?: HerdrPort | null; vault?: Vault | null; browser?: BrowserPort | null; mail?: MailService | null; updater?: Updater | null; memory?: MemoryStore | null; memoryDreams?: { request(ghostId: string): void } | null }): { port: number; stop(): Promise<void> } {
+  const { core, config, ownerToken, documents, skills, coding = null, herdr = null, vault = null, browser = null, updater = null, memory = null, memoryDreams = null } = deps;
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
@@ -548,6 +550,27 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         const detail = coding.sessions.get(codingSession[1]!, Number.isInteger(after) && after >= 0 ? after : 0);
         if (detail === null) throw notFound(`coding session ${codingSession[1]}`);
         return json(detail satisfies CodingSessionDetail);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+
+    // The coding agents in the owner's herdr sessions, and one pane's terminal text. Read-only: nothing here reaches a terminal.
+    if (pathname === "/api/herdr" && request.method === "GET") {
+      try {
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        return json(await herdr.overview() satisfies HerdrView);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
+    if (pathname === "/api/herdr/output" && request.method === "GET") {
+      try {
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        const session = url.searchParams.get("session") ?? "", pane = url.searchParams.get("pane") ?? "";
+        const output = await herdr.output(session, pane);
+        if (output === null) throw notFound(`herdr pane ${pane}`);
+        return json(output satisfies HerdrOutput);
       } catch (caught) {
         return failure(caught);
       }

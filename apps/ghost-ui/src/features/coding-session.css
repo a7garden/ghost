@@ -26,6 +26,9 @@
   .coding-state[data-state='failed'] { color: var(--ghost-danger-ink); }
   .coding-state[data-state='interrupted'] { color: var(--ghost-amber-ink); }
   .coding-state[data-state='done'] { color: var(--ghost-success-ink); }
+  .coding-state[data-herdr='working'] { color: var(--ghost-signal-ink); }
+  .coding-state[data-herdr='blocked'] { color: var(--ghost-amber-ink); }
+  .coding-state[data-herdr='idle'], .coding-state[data-herdr='done'] { color: var(--ghost-success-ink); }
 
   .coding-pane { display: flex; flex-direction: column; min-height: 0; }
   .coding-pane-status { padding: 24px; color: var(--ghost-ink3); }
@@ -41,6 +44,10 @@
   .coding-context code { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
   .coding-context code svg { width: 13px; height: 13px; flex: none; }
   .coding-directory { display: block; margin-top: 7px; color: var(--ghost-ink3); overflow-wrap: anywhere; font-size: var(--text-caption); }
+  .herdr-screen {
+    flex: 1; min-height: 0; margin: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 24px; outline-offset: -2px;
+    color: var(--ghost-ink2); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-caption); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
   .coding-transcript-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
   .coding-transcript { display: flex; flex-direction: column; align-items: stretch; gap: 16px; max-width: 50rem; margin: 0 auto; padding: 22px 24px; list-style: none; }
   .coding-transcript p { white-space: pre-wrap; margin: 0; overflow-wrap: anywhere; }
@@ -102,6 +109,7 @@
   .coding-page[data-compact] .coding-detail-actions .coding-resume button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .coding-page[data-compact] .coding-detail-actions .coding-resume:has(code) { max-width: 9rem; }
   .coding-page[data-compact] .coding-transcript { padding: 16px; }
+  .coding-page[data-compact] .herdr-screen { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); }
   .coding-page[data-compact] .coding-dock { padding: 8px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   :root[data-keyboard='open'] .coding-page[data-compact] .coding-dock { padding-bottom: 6px; }
   .coding-page[data-compact] .coding-new { padding: 14px 16px max(20px, env(safe-area-inset-bottom)); }

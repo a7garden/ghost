@@ -182,7 +182,7 @@ function Shell() {
   const switchGhost = (id: string) => navigate(`/ghosts/${encodeURIComponent(id)}`);
 
   const selectedScope = section === 'scopes' && path.split('/')[2] ? decodeURIComponent(path.split('/')[2]!) : undefined;
-  const codingDetail = section === 'coding' && (params.get('new') === '1' || params.has('session'));
+  const codingDetail = section === 'coding' && (params.get('new') === '1' || params.has('session') || params.has('herdr'));
   const ownsGeometry = section === 'settings' || section === 'ghosts' || section === 'workspace' || section === 'mail' || section === 'coding';
   const closeCodingForm = (next: string) => {
     // A start can finish after the owner leaves the form, without pulling them back.
@@ -302,7 +302,7 @@ function Shell() {
             {section === 'workspace' && compact && <div className="workspace-page">{sidebar}</div>}
             {section === 'inbox' && <InboxView state={state} navigate={navigate} focusDecisionId={params.get('decision')}/>}
             {section === 'mail' && <MailView navigate={navigate}/>}
-            {section === 'coding' && <CodingPage scopes={state.scopes} sessionId={params.get('session')} creating={params.get('new') === '1'} compact={compact}
+            {section === 'coding' && <CodingPage scopes={state.scopes} sessionId={params.get('session')} herdrPane={params.get('herdr')} creating={params.get('new') === '1'} compact={compact}
               onCancel={() => closeCodingForm('/coding')} onStarted={id => closeCodingForm(codingSessionPath(id))}/>}
             {section === 'goals' && <Goals state={state} navigate={navigate}/>}
             {section === 'work' && (path.split('/')[2]

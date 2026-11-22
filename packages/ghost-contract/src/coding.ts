@@ -88,3 +88,28 @@ export type CodingSessionStart = Static<typeof CodingSessionStart>;
 /** A follow-up the owner sends into a session that is not running: it continues the same agent conversation in the same directory. */
 export const CodingSessionMessage = Type.Object({ text: Type.String({ minLength: 1, maxLength: 24_000 }) });
 export type CodingSessionMessage = Static<typeof CodingSessionMessage>;
+
+/** What herdr reports a pane's agent doing; `unknown` is an agent herdr cannot classify, not one that stopped. */
+export const HerdrStatus = Type.Union([Type.Literal("idle"), Type.Literal("working"), Type.Literal("blocked"), Type.Literal("done"), Type.Literal("unknown")]);
+export type HerdrStatus = Static<typeof HerdrStatus>;
+
+/** One coding agent running in a herdr pane. Pane ids belong to one herdr session, so `session` is part of what names it. */
+export const HerdrPaneView = Type.Object({
+  session: Type.String(),
+  id: Type.String(),
+  workspace: Type.String(),
+  tab: Type.String(),
+  agent: Type.String(),
+  status: HerdrStatus,
+  cwd: nullable(Type.String()),
+  title: Type.String(),
+});
+export type HerdrPaneView = Static<typeof HerdrPaneView>;
+
+/** The agents in every running herdr session; `available` is false when herdr is not installed on the Host's Mac, `note` says why a look failed. */
+export const HerdrView = Type.Object({ available: Type.Boolean(), note: nullable(Type.String()), panes: Type.Array(HerdrPaneView) });
+export type HerdrView = Static<typeof HerdrView>;
+
+/** A pane as it stands with the end of its terminal, as text. Read-only: nothing the owner does here reaches the terminal. */
+export const HerdrOutput = Type.Object({ pane: HerdrPaneView, text: Type.String() });
+export type HerdrOutput = Static<typeof HerdrOutput>;

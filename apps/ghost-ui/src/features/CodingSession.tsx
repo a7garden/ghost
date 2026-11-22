@@ -5,7 +5,8 @@ import { Button, InlineError, SettingsGroup, SettingsRow } from '../ui';
 import { useHost } from '../host/context';
 import { NewCodingSession } from './CodingSessionStart';
 import { OpenCodingSession } from './CodingSessionDetail';
-import { codingAgentName, firstTaskLine, SessionState } from './codingSessionDisplay';
+import { codingAgentName, firstTaskLine, parseHerdrPane, SessionState } from './codingSessionDisplay';
+import { HerdrRoster, OpenHerdrPane, useHerdr } from './Herdr';
 import { absoluteTime, relativeTime, useNow } from './time';
 import './coding-session.css';
 
@@ -13,8 +14,8 @@ export function codingSessionPath(id: string) {
   return `/coding?session=${encodeURIComponent(id)}`;
 }
 
-export function CodingPage({ scopes, sessionId, creating, onStarted, onCancel, compact }: {
-  scopes: Scope[]; sessionId: string | null; creating: boolean; compact: boolean;
+export function CodingPage({ scopes, sessionId, herdrPane, creating, onStarted, onCancel, compact }: {
+  scopes: Scope[]; sessionId: string | null; herdrPane: string | null; creating: boolean; compact: boolean;
   onStarted(id: string): void; onCancel(): void;
 }) {
   const { client } = useHost();
@@ -22,6 +23,8 @@ export function CodingPage({ scopes, sessionId, creating, onStarted, onCancel, c
   const [error, setError] = useState('');
   const [revision, refresh] = useReducer((count: number) => count + 1, 0);
   const now = useNow();
+  const herdr = useHerdr();
+  const openHerdr = herdrPane === null ? null : parseHerdrPane(herdrPane);
   useEffect(() => {
     let live = true, running = false, timer: ReturnType<typeof setTimeout>;
     const load = async () => {
@@ -45,7 +48,7 @@ export function CodingPage({ scopes, sessionId, creating, onStarted, onCancel, c
     { label: '진행 중', rows: sessions?.filter(session => session.state === 'running') },
     { label: '최근 세션', rows: sessions?.filter(session => session.state !== 'running') },
   ];
-  const showDetail = creating || sessionId !== null;
+  const showDetail = creating || sessionId !== null || herdrPane !== null;
   return <div className="coding-page" data-compact={compact || undefined} data-detail={showDetail || undefined}>
     <section className="coding-roster" aria-label="코딩 세션">
       <header className="coding-roster-head">
@@ -68,11 +71,14 @@ export function CodingPage({ scopes, sessionId, creating, onStarted, onCancel, c
             </a></li>;
           })}</ul>
         </section> : null)}
+        <HerdrRoster view={herdr} selected={openHerdr}/>
       </div>
     </section>
     {showDetail ? <div className="coding-pane">
       {creating ? <NewCodingSession scopes={scopes} sessions={sessions ?? []} onCancel={onCancel}
         onStarted={started => { refresh(); onStarted(started.session.id); }}/>
+        : openHerdr ? <OpenHerdrPane key={herdrPane} session={openHerdr.session} pane={openHerdr.pane}/>
+        : herdrPane !== null ? <div className="coding-pane-status"><p role="alert">herdr 패널 주소가 올바르지 않습니다.</p></div>
         : <OpenCodingSession key={sessionId} id={sessionId!} onChanged={refresh}/>}
     </div> : <div className="coding-pane coding-unselected"><p className="coding-hint">세션을 선택하세요.</p></div>}
   </div>;

@@ -1,4 +1,4 @@
-import type { CodingAgentId, CodingSessionDetail, CodingSessionStart, CodingSessionView, CodingStep, Decision, ExecutionTarget, Scope, VaultItem, Work } from "@ghost/contract";
+import type { CodingAgentId, CodingSessionDetail, CodingSessionStart, CodingSessionView, CodingStep, Decision, ExecutionTarget, HerdrOutput, HerdrView, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 
@@ -379,4 +379,12 @@ export interface DesktopPort {
   /** A PNG window image as a JPEG no larger than `maxEdge` pixels on its long side, for model input. */
   image(png: Uint8Array, maxEdge: number): Promise<{ data: string; mimeType: "image/jpeg"; width: number; height: number }>;
   shutdown(): Promise<void>;
+}
+
+/** The coding agents running in the owner's herdr sessions, looked at and never driven. Implemented in src/integrations/herdr.ts. */
+export interface HerdrPort {
+  /** Every agent pane of every running herdr session. */
+  overview(): Promise<HerdrView>;
+  /** One agent pane with the end of its terminal as text; null when that pane is not an agent pane of that session. */
+  output(session: string, pane: string): Promise<HerdrOutput | null>;
 }

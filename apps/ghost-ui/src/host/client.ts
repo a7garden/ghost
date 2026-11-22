@@ -12,6 +12,8 @@ import type {
   ConnectionOAuthClientInput,
   ConnectionOAuthStart,
   CommandResponse,
+  HerdrOutput,
+  HerdrView,
   ConversationPage,
   LedgerEvent,
   LiveEvent,
@@ -233,6 +235,15 @@ export class HostClient {
 
   stopCodingSession(id: string): Promise<CodingSessionDetail> {
     return this.json(`/api/coding-sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+  }
+
+  /** The coding agents running in the owner's herdr sessions. */
+  herdr(): Promise<HerdrView> {
+    return this.json('/api/herdr');
+  }
+  /** One herdr agent pane with the end of its terminal as text. */
+  herdrOutput(session: string, pane: string): Promise<HerdrOutput> {
+    return this.json(`/api/herdr/output?session=${encodeURIComponent(session)}&pane=${encodeURIComponent(pane)}`);
   }
 
   /** The host's own release update state. */

@@ -1,9 +1,11 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { CodingSessionView, CodingStep } from '@ghost/contract';
+import type { CodingSessionView, CodingStep, HerdrPaneView, HerdrView } from '@ghost/contract';
 import { CodingSessionBody } from './CodingSessionDetail';
 import { codingStartInput } from './CodingSessionStart';
+import { HerdrPaneBody, HerdrRoster } from './Herdr';
+import { herdrPanePath, parseHerdrPane } from './codingSessionDisplay';
 
 const session = (patch: Partial<CodingSessionView> = {}): CodingSessionView => ({
   id: 'a'.repeat(32), agent: 'claude', workId: 'w1', callId: 'call-1', task: '로그인 버그 고치기\n세부 설명', cwd: '/Users/garden/Workspace/Projects/wt/app-fix', branch: 'ghost/fix-login',
@@ -100,5 +102,37 @@ describe('new coding session form payload', () => {
     expect(codingStartInput(fields, 'codex')).toEqual({
       agent: 'codex', repo: '/Projects/ghost', task: '첫 줄\n둘째 줄', resume: 'session-123',
     });
+  });
+});
+
+describe('herdr panes', () => {
+  const pane: HerdrPaneView = { session: 'default', id: 'w1:pA', workspace: 'ghost', tab: '로그인 고치기', agent: 'claude', status: 'blocked', cwd: '/work/tree', title: '로그인 고치기' };
+
+  it('names a pane in the address and reads it back, colon and all', () => {
+    expect(herdrPanePath(pane)).toBe('/coding?herdr=default%2Fw1%3ApA');
+    expect(parseHerdrPane(decodeURIComponent('default%2Fw1%3ApA'))).toEqual({ session: 'default', pane: 'w1:pA' });
+    expect(parseHerdrPane('default')).toBeNull();
+    expect(parseHerdrPane('/w1:pA')).toBeNull();
+  });
+
+  it('lists agents under herdr, and shows nothing when herdr is absent or has none to report', () => {
+    const roster = (view: HerdrView | null) => renderToStaticMarkup(createElement(HerdrRoster, { view, selected: { session: 'default', pane: 'w1:pA' } }));
+    const markup = roster({ available: true, note: null, panes: [pane] });
+    expect(markup).toContain('로그인 고치기');
+    expect(markup).toContain('입력 필요');
+    expect(markup).toContain('href="#/coding?herdr=default%2Fw1%3ApA"');
+    expect(markup).toContain('aria-current="page"');
+    expect(roster({ available: false, note: null, panes: [] })).toBe('');
+    expect(roster({ available: true, note: null, panes: [] })).toBe('');
+    expect(roster(null)).toBe('');
+  });
+
+  it('shows the terminal as text, never as markup, with no way to type into it', () => {
+    const markup = renderToStaticMarkup(createElement(HerdrPaneBody, { pane, text: '<b>$ bun test</b>\n3 pass' }));
+    expect(markup).toContain('&lt;b&gt;$ bun test&lt;/b&gt;\n3 pass');
+    expect(markup).not.toContain('<b>$ bun test');
+    expect(markup).not.toContain('<textarea');
+    expect(markup).not.toContain('<input');
+    expect(markup).toContain('/work/tree');
   });
 });

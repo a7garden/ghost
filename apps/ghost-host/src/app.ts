@@ -21,9 +21,10 @@ import { FileSecrets } from "./stores/secrets.ts";
 import { createVault, type Vault } from "./stores/vault.ts";
 import { acquireRootLock } from "./state-lock.ts";
 import { createToolSet } from "./tools/index.ts";
-import type { BrowserPort, CodingAgentPort, DesktopPort, DocumentsPort, SkillsPort, HostPort } from "./integrations/ports.ts";
+import type { BrowserPort, CodingAgentPort, DesktopPort, DocumentsPort, HerdrPort, SkillsPort, HostPort } from "./integrations/ports.ts";
 import { MacHost } from "./integrations/host.ts";
 import { CodingAgents } from "./integrations/coding-agents.ts";
+import { Herdr } from "./integrations/herdr.ts";
 import type { CodingPrefs } from "@ghost/contract";
 import { HostWatch } from "./core/hostwatch.ts";
 import { ProviderCatalog } from "./integrations/provider-catalog.ts";
@@ -43,6 +44,7 @@ export interface App {
   documents: DocumentsPort;
   skills: SkillsPort | null;
   coding: CodingAgentPort | null;
+  herdr: HerdrPort | null;
   host: HostPort | null;
   vault: Vault;
   /** Host-side Chrome; the owner's handoff live view reaches it through the API. */
@@ -171,6 +173,7 @@ export async function openApp(config: Config): Promise<App> {
     const desktop = (openedDesktop = createDesktop(config, { root: config.root }));
     const memory = (openedMemory = new MemoryStore(config.root));
     const coding = config.coding === false || process.platform !== "darwin" ? null : new CodingAgents(join(config.root, "coding-sessions"), { prefs: () => core.ledger.setting<CodingPrefs>("coding", { default: null, disabled: [] }) });
+    const herdr = config.coding === false ? null : new Herdr();
     const tools = createToolSet({ core, sandbox, memory, memoryEngine: () => openedEngine, documents, skills, host, coding, reach: createReach(config), browser, vault, desktop, mail, toss: createToss(), mcp });
     const engine = (openedEngine = await createEngine({ core, storagePath: join(config.root, "pi.db"), tools, sandbox, memory, log }));
     const memoryDreams = (openedDreams = new MemoryDreams({ core, memory, engine, log }));
@@ -183,6 +186,7 @@ export async function openApp(config: Config): Promise<App> {
       documents,
       skills,
       coding,
+      herdr,
       host,
       vault,
       browser,
@@ -245,7 +249,7 @@ export async function serve(config: Config) {
     app.core.catalog.start(catalogChanged);
     app.core.codexCatalog.start(catalogChanged);
     const token = ownerToken(config.root);
-    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, coding: app.coding, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
+    server = startServer({ core: app.core, config, ownerToken: token, documents: app.documents, skills: app.skills, coding: app.coding, herdr: app.herdr, vault: app.vault, browser: app.browser, memory: app.memory, memoryDreams: app.memoryDreams, mail: app.mail, updater });
     push = startPush(app.core, config);
     const hostFile = join(config.root, "host.json");
     writeFileSync(hostFile, `${JSON.stringify({ port: server.port, token, pid: process.pid } satisfies HostFile)}\n`, { mode: 0o600 });
