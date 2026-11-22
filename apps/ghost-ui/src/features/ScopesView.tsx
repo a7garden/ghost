@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { ChevronRight, Folder, FolderPlus, BriefcaseBusiness } from 'lucide-react';
-import { Button, InlineError, Page, PageHeader } from '../ui';
+import { Button, InlineError, Page, PageHeader, Row } from '../ui';
 import type { PageSummary } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -103,8 +103,8 @@ export function ScopesView({ selectedScope, onSelectScope, createRequested, onCr
     </Page>;
   }
   return <Page width="reading"><PageHeader title={routeLabels.scopes} actions={<Button disabled={!state} onClick={() => setCreating(true)}><FolderPlus size={16}/>새 프로젝트</Button>}/>
-    {scopes.length ? <div className="projects">{scopes.map(item => <button type="button" className="project-row" key={item.id} onClick={() => select(item.id)}>
+    {scopes.length ? <div className="projects">{scopes.map(item => <Row key={item.id} onClick={() => select(item.id)}>
       <span className="project-row__glyph" aria-hidden="true"><Folder size={17}/></span><span className="project-row__copy"><span className="project-row__name">{item.name}</span><span className="project-row__path">{item.state === 'paused' ? '멈춤' : '진행'} · {(item.ghostId ? state?.ghosts.find(ghost => ghost.id === item.ghostId) : state?.ghosts.find(ghost => ghost.isDefault))?.name ?? '받을 Ghost 없음'}</span></span><ChevronRight className="project-row__go" aria-hidden="true"/>
-    </button>)}</div> : state && <div className="calm"><FolderPlus size={16}/><p>등록된 프로젝트가 없습니다</p></div>}
+    </Row>)}</div> : state && <div className="calm"><FolderPlus size={16}/><p>등록된 프로젝트가 없습니다</p></div>}
   </Page>;
 }

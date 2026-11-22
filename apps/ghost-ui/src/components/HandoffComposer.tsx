@@ -1,6 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { ChevronDown, Paperclip } from 'lucide-react';
-import { Composer, InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui'
+import { Composer, InlineError, Popover, PopoverContent, PopoverTrigger, Row } from '../ui'
 import type { Ghost } from '@ghost/contract';
 import { DotAvatar } from './DotAvatar';
 import { toneFor, visibleGhosts } from '../features/ghostState';
@@ -153,11 +153,11 @@ function RecipientToken({ ghosts, value, onChange, disabled }: { ghosts: Ghost[]
       {searchable && <input ref={searchRef} type="text" enterKeyHint="search" className="recipient-search" aria-label="Ghost 찾기"
         placeholder="Ghost 찾기" value={query} onChange={event => setQuery(event.target.value)}
         onKeyDown={event => { blurTouchSearchOnEnter(event); if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}/>}
-      {shown.map(ghost => <button key={ghost.id} type="button" aria-pressed={ghost.id === value.id}
-        className="menu-row" onClick={() => { onChange(ghost.id); setOpen(false); }}>
+      {shown.map(ghost => <Row key={ghost.id} size="menu" aria-pressed={ghost.id === value.id}
+        onClick={() => { onChange(ghost.id); setOpen(false); }}>
         <DotAvatar profileId={ghost.id} tone={toneFor(ghost.id)} size={20}/><span className="min-w-0 flex-1 truncate">{ghost.name}</span>
         {ghost.isDefault && <span className="presence-row__main-mark">메인</span>}
-      </button>)}
+      </Row>)}
     </PopoverContent>
   </Popover>;
 }

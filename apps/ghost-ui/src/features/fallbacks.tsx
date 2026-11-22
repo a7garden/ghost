@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronDown, Plus, Search, X } from 'lucide-react';
 import type { ModelRef } from '@ghost/contract';
-import { Button, Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { Button, Popover, PopoverContent, PopoverTrigger, Row } from '../ui';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
 import { usableProviders } from '../pets/ModelPicker';
@@ -116,22 +116,22 @@ export function ModelChoice({ value, onChange, add = false, inherit = true, excl
         <input type="text" enterKeyHint="search" aria-label="모델 검색" placeholder="모델 검색" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={blurTouchSearchOnEnter}/>
       </label>
       <div className="model-menu__list">
-        {!add && inherit && !search && <button type="button" className="menu-row w-full" aria-pressed={!value} onClick={() => pick(null)}>
+        {!add && inherit && !search && <Row size="menu" className="w-full" aria-pressed={!value} onClick={() => pick(null)}>
           <span className="flex-1">기본 모델 따름</span>{!value && <Check size={14} aria-hidden="true"/>}
-        </button>}
+        </Row>}
         {matches.map(provider => <div key={provider.id}>
           <p className="menu-heading">{provider.name}</p>
           {provider.models.map(model => {
             const chosen = value?.provider === provider.id && value.model === model.id;
             const used = excluded.some(ref => ref.provider === provider.id && ref.model === model.id);
-            return <button key={model.id} type="button" className="menu-row w-full" disabled={used} aria-pressed={chosen} onClick={() => pick({ provider: provider.id, model: model.id })}>
+            return <Row key={model.id} size="menu" className="w-full" disabled={used} aria-pressed={chosen} onClick={() => pick({ provider: provider.id, model: model.id })}>
               <span className="model-menu__name">{model.name || model.id}</span>
               {used ? <span className="model-menu__used">이미 사용 중</span> : chosen && <Check size={14} aria-hidden="true"/>}
-            </button>;
+            </Row>;
           })}
         </div>)}
         {!matches.length && <p className="model-menu__empty">{providers.length ? '일치하는 모델이 없습니다.' : '연결된 모델이 없습니다.'}</p>}
-        {!providers.length && <a className="menu-row" href="#/settings?tab=models">모델 설정</a>}
+        {!providers.length && <Row size="menu" asChild><a href="#/settings?tab=models">모델 설정</a></Row>}
       </div>
     </PopoverContent>
   </Popover>;

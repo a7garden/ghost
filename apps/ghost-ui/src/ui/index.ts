@@ -1,5 +1,6 @@
 // App-owned controls and compositions; retained-source notices are in ./LICENSE.
 export { Button } from './button';
+export { Row } from './row';
 export { Badge } from './badge';
 export { Checkbox } from './checkbox';
 export { Input } from './input';

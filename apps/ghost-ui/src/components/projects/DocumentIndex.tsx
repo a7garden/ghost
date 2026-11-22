@@ -1,5 +1,5 @@
 import { Search, X } from 'lucide-react';
-import { Button, InlineError } from '../../ui';
+import { Button, InlineError, Row } from '../../ui';
 import { isEditableProfile } from '../../features/scopePages';
 import type { PageSummary } from '@ghost/contract';
 
@@ -40,12 +40,12 @@ export function DocumentIndex({ pages, total, search, onSearch, loading, error, 
       {pages.map(item => {
         const legacy = !isEditableProfile(item.profile);
         return <li key={item.pageId}>
-          <button type="button" className="doc__row" aria-haspopup="dialog"
+          <Row className="doc__row" aria-haspopup="dialog"
             aria-label={`${item.title}, ${item.profile}${legacy ? ', 읽기 전용' : ''}`}
             onClick={() => onOpen(item.pageId)}>
             <span className="doc__title">{item.title}</span>
             <span className="doc__profile" data-legacy={legacy || undefined}>{item.profile}</span>
-          </button>
+          </Row>
         </li>;
       })}
     </ol>}

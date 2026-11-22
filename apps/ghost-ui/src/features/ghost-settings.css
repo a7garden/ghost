@@ -118,7 +118,7 @@ button.ghost-sheet__portrait:focus-visible { outline: 2px solid var(--ghost-ink3
 .model-menu__list { max-height: min(50dvh, 360px); overflow-y: auto; }
 .model-menu__name { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .model-menu__used { flex: none; color: var(--ghost-ink3); font-size: var(--text-micro); }
-.model-menu .menu-row:disabled { opacity: .5; cursor: not-allowed; }
+.model-menu .ghost-row:disabled { opacity: .5; cursor: not-allowed; }
 .model-menu__empty { margin: 0; padding: 16px 10px; color: var(--ghost-ink3); font-size: var(--text-ui); }
 .ghost-settings-page :is(button, a):focus-visible, .model-menu :is(button, a):focus-visible { outline: 2px solid var(--ghost-ink2); outline-offset: 2px; }
 @container ghost-settings-group (max-width: 440px) {

@@ -7,7 +7,7 @@ import { InlineText } from '../components/MessageBody';
 import { GhostRunLabel, LiveReply, Transcript, endsInGhostRun } from '../components/TranscriptMessage';
 import { useHost } from '../host/context';
 import { HostError } from '../host/client';
-import { InlineError } from '../ui';
+import { InlineError, Row } from '../ui';
 import { DecisionCard } from './Decision';
 import { useConversationFeed } from './conversationFeed';
 import { liveWork, toneFor } from './ghostState';
@@ -105,11 +105,11 @@ export function ThreadPanel({ workId, state, closing = false, onClosed, onClose,
       {pending.map(decision => <DecisionCard key={decision.id} decision={decision} ghostName={names.get(decision.ghostId) ?? 'Ghost'} workTitle={work.title} onResolved={() => undefined}/>)}
       {children.length > 0 && <section className="thread-panel__section">
         <h3 className="section-title">위임한 스레드</h3>
-        {children.map(child => <button key={child.id} type="button" className="menu-row w-full" onClick={() => onOpenThread(child.id)}>
+        {children.map(child => <Row key={child.id} size="menu" className="w-full" onClick={() => onOpenThread(child.id)}>
           <StateGlyph state={workGlyph(child.state, waiting.has(child.id))} size={15}/>
           <span className="min-w-0 flex-1 truncate">{child.title}</span>
           <DotAvatar profileId={child.ghostId} tone={toneFor(child.ghostId)} size={16}/>
-        </button>)}
+        </Row>)}
       </section>}
       <section className="thread-panel__section">
         <h3 className="section-title">작업 대화</h3>

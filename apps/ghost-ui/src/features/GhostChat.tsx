@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, CircleAlert, GitBranch, Monitor, X } from 'lucide-react';
-import { Button, Conversation, Popover, PopoverContent, PopoverTrigger } from '../ui'
+import { Button, Conversation, Popover, PopoverContent, PopoverTrigger, Row } from '../ui'
 import { TERMINAL_WORK_STATES, type Conversation as ConversationRow, type Ghost, type Message, type State, type Work } from '@ghost/contract';
 import { GhostProfile } from '../components/GhostProfile';
 import { projectGhostActivity } from '../components/AgentStatus';
@@ -246,11 +246,11 @@ function Threads({ ghost, state, conversations, currentId, waiting, now, onOpenW
   const settled = mine.filter(work => TERMINAL_WORK_STATES.includes(work.state)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
   const earlier = conversations.filter(conversation => conversation.id !== ghost.directConversationId);
   const go = (fn: () => void) => () => { setOpen(false); fn(); };
-  const row = (work: Work) => <button key={work.id} type="button" className="menu-row w-full" onClick={go(() => onOpenWork(work.id))}>
+  const row = (work: Work) => <Row key={work.id} size="menu" className="w-full" onClick={go(() => onOpenWork(work.id))}>
     <StateGlyph state={workGlyph(work.state, waiting.has(work.id))} size={15}/>
     <span className="min-w-0 flex-1 truncate">{work.title}</span>
     <time className="shrink-0 text-micro text-ink-3 tabular">{relativeTime(work.updatedAt, now)}</time>
-  </button>;
+  </Row>;
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
       <button type="button" className="chat-threads" data-live={live.length > 0 || undefined} aria-label={`스레드${live.length ? `, 진행 중 ${live.length}` : ''}`} title="스레드">
@@ -267,13 +267,13 @@ function Threads({ ghost, state, conversations, currentId, waiting, now, onOpenW
         {earlier.length > 0 && <>
           <p className="menu-heading">이전 대화</p>
           {[conversations.find(conversation => conversation.id === ghost.directConversationId), ...earlier].filter((item): item is ConversationRow => Boolean(item)).map(conversation =>
-            <button key={conversation.id} type="button" aria-pressed={conversation.id === currentId} className="menu-row w-full" onClick={go(() => onOpenConversation(conversation.id))}>
+            <Row key={conversation.id} size="menu" aria-pressed={conversation.id === currentId} className="w-full" onClick={go(() => onOpenConversation(conversation.id))}>
               <span className="min-w-0 flex-1 truncate">{conversationName(conversation, ghost)}</span>
               <time className="shrink-0 text-micro text-ink-3 tabular">{relativeTime(conversation.lastActivityAt, now)}</time>
-            </button>)}
+            </Row>)}
         </>}
       </div>
-      <button type="button" className="menu-row mt-1 border-t border-line pt-1" onClick={go(onOpenAll)}>{uiTerms.work} 전체<ArrowRight size={13} className="ml-auto" aria-hidden="true"/></button>
+      <Row size="menu" className="mt-1 border-t border-line pt-1" onClick={go(onOpenAll)}>{uiTerms.work} 전체<ArrowRight size={13} className="ml-auto" aria-hidden="true"/></Row>
     </PopoverContent>
   </Popover>;
 }

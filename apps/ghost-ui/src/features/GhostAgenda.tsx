@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, Clock3, Moon, Pause, Play } from 'lucide-react';
 import type { Ghost, State } from '@ghost/contract';
-import { InlineError, Popover, PopoverContent, PopoverTrigger } from '../ui';
+import { InlineError, Popover, PopoverContent, PopoverTrigger, Row } from '../ui';
 import { useHost } from '../host/context';
 import { specLabel } from './Schedules';
 import { uiTerms } from '../uiText';
@@ -79,8 +79,8 @@ export function GhostAgenda({ ghost, state, navigate }: { ghost: Ghost; state: S
         {!items.length && <p className="m-0 px-2 py-3 text-caption text-ink-3">{plan && !plan.enabled ? '예약 없음 · 말을 걸 때만 움직입니다' : '예약 없음'}</p>}
       </div>
       <div className="mt-1 grid border-t border-line pt-1">
-        <button type="button" className="menu-row" onClick={go('/settings?tab=schedules')}>{uiTerms.schedules}<ArrowRight size={13} className="ml-auto" aria-hidden="true"/></button>
-        <button type="button" className="menu-row" onClick={go('/settings?tab=activities')}>{uiTerms.activities}<ArrowRight size={13} className="ml-auto" aria-hidden="true"/></button>
+        <Row size="menu" onClick={go('/settings?tab=schedules')}>{uiTerms.schedules}<ArrowRight size={13} className="ml-auto" aria-hidden="true"/></Row>
+        <Row size="menu" onClick={go('/settings?tab=activities')}>{uiTerms.activities}<ArrowRight size={13} className="ml-auto" aria-hidden="true"/></Row>
       </div>
     </PopoverContent>
   </Popover>;
