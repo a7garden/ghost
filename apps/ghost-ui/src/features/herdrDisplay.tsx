@@ -1,13 +1,15 @@
 import type { KeyboardEvent } from 'react';
-import { Check, Circle, CircleAlert, LoaderCircle, Square } from 'lucide-react';
+import { StateGlyph, type GlyphState } from '../components/agent/StateGlyph';
 import type { HerdrPaneView } from '@ghost/contract';
 
 const herdrLabel: Record<HerdrPaneView['status'], string> = { idle: '대기', working: '작업 중', blocked: '입력 필요', done: '완료', unknown: '알 수 없음' };
-const herdrIcon = { idle: Circle, working: LoaderCircle, blocked: CircleAlert, done: Check, unknown: Square };
+const glyphs: Record<HerdrPaneView['status'], GlyphState> = { idle: 'queued', working: 'running', blocked: 'attention', done: 'done', unknown: 'queued' };
 
-export function HerdrState({ status }: { status: HerdrPaneView['status'] }) {
-  const Icon = herdrIcon[status];
-  return <span className="coding-state" data-herdr={status}><Icon aria-hidden="true"/>{herdrLabel[status]}</span>;
+export function HerdrState({ status, size = 14, label = true, unread = false }: {
+  status: HerdrPaneView['status']; size?: number; label?: boolean; unread?: boolean;
+}) {
+  return <StateGlyph size={size} state={glyphs[status]} mark={unread ? 'dot' : 'ring'}
+    label={label} accessibleLabel={unread ? '읽지 않은 완료' : herdrLabel[status]} className="coding-state"/>;
 }
 
 export const herdrPanePath = (pane: string) => `/coding?herdr=${encodeURIComponent(pane)}`;

@@ -1,4 +1,4 @@
-import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrAgentStart, HerdrChanges, HerdrClose, HerdrDiff, HerdrFrame, HerdrInput, HerdrOutput, HerdrPaneView, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, Scope, VaultItem, Work } from "@ghost/contract";
+import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrAgentStart, HerdrAnswer, HerdrAsk, HerdrChanges, HerdrChat, HerdrClose, HerdrDiff, HerdrFrame, HerdrInput, HerdrOutput, HerdrPaneView, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, Scope, VaultItem, Work } from "@ghost/contract";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
 
@@ -327,6 +327,9 @@ export interface HerdrPort {
   overview(): Promise<HerdrView>;
   /** The end of a pane's terminal as text; with colours and a longer history for the history view. */
   output(pane: string, options?: { ansi?: boolean; lines?: number }): Promise<HerdrOutput>;
+  ask(pane: string): Promise<HerdrAsk | null>;
+  answer(input: HerdrAnswer): Promise<HerdrPaneView>;
+  chat(pane: string, after: string | null): Promise<HerdrChat>;
   /** What the agent in a pane changed, read from git in its directory. */
   changes(pane: string): Promise<HerdrChanges>;
   diff(pane: string, path: string): Promise<HerdrDiff>;

@@ -90,6 +90,9 @@ Keychain을 건드리지 않고 그 호스트로 셸을 연다. 격리된 개발
 기기를 페어링해 그 값으로 실행한다. `ShellUITests`는
 `TEST_RUNNER_GHOST_SHELL_ORIGIN|DEVICE|TOKEN`이 없으면 건너뛴다. 첨부 화면은
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path /tmp/ghost-shots/ios`로 내보낸다.
+`--shell-loading`은 호스트 없이 첫 로딩 화면만 열고, `--mark-at <초>`는 살아 있는 마크를 그 순간에
+멈춘다(런치 이미지와 첫 프레임 비교는 `--mark-at 0`). 런치 화면 자체는 `xcrun simctl launch
+--wait-for-debugger`로 앱을 멈춰 두고 찍는다.
 
 앱 아이콘 원본은 `apps/ghost-desktop/src-tauri/brand-source/Ghost-round-ios.svg`다.
 1024px 불투명 PNG로 렌더링해 `App/Assets.xcassets/AppIcon.appiconset/Ghost-1024.png`에 넣는다.

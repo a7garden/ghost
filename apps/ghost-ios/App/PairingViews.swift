@@ -70,7 +70,7 @@ struct PairingFlowView: View {
 
     private var hero: some View {
         VStack(spacing: 20) {
-            GhostMark(size: 72)
+            GhostAwake(size: 72, arc: false)
             Text("내 Ghost와 연결")
                 .font(.system(.largeTitle, design: .rounded, weight: .semibold)).tracking(-0.6)
                 .multilineTextAlignment(.center)
@@ -162,7 +162,7 @@ private struct ConnectingState: View {
     let origin: URL?
     var body: some View {
         VStack(spacing: 14) {
-            GhostWorking(size: 52)
+            GhostAwake(size: 52)
             Text("연결하는 중").font(.headline)
             if let host = origin?.host() {
                 Text(host).font(.footnote.monospaced()).foregroundStyle(GhostStyle.secondary)

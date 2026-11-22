@@ -4,14 +4,17 @@ import { useHost } from '../host/context';
 import { HostError } from '../host/client';
 import { Button, InlineError } from '../ui';
 import { openHerdrXterm } from './herdrXterm';
+import { CodingSkeleton } from './HerdrInbox';
 
-export default function HerdrHistory({ pane, onGone }: { pane: string; onGone(): void }) {
+export default function HerdrHistory({ pane, onGone, fontSize }: { pane: string; onGone(): void; fontSize: number }) {
   const { client } = useHost();
   const mount = useRef<HTMLDivElement>(null);
   const scrollport = useRef<HTMLDivElement>(null);
   const spacer = useRef<HTMLDivElement>(null);
   const jumpToBottom = useRef<() => void>(null);
   const gone = useEffectEvent(onGone);
+  const initialSize = useEffectEvent(() => fontSize);
+  const resizeFont = useRef<(size: number) => void>(null);
   const [loading, setLoading] = useState(true);
   const [scrolled, setScrolled] = useState(false);
   const [error, setError] = useState('');
@@ -20,7 +23,7 @@ export default function HerdrHistory({ pane, onGone }: { pane: string; onGone():
     const node = mount.current!;
     const viewport = scrollport.current!;
     const space = spacer.current!;
-    const { terminal, fit, dispose } = openHerdrXterm(node, { disableStdin: true, convertEol: true, scrollback: 10_000, cursorInactiveStyle: 'none' });
+    const { terminal, fit, dispose } = openHerdrXterm(node, { disableStdin: true, convertEol: true, scrollback: 10_000, cursorInactiveStyle: 'none', fontSize: initialSize() });
     terminal.textarea?.setAttribute('aria-label', '터미널 기록 (읽기 전용)');
     const screen = node.querySelector<HTMLElement>('.xterm-screen')!;
     const request = new AbortController();
@@ -73,6 +76,12 @@ export default function HerdrHistory({ pane, onGone }: { pane: string; onGone():
       fit.fit();
       rowHeight = screen.getBoundingClientRect().height / terminal.rows;
       setScrollPosition(follow ? terminal.buffer.active.baseY : terminal.buffer.active.viewportY);
+    };
+    resizeFont.current = size => {
+      if (terminal.options.fontSize !== size) {
+        terminal.options.fontSize = size;
+        resize();
+      }
     };
     const geometry = new ResizeObserver(resize);
     geometry.observe(node);
@@ -144,15 +153,17 @@ export default function HerdrHistory({ pane, onGone }: { pane: string; onGone():
       scroll.dispose();
       dispose();
       jumpToBottom.current = null;
+      resizeFont.current = null;
     };
   }, [client, pane]);
+  useEffect(() => resizeFont.current?.(fontSize), [fontSize]);
 
   return <section className="herdr-live herdr-history" aria-label="터미널 기록">
     <div className="herdr-history-scroll" ref={scrollport} tabIndex={0} aria-label="기록 스크롤">
       <div className="herdr-xterm" ref={mount}/>
       <div aria-hidden="true" ref={spacer}/>
     </div>
-    {loading && <div className="herdr-live-status" role="status">기록을 불러오는 중…</div>}
+    {loading && <div className="herdr-terminal-skeleton"><CodingSkeleton detail/></div>}
     {error && <InlineError className="herdr-history-error">{error}</InlineError>}
     {scrolled && <Button className="herdr-history-bottom" type="button" size="sm" variant="outline" onClick={() => jumpToBottom.current?.()}>
       <ArrowDown aria-hidden="true"/>맨 아래로

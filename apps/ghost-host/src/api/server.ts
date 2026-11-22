@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import { basename, extname, join, resolve, sep } from "node:path";
+import { Type } from "typebox";
 import {
   ArtifactRef,
   CommandRequest,
@@ -33,6 +34,7 @@ import {
   type HerdrView,
   CodingStart,
   HerdrAgentStart,
+  HerdrAnswer,
   HerdrClose,
   HerdrInput,
   HerdrIntegrationInstall,
@@ -76,6 +78,8 @@ const HTTP_STATUS: Record<ErrorCode, number> = { invalid: 400, forbidden: 403, n
 const DIGEST = /^[0-9a-f]{64}$/;
 const AFTER = /^\d+$/;
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+// An integer outside the live menu is a conflict, not a malformed answer.
+const HerdrAnswerPayload = Type.Object({ ...HerdrAnswer.properties, index: Type.Integer() });
 const MEDIA_TYPE = /^[!#$%&'*+.^_`|~0-9a-z-]+\/[!#$%&'*+.^_`|~0-9a-z-]+(?:\s*;\s*[!#$%&'*+.^_`|~0-9a-z-]+=(?:[!#$%&'*+.^_`|~0-9a-z-]+|"[^"\\\r\n]*"))*$/i;
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -572,6 +576,15 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         return failure(caught);
       }
     }
+    if ((pathname === "/api/herdr/ask" || pathname === "/api/herdr/chat") && request.method === "GET") {
+      try {
+        if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
+        const pane = url.searchParams.get("pane") ?? "";
+        return json(pathname === "/api/herdr/ask" ? await herdr.ask(pane) : await herdr.chat(pane, url.searchParams.get("after")));
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
     if (pathname === "/api/herdr/changes" && request.method === "GET") {
       try {
         if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
@@ -674,6 +687,8 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
             const prompt = parse(HerdrPrompt, body);
             return json((await herdr.prompt(prompt.pane, prompt.text)).pane satisfies HerdrPaneView);
           }
+          case "/api/herdr/answer":
+            return json(await herdr.answer(parse(HerdrAnswerPayload, body)) satisfies HerdrPaneView);
           case "/api/herdr/input":
             await herdr.input(parse(HerdrInput, body));
             return json({ ok: true });

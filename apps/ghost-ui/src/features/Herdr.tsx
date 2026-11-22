@@ -1,19 +1,22 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
 import type { HerdrPaneView, HerdrUpload, HerdrView } from '@ghost/contract';
-import { Button, InlineError, SegmentedControl } from '../ui';
 import { useHost } from '../host/context';
 import { HostError } from '../host/client';
-import { HerdrState } from './herdrDisplay';
+import { haptic } from '../host/shell';
+import { Button, InlineError } from '../ui';
 import { HerdrInputQueue } from './herdrTerminalProtocol';
 import { HerdrComposer, useHerdrDraft } from './HerdrComposer';
 import { HerdrChangesView, usePaneChanges } from './HerdrChanges';
-import { extendedTerminalKeys, modifiedTerminalKey, noModifiers, shellCommand, type TerminalModifiers } from './herdrMobileInput';
+import { modifiedTerminalKey, noModifiers, shellCommand, type TerminalModifiers } from './herdrMobileInput';
+import { HerdrAskCard, type HerdrAsks } from './HerdrAsk';
+import { HerdrConversation, useHerdrChat } from './HerdrChat';
+import { CodingSkeleton } from './HerdrInbox';
+import { readCodingValue, writeCodingValue } from './herdrInboxModel';
+import { HerdrPaneHeader, herdrModes, type HerdrMode, type PaneNavigation } from './HerdrPaneHeader';
+import { readTerminalSize, TerminalKeyRail } from './HerdrTerminalControls';
 
 const LiveTerminal = lazy(() => import('./HerdrTerminal'));
 const HistoryTerminal = lazy(() => import('./HerdrHistory'));
-const terminalModes = [{ value: 'live', label: '터미널' }, { value: 'history', label: '기록' }] as const;
-const allModes = [...terminalModes, { value: 'changes', label: '변경' }] as const;
-type Mode = typeof allModes[number]['value'];
 
 export function useHerdr(revision: number) {
   const { client } = useHost();
@@ -46,84 +49,65 @@ export function useHerdr(revision: number) {
   return { view, error };
 }
 
-const toolbarKeys = [
-  { key: 'esc', label: 'Esc' }, { key: 'tab', label: 'Tab' },
-  { key: 'up', label: '↑', name: '위쪽 화살표' }, { key: 'down', label: '↓', name: '아래쪽 화살표' },
-  { key: 'left', label: '←', name: '왼쪽 화살표' }, { key: 'right', label: '→', name: '오른쪽 화살표' },
-  { key: 'enter', label: 'Enter' }, { key: 'ctrl+c', label: 'Ctrl+C' },
-] as const;
-
-export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes, pending = false, error, onPrompt, onKey,
-  onText, modifiers = noModifiers, onModifier, onModifiedKey = () => false, onUpload }: {
-  pane: HerdrPaneView; screen: ReactNode; mode: Mode; onMode(mode: Mode): void; compact: boolean; changes?: boolean;
-  pending?: boolean; error?: string; onPrompt(text: string): Promise<boolean>; onKey(key: string): void;
+export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = false, chat = false, pending = false, error,
+  onPrompt, onKey, onText, modifiers = noModifiers, onModifier, onModifiedKey = () => false, onUpload, fontSize = 13, onFontSize,
+  branch, navigation, asks, draftKey }: {
+  pane: HerdrPaneView; screen: ReactNode; mode: HerdrMode; onMode(mode: HerdrMode): void; compact: boolean;
+  changes?: boolean; chat?: boolean; pending?: boolean; error?: string;
+  onPrompt(text: string): Promise<boolean>; onKey(key: string): void;
   onText?(text: string): void; modifiers?: TerminalModifiers; onModifier?(key: keyof TerminalModifiers): void;
   onModifiedKey?(text: string): boolean; onUpload?(file: File): Promise<HerdrUpload>;
+  fontSize?: number; onFontSize?(size: number): void; branch?: string | null; navigation?: PaneNavigation;
+  asks?: HerdrAsks; draftKey?: string;
 }) {
-  const draft = useHerdrDraft(onUpload);
+  const draft = useHerdrDraft(draftKey, onUpload);
   const field = useRef<HTMLTextAreaElement>(null);
   const root = useRef<HTMLElement>(null);
   const blocked = Boolean(pane.agent && pane.status === 'blocked');
   const working = Boolean(pane.agent && pane.status === 'working');
   const keysVisible = mode === 'live' && (compact || blocked);
   const uploadEnabled = mode !== 'changes' && !pending && !blocked && !working;
+  const approval = blocked ? asks?.entries[pane.id] : undefined;
   const focusComposer = useEffectEvent(() => {
     if (pane.agent && !compact && mode !== 'changes' && !field.current?.disabled) field.current?.focus({ preventScroll: true });
   });
   useEffect(() => { focusComposer(); }, [pane.id, pane.agent]);
-  return <section ref={root} className="coding-detail" aria-label={pane.title}
+  return <section ref={root} className="coding-detail" aria-label={pane.title} data-pane-mode={mode}
     onPasteCapture={event => draft.paste(event, uploadEnabled)} onDragOver={draft.drag}
     onDrop={event => draft.drop(event, uploadEnabled)}>
-    <header className="coding-detail-head">
-      <div className="coding-detail-top">
-        <div className="coding-detail-title">
-          <h2>{pane.title}</h2>
-          <div className="coding-context">{pane.agent && <HerdrState status={pane.status}/>}<span>{pane.agent ?? '셸'}</span><span>{pane.workspace}</span></div>
-        </div>
-        <div className="herdr-view-actions">
-          <SegmentedControl aria-label="터미널 보기" value={mode} options={changes ? allModes : terminalModes} onValueChange={onMode}/>
-          {pane.agent && mode !== 'changes' && !keysVisible &&
-            <Button type="button" variant="outline" size="sm" aria-label="중단 (Esc)" onClick={() => onKey('esc')}>Esc</Button>}
-        </div>
-      </div>
-      {pane.cwd && <code className="coding-directory" aria-label={`작업 디렉터리 ${pane.cwd}`}>{pane.cwd}</code>}
-    </header>
-    {screen}
+    <HerdrPaneHeader pane={pane} mode={mode} onMode={onMode} chat={chat} changes={changes} compact={compact} branch={branch}
+      navigation={navigation} fontSize={fontSize} onFontSize={size => onFontSize?.(size)}
+      onEsc={pane.agent && !keysVisible && (mode === 'live' || mode === 'history' || (mode === 'chat' && working)) ? () => onKey('esc') : undefined}/>
+    <div className="herdr-pane-content" key={mode}>{screen}</div>
     {(error || mode !== 'changes') && <div className="coding-dock" aria-busy={pending || undefined}>
       {error && <InlineError>{error}</InlineError>}
-      {keysVisible && <div className="herdr-keypad" onPointerDown={event => {
-        const active = document.activeElement;
-        if (active === field.current || active?.classList.contains('xterm-helper-textarea')) event.preventDefault();
-      }}>
-        <div className="herdr-keys" role="group" aria-label="터미널 키">
-          {toolbarKeys.map(item => <Button key={item.key} type="button" variant="outline" size="sm"
-            aria-label={'name' in item ? item.name : item.key === 'esc' ? '중단 (Esc)' : undefined}
-            onClick={() => onKey(item.key)}>{item.label}</Button>)}
-        </div>
-        <div className="herdr-keys-extended" role="group" aria-label="보조 터미널 키">
-          {(['ctrl', 'alt'] as const).map(key => <Button key={key} type="button" variant="outline" size="sm" aria-pressed={modifiers[key]}
-            onClick={() => {
-              onModifier?.(key);
-              if (!document.activeElement?.classList.contains('xterm-helper-textarea')) {
-                const next = field.current && !field.current.disabled ? field.current : root.current?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
-                next?.focus({ preventScroll: true });
-              }
-            }}>{key === 'ctrl' ? 'Ctrl' : 'Alt'}</Button>)}
-          {extendedTerminalKeys.map(key => <Button key={key.name} type="button" variant="outline" size="sm"
-            aria-label={key.name} onClick={() => onText?.(key.text)}>{key.label}</Button>)}
-        </div>
+      {mode === 'chat' && blocked && <div className="herdr-chat-ask">
+        {approval ? <HerdrAskCard entry={approval} answer={index => void asks?.answer(pane.id, index)}/>
+          : <Button type="button" variant="outline" onClick={() => onMode('live')}>터미널 열기</Button>}
       </div>}
-      {mode !== 'changes' && <HerdrComposer shell={!pane.agent} blocked={blocked} working={working} pending={pending}
+      {keysVisible && <TerminalKeyRail compact={compact} modifiers={modifiers} onKey={onKey} onText={text => onText?.(text)} onModifier={key => {
+        onModifier?.(key);
+        if (!document.activeElement?.classList.contains('xterm-helper-textarea')) {
+          const next = field.current && !field.current.disabled ? field.current : root.current?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
+          next?.focus({ preventScroll: true });
+        }
+      }} onDismiss={() => {
+        if (document.activeElement instanceof HTMLElement && root.current?.contains(document.activeElement)) document.activeElement.blur();
+      }}/>}
+      {mode !== 'changes' && <HerdrComposer shell={!pane.agent} blocked={blocked} working={working} pending={pending} compact={compact}
         draft={draft} field={field} onSubmit={onPrompt} onModifiedKey={onModifiedKey} canUpload={Boolean(onUpload)}/>}
     </div>}
   </section>;
 }
 
-export function OpenHerdrPane({ pane, compact, onChanged, onGone }: {
+export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey, since, branch, navigation, asks }: {
   pane: HerdrPaneView; compact: boolean; onChanged(): void; onGone(): void;
+  preferencesKey: string; since: number; branch?: string | null; navigation: PaneNavigation; asks: HerdrAsks;
 }) {
   const { client } = useHost();
-  const [mode, setMode] = useState<Mode>('live');
+  const [mode, setMode] = useState(() => herdrModes.find(item => item === readCodingValue(`mode:${preferencesKey}`)));
+  const [fontSize, setFontSize] = useState<number>(readTerminalSize);
+  const select = (value: HerdrMode) => { setMode(value); writeCodingValue(`mode:${preferencesKey}`, value); };
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const [reply, setReply] = useState<{ snapshot: HerdrPaneView; pane: HerdrPaneView } | null>(null);
@@ -132,6 +116,12 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone }: {
   const modifierRef = useRef(noModifiers);
   const [modifiers, setModifiers] = useState(noModifiers);
   const displayed = reply?.snapshot === pane ? reply.pane : pane;
+  const previous = useRef(displayed.status);
+  useEffect(() => {
+    if (displayed.status === 'done' && (previous.current === 'working' || previous.current === 'blocked') && !document.hidden) haptic();
+    previous.current = displayed.status;
+  }, [displayed.status]);
+  const { chat, error: chatError } = useHerdrChat(displayed, mode === undefined || mode === 'chat');
   const { changes, error: changesError, refresh: refreshChanges, revision: changesRevision } = usePaneChanges(displayed);
   const changed = useEffectEvent((input: { text?: string; keys?: string[] }) => {
     if (input.keys || /[\r\x03\x1b]/.test(input.text ?? '') || (pane.status === 'blocked' && /^[yn123]$/i.test(input.text ?? ''))) onChanged();
@@ -196,15 +186,20 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone }: {
     return true;
   }
   const changesVisible = changes?.git === true || Boolean(changesError);
-  const activeMode = mode === 'changes' && !changesVisible ? 'live' : mode;
-  return <HerdrPaneBody pane={displayed} compact={compact} mode={activeMode} onMode={setMode} pending={pending} error={error}
+  const chatVisible = Boolean(chat.source);
+  const requested = mode ?? (chatVisible ? 'chat' : 'live');
+  const activeMode = (requested === 'changes' && !changesVisible) || (requested === 'chat' && !chatVisible) ? 'live' : requested;
+  const checkingChat = Boolean(pane.agent) && (mode === undefined || mode === 'chat') && chat.source === undefined && !chatError;
+  return <HerdrPaneBody pane={displayed} compact={compact} mode={activeMode} onMode={select} pending={pending} error={error}
     onPrompt={prompt} onKey={key => { setError(''); queue.current?.key(key); }} onText={sendText}
     onModifiedKey={modifiedKey} modifiers={modifiers} onModifier={key => setSticky({ ...modifierRef.current, [key]: !modifierRef.current[key] })}
-    onUpload={file => client.herdrUpload(file)} changes={changesVisible}
-    screen={activeMode === 'changes' ? <HerdrChangesView pane={displayed} compact={compact} data={changes} error={changesError}
-      onRefresh={refreshChanges} revision={changesRevision}/>
-      : <Suspense fallback={<p className="coding-pane-status" role="status">{activeMode === 'history' ? '기록을 불러오는 중…' : '터미널을 불러오는 중…'}</p>}>
-        {activeMode === 'history' ? <HistoryTerminal pane={id} onGone={onGone}/>
-          : <LiveTerminal pane={id} onData={sendText} onModifiedKey={modifiedKey} onGone={onGone}/>}
+    onUpload={file => client.herdrUpload(file)} changes={changesVisible} chat={chatVisible} fontSize={fontSize} onFontSize={setFontSize}
+    branch={changes?.branch ?? branch} navigation={navigation} asks={asks} draftKey={`draft:${preferencesKey}`}
+    screen={activeMode === 'chat' ? <HerdrConversation items={chat.items} busy={displayed.status === 'working'} since={since} error={chatError}/>
+      : activeMode === 'changes' ? <HerdrChangesView pane={displayed} compact={compact} data={changes} error={changesError}
+        onRefresh={refreshChanges} revision={changesRevision}/>
+      : checkingChat ? <CodingSkeleton detail/> : <Suspense fallback={<CodingSkeleton detail/>}>
+        {activeMode === 'history' ? <HistoryTerminal pane={id} onGone={onGone} fontSize={fontSize}/>
+          : <LiveTerminal pane={id} onData={sendText} onModifiedKey={modifiedKey} onGone={onGone} fontSize={fontSize}/>}
       </Suspense>}/>;
 }

@@ -30,6 +30,7 @@
 .state-glyph[data-tone="danger"] { color: var(--ghost-danger); }
 .state-glyph[data-tone="success"] { color: var(--ghost-success); }
 .state-glyph__spin { animation: ghost-spin 1s linear infinite; }
+@keyframes ghost-state-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .58; } }
 .state-glyph__label { color: var(--ghost-ink2); font-size: var(--text-caption); font-weight: 500; }
 .state-glyph[data-tone="amber"] .state-glyph__label { color: var(--ghost-amber-ink); }
 .state-glyph[data-tone="danger"] .state-glyph__label { color: var(--ghost-danger-ink); }
@@ -156,8 +157,12 @@ button.ref-mark { cursor: pointer; }
 .file-chip:focus-visible { outline: 2px solid var(--ghost-ink3); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .presence[data-presence="working"] .presence__ring { animation: none; background: conic-gradient(var(--ghost-signal) 0 70%, transparent 70%); }
-  .state-glyph__spin, .lifecycle__bar[data-moving]::after, .island__count > i { animation: none; }
+  .presence[data-presence="working"] .presence__ring {
+    background: conic-gradient(var(--ghost-signal) 0 70%, transparent 70%);
+    animation: ghost-state-pulse 1.8s ease-in-out infinite;
+  }
+  .state-glyph__spin { animation: ghost-state-pulse 1.45s ease-in-out infinite; }
+  .lifecycle__bar[data-moving]::after, .island__count > i { animation: none; }
 }
 @media (forced-colors: active) {
   .presence__ring, .presence__notch { forced-color-adjust: none; background: Highlight !important; }

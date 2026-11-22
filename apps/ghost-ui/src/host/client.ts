@@ -25,6 +25,9 @@ import type {
   HerdrChanges,
   HerdrDiff,
   HerdrUpload,
+  HerdrAnswer,
+  HerdrAsk,
+  HerdrChat,
   OmpInfo,
   ConversationPage,
   LedgerEvent,
@@ -240,6 +243,17 @@ export class HostClient {
   }
   herdrChanges(pane: string, signal?: AbortSignal): Promise<HerdrChanges> {
     return this.json(`/api/herdr/changes?${new URLSearchParams({ pane })}`, { signal });
+  }
+  herdrAsk(pane: string, signal?: AbortSignal): Promise<HerdrAsk | null> {
+    return this.json(`/api/herdr/ask?${new URLSearchParams({ pane })}`, { signal });
+  }
+  answerHerdr(input: HerdrAnswer): Promise<HerdrPaneView> {
+    return this.postHerdr('answer', input);
+  }
+  herdrChat(pane: string, after: string, signal?: AbortSignal): Promise<HerdrChat> {
+    const query = new URLSearchParams({ pane });
+    if (after) query.set('after', after);
+    return this.json(`/api/herdr/chat?${query}`, { signal });
   }
   herdrDiff(pane: string, path: string, signal?: AbortSignal): Promise<HerdrDiff> {
     return this.json(`/api/herdr/diff?${new URLSearchParams({ pane, path })}`, { signal });

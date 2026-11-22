@@ -91,7 +91,7 @@ describe('herdr pane', () => {
     const markup = body('idle', false, true, null);
     const keys = markup.match(/aria-label="터미널 키">(.*?)<\/div>/)?.[1] ?? '';
     for (const label of ['Esc', 'Tab', '↑', '↓', '←', '→', 'Enter', 'Ctrl+C']) expect(keys).toContain(`>${label}</button>`);
-    expect(markup).toContain('aria-label="보조 터미널 키"');
+    expect(markup).toContain('aria-label="키보드 닫기"');
     expect(markup).toContain('aria-label="Shift+Tab"');
     expect(markup).toContain('aria-label="셸 명령"');
     expect(markup).not.toContain('후속 지시');

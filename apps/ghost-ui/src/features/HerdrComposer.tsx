@@ -1,11 +1,13 @@
-import { useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type RefObject } from 'react';
 import { ArrowUp, Paperclip } from 'lucide-react';
 import type { HerdrUpload } from '@ghost/contract';
 import { Button, InlineError, Textarea } from '../ui';
 import { submitCodingOnShortcut } from './herdrDisplay';
+import { readCodingValue, writeCodingValue } from './herdrInboxModel';
 
-export function useHerdrDraft(upload?: (file: File) => Promise<HerdrUpload>) {
-  const [draft, setDraft] = useState('');
+export function useHerdrDraft(key: string | undefined, upload?: (file: File) => Promise<HerdrUpload>) {
+  const [draft, setDraft] = useState(() => key ? readCodingValue(key) ?? '' : '');
+  useEffect(() => { if (key) writeCodingValue(key, draft); }, [key, draft]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const active = useRef(false);
@@ -48,8 +50,8 @@ export function useHerdrDraft(upload?: (file: File) => Promise<HerdrUpload>) {
   return { draft, setDraft, attach, paste, drag, drop, uploading, uploadError };
 }
 
-export function HerdrComposer({ shell, blocked, working, pending, draft, field, onSubmit, onModifiedKey, canUpload }: {
-  shell: boolean; blocked: boolean; working: boolean; pending: boolean;
+export function HerdrComposer({ shell, blocked, working, pending, compact, draft, field, onSubmit, onModifiedKey, canUpload }: {
+  shell: boolean; blocked: boolean; working: boolean; pending: boolean; compact: boolean;
   draft: ReturnType<typeof useHerdrDraft>; field: RefObject<HTMLTextAreaElement | null>;
   onSubmit(text: string): Promise<boolean>; onModifiedKey(text: string): boolean; canUpload: boolean;
 }) {
@@ -83,14 +85,18 @@ export function HerdrComposer({ shell, blocked, working, pending, draft, field, 
           <Paperclip aria-hidden="true"/>
         </Button>
       </>}
-      <Textarea ref={field} aria-label={label} placeholder={blocked ? '승인에 먼저 답하세요' : working ? '에이전트가 작업 중입니다' : label}
+      <Textarea ref={field} aria-label={label} placeholder={label}
+        className="min-h-11 bg-transparent shadow-none focus:shadow-none"
         rows={1} maxLength={24_000} value={draft.draft} disabled={disabled} onChange={change} autoCorrect="off" spellCheck={false}
-        aria-keyshortcuts="Meta+Enter Control+Enter" onKeyDown={event => {
+        aria-keyshortcuts={compact ? undefined : 'Enter'} onKeyDown={event => {
           if (!event.nativeEvent.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && onModifiedKey(event.key)) {
             event.preventDefault();
             return;
           }
-          submitCodingOnShortcut(event);
+          if (!compact && event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            event.currentTarget.form?.requestSubmit();
+          } else submitCodingOnShortcut(event);
         }}/>
       <Button type="submit" size="icon" aria-label="보내기" disabled={disabled || draft.uploading || !draft.draft.trim()}><ArrowUp aria-hidden="true"/></Button>
     </form>

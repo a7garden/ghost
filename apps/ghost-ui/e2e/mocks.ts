@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import type { CodingPrefs, CodingSetup, Decision, HerdrAgentStart, HerdrChanges, HerdrClose, HerdrDiff, HerdrFrame, HerdrInput, HerdrIntegrationInstall, HerdrOutput, HerdrPaneView, HerdrPrompt, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrUpload, HerdrView, HerdrWorkspaceCreate, HerdrWorkspaceView, OmpInfo, VaultItem } from '@ghost/contract';
+import type { HerdrAnswer, HerdrAsk, HerdrChat, HerdrChatItem } from '@ghost/contract';
 import { readRunState } from './run-state';
 
 /** The synthetic decision ids the decision-surface screens focus. */
@@ -136,7 +137,7 @@ export function fulfillHerdrFrame(route: Route, text: string, { end = false }: {
 }
 
 /** Coding requests use a page-local herdr session; other API calls go to the seeded Host. */
-export async function mockCodingApi(page: Page, { stopped = false }: { stopped?: boolean } = {}): Promise<void> {
+export async function mockCodingApi(page: Page, { stopped = false, rich = false }: { stopped?: boolean; rich?: boolean } = {}): Promise<void> {
   const server = { version: '1.4.0', compatible: true, restartNeeded: false };
   const setup: CodingSetup = {
     herdr: { path: '/Users/garden/.local/bin/herdr', version: '1.4.0' },
@@ -207,6 +208,37 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
       text: 'app % git status --short\n M src/checkout/payment.ts\n?? src/checkout/payment.test.ts\n\napp %',
     },
   ] satisfies HerdrOutput[]) entries.set(output.pane.id, output);
+  const now = readRunState().fixedNow;
+  const initialChats = new Map<string, HerdrChatItem[]>([
+    [visualCodingIds.running, [
+      { id: 'run-u1', kind: 'user', at: now - 140_000, text: '카드 결제 화면에 승인·거절 테스트를 추가해 주세요.' },
+      { id: 'run-t1', kind: 'thinking', at: now - 135_000 },
+      { id: 'run-t2', kind: 'tool', at: now - 128_000, name: 'grep', summary: '결제 테스트와 모의 응답 찾기', ok: true },
+      { id: 'run-a1', kind: 'agent', at: now - 118_000, text: '기존 결제 테스트에서 카드사의 **승인·거절 응답**을 찾았습니다. 거절 뒤에 결제 버튼이 다시 활성화되는지도 확인하겠습니다.' },
+      { id: 'run-t3', kind: 'tool', at: now - 104_000, name: 'edit', summary: 'src/checkout/payment.test.ts', ok: null },
+    ]],
+    [visualCodingIds.finished, [
+      { id: 'done-note', kind: 'note', at: now - 560_000, text: 'fix/login-message' },
+      { id: 'done-u1', kind: 'user', at: now - 520_000, text: '로그인 실패 시 안내 문구를 고쳐 주세요.' },
+      { id: 'done-t1', kind: 'thinking', at: now - 515_000 },
+      { id: 'done-t2', kind: 'tool', at: now - 456_000, name: 'edit', summary: 'src/auth/login.ts', ok: true },
+      { id: 'done-t3', kind: 'tool', at: now - 389_000, name: 'bash', summary: 'bun test src/auth/login.test.ts', ok: true },
+      { id: 'done-a1', kind: 'agent', at: now - 325_000, text: '오류 문구가 비어 있으면 **기본 안내 문구**를 표시하도록 바꿨습니다.\n\n- 안내: “로그인할 수 없습니다. 다시 시도해 주세요.”\n- 테스트 3개 통과' },
+    ]],
+    [visualCodingIds.blocked, [
+      { id: 'ask-u1', kind: 'user', at: now - 60_000, text: '설정 화면에서 키보드로 탭을 이동할 수 있는지 확인해 주세요.' },
+      { id: 'ask-t1', kind: 'tool', at: now - 32_000, name: 'read', summary: 'src/ui/settings.test.tsx', ok: true },
+      { id: 'ask-a1', kind: 'agent', at: now - 22_000, text: '**탭 순서와 초점 표시**를 검증하는 테스트가 있습니다. 기존 테스트를 실행해 확인하겠습니다.' },
+    ]],
+  ]);
+  const question: HerdrAsk = {
+    pane: visualCodingIds.blocked, kind: 'approval', title: '설정 테스트를 실행할까요?', detail: 'bun test src/ui/settings.test.tsx',
+    choices: [
+      { index: 0, label: '이번만 실행', tone: 'approve' },
+      { index: 1, label: '이 세션에서 항상 허용', tone: 'trust' },
+      { index: 2, label: '실행하지 않기', tone: 'deny' },
+    ], selected: 0,
+  };
   const spaces = new Map<string, Pick<HerdrWorkspaceView, 'label' | 'worktree'>>([
     ['w79', { label: 'app', worktree: null }],
     ['w80', { label: 'ghost', worktree: { path: '/Projects/wt/ghost-settings', branch: 'fix/settings-navigation' } }],
@@ -273,6 +305,27 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
   });
 
   await page.route('**/api/herdr', route => fulfillJson(route, 200, overview()));
+  await page.route('**/api/herdr/ask?*', route => {
+    const pane = new URL(route.request().url()).searchParams.get('pane') ?? '';
+    return fulfillJson(route, 200, rich && pane === question.pane && entries.get(pane)?.pane.status === 'blocked' ? question : null);
+  });
+  await page.route('**/api/herdr/answer', route => {
+    const { pane, index, title } = route.request().postDataJSON() as HerdrAnswer;
+    const entry = entries.get(pane);
+    if (!rich || entry?.pane.status !== 'blocked' || pane !== question.pane || title !== question.title || !question.choices[index]) {
+      return error(route, 409, '질문이 바뀌었습니다.');
+    }
+    entry.pane.status = index === 2 ? 'idle' : 'working';
+    return fulfillJson(route, 200, entry.pane);
+  });
+  await page.route('**/api/herdr/chat?*', route => {
+    const query = new URL(route.request().url()).searchParams;
+    const pane = query.get('pane') ?? '';
+    const items = rich ? initialChats.get(pane) : undefined;
+    const after = Number(query.get('after') ?? 0);
+    const source = items ? pane === visualCodingIds.finished ? 'omp' : 'claude' : null;
+    return fulfillJson(route, 200, { pane, source, items: items?.slice(after) ?? [], title: null, cursor: String(items?.length ?? 0), reset: !after } satisfies HerdrChat);
+  });
   await page.route('**/api/herdr/terminal?*', route => {
     const id = new URL(route.request().url()).searchParams.get('pane');
     const entry = id ? entries.get(id) : undefined;
@@ -361,6 +414,8 @@ export async function mockCodingApi(page: Page, { stopped = false }: { stopped?:
     if (entry.pane.status === 'blocked') return error(route, 409, '승인에 먼저 답하세요.');
     entry.text += `\n❯ ${text}\n\n● 실패 응답도 확인하겠습니다.`;
     entry.pane.status = 'working';
+    const list = initialChats.get(pane);
+    if (list) list.push({ id: `prompt-${list.length}`, kind: 'user', at: now, text });
     return fulfillJson(route, 200, entry.pane);
   });
   await page.route('**/api/herdr/input', route => {

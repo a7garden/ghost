@@ -19,6 +19,11 @@ enum MobileUIFixture {
     /// `--shell-route /inbox` opens the page at that hash route (screenshots of one screen).
     static var shellRoute: String? { enabled ? value("--shell-route") : nil }
 
+    /// `--shell-loading` shows the first-load view alone, without a Host; `--mark-at 0.4` holds every living mark at
+    /// that many seconds (screenshots of one moment of the motion).
+    static var shellLoading: Bool { enabled && arguments.contains("--shell-loading") }
+    static var markAt: TimeInterval? { enabled ? value("--mark-at").flatMap { TimeInterval($0) } : nil }
+
     private static func value(_ name: String) -> String? {
         guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]

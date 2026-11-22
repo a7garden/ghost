@@ -291,3 +291,51 @@ export type HerdrDiff = Static<typeof HerdrDiff>;
 /** A file the owner sent from the app (a screenshot from the phone): where it was saved on the Mac, for an agent to read by path (`@path`). */
 export const HerdrUpload = Type.Object({ path: Type.String(), name: Type.String(), size: Type.Integer() });
 export type HerdrUpload = Static<typeof HerdrUpload>;
+
+/** What an option does, read from its words: approve runs it once, trust keeps allowing it, deny refuses; neutral is anything else. */
+export const HerdrChoiceTone = Type.Union([Type.Literal("approve"), Type.Literal("trust"), Type.Literal("deny"), Type.Literal("neutral")]);
+export type HerdrChoiceTone = Static<typeof HerdrChoiceTone>;
+
+/** A single-choice menu an agent is waiting on (a tool approval, a question), read from its screen. The phone answers with one tap. */
+export const HerdrAsk = Type.Object({
+  pane: Type.String(),
+  kind: Type.Union([Type.Literal("approval"), Type.Literal("question")]),
+  /** The agent's own question, as on its screen. */
+  title: Type.String(),
+  /** What it wants to run or change (a command, a path), when the screen shows one. */
+  detail: nullable(Type.String()),
+  /** Options in screen order. `index` is the position, 0-based. */
+  choices: Type.Array(Type.Object({ index: Type.Integer(), label: Type.String(), tone: HerdrChoiceTone })),
+  /** The option the agent's cursor is on now. */
+  selected: Type.Integer(),
+});
+export type HerdrAsk = Static<typeof HerdrAsk>;
+
+/** Answer an ask: `title` must still match the screen, so a tap on a stale card does nothing. */
+export const HerdrAnswer = Type.Object({ pane: Type.String(), index: Type.Integer({ minimum: 0, maximum: 20 }), title: Type.String() });
+export type HerdrAnswer = Static<typeof HerdrAnswer>;
+
+/** One entry of an agent's own conversation record (not its screen). Tool calls and thinking stay one-liners; the phone folds them. */
+export const HerdrChatItem = Type.Union([
+  Type.Object({ id: Type.String(), kind: Type.Literal("user"), at: nullable(Type.Integer()), text: Type.String() }),
+  Type.Object({ id: Type.String(), kind: Type.Literal("agent"), at: nullable(Type.Integer()), text: Type.String() }),
+  Type.Object({ id: Type.String(), kind: Type.Literal("tool"), at: nullable(Type.Integer()), name: Type.String(), summary: Type.String(), ok: nullable(Type.Boolean()) }),
+  Type.Object({ id: Type.String(), kind: Type.Literal("thinking"), at: nullable(Type.Integer()) }),
+  Type.Object({ id: Type.String(), kind: Type.Literal("note"), at: nullable(Type.Integer()), text: Type.String() }),
+]);
+export type HerdrChatItem = Static<typeof HerdrChatItem>;
+
+/**
+ * The agent's conversation record for a pane, read on the Mac from the file herdr says the pane's session writes
+ * (`agent_session`). `source` is null when the pane has no readable record (a shell, an unknown agent); the phone then stays on the
+ * terminal. `after` continues from `cursor`; `reset` means the record changed under the cursor and `items` replace everything.
+ */
+export const HerdrChat = Type.Object({
+  pane: Type.String(),
+  source: nullable(Type.Union([Type.Literal("omp"), Type.Literal("claude")])),
+  title: nullable(Type.String()),
+  items: Type.Array(HerdrChatItem),
+  cursor: Type.String(),
+  reset: Type.Boolean(),
+});
+export type HerdrChat = Static<typeof HerdrChat>;

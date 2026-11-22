@@ -797,6 +797,9 @@ async function codingFixture(options: { installed?: ("omp" | "claude" | "codex")
     session: "default",
     overview: async () => ({ available: true, session: "default", note: null, workspaces: [] }),
     output: async () => ({ pane: pane("w1:p1"), text: "changed b.txt; checked nothing" }),
+    ask: unused,
+    answer: unused,
+    chat: unused,
     setup: async () => ({
       herdr: { path: "/bin/herdr", version: "0.9.5" }, config: { ok: true, note: null }, session: "default", sessions: [{ name: "default", running: options.server !== false }],
       server: options.server === false ? null : { version: "0.9.5", compatible: true, restartNeeded: false },

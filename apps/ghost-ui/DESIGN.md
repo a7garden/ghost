@@ -152,6 +152,9 @@ Feature-level compositions:
   opening it shows each call's output on a thread. Live tools tick in at the end; the
   composer edge carries a travelling signal while the Ghost responds: a comet on the edge,
   a soft glow behind it and a faint steady ring.
+- **Coding inbox**: blocked agents come first, then active work and unread completions.
+  The same inline approval sits above the pane composer. Chats group a run's tool
+  steps into one disclosure; the space tree and terminal remain alternate views.
 - **Collaboration**: a `delegate` result reads as a 위임 event line (Ghost · title), and a
   child's report as 위임 결과. Thread cards list every Ghost working under the thread with
   its live state; a waiting Work reads 응답 대기, whether it waits on delegated Work, a question
@@ -186,8 +189,9 @@ Feature-level compositions:
 
 Motion stays short and purposeful: pages rise in, list rows cascade once, the owner's
 message and a starting reply rise in (a finished reply replaces its live article without a
-second entrance), disclosures unfold, cards lift on hover and press in on click. Reduced
-motion stops all of it.
+second entrance), disclosures unfold, cards lift on hover and press in on click.
+Reduce Motion stops decorative movement; working arcs and presence rings keep
+signaling through a gentle opacity pulse instead of rotation.
 
 ## Conversation — 2026-11-07
 

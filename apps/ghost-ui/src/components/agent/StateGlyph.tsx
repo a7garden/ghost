@@ -24,11 +24,13 @@ export const glyphTone = (state: GlyphState) => state === 'attention' || state =
  * hollow ring queued, spinning arc running, pause bars waiting, half disc verifying,
  * exclamation needs the owner, check done, cross failed, slash cancelled.
  */
-export function StateGlyph({ state, size = 16, label, className = '' }: { state: GlyphState; size?: number; label?: boolean; className?: string }) {
+export function StateGlyph({ state, size = 16, label, className = '', mark, accessibleLabel }: {
+  state: GlyphState; size?: number; label?: boolean; className?: string; mark?: 'ring' | 'dot'; accessibleLabel?: string;
+}) {
   const tone = glyphTone(state);
   return <span className={`state-glyph ${className}`} data-tone={tone} data-state={state}>
     <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" className={state === 'running' ? 'state-glyph__spin' : undefined}>
-      {state === 'queued' && <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2.2 2.1"/>}
+      {state === 'queued' && <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray={mark === 'ring' ? undefined : '2.2 2.1'}/>}
       {state === 'running' && <>
         <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeOpacity=".22" strokeWidth="1.75"/>
         <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"/>
@@ -47,8 +49,9 @@ export function StateGlyph({ state, size = 16, label, className = '' }: { state:
         <circle cx="8" cy="11" r="1" fill="var(--ghost-canvas)"/>
       </>}
       {state === 'done' && <>
-        <circle cx="8" cy="8" r="6.5" fill="currentColor"/>
-        <path d="m5.3 8.2 1.8 1.8 3.6-3.8" fill="none" stroke="var(--ghost-canvas)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+        <circle className="state-glyph__disc" cx="8" cy="8" r={mark === 'dot' ? 4 : 6.5} fill="currentColor"/>
+        {mark !== 'dot' && <path className="state-glyph__check" d="m5.3 8.2 1.8 1.8 3.6-3.8" fill="none" stroke="var(--ghost-canvas)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>}
+        {mark === 'ring' && <circle className="state-glyph__closing" cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeDasharray="29 12" opacity="0"/>}
       </>}
       {state === 'failed' && <>
         <circle cx="8" cy="8" r="6.5" fill="currentColor"/>
@@ -59,6 +62,6 @@ export function StateGlyph({ state, size = 16, label, className = '' }: { state:
         <path d="m4.4 11.6 7.2-7.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
       </>}
     </svg>
-    {label ? <span className="state-glyph__label">{glyphLabel[state]}</span> : <span className="sr-only">{glyphLabel[state]}</span>}
+    {label ? <span className="state-glyph__label">{accessibleLabel ?? glyphLabel[state]}</span> : <span className="sr-only">{accessibleLabel ?? glyphLabel[state]}</span>}
   </span>;
 }

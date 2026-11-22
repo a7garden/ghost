@@ -22,13 +22,22 @@ live in `apps/ghost-ui`; this app owns only what a web page cannot.
   `notification.open` page event; the web UI routes it exactly as its inbox does.
 - **The moments the page cannot draw.** Launch, first load and an unreachable Host
   (retry, or forget the connection). Launch and first load are one picture: the face from
-  the app icon (a disc with two bar eyes and a small mouth, cut in the canvas colour) alone
-  in the middle of the whole screen, no words. The launch screen is the canvas colour and
-  `LaunchMark` (declared as `UILaunchScreen` in `App/Info.plist`, light and dark); the first-load
-  view draws the same mark at the same size and place, so the mark never moves and only gains
-  the icon's blue working arc, which fades in and travels once around it every 1.6 s (Reduce
-  Motion keeps it still). `LaunchMark` is rendered by `scripts/render-launch-mark.swift`; run
-  it again when `GhostMark`'s proportions or the canvas and ink tokens change.
+  the app icon alone in the middle of the whole screen, no words. The disc has a soft
+  top-to-bottom gradient and a faint sheen (and in the dark a hairline of light on its top
+  edge), the eyes are near-white, and a halo of the signal blue glows behind it;
+  the icon's working arc rests where the icon draws it, its tail fading. The launch screen is
+  the canvas colour and `LaunchMark` (declared as `UILaunchScreen` in `App/Info.plist`, light
+  and dark), which shows the icon's slit eyes. The first-load view (`GhostAwake`) starts on
+  exactly that picture at the same size and place, then wakes: after 0.15 s the eyes spring
+  open, the disc and halo lift a little and settle, the arc gathers speed into a turn every
+  1.6 s, the halo breathes and the eyes blink now and then. When the page says it is ready the
+  mark swells, softens and fades as the page fades in just behind it. Reduce Motion turns and
+  scales nothing: the eyes simply open, the arc stays in place and pulses in opacity with the
+  halo, and the mark only fades out. The pairing screen shows the same mark awake and breathing
+  without the arc, connecting adds the arc, and an unreachable Host shows it asleep (slit eyes,
+  no halo). Everything is drawn by `App/GhostMarkArt.swift`, which
+  `scripts/render-launch-mark.swift` also compiles to render `LaunchMark`; run it again
+  whenever that file or `GhostMark.launchSize` changes.
 
 ## Shell rules
 

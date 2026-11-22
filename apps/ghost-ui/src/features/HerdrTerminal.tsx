@@ -3,21 +3,25 @@ import { useHost } from '../host/context';
 import { HostError } from '../host/client';
 import { decodeHerdrFrame } from './herdrTerminalProtocol';
 import { openHerdrXterm } from './herdrXterm';
+import { CodingSkeleton } from './HerdrInbox';
 
-export default function HerdrTerminal({ pane, onData, onModifiedKey, onGone }: {
-  pane: string; onData(data: string): void; onModifiedKey(key: string): boolean; onGone(): void;
+export default function HerdrTerminal({ pane, onData, onModifiedKey, onGone, fontSize }: {
+  pane: string; onData(data: string): void; onModifiedKey(key: string): boolean; onGone(): void; fontSize: number;
 }) {
   const { client } = useHost();
   const mount = useRef<HTMLDivElement>(null);
   const data = useEffectEvent(onData);
   const modifiedKey = useEffectEvent(onModifiedKey);
   const gone = useEffectEvent(onGone);
-  const [status, setStatus] = useState('터미널을 불러오는 중…');
+  const initialSize = useEffectEvent(() => fontSize);
+  const resizeFont = useRef<(size: number) => void>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [status, setStatus] = useState('');
   const [networkNote, setNetworkNote] = useState('');
 
   useEffect(() => {
     const node = mount.current!;
-    const { terminal, fit, dispose } = openHerdrXterm(node, { scrollback: 0 });
+    const { terminal, fit, dispose } = openHerdrXterm(node, { scrollback: 0, fontSize: initialSize() });
     // Keep Ghost's global shortcuts out of the terminal. Shift+Esc exits terminal focus without sending input.
     terminal.textarea?.setAttribute('aria-keyshortcuts', 'Shift+Escape');
     terminal.textarea?.setAttribute('title', 'Shift+Esc: 터미널에서 포커스 나가기');
@@ -68,6 +72,7 @@ export default function HerdrTerminal({ pane, onData, onModifiedKey, onGone }: {
             sequence = frame.seq;
             if (!painted) {
               painted = seen = true;
+              setLoaded(true);
               lost = false;
               backoff = 600;
               clearTimeout(quietTimer);
@@ -108,6 +113,12 @@ export default function HerdrTerminal({ pane, onData, onModifiedKey, onGone }: {
       terminal.resize(cols, rows);
       connect();
     }
+    resizeFont.current = size => {
+      if (terminal.options.fontSize !== size) {
+        terminal.options.fontSize = size;
+        resize();
+      }
+    };
     const geometry = new ResizeObserver(() => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(resize, 250);
@@ -124,6 +135,7 @@ export default function HerdrTerminal({ pane, onData, onModifiedKey, onGone }: {
       clearTimeout(retryTimer);
       clearTimeout(quietTimer);
       geometry.disconnect();
+      resizeFont.current = null;
       node.removeEventListener('keydown', keys);
       node.removeEventListener('beforeinput', softKey, true);
       node.removeEventListener('click', focus);
@@ -131,9 +143,11 @@ export default function HerdrTerminal({ pane, onData, onModifiedKey, onGone }: {
       dispose();
     };
   }, [client, pane]);
+  useEffect(() => resizeFont.current?.(fontSize), [fontSize]);
 
   return <div className="herdr-live">
     <div className="herdr-xterm" ref={mount}/>
+    {!loaded && !status && <div className="herdr-terminal-skeleton"><CodingSkeleton detail/></div>}
     {status && <div className="herdr-live-status" role="status">{status}{networkNote && <span>{networkNote}</span>}</div>}
   </div>;
 }

@@ -2,8 +2,10 @@ import { accessSync, constants, existsSync, realpathSync, statSync } from "node:
 import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import { Type } from "typebox";
-import { HERDR_AGENT_KINDS, validate, type CodingAgentId, type CodingPrefs, type CodingSetup, type CodingStart, type HerdrAgentKind, type HerdrAgentStart, type HerdrChangedFile, type HerdrChanges, type HerdrClose, type HerdrDiff, type HerdrFrame, type HerdrInput, type HerdrIntegration, type HerdrOutput, type HerdrPaneView, type HerdrRename, type HerdrSplit, type HerdrTabCreate, type HerdrView, type HerdrWorkspaceCreate, type HerdrWorkspaceView } from "@ghost/contract";
+import { HERDR_AGENT_KINDS, validate, type CodingAgentId, type CodingPrefs, type CodingSetup, type CodingStart, type HerdrAgentKind, type HerdrAgentStart, type HerdrAnswer, type HerdrAsk, type HerdrChangedFile, type HerdrChanges, type HerdrChat, type HerdrClose, type HerdrDiff, type HerdrFrame, type HerdrInput, type HerdrIntegration, type HerdrOutput, type HerdrPaneView, type HerdrRename, type HerdrSplit, type HerdrTabCreate, type HerdrView, type HerdrWorkspaceCreate, type HerdrWorkspaceView } from "@ghost/contract";
 import { CommandError, conflict, invalid, notFound } from "../core/errors.ts";
+import { detectHerdrAsk } from "./herdr-ask.ts";
+import { HerdrChatReader } from "./herdr-chat.ts";
 import type { HerdrPort, HerdrRun, HerdrWait } from "./ports.ts";
 
 /** Only the fields the Host reads of herdr's `api snapshot`; everything else in it is ignored. */
@@ -49,6 +51,15 @@ const Created = Type.Object({
 });
 /** What `pane split` answers with. */
 const Split = Type.Object({ result: Type.Object({ pane: Type.Object({ pane_id: Type.String() }) }) });
+const PaneSessions = Type.Object({
+  result: Type.Object({ panes: Type.Array(Type.Object({
+    pane_id: Type.String(),
+    agent: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    agent_session: Type.Optional(Type.Union([Type.Null(), Type.Object({
+      agent: Type.String(), kind: Type.String(), value: Type.String(),
+    })])),
+  })) }),
+});
 /** What `terminal session observe` says when the pane it shows is gone. */
 const Closed = Type.Object({ type: Type.Literal("terminal.closed") });
 /** One line of `terminal session observe`. */
@@ -232,12 +243,16 @@ function failure(code: string | null, message: string): CommandError {
  */
 export class Herdr implements HerdrPort {
   private found: string | null = null;
+  private readonly transcripts: HerdrChatReader;
+  private readonly answering = new Set<string>();
 
   /** `executable` undefined: find herdr where its installer puts it, again on every use until it is found, so installing it while the Host runs is noticed. Null or a path is taken as given. */
   constructor(
     private readonly given?: string | null,
-    private readonly options: { prefs?: () => CodingPrefs; agentDirs?: string[] } = {},
-  ) {}
+    private readonly options: { prefs?: () => CodingPrefs; agentDirs?: string[]; transcriptHome?: string } = {},
+  ) {
+    this.transcripts = new HerdrChatReader(options.transcriptHome);
+  }
 
   private get executable(): string | null {
     if (this.given !== undefined) return this.given;
@@ -288,9 +303,9 @@ export class Herdr implements HerdrPort {
   }
 
   /** Runs a session command and returns its JSON (null when it printed none), or throws herdr's reason. */
-  private async call(args: string[], limitMs = PROBE_MS, signal?: AbortSignal): Promise<unknown> {
+  private async call(args: string[], limitMs = PROBE_MS, signal?: AbortSignal, session = this.session): Promise<unknown> {
     if (this.executable === null) throw new CommandError("unavailable", "herdr is not installed on this Mac");
-    const result = await this.run(["--session", this.session, ...args], limitMs, signal);
+    const result = await this.run(["--session", session, ...args], limitMs, signal);
     const why = Herdr.reason(result);
     if (result.code !== 0 || why.code !== null) throw failure(why.code, why.message);
     // Some commands (`pane send-text`) print nothing on success; a caller that needs an answer validates what it gets.
@@ -298,8 +313,8 @@ export class Herdr implements HerdrPort {
   }
 
   /** The session as herdr's own sidebar shows it: workspaces, their tabs, their panes. */
-  private async tree(): Promise<HerdrWorkspaceView[]> {
-    const parsed = await this.call(["api", "snapshot"]);
+  private async tree(session = this.session): Promise<HerdrWorkspaceView[]> {
+    const parsed = await this.call(["api", "snapshot"], PROBE_MS, undefined, session);
     if (!validate(Snapshot, parsed)) throw new CommandError("unavailable", "herdr gave a snapshot in a shape this Host does not know");
     const { workspaces, tabs, panes } = parsed.result.snapshot;
     const byNumber = (a: { number?: number | undefined }, b: { number?: number | undefined }) => (a.number ?? 0) - (b.number ?? 0);
@@ -331,9 +346,9 @@ export class Herdr implements HerdrPort {
   }
 
   /** One pane of the session in use, an agent or a plain shell. */
-  private async pane(id: string): Promise<HerdrPaneView> {
+  private async pane(id: string, session = this.session): Promise<HerdrPaneView> {
     if (!PANE.test(id)) throw invalid("not a herdr pane id");
-    const view = (await this.tree()).flatMap((workspace) => workspace.tabs.flatMap((tab) => tab.panes)).find((entry) => entry.id === id);
+    const view = (await this.tree(session)).flatMap((workspace) => workspace.tabs.flatMap((tab) => tab.panes)).find((entry) => entry.id === id);
     if (view === undefined) throw notFound(`herdr pane ${id}`);
     return view;
   }
@@ -358,15 +373,54 @@ export class Herdr implements HerdrPort {
 
   /** The end of a pane's terminal as text; `ansi` keeps the colours (the history view), `lines` is how far back. */
   async output(id: string, options: { ansi?: boolean; lines?: number } = {}): Promise<HerdrOutput> {
-    const pane = await this.pane(id);
+    const session = this.session;
+    return this.readOutput(await this.pane(id, session), session, options);
+  }
+
+  private async readOutput(pane: HerdrPaneView, session: string, options: { ansi?: boolean; lines?: number } = {}): Promise<HerdrOutput> {
     if (this.executable === null) throw new CommandError("unavailable", "herdr is not installed on this Mac");
     const lines = Math.min(Math.max(Math.round(options.lines ?? OUTPUT_LINES), 1), HISTORY_MAX_LINES);
-    const read = await this.run(["--session", this.session, "pane", "read", id, "--source", "recent-unwrapped", "--lines", String(lines), ...(options.ansi ? ["--format", "ansi"] : [])], 15_000);
+    const read = await this.run(["--session", session, "pane", "read", pane.id, "--source", "recent-unwrapped", "--lines", String(lines), ...(options.ansi ? ["--format", "ansi"] : [])], 15_000);
     if (read.code !== 0) {
       const why = Herdr.reason(read);
       throw failure(why.code, why.message);
     }
     return { pane, text: options.ansi ? ansiText(read.out, lines, HISTORY_BYTES) : terminalText(read.out, lines, lines > OUTPUT_LINES ? HISTORY_BYTES : OUTPUT_BYTES) };
+  }
+
+  private async currentAsk(id: string, session: string) {
+    const pane = await this.pane(id, session);
+    return pane.agent !== null && pane.status === "blocked" ? detectHerdrAsk(await this.readOutput(pane, session)) : null;
+  }
+
+  async ask(pane: string): Promise<HerdrAsk | null> {
+    return (await this.currentAsk(pane, this.session))?.view ?? null;
+  }
+
+  async answer({ pane, title, index }: HerdrAnswer): Promise<HerdrPaneView> {
+    const session = this.session;
+    const key = `${session}/${pane}`;
+    if (this.answering.has(key)) throw conflict("응답 대기 중");
+    this.answering.add(key);
+    try {
+      const ask = await this.currentAsk(pane, session);
+      if (!ask || ask.view.title !== title || !ask.view.choices[index]) throw conflict("질문이 바뀌었습니다.");
+      await this.call(["pane", "send-keys", pane, ...ask.keys(index)], PROBE_MS, undefined, session);
+      return await this.pane(pane, session);
+    } finally {
+      this.answering.delete(key);
+    }
+  }
+
+  async chat(pane: string, after: string | null): Promise<HerdrChat> {
+    if (!PANE.test(pane)) throw invalid("not a herdr pane id");
+    const session = this.session;
+    const parsed = await this.call(["pane", "list", "--workspace", pane.split(":")[0]!], PROBE_MS, undefined, session);
+    if (!validate(PaneSessions, parsed)) throw new CommandError("unavailable", "herdr gave a pane list in a shape this Host does not know");
+    const listed = parsed.result.panes.find((item) => item.pane_id === pane);
+    if (!listed) throw notFound(`herdr pane ${pane}`);
+    const ref = listed.agent_session;
+    return this.transcripts.read(pane, ref?.agent === listed.agent ? ref ?? null : null, after, `${session}/${pane}`);
   }
 
   /** The repository a pane works in, and the commit its work is measured from: where its worktree was cut, for the main checkout HEAD itself. */

@@ -26,9 +26,13 @@ struct WebShellView: View {
             ShellWebView(webView: controller.webView)
                 .ignoresSafeArea(.container)
                 .opacity(controller.phase == .ready ? 1 : 0)
+                // The page comes up just behind the leaving mark, so the two never sit half-faded on each other.
+                .animation(controller.phase == .ready ? .easeOut(duration: 0.45).delay(0.12) : .easeOut(duration: 0.2), value: controller.phase)
                 .accessibilityHidden(controller.phase != .ready)
             switch controller.phase {
-            case .loading: loading
+            case .loading:
+                ShellLoadingView()
+                    .transition(.asymmetric(insertion: .opacity, removal: MarkDissolve.removal))
             case .unreachable: unreachable
             case .ready: EmptyView()
             }
@@ -60,21 +64,10 @@ struct WebShellView: View {
         await model.retryPendingPushToken()
     }
 
-    /// Same size and place as the launch screen's mark (the middle of the whole screen, not of the safe area), so
-    /// the app opens on one still mark that only gains the working arc.
-    private var loading: some View {
-        GhostWorking(size: GhostMark.launchSize)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea()
-            .accessibilityElement()
-            .accessibilityLabel("PC Ghost를 여는 중")
-            .accessibilityIdentifier("shell-loading")
-    }
-
     private var unreachable: some View {
         VStack(spacing: 24) {
             Spacer()
-            GhostMark(size: 56)
+            GhostMark(size: 56, open: 0, glow: false)
             VStack(spacing: 8) {
                 Text("PC Ghost에 연결할 수 없습니다").font(.title3.weight(.semibold)).multilineTextAlignment(.center)
                 Text(connection.origin.host() ?? connection.origin.absoluteString)
@@ -96,6 +89,35 @@ struct WebShellView: View {
         .background(GhostStyle.canvas)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("shell-unreachable")
+    }
+}
+
+/// The launch screen come alive: the same mark at the same size and place (the middle of the whole screen, not of the
+/// safe area), so its first frame is the launch image; then it wakes while the page loads.
+struct ShellLoadingView: View {
+    var body: some View {
+        GhostAwake(size: GhostMark.launchSize, wakes: true)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+            .accessibilityElement()
+            .accessibilityLabel("PC Ghost를 여는 중")
+            .accessibilityIdentifier("shell-loading")
+    }
+}
+
+/// The loading mark leaving: it swells, softens and fades into the page. Reduce Motion only fades it.
+private struct MarkDissolve: ViewModifier {
+    static var removal: AnyTransition {
+        .modifier(active: MarkDissolve(progress: 1), identity: MarkDissolve(progress: 0)).animation(.easeIn(duration: 0.32))
+    }
+
+    let progress: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(reduceMotion ? 1 : 1 + 0.28 * progress)
+            .blur(radius: reduceMotion ? 0 : 12 * progress)
+            .opacity(1 - progress)
     }
 }
 

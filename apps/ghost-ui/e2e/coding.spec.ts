@@ -1,11 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { CodingSetup, Effect, HerdrOutput, WorkDetail } from '@ghost/contract';
+import type { CodingSetup, Effect, HerdrChat, HerdrChatItem, HerdrOutput, WorkDetail } from '@ghost/contract';
 import { fulfillHerdrFrame, mockCodingApi, visualCodingIds } from './mocks';
 import { openScreen } from './visual';
 import { readRunState } from './run-state';
 
 const landing = { name: 'coding', route: () => '/', waits: () => ['최근 끝난 일'], prepare: mockCodingApi };
 const coding = { ...landing, route: () => '/coding', waits: () => ['결제 화면 테스트 추가'] };
+const richCoding = { ...coding, prepare: (page: Page) => mockCodingApi(page, { rich: true }) };
 const stopped = { ...coding, waits: () => ['Mac 터미널에서 herdr를 여세요.'], prepare: (page: Page) => mockCodingApi(page, { stopped: true }) };
 const sizes = [
   { name: 'desktop', width: 1440, height: 900, touch: false },
@@ -13,7 +14,12 @@ const sizes = [
 ];
 
 async function captureCoding(page: Page, name: string) {
-  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    const entrances = document.getAnimations().filter(animation => animation.effect instanceof KeyframeEffect
+      && animation.effect.target?.closest('.coding-page') && animation.effect.getTiming().iterations !== Infinity);
+    await Promise.allSettled(entrances.map(animation => animation.finished));
+  });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize()!.width);
   await expect.soft(page).toHaveScreenshot(name, { animations: 'disabled', caret: 'hide', threshold: 0.2 });
 }
@@ -25,6 +31,7 @@ const input = (page: Page) => page.getByRole('textbox', { name: '터미널 입�
 const history = (page: Page) => page.getByRole('region', { name: '터미널 기록', exact: true });
 const back = (page: Page) => page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true });
 const codingNav = (page: Page, touch: boolean) => page.getByRole('navigation', { name: touch ? '주요 화면' : '작업실', exact: true });
+const spaces = (page: Page) => page.getByRole('radio', { name: '스페이스', exact: true }).click();
 const choice = async (page: Page, field: string, option: string) => {
   await page.getByRole('combobox', { name: field, exact: true }).click();
   await page.getByRole('option', { name: option, exact: true }).click();
@@ -36,7 +43,13 @@ for (const { name, width, height, touch } of sizes) {
     for (const theme of ['light', 'dark'] as const) {
       test(`coding screen in ${theme}`, async ({ page }) => {
         await page.emulateMedia({ colorScheme: theme });
-        await openScreen(page, landing, theme);
+        await openScreen(page, { ...richCoding, route: landing.route, waits: landing.waits, prepare: async page => {
+          const now = readRunState().fixedNow;
+          await page.addInitScript(({ now, pane }) => {
+            localStorage.setItem('ghost.coding.activity:default', JSON.stringify({ [pane]: { status: 'working', changedAt: now - 120_000, openedAt: -1 } }));
+          }, { now, pane: visualCodingIds.running });
+          await mockCodingApi(page, { rich: true });
+        } }, theme);
         const nav = codingNav(page, touch);
         const codingLink = nav.getByRole('button', { name: /코딩/ });
         await expect(codingLink).toContainText('입력 필요');
@@ -44,6 +57,11 @@ for (const { name, width, height, touch } of sizes) {
         await codingLink.click();
         await expect(page).toHaveURL(/#\/coding$/);
         const list = page.getByRole('region', { name: '코딩 세션', exact: true });
+        await expect(list.getByRole('region', { name: '입력 필요', exact: true }).getByRole('button', { name: '이번만 실행' })).toBeVisible();
+        await expect(list.getByRole('region', { name: '작업 중', exact: true }).getByText('2분')).toBeVisible();
+        await expect(list.getByRole('region', { name: '완료 (읽지 않음)', exact: true })).toBeVisible();
+        await captureCoding(page, `list-${theme}-${name}.png`);
+        await spaces(page);
         const app = list.getByRole('region', { name: '스페이스 · app', exact: true });
         const running = app.getByRole('link', { name: /결제 화면 테스트 추가/ });
         const finished = app.getByRole('link', { name: /로그인 실패 시 안내 문구 고치기/ });
@@ -56,10 +74,16 @@ for (const { name, width, height, touch } of sizes) {
         await expect(list.getByText('fix/settings-navigation')).toBeVisible();
         await expect(blocked).toContainText('입력 필요');
         await expect(list.getByText('에이전트 연동', { exact: true })).toBeVisible();
-        await captureCoding(page, `list-${theme}-${name}.png`);
+        await captureCoding(page, `spaces-${theme}-${name}.png`);
 
         await running.click();
         await expect(page).toHaveURL(url => url.hash === `#${paneRoute(visualCodingIds.running)}`);
+        await expect(page.getByRole('radio', { name: '대화', exact: true })).toBeChecked();
+        await expect(page.getByText('승인·거절 응답', { exact: true })).toBeVisible();
+        if (!touch) await page.getByRole('radio', { name: '에이전트', exact: true }).click();
+        await captureCoding(page, `chat-working-${theme}-${name}.png`);
+        if (!touch) await spaces(page);
+        await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('기존 결제 테스트');
         expect(await terminal(page).locator('.xterm-fg-6').count()).toBeGreaterThan(0);
         await expect(composer).toBeDisabled();
@@ -76,18 +100,27 @@ for (const { name, width, height, touch } of sizes) {
         await expect(composer).toBeEnabled();
         if (!touch) await expect(composer).toBeFocused();
         await expect(page.getByRole('radio', { name: '변경' })).toBeVisible();
+        const conversation = page.getByRole('region', { name: '에이전트 대화' });
+        await expect(conversation.getByText('기본 안내 문구', { exact: true })).toBeVisible();
+        const fold = conversation.getByText('3단계 · 3분', { exact: true });
+        await expect(conversation.getByText('bun test src/auth/login.test.ts', { exact: true })).toBeHidden();
+        await fold.click();
+        await expect(conversation.getByText('bun test src/auth/login.test.ts', { exact: true })).toBeVisible();
+        await fold.click();
+        await captureCoding(page, `chat-done-${theme}-${name}.png`);
+        await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('3 pass');
         await expect(terminal(page).locator('b')).toHaveCount(0);
         await captureCoding(page, `finished-${theme}-${name}.png`);
 
-        await page.getByRole('radio', { name: '기록' }).click();
+        await page.getByRole('button', { name: '기록', exact: true }).click();
         await expect(history(page).locator('.xterm-rows')).toContainText('3 pass');
         await expect(history(page).locator('.xterm-rows .xterm-fg-6').first()).toBeVisible();
         await expect(history(page).locator('.xterm-rows b')).toHaveCount(0);
         await captureCoding(page, `history-${theme}-${name}.png`);
 
         await page.getByRole('radio', { name: '변경' }).click();
-        await expect(page.getByText('fix/login-message', { exact: true })).toBeVisible();
+        await expect(page.getByRole('region', { name: '작업 변경' }).getByText('fix/login-message', { exact: true })).toBeVisible();
         await page.getByText('커밋 1', { exact: true }).click();
         await expect(page.getByText('Show a fallback on login errors')).toBeVisible();
         await page.getByRole('button', { name: /src\/auth\/login\.ts/ }).click();
@@ -107,9 +140,13 @@ for (const { name, width, height, touch } of sizes) {
         if (touch) await back(page).click();
 
         await blocked.click();
+        const blockedPane = page.getByRole('region', { name: '설정 화면 키보드 탐색 확인', exact: true });
+        await expect(blockedPane.getByRole('region', { name: '승인 요청' })).toBeVisible();
+        await captureCoding(page, `chat-blocked-${theme}-${name}.png`);
+        await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('Do you want to proceed?');
         await expect(composer).toBeDisabled();
-        await expect(keys.getByRole('button')).toHaveCount(8);
+        await expect(keys.getByRole('button')).toHaveCount(21);
         if (touch) {
           const bounds = await keys.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().toJSON()));
           expect(bounds.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
@@ -373,6 +410,7 @@ test('retains the last picture during loss and reconnects after the quiet interv
 
 test('manages workspaces, tabs, splits and shell agents through the roster', async ({ page }) => {
   await openScreen(page, coding, 'light');
+  await spaces(page);
   async function choose(node: string, label: string) {
     const menu = `${node} 작업`;
     await page.getByRole('button', { name: menu, exact: true }).click();
@@ -445,7 +483,7 @@ test('colour history follows the bottom and preserves the visible lines through 
       });
     },
   }, 'light');
-  await page.getByRole('radio', { name: '기록' }).click();
+  await page.getByRole('button', { name: '기록', exact: true }).click();
   const screen = history(page);
   const rows = screen.locator('.xterm-rows');
   const scroller = screen.locator('.herdr-history-scroll');
@@ -509,7 +547,7 @@ test.describe('mobile pane controls', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   test('sends sticky shortcuts, file bytes and an IME-safe shell command', async ({ page }) => {
     await openScreen(page, { ...coding, route: () => paneRoute(visualCodingIds.shell), waits: () => [] }, 'light');
-    const bar = page.getByRole('group', { name: '보조 터미널 키' });
+    const bar = page.getByRole('group', { name: '터미널 키', exact: true });
     const ctrl = bar.getByRole('button', { name: 'Ctrl', exact: true });
     const alt = bar.getByRole('button', { name: 'Alt', exact: true });
     const composer = page.getByRole('textbox', { name: '셸 명령' });
@@ -560,7 +598,7 @@ test.describe('mobile pane controls', () => {
         } }));
       },
     }, 'dark');
-    await page.getByRole('radio', { name: '기록' }).click();
+    await page.getByRole('button', { name: '기록', exact: true }).click();
     const screen = history(page);
     await expect(screen.locator('.xterm-rows')).toContainText('최근 출력');
     const scrollport = await screen.locator('.herdr-history-scroll').boundingBox();
@@ -650,4 +688,122 @@ test('opens the pane returned by code_run from the Work record, not a guessed id
   await link.click();
   await expect(page).toHaveURL(url => url.hash === `#${paneRoute(visualCodingIds.finished)}`);
   await expect(terminal(page)).toContainText('3 pass');
+});
+
+test('rotates working arcs and switches to a live opacity pulse with Reduce Motion', async ({ page }) => {
+  await openScreen(page, richCoding, 'light');
+  const glyph = page.getByRole('region', { name: '작업 중', exact: true }).locator('.state-glyph__spin');
+  const style = () => glyph.evaluate(element => {
+    const css = getComputedStyle(element);
+    return { name: css.animationName, count: css.animationIterationCount, duration: css.animationDuration, transform: css.transform };
+  });
+  await expect.poll(style).toMatchObject({ name: 'ghost-spin', count: 'infinite', duration: '1s' });
+  await expect.poll(async () => (await style()).transform).not.toBe('none');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect.poll(style).toEqual({ name: 'ghost-state-pulse', count: 'infinite', duration: '1.45s', transform: 'none' });
+});
+
+test('answers from the inbox without reopening a stale approval', async ({ page }) => {
+  let unavailable = false;
+  const { promise: hold, resolve: release } = Promise.withResolvers<void>();
+  await openScreen(page, { ...richCoding, prepare: async page => {
+    await mockCodingApi(page, { rich: true });
+    await page.route('**/api/herdr/ask?*', route => unavailable ? route.fulfill({ contentType: 'application/json', body: 'null' }) : route.fallback());
+    await page.route('**/api/herdr/answer', async route => {
+      await hold;
+      unavailable = true;
+      await route.fulfill({ status: 409, json: { error: { code: 'conflict', message: '질문이 바뀌었습니다.' } } });
+    }, { times: 1 });
+  } }, 'light');
+  const inbox = page.getByRole('region', { name: '입력 필요', exact: true });
+  const approve = inbox.getByRole('button', { name: /이번만 실행/ });
+  try {
+    const request = post(page, '/api/herdr/answer');
+    await approve.click();
+    expect((await request).postDataJSON()).toEqual({ pane: visualCodingIds.blocked, index: 0, title: '설정 테스트를 실행할까요?' });
+    await expect(approve).toBeDisabled();
+    await expect(approve.locator('.state-glyph__spin')).toBeVisible();
+  } finally { release(); }
+  await expect(inbox.getByRole('link', { name: /열기/ })).toBeVisible();
+  await expect(approve).toHaveCount(0);
+  unavailable = false;
+  await approve.click();
+  await expect(inbox).toHaveCount(0);
+  await expect(page).toHaveURL(/#\/coding$/);
+});
+
+test('merges tool completion by id and preserves scroll and the unsent draft', async ({ page }) => {
+  const id = visualCodingIds.finished;
+  const transcript = Array.from({ length: 32 }, (_, index): HerdrChatItem => ({
+    id: `message-${index}`, kind: index % 2 ? 'agent' : 'user', at: 100 + index, text: `기록 ${index + 1}`,
+  }));
+  const tool = { kind: 'tool', id: 'exec', name: 'bash', summary: 'bun run test', ok: null, at: 133 } as const;
+  const cursors: string[] = [];
+  let update = false;
+  await openScreen(page, { ...richCoding, route: () => paneRoute(id), waits: () => [], prepare: async page => {
+    await mockCodingApi(page, { rich: true });
+    await page.route('**/api/herdr/chat?*', route => {
+      const after = new URL(route.request().url()).searchParams.get('after');
+      if (after) cursors.push(after);
+      const items: HerdrChatItem[] = !after ? [...transcript, tool] : update && after === '1024' ? [
+        { ...tool, ok: false }, { id: 'latest', kind: 'agent', text: '테스트가 실패했습니다.', at: 160 },
+      ] : [];
+      return route.fulfill({ json: { pane: id, source: 'omp', title: null, reset: !after, cursor: update ? '1256' : '1024', items } satisfies HerdrChat });
+    });
+  } }, 'light');
+  const feed = page.getByRole('region', { name: '에이전트 대화' });
+  await expect(feed.getByText('기록 32', { exact: true })).toBeVisible();
+  await feed.locator('.herdr-chat-steps summary').last().click();
+  await expect(feed.getByText('bun run test', { exact: true })).toHaveCount(1);
+  const scroll = feed.locator('.herdr-chat-scroll');
+  await scroll.evaluate(node => { node.scrollTop = 120; });
+  const jump = feed.getByRole('button', { name: '최신으로' });
+  await expect(jump).toBeVisible();
+  const prior = await scroll.evaluate(node => node.scrollTop);
+  update = true;
+  await expect(feed.getByText('테스트가 실패했습니다.')).toHaveCount(1);
+  expect(cursors).toContain('1024');
+  await expect(feed.locator('[data-failed]').filter({ hasText: 'bun run test' })).toHaveCount(1);
+  await expect.poll(() => scroll.evaluate(node => node.scrollTop)).toBe(prior);
+  await jump.click();
+  await expect(jump).toHaveCount(0);
+  const draft = page.getByRole('textbox', { name: '후속 지시' });
+  await draft.fill('고치기 전에 기록을 보여 주세요.');
+  await page.reload();
+  await expect(draft).toHaveValue('고치기 전에 기록을 보여 주세요.');
+  await expect(page.getByRole('radio', { name: '대화' })).toBeChecked();
+});
+
+test.describe('mobile pane navigation', () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  test('swipes only to siblings and keeps terminal size across panes', async ({ page }) => {
+    await openScreen(page, { ...richCoding, route: () => paneRoute(visualCodingIds.running), waits: () => [] }, 'light');
+    await expect(page.getByRole('radio', { name: '대화' })).toBeChecked();
+    const dots = page.getByRole('navigation', { name: '탭의 패널' });
+    await expect(dots.getByRole('button')).toHaveCount(2);
+    const header = (await page.locator('.coding-detail-top').boundingBox())!;
+    const x = header.x + 165, y = header.y + 25;
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      for (let step = 1; step <= 4; step++) await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove', touchPoints: [{ x: x - 22 * step, y }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } finally { await cdp.detach(); }
+    await expect(page).toHaveURL(url => url.hash === `#${paneRoute(visualCodingIds.shell)}`);
+    await expect(page.getByRole('radio', { name: '대화' })).toHaveCount(0);
+    await expect(terminal(page)).toContainText('git status --short');
+    await input(page).focus();
+    await page.getByRole('button', { name: '키보드 닫기' }).click();
+    await expect(input(page)).not.toBeFocused();
+    await page.getByRole('button', { name: '터미널 글자 크기' }).click();
+    await page.getByRole('button', { name: '글자 크게' }).click();
+    await expect(page.getByRole('dialog', { name: '터미널 글자 크기' }).locator('output')).toHaveText('15px');
+    await page.keyboard.press('Escape');
+    await dots.getByRole('button', { name: '결제 화면 테스트 추가' }).click();
+    await page.getByRole('radio', { name: '터미널' }).click();
+    await page.getByRole('button', { name: '터미널 글자 크기' }).click();
+    await expect(page.getByRole('dialog', { name: '터미널 글자 크기' }).locator('output')).toHaveText('15px');
+  });
 });

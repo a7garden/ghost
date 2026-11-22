@@ -14,6 +14,7 @@
 		77745434DF1D960CAD5E50CE /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5233062CDDA8ECDAD9337D86 /* Model.swift */; };
 		88AB3D004E21ABCCC58DF544 /* PushNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB97B18F4DD1FA95AA143C6 /* PushNotifications.swift */; };
 		8E1479C3C27959AE32B2D7D2 /* WebShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F7E8D4EE9C6B4AAE79F39C /* WebShell.swift */; };
+		8FD5E82D766ABB3DBA2B766A /* GhostMarkArt.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A46AF23E48D847ABE25064 /* GhostMarkArt.swift */; };
 		936EC6C4E425A74A9C921974 /* QRCodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E69A25A3011B428D51B306C /* QRCodeScanner.swift */; };
 		9F8288298AE80B7EAE114D7A /* PairingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3BAA0947D00D3210549EE16 /* PairingUITests.swift */; };
 		9FFA1554C5E092072B759688 /* MobileUIFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774B7C24A75A7CB1C63425F3 /* MobileUIFixture.swift */; };
@@ -50,6 +51,7 @@
 		A2CBD3F209672C194763E595 /* GhostUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = GhostUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B53D78C91C967D8EFDF3F772 /* ShellUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellUITests.swift; sourceTree = "<group>"; };
 		C3BAA0947D00D3210549EE16 /* PairingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingUITests.swift; sourceTree = "<group>"; };
+		C9A46AF23E48D847ABE25064 /* GhostMarkArt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostMarkArt.swift; sourceTree = "<group>"; };
 		EBB97B18F4DD1FA95AA143C6 /* PushNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotifications.swift; sourceTree = "<group>"; };
 		EF785EFE497A98A4369F7BE7 /* PairingDialogUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingDialogUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -109,6 +111,7 @@
 				3E420AE48AC6FD8BC694C132 /* Assets.xcassets */,
 				8D462C3EF9DDC55EB4A85802 /* Ghost.entitlements */,
 				9B9F8310C88BC181A67965A7 /* GhostApp.swift */,
+				C9A46AF23E48D847ABE25064 /* GhostMarkArt.swift */,
 				36A854FF01D5392AB5785ED3 /* Info.plist */,
 				0FC087AFC373DABF24BECE87 /* MobileComponents.swift */,
 				774B7C24A75A7CB1C63425F3 /* MobileUIFixture.swift */,
@@ -221,6 +224,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F9379130D7349B4A746AB49F /* GhostApp.swift in Sources */,
+				8FD5E82D766ABB3DBA2B766A /* GhostMarkArt.swift in Sources */,
 				E2EACA079C84B160E4B7CD84 /* MobileComponents.swift in Sources */,
 				9FFA1554C5E092072B759688 /* MobileUIFixture.swift in Sources */,
 				77745434DF1D960CAD5E50CE /* Model.swift in Sources */,
@@ -260,7 +264,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/Ghost.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Ghost;
@@ -441,7 +445,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/Ghost.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Ghost;

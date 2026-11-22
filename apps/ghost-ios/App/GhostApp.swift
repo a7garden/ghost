@@ -73,12 +73,15 @@ struct RootView: View {
     let model: GhostModel
     var body: some View {
         Group {
-            if let connection = model.connection {
-                WebShellView(model: model, connection: connection)
-                    .id(connection.origin.absoluteString + connection.deviceId)
+            #if DEBUG
+            if MobileUIFixture.shellLoading {
+                ShellLoadingView().background(GhostStyle.canvas.ignoresSafeArea())
             } else {
-                PairingFlowView(model: model)
+                content
             }
+            #else
+            content
+            #endif
         }
         .tint(GhostStyle.ink)
         .onAppear { AppDelegate.coordinator.activate(model: model) }
@@ -86,6 +89,15 @@ struct RootView: View {
             // Parsed strictly before any network or storage use; an already
             // connected device ignores pairing links.
             if model.connection == nil { model.pairing.handleDeepLink(url) }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        if let connection = model.connection {
+            WebShellView(model: model, connection: connection)
+                .id(connection.origin.absoluteString + connection.deviceId)
+        } else {
+            PairingFlowView(model: model)
         }
     }
 }
