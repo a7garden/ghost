@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, ChevronRight, KeyRound, LogIn, ShieldOff, Plus, Trash2 } from 'lucide-react';
-import { Button, SettingsGroup, SettingsRow, InlineError, SelectField, Badge, SegmentedControl } from '../ui';
+import { Button, SettingsGroup, SettingsRow, InlineError, SelectField, Badge, SegmentedControl, Switch } from '../ui';
 import type { Provider, ProviderPreset, Thinking } from '@ghost/contract';
 import { useHost } from '../host/context';
 import { useHostState } from '../host/store';
@@ -39,11 +39,12 @@ export function ModelSettings() {
     catch (reason) { setError(reason instanceof Error ? reason.message : '요청을 처리하지 못했습니다.'); }
     finally { setPending(''); }
   };
-  const roleCommand = (field: 'defaultModel' | 'reviewModel' | 'memoryModel', key: string) => {
+  const roleCommand = (field: 'defaultModel' | 'reviewModel' | 'memoryModel' | 'suggestionModel', key: string) => {
     const model = modelFromKey(settings, key) ?? null;
     if (field === 'defaultModel') void run(field, () => client.send({ type: 'settings.update', defaultModel: model }), '모델을 저장했습니다.');
     else if (field === 'reviewModel') void run(field, () => client.send({ type: 'settings.update', reviewModel: model }), '모델을 저장했습니다.');
-    else void run(field, () => client.send({ type: 'settings.update', memoryModel: model }), '모델을 저장했습니다.');
+    else if (field === 'memoryModel') void run(field, () => client.send({ type: 'settings.update', memoryModel: model }), '모델을 저장했습니다.');
+    else void run(field, () => client.send({ type: 'settings.update', suggestionModel: model }), '모델을 저장했습니다.');
   };
   // Reasoning depth rides on the default model; models that cannot reason ignore it.
   const thinkingCommand = (thinking: Thinking) => {
@@ -113,6 +114,14 @@ export function ModelSettings() {
         <SelectField label="기억 모델" className="w-[240px] max-w-full" value={settings?.memoryModel ? `${settings.memoryModel.provider}/${settings.memoryModel.model}` : NO_MODEL}
           disabled={pending !== '' || !settings} onValueChange={key => roleCommand('memoryModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
       </SettingsRow>
+      <SettingsRow label="다음 메시지 제안" description="답이 끝나면 보낼 만한 다음 메시지를 입력창에 띄웁니다. 제안마다 요청이 한 번 더 나갑니다." htmlFor="suggestions-switch">
+        <Switch id="suggestions-switch" checked={settings?.nextMessageSuggestions !== false} disabled={pending !== '' || !settings}
+          onCheckedChange={checked => void run('suggestions', () => client.send({ type: 'settings.update', nextMessageSuggestions: checked }), checked ? '다음 메시지를 제안합니다.' : '다음 메시지를 제안하지 않습니다.')}/>
+      </SettingsRow>
+      {settings?.nextMessageSuggestions !== false && <SettingsRow label="제안 모델" description="선택하지 않으면 기본 모델을 따릅니다. 빠른 모델이면 제안이 일찍 뜹니다.">
+        <SelectField label="제안 모델" className="w-[240px] max-w-full" value={settings?.suggestionModel ? `${settings.suggestionModel.provider}/${settings.suggestionModel.model}` : NO_MODEL}
+          disabled={pending !== '' || !settings} onValueChange={key => roleCommand('suggestionModel', key)} options={[{ value: NO_MODEL, label: '선택 안 함' }, ...options]}/>
+      </SettingsRow>}
     </SettingsGroup>
     {editor && <ProviderEditor initial={editor.initial} presets={catalog} providerIds={settings?.providers.map(provider => provider.id) ?? []} busy={pending !== ''} onClose={() => setEditor(undefined)} onSave={saveProvider}/>}
     {login && <ChatGptLoginDialog provider={login} onClose={() => setLogin(undefined)}/>}

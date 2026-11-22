@@ -6,7 +6,7 @@ import { useHost } from '../host/context';
 import { Button } from '../ui';
 import { CodingSkeleton } from './HerdrParts';
 import type { HerdrTerminalControls } from './HerdrTerminal';
-import { controlComposerText, controlRailKey, TerminalResize, TerminalScrollLines, terminalProblem, type TerminalProblem, type TerminalSize } from './herdrControlModel';
+import { controlRailKey, TerminalResize, TerminalScrollLines, terminalProblem, type TerminalProblem, type TerminalSize } from './herdrControlModel';
 import { decodeHerdrFrame, HerdrInputQueue } from './herdrTerminalProtocol';
 import { terminalWheelOffset } from './herdrTerminalScroll';
 import { openHerdrXterm } from './herdrXterm';
@@ -14,7 +14,6 @@ import { openHerdrXterm } from './herdrXterm';
 export type LeasedTerminalControls = HerdrTerminalControls & {
   text(text: string): void;
   key(key: string): void;
-  submit(text: string): Promise<boolean>;
 };
 
 type Command = HerdrControlCommand extends infer C ? C extends HerdrControlCommand ? Omit<C, 'pane' | 'leaseId'> : never : never;
@@ -44,7 +43,6 @@ export default function HerdrControl({ ref, pane, fit, takeover, fontSize, onRea
     pageUp: () => { controls.current?.pageUp(); return true; },
     text: text => controls.current?.text(text),
     key: key => controls.current?.key(key),
-    submit: text => controls.current?.submit(text) ?? Promise.resolve(false),
   }), []);
 
   useEffect(() => {
@@ -148,19 +146,6 @@ export default function HerdrControl({ ref, pane, fit, takeover, fontSize, onRea
       key(key) {
         const value = controlRailKey(key, terminal.modes.applicationCursorKeysMode);
         if (value !== undefined) text(value);
-      },
-      async submit(value) {
-        const current = lease, queue = writer;
-        if (!current || !queue) return false;
-        const input = controlComposerText(value, terminal.modes.bracketedPasteMode);
-        latest(true);
-        // Queue the draft like native typing, but only acknowledge it once its bytes were sent.
-        return queue.afterInput(async () => {
-          if (writer !== queue) return false;
-          await send(current, { type: 'input', text: input });
-          if (writer === queue) inputSent(input);
-          return true;
-        });
       },
     };
 

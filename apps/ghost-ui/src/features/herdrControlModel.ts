@@ -114,11 +114,6 @@ export function controlRailKey(key: string, applicationCursorKeys: boolean): str
   return controls[key] ?? (arrows[key] ? `\x1b${applicationCursorKeys ? 'O' : '['}${arrows[key]}` : undefined);
 }
 
-export function controlComposerText(text: string, bracketedPaste: boolean): string {
-  const normalized = text.replace(/\r\n|\n/g, '\r');
-  return bracketedPaste ? `\x1b[200~${normalized}\x1b[201~\r` : `${normalized}\r`;
-}
-
 /** One lease lifecycle for the terminal: who may drive it, what still needs the owner's yes, and what to tell them. */
 export type TerminalLease = {
   /** The explicit 직접 조작 ask for a pane the app does not own; it never outlives the live view. */

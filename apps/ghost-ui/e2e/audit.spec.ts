@@ -10,6 +10,58 @@ async function capture(page: Page, name: string, theme: Theme, device: string) {
   await screenshot(page, `${name}-${theme}-${device}.png`);
 }
 
+test('Ghost chat drafts a suggested next message without sending it', async ({ page }) => {
+  const { conversationA } = readRunState();
+  const suggestions = ['보고서 초안을 보여 주세요.', '우선순위를 다시 정리해 주세요.'];
+  const messages: unknown[] = [];
+  await page.route('**/api/commands', async route => {
+    const request = route.request();
+    const command = request.postDataJSON()?.command;
+    if (command?.type !== 'message.send') return route.fallback();
+    messages.push(command);
+    await route.abort();
+  });
+  const requested = page.waitForRequest(request => new URL(request.url()).pathname === '/api/suggestions');
+  await openScreen(page, { name: 'conversation', route: state => `/ghosts/${state.defaultGhostId}`, waits: () => ['맡긴 일에서 볼 수 있어요'], prepare: async page => {
+    await page.route('**/api/suggestions?*', route => route.fulfill({ json: {
+      suggestions: new URL(route.request().url()).searchParams.get('conversation') === conversationA ? suggestions : [],
+    } }));
+  } }, 'light');
+  expect(new URL((await requested).url()).searchParams.get('conversation')).toBe(conversationA);
+  const list = page.getByRole('list', { name: '다음 메시지 제안', exact: true });
+  await expect(list.getByRole('listitem')).toHaveCount(2);
+  const field = page.getByRole('combobox', { name: '도우미에게 메시지', exact: true });
+  await expect(field).toHaveValue('');
+  await field.press('Tab');
+  await expect(field).toHaveValue(suggestions[0]!);
+  await expect(field).toBeFocused();
+  await expect(list).toHaveCount(0);
+  expect(messages).toEqual([]);
+});
+
+test('model settings expose the next-message switch and model', async ({ page }) => {
+  await openScreen(page, { name: 'models', route: () => '/settings?tab=models', waits: () => [], prepare: page =>
+    page.route('**/api/providers/quota*', route => route.fulfill({ json: [] })) }, 'light');
+  const enabled = page.getByRole('switch', { name: '다음 메시지 제안', exact: true });
+  const model = page.getByRole('combobox', { name: '제안 모델', exact: true });
+  await expect(enabled).toBeChecked();
+  await expect(model).toBeEnabled();
+  try {
+    const saved = page.waitForResponse(response => response.url().endsWith('/api/commands') &&
+      response.request().postDataJSON()?.command?.type === 'settings.update');
+    await enabled.click();
+    const response = await saved;
+    expect(response.ok()).toBe(true);
+    expect(response.request().postDataJSON().command).toEqual({ type: 'settings.update', nextMessageSuggestions: false });
+    await expect(enabled).not.toBeChecked();
+    await expect(model).toHaveCount(0);
+  } finally {
+    if (!await enabled.isChecked()) await enabled.click();
+    await expect(enabled).toBeChecked();
+    await expect(model).toBeEnabled();
+  }
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test.describe(theme, () => {
     test.use({ colorScheme: theme });
@@ -40,7 +92,12 @@ for (const theme of ['light', 'dark'] as const) {
           }
         } }, theme);
         await expect(page.locator('.ghost-settings__content-inner')).not.toBeEmpty();
-        if (tab === 'coding') await expect(page.getByRole('combobox', { name: 'herdr 세션' })).toHaveText('기본 세션');
+        if (tab === 'coding') {
+          await expect(page.getByRole('combobox', { name: 'herdr 세션' })).toHaveText('기본 세션');
+          const delivery = page.getByRole('radiogroup', { name: '지시를 보내는 방식' });
+          await expect(delivery.getByRole('radio', { name: '스티어링' })).toBeChecked();
+          await expect(delivery.getByRole('radio', { name: '대기열' })).toBeEnabled();
+        }
         await capture(page, `settings-${tab}`, theme, info.project.name);
         if (tab === 'devices') {
           const conversation = page.getByRole('group', { name: '받을 알림' }).getByRole('button', { name: '대화', exact: true });

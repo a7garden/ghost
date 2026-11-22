@@ -69,6 +69,8 @@ export interface Engine extends Partial<MemoryEngine> {
   /** Stop the current run and withdraw queued inputs. */
   abort(conversationId: string): Promise<void>;
   page(conversationId: string, before: string | null, limit: number): Promise<TranscriptPage>;
+  /** A stateless next-message prediction; never opens or submits to a conversation. */
+  suggest?(input: { messages: { role: "user" | "assistant"; text: string }[]; signal: AbortSignal }): Promise<string[]>;
   watch(conversationId: string, listener: (event: LiveEvent) => void): () => void;
   status(): { ready: boolean; detail: string };
   /** Append imported history without running the model. Only for `ghost import` into a fresh conversation. */

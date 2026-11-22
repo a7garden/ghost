@@ -3,7 +3,8 @@ import { Check, CircleAlert } from 'lucide-react';
 import type { CodingAgentId, CodingPrefs, CodingSetup } from '@ghost/contract';
 import { CopyButton } from '../components/MessageBody';
 import { useHost } from '../host/context';
-import { Button, InlineError, SelectField, SettingsGroup, SettingsRow } from '../ui';
+import { useHostState } from '../host/store';
+import { Button, InlineError, SegmentedControl, SelectField, SettingsGroup, SettingsRow } from '../ui';
 
 const INSTALL_DOCS = 'https://herdr.dev/tui/docs/install/';
 const INSTALL = 'curl -fsSL https://herdr.dev/install.sh | sh';
@@ -172,8 +173,23 @@ export function CodingSettings() {
   const model = useCodingSetup(true);
   const { view, pending, readError, act } = model;
   const sessionId = useId(), agentId = useId(), notifyId = useId();
+  const { client, store } = useHost();
+  const { state } = useHostState(store);
+  const delivery = state?.settings?.codingDelivery ?? 'steer';
+  const [deliveryError, setDeliveryError] = useState('');
   return <div className="coding-settings">
     <SetupErrors model={model}/>
+    {deliveryError && <InlineError>{deliveryError}</InlineError>}
+    <SettingsGroup title="작업 중 보내기">
+      <SettingsRow label="지시를 보내는 방식" description="에이전트가 일하는 중에 보낸 지시를 어떻게 전할지 정합니다. ⌥Enter로 보내면 다른 방식으로 한 번 보냅니다. omp에서 구분하며 다른 에이전트는 자기 Enter 동작을 따릅니다.">
+        <SegmentedControl aria-label="지시를 보내는 방식" value={delivery}
+          onValueChange={value => {
+            setDeliveryError('');
+            client.send({ type: 'settings.update', codingDelivery: value }).catch(reason => setDeliveryError(reason instanceof Error ? reason.message : '설정을 저장하지 못했습니다.'));
+          }}
+          options={[{ value: 'steer', label: '스티어링', disabled: !state?.settings }, { value: 'queue', label: '대기열', disabled: !state?.settings }]}/>
+      </SettingsRow>
+    </SettingsGroup>
     {!view && !readError && <p role="status">herdr 설정을 불러오는 중…</p>}
     {view && <>
       <SettingsGroup title="세션과 에이전트">

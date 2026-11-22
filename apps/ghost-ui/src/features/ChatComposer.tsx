@@ -4,6 +4,7 @@ import type { DocRef, Ghost } from '@ghost/contract';
 import { Composer } from '../ui';
 import { ComposerPlus, type PlusAction } from '../components/composer/ComposerPlus';
 import { ComposerSuggest, type Suggestion } from '../components/composer/ComposerSuggest';
+import { NextSuggestions } from '../components/composer/NextSuggestions';
 import { AttachmentTray, useAttachments, type PendingAttachment } from '../components/composer/attachments';
 import { DotAvatar } from '../components/DotAvatar';
 import { ModelPicker } from '../pets/ModelPicker';
@@ -40,7 +41,7 @@ const whenLabel = (at: number) => new Date(at).toLocaleString('ko-KR', { month: 
  * Typing `/` at the start offers the same actions by keyboard; `@` hands the message to a Ghost as a 맡긴 일
  * that reports back here.
  */
-export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, recoveredMessage, setRecoveredMessage, inputRef, onPost, onStop, onError, initialScopeIds = [], initialMode = 'talk' }: {
+export function ChatComposer({ ghost, conversationId, running, busy, draft, setDraft, recoveredMessage, setRecoveredMessage, inputRef, onPost, onStop, onError, nextMessages = [], initialScopeIds = [], initialMode = 'talk' }: {
   ghost: Ghost;
   conversationId: string | null;
   running: boolean;
@@ -56,6 +57,8 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
   onPost(command: MessageSend): void;
   onStop(): void;
   onError(message: string): void;
+  /** The messages the owner is likely to send next, while the field is empty and the Ghost is idle. */
+  nextMessages?: readonly string[];
   initialScopeIds?: string[];
   initialMode?: 'talk' | 'work';
 }) {
@@ -162,9 +165,16 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
         }));
   const open = suggestions.length > 0;
   const current = Math.min(active, suggestions.length - 1);
+  const offered = mode === 'talk' && !draft && !running && !open && conversationId ? nextMessages : [];
+  const takeNext = (text: string) => { setDraft(text); focus(); };
   const steer = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     projects.onKeyDown(event);
     if (event.defaultPrevented) return;
+    if (event.key === 'Tab' && !event.shiftKey && !event.nativeEvent.isComposing && offered.length) {
+      event.preventDefault();
+      takeNext(offered[0]!);
+      return;
+    }
     if (!open || event.nativeEvent.isComposing) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -188,14 +198,14 @@ export function ChatComposer({ ghost, conversationId, running, busy, draft, setD
       submitLabel={mode === 'work' ? '일 맡기기' : mode === 'later' ? '예약하기' : '메시지 보내기'}
       disabled={!conversationId} pending={sending} running={running} describedBy="composer-keyboard-help"
       onFiles={mode === 'talk' ? attachments.add : undefined}
-      header={mode !== 'talk' && <div className="composer-mode" data-mode={mode}>
+      header={mode !== 'talk' ? <div className="composer-mode" data-mode={mode}>
         <span className="composer-mode__token">
           {mode === 'work' ? <BriefcaseBusiness aria-hidden="true"/> : <Clock3 aria-hidden="true"/>}
           {mode === 'work' ? '맡기기' : laterAt ? whenLabel(laterAt) : '나중에 보내기'}
           {mode === 'work' && handedTo && <span className="composer-mode__to"><DotAvatar profileId={handedTo.id} tone={toneFor(handedTo.id)} size={15}/>{handedTo.name}</span>}
           <button type="button" className="composer-mode__close" aria-label="일반 메시지로" onClick={() => switchMode('talk')}><X size={11} aria-hidden="true"/></button>
         </span>
-      </div>}
+      </div> : offered.length > 0 ? <NextSuggestions items={offered} onPick={takeNext}/> : undefined}
       tray={<>{projects.chips}<DocAttachmentTray refs={returnedDocs} scopes={state?.scopes} onRemove={ref => { if (recoveredMessage) setRecoveredMessage({ ...recoveredMessage, attachments: returnedRefs.filter(item => messageAttachmentKey(item) !== messageAttachmentKey(ref)) }); }}/><AttachmentTray items={[...returnedItems, ...attachments.items]} onRemove={removeFile}/></>}
       extension={mode === 'work' ? <div className="composer-fields">
         <label className="composer-field"><span>완료 기준</span>

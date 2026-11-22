@@ -14,10 +14,6 @@ export function modifiedTerminalKey(value: string, { ctrl, alt }: TerminalModifi
   return alt ? `\x1b${key}` : key;
 }
 
-export function shellCommand(draft: string): string {
-  return `${draft}\r`;
-}
-
 export const extendedTerminalKeys = [
   { label: 'Home', name: 'Home', text: '\x1b[H' },
   { label: 'End', name: 'End', text: '\x1b[F' },

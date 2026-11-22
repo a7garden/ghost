@@ -35,6 +35,15 @@ const directControl = (page: Page) => page.getByRole('button', { name: '직접 �
 const controlRequest = (page: Page) => page.waitForRequest(request => new URL(request.url()).pathname === '/api/herdr/control');
 const controlCommand = (page: Page, type: HerdrControlCommand['type']) => page.waitForRequest(request =>
   new URL(request.url()).pathname === '/api/herdr/control/send' && request.postDataJSON().type === type);
+const followUp = (page: Page) => page.getByRole('textbox', { name: '후속 지시', exact: true });
+const stop = (page: Page) => page.getByRole('button', { name: '작업 중단', exact: true });
+const attachments = (page: Page) => page.getByRole('button', { name: '파일 첨부', exact: true });
+const nextMessages = (page: Page) => page.getByRole('list', { name: '다음 메시지 제안', exact: true });
+const suggested = ['로그인이 잠겼을 때도 같은 문구가 나오나요?', '변경한 테스트를 보여 주세요.'];
+const mockPaneSuggestions = (page: Page) => page.route('**/api/herdr/suggestions?*', route => {
+  const { searchParams } = new URL(route.request().url());
+  return route.fulfill({ json: { suggestions: searchParams.get('pane') === visualCodingIds.finished ? suggested : [] } });
+});
 const back = (page: Page) => page.getByRole('navigation', { name: '위치' }).getByRole('button', { name: '뒤로', exact: true });
 const codingNav = (page: Page, touch: boolean) => page.getByRole('navigation', { name: touch ? '주요 화면' : '작업실', exact: true });
 const spaces = (page: Page) => page.getByRole('radio', { name: '스페이스', exact: true }).click();
@@ -46,6 +55,12 @@ const choice = async (page: Page, field: string, option: string) => {
 for (const { name, width, height, touch } of sizes) {
   test.describe(name, () => {
     test.use({ viewport: { width, height }, isMobile: touch, hasTouch: touch });
+    if (!touch) test.beforeEach(async ({ page }) => {
+      // This viewport uses the Mac shortcut chrome even under the iPhone project.
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'userAgentData', { value: { platform: 'macOS' } });
+      });
+    });
     for (const theme of ['light', 'dark'] as const) {
       test(`coding screen in ${theme}`, async ({ page }) => {
         await page.emulateMedia({ colorScheme: theme });
@@ -55,6 +70,7 @@ for (const { name, width, height, touch } of sizes) {
             localStorage.setItem('ghost.coding.activity:default', JSON.stringify({ [pane]: { status: 'working', changedAt: now - 120_000, openedAt: -1 } }));
           }, { now, pane: visualCodingIds.running });
           await mockCodingApi(page, { rich: true, owned: [visualCodingIds.shell] });
+          await mockPaneSuggestions(page);
         } }, theme);
         const nav = codingNav(page, touch);
         const codingLink = nav.getByRole('button', { name: /코딩/ });
@@ -73,7 +89,7 @@ for (const { name, width, height, touch } of sizes) {
         const finished = app.getByRole('link', { name: /로그인 실패 시 안내 문구 고치기/ });
         const blocked = list.getByRole('region', { name: '스페이스 · ghost', exact: true }).getByRole('link', { name: /설정 화면 키보드 탐색 확인/ });
         const shell = app.getByRole('link', { name: /^zsh/ });
-        const composer = page.getByRole('textbox', { name: '후속 지시' });
+        const composer = followUp(page);
         const keys = page.getByRole('group', { name: '터미널 키', exact: true });
         await expect(app.getByRole('region', { name: '탭 · checkout' }).getByRole('link')).toHaveCount(2);
         await expect(app.getByRole('region', { name: '탭 · login' }).getByRole('link')).toHaveCount(1);
@@ -86,13 +102,17 @@ for (const { name, width, height, touch } of sizes) {
         await expect(page).toHaveURL(url => url.hash === `#${paneRoute(visualCodingIds.running)}`);
         await expect(page.getByRole('radio', { name: '대화', exact: true })).toBeChecked();
         await expect(page.getByText('승인·거절 응답', { exact: true })).toBeVisible();
+        await expect(composer).toBeEnabled();
+        await expect(stop(page)).toBeVisible();
         if (!touch) await page.getByRole('radio', { name: '에이전트', exact: true }).click();
         await captureCoding(page, `chat-working-${theme}-${name}.png`);
         if (!touch) await spaces(page);
         await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('기존 결제 테스트');
         expect(await terminal(page).locator('.xterm-fg-6').count()).toBeGreaterThan(0);
-        await expect(composer).toBeDisabled();
+        await expect(composer).toHaveCount(0);
+        await expect(attachments(page)).toHaveCount(0);
+        await expect(stop(page)).toHaveCount(touch ? 0 : 1);
         await expect(keys).toHaveCount(touch ? 1 : 0);
         if (touch) {
           await expect(list).toBeHidden();
@@ -113,9 +133,11 @@ for (const { name, width, height, touch } of sizes) {
         await fold.click();
         await expect(conversation.getByText('bun test src/auth/login.test.ts', { exact: true })).toBeVisible();
         await fold.click();
+        await expect(nextMessages(page).getByRole('button')).toHaveCount(suggested.length);
         await captureCoding(page, `chat-done-${theme}-${name}.png`);
         await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('3 pass');
+        await expect(composer).toHaveCount(0);
         await expect(terminal(page).locator('b')).toHaveCount(0);
         await captureCoding(page, `finished-${theme}-${name}.png`);
 
@@ -129,6 +151,8 @@ for (const { name, width, height, touch } of sizes) {
 
         await page.getByRole('radio', { name: '변경' }).click();
         await expect(page.getByRole('region', { name: '작업 변경' }).getByText('fix/login-message', { exact: true })).toBeVisible();
+        await expect(composer).toHaveCount(0);
+        await expect(attachments(page)).toHaveCount(0);
         await page.getByText('커밋 1', { exact: true }).click();
         await expect(page.getByText('Show a fallback on login errors')).toBeVisible();
         await page.getByRole('button', { name: /src\/auth\/login\.ts/ }).click();
@@ -151,10 +175,16 @@ for (const { name, width, height, touch } of sizes) {
         await blocked.click();
         const blockedPane = page.getByRole('region', { name: '설정 화면 키보드 탐색 확인', exact: true });
         await expect(blockedPane.getByRole('region', { name: '승인 요청' })).toBeVisible();
+        if (touch) await expect(composer).toHaveCount(0);
+        else {
+          await expect(composer).toBeDisabled();
+          await expect(stop(page)).toBeVisible();
+        }
         await captureCoding(page, `chat-blocked-${theme}-${name}.png`);
         await page.getByRole('radio', { name: '터미널', exact: true }).click();
         await expect(terminal(page)).toContainText('Do you want to proceed?');
-        await expect(composer).toBeDisabled();
+        await expect(composer).toHaveCount(0);
+        await expect(stop(page)).toHaveCount(0);
         await expect(keys.getByRole('button', { name: '추가 키' })).toBeVisible();
         if (touch) {
           const bounds = await keys.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().toJSON()));
@@ -166,7 +196,8 @@ for (const { name, width, height, touch } of sizes) {
         await shell.click();
         await expect(terminal(page)).toContainText('git status --short');
         await expect(composer).toHaveCount(0);
-        await expect(page.getByRole('textbox', { name: '셸 명령' })).toBeEnabled();
+        await expect(attachments(page)).toHaveCount(0);
+        await expect(page.getByRole('radio', { name: '대화' })).toHaveCount(0);
         await expect(page.getByRole('radio', { name: '변경' })).toHaveCount(0);
         await captureCoding(page, `shell-${theme}-${name}.png`);
         if (touch) await back(page).click();
@@ -189,7 +220,7 @@ for (const { name, width, height, touch } of sizes) {
     }
 
     test('starts and interrupts an agent, preserves rejected prompts and sends a follow-up', async ({ page }) => {
-      await openScreen(page, coding, 'light');
+      await openScreen(page, richCoding, 'light');
       await page.getByRole('link', { name: '새 스페이스' }).click();
       const task = page.getByRole('textbox', { name: '첫 지시 (선택)' });
       const start = page.getByRole('button', { name: '스페이스 만들기' });
@@ -223,14 +254,21 @@ for (const { name, width, height, touch } of sizes) {
       await expect(page).toHaveURL(url => url.hash === `#${paneRoute(visualCodingIds.started)}`);
       await expect(terminal(page)).toContainText('두 번째 줄');
       const interrupted = controlCommand(page, 'input');
-      await page.getByRole('button', { name: '중단 (Esc)' }).click();
+      if (touch) {
+        await expect(stop(page)).toHaveCount(0);
+        await page.getByRole('group', { name: '터미널 키' }).getByRole('button', { name: '중단 (Esc)', exact: true }).tap();
+      } else {
+        const headerStop = page.locator('.coding-detail-head').getByRole('button', { name: '작업 중단', exact: true });
+        await expect(headerStop).toHaveAttribute('title', '작업 중단 (Esc)');
+        await headerStop.click();
+      }
       expect((await interrupted).postDataJSON()).toMatchObject({ pane: visualCodingIds.started, type: 'input', text: '\x1b' });
       await expect(terminal(page)).toContainText('Interrupted');
       if (touch) await back(page).click();
 
       await page.getByRole('link', { name: /로그인 실패 시 안내 문구 고치기/ }).click();
       const replyPane = page.getByRole('region', { name: '로그인 실패 시 안내 문구 고치기', exact: true });
-      const compose = replyPane.getByRole('textbox', { name: '후속 지시' });
+      const compose = followUp(page);
       const send = replyPane.getByRole('button', { name: '보내기', exact: true });
       await compose.fill('실패 응답도 확인해 주세요.');
       if (touch) {
@@ -255,9 +293,49 @@ for (const { name, width, height, touch } of sizes) {
       const sent = post(page, '/api/herdr/prompt');
       if (touch) await send.click(); else await compose.press('Meta+Enter');
       expect((await sent).postDataJSON()).toEqual({ pane: visualCodingIds.finished, text });
-      await expect(terminal(page)).toContainText('실패 응답도 확인하겠습니다.');
-      await expect(compose).toBeDisabled();
       await expect(compose).toHaveValue('');
+      await expect(compose).toBeEnabled();
+      await expect(replyPane.getByRole('region', { name: '에이전트 대화' }).getByText(text)).toBeVisible();
+    });
+
+    test('stops a working agent from the chat composer', async ({ page }) => {
+      const pane = visualCodingIds.running;
+      await openScreen(page, { ...richCoding, route: () => paneRoute(pane), waits: () => [] }, 'light');
+      await expect(page.getByRole('radio', { name: '대화', exact: true })).toBeChecked();
+      await expect(followUp(page)).toBeEnabled();
+      await expect(page.locator('.coding-detail-head').getByRole('button', { name: '작업 중단', exact: true })).toHaveCount(0);
+      const interrupted = post(page, '/api/herdr/input');
+      await stop(page).click();
+      expect((await interrupted).postDataJSON()).toEqual({ pane, keys: ['esc'] });
+      await expect(stop(page)).toHaveCount(0);
+    });
+
+    test('offers next messages after a finished pane and drafts one without sending', async ({ page }) => {
+      const pane = visualCodingIds.finished;
+      const prompts: unknown[] = [];
+      page.on('request', request => {
+        if (new URL(request.url()).pathname === '/api/herdr/prompt' && request.method() === 'POST') prompts.push(request.postDataJSON());
+      });
+      const requested = page.waitForRequest(request => new URL(request.url()).pathname === '/api/herdr/suggestions');
+      await openScreen(page, { ...richCoding, route: () => paneRoute(pane), waits: () => ['기본 안내 문구'], prepare: async page => {
+        await mockCodingApi(page, { rich: true });
+        await mockPaneSuggestions(page);
+      } }, 'light');
+      expect(new URL((await requested).url()).searchParams.get('pane')).toBe(pane);
+      const rows = nextMessages(page);
+      await expect(rows.getByRole('listitem')).toHaveCount(2);
+      await expect(rows.getByRole('button', { name: suggested[0], exact: true })).toContainText('Tab');
+      const field = followUp(page);
+      await expect(field).toHaveValue('');
+      await field.press('Tab');
+      await expect(field).toHaveValue(suggested[0]!);
+      await expect(field).toBeFocused();
+      await expect(rows).toHaveCount(0);
+      await field.fill('');
+      await rows.getByRole('button', { name: suggested[1], exact: true }).click();
+      await expect(field).toHaveValue(suggested[1]!);
+      await expect(field).toBeFocused();
+      expect(prompts).toEqual([]);
     });
 
     test('moves the blocked choice with arrows, submits it and returns to the roster when the terminal ends', async ({ page }) => {
@@ -313,6 +391,53 @@ for (const { name, width, height, touch } of sizes) {
     });
   });
 }
+
+test('working omp prompts use the configured delivery and Alt+Enter inverts it once', async ({ page }) => {
+  const pane = visualCodingIds.finished;
+  const hash = (value: string) => page.evaluate(next => { location.hash = next; }, value);
+  await openScreen(page, { ...richCoding, route: () => paneRoute(pane), waits: () => ['기본 안내 문구'] }, 'light');
+  const field = followUp(page);
+  const send = async (text: string, button: string, delivery?: 'steer' | 'queue', key?: string) => {
+    await expect(field).toBeEnabled();
+    await field.fill(text);
+    const request = post(page, '/api/herdr/prompt');
+    if (key) await field.press(key);
+    else await page.getByRole('button', { name: button, exact: true }).click();
+    expect((await request).postDataJSON()).toEqual({ pane, text, ...(delivery ? { delivery } : {}) });
+    await expect(field).toHaveValue('');
+  };
+
+  await send('작업을 이어서 해 주세요.', '보내기');
+  await expect(page.getByText('스티어링', { exact: true })).toBeVisible();
+  await send('이 지시는 바로 적용해 주세요.', '스티어링로 보내기', 'steer');
+  await send('이 지시는 끝난 뒤 적용해 주세요.', '스티어링로 보내기', 'queue', 'Alt+Enter');
+  await expect(page.getByText('스티어링', { exact: true })).toBeVisible();
+
+  const settings = '/settings?tab=coding';
+  const group = page.getByRole('radiogroup', { name: '지시를 보내는 방식' });
+  const steer = group.getByRole('radio', { name: '스티어링', exact: true });
+  const queue = group.getByRole('radio', { name: '대기열', exact: true });
+  await hash(settings);
+  await expect(steer).toBeChecked();
+  try {
+    const saved = page.waitForResponse(response => response.url().endsWith('/api/commands') &&
+      response.request().postDataJSON()?.command?.type === 'settings.update');
+    await queue.click();
+    const response = await saved;
+    expect(response.ok()).toBe(true);
+    expect(response.request().postDataJSON().command).toEqual({ type: 'settings.update', codingDelivery: 'queue' });
+    await expect(queue).toBeChecked();
+    await hash(paneRoute(pane));
+    await expect(page.getByText('대기열', { exact: true })).toBeVisible();
+    await send('다음 차례에 테스트를 추가해 주세요.', '대기열로 보내기', 'queue');
+    await send('이 지시만 바로 적용해 주세요.', '대기열로 보내기', 'steer', 'Alt+Enter');
+    await expect(page.getByText('대기열', { exact: true })).toBeVisible();
+  } finally {
+    await hash(settings);
+    await steer.click();
+    await expect(steer).toBeChecked();
+  }
+});
 
 test('rechecks setup, copies the install command, and reports when herdr stops later', async ({ page }) => {
   let setupOverride: CodingSetup | null = {
@@ -379,7 +504,8 @@ test('forwards native terminal input, including bracketed paste, and refits with
     return url.pathname === '/api/herdr/terminal' && url.searchParams.get('pane') === visualCodingIds.shell &&
       Number(url.searchParams.get('cols')) < Number(initial.get('cols')) && url.searchParams.get('rows') === '120';
   });
-  await page.setViewportSize({ width: 1120, height: 720 });
+  const viewport = page.viewportSize()!;
+  await page.setViewportSize({ width: viewport.width - 80, height: viewport.height - 80 });
   const resized = await refitted;
   expect(resized.headers()['authorization']).toMatch(/^Bearer /);
   await expect(page).toHaveURL(`${baseUrl}/#${paneRoute(visualCodingIds.shell)}`);
@@ -529,13 +655,22 @@ test('retains the last picture during loss and reconnects after the quiet interv
   await expect(reconnecting).toHaveCount(0);
 });
 
-test('manages workspaces, tabs, splits and shell agents through the roster', async ({ page }) => {
+test('manages workspaces, tabs, splits and shell agents through the roster', async ({ page, hasTouch }) => {
   await openScreen(page, coding, 'light');
   await spaces(page);
   async function choose(node: string, label: string) {
     const menu = `${node} 작업`;
     await page.getByRole('button', { name: menu, exact: true }).click();
-    await page.getByRole('dialog', { name: menu }).getByRole('button', { name: label, exact: true }).click();
+    await page.getByRole('dialog', { name: menu }).getByRole('button', { name: label, exact: true })
+      .and(page.locator('.herdr-node-action')).click();
+  }
+  async function returnToRoster(text: string) {
+    if (!hasTouch) return;
+    // Let the new pane establish its lease before leaving, then wait for its release.
+    await expect(terminal(page)).toContainText(text);
+    const released = page.waitForResponse(response => response.url().endsWith('/api/herdr/control/release') && response.ok());
+    await back(page).tap();
+    await released;
   }
   await choose('app', '닫기');
   const close = page.getByRole('dialog', { name: '스페이스 닫기' });
@@ -558,13 +693,16 @@ test('manages workspaces, tabs, splits and shell agents through the roster', asy
   await page.getByRole('button', { name: '탭 만들기' }).click();
   expect((await tab).postDataJSON()).toEqual({ workspace: 'w79', label: '실험' });
   await expect(page).toHaveURL(url => url.hash === `#${paneRoute('w79:p81')}`);
+  await returnToRoster('zsh %');
 
   await choose('실험', '오른쪽으로 분할');
   const split = post(page, '/api/herdr/split');
   await page.getByRole('button', { name: '분할', exact: true }).click();
   expect((await split).postDataJSON()).toEqual({ pane: 'w79:p81', direction: 'right' });
   await expect(page).toHaveURL(url => url.hash === `#${paneRoute('w79:p82')}`);
-  const shell = page.getByRole('region', { name: '탭 · 실험', exact: true }).locator('.herdr-pane-row[data-selected]');
+  await returnToRoster('zsh %');
+  const shell = page.getByRole('region', { name: '탭 · 실험', exact: true }).locator('.herdr-pane-row')
+    .filter({ has: page.locator(`a[href="#${paneRoute('w79:p82')}"]`) });
   await shell.getByRole('button', { name: 'zsh 작업' }).click();
   await page.getByRole('dialog', { name: 'zsh 작업' }).getByRole('button', { name: '에이전트 시작' }).click();
   await page.getByRole('combobox', { name: '에이전트' }).click();
@@ -575,7 +713,8 @@ test('manages workspaces, tabs, splits and shell agents through the roster', asy
   await page.getByRole('button', { name: '시작', exact: true }).click();
   expect((await agent).postDataJSON()).toEqual({ pane: 'w79:p82', agent: 'pi', task: '변경을 읽어 주세요.' });
   await expect(terminal(page)).toContainText('변경을 읽어 주세요.');
-  await expect(page.getByRole('textbox', { name: '후속 지시' })).toBeDisabled();
+  await expect(followUp(page)).toHaveCount(0);
+  await returnToRoster('변경을 읽어 주세요.');
 
   await choose('실험', '닫기');
   const closing = post(page, '/api/herdr/close');
@@ -615,7 +754,7 @@ test('preloads colour history, applies the original wheel delta, and keeps the a
   const end = await page.locator('.herdr-history-scroll').evaluate(node => node.scrollTop);
   const count = requests.length;
   await liveScreen(page).hover();
-  await page.mouse.wheel(0, -240);
+  await liveScreen(page).dispatchEvent('wheel', { deltaY: -240, bubbles: true, cancelable: true });
   await expect(latest(page)).toBeVisible();
   await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBe(end - 240);
   await expect.poll(() => requests.length).toBeGreaterThan(count);
@@ -681,7 +820,7 @@ test('live wheel events still reach applications that track the mouse', async ({
   await expect(latest(page)).toBeHidden();
 });
 
-test('starts omp with the chosen options, and never reuses approval bypass without confirmation', async ({ page }) => {
+test('starts omp with the chosen options, and never reuses approval bypass without confirmation', async ({ page, hasTouch }) => {
   await openScreen(page, { ...coding, route: () => '/coding?new=1', waits: () => [] }, 'light');
   const repo = page.getByRole('textbox', { name: '디렉터리', exact: true });
   await repo.fill('/Projects/app');
@@ -711,6 +850,7 @@ test('starts omp with the chosen options, and never reuses approval bypass witho
     args: ['--resume', 'omp-login-session', '--model', 'zai/glm-5.1', '--thinking', 'high', '--approval-mode', 'yolo'],
   });
   await expect(terminal(page)).toContainText('이어서 수정해 주세요.');
+  if (hasTouch) await back(page).click();
   await page.getByRole('link', { name: '새 스페이스' }).click();
   await repo.fill('/Projects/app');
   await choice(page, '에이전트', 'omp');
@@ -725,7 +865,7 @@ test('starts omp with the chosen options, and never reuses approval bypass witho
 test.describe('mobile pane controls', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test('controlled terminal sends wheel, touch, page and composer input and defers keyboard resize during a gesture', async ({ page }) => {
+  test('controlled terminal sends wheel, touch, page and xterm input and defers keyboard resize during a gesture', async ({ page }) => {
     const pane = visualCodingIds.shell;
     const commands: HerdrControlCommand[] = [];
     page.on('request', request => {
@@ -739,7 +879,7 @@ test.describe('mobile pane controls', () => {
     const grid = page.locator('.herdr-control .xterm-screen');
     await grid.hover();
     const wheel = controlCommand(page, 'scroll');
-    await page.mouse.wheel(0, -85);
+    await grid.dispatchEvent('wheel', { deltaY: -85, bubbles: true, cancelable: true });
     expect((await wheel).postDataJSON()).toMatchObject({ pane, type: 'scroll', direction: 'up', source: 'wheel', lines: 4 });
     await expect(latest(page)).toBeVisible();
     const reset = controlCommand(page, 'scroll');
@@ -783,12 +923,13 @@ test.describe('mobile pane controls', () => {
       Reflect.deleteProperty(window.visualViewport!, 'height');
       window.visualViewport!.dispatchEvent(new Event('resize'));
     });
-    const field = page.getByRole('textbox', { name: '셸 명령' });
-    await field.fill('echo hello');
-    const sent = controlCommand(page, 'input');
-    await page.getByRole('button', { name: '보내기' }).click();
-    expect((await sent).postDataJSON()).toMatchObject({ pane, type: 'input', text: '\x1b[200~echo hello\x1b[201~\r' });
-    await expect(field).toHaveValue('');
+    await expect(followUp(page)).toHaveCount(0);
+    const typedAfterResize = controlCommand(page, 'input');
+    await input(page).press('e');
+    expect((await typedAfterResize).postDataJSON()).toMatchObject({ pane, type: 'input', text: 'e' });
+    const entered = controlCommand(page, 'input');
+    await page.getByRole('group', { name: '터미널 키' }).getByRole('button', { name: 'Enter', exact: true }).tap();
+    expect((await entered).postDataJSON()).toMatchObject({ pane, type: 'input', text: '\r' });
   });
 
   test('controlled mouse mode sends touch taps as cell down/up and still sends wheel scroll', async ({ page }) => {
@@ -814,36 +955,35 @@ test.describe('mobile pane controls', () => {
     expect((await wheel).postDataJSON()).toMatchObject({ pane, source: 'wheel', direction: 'up', row: expect.any(Number), column: expect.any(Number) });
     await expect(latest(page)).toBeHidden();
   });
-  test('sends sticky shortcuts, file bytes and an IME-safe shell command', async ({ page }) => {
+  test('sends sticky shortcuts and Korean shell input through xterm', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
     await openScreen(page, { ...coding, route: () => paneRoute(visualCodingIds.shell), waits: () => [] }, 'light');
     const bar = page.getByRole('group', { name: '터미널 키', exact: true });
     const more = bar.getByRole('button', { name: '추가 키' });
     const ctrl = bar.getByRole('button', { name: 'Ctrl', exact: true });
     const alt = bar.getByRole('button', { name: 'Alt', exact: true });
-    const composer = page.getByRole('textbox', { name: '셸 명령' });
     await expect(terminal(page)).toContainText('git status --short');
-    await composer.fill('printf 안녕');
+    await expect(attachments(page)).toHaveCount(0);
+    await input(page).focus();
     await expect(ctrl).toBeHidden();
     const row = await bar.getByRole('button').evaluateAll(keys => keys.map(k => k.getBoundingClientRect().toJSON()));
     expect(row.every(k => k.y === row[0].y && k.width >= 44 && k.x >= 0 && k.right <= 320)).toBe(true);
     const viewport = await liveScreen(page).boundingBox();
     await more.tap();
-    await expect(composer).toBeFocused();
+    await expect(input(page)).toBeFocused();
     expect(await liveScreen(page).boundingBox()).toEqual(viewport);
     await captureCoding(page, 'extra-keys-light-320.png');
     await page.keyboard.press('Escape');
     await expect(ctrl).toBeHidden();
-    await expect(composer).toBeFocused();
+    await expect(input(page)).toBeFocused();
     await more.tap();
     await ctrl.click();
     await expect(ctrl).toBeHidden();
     await expect(more).toHaveText('Ctrl');
-    await expect(composer).toBeFocused();
+    await expect(input(page)).toBeFocused();
     const ctrlInput = post(page, '/api/herdr/input');
-    await composer.press('l');
+    await input(page).press('l');
     expect((await ctrlInput).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: '\x0c' });
-    await expect(composer).toHaveValue('printf 안녕');
     await expect(more).not.toHaveText('Ctrl');
     await input(page).focus();
     await more.tap();
@@ -856,8 +996,27 @@ test.describe('mobile pane controls', () => {
     await bar.getByRole('button', { name: 'Ctrl+D' }).click();
     expect((await extendedInput).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: '\x04' });
 
+    await input(page).focus();
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      await cdp.send('Input.imeSetComposition', { text: '안', selectionStart: 1, selectionEnd: 1 });
+      await expect(liveScreen(page).locator('.composition-view')).toHaveText('안');
+      const committed = post(page, '/api/herdr/input');
+      await cdp.send('Input.insertText', { text: '안녕' });
+      expect((await committed).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: '안녕' });
+    } finally { await cdp.detach(); }
+    const entered = post(page, '/api/herdr/input');
+    await bar.getByRole('button', { name: 'Enter', exact: true }).tap();
+    expect((await entered).postDataJSON()).toEqual({ pane: visualCodingIds.shell, keys: ['enter'] });
+  });
+
+  test('uploads chosen file bytes from the mobile chat composer', async ({ page }) => {
+    const pane = visualCodingIds.finished;
+    await openScreen(page, { ...richCoding, route: () => paneRoute(pane), waits: () => ['기본 안내 문구'] }, 'light');
+    const composer = followUp(page);
+    await composer.fill('확인해 주세요.');
     const chooser = page.waitForEvent('filechooser');
-    await page.getByRole('button', { name: '파일 첨부' }).click();
+    await attachments(page).tap();
     const file = post(page, '/api/herdr/upload');
     const data = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
     await (await chooser).setFiles({ name: '확인.png', mimeType: 'image/png', buffer: data });
@@ -866,10 +1025,10 @@ test.describe('mobile pane controls', () => {
     expect(request.headers()['content-type']).toBe('image/png');
     expect(request.headers().authorization).toMatch(/^Bearer /);
     expect(request.postDataBuffer()).toEqual(data);
-    await expect(composer).toHaveValue('printf 안녕 @/Ghost/uploads/a1b2c3d4-확인.png ');
-    const sent = post(page, '/api/herdr/input');
-    await page.getByRole('button', { name: '보내기' }).click();
-    expect((await sent).postDataJSON()).toEqual({ pane: visualCodingIds.shell, text: 'printf 안녕 @/Ghost/uploads/a1b2c3d4-확인.png \r' });
+    await expect(composer).toHaveValue('확인해 주세요. @/Ghost/uploads/a1b2c3d4-확인.png ');
+    const sent = post(page, '/api/herdr/prompt');
+    await page.getByRole('button', { name: '보내기', exact: true }).tap();
+    expect((await sent).postDataJSON()).toEqual({ pane, text: '확인해 주세요. @/Ghost/uploads/a1b2c3d4-확인.png' });
     await expect(composer).toHaveValue('');
   });
 
@@ -993,13 +1152,24 @@ test.describe('mobile pane controls', () => {
   });
 });
 
-test('restores the last pane on re-entry and saves the complete notification preference', async ({ page }) => {
-  await openScreen(page, { ...coding, route: () => paneRoute(visualCodingIds.finished), waits: () => [] }, 'light');
-  await expect(page.getByRole('textbox', { name: '후속 지시' })).toBeFocused();
+test('restores the last pane on re-entry and saves the complete notification preference', async ({ page, hasTouch }) => {
+  await openScreen(page, { ...richCoding, route: () => paneRoute(visualCodingIds.finished), waits: () => [] }, 'light');
+  await expect(followUp(page)).toBeVisible();
+  if (!hasTouch) await expect(followUp(page)).toBeFocused();
   await page.evaluate(() => { location.hash = '/'; });
-  const nav = codingNav(page, false);
-  await expect(nav.getByRole('button', { name: /코딩.*입력 필요.*1/ })).toBeVisible();
-  await nav.getByRole('button', { name: /코딩/ }).click();
+  const codingLink = codingNav(page, hasTouch).getByRole('button', { name: /코딩/ });
+  await expect(codingLink).toContainText('입력 필요');
+  await expect(codingLink).toContainText('1');
+  await codingLink.click();
+  if (hasTouch) {
+    // Approvals take precedence over restoring the last pane on a compact screen.
+    await expect(page).toHaveURL(/#\/coding$/);
+    const blocked = page.getByRole('region', { name: '입력 필요', exact: true });
+    await blocked.getByRole('button', { name: '이번만 실행', exact: true }).tap();
+    await expect(blocked).toHaveCount(0);
+    await page.evaluate(() => { location.hash = '/'; });
+    await codingLink.tap();
+  }
   await expect(page).toHaveURL(url => url.hash === `#${paneRoute(visualCodingIds.finished)}`);
   await page.evaluate(() => { location.hash = '/settings?tab=coding'; });
   const saved = post(page, '/api/commands');
@@ -1008,15 +1178,15 @@ test('restores the last pane on re-entry and saves the complete notification pre
   await expect(page.getByRole('combobox', { name: '에이전트 알림' })).toHaveText('입력 필요·끝났을 때');
 });
 
-test('attaches pasted images and dropped files from a desktop pane', async ({ page }) => {
-  await openScreen(page, { ...coding, route: () => paneRoute(visualCodingIds.finished), waits: () => [] }, 'light');
-  const composer = page.getByRole('textbox', { name: '후속 지시' });
+test('attaches pasted images and dropped files on the desktop chat composer', async ({ page }) => {
+  await openScreen(page, { ...richCoding, route: () => paneRoute(visualCodingIds.finished), waits: () => [] }, 'light');
+  const composer = followUp(page);
   await composer.fill('이 파일도 확인해 주세요.');
   const { promise: hold, resolve: release } = Promise.withResolvers<void>();
   await page.route('**/api/herdr/upload?*', async route => { await hold; await route.fallback(); }, { times: 1 });
   const uploaded = post(page, '/api/herdr/upload');
   try {
-    await input(page).evaluate(node => {
+    await composer.evaluate(node => {
       const clipboardData = new DataTransfer();
       clipboardData.items.add(new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'clipboard.png', { type: 'image/png' }));
       node.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
@@ -1026,7 +1196,7 @@ test('attaches pasted images and dropped files from a desktop pane', async ({ pa
     await expect(page.getByRole('button', { name: '보내기' })).toBeDisabled();
   } finally { release(); }
   await expect(composer).toHaveValue('이 파일도 확인해 주세요. @/Ghost/uploads/a1b2c3d4-clipboard.png ');
-  await terminal(page).evaluate(node => {
+  await page.locator('.coding-composer .ghost-composer__surface').evaluate(node => {
     const dataTransfer = new DataTransfer();
     dataTransfer.items.add(new File([''], 'empty.txt', { type: 'text/plain' }));
     dataTransfer.items.add(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
@@ -1036,9 +1206,9 @@ test('attaches pasted images and dropped files from a desktop pane', async ({ pa
   await expect(composer).toHaveValue('이 파일도 확인해 주세요. @/Ghost/uploads/a1b2c3d4-clipboard.png @/Ghost/uploads/a1b2c3d4-notes.txt ');
 });
 
-test('opens the pane returned by code_run from the Work record, not a guessed id', async ({ page }) => {
+test('opens the pane returned by code_run from the Work record, not a guessed id', async ({ page, hasTouch }) => {
   await openScreen(page, {
-    ...coding, route: state => `/work/${state.workDoneId}`, waits: () => ['코딩 결과 확인'], prepare: async page => {
+    ...coding, route: state => `/work/${state.workDoneId}`, waits: () => [], prepare: async page => {
       await mockCodingApi(page);
       const { workDoneId, fixedNow, conversationA } = readRunState();
       await page.route(`**/api/works/${workDoneId}`, async route => {
@@ -1055,6 +1225,10 @@ test('opens the pane returned by code_run from the Work record, not a guessed id
       });
     },
   }, 'light');
+  if (hasTouch) {
+    await page.locator('summary').filter({ has: page.getByRole('heading', { name: /^실행 기록/ }) }).click();
+  }
+  await expect(page.getByText('코딩 결과 확인', { exact: true }).first()).toBeVisible();
   const link = page.getByRole('link', { name: 'herdr에서 보기' });
   await expect(link).toHaveCount(1);
   await link.click();
@@ -1139,8 +1313,18 @@ test('merges tool completion by id and preserves scroll and the unsent draft', a
   await expect.poll(() => scroll.evaluate(node => node.scrollTop)).toBe(prior);
   await jump.click();
   await expect(jump).toHaveCount(0);
-  const draft = page.getByRole('textbox', { name: '후속 지시' });
+  const draft = followUp(page);
   await draft.fill('고치기 전에 기록을 보여 주세요.');
+  await page.getByRole('radio', { name: '터미널', exact: true }).click();
+  await expect(terminal(page)).toContainText('3 pass');
+  await expect(draft).toHaveCount(0);
+  await expect(attachments(page)).toHaveCount(0);
+  await page.getByRole('radio', { name: '변경', exact: true }).click();
+  await expect(page.getByRole('region', { name: '작업 변경' })).toBeVisible();
+  await expect(draft).toHaveCount(0);
+  await expect(attachments(page)).toHaveCount(0);
+  await page.getByRole('radio', { name: '대화', exact: true }).click();
+  await expect(draft).toHaveValue('고치기 전에 기록을 보여 주세요.');
   await page.reload();
   await expect(draft).toHaveValue('고치기 전에 기록을 보여 주세요.');
   await expect(page.getByRole('radio', { name: '대화' })).toBeChecked();

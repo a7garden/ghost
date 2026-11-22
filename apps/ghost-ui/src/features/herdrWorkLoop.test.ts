@@ -3,7 +3,7 @@ import type { HerdrPaneView, HerdrView, OmpInfo } from '@ghost/contract';
 import { buildAgentArgs, defaultAgentOptions } from './herdrAgentArgs';
 import { blockedAgentCount } from './herdrAttention';
 import { changeStatus, diffLines } from './herdrChangesDisplay';
-import { modifiedTerminalKey, shellCommand } from './herdrMobileInput';
+import { modifiedTerminalKey } from './herdrMobileInput';
 
 const cwd = '/dev/app';
 const info: OmpInfo = {
@@ -36,7 +36,6 @@ it('maps one sticky printable terminal key without consuming Korean or pasted st
   expect(modifiedTerminalKey('k', { ctrl: false, alt: true })).toBe('\x1bk');
   expect(modifiedTerminalKey('C', { ctrl: true, alt: true })).toBe('\x1b\x03');
   for (const text of ['가', 'pwd', '\x1b[A', 'ArrowUp', '😀']) expect(modifiedTerminalKey(text, { ctrl: true, alt: true })).toBeNull();
-  expect(shellCommand('printf "안녕" ')).toBe('printf "안녕" \r');
 });
 
 it('distinguishes diff metadata and hunk rows from source lines starting with extra +/-', () => {

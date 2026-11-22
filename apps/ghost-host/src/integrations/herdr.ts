@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import { Type } from "typebox";
 import { HERDR_AGENT_KINDS, validate, type CodingAgentId, type CodingPrefs, type CodingSetup, type CodingStart, type HerdrAgentKind, type HerdrAgentStart, type HerdrAnswer, type HerdrAsk, type HerdrChangedFile, type HerdrChanges, type HerdrChat, type HerdrClose, type HerdrControlCommand, type HerdrControlRelease, type HerdrDiff, type HerdrFrame, type HerdrInput, type HerdrIntegration, type HerdrOutput, type HerdrPaneView, type HerdrRename, type HerdrSplit, type HerdrTabCreate, type HerdrView, type HerdrWorkspaceCreate, type HerdrWorkspaceView } from "@ghost/contract";
+import type { HerdrDelivery } from "@ghost/contract";
 import { CommandError, conflict, invalid, notFound } from "../core/errors.ts";
 import { detectHerdrAsk } from "./herdr-ask.ts";
 import { HerdrChatReader } from "./herdr-chat.ts";
@@ -790,7 +791,7 @@ export class Herdr implements HerdrPort {
     }
   }
 
-  async prompt(id: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }): Promise<HerdrRun> {
+  async prompt(id: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }, delivery?: HerdrDelivery): Promise<HerdrRun> {
     const session = guard?.session ?? this.session;
     const pane = await this.agentPane(id, session);
     if (guard) {
@@ -798,7 +799,18 @@ export class Herdr implements HerdrPort {
       if (!["idle", "done"].includes(pane.status)) throw conflict("the coding agent is not ready for another prompt");
       guard.authorize(pane);
     }
-    const settled = await this.submit(id, text, wait, session);
+    // Take a fresh status before sending raw bytes. `agent prompt` itself refuses blocked agents.
+    const queueTarget = delivery === "queue" && pane.agent === "omp" && pane.status === "working"
+      ? await this.agentPane(id, session) : null;
+    let settled: HerdrRun["settled"] = "unwaited";
+    if (queueTarget?.agent === "omp" && queueTarget.status === "working" && queueTarget.terminalId === pane.terminalId) {
+      // Ctrl+Q is omp's default follow-up chord (packages/tui/src/app-keybindings.ts). Send
+      // the entire paste and chord in one write; Ctrl+Q also approves in a blocked composer.
+      const paste = `\x1b[200~${text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "")}\x1b[201~\x11`;
+      await this.sendInput({ pane: id, text: paste }, session);
+    } else {
+      settled = await this.submit(id, text, wait, session);
+    }
     const after = await this.agentPane(id, session);
     // Only a caller that waits for the work reports on it, and it needs the branch the agent is on.
     const cwd = after.cwd ?? pane.cwd;
@@ -821,9 +833,13 @@ export class Herdr implements HerdrPort {
   async input(input: HerdrInput): Promise<void> {
     if (!PANE.test(input.pane)) throw invalid("not a herdr pane id");
     if (input.text === undefined && input.keys === undefined) throw invalid("nothing to send");
+    await this.sendInput(input, this.session);
+  }
+
+  private async sendInput(input: HerdrInput, session: string): Promise<void> {
     // A NUL cannot travel in an argument, and no key a terminal sends needs one.
-    if (input.text !== undefined) await this.call(["pane", "send-text", input.pane, input.text.replaceAll("\0", "")]);
-    if (input.keys !== undefined) await this.call(["pane", "send-keys", input.pane, ...input.keys]);
+    if (input.text !== undefined) await this.call(["pane", "send-text", input.pane, input.text.replaceAll("\0", "")], PROBE_MS, undefined, session);
+    if (input.keys !== undefined) await this.call(["pane", "send-keys", input.pane, ...input.keys], PROBE_MS, undefined, session);
   }
 
   private observers = 0;

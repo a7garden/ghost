@@ -1,14 +1,16 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useReducer, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { SquareTerminal } from 'lucide-react';
-import type { HerdrPaneView, HerdrUpload, HerdrView } from '@ghost/contract';
+import type { HerdrDelivery, HerdrPaneView, HerdrUpload, HerdrView } from '@ghost/contract';
 import { useHost } from '../host/context';
+import { useHostState } from '../host/store';
 import { HostError } from '../host/client';
 import { haptic } from '../host/shell';
 import { Button, Dialog, DialogContent, DialogTitle, InlineError } from '../ui';
 import { HerdrInputQueue } from './herdrTerminalProtocol';
 import { HerdrComposer, useHerdrDraft } from './HerdrComposer';
 import { HerdrChangesView, usePaneChanges } from './HerdrChanges';
-import { modifiedTerminalKey, noModifiers, shellCommand, type TerminalModifiers } from './herdrMobileInput';
+import { modifiedTerminalKey, noModifiers, type TerminalModifiers } from './herdrMobileInput';
+import { lastReply, useNextSuggestions } from './nextSuggestions';
 import { HerdrAskCard, type HerdrAsks } from './HerdrAsk';
 import { HerdrConversation, useHerdrChat } from './HerdrChat';
 import { CodingSkeleton } from './HerdrParts';
@@ -68,38 +70,39 @@ export function useHerdr(revision: number) {
 }
 
 export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = false, chat = false, pending = false, error,
-  onPrompt, onKey, onText, modifiers = noModifiers, onModifier, onModifiedKey = () => false, onUpload, fontSize = 13, onFontSize,
-  branch, navigation, asks, draftKey, terminal, terminalAction }: {
+  onPrompt, onKey, onText, modifiers = noModifiers, onModifier, onUpload, fontSize = 13, onFontSize,
+  branch, navigation, asks, draftKey, terminal, terminalAction, delivery = 'steer', suggestions = [],
+}: {
   pane: HerdrPaneView; screen: ReactNode; mode: HerdrMode; onMode(mode: HerdrMode): void; compact: boolean;
   changes?: boolean; chat?: boolean; pending?: boolean; error?: string;
-  onPrompt(text: string): Promise<boolean>; onKey(key: string): void;
+  onPrompt(text: string, delivery?: HerdrDelivery): Promise<boolean>; onKey(key: string): void;
   onText?(text: string): void; modifiers?: TerminalModifiers; onModifier?(key: keyof TerminalModifiers): void;
-  onModifiedKey?(text: string): boolean; onUpload?(file: File): Promise<HerdrUpload>;
+  onUpload?(file: File): Promise<HerdrUpload>;
   fontSize?: number; onFontSize?(size: number): void; branch?: string | null; navigation?: PaneNavigation;
   asks?: HerdrAsks; draftKey?: string;
   terminal?: RefObject<HerdrTerminalControls | null>; terminalAction?: ReactNode;
+  delivery?: HerdrDelivery; suggestions?: readonly string[];
 }) {
   const draft = useHerdrDraft(draftKey, onUpload);
   const field = useRef<HTMLTextAreaElement>(null);
   const root = useRef<HTMLElement>(null);
   const blocked = Boolean(pane.agent && pane.status === 'blocked');
   const working = Boolean(pane.agent && pane.status === 'working');
+  // The terminal takes its own typing; only a conversation view carries the follow-up field.
   const keysVisible = mode === 'live' && (compact || blocked);
-  const uploadEnabled = mode !== 'changes' && !pending && !blocked && !working;
+  const composing = mode === 'chat' && Boolean(pane.agent) && !(compact && blocked);
   const approval = blocked ? asks?.entries[pane.id] : undefined;
   const focusComposer = useEffectEvent(() => {
-    if (pane.agent && !compact && mode !== 'changes' && !field.current?.disabled) field.current?.focus({ preventScroll: true });
+    if (composing && !compact && !field.current?.disabled) field.current?.focus({ preventScroll: true });
   });
-  useEffect(() => { focusComposer(); }, [pane.id, pane.agent]);
+  useEffect(() => { focusComposer(); }, [pane.id, pane.agent, mode]);
   return <section ref={root} className="coding-detail" aria-label={pane.title} data-pane-mode={mode}
-    onInputCapture={event => { if (event.target === field.current) terminal?.current?.latest(true); }}
-    onPasteCapture={event => draft.paste(event, uploadEnabled)} onDragOver={draft.drag}
-    onDrop={event => draft.drop(event, uploadEnabled)}>
+    onInputCapture={event => { if (event.target === field.current) terminal?.current?.latest(true); }}>
     <HerdrPaneHeader pane={pane} mode={mode} onMode={onMode} chat={chat} changes={changes} compact={compact} branch={branch}
       navigation={navigation} fontSize={fontSize} onFontSize={size => onFontSize?.(size)} terminalAction={terminalAction}
-      onEsc={pane.agent && !keysVisible && (mode === 'live' || (mode === 'chat' && working)) ? () => onKey('esc') : undefined}/>
+      onStop={pane.agent && !keysVisible && mode === 'live' && (working || blocked) ? () => onKey('esc') : undefined}/>
     <div className="herdr-pane-content" key={mode}>{screen}</div>
-    {(error || mode !== 'changes') && <div className="coding-dock" aria-busy={pending || undefined}>
+    {(error || composing || keysVisible || (mode === 'chat' && blocked)) && <div className="coding-dock" aria-busy={pending || undefined}>
       {error && <InlineError>{error}</InlineError>}
       {mode === 'chat' && blocked && <div className="herdr-chat-ask">
         {approval ? <HerdrAskCard entry={approval} answer={index => void asks?.answer(pane.id, index)}/>
@@ -109,15 +112,13 @@ export function HerdrPaneBody({ pane, screen, mode, onMode, compact, changes = f
         onText={text => onText?.(text)} onPageUp={text => { if (!terminal?.current?.pageUp()) onText?.(text); }} onModifier={key => {
         onModifier?.(key);
         if (!document.activeElement?.classList.contains('xterm-helper-textarea')) {
-          const next = field.current && !field.current.disabled ? field.current
-            : root.current?.querySelector<HTMLTextAreaElement>('.herdr-terminal-live .xterm-helper-textarea, .herdr-control .xterm-helper-textarea');
-          next?.focus({ preventScroll: true });
+          root.current?.querySelector<HTMLTextAreaElement>('.herdr-terminal-live .xterm-helper-textarea, .herdr-control .xterm-helper-textarea')?.focus({ preventScroll: true });
         }
       }} onDismiss={() => {
         if (document.activeElement instanceof HTMLElement && root.current?.contains(document.activeElement)) document.activeElement.blur();
       }}/>}
-      {mode !== 'changes' && !(compact && blocked && mode === 'chat') && <HerdrComposer shell={!pane.agent} blocked={blocked} working={working} pending={pending} compact={compact}
-        draft={draft} field={field} onSubmit={onPrompt} onModifiedKey={onModifiedKey} canUpload={Boolean(onUpload)}/>}
+      {composing && <HerdrComposer agent={pane.agent} blocked={blocked} working={working} pending={pending} delivery={delivery}
+        draft={draft} field={field} suggestions={suggestions} onSubmit={onPrompt} onStop={() => onKey('esc')} canUpload={Boolean(onUpload)}/>}
     </div>}
   </section>;
 }
@@ -126,7 +127,7 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
   pane: HerdrPaneView; compact: boolean; onChanged(): void; onGone(): void;
   preferencesKey: string; since: number; branch?: string | null; navigation: PaneNavigation; asks: HerdrAsks;
 }) {
-  const { client } = useHost();
+  const { client, store } = useHost();
   const [mode, setMode] = useState(() => herdrModes.find(item => item === readCodingValue(`mode:${preferencesKey}`)));
   const [fontSize, setFontSize] = useState<number>(readTerminalSize);
   const select = (value: HerdrMode) => { setMode(value); writeCodingValue(`mode:${preferencesKey}`, value); };
@@ -149,6 +150,11 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
     previous.current = displayed.status;
   }, [displayed.status]);
   const { chat, error: chatError } = useHerdrChat(displayed, mode === undefined || mode === 'chat');
+  const { state } = useHostState(store);
+  const delivery = state?.settings?.codingDelivery ?? 'steer';
+  const latest = lastReply(chat.items, item => item.kind === 'user' || item.kind === 'agent');
+  const suggestions = useNextSuggestions({ kind: 'pane', id: pane.id }, latest?.id ?? null,
+    latest?.kind === 'agent' && (displayed.status === 'idle' || displayed.status === 'done'));
   const { changes, error: changesError, refresh: refreshChanges, revision: changesRevision } = usePaneChanges(displayed);
   const changed = useEffectEvent((input: { text?: string; keys?: string[] }) => {
     if (input.keys || /[\r\x03\x1b]/.test(input.text ?? '') || (pane.status === 'blocked' && /^[yn123]$/i.test(input.text ?? ''))) onChanged();
@@ -169,16 +175,8 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
     return () => { live = false; writer.close(); queue.current = null; };
   }, [client, id]);
 
-  async function prompt(text: string) {
+  async function prompt(text: string, delivery?: HerdrDelivery) {
     terminal.current?.latest(true);
-    if (activeMode === 'live' && controlWanted) {
-      if (busy.current || !control.current) return false;
-      busy.current = true;
-      setPending(true);
-      setError('');
-      try { return await control.current.submit(text); }
-      finally { busy.current = false; setPending(false); }
-    }
     const writer = queue.current;
     if (!writer || busy.current) return false;
     busy.current = true;
@@ -187,11 +185,11 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
     try {
       return await writer.afterInput(async () => {
         try {
-          if (pane.agent) {
-            const next = await client.promptHerdr({ pane: id, text });
-            if (queue.current === writer) setReply({ snapshot: pane, pane: next });
-          } else await client.inputHerdr({ pane: id, text: shellCommand(text) });
-          if (queue.current === writer) onChanged();
+          const next = await client.promptHerdr({ pane: id, text, ...(delivery ? { delivery } : {}) });
+          if (queue.current === writer) {
+            setReply({ snapshot: pane, pane: next });
+            onChanged();
+          }
           return true;
         } catch (reason) {
           if (queue.current === writer) {
@@ -242,11 +240,11 @@ export function OpenHerdrPane({ pane, compact, onChanged, onGone, preferencesKey
       else { terminal.current?.latest(); queue.current?.key(key); }
     }}
     onText={text => { activeTerminal.current?.latest(); sendText(text); }}
-    onModifiedKey={modifiedKey} modifiers={modifiers}
+    modifiers={modifiers}
     onModifier={key => { activeTerminal.current?.latest(); setSticky({ ...modifierRef.current, [key]: !modifierRef.current[key] }); }}
     onUpload={file => client.herdrUpload(file)} changes={changesVisible} chat={chatVisible} fontSize={fontSize} onFontSize={setFontSize}
     branch={changes?.branch ?? branch} navigation={navigation} asks={asks} draftKey={`draft:${preferencesKey}`} terminal={activeTerminal}
-    terminalAction={terminalAction}
+    terminalAction={terminalAction} delivery={delivery} suggestions={suggestions}
     screen={activeMode === 'chat' ? <HerdrConversation items={chat.items} busy={displayed.status === 'working'} since={since} error={chatError}/>
       : activeMode === 'changes' ? <HerdrChangesView pane={displayed} compact={compact} data={changes} error={changesError}
         onRefresh={refreshChanges} revision={changesRevision}/>

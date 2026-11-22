@@ -1,4 +1,5 @@
 import type { CodingAgentId, CodingSetup, CodingStart, Decision, ExecutionTarget, HerdrAgentStart, HerdrAnswer, HerdrAsk, HerdrChanges, HerdrChat, HerdrClose, HerdrControlCommand, HerdrControlRelease, HerdrDiff, HerdrFrame, HerdrInput, HerdrOutput, HerdrPaneView, HerdrRename, HerdrSplit, HerdrTabCreate, HerdrView, HerdrWorkspaceCreate, Scope, VaultItem, Work } from "@ghost/contract";
+import type { HerdrDelivery } from "@ghost/contract";
 import type { HerdrControlRequest, HerdrControlStream } from "./herdr-control.ts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 export type { McpPort, McpTool, McpCallResult } from "./mcp.ts";
@@ -341,7 +342,7 @@ export interface HerdrPort {
   installIntegration(agent: CodingAgentId): Promise<void>;
   /** Persist the opened handle before the first agent launch or prompt. Omitted wait returns after admission, not completion. */
   start(input: CodingStart, wait?: HerdrWait, opened?: (prepared: HerdrRun) => void, guard?: { session: string; authorize: (stage?: "open" | "launch" | "prompt", pane?: HerdrPaneView) => void }): Promise<HerdrRun>;
-  prompt(pane: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }): Promise<HerdrRun>;
+  prompt(pane: string, text: string, wait?: HerdrWait, guard?: { session: string; terminalId: string; agent: string; authorize: (pane?: HerdrPaneView) => void }, delivery?: HerdrDelivery): Promise<HerdrRun>;
   /** Interrupt only the same terminal in its recorded session; never close the pane or delete its worktree. */
   interrupt?(session: string, pane: string, terminalId: string, guard?: { agent: string; authorize: (pane?: HerdrPaneView) => void }): Promise<void>;
   createWorkspace(input: HerdrWorkspaceCreate): Promise<HerdrPaneView>;

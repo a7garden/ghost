@@ -53,6 +53,7 @@ import type { MemoryStore } from "../stores/memory.ts";
 import type { MemoryDreamInput, MemoryEngine } from "../memory/types.ts";
 import { dreamInPi } from "../memory/pi.ts";
 import { gateRecoveredDreams, memoryRegistry } from "../memory/runtime.ts";
+import { PREDICTION_CHOICES, PREDICTION_SYSTEM_PROMPT, parseComposerPredictions } from "./composer-prediction.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const SELECTABLE_TOOLS = new Set<string>(GHOST_TOOLS);
@@ -153,7 +154,7 @@ class HostEngine implements Engine, MemoryEngine {
   private readonly toolLoads = new Map<number, Promise<void>>();
   private closing = false;
 
-  constructor(deps: EngineDeps, harness: Harness, ownedModels: MutableModels | null, private readonly registry: Registry, private readonly guardExtension: Extension) {
+  constructor(deps: EngineDeps, harness: Harness, private readonly models: Models, ownedModels: MutableModels | null, private readonly registry: Registry, private readonly guardExtension: Extension) {
     this.core = deps.core;
     this.tools = deps.tools;
     this.log = deps.log;
@@ -746,6 +747,25 @@ class HostEngine implements Engine, MemoryEngine {
   }
 
   // Reading
+
+  async suggest({ messages, signal }: Parameters<NonNullable<Engine["suggest"]>>[0]): Promise<string[]> {
+    const settings = this.core.ledger.settings();
+    const ref = settings.suggestionModel ?? settings.defaultModel;
+    if (settings.nextMessageSuggestions === false || !ref) return [];
+    const model = this.models.getModel(ref.provider, ref.model);
+    if (!model) return [];
+    signal.throwIfAborted();
+    const transcript = messages.slice(-16).map(({ role, text }) => ({ role, text: text.slice(0, 1500) }));
+    const reply = await this.models.completeSimple(model, {
+      systemPrompt: PREDICTION_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: JSON.stringify(transcript), timestamp: Date.now() }],
+    }, { signal, maxTokens: 1024, reasoning: model.reasoning ? "minimal" : undefined, maxRetries: 0, cacheRetention: "none" });
+    signal.throwIfAborted();
+    if (reply.stopReason !== "stop" && reply.stopReason !== "length") {
+      throw new Error(reply.errorMessage ?? `suggestion model stopped: ${reply.stopReason}`);
+    }
+    return parseComposerPredictions(reply.content.filter(part => part.type === "text").map(part => part.text).join("\n"), PREDICTION_CHOICES) ?? [];
+  }
 
   async page(conversationId: string, before: string | null, limit: number): Promise<TranscriptPage> {
     const state = await this.stateFor(conversationId);
@@ -1537,7 +1557,7 @@ export async function createEngine(deps: EngineDeps): Promise<Engine & MemoryEng
     );
     await gateRecoveredDreams(harness, (id) => Boolean(core.ledger.conversationByPiId(String(id))));
     opening = false;
-    const engine = new HostEngine(deps, harness, ownedModels, registry, guard.extension);
+    const engine = new HostEngine(deps, harness, models, ownedModels, registry, guard.extension);
     await engine.prepareContexts();
     return engine;
   } catch (error) {

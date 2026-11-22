@@ -497,6 +497,9 @@ function runSync(core: Core, access: Access, { command }: CommandRequest, contex
         if (command.noFallbackGhosts !== undefined) ledger.putSetting("noFallbackGhosts", [...new Set(command.noFallbackGhosts)]);
         if (command.reviewModel !== undefined) ledger.putSetting("reviewModel", command.reviewModel);
         if (command.memoryModel !== undefined) ledger.putSetting("memoryModel", command.memoryModel);
+        if (command.nextMessageSuggestions !== undefined) ledger.putSetting("nextMessageSuggestions", command.nextMessageSuggestions);
+        if (command.suggestionModel !== undefined) ledger.putSetting("suggestionModel", command.suggestionModel);
+        if (command.codingDelivery !== undefined) ledger.putSetting("codingDelivery", command.codingDelivery);
         if (command.ownerLanguage !== undefined) ledger.putSetting("ownerLanguage", command.ownerLanguage);
         if (command.approvals !== undefined) ledger.putSetting("approvals", command.approvals);
         if (command.limits !== undefined) ledger.putSetting("limits", { ...ledger.limits(), ...command.limits });

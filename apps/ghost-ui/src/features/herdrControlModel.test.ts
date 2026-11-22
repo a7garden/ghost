@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HerdrControlError, HostError } from '../host/client';
-import { controlComposerText, controlRailKey, initialTerminalLease, shouldControlTerminal, takenNote, terminalLeaseConsent, terminalLeaseReducer, TerminalResize, TerminalScrollLines, terminalProblem, type TerminalLeaseAction, type TerminalSize } from './herdrControlModel';
+import { controlRailKey, initialTerminalLease, shouldControlTerminal, takenNote, terminalLeaseConsent, terminalLeaseReducer, TerminalResize, TerminalScrollLines, terminalProblem, type TerminalLeaseAction, type TerminalSize } from './herdrControlModel';
 
 it('drives owned panes themselves; borrowed panes only after an explicit 직접 조작', () => {
   expect(shouldControlTerminal(true, null)).toBe(true);
@@ -34,11 +34,10 @@ it('coalesces signed fractional cell scroll and splits large wheel bursts', () =
   expect(scroll.ready).toBe(false);
 });
 
-it('uses terminal cursor mode and bracketed paste for rail and composer bytes', () => {
+it('uses terminal cursor mode for rail bytes', () => {
   expect(controlRailKey('up', true)).toBe('\x1bOA');
   expect(controlRailKey('up', false)).toBe('\x1b[A');
   expect(controlRailKey('ctrl+c', true)).toBe('\x03');
-  expect(controlComposerText('line 1\r\nline 2', true)).toBe('\x1b[200~line 1\rline 2\x1b[201~\r');
 });
 
 describe('controlled terminal resizing', () => {

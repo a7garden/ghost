@@ -62,7 +62,7 @@ case "$*" in
   "integration status") cat "$D/integrations.txt" ;;
   "integration install claude") echo installed ;;
   "integration install codex") echo '{"error":{"code":"install_failed","message":"cannot write ~/.codex"}}'; exit 1 ;;
-  "--session default api snapshot"|"--session work api snapshot") cat "$D/snapshot.json" ;;
+  "--session default api snapshot"|"--session work api snapshot") cat "$D/snapshot.json"; if [ -e "$D/next-snapshot.json" ]; then mv "$D/next-snapshot.json" "$D/snapshot.json"; fi ;;
   "--session default pane read w1:pA "*) printf '\\n\\n  working on it   \\n\\033[31mred\\n\\n' ;;
   "--session default pane read "*) echo '{"error":{"code":"pane_not_found","message":"gone"}}'; exit 1 ;;
   "--session default worktree create "*"--branch ghost/dup "*) if [ -e "$D/dup" ]; then echo '${created("w9:p1", "/wt/repo-dup-2")}'; else touch "$D/dup"; echo '{"error":{"code":"worktree_create_failed","message":"fatal: already exists"}}'; exit 1; fi ;;
@@ -288,6 +288,58 @@ test("a prompt reaches only an agent, and a blocked agent's refusal is the owner
     await expect(herdr.prompt("w1:p3", "x")).rejects.toMatchObject({ code: "invalid" });
     await expect(herdr.prompt("w1:pZ", "x")).rejects.toMatchObject({ code: "not_found" });
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("only a working omp receives a queued prompt as one multiline paste with the follow-up chord", async () => {
+  const dir = tempDir();
+  const fake = fakeHerdr(dir);
+  const h = harness();
+  const config: Config = { root: dir, host: "127.0.0.1", port: 0, publicOrigin: null, uiDir: null, sandbox: { kind: "local" }, voice: null, apns: null, skills: null, reach: null, browser: null };
+  const server = startServer({ core: h.core, config, ownerToken: OWNER, documents: null, skills: null, herdr: new Herdr(fake.path) });
+  const pane = "w9:p1";
+  const text = "계속해\n두 번째 줄";
+  const request = (delivery?: "steer" | "queue") => fetch(`http://127.0.0.1:${server.port}/api/herdr/prompt`, {
+    method: "POST", headers: { authorization: `Bearer ${OWNER}`, "content-type": "application/json" }, body: JSON.stringify({ pane, text, delivery }),
+  });
+  try {
+    for (const [agent, status, delivery, queued] of [
+      ["omp", "working", "queue", true],
+      ["omp", "working", "steer", false],
+      ["omp", "working", undefined, false],
+      ["omp", "idle", "queue", false],
+      ["omp", "done", "queue", false],
+      ["claude", "working", "queue", false],
+    ] as const) {
+      const view = structuredClone(snapshot);
+      const target = view.result.snapshot.panes.find(p => p.pane_id === pane)!;
+      target.agent = agent;
+      target.agent_status = status;
+      writeFileSync(join(dir, "snapshot.json"), JSON.stringify(view));
+      const previous = (await fake.runs()).length;
+      const response = await request(delivery);
+      expect(response.status).toBe(200);
+      expect(parse(HerdrPaneView, await response.json()).id).toBe(pane);
+      const writes = (await fake.runs()).slice(previous).filter(run => run[2] !== "api");
+      expect(writes).toEqual(queued
+        ? [["--session", "default", "pane", "send-text", pane, `\x1b[200~${text}\x1b[201~\x11`]]
+        : [["--session", "default", "agent", "prompt", pane, text]]);
+    }
+    const working = structuredClone(snapshot);
+    const target = working.result.snapshot.panes.find(p => p.pane_id === pane)!;
+    target.agent_status = "working";
+    writeFileSync(join(dir, "snapshot.json"), JSON.stringify(working));
+    target.agent_status = "blocked";
+    writeFileSync(join(dir, "next-snapshot.json"), JSON.stringify(working));
+    const previous = (await fake.runs()).length;
+    expect((await request("queue")).status).toBe(200);
+    expect((await fake.runs()).slice(previous).filter(run => run[2] !== "api")).toEqual([
+      ["--session", "default", "agent", "prompt", pane, text],
+    ]);
+  } finally {
+    await server.stop();
+    h.ledger.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

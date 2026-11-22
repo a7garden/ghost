@@ -235,9 +235,21 @@ export type HerdrRename = Static<typeof HerdrRename>;
 export const HerdrClose = Type.Object({ target: HerdrTarget, id: Ref });
 export type HerdrClose = Static<typeof HerdrClose>;
 
+/**
+ * How a follow-up reaches an agent that is still working. `steer` redirects the current turn (the agent reads it at its next
+ * step); `queue` waits for the turn to finish. Only agents with a distinct queue key (omp: Ctrl+Q) differ; every other
+ * agent receives the message the way its own Enter does. The Host ignores the choice while the agent is idle.
+ */
+export const HerdrDelivery = Type.Union([Type.Literal("steer"), Type.Literal("queue")]);
+export type HerdrDelivery = Static<typeof HerdrDelivery>;
+
 /** A follow-up instruction submitted to the agent in a pane, as herdr submits a prompt (refused while the agent waits at a dialog). */
-export const HerdrPrompt = Type.Object({ ...PaneRef, text: Task });
+export const HerdrPrompt = Type.Object({ ...PaneRef, text: Task, delivery: Type.Optional(HerdrDelivery) });
 export type HerdrPrompt = Static<typeof HerdrPrompt>;
+
+/** The next messages the owner is likely to send, each exactly as they would type it, most likely first. Empty when suggestions are off or nothing is worth offering. */
+export const NextMessageSuggestions = Type.Object({ suggestions: Type.Array(Type.String({ minLength: 1, maxLength: 500 }), { maxItems: 4 }) });
+export type NextMessageSuggestions = Static<typeof NextMessageSuggestions>;
 
 /**
  * Input for a pane's terminal, the keyboard of the web terminal: `text` is typed exactly as given, control characters

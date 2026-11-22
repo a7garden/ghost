@@ -195,14 +195,19 @@
   .herdr-history-scroll .xterm-scrollable-element > .scrollbar { display: none; }
   .herdr-terminal-latest { position: absolute; inset-inline-end: 24px; bottom: 12px; background: var(--ghost-canvas); }
   .herdr-history-error { position: absolute; inset: 8px 16px auto; }
-  .coding-dock { flex: none; padding: 10px 24px 14px; border-top: 1px solid var(--ghost-line); }
+  .coding-dock { flex: none; padding: 6px 24px 16px; }
   .coding-dock > * { max-width: 47rem; margin-inline: auto; }
   .coding-dock > [role='alert'] { margin-bottom: 8px; }
-  .coding-compose { display: flex; align-items: flex-end; gap: 4px; padding: 4px; border-radius: 16px; background: var(--ghost-inset); box-shadow: var(--shadow-inset-field); }
-  .coding-compose textarea { min-height: 42px; max-height: min(128px, 25dvh); overflow: auto; resize: none; background: transparent; box-shadow: none; }
-  .coding-compose textarea:focus { box-shadow: none; }
-  .coding-compose:focus-within { box-shadow: inset 0 0 0 1px var(--ghost-ink3); }
-  .coding-compose button { flex: none; min-height: 40px; min-width: 40px; border-radius: 12px; }
+  .coding-composer { width: 100%; }
+  .coding-composer .ghost-composer__surface { padding-top: 10px; }
+  .coding-composer .coding-hint { padding: 2px 0; }
+  /* The pane clips its edge, so the working glow stays inside the dock's padding. */
+  .coding-composer[data-running] .ghost-composer__surface::after { inset: -2px; filter: blur(7px); }
+  /* How a message sent now reaches the working agent. */
+  .coding-delivery { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px 3px 7px; border-radius: var(--radius-pill);
+    background: var(--ghost-signal-tint); color: var(--ghost-signal-ink); font-size: var(--text-caption); font-weight: 550; white-space: nowrap; }
+  .coding-delivery svg { width: 13px; height: 13px; }
+  .herdr-stop svg { width: 12px; height: 12px; fill: currentColor; }
   .herdr-keypad { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; max-width: 23rem; margin-bottom: 8px; }
   .herdr-key-palette { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 6px;
     width: min(17rem, calc(100vw - 16px)); max-height: var(--radix-popover-content-available-height); overflow-y: auto;
@@ -330,7 +335,7 @@
   .coding-page[data-compact] .herdr-chat-body { padding: 14px 16px 18px; gap: 16px; }
   .coding-page[data-compact] .herdr-chat-steps summary { min-height: 44px; }
   .coding-page[data-compact] .herdr-chat-latest { inset-inline-end: 16px; }
-  .coding-page[data-compact] .coding-compose textarea { font-size: 16px; }
+  .coding-page[data-compact] .coding-composer .ghost-composer__textarea { font-size: 16px; }
   .coding-page[data-compact] .herdr-view-actions [data-slot='segmented-control-item'] { min-height: 44px; }
   .coding-page[data-compact] .herdr-live { padding: 8px 16px; }
   .coding-page[data-compact] .herdr-pane-row a { min-height: 44px; align-content: center; }
@@ -343,9 +348,8 @@
   .coding-page[data-compact] .herdr-file-diff { border-inline-start: 0; }
   .coding-page[data-compact] .herdr-file-diff header { padding-inline: 8px 12px; }
   .coding-page[data-compact] .herdr-agent-options > summary { padding-block: 10px; }
-  .coding-page[data-compact] .coding-dock { padding: 8px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
-  :root[data-keyboard='open'] .coding-page[data-compact] .coding-dock { padding-bottom: 6px; }
-  :root[data-keyboard='open'] .coding-page[data-compact] .coding-detail:has(.herdr-xterm:focus-within) .coding-compose { display: none; }
+  .coding-page[data-compact] .coding-dock { padding: 8px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  :root[data-keyboard='open'] .coding-page[data-compact] .coding-dock { padding-bottom: 12px; }
   .coding-page[data-compact] .coding-new { padding: 14px 16px max(20px, env(safe-area-inset-bottom)); }
   .coding-page[data-compact] .coding-new :is(input[data-slot='input'], button[data-slot='select-trigger']), .coding-page[data-compact] [data-slot='button'] { min-height: 44px; }
   .coding-page[data-compact] [data-slot='button'][aria-label] { min-width: 44px; }

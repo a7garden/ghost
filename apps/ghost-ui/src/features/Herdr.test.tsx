@@ -83,9 +83,11 @@ describe('herdr roster', () => {
 });
 
 describe('herdr pane', () => {
-  const body = (status: HerdrPaneView['status'], pending?: boolean, compact = false, agent = pane.agent) => renderToStaticMarkup(<HerdrPaneBody
-    pane={{ ...pane, status, agent }} pending={pending} compact={compact} mode="live" onMode={() => {}}
-    screen={<HerdrDiffText value={'@@ -0 +1 @@\n+<b>$ bun test</b>'} wrap={false}/>} onPrompt={async () => true} onKey={() => {}}/>);
+  const body = (status: HerdrPaneView['status'], options: { mode?: 'chat' | 'live'; pending?: boolean; compact?: boolean; agent?: string | null; delivery?: 'steer' | 'queue'; suggestions?: string[] } = {}) =>
+    renderToStaticMarkup(<HerdrPaneBody
+      pane={{ ...pane, status, agent: options.agent === undefined ? pane.agent : options.agent }} pending={options.pending} compact={options.compact ?? false}
+      mode={options.mode ?? 'live'} chat onMode={() => {}} delivery={options.delivery} suggestions={options.suggestions}
+      screen={<HerdrDiffText value={'@@ -0 +1 @@\n+<b>$ bun test</b>'} wrap={false}/>} onPrompt={async () => true} onKey={() => {}}/>);
 
   it('escapes diffs as text and keeps the pane context', () => {
     const markup = body('blocked');
@@ -96,19 +98,39 @@ describe('herdr pane', () => {
     expect(markup).toContain('Claude Code');
   });
 
-  it.each([['blocked', true], ['working', true], ['done', false], ['idle', false], ['unknown', false]] as const)
-  ('renders the right composer and key controls for %s', (status, disabled) => {
+  it.each(['blocked', 'working', 'done', 'idle', 'unknown'] as const)('leaves typing to the terminal in the live view of a %s pane', status => {
     const markup = body(status);
-    expect(markup).toContain('aria-label="중단 (Esc)"');
+    expect(markup).not.toContain('<textarea');
     expect(markup.includes('aria-label="터미널 키"')).toBe(status === 'blocked');
-    expect(markup.match(/<textarea[^>]+>/)?.[0].includes('disabled=""')).toBe(disabled);
+    // A blocked pane's Esc lives on the terminal key rail, beside the other keys it answers with.
+    expect(markup.includes('aria-label="작업 중단"')).toBe(status === 'working');
   });
 
-  it('offers a shell command field without an agent follow-up', () => {
-    const markup = body('idle', false, true, null);
-    expect(markup).toContain('aria-label="셸 명령"');
-    expect(markup).not.toContain('후속 지시');
-    expect(body('idle', true).match(/<textarea[^>]+>/)?.[0]).toContain('disabled=""');
+  it.each([['blocked', true], ['working', false], ['done', false], ['idle', false], ['unknown', false]] as const)
+  ('keeps the follow-up field writable while the agent works: %s', (status, disabled) => {
+    const markup = body(status, { mode: 'chat' });
+    expect(markup).toContain('>후속 지시</label>');
+    expect(markup.match(/<textarea[^>]+>/)?.[0].includes('disabled=""')).toBe(disabled);
+    expect(markup.includes('aria-label="작업 중단"')).toBe(status === 'blocked' || status === 'working');
+  });
+
+  it('says how a message sent now reaches an omp that is working, and only then', () => {
+    expect(body('working', { mode: 'chat', agent: 'omp', delivery: 'steer' })).toContain('스티어링');
+    expect(body('working', { mode: 'chat', agent: 'omp', delivery: 'queue' })).toContain('대기열');
+    expect(body('working', { mode: 'chat', agent: 'claude', delivery: 'queue' })).not.toContain('대기열');
+    expect(body('idle', { mode: 'chat', agent: 'omp', delivery: 'queue' })).not.toContain('대기열');
+  });
+
+  it('offers a likely next message only to an empty field of an agent that waits for the owner', () => {
+    const suggestions = ['테스트도 돌려줘', '커밋해 줘'];
+    const markup = body('done', { mode: 'chat', suggestions });
+    expect(markup).toContain('aria-label="다음 메시지 제안"');
+    expect(markup).toContain('테스트도 돌려줘');
+    expect(body('working', { mode: 'chat', suggestions })).not.toContain('다음 지시 제안');
+  });
+
+  it('has no follow-up field for a plain shell', () => {
+    expect(body('idle', { mode: 'live', compact: true, agent: null })).not.toContain('<textarea');
   });
 });
 

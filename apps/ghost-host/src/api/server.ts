@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import {
   ArtifactRef,
   type ProviderQuota,
+  Id,
   CommandRequest,
   ContractError,
   PairingClaim,
@@ -30,6 +31,7 @@ import {
   type HerdrFrame,
   type HerdrOutput,
   type HerdrUpload,
+  type NextMessageSuggestions,
   type OmpInfo,
   type HerdrPaneView,
   type HerdrView,
@@ -53,6 +55,7 @@ import type { Config } from "../config.ts";
 import type { BrowserPort, DocumentsPort, HerdrPort, SkillsPort } from "../integrations/ports.ts";
 import { HerdrControlRefusal } from "../integrations/herdr-control.ts";
 import { mergeFrames } from "../integrations/herdr.ts";
+import { HERDR_PANE } from "../integrations/herdr-state.ts";
 import type { OmpInfoProvider } from "../integrations/omp.ts";
 import { saveUpload, UPLOAD_MAX_BYTES } from "../integrations/uploads.ts";
 import { PairingLimiter } from "./pairing-limit.ts";
@@ -66,6 +69,7 @@ import type { Core } from "../core/core.ts";
 import { CommandError, invalid, notFound } from "../core/errors.ts";
 import { newId } from "../core/ids.ts";
 import { HOST_VERSION, snapshot, workDetail } from "../core/state.ts";
+import { Suggestions } from "../core/suggestions.ts";
 import { readMetrics } from "../core/metrics.ts";
 import type { ConfigRevision } from "@ghost/contract";
 import { NotFound } from "../ledger/ledger.ts";
@@ -141,6 +145,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   const ownerHash = Buffer.from(hashSecret(ownerToken));
   const pairingLimiter = new PairingLimiter(10, 30);
   const oauth = new OAuthLogins(core);
+  const suggestions = new Suggestions(core, herdr);
 
   const server: Bun.Server<undefined> = Bun.serve({
     hostname: config.host,
@@ -604,6 +609,15 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         return failure(caught);
       }
     }
+    if (pathname === "/api/herdr/suggestions" && request.method === "GET") {
+      try {
+        const pane = url.searchParams.get("pane") ?? "";
+        if (!HERDR_PANE.test(pane)) throw invalid("not a herdr pane id");
+        return json(await suggestions.coding(pane, request.signal) satisfies NextMessageSuggestions);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
     if (pathname === "/api/herdr/changes" && request.method === "GET") {
       try {
         if (!herdr) throw new CommandError("unavailable", "herdr is not available on this Host");
@@ -768,7 +782,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
             return json(await herdr.startAgent(parse(HerdrAgentStart, body)) satisfies HerdrPaneView);
           case "/api/herdr/prompt": {
             const prompt = parse(HerdrPrompt, body);
-            return json((await herdr.prompt(prompt.pane, prompt.text)).pane satisfies HerdrPaneView);
+            return json((await herdr.prompt(prompt.pane, prompt.text, undefined, undefined, prompt.delivery)).pane satisfies HerdrPaneView);
           }
           case "/api/herdr/answer":
             return json(await herdr.answer(parse(HerdrAnswerPayload, body)) satisfies HerdrPaneView);
@@ -821,6 +835,14 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
         return failure(caught);
       }
     }
+    if (pathname === "/api/suggestions" && request.method === "GET") {
+      try {
+        const id = parse(Id, url.searchParams.get("conversation"));
+        return json(await suggestions.direct(id, request.signal) satisfies NextMessageSuggestions);
+      } catch (caught) {
+        return failure(caught);
+      }
+    }
     const artifact = /^\/api\/artifacts\/([^/]+)$/.exec(pathname);
     if (artifact !== null && request.method === "GET") {
       try {
@@ -851,6 +873,7 @@ export function startServer(deps: { core: Core; config: Config; ownerToken: stri
   return {
     port: server.port!, // a TCP listener always reports its bound port
     stop: async () => {
+      suggestions.close();
       oauth.close();
       connectionOAuth.close();
       core.activitySources?.setOAuthRefresher?.(null);

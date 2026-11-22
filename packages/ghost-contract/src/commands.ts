@@ -219,7 +219,7 @@ export const Command = Type.Union([
   command("avatar.delete", { avatarId: Id }),
 
   // Settings and providers
-  command("settings.update", { toolSearchThreshold: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })), defaultSlot: Type.Optional(nullable(SlotName)), defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy), limits: Type.Optional(Type.Partial(Limits)) }),
+  command("settings.update", { toolSearchThreshold: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })), defaultSlot: Type.Optional(nullable(SlotName)), defaultModel: Type.Optional(nullable(ModelRef)), defaultFallbacks: Type.Optional(FallbackList), noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })), reviewModel: Type.Optional(nullable(ModelRef)), memoryModel: Type.Optional(nullable(ModelRef)), nextMessageSuggestions: Type.Optional(Type.Boolean()), suggestionModel: Type.Optional(nullable(ModelRef)), codingDelivery: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("queue")])), ownerLanguage: Type.Optional(OwnerLanguage), approvals: Type.Optional(ApprovalPolicy), limits: Type.Optional(Type.Partial(Limits)) }),
   command("provider.upsert", {
     id: Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }),
     kind: ProviderKind,

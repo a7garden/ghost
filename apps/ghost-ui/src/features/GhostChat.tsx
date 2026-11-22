@@ -11,6 +11,7 @@ import { LiveReply, Transcript, type TranscriptExtra } from '../components/Trans
 import { OutgoingMessage } from '../components/OutgoingMessage';
 import { quoteForReply } from '../components/MessageMenu';
 import { ChatComposer } from './ChatComposer';
+import { lastReply, useNextSuggestions } from './nextSuggestions';
 import { chatDecisions } from './Decision';
 import { ChatDecisions } from './ChatDecisions';
 import { BrowserLiveView } from './BrowserLiveView';
@@ -138,6 +139,9 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
   const currentConversation = conversations.find(conversation => conversation.id === conversationId);
   const busy = Boolean(currentConversation?.busy);
   const running = busy || Boolean(live?.running);
+  const lastMessage = lastReply(page.messages, message => message.role === 'user' || message.role === 'assistant');
+  const nextMessages = useNextSuggestions(conversationId ? { kind: 'conversation', id: conversationId } : null, lastMessage?.id ?? null,
+    !running && lastMessage?.role === 'assistant' && outbox.rows.length === 0);
   const names = new Map(state.ghosts.map(item => [item.id, item.name]));
   const waiting = new Set(state.decisions.filter(decision => decision.state === 'pending' && decision.workId).map(decision => decision.workId!));
   // What this screen needs from the owner, answered above the composer; an open thread's own decisions sit in its panel.
@@ -188,7 +192,7 @@ export function GhostChat({ ghost, state, conversationId, threadId, navigate, in
         </BrowserPaneContext.Provider>
         <ChatComposer ghost={ghost} conversationId={conversationId} running={running} busy={busy} draft={draft} setDraft={setDraft}
           recoveredMessage={recoveredMessage} setRecoveredMessage={setRecoveredMessage} inputRef={inputRef} initialScopeIds={initialScopeIds}
-          onPost={command => { setFollowKey(key => key + 1); outbox.post(command); }} onStop={stop} onError={setError}/>
+          onPost={command => { setFollowKey(key => key + 1); outbox.post(command); }} onStop={stop} onError={setError} nextMessages={nextMessages}/>
       </>}
       footer={<>
         {error && <div className="chat-error" role="alert"><CircleAlert size={15} aria-hidden="true"/><span>{error}</span><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label="오류 메시지 닫기" onClick={() => setError('')}><X size={14}/></Button></div>}

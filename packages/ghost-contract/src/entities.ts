@@ -909,6 +909,12 @@ export const Settings = Type.Object({
   noFallbackGhosts: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 })),
   /** Model for Host memory consolidation; null follows defaultModel. */
   memoryModel: Type.Optional(nullable(ModelRef)),
+  /** Whether the composer offers the owner's likely next message after a completed turn; each offer is one extra billed request. Default on. */
+  nextMessageSuggestions: Type.Optional(Type.Boolean()),
+  /** Model for next-message suggestions; null follows defaultModel. */
+  suggestionModel: Type.Optional(nullable(ModelRef)),
+  /** How a coding follow-up sent while the agent works is delivered; default steer. */
+  codingDelivery: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("queue")])),
   providers: Type.Array(Provider, { maxItems: 64 }),
   ownerLanguage: Type.Optional(OwnerLanguage),
   approvals: Type.Optional(ApprovalPolicy),

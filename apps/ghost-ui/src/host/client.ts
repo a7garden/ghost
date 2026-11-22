@@ -32,6 +32,7 @@ import type {
   HerdrAnswer,
   HerdrAsk,
   HerdrChat,
+  NextMessageSuggestions,
   OmpInfo,
   ConversationPage,
   LedgerEvent,
@@ -269,6 +270,12 @@ export class HostClient {
     const query = new URLSearchParams({ pane });
     if (after) query.set('after', after);
     return this.json(`/api/herdr/chat?${query}`, { signal });
+  }
+  herdrSuggestions(pane: string, signal?: AbortSignal): Promise<NextMessageSuggestions> {
+    return this.json(`/api/herdr/suggestions?${new URLSearchParams({ pane })}`, { signal });
+  }
+  conversationSuggestions(conversation: string, signal?: AbortSignal): Promise<NextMessageSuggestions> {
+    return this.json(`/api/suggestions?${new URLSearchParams({ conversation })}`, { signal });
   }
   herdrDiff(pane: string, path: string, signal?: AbortSignal): Promise<HerdrDiff> {
     return this.json(`/api/herdr/diff?${new URLSearchParams({ pane, path })}`, { signal });
